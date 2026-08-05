@@ -7,16 +7,15 @@ import { cdpEject, cdpInject, cdpOpenThread, cdpRestartAndInject, cdpStatus, wat
 import {
   cdpPort,
   ensureDirectories,
-  gatewayLogPath,
   injectorLogPath,
   injectorPidPath,
-  port,
   betterCodexHome,
+  runtimeLogPath,
   token,
 } from "./config.js";
+import { readRuntimeState } from "./runtime-state.js";
+import { injectionEnabled, setInjectionEnabled } from "./injection-state.js";
 import { installService, restartService, serviceLogs, serviceStatus, startService, stopService, uninstallService } from "./service.js";
-
-const baseUrl = `http://127.0.0.1:${port}`;
 
 function accessToken() {
   return token();
@@ -40,7 +39,9 @@ function positionals(args: string[]) {
 }
 
 async function request(path: string, options: RequestInit = {}) {
-  const response = await fetch(baseUrl + path, {
+  const runtime = readRuntimeState();
+  if (!runtime) throw new Error("runtime_unavailable");
+  const response = await fetch(`http://127.0.0.1:${runtime.port}${path}`, {
     ...options,
     headers: {
       authorization: `Bearer ${accessToken()}`,
@@ -54,31 +55,36 @@ async function request(path: string, options: RequestInit = {}) {
 }
 
 async function health() {
-  const response = await fetch(baseUrl + "/health");
-  if (!response.ok) throw new Error("gateway_unavailable");
-  return response.json() as Promise<Record<string, unknown>>;
+  const runtime = readRuntimeState();
+  if (!runtime) throw new Error("runtime_unavailable");
+  const response = await fetch(`http://127.0.0.1:${runtime.port}/health`);
+  if (!response.ok) throw new Error("runtime_unavailable");
+  const value = await response.json() as Record<string, unknown>;
+  if (value.instanceId !== runtime.instanceId || value.pid !== runtime.pid) throw new Error("runtime_identity_mismatch");
+  return value;
 }
 
-function spawnSelf(args: string[], logFile: string) {
+function spawnSelf(args: string[], logFile: string, detached = true) {
   ensureDirectories();
   const descriptor = openSync(logFile, "a");
   const ownArgs = isSea() ? args : [...process.execArgv, process.argv[1], ...args];
   const child = spawn(process.execPath, ownArgs, {
     cwd: process.cwd(),
-    detached: true,
+    detached,
     env: { ...process.env, BETTER_CODEX_TOKEN: accessToken() },
     stdio: ["ignore", descriptor, descriptor],
   });
-  child.unref();
+  if (detached) child.unref();
   closeSync(descriptor);
-  return child.pid;
+  return child;
 }
 
-async function ensureGateway() {
+async function ensureRuntime() {
   try {
     return await health();
   } catch {
-    spawnSelf(["serve"], gatewayLogPath);
+    if (process.platform === "darwin" && serviceStatus().installed) startService();
+    else spawnSelf(["runtime"], runtimeLogPath);
     for (let attempt = 0; attempt < 60; attempt += 1) {
       try {
         return await health();
@@ -86,8 +92,14 @@ async function ensureGateway() {
         await new Promise(resolve => setTimeout(resolve, 200));
       }
     }
-    throw new Error("gateway_start_failed");
+    throw new Error("runtime_start_failed");
   }
+}
+
+function activeRuntimePort() {
+  const runtime = readRuntimeState();
+  if (!runtime) throw new Error("runtime_unavailable");
+  return runtime.port;
 }
 
 function processAlive(pid: number) {
@@ -108,10 +120,55 @@ function injectorPid() {
 function startInjector(portNumber: number) {
   const existing = injectorPid();
   if (existing) return existing;
-  const pid = spawnSelf(["watch-inject", String(portNumber)], injectorLogPath);
+  const pid = spawnSelf(["watch-inject", String(portNumber)], injectorLogPath).pid;
   if (!pid) throw new Error("injector_start_failed");
   writeFileSync(injectorPidPath, String(pid));
   return pid;
+}
+
+async function waitForInjector() {
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    const pid = injectorPid();
+    if (pid) return pid;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  throw new Error("injector_start_failed");
+}
+
+async function runRuntime() {
+  const server = (await import("./server.js")).startServer();
+  await stopInjector();
+  let stopping = false;
+  let watcher: ReturnType<typeof spawn> | null = null;
+  const startWatcher = () => {
+    if (stopping || watcher || !injectionEnabled()) return;
+    watcher = spawnSelf(["watch-inject", String(cdpPort)], injectorLogPath, false);
+    if (!watcher.pid) throw new Error("injector_start_failed");
+    writeFileSync(injectorPidPath, String(watcher.pid));
+    watcher.once("exit", () => {
+      watcher = null;
+    });
+  };
+  const reconcileWatcher = () => {
+    if (!injectionEnabled()) {
+      watcher?.kill("SIGTERM");
+      return;
+    }
+    startWatcher();
+  };
+  startWatcher();
+  const watcherTimer = setInterval(reconcileWatcher, 1000);
+  watcherTimer.unref();
+  process.once("exit", () => {
+    stopping = true;
+    clearInterval(watcherTimer);
+    watcher?.kill("SIGTERM");
+    if (watcher?.pid && existsSync(injectorPidPath)) {
+      const recorded = Number(readFileSync(injectorPidPath, "utf8"));
+      if (recorded === watcher.pid) unlinkSync(injectorPidPath);
+    }
+  });
+  return server;
 }
 
 async function stopInjector() {
@@ -130,7 +187,7 @@ function print(value: unknown) {
 }
 
 function usage() {
-  console.log("better-codex version | setup [--yes] | start [--launch] | stop | status | inject [--launch] [--port N] | eject [--port N] | service install|uninstall|start|stop|restart|status|logs | project list|create | issue list|get|create|update|status|link|open");
+  console.log("better-codex version | setup [--yes] | enable | disable | start [--launch] | stop | status | inject [--launch] [--port N] | eject [--port N] | service install|uninstall|start|stop|restart|status|logs | project list|create | issue list|get|create|update|status|link|open");
 }
 
 async function confirmSetup() {
@@ -199,14 +256,48 @@ async function issueCommand(action: string | undefined, args: string[]) {
 async function main() {
   const [command, action, ...args] = process.argv.slice(2);
   if (command === "version" || command === "--version" || command === "-v") return console.log("better-codex 0.2.0");
+  if (command === "runtime") return runRuntime();
   if (command === "serve") return (await import("./server.js")).startServer();
   if (command === "watch-inject") return watchInjection(Number(action || cdpPort), accessToken());
   if (command === "setup") {
     if (![action, ...args].includes("--yes") && !(await confirmSetup())) return print({ configured: false });
-    await ensureGateway();
-    const injection = await cdpRestartAndInject(cdpPort, accessToken());
-    const pid = startInjector(cdpPort);
-    return print({ configured: true, injection, injectorPid: pid });
+    setInjectionEnabled(false);
+    await stopInjector();
+    try {
+      const runtime = await ensureRuntime();
+      const injection = await cdpRestartAndInject(cdpPort, activeRuntimePort(), accessToken());
+      setInjectionEnabled(true);
+      const pid = await waitForInjector();
+      return print({ configured: true, runtime, injection, injectorPid: pid });
+    } catch (error) {
+      setInjectionEnabled(false);
+      await stopInjector();
+      throw error;
+    }
+  }
+  if (command === "enable") {
+    setInjectionEnabled(false);
+    await stopInjector();
+    try {
+      const runtime = await ensureRuntime();
+      const selectedPort = Number(option([action, ...args].filter(Boolean) as string[], "--port") ?? cdpPort);
+      await cdpInject(selectedPort, activeRuntimePort(), accessToken(), false);
+      setInjectionEnabled(true);
+      await waitForInjector();
+      return print({ enabled: true, runtime, injection: await cdpStatus(selectedPort) });
+    } catch (error) {
+      setInjectionEnabled(false);
+      await stopInjector();
+      throw error;
+    }
+  }
+  if (command === "disable") {
+    setInjectionEnabled(false);
+    await stopInjector();
+    const selectedPort = Number(option([action, ...args].filter(Boolean) as string[], "--port") ?? cdpPort);
+    let injection: unknown = { available: false, disabled: true };
+    try { injection = await cdpEject(selectedPort, accessToken()); } catch {}
+    return print({ enabled: false, injection });
   }
   if (command === "service") {
     if (action === "install") {
@@ -230,42 +321,53 @@ async function main() {
     return usage();
   }
   if (command === "start") {
-    const gateway = await ensureGateway();
+    setInjectionEnabled(true);
+    const runtime = await ensureRuntime();
     const selectedPort = Number(option([action, ...args].filter(Boolean) as string[], "--port") ?? cdpPort);
     let injection: unknown = await cdpStatus(selectedPort);
     if ((injection as { available?: boolean }).available || [action, ...args].includes("--launch")) {
-      await cdpInject(selectedPort, accessToken(), [action, ...args].includes("--launch"));
+      await cdpInject(selectedPort, activeRuntimePort(), accessToken(), [action, ...args].includes("--launch"));
       startInjector(selectedPort);
       injection = await cdpStatus(selectedPort);
     }
-    return print({ gateway, injection });
+    return print({ runtime, injection });
   }
   if (command === "stop") {
     await stopInjector();
     try { await cdpEject(cdpPort, accessToken()); } catch {}
-    let gateway: unknown = { stopped: true, alreadyStopped: true };
-    try { gateway = await request("/api/shutdown", { method: "POST" }); } catch {}
-    return print({ gateway, injection: { stopped: true } });
+    let runtime: unknown = { stopped: true, alreadyStopped: true };
+    try { runtime = await request("/api/shutdown", { method: "POST" }); } catch {}
+    return print({ runtime, injection: { stopped: true } });
   }
   if (command === "status") {
-    let gateway: unknown;
-    try { gateway = await health(); } catch (error) { gateway = { ok: false, error: error instanceof Error ? error.message : "gateway_unavailable" }; }
-    return print({ gateway, injection: await cdpStatus(Number(option([action, ...args].filter(Boolean) as string[], "--port") ?? cdpPort)), injectorPid: injectorPid() });
+    let runtime: unknown;
+    try { runtime = await health(); } catch (error) { runtime = { ok: false, error: error instanceof Error ? error.message : "runtime_unavailable" }; }
+    return print({ runtime, injection: await cdpStatus(Number(option([action, ...args].filter(Boolean) as string[], "--port") ?? cdpPort)), injectionEnabled: injectionEnabled(), injectorPid: injectorPid() });
   }
   if (command === "inject") {
-    await ensureGateway();
-    const selectedPort = Number(option([action, ...args].filter(Boolean) as string[], "--port") ?? cdpPort);
-    const launch = [action, ...args].includes("--launch");
-    await cdpInject(selectedPort, accessToken(), launch);
-    const pid = startInjector(selectedPort);
-    return print({ ...(await cdpStatus(selectedPort)), injectorPid: pid });
+    setInjectionEnabled(false);
+    await stopInjector();
+    try {
+      await ensureRuntime();
+      const selectedPort = Number(option([action, ...args].filter(Boolean) as string[], "--port") ?? cdpPort);
+      const launch = [action, ...args].includes("--launch");
+      await cdpInject(selectedPort, activeRuntimePort(), accessToken(), launch);
+      setInjectionEnabled(true);
+      const pid = await waitForInjector();
+      return print({ ...(await cdpStatus(selectedPort)), injectorPid: pid });
+    } catch (error) {
+      setInjectionEnabled(false);
+      await stopInjector();
+      throw error;
+    }
   }
   if (command === "eject") {
+    setInjectionEnabled(false);
     const selectedPort = Number(option([action, ...args].filter(Boolean) as string[], "--port") ?? cdpPort);
     await stopInjector();
     return print(await cdpEject(selectedPort, accessToken()));
   }
-  await ensureGateway();
+  await ensureRuntime();
   if (command === "project" && action === "list") return print(await request("/api/projects"));
   if (command === "project" && action === "create") {
     const values = positionals(args);
@@ -276,9 +378,14 @@ async function main() {
   usage();
 }
 
-void main().catch(error => {
+const persistentCommand = ["runtime", "serve", "watch-inject"].includes(process.argv[2]);
+
+void main().then(() => {
+  if (!persistentCommand) setImmediate(() => process.exit(0));
+}).catch(error => {
   console.error(error instanceof Error ? error.message : error);
-  process.exitCode = 1;
+  if (!persistentCommand) setImmediate(() => process.exit(1));
+  else process.exitCode = 1;
 });
 
 process.once("exit", () => {
@@ -288,5 +395,5 @@ process.once("exit", () => {
   }
 });
 
-if (process.argv[2] === "serve") ensureDirectories();
-if (process.argv[2] === "serve") console.log(`Better Codex home: ${betterCodexHome}`);
+if (["runtime", "serve"].includes(process.argv[2])) ensureDirectories();
+if (["runtime", "serve"].includes(process.argv[2])) console.log(`Better Codex home: ${betterCodexHome}`);

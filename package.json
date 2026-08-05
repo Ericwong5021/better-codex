@@ -16,9 +16,12 @@
   "files": [
     "dist/cdp.js",
     "dist/cli.js",
+    "dist/compatibility.js",
     "dist/config.js",
     "dist/db.js",
     "dist/dom.js",
+    "dist/injection-state.js",
+    "dist/runtime-state.js",
     "dist/server.js",
     "dist/service.js"
   ],

@@ -1,9 +1,10 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { readCompatibilityStatus } from "./compatibility.js";
 import { issuePriorities, issueStatuses, Store, type IssuePriority, type IssueStatus } from "./db.js";
-import { port, token } from "./config.js";
+import { runtimePort, token } from "./config.js";
+import { acquireRuntimeLock, clearRuntimeState, createRuntimeIdentity, publishRuntimeState } from "./runtime-state.js";
 
 const accessToken = token();
-const store = new Store();
 
 function sendJson(response: ServerResponse, status: number, value: unknown) {
   const body = JSON.stringify(value);
@@ -124,17 +125,36 @@ function errorStatus(code: string) {
 }
 
 export function startServer() {
+  if (!Number.isInteger(runtimePort) || runtimePort < 0 || runtimePort > 65535) throw new Error("invalid_runtime_port");
+  const identity = createRuntimeIdentity();
+  acquireRuntimeLock(identity.instanceId);
+  let store: Store;
+  try {
+    store = new Store();
+  } catch (error) {
+    clearRuntimeState(identity.instanceId);
+    throw error;
+  }
+  let cleaned = false;
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    clearRuntimeState(identity.instanceId);
+    store.close();
+  };
   const server = createServer((request, response) => {
     void (async () => {
       if (!request.url || !loopback(request) || !trustedOrigin(request)) return sendJson(response, 403, { error: "forbidden" });
-      const url = new URL(request.url, `http://127.0.0.1:${port}`);
+      const url = new URL(request.url, "http://127.0.0.1");
       const path = url.pathname.split("/").filter(Boolean);
       const method = request.method ?? "GET";
 
       if (method === "OPTIONS") return sendPreflight(response);
       if (url.pathname === "/health") {
         const database = store.health();
-        return sendJson(response, database.ok ? 200 : 503, { ok: database.ok, version: "0.2.0", pid: process.pid, database });
+        const address = server.address();
+        const activePort = typeof address === "object" && address ? address.port : 0;
+        return sendJson(response, database.ok ? 200 : 503, { ok: database.ok, name: "Better Codex Runtime", version: identity.version, pid: process.pid, port: activePort, instanceId: identity.instanceId, database, compatibility: readCompatibilityStatus() });
       }
       if (!authorized(request, url)) return sendJson(response, 401, { error: "unauthorized" });
       if (url.pathname === "/api/bootstrap" && method === "GET") {
@@ -199,7 +219,7 @@ export function startServer() {
       if (url.pathname === "/api/shutdown" && method === "POST") {
         sendJson(response, 200, { ok: true });
         setImmediate(() => server.close(() => {
-          store.close();
+          cleanup();
           process.exit(0);
         }));
         return;
@@ -212,12 +232,20 @@ export function startServer() {
     });
   });
 
-  server.listen(port, "127.0.0.1", () => {
-    console.log(`Better Codex 0.2.0 listening on http://127.0.0.1:${port}`);
+  server.listen(runtimePort, "127.0.0.1", () => {
+    const address = server.address();
+    if (typeof address !== "object" || !address) throw new Error("runtime_address_unavailable");
+    publishRuntimeState({ ...identity, port: address.port });
+    console.log(`Better Codex Runtime 0.2.0 listening on http://127.0.0.1:${address.port}`);
   });
   const stop = () => server.close(() => {
-    store.close();
+    cleanup();
     process.exit(0);
+  });
+  server.once("error", error => {
+    cleanup();
+    console.error(error.message);
+    process.exit(1);
   });
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);

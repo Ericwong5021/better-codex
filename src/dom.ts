@@ -1,4 +1,6 @@
-export const injectionVersion = "0.2.0";
+import { bundledCompatibility } from "./compatibility.js";
+
+export const injectionVersion = bundledCompatibility.version;
 
 export function injectionScript(port: number, accessToken: string, action: "install" | "uninstall") {
   if (action === "uninstall") {
@@ -13,12 +15,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     })()`;
   }
   const baseUrl = JSON.stringify(`http://127.0.0.1:${port}`);
-  const token = JSON.stringify(accessToken);
+  const bridgeToken = JSON.stringify(accessToken);
   return `(() => {
     "use strict";
     const VERSION = ${JSON.stringify(injectionVersion)};
     const previous = window.__betterCodexInjection__;
-    if (previous?.version === VERSION) {
+    if (previous?.version === VERSION && previous?.endpoint === ${baseUrl}) {
       previous.refresh();
       return { installed: true, reused: true };
     }
@@ -31,10 +33,15 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const HIDDEN = "data-better-codex-native-hidden";
     const HOST = "data-better-codex-page-host";
     const BASE_URL = ${baseUrl};
-    const TOKEN = ${token};
+    const BRIDGE_TOKEN = ${bridgeToken};
+    const SELECTORS = ${JSON.stringify(bundledCompatibility.selectors)};
+    const ATTRIBUTES = ${JSON.stringify(bundledCompatibility.attributes)};
+    const NAVIGATION = ${JSON.stringify(bundledCompatibility.navigation)};
     const statusLabels = { backlog: "待整理", todo: "待办", in_progress: "进行中", blocked: "阻塞", in_review: "审核中", done: "完成" };
     const priorityLabels = { none: "无", low: "低", medium: "中", high: "高", urgent: "紧急" };
     const state = { projects: [], issues: [], projectId: "", search: "", selected: null, error: "" };
+    const bridgeRequests = new Map();
+    let bridgeSequence = 0;
     let entry = null;
     let panel = null;
     let observer = null;
@@ -91,12 +98,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function findReferenceButton() {
-      const scroll = document.querySelector("[data-app-action-sidebar-scroll]");
+      const scroll = document.querySelector(SELECTORS.sidebarScroll);
       if (!scroll) return null;
       const buttons = Array.from(scroll.querySelectorAll("button"));
       const plugin = buttons.find(button => ["插件", "plugins"].includes(label(button.textContent || button.getAttribute("aria-label"))));
       if (plugin) return plugin;
-      return buttons.find(button => button.closest("[data-app-action-sidebar-section]")) || buttons[0] || null;
+      return buttons.find(button => button.closest(SELECTORS.sidebarSection)) || buttons[0] || null;
     }
 
     function nativeButton(text) {
@@ -105,7 +112,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       button.type = "button";
       ["id", "disabled", "aria-current", "aria-expanded", "aria-controls", "aria-describedby", "data-state"].forEach(name => button.removeAttribute(name));
       button.querySelectorAll("[id]").forEach(node => node.removeAttribute("id"));
-      const content = button.querySelector(".text-fade-truncate") || Array.from(button.querySelectorAll("span")).at(-1);
+      const content = button.querySelector(SELECTORS.truncatedText) || Array.from(button.querySelectorAll("span")).at(-1);
       if (content) content.textContent = text;
       else button.textContent = text;
       return button;
@@ -145,45 +152,56 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function findMount() {
-      const frame = document.querySelector(".app-shell-main-content-frame");
-      const layout = frame?.closest("[data-app-shell-main-content-layout]") || document.querySelector("[data-app-shell-main-content-layout]");
+      const frame = document.querySelector(SELECTORS.contentFrame);
+      const layout = frame?.closest(SELECTORS.contentLayout) || document.querySelector(SELECTORS.contentLayout);
       const surface = layout?.parentElement;
       return surface?.closest("main") ? surface : null;
     }
 
     function activeThreadRow() {
-      const rows = Array.from(document.querySelectorAll("[data-app-action-sidebar-thread-id]"));
-      return rows.find(row => row.getAttribute("data-app-action-sidebar-thread-active") === "true") || rows.find(row => ["page", "true"].includes(row.getAttribute("aria-current"))) || null;
+      const rows = Array.from(document.querySelectorAll(SELECTORS.threadRow));
+      return rows.find(row => row.getAttribute(ATTRIBUTES.threadActive) === "true") || rows.find(row => ["page", "true"].includes(row.getAttribute("aria-current"))) || null;
     }
 
     function readContext() {
       const row = activeThreadRow();
-      const projectList = row?.closest("[data-app-action-sidebar-project-list-id]");
-      const projectRow = row?.closest("[data-app-action-sidebar-project-id]") || document.querySelector('[data-app-action-sidebar-project-row][aria-current="page"]');
-      const projects = Array.from(document.querySelectorAll("[data-app-action-sidebar-project-row]")).flatMap(item => {
-        const id = item.getAttribute("data-app-action-sidebar-project-id")?.trim();
-        const name = (item.getAttribute("data-app-action-sidebar-project-label") || item.getAttribute("aria-label") || "").trim();
+      const projectList = row?.closest(SELECTORS.projectList);
+      const projectRow = row?.closest(SELECTORS.projectId) || document.querySelector(SELECTORS.currentProjectRow);
+      const projects = Array.from(document.querySelectorAll(SELECTORS.projectRow)).flatMap(item => {
+        const id = item.getAttribute(ATTRIBUTES.projectId)?.trim();
+        const name = (item.getAttribute(ATTRIBUTES.projectLabel) || item.getAttribute("aria-label") || "").trim();
         return id && name ? [{ id, name }] : [];
       });
       const url = new URL(location.href);
       return {
-        projectId: projectList?.getAttribute("data-app-action-sidebar-project-list-id") || projectRow?.getAttribute("data-app-action-sidebar-project-id") || "",
-        threadId: row?.getAttribute("data-app-action-sidebar-thread-id") || location.pathname.match(/\\/local\\/([^/?#]+)/)?.[1] || "",
+        projectId: projectList?.getAttribute(ATTRIBUTES.projectListId) || projectRow?.getAttribute(ATTRIBUTES.projectId) || "",
+        threadId: row?.getAttribute(ATTRIBUTES.threadId) || location.pathname.match(/\\/local\\/([^/?#]+)/)?.[1] || "",
         workspacePath: url.searchParams.get("workspace") || url.searchParams.get("cwd") || "",
         projects
       };
     }
 
-    async function api(path, options = {}) {
-      const separator = path.includes("?") ? "&" : "?";
-      const response = await fetch(BASE_URL + path + separator + "token=" + encodeURIComponent(TOKEN), {
-        ...options,
-        headers: options.body ? { "content-type": "text/plain;charset=UTF-8" } : undefined
+    function api(path, options = {}) {
+      if (typeof window.betterCodexRequest !== "function") return Promise.reject(new Error("runtime_bridge_unavailable"));
+      const id = VERSION + ":" + (++bridgeSequence);
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          bridgeRequests.delete(id);
+          reject(new Error("runtime_bridge_timeout"));
+        }, 10000);
+        bridgeRequests.set(id, { resolve, reject, timer });
+        window.betterCodexRequest(JSON.stringify({ id, token: BRIDGE_TOKEN, path, method: options.method || "GET", body: options.body }));
       });
-      const value = await response.json();
-      if (!response.ok) throw new Error(value.error || "request_failed");
-      return value;
     }
+
+    window.__betterCodexBridgeResolve = (id, result) => {
+      const pending = bridgeRequests.get(id);
+      if (!pending) return;
+      bridgeRequests.delete(id);
+      clearTimeout(pending.timer);
+      if (result?.ok) pending.resolve(result.value);
+      else pending.reject(new Error(result?.value?.error || "request_failed"));
+    };
 
     function showError(error) {
       state.error = error instanceof Error ? error.message : String(error || "request_failed");
@@ -214,7 +232,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function createPanel() {
-      const nativeFrame = document.querySelector(".app-shell-main-content-frame");
+      const nativeFrame = document.querySelector(SELECTORS.contentFrame);
       const section = document.createElement("section");
       section.id = PANEL_ID;
       section.className = nativeFrame?.className || "";
@@ -229,7 +247,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       projects.id = "better-codex-project";
       projects.className = "better-codex-control";
       projects.addEventListener("change", () => { state.projectId = projects.value; void perform(loadIssues); });
-      const search = document.querySelector('input[type="search"]')?.cloneNode(false) || document.createElement("input");
+      const search = document.querySelector(SELECTORS.searchInput)?.cloneNode(false) || document.createElement("input");
       search.id = "better-codex-search";
       search.classList.add("better-codex-control", "better-codex-search");
       search.placeholder = "搜索任务";
@@ -304,7 +322,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         await loadIssues();
       } catch (error) {
         const board = panel?.querySelector("#better-codex-board");
-        const message = error instanceof Error ? error.message : "无法连接 Gateway";
+        const message = error instanceof Error ? error.message : "无法连接 Better Codex Runtime";
         showError(message);
         if (board) board.innerHTML = '<div class="better-codex-empty">' + escapeHtml(message) + " · 点击刷新重试</div>";
       }
@@ -427,13 +445,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     async function openThread(threadId) {
       const expected = String(threadId || "").replace(/^(local|cloud):/i, "");
-      const row = Array.from(document.querySelectorAll("[data-app-action-sidebar-thread-id]")).find(item => String(item.getAttribute("data-app-action-sidebar-thread-id") || "").replace(/^(local|cloud):/i, "") === expected);
+      const row = Array.from(document.querySelectorAll(SELECTORS.threadRow)).find(item => String(item.getAttribute(ATTRIBUTES.threadId) || "").replace(/^(local|cloud):/i, "") === expected);
       if (row) {
         close();
         row.click();
         return { opened: true, via: "sidebar" };
       }
-      window.postMessage({ type: "navigate-to-route", path: "/local/" + encodeURIComponent(expected) }, window.location.origin);
+      window.postMessage({ type: NAVIGATION.messageType, path: NAVIGATION.threadRoutePrefix + encodeURIComponent(expected) }, window.location.origin);
       await new Promise(resolve => setTimeout(resolve, 400));
       const current = location.pathname.match(/\\/local\\/([^/?#]+)/)?.[1] || "";
       if (decodeURIComponent(current) === expected) {
@@ -445,9 +463,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     function onClick(event) {
       if (!active) return;
-      const target = event.target?.closest?.("button,a,[role='button'],[data-app-action-sidebar-thread-id]");
+      const target = event.target?.closest?.("button,a,[role='button']," + SELECTORS.threadRow);
       if (!target || target === entry || target.closest("#" + PANEL_ID) || target.closest("#better-codex-dialog")) return;
-      if (target.closest('aside nav[role="navigation"]')) close();
+      if (target.closest(SELECTORS.sidebarNavigation)) close();
     }
 
     function refresh() {
@@ -468,10 +486,16 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       destroyed = true;
       if (timer !== null) clearTimeout(timer);
       observer?.disconnect();
+      for (const pending of bridgeRequests.values()) {
+        clearTimeout(pending.timer);
+        pending.reject(new Error("injection_destroyed"));
+      }
+      bridgeRequests.clear();
       document.removeEventListener("DOMContentLoaded", mount);
       document.removeEventListener("click", onClick, true);
       close();
       document.querySelectorAll('[' + OWNED + '="true"]').forEach(node => node.remove());
+      delete window.__betterCodexBridgeResolve;
       delete window.__betterCodexInjection__;
     }
 
@@ -479,11 +503,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       document.removeEventListener("DOMContentLoaded", mount);
       if (destroyed || observer || !document.documentElement) return;
       observer = new MutationObserver(scheduleRefresh);
-      observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "data-theme", "aria-current", "data-app-action-sidebar-thread-active"] });
+      observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "data-theme", "aria-current", ATTRIBUTES.threadActive] });
       ensureEntry();
     }
 
-    window.__betterCodexInjection__ = { version: VERSION, refresh, open, close, destroy };
+    window.__betterCodexInjection__ = { version: VERSION, endpoint: BASE_URL, refresh, open, close, destroy };
     document.addEventListener("click", onClick, true);
     if (document.documentElement) mount();
     else document.addEventListener("DOMContentLoaded", mount, { once: true });

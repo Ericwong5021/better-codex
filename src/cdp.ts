@@ -1,8 +1,9 @@
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { basename } from "node:path";
-import { port as gatewayPort } from "./config.js";
+import { basename, join } from "node:path";
+import { bundledCompatibility, capabilityExpression, clearCompatibilityStatus, missingCapabilities, navigationExpression, readCompatibilityStatus, targetAllowed, type RendererCapabilities, writeCompatibilityStatus } from "./compatibility.js";
 import { injectionScript, injectionVersion } from "./dom.js";
+import { readRuntimeState } from "./runtime-state.js";
 
 type Target = {
   id: string;
@@ -50,9 +51,43 @@ class Connection {
     });
   }
 
+  on(method: string, listener: (params: Record<string, unknown>) => void) {
+    const handler = (event: MessageEvent) => {
+      const reply = JSON.parse(String(event.data)) as { method?: string; params?: Record<string, unknown> };
+      if (reply.method === method && reply.params) listener(reply.params);
+    };
+    this.socket.addEventListener("message", handler);
+    return () => this.socket.removeEventListener("message", handler);
+  }
+
   close() {
     this.socket.close();
   }
+}
+
+async function bridgeRequest(connection: Connection, runtimePort: number, accessToken: string, payload: unknown) {
+  let requestId = "";
+  let result: { ok: boolean; status: number; value: unknown };
+  try {
+    const request = JSON.parse(String(payload)) as { id?: unknown; token?: unknown; path?: unknown; method?: unknown; body?: unknown };
+    requestId = typeof request.id === "string" ? request.id : "";
+    const path = typeof request.path === "string" ? request.path : "";
+    const method = typeof request.method === "string" ? request.method : "GET";
+    if (!requestId || request.token !== accessToken || !/^\/api\/(?:bootstrap(?:[?]|$)|projects(?:\/ensure)?(?:[?]|$)|issues(?:[/?]|$))/.test(path) || !["GET", "POST", "PATCH"].includes(method)) throw new Error("invalid_bridge_request");
+    const response = await fetch(`http://127.0.0.1:${runtimePort}${path}`, {
+      method,
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        "content-type": "application/json",
+      },
+      body: typeof request.body === "string" && method !== "GET" ? request.body : undefined,
+    });
+    result = { ok: response.ok, status: response.status, value: await response.json() };
+  } catch (error) {
+    result = { ok: false, status: 0, value: { error: error instanceof Error ? error.message : "runtime_unavailable" } };
+  }
+  if (!requestId) return;
+  await evaluate(connection, `window.__betterCodexBridgeResolve?.(${JSON.stringify(requestId)}, ${JSON.stringify(result)})`);
 }
 
 async function targets(port: number) {
@@ -64,11 +99,7 @@ async function targets(port: number) {
   }
   if (!response.ok) throw new Error(`cdp_http_${response.status}`);
   const values = await response.json() as Target[];
-  return values.filter(target => {
-    if (target.type !== "page" || !target.webSocketDebuggerUrl || !target.id) return false;
-    if (target.url?.includes("initialRoute=%2Fglobal-dictation") || target.url?.includes("initialRoute=%2Favatar-overlay")) return false;
-    return target.url?.startsWith("app://") || target.title?.includes("Codex");
-  });
+  return values.filter(target => target.type === "page" && target.webSocketDebuggerUrl && target.id && targetAllowed(target));
 }
 
 async function evaluate(connection: Connection, expression: string) {
@@ -78,24 +109,68 @@ async function evaluate(connection: Connection, expression: string) {
 }
 
 async function mainTargets(port: number) {
+  if (!bundledCompatibility.supportedPlatforms.some(platform => platform === process.platform)) {
+    writeCompatibilityStatus({ codexVersion: null, compatible: false, reason: "unsupported_platform", targetId: null, capabilities: null });
+    throw new Error(`codex_incompatible_unsupported_platform_${process.platform}`);
+  }
   const candidates = await targets(port);
   const selected: Target[] = [];
+  const codexVersion = desktopVersion();
+  let lastReason = "renderer_not_found";
+  let lastTargetId: string | null = null;
+  let lastCapabilities: RendererCapabilities | null = null;
+  let compatibleCapabilities: RendererCapabilities | null = null;
   for (const target of candidates) {
     const connection = new Connection(target.webSocketDebuggerUrl!);
     try {
       await connection.open();
-      const main = await evaluate(connection, "Boolean(document.querySelector('[data-app-action-sidebar-scroll], [data-app-shell-main-content-layout]'))");
-      if (main) selected.push(target);
+      const capabilities = await evaluate(connection, capabilityExpression()) as RendererCapabilities;
+      const missing = missingCapabilities(capabilities);
+      lastTargetId = target.id;
+      lastCapabilities = capabilities;
+      if (missing.length === 0) {
+        selected.push(target);
+        compatibleCapabilities ??= capabilities;
+      } else {
+        lastReason = `missing_${missing.join("_")}`;
+      }
     } catch {
+      lastReason = "renderer_probe_failed";
+      lastTargetId = target.id;
+      lastCapabilities = null;
     } finally {
       connection.close();
     }
   }
-  return selected.length > 0 ? selected : candidates.slice(0, 1);
+  if (selected.length > 0) {
+    writeCompatibilityStatus({ codexVersion, compatible: true, reason: null, targetId: selected[0].id, capabilities: compatibleCapabilities });
+    return selected;
+  }
+  writeCompatibilityStatus({ codexVersion, compatible: false, reason: lastReason, targetId: lastTargetId, capabilities: lastCapabilities });
+  if (candidates.length > 0) throw new Error(`codex_incompatible_${lastReason}`);
+  return [];
+}
+
+let cachedCodexVersion: string | null | undefined;
+
+function desktopVersion() {
+  if (cachedCodexVersion !== undefined) return cachedCodexVersion;
+  try {
+    if (process.platform === "darwin") {
+      cachedCodexVersion = execFileSync("/usr/libexec/PlistBuddy", ["-c", "Print :CFBundleShortVersionString", join(desktopApplication(), "Contents", "Info.plist")], { encoding: "utf8" }).trim() || null;
+    } else if (process.platform === "win32") {
+      cachedCodexVersion = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "(Get-AppxPackage -Name OpenAI.Codex | Select-Object -First 1 -ExpandProperty Version)"], { encoding: "utf8", windowsHide: true }).trim() || null;
+    } else {
+      cachedCodexVersion = null;
+    }
+  } catch {
+    cachedCodexVersion = null;
+  }
+  return cachedCodexVersion;
 }
 
 function desktopApplication() {
-  const application = ["/Applications/ChatGPT.app", "/Applications/Codex.app"].find(existsSync);
+  const application = ["/Applications/Codex.app", "/Applications/ChatGPT.app"].find(existsSync);
   if (!application) throw new Error("codex_app_not_found");
   return application;
 }
@@ -215,42 +290,64 @@ async function quitCodex() {
 }
 
 async function waitForTargets(port: number) {
+  let incompatibility: Error | null = null;
+  let stableIds = "";
+  let stableCount = 0;
   for (let attempt = 0; attempt < 80; attempt += 1) {
     try {
       const values = await mainTargets(port);
-      if (values.length > 0) return values;
-    } catch {
+      if (values.length > 0) {
+        const ids = values.map(value => value.id).sort().join(",");
+        stableCount = ids === stableIds ? stableCount + 1 : 1;
+        stableIds = ids;
+        if (stableCount >= 4) return values;
+      } else {
+        stableCount = 0;
+        stableIds = "";
+      }
+    } catch (error) {
+      stableCount = 0;
+      stableIds = "";
+      if (error instanceof Error && error.message.startsWith("codex_incompatible_")) {
+        incompatibility = error;
+      }
     }
     await new Promise(resolve => setTimeout(resolve, 500));
   }
+  if (incompatibility) throw incompatibility;
   throw new Error(`cdp_unavailable_${port}`);
 }
 
-async function installTarget(target: Target, port: number, accessToken: string) {
+async function installTarget(target: Target, runtimePort: number, accessToken: string) {
   const connection = new Connection(target.webSocketDebuggerUrl!);
   await connection.open();
   try {
     await connection.send("Page.enable");
     await connection.send("Page.setBypassCSP", { enabled: true });
     await connection.send("Runtime.enable");
-    const existing = await evaluate(connection, "window.__betterCodexInjection__?.version || null");
-    if (existing === injectionVersion) {
+    try { await connection.send("Runtime.addBinding", { name: "betterCodexRequest" }); } catch {}
+    const existing = await evaluate(connection, "({ version: window.__betterCodexInjection__?.version || null, endpoint: window.__betterCodexInjection__?.endpoint || null })") as { version?: string; endpoint?: string };
+    if (existing.version === injectionVersion && existing.endpoint === `http://127.0.0.1:${runtimePort}`) {
       const storedIdentifier = await evaluate(connection, "window.__betterCodexNewDocumentScriptId || null");
       await evaluate(connection, "window.__betterCodexInjection__.refresh()");
+      const current = readCompatibilityStatus();
+      writeCompatibilityStatus({ codexVersion: current?.codexVersion ?? desktopVersion(), compatible: true, reason: null, targetId: target.id, capabilities: current?.capabilities ?? null }, true);
       return { targetId: target.id, title: target.title, installed: true, reused: true, identifier: typeof storedIdentifier === "string" ? storedIdentifier : undefined };
     }
-    const source = injectionScript(gatewayPort, accessToken, "install");
+    const source = injectionScript(runtimePort, accessToken, "install");
     const registration = await connection.send("Page.addScriptToEvaluateOnNewDocument", { source });
     const identifier = String(registration.identifier ?? "");
     await evaluate(connection, source);
     await evaluate(connection, `window.__betterCodexNewDocumentScriptId = ${JSON.stringify(identifier)}`);
+    const current = readCompatibilityStatus();
+    writeCompatibilityStatus({ codexVersion: current?.codexVersion ?? desktopVersion(), compatible: true, reason: null, targetId: target.id, capabilities: current?.capabilities ?? null }, true);
     return { targetId: target.id, title: target.title, installed: true, reused: false, identifier };
   } finally {
     connection.close();
   }
 }
 
-async function uninstallTarget(target: Target, port: number, accessToken: string) {
+async function uninstallTarget(target: Target, accessToken: string) {
   const connection = new Connection(target.webSocketDebuggerUrl!);
   await connection.open();
   try {
@@ -264,18 +361,19 @@ async function uninstallTarget(target: Target, port: number, accessToken: string
       } catch {
       }
     }
-    const value = await evaluate(connection, injectionScript(gatewayPort, accessToken, "uninstall"));
+    const value = await evaluate(connection, injectionScript(0, accessToken, "uninstall"));
     return { targetId: target.id, title: target.title, uninstalled: true, value };
   } finally {
     connection.close();
   }
 }
 
-export async function cdpInject(port: number, accessToken: string, launch = false) {
+export async function cdpInject(port: number, runtimePort: number, accessToken: string, launch = false) {
   let values: Target[];
   try {
     values = await mainTargets(port);
   } catch (error) {
+    if (error instanceof Error && error.message.startsWith("codex_incompatible_")) throw error;
     if (!launch) throw error;
     launchCodex(port);
     values = await waitForTargets(port);
@@ -285,18 +383,22 @@ export async function cdpInject(port: number, accessToken: string, launch = fals
     values = await waitForTargets(port);
   }
   if (values.length === 0) throw new Error("cdp_main_renderer_not_found");
-  return Promise.all(values.map(target => installTarget(target, port, accessToken)));
+  return Promise.all(values.map(target => installTarget(target, runtimePort, accessToken)));
 }
 
-export async function cdpRestartAndInject(port: number, accessToken: string) {
+export async function cdpRestartAndInject(port: number, runtimePort: number, accessToken: string) {
   if (process.platform === "darwin") await quitCodex();
   if (!['darwin', 'win32'].includes(process.platform)) throw new Error(`setup_unsupported_${process.platform}`);
-  return cdpInject(port, accessToken, true);
+  return cdpInject(port, runtimePort, accessToken, true);
 }
 
 export async function cdpEject(port: number, accessToken: string) {
-  const values = await mainTargets(port);
-  return Promise.all(values.map(target => uninstallTarget(target, port, accessToken)));
+  try {
+    const values = await targets(port);
+    return await Promise.all(values.map(target => uninstallTarget(target, accessToken)));
+  } finally {
+    clearCompatibilityStatus();
+  }
 }
 
 export async function cdpStatus(port: number) {
@@ -318,9 +420,9 @@ export async function cdpStatus(port: number) {
         connection.close();
       }
     }
-    return { available: true, port, targets: rendered };
+    return { available: true, port, compatibility: readCompatibilityStatus(), targets: rendered };
   } catch (error) {
-    return { available: false, port, error: error instanceof Error ? error.message : "cdp_error", targets: [] };
+    return { available: false, port, error: error instanceof Error ? error.message : "cdp_error", compatibility: readCompatibilityStatus(), targets: [] };
   }
 }
 
@@ -331,23 +433,7 @@ export async function cdpOpenThread(port: number, threadId: string) {
   const connection = new Connection(target.webSocketDebuggerUrl!);
   await connection.open();
   try {
-    return await evaluate(connection, `(async () => {
-      const expected = ${JSON.stringify(threadId)}.replace(/^(local|cloud):/i, '');
-      const row = Array.from(document.querySelectorAll('[data-app-action-sidebar-thread-id]')).find(item => String(item.getAttribute('data-app-action-sidebar-thread-id') || '').replace(/^(local|cloud):/i, '') === expected);
-      if (row) {
-        window.__betterCodexInjection__?.close?.();
-        row.click();
-        return { opened: true, via: 'sidebar' };
-      }
-      window.postMessage({ type: 'navigate-to-route', path: '/local/' + encodeURIComponent(expected) }, window.location.origin);
-      await new Promise(resolve => setTimeout(resolve, 400));
-      const current = location.pathname.match(/\\/local\\/([^/?#]+)/)?.[1] || '';
-      if (decodeURIComponent(current) === expected) {
-        window.__betterCodexInjection__?.close?.();
-        return { opened: true, via: 'route' };
-      }
-      return { opened: false, requested: true, via: 'route', error: 'thread_open_unconfirmed' };
-    })()`);
+    return await evaluate(connection, navigationExpression(threadId));
   } finally {
     connection.close();
   }
@@ -355,12 +441,27 @@ export async function cdpOpenThread(port: number, threadId: string) {
 
 export async function watchInjection(port: number, accessToken: string) {
   const attached = new Map<string, { connection: Connection; identifier?: string; target: Target }>();
+  let activeRuntimePort = 0;
   let stopping = false;
   const stop = () => { stopping = true; };
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
   while (!stopping) {
     try {
+      const runtime = readRuntimeState();
+      if (!runtime) throw new Error("runtime_unavailable");
+      if (activeRuntimePort && activeRuntimePort !== runtime.port) {
+        for (const current of attached.values()) {
+          try {
+            if (current.identifier) await current.connection.send("Page.removeScriptToEvaluateOnNewDocument", { identifier: current.identifier });
+            await evaluate(current.connection, injectionScript(0, accessToken, "uninstall"));
+          } catch {
+          }
+          current.connection.close();
+        }
+        attached.clear();
+      }
+      activeRuntimePort = runtime.port;
       const values = await mainTargets(port);
       const activeIds = new Set(values.map(target => target.id));
       for (const [id, current] of attached) {
@@ -376,24 +477,37 @@ export async function watchInjection(port: number, accessToken: string) {
         await connection.send("Page.enable");
         await connection.send("Page.setBypassCSP", { enabled: true });
         await connection.send("Runtime.enable");
-        const existing = await evaluate(connection, "window.__betterCodexInjection__?.version || null");
+        try { await connection.send("Runtime.addBinding", { name: "betterCodexRequest" }); } catch {}
+        connection.on("Runtime.bindingCalled", params => {
+          if (params.name === "betterCodexRequest") void bridgeRequest(connection, activeRuntimePort, accessToken, params.payload);
+        });
+        const existing = await evaluate(connection, "({ version: window.__betterCodexInjection__?.version || null, endpoint: window.__betterCodexInjection__?.endpoint || null })") as { version?: string; endpoint?: string };
         let identifier: string | undefined;
-        if (existing === injectionVersion) {
+        if (existing.version === injectionVersion && existing.endpoint === `http://127.0.0.1:${activeRuntimePort}`) {
           const stored = await evaluate(connection, "window.__betterCodexNewDocumentScriptId || null");
           identifier = typeof stored === "string" ? stored : undefined;
           await evaluate(connection, "window.__betterCodexInjection__.refresh()");
         } else {
-          const source = injectionScript(gatewayPort, accessToken, "install");
+          const source = injectionScript(activeRuntimePort, accessToken, "install");
           const registration = await connection.send("Page.addScriptToEvaluateOnNewDocument", { source });
           identifier = String(registration.identifier ?? "") || undefined;
           await evaluate(connection, source);
           await evaluate(connection, `window.__betterCodexNewDocumentScriptId = ${JSON.stringify(identifier ?? "")}`);
         }
         attached.set(target.id, { connection, identifier, target });
+        const current = readCompatibilityStatus();
+        writeCompatibilityStatus({ codexVersion: current?.codexVersion ?? desktopVersion(), compatible: true, reason: null, targetId: target.id, capabilities: current?.capabilities ?? null }, true);
       }
       for (const [id, current] of attached) {
         try {
-          await evaluate(current.connection, "window.__betterCodexInjection__?.version || null");
+          const existing = await evaluate(current.connection, "({ version: window.__betterCodexInjection__?.version || null, endpoint: window.__betterCodexInjection__?.endpoint || null })") as { version?: string; endpoint?: string };
+          if (existing.version !== injectionVersion || existing.endpoint !== `http://127.0.0.1:${activeRuntimePort}`) {
+            if (current.identifier) {
+              try { await current.connection.send("Page.removeScriptToEvaluateOnNewDocument", { identifier: current.identifier }); } catch {}
+            }
+            current.connection.close();
+            attached.delete(id);
+          }
         } catch {
           current.connection.close();
           attached.delete(id);
@@ -407,7 +521,7 @@ export async function watchInjection(port: number, accessToken: string) {
   for (const current of attached.values()) {
     try {
       if (current.identifier) await current.connection.send("Page.removeScriptToEvaluateOnNewDocument", { identifier: current.identifier });
-      await evaluate(current.connection, injectionScript(gatewayPort, accessToken, "uninstall"));
+      await evaluate(current.connection, injectionScript(0, accessToken, "uninstall"));
     } catch {
     }
     current.connection.close();

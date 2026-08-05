@@ -3,17 +3,19 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { isSea } from "node:sea";
-import { cdpPort, ensureDirectories, gatewayLogPath, logPath, port, betterCodexHome } from "./config.js";
+import { cdpPort, ensureDirectories, logPath, runtimeLogPath, betterCodexHome } from "./config.js";
 
-const label = "com.better-codex.gateway";
+const label = "com.better-codex.runtime";
+const legacyLabel = "com.better-codex.gateway";
 export const launchAgentPath = join(homedir(), "Library", "LaunchAgents", `${label}.plist`);
+const legacyLaunchAgentPath = join(homedir(), "Library", "LaunchAgents", `${legacyLabel}.plist`);
 
 function xml(value: string) {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
 function command() {
-  return isSea() ? [process.execPath, "serve"] : [process.execPath, process.argv[1], "serve"];
+  return isSea() ? [process.execPath, "runtime"] : [process.execPath, ...process.execArgv, process.argv[1], "runtime"];
 }
 
 export function servicePlist() {
@@ -25,7 +27,6 @@ export function servicePlist() {
 <key>ProgramArguments</key><array>${argumentsXml}</array>
 <key>EnvironmentVariables</key><dict>
 <key>BETTER_CODEX_HOME</key><string>${xml(betterCodexHome)}</string>
-<key>BETTER_CODEX_PORT</key><string>${port}</string>
 <key>BETTER_CODEX_CDP_PORT</key><string>${cdpPort}</string>
 </dict>
 <key>WorkingDirectory</key><string>${xml(betterCodexHome)}</string>
@@ -33,8 +34,8 @@ export function servicePlist() {
 <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
 <key>ThrottleInterval</key><integer>5</integer>
 <key>ProcessType</key><string>Background</string>
-<key>StandardOutPath</key><string>${xml(gatewayLogPath)}</string>
-<key>StandardErrorPath</key><string>${xml(join(logPath, "gateway.error.log"))}</string>
+<key>StandardOutPath</key><string>${xml(runtimeLogPath)}</string>
+<key>StandardErrorPath</key><string>${xml(join(logPath, "runtime.error.log"))}</string>
 </dict></plist>
 `;
 }
@@ -59,6 +60,8 @@ export function installService() {
   if (process.platform !== "darwin") throw new Error("service_install_requires_macos");
   ensureDirectories();
   mkdirSync(join(homedir(), "Library", "LaunchAgents"), { recursive: true });
+  launchctl(["bootout", domain(), legacyLaunchAgentPath], true);
+  if (existsSync(legacyLaunchAgentPath)) unlinkSync(legacyLaunchAgentPath);
   writeFileSync(launchAgentPath, servicePlist(), { mode: 0o644 });
   launchctl(["bootout", domain(), launchAgentPath], true);
   launchctl(["bootstrap", domain(), launchAgentPath]);
@@ -68,7 +71,9 @@ export function installService() {
 
 export function uninstallService() {
   launchctl(["bootout", domain(), launchAgentPath], true);
+  launchctl(["bootout", domain(), legacyLaunchAgentPath], true);
   if (existsSync(launchAgentPath)) unlinkSync(launchAgentPath);
+  if (existsSync(legacyLaunchAgentPath)) unlinkSync(legacyLaunchAgentPath);
   return { installed: false, label, path: launchAgentPath };
 }
 
@@ -97,6 +102,6 @@ export function serviceStatus() {
 }
 
 export function serviceLogs(lines = 50) {
-  if (!existsSync(gatewayLogPath)) return "";
-  return readFileSync(gatewayLogPath, "utf8").split("\n").slice(-Math.max(1, lines) - 1).join("\n");
+  if (!existsSync(runtimeLogPath)) return "";
+  return readFileSync(runtimeLogPath, "utf8").split("\n").slice(-Math.max(1, lines) - 1).join("\n");
 }

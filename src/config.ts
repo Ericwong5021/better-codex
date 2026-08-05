@@ -8,16 +8,22 @@ export const betterCodexHome = resolve(process.env.BETTER_CODEX_HOME || defaultH
 export const databasePath = resolve(process.env.BETTER_CODEX_DB || join(betterCodexHome, "better-codex.db"));
 export const runPath = join(betterCodexHome, "run");
 export const logPath = join(betterCodexHome, "logs");
+export const compatibilityPath = join(betterCodexHome, "compatibility");
+export const compatibilityStatusPath = join(compatibilityPath, "status.json");
 export const tokenPath = join(runPath, "token");
-export const gatewayLogPath = join(logPath, "gateway.log");
+export const runtimeStatePath = join(runPath, "runtime.json");
+export const runtimeLockPath = join(runPath, "runtime.lock");
+export const runtimeLogPath = join(logPath, "runtime.log");
 export const injectorLogPath = join(logPath, "injector.log");
 export const injectorPidPath = join(runPath, "injector.pid");
-export const port = Number(process.env.BETTER_CODEX_PORT ?? 4317);
+export const injectionStatePath = join(runPath, "injection.json");
+export const runtimePort = Number(process.env.BETTER_CODEX_RUNTIME_PORT ?? process.env.BETTER_CODEX_PORT ?? 0);
 export const cdpPort = Number(process.env.BETTER_CODEX_CDP_PORT ?? 9229);
 
 export function ensureDirectories() {
   mkdirSync(runPath, { recursive: true });
   mkdirSync(logPath, { recursive: true });
+  mkdirSync(compatibilityPath, { recursive: true });
 }
 
 export function token() {
