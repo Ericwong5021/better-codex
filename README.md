@@ -11,7 +11,7 @@ Tilo 是给 Codex 桌面端用户准备的本地任务看板。它把散落在�
 - 把当前 Codex 对话变成一张任务卡片，随时回到原来的对话。
 - 用待办、进行中、待审核、已完成等状态整理工作，不再让重要事项沉下去。
 - 创建项目、搜索任务、设置优先级、置顶或归档卡片。
-- 把所有任务留在自己的 Mac 上，本地 SQLite 数据库保存，不依赖云端账号。
+- 把所有任务留在自己的电脑上，本地 SQLite 数据库保存，不依赖云端账号。
 
 ## 适合谁
 
@@ -19,7 +19,7 @@ Tilo 是给 Codex 桌面端用户准备的本地任务看板。它把散落在�
 
 ## 三步开始
 
-目前 Tilo 面向 macOS 和 Codex 桌面端。先准备好 Node.js 22.5 或更新版本，然后运行：
+Tilo 支持 macOS 和 Windows 版 Codex 桌面端。先准备好 Node.js 22.5 或更新版本，然后运行：
 
 ```bash
 git clone https://github.com/Ericwong5021/tilo.git
@@ -29,6 +29,10 @@ npm run build
 npm link
 tilo inject --launch
 ```
+
+Windows 用户需要安装 Microsoft Store 版 Codex。首次注入前请完全退出 Codex（包括后台进程），再执行 `tilo inject --launch`；Tilo 会通过应用标识冷启动 Codex，并在启动参数中启用本地调试端口。
+
+macOS 用户可以直接执行同一条命令。后台服务的 `tilo service` 命令目前仅用于 macOS；Windows 上 `tilo inject --launch` 会按需启动本地 Gateway 和注入守护进程。
 
 回到 Codex 桌面端，侧边栏会出现 Tilo。打开它，创建第一个项目和任务卡片即可。
 
@@ -53,7 +57,7 @@ tilo status
 tilo eject
 ```
 
-这不会删除你的任务数据。数据默认保存在 `~/.tilo/tilo.db`。
+这不会删除你的任务数据。数据默认保存在 `~/.tilo/tilo.db`；Windows 对应路径为 `%USERPROFILE%\.tilo\tilo.db`。
 
 ## 开源与隐私
 

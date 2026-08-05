@@ -1,6 +1,6 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { port as gatewayPort } from "./config.js";
-import { injectionScript } from "./dom.js";
+import { injectionScript, injectionVersion } from "./dom.js";
 
 type Target = {
   id: string;
@@ -92,16 +92,95 @@ async function mainTargets(port: number) {
   return selected.length > 0 ? selected : candidates.slice(0, 1);
 }
 
+function windowsActivationScript(port: number) {
+  return `$ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"
+try {
+$runningMainProcess = Get-CimInstance Win32_Process -Filter "Name = 'ChatGPT.exe'" |
+  Where-Object { $_.CommandLine -notmatch "--type=" } |
+  Select-Object -First 1
+if ($runningMainProcess) {
+  throw "Codex is already running without CDP. Quit Codex completely and try again."
+}
+
+$codexApp = Get-StartApps |
+  Where-Object { $_.AppID -like "OpenAI.Codex_*!App" } |
+  Select-Object -First 1
+if (-not $codexApp) {
+  throw "The Microsoft Store Codex application is not installed for this Windows user."
+}
+
+$activationSource = @'
+using System;
+using System.Runtime.InteropServices;
+
+[ComImport]
+[Guid("2e941141-7f97-4756-ba1d-9decde894a3d")]
+[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+public interface IApplicationActivationManager {
+  [PreserveSig]
+  int ActivateApplication(
+    [MarshalAs(UnmanagedType.LPWStr)] string appUserModelId,
+    [MarshalAs(UnmanagedType.LPWStr)] string arguments,
+    uint options,
+    out uint processId);
+}
+
+[ComImport]
+[Guid("45BA127D-10A8-46EA-8AB7-56EA9078943C")]
+public class ApplicationActivationManager {}
+
+public static class TiloCodexApplication {
+  public static uint Activate(string appUserModelId, string arguments) {
+    var manager = (IApplicationActivationManager)new ApplicationActivationManager();
+    uint processId;
+    int result = manager.ActivateApplication(appUserModelId, arguments, 0, out processId);
+    Marshal.ThrowExceptionForHR(result);
+    return processId;
+  }
+}
+'@
+
+Add-Type -TypeDefinition $activationSource
+$arguments = "--remote-debugging-port=${port} --remote-allow-origins=http://127.0.0.1:${port}"
+[void][TiloCodexApplication]::Activate($codexApp.AppID, $arguments)
+} catch {
+  [Console]::Error.WriteLine($_.Exception.Message)
+  exit 1
+}
+`;
+}
+
 function launchCodex(port: number) {
-  const child = spawn("/usr/bin/open", [
-    "-n",
-    "-a",
-    "/Applications/ChatGPT.app",
-    "--args",
-    `--remote-debugging-port=${port}`,
-    `--remote-allow-origins=http://127.0.0.1:${port}`,
-  ], { detached: true, stdio: "ignore" });
-  child.unref();
+  if (process.platform === "darwin") {
+    const child = spawn("/usr/bin/open", [
+      "-n",
+      "-a",
+      "/Applications/ChatGPT.app",
+      "--args",
+      `--remote-debugging-port=${port}`,
+      `--remote-allow-origins=http://127.0.0.1:${port}`,
+    ], { detached: true, stdio: "ignore" });
+    child.unref();
+    return;
+  }
+  if (process.platform === "win32") {
+    const encoded = Buffer.from(windowsActivationScript(port), "utf16le").toString("base64");
+    try {
+      execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-OutputFormat", "Text", "-EncodedCommand", encoded], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        windowsHide: true,
+      });
+    } catch (error) {
+      const output = error && typeof error === "object"
+        ? String("stderr" in error ? error.stderr : "stdout" in error ? error.stdout : "").trim()
+        : "";
+      throw new Error(output || "codex_windows_launch_failed");
+    }
+    return;
+  }
+  throw new Error(`codex_launch_unsupported_${process.platform}`);
 }
 
 async function waitForTargets(port: number) {
@@ -124,7 +203,7 @@ async function installTarget(target: Target, port: number, accessToken: string) 
     await connection.send("Page.setBypassCSP", { enabled: true });
     await connection.send("Runtime.enable");
     const existing = await evaluate(connection, "window.__tiloInjection__?.version || null");
-    if (existing === "0.1.0") {
+    if (existing === injectionVersion) {
       const storedIdentifier = await evaluate(connection, "window.__tiloNewDocumentScriptId || null");
       await evaluate(connection, "window.__tiloInjection__.refresh()");
       return { targetId: target.id, title: target.title, installed: true, reused: true, identifier: typeof storedIdentifier === "string" ? storedIdentifier : undefined };
@@ -253,7 +332,7 @@ export async function watchInjection(port: number, accessToken: string) {
         await connection.send("Runtime.enable");
         const existing = await evaluate(connection, "window.__tiloInjection__?.version || null");
         let identifier: string | undefined;
-        if (existing === "0.1.0") {
+        if (existing === injectionVersion) {
           const stored = await evaluate(connection, "window.__tiloNewDocumentScriptId || null");
           identifier = typeof stored === "string" ? stored : undefined;
           await evaluate(connection, "window.__tiloInjection__.refresh()");

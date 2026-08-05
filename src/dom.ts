@@ -1,3 +1,5 @@
+export const injectionVersion = "0.1.1";
+
 export function injectionScript(port: number, accessToken: string, action: "install" | "uninstall") {
   if (action === "uninstall") {
     return `(() => {
@@ -14,7 +16,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
   const token = JSON.stringify(accessToken);
   return `(() => {
     "use strict";
-    const VERSION = "0.1.0";
+    const VERSION = ${JSON.stringify(injectionVersion)};
     const previous = window.__tiloInjection__;
     if (previous?.version === VERSION) {
       previous.refresh();
@@ -54,30 +56,30 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       style.id = STYLE_ID;
       style.setAttribute(OWNED, "true");
       style.textContent = \`
-        #\${ENTRY_ID}[aria-current="page"] { background: var(--color-token-list-hover-background, color-mix(in srgb, currentColor 8%, transparent)); }
+        #\${ENTRY_ID}[aria-current="page"] { background: var(--color-background-primary-soft-active, var(--color-token-list-hover-background, color-mix(in srgb, currentColor 8%, transparent))); }
         [\${HOST}="true"] { position: relative !important; z-index: 31 !important; pointer-events: none !important; }
         [\${HIDDEN}="true"] { visibility: hidden !important; pointer-events: none !important; }
-        #\${PANEL_ID} { position: absolute; inset: 0; z-index: 2; display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; color: inherit; background: var(--color-token-bg-primary, Canvas); pointer-events: auto; }
+        #\${PANEL_ID} { position: absolute; inset: 0; z-index: 2; display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; color: var(--color-text-foreground, inherit); background: var(--color-background-surface, var(--wb-surface-primary, var(--color-token-bg-primary, Canvas))); pointer-events: auto; }
         #\${PANEL_ID}[hidden] { display: none !important; }
-        #\${PANEL_ID} .tilo-toolbar { display: flex; align-items: center; gap: 8px; min-height: 52px; padding: 0 16px; border-bottom: 1px solid var(--color-token-border-default, color-mix(in srgb, currentColor 14%, transparent)); }
+        #\${PANEL_ID} .tilo-toolbar { display: flex; align-items: center; gap: 8px; min-height: 52px; padding: 0 16px; border-bottom: 1px solid var(--color-border, var(--color-token-border-default, color-mix(in srgb, currentColor 14%, transparent))); background: var(--color-background-surface, var(--wb-surface-primary, transparent)); }
         #\${PANEL_ID} .tilo-title { margin-right: auto; font-size: 15px; font-weight: 600; }
-        #\${PANEL_ID} .tilo-control { min-height: 30px; border: 1px solid var(--color-token-border-default, color-mix(in srgb, currentColor 15%, transparent)); border-radius: 6px; color: inherit; background: transparent; padding: 0 8px; font: inherit; }
+        #\${PANEL_ID} .tilo-control { min-height: 30px; border: 1px solid var(--color-border, var(--color-token-border-default, color-mix(in srgb, currentColor 15%, transparent))); border-radius: 6px; color: inherit; background: var(--color-background-primary-soft, transparent); padding: 0 8px; font: inherit; }
         #\${PANEL_ID} .tilo-search { width: 180px; }
         #\${PANEL_ID} .tilo-board { display: grid; grid-auto-columns: minmax(220px, 1fr); grid-auto-flow: column; gap: 10px; min-height: 0; flex: 1; overflow: auto; padding: 12px; }
-        #\${PANEL_ID} .tilo-column { display: flex; min-height: 180px; flex-direction: column; gap: 7px; border-radius: 8px; background: color-mix(in srgb, currentColor 4%, transparent); padding: 8px; }
+        #\${PANEL_ID} .tilo-column { display: flex; min-height: 180px; flex-direction: column; gap: 7px; border-radius: 8px; background: var(--color-background-secondary-soft, color-mix(in srgb, currentColor 4%, transparent)); padding: 8px; }
         #\${PANEL_ID} .tilo-column-head { display: flex; align-items: center; justify-content: space-between; padding: 2px 3px 6px; font-size: 12px; font-weight: 600; }
-        #\${PANEL_ID} .tilo-card { border: 1px solid var(--color-token-border-default, color-mix(in srgb, currentColor 12%, transparent)); border-radius: 7px; background: var(--color-token-bg-primary, Canvas); padding: 9px; cursor: pointer; }
-        #\${PANEL_ID} .tilo-card:hover { background: var(--color-token-list-hover-background, color-mix(in srgb, currentColor 6%, transparent)); }
-        #\${PANEL_ID} .tilo-card-id { display: flex; justify-content: space-between; color: color-mix(in srgb, currentColor 55%, transparent); font-size: 11px; }
+        #\${PANEL_ID} .tilo-card { border: 1px solid var(--color-border, var(--color-token-border-default, color-mix(in srgb, currentColor 12%, transparent))); border-radius: 7px; background: var(--color-background-primary-soft, var(--color-token-bg-primary, Canvas)); padding: 9px; cursor: pointer; }
+        #\${PANEL_ID} .tilo-card:hover { background: var(--color-background-primary-ghost-hover, var(--color-token-list-hover-background, color-mix(in srgb, currentColor 6%, transparent))); }
+        #\${PANEL_ID} .tilo-card-id { display: flex; justify-content: space-between; color: var(--color-text-foreground-tertiary, color-mix(in srgb, currentColor 55%, transparent)); font-size: 11px; }
         #\${PANEL_ID} .tilo-card-title { margin: 6px 0 8px; font-size: 13px; line-height: 1.35; }
-        #\${PANEL_ID} .tilo-card-meta { display: flex; gap: 6px; color: color-mix(in srgb, currentColor 60%, transparent); font-size: 11px; }
+        #\${PANEL_ID} .tilo-card-meta { display: flex; gap: 6px; color: var(--color-text-foreground-secondary, color-mix(in srgb, currentColor 60%, transparent)); font-size: 11px; }
         #\${PANEL_ID} .tilo-link { margin-left: auto; }
-        #\${PANEL_ID} .tilo-empty { padding: 16px 4px; text-align: center; color: color-mix(in srgb, currentColor 45%, transparent); font-size: 12px; }
-        #tilo-dialog { width: min(560px, calc(100vw - 64px)); border: 1px solid var(--color-token-border-default, color-mix(in srgb, currentColor 15%, transparent)); border-radius: 10px; color: inherit; background: var(--color-token-bg-primary, Canvas); padding: 18px; }
+        #\${PANEL_ID} .tilo-empty { padding: 16px 4px; text-align: center; color: var(--color-text-foreground-tertiary, color-mix(in srgb, currentColor 45%, transparent)); font-size: 12px; }
+        #tilo-dialog { width: min(560px, calc(100vw - 64px)); border: 1px solid var(--color-border-strong, var(--color-border, var(--color-token-border-default, color-mix(in srgb, currentColor 15%, transparent)))); border-radius: 10px; color: var(--color-text-foreground, inherit); background: var(--color-background-surface, var(--wb-surface-primary, var(--color-token-bg-primary, Canvas))); padding: 18px; }
         #tilo-dialog::backdrop { background: rgba(0,0,0,.38); }
         #tilo-dialog form { display: grid; gap: 12px; }
         #tilo-dialog label { display: grid; gap: 5px; font-size: 12px; }
-        #tilo-dialog input, #tilo-dialog textarea, #tilo-dialog select { box-sizing: border-box; width: 100%; border: 1px solid var(--color-token-border-default, color-mix(in srgb, currentColor 15%, transparent)); border-radius: 6px; color: inherit; background: transparent; padding: 8px; font: inherit; }
+        #tilo-dialog input, #tilo-dialog textarea, #tilo-dialog select { box-sizing: border-box; width: 100%; border: 1px solid var(--color-border, var(--color-token-border-default, color-mix(in srgb, currentColor 15%, transparent))); border-radius: 6px; color: inherit; background: var(--color-background-primary-soft, transparent); padding: 8px; font: inherit; }
         #tilo-dialog textarea { min-height: 110px; resize: vertical; }
         #tilo-dialog .tilo-dialog-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
         #tilo-dialog .tilo-dialog-actions { display: flex; gap: 8px; justify-content: flex-end; }
