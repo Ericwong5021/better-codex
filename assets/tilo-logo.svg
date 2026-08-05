@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 160" role="img" aria-labelledby="title">
+  <title id="title">Tilo</title>
+  <defs>
+    <linearGradient id="indigo" x1="0" x2="1" y1="1" y2="0">
+      <stop stop-color="#3f2dff"/>
+      <stop offset="1" stop-color="#5b4fff"/>
+    </linearGradient>
+    <linearGradient id="lavender" x1="0" x2="1" y1="1" y2="0">
+      <stop stop-color="#a99eff"/>
+      <stop offset="1" stop-color="#cfc6ff"/>
+    </linearGradient>
+  </defs>
+  <path fill="#36384c" d="M36 56c0-8 5-15 13-18l29-11c8-3 13 1 13 9v76c0 8-5 15-13 18l-29 11c-8 3-13-1-13-9V56Z"/>
+  <path fill="url(#indigo)" d="M105 38c0-8 5-15 13-18l29-11c8-3 13 1 13 9v76c0 8-5 15-13 18l-29 11c-8 3-13-1-13-9V38Z"/>
+  <path fill="url(#lavender)" d="M174 20c0-8 5-15 13-18l29-11c8-3 13 1 13 9v76c0 8-5 15-13 18l-29 11c-8 3-13-1-13-9V20Z" transform="translate(0 18)"/>
+  <text x="258" y="117" fill="#0b0d14" font-family="Arial, Helvetica, sans-serif" font-size="102" font-weight="700" letter-spacing="-5">Tilo</text>
+</svg>

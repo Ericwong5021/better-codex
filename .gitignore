@@ -1,0 +1,9 @@
+node_modules
+dist
+data
+.env
+ref
+release
+logs
+run
+tilo.db*
