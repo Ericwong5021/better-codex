@@ -27,7 +27,8 @@
     "dev": "tsx src/cli.ts serve",
     "package:binary": "node scripts/package.mjs",
     "start": "node dist/cli.js serve",
-    "better-codex": "tsx src/cli.ts"
+    "better-codex": "tsx src/cli.ts",
+    "test": "tsx --test test/*.test.ts"
   },
   "devDependencies": {
     "@types/node": "^22.15.21",

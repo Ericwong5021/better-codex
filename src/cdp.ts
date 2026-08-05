@@ -331,13 +331,22 @@ export async function cdpOpenThread(port: number, threadId: string) {
   const connection = new Connection(target.webSocketDebuggerUrl!);
   await connection.open();
   try {
-    return await evaluate(connection, `(() => {
+    return await evaluate(connection, `(async () => {
       const expected = ${JSON.stringify(threadId)}.replace(/^(local|cloud):/i, '');
       const row = Array.from(document.querySelectorAll('[data-app-action-sidebar-thread-id]')).find(item => String(item.getAttribute('data-app-action-sidebar-thread-id') || '').replace(/^(local|cloud):/i, '') === expected);
-      window.__betterCodexInjection__?.close?.();
-      if (row) { row.click(); return { opened: true, via: 'sidebar' }; }
+      if (row) {
+        window.__betterCodexInjection__?.close?.();
+        row.click();
+        return { opened: true, via: 'sidebar' };
+      }
       window.postMessage({ type: 'navigate-to-route', path: '/local/' + encodeURIComponent(expected) }, window.location.origin);
-      return { opened: true, via: 'route' };
+      await new Promise(resolve => setTimeout(resolve, 400));
+      const current = location.pathname.match(/\/local\/([^/?#]+)/)?.[1] || '';
+      if (decodeURIComponent(current) === expected) {
+        window.__betterCodexInjection__?.close?.();
+        return { opened: true, via: 'route' };
+      }
+      return { opened: false, requested: true, via: 'route', error: 'thread_open_unconfirmed' };
     })()`);
   } finally {
     connection.close();

@@ -34,7 +34,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const TOKEN = ${token};
     const statusLabels = { backlog: "待整理", todo: "待办", in_progress: "进行中", blocked: "阻塞", in_review: "审核中", done: "完成" };
     const priorityLabels = { none: "无", low: "低", medium: "中", high: "高", urgent: "紧急" };
-    const state = { projects: [], issues: [], projectId: "", search: "", selected: null };
+    const state = { projects: [], issues: [], projectId: "", search: "", selected: null, error: "" };
     let entry = null;
     let panel = null;
     let observer = null;
@@ -65,6 +65,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #\${PANEL_ID} .better-codex-title { margin-right: auto; font-size: 15px; font-weight: 600; }
         #\${PANEL_ID} .better-codex-control { min-height: 30px; border: 1px solid var(--color-border, var(--color-token-border-default, color-mix(in srgb, currentColor 15%, transparent))); border-radius: 6px; color: inherit; background: var(--color-background-primary-soft, transparent); padding: 0 8px; font: inherit; }
         #\${PANEL_ID} .better-codex-search { width: 180px; }
+        #\${PANEL_ID} .better-codex-error { color: var(--color-text-danger, #c33); font-size: 12px; }
         #\${PANEL_ID} .better-codex-board { display: grid; grid-auto-columns: minmax(220px, 1fr); grid-auto-flow: column; gap: 10px; min-height: 0; flex: 1; overflow: auto; padding: 12px; }
         #\${PANEL_ID} .better-codex-column { display: flex; min-height: 180px; flex-direction: column; gap: 7px; border-radius: 8px; background: var(--color-background-secondary-soft, color-mix(in srgb, currentColor 4%, transparent)); padding: 8px; }
         #\${PANEL_ID} .better-codex-column-head { display: flex; align-items: center; justify-content: space-between; padding: 2px 3px 6px; font-size: 12px; font-weight: 600; }
@@ -184,6 +185,34 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       return value;
     }
 
+    function showError(error) {
+      state.error = error instanceof Error ? error.message : String(error || "request_failed");
+      const output = panel?.querySelector("#better-codex-error");
+      if (output) {
+        output.textContent = state.error;
+        output.hidden = false;
+      }
+    }
+
+    function clearError() {
+      state.error = "";
+      const output = panel?.querySelector("#better-codex-error");
+      if (output) {
+        output.textContent = "";
+        output.hidden = true;
+      }
+    }
+
+    async function perform(action) {
+      clearError();
+      try {
+        return await action();
+      } catch (error) {
+        showError(error);
+        return null;
+      }
+    }
+
     function createPanel() {
       const nativeFrame = document.querySelector(".app-shell-main-content-frame");
       const section = document.createElement("section");
@@ -199,27 +228,31 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const projects = document.createElement("select");
       projects.id = "better-codex-project";
       projects.className = "better-codex-control";
-      projects.addEventListener("change", () => { state.projectId = projects.value; void loadIssues(); });
+      projects.addEventListener("change", () => { state.projectId = projects.value; void perform(loadIssues); });
       const search = document.querySelector('input[type="search"]')?.cloneNode(false) || document.createElement("input");
       search.id = "better-codex-search";
       search.classList.add("better-codex-control", "better-codex-search");
       search.placeholder = "搜索任务";
       search.value = "";
-      search.addEventListener("input", () => { state.search = search.value; void loadIssues(); });
+      search.addEventListener("input", () => { state.search = search.value; void perform(loadIssues); });
+      const error = document.createElement("div");
+      error.id = "better-codex-error";
+      error.className = "better-codex-error";
+      error.hidden = true;
       const addProject = nativeButton("新建项目");
-      addProject.addEventListener("click", async () => {
+      addProject.addEventListener("click", () => void perform(async () => {
         const name = window.prompt("项目名称");
         if (!name?.trim()) return;
         const project = await api("/api/projects", { method: "POST", body: JSON.stringify({ name, workspace_path: readContext().workspacePath }) });
         state.projects.push(project);
         state.projectId = project.id;
         await loadIssues();
-      });
+      }));
       const addIssue = nativeButton("新建任务");
       addIssue.addEventListener("click", () => openEditor());
       const refreshButton = nativeButton("刷新");
       refreshButton.addEventListener("click", () => load());
-      toolbar.append(title, projects, search, addProject, addIssue, refreshButton);
+      toolbar.append(title, projects, search, error, addProject, addIssue, refreshButton);
       const board = document.createElement("main");
       board.id = "better-codex-board";
       board.className = "better-codex-board";
@@ -252,6 +285,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     async function load() {
+      clearError();
       try {
         const bootstrap = await api("/api/bootstrap");
         state.projects = bootstrap.projects;
@@ -270,7 +304,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         await loadIssues();
       } catch (error) {
         const board = panel?.querySelector("#better-codex-board");
-        if (board) board.innerHTML = '<div class="better-codex-empty">' + escapeHtml(error.message || "无法连接 Gateway") + "</div>";
+        const message = error instanceof Error ? error.message : "无法连接 Gateway";
+        showError(message);
+        if (board) board.innerHTML = '<div class="better-codex-empty">' + escapeHtml(message) + " · 点击刷新重试</div>";
       }
     }
 
@@ -292,11 +328,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const actions = dialog.querySelector(".better-codex-dialog-actions");
       if (issue) {
         const archive = nativeButton("归档");
-        archive.addEventListener("click", async () => {
+        archive.addEventListener("click", () => void perform(async () => {
           await api("/api/issues/" + encodeURIComponent(issue.id) + "/archive", { method: "POST", body: JSON.stringify({ version: issue.version }) });
           dialog.close();
           await loadIssues();
-        });
+        }));
         actions.append(archive);
       }
       const cancel = nativeButton("取消");
@@ -304,7 +340,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const save = nativeButton("保存");
       save.type = "submit";
       actions.append(cancel, save);
-      dialog.querySelector("form").addEventListener("submit", async event => {
+      dialog.querySelector("form").addEventListener("submit", event => void perform(async () => {
         event.preventDefault();
         const form = new FormData(event.currentTarget);
         const body = {
@@ -319,35 +355,39 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         else await api("/api/issues", { method: "POST", body: JSON.stringify({ ...body, project_id: state.projectId }) });
         dialog.close();
         await loadIssues();
-      });
+      }));
       document.body.append(dialog);
       dialog.addEventListener("close", () => dialog.remove(), { once: true });
       dialog.showModal();
     }
 
-    async function onBoardClick(event) {
+    function onBoardClick(event) {
       const thread = event.target.closest("[data-thread]");
-      if (thread) return openThread(thread.dataset.thread);
+      if (thread) return void perform(() => openThread(thread.dataset.thread));
       const pin = event.target.closest("[data-pin]");
       if (pin) {
         const issue = state.issues.find(item => item.id === pin.dataset.pin);
         if (!issue) return;
-        await api("/api/issues/" + encodeURIComponent(issue.id), { method: "PATCH", body: JSON.stringify({ version: issue.version, pinned: !issue.pinned }) });
-        return loadIssues();
+        return void perform(async () => {
+          await api("/api/issues/" + encodeURIComponent(issue.id), { method: "PATCH", body: JSON.stringify({ version: issue.version, pinned: !issue.pinned }) });
+          await loadIssues();
+        });
       }
       const card = event.target.closest("[data-issue-id]");
       const issue = state.issues.find(item => item.id === card?.dataset.issueId);
       if (issue) openEditor(issue);
     }
 
-    async function onDrop(event) {
+    function onDrop(event) {
       event.preventDefault();
       const id = event.dataTransfer?.getData("text/plain");
       const status = event.target.closest("[data-status]")?.dataset.status;
       const issue = state.issues.find(item => item.id === id);
       if (!issue || !status || issue.status === status) return;
-      await api("/api/issues/" + encodeURIComponent(issue.id), { method: "PATCH", body: JSON.stringify({ version: issue.version, status }) });
-      await loadIssues();
+      void perform(async () => {
+        await api("/api/issues/" + encodeURIComponent(issue.id), { method: "PATCH", body: JSON.stringify({ version: issue.version, status }) });
+        await loadIssues();
+      });
     }
 
     function mountPanel() {
@@ -385,12 +425,22 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       ensureEntry();
     }
 
-    function openThread(threadId) {
+    async function openThread(threadId) {
       const expected = String(threadId || "").replace(/^(local|cloud):/i, "");
       const row = Array.from(document.querySelectorAll("[data-app-action-sidebar-thread-id]")).find(item => String(item.getAttribute("data-app-action-sidebar-thread-id") || "").replace(/^(local|cloud):/i, "") === expected);
-      close();
-      if (row) row.click();
-      else window.postMessage({ type: "navigate-to-route", path: "/local/" + encodeURIComponent(expected) }, window.location.origin);
+      if (row) {
+        close();
+        row.click();
+        return { opened: true, via: "sidebar" };
+      }
+      window.postMessage({ type: "navigate-to-route", path: "/local/" + encodeURIComponent(expected) }, window.location.origin);
+      await new Promise(resolve => setTimeout(resolve, 400));
+      const current = location.pathname.match(/\/local\/([^/?#]+)/)?.[1] || "";
+      if (decodeURIComponent(current) === expected) {
+        close();
+        return { opened: true, via: "route" };
+      }
+      throw new Error("thread_open_unconfirmed");
     }
 
     function onClick(event) {

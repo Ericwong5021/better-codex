@@ -66,13 +66,22 @@ function cleanString(value: unknown, limit = 10000) {
   return value.trim();
 }
 
+function asLabels(value: unknown) {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.some(item => typeof item !== "string")) throw new Error("invalid_labels");
+  return value.map(item => item.trim()).filter(Boolean).slice(0, 20);
+}
+
 function parseIssuePatch(body: Record<string, unknown>) {
   const patch: Record<string, unknown> = {};
   if ("title" in body) patch.title = cleanString(body.title, 500);
   if ("description" in body) patch.description = cleanString(body.description, 100000);
   if ("status" in body) patch.status = asStatus(body.status);
   if ("priority" in body) patch.priority = asPriority(body.priority);
-  if ("pinned" in body) patch.pinned = Boolean(body.pinned);
+  if ("pinned" in body) {
+    if (typeof body.pinned !== "boolean") throw new Error("invalid_pinned");
+    patch.pinned = body.pinned;
+  }
   if ("sort_order" in body) {
     if (typeof body.sort_order !== "number" || !Number.isFinite(body.sort_order)) throw new Error("invalid_sort_order");
     patch.sort_order = body.sort_order;
@@ -80,10 +89,22 @@ function parseIssuePatch(body: Record<string, unknown>) {
   if ("thread_id" in body) patch.thread_id = cleanString(body.thread_id, 200) || null;
   if ("workspace_path" in body) patch.workspace_path = cleanString(body.workspace_path, 4096) || null;
   if ("labels" in body) {
-    if (!Array.isArray(body.labels) || body.labels.some((item) => typeof item !== "string")) throw new Error("invalid_labels");
-    patch.labels = body.labels.map((item) => item.trim()).filter(Boolean).slice(0, 20);
+    patch.labels = asLabels(body.labels);
   }
   return patch;
+}
+
+function errorCode(error: unknown) {
+  const message = error instanceof Error ? error.message : "request_failed";
+  if (message.startsWith("SQLITE_") || message.includes("database is")) return "database_unavailable";
+  return message;
+}
+
+function errorStatus(code: string) {
+  if (code === "version_conflict") return 409;
+  if (code.endsWith("_not_found")) return 404;
+  if (code === "database_unavailable" || code === "database_integrity_check_failed") return 503;
+  return 400;
 }
 
 export function startServer() {
@@ -95,7 +116,8 @@ export function startServer() {
       const method = request.method ?? "GET";
 
       if (url.pathname === "/health") {
-        return sendJson(response, 200, { ok: true, version: "0.2.0", pid: process.pid, database: true });
+        const database = store.health();
+        return sendJson(response, database.ok ? 200 : 503, { ok: database.ok, version: "0.2.0", pid: process.pid, database });
       }
       if (!authorized(request, url)) return sendJson(response, 401, { error: "unauthorized" });
       if (url.pathname === "/api/bootstrap" && method === "GET") {
@@ -132,9 +154,9 @@ export function startServer() {
           projectId: cleanString(body.project_id, 200),
           title: cleanString(body.title, 500),
           description: cleanString(body.description, 100000),
-          status: body.status ? asStatus(body.status) : undefined,
-          priority: body.priority ? asPriority(body.priority) : undefined,
-          labels: Array.isArray(body.labels) ? body.labels.map(String) : [],
+          status: "status" in body ? asStatus(body.status) : undefined,
+          priority: "priority" in body ? asPriority(body.priority) : undefined,
+          labels: asLabels(body.labels),
           threadId: cleanString(body.thread_id, 200),
           workspacePath: cleanString(body.workspace_path, 4096),
         });
@@ -159,14 +181,16 @@ export function startServer() {
       }
       if (url.pathname === "/api/shutdown" && method === "POST") {
         sendJson(response, 200, { ok: true });
-        setImmediate(() => server.close(() => process.exit(0)));
+        setImmediate(() => server.close(() => {
+          store.close();
+          process.exit(0);
+        }));
         return;
       }
       return sendJson(response, 404, { error: "not_found" });
     })().catch((error) => {
-      const message = error instanceof Error ? error.message : "request_failed";
-      const status = message === "version_conflict" ? 409 : message.endsWith("_not_found") ? 404 : 400;
-      if (!response.headersSent) sendJson(response, status, { error: message });
+      const code = errorCode(error);
+      if (!response.headersSent) sendJson(response, errorStatus(code), { error: code });
       else response.end();
     });
   });
@@ -174,7 +198,10 @@ export function startServer() {
   server.listen(port, "127.0.0.1", () => {
     console.log(`Better Codex 0.2.0 listening on http://127.0.0.1:${port}`);
   });
-  const stop = () => server.close(() => process.exit(0));
+  const stop = () => server.close(() => {
+    store.close();
+    process.exit(0);
+  });
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
   return server;

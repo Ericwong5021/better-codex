@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { existsSync, mkdirSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { databasePath } from "./config.js";
 
@@ -60,13 +60,31 @@ type IssueInput = {
 
 type IssuePatch = Partial<Pick<Issue, "title" | "description" | "status" | "priority" | "labels" | "sort_order" | "pinned" | "thread_id" | "workspace_path">>;
 
+const latestSchemaVersion = 2;
+
 function now() {
   return new Date().toISOString();
 }
 
 function projectPrefix(name: string) {
   const ascii = name.normalize("NFKD").replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
-  return (ascii.slice(0, 3) || "TIL").padEnd(3, "X");
+  return (ascii.slice(0, 3) || "BCX").padEnd(3, "X");
+}
+
+function cleanName(value: string) {
+  const name = value.trim();
+  if (!name) throw new Error("name_required");
+  return name;
+}
+
+function cleanTitle(value: string) {
+  const title = value.trim();
+  if (!title) throw new Error("title_required");
+  return title;
+}
+
+function cleanLabels(values: string[]) {
+  return [...new Set(values.map(value => value.trim()).filter(Boolean))].slice(0, 20);
 }
 
 function issueFromRow(row: Record<string, unknown>): Issue {
@@ -80,66 +98,135 @@ function issueFromRow(row: Record<string, unknown>): Issue {
 
 export class Store {
   readonly db: DatabaseSync;
+  readonly file: string;
+  lastBackupPath: string | null = null;
 
   constructor(file = databasePath) {
+    this.file = file;
     mkdirSync(dirname(file), { recursive: true });
+    const existing = existsSync(file);
     this.db = new DatabaseSync(file);
     this.db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS projects (
-        id TEXT PRIMARY KEY,
-        external_id TEXT UNIQUE,
-        identifier_prefix TEXT NOT NULL DEFAULT 'TIL',
-        name TEXT NOT NULL,
-        workspace_path TEXT NOT NULL DEFAULT '',
-        next_issue_number INTEGER NOT NULL DEFAULT 1,
-        default_branch TEXT NOT NULL DEFAULT 'main',
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS issues (
-        id TEXT PRIMARY KEY,
-        identifier TEXT NOT NULL UNIQUE,
-        project_id TEXT NOT NULL REFERENCES projects(id),
-        title TEXT NOT NULL,
-        description TEXT NOT NULL DEFAULT '',
-        status TEXT NOT NULL DEFAULT 'todo',
-        priority TEXT NOT NULL DEFAULT 'medium',
-        labels_json TEXT NOT NULL DEFAULT '[]',
-        sort_order REAL NOT NULL,
-        pinned INTEGER NOT NULL DEFAULT 0,
-        archived_at TEXT,
-        thread_id TEXT,
-        workspace_path TEXT,
-        version INTEGER NOT NULL DEFAULT 1,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS issues_project_status_sort
-        ON issues(project_id, archived_at, status, pinned DESC, sort_order, created_at);
-      CREATE INDEX IF NOT EXISTS issues_thread_id ON issues(thread_id);
-    `);
-    this.upgradeLegacyProjects();
+    const currentVersion = this.schemaVersion();
+    if (currentVersion > latestSchemaVersion) {
+      this.db.close();
+      throw new Error("database_schema_too_new");
+    }
+    if (existing && currentVersion < latestSchemaVersion) this.lastBackupPath = this.backup();
+    this.migrate(currentVersion);
+    const integrity = this.db.prepare("PRAGMA quick_check").get() as Record<string, unknown> | undefined;
+    if (String(integrity?.quick_check ?? "") !== "ok") {
+      this.db.close();
+      throw new Error("database_integrity_check_failed");
+    }
     if (this.listProjects().length === 0) {
       this.ensureProject({ externalId: "inbox", name: "Inbox", workspacePath: process.cwd() });
     }
   }
 
-  close() {
-    this.db.close();
+  private schemaVersion() {
+    const table = this.db.prepare("SELECT 1 AS value FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'").get();
+    if (!table) return 0;
+    const row = this.db.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as { version: number };
+    return Number(row.version);
+  }
+
+  private backup() {
+    const directory = join(dirname(this.file), "backups");
+    mkdirSync(directory, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const target = join(directory, `better-codex-before-v${latestSchemaVersion}-${stamp}.db`);
+    this.db.prepare("VACUUM INTO ?").run(target);
+    return target;
+  }
+
+  private migrate(fromVersion: number) {
+    this.db.exec("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)");
+    if (fromVersion < 1) {
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS projects (
+            id TEXT PRIMARY KEY,
+            external_id TEXT UNIQUE,
+            identifier_prefix TEXT NOT NULL DEFAULT 'BCX',
+            name TEXT NOT NULL,
+            workspace_path TEXT NOT NULL DEFAULT '',
+            next_issue_number INTEGER NOT NULL DEFAULT 1,
+            default_branch TEXT NOT NULL DEFAULT 'main',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          );
+          CREATE TABLE IF NOT EXISTS issues (
+            id TEXT PRIMARY KEY,
+            identifier TEXT NOT NULL UNIQUE,
+            project_id TEXT NOT NULL REFERENCES projects(id),
+            title TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'todo',
+            priority TEXT NOT NULL DEFAULT 'medium',
+            labels_json TEXT NOT NULL DEFAULT '[]',
+            sort_order REAL NOT NULL,
+            pinned INTEGER NOT NULL DEFAULT 0,
+            archived_at TEXT,
+            thread_id TEXT,
+            workspace_path TEXT,
+            version INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          );
+        `);
+        this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (1, ?)").run(now());
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    }
+    if (fromVersion < 2) {
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        this.upgradeLegacyProjects();
+        this.db.exec(`
+          CREATE UNIQUE INDEX IF NOT EXISTS projects_external_id ON projects(external_id);
+          CREATE INDEX IF NOT EXISTS issues_project_status_sort
+            ON issues(project_id, archived_at, status, pinned DESC, sort_order, created_at);
+          CREATE INDEX IF NOT EXISTS issues_thread_id ON issues(thread_id);
+        `);
+        this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (2, ?)").run(now());
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    }
   }
 
   private upgradeLegacyProjects() {
     const columns = new Set((this.db.prepare("PRAGMA table_info(projects)").all() as Array<{ name: string }>).map((item) => item.name));
     for (const [name, definition] of [
       ["external_id", "TEXT"],
-      ["identifier_prefix", "TEXT NOT NULL DEFAULT 'TIL'"],
+      ["identifier_prefix", "TEXT NOT NULL DEFAULT 'BCX'"],
       ["next_issue_number", "INTEGER NOT NULL DEFAULT 1"],
       ["updated_at", "TEXT NOT NULL DEFAULT ''"],
     ]) {
       if (!columns.has(name)) this.db.exec(`ALTER TABLE projects ADD COLUMN ${name} ${definition}`);
     }
     this.db.exec("UPDATE projects SET updated_at = created_at WHERE updated_at = ''");
+  }
+
+  health() {
+    const integrity = this.db.prepare("PRAGMA quick_check").get() as Record<string, unknown> | undefined;
+    return {
+      ok: String(integrity?.quick_check ?? "") === "ok",
+      schemaVersion: this.schemaVersion(),
+      latestSchemaVersion,
+      lastBackupPath: this.lastBackupPath,
+    };
+  }
+
+  close() {
+    this.db.close();
   }
 
   listProjects() {
@@ -157,26 +244,28 @@ export class Store {
   }
 
   ensureProject(input: ProjectInput) {
+    const name = cleanName(input.name);
     if (input.externalId) {
       const existing = this.db.prepare("SELECT id FROM projects WHERE external_id = ?").get(input.externalId) as { id: string } | undefined;
       if (existing) {
         const timestamp = now();
         this.db.prepare("UPDATE projects SET name = ?, workspace_path = COALESCE(NULLIF(?, ''), workspace_path), updated_at = ? WHERE id = ?")
-          .run(input.name, input.workspacePath ?? "", timestamp, existing.id);
+          .run(name, input.workspacePath ?? "", timestamp, existing.id);
         return this.getProject(existing.id)!;
       }
     }
-    return this.createProject(input);
+    return this.createProject({ ...input, name });
   }
 
   createProject(input: ProjectInput) {
+    const name = cleanName(input.name);
     const id = input.id ?? randomUUID();
     const timestamp = now();
     this.db.prepare(`
       INSERT INTO projects (
         id, external_id, identifier_prefix, name, workspace_path, next_issue_number, default_branch, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, 1, 'main', ?, ?)
-    `).run(id, input.externalId ?? null, projectPrefix(input.name), input.name.trim(), input.workspacePath ?? "", timestamp, timestamp);
+    `).run(id, input.externalId ?? null, projectPrefix(name), name, input.workspacePath ?? "", timestamp, timestamp);
     return this.getProject(id)!;
   }
 
@@ -208,14 +297,20 @@ export class Store {
   createIssue(input: IssueInput) {
     const project = this.getProject(input.projectId);
     if (!project) throw new Error("project_not_found");
-    const title = input.title.trim();
-    if (!title) throw new Error("title_required");
+    const title = cleanTitle(input.title);
+    if (input.status && !issueStatuses.includes(input.status)) throw new Error("invalid_status");
+    if (input.priority && !issuePriorities.includes(input.priority)) throw new Error("invalid_priority");
     const id = randomUUID();
     const timestamp = now();
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const current = this.getProject(project.id)!;
-      const identifier = `${current.identifier_prefix}-${current.next_issue_number}`;
+      let issueNumber = current.next_issue_number;
+      let identifier = `${current.identifier_prefix}-${issueNumber}`;
+      while (this.db.prepare("SELECT 1 AS value FROM issues WHERE identifier = ?").get(identifier)) {
+        issueNumber += 1;
+        identifier = `${current.identifier_prefix}-${issueNumber}`;
+      }
       const row = this.db.prepare("SELECT COALESCE(MAX(sort_order), 0) AS value FROM issues WHERE project_id = ? AND status = ?")
         .get(project.id, input.status ?? "todo") as { value: number };
       this.db.prepare(`
@@ -231,15 +326,15 @@ export class Store {
         input.description ?? "",
         input.status ?? "todo",
         input.priority ?? "medium",
-        JSON.stringify(input.labels ?? []),
+        JSON.stringify(cleanLabels(input.labels ?? [])),
         Number(row.value) + 1000,
         input.threadId || null,
         input.workspacePath || null,
         timestamp,
         timestamp,
       );
-      this.db.prepare("UPDATE projects SET next_issue_number = next_issue_number + 1, updated_at = ? WHERE id = ?")
-        .run(timestamp, project.id);
+      this.db.prepare("UPDATE projects SET next_issue_number = ?, updated_at = ? WHERE id = ?")
+        .run(issueNumber + 1, timestamp, project.id);
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");
@@ -249,36 +344,59 @@ export class Store {
   }
 
   updateIssue(id: string, version: number, patch: IssuePatch) {
-    const issue = this.getIssue(id);
-    if (!issue) throw new Error("issue_not_found");
-    if (issue.version !== version) throw new Error("version_conflict");
-    const columns: Record<keyof IssuePatch, string> = {
-      title: "title",
-      description: "description",
-      status: "status",
-      priority: "priority",
-      labels: "labels_json",
-      sort_order: "sort_order",
-      pinned: "pinned",
-      thread_id: "thread_id",
-      workspace_path: "workspace_path",
-    };
-    const assignments: string[] = [];
-    const values: unknown[] = [];
-    for (const [key, value] of Object.entries(patch) as Array<[keyof IssuePatch, IssuePatch[keyof IssuePatch]]>) {
-      if (value === undefined) continue;
-      assignments.push(`${columns[key]} = ?`);
-      values.push(key === "labels" ? JSON.stringify(value) : key === "pinned" ? Number(value) : value || null);
+    if (!Number.isInteger(version) || version < 1) throw new Error("invalid_version");
+    if (patch.title !== undefined) patch.title = cleanTitle(patch.title);
+    if (patch.status !== undefined && !issueStatuses.includes(patch.status)) throw new Error("invalid_status");
+    if (patch.priority !== undefined && !issuePriorities.includes(patch.priority)) throw new Error("invalid_priority");
+    if (patch.labels !== undefined) patch.labels = cleanLabels(patch.labels);
+    if (patch.sort_order !== undefined && !Number.isFinite(patch.sort_order)) throw new Error("invalid_sort_order");
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const issue = this.getIssue(id);
+      if (!issue) throw new Error("issue_not_found");
+      if (issue.version !== version) throw new Error("version_conflict");
+      if (patch.status !== undefined && patch.status !== issue.status && patch.sort_order === undefined) {
+        const row = this.db.prepare("SELECT COALESCE(MAX(sort_order), 0) AS value FROM issues WHERE project_id = ? AND status = ? AND archived_at IS NULL")
+          .get(issue.project_id, patch.status) as { value: number };
+        patch.sort_order = Number(row.value) + 1000;
+      }
+      const columns: Record<keyof IssuePatch, string> = {
+        title: "title",
+        description: "description",
+        status: "status",
+        priority: "priority",
+        labels: "labels_json",
+        sort_order: "sort_order",
+        pinned: "pinned",
+        thread_id: "thread_id",
+        workspace_path: "workspace_path",
+      };
+      const assignments: string[] = [];
+      const values: unknown[] = [];
+      for (const [key, value] of Object.entries(patch) as Array<[keyof IssuePatch, IssuePatch[keyof IssuePatch]]>) {
+        if (value === undefined) continue;
+        assignments.push(`${columns[key]} = ?`);
+        values.push(key === "labels" ? JSON.stringify(value) : key === "pinned" ? Number(value) : key === "thread_id" || key === "workspace_path" ? value || null : value);
+      }
+      if (assignments.length === 0) {
+        this.db.exec("COMMIT");
+        return issue;
+      }
+      assignments.push("version = version + 1", "updated_at = ?");
+      values.push(now(), issue.id, version);
+      const result = this.db.prepare(`UPDATE issues SET ${assignments.join(", ")} WHERE id = ? AND version = ?`).run(...values as never[]);
+      if (result.changes !== 1) throw new Error("version_conflict");
+      const updated = this.getIssue(issue.id)!;
+      this.db.exec("COMMIT");
+      return updated;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
     }
-    if (assignments.length === 0) return issue;
-    assignments.push("version = version + 1", "updated_at = ?");
-    values.push(now(), issue.id, version);
-    const result = this.db.prepare(`UPDATE issues SET ${assignments.join(", ")} WHERE id = ? AND version = ?`).run(...values as never[]);
-    if (result.changes !== 1) throw new Error("version_conflict");
-    return this.getIssue(issue.id)!;
   }
 
   archiveIssue(id: string, version: number) {
+    if (!Number.isInteger(version) || version < 1) throw new Error("invalid_version");
     const issue = this.getIssue(id);
     if (!issue) throw new Error("issue_not_found");
     if (issue.version !== version) throw new Error("version_conflict");
