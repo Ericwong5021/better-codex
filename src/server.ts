@@ -12,9 +12,25 @@ function sendJson(response: ServerResponse, status: number, value: unknown) {
     "content-length": Buffer.byteLength(body),
     "content-type": "application/json; charset=utf-8",
     "access-control-allow-origin": "app://-",
+    "access-control-allow-methods": "GET, POST, PATCH, OPTIONS",
+    "access-control-allow-headers": "authorization, content-type",
+    "access-control-allow-private-network": "true",
     "cross-origin-resource-policy": "cross-origin",
+    "vary": "Origin",
   });
   response.end(body);
+}
+
+function sendPreflight(response: ServerResponse) {
+  response.writeHead(204, {
+    "access-control-allow-origin": "app://-",
+    "access-control-allow-methods": "GET, POST, PATCH, OPTIONS",
+    "access-control-allow-headers": "authorization, content-type",
+    "access-control-allow-private-network": "true",
+    "access-control-max-age": "600",
+    "vary": "Origin",
+  });
+  response.end();
 }
 
 function readBody(request: IncomingMessage) {
@@ -115,6 +131,7 @@ export function startServer() {
       const path = url.pathname.split("/").filter(Boolean);
       const method = request.method ?? "GET";
 
+      if (method === "OPTIONS") return sendPreflight(response);
       if (url.pathname === "/health") {
         const database = store.health();
         return sendJson(response, database.ok ? 200 : 503, { ok: database.ok, version: "0.2.0", pid: process.pid, database });

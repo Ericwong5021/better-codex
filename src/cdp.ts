@@ -341,7 +341,7 @@ export async function cdpOpenThread(port: number, threadId: string) {
       }
       window.postMessage({ type: 'navigate-to-route', path: '/local/' + encodeURIComponent(expected) }, window.location.origin);
       await new Promise(resolve => setTimeout(resolve, 400));
-      const current = location.pathname.match(/\/local\/([^/?#]+)/)?.[1] || '';
+      const current = location.pathname.match(/\\/local\\/([^/?#]+)/)?.[1] || '';
       if (decodeURIComponent(current) === expected) {
         window.__betterCodexInjection__?.close?.();
         return { opened: true, via: 'route' };

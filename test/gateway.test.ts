@@ -71,6 +71,19 @@ test("gateway completes the issue workflow and survives restart", async () => {
     const health = await (await fetch(`http://127.0.0.1:${port}/health`)).json() as { database: { schemaVersion: number } };
     assert.equal(health.database.schemaVersion, 2);
 
+    const preflight = await fetch(`http://127.0.0.1:${port}/api/bootstrap`, {
+      method: "OPTIONS",
+      headers: {
+        origin: "app://-",
+        "access-control-request-method": "GET",
+        "access-control-request-headers": "content-type",
+        "access-control-request-private-network": "true",
+      },
+    });
+    assert.equal(preflight.status, 204);
+    assert.equal(preflight.headers.get("access-control-allow-origin"), "app://-");
+    assert.equal(preflight.headers.get("access-control-allow-private-network"), "true");
+
     const projectResponse = await request("/api/projects", { method: "POST", body: JSON.stringify({ name: "Gateway" }) });
     assert.equal(projectResponse.status, 201);
     const project = await projectResponse.json() as { id: string };

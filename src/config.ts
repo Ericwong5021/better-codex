@@ -4,8 +4,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
 const defaultHome = join(homedir(), ".better-codex");
-const legacyHome = join(homedir(), ".tilo");
-export const betterCodexHome = resolve(process.env.BETTER_CODEX_HOME || (existsSync(defaultHome) || !existsSync(legacyHome) ? defaultHome : legacyHome));
+export const betterCodexHome = resolve(process.env.BETTER_CODEX_HOME || defaultHome);
 export const databasePath = resolve(process.env.BETTER_CODEX_DB || join(betterCodexHome, "better-codex.db"));
 export const runPath = join(betterCodexHome, "run");
 export const logPath = join(betterCodexHome, "logs");
