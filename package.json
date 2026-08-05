@@ -23,12 +23,14 @@
     "dist/injection-state.js",
     "dist/runtime-state.js",
     "dist/server.js",
-    "dist/service.js"
+    "dist/service.js",
+    "dist/updater.js"
   ],
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/cli.ts serve",
     "package:binary": "node scripts/package.mjs",
+    "package:update-manifest": "node scripts/create-update-manifest.mjs release",
     "start": "node dist/cli.js serve",
     "better-codex": "tsx src/cli.ts",
     "test": "tsx --test test/*.test.ts"

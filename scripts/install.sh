@@ -29,6 +29,7 @@ trap 'rm -rf "$WORK_DIR"' EXIT
 if [ -n "${BETTER_CODEX_ARCHIVE:-}" ]; then
   ARCHIVE="$BETTER_CODEX_ARCHIVE"
   CHECKSUMS="${BETTER_CODEX_CHECKSUMS:-$(dirname "$ARCHIVE")/checksums.txt}"
+  UPDATE_PUBLIC_KEY="${BETTER_CODEX_UPDATE_PUBLIC_KEY_FILE:-}"
 else
   TAG="${BETTER_CODEX_VERSION:-$(curl -fsSIL -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest" | sed 's#.*/##')}"
   VERSION="${TAG#v}"
@@ -36,8 +37,10 @@ else
   BASE="https://github.com/$REPO/releases/download/$TAG"
   ARCHIVE="$WORK_DIR/$NAME"
   CHECKSUMS="$WORK_DIR/checksums.txt"
+  UPDATE_PUBLIC_KEY="$WORK_DIR/update-public-key.pem"
   curl -fsSL "$BASE/$NAME" -o "$ARCHIVE"
   curl -fsSL "$BASE/checksums.txt" -o "$CHECKSUMS"
+  curl -fsSL "$BASE/update-public-key.pem" -o "$UPDATE_PUBLIC_KEY"
 fi
 
 NAME="$(basename "$ARCHIVE")"
@@ -55,6 +58,10 @@ fi
 tar -xzf "$ARCHIVE" -C "$WORK_DIR"
 mkdir -p "$BIN_DIR"
 install -m 755 "$WORK_DIR/better-codex" "$BIN_DIR/better-codex"
+if [ -n "$UPDATE_PUBLIC_KEY" ]; then
+  mkdir -p "$HOME/.better-codex"
+  install -m 600 "$UPDATE_PUBLIC_KEY" "$HOME/.better-codex/update-public-key.pem"
+fi
 
 if ! printf '%s' ":$PATH:" | grep -q ":$BIN_DIR:"; then
   for RC in "$HOME/.zshrc" "$HOME/.bashrc"; do

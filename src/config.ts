@@ -8,8 +8,15 @@ export const betterCodexHome = resolve(process.env.BETTER_CODEX_HOME || defaultH
 export const databasePath = resolve(process.env.BETTER_CODEX_DB || join(betterCodexHome, "better-codex.db"));
 export const runPath = join(betterCodexHome, "run");
 export const logPath = join(betterCodexHome, "logs");
-export const compatibilityPath = join(betterCodexHome, "compatibility");
+export const managedRuntimePath = join(betterCodexHome, "runtime");
+export const compatibilityPath = join(managedRuntimePath, "compatibility");
 export const compatibilityStatusPath = join(compatibilityPath, "status.json");
+export const compatibilityVersionsPath = join(compatibilityPath, "versions");
+export const compatibilityCurrentPath = join(compatibilityPath, "current.json");
+export const runtimeVersionsPath = join(managedRuntimePath, "versions");
+export const runtimeCurrentPath = join(managedRuntimePath, "current.json");
+export const updateStatePath = join(managedRuntimePath, "update.json");
+export const updatePublicKeyPath = join(betterCodexHome, "update-public-key.pem");
 export const tokenPath = join(runPath, "token");
 export const runtimeStatePath = join(runPath, "runtime.json");
 export const runtimeLockPath = join(runPath, "runtime.lock");
@@ -24,6 +31,8 @@ export function ensureDirectories() {
   mkdirSync(runPath, { recursive: true });
   mkdirSync(logPath, { recursive: true });
   mkdirSync(compatibilityPath, { recursive: true });
+  mkdirSync(compatibilityVersionsPath, { recursive: true });
+  mkdirSync(runtimeVersionsPath, { recursive: true });
 }
 
 export function token() {

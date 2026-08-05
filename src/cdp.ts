@@ -1,7 +1,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
-import { bundledCompatibility, capabilityExpression, clearCompatibilityStatus, missingCapabilities, navigationExpression, readCompatibilityStatus, targetAllowed, type RendererCapabilities, writeCompatibilityStatus } from "./compatibility.js";
+import { activeCompatibility, capabilityExpression, clearCompatibilityStatus, missingCapabilities, navigationExpression, readCompatibilityStatus, targetAllowed, type RendererCapabilities, writeCompatibilityStatus } from "./compatibility.js";
 import { injectionScript, injectionVersion } from "./dom.js";
 import { readRuntimeState } from "./runtime-state.js";
 
@@ -109,7 +109,7 @@ async function evaluate(connection: Connection, expression: string) {
 }
 
 async function mainTargets(port: number) {
-  if (!bundledCompatibility.supportedPlatforms.some(platform => platform === process.platform)) {
+  if (!activeCompatibility().supportedPlatforms.some(platform => platform === process.platform)) {
     writeCompatibilityStatus({ codexVersion: null, compatible: false, reason: "unsupported_platform", targetId: null, capabilities: null });
     throw new Error(`codex_incompatible_unsupported_platform_${process.platform}`);
   }
@@ -327,7 +327,7 @@ async function installTarget(target: Target, runtimePort: number, accessToken: s
     await connection.send("Runtime.enable");
     try { await connection.send("Runtime.addBinding", { name: "betterCodexRequest" }); } catch {}
     const existing = await evaluate(connection, "({ version: window.__betterCodexInjection__?.version || null, endpoint: window.__betterCodexInjection__?.endpoint || null })") as { version?: string; endpoint?: string };
-    if (existing.version === injectionVersion && existing.endpoint === `http://127.0.0.1:${runtimePort}`) {
+    if (existing.version === injectionVersion() && existing.endpoint === `http://127.0.0.1:${runtimePort}`) {
       const storedIdentifier = await evaluate(connection, "window.__betterCodexNewDocumentScriptId || null");
       await evaluate(connection, "window.__betterCodexInjection__.refresh()");
       const current = readCompatibilityStatus();
@@ -483,7 +483,7 @@ export async function watchInjection(port: number, accessToken: string) {
         });
         const existing = await evaluate(connection, "({ version: window.__betterCodexInjection__?.version || null, endpoint: window.__betterCodexInjection__?.endpoint || null })") as { version?: string; endpoint?: string };
         let identifier: string | undefined;
-        if (existing.version === injectionVersion && existing.endpoint === `http://127.0.0.1:${activeRuntimePort}`) {
+        if (existing.version === injectionVersion() && existing.endpoint === `http://127.0.0.1:${activeRuntimePort}`) {
           const stored = await evaluate(connection, "window.__betterCodexNewDocumentScriptId || null");
           identifier = typeof stored === "string" ? stored : undefined;
           await evaluate(connection, "window.__betterCodexInjection__.refresh()");
@@ -501,7 +501,7 @@ export async function watchInjection(port: number, accessToken: string) {
       for (const [id, current] of attached) {
         try {
           const existing = await evaluate(current.connection, "({ version: window.__betterCodexInjection__?.version || null, endpoint: window.__betterCodexInjection__?.endpoint || null })") as { version?: string; endpoint?: string };
-          if (existing.version !== injectionVersion || existing.endpoint !== `http://127.0.0.1:${activeRuntimePort}`) {
+          if (existing.version !== injectionVersion() || existing.endpoint !== `http://127.0.0.1:${activeRuntimePort}`) {
             if (current.identifier) {
               try { await current.connection.send("Page.removeScriptToEvaluateOnNewDocument", { identifier: current.identifier }); } catch {}
             }

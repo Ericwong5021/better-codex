@@ -19,6 +19,7 @@ const blob = join(work, "better-codex.blob");
 const executable = join(work, "better-codex");
 const archiveName = `better-codex-cli-${packageJson.version}-${platform}-${architecture}.tar.gz`;
 const archive = join(output, archiveName);
+const coreName = `better-codex-core-${packageJson.version}-${platform}-${architecture}`;
 
 try {
   await build({ entryPoints: [join(root, "src", "cli.ts")], bundle: true, platform: "node", format: "cjs", target: "node22", outfile: bundle });
@@ -40,6 +41,7 @@ try {
   execFileSync("/usr/bin/codesign", ["--sign", "-", "--force", executable], { stdio: "inherit" });
   execFileSync(executable, ["version"], { stdio: "inherit", env: { ...process.env, BETTER_CODEX_HOME: join(work, "home") } });
   await mkdir(output, { recursive: true });
+  await copyFile(executable, join(output, coreName));
   execFileSync("/usr/bin/tar", ["-czf", archive, "-C", work, "better-codex"], { stdio: "inherit" });
   const digest = createHash("sha256").update(await readFile(archive)).digest("hex");
   await writeFile(join(output, "checksums.txt"), `${digest}  ${archiveName}\n`);

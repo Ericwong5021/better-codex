@@ -30,17 +30,26 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: better-codex-${{ matrix.runner }}
-          path: release/*.tar.gz
+          path: release/*
 
   release:
     needs: package
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.0
+          cache: npm
+      - run: npm ci
+      - run: npm run build
       - uses: actions/download-artifact@v4
         with:
           path: release
           merge-multiple: true
+      - env:
+          BETTER_CODEX_UPDATE_PRIVATE_KEY: ${{ secrets.BETTER_CODEX_UPDATE_PRIVATE_KEY }}
+        run: npm run package:update-manifest
       - run: sha256sum release/*.tar.gz | sed 's#release/##' > release/checksums.txt
       - env:
           GH_TOKEN: ${{ github.token }}

@@ -1,9 +1,41 @@
-import { readFileSync, renameSync, writeFileSync } from "node:fs";
-import { compatibilityStatusPath, ensureDirectories } from "./config.js";
+import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { compatibilityCurrentPath, compatibilityStatusPath, compatibilityVersionsPath, ensureDirectories } from "./config.js";
 
-export const bundledCompatibility = {
+export const coreVersion = "0.2.0";
+
+export type CompatibilityManifest = {
+  version: string;
+  minimumCoreVersion: string;
+  supportedPlatforms: string[];
+  supportedCodexVersions: {
+    strategy: "capability";
+    minimum: string | null;
+    maximumExclusive: string | null;
+  };
+  targetRules: {
+    urlPrefixes: string[];
+    titleTerms: string[];
+    excludedRoutes: string[];
+  };
+  selectors: Record<string, string> & {
+    sidebarScroll: string;
+    contentLayout: string;
+    threadRow: string;
+    projectRow: string;
+  };
+  attributes: Record<string, string> & {
+    threadId: string;
+  };
+  navigation: {
+    messageType: string;
+    threadRoutePrefix: string;
+  };
+};
+
+export const bundledCompatibility: CompatibilityManifest = {
   version: "0.2.0",
-  coreVersion: "0.2.0",
+  minimumCoreVersion: coreVersion,
   supportedPlatforms: ["darwin", "win32"],
   supportedCodexVersions: {
     strategy: "capability",
@@ -40,7 +72,14 @@ export const bundledCompatibility = {
     messageType: "navigate-to-route",
     threadRoutePrefix: "/local/",
   },
-} as const;
+};
+
+type CompatibilityPointer = {
+  current: string;
+  previous: string | null;
+  failures: number;
+  updatedAt: string;
+};
 
 export type RendererCapabilities = {
   sidebar: boolean;
@@ -52,7 +91,7 @@ export type RendererCapabilities = {
 export type CompatibilityStatus = {
   version: string;
   coreVersion: string;
-  supportedCodexVersions: typeof bundledCompatibility.supportedCodexVersions;
+  supportedCodexVersions: CompatibilityManifest["supportedCodexVersions"];
   platform: string;
   codexVersion: string | null;
   compatible: boolean;
@@ -63,15 +102,102 @@ export type CompatibilityStatus = {
   lastSuccessfulAt: string | null;
 };
 
+function versionParts(version: string) {
+  return version.replace(/^v/, "").split(/[.-]/).map(value => /^\d+$/.test(value) ? Number(value) : value);
+}
+
+export function compareVersions(left: string, right: string) {
+  const a = versionParts(left);
+  const b = versionParts(right);
+  for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+    const x = a[index] ?? 0;
+    const y = b[index] ?? 0;
+    if (x === y) continue;
+    if (typeof x === "number" && typeof y === "number") return x < y ? -1 : 1;
+    return String(x).localeCompare(String(y));
+  }
+  return 0;
+}
+
+function stringArray(value: unknown, maximum = 32) {
+  return Array.isArray(value) && value.length <= maximum && value.every(item => typeof item === "string" && item.length > 0 && item.length <= 512);
+}
+
+function stringMap(value: unknown, required: string[]) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const entries = Object.entries(value);
+  return entries.length <= 64
+    && required.every(key => typeof (value as Record<string, unknown>)[key] === "string")
+    && entries.every(([key, item]) => /^[A-Za-z][A-Za-z0-9]*$/.test(key) && typeof item === "string" && item.length > 0 && item.length <= 512);
+}
+
+export function validateCompatibility(value: unknown): CompatibilityManifest {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("compatibility_invalid");
+  const item = value as Record<string, unknown>;
+  const allowed = ["version", "minimumCoreVersion", "supportedPlatforms", "supportedCodexVersions", "targetRules", "selectors", "attributes", "navigation"];
+  if (Object.keys(item).some(key => !allowed.includes(key))) throw new Error("compatibility_field_not_allowed");
+  if (typeof item.version !== "string" || !/^\d+\.\d+\.\d+(?:[-.][A-Za-z0-9.-]+)?$/.test(item.version)) throw new Error("compatibility_version_invalid");
+  if (typeof item.minimumCoreVersion !== "string" || compareVersions(coreVersion, item.minimumCoreVersion) < 0) throw new Error("compatibility_core_incompatible");
+  if (!stringArray(item.supportedPlatforms) || !(item.supportedPlatforms as string[]).every(platform => ["darwin", "win32"].includes(platform))) throw new Error("compatibility_platforms_invalid");
+  const codex = item.supportedCodexVersions as Record<string, unknown>;
+  if (!codex || codex.strategy !== "capability" || ![null, "string"].includes(codex.minimum === null ? null : typeof codex.minimum) || ![null, "string"].includes(codex.maximumExclusive === null ? null : typeof codex.maximumExclusive)) throw new Error("compatibility_codex_range_invalid");
+  const rules = item.targetRules as Record<string, unknown>;
+  if (!rules || !stringArray(rules.urlPrefixes) || !stringArray(rules.titleTerms) || !stringArray(rules.excludedRoutes)) throw new Error("compatibility_target_rules_invalid");
+  if (!stringMap(item.selectors, ["sidebarScroll", "contentLayout", "threadRow", "projectRow"])) throw new Error("compatibility_selectors_invalid");
+  if (!stringMap(item.attributes, ["threadId"])) throw new Error("compatibility_attributes_invalid");
+  const navigation = item.navigation as Record<string, unknown>;
+  if (!navigation || Object.keys(navigation).some(key => !["messageType", "threadRoutePrefix"].includes(key)) || typeof navigation.messageType !== "string" || typeof navigation.threadRoutePrefix !== "string") throw new Error("compatibility_navigation_invalid");
+  return value as CompatibilityManifest;
+}
+
+export function readCompatibilityPointer() {
+  try {
+    const value = JSON.parse(readFileSync(compatibilityCurrentPath, "utf8")) as CompatibilityPointer;
+    if (typeof value.current !== "string" || !Number.isInteger(value.failures)) return null;
+    return value;
+  } catch {
+    return null;
+  }
+}
+
+export function writeCompatibilityPointer(value: CompatibilityPointer) {
+  ensureDirectories();
+  const temporary = `${compatibilityCurrentPath}.${process.pid}.tmp`;
+  writeFileSync(temporary, JSON.stringify(value), { mode: 0o600 });
+  renameSync(temporary, compatibilityCurrentPath);
+}
+
+export function activeCompatibility() {
+  const pointer = readCompatibilityPointer();
+  if (!pointer || pointer.current === bundledCompatibility.version) return bundledCompatibility;
+  try {
+    return validateCompatibility(JSON.parse(readFileSync(join(compatibilityVersionsPath, pointer.current, "manifest.json"), "utf8")));
+  } catch {
+    return bundledCompatibility;
+  }
+}
+
+export function rollbackCompatibility() {
+  const pointer = readCompatibilityPointer();
+  if (!pointer?.previous) throw new Error("compatibility_rollback_unavailable");
+  const target = pointer.previous;
+  const manifest = target === bundledCompatibility.version
+    ? bundledCompatibility
+    : validateCompatibility(JSON.parse(readFileSync(join(compatibilityVersionsPath, target, "manifest.json"), "utf8")));
+  writeCompatibilityPointer({ current: target, previous: pointer.current, failures: 0, updatedAt: new Date().toISOString() });
+  return manifest;
+}
+
 export function targetAllowed(target: { url?: string; title?: string }) {
+  const compatibility = activeCompatibility();
   const url = target.url ?? "";
-  if (bundledCompatibility.targetRules.excludedRoutes.some(route => url.includes(route))) return false;
-  return bundledCompatibility.targetRules.urlPrefixes.some(prefix => url.startsWith(prefix))
-    || bundledCompatibility.targetRules.titleTerms.some(term => target.title?.includes(term));
+  if (compatibility.targetRules.excludedRoutes.some(route => url.includes(route))) return false;
+  return compatibility.targetRules.urlPrefixes.some(prefix => url.startsWith(prefix))
+    || compatibility.targetRules.titleTerms.some(term => target.title?.includes(term));
 }
 
 export function capabilityExpression() {
-  const selectors = JSON.stringify(bundledCompatibility.selectors);
+  const selectors = JSON.stringify(activeCompatibility().selectors);
   return `(() => {
     const selectors = ${selectors};
     const layout = document.querySelector(selectors.contentLayout);
@@ -86,16 +212,14 @@ export function capabilityExpression() {
 }
 
 export function missingCapabilities(capabilities: RendererCapabilities) {
-  return [
-    capabilities.sidebar ? null : "sidebar",
-    capabilities.content ? null : "content",
-  ].filter((value): value is string => Boolean(value));
+  return [capabilities.sidebar ? null : "sidebar", capabilities.content ? null : "content"].filter((value): value is string => Boolean(value));
 }
 
 export function navigationExpression(threadId: string) {
-  const selectors = JSON.stringify(bundledCompatibility.selectors);
-  const attributes = JSON.stringify(bundledCompatibility.attributes);
-  const navigation = JSON.stringify(bundledCompatibility.navigation);
+  const compatibility = activeCompatibility();
+  const selectors = JSON.stringify(compatibility.selectors);
+  const attributes = JSON.stringify(compatibility.attributes);
+  const navigation = JSON.stringify(compatibility.navigation);
   return `(async () => {
     const selectors = ${selectors};
     const attributes = ${attributes};
@@ -128,21 +252,25 @@ export function readCompatibilityStatus() {
 
 export function writeCompatibilityStatus(input: Omit<CompatibilityStatus, "version" | "coreVersion" | "supportedCodexVersions" | "platform" | "checkedAt" | "lastSuccessfulAt">, successful = false) {
   ensureDirectories();
+  let compatibility = activeCompatibility();
+  const pointer = readCompatibilityPointer();
+  if (pointer && pointer.current === compatibility.version) {
+    if (successful && pointer.failures !== 0) writeCompatibilityPointer({ ...pointer, failures: 0, updatedAt: new Date().toISOString() });
+    if (!successful && input.reason?.startsWith("missing_") && pointer.previous) {
+      const failures = pointer.failures + 1;
+      writeCompatibilityPointer({ ...pointer, failures, updatedAt: new Date().toISOString() });
+      if (failures >= 3) compatibility = rollbackCompatibility();
+    }
+  }
   const previous = readCompatibilityStatus();
   const now = new Date();
-  const unchanged = previous
-    && previous.version === bundledCompatibility.version
-    && previous.codexVersion === input.codexVersion
-    && previous.compatible === input.compatible
-    && previous.reason === input.reason
-    && previous.targetId === input.targetId
-    && JSON.stringify(previous.capabilities) === JSON.stringify(input.capabilities);
+  const unchanged = previous && previous.version === compatibility.version && previous.codexVersion === input.codexVersion && previous.compatible === input.compatible && previous.reason === input.reason && previous.targetId === input.targetId && JSON.stringify(previous.capabilities) === JSON.stringify(input.capabilities);
   const lastWrite = previous ? Date.parse(successful ? previous.lastSuccessfulAt ?? "" : previous.checkedAt) : 0;
   if (unchanged && Number.isFinite(lastWrite) && now.getTime() - lastWrite < 60000) return previous;
   const value: CompatibilityStatus = {
-    version: bundledCompatibility.version,
-    coreVersion: bundledCompatibility.coreVersion,
-    supportedCodexVersions: bundledCompatibility.supportedCodexVersions,
+    version: compatibility.version,
+    coreVersion,
+    supportedCodexVersions: compatibility.supportedCodexVersions,
     platform: process.platform,
     codexVersion: input.codexVersion,
     compatible: input.compatible,

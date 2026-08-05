@@ -1,6 +1,8 @@
-import { bundledCompatibility } from "./compatibility.js";
+import { activeCompatibility } from "./compatibility.js";
 
-export const injectionVersion = bundledCompatibility.version;
+export function injectionVersion() {
+  return activeCompatibility().version;
+}
 
 export function injectionScript(port: number, accessToken: string, action: "install" | "uninstall") {
   if (action === "uninstall") {
@@ -14,11 +16,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       return { uninstalled: true };
     })()`;
   }
+  const compatibility = activeCompatibility();
   const baseUrl = JSON.stringify(`http://127.0.0.1:${port}`);
   const bridgeToken = JSON.stringify(accessToken);
   return `(() => {
     "use strict";
-    const VERSION = ${JSON.stringify(injectionVersion)};
+    const VERSION = ${JSON.stringify(compatibility.version)};
     const previous = window.__betterCodexInjection__;
     if (previous?.version === VERSION && previous?.endpoint === ${baseUrl}) {
       previous.refresh();
@@ -34,9 +37,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const HOST = "data-better-codex-page-host";
     const BASE_URL = ${baseUrl};
     const BRIDGE_TOKEN = ${bridgeToken};
-    const SELECTORS = ${JSON.stringify(bundledCompatibility.selectors)};
-    const ATTRIBUTES = ${JSON.stringify(bundledCompatibility.attributes)};
-    const NAVIGATION = ${JSON.stringify(bundledCompatibility.navigation)};
+    const SELECTORS = ${JSON.stringify(compatibility.selectors)};
+    const ATTRIBUTES = ${JSON.stringify(compatibility.attributes)};
+    const NAVIGATION = ${JSON.stringify(compatibility.navigation)};
     const statusLabels = { backlog: "待整理", todo: "待办", in_progress: "进行中", blocked: "阻塞", in_review: "审核中", done: "完成" };
     const priorityLabels = { none: "无", low: "低", medium: "中", high: "高", urgent: "紧急" };
     const state = { projects: [], issues: [], projectId: "", search: "", selected: null, error: "" };

@@ -16,6 +16,7 @@ import {
 import { readRuntimeState } from "./runtime-state.js";
 import { injectionEnabled, setInjectionEnabled } from "./injection-state.js";
 import { installService, restartService, serviceLogs, serviceStatus, startService, stopService, uninstallService } from "./service.js";
+import { activeVersions, checkForUpdates, maybeDelegateToActiveCore, rollbackCompatibilityUpdate, shouldCheckForUpdates, updateAll, updateCompatibility } from "./updater.js";
 
 function accessToken() {
   return token();
@@ -137,6 +138,7 @@ async function waitForInjector() {
 
 async function runRuntime() {
   const server = (await import("./server.js")).startServer();
+  if (shouldCheckForUpdates()) void checkForUpdates().catch(() => undefined);
   await stopInjector();
   let stopping = false;
   let watcher: ReturnType<typeof spawn> | null = null;
@@ -187,7 +189,7 @@ function print(value: unknown) {
 }
 
 function usage() {
-  console.log("better-codex version | setup [--yes] | enable | disable | start [--launch] | stop | status | inject [--launch] [--port N] | eject [--port N] | service install|uninstall|start|stop|restart|status|logs | project list|create | issue list|get|create|update|status|link|open");
+  console.log("better-codex version | update [check|compatibility|rollback] [--channel stable|preview] | setup [--yes] | enable | disable | start [--launch] | stop | status | inject [--launch] [--port N] | eject [--port N] | service install|uninstall|start|stop|restart|status|logs | project list|create | issue list|get|create|update|status|link|open");
 }
 
 async function confirmSetup() {
@@ -255,7 +257,46 @@ async function issueCommand(action: string | undefined, args: string[]) {
 
 async function main() {
   const [command, action, ...args] = process.argv.slice(2);
-  if (command === "version" || command === "--version" || command === "-v") return console.log("better-codex 0.2.0");
+  const delegated = maybeDelegateToActiveCore();
+  if (delegated !== null) process.exit(delegated);
+  if (command === "version" || command === "--version" || command === "-v") {
+    const versions = activeVersions();
+    if ([action, ...args].includes("--json")) return console.log(JSON.stringify(versions));
+    return console.log(`better-codex core ${versions.core} compatibility ${versions.compatibility}`);
+  }
+  if (command === "update") {
+    const values = [action, ...args].filter(Boolean) as string[];
+    const selected = option(values, "--channel") ?? "stable";
+    if (!["stable", "preview"].includes(selected)) throw new Error("update_channel_invalid");
+    const channel = selected as "stable" | "preview";
+    if (action === "check") return print(await checkForUpdates(channel));
+    if (action === "compatibility") {
+      const result = await updateCompatibility(undefined, channel);
+      if (result.updated && injectionEnabled()) {
+        try {
+          await ensureRuntime();
+          await cdpInject(cdpPort, activeRuntimePort(), accessToken(), false);
+          return print({ ...result, injection: { restored: true } });
+        } catch (error) {
+          return print({ ...result, injection: { restored: false, pending: true, error: error instanceof Error ? error.message : "injection_unavailable" } });
+        }
+      }
+      return print(result);
+    }
+    if (action === "rollback") return print(rollbackCompatibilityUpdate());
+    if (action && !action.startsWith("--")) return usage();
+    const result = await updateAll(channel);
+    if (result.compatibility.updated && injectionEnabled()) {
+      try {
+        await ensureRuntime();
+        await cdpInject(cdpPort, activeRuntimePort(), accessToken(), false);
+        return print({ ...result, injection: { restored: true } });
+      } catch (error) {
+        return print({ ...result, injection: { restored: false, pending: true, error: error instanceof Error ? error.message : "injection_unavailable" } });
+      }
+    }
+    return print(result);
+  }
   if (command === "runtime") return runRuntime();
   if (command === "serve") return (await import("./server.js")).startServer();
   if (command === "watch-inject") return watchInjection(Number(action || cdpPort), accessToken());
