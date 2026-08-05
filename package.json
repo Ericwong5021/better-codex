@@ -1,0 +1,39 @@
+{
+  "name": "better-codex",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "os": [
+    "darwin",
+    "win32"
+  ],
+  "bin": {
+    "better-codex": "dist/cli.js"
+  },
+  "files": [
+    "dist/cdp.js",
+    "dist/cli.js",
+    "dist/config.js",
+    "dist/db.js",
+    "dist/dom.js",
+    "dist/server.js",
+    "dist/service.js"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/cli.ts serve",
+    "package:binary": "node scripts/package.mjs",
+    "start": "node dist/cli.js serve",
+    "better-codex": "tsx src/cli.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.21",
+    "esbuild": "^0.28.1",
+    "postject": "^1.0.0-alpha.6",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  }
+}
