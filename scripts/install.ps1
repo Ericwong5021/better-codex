@@ -6,7 +6,12 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$ProgressPreference = "SilentlyContinue"
+$ProgressPreference = "Continue"
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new()
+
+function Write-Step([string]$Message) {
+  Write-Host "[Better Codex] $Message"
+}
 
 if (-not [Environment]::Is64BitOperatingSystem) { throw "Better Codex requires 64-bit Windows." }
 
@@ -18,6 +23,7 @@ if ($codexProcesses.Count -gt 0) {
     return
   }
   $codexProcesses | Stop-Process -Force
+  Write-Step "Stopping Codex..."
   for ($attempt = 0; $attempt -lt 60; $attempt++) {
     if (-not (Get-Process -Name "ChatGPT", "Codex" -ErrorAction SilentlyContinue)) { break }
     Start-Sleep -Milliseconds 250
@@ -28,6 +34,7 @@ if ($codexProcesses.Count -gt 0) {
 $workDirectory = Join-Path ([IO.Path]::GetTempPath()) ("better-codex-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $workDirectory | Out-Null
 try {
+  Write-Step "Resolving release version..."
   if (-not $Version) {
     $latest = Invoke-WebRequest -UseBasicParsing -Uri "https://api.github.com/repos/$Repository/releases/latest"
     $Version = (ConvertFrom-Json $latest.Content).tag_name
@@ -39,14 +46,19 @@ try {
   $archive = Join-Path $workDirectory $name
   $checksums = Join-Path $workDirectory "checksums.txt"
   $publicKey = Join-Path $workDirectory "update-public-key.pem"
+  Write-Step "Downloading $name..."
   Invoke-WebRequest -UseBasicParsing -Uri "$base/$name" -OutFile $archive
+  Write-Step "Downloading checksums and update key..."
   Invoke-WebRequest -UseBasicParsing -Uri "$base/checksums.txt" -OutFile $checksums
   Invoke-WebRequest -UseBasicParsing -Uri "$base/update-public-key.pem" -OutFile $publicKey
+  Write-Step "Verifying SHA-256 checksum..."
   $expected = ((Get-Content $checksums | Where-Object { $_ -match [regex]::Escape($name) }) -split "\s+")[0]
   if (-not $expected) { throw "No checksum found for $name." }
   $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
   if ($actual -ne $expected.ToLowerInvariant()) { throw "Checksum mismatch for $name." }
+  Write-Step "Extracting package..."
   Expand-Archive -LiteralPath $archive -DestinationPath $workDirectory -Force
+  Write-Step "Installing executable to $BinDirectory..."
   New-Item -ItemType Directory -Force -Path $BinDirectory | Out-Null
   $executable = Join-Path $BinDirectory "better-codex.exe"
   if (Test-Path $executable) {
@@ -62,16 +74,20 @@ try {
   if (-not (($userPath -split ";") -contains $BinDirectory)) {
     [Environment]::SetEnvironmentVariable("Path", (($userPath.TrimEnd(";") + ";" + $BinDirectory).TrimStart(";")), "User")
   }
+  Write-Step "Verifying executable..."
   & $executable version
   if ($LASTEXITCODE -ne 0) { throw "Better Codex executable verification failed." }
   if (-not $NoService) {
-    & $executable setup --yes
-    if ($LASTEXITCODE -ne 0) { throw "Better Codex setup failed." }
+    Write-Step "Registering runtime and injecting Better Codex..."
+    & $executable setup --yes 2>&1 | ForEach-Object { Write-Host "[Better Codex] $_" }
+    $setupExitCode = $LASTEXITCODE
+    if ($setupExitCode -ne 0) { throw "Better Codex setup failed with exit code $setupExitCode." }
+    Write-Step "Running installation diagnostics..."
     $doctor = (& $executable doctor | Out-String | ConvertFrom-Json)
     $doctor | ConvertTo-Json -Depth 8
     if (-not $doctor.ok) { throw "Better Codex installation verification failed." }
   }
-  Write-Output "Installed Better Codex to $executable"
+  Write-Step "Installation completed: $executable"
 } finally {
   Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $workDirectory
 }

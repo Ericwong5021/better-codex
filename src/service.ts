@@ -1,13 +1,14 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { isSea } from "node:sea";
-import { cdpPort, ensureDirectories, logPath, runtimeLogPath, betterCodexHome } from "./config.js";
+import { cdpPort, ensureDirectories, logPath, runtimeLogPath, betterCodexHome, runPath } from "./config.js";
 
 const label = "com.better-codex.runtime";
 const legacyLabel = "com.better-codex.gateway";
 const windowsTask = "Better Codex Runtime";
+const windowsRunKey = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 export const launchAgentPath = join(homedir(), "Library", "LaunchAgents", `${label}.plist`);
 const legacyLaunchAgentPath = join(homedir(), "Library", "LaunchAgents", `${legacyLabel}.plist`);
 
@@ -25,6 +26,17 @@ function quoteWindows(value: string) {
 
 function windowsCommand() {
   return command().map(quoteWindows).join(" ");
+}
+
+function windowsRuntime() {
+  try {
+    const value = JSON.parse(readFileSync(join(runPath, "runtime.json"), "utf8")) as { pid?: number };
+    if (!Number.isInteger(value.pid) || value.pid! < 1) return null;
+    process.kill(value.pid!, 0);
+    return value.pid!;
+  } catch {
+    return null;
+  }
 }
 
 export function servicePlist() {
@@ -59,9 +71,9 @@ function launchctl(args: string[], ignoreFailure = false) {
   }
 }
 
-function schtasks(args: string[], ignoreFailure = false) {
+function reg(args: string[], ignoreFailure = false) {
   try {
-    return execFileSync("schtasks.exe", args, { encoding: "utf8", windowsHide: true, stdio: ["ignore", "pipe", "pipe"] }).trim();
+    return execFileSync("reg.exe", args, { encoding: "utf8", windowsHide: true, stdio: ["ignore", "pipe", "pipe"] }).trim();
   } catch (error) {
     if (ignoreFailure) return "";
     const message = error && typeof error === "object" && "stderr" in error ? String(error.stderr).trim() : "windows_service_failed";
@@ -78,8 +90,8 @@ function domain() {
 export function installService() {
   ensureDirectories();
   if (process.platform === "win32") {
-    schtasks(["/Create", "/TN", windowsTask, "/TR", windowsCommand(), "/SC", "ONLOGON", "/RL", "LIMITED", "/F"]);
-    schtasks(["/Run", "/TN", windowsTask]);
+    reg(["ADD", windowsRunKey, "/V", windowsTask, "/T", "REG_SZ", "/D", windowsCommand(), "/F"]);
+    startService();
     return { installed: true, label: windowsTask, path: null };
   }
   if (process.platform !== "darwin") throw new Error("service_install_unsupported");
@@ -95,8 +107,8 @@ export function installService() {
 
 export function uninstallService() {
   if (process.platform === "win32") {
-    schtasks(["/End", "/TN", windowsTask], true);
-    schtasks(["/Delete", "/TN", windowsTask, "/F"], true);
+    stopService();
+    reg(["DELETE", windowsRunKey, "/V", windowsTask, "/F"], true);
     return { installed: false, label: windowsTask, path: null };
   }
   if (process.platform !== "darwin") throw new Error("service_uninstall_unsupported");
@@ -110,7 +122,11 @@ export function uninstallService() {
 export function startService() {
   if (process.platform === "win32") {
     if (!serviceStatus().installed) throw new Error("service_not_installed");
-    schtasks(["/Run", "/TN", windowsTask]);
+    if (!windowsRuntime()) {
+      const [executable, ...args] = command();
+      const child = spawn(executable, args, { cwd: betterCodexHome, detached: true, stdio: "ignore", windowsHide: true });
+      child.unref();
+    }
     return { started: true, label: windowsTask };
   }
   if (!existsSync(launchAgentPath)) throw new Error("service_not_installed");
@@ -121,7 +137,10 @@ export function startService() {
 
 export function stopService() {
   if (process.platform === "win32") {
-    schtasks(["/End", "/TN", windowsTask], true);
+    const pid = windowsRuntime();
+    if (pid) {
+      try { process.kill(pid); } catch {}
+    }
     return { stopped: true, label: windowsTask };
   }
   launchctl(["bootout", domain(), launchAgentPath], true);
@@ -135,10 +154,10 @@ export function restartService() {
 
 export function serviceStatus() {
   if (process.platform === "win32") {
-    const output = schtasks(["/Query", "/TN", windowsTask, "/FO", "LIST", "/V"], true);
+    const output = reg(["QUERY", windowsRunKey, "/V", windowsTask], true);
     const installed = Boolean(output);
-    const running = /(?:Status|状态):\s*(?:Running|正在运行)/i.test(output);
-    return { installed, running, pid: null, label: windowsTask, path: null };
+    const pid = windowsRuntime();
+    return { installed, running: Boolean(pid), pid, label: windowsTask, path: null };
   }
   if (process.platform !== "darwin") return { installed: false, running: false, pid: null, label, path: null };
   const installed = existsSync(launchAgentPath);
