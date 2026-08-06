@@ -23,6 +23,78 @@ case "$(uname -m)" in
   *) echo "Unsupported architecture: $(uname -m)" >&2; exit 1 ;;
 esac
 
+version_at_least() {
+  awk -v current="${1#v}" -v target="${2#v}" 'BEGIN {
+    split(current, a, "."); split(target, b, ".")
+    for (i = 1; i <= 4; i++) {
+      av = a[i] + 0; bv = b[i] + 0
+      if (av > bv) exit 0
+      if (av < bv) exit 1
+    }
+    exit 0
+  }'
+}
+
+installed_version() {
+  local binary="$1" raw core managed
+  raw="$("$binary" version --json 2>/dev/null)" || return 1
+  core="$(printf '%s' "$raw" | sed -n 's/.*"core":"\([^"]*\)".*/\1/p')"
+  managed="$(printf '%s' "$raw" | sed -n 's/.*"managedCore":"\([^"]*\)".*/\1/p')"
+  if [ -n "$managed" ] && [ -n "$core" ] && version_at_least "$managed" "$core"; then
+    printf '%s' "$managed"
+  elif [ -n "$core" ]; then
+    printf '%s' "$core"
+  else
+    return 1
+  fi
+}
+
+TARGET_VERSION=""
+if [ -z "${BETTER_CODEX_ARCHIVE:-}" ]; then
+  TAG="${BETTER_CODEX_VERSION:-$(curl -fsSIL -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest" | sed 's#.*/##')}"
+  TARGET_VERSION="${TAG#v}"
+fi
+
+EXISTING_BINARY=""
+if [ -x "$BIN_DIR/better-codex" ]; then
+  EXISTING_BINARY="$BIN_DIR/better-codex"
+elif command -v better-codex >/dev/null 2>&1; then
+  EXISTING_BINARY="$(command -v better-codex)"
+fi
+
+CURRENT_VERSION=""
+if [ -n "$EXISTING_BINARY" ]; then
+  CURRENT_VERSION="$(installed_version "$EXISTING_BINARY" || true)"
+fi
+
+if [ -n "$CURRENT_VERSION" ] && [ -n "$TARGET_VERSION" ] && version_at_least "$CURRENT_VERSION" "$TARGET_VERSION"; then
+  printf '[OK] Better Codex is up to date (v%s)\n' "$CURRENT_VERSION"
+  exit 0
+fi
+
+if [ -n "$CURRENT_VERSION" ] && [ -n "$TARGET_VERSION" ]; then
+  printf '[Better Codex] Better Codex v%s is installed; upgrading to v%s...\n' "$CURRENT_VERSION" "$TARGET_VERSION"
+  if "$EXISTING_BINARY" update >/dev/null 2>&1; then
+    UPDATED_VERSION="$(installed_version "$EXISTING_BINARY" || true)"
+    if [ -n "$UPDATED_VERSION" ] && version_at_least "$UPDATED_VERSION" "$TARGET_VERSION"; then
+      UPGRADE_READY=1
+      if [ "$WITH_SERVICE" = "1" ]; then
+        "$EXISTING_BINARY" service restart >/dev/null 2>&1 || UPGRADE_READY=0
+        if [ "$UPGRADE_READY" = "1" ]; then
+          sleep 0.8
+          "$EXISTING_BINARY" inject --launch >/dev/null 2>&1 || UPGRADE_READY=0
+          "$EXISTING_BINARY" doctor >/dev/null 2>&1 || UPGRADE_READY=0
+        fi
+      fi
+      if [ "$UPGRADE_READY" = "1" ]; then
+        printf '[OK] Better Codex upgraded to v%s\n' "$UPDATED_VERSION"
+        exit 0
+      fi
+    fi
+  fi
+  printf '[Better Codex] Automatic upgrade unavailable; continuing with full installation...\n'
+fi
+
 CODEX_APP=""
 for CANDIDATE in Codex ChatGPT; do
   if /usr/bin/pgrep -x "$CANDIDATE" >/dev/null 2>&1; then
@@ -63,8 +135,7 @@ if [ -n "${BETTER_CODEX_ARCHIVE:-}" ]; then
   CHECKSUMS="${BETTER_CODEX_CHECKSUMS:-$(dirname "$ARCHIVE")/checksums.txt}"
   UPDATE_PUBLIC_KEY="${BETTER_CODEX_UPDATE_PUBLIC_KEY_FILE:-}"
 else
-  TAG="${BETTER_CODEX_VERSION:-$(curl -fsSIL -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest" | sed 's#.*/##')}"
-  VERSION="${TAG#v}"
+  VERSION="$TARGET_VERSION"
   NAME="better-codex-cli-$VERSION-darwin-$ARCH.tar.gz"
   BASE="https://github.com/$REPO/releases/download/$TAG"
   ARCHIVE="$WORK_DIR/$NAME"

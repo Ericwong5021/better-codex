@@ -13,7 +13,79 @@ function Write-Step([string]$Message) {
   Write-Host "[Better Codex] $Message"
 }
 
+function Write-Ok([string]$Message) {
+  Write-Host "[OK] $Message" -ForegroundColor Green
+}
+
+function Get-InstalledVersion([string]$Executable) {
+  if (-not (Test-Path $Executable)) { return $null }
+  try {
+    $versions = (& $Executable version --json 2>$null | Out-String | ConvertFrom-Json)
+    if ($LASTEXITCODE -ne 0) { return $null }
+    $core = if ($versions.core) { [string]$versions.core } else { $null }
+    $managed = if ($versions.managedCore) { [string]$versions.managedCore } else { $null }
+    if ($managed -and $core) {
+      try {
+        if ([System.Version]$managed -ge [System.Version]$core) { return $managed }
+      } catch {
+        if ($managed -eq $Version.TrimStart("v")) { return $managed }
+      }
+    }
+    return $core
+  } catch {
+    return $null
+  }
+}
+
+function Test-VersionAtLeast([string]$Current, [string]$Target) {
+  if (-not $Current -or -not $Target) { return $false }
+  try {
+    $currentVersion = [System.Version]($Current.TrimStart("v"))
+    $targetVersion = [System.Version]($Target.TrimStart("v"))
+    return $currentVersion -ge $targetVersion
+  } catch {
+    return $Current.TrimStart("v") -eq $Target.TrimStart("v")
+  }
+}
+
+function Invoke-ExistingUpgrade([string]$Executable, [string]$TargetVersion) {
+  try {
+    & $Executable update 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { return $false }
+    $updatedVersion = Get-InstalledVersion $Executable
+    if (-not (Test-VersionAtLeast $updatedVersion $TargetVersion)) { return $false }
+    if (-not $NoService) {
+      & $Executable service restart 2>&1 | Out-Null
+      if ($LASTEXITCODE -ne 0) { return $false }
+      Start-Sleep -Milliseconds 800
+      & $Executable inject --launch 2>&1 | Out-Null
+      if ($LASTEXITCODE -ne 0) { return $false }
+      $doctor = (& $Executable doctor | Out-String | ConvertFrom-Json)
+      if (-not $doctor.ok) { return $false }
+    }
+    Write-Ok "Better Codex upgraded to v$updatedVersion"
+    return $true
+  } catch {
+    return $false
+  }
+}
+
 if (-not [Environment]::Is64BitOperatingSystem) { throw "Better Codex requires 64-bit Windows." }
+
+$executable = Join-Path $BinDirectory "better-codex.exe"
+$targetVersion = $Version.TrimStart("v")
+$installedVersion = Get-InstalledVersion $executable
+
+if ($installedVersion -and (Test-VersionAtLeast $installedVersion $targetVersion)) {
+  Write-Ok "Better Codex is up to date (v$installedVersion)"
+  return
+}
+
+if ($installedVersion) {
+  Write-Step "Better Codex v$installedVersion is installed; upgrading to v$targetVersion..."
+  if (Invoke-ExistingUpgrade $executable $targetVersion) { return }
+  Write-Step "Automatic upgrade unavailable; continuing with full installation..."
+}
 
 $codexProcesses = @(Get-Process -Name "ChatGPT", "Codex" -ErrorAction SilentlyContinue)
 if ($codexProcesses.Count -gt 0) {
@@ -55,7 +127,6 @@ try {
   Expand-Archive -LiteralPath $archive -DestinationPath $workDirectory -Force
   Write-Step "Installing executable to $BinDirectory..."
   New-Item -ItemType Directory -Force -Path $BinDirectory | Out-Null
-  $executable = Join-Path $BinDirectory "better-codex.exe"
   if (Test-Path $executable) {
     & $executable disable 2>$null | Out-Null
     & $executable service stop 2>$null | Out-Null
