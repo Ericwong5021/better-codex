@@ -60,6 +60,11 @@ class Connection {
     return () => this.socket.removeEventListener("message", handler);
   }
 
+  onClose(listener: () => void) {
+    this.socket.addEventListener("close", listener, { once: true });
+    return () => this.socket.removeEventListener("close", listener);
+  }
+
   close() {
     this.socket.close();
   }
@@ -100,6 +105,14 @@ async function targets(port: number) {
   if (!response.ok) throw new Error(`cdp_http_${response.status}`);
   const values = await response.json() as Target[];
   return values.filter(target => target.type === "page" && target.webSocketDebuggerUrl && target.id && targetAllowed(target));
+}
+
+async function browserDebuggerUrl(port: number) {
+  const response = await fetch(`http://127.0.0.1:${port}/json/version`);
+  if (!response.ok) throw new Error(`cdp_http_${response.status}`);
+  const value = await response.json() as { webSocketDebuggerUrl?: unknown };
+  if (typeof value.webSocketDebuggerUrl !== "string") throw new Error("cdp_browser_websocket_unavailable");
+  return value.webSocketDebuggerUrl;
 }
 
 async function evaluate(connection: Connection, expression: string) {
@@ -470,11 +483,45 @@ export async function watchInjection(port: number, accessToken: string) {
   const attached = new Map<string, { connection: Connection; identifier?: string; target: Target }>();
   let activeRuntimePort = 0;
   let stopping = false;
-  const stop = () => { stopping = true; };
+  let discovery: Connection | null = null;
+  let wakeTargetActivity: (() => void) | null = null;
+  const wake = () => wakeTargetActivity?.();
+  const stop = () => { stopping = true; wake(); };
+  const ensureDiscovery = async () => {
+    if (discovery) return;
+    let connection: Connection | null = null;
+    try {
+      connection = new Connection(await browserDebuggerUrl(port));
+      await connection.open();
+      const reset = () => {
+        if (discovery === connection) discovery = null;
+        wake();
+      };
+      connection.onClose(reset);
+      connection.on("Target.targetCreated", wake);
+      connection.on("Target.targetInfoChanged", wake);
+      connection.on("Target.targetDestroyed", wake);
+      await connection.send("Target.setDiscoverTargets", { discover: true });
+      discovery = connection;
+    } catch {
+      connection?.close();
+    }
+  };
+  const targetActivity = (fallbackMs: number) => new Promise<void>(resolve => {
+    const finish = () => {
+      clearTimeout(timeout);
+      if (wakeTargetActivity === finish) wakeTargetActivity = null;
+      resolve();
+    };
+    const timeout = setTimeout(finish, fallbackMs);
+    wakeTargetActivity = finish;
+  });
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
   while (!stopping) {
+    const activity = targetActivity(2000);
     try {
+      await ensureDiscovery();
       const runtime = readRuntimeState();
       if (!runtime) throw new Error("runtime_unavailable");
       if (activeRuntimePort && activeRuntimePort !== runtime.port) {
@@ -543,8 +590,10 @@ export async function watchInjection(port: number, accessToken: string) {
     } catch (error) {
       console.error(error instanceof Error ? error.message : "injector_cycle_failed");
     }
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    await activity;
   }
+  const activeDiscovery = discovery as Connection | null;
+  activeDiscovery?.close();
   for (const current of attached.values()) {
     try {
       if (current.identifier) await current.connection.send("Page.removeScriptToEvaluateOnNewDocument", { identifier: current.identifier });
