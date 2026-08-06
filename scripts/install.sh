@@ -176,7 +176,26 @@ fi
 
 "$BIN_DIR/better-codex" version
 if [ "$WITH_SERVICE" = "1" ]; then
-  "$BIN_DIR/better-codex" setup --yes
-  "$BIN_DIR/better-codex" doctor
+  printf '[Better Codex] Registering runtime and injecting Better Codex...\n'
+  SETUP_LOG="$WORK_DIR/setup.log"
+  if ! "$BIN_DIR/better-codex" setup --yes >"$SETUP_LOG" 2>&1; then
+    cat "$SETUP_LOG" >&2
+    exit 1
+  fi
+  printf '[Better Codex] Running installation diagnostics...\n'
+  DOCTOR_LOG="$WORK_DIR/doctor.log"
+  if ! "$BIN_DIR/better-codex" doctor >"$DOCTOR_LOG" 2>&1; then
+    cat "$DOCTOR_LOG" >&2
+    exit 1
+  fi
+  if ! awk '/"ok":/ { found=1; ok=($0 ~ /true/); exit } END { if (!found || !ok) exit 1 }' "$DOCTOR_LOG"; then
+    cat "$DOCTOR_LOG" >&2
+    exit 1
+  fi
 fi
-printf 'Installed Better Codex to %s\n' "$BIN_DIR/better-codex"
+READY_VERSION="$(installed_version "$BIN_DIR/better-codex" || true)"
+if [ -n "$READY_VERSION" ]; then
+  printf '[OK] Better Codex v%s is ready\n' "$READY_VERSION"
+else
+  printf '[OK] Better Codex is ready\n'
+fi

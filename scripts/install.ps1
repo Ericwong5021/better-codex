@@ -145,23 +145,37 @@ try {
   if ($LASTEXITCODE -ne 0) { throw "Better Codex executable verification failed." }
   if (-not $NoService) {
     Write-Step "Registering runtime and injecting Better Codex..."
-    & $executable setup --yes 2>&1 | ForEach-Object { Write-Host "[Better Codex] $_" }
+    $setupOutput = (& $executable setup --yes 2>&1 | Out-String)
     $setupExitCode = $LASTEXITCODE
-    if ($setupExitCode -ne 0) { throw "Better Codex setup failed with exit code $setupExitCode." }
+    if ($setupExitCode -ne 0) {
+      Write-Host ($setupOutput.TrimEnd())
+      throw "Better Codex setup failed with exit code $setupExitCode."
+    }
     Write-Step "Running installation diagnostics..."
     $doctor = $null
+    $doctorOutput = $null
     for ($attempt = 1; $attempt -le 8; $attempt++) {
-      $doctor = (& $executable doctor | Out-String | ConvertFrom-Json)
+      $doctorOutput = (& $executable doctor 2>&1 | Out-String)
+      $doctorExitCode = $LASTEXITCODE
+      try {
+        $doctor = $doctorOutput | ConvertFrom-Json
+      } catch {
+        Write-Host ($doctorOutput.TrimEnd())
+        throw "Better Codex diagnostics returned invalid output."
+      }
       if ($doctor.ok) { break }
       $reason = $doctor.checks.injection.error
+      if (-not $reason -and $doctorExitCode -ne 0) { $reason = "exit code $doctorExitCode" }
       if (-not $reason) { $reason = "not ready" }
       Write-Step "Diagnostics pending ($attempt/8): $reason. Retrying..."
       Start-Sleep -Seconds 2
     }
-    $doctor | ConvertTo-Json -Depth 8
-    if (-not $doctor.ok) { throw "Better Codex installation verification failed." }
+    if (-not $doctor.ok) {
+      Write-Host ($doctorOutput.TrimEnd())
+      throw "Better Codex installation verification failed."
+    }
   }
-  Write-Step "Installation completed: $executable"
+  Write-Ok "Better Codex v$targetVersion is ready"
 } finally {
   Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $workDirectory
 }
