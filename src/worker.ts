@@ -3,6 +3,7 @@ import { closeSync, createWriteStream, existsSync, openSync, readSync, readdirSy
 import { homedir } from "node:os";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
+import { agentConfigProfileName } from "./agent-profiles.js";
 import { runLogPath, workerLogPath } from "./config.js";
 import { Store, type ClaimedIssue } from "./db.js";
 
@@ -111,6 +112,7 @@ export class IssueWorker {
     if (workspacePath !== claim.workspacePath) this.store.setRunWorkspace(claim.issue.id, workspacePath);
     const args = [
       "exec",
+      ...(claim.issue.agent_id ? ["--profile", agentConfigProfileName(claim.issue.agent_id)] : []),
       "--json",
       "--color",
       "never",

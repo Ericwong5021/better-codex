@@ -53,6 +53,7 @@ export type Issue = {
   thread_id: string | null;
   workspace_path: string | null;
   agent_enabled: boolean;
+  agent_id: string | null;
   version: number;
   created_at: string;
   updated_at: string;
@@ -84,9 +85,10 @@ type IssueInput = {
   threadId?: string;
   workspacePath?: string;
   agentEnabled?: boolean;
+  agentId?: string;
 };
 
-type IssuePatch = Partial<Pick<Issue, "title" | "description" | "status" | "priority" | "labels" | "sort_order" | "pinned" | "thread_id" | "workspace_path" | "agent_enabled">>;
+type IssuePatch = Partial<Pick<Issue, "title" | "description" | "status" | "priority" | "labels" | "sort_order" | "pinned" | "thread_id" | "workspace_path" | "agent_enabled" | "agent_id">>;
 
 type AgentProfileInput = Pick<AgentProfile, "name" | "description" | "instructions" | "model" | "reasoning_effort">;
 type AgentProfilePatch = Partial<AgentProfileInput>;
@@ -252,6 +254,8 @@ export class Store {
   private ensureAgentColumn() {
     const columns = new Set((this.db.prepare("PRAGMA table_info(issues)").all() as Array<{ name: string }>).map(item => item.name));
     if (!columns.has("agent_enabled")) this.db.exec("ALTER TABLE issues ADD COLUMN agent_enabled INTEGER NOT NULL DEFAULT 0");
+    if (!columns.has("agent_id")) this.db.exec("ALTER TABLE issues ADD COLUMN agent_id TEXT");
+    this.db.exec("CREATE INDEX IF NOT EXISTS issues_agent_id ON issues(agent_id)");
   }
 
   private ensureAgentProfileTable() {
@@ -398,8 +402,16 @@ export class Store {
     const profile = this.getAgentProfile(id);
     if (!profile) throw new Error("agent_not_found");
     if (profile.version !== version) throw new Error("version_conflict");
-    const result = this.db.prepare("DELETE FROM agent_profiles WHERE id = ? AND version = ?").run(profile.id, version);
-    if (result.changes !== 1) throw new Error("version_conflict");
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare("UPDATE issues SET agent_id = NULL, version = version + 1, updated_at = ? WHERE agent_id = ?").run(now(), profile.id);
+      const result = this.db.prepare("DELETE FROM agent_profiles WHERE id = ? AND version = ?").run(profile.id, version);
+      if (result.changes !== 1) throw new Error("version_conflict");
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
     return profile;
   }
 
@@ -470,6 +482,8 @@ export class Store {
     const title = cleanTitle(input.title);
     if (input.status && !issueStatuses.includes(input.status)) throw new Error("invalid_status");
     if (input.priority && !issuePriorities.includes(input.priority)) throw new Error("invalid_priority");
+    const agentId = input.agentEnabled && input.agentId ? input.agentId : null;
+    if (agentId && !this.getAgentProfile(agentId)) throw new Error("agent_not_found");
     const id = randomUUID();
     const timestamp = now();
     this.db.exec("BEGIN IMMEDIATE");
@@ -486,8 +500,8 @@ export class Store {
       this.db.prepare(`
         INSERT INTO issues (
           id, identifier, project_id, title, description, status, priority, labels_json,
-          sort_order, pinned, archived_at, thread_id, workspace_path, agent_enabled, version, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?, 1, ?, ?)
+          sort_order, pinned, archived_at, thread_id, workspace_path, agent_enabled, agent_id, version, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?, ?, 1, ?, ?)
       `).run(
         id,
         identifier,
@@ -501,6 +515,7 @@ export class Store {
         input.threadId || null,
         input.workspacePath || null,
         Number(input.agentEnabled ?? false),
+        agentId,
         timestamp,
         timestamp,
       );
@@ -521,11 +536,13 @@ export class Store {
     if (patch.priority !== undefined && !issuePriorities.includes(patch.priority)) throw new Error("invalid_priority");
     if (patch.labels !== undefined) patch.labels = cleanLabels(patch.labels);
     if (patch.sort_order !== undefined && !Number.isFinite(patch.sort_order)) throw new Error("invalid_sort_order");
+    if (patch.agent_id && !this.getAgentProfile(patch.agent_id)) throw new Error("agent_not_found");
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const issue = this.getIssue(id);
       if (!issue) throw new Error("issue_not_found");
       if (issue.version !== version) throw new Error("version_conflict");
+      if (patch.agent_enabled === false) patch.agent_id = null;
       if (patch.status !== undefined && patch.status !== issue.status && patch.sort_order === undefined) {
         const row = this.db.prepare("SELECT COALESCE(MAX(sort_order), 0) AS value FROM issues WHERE project_id = ? AND status = ? AND archived_at IS NULL")
           .get(issue.project_id, patch.status) as { value: number };
@@ -542,13 +559,14 @@ export class Store {
         thread_id: "thread_id",
         workspace_path: "workspace_path",
         agent_enabled: "agent_enabled",
+        agent_id: "agent_id",
       };
       const assignments: string[] = [];
       const values: unknown[] = [];
       for (const [key, value] of Object.entries(patch) as Array<[keyof IssuePatch, IssuePatch[keyof IssuePatch]]>) {
         if (value === undefined) continue;
         assignments.push(`${columns[key]} = ?`);
-        values.push(key === "labels" ? JSON.stringify(value) : key === "pinned" || key === "agent_enabled" ? Number(value) : key === "thread_id" || key === "workspace_path" ? value || null : value);
+        values.push(key === "labels" ? JSON.stringify(value) : key === "pinned" || key === "agent_enabled" ? Number(value) : key === "thread_id" || key === "workspace_path" || key === "agent_id" ? value || null : value);
       }
       if (assignments.length === 0) {
         this.db.exec("COMMIT");

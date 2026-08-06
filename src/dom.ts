@@ -234,7 +234,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #better-codex-dialog .better-codex-dialog-editor::placeholder { color: #8b8b94; opacity: 1; }
         #better-codex-dialog[data-mode="agent"] .better-codex-dialog-editor { margin-top: 2px; min-height: 120px; }
         #better-codex-dialog .better-codex-agent-picker { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; padding: 5px 20px 8px; color: #71717a; font-size: 12px; }
-        #better-codex-dialog .better-codex-agent-picker strong { display: flex; align-items: center; gap: 6px; color: #3f3f46; font-weight: 550; }
+        #better-codex-dialog .better-codex-agent-assignee { display: flex; min-width: 0; align-items: center; gap: 6px; color: #3f3f46; font-weight: 550; }
+        #better-codex-dialog .better-codex-agent-assignee select { max-width: 260px; border: 0; color: inherit; background: transparent; padding: 2px 20px 2px 0; font: inherit; font-weight: inherit; outline: none; cursor: pointer; }
+        #better-codex-dialog .better-codex-agent-assignee:focus-within { border-radius: 5px; box-shadow: 0 0 0 2px rgba(24,24,27,.08); }
         #better-codex-dialog .better-codex-agent-avatar { display: inline-flex; width: 18px; height: 18px; align-items: center; justify-content: center; border-radius: 999px; color: #fff; background: #3f3f46; font-size: 8px; }
         #better-codex-dialog .better-codex-run-hint { display: flex; flex: 0 0 auto; align-items: center; gap: 7px; padding: 1px 20px 4px; color: #8b8b94; font-size: 11px; }
         #better-codex-dialog .better-codex-dialog-properties { display: flex; flex: 0 0 auto; align-items: center; flex-wrap: wrap; gap: 6px; padding: 6px 16px 9px; }
@@ -316,7 +318,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #better-codex-agent-dialog .better-codex-button { border-color: var(--bc-border); color: var(--bc-muted); background: var(--bc-surface); }
         #better-codex-agent-dialog .better-codex-submit, #better-codex-dialog .better-codex-submit { border-color: var(--bc-primary); color: var(--bc-primary-foreground); background: var(--bc-primary); }
         #better-codex-dialog .better-codex-dialog-breadcrumb, #better-codex-dialog .better-codex-manual-title::placeholder, #better-codex-dialog .better-codex-agent-picker, #better-codex-dialog .better-codex-run-hint, #better-codex-dialog .better-codex-switch-mode, #better-codex-dialog .better-codex-keep-open, #better-codex-dialog .better-codex-project-empty { color: var(--bc-muted); }
-        #better-codex-dialog .better-codex-dialog-breadcrumb strong, #better-codex-dialog .better-codex-manual-title, #better-codex-dialog .better-codex-agent-picker strong { color: var(--bc-foreground); }
+        #better-codex-dialog .better-codex-dialog-breadcrumb strong, #better-codex-dialog .better-codex-manual-title, #better-codex-dialog .better-codex-agent-assignee { color: var(--bc-foreground); }
+        #better-codex-dialog .better-codex-agent-assignee:focus-within { box-shadow: 0 0 0 2px color-mix(in oklch,var(--bc-ring) 20%,transparent); }
         #better-codex-dialog .better-codex-icon-button, #better-codex-dialog .better-codex-dialog-editor { color: color-mix(in oklch,var(--bc-foreground) 78%,var(--bc-muted)); }
         #better-codex-dialog .better-codex-icon-button:hover, #better-codex-dialog .better-codex-switch-mode:hover, #better-codex-dialog .better-codex-project-option:hover, #better-codex-dialog .better-codex-project-option:focus-visible { color: var(--bc-foreground); background: var(--bc-hover); }
         #better-codex-dialog .better-codex-dialog-editor::placeholder { color: var(--bc-muted); }
@@ -548,7 +551,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (filters.project.length && !filters.project.includes(issue.project_id)) return false;
       if (filters.label.length && !filters.label.some(value => (issue.labels || []).includes(value))) return false;
       if (filters.assignee.length) {
-        const assignee = issue.agent_enabled ? "codex" : "none";
+        const assignee = issue.agent_enabled ? issue.agent_id || "codex" : "none";
         if (!filters.assignee.includes(assignee)) return false;
       }
       if (filters.creator.length && !filters.creator.includes("me")) return false;
@@ -569,7 +572,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (key === "status") return Object.entries(statusLabels).map(([value, text]) => ({ value, text }));
       if (key === "priority") return Object.entries(priorityLabels).map(([value, text]) => ({ value, text: value === "none" ? "无优先级" : text + "优先级" }));
       if (key === "date") return [{ value: "1", text: "最近 24 小时" }, { value: "7", text: "最近 7 天" }, { value: "30", text: "最近 30 天" }];
-      if (key === "assignee") return [{ value: "codex", text: "Codex" }, { value: "none", text: "未分配" }];
+      if (key === "assignee") return [{ value: "codex", text: "Codex（默认配置）" }, ...state.agents.map(agent => ({ value: agent.id, text: agent.name })), { value: "none", text: "未分配" }];
       if (key === "creator") return [{ value: "me", text: "由我创建" }];
       if (key === "project") return state.projects.map(project => ({ value: project.id, text: project.name }));
       if (key === "label") return [...new Set(state.issues.flatMap(issue => issue.labels || []))].map(value => ({ value, text: value }));
@@ -858,9 +861,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const issues = visible.filter(issue => issue.status === status);
         const cards = issues.map(issue => {
           const sessionId = issue.run_thread_id || "";
-          const activity = issue.active_run_status ? '<span class="better-codex-activity" data-run="' + escapeHtml(issue.active_run_status) + '"><span class="better-codex-avatar">AI</span><span class="' + (issue.active_run_status === "running" ? "better-codex-shimmer" : "") + '">' + (issue.active_run_status === "running" ? "Working" : "Queued") + '</span></span>' : "";
+          const assignedAgent = state.agents.find(agent => agent.id === issue.agent_id);
+          const agentName = issue.agent_enabled ? assignedAgent?.name || "Codex" : "";
+          const agentInitial = Array.from(agentName.trim())[0] || "AI";
+          const activity = issue.active_run_status ? '<span class="better-codex-activity" data-run="' + escapeHtml(issue.active_run_status) + '"><span class="better-codex-avatar">' + escapeHtml(agentInitial) + '</span><span class="' + (issue.active_run_status === "running" ? "better-codex-shimmer" : "") + '">' + (issue.active_run_status === "running" ? "Working" : "Queued") + '</span></span>' : "";
           const description = String(issue.description || "").replace(/[#*_\`~>\[\]()]/g, "").replace(/\s+/g, " ").trim();
-          const chips = [project?.name, ...(issue.labels || [])].filter(Boolean).map(value => '<span class="better-codex-chip">' + escapeHtml(value) + '</span>').join("");
+          const chips = [project?.name, agentName, ...(issue.labels || [])].filter(Boolean).map(value => '<span class="better-codex-chip">' + escapeHtml(value) + '</span>').join("");
           const meta = sessionId ? '<span>打开 Session</span>' : '<span>等待 Session</span>';
           return '<article class="better-codex-card" draggable="true" data-issue-id="' + escapeHtml(issue.id) + '"' + (sessionId ? ' data-thread="' + escapeHtml(sessionId) + '"' : "") + '><div class="better-codex-card-row"><div class="better-codex-card-id">' + priorityIcon(issue.priority) + '<span>' + escapeHtml(issue.identifier) + '</span></div>' + activity + '</div><div class="better-codex-card-title">' + escapeHtml(issue.title) + '</div>' + (description ? '<div class="better-codex-card-description">' + escapeHtml(description) + '</div>' : "") + (chips ? '<div class="better-codex-chip-row">' + chips + '</div>' : "") + '<div class="better-codex-card-meta">' + meta + '<span>更新于 ' + timeAgo(issue.updated_at) + '</span></div></article>';
         }).join("");
@@ -891,6 +897,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       try {
         const bootstrap = await api("/api/bootstrap");
         state.projects = bootstrap.projects;
+        state.agents = bootstrap.agents || [];
         state.agentModels = bootstrap.agentModels || [];
         state.agentReasoningEfforts = bootstrap.agentReasoningEfforts || [];
         const context = readContext();
@@ -990,10 +997,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const context = readContext();
       const project = state.projects.find(item => item.id === state.projectId);
       const draft = {
-        mode: issue ? "manual" : state.createMode,
+        mode: issue ? issue.agent_enabled ? "agent" : "manual" : state.createMode,
         title: issue?.title || "",
         description: issue?.description || "",
         prompt: issue?.description || "",
+        agentId: issue?.agent_id || "",
         status: issue?.status || initialStatus,
         priority: issue?.priority || "none",
         labels: (issue?.labels || []).join(", "),
@@ -1017,6 +1025,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           draft.labels = String(values.get("labels") || "");
         } else {
           draft.prompt = String(values.get("prompt") || "");
+          draft.agentId = String(values.get("agent_id") || "");
         }
       }
 
@@ -1029,6 +1038,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (issue) return '<span class="better-codex-property">' + icon("folder") + '<span>' + escapeHtml(selectedProject?.name || "无项目") + '</span></span>';
         const options = state.projects.map(item => '<button class="better-codex-project-option" type="button" data-dialog-project-option="' + escapeHtml(item.id) + '">' + icon("folder") + '<span>' + escapeHtml(item.name) + '</span><span class="better-codex-project-check">' + (item.id === draft.projectId ? icon("check") : "") + '</span></button>').join("");
         return '<span class="better-codex-project-picker"><button class="better-codex-property" type="button" data-dialog-project>' + icon("folder") + '<span data-project-label>' + escapeHtml(selectedProject?.name || "选择项目") + '</span></button><span class="better-codex-project-menu" hidden><input class="better-codex-project-search" type="search" placeholder="搜索项目..." aria-label="搜索项目"><span data-project-options>' + (options || '<span class="better-codex-project-empty">暂无项目</span>') + '</span></span></span>';
+      }
+
+      function agentPicker() {
+        const selectedAgent = state.agents.find(agent => agent.id === draft.agentId);
+        const initial = Array.from((selectedAgent?.name || "Codex").trim())[0] || "AI";
+        const options = [{ id: "", name: "Codex（默认配置）" }, ...state.agents].map(agent => '<option value="' + escapeHtml(agent.id) + '"' + (agent.id === draft.agentId ? " selected" : "") + '>' + escapeHtml(agent.name) + '</option>').join("");
+        return '<div class="better-codex-agent-picker"><span>指派给</span><label class="better-codex-agent-assignee"><span class="better-codex-agent-avatar" data-agent-avatar>' + escapeHtml(initial) + '</span><select name="agent_id" aria-label="选择执行智能体">' + options + '</select></label></div>';
       }
 
       function propertyRows() {
@@ -1052,8 +1068,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         dialog.dataset.mode = draft.mode;
         dialog.dataset.expanded = String(draft.expanded);
         if (draft.mode === "agent") {
-          dialog.innerHTML = '<form>' + header() + '<div class="better-codex-agent-picker"><span>创建者</span><strong><span class="better-codex-agent-avatar">AI</span>Codex</strong></div><textarea class="better-codex-dialog-editor" name="prompt" placeholder="告诉智能体要做什么，例如：&quot;修复项目里任务运行状态不可见的问题&quot;">' + escapeHtml(draft.prompt) + '</textarea>' + propertyRows() + '<div class="better-codex-dialog-error" hidden></div>' + footer() + '</form>';
-          dialog.querySelector(".better-codex-dialog-properties")?.insertAdjacentHTML("beforebegin", '<div class="better-codex-run-hint"><span class="better-codex-agent-avatar">AI</span><span>创建后 Codex 将自动开始工作。</span></div>');
+          const selectedAgent = state.agents.find(agent => agent.id === draft.agentId);
+          const selectedName = selectedAgent?.name || "Codex";
+          dialog.innerHTML = '<form>' + header() + agentPicker() + '<textarea class="better-codex-dialog-editor" name="prompt" placeholder="告诉智能体要做什么，例如：&quot;修复项目里任务运行状态不可见的问题&quot;">' + escapeHtml(draft.prompt) + '</textarea>' + propertyRows() + '<div class="better-codex-dialog-error" hidden></div>' + footer() + '</form>';
+          dialog.querySelector(".better-codex-dialog-properties")?.insertAdjacentHTML("beforebegin", '<div class="better-codex-run-hint"><span class="better-codex-agent-avatar">' + escapeHtml(Array.from(selectedName.trim())[0] || "AI") + '</span><span>创建后将由 ' + escapeHtml(selectedName) + ' 自动开始工作。</span></div>');
         } else {
           dialog.innerHTML = '<form>' + header() + '<input class="better-codex-manual-title" name="title" maxlength="500" placeholder="任务标题" value="' + escapeHtml(draft.title) + '"><textarea class="better-codex-dialog-editor" name="description" placeholder="添加描述...">' + escapeHtml(draft.description) + '</textarea>' + propertyRows() + '<div class="better-codex-dialog-error" hidden></div>' + footer() + '</form>';
         }
@@ -1062,6 +1080,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const updateSubmit = () => { submit.disabled = !String(content?.value || "").trim(); };
         updateSubmit();
         content?.addEventListener("input", updateSubmit);
+        dialog.querySelector('[name="agent_id"]')?.addEventListener("change", event => {
+          draft.agentId = event.currentTarget.value;
+          const selectedAgent = state.agents.find(agent => agent.id === draft.agentId);
+          const selectedName = selectedAgent?.name || "Codex";
+          dialog.querySelectorAll(".better-codex-agent-avatar").forEach(avatar => { avatar.textContent = Array.from(selectedName.trim())[0] || "AI"; });
+          const hint = dialog.querySelector(".better-codex-run-hint span:last-child");
+          if (hint) hint.textContent = "创建后将由 " + selectedName + " 自动开始工作。";
+        });
         dialog.querySelector('[name="keep"]')?.addEventListener("change", event => { state.keepCreate = event.currentTarget.checked; });
         dialog.querySelector('[name="status"]')?.addEventListener("change", event => {
           draft.status = event.currentTarget.value;
@@ -1145,12 +1171,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           const body = {
             title,
             description: draft.mode === "agent" ? prompt : draft.description,
-            status: draft.mode === "agent" ? "todo" : draft.status,
+            status: draft.mode === "agent" && !issue ? "todo" : draft.status,
             priority: draft.priority,
             labels: draft.labels.split(/[,，]/).map(value => value.trim()).filter(Boolean),
             thread_id: context.threadId || issue?.thread_id || "",
             workspace_path: state.projects.find(item => item.id === draft.projectId)?.workspace_path || context.workspacePath,
-            agent_enabled: issue ? issue.agent_enabled : draft.mode === "agent"
+            agent_enabled: draft.mode === "agent",
+            agent_id: draft.mode === "agent" ? draft.agentId : ""
           };
           if (issue) await api("/api/issues/" + encodeURIComponent(issue.id), { method: "PATCH", body: JSON.stringify({ ...body, version: issue.version }) });
           else {

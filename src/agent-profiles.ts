@@ -7,6 +7,10 @@ const codexHome = process.env.CODEX_HOME || join(homedir(), ".codex");
 const configPath = join(codexHome, "config.toml");
 const profilesPath = join(codexHome, "agents", "better-codex");
 
+export function agentConfigProfileName(id: string) {
+  return `better-codex-${id}`;
+}
+
 function quoted(value: string) {
   return JSON.stringify(value);
 }
@@ -32,15 +36,21 @@ export function syncAgentProfiles(profiles: AgentProfile[]) {
   for (const profile of profiles) {
     const file = `${profile.id}.toml`;
     activeFiles.add(file);
-    writeFileSync(join(profilesPath, file), [
+    const configuration = [
       `model = ${quoted(profile.model)}`,
       `model_reasoning_effort = ${quoted(profile.reasoning_effort)}`,
       `developer_instructions = ${quoted(profile.instructions)}`,
       "",
-    ].join("\n"), { mode: 0o600 });
+    ].join("\n");
+    writeFileSync(join(profilesPath, file), configuration, { mode: 0o600 });
+    writeFileSync(join(codexHome, `${agentConfigProfileName(profile.id)}.config.toml`), configuration, { mode: 0o600 });
   }
   for (const file of readdirSync(profilesPath)) {
     if (/^[a-f0-9-]{36}\.toml$/i.test(file) && !activeFiles.has(file)) unlinkSync(join(profilesPath, file));
+  }
+  const activeConfigProfiles = new Set(profiles.map(profile => `${agentConfigProfileName(profile.id)}.config.toml`));
+  for (const file of readdirSync(codexHome)) {
+    if (/^better-codex-[a-f0-9-]{36}\.config\.toml$/i.test(file) && !activeConfigProfiles.has(file)) unlinkSync(join(codexHome, file));
   }
   const source = existsSync(configPath) ? readFileSync(configPath, "utf8") : "";
   const base = withoutManagedRoles(source);

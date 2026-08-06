@@ -121,6 +121,7 @@ function parseIssuePatch(body: Record<string, unknown>) {
     if (typeof body.agent_enabled !== "boolean") throw new Error("invalid_agent_enabled");
     patch.agent_enabled = body.agent_enabled;
   }
+  if ("agent_id" in body) patch.agent_id = cleanString(body.agent_id, 200) || null;
   if ("labels" in body) {
     patch.labels = asLabels(body.labels);
   }
@@ -177,7 +178,7 @@ export function startServer() {
       }
       if (!authorized(request, url)) return sendJson(response, 401, { error: "unauthorized" });
       if (url.pathname === "/api/bootstrap" && method === "GET") {
-        return sendJson(response, 200, { projects: store.listProjects(), statuses: issueStatuses, priorities: issuePriorities, agentModels, agentReasoningEfforts });
+        return sendJson(response, 200, { projects: store.listProjects(), agents: store.listAgentProfiles(), statuses: issueStatuses, priorities: issuePriorities, agentModels, agentReasoningEfforts });
       }
       if (url.pathname === "/api/agents" && method === "GET") return sendJson(response, 200, store.listAgentProfiles());
       if (url.pathname === "/api/agents" && method === "POST") {
@@ -241,6 +242,7 @@ export function startServer() {
           threadId: cleanString(body.thread_id, 200),
           workspacePath: cleanString(body.workspace_path, 4096),
           agentEnabled: body.agent_enabled === true,
+          agentId: cleanString(body.agent_id, 200),
         });
         if (issue.agent_enabled && issue.status === "todo") worker.wake();
         return sendJson(response, 201, issue);
