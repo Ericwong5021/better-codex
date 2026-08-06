@@ -16,6 +16,7 @@
   "files": [
     "dist/cdp.js",
     "dist/cli.js",
+    "dist/design-system.js",
     "dist/agent-profiles.js",
     "dist/compatibility.js",
     "dist/config.js",
