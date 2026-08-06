@@ -43,7 +43,7 @@ import {
 
 function lucideDefinition(svg: string) {
   const name = svg.match(/\blucide-([a-z0-9-]+)"/)?.[1];
-  const nodes = svg.match(/<svg[^>]*>([\s\S]*?)<\/svg>/)?.[1].trim();
+  const nodes = svg.match(/<svg[^>]*>([\s\S]*?)<\/svg>/)?.[1].trim().replace(/<([a-z][\w:-]*)([^>]*?)\s*\/>/g, "<$1$2></$1>");
   if (!name || !nodes) throw new Error("invalid_lucide_icon");
   return { name, nodes };
 }
@@ -535,9 +535,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (svg.getAttribute("fill") !== "none") svg.setAttribute("fill", "none");
         if (svg.getAttribute("stroke") !== "currentColor") svg.setAttribute("stroke", "currentColor");
         if (svg.getAttribute("stroke-width") !== "1.8") svg.setAttribute("stroke-width", "1.8");
-        svg.setAttribute("stroke-linecap", "round");
-        svg.setAttribute("stroke-linejoin", "round");
-        svg.setAttribute("class", "lucide lucide-" + definition.name);
+        if (svg.getAttribute("stroke-linecap") !== "round") svg.setAttribute("stroke-linecap", "round");
+        if (svg.getAttribute("stroke-linejoin") !== "round") svg.setAttribute("stroke-linejoin", "round");
+        if (svg.getAttribute("class") !== "lucide lucide-" + definition.name) svg.setAttribute("class", "lucide lucide-" + definition.name);
         if (svg.innerHTML !== definition.nodes) svg.innerHTML = definition.nodes;
       }
     }

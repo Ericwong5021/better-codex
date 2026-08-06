@@ -25,6 +25,10 @@ type LaunchIntegrationState = {
 };
 
 function macLauncherPath() {
+  return "/Applications/Better Codex Launcher.app";
+}
+
+function legacyMacLauncherPath() {
   return join(homedir(), "Applications", "Better Codex Launcher.app");
 }
 
@@ -61,7 +65,7 @@ function validateState(value: unknown): LaunchIntegrationState {
   if (state.launcherArguments && (!Array.isArray(state.launcherArguments) || state.launcherArguments.some(argument => typeof argument !== "string"))) {
     throw new Error("launch_integration_state_invalid");
   }
-  if (state.platform === "darwin" && state.appPath !== macLauncherPath()) throw new Error("launch_integration_state_invalid");
+  if (state.platform === "darwin" && ![macLauncherPath(), legacyMacLauncherPath()].includes(state.appPath ?? "")) throw new Error("launch_integration_state_invalid");
   if (state.platform === "win32") {
     if (!Array.isArray(state.shortcuts)) throw new Error("launch_integration_state_invalid");
     const backupDirectory = resolve(join(dirname(launchIntegrationStatePath), "shortcut-backups"));
@@ -138,6 +142,13 @@ function macIcon(application: string | null) {
 
 function installMacLauncher(command: string[], previous: LaunchIntegrationState | null) {
   const appPath = macLauncherPath();
+  const legacyAppPath = legacyMacLauncherPath();
+  if (!existsSync(appPath) && existsSync(legacyAppPath)) {
+    const legacyContents = join(legacyAppPath, "Contents");
+    const legacyInfo = join(legacyContents, "Info.plist");
+    if (lstatSync(legacyAppPath).isSymbolicLink() || !existsSync(legacyContents) || lstatSync(legacyContents).isSymbolicLink() || !existsSync(legacyInfo) || lstatSync(legacyInfo).isSymbolicLink() || macBundleIdentifier(legacyInfo) !== "com.better-codex.launcher") throw new Error("mac_launcher_path_occupied");
+    renameSync(legacyAppPath, appPath);
+  }
   const existingContents = join(appPath, "Contents");
   const existingInfo = join(existingContents, "Info.plist");
   if (existsSync(appPath) && (lstatSync(appPath).isSymbolicLink() || !existsSync(existingContents) || lstatSync(existingContents).isSymbolicLink() || !existsSync(existingInfo) || lstatSync(existingInfo).isSymbolicLink() || macBundleIdentifier(existingInfo) !== "com.better-codex.launcher")) throw new Error("mac_launcher_path_occupied");
@@ -153,6 +164,11 @@ exit 0
     const existingExecutable = join(existingContents, "MacOS", "better-codex-launcher");
     if (!existsSync(existingExecutable) || lstatSync(existingExecutable).isSymbolicLink() || readFileSync(existingExecutable, "utf8") !== expectedScript) {
       throw new Error("mac_launcher_replacement_required");
+    }
+    try {
+      execFileSync("/usr/bin/touch", [appPath]);
+      execFileSync("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister", ["-f", appPath], { stdio: "ignore" });
+    } catch {
     }
     return { platform: "darwin", launcher, launcherArguments, appPath } satisfies LaunchIntegrationState;
   }
@@ -174,7 +190,6 @@ exit 0
 <key>CFBundleName</key><string>Better Codex</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>1.0</string>
-<key>LSUIElement</key><true/>
 </dict></plist>
 `);
     const executable = join(macos, "better-codex-launcher");
@@ -415,7 +430,7 @@ export function uninstallLaunchIntegration() {
     if (result.pending > 0) throw new Error(`shortcut_restore_incomplete_${result.pending}`);
   }
   if (state.platform === "darwin" && state.appPath && process.platform === "darwin") {
-    const appPath = macLauncherPath();
+    const appPath = state.appPath;
     const contents = join(appPath, "Contents");
     const info = join(contents, "Info.plist");
     if (existsSync(appPath) && !lstatSync(appPath).isSymbolicLink() && existsSync(contents) && !lstatSync(contents).isSymbolicLink() && existsSync(info) && !lstatSync(info).isSymbolicLink() && macBundleIdentifier(info) === "com.better-codex.launcher") {
