@@ -1,6 +1,6 @@
 param(
   [string]$Repository = "Ericwong5021/better-codex",
-  [string]$Version = "v0.3.3",
+  [string]$Version = "v0.3.4",
   [string]$BinDirectory = "$env:LOCALAPPDATA\BetterCodex\bin",
   [switch]$NoService
 )
@@ -78,7 +78,15 @@ try {
     $setupExitCode = $LASTEXITCODE
     if ($setupExitCode -ne 0) { throw "Better Codex setup failed with exit code $setupExitCode." }
     Write-Step "Running installation diagnostics..."
-    $doctor = (& $executable doctor | Out-String | ConvertFrom-Json)
+    $doctor = $null
+    for ($attempt = 1; $attempt -le 8; $attempt++) {
+      $doctor = (& $executable doctor | Out-String | ConvertFrom-Json)
+      if ($doctor.ok) { break }
+      $reason = $doctor.checks.injection.error
+      if (-not $reason) { $reason = "not ready" }
+      Write-Step "Diagnostics pending ($attempt/8): $reason. Retrying..."
+      Start-Sleep -Seconds 2
+    }
     $doctor | ConvertTo-Json -Depth 8
     if (-not $doctor.ok) { throw "Better Codex installation verification failed." }
   }
