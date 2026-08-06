@@ -56,8 +56,8 @@ After installation, Codex has two new sidebar entries:
 
 The installer also configures injection-aware launch entry points:
 
-- macOS creates `/Applications/Better Codex Launcher.app`, which can be pinned to the Dock.
-- Windows rewrites Codex shortcuts in the current user's Desktop, Start Menu, and taskbar to launch through Better Codex. Original shortcut settings are backed up and restored on uninstall.
+- macOS creates `/Applications/Better Codex.app`, which can be pinned to the Dock.
+- Windows creates a `Better Codex` shortcut on the Desktop and in the Start Menu.
 
 If Codex is already running without injection support, launching through these entries quits and restarts Codex. Save active work first.
 
@@ -136,7 +136,7 @@ npm ci
 npm run build
 npm link
 better-codex inject --launch
-# Create the Better Codex Launcher.app startup shortcut.
+# Create the Better Codex launcher.
 better-codex launcher install
 ```
 

@@ -1,12 +1,16 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
 import { isSea } from "node:sea";
 import { ensureDirectories, launchIntegrationStatePath, logPath } from "./config.js";
 
-type WindowsShortcutBackup = {
+type WindowsOwnedShortcut = {
+  path: string;
+};
+
+type WindowsLegacyShortcut = {
   path: string;
   backupPath?: string;
   targetPath: string;
@@ -21,15 +25,25 @@ type LaunchIntegrationState = {
   launcher: string;
   launcherArguments?: string[];
   appPath?: string;
-  shortcuts?: WindowsShortcutBackup[];
+  shortcuts?: Array<WindowsOwnedShortcut | WindowsLegacyShortcut>;
 };
 
+const MAC_BUNDLE_ID = "com.better-codex.launcher";
+const WINDOWS_SHORTCUT_NAME = "Better Codex.lnk";
+
 function macLauncherPath() {
-  return "/Applications/Better Codex Launcher.app";
+  return "/Applications/Better Codex.app";
 }
 
-function legacyMacLauncherPath() {
-  return join(homedir(), "Applications", "Better Codex Launcher.app");
+function legacyMacLauncherPaths() {
+  return [
+    "/Applications/Better Codex Launcher.app",
+    join(homedir(), "Applications", "Better Codex Launcher.app"),
+  ];
+}
+
+function allowedMacLauncherPaths() {
+  return [macLauncherPath(), ...legacyMacLauncherPaths()];
 }
 
 function macBundleIdentifier(infoPath: string) {
@@ -40,7 +54,17 @@ function macBundleIdentifier(infoPath: string) {
   }
 }
 
-function windowsShortcutRoots() {
+function windowsOwnedShortcutRoots() {
+  const script = `@(
+  [Environment]::GetFolderPath('Desktop'),
+  (Join-Path ([Environment]::GetFolderPath('StartMenu')) 'Programs')
+) | Where-Object { $_ } | Select-Object -Unique | ConvertTo-Json -Compress`;
+  const output = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { encoding: "utf8", windowsHide: true }).trim();
+  const value = output ? JSON.parse(output) as string[] | string : [];
+  return (Array.isArray(value) ? value : [value]).map(root => resolve(root));
+}
+
+function windowsLegacyShortcutRoots() {
   const script = `@(
   [Environment]::GetFolderPath('Desktop'),
   [Environment]::GetFolderPath('StartMenu'),
@@ -54,7 +78,19 @@ function windowsShortcutRoots() {
 function pathWithin(path: string, root: string) {
   const normalizedPath = path.toLowerCase();
   const normalizedRoot = root.toLowerCase().replace(/[\\/]+$/, "");
-  return normalizedPath.startsWith(`${normalizedRoot}\\`);
+  return normalizedPath === normalizedRoot || normalizedPath.startsWith(`${normalizedRoot}\\`);
+}
+
+function isLegacyWindowsShortcut(shortcut: WindowsOwnedShortcut | WindowsLegacyShortcut): shortcut is WindowsLegacyShortcut {
+  return "targetPath" in shortcut && typeof shortcut.targetPath === "string";
+}
+
+function isLegacyWindowsState(state: LaunchIntegrationState) {
+  return state.platform === "win32" && Boolean(state.shortcuts?.some(isLegacyWindowsShortcut));
+}
+
+function backupDirectoryPath() {
+  return resolve(join(dirname(launchIntegrationStatePath), "shortcut-backups"));
 }
 
 function validateState(value: unknown): LaunchIntegrationState {
@@ -65,33 +101,62 @@ function validateState(value: unknown): LaunchIntegrationState {
   if (state.launcherArguments && (!Array.isArray(state.launcherArguments) || state.launcherArguments.some(argument => typeof argument !== "string"))) {
     throw new Error("launch_integration_state_invalid");
   }
-  if (state.platform === "darwin" && ![macLauncherPath(), legacyMacLauncherPath()].includes(state.appPath ?? "")) throw new Error("launch_integration_state_invalid");
+  if (state.platform === "darwin" && !allowedMacLauncherPaths().includes(state.appPath ?? "")) throw new Error("launch_integration_state_invalid");
   if (state.platform === "win32") {
     if (!Array.isArray(state.shortcuts)) throw new Error("launch_integration_state_invalid");
-    const backupDirectory = resolve(join(dirname(launchIntegrationStatePath), "shortcut-backups"));
-    if (!existsSync(backupDirectory) || lstatSync(backupDirectory).isSymbolicLink()) throw new Error("launch_integration_state_invalid");
-    const canonicalBackupDirectory = realpathSync.native(backupDirectory);
-    const roots = windowsShortcutRoots().filter(existsSync).map(root => realpathSync.native(root));
-    for (const shortcut of state.shortcuts) {
-      if (!shortcut || typeof shortcut !== "object") throw new Error("launch_integration_state_invalid");
-      for (const key of ["path", "targetPath", "arguments", "workingDirectory", "description", "iconLocation"] as const) {
-        if (typeof shortcut[key] !== "string") throw new Error("launch_integration_state_invalid");
-      }
-      const shortcutPath = resolve(shortcut.path);
-      if (!shortcutPath.toLowerCase().endsWith(".lnk")) {
+    if (isLegacyWindowsState(state)) validateLegacyWindowsState(state);
+    else validateOwnedWindowsState(state);
+  }
+  return state;
+}
+
+function validateOwnedWindowsState(state: LaunchIntegrationState) {
+  const roots = windowsOwnedShortcutRoots().filter(existsSync).map(root => realpathSync.native(root));
+  for (const shortcut of state.shortcuts ?? []) {
+    if (!shortcut || typeof shortcut !== "object" || typeof shortcut.path !== "string") throw new Error("launch_integration_state_invalid");
+    if (isLegacyWindowsShortcut(shortcut)) throw new Error("launch_integration_state_invalid");
+    const shortcutPath = resolve(shortcut.path);
+    if (basename(shortcutPath).toLowerCase() !== WINDOWS_SHORTCUT_NAME.toLowerCase() || !shortcutPath.toLowerCase().endsWith(".lnk")) {
+      throw new Error("launch_integration_state_invalid");
+    }
+    if (existsSync(shortcutPath)) {
+      if (lstatSync(shortcutPath).isSymbolicLink() || !roots.some(root => pathWithin(realpathSync.native(shortcutPath), root))) {
         throw new Error("launch_integration_state_invalid");
       }
-      if (existsSync(shortcutPath)) {
-        if (lstatSync(shortcutPath).isSymbolicLink() || !roots.some(root => pathWithin(realpathSync.native(shortcutPath), root))) throw new Error("launch_integration_state_invalid");
-      }
-      if (shortcut.backupPath) {
-        const backup = resolve(shortcut.backupPath);
-        if (dirname(backup) !== backupDirectory || !backup.toLowerCase().endsWith(".lnk")) throw new Error("launch_integration_state_invalid");
-        if (existsSync(backup) && (lstatSync(backup).isSymbolicLink() || dirname(realpathSync.native(backup)) !== canonicalBackupDirectory)) throw new Error("launch_integration_state_invalid");
+    } else {
+      const parent = dirname(shortcutPath);
+      if (!existsSync(parent) || lstatSync(parent).isSymbolicLink() || !roots.some(root => pathWithin(realpathSync.native(parent), root))) {
+        throw new Error("launch_integration_state_invalid");
       }
     }
   }
-  return state;
+}
+
+function validateLegacyWindowsState(state: LaunchIntegrationState) {
+  const backupDirectory = backupDirectoryPath();
+  if (!existsSync(backupDirectory) || lstatSync(backupDirectory).isSymbolicLink()) throw new Error("launch_integration_state_invalid");
+  const canonicalBackupDirectory = realpathSync.native(backupDirectory);
+  const roots = windowsLegacyShortcutRoots().filter(existsSync).map(root => realpathSync.native(root));
+  for (const shortcut of state.shortcuts ?? []) {
+    if (!shortcut || typeof shortcut !== "object" || !isLegacyWindowsShortcut(shortcut)) throw new Error("launch_integration_state_invalid");
+    for (const key of ["path", "targetPath", "arguments", "workingDirectory", "description", "iconLocation"] as const) {
+      if (typeof shortcut[key] !== "string") throw new Error("launch_integration_state_invalid");
+    }
+    const shortcutPath = resolve(shortcut.path);
+    if (!shortcutPath.toLowerCase().endsWith(".lnk")) throw new Error("launch_integration_state_invalid");
+    if (existsSync(shortcutPath)) {
+      if (lstatSync(shortcutPath).isSymbolicLink() || !roots.some(root => pathWithin(realpathSync.native(shortcutPath), root))) {
+        throw new Error("launch_integration_state_invalid");
+      }
+    }
+    if (shortcut.backupPath) {
+      const backup = resolve(shortcut.backupPath);
+      if (dirname(backup) !== backupDirectory || !backup.toLowerCase().endsWith(".lnk")) throw new Error("launch_integration_state_invalid");
+      if (existsSync(backup) && (lstatSync(backup).isSymbolicLink() || dirname(realpathSync.native(backup)) !== canonicalBackupDirectory)) {
+        throw new Error("launch_integration_state_invalid");
+      }
+    }
+  }
 }
 
 function launcherCommand() {
@@ -140,18 +205,29 @@ function macIcon(application: string | null) {
   return null;
 }
 
+function assertOwnedMacApp(appPath: string) {
+  const contents = join(appPath, "Contents");
+  const info = join(contents, "Info.plist");
+  if (lstatSync(appPath).isSymbolicLink() || !existsSync(contents) || lstatSync(contents).isSymbolicLink() || !existsSync(info) || lstatSync(info).isSymbolicLink() || macBundleIdentifier(info) !== MAC_BUNDLE_ID) {
+    throw new Error("mac_launcher_path_occupied");
+  }
+}
+
+function migrateLegacyMacLauncher(appPath: string) {
+  if (existsSync(appPath)) return;
+  for (const legacyAppPath of legacyMacLauncherPaths()) {
+    if (!existsSync(legacyAppPath)) continue;
+    assertOwnedMacApp(legacyAppPath);
+    renameSync(legacyAppPath, appPath);
+    return;
+  }
+}
+
 function installMacLauncher(command: string[], previous: LaunchIntegrationState | null) {
   const appPath = macLauncherPath();
-  const legacyAppPath = legacyMacLauncherPath();
-  if (!existsSync(appPath) && existsSync(legacyAppPath)) {
-    const legacyContents = join(legacyAppPath, "Contents");
-    const legacyInfo = join(legacyContents, "Info.plist");
-    if (lstatSync(legacyAppPath).isSymbolicLink() || !existsSync(legacyContents) || lstatSync(legacyContents).isSymbolicLink() || !existsSync(legacyInfo) || lstatSync(legacyInfo).isSymbolicLink() || macBundleIdentifier(legacyInfo) !== "com.better-codex.launcher") throw new Error("mac_launcher_path_occupied");
-    renameSync(legacyAppPath, appPath);
-  }
+  migrateLegacyMacLauncher(appPath);
+  if (existsSync(appPath)) assertOwnedMacApp(appPath);
   const existingContents = join(appPath, "Contents");
-  const existingInfo = join(existingContents, "Info.plist");
-  if (existsSync(appPath) && (lstatSync(appPath).isSymbolicLink() || !existsSync(existingContents) || lstatSync(existingContents).isSymbolicLink() || !existsSync(existingInfo) || lstatSync(existingInfo).isSymbolicLink() || macBundleIdentifier(existingInfo) !== "com.better-codex.launcher")) throw new Error("mac_launcher_path_occupied");
   const stableCommand = existsSync(appPath) && previous?.platform === "darwin"
     ? [previous.launcher, ...(previous.launcherArguments ?? [])]
     : command;
@@ -186,7 +262,7 @@ exit 0
 <key>CFBundleDisplayName</key><string>Better Codex</string>
 <key>CFBundleExecutable</key><string>better-codex-launcher</string>
 <key>CFBundleIconFile</key><string>AppIcon</string>
-<key>CFBundleIdentifier</key><string>com.better-codex.launcher</string>
+<key>CFBundleIdentifier</key><string>${MAC_BUNDLE_ID}</string>
 <key>CFBundleName</key><string>Better Codex</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>1.0</string>
@@ -210,46 +286,37 @@ exit 0
   return { platform: "darwin", launcher, launcherArguments, appPath } satisfies LaunchIntegrationState;
 }
 
-function windowsInstallScript(command: string[], previousState: LaunchIntegrationState | null, backupDirectory: string) {
-  const [launcher, ...launcherArguments] = command;
-  const argumentsValue = [...launcherArguments, "launch"].map(windowsArgument).join(" ");
-  const existing = previousState?.platform === "win32" ? previousState.shortcuts ?? [] : [];
-  const previousLauncher = previousState?.platform === "win32" ? previousState.launcher : "";
-  const previousArguments = previousState?.platform === "win32"
-    ? [...(previousState.launcherArguments ?? []), "launch"].map(windowsArgument).join(" ")
-    : "";
-  const previous = Buffer.from(JSON.stringify(existing), "utf8").toString("base64");
-  return `$ErrorActionPreference = "Stop"
-$launcher = ${powershellLiteral(launcher)}
-$launchArguments = ${powershellLiteral(argumentsValue)}
-$previousLauncher = ${powershellLiteral(previousLauncher)}
-$previousArguments = ${powershellLiteral(previousArguments)}
+function restoreLegacyWindowsShortcuts(state: LaunchIntegrationState) {
+  const payload = Buffer.from(JSON.stringify(state.shortcuts ?? []), "utf8").toString("base64");
+  const expectedArguments = [...(state.launcherArguments ?? []), "launch"].map(windowsArgument).join(" ");
+  const backupDirectory = backupDirectoryPath();
+  const script = `$ErrorActionPreference = "Continue"
+$launcher = ${powershellLiteral(state.launcher)}
+$launchArguments = ${powershellLiteral(expectedArguments)}
 $backupDirectory = ${powershellLiteral(backupDirectory)}
-$previousJson = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(${powershellLiteral(previous)}))
-$backups = @()
-if ($previousJson) { $backups = @($previousJson | ConvertFrom-Json) }
-$known = @{}
-foreach ($item in $backups) { $known[[string]$item.path] = $item }
+$json = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(${powershellLiteral(payload)}))
+$items = @($json | ConvertFrom-Json)
 $roots = @(
   [Environment]::GetFolderPath('Desktop'),
   [Environment]::GetFolderPath('StartMenu'),
   (Join-Path $env:APPDATA 'Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar')
 ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -Unique
-$canonicalRoots = @($roots | ForEach-Object { (Resolve-Path -LiteralPath $_).Path.TrimEnd('\') })
-$canonicalBackupDirectory = (Resolve-Path -LiteralPath $backupDirectory).Path.TrimEnd('\')
+$canonicalRoots = @($roots | ForEach-Object { (Resolve-Path -LiteralPath $_).Path.TrimEnd('\\') })
+$canonicalBackupDirectory = if (Test-Path -LiteralPath $backupDirectory) { (Resolve-Path -LiteralPath $backupDirectory).Path.TrimEnd('\\') } else { '' }
 function Test-ManagedShortcut([string]$path) {
   try {
     $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
     if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { return $false }
     $resolved = (Resolve-Path -LiteralPath $path -ErrorAction Stop).Path
     foreach ($root in $canonicalRoots) {
-      if ($resolved.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase)) { return $true }
+      if ($resolved.StartsWith($root + '\\', [StringComparison]::OrdinalIgnoreCase)) { return $true }
     }
   } catch {}
   return $false
 }
 function Test-ManagedBackup([string]$path) {
   try {
+    if (-not $canonicalBackupDirectory) { return $false }
     $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
     if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { return $false }
     $resolved = (Resolve-Path -LiteralPath $path -ErrorAction Stop).Path
@@ -257,65 +324,145 @@ function Test-ManagedBackup([string]$path) {
   } catch { return $false }
 }
 $shell = New-Object -ComObject WScript.Shell
-foreach ($root in $roots) {
-  foreach ($file in Get-ChildItem -LiteralPath $root -Filter '*.lnk' -File -Recurse -ErrorAction SilentlyContinue) {
-    try {
-      if (-not (Test-ManagedShortcut $file.FullName)) { continue }
-      $shortcut = $shell.CreateShortcut($file.FullName)
-      $target = [string]$shortcut.TargetPath
-      $arguments = [string]$shortcut.Arguments
-      $iconLocation = [string]$shortcut.IconLocation
-      $looksLikeCodex = ($file.BaseName -match '^Codex$' -or
-        $target -match '(?i)[\\/]Codex\.exe$' -or
-        $arguments -match '(?i)OpenAI\.Codex_[A-Za-z0-9]+!App(?:$|\s)')
-      $ownedByPrevious = $known.ContainsKey($file.FullName) -and $previousLauncher -and $target -and
-        [IO.Path]::GetFullPath($target) -eq [IO.Path]::GetFullPath($previousLauncher) -and $arguments -eq $previousArguments
-      if (-not $looksLikeCodex -and -not $ownedByPrevious) { continue }
-      if ($target -and [IO.Path]::GetFullPath($target) -eq [IO.Path]::GetFullPath($launcher) -and $arguments -eq $launchArguments) { continue }
-      if (-not $ownedByPrevious) {
-        $backupPath = Join-Path $backupDirectory (([guid]::NewGuid().ToString()) + '.lnk')
-        Copy-Item -LiteralPath $file.FullName -Destination $backupPath -Force
-        $replacement = [pscustomobject]@{
-          path = $file.FullName
-          backupPath = $backupPath
-          targetPath = $target
-          arguments = $arguments
-          workingDirectory = [string]$shortcut.WorkingDirectory
-          description = [string]$shortcut.Description
-          iconLocation = $iconLocation
-        }
-        if ($known.ContainsKey($file.FullName)) {
-          $oldBackup = [string]$known[$file.FullName].backupPath
-          if ($oldBackup -and $oldBackup -ne $backupPath -and (Test-ManagedBackup $oldBackup)) { Remove-Item -LiteralPath $oldBackup -Force -ErrorAction SilentlyContinue }
-        }
-        $known[$file.FullName] = $replacement
-      }
-      $shortcut.TargetPath = $launcher
-      $shortcut.Arguments = $launchArguments
-      $shortcut.WorkingDirectory = [IO.Path]::GetDirectoryName($launcher)
-      $shortcut.Description = 'Launch Codex with Better Codex injection'
-      if ($iconLocation) { $shortcut.IconLocation = $iconLocation }
-      elseif ($target -and (Test-Path -LiteralPath $target)) { $shortcut.IconLocation = "$target,0" }
-      $shortcut.Save()
-    } catch {
-      # System-wide shortcuts may not be writable without elevation.
+$restored = 0
+$pending = 0
+foreach ($item in $items) {
+  if (-not $item.targetPath) { continue }
+  if (-not (Test-ManagedShortcut ([string]$item.path))) { continue }
+  try {
+    $shortcut = $shell.CreateShortcut([string]$item.path)
+    if ([IO.Path]::GetFullPath([string]$shortcut.TargetPath) -ne [IO.Path]::GetFullPath($launcher) -or [string]$shortcut.Arguments -ne $launchArguments) { continue }
+    if ($item.backupPath -and (Test-ManagedBackup ([string]$item.backupPath))) {
+      Copy-Item -LiteralPath $item.backupPath -Destination $item.path -Force -ErrorAction Stop
+      $restored += 1
+      continue
     }
-  }
+    $shortcut.TargetPath = [string]$item.targetPath
+    $shortcut.Arguments = [string]$item.arguments
+    $shortcut.WorkingDirectory = [string]$item.workingDirectory
+    $shortcut.Description = [string]$item.description
+    $shortcut.IconLocation = [string]$item.iconLocation
+    $shortcut.Save()
+    $restored += 1
+  } catch { $pending += 1 }
 }
-@($known.Values) | ConvertTo-Json -Depth 4 -Compress
+[pscustomobject]@{ restored = $restored; pending = $pending } | ConvertTo-Json -Compress
 `;
+  const output = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script], { encoding: "utf8", windowsHide: true }).trim();
+  return JSON.parse(output) as { restored: number; pending: number };
+}
+
+function cleanupLegacyWindowsBackups() {
+  rmSync(backupDirectoryPath(), { recursive: true, force: true });
 }
 
 function installWindowsShortcuts(command: string[], previous: LaunchIntegrationState | null) {
+  if (previous && isLegacyWindowsState(previous)) {
+    const result = restoreLegacyWindowsShortcuts(previous);
+    if (result.pending > 0) throw new Error(`shortcut_restore_incomplete_${result.pending}`);
+    cleanupLegacyWindowsBackups();
+  }
   const [launcher, ...launcherArguments] = command;
-  const backupDirectory = join(dirname(launchIntegrationStatePath), "shortcut-backups");
-  mkdirSync(backupDirectory, { recursive: true });
-  const output = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", windowsInstallScript(command, previous, backupDirectory)], {
+  const argumentsValue = [...launcherArguments, "launch"].map(windowsArgument).join(" ");
+  const stableCommand = previous?.platform === "win32" && !isLegacyWindowsState(previous)
+    ? [previous.launcher, ...(previous.launcherArguments ?? [])]
+    : command;
+  const [stableLauncher, ...stableLauncherArguments] = stableCommand;
+  const stableArgumentsValue = [...stableLauncherArguments, "launch"].map(windowsArgument).join(" ");
+  const useStable = previous?.platform === "win32" && !isLegacyWindowsState(previous) && previous.shortcuts?.length;
+  const target = useStable ? stableLauncher : launcher;
+  const targetArguments = useStable ? stableArgumentsValue : argumentsValue;
+  const script = `$ErrorActionPreference = "Stop"
+$launcher = ${powershellLiteral(target)}
+$launchArguments = ${powershellLiteral(targetArguments)}
+$desktop = [Environment]::GetFolderPath('Desktop')
+$startMenu = Join-Path ([Environment]::GetFolderPath('StartMenu')) 'Programs'
+if (-not (Test-Path -LiteralPath $startMenu)) { New-Item -ItemType Directory -Path $startMenu -Force | Out-Null }
+$paths = @(
+  (Join-Path $desktop ${powershellLiteral(WINDOWS_SHORTCUT_NAME)}),
+  (Join-Path $startMenu ${powershellLiteral(WINDOWS_SHORTCUT_NAME)})
+) | Where-Object { $_ }
+$iconLocation = ''
+$candidates = @(
+  (Join-Path $env:LOCALAPPDATA 'Microsoft\\WindowsApps\\Codex.exe'),
+  (Join-Path $env:LOCALAPPDATA 'Programs\\Codex\\Codex.exe')
+)
+foreach ($candidate in $candidates) {
+  if (Test-Path -LiteralPath $candidate) { $iconLocation = "$candidate,0"; break }
+}
+$shell = New-Object -ComObject WScript.Shell
+$created = @()
+foreach ($path in $paths) {
+  $shortcut = $shell.CreateShortcut($path)
+  $shortcut.TargetPath = $launcher
+  $shortcut.Arguments = $launchArguments
+  $shortcut.WorkingDirectory = [IO.Path]::GetDirectoryName($launcher)
+  $shortcut.Description = 'Better Codex'
+  if ($iconLocation) { $shortcut.IconLocation = $iconLocation }
+  $shortcut.Save()
+  $created += [pscustomobject]@{ path = $path }
+}
+@($created) | ConvertTo-Json -Depth 3 -Compress
+`;
+  const output = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script], {
     encoding: "utf8",
     windowsHide: true,
   }).trim();
-  const shortcuts = output ? JSON.parse(output) as WindowsShortcutBackup[] | WindowsShortcutBackup : [];
-  return { platform: "win32", launcher, launcherArguments, shortcuts: Array.isArray(shortcuts) ? shortcuts : [shortcuts] } satisfies LaunchIntegrationState;
+  const shortcuts = output ? JSON.parse(output) as WindowsOwnedShortcut[] | WindowsOwnedShortcut : [];
+  return {
+    platform: "win32",
+    launcher: target,
+    launcherArguments: useStable ? stableLauncherArguments : launcherArguments,
+    shortcuts: Array.isArray(shortcuts) ? shortcuts : [shortcuts],
+  } satisfies LaunchIntegrationState;
+}
+
+function removeOwnedWindowsShortcuts(state: LaunchIntegrationState) {
+  const payload = Buffer.from(JSON.stringify(state.shortcuts ?? []), "utf8").toString("base64");
+  const expectedArguments = [...(state.launcherArguments ?? []), "launch"].map(windowsArgument).join(" ");
+  const script = `$ErrorActionPreference = "Continue"
+$launcher = ${powershellLiteral(state.launcher)}
+$launchArguments = ${powershellLiteral(expectedArguments)}
+$json = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(${powershellLiteral(payload)}))
+$items = @($json | ConvertFrom-Json)
+$roots = @(
+  [Environment]::GetFolderPath('Desktop'),
+  (Join-Path ([Environment]::GetFolderPath('StartMenu')) 'Programs')
+) | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -Unique
+$canonicalRoots = @($roots | ForEach-Object { (Resolve-Path -LiteralPath $_).Path.TrimEnd('\\') })
+function Test-OwnedShortcut([string]$path) {
+  try {
+    if ([IO.Path]::GetFileName($path) -ne ${powershellLiteral(WINDOWS_SHORTCUT_NAME)}) { return $false }
+    $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+    if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { return $false }
+    $resolved = (Resolve-Path -LiteralPath $path -ErrorAction Stop).Path
+    foreach ($root in $canonicalRoots) {
+      if ([IO.Path]::GetDirectoryName($resolved).Equals($root, [StringComparison]::OrdinalIgnoreCase)) { return $true }
+    }
+  } catch {}
+  return $false
+}
+$shell = New-Object -ComObject WScript.Shell
+$removed = 0
+$pending = 0
+foreach ($item in $items) {
+  $path = [string]$item.path
+  if (-not (Test-Path -LiteralPath $path)) { continue }
+  if (-not (Test-OwnedShortcut $path)) { $pending += 1; continue }
+  try {
+    $shortcut = $shell.CreateShortcut($path)
+    if ([IO.Path]::GetFullPath([string]$shortcut.TargetPath) -ne [IO.Path]::GetFullPath($launcher) -or [string]$shortcut.Arguments -ne $launchArguments) {
+      $pending += 1
+      continue
+    }
+    Remove-Item -LiteralPath $path -Force -ErrorAction Stop
+    $removed += 1
+  } catch { $pending += 1 }
+}
+[pscustomobject]@{ removed = $removed; pending = $pending } | ConvertTo-Json -Compress
+`;
+  const output = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script], { encoding: "utf8", windowsHide: true }).trim();
+  return JSON.parse(output) as { removed: number; pending: number };
 }
 
 function windowsShortcutStatus(state: LaunchIntegrationState) {
@@ -355,90 +502,32 @@ export function installLaunchIntegration() {
   return { installed: true, ...state, shortcutCount: state.shortcuts?.length ?? undefined };
 }
 
-function restoreWindowsShortcuts(state: LaunchIntegrationState) {
-  const payload = Buffer.from(JSON.stringify(state.shortcuts ?? []), "utf8").toString("base64");
-  const expectedArguments = [...(state.launcherArguments ?? []), "launch"].map(windowsArgument).join(" ");
-  const backupDirectory = join(dirname(launchIntegrationStatePath), "shortcut-backups");
-  const script = `$ErrorActionPreference = "Continue"
-$launcher = ${powershellLiteral(state.launcher)}
-$launchArguments = ${powershellLiteral(expectedArguments)}
-$backupDirectory = ${powershellLiteral(backupDirectory)}
-$json = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(${powershellLiteral(payload)}))
-$items = @($json | ConvertFrom-Json)
-$roots = @(
-  [Environment]::GetFolderPath('Desktop'),
-  [Environment]::GetFolderPath('StartMenu'),
-  (Join-Path $env:APPDATA 'Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar')
-) | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -Unique
-$canonicalRoots = @($roots | ForEach-Object { (Resolve-Path -LiteralPath $_).Path.TrimEnd('\') })
-$canonicalBackupDirectory = (Resolve-Path -LiteralPath $backupDirectory).Path.TrimEnd('\')
-function Test-ManagedShortcut([string]$path) {
-  try {
-    $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
-    if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { return $false }
-    $resolved = (Resolve-Path -LiteralPath $path -ErrorAction Stop).Path
-    foreach ($root in $canonicalRoots) {
-      if ($resolved.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase)) { return $true }
-    }
-  } catch {}
-  return $false
-}
-function Test-ManagedBackup([string]$path) {
-  try {
-    $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
-    if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { return $false }
-    $resolved = (Resolve-Path -LiteralPath $path -ErrorAction Stop).Path
-    return [IO.Path]::GetDirectoryName($resolved).Equals($canonicalBackupDirectory, [StringComparison]::OrdinalIgnoreCase)
-  } catch { return $false }
-}
-$shell = New-Object -ComObject WScript.Shell
-$restored = 0
-$pending = 0
-foreach ($item in $items) {
-  if (-not (Test-ManagedShortcut ([string]$item.path))) { continue }
-  try {
-    $shortcut = $shell.CreateShortcut([string]$item.path)
-    if ([IO.Path]::GetFullPath([string]$shortcut.TargetPath) -ne [IO.Path]::GetFullPath($launcher) -or [string]$shortcut.Arguments -ne $launchArguments) { continue }
-    if ($item.backupPath -and (Test-ManagedBackup ([string]$item.backupPath))) {
-      Copy-Item -LiteralPath $item.backupPath -Destination $item.path -Force -ErrorAction Stop
-      $restored += 1
-      continue
-    }
-    $shortcut.TargetPath = [string]$item.targetPath
-    $shortcut.Arguments = [string]$item.arguments
-    $shortcut.WorkingDirectory = [string]$item.workingDirectory
-    $shortcut.Description = [string]$item.description
-    $shortcut.IconLocation = [string]$item.iconLocation
-    $shortcut.Save()
-    $restored += 1
-  } catch { $pending += 1 }
-}
-[pscustomobject]@{ restored = $restored; pending = $pending } | ConvertTo-Json -Compress
-`;
-  const output = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script], { encoding: "utf8", windowsHide: true }).trim();
-  return JSON.parse(output) as { restored: number; pending: number };
-}
-
 export function uninstallLaunchIntegration() {
   const state = readState();
   if (!state) return { uninstalled: true, restored: 0, removed: null };
   let restored = 0;
   let removed: string | null = null;
   if (state.platform === "win32" && process.platform === "win32") {
-    const result = restoreWindowsShortcuts(state);
-    restored = result.restored;
-    if (result.pending > 0) throw new Error(`shortcut_restore_incomplete_${result.pending}`);
+    if (isLegacyWindowsState(state)) {
+      const result = restoreLegacyWindowsShortcuts(state);
+      restored = result.restored;
+      if (result.pending > 0) throw new Error(`shortcut_restore_incomplete_${result.pending}`);
+      cleanupLegacyWindowsBackups();
+    } else {
+      const result = removeOwnedWindowsShortcuts(state);
+      if (result.pending > 0) throw new Error(`shortcut_remove_incomplete_${result.pending}`);
+      removed = result.removed > 0 ? WINDOWS_SHORTCUT_NAME : null;
+    }
   }
   if (state.platform === "darwin" && state.appPath && process.platform === "darwin") {
     const appPath = state.appPath;
     const contents = join(appPath, "Contents");
     const info = join(contents, "Info.plist");
-    if (existsSync(appPath) && !lstatSync(appPath).isSymbolicLink() && existsSync(contents) && !lstatSync(contents).isSymbolicLink() && existsSync(info) && !lstatSync(info).isSymbolicLink() && macBundleIdentifier(info) === "com.better-codex.launcher") {
+    if (existsSync(appPath) && !lstatSync(appPath).isSymbolicLink() && existsSync(contents) && !lstatSync(contents).isSymbolicLink() && existsSync(info) && !lstatSync(info).isSymbolicLink() && macBundleIdentifier(info) === MAC_BUNDLE_ID) {
       rmSync(appPath, { recursive: true, force: true });
       removed = appPath;
     }
   }
-  if (state.platform === "win32") rmSync(join(dirname(launchIntegrationStatePath), "shortcut-backups"), { recursive: true, force: true });
   rmSync(launchIntegrationStatePath, { force: true });
   return { uninstalled: true, restored, removed };
 }
@@ -447,6 +536,9 @@ export function launchIntegrationStatus() {
   const state = readState();
   if (!state) return { installed: false, platform: process.platform };
   if (state.platform === "win32" && process.platform === "win32") {
+    if (isLegacyWindowsState(state)) {
+      return { installed: true, ...state, shortcutCount: state.shortcuts?.length ?? 0, legacy: true };
+    }
     const shortcuts = windowsShortcutStatus(state);
     return { installed: shortcuts.healthy > 0, ...state, shortcutCount: state.shortcuts?.length ?? 0, ...shortcuts };
   }

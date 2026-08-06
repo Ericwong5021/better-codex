@@ -282,7 +282,7 @@ async function confirmSetup() {
   if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error("setup_requires_interactive_terminal");
   const terminal = createInterface({ input: process.stdin, output: process.stdout });
   try {
-    const answer = await terminal.question("Better Codex needs to restart Codex and configure injection-aware launch shortcuts. Continue? [y/N] ");
+    const answer = await terminal.question("Better Codex needs to restart Codex and create the Better Codex launcher. Continue? [y/N] ");
     return /^(y|yes)$/i.test(answer.trim());
   } finally {
     terminal.close();
