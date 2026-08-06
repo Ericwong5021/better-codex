@@ -1,6 +1,6 @@
 param(
   [string]$Repository = "Ericwong5021/better-codex",
-  [string]$Version = "v0.3.5",
+  [string]$Version = "v0.3.6",
   [string]$BinDirectory = "$env:LOCALAPPDATA\BetterCodex\bin",
   [switch]$NoService
 )
