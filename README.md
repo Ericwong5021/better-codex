@@ -2,24 +2,31 @@
   <img src="assets/better-codex.png" width="560" alt="Better Codex" />
 </p>
 
-<p align="center">让每一段 Codex 对话，都有清晰的下一步。</p>
+<p align="center">
+  <strong>Give every Codex conversation a clear next step.</strong>
+</p>
 
-Better Codex 是给 Codex 桌面端用户准备的本地任务看板。它把散落在聊天里的待办、想法和进度放到一个看板里：你不用切换到另一套复杂工具，也不用把工作计划记在脑子里。
+<p align="center">
+  English · <a href="README.zh-CN.md">简体中文</a>
+</p>
 
-## 你可以用 Better Codex 做什么
+Better Codex is a local task board and agent manager for Codex Desktop. It keeps tasks, ideas, and progress next to your Codex conversations, so you can return to the right thread without moving your workflow into a separate project management tool.
 
-- 把当前 Codex 对话变成一张任务卡片，随时回到原来的对话。
-- 用待办、进行中、待审核、已完成等状态整理工作，不再让重要事项沉下去。
-- 创建项目、搜索任务、设置优先级、置顶或归档卡片。
-- 把所有任务留在自己的电脑上，本地 SQLite 数据库保存，不依赖云端账号。
+## What you can do
 
-## 适合谁
+- Turn the current Codex conversation into a task card and reopen the linked thread later.
+- Organize work across Todo, In Progress, Review, and Done.
+- Create projects, search tasks, set priorities, pin cards, and archive completed work.
+- Create Codex Profile Agents with a name, description, developer instructions, model, and reasoning level.
+- Keep task data on your computer in a local SQLite database with no cloud account.
 
-如果你经常用 Codex 写代码、做设计、整理需求，打开的对话越来越多，却总要花时间找回“上次做到哪里”，Better Codex 就是为这个场景做的。
+## Who it is for
 
-## 三步开始
+Better Codex is for people who use Codex for coding, design, research, or planning and need a reliable way to remember what each conversation was doing.
 
-Better Codex 支持 macOS 和 Windows 版 Codex 桌面端。先准备好 Node.js 22.5 或更新版本，然后运行：
+## Install
+
+Better Codex supports Codex Desktop on macOS and Windows. Install Node.js 22.5 or later, then run:
 
 ```bash
 git clone https://github.com/Ericwong5021/better-codex.git
@@ -30,37 +37,42 @@ npm link
 better-codex inject --launch
 ```
 
-Windows 用户需要安装 Microsoft Store 版 Codex。首次注入前请完全退出 Codex（包括后台进程），再执行 `better-codex inject --launch`；Better Codex 会通过应用标识冷启动 Codex，并在启动参数中启用本地调试端口。
+### Windows
 
-macOS 用户可以直接执行同一条命令。后台服务的 `better-codex service` 命令目前仅用于 macOS；Windows 上 `better-codex inject --launch` 会按需启动本地 Gateway 和注入守护进程。
+Use the Microsoft Store version of Codex. Before the first injection, quit Codex completely, including background processes, then run `better-codex inject --launch`. Better Codex cold-starts Codex with the local debugging port enabled.
 
-回到 Codex 桌面端，侧边栏会出现 Better Codex。打开它，创建第一个项目和任务卡片即可。
+The `better-codex service` command is currently available only on macOS. On Windows, `better-codex inject --launch` starts the local gateway and injection watcher when needed.
 
-## 日常使用
+### macOS
 
-打开 Better Codex 后：
+Run the same `better-codex inject --launch` command. The Better Codex entry will appear in the Codex sidebar after injection.
 
-1. 新建一个项目，例如“我的网站”。
-2. 把要做的事情写成任务卡片。
-3. 需要时关联当前 Codex 对话。
-4. 完成一步就拖动卡片更新状态。
+## Use Better Codex
 
-想确认本地服务与看板连接是否正常，运行：
+1. Open Better Codex from the Codex sidebar.
+2. Create a project.
+3. Add task cards and link them to Codex conversations when needed.
+4. Move cards as work progresses.
+5. Open Agents to create and manage Codex Profile Agents.
+
+Check the local service and board connection:
 
 ```bash
 better-codex status
 ```
 
-如需暂时移除看板入口，运行：
+Temporarily remove the sidebar entry:
 
 ```bash
 better-codex eject
 ```
 
-这不会删除你的任务数据。数据默认保存在 `~/.better-codex/better-codex.db`；Windows 对应路径为 `%USERPROFILE%\.better-codex\better-codex.db`。
+This does not delete your task data. The database is stored at `~/.better-codex/better-codex.db` on macOS and `%USERPROFILE%\.better-codex\better-codex.db` on Windows.
 
-## 开源与隐私
+## Privacy
 
-Better Codex 是开源项目。任务数据默认只保存在你的电脑上；本地服务只监听 `127.0.0.1`，不会把任务内容发送到第三方服务器。
+Task data stays on your computer by default. The local service listens only on `127.0.0.1` and does not send task content to third-party servers.
 
-欢迎提交 Issue、分享使用反馈，或参与改进这个项目。
+## Community
+
+Use [GitHub Issues](https://github.com/Ericwong5021/better-codex/issues) for bugs and feature requests. Use [GitHub Discussions](https://github.com/Ericwong5021/better-codex/discussions) for questions, ideas, and workflow sharing. Please write public GitHub posts in English so the whole community can follow them.
