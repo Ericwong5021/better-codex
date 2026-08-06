@@ -146,6 +146,12 @@ export function betterCodexDesignSystemCss() {
       gap: var(--bc-space-3);
       padding: 0 var(--bc-space-5);
       background: var(--bc-color-canvas);
+      -webkit-app-region: drag;
+    }
+
+    #better-codex-panel .better-codex-toolbar :is(button, input, a, select, textarea, label),
+    #better-codex-panel .better-codex-agent-inspector-head :is(button, input, a, select, textarea, label) {
+      -webkit-app-region: no-drag;
     }
 
     #better-codex-panel .better-codex-tabs,
@@ -1603,6 +1609,7 @@ export function betterCodexDesignSystemCss() {
       color: var(--bc-color-text-muted);
       font-size: var(--bc-text-md);
       font-weight: 600;
+      -webkit-app-region: drag;
     }
 
     #better-codex-panel .better-codex-agent-inspector-scroll {
@@ -2556,13 +2563,13 @@ export function betterCodexDesignSystemCss() {
       border: 0;
       outline: 0;
       background: var(--bc-color-control);
-      box-shadow: none;
+      box-shadow: var(--bc-inset-hairline);
     }
 
     #better-codex-dialog .better-codex-toggle:focus,
     #better-codex-dialog .better-codex-toggle:focus-visible {
       outline: 0;
-      box-shadow: none;
+      box-shadow: var(--bc-inset-hairline), var(--bc-focus-ring);
     }
 
     #better-codex-dialog .better-codex-toggle::after {

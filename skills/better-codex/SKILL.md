@@ -54,12 +54,13 @@ Use only these statuses: `backlog`, `todo`, `in_progress`, `in_review`, `done`, 
 
 Rules:
 
-- Set `blocked` when a problem prevents completing the work, and usually leave `pending_actor` as `user` or the assigned Agent only if that Agent can self-retry.
+- Set `blocked` when a problem prevents completing the work, and leave `pending_actor=user` with `needs_attention=true`. Only set `pending_actor=agent` when you intentionally want auto-dispatch to retry.
 - Set `in_review` after completing and verifying work that needs user review. Set `pending_actor=user` and `needs_attention=true`.
 - Set `done` only when the work is fully complete, verified, and needs no further review. Set `needs_attention=false`.
 - Never claim or reprocess work when `pending_actor=user`.
 - Do not move an actively running issue back to `todo` or `backlog`.
 - Do not leave an Agent as `pending_actor` after you need a human decision.
+- Update the board before the session exits. If status is still `in_progress` when the process ends, the runtime applies a safety net (`in_review`/`blocked` + `pending_actor=user`). If you already moved the issue off `in_progress`, the runtime keeps your board update.
 
 Always synchronize the final status and pending actor before replying with the result. Use the identifier verified from the task prompt. Do not modify unrelated issues unless the user explicitly asks.
 

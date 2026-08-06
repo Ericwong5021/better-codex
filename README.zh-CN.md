@@ -1,13 +1,15 @@
 <p align="center">
-  <img src="assets/better-codex.png" width="160" alt="Better Codex" />
+  <img src="assets/better-codex.png" width="132" alt="Better Codex" />
+</p>
+
+<h1 align="center">Better Codex</h1>
+
+<p align="center">
+  <strong>把 Codex 对话，变成能持续推进的工作。</strong>
 </p>
 
 <p align="center">
-  <strong>让 Codex 里的工作持续推进。</strong>
-</p>
-
-<p align="center">
-  管理任务、回到对应的对话，并把工作指派给不同 Agent，全程无需离开 Codex 桌面端。
+  直接运行在 Codex Desktop 里的本地任务看板与智能体工作流。
 </p>
 
 <p align="center">
@@ -23,17 +25,29 @@
   <a href="README.md">English</a> · 简体中文
 </p>
 
-Better Codex 是 Codex 桌面端的本地工作流扩展。它在 Codex 侧边栏中加入任务和项目管理，任务数据保存在本地 SQLite 数据库中。
+Better Codex 给 Codex Desktop 补上了一条真正能推进工作的闭环：把当前对话收进任务，在看板上持续推进，交给一个明确负责人，并在需要判断时回到原始对话继续处理。
+
+它不是另一个需要维护的 Web 工作台。任务看板、智能体配置、执行状态和人工审核都在 Codex 里面。
 
 <p align="center">
-  <img src="assets/better-codex-board.png" width="1200" alt="Better Codex 任务看板" />
+  <img src="assets/better-codex-board.png" width="1200" alt="Codex Desktop 中的 Better Codex 任务看板" />
 </p>
+
+## Better Codex 的产品特色
+
+| | 能力 | 带来的变化 |
+| --- | --- | --- |
+| **01** | 对话与任务双向关联 | 从当前 Codex 对话创建任务，也能从任务重新打开对应会话。上下文始终跟着工作走。 |
+| **02** | 一眼看清全部进度 | 按项目、状态、优先级、标签和负责人管理任务。拖动卡片即可推进，并清楚看到等待中、执行中、审核中、已阻塞和已完成的工作。 |
+| **03** | 可复用的智能体配置 | 为代码审查、前端实现、问题排查等角色分别设置指令、模型、推理等级和头像。每个任务仍然只有一个明确负责人。 |
+| **04** | 手动运行与自动运行 | 你可以亲自决定每次何时开始，也可以让自动运行领取已经就绪的智能体任务。遇到审核、决策或阻塞时，控制权会回到你。 |
+| **05** | 本地优先 | 项目、任务、负责人和运行状态保存在本机 SQLite 数据库，不需要注册 Better Codex 账号，也不依赖托管任务服务。 |
 
 <p align="center">
-  <img src="assets/better-codex-agents.png" width="1200" alt="Better Codex 智能体管理" />
+  <img src="assets/better-codex-agents.png" width="1200" alt="Better Codex 中可复用的智能体配置" />
 </p>
 
-## 快速使用
+## 安装
 
 ### macOS
 
@@ -45,62 +59,50 @@ curl -fsSL https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scri
 
 ### Windows
 
-请使用 Microsoft Store 版本的 Codex，然后在 PowerShell 中运行：
+支持 Windows x64 与 Microsoft Store 版本的 Codex。请在 PowerShell 中运行：
 
 ```powershell
 irm https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scripts/install.ps1 | iex
 ```
 
-安装过程中 Codex 会重启，请先保存当前工作，确保关键进度不会丢失。
+安装程序会下载对应版本、校验 SHA-256、安装本地运行时、配置 Codex 集成，并确认安装结果。
 
-安装完成后，Codex 侧边栏会出现两个新入口：
+如果 Codex 正在运行，安装程序会先征求关闭许可。继续前请保存当前工作。
 
-- `Better Codex`：打开任务和项目界面。
-- `智能体`：打开 Profile Agent 管理界面。
+安装完成后：
 
-安装程序也会配置支持注入的启动入口：
+- Codex 侧边栏会出现 `Better Codex`，用于管理任务和项目。
+- 侧边栏会出现 `智能体`，用于管理可复用的智能体配置。
+- macOS 会创建 `/Applications/Better Codex.app`，可以固定到 Dock。
+- Windows 会在桌面和开始菜单创建 `Better Codex` 快捷方式。
 
-- macOS：在 `/Applications` 创建 `Better Codex.app`，可将它固定到 Dock；以后请从该入口启动 Codex。
-- Windows：在桌面和开始菜单各创建一个名为 `Better Codex` 的快捷方式。
+以后请从 Better Codex 创建的启动入口打开 Codex，确保本地集成正常启用。
 
-如果 Codex 已经以不支持注入的方式运行，从这些入口再次启动会先退出并重新启动 Codex，请先保存正在进行的工作。
-
-## 当前功能
-
-| 模块 | 功能 |
-| --- | --- |
-| 任务和项目 | 创建项目和任务，设置优先级，搜索、筛选、置顶、归档，并在不同状态之间移动任务卡片。 |
-| Codex 对话 | 从当前对话创建任务，也可以从任务卡片重新打开关联的对话。 |
-| Profile Agent | 创建带有独立描述、开发者指令、模型和推理等级的 Agent，并把任务指派给它。 |
-| 执行状态 | 查看任务正在等待 Session、执行中、审核中、已完成、已阻塞或已取消。 |
-| 本地数据 | 使用本地 SQLite 保存项目、任务、Agent 指派和运行状态，无需注册 Better Codex 账号。 |
-| 版本更新 | 通过 Codex 内的更新提示安装带签名的更新，也可以重新运行安装命令完成升级。 |
-
-## 基本流程
+## 一套完整的工作流程
 
 1. 从 Codex 侧边栏打开 `Better Codex`。
-2. 创建项目，并添加一个任务。
-3. 把任务关联到 Codex 对话，或者直接从当前对话创建任务。
-4. 随着工作推进移动任务卡片。
-5. 打开任务，回到对应的 Codex 对话。
-6. 需要特定角色或配置时，把任务指派给对应的 Profile Agent。
+2. 创建项目，并手动添加任务，或者直接把当前对话收进任务。
+3. 把任务分配给自己、默认 Codex 配置或自定义智能体配置。
+4. 需要完整控制时使用手动运行，需要持续推进时开启自动运行。
+5. 在看板上跟踪进度。任务需要审核或决定时，会重新交给你。
+6. 打开任务，回到关联的 Codex 对话继续工作。
 
-这套流程可以用于编程、调研、写作、资料整理、数据收集，以及其他已经在 Codex 中完成的工作。
+同一套流程可以用于编程、调研、写作、文档整理，以及其他已经在 Codex 中完成的工作。
 
-## 版本更新
-
-再次运行安装命令即可升级。Better Codex 会优先升级现有运行时，需要时自动执行完整安装。
-
-从 v0.3.7 开始，Better Codex 会在后台检查带签名的更新清单。发现新版本后，Codex 内会显示更新提示，安装完成后自动重启 Codex。
-
-## 数据与隐私
+## 本地数据与隐私
 
 | 平台 | 数据库路径 |
 | --- | --- |
 | macOS | `~/.better-codex/better-codex.db` |
 | Windows | `%USERPROFILE%\.better-codex\better-codex.db` |
 
-Better Codex 运行时只监听 `127.0.0.1`。它不依赖 Better Codex 云端服务，也不会向此类服务上传任务内容。
+Better Codex 运行时只监听 `127.0.0.1`。它不需要 Better Codex 云端服务，也不会向此类服务上传任务内容。
+
+## 版本更新
+
+Better Codex 会在后台检查带签名的更新清单。发现新版本后，Codex 内会显示更新提示。完成安装后，Codex 会自动重启并重新验证集成状态。
+
+你也可以随时重新运行安装命令。Better Codex 会优先升级现有运行时，需要时再执行完整安装。
 
 ## 常用命令
 
@@ -116,14 +118,14 @@ better-codex doctor
 better-codex status
 ```
 
-重新配置或检查系统启动入口：
+安装或检查系统启动入口：
 
 ```bash
 better-codex launcher install
 better-codex launcher status
 ```
 
-移除侧边栏入口，同时保留任务数据：
+移除 Codex 侧边栏集成，同时保留任务数据：
 
 ```bash
 better-codex eject
@@ -131,7 +133,7 @@ better-codex eject
 
 ## 从源码安装
 
-请先安装 Node.js 22.5 或更新版本，然后运行：
+需要 Node.js 22.5 或更新版本。
 
 ```bash
 git clone https://github.com/Ericwong5021/better-codex.git
@@ -140,18 +142,17 @@ npm ci
 npm run build
 npm link
 better-codex inject --launch
-# 创建 Better Codex 启动入口
 better-codex launcher install
 ```
 
 ## 兼容性
 
-Better Codex 支持 macOS 版 Codex 桌面端，以及 Windows 上通过 Microsoft Store 安装的 Codex。它依赖桌面应用的本地 CDP 接口和页面结构，因此部分 Codex 更新可能需要 Better Codex 跟进适配。
+Better Codex 支持 macOS 版 Codex Desktop，以及 Windows 上通过 Microsoft Store 安装的 Codex。Release 安装包和 CI 覆盖 Apple Silicon、Intel Mac 和 Windows x64。
 
-Release 安装包和 CI 检查覆盖 Apple Silicon、Intel Mac 和 Windows x64。
+Better Codex 使用桌面应用的本地 CDP 接口和页面结构。Codex 更新后，偶尔可能需要安装对应的 Better Codex 兼容性更新。
 
 ## 社区
 
-请通过 [GitHub Issues](https://github.com/Ericwong5021/better-codex/issues) 提交问题和功能建议，通过 [GitHub Discussions](https://github.com/Ericwong5021/better-codex/discussions) 交流问题和工作流想法。
+请通过 [GitHub Issues](https://github.com/Ericwong5021/better-codex/issues) 提交问题和功能建议，通过 [GitHub Discussions](https://github.com/Ericwong5021/better-codex/discussions) 交流使用问题和工作流想法。
 
 请在 GitHub 的公开讨论中使用英文，方便所有人阅读和参与。

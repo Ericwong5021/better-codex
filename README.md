@@ -1,13 +1,15 @@
 <p align="center">
-  <img src="assets/better-codex.png" width="160" alt="Better Codex" />
+  <img src="assets/better-codex.png" width="132" alt="Better Codex" />
+</p>
+
+<h1 align="center">Better Codex</h1>
+
+<p align="center">
+  <strong>Turn Codex conversations into work that keeps moving.</strong>
 </p>
 
 <p align="center">
-  <strong>Keep work moving in Codex.</strong>
-</p>
-
-<p align="center">
-  Plan tasks, return to the right conversation, and assign work to reusable Agents without leaving Codex Desktop.
+  A local-first task board and Agent workflow built directly into Codex Desktop.
 </p>
 
 <p align="center">
@@ -23,17 +25,29 @@
   English · <a href="README.zh-CN.md">简体中文</a>
 </p>
 
-Better Codex is a local workflow extension for Codex Desktop. It adds task and project management to the Codex sidebar and stores task data locally in SQLite.
+Better Codex adds a real work loop to Codex Desktop. Capture a conversation as a task, move it across a visible board, assign one clear owner, and return to the original thread when a decision needs you.
+
+It is not another web dashboard to maintain. The board, Agent profiles, execution state, and review handoff all live inside Codex.
 
 <p align="center">
   <img src="assets/better-codex-board.png" width="1200" alt="Better Codex task board inside Codex Desktop" />
 </p>
 
+## What makes Better Codex different
+
+| | Capability | What it changes |
+| --- | --- | --- |
+| **01** | Conversation-linked tasks | Create a task from the current Codex conversation and reopen the exact linked thread later. Context stays attached to the work. |
+| **02** | A board that shows the whole workload | Organize tasks by project, status, priority, label, and assignee. Drag cards forward and see what is waiting, running, under review, blocked, or done. |
+| **03** | Reusable Agent profiles | Give code review, frontend work, debugging, or another role its own instructions, model, reasoning level, and avatar. Each task still has one explicit owner. |
+| **04** | Manual or automatic execution | Start Agent work yourself, or let automatic mode claim ready tasks. Work returns to you when it needs review, a decision, or recovery from a blocker. |
+| **05** | Local-first data | Projects, tasks, assignments, and run state stay in a local SQLite database. No Better Codex account or hosted task service is required. |
+
 <p align="center">
-  <img src="assets/better-codex-agents.png" width="1200" alt="Better Codex Agents manager inside Codex Desktop" />
+  <img src="assets/better-codex-agents.png" width="1200" alt="Reusable Agent profiles inside Better Codex" />
 </p>
 
-## Quick Start
+## Install
 
 ### macOS
 
@@ -45,66 +59,54 @@ curl -fsSL https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scri
 
 ### Windows
 
-Use the Microsoft Store version of Codex, then run this command in PowerShell:
+Supports Windows x64 with the Microsoft Store version of Codex. Run in PowerShell:
 
 ```powershell
 irm https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scripts/install.ps1 | iex
 ```
 
-If Codex is running, the installer asks before closing it. Press Enter or type `Y` to continue. The installer downloads the latest release, verifies its SHA-256 checksum, installs the local runtime, restarts Codex, and checks that the integration is working.
+The installer downloads the matching release, verifies its SHA-256 checksum, installs the local runtime, configures the Codex integration, and verifies that it is ready.
 
-After installation, Codex has two new sidebar entries:
+If Codex is open, the installer asks before closing it. Save active work first.
 
-- `Better Codex` opens the task and project view.
-- `Agents` opens the Profile Agent manager.
+After installation:
 
-The installer also configures injection-aware launch entry points:
+- `Better Codex` appears in the Codex sidebar for tasks and projects.
+- `Agents` appears in the sidebar for reusable Agent profiles.
+- macOS gets `/Applications/Better Codex.app`, which can be pinned to the Dock.
+- Windows gets a `Better Codex` shortcut on the Desktop and in the Start Menu.
 
-- macOS creates `/Applications/Better Codex.app`, which can be pinned to the Dock.
-- Windows creates a `Better Codex` shortcut on the Desktop and in the Start Menu.
+Use the Better Codex launcher after installation so Codex starts with the required local integration enabled.
 
-If Codex is already running without injection support, launching through these entries quits and restarts Codex. Save active work first.
-
-## Features
-
-| Area | Capabilities |
-| --- | --- |
-| Tasks and projects | Create projects and tasks, set priorities, search, filter, pin, archive, and move cards between workflow states. |
-| Codex conversations | Create tasks from the current conversation and reopen the linked thread from a task card. |
-| Profile Agents | Create Agents with their own description, developer instructions, model, and reasoning level, then assign tasks to them. |
-| Execution status | See when a task is waiting for a session, running, under review, completed, blocked, or canceled. |
-| Local data | Store projects, tasks, assignments, and run state in a local SQLite database. No Better Codex account is required. |
-| Updates | Install signed updates from the notice inside Codex, or rerun the installation command to upgrade. |
-
-## Basic Workflow
+## How the workflow fits together
 
 1. Open `Better Codex` from the Codex sidebar.
-2. Create a project and add a task.
-3. Link the task to a Codex conversation, or create it from the conversation you are using.
-4. Move the task as the work progresses.
-5. Open the task to return to its conversation.
-6. Assign the task to a Profile Agent when it needs a specific role or configuration.
+2. Create a project and capture a task, either manually or from the current conversation.
+3. Assign the task to yourself, the default Codex profile, or a custom Agent profile.
+4. Keep manual mode for explicit control, or enable automatic mode for ready Agent-owned tasks.
+5. Follow progress on the board. When the task needs review or a decision, it returns to you.
+6. Open the task to continue in its linked Codex conversation.
 
-The same workflow can be used for coding, research, writing, document preparation, data collection, and other work done with Codex.
+The same loop works for coding, research, writing, document preparation, and other work already done with Codex.
 
-## Updates
-
-Run the installation command again to upgrade. Better Codex upgrades the existing runtime when possible and performs a full installation when required.
-
-Starting with v0.3.7, Better Codex also checks a signed update manifest in the background. When a new version is available, an update notice appears inside Codex. Installing the update restarts Codex automatically.
-
-## Data and Privacy
+## Local data and privacy
 
 | Platform | Database |
 | --- | --- |
 | macOS | `~/.better-codex/better-codex.db` |
 | Windows | `%USERPROFILE%\.better-codex\better-codex.db` |
 
-The Better Codex runtime listens on `127.0.0.1`. It does not require a Better Codex cloud service or upload task content to one.
+The Better Codex runtime listens on `127.0.0.1`. It does not require a Better Codex cloud service and does not upload task content to one.
 
-## Commands
+## Updates
 
-Check the runtime, database, Codex compatibility, and injection:
+Better Codex checks a signed update manifest in the background. When a new version is available, an update notice appears inside Codex. Installing it restarts Codex and verifies the updated integration.
+
+You can also rerun the installation command at any time. It upgrades the existing runtime when possible and falls back to a full installation when required.
+
+## Useful commands
+
+Check the runtime, database, Codex compatibility, and injection state:
 
 ```bash
 better-codex doctor
@@ -116,22 +118,22 @@ Show the current service and board connection:
 better-codex status
 ```
 
-Reconfigure or inspect system launch entry points:
+Install or inspect the system launcher:
 
 ```bash
 better-codex launcher install
 better-codex launcher status
 ```
 
-Remove the sidebar entries without deleting task data:
+Remove the Codex sidebar integration without deleting task data:
 
 ```bash
 better-codex eject
 ```
 
-## Install from Source
+## Install from source
 
-Install Node.js 22.5 or later, then run:
+Requires Node.js 22.5 or later.
 
 ```bash
 git clone https://github.com/Ericwong5021/better-codex.git
@@ -140,18 +142,17 @@ npm ci
 npm run build
 npm link
 better-codex inject --launch
-# Create the Better Codex launcher.
 better-codex launcher install
 ```
 
 ## Compatibility
 
-Better Codex supports Codex Desktop on macOS and the Microsoft Store version of Codex on Windows. It relies on the desktop app's local CDP interface and page structure, so some Codex updates may require a Better Codex compatibility update.
+Better Codex supports Codex Desktop on macOS and the Microsoft Store version of Codex on Windows. Release packages and CI cover Apple Silicon, Intel Mac, and Windows x64.
 
-Release packages and CI checks cover macOS on Apple Silicon and Intel, plus Windows x64.
+The integration uses the desktop app's local CDP interface and page structure. A Codex update can occasionally require a matching Better Codex compatibility update.
 
 ## Community
 
 Use [GitHub Issues](https://github.com/Ericwong5021/better-codex/issues) for bugs and feature requests. Use [GitHub Discussions](https://github.com/Ericwong5021/better-codex/discussions) for questions and workflow ideas.
 
-Please use English for public GitHub conversations so everyone can follow them.
+Please use English in public GitHub conversations so everyone can follow them.

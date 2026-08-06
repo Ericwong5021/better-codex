@@ -19,8 +19,12 @@ test("board bridge requests retry once after runtime_bridge_timeout", () => {
 
 test("injected panel opts out of the native Electron drag region", () => {
   const source = injectionScript(4317, "test-token", "install");
+  const css = betterCodexDesignSystemCss();
 
   assert.match(source, /#\$\{PANEL_ID\}[^}]*-webkit-app-region:\s*no-drag\s*!important/);
+  assert.match(css, /\.better-codex-toolbar\s*\{[^}]*-webkit-app-region:\s*drag;/s);
+  assert.match(css, /\.better-codex-agent-inspector-head\s*\{[^}]*-webkit-app-region:\s*drag;/s);
+  assert.match(css, /\.better-codex-toolbar :is\(button, input, a, select, textarea, label\)[^}]*-webkit-app-region:\s*no-drag;/s);
 });
 
 test("leaving the app surface suspends the panel and immediately restores its previous surface", () => {

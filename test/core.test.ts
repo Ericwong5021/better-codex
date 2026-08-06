@@ -221,6 +221,148 @@ test("auto-dispatch claims only attentive agent-owned issues outside backlog", (
   }
 });
 
+test("opening the store does not re-arm resting user-owned agent issues", () => {
+  const target = temporaryDatabase();
+  try {
+    let store = new Store(target.file);
+    const project = store.createProject({ name: "Resting", workspacePath: target.directory });
+    const profile = store.createAgentProfile({ name: "Runner", description: "", instructions: "", model: "gpt-test", reasoning_effort: "medium" });
+    store.setAutoDispatch(true);
+    const issue = store.createIssue({
+      projectId: project.id,
+      title: "Reviewed",
+      status: "in_review",
+      agentEnabled: true,
+      agentId: profile.id,
+      workspacePath: target.directory,
+    });
+    const resting = store.updateIssue(issue.id, issue.version, { pending_actor: "user", needs_attention: false });
+    assert.equal(resting.needs_attention, false);
+    assert.equal(resting.pending_actor, "user");
+    assert.equal(store.claimNextIssue(), null);
+    store.close();
+
+    store = new Store(target.file);
+    store.setAutoDispatch(true);
+    const reopened = store.getIssue(resting.id)!;
+    assert.equal(reopened.needs_attention, false);
+    assert.equal(reopened.pending_actor, "user");
+    assert.equal(store.claimNextIssue(), null);
+    store.close();
+  } finally {
+    rmSync(target.directory, { recursive: true, force: true });
+  }
+});
+
+test("failed runs hand back to the user and do not auto-reclaim", () => {
+  const target = temporaryDatabase();
+  try {
+    const store = new Store(target.file);
+    const project = store.createProject({ name: "Fail", workspacePath: target.directory });
+    const profile = store.createAgentProfile({ name: "Runner", description: "", instructions: "", model: "gpt-test", reasoning_effort: "medium" });
+    store.setAutoDispatch(true);
+    const issue = store.createIssue({
+      projectId: project.id,
+      title: "Boom",
+      status: "todo",
+      agentEnabled: true,
+      agentId: profile.id,
+      workspacePath: target.directory,
+    });
+    const claimed = store.claimNextIssue();
+    assert.equal(claimed?.issue.id, issue.id);
+    store.finishRun(claimed!.runId, claimed!.issue.id, false, "codex_exit_1");
+    const failed = store.getIssue(issue.id)!;
+    assert.equal(failed.status, "blocked");
+    assert.equal(failed.needs_attention, true);
+    assert.equal(failed.pending_actor, "user");
+    assert.equal(store.claimNextIssue(), null);
+    store.close();
+  } finally {
+    rmSync(target.directory, { recursive: true, force: true });
+  }
+});
+
+test("finishRun keeps board updates already made by the agent skill", () => {
+  const target = temporaryDatabase();
+  try {
+    const store = new Store(target.file);
+    const project = store.createProject({ name: "Skill", workspacePath: target.directory });
+    const profile = store.createAgentProfile({ name: "Runner", description: "", instructions: "", model: "gpt-test", reasoning_effort: "medium" });
+    store.setAutoDispatch(true);
+
+    const doneIssue = store.createIssue({
+      projectId: project.id,
+      title: "Done by skill",
+      status: "todo",
+      agentEnabled: true,
+      agentId: profile.id,
+      workspacePath: target.directory,
+    });
+    const doneClaim = store.claimNextIssue();
+    assert.equal(doneClaim?.issue.id, doneIssue.id);
+    store.updateIssue(doneClaim!.issue.id, doneClaim!.issue.version, { status: "done", needs_attention: false, pending_actor: "user" });
+    store.finishRun(doneClaim!.runId, doneClaim!.issue.id, true);
+    const done = store.getIssue(doneIssue.id)!;
+    assert.equal(done.status, "done");
+    assert.equal(done.needs_attention, false);
+    assert.equal(done.pending_actor, "user");
+    assert.equal(store.claimNextIssue(), null);
+
+    const retryIssue = store.createIssue({
+      projectId: project.id,
+      title: "Retry by skill",
+      status: "todo",
+      agentEnabled: true,
+      agentId: profile.id,
+      workspacePath: target.directory,
+    });
+    const retryClaim = store.claimNextIssue();
+    assert.equal(retryClaim?.issue.id, retryIssue.id);
+    store.updateIssue(retryClaim!.issue.id, retryClaim!.issue.version, { status: "todo", needs_attention: true, pending_actor: "agent" });
+    store.finishRun(retryClaim!.runId, retryClaim!.issue.id, true);
+    const retry = store.getIssue(retryIssue.id)!;
+    assert.equal(retry.status, "todo");
+    assert.equal(retry.needs_attention, true);
+    assert.equal(retry.pending_actor, "agent");
+    const reclaimed = store.claimNextIssue();
+    assert.equal(reclaimed?.issue.id, retryIssue.id);
+    store.finishRun(reclaimed!.runId, reclaimed!.issue.id, true);
+    store.close();
+  } finally {
+    rmSync(target.directory, { recursive: true, force: true });
+  }
+});
+
+test("interrupted runs hand blocked issues back to the user", () => {
+  const target = temporaryDatabase();
+  try {
+    const store = new Store(target.file);
+    const project = store.createProject({ name: "Interrupt", workspacePath: target.directory });
+    const profile = store.createAgentProfile({ name: "Runner", description: "", instructions: "", model: "gpt-test", reasoning_effort: "medium" });
+    store.setAutoDispatch(true);
+    const issue = store.createIssue({
+      projectId: project.id,
+      title: "Stopped",
+      status: "todo",
+      agentEnabled: true,
+      agentId: profile.id,
+      workspacePath: target.directory,
+    });
+    const claimed = store.claimNextIssue();
+    assert.equal(claimed?.issue.id, issue.id);
+    store.interruptRun(claimed!.runId, claimed!.issue.id);
+    const stopped = store.getIssue(issue.id)!;
+    assert.equal(stopped.status, "blocked");
+    assert.equal(stopped.needs_attention, true);
+    assert.equal(stopped.pending_actor, "user");
+    assert.equal(store.claimNextIssue(), null);
+    store.close();
+  } finally {
+    rmSync(target.directory, { recursive: true, force: true });
+  }
+});
+
 test("agent avatars persist independently and are removed with their profile", () => {
   const target = temporaryDatabase();
   try {

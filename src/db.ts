@@ -277,23 +277,29 @@ export class Store {
 
   private ensureDispatchColumns() {
     const columns = new Set((this.db.prepare("PRAGMA table_info(issues)").all() as Array<{ name: string }>).map(item => item.name));
-    if (!columns.has("needs_attention")) this.db.exec("ALTER TABLE issues ADD COLUMN needs_attention INTEGER NOT NULL DEFAULT 0");
-    if (!columns.has("pending_actor")) this.db.exec("ALTER TABLE issues ADD COLUMN pending_actor TEXT NOT NULL DEFAULT 'user'");
+    const addedNeedsAttention = !columns.has("needs_attention");
+    const addedPendingActor = !columns.has("pending_actor");
+    if (addedNeedsAttention) this.db.exec("ALTER TABLE issues ADD COLUMN needs_attention INTEGER NOT NULL DEFAULT 0");
+    if (addedPendingActor) this.db.exec("ALTER TABLE issues ADD COLUMN pending_actor TEXT NOT NULL DEFAULT 'user'");
     this.db.exec("CREATE INDEX IF NOT EXISTS issues_dispatch ON issues(needs_attention, pending_actor, agent_enabled, status)");
-    this.db.prepare(`
-      UPDATE issues
-      SET needs_attention = 1, pending_actor = 'agent'
-      WHERE agent_enabled = 1
-        AND archived_at IS NULL
-        AND status NOT IN ('backlog', 'done', 'cancelled')
-        AND needs_attention = 0
-        AND pending_actor = 'user'
-        AND NOT EXISTS (
-          SELECT 1 FROM issue_runs
-          WHERE issue_runs.issue_id = issues.id
-            AND issue_runs.status IN ('claimed', 'running')
-        )
-    `).run();
+    // One-shot backfill when dispatch columns are first introduced. Do not re-arm
+    // resting agent-owned issues (pending_actor=user, needs_attention=0) on every open.
+    if (addedNeedsAttention || addedPendingActor) {
+      this.db.prepare(`
+        UPDATE issues
+        SET needs_attention = 1, pending_actor = 'agent'
+        WHERE agent_enabled = 1
+          AND archived_at IS NULL
+          AND status NOT IN ('backlog', 'done', 'cancelled')
+          AND needs_attention = 0
+          AND pending_actor = 'user'
+          AND NOT EXISTS (
+            SELECT 1 FROM issue_runs
+            WHERE issue_runs.issue_id = issues.id
+              AND issue_runs.status IN ('claimed', 'running')
+          )
+      `).run();
+    }
   }
 
   private ensureSettingsTable() {
@@ -740,7 +746,15 @@ export class Store {
       const rows = this.db.prepare("SELECT id, issue_id FROM issue_runs WHERE status IN ('claimed', 'running')").all() as Array<{ id: string; issue_id: string }>;
       for (const row of rows) {
         this.db.prepare("UPDATE issue_runs SET status = 'interrupted', finished_at = ?, error = 'runtime_restarted' WHERE id = ?").run(timestamp, row.id);
-        this.db.prepare("UPDATE issues SET status = 'blocked', version = version + 1, updated_at = ? WHERE id = ? AND status = 'in_progress'").run(timestamp, row.issue_id);
+        this.db.prepare(`
+          UPDATE issues
+          SET status = CASE WHEN status = 'in_progress' THEN 'blocked' ELSE status END,
+              needs_attention = 1,
+              pending_actor = 'user',
+              version = version + 1,
+              updated_at = ?
+          WHERE id = ?
+        `).run(timestamp, row.issue_id);
       }
       this.db.exec("COMMIT");
       return rows.length;
@@ -845,15 +859,19 @@ export class Store {
     try {
       this.db.prepare("UPDATE issue_runs SET status = ?, finished_at = ?, error = ? WHERE id = ? AND status IN ('claimed', 'running')")
         .run(success ? "completed" : "failed", timestamp, error ?? null, runId);
+      // Safety net only while the board was left mid-run. If the agent already
+      // finalized via CLI (done / in_review / blocked / re-queued), keep that.
+      // Failures hand back to the user so auto-dispatch cannot loop forever.
       this.db.prepare(`
         UPDATE issues
-        SET status = CASE WHEN status = 'in_progress' THEN ? ELSE status END,
+        SET status = ?,
             needs_attention = 1,
-            pending_actor = ?,
+            pending_actor = 'user',
             version = version + 1,
             updated_at = ?
         WHERE id = ?
-      `).run(success ? "in_review" : "blocked", success ? "user" : "agent", timestamp, issueId);
+          AND status = 'in_progress'
+      `).run(success ? "in_review" : "blocked", timestamp, issueId);
       this.db.exec("COMMIT");
     } catch (caught) {
       this.db.exec("ROLLBACK");
@@ -866,7 +884,15 @@ export class Store {
     this.db.exec("BEGIN IMMEDIATE");
     try {
       this.db.prepare("UPDATE issue_runs SET status = 'interrupted', finished_at = ?, error = 'runtime_stopped' WHERE id = ? AND status IN ('claimed', 'running')").run(timestamp, runId);
-      this.db.prepare("UPDATE issues SET status = 'blocked', version = version + 1, updated_at = ? WHERE id = ? AND status = 'in_progress'").run(timestamp, issueId);
+      this.db.prepare(`
+        UPDATE issues
+        SET status = CASE WHEN status = 'in_progress' THEN 'blocked' ELSE status END,
+            needs_attention = 1,
+            pending_actor = 'user',
+            version = version + 1,
+            updated_at = ?
+        WHERE id = ?
+      `).run(timestamp, issueId);
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");
