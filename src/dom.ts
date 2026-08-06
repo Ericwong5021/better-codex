@@ -44,7 +44,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const NAVIGATION = ${JSON.stringify(compatibility.navigation)};
     const statusLabels = { backlog: "待规划", todo: "待办", in_progress: "进行中", in_review: "审核中", done: "已完成", blocked: "已阻塞", cancelled: "已取消" };
     const priorityLabels = { none: "无", low: "低", medium: "中", high: "高", urgent: "紧急" };
-    const state = { projects: [], issues: [], agents: [], agentModels: [], agentReasoningEfforts: [], projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, surface: "issues", view: "all", createMode: "manual", keepCreate: false, selected: null, error: "", filters: { status: [], priority: [], date: [], assignee: [], creator: [], project: [], label: [] } };
+    const state = { projects: [], issues: [], agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, surface: "issues", view: "all", createMode: "manual", keepCreate: false, selected: null, error: "", filters: { status: [], priority: [], date: [], assignee: [], creator: [], project: [], label: [] } };
     const bridgeRequests = new Map();
     let bridgeSequence = 0;
     let entry = null;
@@ -962,6 +962,15 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       agents.id = "better-codex-agents";
       agents.className = "better-codex-agents";
       agents.addEventListener("click", onAgentsClick);
+      agents.addEventListener("keydown", event => {
+        if (event.key !== "Escape") return;
+        const openPicker = agents.querySelector(".better-codex-agent-setting.is-open");
+        if (!openPicker) return;
+        openPicker.classList.remove("is-open");
+        const trigger = openPicker.querySelector("[data-agent-picker-toggle]");
+        trigger?.setAttribute("aria-expanded", "false");
+        trigger?.focus();
+      });
       agents.addEventListener("input", event => {
         if (!event.target.matches("[data-agent-search]")) return;
         state.agentSearch = event.target.value;
@@ -979,27 +988,24 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function modelLabel(value) {
-      return ({
-        "gpt-5.6-sol": "GPT-5.6 Sol",
-        "gpt-5.6-terra": "GPT-5.6 Terra",
-        "gpt-5.6-luna": "GPT-5.6 Luna",
-        "gpt-5.5": "GPT-5.5",
-        "gpt-5.4": "GPT-5.4",
-        "gpt-5.4-mini": "GPT-5.4 Mini",
-        "gpt-5.3-codex-spark": "GPT-5.3 Codex Spark"
-      })[value] || value;
+      return state.agentModelCatalog.find(model => model.id === value)?.displayName || value;
     }
 
     function effortLabel(value) {
       return ({ low: "低", medium: "中", high: "高", xhigh: "超高", max: "最大", ultra: "极致" })[value] || value;
     }
 
-    function agentModelOptions(selected) {
-      return state.agentModels.map(value => '<option value="' + escapeHtml(value) + '"' + (value === selected ? " selected" : "") + '>' + escapeHtml(modelLabel(value)) + '</option>').join("");
+    function effortsForModel(model) {
+      const entry = state.agentModelCatalog.find(item => item.id === model);
+      return entry?.supportedReasoningEfforts?.length
+        ? entry.supportedReasoningEfforts.map(item => ({ value: item.value, label: effortLabel(item.value), description: item.description || "" }))
+        : state.agentReasoningEfforts.map(value => ({ value, label: effortLabel(value), description: "" }));
     }
 
-    function agentEffortOptions(selected) {
-      return state.agentReasoningEfforts.map(value => '<option value="' + escapeHtml(value) + '"' + (value === selected ? " selected" : "") + '>' + escapeHtml(effortLabel(value)) + '</option>').join("");
+    function agentPicker(name, label, selected, options) {
+      const current = options.find(option => option.value === selected) || options[0] || { value: "", label: "未提供" };
+      const rows = options.map(option => '<button class="better-codex-agent-menu-item' + (option.value === current.value ? " is-selected" : "") + '" type="button" role="option" aria-selected="' + (option.value === current.value) + '" data-agent-option="' + escapeHtml(name) + '" data-agent-option-value="' + escapeHtml(option.value) + '"><span>' + escapeHtml(option.label) + '</span>' + (option.value === current.value ? icon("check") : "") + '</button>').join("");
+      return '<div class="better-codex-agent-setting" data-agent-picker="' + escapeHtml(name) + '"><span>' + escapeHtml(label) + '</span><input type="hidden" name="' + escapeHtml(name) + '" value="' + escapeHtml(current.value) + '"><button class="better-codex-agent-picker-trigger" type="button" role="combobox" aria-haspopup="listbox" aria-expanded="false" data-agent-picker-toggle="' + escapeHtml(name) + '"><span data-agent-picker-label>' + escapeHtml(current.label) + '</span>' + icon("chevron") + '</button><div class="better-codex-agent-menu" role="listbox"><div class="better-codex-agent-menu-title">' + escapeHtml(label) + '</div>' + rows + '</div></div>';
     }
 
     const suggestedAgents = [
@@ -1016,8 +1022,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const name = creating ? draft.name || "" : draft.name;
       const description = creating ? draft.description || "" : draft.description || "";
       const instructions = creating ? draft.instructions || "" : draft.instructions || "";
-      const model = draft.model || (state.agentModels.includes("gpt-5.6-sol") ? "gpt-5.6-sol" : state.agentModels[0] || "");
-      const effort = draft.reasoning_effort || (state.agentReasoningEfforts.includes("medium") ? "medium" : state.agentReasoningEfforts[0] || "");
+      const defaultModel = state.agentModelCatalog.find(item => item.isDefault) || state.agentModelCatalog[0];
+      const model = state.agentModels.includes(draft.model) ? draft.model : defaultModel?.id || draft.model || "";
+      const effortOptions = effortsForModel(model);
+      const preferredEffort = draft.reasoning_effort || state.agentModelCatalog.find(item => item.id === model)?.defaultReasoningEffort;
+      const effort = effortOptions.some(item => item.value === preferredEffort) ? preferredEffort : effortOptions[0]?.value || "medium";
       const heading = creating ? "新建" : "智能体";
       const title = creating ? "创建智能体" : draft.name;
       const identity = isDefault
@@ -1025,12 +1034,15 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         : '<label class="better-codex-agent-inspector-field"><span>名称</span><input name="name" maxlength="80" value="' + escapeHtml(name) + '" placeholder="智能体名称" required></label><label class="better-codex-agent-inspector-field"><span>介绍 <small>可选</small></span><textarea name="description" maxlength="500" rows="3" placeholder="说明这个智能体适合承担什么工作">' + escapeHtml(description) + '</textarea></label>';
       const instructionField = isDefault ? "" : '<label class="better-codex-agent-inspector-field"><span>Instruct <small>可选</small></span><textarea name="instructions" rows="7" placeholder="定义职责、工作方式和输出要求">' + escapeHtml(instructions) + '</textarea></label>';
       const deleteButton = !creating && !isDefault ? '<button class="better-codex-agent-danger" type="button" data-agent-delete data-agent-key="' + escapeHtml(agentKey(draft)) + '">删除智能体</button>' : "";
-      return '<aside class="better-codex-agent-inspector"><form data-agent-form="' + (creating ? "create" : isDefault ? "default" : "update") + '" data-agent-key="' + escapeHtml(creating ? "" : agentKey(draft)) + '"><header class="better-codex-agent-inspector-head"><span>' + heading + '</span><button class="better-codex-agent-card-action" type="button" data-agent-close-pane aria-label="关闭详情">' + icon("close") + '</button></header><div class="better-codex-agent-inspector-scroll"><h2>' + escapeHtml(title) + '</h2>' + identity + '<h3>详情</h3><div class="better-codex-agent-inspector-group"><label><span>模型</span><select name="model">' + agentModelOptions(model) + '</select></label><label><span>推理</span><select name="reasoning_effort">' + agentEffortOptions(effort) + '</select></label></div>' + instructionField + '<div class="better-codex-agent-inspector-error" hidden></div></div><footer class="better-codex-agent-inspector-footer">' + deleteButton + '<button class="better-codex-submit" type="submit">' + (creating ? "创建" : "保存") + '</button></footer></form></aside>';
+      const modelOptions = state.agentModelCatalog.map(item => ({ value: item.id, label: item.displayName, description: item.description || "" }));
+      return '<aside class="better-codex-agent-inspector"><form data-agent-form="' + (creating ? "create" : isDefault ? "default" : "update") + '" data-agent-key="' + escapeHtml(creating ? "" : agentKey(draft)) + '"><header class="better-codex-agent-inspector-head"><span>' + heading + '</span><button class="better-codex-agent-card-action" type="button" data-agent-close-pane aria-label="关闭详情">' + icon("close") + '</button></header><div class="better-codex-agent-inspector-scroll"><h2>' + escapeHtml(title) + '</h2>' + identity + '<h3>详情</h3><div class="better-codex-agent-inspector-group">' + agentPicker("model", "模型", model, modelOptions) + agentPicker("reasoning_effort", "推理", effort, effortOptions) + '</div>' + instructionField + '<div class="better-codex-agent-inspector-error" hidden></div></div><footer class="better-codex-agent-inspector-footer">' + deleteButton + '<button class="better-codex-submit" type="submit">' + (creating ? "创建" : "保存") + '</button></footer></form></aside>';
     }
 
     function renderAgents() {
       const container = panel?.querySelector("#better-codex-agents");
       if (!container) return;
+      const addAgent = panel.querySelector(".better-codex-agent-actions");
+      if (addAgent) addAgent.hidden = state.agentPane !== "preview";
       panel.querySelectorAll("[data-agent-view]").forEach(button => button.classList.toggle("is-active", button.dataset.agentView === state.agentView));
       const query = state.agentSearch.trim().toLowerCase();
       const agents = state.agents.filter(agent => {
@@ -1080,7 +1092,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           const meta = sessionId ? '<span>打开 Session</span>' : '<span>等待 Session</span>';
           return '<article class="better-codex-card" draggable="true" data-issue-id="' + escapeHtml(issue.id) + '"' + (sessionId ? ' data-thread="' + escapeHtml(sessionId) + '"' : "") + '><div class="better-codex-card-row"><div class="better-codex-card-id">' + priorityIcon(issue.priority) + '<span>' + escapeHtml(issue.identifier) + '</span></div>' + activity + '</div><div class="better-codex-card-title">' + escapeHtml(issue.title) + '</div>' + (description ? '<div class="better-codex-card-description">' + escapeHtml(description) + '</div>' : "") + (chips ? '<div class="better-codex-chip-row">' + chips + '</div>' : "") + '<div class="better-codex-card-meta">' + meta + '<span>更新于 ' + timeAgo(issue.updated_at) + '</span></div></article>';
         }).join("");
-        return '<section class="better-codex-column" data-status="' + status + '"><div class="better-codex-column-head"><span class="better-codex-column-title">' + statusIcon(status) + '<span>' + statusLabel + '</span><span>' + issues.length + '</span></span><span class="better-codex-column-actions"><button class="better-codex-column-icon" type="button" aria-label="更多">' + icon("more") + '</button><button class="better-codex-column-icon" type="button" data-add-status="' + status + '" aria-label="新建任务">' + icon("plus") + '</button></span></div><div class="better-codex-cards">' + (cards || '<div class="better-codex-empty">暂无任务</div>') + '</div></section>';
+        return '<section class="better-codex-column" data-status="' + status + '"><div class="better-codex-column-head"><span class="better-codex-column-title">' + statusIcon(status) + '<span>' + statusLabel + '</span><span>' + issues.length + '</span></span><span class="better-codex-column-actions"><button class="better-codex-column-icon" type="button" data-add-status="' + status + '" aria-label="新建任务">' + icon("plus") + '</button></span></div><div class="better-codex-cards">' + (cards || '<div class="better-codex-empty">暂无任务</div>') + '</div></section>';
       }).join("");
     }
 
@@ -1108,7 +1120,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const bootstrap = await api("/api/bootstrap");
         state.projects = bootstrap.projects;
         state.agents = bootstrap.agents || [];
-        state.agentModels = bootstrap.agentModels || [];
+        state.agentModelCatalog = bootstrap.agentModelCatalog || (bootstrap.agentModels || []).map(id => ({ id, displayName: id, description: "", isDefault: false, defaultReasoningEffort: "medium", supportedReasoningEfforts: (bootstrap.agentReasoningEfforts || []).map(value => ({ value, description: "" })) }));
+        state.agentModels = state.agentModelCatalog.map(model => model.id);
         state.agentReasoningEfforts = bootstrap.agentReasoningEfforts || [];
         const context = readContext();
         if (context.projectId) {
@@ -1129,52 +1142,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         showError(message);
         if (board) board.innerHTML = '<div class="better-codex-empty">' + escapeHtml(message) + " · 点击刷新重试</div>";
       }
-    }
-
-    function openAgentEditor(agent = null) {
-      const dialog = document.createElement("dialog");
-      dialog.id = "better-codex-agent-dialog";
-      dialog.setAttribute(OWNED, "true");
-      const modelOptions = state.agentModels.map(value => '<option value="' + escapeHtml(value) + '">' + escapeHtml(value) + "</option>").join("");
-      const effortOptions = state.agentReasoningEfforts.map(value => '<option value="' + escapeHtml(value) + '">' + escapeHtml(value) + "</option>").join("");
-      dialog.innerHTML = '<form><div class="better-codex-agent-dialog-head"><div><strong>' + (agent ? "编辑智能体" : "创建智能体") + '</strong><span>配置一个可供 Codex 调度的 Profile Agent</span></div><button class="better-codex-agent-card-action" type="button" data-agent-close aria-label="关闭">' + icon("close") + '</button></div><div class="better-codex-agent-dialog-body"><section class="better-codex-agent-section"><div class="better-codex-agent-section-title"><strong>身份</strong><span>帮助主智能体理解它是谁，以及适合承担什么工作。</span></div><div class="better-codex-agent-settings"><div class="better-codex-agent-field"><label for="better-codex-agent-name">名称</label><input id="better-codex-agent-name" name="name" maxlength="80" autocomplete="off" placeholder="例如：前端工程师" required></div><div class="better-codex-agent-field is-top"><label for="better-codex-agent-description">描述</label><textarea id="better-codex-agent-description" name="description" maxlength="500" rows="3" placeholder="简要说明这个智能体擅长什么，以及何时应调用它" required></textarea></div></div></section><section class="better-codex-agent-section"><div class="better-codex-agent-section-title"><strong>行为</strong><span>这些指令会作为 developer instructions 注入智能体上下文。</span></div><div class="better-codex-agent-settings"><div class="better-codex-agent-field is-top"><label for="better-codex-agent-instructions">指令</label><textarea id="better-codex-agent-instructions" name="instructions" placeholder="定义职责、工作方式、输出要求和边界" required></textarea></div></div></section><section class="better-codex-agent-section"><div class="better-codex-agent-section-title"><strong>执行</strong><span>选择该智能体使用的模型和推理等级。</span></div><div class="better-codex-agent-settings"><div class="better-codex-agent-execution"><div><label for="better-codex-agent-model">模型</label><select id="better-codex-agent-model" name="model">' + modelOptions + '</select></div><div><label for="better-codex-agent-effort">推理等级</label><select id="better-codex-agent-effort" name="reasoning_effort">' + effortOptions + '</select></div></div></div></section><div class="better-codex-agent-dialog-error" hidden></div></div><div class="better-codex-agent-dialog-footer"><button class="better-codex-button" type="button" data-agent-close>取消</button><button class="better-codex-submit" type="submit">' + (agent ? "保存修改" : "创建智能体") + "</button></div></form>";
-      document.body.appendChild(dialog);
-      const form = dialog.querySelector("form");
-      form.elements.name.value = agent?.name || "";
-      form.elements.description.value = agent?.description || "";
-      form.elements.instructions.value = agent?.instructions || "";
-      form.elements.model.value = agent?.model || (state.agentModels.includes("gpt-5.3-codex-spark") ? "gpt-5.3-codex-spark" : state.agentModels[0] || "");
-      form.elements.reasoning_effort.value = agent?.reasoning_effort || (state.agentReasoningEfforts.includes("medium") ? "medium" : state.agentReasoningEfforts[0] || "");
-      dialog.querySelectorAll("[data-agent-close]").forEach(button => button.addEventListener("click", () => dialog.close()));
-      form.addEventListener("submit", event => {
-        event.preventDefault();
-        void perform(async () => {
-          const submit = form.querySelector('[type="submit"]');
-          const error = form.querySelector(".better-codex-agent-dialog-error");
-          submit.disabled = true;
-          error.hidden = true;
-          try {
-            const body = {
-              name: form.elements.name.value,
-              description: form.elements.description.value,
-              instructions: form.elements.instructions.value,
-              model: form.elements.model.value,
-              reasoning_effort: form.elements.reasoning_effort.value,
-              ...(agent ? { version: agent.version } : {})
-            };
-            await api(agent ? "/api/agents/" + encodeURIComponent(agent.id) : "/api/agents", { method: agent ? "PATCH" : "POST", body: JSON.stringify(body) });
-            await loadAgents();
-            dialog.close();
-          } catch (caught) {
-            error.textContent = caught instanceof Error ? caught.message : "保存失败";
-            error.hidden = false;
-            submit.disabled = false;
-          }
-        });
-      });
-      dialog.addEventListener("close", () => dialog.remove(), { once: true });
-      dialog.showModal();
-      form.elements.name.focus();
     }
 
     function startAgentCreate(draft = null) {
@@ -1220,6 +1187,47 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function onAgentsClick(event) {
+      const option = event.target.closest("[data-agent-option]");
+      if (option) {
+        const picker = option.closest("[data-agent-picker]");
+        const form = option.closest("form");
+        const name = option.dataset.agentOption;
+        const value = option.dataset.agentOptionValue;
+        if (!picker || !form || !name) return;
+        picker.querySelector('[name="' + name + '"]').value = value;
+        picker.querySelector("[data-agent-picker-label]").textContent = name === "model" ? modelLabel(value) : effortLabel(value);
+        picker.querySelectorAll("[data-agent-option]").forEach(row => {
+          const selected = row.dataset.agentOptionValue === value;
+          row.classList.toggle("is-selected", selected);
+          row.setAttribute("aria-selected", String(selected));
+          row.querySelector("svg")?.remove();
+          if (selected) row.insertAdjacentHTML("beforeend", icon("check"));
+        });
+        picker.classList.remove("is-open");
+        picker.querySelector("[data-agent-picker-toggle]").setAttribute("aria-expanded", "false");
+        if (name === "model") {
+          const efforts = effortsForModel(value);
+          const effortPicker = form.querySelector('[data-agent-picker="reasoning_effort"]');
+          const oldEffort = form.elements.reasoning_effort.value;
+          const modelDefault = state.agentModelCatalog.find(item => item.id === value)?.defaultReasoningEffort;
+          const nextEffort = efforts.some(item => item.value === oldEffort) ? oldEffort : modelDefault || efforts[0]?.value || "medium";
+          effortPicker.outerHTML = agentPicker("reasoning_effort", "推理", nextEffort, efforts);
+        }
+        return;
+      }
+      const pickerToggle = event.target.closest("[data-agent-picker-toggle]");
+      if (pickerToggle) {
+        const picker = pickerToggle.closest("[data-agent-picker]");
+        const opening = !picker.classList.contains("is-open");
+        panel.querySelectorAll(".better-codex-agent-setting.is-open").forEach(item => item.classList.remove("is-open"));
+        picker.classList.toggle("is-open", opening);
+        pickerToggle.setAttribute("aria-expanded", String(opening));
+        return;
+      }
+      panel.querySelectorAll(".better-codex-agent-setting.is-open").forEach(item => {
+        item.classList.remove("is-open");
+        item.querySelector("[data-agent-picker-toggle]")?.setAttribute("aria-expanded", "false");
+      });
       if (event.target.closest("[data-agent-create]")) return startAgentCreate();
       const templateButton = event.target.closest("[data-agent-template]");
       if (templateButton) return startAgentCreate(suggestedAgents.find(item => item.key === templateButton.dataset.agentTemplate) || null);
