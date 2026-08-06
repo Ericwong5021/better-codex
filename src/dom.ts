@@ -10,10 +10,10 @@ import {
   ChevronDown,
   ChevronRight,
   Circle,
-  CircleAlert,
   CircleCheckBig,
   CircleDashed,
   CircleDot,
+  CircleHelp,
   CircleSlash2,
   CircleX,
   Columns3,
@@ -93,6 +93,7 @@ const lucideIcons = Object.fromEntries(Object.entries({
   chevronDown: ChevronDown,
   check: Check,
   circle: Circle,
+  help: CircleHelp,
   dash: Minus,
   trash: Trash2,
   refresh: RefreshCw,
@@ -108,8 +109,15 @@ const lucideIcons = Object.fromEntries(Object.entries({
   priorityLow: SignalLow,
   priorityMedium: SignalMedium,
   priorityHigh: SignalHigh,
-  priorityUrgent: CircleAlert,
 }).map(([key, svg]) => [key, lucideDefinition(svg)]));
+
+Object.assign(lucideIcons, {
+  // Linear-style urgent mark (rounded square alert).
+  priorityUrgent: {
+    name: "priority-urgent",
+    nodes: '<rect width="16" height="16" x="4" y="4" rx="2.5"></rect><path d="M12 8v4"></path><path d="M12 16h.01"></path>',
+  },
+});
 
 const agentAvatarPresets = [
   { id: "reviewer", icon: "review", tone: "info", label: "代码审查" },
@@ -252,7 +260,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const statusLabels = { backlog: "待规划", todo: "待办", in_progress: "进行中", in_review: "审核中", done: "已完成", blocked: "已阻塞", cancelled: "已取消" };
     const priorityLabels = { none: "无", low: "低", medium: "中", high: "高", urgent: "紧急" };
     const rememberedSurface = sessionStorage.getItem(RESUME_SURFACE_KEY);
-    const state = { projects: [], issues: [], agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, surface: ["issues", "agents"].includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", createMode: "manual", keepCreate: false, selected: null, error: "", filters: { status: [], priority: [], date: [], assignee: [], creator: [], project: [], label: [] } };
+    const state = { projects: [], issues: [], agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, surface: ["issues", "agents"].includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, createMode: "manual", keepCreate: false, selected: null, error: "", filters: { status: [], priority: [], date: [], assignee: [], creator: [], project: [], label: [] } };
     const bridgeRequests = new Map();
     let bridgeSequence = 0;
     let entry = null;
@@ -269,6 +277,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     let issueMenu = null;
     let issueMenuDismiss = null;
     let avatarPickerClose = null;
+    let suppressAgentOutside = false;
+    let draggingIssueId = "";
     let codexLogoSequence = 0;
     let active = false;
     let destroyed = false;
@@ -279,6 +289,15 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     function escapeHtml(value) {
       return String(value ?? "").replace(/[&<>\"']/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\\\"": "&quot;", "'": "&#39;" })[character]);
+    }
+
+    function normalizeSessionId(value) {
+      const id = String(value || "").replace(/^(local|cloud):/i, "");
+      return /^[a-f0-9-]{36}$/i.test(id) ? id : "";
+    }
+
+    function issueSessionId(issue) {
+      return normalizeSessionId(issue?.run_thread_id) || normalizeSessionId(issue?.thread_id) || "";
     }
 
     function installStyle() {
@@ -292,8 +311,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         html[data-better-codex-open="true"] \${SELECTORS.sidebarNavigation} [aria-current="page"]:not(#\${ENTRY_ID}):not(#\${AGENTS_ENTRY_ID}) .text-token-list-active-selection-foreground { color: var(--color-token-foreground) !important; }
         [\${HOST}="true"] { position: relative !important; z-index: 31 !important; pointer-events: none !important; }
         [\${HIDDEN}="true"] { visibility: hidden !important; pointer-events: none !important; }
-        html { --bc-page: oklch(.988087 0 0); --bc-surface: oklch(1 0 0); --bc-raised: oklch(1 0 0); --bc-hover: oklch(.967 .001 286.375); --bc-selected: oklch(.95 .002 286.375); --bc-foreground: oklch(.141 .005 285.823); --bc-muted: oklch(.505 .016 285.938); --bc-faint: oklch(.606 .016 285.938); --bc-border: oklch(.92 .004 286.32); --bc-divider: oklch(.945 .003 286.32); --bc-input: oklch(.92 .004 286.32); --bc-ring: oklch(.705 .015 286.067); --bc-primary: oklch(.21 .006 285.885); --bc-primary-foreground: oklch(.985 0 0); --bc-warning: oklch(.75 .16 85); --bc-success: oklch(.55 .16 145); --bc-info: oklch(.55 .18 250); --bc-danger: oklch(.577 .245 27.325); --bc-surface-shadow: 0 1px 2px rgb(15 23 42 / .04),0 1px 1px rgb(15 23 42 / .03); --bc-card-shadow: 0 1px 3px rgb(15 23 42 / .10); --bc-floating-shadow: 0 16px 40px rgb(15 23 42 / .14),0 3px 10px rgb(15 23 42 / .08); --bc-menu-shadow: 0 8px 24px rgb(15 23 42 / .08),0 2px 6px rgb(15 23 42 / .05); --bc-scrim: rgb(24 24 27 / .22); color-scheme: light; }
-        html.electron-dark, html.dark, html[data-theme="dark"] { --bc-page: oklch(.18 .005 285.823); --bc-surface: oklch(.21 .006 285.885); --bc-raised: oklch(.235 .007 285.885); --bc-hover: oklch(.274 .006 286.033); --bc-selected: oklch(.3 .006 286.033); --bc-foreground: oklch(.985 0 0); --bc-muted: oklch(.705 .015 286.067); --bc-faint: oklch(.60 .015 286.067); --bc-border: oklch(1 0 0 / 10%); --bc-divider: oklch(1 0 0 / 6%); --bc-input: oklch(1 0 0 / 15%); --bc-ring: oklch(.552 .016 285.938); --bc-primary: oklch(.92 .004 286.32); --bc-primary-foreground: oklch(.21 .006 285.885); --bc-warning: oklch(.70 .16 85); --bc-success: oklch(.65 .15 145); --bc-info: oklch(.65 .18 250); --bc-danger: oklch(.704 .191 22.216); --bc-surface-shadow: 0 1px 2px rgb(0 0 0 / .2),0 1px 1px rgb(0 0 0 / .16); --bc-card-shadow: 0 0 0 1px rgb(255 255 255 / .03); --bc-floating-shadow: 0 20px 48px rgb(0 0 0 / .46),0 4px 12px rgb(0 0 0 / .28); --bc-menu-shadow: 0 10px 28px rgb(0 0 0 / .3),0 2px 8px rgb(0 0 0 / .18); --bc-scrim: rgb(0 0 0 / .5); color-scheme: dark; }
+        html { --bc-page: oklch(.988087 0 0); --bc-surface: oklch(1 0 0); --bc-raised: oklch(1 0 0); --bc-hover: oklch(.967 .001 286.375); --bc-selected: oklch(.95 .002 286.375); --bc-foreground: oklch(.141 .005 285.823); --bc-muted: oklch(.505 .016 285.938); --bc-faint: oklch(.606 .016 285.938); --bc-border: oklch(.92 .004 286.32); --bc-divider: oklch(.945 .003 286.32); --bc-input: oklch(.92 .004 286.32); --bc-ring: oklch(.705 .015 286.067); --bc-primary: oklch(.21 .006 285.885); --bc-primary-foreground: oklch(.985 0 0); --bc-warning: oklch(.75 .16 85); --bc-success: oklch(.55 .16 145); --bc-info: oklch(.55 .18 250); --bc-danger: oklch(.577 .245 27.325); --bc-priority-none: oklch(.62 .01 286); --bc-priority-low: oklch(.55 .1 250); --bc-priority-medium: oklch(.76 .15 95); --bc-priority-high: oklch(.68 .18 52); --bc-priority-urgent: var(--bc-danger); --bc-surface-shadow: 0 1px 2px rgb(15 23 42 / .04),0 1px 1px rgb(15 23 42 / .03); --bc-card-shadow: 0 1px 3px rgb(15 23 42 / .10); --bc-floating-shadow: 0 16px 40px rgb(15 23 42 / .14),0 3px 10px rgb(15 23 42 / .08); --bc-menu-shadow: 0 8px 24px rgb(15 23 42 / .08),0 2px 6px rgb(15 23 42 / .05); --bc-scrim: rgb(24 24 27 / .22); color-scheme: light; }
+        html.electron-dark, html.dark, html[data-theme="dark"] { --bc-page: oklch(.18 .005 285.823); --bc-surface: oklch(.21 .006 285.885); --bc-raised: oklch(.235 .007 285.885); --bc-hover: oklch(.274 .006 286.033); --bc-selected: oklch(.3 .006 286.033); --bc-foreground: oklch(.985 0 0); --bc-muted: oklch(.705 .015 286.067); --bc-faint: oklch(.60 .015 286.067); --bc-border: oklch(1 0 0 / 10%); --bc-divider: oklch(1 0 0 / 6%); --bc-input: oklch(1 0 0 / 15%); --bc-ring: oklch(.552 .016 285.938); --bc-primary: oklch(.92 .004 286.32); --bc-primary-foreground: oklch(.21 .006 285.885); --bc-warning: oklch(.70 .16 85); --bc-success: oklch(.65 .15 145); --bc-info: oklch(.65 .18 250); --bc-danger: oklch(.704 .191 22.216); --bc-priority-none: oklch(.68 .01 286); --bc-priority-low: oklch(.68 .1 250); --bc-priority-medium: oklch(.78 .14 95); --bc-priority-high: oklch(.74 .16 52); --bc-priority-urgent: var(--bc-danger); --bc-surface-shadow: 0 1px 2px rgb(0 0 0 / .2),0 1px 1px rgb(0 0 0 / .16); --bc-card-shadow: 0 0 0 1px rgb(255 255 255 / .03); --bc-floating-shadow: 0 20px 48px rgb(0 0 0 / .46),0 4px 12px rgb(0 0 0 / .28); --bc-menu-shadow: 0 10px 28px rgb(0 0 0 / .3),0 2px 8px rgb(0 0 0 / .18); --bc-scrim: rgb(0 0 0 / .5); color-scheme: dark; }
         #\${PANEL_ID} { position: absolute; inset: 0; z-index: 2; display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; color: var(--color-text-foreground, inherit); background: var(--color-background-surface, var(--wb-surface-primary, var(--color-token-bg-primary, Canvas))); pointer-events: auto; -webkit-app-region: no-drag !important; }
         #\${PANEL_ID}[hidden] { display: none !important; }
         #better-codex-update-notice { position: fixed; right: 16px; bottom: 16px; z-index: 2147483000; box-sizing: border-box; width: min(320px,calc(100vw - 32px)); color: var(--bc-foreground); background: var(--bc-raised); padding: 16px; border-radius: 12px; box-shadow: var(--bc-floating-shadow); outline: 1px solid color-mix(in srgb,var(--bc-foreground) 10%,transparent); outline-offset: -1px; font-family: Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif; animation: better-codex-update-enter .3s cubic-bezier(.16,1,.3,1); }
@@ -345,14 +364,20 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #better-codex-context-menu .better-codex-context-item-wrap { position: relative; }
         #better-codex-context-menu .better-codex-context-item { display: flex; width: 100%; min-height: 34px; align-items: center; gap: 9px; border: 0; border-radius: 6px; color: inherit; background: transparent; padding: 0 10px; font: inherit; font-size: var(--bc-text-md); text-align: left; cursor: pointer; white-space: nowrap; }
         #better-codex-context-menu .better-codex-context-item:hover, #better-codex-context-menu .better-codex-context-item:focus-visible, #better-codex-context-menu .better-codex-context-item-wrap:hover > .better-codex-context-item { background: #f1f1f2; outline: none; }
-        #better-codex-context-menu .better-codex-context-item > span:not(.better-codex-context-check) { min-width: 0; flex: 1; }
+        #better-codex-context-menu .better-codex-context-item > span:last-of-type { min-width: 0; flex: 1; }
         #better-codex-context-menu .better-codex-status-icon, #better-codex-context-menu .better-codex-priority { width: 16px; height: 16px; flex: 0 0 auto; }
         #better-codex-context-menu .better-codex-context-item.is-danger { color: #ef4444; }
         #better-codex-context-menu .better-codex-context-divider { height: 1px; margin: 5px 3px; background: #ededee; }
-        #better-codex-context-menu .better-codex-context-submenu { position: absolute; top: -5px; left: calc(100% + 5px); display: none; min-width: 148px; max-width: min(220px, calc(100vw - 24px)); }
-        #better-codex-context-menu[data-align="left"] .better-codex-context-submenu { right: calc(100% + 5px); left: auto; }
+        #better-codex-context-menu .better-codex-context-submenu { position: absolute; top: -5px; left: 100%; display: none; min-width: 148px; max-width: min(240px, calc(100vw - 24px)); max-height: min(320px, calc(100vh - 24px)); overflow-y: auto; }
+        #better-codex-context-menu[data-align="left"] .better-codex-context-submenu { right: 100%; left: auto; }
         #better-codex-context-menu .better-codex-context-item-wrap:hover > .better-codex-context-submenu, #better-codex-context-menu .better-codex-context-item-wrap:focus-within > .better-codex-context-submenu { display: block; }
         #better-codex-context-menu .better-codex-context-check { display: inline-flex; width: 14px; flex: 0 0 14px; align-items: center; justify-content: center; color: #18181b; }
+        #better-codex-context-menu .better-codex-context-avatar { display: inline-flex; width: 16px; height: 16px; flex: 0 0 16px; align-items: center; justify-content: center; overflow: hidden; border-radius: 999px; color: #fff; background: #27272a; }
+        #better-codex-context-menu .better-codex-context-avatar.is-codex { color: inherit; background: transparent; border-radius: 4px; }
+        #better-codex-context-menu .better-codex-context-avatar.is-fallback, #better-codex-context-menu .better-codex-context-avatar.is-icon { color: var(--bc-muted, #71717a); background: #f2f2f3; }
+        #better-codex-context-menu .better-codex-context-avatar img, #better-codex-context-menu .better-codex-context-avatar svg { display: block; width: 100%; height: 100%; object-fit: cover; }
+        #better-codex-context-menu .better-codex-context-avatar.is-fallback svg, #better-codex-context-menu .better-codex-context-avatar.is-icon svg { width: 10px; height: 10px; margin: auto; }
+        #better-codex-context-menu .better-codex-context-avatar.is-user.is-initials { color: #fff; font-size: 9px; font-weight: 700; line-height: 1; }
         #\${PANEL_ID} .better-codex-board { display: flex; gap: 12px; min-height: 0; flex: 1; overflow-x: auto; overflow-y: hidden; padding: 0 16px 10px; }
         #\${PANEL_ID} .better-codex-column { box-sizing: border-box; display: flex; width: 280px; min-width: 280px; min-height: 200px; flex-direction: column; border-radius: 12px; padding: 8px; }
         #\${PANEL_ID} .better-codex-column[data-status="backlog"], #\${PANEL_ID} .better-codex-column[data-status="todo"], #\${PANEL_ID} .better-codex-column[data-status="cancelled"] { background: rgba(228,228,231,.42); }
@@ -360,7 +385,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #\${PANEL_ID} .better-codex-column[data-status="in_review"] { background: rgba(46,156,90,.07); }
         #\${PANEL_ID} .better-codex-column[data-status="done"] { background: rgba(37,131,216,.07); }
         #\${PANEL_ID} .better-codex-column[data-status="blocked"] { background: rgba(229,72,77,.07); }
-        #\${PANEL_ID} .better-codex-column-head { display: flex; min-height: 30px; align-items: center; justify-content: space-between; padding: 0 6px 6px; font-size: var(--bc-text-md); font-weight: 600; }
+        #\${PANEL_ID} .better-codex-column-head { display: flex; min-height: 30px; align-items: center; justify-content: space-between; padding: 0 0 6px; font-size: var(--bc-text-md); font-weight: 600; }
         #\${PANEL_ID} .better-codex-column-title, #\${PANEL_ID} .better-codex-column-actions { display: flex; align-items: center; gap: 6px; }
         #\${PANEL_ID} #better-codex-filter > svg { color: var(--bc-info); }
         #\${PANEL_ID} .better-codex-status-icon, #better-codex-context-menu .better-codex-status-icon, #better-codex-dialog .better-codex-status-icon { width: 14px; height: 14px; color: var(--bc-muted); }
@@ -370,22 +395,36 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #\${PANEL_ID} .better-codex-status-icon[data-status="blocked"], #\${PANEL_ID} [data-status="blocked"] .better-codex-status-icon, #better-codex-context-menu .better-codex-status-icon[data-status="blocked"], #better-codex-dialog .better-codex-status-icon[data-status="blocked"] { color: var(--bc-danger); }
         #\${PANEL_ID} .better-codex-column-icon { width: 24px; height: 24px; border: 0; border-radius: 999px; color: var(--bc-muted); background: transparent; padding: 0; font-size: var(--bc-text-icon-lg); line-height: 20px; cursor: pointer; }
         #\${PANEL_ID} .better-codex-column-icon:hover { background: rgba(113,113,122,.1); }
-        #\${PANEL_ID} .better-codex-cards { min-height: 0; flex: 1; overflow-y: auto; padding: 4px; border-radius: 8px; }
-        #\${PANEL_ID} .better-codex-card { box-sizing: border-box; width: 256px; margin-bottom: 8px; border: 1px solid var(--bc-color-hairline, #e5e5e6); border-radius: 8px; background: transparent; padding: 12px 10px; box-shadow: var(--bc-card-shadow, 0 1px 2px rgba(15,23,42,.04),0 4px 14px rgba(15,23,42,.07)); cursor: pointer; transition: border-color .15s, box-shadow .15s, transform .15s; }
-        #\${PANEL_ID} .better-codex-card:hover { border-color: color-mix(in srgb, var(--bc-color-text, #1a1c1f) 16%, var(--bc-color-hairline, #e5e5e6)); background: transparent; }
+        #\${PANEL_ID} .better-codex-cards { min-height: 0; flex: 1; overflow-y: auto; padding: 0; border-radius: 8px; }
+        #\${PANEL_ID} .better-codex-card { box-sizing: border-box; width: 100%; margin-bottom: 8px; border: 1px solid var(--bc-color-hairline, #e5e5e6); border-radius: 8px; background: var(--bc-color-canvas, var(--bc-page, #fff)); padding: 12px 10px; box-shadow: var(--bc-card-shadow, 0 1px 2px rgba(15,23,42,.04),0 2px 6px rgba(15,23,42,.05)); cursor: pointer; transition: border-color .15s, box-shadow .15s, transform .15s; }
+        #\${PANEL_ID} .better-codex-card:hover { border-color: color-mix(in srgb, var(--bc-color-text, #1a1c1f) 16%, var(--bc-color-hairline, #e5e5e6)); background: var(--bc-color-canvas, var(--bc-page, #fff)); box-shadow: var(--bc-card-shadow, 0 1px 2px rgba(15,23,42,.04),0 2px 6px rgba(15,23,42,.05)), 0 4px 12px rgba(15,23,42,.06); }
         #\${PANEL_ID} .better-codex-card:active { transform: scale(.995); }
         #\${PANEL_ID} .better-codex-card-row, #\${PANEL_ID} .better-codex-card-id, #\${PANEL_ID} .better-codex-card-meta { display: flex; align-items: center; }
         #\${PANEL_ID} .better-codex-card-row { justify-content: space-between; gap: 8px; }
         #\${PANEL_ID} .better-codex-card-id { min-width: 0; gap: 6px; color: var(--bc-muted); font-size: var(--bc-text-sm); }
         #\${PANEL_ID} .better-codex-priority { width: 14px; height: 14px; flex: 0 0 auto; }
-        #\${PANEL_ID} .better-codex-priority[data-priority="urgent"] { color: var(--bc-danger); }
-        #\${PANEL_ID} .better-codex-priority[data-priority="high"], #\${PANEL_ID} .better-codex-priority[data-priority="medium"] { color: var(--bc-warning); }
-        #\${PANEL_ID} .better-codex-priority[data-priority="low"] { color: var(--bc-info); }
+        #\${PANEL_ID} .better-codex-priority, #better-codex-context-menu .better-codex-priority, #better-codex-dialog .better-codex-priority { color: var(--bc-priority-none, var(--bc-muted)); }
+        #\${PANEL_ID} .better-codex-priority[data-priority="none"], #better-codex-context-menu .better-codex-priority[data-priority="none"], #better-codex-dialog .better-codex-priority[data-priority="none"] { color: var(--bc-priority-none, var(--bc-muted)); }
+        #\${PANEL_ID} .better-codex-priority[data-priority="low"], #better-codex-context-menu .better-codex-priority[data-priority="low"], #better-codex-dialog .better-codex-priority[data-priority="low"] { color: var(--bc-priority-low, var(--bc-info)); }
+        #\${PANEL_ID} .better-codex-priority[data-priority="medium"], #better-codex-context-menu .better-codex-priority[data-priority="medium"], #better-codex-dialog .better-codex-priority[data-priority="medium"] { color: var(--bc-priority-medium, var(--bc-warning)); }
+        #\${PANEL_ID} .better-codex-priority[data-priority="high"], #better-codex-context-menu .better-codex-priority[data-priority="high"], #better-codex-dialog .better-codex-priority[data-priority="high"] { color: var(--bc-priority-high, oklch(.68 .18 52)); }
+        #\${PANEL_ID} .better-codex-priority[data-priority="urgent"], #better-codex-context-menu .better-codex-priority[data-priority="urgent"], #better-codex-dialog .better-codex-priority[data-priority="urgent"] { color: var(--bc-priority-urgent, var(--bc-danger)); }
         #\${PANEL_ID} .better-codex-card-title { display: -webkit-box; margin: 5px 0 0; overflow: hidden; color: #202024; font-size: var(--bc-text-md); font-weight: 550; line-height: 1.38; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
         #\${PANEL_ID} .better-codex-card-description { margin-top: 4px; overflow: hidden; color: var(--bc-muted); font-size: var(--bc-text-sm); line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
         #\${PANEL_ID} .better-codex-chip-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
         #\${PANEL_ID} .better-codex-chip { display: inline-flex; max-width: 155px; align-items: center; gap: 4px; overflow: hidden; border-radius: 999px; background: #f2f2f3; padding: 2px 6px; color: var(--bc-muted); font-size: var(--bc-text-caption); text-overflow: ellipsis; white-space: nowrap; }
+        #\${PANEL_ID} .better-codex-chip > svg { width: 11px; height: 11px; flex: 0 0 auto; }
+        #\${PANEL_ID} .better-codex-chip > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
         #\${PANEL_ID} .better-codex-card-meta { justify-content: space-between; gap: 8px; margin-top: 8px; color: var(--bc-muted); font-size: var(--bc-text-sm); }
+        #\${PANEL_ID} .better-codex-card-assignee { display: inline-flex; min-width: 0; align-items: center; gap: 5px; overflow: hidden; color: var(--bc-muted); }
+        #\${PANEL_ID} .better-codex-card-assignee > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        #\${PANEL_ID} .better-codex-card-assignee > svg { width: 12px; height: 12px; flex: 0 0 auto; }
+        #\${PANEL_ID} .better-codex-card-avatar { display: inline-flex; width: 16px; height: 16px; flex: 0 0 auto; align-items: center; justify-content: center; overflow: hidden; border-radius: 999px; color: #fff; background: #27272a; }
+        #\${PANEL_ID} .better-codex-card-avatar.is-codex { color: inherit; background: transparent; border-radius: 4px; }
+        #\${PANEL_ID} .better-codex-card-avatar.is-fallback, #\${PANEL_ID} .better-codex-card-avatar.is-icon { color: var(--bc-muted); background: #f2f2f3; }
+        #\${PANEL_ID} .better-codex-card-avatar img, #\${PANEL_ID} .better-codex-card-avatar svg { width: 100%; height: 100%; display: block; object-fit: cover; }
+        #\${PANEL_ID} .better-codex-card-avatar.is-fallback svg, #\${PANEL_ID} .better-codex-card-avatar.is-icon svg { width: 10px; height: 10px; margin: auto; }
+        #\${PANEL_ID} .better-codex-card-avatar.is-user.is-initials { color: #fff; font-size: 9px; font-weight: 700; line-height: 1; }
         #\${PANEL_ID} .better-codex-link { overflow: hidden; border: 0; color: var(--bc-info, #2563eb); background: transparent; padding: 0; font: inherit; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
         #\${PANEL_ID} .better-codex-link:hover { text-decoration: underline; }
         #\${PANEL_ID} .better-codex-activity { display: inline-flex; align-items: center; gap: 5px; flex: 0 0 auto; font-size: var(--bc-text-caption); font-weight: 600; }
@@ -508,6 +547,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #better-codex-dialog .better-codex-project-option > span:first-of-type { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         #better-codex-dialog .better-codex-project-check { width: 14px; flex: 0 0 auto; }
         #better-codex-dialog .better-codex-project-empty { padding: 8px 7px; color: #a1a1aa; font-size: var(--bc-text-md); }
+        #better-codex-dialog .better-codex-dialog-attachments { display: flex; flex: 0 0 auto; flex-wrap: wrap; gap: 6px; padding: 0 16px 8px; }
+        #better-codex-dialog .better-codex-dialog-attachments[hidden] { display: none; }
+        #better-codex-dialog .better-codex-attachment-chip { display: inline-flex; max-width: 100%; min-height: 28px; align-items: center; gap: 6px; border: 1px solid #e5e5e7; border-radius: 999px; color: #52525b; background: #fff; padding: 0 4px 0 9px; font-size: var(--bc-text-md); }
+        #better-codex-dialog .better-codex-attachment-chip > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        #better-codex-dialog .better-codex-attachment-chip button { display: inline-flex; width: 22px; height: 22px; flex: 0 0 auto; align-items: center; justify-content: center; border: 0; border-radius: 999px; color: #71717a; background: transparent; padding: 0; cursor: pointer; }
+        #better-codex-dialog .better-codex-attachment-chip button:hover { color: #27272a; background: #f4f4f5; }
         #better-codex-dialog .better-codex-dialog-footer { display: flex; min-height: 48px; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 10px; border-top: 1px solid #ededee; padding: 0 14px 0 18px; }
         #better-codex-dialog .better-codex-dialog-footer-right { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
         #better-codex-dialog .better-codex-switch-mode { display: inline-flex; height: var(--bc-control-height, 32px); align-items: center; gap: 6px; border: 0; border-radius: 5px; color: #71717a; background: transparent; padding: 0 8px; font: inherit; font-size: var(--bc-text-md); cursor: pointer; }
@@ -543,10 +588,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #\${PANEL_ID} .better-codex-column[data-status="done"] { background: color-mix(in oklch,var(--bc-info) 8%,transparent); }
         #\${PANEL_ID} .better-codex-column[data-status="blocked"] { background: color-mix(in oklch,var(--bc-danger) 8%,transparent); }
         #\${PANEL_ID} .better-codex-column-icon:hover { background: var(--bc-hover); }
-        #\${PANEL_ID} .better-codex-card { border-color: var(--bc-color-hairline); color: var(--bc-foreground); background: transparent; box-shadow: var(--bc-card-shadow); }
-        #\${PANEL_ID} .better-codex-card:hover { border-color: color-mix(in srgb, var(--bc-color-text) 16%, var(--bc-color-hairline)); background: transparent; }
+        #\${PANEL_ID} .better-codex-card { border-color: var(--bc-color-hairline); color: var(--bc-foreground); background: var(--bc-color-canvas); box-shadow: var(--bc-card-shadow); }
+        #\${PANEL_ID} .better-codex-card:hover { border-color: color-mix(in srgb, var(--bc-color-text) 16%, var(--bc-color-hairline)); background: var(--bc-color-canvas); }
         #\${PANEL_ID} .better-codex-card-title { color: var(--bc-foreground); }
         #\${PANEL_ID} .better-codex-chip { color: var(--bc-muted); background: var(--bc-hover); }
+        #\${PANEL_ID} .better-codex-card-avatar { color: var(--bc-primary-foreground); background: var(--bc-primary); }
+        #\${PANEL_ID} .better-codex-card-avatar.is-fallback, #\${PANEL_ID} .better-codex-card-avatar.is-icon { color: var(--bc-muted); background: var(--bc-hover); }
+        #\${PANEL_ID} .better-codex-card-avatar.is-codex { color: inherit; background: transparent; }
         #\${PANEL_ID} .better-codex-avatar, #\${PANEL_ID} .better-codex-agent-card-avatar { color: var(--bc-primary-foreground); background: var(--bc-primary); }
         #\${PANEL_ID} .better-codex-activity[data-run="running"] { color: var(--bc-foreground); }
         #\${PANEL_ID} .better-codex-shimmer { background-image: linear-gradient(90deg,var(--bc-muted) 0%,var(--bc-muted) 35%,var(--bc-foreground) 50%,var(--bc-muted) 65%,var(--bc-muted) 100%); }
@@ -582,9 +630,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #better-codex-dialog .better-codex-agent-avatar.is-fallback { border-radius: var(--bc-radius-xs); color: var(--bc-color-text-muted); background: var(--bc-color-control); }
         #better-codex-dialog .better-codex-agent-avatar.is-fallback svg { width: 12px; height: 12px; }
         #better-codex-dialog .better-codex-agent-avatar.is-icon svg { width: 12px; height: 12px; }
+        #better-codex-dialog .better-codex-agent-avatar.is-user.is-initials { color: #fff; font-size: 9px; font-weight: 700; line-height: 1; }
         #better-codex-dialog .better-codex-property { border-color: var(--bc-border); color: var(--bc-muted); background: var(--bc-surface); }
         #better-codex-dialog .better-codex-project-menu { border-color: var(--bc-border); color: var(--bc-foreground); background: var(--bc-raised); box-shadow: var(--bc-menu-shadow); }
         #better-codex-dialog .better-codex-project-search, #better-codex-dialog .better-codex-dialog-footer { border-color: var(--bc-divider); }
+        #better-codex-dialog .better-codex-attachment-chip { border-color: var(--bc-border); color: var(--bc-muted); background: var(--bc-surface); }
+        #better-codex-dialog .better-codex-attachment-chip button { color: var(--bc-muted); }
+        #better-codex-dialog .better-codex-attachment-chip button:hover { color: var(--bc-foreground); background: var(--bc-hover); }
         #better-codex-dialog[data-mode="manual"] .better-codex-switch-mode { color: var(--bc-foreground); background: var(--bc-selected); box-shadow: inset 0 0 0 1px var(--bc-divider); }
         #better-codex-dialog .better-codex-toggle { background: var(--bc-input); }
         #better-codex-dialog .better-codex-toggle::after { background: var(--bc-primary-foreground); }
@@ -721,15 +773,29 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     function api(path, options = {}) {
       if (typeof window.betterCodexRequest !== "function") return Promise.reject(new Error("runtime_bridge_unavailable"));
-      const id = VERSION + ":" + (++bridgeSequence);
-      return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => {
-          bridgeRequests.delete(id);
-          reject(new Error("runtime_bridge_timeout"));
-        }, 10000);
-        bridgeRequests.set(id, { resolve, reject, timer });
-        window.betterCodexRequest(JSON.stringify({ id, token: BRIDGE_TOKEN, path, method: options.method || "GET", body: options.body }));
-      });
+      const attempt = (retriesLeft) => {
+        const id = VERSION + ":" + (++bridgeSequence);
+        return new Promise((resolve, reject) => {
+          const timer = setTimeout(() => {
+            bridgeRequests.delete(id);
+            reject(new Error("runtime_bridge_timeout"));
+          }, 10000);
+          bridgeRequests.set(id, { resolve, reject, timer });
+          try {
+            window.betterCodexRequest(JSON.stringify({ id, token: BRIDGE_TOKEN, path, method: options.method || "GET", body: options.body }));
+          } catch (error) {
+            bridgeRequests.delete(id);
+            clearTimeout(timer);
+            reject(error instanceof Error ? error : new Error("runtime_bridge_unavailable"));
+          }
+        }).catch(error => {
+          if (retriesLeft > 0 && error instanceof Error && error.message === "runtime_bridge_timeout") {
+            return attempt(retriesLeft - 1);
+          }
+          throw error;
+        });
+      };
+      return attempt(1);
     }
 
     window.__betterCodexBridgeResolve = (id, result) => {
@@ -871,7 +937,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     function codexLogo() {
       const gradientId = "better-codex-logo-gradient-" + (++codexLogoSequence);
-      return '<svg viewBox="0 0 24 24" width="36" height="36" role="img" aria-label="Codex"><path d="M19.503 0H4.496A4.496 4.496 0 000 4.496v15.007A4.496 4.496 0 004.496 24h15.007A4.496 4.496 0 0024 19.503V4.496A4.496 4.496 0 0019.503 0z" fill="#fff"></path><path d="M9.064 3.344a4.578 4.578 0 012.285-.312c1 .115 1.891.54 2.673 1.275.01.01.024.017.037.021a.09.09 0 00.043 0 4.55 4.55 0 013.046.275l.047.022.116.057a4.581 4.581 0 012.188 2.399c.209.51.313 1.041.315 1.595a4.24 4.24 0 01-.134 1.223.123.123 0 00.03.115c.594.607.988 1.33 1.183 2.17.289 1.425-.007 2.71-.887 3.854l-.136.166a4.548 4.548 0 01-2.201 1.388.123.123 0 00-.081.076c-.191.551-.383 1.023-.74 1.494-.9 1.187-2.222 1.846-3.711 1.838-1.187-.006-2.239-.44-3.157-1.302a.107.107 0 00-.105-.024c-.388.125-.78.143-1.204.138a4.441 4.441 0 01-1.945-.466 4.544 4.544 0 01-1.61-1.335c-.152-.202-.303-.392-.414-.617a5.81 5.81 0 01-.37-.961 4.582 4.582 0 01-.014-2.298.124.124 0 00.006-.056.085.085 0 00-.027-.048 4.467 4.467 0 01-1.034-1.651 3.896 3.896 0 01-.251-1.192 5.189 5.189 0 01.141-1.6c.337-1.112.982-1.985 1.933-2.618.212-.141.413-.251.601-.33.215-.089.43-.164.646-.227a.098.098 0 00.065-.066 4.51 4.51 0 01.829-1.615 4.535 4.535 0 011.837-1.388zm3.482 10.565a.637.637 0 000 1.272h3.636a.637.637 0 100-1.272h-3.636zM8.462 9.23a.637.637 0 00-1.106.631l1.272 2.224-1.266 2.136a.636.636 0 101.095.649l1.454-2.455a.636.636 0 00.005-.64L8.462 9.23z" fill="url(#' + gradientId + ')"></path><defs><linearGradient gradientUnits="userSpaceOnUse" id="' + gradientId + '" x1="12" x2="12" y1="3" y2="21"><stop stop-color="#B1A7FF"></stop><stop offset=".5" stop-color="#7A9DFF"></stop><stop offset="1" stop-color="#3941FF"></stop></linearGradient></defs></svg>';
+      return '<svg viewBox="0 0 24 24" width="36" height="36" role="img" aria-label="Better Codex"><path d="M19.503 0H4.496A4.496 4.496 0 000 4.496v15.007A4.496 4.496 0 004.496 24h15.007A4.496 4.496 0 0024 19.503V4.496A4.496 4.496 0 0019.503 0z" fill="#fff"></path><path d="M9.064 3.344a4.578 4.578 0 012.285-.312c1 .115 1.891.54 2.673 1.275.01.01.024.017.037.021a.09.09 0 00.043 0 4.55 4.55 0 013.046.275l.047.022.116.057a4.581 4.581 0 012.188 2.399c.209.51.313 1.041.315 1.595a4.24 4.24 0 01-.134 1.223.123.123 0 00.03.115c.594.607.988 1.33 1.183 2.17.289 1.425-.007 2.71-.887 3.854l-.136.166a4.548 4.548 0 01-2.201 1.388.123.123 0 00-.081.076c-.191.551-.383 1.023-.74 1.494-.9 1.187-2.222 1.846-3.711 1.838-1.187-.006-2.239-.44-3.157-1.302a.107.107 0 00-.105-.024c-.388.125-.78.143-1.204.138a4.441 4.441 0 01-1.945-.466 4.544 4.544 0 01-1.61-1.335c-.152-.202-.303-.392-.414-.617a5.81 5.81 0 01-.37-.961 4.582 4.582 0 01-.014-2.298.124.124 0 00.006-.056.085.085 0 00-.027-.048 4.467 4.467 0 01-1.034-1.651 3.896 3.896 0 01-.251-1.192 5.189 5.189 0 01.141-1.6c.337-1.112.982-1.985 1.933-2.618.212-.141.413-.251.601-.33.215-.089.43-.164.646-.227a.098.098 0 00.065-.066 4.51 4.51 0 01.829-1.615 4.535 4.535 0 011.837-1.388zm3.482 10.565a.637.637 0 000 1.272h3.636a.637.637 0 100-1.272h-3.636zM8.462 9.23a.637.637 0 00-1.106.631l1.272 2.224-1.266 2.136a.636.636 0 101.095.649l1.454-2.455a.636.636 0 00.005-.64L8.462 9.23z" fill="url(#' + gradientId + ')"></path><path d="M14.2 0h5.303A4.496 4.496 0 0124 4.496V9.8z" fill="url(#' + gradientId + '-badge)"></path><text x="19.35" y="3.35" fill="#fff" font-family="Arial,sans-serif" font-size="2.55" font-weight="700" letter-spacing=".08" text-anchor="middle" transform="rotate(45 19.35 3.35)">better</text><defs><linearGradient gradientUnits="userSpaceOnUse" id="' + gradientId + '" x1="12" x2="12" y1="3" y2="21"><stop stop-color="#B1A7FF"></stop><stop offset=".5" stop-color="#7A9DFF"></stop><stop offset="1" stop-color="#3941FF"></stop></linearGradient><linearGradient gradientUnits="userSpaceOnUse" id="' + gradientId + '-badge" x1="14.2" x2="24" y1="0" y2="9.8"><stop stop-color="#7146ff"></stop><stop offset="1" stop-color="#a53cff"></stop></linearGradient></defs></svg>';
     }
 
     function icon(name, className = "", strokeWidth = "1.7") {
@@ -889,7 +955,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     function priorityIcon(priority) {
       const names = { none: "priorityNone", low: "priorityLow", medium: "priorityMedium", high: "priorityHigh", urgent: "priorityUrgent" };
-      const markup = icon(names[priority] || "priorityNone", "better-codex-priority");
+      const markup = icon(names[priority] || "priorityNone", "better-codex-priority", "2.35");
       return markup.replace("<svg ", '<svg data-priority="' + escapeHtml(priority) + '" ');
     }
 
@@ -908,7 +974,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (filters.project.length && !filters.project.includes(issue.project_id)) return false;
       if (filters.label.length && !filters.label.some(value => (issue.labels || []).includes(value))) return false;
       if (filters.assignee.length) {
-        const assignee = issue.agent_enabled ? issue.agent_id || "codex" : "none";
+        const assignee = issue.agent_enabled
+          ? issue.agent_id || "codex"
+          : issue.user_assigned ? "user" : "none";
         if (!filters.assignee.includes(assignee)) return false;
       }
       if (filters.creator.length && !filters.creator.includes("me")) return false;
@@ -976,7 +1044,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (key === "status") return Object.entries(statusLabels).map(([value, text]) => ({ value, text }));
       if (key === "priority") return Object.entries(priorityLabels).map(([value, text]) => ({ value, text: value === "none" ? "无优先级" : text + "优先级" }));
       if (key === "date") return [{ value: "1", text: "最近 24 小时" }, { value: "7", text: "最近 7 天" }, { value: "30", text: "最近 30 天" }];
-      if (key === "assignee") return [{ value: "codex", text: "Codex（默认配置）" }, ...state.agents.map(agent => ({ value: agent.id, text: agent.name })), { value: "none", text: "未分配" }];
+      if (key === "assignee") return [{ value: "user", text: state.user.name || "我" }, { value: "codex", text: "Codex（默认配置）" }, ...state.agents.filter(agent => !agent.is_default).map(agent => ({ value: agent.id, text: agent.name })), { value: "none", text: "未分配" }];
       if (key === "creator") return [{ value: "me", text: "由我创建" }];
       if (key === "project") return state.projects.map(project => ({ value: project.id, text: project.name }));
       if (key === "label") return [...new Set(state.issues.flatMap(issue => issue.labels || []))].map(value => ({ value, text: value }));
@@ -1106,19 +1174,53 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const workspacePath = issue.workspace_path || project?.workspace_path || readContext().workspacePath;
       const statusItems = Object.entries(statusLabels).map(([value, text]) => '<button class="better-codex-context-item" type="button" data-context-action="update" data-context-field="status" data-context-value="' + value + '"><span class="better-codex-context-check">' + (issue.status === value ? icon("check") : "") + '</span>' + statusIcon(value) + '<span>' + escapeHtml(text) + "</span></button>").join("");
       const priorityItems = Object.entries(priorityLabels).map(([value, text]) => '<button class="better-codex-context-item" type="button" data-context-action="update" data-context-field="priority" data-context-value="' + value + '"><span class="better-codex-context-check">' + (issue.priority === value ? icon("check") : "") + '</span>' + priorityIcon(value) + '<span>' + escapeHtml(value === "none" ? "无优先级" : text + "优先级") + "</span></button>").join("");
+      const userSelected = Boolean(issue.user_assigned) && !issue.agent_enabled;
+      const noneSelected = !issue.user_assigned && !issue.agent_enabled;
+      const userName = state.user.name || "我";
+      const userAvatar = '<span class="better-codex-context-avatar is-user is-initials" style="background:' + escapeHtml(state.user.color || "#16a34a") + '">' + escapeHtml(state.user.initials || "你") + '</span>';
+      const assigneeItems = [
+        '<button class="better-codex-context-item" type="button" data-context-action="assign" data-assignee-kind="me"><span class="better-codex-context-check">' + (userSelected ? icon("check") : "") + '</span>' + userAvatar + '<span>' + escapeHtml(userName) + '</span></button>',
+        ...state.agents.map(agent => {
+          const selected = Boolean(issue.agent_enabled) && (agent.is_default ? !issue.agent_id : issue.agent_id === agent.id);
+          const label = agent.is_default ? agent.name + "（默认）" : agent.name;
+          return '<button class="better-codex-context-item" type="button" data-context-action="assign" data-assignee-kind="agent" data-context-agent-id="' + escapeHtml(agent.id || "") + '"><span class="better-codex-context-check">' + (selected ? icon("check") : "") + '</span>' + agentAvatarMarkup(agent, "better-codex-context-avatar") + '<span>' + escapeHtml(label) + "</span></button>";
+        }),
+        '<div class="better-codex-context-divider"></div>',
+        '<button class="better-codex-context-item" type="button" data-context-action="assign" data-assignee-kind="none"><span class="better-codex-context-check">' + (noneSelected ? icon("check") : "") + '</span>' + icon("user") + '<span>取消分配</span></button>'
+      ].join("");
       const menu = document.createElement("div");
       menu.id = "better-codex-context-menu";
       menu.setAttribute(OWNED, "true");
       menu.dataset.issueId = issue.id;
       menu.dataset.align = event.clientX + 430 > window.innerWidth ? "left" : "right";
-      menu.innerHTML = '<div class="better-codex-context-item-wrap"><button class="better-codex-context-item" type="button">' + statusIcon(issue.status) + '<span>状态</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu">' + statusItems + '</div></div><div class="better-codex-context-item-wrap"><button class="better-codex-context-item" type="button">' + priorityIcon(issue.priority) + '<span>优先级</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu">' + priorityItems + '</div></div>' + (workspacePath ? '<div class="better-codex-context-divider"></div><button class="better-codex-context-item" type="button" data-context-action="copy-workspace">' + icon("folder") + '<span>复制本地 workdir 路径</span></button>' : "") + '<div class="better-codex-context-divider"></div><button class="better-codex-context-item is-danger" type="button" data-context-action="archive">' + icon("trash") + '<span>删除任务</span></button>';
+      menu.innerHTML = '<div class="better-codex-context-item-wrap"><button class="better-codex-context-item" type="button">' + statusIcon(issue.status) + '<span>状态</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu">' + statusItems + '</div></div><div class="better-codex-context-item-wrap"><button class="better-codex-context-item" type="button">' + priorityIcon(issue.priority) + '<span>优先级</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu">' + priorityItems + '</div></div><div class="better-codex-context-item-wrap"><button class="better-codex-context-item" type="button">' + icon("user") + '<span>指定负责人</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu is-assignee">' + assigneeItems + '</div></div>' + (workspacePath ? '<div class="better-codex-context-divider"></div><button class="better-codex-context-item" type="button" data-context-action="copy-workspace">' + icon("folder") + '<span>复制本地 workdir 路径</span></button>' : "") + '<div class="better-codex-context-divider"></div><button class="better-codex-context-item is-danger" type="button" data-context-action="archive">' + icon("trash") + '<span>删除任务</span></button>';
       document.body.appendChild(menu);
       const rect = menu.getBoundingClientRect();
       menu.style.left = Math.max(8, Math.min(event.clientX, window.innerWidth - rect.width - 8)) + "px";
       menu.style.top = Math.max(8, Math.min(event.clientY, window.innerHeight - rect.height - 8)) + "px";
+
+      async function assignIssue(kind, agentId = "") {
+        const current = state.issues.find(candidate => candidate.id === menu.dataset.issueId);
+        if (!current) return closeIssueMenu();
+        const alreadyMe = kind === "me" && current.user_assigned && !current.agent_enabled;
+        const alreadyNone = kind === "none" && !current.user_assigned && !current.agent_enabled;
+        const alreadyAgent = kind === "agent" && current.agent_enabled && (agentId ? current.agent_id === agentId : !current.agent_id);
+        if (alreadyMe || alreadyNone || alreadyAgent) return closeIssueMenu();
+        closeIssueMenu();
+        const body = kind === "me"
+          ? { version: current.version, user_assigned: true, agent_enabled: false, agent_id: "" }
+          : kind === "agent"
+            ? { version: current.version, user_assigned: false, agent_enabled: true, agent_id: agentId }
+            : { version: current.version, user_assigned: false, agent_enabled: false, agent_id: "" };
+        await perform(async () => {
+          await api("/api/issues/" + encodeURIComponent(current.id), { method: "PATCH", body: JSON.stringify(body) });
+          await loadIssues();
+        });
+      }
+
       menu.addEventListener("click", clickEvent => {
         const item = clickEvent.target.closest("[data-context-action]");
-        if (!item) return;
+        if (!item || !menu.contains(item)) return;
         clickEvent.preventDefault();
         clickEvent.stopPropagation();
         const current = state.issues.find(candidate => candidate.id === menu.dataset.issueId);
@@ -1136,6 +1238,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
               await loadIssues();
             });
           });
+        }
+        if (item.dataset.contextAction === "assign") {
+          const kind = item.getAttribute("data-assignee-kind") || "";
+          const agentId = item.getAttribute("data-context-agent-id") || "";
+          return void assignIssue(kind, agentId);
         }
         const field = item.dataset.contextField;
         const value = item.dataset.contextValue;
@@ -1207,6 +1314,39 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const filterWrap = document.createElement("div");
       filterWrap.className = "better-codex-filter-wrap";
       filterWrap.appendChild(filter);
+      const autoDispatchWrap = document.createElement("div");
+      autoDispatchWrap.className = "better-codex-auto-dispatch-wrap";
+      const autoDispatch = actionButton("");
+      autoDispatch.id = "better-codex-auto-dispatch";
+      autoDispatch.classList.add("better-codex-auto-dispatch", "is-bordered");
+      autoDispatch.setAttribute("aria-pressed", "false");
+      autoDispatch.setAttribute("aria-label", "切换为自动运行");
+      autoDispatch.innerHTML = icon("refresh") + "<span>手动运行</span>";
+      autoDispatch.addEventListener("click", () => {
+        const next = !state.autoDispatch;
+        state.autoDispatch = next;
+        syncAutoDispatch();
+        void perform(async () => {
+          try {
+            const result = await api("/api/settings/auto-dispatch", { method: "PATCH", body: JSON.stringify({ enabled: next }) });
+            state.autoDispatch = Boolean(result.enabled);
+          } catch (error) {
+            state.autoDispatch = !next;
+            throw error;
+          } finally {
+            syncAutoDispatch();
+          }
+        });
+      });
+      const autoDispatchHelp = actionButton("");
+      autoDispatchHelp.className = "better-codex-auto-dispatch-help";
+      autoDispatchHelp.setAttribute("aria-label", "运行模式说明");
+      autoDispatchHelp.innerHTML = icon("help");
+      autoDispatchHelp.addEventListener("click", event => {
+        event.stopPropagation();
+        showAutoDispatchHelp();
+      });
+      autoDispatchWrap.append(autoDispatch, autoDispatchHelp);
       const addIssue = actionButton("新建 issue");
       addIssue.className = "better-codex-create-primary";
       addIssue.insertAdjacentHTML("afterbegin", icon("plus"));
@@ -1229,7 +1369,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const createSplit = document.createElement("div");
       createSplit.className = "better-codex-create-split";
       createSplit.append(addIssue, createToggle);
-      actions.append(error, working, search, filterWrap, createSplit);
+      actions.append(error, working, search, filterWrap, autoDispatchWrap, createSplit);
       const agentActions = document.createElement("div");
       agentActions.className = "better-codex-agent-actions";
       const addAgent = actionButton("新建智能体");
@@ -1243,7 +1383,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       board.className = "better-codex-board better-codex-issue-only";
       board.addEventListener("click", onBoardClick);
       board.addEventListener("contextmenu", openIssueMenu);
-      board.addEventListener("dragstart", event => event.dataTransfer?.setData("text/plain", event.target.closest("[data-issue-id]")?.dataset.issueId || ""));
+      board.addEventListener("dragstart", onCardDragStart);
+      board.addEventListener("dragend", onCardDragEnd);
       board.addEventListener("dragover", event => event.preventDefault());
       board.addEventListener("drop", onDrop);
       const agents = document.createElement("main");
@@ -1336,8 +1477,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         };
         avatarPickerClose = () => finish(null);
         const onDismiss = event => {
-          if (picker.contains(event.target) || anchor?.contains?.(event.target)) return;
+          // Only the picker itself is "inside". The avatar field label sits under the
+          // popover and must still count as outside.
+          if (picker.contains(event.target)) return;
+          // Outside mousedown closes the picker only. The matching click must not
+          // also dismiss the agent inspector or the whole Better Codex panel.
+          suppressAgentOutside = true;
           finish(null);
+          setTimeout(() => { suppressAgentOutside = false; }, 0);
         };
         const onKeydown = event => {
           if (event.key === "Escape") {
@@ -1517,7 +1664,45 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     const suggestedAgents = ${JSON.stringify(suggestedAgents)};
 
-    function agentInspector(agent) {
+    let agentInspectorClosing = false;
+
+    function closeAgentInspector() {
+      if (state.agentPane === "preview") return;
+      const inspector = panel?.querySelector(".better-codex-agent-inspector");
+      if (inspector?.classList.contains("is-closing")) return;
+      const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+      if (!inspector || reduceMotion) {
+        agentInspectorClosing = false;
+        state.agentPane = "preview";
+        state.selectedAgentId = "";
+        state.agentDraft = null;
+        renderAgents();
+        return;
+      }
+      agentInspectorClosing = true;
+      inspector.classList.add("is-closing");
+      inspector.setAttribute("aria-hidden", "true");
+      let finished = false;
+      const finish = () => {
+        if (finished) return;
+        finished = true;
+        agentInspectorClosing = false;
+        inspector.removeEventListener("transitionend", onEnd);
+        state.agentPane = "preview";
+        state.selectedAgentId = "";
+        state.agentDraft = null;
+        renderAgents();
+      };
+      const onEnd = event => {
+        if (event.target !== inspector) return;
+        if (event.propertyName !== "width" && event.propertyName !== "min-width") return;
+        finish();
+      };
+      inspector.addEventListener("transitionend", onEnd);
+      setTimeout(finish, 400);
+    }
+
+    function agentInspector(agent, options = {}) {
       if (state.agentPane === "preview") return "";
       const creating = state.agentPane === "create";
       const draft = creating ? (state.agentDraft || {}) : agent;
@@ -1537,17 +1722,19 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         ? '<h2>创建智能体</h2><div class="better-codex-agent-avatar-field">' + agentAvatarEditorMarkup(draft, "") + '<div><strong>头像</strong><span>点击选择预设图标，或上传图片</span></div>' + avatarInput + '</div>'
         : '<div class="better-codex-agent-profile-head">' + agentAvatarEditorMarkup(draft, agentKey(draft)) + '<h2>' + escapeHtml(draft.name) + '</h2>' + avatarInput + '</div>';
       const identity = isDefault
-        ? '<div class="better-codex-agent-summary"><div><strong>Codex 默认智能体</strong><p>此处修改会写入根 config.toml，并影响之后新建的 Codex 窗口。</p></div></div>'
+        ? '<div class="better-codex-agent-summary"><div><strong>Codex 默认智能体</strong></div></div>'
         : '<label class="better-codex-agent-inspector-field"><span>名称</span><input name="name" maxlength="80" value="' + escapeHtml(name) + '" placeholder="智能体名称" required></label><label class="better-codex-agent-inspector-field"><span>介绍 <small>可选</small></span><textarea name="description" maxlength="500" rows="3" placeholder="说明这个智能体适合承担什么工作">' + escapeHtml(description) + '</textarea></label>';
       const instructionField = isDefault ? "" : '<label class="better-codex-agent-inspector-field"><span>Instruct <small>可选</small></span><textarea name="instructions" rows="7" placeholder="定义职责、工作方式和输出要求">' + escapeHtml(instructions) + '</textarea></label>';
       const deleteButton = !creating && !isDefault ? '<button class="better-codex-agent-danger" type="button" data-agent-delete data-agent-key="' + escapeHtml(agentKey(draft)) + '">删除智能体</button>' : "";
       const modelOptions = state.agentModelCatalog.map(item => ({ value: item.id, label: item.displayName, description: item.description || "" }));
-      return '<aside class="better-codex-agent-inspector"><form data-agent-form="' + (creating ? "create" : isDefault ? "default" : "update") + '" data-agent-key="' + escapeHtml(creating ? "" : agentKey(draft)) + '"><header class="better-codex-agent-inspector-head"><span>' + heading + '</span><button class="better-codex-agent-card-action" type="button" data-agent-close-pane aria-label="关闭详情">' + icon("close") + '</button></header><div class="better-codex-agent-inspector-scroll">' + profileHead + identity + '<h3>详情</h3><div class="better-codex-agent-inspector-group">' + agentPicker("model", "模型", model, modelOptions) + agentPicker("reasoning_effort", "推理", effort, effortOptions) + '</div>' + instructionField + '<div class="better-codex-agent-inspector-error" hidden></div></div><footer class="better-codex-agent-inspector-footer">' + deleteButton + '<button class="better-codex-submit" type="submit">' + (creating ? "创建" : "保存") + '</button></footer></form></aside>';
+      const animateAttr = options.animateEnter ? ' data-animate="enter"' : "";
+      return '<aside class="better-codex-agent-inspector"' + animateAttr + '><form data-agent-form="' + (creating ? "create" : isDefault ? "default" : "update") + '" data-agent-key="' + escapeHtml(creating ? "" : agentKey(draft)) + '"><header class="better-codex-agent-inspector-head"><span>' + heading + '</span><button class="better-codex-agent-card-action" type="button" data-agent-close-pane aria-label="关闭详情">' + icon("close") + '</button></header><div class="better-codex-agent-inspector-scroll">' + profileHead + identity + '<h3>详情</h3><div class="better-codex-agent-inspector-group">' + agentPicker("model", "模型", model, modelOptions) + agentPicker("reasoning_effort", "推理", effort, effortOptions) + '</div>' + instructionField + '<div class="better-codex-agent-inspector-error" hidden></div></div><footer class="better-codex-agent-inspector-footer">' + deleteButton + '<button class="better-codex-submit" type="submit">' + (creating ? "创建" : "保存") + '</button></footer></form></aside>';
     }
 
     function renderAgents() {
       const container = panel?.querySelector("#better-codex-agents");
       if (!container) return;
+      const previousPane = panel.dataset.agentPane || "preview";
       panel.dataset.agentPane = state.agentPane;
       const addAgent = panel.querySelector(".better-codex-agent-actions");
       if (addAgent) addAgent.hidden = state.agentPane !== "preview";
@@ -1562,20 +1749,67 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const key = agentKey(agent);
         const avatar = agentAvatarMarkup(agent, "better-codex-agent-list-avatar");
         const meta = modelLabel(agent.model) + " · " + effortLabel(agent.reasoning_effort) + "推理";
-        return '<button class="better-codex-agent-row' + (key === state.selectedAgentId ? " is-selected" : "") + '" type="button" data-agent-key="' + escapeHtml(key) + '">' + avatar + '<span class="better-codex-agent-row-copy"><strong>' + escapeHtml(agent.name) + (agent.is_default ? '<small>默认</small>' : "") + '</strong><span>' + escapeHtml(agent.description || "尚未添加介绍") + '</span><em>' + escapeHtml(meta) + '</em></span><span class="better-codex-agent-row-chevron">' + icon("chevron") + '</span></button>';
+        const description = agent.description || (agent.is_default ? "" : "尚未添加介绍");
+        return '<button class="better-codex-agent-row' + (key === state.selectedAgentId ? " is-selected" : "") + '" type="button" data-agent-key="' + escapeHtml(key) + '">' + avatar + '<span class="better-codex-agent-row-copy"><strong>' + escapeHtml(agent.name) + (agent.is_default ? '<small>默认</small>' : "") + '</strong>' + (description ? '<span>' + escapeHtml(description) + '</span>' : '') + '<em>' + escapeHtml(meta) + '</em></span><span class="better-codex-agent-row-chevron">' + icon("chevron") + '</span></button>';
       }).join("");
       const empty = '<div class="better-codex-agent-list-empty">' + (query ? "没有匹配的智能体" : "此分类暂无智能体") + '</div>';
       const suggestions = suggestedAgents.map(item => {
         const selected = state.agentPane === "create" && state.agentDraft?.key === item.key;
         return '<button class="better-codex-agent-suggestion' + (selected ? " is-selected" : "") + '" type="button" data-agent-template="' + item.key + '" aria-pressed="' + selected + '"><span class="better-codex-agent-suggestion-icon" data-tone="' + escapeHtml(item.tone) + '">' + icon(item.icon, "", "2.4") + '</span><span><strong>' + escapeHtml(item.name) + '</strong><small>' + escapeHtml(item.description) + '</small></span></button>';
       }).join("");
-      container.innerHTML = '<div class="better-codex-agent-shell" data-pane="' + state.agentPane + '"><section class="better-codex-agent-directory"><div class="better-codex-agent-search-wrap">' + icon("search") + '<input class="better-codex-search" data-agent-search type="search" value="' + escapeHtml(state.agentSearch) + '" placeholder="搜索智能体" aria-label="搜索智能体"></div><div class="better-codex-agent-list">' + (rows || empty) + '</div>' + (state.agentView === "all" && !query ? '<div class="better-codex-agent-suggestions"><h3>建议</h3>' + suggestions + '</div>' : "") + '</section>' + agentInspector(selected) + '</div>';
+      const animateEnter = previousPane === "preview" && state.agentPane !== "preview";
+      container.innerHTML = '<div class="better-codex-agent-shell" data-pane="' + state.agentPane + '"><section class="better-codex-agent-directory"><div class="better-codex-agent-search-wrap">' + icon("search") + '<input class="better-codex-search" data-agent-search type="search" value="' + escapeHtml(state.agentSearch) + '" placeholder="搜索智能体" aria-label="搜索智能体"></div><div class="better-codex-agent-list">' + (rows || empty) + '</div>' + (state.agentView === "all" && !query ? '<div class="better-codex-agent-suggestions"><h3>建议</h3>' + suggestions + '</div>' : "") + '</section>' + agentInspector(selected, { animateEnter }) + '</div>';
+    }
+
+    function showAutoDispatchHelp() {
+      document.getElementById("better-codex-auto-dispatch-help-dialog")?.remove();
+      const dialog = document.createElement("dialog");
+      dialog.id = "better-codex-auto-dispatch-help-dialog";
+      dialog.setAttribute(OWNED, "true");
+      dialog.innerHTML = [
+        '<div class="better-codex-auto-dispatch-help-shell">',
+        '<header><strong>运行模式说明</strong><button type="button" data-help-close aria-label="关闭">' + icon("close") + "</button></header>",
+        '<div class="better-codex-auto-dispatch-help-panels">',
+        '<section class="better-codex-auto-dispatch-help-panel is-manual">',
+        '<div class="better-codex-auto-dispatch-help-heading">' + icon("user") + "<h3>手动运行</h3></div>",
+        "<p>关闭后，系统不会自动找智能体开工。你可以随时手动新建智能体任务、打开 Session，或在对话里回复来触发会话。</p>",
+        "</section>",
+        '<div class="better-codex-auto-dispatch-help-divider" aria-hidden="true"></div>',
+        '<section class="better-codex-auto-dispatch-help-panel is-auto">',
+        '<div class="better-codex-auto-dispatch-help-heading">' + icon("refresh") + "<h3>自动运行</h3></div>",
+        "<p>开启后，已指派智能体、且还需要智能体继续处理的任务会自动开对话；「待规划」里的任务不会动。智能体做完会交回给你确认。如果任务在等你回复或拍板，系统会停着等你，直到你重新指派给智能体。</p>",
+        "</section>",
+        "</div>",
+        '<footer><button type="button" data-help-close>知道了</button></footer>',
+        "</div>",
+      ].join("");
+      const finish = () => {
+        dialog.close();
+        dialog.remove();
+      };
+      dialog.querySelectorAll("[data-help-close]").forEach(button => button.addEventListener("click", finish));
+      dialog.addEventListener("cancel", event => { event.preventDefault(); finish(); });
+      bindModalDismiss(dialog, finish);
+      document.body.appendChild(dialog);
+      dialog.showModal();
+    }
+
+    function syncAutoDispatch() {
+      const button = panel?.querySelector("#better-codex-auto-dispatch");
+      if (!button) return;
+      const label = state.autoDispatch ? "自动运行" : "手动运行";
+      button.classList.toggle("is-on", state.autoDispatch);
+      button.setAttribute("aria-pressed", String(state.autoDispatch));
+      button.removeAttribute("title");
+      button.setAttribute("aria-label", state.autoDispatch ? "切换为手动运行" : "切换为自动运行");
+      button.innerHTML = icon("refresh") + "<span>" + label + "</span>";
     }
 
     function render() {
       if (!panel) return;
       panel.dataset.surface = state.surface;
       renderAgents();
+      syncAutoDispatch();
       const runningCount = state.issues.filter(issue => issue.active_run_status === "running" || issue.active_run_status === "claimed").length;
       panel.querySelectorAll("[data-view]").forEach(button => button.classList.toggle("is-active", button.dataset.view === state.view));
       const working = panel.querySelector("#better-codex-working");
@@ -1588,7 +1822,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       filterButton.innerHTML = icon("filter") + (filterCount ? filterCount + " 个筛选" : "筛选");
       filterButton.classList.toggle("is-active", filterCount > 0);
       const visible = state.issues.filter(issue => {
-        const assigned = Boolean(issue.agent_enabled || issue.thread_id);
+        const assigned = Boolean(issue.agent_enabled || issue.user_assigned || issue.thread_id);
         const matchesView = state.view === "all"
           || (state.view === "assigned" && assigned)
           || (state.view === "unassigned" && !assigned)
@@ -1599,23 +1833,36 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       panel.querySelector("#better-codex-board").innerHTML = Object.entries(statusLabels).map(([status, statusLabel]) => {
         const issues = visible.filter(issue => issue.status === status);
         const cards = issues.map(issue => {
-          const sessionId = issue.run_thread_id || issue.thread_id || "";
           const assignedAgent = state.agents.find(agent => agent.id === issue.agent_id);
-          const agentName = issue.agent_enabled ? assignedAgent?.name || "Codex" : "";
-          const agentInitial = Array.from(agentName.trim())[0] || "AI";
-          const activity = issue.active_run_status ? '<span class="better-codex-activity" data-run="' + escapeHtml(issue.active_run_status) + '"><span class="better-codex-avatar">' + escapeHtml(agentInitial) + '</span><span class="' + (issue.active_run_status === "running" ? "better-codex-shimmer" : "") + '">' + (issue.active_run_status === "running" ? "Working" : "Queued") + '</span></span>' : "";
+          const defaultAgent = state.agents.find(agent => agent.is_default);
+          const assignee = issue.agent_enabled
+            ? (assignedAgent || defaultAgent || { name: "Codex", is_default: true })
+            : null;
+          const agentName = assignee?.name || "";
+          const activityAgent = assignee || defaultAgent || { name: "Codex", is_default: true };
+          const activity = issue.active_run_status
+            ? '<span class="better-codex-activity" data-run="' + escapeHtml(issue.active_run_status) + '">' + agentAvatarMarkup(activityAgent, "better-codex-card-avatar") + '<span class="' + (issue.active_run_status === "running" ? "better-codex-shimmer" : "") + '">' + (issue.active_run_status === "running" ? "Working" : "Queued") + '</span></span>'
+            : "";
           const description = String(issue.description || "").replace(/[#*_\`~>\[\]()]/g, "").replace(/\s+/g, " ").trim();
-          const chips = [project?.name, agentName, ...(issue.labels || [])].filter(Boolean).map(value => '<span class="better-codex-chip">' + escapeHtml(value) + '</span>').join("");
-          const meta = sessionId
-            ? '<button class="better-codex-link" type="button" data-thread="' + escapeHtml(sessionId) + '">打开 Session</button>'
-            : '<span>等待 Session</span>';
-          return '<article class="better-codex-card" draggable="true" data-issue-id="' + escapeHtml(issue.id) + '"><div class="better-codex-card-row"><div class="better-codex-card-id">' + priorityIcon(issue.priority) + '<span>' + escapeHtml(issue.identifier) + '</span></div>' + activity + '</div><div class="better-codex-card-title">' + escapeHtml(issue.title) + '</div>' + (description ? '<div class="better-codex-card-description">' + escapeHtml(description) + '</div>' : "") + (chips ? '<div class="better-codex-chip-row">' + chips + '</div>' : "") + '<div class="better-codex-card-meta">' + meta + '<span>更新于 ' + timeAgo(issue.updated_at) + '</span></div></article>';
+          const issueProject = state.projects.find(item => item.id === issue.project_id) || project;
+          const projectChip = issueProject?.name
+            ? '<span class="better-codex-chip">' + icon("folder") + '<span>' + escapeHtml(issueProject.name) + '</span></span>'
+            : "";
+          const labelChips = (issue.labels || []).map(value => '<span class="better-codex-chip">' + escapeHtml(value) + '</span>').join("");
+          const chips = projectChip + labelChips;
+          const meta = assignee
+            ? '<span class="better-codex-card-assignee">' + agentAvatarMarkup(assignee, "better-codex-card-avatar") + '<span>' + escapeHtml(agentName || "Codex") + '</span></span>'
+            : issue.user_assigned
+              ? '<span class="better-codex-card-assignee"><span class="better-codex-card-avatar is-user is-initials" style="background:' + escapeHtml(state.user.color || "#16a34a") + '">' + escapeHtml(state.user.initials || "你") + '</span><span>' + escapeHtml(state.user.name || "我") + '</span></span>'
+              : '<span class="better-codex-card-assignee is-empty">' + icon("user") + '<span>未分配</span></span>';
+          return '<article class="better-codex-card' + (issue.id === draggingIssueId ? " is-dragging" : "") + '" draggable="true" data-issue-id="' + escapeHtml(issue.id) + '"><div class="better-codex-card-row"><div class="better-codex-card-id">' + priorityIcon(issue.priority) + '<span>' + escapeHtml(issue.identifier) + '</span></div>' + activity + '</div><div class="better-codex-card-title">' + escapeHtml(issue.title) + '</div>' + (description ? '<div class="better-codex-card-description">' + escapeHtml(description) + '</div>' : "") + (chips ? '<div class="better-codex-chip-row">' + chips + '</div>' : "") + '<div class="better-codex-card-meta">' + meta + '<span>更新于 ' + timeAgo(issue.updated_at) + '</span></div></article>';
         }).join("");
         return '<section class="better-codex-column" data-status="' + status + '"><div class="better-codex-column-head"><span class="better-codex-column-title">' + statusIcon(status) + '<span>' + statusLabel + '</span><span>' + issues.length + '</span></span><span class="better-codex-column-actions"><button class="better-codex-column-icon" type="button" data-add-status="' + status + '" aria-label="新建任务">' + icon("plus") + '</button></span></div><div class="better-codex-cards">' + (cards || '<div class="better-codex-empty">暂无任务</div>') + '</div></section>';
       }).join("");
     }
 
-    async function loadIssues() {
+    async function loadIssues(options = {}) {
+      if (options.background && draggingIssueId) return;
       if (!state.projectId) return render();
       const query = new URLSearchParams({ project_id: state.projectId });
       if (state.search) query.set("search", state.search);
@@ -1634,7 +1881,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     async function loadSurface(options = {}) {
       if (state.surface === "agents") await loadAgents(options);
-      else await loadIssues();
+      else await loadIssues(options);
     }
 
     async function load() {
@@ -1642,11 +1889,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       try {
         const bootstrap = await api("/api/bootstrap");
         applyAppearance(bootstrap.appearance);
+        if (bootstrap.user && typeof bootstrap.user === "object") state.user = bootstrap.user;
         state.projects = bootstrap.projects;
         state.agents = bootstrap.agents || [];
         state.agentModelCatalog = bootstrap.agentModelCatalog || (bootstrap.agentModels || []).map(id => ({ id, displayName: id, description: "", isDefault: false, defaultReasoningEffort: "medium", supportedReasoningEfforts: (bootstrap.agentReasoningEfforts || []).map(value => ({ value, description: "" })) }));
         state.agentModels = state.agentModelCatalog.map(model => model.id);
         state.agentReasoningEfforts = bootstrap.agentReasoningEfforts || [];
+        state.autoDispatch = Boolean(bootstrap.autoDispatch);
+        syncAutoDispatch();
         const context = readContext();
         if (context.projectId) {
           let project = state.projects.find(item => item.external_id === context.projectId);
@@ -1669,6 +1919,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function startAgentCreate(draft = null) {
+      agentInspectorClosing = false;
       state.agentPane = "create";
       state.selectedAgentId = "";
       state.agentDraft = draft
@@ -1714,6 +1965,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function onAgentsClick(event) {
+      if (suppressAgentOutside) return;
       const formAvatarButton = event.target.closest("[data-agent-avatar-form]");
       if (formAvatarButton) {
         const form = formAvatarButton.closest("form");
@@ -1778,12 +2030,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (event.target.closest("[data-agent-create]")) return startAgentCreate();
       const templateButton = event.target.closest("[data-agent-template]");
       if (templateButton) return startAgentCreate(suggestedAgents.find(item => item.key === templateButton.dataset.agentTemplate) || null);
-      if (event.target.closest("[data-agent-close-pane]")) {
-        state.agentPane = "preview";
-        state.selectedAgentId = "";
-        state.agentDraft = null;
-        return renderAgents();
-      }
+      if (event.target.closest("[data-agent-close-pane]")) return closeAgentInspector();
       const deleteButton = event.target.closest("[data-agent-delete]");
       if (deleteButton) {
         const agent = state.agents.find(item => agentKey(item) === deleteButton.dataset.agentKey);
@@ -1792,9 +2039,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           if (!confirmed) return;
           return perform(async () => {
             await api("/api/agents/" + encodeURIComponent(agent.id), { method: "DELETE", body: JSON.stringify({ version: agent.version }) });
-            state.agentPane = "preview";
             state.selectedAgentId = "";
-            await loadAgents();
+            state.agentDraft = null;
+            await loadAgents({ preserveInspector: true });
+            closeAgentInspector();
           });
         });
         return;
@@ -1803,17 +2051,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (row) {
         const agent = state.agents.find(item => agentKey(item) === row.dataset.agentKey);
         if (!agent) return;
+        agentInspectorClosing = false;
         state.selectedAgentId = agentKey(agent);
         state.agentPane = "detail";
         state.agentDraft = null;
         return renderAgents();
       }
-      if (state.agentPane !== "preview" && event.target.closest(".better-codex-agent-directory")) {
-        state.agentPane = "preview";
-        state.selectedAgentId = "";
-        state.agentDraft = null;
-        return renderAgents();
-      }
+      if (state.agentPane !== "preview" && event.target.closest(".better-codex-agent-directory")) return closeAgentInspector();
     }
 
     async function openEditor(issue = null, initialStatus = "todo") {
@@ -1823,22 +2067,36 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const context = readContext();
       const project = state.projects.find(item => item.id === state.projectId);
       const draft = {
-        mode: issue ? issue.agent_enabled ? "agent" : "manual" : state.createMode,
+        mode: issue ? "manual" : state.createMode,
         title: issue?.title || "",
         description: issue?.description || "",
         prompt: issue?.description || "",
         agentId: issue?.agent_id || "",
+        assignee: issue
+          ? (issue.agent_enabled ? (issue.agent_id || "codex") : issue.user_assigned ? "user" : "none")
+          : "none",
         status: issue?.status || initialStatus,
         priority: issue?.priority || "none",
         labels: (issue?.labels || []).join(", "),
         projectId: issue?.project_id || state.projectId,
-        expanded: false
+        expanded: false,
+        reply: "",
+        attachments: []
       };
       const dialog = document.createElement("dialog");
       dialog.id = "better-codex-dialog";
       dialog.setAttribute(OWNED, "true");
       let projectDismiss = null;
       let selectDismiss = null;
+      let conversationTimer = null;
+      const sessionId = issueSessionId(issue);
+
+      function stopConversationPoll() {
+        if (conversationTimer !== null) {
+          clearTimeout(conversationTimer);
+          conversationTimer = null;
+        }
+      }
 
       function syncDraft() {
         const form = dialog.querySelector("form");
@@ -1849,7 +2107,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           draft.description = String(values.get("description") || "");
           draft.status = String(values.get("status") || draft.status);
           draft.priority = String(values.get("priority") || draft.priority);
+          draft.assignee = String(values.get("assignee") || draft.assignee || "none");
           draft.labels = String(values.get("labels") || "");
+          draft.reply = String(values.get("reply") || "");
         } else {
           draft.prompt = String(values.get("prompt") || "");
           draft.agentId = String(values.get("agent_id") || "");
@@ -1857,11 +2117,116 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       }
 
       function header() {
-        const sessionId = issue?.run_thread_id || issue?.thread_id || "";
         const openThreadButton = issue && sessionId
           ? '<button class="better-codex-dialog-open-thread" type="button" data-dialog-open-thread="' + escapeHtml(sessionId) + '">在对话中打开</button>'
           : "";
-        return '<div class="better-codex-dialog-head"><div class="better-codex-dialog-breadcrumb"><span>' + escapeHtml(project?.name || "Better Codex") + '</span><span aria-hidden="true">' + icon("chevron") + '</span><strong>' + (draft.mode === "agent" ? "通过智能体创建" : issue ? "Issue 详情" : "手动创建") + '</strong></div><div class="better-codex-dialog-head-actions">' + openThreadButton + '<button class="better-codex-icon-button" type="button" data-dialog-expand aria-label="' + (draft.expanded ? "缩小" : "展开") + '">' + icon(draft.expanded ? "shrink" : "expand") + '</button><button class="better-codex-icon-button" type="button" data-dialog-close aria-label="关闭">' + icon("close") + '</button></div></div>';
+        const title = draft.mode === "agent" ? "通过智能体创建" : issue ? "Issue 详情" : "手动创建";
+        const crumb = issue
+          ? '<span>' + escapeHtml(project?.name || "Better Codex") + '</span><span aria-hidden="true">' + icon("chevron") + '</span><strong>' + title + '</strong>'
+          : '<strong>' + title + '</strong>';
+        return '<div class="better-codex-dialog-head"><div class="better-codex-dialog-breadcrumb">' + crumb + '</div><div class="better-codex-dialog-head-actions">' + openThreadButton + '<button class="better-codex-icon-button" type="button" data-dialog-expand aria-label="' + (draft.expanded ? "缩小" : "展开") + '">' + icon(draft.expanded ? "shrink" : "expand") + '</button><button class="better-codex-icon-button" type="button" data-dialog-close aria-label="关闭">' + icon("close") + '</button></div></div>';
+      }
+
+      function conversationPanel() {
+        if (!issue || !sessionId) return "";
+        return '<section class="better-codex-conversation"><div class="better-codex-conversation-head"><span>对话</span><span class="better-codex-conversation-status" data-conversation-status data-state="idle">加载中…</span></div><div class="better-codex-timeline" data-conversation-body><p class="better-codex-markdown-empty">加载对话…</p></div></section><div class="better-codex-composer"><textarea name="reply" rows="2" placeholder="在此回复智能体…" aria-label="回复">' + escapeHtml(draft.reply) + '</textarea><button class="better-codex-composer-send" type="button" data-conversation-send>发送</button></div>';
+      }
+
+      function relativeTime(value) {
+        if (!value) return "";
+        const time = Date.parse(value);
+        if (!Number.isFinite(time)) return "";
+        const delta = Math.max(0, Date.now() - time);
+        const minute = 60 * 1000;
+        const hour = 60 * minute;
+        const day = 24 * hour;
+        if (delta < minute) return "刚刚";
+        if (delta < hour) return Math.floor(delta / minute) + " 分钟前";
+        if (delta < day) return Math.floor(delta / hour) + " 小时前";
+        if (delta < day * 30) return Math.floor(delta / day) + " 天前";
+        return new Date(time).toLocaleDateString();
+      }
+
+      function conversationBubbles(messages, profile = null) {
+        const agent = state.agents.find(item => item.id === issue?.agent_id) || state.agents.find(item => item.is_default) || null;
+        const agentName = agent?.name || (issue?.agent_enabled ? "Codex" : "智能体");
+        const user = profile && profile.name ? profile : state.user || { name: "你", initials: "你", color: "#16a34a" };
+        if (profile && profile.name) state.user = { ...state.user, ...profile };
+        return (messages || []).map(message => {
+          const isUser = message.role === "user";
+          const avatar = isUser
+            ? '<span class="better-codex-bubble-avatar is-user is-initials" style="background:' + escapeHtml(user.color || "#16a34a") + '" title="' + escapeHtml(user.handle ? "@" + user.handle : user.name || "") + '" aria-hidden="true">' + escapeHtml(user.initials || "你") + '</span>'
+            : agentAvatarMarkup(agent, "better-codex-bubble-avatar");
+          const name = isUser ? (user.name || "你") : agentName;
+          const time = relativeTime(message.timestamp);
+          return '<article class="better-codex-bubble ' + (isUser ? "is-user" : "is-agent") + '">' + avatar + '<div class="better-codex-bubble-main"><div class="better-codex-bubble-meta"><strong>' + escapeHtml(name) + '</strong>' + (time ? '<time datetime="' + escapeHtml(message.timestamp || "") + '">' + escapeHtml(time) + '</time>' : "") + '</div><div class="better-codex-bubble-content">' + (message.html || renderPlainBubble(message.markdown || "")) + '</div></div></article>';
+        }).join("");
+      }
+
+      function renderPlainBubble(value) {
+        return '<p>' + escapeHtml(value).replace(/\\n/g, "<br>") + '</p>';
+      }
+
+      function applyConversation(data, options = {}) {
+        const body = dialog.querySelector("[data-conversation-body]");
+        const status = dialog.querySelector("[data-conversation-status]");
+        const send = dialog.querySelector("[data-conversation-send]");
+        if (!body || !status) return;
+        if (data?.user && typeof data.user === "object") state.user = { ...state.user, ...data.user };
+        const messages = Array.isArray(data?.messages) ? data.messages : [];
+        if (messages.length) {
+          body.innerHTML = conversationBubbles(messages, data.user);
+          body.scrollTop = body.scrollHeight;
+        } else if (data?.html) {
+          body.innerHTML = conversationBubbles([{ role: "agent", html: data.html, markdown: data.markdown || "", timestamp: null }], data.user);
+          body.scrollTop = body.scrollHeight;
+        } else {
+          body.innerHTML = '<p class="better-codex-markdown-empty">' + (sessionId ? "暂无对话，可在下方回复或打开完整对话。" : "未关联对话。") + "</p>";
+        }
+        const reply = data?.reply || { status: "idle" };
+        const stateName = reply.status || "idle";
+        status.dataset.state = stateName;
+        const countLabel = messages.length ? (messages.length + " 条") : "";
+        status.textContent = stateName === "running" ? "回复进行中…" : stateName === "failed" ? ("回复失败" + (reply.error ? "：" + reply.error : "")) : stateName === "succeeded" ? "回复已完成" : (countLabel || (data?.found ? "已同步" : "等待对话"));
+        if (send) send.disabled = stateName === "running" || !String(dialog.querySelector('[name="reply"]')?.value || "").trim();
+        stopConversationPoll();
+        if (stateName === "running") conversationTimer = setTimeout(() => void loadConversation({ quiet: true }), 2000);
+        else if (stateName === "succeeded" && !options.afterSuccess) conversationTimer = setTimeout(() => void loadConversation({ quiet: true, afterSuccess: true }), 1200);
+      }
+
+      async function loadConversation(options = {}) {
+        if (!issue || !sessionId || !dialog.isConnected) return;
+        try {
+          const data = await api("/api/issues/" + encodeURIComponent(issue.id) + "/conversation");
+          applyConversation(data, options);
+        } catch (error) {
+          if (options.quiet) {
+            conversationTimer = setTimeout(() => void loadConversation({ quiet: true }), 2500);
+            return;
+          }
+          applyConversation({ html: "", found: false, reply: { status: "failed", error: error instanceof Error ? error.message : "加载失败" } });
+        }
+      }
+
+      async function sendReply() {
+        const textarea = dialog.querySelector('[name="reply"]');
+        const send = dialog.querySelector("[data-conversation-send]");
+        const errorOutput = dialog.querySelector(".better-codex-dialog-error");
+        const message = String(textarea?.value || "").trim();
+        if (!issue || !sessionId || !message) return;
+        send.disabled = true;
+        errorOutput.hidden = true;
+        try {
+          const reply = await api("/api/issues/" + encodeURIComponent(issue.id) + "/reply", { method: "POST", body: JSON.stringify({ message }) });
+          draft.reply = "";
+          if (textarea) textarea.value = "";
+          applyConversation({ html: dialog.querySelector("[data-conversation-body]")?.innerHTML || "", found: true, reply });
+          conversationTimer = setTimeout(() => void loadConversation({ quiet: true }), 1500);
+        } catch (error) {
+          errorOutput.textContent = error instanceof Error ? error.message : "发送失败";
+          errorOutput.hidden = false;
+          send.disabled = false;
+        }
       }
 
       function projectPicker() {
@@ -1888,19 +2253,76 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         return '<div class="better-codex-agent-picker"><span>指派给</span>' + dialogSelect("agent_id", "选择执行智能体", selectedAgent?.id || draft.agentId, options, "is-agent") + '</div>';
       }
 
+      function assigneePicker() {
+        const defaultAgent = state.agents.find(agent => agent.is_default) || { name: "Codex", is_default: true, id: "" };
+        const userVisual = () => '<span class="better-codex-agent-avatar is-user is-initials" style="background:' + escapeHtml(state.user.color || "#16a34a") + '">' + escapeHtml(state.user.initials || "你") + "</span>";
+        const options = [
+          { value: "none", label: "未指派", visual: () => icon("user") },
+          { value: "user", label: state.user.name || "我", visual: userVisual },
+          { value: "codex", label: (defaultAgent.name || "Codex") + "（默认配置）", visual: () => agentAvatarMarkup(defaultAgent, "better-codex-agent-avatar") },
+          ...state.agents.filter(agent => !agent.is_default).map(agent => ({
+            value: agent.id,
+            label: agent.name,
+            visual: () => agentAvatarMarkup(agent, "better-codex-agent-avatar")
+          }))
+        ];
+        return '<div class="better-codex-agent-picker"><span>指派给</span>' + dialogSelect("assignee", "选择责任人", draft.assignee || "none", options, "is-assignee") + '</div>';
+      }
+
       function propertyRows() {
         const projectChip = projectPicker();
         if (draft.mode === "agent") return '<div class="better-codex-dialog-properties">' + projectChip + '</div>';
         const statuses = Object.entries(statusLabels).map(([value, text]) => ({ value, label: text, visual: statusIcon(value) }));
         const priorities = Object.entries(priorityLabels).map(([value, text]) => ({ value, label: value === "none" ? "无优先级" : text + "优先级", visual: priorityIcon(value) }));
-        const agentChip = issue?.agent_enabled ? '<span class="better-codex-property"><span class="better-codex-agent-avatar">AI</span><span>Codex</span></span>' : "";
-        return '<div class="better-codex-dialog-properties">' + dialogSelect("status", "状态", draft.status, statuses) + dialogSelect("priority", "优先级", draft.priority, priorities) + agentChip + '<label class="better-codex-property">' + icon("tag") + '<input name="labels" value="' + escapeHtml(draft.labels) + '" placeholder="添加标签" aria-label="标签"></label>' + projectChip + '</div>';
+        return '<div class="better-codex-dialog-properties">' + dialogSelect("status", "状态", draft.status, statuses) + dialogSelect("priority", "优先级", draft.priority, priorities) + '<label class="better-codex-property">' + icon("tag") + '<input name="labels" value="' + escapeHtml(draft.labels) + '" placeholder="添加标签" aria-label="标签"></label>' + projectChip + '</div>';
+      }
+
+      function attachmentPaths() {
+        return draft.attachments.map(item => item.path);
+      }
+
+      function withAttachments(text) {
+        const paths = attachmentPaths();
+        if (!paths.length) return text;
+        const block = "附带文件：\\n" + paths.map(path => "- " + path).join("\\n");
+        return text ? text + "\\n\\n" + block : block;
+      }
+
+      function attachmentList() {
+        if (!draft.attachments.length) return '<div class="better-codex-dialog-attachments" data-dialog-attachments hidden></div>';
+        const chips = draft.attachments.map((item, index) => '<span class="better-codex-attachment-chip" title="' + escapeHtml(item.path) + '">' + icon("paperclip") + '<span>' + escapeHtml(item.name) + '</span><button type="button" data-dialog-detach="' + index + '" aria-label="移除附件">' + icon("close") + '</button></span>').join("");
+        return '<div class="better-codex-dialog-attachments" data-dialog-attachments>' + chips + '</div>';
+      }
+
+      function pickAttachments() {
+        return new Promise(resolve => {
+          const input = document.createElement("input");
+          input.type = "file";
+          input.multiple = true;
+          input.addEventListener("change", () => {
+            const files = Array.from(input.files || []);
+            const selected = [];
+            let skipped = 0;
+            for (const file of files) {
+              const path = String(file.path || "").trim();
+              if (!path) {
+                skipped += 1;
+                continue;
+              }
+              selected.push({ name: file.name || path.split(/[\\\\/]/).pop() || path, path });
+            }
+            resolve({ files: selected, skipped, picked: files.length });
+          }, { once: true });
+          input.addEventListener("cancel", () => resolve({ files: [], skipped: 0, picked: 0 }), { once: true });
+          input.click();
+        });
       }
 
       function footer() {
         const switchButton = issue ? "" : '<button class="better-codex-switch-mode" type="button" data-dialog-switch>' + icon("switch") + (draft.mode === "agent" ? "切换到手动" : "切换到智能体") + '</button>';
         const submitText = issue ? "保存" : draft.mode === "agent" ? "创建" : "创建任务";
-        return '<div class="better-codex-dialog-footer"><button class="better-codex-icon-button" type="button" aria-label="添加附件">' + icon("paperclip") + '</button><div class="better-codex-dialog-footer-right">' + switchButton + '<label class="better-codex-keep-open"><input class="better-codex-toggle" name="keep" type="checkbox"' + (state.keepCreate ? " checked" : "") + '>继续创建</label><button class="better-codex-submit" type="submit">' + submitText + '</button></div></div>';
+        const keepOpen = issue ? "" : '<label class="better-codex-keep-open"><input class="better-codex-toggle" name="keep" type="checkbox"' + (state.keepCreate ? " checked" : "") + '>继续创建</label>';
+        return '<div class="better-codex-dialog-footer"><button class="better-codex-icon-button" type="button" data-dialog-attach aria-label="添加附件">' + icon("paperclip") + '</button><div class="better-codex-dialog-footer-right">' + switchButton + keepOpen + '<button class="better-codex-submit" type="submit">' + submitText + '</button></div></div>';
       }
 
       function renderDialog() {
@@ -1908,15 +2330,22 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (selectDismiss) document.removeEventListener("pointerdown", selectDismiss, true);
         projectDismiss = null;
         selectDismiss = null;
+        stopConversationPoll();
         dialog.dataset.mode = draft.mode;
+        dialog.dataset.detail = issue ? "true" : "false";
         dialog.dataset.expanded = String(draft.expanded);
         if (draft.mode === "agent") {
           const selectedAgent = state.agents.find(agent => agent.id === draft.agentId);
           const selectedName = selectedAgent?.name || "Codex";
-          dialog.innerHTML = '<form>' + header() + agentPicker() + '<textarea class="better-codex-dialog-editor" name="prompt" placeholder="告诉智能体要做什么，例如：&quot;修复项目里任务运行状态不可见的问题&quot;">' + escapeHtml(draft.prompt) + '</textarea>' + propertyRows() + '<div class="better-codex-dialog-error" hidden></div>' + footer() + '</form>';
+          dialog.innerHTML = '<form>' + header() + agentPicker() + '<textarea class="better-codex-dialog-editor" name="prompt" placeholder="告诉智能体要做什么，例如：&quot;修复项目里任务运行状态不可见的问题&quot;">' + escapeHtml(draft.prompt) + '</textarea>' + propertyRows() + attachmentList() + '<div class="better-codex-dialog-error" hidden></div>' + footer() + '</form>';
           dialog.querySelector(".better-codex-dialog-properties")?.insertAdjacentHTML("beforebegin", '<div class="better-codex-run-hint">' + agentAvatarMarkup(selectedAgent, "better-codex-agent-avatar") + '<span>创建后将由 ' + escapeHtml(selectedName) + ' 自动开始工作。</span></div>');
+        } else if (issue) {
+          const descriptionEditor = sessionId
+            ? '<textarea class="better-codex-dialog-editor" name="description" placeholder="添加描述..." rows="2" style="flex:0 0 auto;min-height:56px;max-height:96px">' + escapeHtml(draft.description) + '</textarea>'
+            : '<textarea class="better-codex-dialog-editor" name="description" placeholder="添加描述...">' + escapeHtml(draft.description) + '</textarea>';
+          dialog.innerHTML = '<form>' + header() + assigneePicker() + '<input class="better-codex-manual-title" name="title" maxlength="500" placeholder="任务标题" value="' + escapeHtml(draft.title) + '">' + descriptionEditor + conversationPanel() + propertyRows() + attachmentList() + '<div class="better-codex-dialog-error" hidden></div>' + footer() + '</form>';
         } else {
-          dialog.innerHTML = '<form>' + header() + '<input class="better-codex-manual-title" name="title" maxlength="500" placeholder="任务标题" value="' + escapeHtml(draft.title) + '"><textarea class="better-codex-dialog-editor" name="description" placeholder="添加描述...">' + escapeHtml(draft.description) + '</textarea>' + propertyRows() + '<div class="better-codex-dialog-error" hidden></div>' + footer() + '</form>';
+          dialog.innerHTML = '<form>' + header() + assigneePicker() + '<input class="better-codex-manual-title" name="title" maxlength="500" placeholder="任务标题" value="' + escapeHtml(draft.title) + '"><textarea class="better-codex-dialog-editor" name="description" placeholder="添加描述...">' + escapeHtml(draft.description) + '</textarea>' + propertyRows() + attachmentList() + '<div class="better-codex-dialog-error" hidden></div>' + footer() + '</form>';
         }
         const submit = dialog.querySelector(".better-codex-submit");
         const content = dialog.querySelector(draft.mode === "agent" ? '[name="prompt"]' : '[name="title"]');
@@ -1924,6 +2353,22 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         updateSubmit();
         content?.addEventListener("input", updateSubmit);
         dialog.querySelector('[name="keep"]')?.addEventListener("change", event => { state.keepCreate = event.currentTarget.checked; });
+        const replyInput = dialog.querySelector('[name="reply"]');
+        const sendButton = dialog.querySelector("[data-conversation-send]");
+        const updateSend = () => {
+          if (!sendButton) return;
+          const status = dialog.querySelector("[data-conversation-status]")?.dataset.state;
+          sendButton.disabled = status === "running" || !String(replyInput?.value || "").trim();
+        };
+        replyInput?.addEventListener("input", updateSend);
+        sendButton?.addEventListener("click", () => void sendReply());
+        replyInput?.addEventListener("keydown", event => {
+          if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+            event.preventDefault();
+            void sendReply();
+          }
+        });
+        if (issue && sessionId) void loadConversation();
         const closeDialogSelects = () => {
           dialog.querySelectorAll("[data-dialog-select]").forEach(picker => {
             picker.classList.remove("is-open");
@@ -1965,6 +2410,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           });
           if (name === "status") draft.status = value;
           if (name === "priority") draft.priority = value;
+          if (name === "assignee") draft.assignee = value;
           if (name === "agent_id") {
             draft.agentId = value;
             const selectedAgent = state.agents.find(agent => agent.id === draft.agentId);
@@ -2015,7 +2461,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         }));
         dialog.querySelector("[data-dialog-close]")?.addEventListener("click", () => dialog.close());
         dialog.querySelector("[data-dialog-open-thread]")?.addEventListener("click", event => {
-          const threadId = event.currentTarget.dataset.dialogOpenThread;
+          const threadId = normalizeSessionId(event.currentTarget.dataset.dialogOpenThread);
           if (!threadId) return;
           dialog.close();
           void perform(() => openThread(threadId));
@@ -2041,6 +2487,34 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           renderDialog();
           dialog.querySelector(draft.mode === "agent" ? '[name="prompt"]' : '[name="title"]')?.focus();
         });
+        dialog.querySelector("[data-dialog-attach]")?.addEventListener("click", () => {
+          void pickAttachments().then(result => {
+            const showAttachError = message => {
+              const errorOutput = dialog.querySelector(".better-codex-dialog-error");
+              if (!errorOutput) return;
+              errorOutput.textContent = message;
+              errorOutput.hidden = false;
+            };
+            if (!result.picked) return;
+            if (!result.files.length) return showAttachError("当前环境无法读取本地文件路径");
+            const known = new Set(attachmentPaths());
+            const next = result.files.filter(file => !known.has(file.path));
+            if (next.length) {
+              draft.attachments.push(...next);
+              renderDialog();
+            }
+            if (result.skipped) showAttachError("部分文件无法读取本地路径，已跳过");
+            dialog.querySelector(draft.mode === "agent" ? '[name="prompt"]' : '[name="title"]')?.focus();
+          });
+        });
+        dialog.querySelectorAll("[data-dialog-detach]").forEach(button => button.addEventListener("click", event => {
+          event.preventDefault();
+          const index = Number(button.dataset.dialogDetach);
+          if (!Number.isInteger(index) || index < 0) return;
+          draft.attachments.splice(index, 1);
+          renderDialog();
+          dialog.querySelector(draft.mode === "agent" ? '[name="prompt"]' : '[name="title"]')?.focus();
+        }));
         dialog.querySelector("form")?.addEventListener("keydown", event => {
           if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
             event.preventDefault();
@@ -2063,16 +2537,22 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         submit.disabled = true;
         errorOutput.hidden = true;
         try {
+          const assignee = draft.mode === "agent"
+            ? { user_assigned: false, agent_enabled: true, agent_id: draft.agentId || "" }
+            : draft.assignee === "user"
+              ? { user_assigned: true, agent_enabled: false, agent_id: "" }
+              : draft.assignee === "none"
+                ? { user_assigned: false, agent_enabled: false, agent_id: "" }
+                : { user_assigned: false, agent_enabled: true, agent_id: draft.assignee === "codex" ? "" : draft.assignee };
           const body = {
             title,
-            description: draft.mode === "agent" ? prompt : draft.description,
+            description: withAttachments(draft.mode === "agent" ? prompt : draft.description),
             status: draft.mode === "agent" && !issue ? "todo" : draft.status,
             priority: draft.priority,
             labels: draft.labels.split(/[,，]/).map(value => value.trim()).filter(Boolean),
-            thread_id: context.threadId || issue?.thread_id || "",
+            thread_id: normalizeSessionId(context.threadId) || normalizeSessionId(issue?.thread_id) || "",
             workspace_path: state.projects.find(item => item.id === draft.projectId)?.workspace_path || context.workspacePath,
-            agent_enabled: draft.mode === "agent",
-            agent_id: draft.mode === "agent" ? draft.agentId : ""
+            ...assignee
           };
           if (issue) await api("/api/issues/" + encodeURIComponent(issue.id), { method: "PATCH", body: JSON.stringify({ ...body, version: issue.version }) });
           else {
@@ -2085,6 +2565,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             draft.title = "";
             draft.description = "";
             draft.prompt = "";
+            draft.attachments = [];
             renderDialog();
             dialog.querySelector(draft.mode === "agent" ? '[name="prompt"]' : '[name="title"]')?.focus();
           } else {
@@ -2099,6 +2580,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
       document.body.append(dialog);
       dialog.addEventListener("close", () => {
+        stopConversationPoll();
         if (projectDismiss) document.removeEventListener("pointerdown", projectDismiss, true);
         if (selectDismiss) document.removeEventListener("pointerdown", selectDismiss, true);
         dialog.remove();
@@ -2129,6 +2611,48 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const card = event.target.closest("[data-issue-id]");
       const issue = state.issues.find(item => item.id === card?.dataset.issueId);
       if (issue) return void perform(() => openEditor(issue));
+    }
+
+    function onCardDragStart(event) {
+      const card = event.target.closest("[data-issue-id]");
+      if (!card || !event.dataTransfer) return;
+      const issueId = card.dataset.issueId || "";
+      draggingIssueId = issueId;
+      event.dataTransfer.setData("text/plain", issueId);
+      event.dataTransfer.effectAllowed = "move";
+      const host = panel || document.getElementById(PANEL_ID) || document.body;
+      const ghost = card.cloneNode(true);
+      ghost.removeAttribute("draggable");
+      ghost.removeAttribute("data-issue-id");
+      ghost.classList.remove("is-dragging");
+      ghost.classList.add("is-drag-ghost");
+      ghost.setAttribute(OWNED, "true");
+      const rect = card.getBoundingClientRect();
+      const canvas = getComputedStyle(panel || document.documentElement).getPropertyValue("--bc-color-canvas").trim()
+        || getComputedStyle(document.documentElement).getPropertyValue("--bc-page").trim()
+        || "#ffffff";
+      ghost.style.cssText = [
+        "box-sizing:border-box",
+        "width:" + card.offsetWidth + "px",
+        "margin:0",
+        "position:fixed",
+        "top:" + rect.top + "px",
+        "left:" + rect.left + "px",
+        "opacity:1",
+        "pointer-events:none",
+        "z-index:2147483000",
+        "background:" + canvas,
+      ].join(";");
+      host.appendChild(ghost);
+      event.dataTransfer.setDragImage(ghost, Math.max(12, event.clientX - rect.left), Math.max(12, event.clientY - rect.top));
+      card.classList.add("is-dragging");
+      requestAnimationFrame(() => requestAnimationFrame(() => ghost.remove()));
+    }
+
+    function onCardDragEnd(event) {
+      draggingIssueId = "";
+      event.target.closest("[data-issue-id]")?.classList.remove("is-dragging");
+      document.querySelectorAll(".better-codex-card.is-dragging").forEach(node => node.classList.remove("is-dragging"));
     }
 
     function onDrop(event) {
@@ -2192,8 +2716,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     async function openThread(threadId) {
-      const expected = String(threadId || "").replace(/^(local|cloud):/i, "");
-      const row = Array.from(document.querySelectorAll(SELECTORS.threadRow)).find(item => String(item.getAttribute(ATTRIBUTES.threadId) || "").replace(/^(local|cloud):/i, "") === expected);
+      const expected = normalizeSessionId(threadId);
+      if (!expected) throw new Error("thread_id_invalid");
+      const row = Array.from(document.querySelectorAll(SELECTORS.threadRow)).find(item => normalizeSessionId(item.getAttribute(ATTRIBUTES.threadId)) === expected);
       if (row) {
         close();
         row.click();
@@ -2203,8 +2728,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       await new Promise(resolve => setTimeout(resolve, 400));
       const current = location.pathname.match(/\\/local\\/([^/?#]+)/)?.[1] || "";
       const activeRow = Array.from(document.querySelectorAll(SELECTORS.threadRow)).find(item => item.getAttribute(ATTRIBUTES.threadActive) === "true");
-      const activeThread = String(activeRow?.getAttribute(ATTRIBUTES.threadId) || "").replace(/^(local|cloud):/i, "");
-      if (decodeURIComponent(current) === expected || activeThread === expected) {
+      const activeThread = normalizeSessionId(activeRow?.getAttribute(ATTRIBUTES.threadId));
+      if (normalizeSessionId(decodeURIComponent(current)) === expected || activeThread === expected) {
         close();
         return { opened: true, via: "route" };
       }
@@ -2212,9 +2737,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function onClick(event) {
-      if (!active) return;
+      if (!active || suppressAgentOutside) return;
       const target = event.target?.closest?.("button,a,[role='button']," + SELECTORS.threadRow);
-      if (!target || target === entry || target === agentsEntry || target.closest("#" + PANEL_ID) || target.closest("#better-codex-dialog") || target.closest("#better-codex-agent-dialog")) return;
+      if (!target || target === entry || target === agentsEntry || target.closest("#" + PANEL_ID) || target.closest("#better-codex-dialog") || target.closest("#better-codex-agent-dialog") || target.closest("#better-codex-avatar-picker")) return;
       if (target.closest(SELECTORS.sidebarNavigation)) close();
     }
 
