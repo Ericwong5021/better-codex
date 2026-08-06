@@ -47,5 +47,8 @@
     "postject": "^1.0.0-alpha.6",
     "tsx": "^4.19.4",
     "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "lucide-static": "^1.28.0"
   }
 }

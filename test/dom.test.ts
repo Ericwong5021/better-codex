@@ -22,15 +22,46 @@ test("leaving the app surface suspends the panel and immediately restores its pr
   assert.ok(source.includes('createEntry("任务看板", ENTRY_ID, "打开任务看板", "issues")'));
   assert.ok(source.includes('syncEntryLabel(entry, "任务看板", "打开任务看板")'));
   assert.ok(source.includes('syncEntryIcon(entry, "issues")'));
-  assert.ok(source.includes('<rect x="3" y="4" width="6" height="16" rx="1.5"></rect><rect x="11" y="4" width="6" height="11" rx="1.5"></rect><circle cx="17.5" cy="17.5" r="3.5"></circle><path d="m15.8 17.5 1.1 1.1 2.2-2.3"></path>'));
+  assert.ok(source.includes('"issues":{"name":"layout-dashboard"'));
+  assert.ok(source.includes('"bot":{"name":"bot"'));
   assert.ok(source.includes("return entry.isConnected && agentsEntry.isConnected"));
   assert.ok(source.includes("const entriesAvailable = ensureEntry()"));
   assert.ok(source.includes("if (active) close({ resume: true })"));
   assert.ok(source.includes('if (!active && ["issues", "agents"].includes(resumeSurface)) return open(resumeSurface)'));
   assert.ok(source.includes("queueMicrotask(() =>"));
   assert.ok(source.includes("if (content && content.textContent !== text) content.textContent = text"));
-  assert.ok(source.includes("if (icon.innerHTML !== markup) icon.innerHTML = markup"));
+  assert.ok(source.includes("if (svg.innerHTML !== definition.nodes) svg.innerHTML = definition.nodes"));
   assert.doesNotMatch(source, /function scheduleRefresh\(\)[\s\S]*?setTimeout\([\s\S]*?160/);
+});
+
+test("all interface icons use Lucide definitions", () => {
+  const source = injectionScript(4317, "test-token", "install");
+
+  for (const name of [
+    "plus", "ellipsis", "list-filter", "sliders-horizontal", "columns-3", "arrow-left-right",
+    "maximize-2", "x", "paperclip", "folder", "tag", "calendar", "user", "user-round-pen",
+    "bot", "image", "search", "file-check-corner", "panel-top", "pencil", "chevron-right",
+    "chevron-down", "check", "circle", "minus", "trash-2", "refresh-cw", "layout-dashboard",
+    "circle-dashed", "loader-circle", "circle-dot", "circle-check-big", "circle-slash-2",
+    "circle-x", "signal-low", "signal-medium", "signal-high", "circle-alert",
+  ]) assert.ok(source.includes('"name":"' + name + '"'), `missing Lucide icon: ${name}`);
+
+  assert.ok(source.includes('const classes = "lucide lucide-" + definition.name'));
+  assert.ok(source.includes('return icon(names[status] || "statusTodo", "better-codex-status-icon")'));
+  assert.ok(source.includes('const markup = icon(names[priority] || "priorityNone", "better-codex-priority")'));
+  assert.doesNotMatch(source, /Array\.from\(\{ length: 16 \}/);
+});
+
+test("status and priority menus keep their Lucide icons visible", () => {
+  const source = injectionScript(4317, "test-token", "install");
+  const css = betterCodexDesignSystemCss();
+
+  assert.ok(source.includes('function filterOptionIcon(key, value)'));
+  assert.ok(source.includes('filterOptionIcon(key, option.value)'));
+  assert.ok(source.includes('if (key === "status") return statusIcon(value)'));
+  assert.ok(source.includes('if (key === "priority") return priorityIcon(value)'));
+  assert.match(css, /\.better-codex-dialog-select-trigger-visual,[\s\S]*?\.better-codex-dialog-select-option-visual\s*\{[^}]*width:\s*14px;[^}]*height:\s*14px;/s);
+  assert.match(css, /\.better-codex-dialog-select-trigger-visual > svg,[\s\S]*?\.better-codex-dialog-select-option-visual > svg\s*\{[^}]*width:\s*14px;[^}]*height:\s*14px;/s);
 });
 
 test("square icon controls center their SVG geometry instead of using the text baseline", () => {
@@ -52,6 +83,15 @@ test("task columns only render controls backed by working actions", () => {
   assert.doesNotMatch(source, /新建项目|openNativeProjectEditor|data-app-action-sidebar-project-create/);
   assert.match(source, /data-add-status=/);
   assert.match(source, /aria-label="新建任务"/);
+});
+
+test("issue assignment tabs separate assigned and unassigned work", () => {
+  const source = injectionScript(4317, "test-token", "install");
+
+  assert.ok(source.includes('[["all", "全部"], ["assigned", "已分配"], ["unassigned", "未分配"]]'));
+  assert.ok(source.includes("const assigned = Boolean(issue.agent_enabled || issue.thread_id)"));
+  assert.ok(source.includes('state.view === "unassigned" && !assigned'));
+  assert.ok(!source.includes('[["all", "全部"], ["member", "成员"], ["agent", "智能体"]]'));
 });
 
 test("issue creation uses a primary split button with an agent creation menu", () => {
@@ -150,12 +190,11 @@ test("agent detail avatars use a robot fallback and open a drag-to-crop editor",
   assert.ok(source.includes('branded ? codexLogo() : icon("bot")'));
   assert.ok(source.includes('data-agent-avatar-form'));
   assert.ok(source.includes('better-codex-agent-profile-head'));
-  assert.ok(source.includes('const heading = creating ? "创建智能体" : "智能体"'));
-  assert.ok(source.includes('class="better-codex-agent-profile-name" name="name"'));
-  assert.match(source, /\.better-codex-agent-profile-head\s*\{[^}]*grid-template-columns:\s*54px minmax\(0, 1fr\)/s);
-  assert.match(source, /\.better-codex-agent-profile-head \.better-codex-agent-avatar-editor\s*\{[^}]*z-index:\s*1/s);
+  assert.ok(source.includes('const heading = creating ? "新建" : "智能体"'));
+  assert.ok(source.includes('<h2>创建智能体</h2><div class="better-codex-agent-avatar-field">'));
+  assert.ok(source.includes("悬停头像即可选择并裁剪图片"));
+  assert.ok(!source.includes('class="better-codex-agent-profile-name" name="name"'));
   assert.ok(!source.includes('data-agent-avatar-edit'));
-  assert.ok(!source.includes("悬停头像即可选择并裁剪图片"));
   assert.ok(source.includes('id = "better-codex-avatar-cropper"'));
   assert.ok(source.includes('canvas.addEventListener("pointermove"'));
   assert.ok(source.includes('output.width = 256'));
@@ -243,6 +282,8 @@ test("semantic surface hierarchy is derived from the Codex appearance configurat
 
   assert.ok(css.includes("--bc-color-canvas: var(--bc-host-light-canvas"));
   assert.ok(css.includes("--bc-color-canvas: var(--bc-host-dark-canvas"));
+  assert.ok(css.includes("--bc-color-input: var(--bc-color-canvas)"));
+  assert.match(css, /html\.electron-dark[\s\S]*?--bc-color-input:\s*var\(--bc-color-control\)/);
   assert.ok(css.includes("--bc-color-hairline: var(--bc-host-light-hairline"));
   assert.ok(source.includes("applyAppearance(bootstrap.appearance)"));
   assert.ok(source.includes('setProperty("--bc-host-" + mode + "-canvas"'));
@@ -251,4 +292,8 @@ test("semantic surface hierarchy is derived from the Codex appearance configurat
   assert.match(css, /\.better-codex-agent-inspector-field textarea\s*\{[^}]*box-shadow:\s*var\(--bc-inset-hairline\);/s);
   assert.match(css, /\.better-codex-agent-inspector-group\s*\{[^}]*box-shadow:\s*var\(--bc-inset-hairline\);/s);
   assert.match(css, /\.better-codex-agent-profile-name\s*\{[^}]*box-shadow:\s*var\(--bc-inset-hairline\);/s);
+  assert.match(css, /\.better-codex-search\s*\{[^}]*background:\s*var\(--bc-color-input\);/s);
+  assert.match(css, /\.better-codex-agent-profile-name\s*\{[^}]*background:\s*var\(--bc-color-control\);/s);
+  assert.match(css, /\.better-codex-agent-inspector-group\s*\{[^}]*background:\s*var\(--bc-color-input\);/s);
+  assert.match(css, /\.better-codex-agent-inspector-field textarea\s*\{[^}]*background:\s*var\(--bc-color-input\);/s);
 });

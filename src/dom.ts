@@ -1,5 +1,95 @@
 import { activeCompatibility } from "./compatibility.js";
 import { betterCodexDesignSystemCss } from "./design-system.js";
+import {
+  ArrowLeftRight,
+  Bot,
+  Calendar,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Circle,
+  CircleAlert,
+  CircleCheckBig,
+  CircleDashed,
+  CircleDot,
+  CircleSlash2,
+  CircleX,
+  Columns3,
+  Ellipsis,
+  FileCheck2,
+  Folder,
+  Image,
+  LayoutDashboard,
+  ListFilter,
+  LoaderCircle,
+  Maximize2,
+  Minus,
+  PanelTop,
+  Paperclip,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Search,
+  SignalHigh,
+  SignalLow,
+  SignalMedium,
+  SlidersHorizontal,
+  Tag,
+  Trash2,
+  User,
+  UserRoundPen,
+  X,
+} from "lucide-static";
+
+function lucideDefinition(svg: string) {
+  const name = svg.match(/\blucide-([a-z0-9-]+)"/)?.[1];
+  const nodes = svg.match(/<svg[^>]*>([\s\S]*?)<\/svg>/)?.[1].trim();
+  if (!name || !nodes) throw new Error("invalid_lucide_icon");
+  return { name, nodes };
+}
+
+const lucideIcons = Object.fromEntries(Object.entries({
+  plus: Plus,
+  more: Ellipsis,
+  filter: ListFilter,
+  display: SlidersHorizontal,
+  board: Columns3,
+  switch: ArrowLeftRight,
+  expand: Maximize2,
+  close: X,
+  paperclip: Paperclip,
+  folder: Folder,
+  tag: Tag,
+  calendar: Calendar,
+  user: User,
+  userEdit: UserRoundPen,
+  bot: Bot,
+  image: Image,
+  search: Search,
+  review: FileCheck2,
+  layout: PanelTop,
+  edit: Pencil,
+  chevron: ChevronRight,
+  chevronDown: ChevronDown,
+  check: Check,
+  circle: Circle,
+  dash: Minus,
+  trash: Trash2,
+  refresh: RefreshCw,
+  issues: LayoutDashboard,
+  statusBacklog: CircleDashed,
+  statusTodo: Circle,
+  statusInProgress: LoaderCircle,
+  statusInReview: CircleDot,
+  statusDone: CircleCheckBig,
+  statusBlocked: CircleSlash2,
+  statusCancelled: CircleX,
+  priorityNone: Minus,
+  priorityLow: SignalLow,
+  priorityMedium: SignalMedium,
+  priorityHigh: SignalHigh,
+  priorityUrgent: CircleAlert,
+}).map(([key, svg]) => [key, lucideDefinition(svg)]));
 
 export function injectionVersion() {
   return activeCompatibility().version;
@@ -42,6 +132,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const SELECTORS = ${JSON.stringify(compatibility.selectors)};
     const ATTRIBUTES = ${JSON.stringify(compatibility.attributes)};
     const NAVIGATION = ${JSON.stringify(compatibility.navigation)};
+    const LUCIDE_ICONS = ${JSON.stringify(lucideIcons)};
     const RESUME_SURFACE_KEY = "better-codex-resume-surface";
     const statusLabels = { backlog: "待规划", todo: "待办", in_progress: "进行中", in_review: "审核中", done: "已完成", blocked: "已阻塞", cancelled: "已取消" };
     const priorityLabels = { none: "无", low: "低", medium: "中", high: "高", urgent: "紧急" };
@@ -437,14 +528,17 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function syncEntryIcon(button, surface) {
-      const icon = button.querySelector("svg");
-      if (icon) {
-        const markup = surface === "agents" ? '<rect x="4" y="7" width="16" height="12" rx="4"></rect><path d="M12 3v4M8 12h.01M16 12h.01M8 16h8"></path>' : '<rect x="3" y="4" width="6" height="16" rx="1.5"></rect><rect x="11" y="4" width="6" height="11" rx="1.5"></rect><circle cx="17.5" cy="17.5" r="3.5"></circle><path d="m15.8 17.5 1.1 1.1 2.2-2.3"></path>';
-        if (icon.getAttribute("viewBox") !== "0 0 24 24") icon.setAttribute("viewBox", "0 0 24 24");
-        if (icon.getAttribute("fill") !== "none") icon.setAttribute("fill", "none");
-        if (icon.getAttribute("stroke") !== "currentColor") icon.setAttribute("stroke", "currentColor");
-        if (icon.getAttribute("stroke-width") !== "1.8") icon.setAttribute("stroke-width", "1.8");
-        if (icon.innerHTML !== markup) icon.innerHTML = markup;
+      const svg = button.querySelector("svg");
+      if (svg) {
+        const definition = LUCIDE_ICONS[surface === "agents" ? "bot" : "issues"];
+        if (svg.getAttribute("viewBox") !== "0 0 24 24") svg.setAttribute("viewBox", "0 0 24 24");
+        if (svg.getAttribute("fill") !== "none") svg.setAttribute("fill", "none");
+        if (svg.getAttribute("stroke") !== "currentColor") svg.setAttribute("stroke", "currentColor");
+        if (svg.getAttribute("stroke-width") !== "1.8") svg.setAttribute("stroke-width", "1.8");
+        svg.setAttribute("stroke-linecap", "round");
+        svg.setAttribute("stroke-linejoin", "round");
+        svg.setAttribute("class", "lucide lucide-" + definition.name);
+        if (svg.innerHTML !== definition.nodes) svg.innerHTML = definition.nodes;
       }
     }
 
@@ -663,57 +757,21 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function icon(name, className = "") {
-      const paths = {
-        plus: '<path d="M12 5v14M5 12h14"/>',
-        more: '<circle cx="5" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1" fill="currentColor" stroke="none"/>',
-        filter: '<path d="M4 5h16l-6 7v5l-4 2v-7z"/>',
-        display: '<path d="M4 6h16M4 12h16M4 18h16"/><circle cx="8" cy="6" r="2" fill="currentColor"/><circle cx="15" cy="12" r="2" fill="currentColor"/><circle cx="10" cy="18" r="2" fill="currentColor"/>',
-        board: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15 4v16"/>',
-        switch: '<path d="M8 3L4 7l4 4M4 7h16M16 21l4-4-4-4M20 17H4"/>',
-        expand: '<path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/>',
-        close: '<path d="M6 6l12 12M18 6L6 18"/>',
-        paperclip: '<path d="M21.4 11.6l-8.9 8.9a6 6 0 01-8.5-8.5l9.6-9.6a4 4 0 015.7 5.7l-9.6 9.6a2 2 0 01-2.8-2.8l8.9-8.9"/>',
-        folder: '<path d="M3 6.5h6l2 2h10v9.5a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><path d="M3 10h18"/>',
-        tag: '<path d="M20 13l-7 7-10-10V3h7z"/><circle cx="7.5" cy="7.5" r="1" fill="currentColor" stroke="none"/>',
-        calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4M17 3v4M3 10h18"/>',
-        user: '<circle cx="12" cy="8" r="4"/><path d="M4.5 21a7.5 7.5 0 0115 0"/>',
-        userEdit: '<circle cx="10" cy="8" r="4"/><path d="M3 21a7 7 0 0111-5.7M16 18l4-4 2 2-4 4-3 1z"/>',
-        bot: '<rect x="4" y="7" width="16" height="12" rx="4"/><path d="M12 3v4M8 12h.01M16 12h.01M8 16h8"/>',
-        image: '<rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="9" r="2"/><path d="M4 17l5-5 4 4 3-3 4 4"/>',
-        search: '<circle cx="11" cy="11" r="7"/><path d="M16.5 16.5L21 21"/>',
-        review: '<path d="M5 4h11l3 3v13H5z"/><path d="M16 4v4h4M8 12l2 2 4-5"/>',
-        layout: '<rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 10h18M10 10v10"/>',
-        edit: '<path d="M4 20h4l11-11-4-4L4 16zM13.5 6.5l4 4"/>',
-        chevron: '<path d="M9 5l7 7-7 7"/>',
-        chevronDown: '<path d="M5 9l7 7 7-7"/>',
-        check: '<path d="M5 12l4 4L19 6"/>',
-        circle: '<circle cx="12" cy="12" r="7"/>',
-        dash: '<path d="M5 12h14"/>',
-        trash: '<path d="M4 7h16M9 3h6l1 4H8zM7 7l1 14h8l1-14M10 11v6M14 11v6"/>',
-        refresh: '<path d="M20 11a8 8 0 10-2.3 5.7M20 4v7h-7"/>'
-      };
-      return '<svg class="' + className + '" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + paths[name] + '</svg>';
+      const definition = LUCIDE_ICONS[name];
+      if (!definition) return "";
+      const classes = "lucide lucide-" + definition.name + (className ? " " + escapeHtml(className) : "");
+      return '<svg class="' + classes + '" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + definition.nodes + '</svg>';
     }
 
     function statusIcon(status) {
-      const outer = '<circle cx="7" cy="7" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/>';
-      let content = outer;
-      if (status === "backlog") content = Array.from({ length: 16 }, (_, index) => {
-        const angle = index / 16 * Math.PI * 2 - Math.PI / 2;
-        return '<circle cx="' + (7 + 6 * Math.cos(angle)) + '" cy="' + (7 + 6 * Math.sin(angle)) + '" r=".55" fill="currentColor"/>';
-      }).join("");
-      if (status === "in_progress") content = outer + '<path d="M7 7L7 3.5A3.5 3.5 0 0 1 7 10.5Z" fill="currentColor"/>';
-      if (status === "in_review") content = outer + '<path d="M7 7L7 3.5A3.5 3.5 0 1 1 3.5 7Z" fill="currentColor"/>';
-      if (status === "done") content = '<circle cx="7" cy="7" r="6" fill="currentColor"/><path d="M3.7 7.3L5.8 9.4 10.4 4.8" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>';
-      if (status === "blocked") content = outer + '<path d="M4.5 4.5L9.5 9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>';
-      if (status === "cancelled") content = outer + '<path d="M5 5L9 9M9 5L5 9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>';
-      return '<svg class="better-codex-status-icon" viewBox="0 0 14 14" fill="none" aria-hidden="true">' + content + '</svg>';
+      const names = { backlog: "statusBacklog", todo: "statusTodo", in_progress: "statusInProgress", in_review: "statusInReview", done: "statusDone", blocked: "statusBlocked", cancelled: "statusCancelled" };
+      return icon(names[status] || "statusTodo", "better-codex-status-icon");
     }
 
     function priorityIcon(priority) {
-      const bars = { none: 0, low: 1, medium: 2, high: 3, urgent: 4 }[priority] || 0;
-      if (!bars) return '<svg class="better-codex-priority" data-priority="none" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 8h10"/></svg>';
-      return '<svg class="better-codex-priority" data-priority="' + escapeHtml(priority) + '" viewBox="0 0 16 16" fill="currentColor">' + [0,1,2,3].map(index => '<rect x="' + (1 + index * 4) + '" y="' + (9 - index * 3) + '" width="3" height="' + ((index + 1) * 3) + '" rx=".5" opacity="' + (index < bars ? 1 : .2) + '"/>').join("") + '</svg>';
+      const names = { none: "priorityNone", low: "priorityLow", medium: "priorityMedium", high: "priorityHigh", urgent: "priorityUrgent" };
+      const markup = icon(names[priority] || "priorityNone", "better-codex-priority");
+      return markup.replace("<svg ", '<svg data-priority="' + escapeHtml(priority) + '" ');
     }
 
     function timeAgo(value) {
@@ -806,6 +864,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       return [];
     }
 
+    function filterOptionIcon(key, value) {
+      if (key === "status") return statusIcon(value);
+      if (key === "priority") return priorityIcon(value);
+      const names = { date: "calendar", assignee: "user", creator: "userEdit", project: "folder", label: "tag" };
+      return icon(names[key] || "circle");
+    }
+
     function openFilterMenu(trigger) {
       if (panel?.querySelector(".better-codex-filter-menu")) return closeFilterMenu();
       closeFilterMenu();
@@ -840,7 +905,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             const item = document.createElement("button");
             item.type = "button";
             item.className = "better-codex-filter-row";
-            item.innerHTML = '<span class="better-codex-filter-check">' + (selected ? icon("check") : "") + '</span><span class="better-codex-filter-label">' + escapeHtml(option.text) + "</span>";
+            item.innerHTML = '<span class="better-codex-filter-visual">' + filterOptionIcon(key, option.value) + '</span><span class="better-codex-filter-label">' + escapeHtml(option.text) + '</span><span class="better-codex-filter-check">' + (selected ? icon("check") : "") + "</span>";
             item.addEventListener("click", event => {
               event.stopPropagation();
               const values = state.filters[key];
@@ -989,7 +1054,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       toolbar.className = "better-codex-toolbar";
       const tabs = document.createElement("div");
       tabs.className = "better-codex-tabs better-codex-issue-only";
-      for (const [view, text] of [["all", "全部"], ["member", "成员"], ["agent", "智能体"]]) {
+      for (const [view, text] of [["all", "全部"], ["assigned", "已分配"], ["unassigned", "未分配"]]) {
         const button = actionButton(text);
         button.dataset.view = view;
         button.addEventListener("click", () => { state.view = view; render(); });
@@ -1272,14 +1337,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const effortOptions = effortsForModel(model);
       const preferredEffort = draft.reasoning_effort || state.agentModelCatalog.find(item => item.id === model)?.defaultReasoningEffort;
       const effort = effortOptions.some(item => item.value === preferredEffort) ? preferredEffort : effortOptions[0]?.value || "medium";
-      const heading = creating ? "创建智能体" : "智能体";
-      const profileName = creating
-        ? '<input class="better-codex-agent-profile-name" name="name" maxlength="80" value="' + escapeHtml(name) + '" placeholder="智能体名称" aria-label="智能体名称" required>'
-        : '<h2>' + escapeHtml(draft.name) + '</h2>';
-      const profileHead = '<div class="better-codex-agent-profile-head">' + agentAvatarEditorMarkup(draft, creating ? "" : agentKey(draft)) + profileName + '<input type="hidden" name="avatar" value="' + escapeHtml(draft.avatar || "") + '"></div>';
+      const heading = creating ? "新建" : "智能体";
+      const avatarInput = '<input type="hidden" name="avatar" value="' + escapeHtml(draft.avatar || "") + '">';
+      const profileHead = creating
+        ? '<h2>创建智能体</h2><div class="better-codex-agent-avatar-field">' + agentAvatarEditorMarkup(draft, "") + '<div><strong>头像</strong><span>悬停头像即可选择并裁剪图片</span></div>' + avatarInput + '</div>'
+        : '<div class="better-codex-agent-profile-head">' + agentAvatarEditorMarkup(draft, agentKey(draft)) + '<h2>' + escapeHtml(draft.name) + '</h2>' + avatarInput + '</div>';
       const identity = isDefault
         ? '<div class="better-codex-agent-summary"><div><strong>Codex 默认智能体</strong><p>此处修改会写入根 config.toml，并影响之后新建的 Codex 窗口。</p></div></div>'
-        : (creating ? "" : '<label class="better-codex-agent-inspector-field"><span>名称</span><input name="name" maxlength="80" value="' + escapeHtml(name) + '" placeholder="智能体名称" required></label>') + '<label class="better-codex-agent-inspector-field"><span>介绍 <small>可选</small></span><textarea name="description" maxlength="500" rows="3" placeholder="说明这个智能体适合承担什么工作">' + escapeHtml(description) + '</textarea></label>';
+        : '<label class="better-codex-agent-inspector-field"><span>名称</span><input name="name" maxlength="80" value="' + escapeHtml(name) + '" placeholder="智能体名称" required></label><label class="better-codex-agent-inspector-field"><span>介绍 <small>可选</small></span><textarea name="description" maxlength="500" rows="3" placeholder="说明这个智能体适合承担什么工作">' + escapeHtml(description) + '</textarea></label>';
       const instructionField = isDefault ? "" : '<label class="better-codex-agent-inspector-field"><span>Instruct <small>可选</small></span><textarea name="instructions" rows="7" placeholder="定义职责、工作方式和输出要求">' + escapeHtml(instructions) + '</textarea></label>';
       const deleteButton = !creating && !isDefault ? '<button class="better-codex-agent-danger" type="button" data-agent-delete data-agent-key="' + escapeHtml(agentKey(draft)) + '">删除智能体</button>' : "";
       const modelOptions = state.agentModelCatalog.map(item => ({ value: item.id, label: item.displayName, description: item.description || "" }));
@@ -1325,7 +1390,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const filterCount = Object.values(state.filters).reduce((total, values) => total + values.length, 0);
       filterButton.innerHTML = icon("filter") + (filterCount ? filterCount + " 个筛选" : "筛选");
       filterButton.classList.toggle("is-active", filterCount > 0);
-      const visible = state.issues.filter(issue => (state.view === "all" || (state.view === "member" ? Boolean(issue.thread_id) : Boolean(issue.agent_enabled))) && issueMatchesFilters(issue));
+      const visible = state.issues.filter(issue => {
+        const assigned = Boolean(issue.agent_enabled || issue.thread_id);
+        const matchesView = state.view === "all"
+          || (state.view === "assigned" && assigned)
+          || (state.view === "unassigned" && !assigned)
+          || (state.view === "agent" && Boolean(issue.agent_enabled));
+        return matchesView && issueMatchesFilters(issue);
+      });
       const project = state.projects.find(item => item.id === state.projectId);
       panel.querySelector("#better-codex-board").innerHTML = Object.entries(statusLabels).map(([status, statusLabel]) => {
         const issues = visible.filter(issue => issue.status === status);
@@ -1572,7 +1644,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       }
 
       function header() {
-        return '<div class="better-codex-dialog-head"><div class="better-codex-dialog-breadcrumb"><span>' + escapeHtml(project?.name || "Better Codex") + '</span><span>›</span><strong>' + (draft.mode === "agent" ? "通过智能体创建" : issue ? "编辑 issue" : "手动创建") + '</strong></div><div class="better-codex-dialog-head-actions"><button class="better-codex-icon-button" type="button" data-dialog-expand aria-label="展开">' + icon("expand") + '</button><button class="better-codex-icon-button" type="button" data-dialog-close aria-label="关闭">' + icon("close") + '</button></div></div>';
+        return '<div class="better-codex-dialog-head"><div class="better-codex-dialog-breadcrumb"><span>' + escapeHtml(project?.name || "Better Codex") + '</span><span aria-hidden="true">' + icon("chevron") + '</span><strong>' + (draft.mode === "agent" ? "通过智能体创建" : issue ? "编辑 issue" : "手动创建") + '</strong></div><div class="better-codex-dialog-head-actions"><button class="better-codex-icon-button" type="button" data-dialog-expand aria-label="展开">' + icon("expand") + '</button><button class="better-codex-icon-button" type="button" data-dialog-close aria-label="关闭">' + icon("close") + '</button></div></div>';
       }
 
       function projectPicker() {
