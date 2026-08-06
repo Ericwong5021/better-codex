@@ -37,6 +37,8 @@ export type Project = {
   updated_at: string;
 };
 
+export type PendingActor = "user" | "agent";
+
 export type Issue = {
   id: string;
   identifier: string;
@@ -53,6 +55,9 @@ export type Issue = {
   workspace_path: string | null;
   agent_enabled: boolean;
   agent_id: string | null;
+  user_assigned: boolean;
+  needs_attention: boolean;
+  pending_actor: PendingActor;
   version: number;
   created_at: string;
   updated_at: string;
@@ -85,9 +90,10 @@ type IssueInput = {
   workspacePath?: string;
   agentEnabled?: boolean;
   agentId?: string;
+  userAssigned?: boolean;
 };
 
-type IssuePatch = Partial<Pick<Issue, "title" | "description" | "status" | "priority" | "labels" | "sort_order" | "pinned" | "thread_id" | "workspace_path" | "agent_enabled" | "agent_id">>;
+type IssuePatch = Partial<Pick<Issue, "title" | "description" | "status" | "priority" | "labels" | "sort_order" | "pinned" | "thread_id" | "workspace_path" | "agent_enabled" | "agent_id" | "user_assigned" | "needs_attention" | "pending_actor">>;
 
 type AgentProfileInput = Pick<AgentProfile, "name" | "description" | "instructions" | "model" | "reasoning_effort">;
 type AgentProfilePatch = Partial<AgentProfileInput>;
@@ -96,6 +102,11 @@ const latestSchemaVersion = 2;
 
 function now() {
   return new Date().toISOString();
+}
+
+function asPendingActor(value: unknown): PendingActor {
+  if (value === "user" || value === "agent") return value;
+  throw new Error("invalid_pending_actor");
 }
 
 function projectPrefix(name: string) {
@@ -138,6 +149,9 @@ function issueFromRow(row: Record<string, unknown>): Issue {
     labels: JSON.parse(String(labels_json ?? "[]")),
     pinned: Boolean(row.pinned),
     agent_enabled: Boolean(row.agent_enabled),
+    user_assigned: Boolean(row.user_assigned),
+    needs_attention: Boolean(row.needs_attention),
+    pending_actor: row.pending_actor === "agent" ? "agent" : "user",
   } as Issue;
 }
 
@@ -163,6 +177,8 @@ export class Store {
     this.ensureAgentProfileTable();
     this.ensureAgentAvatarTable();
     this.ensureRunTable();
+    this.ensureSettingsTable();
+    this.ensureDispatchColumns();
     const integrity = this.db.prepare("PRAGMA quick_check").get() as Record<string, unknown> | undefined;
     if (String(integrity?.quick_check ?? "") !== "ok") {
       this.db.close();
@@ -255,7 +271,38 @@ export class Store {
     const columns = new Set((this.db.prepare("PRAGMA table_info(issues)").all() as Array<{ name: string }>).map(item => item.name));
     if (!columns.has("agent_enabled")) this.db.exec("ALTER TABLE issues ADD COLUMN agent_enabled INTEGER NOT NULL DEFAULT 0");
     if (!columns.has("agent_id")) this.db.exec("ALTER TABLE issues ADD COLUMN agent_id TEXT");
+    if (!columns.has("user_assigned")) this.db.exec("ALTER TABLE issues ADD COLUMN user_assigned INTEGER NOT NULL DEFAULT 0");
     this.db.exec("CREATE INDEX IF NOT EXISTS issues_agent_id ON issues(agent_id)");
+  }
+
+  private ensureDispatchColumns() {
+    const columns = new Set((this.db.prepare("PRAGMA table_info(issues)").all() as Array<{ name: string }>).map(item => item.name));
+    if (!columns.has("needs_attention")) this.db.exec("ALTER TABLE issues ADD COLUMN needs_attention INTEGER NOT NULL DEFAULT 0");
+    if (!columns.has("pending_actor")) this.db.exec("ALTER TABLE issues ADD COLUMN pending_actor TEXT NOT NULL DEFAULT 'user'");
+    this.db.exec("CREATE INDEX IF NOT EXISTS issues_dispatch ON issues(needs_attention, pending_actor, agent_enabled, status)");
+    this.db.prepare(`
+      UPDATE issues
+      SET needs_attention = 1, pending_actor = 'agent'
+      WHERE agent_enabled = 1
+        AND archived_at IS NULL
+        AND status NOT IN ('backlog', 'done', 'cancelled')
+        AND needs_attention = 0
+        AND pending_actor = 'user'
+        AND NOT EXISTS (
+          SELECT 1 FROM issue_runs
+          WHERE issue_runs.issue_id = issues.id
+            AND issue_runs.status IN ('claimed', 'running')
+        )
+    `).run();
+  }
+
+  private ensureSettingsTable() {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+    `);
   }
 
   private ensureAgentProfileTable() {
@@ -327,6 +374,31 @@ export class Store {
 
   close() {
     this.db.close();
+  }
+
+  getAutoDispatch() {
+    const row = this.db.prepare("SELECT value FROM settings WHERE key = 'auto_dispatch'").get() as { value: string } | undefined;
+    return row?.value === "1";
+  }
+
+  setAutoDispatch(enabled: boolean) {
+    this.db.prepare(`
+      INSERT INTO settings (key, value) VALUES ('auto_dispatch', ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `).run(enabled ? "1" : "0");
+    return this.getAutoDispatch();
+  }
+
+  isDispatchable(issue: Issue) {
+    return Boolean(
+      issue.needs_attention
+      && issue.pending_actor === "agent"
+      && issue.agent_enabled
+      && !issue.archived_at
+      && issue.status !== "backlog"
+      && issue.status !== "done"
+      && issue.status !== "cancelled",
+    );
   }
 
   listProjects() {
@@ -510,8 +582,13 @@ export class Store {
     const title = cleanTitle(input.title);
     if (input.status && !issueStatuses.includes(input.status)) throw new Error("invalid_status");
     if (input.priority && !issuePriorities.includes(input.priority)) throw new Error("invalid_priority");
+    const userAssigned = Boolean(input.userAssigned) && !Boolean(input.agentEnabled);
     const agentId = input.agentEnabled && input.agentId ? input.agentId : null;
     if (agentId && !this.getAgentProfile(agentId)) throw new Error("agent_not_found");
+    const agentEnabled = Boolean(input.agentEnabled) && !userAssigned;
+    const status = input.status ?? "todo";
+    const needsAttention = agentEnabled && status !== "backlog" && status !== "done" && status !== "cancelled" ? 1 : 0;
+    const pendingActor = agentEnabled ? "agent" : "user";
     const id = randomUUID();
     const timestamp = now();
     this.db.exec("BEGIN IMMEDIATE");
@@ -524,26 +601,30 @@ export class Store {
         identifier = `${current.identifier_prefix}-${issueNumber}`;
       }
       const row = this.db.prepare("SELECT COALESCE(MAX(sort_order), 0) AS value FROM issues WHERE project_id = ? AND status = ?")
-        .get(project.id, input.status ?? "todo") as { value: number };
+        .get(project.id, status) as { value: number };
       this.db.prepare(`
         INSERT INTO issues (
           id, identifier, project_id, title, description, status, priority, labels_json,
-          sort_order, pinned, archived_at, thread_id, workspace_path, agent_enabled, agent_id, version, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?, ?, 1, ?, ?)
+          sort_order, pinned, archived_at, thread_id, workspace_path, agent_enabled, agent_id, user_assigned,
+          needs_attention, pending_actor, version, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
       `).run(
         id,
         identifier,
         project.id,
         title,
         input.description ?? "",
-        input.status ?? "todo",
+        status,
         input.priority ?? "medium",
         JSON.stringify(cleanLabels(input.labels ?? [])),
         Number(row.value) + 1000,
         input.threadId || null,
         input.workspacePath || null,
-        Number(input.agentEnabled ?? false),
+        Number(agentEnabled),
         agentId,
+        Number(userAssigned),
+        needsAttention,
+        pendingActor,
         timestamp,
         timestamp,
       );
@@ -565,12 +646,32 @@ export class Store {
     if (patch.labels !== undefined) patch.labels = cleanLabels(patch.labels);
     if (patch.sort_order !== undefined && !Number.isFinite(patch.sort_order)) throw new Error("invalid_sort_order");
     if (patch.agent_id && !this.getAgentProfile(patch.agent_id)) throw new Error("agent_not_found");
+    if (patch.pending_actor !== undefined) patch.pending_actor = asPendingActor(patch.pending_actor);
+    if (patch.needs_attention !== undefined) patch.needs_attention = Boolean(patch.needs_attention);
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const issue = this.getIssue(id);
       if (!issue) throw new Error("issue_not_found");
       if (issue.version !== version) throw new Error("version_conflict");
-      if (patch.agent_enabled === false) patch.agent_id = null;
+      if (patch.user_assigned !== undefined) patch.user_assigned = Boolean(patch.user_assigned);
+      if (patch.user_assigned === true) {
+        patch.agent_enabled = false;
+        patch.agent_id = null;
+        if (patch.pending_actor === undefined) patch.pending_actor = "user";
+      }
+      if (patch.agent_enabled === false) {
+        patch.agent_id = null;
+        if (patch.pending_actor === undefined) patch.pending_actor = "user";
+      }
+      if (patch.agent_enabled === true) {
+        patch.user_assigned = false;
+        if (patch.pending_actor === undefined) patch.pending_actor = "agent";
+      }
+      if (patch.pending_actor === "agent" && patch.needs_attention === undefined) {
+        const nextStatus = patch.status ?? issue.status;
+        if (nextStatus !== "backlog" && nextStatus !== "done" && nextStatus !== "cancelled") patch.needs_attention = true;
+      }
+      if (patch.status === "backlog" && patch.needs_attention === undefined) patch.needs_attention = false;
       if (patch.status !== undefined && patch.status !== issue.status && patch.sort_order === undefined) {
         const row = this.db.prepare("SELECT COALESCE(MAX(sort_order), 0) AS value FROM issues WHERE project_id = ? AND status = ? AND archived_at IS NULL")
           .get(issue.project_id, patch.status) as { value: number };
@@ -588,13 +689,21 @@ export class Store {
         workspace_path: "workspace_path",
         agent_enabled: "agent_enabled",
         agent_id: "agent_id",
+        user_assigned: "user_assigned",
+        needs_attention: "needs_attention",
+        pending_actor: "pending_actor",
       };
       const assignments: string[] = [];
       const values: unknown[] = [];
       for (const [key, value] of Object.entries(patch) as Array<[keyof IssuePatch, IssuePatch[keyof IssuePatch]]>) {
         if (value === undefined) continue;
         assignments.push(`${columns[key]} = ?`);
-        values.push(key === "labels" ? JSON.stringify(value) : key === "pinned" || key === "agent_enabled" ? Number(value) : key === "thread_id" || key === "workspace_path" || key === "agent_id" ? value || null : value);
+        values.push(
+          key === "labels" ? JSON.stringify(value)
+            : key === "pinned" || key === "agent_enabled" || key === "user_assigned" || key === "needs_attention" ? Number(value)
+              : key === "thread_id" || key === "workspace_path" || key === "agent_id" ? value || null
+                : value,
+        );
       }
       if (assignments.length === 0) {
         this.db.exec("COMMIT");
@@ -644,6 +753,10 @@ export class Store {
   claimNextIssue(): ClaimedIssue | null {
     this.db.exec("BEGIN IMMEDIATE");
     try {
+      if (!this.getAutoDispatch()) {
+        this.db.exec("COMMIT");
+        return null;
+      }
       const active = this.db.prepare("SELECT 1 AS value FROM issue_runs WHERE status IN ('claimed', 'running') LIMIT 1").get();
       if (active) {
         this.db.exec("COMMIT");
@@ -653,9 +766,11 @@ export class Store {
         SELECT issues.*, COALESCE(NULLIF(issues.workspace_path, ''), NULLIF(projects.workspace_path, ''), '') AS resolved_workspace
         FROM issues
         JOIN projects ON projects.id = issues.project_id
-        WHERE issues.status = 'todo'
+        WHERE issues.needs_attention = 1
+          AND issues.pending_actor = 'agent'
           AND issues.agent_enabled = 1
           AND issues.archived_at IS NULL
+          AND issues.status NOT IN ('backlog', 'done', 'cancelled')
           AND (issues.thread_id IS NOT NULL OR issues.workspace_path IS NOT NULL OR projects.workspace_path != '')
         ORDER BY issues.pinned DESC,
           CASE issues.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END,
@@ -672,7 +787,19 @@ export class Store {
       const runId = randomUUID();
       const timestamp = now();
       this.db.prepare("INSERT INTO issue_runs (id, issue_id, status, thread_id, started_at) VALUES (?, ?, 'claimed', NULL, ?)").run(runId, issue.id, timestamp);
-      const result = this.db.prepare("UPDATE issues SET status = 'in_progress', version = version + 1, updated_at = ? WHERE id = ? AND version = ? AND status = 'todo'").run(timestamp, issue.id, issue.version);
+      const result = this.db.prepare(`
+        UPDATE issues
+        SET status = 'in_progress',
+            needs_attention = 0,
+            version = version + 1,
+            updated_at = ?
+        WHERE id = ?
+          AND version = ?
+          AND needs_attention = 1
+          AND pending_actor = 'agent'
+          AND agent_enabled = 1
+          AND status NOT IN ('backlog', 'done', 'cancelled')
+      `).run(timestamp, issue.id, issue.version);
       if (result.changes !== 1) throw new Error("claim_conflict");
       this.db.exec("COMMIT");
       return { runId, issue: this.getIssue(issue.id)!, workspacePath: resolved_workspace };
@@ -718,8 +845,15 @@ export class Store {
     try {
       this.db.prepare("UPDATE issue_runs SET status = ?, finished_at = ?, error = ? WHERE id = ? AND status IN ('claimed', 'running')")
         .run(success ? "completed" : "failed", timestamp, error ?? null, runId);
-      this.db.prepare("UPDATE issues SET status = ?, version = version + 1, updated_at = ? WHERE id = ? AND status = 'in_progress'")
-        .run(success ? "in_review" : "blocked", timestamp, issueId);
+      this.db.prepare(`
+        UPDATE issues
+        SET status = CASE WHEN status = 'in_progress' THEN ? ELSE status END,
+            needs_attention = 1,
+            pending_actor = ?,
+            version = version + 1,
+            updated_at = ?
+        WHERE id = ?
+      `).run(success ? "in_review" : "blocked", success ? "user" : "agent", timestamp, issueId);
       this.db.exec("COMMIT");
     } catch (caught) {
       this.db.exec("ROLLBACK");

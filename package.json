@@ -1,6 +1,6 @@
 {
   "name": "better-codex",
-  "version": "0.3.8",
+  "version": "0.3.9",
   "private": true,
   "type": "module",
   "engines": {
@@ -29,7 +29,11 @@
     "dist/runtime-state.js",
     "dist/server.js",
     "dist/service.js",
+    "dist/session-reply.js",
+    "dist/session-transcript.js",
+    "dist/markdown.js",
     "dist/updater.js",
+    "dist/user-profile.js",
     "dist/worker.js"
   ],
   "scripts": {

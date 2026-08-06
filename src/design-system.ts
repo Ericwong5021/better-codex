@@ -47,6 +47,11 @@ export function betterCodexDesignSystemCss() {
       --bc-color-danger: oklch(.59 .2 27);
       --bc-color-danger-soft: color-mix(in oklch, var(--bc-color-danger) 12%, var(--bc-color-surface));
       --bc-color-scrim: rgb(18 18 20 / .28);
+      --bc-priority-none: oklch(.62 .01 286);
+      --bc-priority-low: oklch(.55 .1 250);
+      --bc-priority-medium: oklch(.76 .15 95);
+      --bc-priority-high: oklch(.68 .18 52);
+      --bc-priority-urgent: var(--bc-color-danger);
       --bc-radius-xs: 7px;
       --bc-radius-sm: 10px;
       --bc-radius-md: 13px;
@@ -66,7 +71,7 @@ export function betterCodexDesignSystemCss() {
       --bc-inset-hairline: inset 0 0 0 1px var(--bc-color-hairline);
       --bc-elevation-float: 0 18px 52px rgb(15 15 18 / .16), 0 3px 12px rgb(15 15 18 / .08);
       --bc-elevation-menu: 0 12px 32px rgb(15 15 18 / .13), 0 2px 8px rgb(15 15 18 / .06);
-      --bc-elevation-card: 0 1px 2px rgb(15 15 18 / .04), 0 4px 14px rgb(15 15 18 / .07);
+      --bc-elevation-card: 0 1px 2px rgb(15 15 18 / .04), 0 2px 6px rgb(15 15 18 / .05);
 
       /* Backward-compatible semantic aliases for the existing renderer. */
       --bc-page: var(--bc-color-canvas);
@@ -106,15 +111,21 @@ export function betterCodexDesignSystemCss() {
       --bc-color-on-primary: var(--bc-color-canvas);
       --bc-color-danger: oklch(.68 .18 24);
       --bc-color-scrim: rgb(0 0 0 / .56);
+      --bc-priority-none: oklch(.68 .01 286);
+      --bc-priority-low: oklch(.68 .1 250);
+      --bc-priority-medium: oklch(.78 .14 95);
+      --bc-priority-high: oklch(.74 .16 52);
+      --bc-priority-urgent: var(--bc-color-danger);
       --bc-elevation-float: 0 22px 58px rgb(0 0 0 / .5), 0 4px 14px rgb(0 0 0 / .3);
       --bc-elevation-menu: 0 14px 34px rgb(0 0 0 / .38), 0 3px 10px rgb(0 0 0 / .22);
-      --bc-elevation-card: 0 1px 2px rgb(0 0 0 / .22), 0 6px 18px rgb(0 0 0 / .28);
+      --bc-elevation-card: 0 1px 2px rgb(0 0 0 / .2), 0 2px 8px rgb(0 0 0 / .22);
     }
 
     #better-codex-panel,
     #better-codex-dialog,
     #better-codex-agent-dialog,
     #better-codex-confirm,
+    #better-codex-auto-dispatch-help-dialog,
     #better-codex-context-menu,
     #better-codex-update-notice,
     #better-codex-avatar-picker,
@@ -320,6 +331,230 @@ export function betterCodexDesignSystemCss() {
       background: color-mix(in oklch, var(--bc-warning) 12%, var(--bc-color-control));
     }
 
+    #better-codex-panel .better-codex-auto-dispatch-wrap {
+      display: inline-flex;
+      flex: 0 0 auto;
+      align-items: center;
+      gap: 2px;
+    }
+
+    #better-codex-panel .better-codex-auto-dispatch {
+      min-width: 0;
+      gap: 6px;
+      padding-inline: var(--bc-control-padding);
+      color: var(--bc-color-text-muted);
+      line-height: normal;
+    }
+
+    #better-codex-panel .better-codex-auto-dispatch > svg {
+      display: block;
+      width: var(--bc-icon-md);
+      height: var(--bc-icon-md);
+      flex: 0 0 auto;
+    }
+
+    #better-codex-panel .better-codex-auto-dispatch > span {
+      white-space: nowrap;
+    }
+
+    #better-codex-panel .better-codex-auto-dispatch.is-on {
+      color: var(--bc-success);
+      background: color-mix(in oklch, var(--bc-success) 12%, var(--bc-color-control));
+    }
+
+    #better-codex-panel .better-codex-auto-dispatch.is-on > svg {
+      animation: better-codex-auto-dispatch-spin 2.8s linear infinite;
+    }
+
+    #better-codex-panel .better-codex-auto-dispatch-help {
+      display: inline-flex;
+      width: calc(var(--bc-control-height) - 4px);
+      height: calc(var(--bc-control-height) - 4px);
+      flex: 0 0 auto;
+      align-items: center;
+      justify-content: center;
+      border: 0;
+      border-radius: 999px;
+      color: var(--bc-color-text-faint);
+      background: transparent;
+      padding: 0;
+      line-height: 0;
+      cursor: pointer;
+    }
+
+    #better-codex-panel .better-codex-auto-dispatch-help:hover,
+    #better-codex-panel .better-codex-auto-dispatch-help:focus-visible {
+      color: var(--bc-color-text);
+      background: var(--bc-color-hover);
+      outline: 0;
+    }
+
+    #better-codex-panel .better-codex-auto-dispatch-help > svg {
+      display: block;
+      width: var(--bc-icon-sm);
+      height: var(--bc-icon-sm);
+    }
+
+    #better-codex-auto-dispatch-help-dialog {
+      position: fixed;
+      inset: 0;
+      z-index: 140;
+      width: min(560px, calc(100vw - 32px));
+      height: fit-content;
+      max-height: calc(100vh - 32px);
+      margin: auto;
+      border: 0;
+      border-radius: var(--bc-radius-lg);
+      color: var(--bc-color-text);
+      background: var(--bc-color-surface-raised);
+      padding: 0;
+      box-shadow: var(--bc-elevation-menu);
+    }
+
+    #better-codex-auto-dispatch-help-dialog::backdrop {
+      background: var(--bc-color-scrim);
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-auto-dispatch-help-shell {
+      display: flex;
+      flex-direction: column;
+      gap: var(--bc-space-4);
+      padding: calc(var(--bc-space-4) + 2px);
+    }
+
+    #better-codex-auto-dispatch-help-dialog header,
+    #better-codex-auto-dispatch-help-dialog footer {
+      display: flex;
+      align-items: center;
+    }
+
+    #better-codex-auto-dispatch-help-dialog header {
+      justify-content: space-between;
+      gap: var(--bc-space-2);
+    }
+
+    #better-codex-auto-dispatch-help-dialog header strong {
+      font-size: calc(var(--bc-text-xl) + 1px);
+      font-weight: 700;
+      letter-spacing: -.01em;
+    }
+
+    #better-codex-auto-dispatch-help-dialog header > button {
+      display: inline-flex;
+      width: 32px;
+      height: 32px;
+      align-items: center;
+      justify-content: center;
+      border: 0;
+      border-radius: var(--bc-radius-sm);
+      color: var(--bc-color-text-muted);
+      background: transparent;
+      padding: 0;
+      cursor: pointer;
+    }
+
+    #better-codex-auto-dispatch-help-dialog header > button > svg {
+      display: block;
+      width: 16px;
+      height: 16px;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-auto-dispatch-help-panels {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 1px minmax(0, 1fr);
+      gap: var(--bc-space-4);
+      align-items: stretch;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-auto-dispatch-help-divider {
+      width: 1px;
+      align-self: stretch;
+      background: color-mix(in srgb, var(--bc-color-text) 14%, var(--bc-color-hairline));
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-auto-dispatch-help-panel {
+      display: flex;
+      min-width: 0;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: var(--bc-space-3);
+      text-align: left;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-auto-dispatch-help-heading {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 10px;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-auto-dispatch-help-heading > svg {
+      display: block;
+      width: calc(var(--bc-icon-md) + 4px);
+      height: calc(var(--bc-icon-md) + 4px);
+      flex: 0 0 auto;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-auto-dispatch-help-panel.is-manual .better-codex-auto-dispatch-help-heading {
+      color: var(--bc-color-text-muted);
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-auto-dispatch-help-panel.is-auto .better-codex-auto-dispatch-help-heading {
+      color: var(--bc-success);
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-auto-dispatch-help-heading h3 {
+      margin: 0;
+      font-size: calc(var(--bc-text-xl) + 2px);
+      font-weight: 700;
+      letter-spacing: -.02em;
+      line-height: 1.2;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-auto-dispatch-help-panel p {
+      margin: 0;
+      max-width: 24em;
+      color: var(--bc-color-text-muted);
+      font-size: var(--bc-text-lg);
+      line-height: 1.6;
+    }
+
+    #better-codex-auto-dispatch-help-dialog footer {
+      justify-content: flex-end;
+    }
+
+    #better-codex-auto-dispatch-help-dialog footer button {
+      display: inline-flex;
+      min-height: var(--bc-control-height);
+      min-width: 96px;
+      align-items: center;
+      justify-content: center;
+      border: 0;
+      border-radius: var(--bc-radius-sm);
+      color: var(--bc-color-text);
+      background: var(--bc-color-control);
+      padding: 0 var(--bc-control-padding);
+      font: inherit;
+      font-size: var(--bc-text-md);
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    @media (max-width: 560px) {
+      #better-codex-auto-dispatch-help-dialog .better-codex-auto-dispatch-help-panels {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      #better-codex-auto-dispatch-help-dialog .better-codex-auto-dispatch-help-divider {
+        width: 100%;
+        height: 1px;
+      }
+    }
+
+    @keyframes better-codex-auto-dispatch-spin {
+      to { transform: rotate(360deg); }
+    }
+
     #better-codex-panel .better-codex-filter-menu,
     #better-codex-panel .better-codex-filter-submenu,
     #better-codex-context-menu,
@@ -340,9 +575,20 @@ export function betterCodexDesignSystemCss() {
     }
 
     #better-codex-context-menu .better-codex-context-submenu {
+      position: absolute;
+      top: -5px;
+      left: 100%;
+      display: none;
       width: max-content;
       min-width: 148px;
-      max-width: min(220px, calc(100vw - 24px));
+      max-width: min(240px, calc(100vw - 24px));
+      max-height: min(320px, calc(100vh - 24px));
+      overflow-y: auto;
+    }
+
+    #better-codex-context-menu[data-align="left"] .better-codex-context-submenu {
+      right: 100%;
+      left: auto;
     }
 
     #better-codex-panel .better-codex-filter-row,
@@ -367,6 +613,54 @@ export function betterCodexDesignSystemCss() {
       align-items: center;
       justify-content: center;
       line-height: 0;
+    }
+
+    #better-codex-context-menu .better-codex-context-avatar {
+      display: inline-flex;
+      width: 16px;
+      height: 16px;
+      flex: 0 0 16px;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      border-radius: 999px;
+      color: var(--bc-primary-foreground);
+      background: var(--bc-primary);
+      line-height: 0;
+    }
+
+    #better-codex-context-menu .better-codex-context-avatar.is-codex {
+      color: inherit;
+      background: transparent;
+      border-radius: 4px;
+    }
+
+    #better-codex-context-menu .better-codex-context-avatar.is-fallback,
+    #better-codex-context-menu .better-codex-context-avatar.is-icon {
+      color: var(--bc-color-text-muted);
+      background: var(--bc-color-control);
+    }
+
+    #better-codex-context-menu .better-codex-context-avatar img,
+    #better-codex-context-menu .better-codex-context-avatar svg {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    #better-codex-context-menu .better-codex-context-avatar.is-fallback svg,
+    #better-codex-context-menu .better-codex-context-avatar.is-icon svg {
+      width: 10px;
+      height: 10px;
+      margin: auto;
+    }
+
+    #better-codex-context-menu .better-codex-context-avatar.is-user.is-initials {
+      color: #fff;
+      font-size: 9px;
+      font-weight: 700;
+      line-height: 1;
     }
 
     #better-codex-context-menu .better-codex-status-icon,
@@ -437,7 +731,7 @@ export function betterCodexDesignSystemCss() {
 
     #better-codex-panel .better-codex-column-head {
       min-height: 36px;
-      padding: 0 0 var(--bc-space-2) var(--bc-space-2);
+      padding: 0 0 var(--bc-space-2);
       font-variant-numeric: tabular-nums;
     }
 
@@ -507,18 +801,55 @@ export function betterCodexDesignSystemCss() {
       color: var(--bc-danger);
     }
 
+    #better-codex-panel .better-codex-priority,
+    #better-codex-context-menu .better-codex-priority,
+    #better-codex-dialog .better-codex-priority {
+      color: var(--bc-priority-none, var(--bc-muted));
+    }
+
+    #better-codex-panel .better-codex-priority[data-priority="none"],
+    #better-codex-context-menu .better-codex-priority[data-priority="none"],
+    #better-codex-dialog .better-codex-priority[data-priority="none"] {
+      color: var(--bc-priority-none, var(--bc-muted));
+    }
+
+    #better-codex-panel .better-codex-priority[data-priority="low"],
+    #better-codex-context-menu .better-codex-priority[data-priority="low"],
+    #better-codex-dialog .better-codex-priority[data-priority="low"] {
+      color: var(--bc-priority-low, var(--bc-info));
+    }
+
+    #better-codex-panel .better-codex-priority[data-priority="medium"],
+    #better-codex-context-menu .better-codex-priority[data-priority="medium"],
+    #better-codex-dialog .better-codex-priority[data-priority="medium"] {
+      color: var(--bc-priority-medium, var(--bc-warning));
+    }
+
+    #better-codex-panel .better-codex-priority[data-priority="high"],
+    #better-codex-context-menu .better-codex-priority[data-priority="high"],
+    #better-codex-dialog .better-codex-priority[data-priority="high"] {
+      color: var(--bc-priority-high, oklch(.68 .18 52));
+    }
+
+    #better-codex-panel .better-codex-priority[data-priority="urgent"],
+    #better-codex-context-menu .better-codex-priority[data-priority="urgent"],
+    #better-codex-dialog .better-codex-priority[data-priority="urgent"] {
+      color: var(--bc-priority-urgent, var(--bc-danger));
+    }
+
     #better-codex-panel .better-codex-cards {
-      padding: var(--bc-space-1);
+      padding: 0;
       border-radius: var(--bc-radius-md);
     }
 
     #better-codex-panel .better-codex-card {
-      width: 260px;
+      width: 100%;
+      box-sizing: border-box;
       margin-bottom: var(--bc-space-2);
       border: 1px solid var(--bc-color-hairline);
       border-radius: var(--bc-radius-md);
       color: var(--bc-color-text);
-      background: transparent;
+      background: var(--bc-color-canvas);
       padding: var(--bc-space-3);
       box-shadow: var(--bc-card-shadow);
       transition: transform var(--bc-motion-fast) var(--bc-ease-out), border-color var(--bc-motion-fast) ease-out, box-shadow var(--bc-motion-fast) ease-out;
@@ -526,11 +857,138 @@ export function betterCodexDesignSystemCss() {
 
     #better-codex-panel .better-codex-card:hover {
       border-color: color-mix(in srgb, var(--bc-color-text) 16%, var(--bc-color-hairline));
-      background: transparent;
-      box-shadow: var(--bc-card-shadow), 0 8px 22px color-mix(in srgb, var(--bc-color-text) 8%, transparent);
+      background: var(--bc-color-canvas);
+      box-shadow: var(--bc-card-shadow), 0 4px 12px color-mix(in srgb, var(--bc-color-text) 6%, transparent);
     }
 
     #better-codex-panel .better-codex-card:active { transform: scale(.98); }
+
+    #better-codex-panel .better-codex-card.is-dragging {
+      opacity: .42;
+    }
+
+    #better-codex-panel .better-codex-card.is-dragging:active {
+      transform: none;
+    }
+
+    .better-codex-card.is-drag-ghost {
+      display: block;
+      margin: 0 !important;
+      border: 1px solid var(--bc-color-hairline, #e5e5e6);
+      border-radius: var(--bc-radius-md, 13px);
+      color: var(--bc-color-text, #1a1c1f);
+      background: var(--bc-color-canvas, #ffffff);
+      padding: var(--bc-space-3, 12px);
+      opacity: 1 !important;
+      box-shadow: var(--bc-card-shadow), 0 6px 16px color-mix(in srgb, var(--bc-color-text, #1a1c1f) 8%, transparent);
+      cursor: grabbing;
+      font-family: var(--bc-font-ui, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif);
+      font-size: var(--bc-text-base, 14px);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .better-codex-card.is-drag-ghost .better-codex-card-row,
+    .better-codex-card.is-drag-ghost .better-codex-card-id,
+    .better-codex-card.is-drag-ghost .better-codex-card-meta {
+      display: flex;
+      align-items: center;
+    }
+
+    .better-codex-card.is-drag-ghost .better-codex-card-row {
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .better-codex-card.is-drag-ghost .better-codex-card-id {
+      min-width: 0;
+      gap: 6px;
+      color: var(--bc-color-text-muted, #71717a);
+      font-size: var(--bc-text-sm, 12px);
+    }
+
+    .better-codex-card.is-drag-ghost .better-codex-card-title {
+      display: -webkit-box;
+      margin: 5px 0 0;
+      overflow: hidden;
+      color: var(--bc-color-text, #1a1c1f);
+      font-size: var(--bc-text-md, 14px);
+      font-weight: 550;
+      line-height: 1.38;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+    }
+
+    .better-codex-card.is-drag-ghost .better-codex-card-description {
+      margin-top: 4px;
+      overflow: hidden;
+      color: var(--bc-color-text-muted, #71717a);
+      font-size: var(--bc-text-sm, 12px);
+      line-height: 1.35;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .better-codex-card.is-drag-ghost .better-codex-chip-row {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 7px;
+    }
+
+    .better-codex-card.is-drag-ghost .better-codex-chip {
+      display: inline-flex;
+      max-width: 155px;
+      align-items: center;
+      gap: 4px;
+      overflow: hidden;
+      border-radius: 999px;
+      color: var(--bc-color-text-muted, #71717a);
+      background: var(--bc-color-control, #f3f3f4);
+      padding: 2px 6px;
+      font-size: var(--bc-text-caption, 11px);
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .better-codex-card.is-drag-ghost .better-codex-chip > svg {
+      width: 11px;
+      height: 11px;
+      flex: 0 0 auto;
+    }
+
+    .better-codex-card.is-drag-ghost .better-codex-card-meta {
+      justify-content: space-between;
+      gap: 8px;
+      margin-top: 8px;
+      color: var(--bc-color-text-muted, #71717a);
+      font-size: var(--bc-text-sm, 12px);
+    }
+
+    .better-codex-card.is-drag-ghost .better-codex-card-assignee {
+      display: inline-flex;
+      min-width: 0;
+      align-items: center;
+      gap: 5px;
+      overflow: hidden;
+    }
+
+    .better-codex-card.is-drag-ghost .better-codex-card-avatar {
+      display: inline-flex;
+      width: 16px;
+      height: 16px;
+      flex: 0 0 auto;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      border-radius: 999px;
+    }
+
+    .better-codex-card.is-drag-ghost .better-codex-priority,
+    .better-codex-card.is-drag-ghost .better-codex-status-icon,
+    .better-codex-card.is-drag-ghost svg {
+      flex: 0 0 auto;
+    }
 
     #better-codex-panel .better-codex-chip,
     #better-codex-panel .better-codex-agent-default-badge,
@@ -540,6 +998,99 @@ export function betterCodexDesignSystemCss() {
       color: var(--bc-color-text-muted);
       background: var(--bc-color-control);
       box-shadow: none;
+    }
+
+    #better-codex-panel .better-codex-chip {
+      display: inline-flex;
+      max-width: 155px;
+      align-items: center;
+      gap: 4px;
+      overflow: hidden;
+      padding: 2px 6px;
+      font-size: var(--bc-text-caption);
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #better-codex-panel .better-codex-chip > svg {
+      width: 11px;
+      height: 11px;
+      flex: 0 0 auto;
+    }
+
+    #better-codex-panel .better-codex-chip > span {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    #better-codex-panel .better-codex-card-assignee {
+      display: inline-flex;
+      min-width: 0;
+      align-items: center;
+      gap: 5px;
+      overflow: hidden;
+      color: var(--bc-color-text-muted);
+    }
+
+    #better-codex-panel .better-codex-card-assignee > span:last-child {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #better-codex-panel .better-codex-card-assignee > svg {
+      width: 12px;
+      height: 12px;
+      flex: 0 0 auto;
+    }
+
+    #better-codex-panel .better-codex-card-avatar {
+      display: inline-flex;
+      width: 16px;
+      height: 16px;
+      flex: 0 0 auto;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      border-radius: 999px;
+      color: var(--bc-primary-foreground);
+      background: var(--bc-primary);
+    }
+
+    #better-codex-panel .better-codex-card-avatar.is-codex {
+      color: inherit;
+      background: transparent;
+      border-radius: 4px;
+    }
+
+    #better-codex-panel .better-codex-card-avatar.is-fallback,
+    #better-codex-panel .better-codex-card-avatar.is-icon {
+      color: var(--bc-color-text-muted);
+      background: var(--bc-color-control);
+    }
+
+    #better-codex-panel .better-codex-card-avatar img,
+    #better-codex-panel .better-codex-card-avatar svg {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    #better-codex-panel .better-codex-card-avatar.is-fallback svg,
+    #better-codex-panel .better-codex-card-avatar.is-icon svg {
+      width: 10px;
+      height: 10px;
+      margin: auto;
+    }
+
+    #better-codex-panel .better-codex-card-avatar.is-user.is-initials {
+      color: #fff;
+      font-size: 9px;
+      font-weight: 700;
+      line-height: 1;
     }
 
     #better-codex-dialog .better-codex-dialog-select {
@@ -1001,12 +1552,30 @@ export function betterCodexDesignSystemCss() {
     }
 
     #better-codex-panel .better-codex-agent-inspector {
+      box-sizing: border-box;
       width: min(32vw, 516px);
       min-width: 430px;
       flex: 0 0 auto;
+      overflow: hidden;
       color: var(--bc-color-text);
       background: var(--bc-color-canvas);
       box-shadow: inset 1px 0 color-mix(in oklch, var(--bc-color-text) 6%, transparent);
+      transform: translateX(0);
+      opacity: 1;
+      transition: width var(--bc-motion-normal) var(--bc-ease-out), min-width var(--bc-motion-normal) var(--bc-ease-out), opacity var(--bc-motion-fast) ease-out, transform var(--bc-motion-normal) var(--bc-ease-out), box-shadow var(--bc-motion-fast) ease-out;
+    }
+
+    #better-codex-panel .better-codex-agent-inspector[data-animate="enter"] {
+      animation: better-codex-inspector-enter var(--bc-motion-normal) var(--bc-ease-out);
+    }
+
+    #better-codex-panel .better-codex-agent-inspector.is-closing {
+      width: 0 !important;
+      min-width: 0 !important;
+      opacity: 0;
+      transform: translateX(18px);
+      box-shadow: none;
+      pointer-events: none;
     }
 
     #better-codex-panel .better-codex-agent-inspector form {
@@ -1367,7 +1936,22 @@ export function betterCodexDesignSystemCss() {
       font-size: var(--bc-text-md);
       line-height: 1.55;
       outline: 0;
-      resize: vertical;
+    }
+
+    #better-codex-panel .better-codex-agent-inspector-field textarea {
+      resize: none;
+      overflow-x: hidden;
+      overflow-y: auto;
+    }
+
+    #better-codex-panel .better-codex-agent-inspector-field textarea[name="description"] {
+      height: calc((var(--bc-text-md) * 1.55 * 4) + 26px);
+    }
+
+    #better-codex-panel .better-codex-agent-inspector-field textarea[name="instructions"] {
+      height: calc((var(--bc-text-sm) * 1.55 * 12) + 26px);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: var(--bc-text-sm);
     }
 
     #better-codex-panel .better-codex-agent-inspector-field input:focus,
@@ -1492,6 +2076,314 @@ export function betterCodexDesignSystemCss() {
 
     #better-codex-dialog .better-codex-dialog-open-thread:active {
       transform: scale(.96);
+    }
+
+    #better-codex-dialog[data-detail="true"] {
+      height: min(78vh, 820px);
+    }
+
+    #better-codex-dialog .better-codex-conversation {
+      display: flex;
+      min-height: 0;
+      flex: 1;
+      flex-direction: column;
+      margin: 0 20px;
+      overflow: hidden;
+      border: 1px solid var(--bc-border);
+      border-radius: var(--bc-radius-md);
+      background: color-mix(in oklch, var(--bc-surface) 92%, var(--bc-hover));
+    }
+
+    #better-codex-dialog .better-codex-conversation-head {
+      display: flex;
+      flex: 0 0 auto;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--bc-space-2);
+      border-bottom: 1px solid var(--bc-divider);
+      padding: calc(var(--bc-text-base) * 0.55) calc(var(--bc-text-base) * 0.85);
+      color: var(--bc-muted);
+      font-size: var(--bc-text-md);
+      font-weight: 550;
+    }
+
+    #better-codex-dialog .better-codex-conversation-status {
+      color: var(--bc-faint);
+      font-weight: 500;
+    }
+
+    #better-codex-dialog .better-codex-conversation-status[data-state="running"] {
+      color: var(--bc-warning);
+    }
+
+    #better-codex-dialog .better-codex-conversation-status[data-state="failed"] {
+      color: var(--bc-danger);
+    }
+
+    #better-codex-dialog .better-codex-timeline {
+      display: flex;
+      min-height: 0;
+      flex: 1;
+      flex-direction: column;
+      gap: calc(var(--bc-text-base) * 1.05);
+      overflow: auto;
+      padding: calc(var(--bc-text-base) * 0.85) calc(var(--bc-text-base) * 0.95);
+    }
+
+    #better-codex-dialog .better-codex-bubble {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    #better-codex-dialog .better-codex-bubble-avatar {
+      display: inline-flex;
+      width: 28px;
+      height: 28px;
+      flex: 0 0 auto;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      border-radius: 999px;
+      color: var(--bc-primary-foreground);
+      background: var(--bc-primary);
+      font-size: var(--bc-text-avatar);
+    }
+
+    #better-codex-dialog .better-codex-bubble-avatar.is-user {
+      color: #fff;
+      background: #16a34a;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      line-height: 1;
+      text-transform: uppercase;
+    }
+
+    #better-codex-dialog .better-codex-bubble-avatar.is-user.is-initials {
+      font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    #better-codex-dialog .better-codex-bubble-avatar.is-codex {
+      color: inherit;
+      background: transparent;
+    }
+
+    #better-codex-dialog .better-codex-bubble-avatar.is-fallback {
+      border-radius: var(--bc-radius-xs);
+      color: var(--bc-color-text-muted);
+      background: var(--bc-color-control);
+    }
+
+    #better-codex-dialog .better-codex-bubble-avatar.has-image img,
+    #better-codex-dialog .better-codex-bubble-avatar svg {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    #better-codex-dialog .better-codex-bubble-avatar.is-fallback svg,
+    #better-codex-dialog .better-codex-bubble-avatar.is-icon svg,
+    #better-codex-dialog .better-codex-bubble-avatar.is-user svg {
+      width: 14px;
+      height: 14px;
+    }
+
+    #better-codex-dialog .better-codex-bubble-avatar.is-codex svg {
+      width: 28px;
+      height: 28px;
+    }
+
+    #better-codex-dialog .better-codex-bubble-main {
+      min-width: 0;
+      flex: 1;
+    }
+
+    #better-codex-dialog .better-codex-bubble-meta {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      margin-bottom: 4px;
+      min-width: 0;
+    }
+
+    #better-codex-dialog .better-codex-bubble-meta strong {
+      overflow: hidden;
+      color: var(--bc-foreground);
+      font-size: var(--bc-text-md);
+      font-weight: 650;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #better-codex-dialog .better-codex-bubble-meta time {
+      flex: 0 0 auto;
+      color: var(--bc-faint);
+      font-size: calc(var(--bc-text-md) * 0.92);
+    }
+
+    #better-codex-dialog .better-codex-bubble-content {
+      color: color-mix(in oklch, var(--bc-foreground) 88%, var(--bc-muted));
+      font-size: var(--bc-text-md);
+      line-height: 1.6;
+    }
+
+    #better-codex-dialog .better-codex-bubble.is-user .better-codex-bubble-content {
+      color: color-mix(in oklch, var(--bc-foreground) 82%, var(--bc-muted));
+    }
+
+    #better-codex-dialog .better-codex-markdown > :first-child,
+    #better-codex-dialog .better-codex-bubble-content > :first-child {
+      margin-top: 0;
+    }
+
+    #better-codex-dialog .better-codex-markdown > :last-child,
+    #better-codex-dialog .better-codex-bubble-content > :last-child {
+      margin-bottom: 0;
+    }
+
+    #better-codex-dialog .better-codex-markdown p,
+    #better-codex-dialog .better-codex-markdown ul,
+    #better-codex-dialog .better-codex-markdown ol,
+    #better-codex-dialog .better-codex-markdown pre,
+    #better-codex-dialog .better-codex-markdown blockquote,
+    #better-codex-dialog .better-codex-bubble-content p,
+    #better-codex-dialog .better-codex-bubble-content ul,
+    #better-codex-dialog .better-codex-bubble-content ol,
+    #better-codex-dialog .better-codex-bubble-content pre,
+    #better-codex-dialog .better-codex-bubble-content blockquote {
+      margin: 0 0 .75em;
+    }
+
+    #better-codex-dialog .better-codex-markdown h1,
+    #better-codex-dialog .better-codex-markdown h2,
+    #better-codex-dialog .better-codex-markdown h3,
+    #better-codex-dialog .better-codex-bubble-content h1,
+    #better-codex-dialog .better-codex-bubble-content h2,
+    #better-codex-dialog .better-codex-bubble-content h3 {
+      margin: 0 0 .5em;
+      color: var(--bc-foreground);
+      font-weight: 650;
+      line-height: 1.35;
+    }
+
+    #better-codex-dialog .better-codex-markdown h1,
+    #better-codex-dialog .better-codex-bubble-content h1 { font-size: 1.2em; }
+    #better-codex-dialog .better-codex-markdown h2,
+    #better-codex-dialog .better-codex-bubble-content h2 { font-size: 1.1em; }
+    #better-codex-dialog .better-codex-markdown h3,
+    #better-codex-dialog .better-codex-bubble-content h3 { font-size: 1.05em; }
+
+    #better-codex-dialog .better-codex-markdown ul,
+    #better-codex-dialog .better-codex-markdown ol,
+    #better-codex-dialog .better-codex-bubble-content ul,
+    #better-codex-dialog .better-codex-bubble-content ol {
+      padding-left: 1.35em;
+    }
+
+    #better-codex-dialog .better-codex-markdown li + li,
+    #better-codex-dialog .better-codex-bubble-content li + li {
+      margin-top: .28em;
+    }
+
+    #better-codex-dialog .better-codex-markdown a,
+    #better-codex-dialog .better-codex-bubble-content a {
+      color: var(--bc-info);
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+
+    #better-codex-dialog .better-codex-markdown code,
+    #better-codex-dialog .better-codex-bubble-content code {
+      border-radius: 4px;
+      background: color-mix(in oklch, var(--bc-hover) 80%, var(--bc-border));
+      padding: .08em .35em;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: .92em;
+    }
+
+    #better-codex-dialog .better-codex-markdown pre,
+    #better-codex-dialog .better-codex-bubble-content pre {
+      overflow: auto;
+      border-radius: var(--bc-radius-sm);
+      background: color-mix(in oklch, var(--bc-hover) 70%, var(--bc-border));
+      padding: .7em .85em;
+    }
+
+    #better-codex-dialog .better-codex-markdown pre code,
+    #better-codex-dialog .better-codex-bubble-content pre code {
+      background: transparent;
+      padding: 0;
+      font-size: .9em;
+    }
+
+    #better-codex-dialog .better-codex-markdown blockquote,
+    #better-codex-dialog .better-codex-bubble-content blockquote {
+      border-left: 3px solid var(--bc-border);
+      color: var(--bc-muted);
+      padding-left: .75em;
+    }
+
+    #better-codex-dialog .better-codex-markdown-empty {
+      margin: auto;
+      padding: 18px 8px;
+      color: var(--bc-faint);
+      text-align: center;
+    }
+
+    #better-codex-dialog .better-codex-composer {
+      display: flex;
+      flex: 0 0 auto;
+      align-items: flex-end;
+      gap: 8px;
+      margin: 8px 20px 0;
+      border: 1px solid var(--bc-border);
+      border-radius: var(--bc-radius-md);
+      background: var(--bc-surface);
+      padding: 8px;
+    }
+
+    #better-codex-dialog .better-codex-composer textarea {
+      box-sizing: border-box;
+      min-height: calc(var(--bc-control-height) * 1.4);
+      max-height: 120px;
+      flex: 1;
+      border: 0;
+      color: var(--bc-foreground);
+      background: transparent;
+      padding: 6px 8px;
+      font: inherit;
+      font-size: var(--bc-text-md);
+      line-height: 1.45;
+      outline: none;
+      resize: vertical;
+    }
+
+    #better-codex-dialog .better-codex-composer textarea::placeholder {
+      color: var(--bc-muted);
+    }
+
+    #better-codex-dialog .better-codex-composer-send {
+      display: inline-flex;
+      min-width: 72px;
+      height: var(--bc-control-height);
+      align-items: center;
+      justify-content: center;
+      border: 0;
+      border-radius: var(--bc-radius-sm);
+      color: var(--bc-primary-foreground);
+      background: var(--bc-primary);
+      padding: 0 12px;
+      font: inherit;
+      font-size: var(--bc-text-md);
+      font-weight: 550;
+      cursor: pointer;
+    }
+
+    #better-codex-dialog .better-codex-composer-send:disabled {
+      cursor: not-allowed;
+      opacity: .55;
     }
 
     #better-codex-dialog .better-codex-dialog-breadcrumb,
@@ -2130,6 +3022,36 @@ export function betterCodexDesignSystemCss() {
       to { opacity: 1; transform: translateY(0) scale(1); }
     }
 
+    @keyframes better-codex-inspector-enter {
+      from {
+        width: 0;
+        min-width: 0;
+        opacity: 0;
+        transform: translateX(18px);
+      }
+      to {
+        width: min(32vw, 516px);
+        min-width: 430px;
+        opacity: 1;
+        transform: translateX(0);
+      }
+    }
+
+    @keyframes better-codex-inspector-enter-mobile {
+      from {
+        width: 0;
+        min-width: 0;
+        opacity: 0;
+        transform: translateX(18px);
+      }
+      to {
+        width: 100%;
+        min-width: 0;
+        opacity: 1;
+        transform: translateX(0);
+      }
+    }
+
     @media (max-width: 720px) {
       #better-codex-panel .better-codex-toolbar {
         min-height: auto;
@@ -2156,8 +3078,11 @@ export function betterCodexDesignSystemCss() {
       #better-codex-panel[data-surface="agents"][data-agent-pane="detail"] .better-codex-toolbar,
       #better-codex-panel[data-surface="agents"][data-agent-pane="create"] .better-codex-toolbar { display: none; }
       #better-codex-panel .better-codex-agent-inspector { width: 100%; min-width: 0; }
+      #better-codex-panel .better-codex-agent-inspector[data-animate="enter"] {
+        animation-name: better-codex-inspector-enter-mobile;
+      }
       #better-codex-panel .better-codex-agent-grid { grid-template-columns: 1fr; }
-      #better-codex-dialog, #better-codex-agent-dialog, #better-codex-confirm, #better-codex-avatar-picker, #better-codex-avatar-cropper { width: calc(100vw - 24px); }
+      #better-codex-dialog, #better-codex-agent-dialog, #better-codex-confirm, #better-codex-auto-dispatch-help-dialog, #better-codex-avatar-picker, #better-codex-avatar-cropper { width: calc(100vw - 24px); }
       #better-codex-dialog .better-codex-dialog-footer { align-items: flex-end; padding-block: var(--bc-space-2); }
       #better-codex-dialog .better-codex-dialog-footer-right { flex-wrap: wrap; }
     }
@@ -2170,6 +3095,16 @@ export function betterCodexDesignSystemCss() {
       #better-codex-avatar-cropper,
       #better-codex-update-notice {
         animation: none;
+      }
+
+      #better-codex-panel .better-codex-auto-dispatch.is-on > svg {
+        animation: none;
+      }
+
+      #better-codex-panel .better-codex-agent-inspector,
+      #better-codex-panel .better-codex-agent-inspector[data-animate="enter"] {
+        animation: none;
+        transition: none;
       }
 
       #better-codex-panel button,

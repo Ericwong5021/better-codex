@@ -53,7 +53,7 @@ test("default Codex agent reflects the root config.toml model settings", () => {
       id: "",
       role: "codex",
       name: "Codex",
-      description: "默认智能体，直接读取 config.toml",
+      description: "",
       instructions: "使用 Codex 默认配置承接并执行 Better Codex Issue。",
       model: "gpt-5.6-sol",
       reasoning_effort: "high",
@@ -118,6 +118,103 @@ test("core workflow persists, orders status moves, and rejects stale writes", ()
     assert.equal(restored?.status, "in_progress");
     assert.equal(restored?.thread_id, "local:thread-1");
     assert.equal(store.health().schemaVersion, 2);
+    store.close();
+  } finally {
+    rmSync(target.directory, { recursive: true, force: true });
+  }
+});
+
+test("issue assignee can be the current user or an agent", () => {
+  const target = temporaryDatabase();
+  try {
+    const store = new Store(target.file);
+    const project = store.createProject({ name: "Owners", workspacePath: target.directory });
+    const profile = store.createAgentProfile({ name: "Helper", description: "", instructions: "", model: "gpt-test", reasoning_effort: "medium" });
+    const issue = store.createIssue({ projectId: project.id, title: "Owned" });
+    assert.equal(issue.user_assigned, false);
+    assert.equal(issue.agent_enabled, false);
+
+    const mine = store.updateIssue(issue.id, issue.version, { user_assigned: true });
+    assert.equal(mine.user_assigned, true);
+    assert.equal(mine.agent_enabled, false);
+    assert.equal(mine.agent_id, null);
+    assert.equal(mine.pending_actor, "user");
+
+    const agentOwned = store.updateIssue(mine.id, mine.version, { agent_enabled: true, agent_id: profile.id });
+    assert.equal(agentOwned.user_assigned, false);
+    assert.equal(agentOwned.agent_enabled, true);
+    assert.equal(agentOwned.agent_id, profile.id);
+
+    const cleared = store.updateIssue(agentOwned.id, agentOwned.version, { user_assigned: false, agent_enabled: false });
+    assert.equal(cleared.user_assigned, false);
+    assert.equal(cleared.agent_enabled, false);
+    assert.equal(cleared.agent_id, null);
+
+    const createdMine = store.createIssue({ projectId: project.id, title: "Mine", userAssigned: true });
+    assert.equal(createdMine.user_assigned, true);
+    assert.equal(createdMine.agent_enabled, false);
+
+    const createdAgent = store.createIssue({ projectId: project.id, title: "Agent", agentEnabled: true, agentId: profile.id });
+    assert.equal(createdAgent.user_assigned, false);
+    assert.equal(createdAgent.agent_enabled, true);
+    assert.equal(createdAgent.agent_id, profile.id);
+    store.close();
+  } finally {
+    rmSync(target.directory, { recursive: true, force: true });
+  }
+});
+
+test("auto-dispatch claims only attentive agent-owned issues outside backlog", () => {
+  const target = temporaryDatabase();
+  try {
+    const store = new Store(target.file);
+    const project = store.createProject({ name: "Dispatch", workspacePath: target.directory });
+    const profile = store.createAgentProfile({ name: "Runner", description: "", instructions: "", model: "gpt-test", reasoning_effort: "medium" });
+
+    assert.equal(store.getAutoDispatch(), false);
+    const quiet = store.createIssue({
+      projectId: project.id,
+      title: "Quiet",
+      description: "ready",
+      status: "todo",
+      agentEnabled: true,
+      agentId: profile.id,
+      workspacePath: target.directory,
+    });
+    assert.equal(quiet.needs_attention, true);
+    assert.equal(quiet.pending_actor, "agent");
+    assert.equal(store.claimNextIssue(), null);
+
+    store.setAutoDispatch(true);
+    const backlog = store.createIssue({
+      projectId: project.id,
+      title: "Backlog",
+      description: "plan later",
+      status: "backlog",
+      agentEnabled: true,
+      agentId: profile.id,
+      workspacePath: target.directory,
+    });
+    assert.equal(backlog.needs_attention, false);
+    assert.equal(backlog.pending_actor, "agent");
+
+    const userOwned = store.updateIssue(quiet.id, quiet.version, { pending_actor: "user", needs_attention: true });
+    assert.equal(store.claimNextIssue(), null);
+
+    const ready = store.updateIssue(userOwned.id, userOwned.version, { pending_actor: "agent", needs_attention: true });
+    const claimed = store.claimNextIssue();
+    assert.equal(claimed?.issue.id, ready.id);
+    assert.equal(claimed?.issue.status, "in_progress");
+    assert.equal(claimed?.issue.needs_attention, false);
+    assert.equal(store.claimNextIssue(), null);
+
+    store.finishRun(claimed!.runId, claimed!.issue.id, true);
+    const finished = store.getIssue(ready.id)!;
+    assert.equal(finished.status, "in_review");
+    assert.equal(finished.needs_attention, true);
+    assert.equal(finished.pending_actor, "user");
+    assert.equal(store.claimNextIssue(), null);
+
     store.close();
   } finally {
     rmSync(target.directory, { recursive: true, force: true });

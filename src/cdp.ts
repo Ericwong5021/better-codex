@@ -78,7 +78,7 @@ async function bridgeRequest(connection: Connection, runtimePort: number, access
     requestId = typeof request.id === "string" ? request.id : "";
     const path = typeof request.path === "string" ? request.path : "";
     const method = typeof request.method === "string" ? request.method : "GET";
-    if (!requestId || request.token !== accessToken || !/^\/api\/(?:bootstrap(?:[?]|$)|update(?:\/install)?(?:[?]|$)|projects(?:\/ensure)?(?:[?]|$)|issues(?:[/?]|$)|agents(?:[/?]|$))/.test(path) || !["GET", "POST", "PATCH", "DELETE"].includes(method)) throw new Error("invalid_bridge_request");
+    if (!requestId || request.token !== accessToken || !/^\/api\/(?:bootstrap(?:[?]|$)|update(?:\/install)?(?:[?]|$)|projects(?:\/ensure)?(?:[?]|$)|issues(?:[/?]|$)|agents(?:[/?]|$)|settings\/auto-dispatch(?:[?]|$))/.test(path) || !["GET", "POST", "PATCH", "DELETE"].includes(method)) throw new Error("invalid_bridge_request");
     const response = await fetch(`http://127.0.0.1:${runtimePort}${path}`, {
       method,
       headers: {
@@ -121,7 +121,7 @@ async function evaluate(connection: Connection, expression: string) {
   return payload?.value;
 }
 
-async function mainTargets(port: number) {
+async function mainTargets(port: number, options: { trustIds?: Set<string> } = {}) {
   if (!activeCompatibility().supportedPlatforms.some(platform => platform === process.platform)) {
     writeCompatibilityStatus({ codexVersion: null, compatible: false, reason: "unsupported_platform", targetId: null, capabilities: null });
     throw new Error(`codex_incompatible_unsupported_platform_${process.platform}`);
@@ -134,6 +134,10 @@ async function mainTargets(port: number) {
   let lastCapabilities: RendererCapabilities | null = null;
   let compatibleCapabilities: RendererCapabilities | null = null;
   for (const target of candidates) {
+    if (options.trustIds?.has(target.id)) {
+      selected.push(target);
+      continue;
+    }
     const connection = new Connection(target.webSocketDebuggerUrl!);
     try {
       await connection.open();
@@ -156,7 +160,9 @@ async function mainTargets(port: number) {
     }
   }
   if (selected.length > 0) {
-    writeCompatibilityStatus({ codexVersion, compatible: true, reason: null, targetId: selected[0].id, capabilities: compatibleCapabilities });
+    if (!options.trustIds?.size) {
+      writeCompatibilityStatus({ codexVersion, compatible: true, reason: null, targetId: selected[0].id, capabilities: compatibleCapabilities });
+    }
     return selected;
   }
   writeCompatibilityStatus({ codexVersion, compatible: false, reason: lastReason, targetId: lastTargetId, capabilities: lastCapabilities });
@@ -331,28 +337,16 @@ async function quitCodex() {
 
 async function waitForTargets(port: number) {
   let incompatibility: Error | null = null;
-  let stableIds = "";
-  let stableCount = 0;
-  for (let attempt = 0; attempt < 80; attempt += 1) {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
     try {
       const values = await mainTargets(port);
-      if (values.length > 0) {
-        const ids = values.map(value => value.id).sort().join(",");
-        stableCount = ids === stableIds ? stableCount + 1 : 1;
-        stableIds = ids;
-        if (stableCount >= 4) return values;
-      } else {
-        stableCount = 0;
-        stableIds = "";
-      }
+      if (values.length > 0) return values;
     } catch (error) {
-      stableCount = 0;
-      stableIds = "";
       if (error instanceof Error && error.message.startsWith("codex_incompatible_")) {
         incompatibility = error;
       }
     }
-    await new Promise(resolve => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, 150));
   }
   if (incompatibility) throw incompatibility;
   throw new Error(`cdp_unavailable_${port}`);
@@ -485,7 +479,11 @@ export async function watchInjection(port: number, accessToken: string) {
   let stopping = false;
   let discovery: Connection | null = null;
   let wakeTargetActivity: (() => void) | null = null;
-  const wake = () => wakeTargetActivity?.();
+  const wake = () => {
+    const finish = wakeTargetActivity;
+    wakeTargetActivity = null;
+    finish?.();
+  };
   const stop = () => { stopping = true; wake(); };
   const ensureDiscovery = async () => {
     if (discovery) return;
@@ -507,19 +505,19 @@ export async function watchInjection(port: number, accessToken: string) {
       connection?.close();
     }
   };
-  const targetActivity = (fallbackMs: number) => new Promise<void>(resolve => {
+  const targetActivity = () => new Promise<void>(resolve => {
     const finish = () => {
-      clearTimeout(timeout);
       if (wakeTargetActivity === finish) wakeTargetActivity = null;
       resolve();
     };
-    const timeout = setTimeout(finish, fallbackMs);
     wakeTargetActivity = finish;
   });
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
   while (!stopping) {
-    const activity = targetActivity(2000);
+    // Arm wake immediately so target events during this cycle can cut the wait short.
+    let settleMs = 250;
+    const activity = targetActivity();
     try {
       await ensureDiscovery();
       const runtime = readRuntimeState();
@@ -536,7 +534,7 @@ export async function watchInjection(port: number, accessToken: string) {
         attached.clear();
       }
       activeRuntimePort = runtime.port;
-      const values = await mainTargets(port);
+      const values = await mainTargets(port, { trustIds: new Set(attached.keys()) });
       const activeIds = new Set(values.map(target => target.id));
       for (const [id, current] of attached) {
         if (!activeIds.has(id)) {
@@ -572,6 +570,7 @@ export async function watchInjection(port: number, accessToken: string) {
         const current = readCompatibilityStatus();
         writeCompatibilityStatus({ codexVersion: current?.codexVersion ?? desktopVersion(), compatible: true, reason: null, targetId: target.id, capabilities: current?.capabilities ?? null }, true);
       }
+      // Health-check attached sessions without opening a second debugger to the same target.
       for (const [id, current] of attached) {
         try {
           const existing = await evaluate(current.connection, "({ version: window.__betterCodexInjection__?.version || null, endpoint: window.__betterCodexInjection__?.endpoint || null })") as { version?: string; endpoint?: string };
@@ -587,10 +586,15 @@ export async function watchInjection(port: number, accessToken: string) {
           attached.delete(id);
         }
       }
+      settleMs = attached.size > 0 ? 2500 : 250;
     } catch (error) {
-      console.error(error instanceof Error ? error.message : "injector_cycle_failed");
+      const message = error instanceof Error ? error.message : "injector_cycle_failed";
+      // Renderer often appears before sidebar/content; probe faster than the idle sweep.
+      settleMs = message.startsWith("codex_incompatible_") || message.startsWith("cdp_unavailable_") ? 200 : 500;
+      console.error(message);
     }
-    await activity;
+    await Promise.race([activity, new Promise<void>(resolve => setTimeout(resolve, settleMs))]);
+    wake();
   }
   const activeDiscovery = discovery as Connection | null;
   activeDiscovery?.close();

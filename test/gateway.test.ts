@@ -82,7 +82,7 @@ test("gateway completes the issue workflow and survives restart", async () => {
       id: "",
       role: "codex",
       name: "Codex",
-      description: "默认智能体，直接读取 config.toml",
+      description: "",
       instructions: "使用 Codex 默认配置承接并执行 Better Codex Issue。",
       model: "默认模型",
       reasoning_effort: "默认推理等级",

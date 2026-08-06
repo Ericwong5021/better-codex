@@ -10,6 +10,13 @@ test("generated injection script is valid JavaScript", () => {
   assert.ok(source.includes("location.pathname.match(/\\/local\\/([^/?#]+)/)"));
 });
 
+test("board bridge requests retry once after runtime_bridge_timeout", () => {
+  const source = injectionScript(4317, "test-token", "install");
+  assert.match(source, /runtime_bridge_timeout/);
+  assert.match(source, /return attempt\(1\)/);
+  assert.match(source, /retriesLeft > 0 && error instanceof Error && error\.message === "runtime_bridge_timeout"/);
+});
+
 test("injected panel opts out of the native Electron drag region", () => {
   const source = injectionScript(4317, "test-token", "install");
 
@@ -44,12 +51,12 @@ test("all interface icons use Lucide definitions", () => {
     "file-code-corner", "flask-conical", "book-open", "shield-check", "database", "sparkles", "pencil", "chevron-right",
     "chevron-down", "check", "circle", "minus", "trash-2", "refresh-cw", "square-kanban",
     "circle-dashed", "loader-circle", "circle-dot", "circle-check-big", "circle-slash-2",
-    "circle-x", "signal-low", "signal-medium", "signal-high", "circle-alert",
+    "circle-x", "signal-low", "signal-medium", "signal-high", "priority-urgent",
   ]) assert.ok(source.includes('"name":"' + name + '"'), `missing Lucide icon: ${name}`);
 
   assert.ok(source.includes('const classes = "lucide lucide-" + definition.name'));
   assert.ok(source.includes('icon(names[status] || "statusTodo", "better-codex-status-icon", "2.35")'));
-  assert.ok(source.includes('const markup = icon(names[priority] || "priorityNone", "better-codex-priority")'));
+  assert.ok(source.includes('const markup = icon(names[priority] || "priorityNone", "better-codex-priority", "2.35")'));
   assert.doesNotMatch(source, /Array\.from\(\{ length: 16 \}/);
 });
 
@@ -62,10 +69,15 @@ test("status and priority menus keep their Lucide icons visible", () => {
   assert.ok(source.includes('if (key === "status") return statusIcon(value)'));
   assert.ok(source.includes('if (key === "priority") return priorityIcon(value)'));
   assert.ok(source.includes('icon(names[status] || "statusTodo", "better-codex-status-icon", "2.35")'));
+  assert.ok(source.includes('icon(names[priority] || "priorityNone", "better-codex-priority", "2.35")'));
   assert.ok(source.includes("escapeHtml(status)") && source.includes("data-status="));
   assert.match(source, /#better-codex-filter > svg \{ color: var\(--bc-info\); \}/);
   assert.match(css, /#better-codex-panel #better-codex-filter > svg\s*\{[^}]*color:\s*var\(--bc-info\);/s);
   assert.match(css, /\.better-codex-status-icon\[data-status="in_progress"\]/);
+  assert.match(css, /\.better-codex-priority\[data-priority="urgent"\]/);
+  assert.match(css, /\.better-codex-priority\[data-priority="high"\][^{]*\{[^}]*--bc-priority-high/);
+  assert.match(css, /\.better-codex-priority\[data-priority="medium"\][^{]*\{[^}]*--bc-priority-medium/);
+  assert.match(css, /\.better-codex-priority\[data-priority="low"\][^{]*\{[^}]*--bc-priority-low/);
   assert.match(css, /\.better-codex-dialog-select-trigger-visual,[\s\S]*?\.better-codex-dialog-select-option-visual\s*\{[^}]*width:\s*var\(--bc-icon-sm\);[^}]*height:\s*var\(--bc-icon-sm\);/s);
   assert.match(css, /\.better-codex-dialog-select-trigger-visual > svg,[\s\S]*?\.better-codex-dialog-select-option-visual > svg\s*\{[^}]*width:\s*var\(--bc-icon-sm\);[^}]*height:\s*var\(--bc-icon-sm\);/s);
 });
@@ -95,9 +107,38 @@ test("issue assignment tabs separate assigned and unassigned work", () => {
   const source = injectionScript(4317, "test-token", "install");
 
   assert.ok(source.includes('[["all", "全部"], ["assigned", "已分配"], ["unassigned", "未分配"]]'));
-  assert.ok(source.includes("const assigned = Boolean(issue.agent_enabled || issue.thread_id)"));
+  assert.ok(source.includes("const assigned = Boolean(issue.agent_enabled || issue.user_assigned || issue.thread_id)"));
   assert.ok(source.includes('state.view === "unassigned" && !assigned'));
   assert.ok(!source.includes('[["all", "全部"], ["member", "成员"], ["agent", "智能体"]]'));
+});
+
+test("issues toolbar has a toggleable auto-dispatch icon between filter and create", () => {
+  const source = injectionScript(4317, "test-token", "install");
+  const css = betterCodexDesignSystemCss();
+
+  assert.ok(source.includes('id = "better-codex-auto-dispatch"'));
+  assert.ok(source.includes("actions.append(error, working, search, filterWrap, autoDispatchWrap, createSplit)"));
+  assert.ok(source.includes('api("/api/settings/auto-dispatch"'));
+  assert.ok(source.includes("state.autoDispatch = Boolean(bootstrap.autoDispatch)"));
+  assert.ok(source.includes("syncAutoDispatch()"));
+  assert.ok(source.includes('showAutoDispatchHelp()'));
+  assert.ok(source.includes('"手动运行"'));
+  assert.ok(source.includes('"自动运行"'));
+  assert.ok(source.includes('id = "better-codex-auto-dispatch-help-dialog"'));
+  assert.ok(source.includes("better-codex-auto-dispatch-help-divider"));
+  assert.ok(source.includes("已指派智能体、且还需要智能体继续处理的任务"));
+  assert.ok(!source.includes("「待处理」标志"));
+  assert.ok(!source.includes('better-codex-attention'));
+  assert.ok(source.includes('icon("user")'));
+  assert.ok(source.includes('icon("refresh")'));
+  assert.ok(!source.includes('button.title = state.autoDispatch'));
+  assert.match(css, /\.better-codex-auto-dispatch\.is-on\s*\{[^}]*color:\s*var\(--bc-success\)/s);
+  assert.match(css, /\.better-codex-auto-dispatch\.is-on > svg\s*\{[^}]*animation:\s*better-codex-auto-dispatch-spin/s);
+  assert.match(css, /@keyframes better-codex-auto-dispatch-spin/);
+  assert.match(css, /\.better-codex-auto-dispatch-help\s*\{/s);
+  assert.match(css, /#better-codex-auto-dispatch-help-dialog \.better-codex-auto-dispatch-help-heading h3\s*\{[^}]*font-size:\s*calc\(var\(--bc-text-xl\) \+ 2px\)/s);
+  assert.match(css, /#better-codex-auto-dispatch-help-dialog \.better-codex-auto-dispatch-help-panel\s*\{[^}]*text-align:\s*left/s);
+  assert.match(css, /\.better-codex-auto-dispatch-help-divider\s*\{/s);
 });
 
 test("issue creation uses a primary split button with an agent creation menu", () => {
@@ -108,23 +149,29 @@ test("issue creation uses a primary split button with an agent creation menu", (
   assert.ok(source.includes('setAttribute("aria-label", "选择 issue 创建方式")'));
   assert.ok(source.includes("通过智能体创建"));
   assert.ok(source.includes('state.createMode = "agent"'));
+  assert.ok(source.includes('const crumb = issue'));
+  assert.ok(source.includes(': \'<strong>\' + title + \'</strong>\''));
   assert.match(css, /\.better-codex-create-split\s*\{[^}]*background:\s*var\(--bc-color-primary\);/s);
   assert.match(css, /\.better-codex-create-menu\s*\{[^}]*box-shadow:\s*var\(--bc-elevation-menu\);/s);
 });
 
-test("column action controls share the column corner inset", () => {
+test("column cards fill the padded column evenly", () => {
   const css = betterCodexDesignSystemCss();
 
-  assert.match(css, /\.better-codex-column-head\s*\{[^}]*padding:\s*0 0 var\(--bc-space-2\) var\(--bc-space-2\);/s);
+  assert.match(css, /\.better-codex-column\s*\{[^}]*padding:\s*var\(--bc-space-2\);/s);
+  assert.match(css, /\.better-codex-column-head\s*\{[^}]*padding:\s*0 0 var\(--bc-space-2\);/s);
+  assert.match(css, /\.better-codex-cards\s*\{[^}]*padding:\s*0;/s);
+  assert.match(css, /\.better-codex-card\s*\{[^}]*width:\s*100%;/s);
 });
 
 test("default Codex agent opens a branded config editor", () => {
   const source = injectionScript(4317, "test-token", "install");
 
-  assert.ok(source.includes('aria-label="Codex"'));
+  assert.ok(source.includes('aria-label="Better Codex"') || source.includes('aria-label="Codex"'));
   assert.ok(source.includes("const isDefault = Boolean(draft.is_default);"));
   assert.ok(source.includes('"/api/agents/default"'));
-  assert.ok(source.includes("影响之后新建的 Codex 窗口"));
+  assert.ok(source.includes("<strong>Codex 默认智能体</strong>"));
+  assert.ok(!source.includes("影响之后新建的 Codex 窗口"));
   assert.ok(source.includes("if (!agent || agent.is_default) return;"));
 });
 
@@ -146,12 +193,39 @@ test("opening an agent inspector hides the toolbar create action", () => {
   assert.match(betterCodexDesignSystemCss(), /\.better-codex-agent-actions\[hidden\]\s*\{[^}]*display:\s*none\s*!important/s);
 });
 
+test("agent inspector slides open and closed with width animation", () => {
+  const source = injectionScript(4317, "test-token", "install");
+  const css = betterCodexDesignSystemCss();
+  assert.ok(source.includes("function closeAgentInspector()"));
+  assert.ok(source.includes('inspector.classList.add("is-closing")'));
+  assert.ok(source.includes('data-animate="enter"'));
+  assert.ok(source.includes('const animateEnter = previousPane === "preview" && state.agentPane !== "preview"'));
+  assert.ok(source.includes("return closeAgentInspector()"));
+  assert.match(css, /\.better-codex-agent-inspector\[data-animate="enter"\]\s*\{[^}]*animation:\s*better-codex-inspector-enter/s);
+  assert.match(css, /\.better-codex-agent-inspector\.is-closing\s*\{[^}]*width:\s*0\s*!important;/s);
+  assert.match(css, /@keyframes better-codex-inspector-enter/);
+});
+
 test("clicking the agent directory outside the inspector closes the side pane", () => {
   const source = injectionScript(4317, "test-token", "install");
 
   assert.ok(source.includes('event.target.closest(".better-codex-agent-directory [data-agent-key]")'));
   assert.ok(source.includes('state.agentPane !== "preview" && event.target.closest(".better-codex-agent-directory")'));
   assert.ok(source.includes('if (event.target.closest("[data-agent-close-pane]")'));
+  assert.ok(source.includes("closeAgentInspector()"));
+});
+
+test("outside click dismisses the avatar picker without closing the agent inspector", () => {
+  const source = injectionScript(4317, "test-token", "install");
+
+  assert.ok(source.includes("let suppressAgentOutside = false"));
+  assert.ok(source.includes("suppressAgentOutside = true"));
+  assert.ok(source.includes("setTimeout(() => { suppressAgentOutside = false; }, 0)"));
+  assert.ok(source.includes("if (suppressAgentOutside) return"));
+  assert.ok(source.includes("if (!active || suppressAgentOutside) return"));
+  assert.ok(source.includes('target.closest("#better-codex-avatar-picker")'));
+  assert.ok(source.includes("if (picker.contains(event.target)) return"));
+  assert.ok(!source.includes("anchor?.contains?.(event.target)"));
 });
 
 test("agent suggestion icons use thicker strokes and semantic tones", () => {
@@ -201,6 +275,15 @@ test("issue editor uses branded listboxes instead of native selects", () => {
   assert.doesNotMatch(source, /<select\b/);
   assert.ok(source.includes('data-dialog-select-toggle="'));
   assert.ok(source.includes('data-dialog-select-option="'));
+  assert.ok(source.includes('data-dialog-select-toggle="assignee"') || source.includes('dialogSelect("assignee"'));
+  assert.ok(source.includes("assigneePicker"));
+  assert.ok(source.includes('header() + assigneePicker()'));
+  assert.ok(source.includes('<span>指派给</span>') && source.includes('dialogSelect("assignee"'));
+  assert.ok(!source.includes("assigneePicker() + '<label class=\"better-codex-property\">'"));
+  assert.ok(source.includes('aria-label="选择责任人"') || source.includes('"选择责任人"'));
+  assert.ok(source.includes('assignee: issue'));
+  assert.ok(source.includes(': "none"'));
+  assert.ok(source.includes('user_assigned: true'));
   assert.match(css, /\.better-codex-dialog-select-menu\s*\{[^}]*position:\s*absolute;/s);
   assert.match(css, /\.better-codex-dialog-select-option\s*\{[^}]*border:\s*0;/s);
 });
@@ -276,19 +359,86 @@ test("issue submit buttons omit visual keyboard shortcut badges", () => {
   assert.ok(source.includes('event.key === "Enter"'));
 });
 
-test("issue cards open details first and keep session entry points explicit", () => {
+test("issue context menu can assign the current user or an agent", () => {
+  const source = injectionScript(4317, "test-token", "install");
+
+  assert.ok(source.includes("指定负责人"));
+  assert.ok(source.includes('data-context-action="assign"'));
+  assert.ok(source.includes('data-assignee-kind="me"'));
+  assert.ok(source.includes('data-assignee-kind="agent"'));
+  assert.ok(source.includes('data-assignee-kind="none"'));
+  assert.ok(source.includes("取消分配"));
+  assert.ok(source.includes("better-codex-context-avatar is-user is-initials"));
+  assert.ok(source.includes("user_assigned: true"));
+  assert.ok(source.includes("const assigned = Boolean(issue.agent_enabled || issue.user_assigned || issue.thread_id)"));
+});
+
+test("issue working activity uses the agent avatar instead of initials", () => {
+  const source = injectionScript(4317, "test-token", "install");
+
+  assert.ok(source.includes("issue.active_run_status"));
+  assert.ok(source.includes('agentAvatarMarkup(activityAgent, "better-codex-card-avatar")'));
+  assert.ok(source.includes('"Working"'));
+  assert.ok(source.includes('"Queued"'));
+  assert.ok(!source.includes('class="better-codex-avatar">\' + escapeHtml(agentInitial)'));
+});
+
+test("issue cards show project icon and assignee instead of session entry", () => {
   const source = injectionScript(4317, "test-token", "install");
   const css = betterCodexDesignSystemCss();
 
-  assert.ok(source.includes('class="better-codex-link" type="button" data-thread="'));
-  assert.ok(source.includes("打开 Session"));
+  assert.ok(source.includes('icon("folder")'));
+  assert.ok(source.includes("better-codex-card-assignee"));
+  assert.ok(source.includes("better-codex-card-avatar"));
+  assert.ok(source.includes("未分配"));
+  assert.ok(!source.includes('class="better-codex-link" type="button" data-thread="'));
+  assert.ok(!source.includes(">打开 Session</button>"));
   assert.ok(source.includes("在对话中打开"));
   assert.ok(source.includes("data-dialog-open-thread"));
+  assert.ok(source.includes("function normalizeSessionId(value)"));
+  assert.ok(source.includes("function issueSessionId(issue)"));
+  assert.ok(source.includes("const sessionId = issueSessionId(issue)"));
+  assert.ok(source.includes("const expected = normalizeSessionId(threadId)"));
+  assert.ok(source.includes('if (!expected) throw new Error("thread_id_invalid")'));
   assert.ok(source.includes("Issue 详情"));
   assert.ok(source.includes("if (issue) return void perform(() => openEditor(issue))"));
+  assert.ok(!source.includes("issue?.run_thread_id || issue?.thread_id || \"\""));
   assert.ok(!source.includes("(sessionId ? ' data-thread=\""));
   assert.doesNotMatch(source, /任务尚未关联 Session/);
   assert.match(css, /\.better-codex-dialog-open-thread\s*\{[^}]*background:\s*var\(--bc-color-primary\)/s);
+  assert.match(css, /\.better-codex-card-assignee\s*\{/s);
+  assert.match(css, /\.better-codex-chip\s*>\s*svg\s*\{/s);
+});
+
+test("open-in-conversation requires a valid session uuid", () => {
+  const source = injectionScript(4317, "test-token", "install");
+
+  assert.ok(source.includes("function normalizeSessionId(value)"));
+  assert.ok(source.includes("/^[a-f0-9-]{36}$/i.test(id)"));
+  assert.ok(source.includes("return normalizeSessionId(issue?.run_thread_id) || normalizeSessionId(issue?.thread_id) || \"\""));
+  assert.ok(source.includes("const openThreadButton = issue && sessionId"));
+  assert.ok(source.includes("if (!issue || !sessionId) return \"\""));
+  assert.ok(source.includes('if (!expected) throw new Error("thread_id_invalid")'));
+});
+
+test("issue details render the latest conversation result and reply composer", () => {
+  const source = injectionScript(4317, "test-token", "install");
+  const css = betterCodexDesignSystemCss();
+
+  assert.ok(source.includes('mode: issue ? "manual" : state.createMode'));
+  assert.ok(source.includes(">对话<"));
+  assert.ok(source.includes("data-conversation-body"));
+  assert.ok(source.includes("better-codex-bubble"));
+  assert.ok(source.includes("conversationBubbles"));
+  assert.ok(source.includes("is-initials"));
+  assert.ok(source.includes("bootstrap.user"));
+  assert.ok(source.includes("/conversation"));
+  assert.ok(source.includes("/reply"));
+  assert.ok(source.includes("在此回复智能体"));
+  assert.ok(source.includes("data-conversation-send"));
+  assert.match(css, /\.better-codex-timeline\s*\{/s);
+  assert.match(css, /\.better-codex-bubble\s*\{/s);
+  assert.match(css, /\.better-codex-composer\s*\{/s);
 });
 
 test("issue keep-open toggle keeps a visible track in light mode", () => {
@@ -297,6 +447,20 @@ test("issue keep-open toggle keeps a visible track in light mode", () => {
 
   assert.match(toggleRule, /background:\s*var\(--bc-color-control\)/);
   assert.match(toggleRule, /box-shadow:\s*var\(--bc-inset-hairline\)/);
+});
+
+test("create dialog paperclip attaches local file paths into the issue description", () => {
+  const source = injectionScript(4317, "test-token", "install");
+
+  assert.ok(source.includes('data-dialog-attach aria-label="添加附件"'));
+  assert.ok(source.includes("attachments: []"));
+  assert.ok(source.includes("function pickAttachments()"));
+  assert.ok(source.includes("function withAttachments(text)"));
+  assert.ok(source.includes('const path = String(file.path || "").trim()'));
+  assert.ok(source.includes('const block = "附带文件：\\n"'));
+  assert.ok(source.includes("description: withAttachments(draft.mode === \"agent\" ? prompt : draft.description)"));
+  assert.ok(source.includes("data-dialog-detach"));
+  assert.ok(source.includes("当前环境无法读取本地文件路径"));
 });
 
 test("destructive actions use the branded confirmation dialog", () => {
@@ -324,8 +488,16 @@ test("Codex-native visual values live behind semantic design tokens", () => {
   assert.ok(css.includes("--bc-color-canvas:"));
   assert.ok(css.includes("--bc-radius-xl:"));
   assert.ok(css.includes("--bc-motion-fast:"));
-  assert.match(css, /\.better-codex-card\s*\{[^}]*border:\s*1px solid var\(--bc-color-hairline\);[^}]*background:\s*transparent;[^}]*box-shadow:\s*var\(--bc-card-shadow\);/s);
-  assert.match(css, /\.better-codex-search\s*\{[^}]*border:\s*0;/s);
+  assert.match(css, /\.better-codex-card\s*\{[^}]*border:\s*1px solid var\(--bc-color-hairline\);[^}]*background:\s*var\(--bc-color-canvas\);[^}]*box-shadow:\s*var\(--bc-card-shadow\);/s);
+  assert.match(css, /\.better-codex-card\.is-dragging\s*\{[^}]*opacity:\s*\.42;/s);
+  assert.ok(source.includes("function onCardDragStart(event)"));
+  assert.ok(source.includes("setDragImage(ghost"));
+  assert.ok(source.includes('ghost.classList.add("is-drag-ghost")'));
+  assert.ok(source.includes("host.appendChild(ghost)"));
+  assert.ok(source.includes("draggingIssueId"));
+  assert.ok(source.includes('options.background && draggingIssueId'));
+  assert.ok(source.includes('issue.id === draggingIssueId ? " is-dragging" : ""'));
+  assert.match(css, /\.better-codex-card\.is-drag-ghost\s*\{[^}]*border:\s*1px solid/s);
   assert.ok(source.includes("--bc-color-surface-raised:"));
 });
 
@@ -343,6 +515,9 @@ test("semantic surface hierarchy is derived from the Codex appearance configurat
   assert.ok(source.includes('setProperty("--bc-host-" + mode + "-control"'));
   assert.ok(source.includes('setProperty("--bc-host-" + mode + "-hairline"'));
   assert.match(css, /\.better-codex-agent-inspector-field textarea\s*\{[^}]*box-shadow:\s*var\(--bc-inset-hairline\);/s);
+  assert.match(css, /\.better-codex-agent-inspector-field textarea\s*\{[^}]*resize:\s*none;/s);
+  assert.match(css, /textarea\[name="description"\]\s*\{[^}]*height:\s*calc\(\(var\(--bc-text-md\) \* 1\.55 \* 4\) \+ 26px\);/s);
+  assert.match(css, /textarea\[name="instructions"\]\s*\{[^}]*height:\s*calc\(\(var\(--bc-text-sm\) \* 1\.55 \* 12\) \+ 26px\);/s);
   assert.match(css, /\.better-codex-agent-inspector-group\s*\{[^}]*box-shadow:\s*var\(--bc-inset-hairline\);/s);
   assert.match(css, /\.better-codex-agent-profile-name\s*\{[^}]*box-shadow:\s*var\(--bc-inset-hairline\);/s);
   assert.match(css, /\.better-codex-search\s*\{[^}]*background:\s*var\(--bc-color-input\);/s);

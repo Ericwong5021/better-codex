@@ -410,9 +410,14 @@ async function issueCommand(action: string | undefined, args: string[]) {
   }
   if (action === "update") {
     const patch: Record<string, unknown> = { version: issue.version };
-    for (const [key, flag] of [["title", "--title"], ["description", "--description"], ["priority", "--priority"], ["status", "--status"]]) {
+    for (const [key, flag] of [["title", "--title"], ["description", "--description"], ["priority", "--priority"], ["status", "--status"], ["pending_actor", "--pending-actor"]]) {
       const value = option(args, flag);
       if (value !== undefined) patch[key] = value;
+    }
+    const needsAttention = option(args, "--needs-attention");
+    if (needsAttention !== undefined) {
+      if (!["true", "false", "1", "0"].includes(needsAttention)) throw new Error("invalid_needs_attention");
+      patch.needs_attention = needsAttention === "true" || needsAttention === "1";
     }
     return print(await request(`/api/issues/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(patch) }));
   }
