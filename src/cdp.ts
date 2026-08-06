@@ -291,9 +291,9 @@ function launchCodex(port: number) {
 
 async function quitCodex() {
   if (process.platform === "win32") {
-    execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "Get-Process -Name 'ChatGPT','Codex' -ErrorAction SilentlyContinue | Stop-Process -Force"], { stdio: "ignore", windowsHide: true });
+    execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "$processes = @(Get-Process -Name 'ChatGPT','Codex' -ErrorAction SilentlyContinue); if ($processes.Count -gt 0) { $processes | Stop-Process -Force -ErrorAction Stop }; exit 0"], { stdio: "ignore", windowsHide: true });
     for (let attempt = 0; attempt < 40; attempt += 1) {
-      const count = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "@(Get-Process -Name 'ChatGPT','Codex' -ErrorAction SilentlyContinue).Count"], { encoding: "utf8", windowsHide: true }).trim();
+      const count = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "$count = @(Get-Process -Name 'ChatGPT','Codex' -ErrorAction SilentlyContinue).Count; Write-Output $count; exit 0"], { encoding: "utf8", windowsHide: true }).trim();
       if (Number(count) === 0) return;
       await new Promise(resolve => setTimeout(resolve, 250));
     }
