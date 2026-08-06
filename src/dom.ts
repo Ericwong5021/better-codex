@@ -42,23 +42,27 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const SELECTORS = ${JSON.stringify(compatibility.selectors)};
     const ATTRIBUTES = ${JSON.stringify(compatibility.attributes)};
     const NAVIGATION = ${JSON.stringify(compatibility.navigation)};
+    const RESUME_SURFACE_KEY = "better-codex-resume-surface";
     const statusLabels = { backlog: "待规划", todo: "待办", in_progress: "进行中", in_review: "审核中", done: "已完成", blocked: "已阻塞", cancelled: "已取消" };
     const priorityLabels = { none: "无", low: "低", medium: "中", high: "高", urgent: "紧急" };
-    const state = { projects: [], issues: [], agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, surface: "issues", view: "all", createMode: "manual", keepCreate: false, selected: null, error: "", filters: { status: [], priority: [], date: [], assignee: [], creator: [], project: [], label: [] } };
+    const rememberedSurface = sessionStorage.getItem(RESUME_SURFACE_KEY);
+    const state = { projects: [], issues: [], agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, surface: ["issues", "agents"].includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", createMode: "manual", keepCreate: false, selected: null, error: "", filters: { status: [], priority: [], date: [], assignee: [], creator: [], project: [], label: [] } };
     const bridgeRequests = new Map();
     let bridgeSequence = 0;
     let entry = null;
     let agentsEntry = null;
     let panel = null;
     let observer = null;
-    let timer = null;
+    let refreshPending = false;
     let pollTimer = null;
     let updateTimer = null;
     let updateNotice = null;
     let dismissedUpdateVersion = sessionStorage.getItem("better-codex-dismissed-update") || "";
     let filterDismiss = null;
+    let createMenuDismiss = null;
     let issueMenu = null;
     let issueMenuDismiss = null;
+    let codexLogoSequence = 0;
     let active = false;
     let destroyed = false;
 
@@ -257,7 +261,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #better-codex-confirm .better-codex-confirm-primary { border-color: var(--bc-danger); color: #fff; background: var(--bc-danger); }
         #better-codex-confirm .better-codex-confirm-primary:hover, #better-codex-confirm .better-codex-confirm-primary:focus-visible { background: color-mix(in oklch,var(--bc-danger) 88%,#000); }
         #better-codex-dialog { position: fixed; inset: 0; box-sizing: border-box; width: min(806px, calc(100vw - 48px)); height: 461px; max-height: calc(100vh - 48px); margin: auto; overflow: visible; border: 1px solid #e4e4e7; border-radius: 14px; color: #27272a; background: #fff; padding: 0; box-shadow: 0 24px 64px rgba(15,23,42,.18),0 4px 14px rgba(15,23,42,.08); font-family: Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; transition: width .3s ease,height .3s ease; }
-        #better-codex-dialog[data-mode="agent"] { width: min(691px, calc(100vw - 48px)); height: min(368px, calc(100vh - 48px)); }
+        #better-codex-dialog[data-mode="agent"] { width: min(691px, calc(100vw - 48px)); height: min(var(--bc-dialog-agent-height, 400px), calc(100vh - 48px)); }
         #better-codex-dialog[data-expanded="true"] { width: min(1075px, calc(100vw - 48px)); height: min(84vh, 912px); }
         #better-codex-dialog::backdrop { background: rgba(24,24,27,.19); backdrop-filter: blur(4px); }
         #better-codex-dialog form { display: flex; width: 100%; height: 100%; min-height: 0; flex-direction: column; zoom: 1.2; }
@@ -277,6 +281,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #better-codex-dialog .better-codex-agent-assignee select { max-width: 260px; border: 0; color: inherit; background: transparent; padding: 2px 20px 2px 0; font: inherit; font-weight: inherit; outline: none; cursor: pointer; }
         #better-codex-dialog .better-codex-agent-assignee:focus-within { border-radius: 5px; box-shadow: 0 0 0 2px rgba(24,24,27,.08); }
         #better-codex-dialog .better-codex-agent-avatar { display: inline-flex; width: 18px; height: 18px; align-items: center; justify-content: center; border-radius: 999px; color: #fff; background: #3f3f46; font-size: 8px; }
+        #better-codex-dialog .better-codex-agent-avatar.is-codex { overflow: hidden; color: inherit; background: transparent; }
+        #better-codex-dialog .better-codex-agent-avatar svg { width: 18px; height: 18px; }
+        #better-codex-dialog .better-codex-agent-avatar.has-image { overflow: hidden; }
+        #better-codex-dialog .better-codex-agent-avatar img { width: 100%; height: 100%; object-fit: cover; }
         #better-codex-dialog .better-codex-run-hint { display: flex; flex: 0 0 auto; align-items: center; gap: 7px; padding: 1px 20px 4px; color: #8b8b94; font-size: 11px; }
         #better-codex-dialog .better-codex-dialog-properties { display: flex; flex: 0 0 auto; align-items: center; flex-wrap: wrap; gap: 6px; padding: 6px 16px 9px; }
         #better-codex-dialog .better-codex-property { display: inline-flex; height: 26px; max-width: 190px; align-items: center; gap: 6px; overflow: hidden; border: 1px solid #e5e5e7; border-radius: 999px; color: #52525b; background: #fff; padding: 0 9px; font: inherit; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
@@ -304,7 +312,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #better-codex-dialog .better-codex-toggle:checked::after { transform: translateX(10px); }
         #better-codex-dialog .better-codex-submit { display: inline-flex; min-width: 112px; height: 30px; align-items: center; justify-content: center; gap: 6px; border: 0; border-radius: 7px; color: #fff; background: #27272a; padding: 0 11px; font: inherit; font-size: 11px; font-weight: 550; cursor: pointer; }
         #better-codex-dialog .better-codex-submit:disabled { color: #fff; background: #a1a1aa; cursor: not-allowed; opacity: .72; }
-        #better-codex-dialog .better-codex-keycap { display: inline-flex; min-width: 17px; height: 17px; align-items: center; justify-content: center; border-radius: 4px; background: rgba(255,255,255,.14); font-size: 10px; }
         #better-codex-dialog .better-codex-dialog-error { padding: 0 20px 6px; color: #e5484d; font-size: 11px; }
         #\${PANEL_ID} { color: var(--bc-foreground); background: var(--bc-page); }
         #\${PANEL_ID} .better-codex-toolbar { background: var(--bc-page); }
@@ -363,6 +370,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #better-codex-dialog .better-codex-icon-button:hover, #better-codex-dialog .better-codex-switch-mode:hover, #better-codex-dialog .better-codex-project-option:hover, #better-codex-dialog .better-codex-project-option:focus-visible { color: var(--bc-foreground); background: var(--bc-hover); }
         #better-codex-dialog .better-codex-dialog-editor::placeholder { color: var(--bc-muted); }
         #better-codex-dialog .better-codex-agent-avatar { color: var(--bc-primary-foreground); background: var(--bc-primary); }
+        #better-codex-dialog .better-codex-agent-avatar.is-codex { color: inherit; background: transparent; }
+        #better-codex-dialog .better-codex-agent-avatar.is-fallback { border-radius: var(--bc-radius-xs); color: var(--bc-color-text-muted); background: var(--bc-color-control); }
+        #better-codex-dialog .better-codex-agent-avatar.is-fallback svg { width: 12px; height: 12px; }
         #better-codex-dialog .better-codex-property { border-color: var(--bc-border); color: var(--bc-muted); background: var(--bc-surface); }
         #better-codex-dialog .better-codex-project-menu { border-color: var(--bc-border); color: var(--bc-foreground); background: var(--bc-raised); box-shadow: var(--bc-menu-shadow); }
         #better-codex-dialog .better-codex-project-search, #better-codex-dialog .better-codex-dialog-footer { border-color: var(--bc-divider); }
@@ -416,14 +426,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       button.setAttribute(OWNED, "true");
       button.setAttribute("aria-label", title);
       button.setAttribute("title", title);
-      const icon = button.querySelector("svg");
-      if (icon) {
-        icon.setAttribute("viewBox", "0 0 24 24");
-        icon.setAttribute("fill", "none");
-        icon.setAttribute("stroke", "currentColor");
-        icon.setAttribute("stroke-width", "1.8");
-        icon.innerHTML = surface === "agents" ? '<rect x="4" y="7" width="16" height="12" rx="4"></rect><path d="M12 3v4M8 12h.01M16 12h.01M8 16h8"></path>' : '<rect x="3.5" y="4" width="17" height="16" rx="2.5"></rect><path d="M9 4v16M14.5 8h2.5M14.5 12h2.5M14.5 16h2.5"></path>';
-      }
+      syncEntryIcon(button, surface);
       button.addEventListener("click", event => {
         event.preventDefault();
         event.stopPropagation();
@@ -433,19 +436,45 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       return button;
     }
 
+    function syncEntryIcon(button, surface) {
+      const icon = button.querySelector("svg");
+      if (icon) {
+        const markup = surface === "agents" ? '<rect x="4" y="7" width="16" height="12" rx="4"></rect><path d="M12 3v4M8 12h.01M16 12h.01M8 16h8"></path>' : '<rect x="3" y="4" width="6" height="16" rx="1.5"></rect><rect x="11" y="4" width="6" height="11" rx="1.5"></rect><circle cx="17.5" cy="17.5" r="3.5"></circle><path d="m15.8 17.5 1.1 1.1 2.2-2.3"></path>';
+        if (icon.getAttribute("viewBox") !== "0 0 24 24") icon.setAttribute("viewBox", "0 0 24 24");
+        if (icon.getAttribute("fill") !== "none") icon.setAttribute("fill", "none");
+        if (icon.getAttribute("stroke") !== "currentColor") icon.setAttribute("stroke", "currentColor");
+        if (icon.getAttribute("stroke-width") !== "1.8") icon.setAttribute("stroke-width", "1.8");
+        if (icon.innerHTML !== markup) icon.innerHTML = markup;
+      }
+    }
+
+    function syncEntryLabel(button, text, title) {
+      const content = button.querySelector(SELECTORS.truncatedText) || Array.from(button.querySelectorAll("span")).at(-1);
+      if (content && content.textContent !== text) content.textContent = text;
+      else if (!content && button.textContent !== text) button.textContent = text;
+      if (button.getAttribute("aria-label") !== title) button.setAttribute("aria-label", title);
+      if (button.getAttribute("title") !== title) button.setAttribute("title", title);
+    }
+
     function ensureEntry() {
-      if (destroyed) return;
+      if (destroyed) return false;
       installStyle();
       const reference = findReferenceButton();
-      if (!reference?.parentElement) return;
-      if (!entry) entry = createEntry("Better Codex", ENTRY_ID, "打开 Better Codex", "issues");
+      if (!reference?.parentElement) return false;
+      if (!entry) entry = createEntry("任务看板", ENTRY_ID, "打开任务看板", "issues");
+      syncEntryLabel(entry, "任务看板", "打开任务看板");
+      syncEntryIcon(entry, "issues");
       if (entry.parentElement !== reference.parentElement || entry.previousElementSibling !== reference) reference.after(entry);
       if (!agentsEntry) agentsEntry = createEntry("智能体", AGENTS_ENTRY_ID, "管理智能体", "agents");
+      syncEntryLabel(agentsEntry, "智能体", "管理智能体");
+      syncEntryIcon(agentsEntry, "agents");
       if (agentsEntry.parentElement !== reference.parentElement || agentsEntry.previousElementSibling !== entry) entry.after(agentsEntry);
-      entry.removeAttribute("aria-current");
-      agentsEntry.removeAttribute("aria-current");
-      if (active && state.surface === "issues") entry.setAttribute("aria-current", "page");
-      if (active && state.surface === "agents") agentsEntry.setAttribute("aria-current", "page");
+      const currentEntry = active && state.surface === "issues" ? entry : active && state.surface === "agents" ? agentsEntry : null;
+      for (const item of [entry, agentsEntry]) {
+        if (item === currentEntry && item.getAttribute("aria-current") !== "page") item.setAttribute("aria-current", "page");
+        if (item !== currentEntry && item.hasAttribute("aria-current")) item.removeAttribute("aria-current");
+      }
+      return entry.isConnected && agentsEntry.isConnected;
     }
 
     function findMount() {
@@ -591,6 +620,15 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       }
     }
 
+    function bindModalDismiss(dialog, dismiss) {
+      dialog.addEventListener("click", event => {
+        if (event.target !== dialog) return;
+        const bounds = dialog.getBoundingClientRect();
+        const outside = event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom;
+        if (outside) dismiss();
+      });
+    }
+
     function confirmAction(title, message, confirmLabel = "确认") {
       document.getElementById("better-codex-confirm")?.remove();
       return new Promise(resolve => {
@@ -609,6 +647,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         dialog.querySelector("[data-confirm-cancel]").addEventListener("click", () => finish(false));
         dialog.querySelector("[data-confirm-accept]").addEventListener("click", () => finish(true));
         dialog.addEventListener("cancel", event => { event.preventDefault(); finish(false); });
+        bindModalDismiss(dialog, () => finish(false));
         dialog.addEventListener("close", () => {
           if (!settled) resolve(false);
           dialog.remove();
@@ -619,7 +658,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function codexLogo() {
-      return '<svg viewBox="0 0 24 24" width="36" height="36" role="img" aria-label="Codex"><path d="M19.503 0H4.496A4.496 4.496 0 000 4.496v15.007A4.496 4.496 0 004.496 24h15.007A4.496 4.496 0 0024 19.503V4.496A4.496 4.496 0 0019.503 0z" fill="#fff"></path><path d="M9.064 3.344a4.578 4.578 0 012.285-.312c1 .115 1.891.54 2.673 1.275.01.01.024.017.037.021a.09.09 0 00.043 0 4.55 4.55 0 013.046.275l.047.022.116.057a4.581 4.581 0 012.188 2.399c.209.51.313 1.041.315 1.595a4.24 4.24 0 01-.134 1.223.123.123 0 00.03.115c.594.607.988 1.33 1.183 2.17.289 1.425-.007 2.71-.887 3.854l-.136.166a4.548 4.548 0 01-2.201 1.388.123.123 0 00-.081.076c-.191.551-.383 1.023-.74 1.494-.9 1.187-2.222 1.846-3.711 1.838-1.187-.006-2.239-.44-3.157-1.302a.107.107 0 00-.105-.024c-.388.125-.78.143-1.204.138a4.441 4.441 0 01-1.945-.466 4.544 4.544 0 01-1.61-1.335c-.152-.202-.303-.392-.414-.617a5.81 5.81 0 01-.37-.961 4.582 4.582 0 01-.014-2.298.124.124 0 00.006-.056.085.085 0 00-.027-.048 4.467 4.467 0 01-1.034-1.651 3.896 3.896 0 01-.251-1.192 5.189 5.189 0 01.141-1.6c.337-1.112.982-1.985 1.933-2.618.212-.141.413-.251.601-.33.215-.089.43-.164.646-.227a.098.098 0 00.065-.066 4.51 4.51 0 01.829-1.615 4.535 4.535 0 011.837-1.388zm3.482 10.565a.637.637 0 000 1.272h3.636a.637.637 0 100-1.272h-3.636zM8.462 9.23a.637.637 0 00-1.106.631l1.272 2.224-1.266 2.136a.636.636 0 101.095.649l1.454-2.455a.636.636 0 00.005-.64L8.462 9.23z" fill="url(#better-codex-logo-gradient)"></path><defs><linearGradient gradientUnits="userSpaceOnUse" id="better-codex-logo-gradient" x1="12" x2="12" y1="3" y2="21"><stop stop-color="#B1A7FF"></stop><stop offset=".5" stop-color="#7A9DFF"></stop><stop offset="1" stop-color="#3941FF"></stop></linearGradient></defs></svg>';
+      const gradientId = "better-codex-logo-gradient-" + (++codexLogoSequence);
+      return '<svg viewBox="0 0 24 24" width="36" height="36" role="img" aria-label="Codex"><path d="M19.503 0H4.496A4.496 4.496 0 000 4.496v15.007A4.496 4.496 0 004.496 24h15.007A4.496 4.496 0 0024 19.503V4.496A4.496 4.496 0 0019.503 0z" fill="#fff"></path><path d="M9.064 3.344a4.578 4.578 0 012.285-.312c1 .115 1.891.54 2.673 1.275.01.01.024.017.037.021a.09.09 0 00.043 0 4.55 4.55 0 013.046.275l.047.022.116.057a4.581 4.581 0 012.188 2.399c.209.51.313 1.041.315 1.595a4.24 4.24 0 01-.134 1.223.123.123 0 00.03.115c.594.607.988 1.33 1.183 2.17.289 1.425-.007 2.71-.887 3.854l-.136.166a4.548 4.548 0 01-2.201 1.388.123.123 0 00-.081.076c-.191.551-.383 1.023-.74 1.494-.9 1.187-2.222 1.846-3.711 1.838-1.187-.006-2.239-.44-3.157-1.302a.107.107 0 00-.105-.024c-.388.125-.78.143-1.204.138a4.441 4.441 0 01-1.945-.466 4.544 4.544 0 01-1.61-1.335c-.152-.202-.303-.392-.414-.617a5.81 5.81 0 01-.37-.961 4.582 4.582 0 01-.014-2.298.124.124 0 00.006-.056.085.085 0 00-.027-.048 4.467 4.467 0 01-1.034-1.651 3.896 3.896 0 01-.251-1.192 5.189 5.189 0 01.141-1.6c.337-1.112.982-1.985 1.933-2.618.212-.141.413-.251.601-.33.215-.089.43-.164.646-.227a.098.098 0 00.065-.066 4.51 4.51 0 01.829-1.615 4.535 4.535 0 011.837-1.388zm3.482 10.565a.637.637 0 000 1.272h3.636a.637.637 0 100-1.272h-3.636zM8.462 9.23a.637.637 0 00-1.106.631l1.272 2.224-1.266 2.136a.636.636 0 101.095.649l1.454-2.455a.636.636 0 00.005-.64L8.462 9.23z" fill="url(#' + gradientId + ')"></path><defs><linearGradient gradientUnits="userSpaceOnUse" id="' + gradientId + '" x1="12" x2="12" y1="3" y2="21"><stop stop-color="#B1A7FF"></stop><stop offset=".5" stop-color="#7A9DFF"></stop><stop offset="1" stop-color="#3941FF"></stop></linearGradient></defs></svg>';
     }
 
     function icon(name, className = "") {
@@ -639,11 +679,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         user: '<circle cx="12" cy="8" r="4"/><path d="M4.5 21a7.5 7.5 0 0115 0"/>',
         userEdit: '<circle cx="10" cy="8" r="4"/><path d="M3 21a7 7 0 0111-5.7M16 18l4-4 2 2-4 4-3 1z"/>',
         bot: '<rect x="4" y="7" width="16" height="12" rx="4"/><path d="M12 3v4M8 12h.01M16 12h.01M8 16h8"/>',
+        image: '<rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="9" r="2"/><path d="M4 17l5-5 4 4 3-3 4 4"/>',
         search: '<circle cx="11" cy="11" r="7"/><path d="M16.5 16.5L21 21"/>',
         review: '<path d="M5 4h11l3 3v13H5z"/><path d="M16 4v4h4M8 12l2 2 4-5"/>',
         layout: '<rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 10h18M10 10v10"/>',
         edit: '<path d="M4 20h4l11-11-4-4L4 16zM13.5 6.5l4 4"/>',
         chevron: '<path d="M9 5l7 7-7 7"/>',
+        chevronDown: '<path d="M5 9l7 7 7-7"/>',
         check: '<path d="M5 12l4 4L19 6"/>',
         circle: '<circle cx="12" cy="12" r="7"/>',
         dash: '<path d="M5 12h14"/>',
@@ -704,6 +746,53 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       panel?.querySelectorAll(".better-codex-filter-menu,.better-codex-filter-submenu").forEach(node => node.remove());
       if (filterDismiss) document.removeEventListener("click", filterDismiss, true);
       filterDismiss = null;
+    }
+
+    function closeCreateMenu(restoreFocus = false) {
+      const menu = panel?.querySelector(".better-codex-create-menu");
+      const toggle = panel?.querySelector("[data-create-menu-toggle]");
+      menu?.remove();
+      toggle?.setAttribute("aria-expanded", "false");
+      if (createMenuDismiss) {
+        document.removeEventListener("pointerdown", createMenuDismiss, true);
+        document.removeEventListener("keydown", createMenuDismiss, true);
+      }
+      createMenuDismiss = null;
+      if (restoreFocus) toggle?.focus();
+    }
+
+    function openCreateMenu(trigger) {
+      if (panel?.querySelector(".better-codex-create-menu")) return closeCreateMenu(true);
+      closeFilterMenu();
+      const menu = document.createElement("div");
+      menu.className = "better-codex-create-menu";
+      menu.setAttribute("role", "menu");
+      menu.setAttribute(OWNED, "true");
+      const agent = document.createElement("button");
+      agent.type = "button";
+      agent.className = "better-codex-create-menu-item";
+      agent.setAttribute("role", "menuitem");
+      agent.innerHTML = icon("bot") + "<span>通过智能体创建</span>";
+      agent.addEventListener("click", event => {
+        event.stopPropagation();
+        state.createMode = "agent";
+        closeCreateMenu();
+        void perform(() => openEditor());
+      });
+      menu.append(agent);
+      trigger.closest(".better-codex-create-split")?.append(menu);
+      trigger.setAttribute("aria-expanded", "true");
+      createMenuDismiss = event => {
+        if (event.type === "keydown") {
+          if (event.key === "Escape") closeCreateMenu(true);
+          return;
+        }
+        if (!menu.contains(event.target) && !trigger.contains(event.target)) closeCreateMenu();
+      };
+      setTimeout(() => {
+        document.addEventListener("pointerdown", createMenuDismiss, true);
+        document.addEventListener("keydown", createMenuDismiss, true);
+      }, 0);
     }
 
     function filterOptions(key) {
@@ -926,9 +1015,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       search.placeholder = "搜索任务";
       search.value = "";
       search.addEventListener("input", () => { state.search = search.value; void perform(loadIssues); });
-      const addProject = actionButton("新建项目");
-      addProject.classList.add("is-bordered");
-      addProject.addEventListener("click", () => void perform(async () => openNativeProjectEditor()));
       const filter = actionButton("筛选");
       filter.id = "better-codex-filter";
       filter.classList.add("is-bordered");
@@ -938,10 +1024,28 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       filterWrap.className = "better-codex-filter-wrap";
       filterWrap.appendChild(filter);
       const addIssue = actionButton("新建 issue");
-      addIssue.classList.add("is-bordered");
+      addIssue.className = "better-codex-create-primary";
       addIssue.insertAdjacentHTML("afterbegin", icon("plus"));
-      addIssue.addEventListener("click", () => openEditor());
-      actions.append(error, working, search, filterWrap, addProject, addIssue);
+      addIssue.addEventListener("click", () => {
+        closeCreateMenu();
+        state.createMode = "manual";
+        void perform(() => openEditor());
+      });
+      const createToggle = actionButton("");
+      createToggle.className = "better-codex-create-toggle";
+      createToggle.dataset.createMenuToggle = "true";
+      createToggle.setAttribute("aria-label", "选择 issue 创建方式");
+      createToggle.setAttribute("aria-haspopup", "menu");
+      createToggle.setAttribute("aria-expanded", "false");
+      createToggle.innerHTML = icon("chevronDown");
+      createToggle.addEventListener("click", event => {
+        event.stopPropagation();
+        openCreateMenu(createToggle);
+      });
+      const createSplit = document.createElement("div");
+      createSplit.className = "better-codex-create-split";
+      createSplit.append(addIssue, createToggle);
+      actions.append(error, working, search, filterWrap, createSplit);
       const agentActions = document.createElement("div");
       agentActions.className = "better-codex-agent-actions";
       const addAgent = actionButton("新建智能体");
@@ -987,12 +1091,153 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       return agent.is_default ? "default" : agent.id;
     }
 
+    function agentAvatarMarkup(agent, className) {
+      const branded = Boolean(agent?.is_default);
+      const customized = Boolean(agent?.avatar);
+      const content = customized
+        ? '<img src="' + escapeHtml(agent.avatar) + '" alt="">'
+        : branded ? codexLogo() : icon("bot");
+      return '<span class="' + className + (customized ? " has-image" : branded ? " is-codex" : " is-fallback") + '">' + content + '</span>';
+    }
+
+    function syncAgentAvatar(node, agent) {
+      if (!node) return;
+      const branded = Boolean(agent?.is_default);
+      const customized = Boolean(agent?.avatar);
+      node.classList.toggle("has-image", customized);
+      node.classList.toggle("is-codex", !customized && branded);
+      node.classList.toggle("is-fallback", !customized && !branded);
+      node.innerHTML = customized ? '<img src="' + escapeHtml(agent.avatar) + '" alt="">' : branded ? codexLogo() : icon("bot");
+    }
+
+    function agentAvatarEditorMarkup(agent, key) {
+      return '<button class="better-codex-agent-avatar-editor" type="button" data-agent-avatar-form="' + escapeHtml(key) + '" aria-label="更换 ' + escapeHtml(agent?.name || "智能体") + ' 的头像">' + agentAvatarMarkup(agent, "better-codex-agent-list-avatar") + '<span class="better-codex-agent-avatar-overlay" aria-hidden="true">' + icon("plus") + '</span></button>';
+    }
+
+    function cropAgentAvatar(file) {
+      return new Promise((resolve, reject) => {
+        if (!file || !["image/png", "image/jpeg", "image/webp"].includes(file.type)) return reject(new Error("请选择 PNG、JPEG 或 WebP 图片"));
+        if (file.size > 10 * 1024 * 1024) return reject(new Error("图片不能超过 10 MB"));
+        const source = URL.createObjectURL(file);
+        const image = new Image();
+        image.onload = () => {
+          const size = 512;
+          let zoom = 1;
+          let offsetX = 0;
+          let offsetY = 0;
+          let dragging = false;
+          let pointerX = 0;
+          let pointerY = 0;
+          let settled = false;
+          const dialog = document.createElement("dialog");
+          dialog.id = "better-codex-avatar-cropper";
+          dialog.setAttribute(OWNED, "true");
+          dialog.innerHTML = '<div class="better-codex-avatar-cropper-shell"><header><div><strong>裁剪头像</strong><span>拖动图片调整位置</span></div><button type="button" data-avatar-crop-cancel aria-label="关闭">' + icon("close") + '</button></header><div class="better-codex-avatar-canvas-wrap"><canvas width="' + size + '" height="' + size + '"></canvas><span class="better-codex-avatar-crop-guide" aria-hidden="true"></span></div><label class="better-codex-avatar-zoom"><span>' + icon("image") + '</span><input type="range" min="1" max="3" value="1" step="0.01" aria-label="缩放头像"><span>' + icon("image") + '</span></label><footer><button type="button" data-avatar-crop-cancel>取消</button><button class="is-primary" type="button" data-avatar-crop-save>使用此头像</button></footer></div>';
+          const canvas = dialog.querySelector("canvas");
+          const context = canvas.getContext("2d");
+          const range = dialog.querySelector('input[type="range"]');
+          const baseScale = Math.max(size / image.naturalWidth, size / image.naturalHeight);
+          const finish = value => {
+            if (settled) return;
+            settled = true;
+            URL.revokeObjectURL(source);
+            dialog.close();
+            dialog.remove();
+            resolve(value);
+          };
+          const clamp = () => {
+            const width = image.naturalWidth * baseScale * zoom;
+            const height = image.naturalHeight * baseScale * zoom;
+            offsetX = Math.max((size - width) / 2, Math.min((width - size) / 2, offsetX));
+            offsetY = Math.max((size - height) / 2, Math.min((height - size) / 2, offsetY));
+          };
+          const draw = () => {
+            clamp();
+            const width = image.naturalWidth * baseScale * zoom;
+            const height = image.naturalHeight * baseScale * zoom;
+            context.clearRect(0, 0, size, size);
+            context.drawImage(image, (size - width) / 2 + offsetX, (size - height) / 2 + offsetY, width, height);
+          };
+          range.addEventListener("input", () => { zoom = Number(range.value); draw(); });
+          canvas.addEventListener("pointerdown", event => {
+            dragging = true;
+            pointerX = event.clientX;
+            pointerY = event.clientY;
+            canvas.setPointerCapture(event.pointerId);
+          });
+          canvas.addEventListener("pointermove", event => {
+            if (!dragging) return;
+            const ratio = size / canvas.getBoundingClientRect().width;
+            offsetX += (event.clientX - pointerX) * ratio;
+            offsetY += (event.clientY - pointerY) * ratio;
+            pointerX = event.clientX;
+            pointerY = event.clientY;
+            draw();
+          });
+          canvas.addEventListener("pointerup", () => { dragging = false; });
+          canvas.addEventListener("pointercancel", () => { dragging = false; });
+          dialog.querySelectorAll("[data-avatar-crop-cancel]").forEach(button => button.addEventListener("click", () => finish(null)));
+          dialog.querySelector("[data-avatar-crop-save]").addEventListener("click", () => {
+            const output = document.createElement("canvas");
+            output.width = 256;
+            output.height = 256;
+            output.getContext("2d").drawImage(canvas, 0, 0, 256, 256);
+            finish(output.toDataURL("image/webp", .86));
+          });
+          dialog.addEventListener("cancel", event => { event.preventDefault(); finish(null); });
+          bindModalDismiss(dialog, () => finish(null));
+          document.body.appendChild(dialog);
+          draw();
+          dialog.showModal();
+        };
+        image.onerror = () => { URL.revokeObjectURL(source); reject(new Error("无法读取这张图片")); };
+        image.src = source;
+      });
+    }
+
+    function pickAgentAvatar() {
+      return new Promise((resolve, reject) => {
+        const input = document.createElement("input");
+        input.type = "file";
+        input.accept = "image/png,image/jpeg,image/webp";
+        input.addEventListener("change", () => {
+          if (!input.files?.[0]) return resolve(null);
+          cropAgentAvatar(input.files[0]).then(resolve, reject);
+        }, { once: true });
+        input.addEventListener("cancel", () => resolve(null), { once: true });
+        input.click();
+      });
+    }
+
     function modelLabel(value) {
       return state.agentModelCatalog.find(model => model.id === value)?.displayName || value;
     }
 
     function effortLabel(value) {
       return ({ low: "低", medium: "中", high: "高", xhigh: "超高", max: "最大", ultra: "极致" })[value] || value;
+    }
+
+    function applyAppearance(appearance) {
+      const root = document.documentElement.style;
+      const applyTheme = (mode, profile) => {
+        const canvas = String(profile?.surface || "");
+        const ink = String(profile?.ink || "");
+        const accent = String(profile?.accent || "");
+        if (!CSS.supports("color", canvas) || !CSS.supports("color", ink) || !CSS.supports("color", accent)) return;
+        const contrast = Math.max(0, Math.min(100, Number(profile?.contrast) || 50));
+        const layer = amount => "color-mix(in srgb, " + ink + " " + Math.round(amount * contrast / 50 * 100) / 100 + "%, " + canvas + ")";
+        root.setProperty("--bc-host-" + mode + "-canvas", canvas);
+        root.setProperty("--bc-host-" + mode + "-ink", ink);
+        root.setProperty("--bc-host-" + mode + "-accent", accent);
+        root.setProperty("--bc-host-" + mode + "-surface", layer(2.5));
+        root.setProperty("--bc-host-" + mode + "-control", layer(5));
+        root.setProperty("--bc-host-" + mode + "-raised", layer(7.5));
+        root.setProperty("--bc-host-" + mode + "-hover", layer(9));
+        root.setProperty("--bc-host-" + mode + "-pressed", layer(12));
+        root.setProperty("--bc-host-" + mode + "-hairline", layer(11));
+      };
+      applyTheme("light", appearance?.light);
+      applyTheme("dark", appearance?.dark);
     }
 
     function effortsForModel(model) {
@@ -1027,20 +1272,24 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const effortOptions = effortsForModel(model);
       const preferredEffort = draft.reasoning_effort || state.agentModelCatalog.find(item => item.id === model)?.defaultReasoningEffort;
       const effort = effortOptions.some(item => item.value === preferredEffort) ? preferredEffort : effortOptions[0]?.value || "medium";
-      const heading = creating ? "新建" : "智能体";
-      const title = creating ? "创建智能体" : draft.name;
+      const heading = creating ? "创建智能体" : "智能体";
+      const profileName = creating
+        ? '<input class="better-codex-agent-profile-name" name="name" maxlength="80" value="' + escapeHtml(name) + '" placeholder="智能体名称" aria-label="智能体名称" required>'
+        : '<h2>' + escapeHtml(draft.name) + '</h2>';
+      const profileHead = '<div class="better-codex-agent-profile-head">' + agentAvatarEditorMarkup(draft, creating ? "" : agentKey(draft)) + profileName + '<input type="hidden" name="avatar" value="' + escapeHtml(draft.avatar || "") + '"></div>';
       const identity = isDefault
-        ? '<div class="better-codex-agent-summary"><span class="better-codex-agent-summary-logo">' + codexLogo() + '</span><div><strong>Codex 默认智能体</strong><p>此处修改会写入根 config.toml，并影响之后新建的 Codex 窗口。</p></div></div>'
-        : '<label class="better-codex-agent-inspector-field"><span>名称</span><input name="name" maxlength="80" value="' + escapeHtml(name) + '" placeholder="智能体名称" required></label><label class="better-codex-agent-inspector-field"><span>介绍 <small>可选</small></span><textarea name="description" maxlength="500" rows="3" placeholder="说明这个智能体适合承担什么工作">' + escapeHtml(description) + '</textarea></label>';
+        ? '<div class="better-codex-agent-summary"><div><strong>Codex 默认智能体</strong><p>此处修改会写入根 config.toml，并影响之后新建的 Codex 窗口。</p></div></div>'
+        : (creating ? "" : '<label class="better-codex-agent-inspector-field"><span>名称</span><input name="name" maxlength="80" value="' + escapeHtml(name) + '" placeholder="智能体名称" required></label>') + '<label class="better-codex-agent-inspector-field"><span>介绍 <small>可选</small></span><textarea name="description" maxlength="500" rows="3" placeholder="说明这个智能体适合承担什么工作">' + escapeHtml(description) + '</textarea></label>';
       const instructionField = isDefault ? "" : '<label class="better-codex-agent-inspector-field"><span>Instruct <small>可选</small></span><textarea name="instructions" rows="7" placeholder="定义职责、工作方式和输出要求">' + escapeHtml(instructions) + '</textarea></label>';
       const deleteButton = !creating && !isDefault ? '<button class="better-codex-agent-danger" type="button" data-agent-delete data-agent-key="' + escapeHtml(agentKey(draft)) + '">删除智能体</button>' : "";
       const modelOptions = state.agentModelCatalog.map(item => ({ value: item.id, label: item.displayName, description: item.description || "" }));
-      return '<aside class="better-codex-agent-inspector"><form data-agent-form="' + (creating ? "create" : isDefault ? "default" : "update") + '" data-agent-key="' + escapeHtml(creating ? "" : agentKey(draft)) + '"><header class="better-codex-agent-inspector-head"><span>' + heading + '</span><button class="better-codex-agent-card-action" type="button" data-agent-close-pane aria-label="关闭详情">' + icon("close") + '</button></header><div class="better-codex-agent-inspector-scroll"><h2>' + escapeHtml(title) + '</h2>' + identity + '<h3>详情</h3><div class="better-codex-agent-inspector-group">' + agentPicker("model", "模型", model, modelOptions) + agentPicker("reasoning_effort", "推理", effort, effortOptions) + '</div>' + instructionField + '<div class="better-codex-agent-inspector-error" hidden></div></div><footer class="better-codex-agent-inspector-footer">' + deleteButton + '<button class="better-codex-submit" type="submit">' + (creating ? "创建" : "保存") + '</button></footer></form></aside>';
+      return '<aside class="better-codex-agent-inspector"><form data-agent-form="' + (creating ? "create" : isDefault ? "default" : "update") + '" data-agent-key="' + escapeHtml(creating ? "" : agentKey(draft)) + '"><header class="better-codex-agent-inspector-head"><span>' + heading + '</span><button class="better-codex-agent-card-action" type="button" data-agent-close-pane aria-label="关闭详情">' + icon("close") + '</button></header><div class="better-codex-agent-inspector-scroll">' + profileHead + identity + '<h3>详情</h3><div class="better-codex-agent-inspector-group">' + agentPicker("model", "模型", model, modelOptions) + agentPicker("reasoning_effort", "推理", effort, effortOptions) + '</div>' + instructionField + '<div class="better-codex-agent-inspector-error" hidden></div></div><footer class="better-codex-agent-inspector-footer">' + deleteButton + '<button class="better-codex-submit" type="submit">' + (creating ? "创建" : "保存") + '</button></footer></form></aside>';
     }
 
     function renderAgents() {
       const container = panel?.querySelector("#better-codex-agents");
       if (!container) return;
+      panel.dataset.agentPane = state.agentPane;
       const addAgent = panel.querySelector(".better-codex-agent-actions");
       if (addAgent) addAgent.hidden = state.agentPane !== "preview";
       panel.querySelectorAll("[data-agent-view]").forEach(button => button.classList.toggle("is-active", button.dataset.agentView === state.agentView));
@@ -1052,8 +1301,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const selected = state.agents.find(agent => agentKey(agent) === state.selectedAgentId);
       const rows = agents.map(agent => {
         const key = agentKey(agent);
-        const initial = Array.from(agent.name.trim())[0] || "AI";
-        const avatar = agent.is_default ? '<span class="better-codex-agent-list-avatar is-codex">' + codexLogo() + '</span>' : '<span class="better-codex-agent-list-avatar">' + escapeHtml(initial) + '</span>';
+        const avatar = agentAvatarMarkup(agent, "better-codex-agent-list-avatar");
         const meta = modelLabel(agent.model) + " · " + effortLabel(agent.reasoning_effort) + "推理";
         return '<button class="better-codex-agent-row' + (key === state.selectedAgentId ? " is-selected" : "") + '" type="button" data-agent-key="' + escapeHtml(key) + '">' + avatar + '<span class="better-codex-agent-row-copy"><strong>' + escapeHtml(agent.name) + (agent.is_default ? '<small>默认</small>' : "") + '</strong><span>' + escapeHtml(agent.description || "尚未添加介绍") + '</span><em>' + escapeHtml(meta) + '</em></span><span class="better-codex-agent-row-chevron">' + icon("chevron") + '</span></button>';
       }).join("");
@@ -1104,13 +1352,17 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       render();
     }
 
-    async function loadAgents() {
-      state.agents = await api("/api/agents");
+    async function loadAgents(options = {}) {
+      const agents = await api("/api/agents");
+      const changed = JSON.stringify(agents) !== JSON.stringify(state.agents);
+      state.agents = agents;
+      if (options.preserveInspector && panel?.dataset.surface === "agents" && state.agentPane !== "preview") return;
+      if (options.background && (state.agentPane !== "preview" || !changed)) return;
       render();
     }
 
-    async function loadSurface() {
-      if (state.surface === "agents") await loadAgents();
+    async function loadSurface(options = {}) {
+      if (state.surface === "agents") await loadAgents(options);
       else await loadIssues();
     }
 
@@ -1118,6 +1370,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       clearError();
       try {
         const bootstrap = await api("/api/bootstrap");
+        applyAppearance(bootstrap.appearance);
         state.projects = bootstrap.projects;
         state.agents = bootstrap.agents || [];
         state.agentModelCatalog = bootstrap.agentModelCatalog || (bootstrap.agentModels || []).map(id => ({ id, displayName: id, description: "", isDefault: false, defaultReasoningEffort: "medium", supportedReasoningEfforts: (bootstrap.agentReasoningEfforts || []).map(value => ({ value, description: "" })) }));
@@ -1135,7 +1388,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         } else if (!state.projects.some(item => item.id === state.projectId)) {
           state.projectId = state.projects[0]?.id || "";
         }
-        await loadSurface();
+        await loadSurface({ preserveInspector: true });
       } catch (error) {
         const board = panel?.querySelector("#better-codex-board");
         const message = error instanceof Error ? error.message : "无法连接 Better Codex Runtime";
@@ -1166,6 +1419,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         instructions: form.elements.instructions?.value || "",
         model: form.elements.model.value,
         reasoning_effort: form.elements.reasoning_effort.value,
+        avatar: form.elements.avatar?.value || "",
         ...(selected && !selected.is_default ? { version: selected.version } : {})
       };
       void perform(async () => {
@@ -1187,6 +1441,21 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function onAgentsClick(event) {
+      const formAvatarButton = event.target.closest("[data-agent-avatar-form]");
+      if (formAvatarButton) {
+        const form = formAvatarButton.closest("form");
+        if (!form) return;
+        void perform(async () => {
+          const avatar = await pickAgentAvatar();
+          if (!avatar) return;
+          form.elements.avatar.value = avatar;
+          const selected = state.agents.find(agent => agentKey(agent) === form.dataset.agentKey);
+          const draft = { ...(selected || state.agentDraft || {}), avatar };
+          if (form.dataset.agentForm === "create") state.agentDraft = draft;
+          syncAgentAvatar(formAvatarButton.querySelector(".better-codex-agent-list-avatar"), draft);
+        });
+        return;
+      }
       const option = event.target.closest("[data-agent-option]");
       if (option) {
         const picker = option.closest("[data-agent-picker]");
@@ -1262,14 +1531,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       renderAgents();
     }
 
-    function openNativeProjectEditor() {
-      const button = document.querySelector("[data-app-action-sidebar-project-create]");
-      if (!button) throw new Error("native_project_create_unavailable");
-      close();
-      button.click();
-    }
-
-    function openEditor(issue = null, initialStatus = "todo") {
+    async function openEditor(issue = null, initialStatus = "todo") {
+      state.agents = await api("/api/agents");
       state.selected = issue;
       document.getElementById("better-codex-dialog")?.remove();
       const context = readContext();
@@ -1290,6 +1553,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       dialog.id = "better-codex-dialog";
       dialog.setAttribute(OWNED, "true");
       let projectDismiss = null;
+      let selectDismiss = null;
 
       function syncDraft() {
         const form = dialog.querySelector("form");
@@ -1318,38 +1582,50 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         return '<span class="better-codex-project-picker"><button class="better-codex-property" type="button" data-dialog-project>' + icon("folder") + '<span data-project-label>' + escapeHtml(selectedProject?.name || "选择项目") + '</span></button><span class="better-codex-project-menu" hidden><input class="better-codex-project-search" type="search" placeholder="搜索项目..." aria-label="搜索项目"><span data-project-options>' + (options || '<span class="better-codex-project-empty">暂无项目</span>') + '</span></span></span>';
       }
 
+      function dialogSelect(name, ariaLabel, selected, options, modifier = "") {
+        const current = options.find(option => option.value === selected) || options[0] || { value: "", label: "未提供", visual: "" };
+        const visual = option => typeof option.visual === "function" ? option.visual() : option.visual || "";
+        const rows = options.map(option => '<button class="better-codex-dialog-select-option' + (option.value === current.value ? " is-selected" : "") + '" type="button" role="option" aria-selected="' + (option.value === current.value) + '" data-dialog-select-option="' + escapeHtml(name) + '" data-dialog-select-value="' + escapeHtml(option.value) + '"><span class="better-codex-dialog-select-option-visual">' + visual(option) + '</span><span>' + escapeHtml(option.label) + '</span><span class="better-codex-dialog-select-check">' + (option.value === current.value ? icon("check") : "") + '</span></button>').join("");
+        return '<span class="better-codex-dialog-select ' + escapeHtml(modifier) + '" data-dialog-select="' + escapeHtml(name) + '"><input type="hidden" name="' + escapeHtml(name) + '" value="' + escapeHtml(current.value) + '"><button class="better-codex-property better-codex-dialog-select-trigger" type="button" role="combobox" aria-label="' + escapeHtml(ariaLabel) + '" aria-haspopup="listbox" aria-expanded="false" data-dialog-select-toggle="' + escapeHtml(name) + '"><span class="better-codex-dialog-select-trigger-visual">' + visual(current) + '</span><span data-dialog-select-label>' + escapeHtml(current.label) + '</span>' + icon("chevron") + '</button><span class="better-codex-dialog-select-menu" role="listbox" hidden>' + rows + '</span></span>';
+      }
+
       function agentPicker() {
         const selectedAgent = state.agents.find(agent => agent.id === draft.agentId);
-        const initial = Array.from((selectedAgent?.name || "Codex").trim())[0] || "AI";
-        const options = state.agents.map(agent => '<option value="' + escapeHtml(agent.id) + '"' + (agent.id === draft.agentId ? " selected" : "") + '>' + escapeHtml(agent.is_default ? agent.name + "（默认配置）" : agent.name) + '</option>').join("");
-        return '<div class="better-codex-agent-picker"><span>指派给</span><label class="better-codex-agent-assignee"><span class="better-codex-agent-avatar" data-agent-avatar>' + escapeHtml(initial) + '</span><select name="agent_id" aria-label="选择执行智能体">' + options + '</select></label></div>';
+        const options = state.agents.map(agent => ({
+          value: agent.id,
+          label: agent.is_default ? agent.name + "（默认配置）" : agent.name,
+          visual: () => agentAvatarMarkup(agent, "better-codex-agent-avatar")
+        }));
+        return '<div class="better-codex-agent-picker"><span>指派给</span>' + dialogSelect("agent_id", "选择执行智能体", selectedAgent?.id || draft.agentId, options, "is-agent") + '</div>';
       }
 
       function propertyRows() {
         const projectChip = projectPicker();
         if (draft.mode === "agent") return '<div class="better-codex-dialog-properties">' + projectChip + '</div>';
-        const statuses = Object.entries(statusLabels).map(([value, text]) => '<option value="' + value + '"' + (draft.status === value ? " selected" : "") + '>' + text + '</option>').join("");
-        const priorities = Object.entries(priorityLabels).map(([value, text]) => '<option value="' + value + '"' + (draft.priority === value ? " selected" : "") + '>' + (value === "none" ? "无优先级" : text + "优先级") + '</option>').join("");
+        const statuses = Object.entries(statusLabels).map(([value, text]) => ({ value, label: text, visual: statusIcon(value) }));
+        const priorities = Object.entries(priorityLabels).map(([value, text]) => ({ value, label: value === "none" ? "无优先级" : text + "优先级", visual: priorityIcon(value) }));
         const agentChip = issue?.agent_enabled ? '<span class="better-codex-property"><span class="better-codex-agent-avatar">AI</span><span>Codex</span></span>' : "";
-        return '<div class="better-codex-dialog-properties"><label class="better-codex-property">' + statusIcon(draft.status) + '<select name="status" aria-label="状态">' + statuses + '</select></label><label class="better-codex-property">' + priorityIcon(draft.priority) + '<select name="priority" aria-label="优先级">' + priorities + '</select></label>' + agentChip + '<label class="better-codex-property">' + icon("tag") + '<input name="labels" value="' + escapeHtml(draft.labels) + '" placeholder="添加标签" aria-label="标签"></label>' + projectChip + '</div>';
+        return '<div class="better-codex-dialog-properties">' + dialogSelect("status", "状态", draft.status, statuses) + dialogSelect("priority", "优先级", draft.priority, priorities) + agentChip + '<label class="better-codex-property">' + icon("tag") + '<input name="labels" value="' + escapeHtml(draft.labels) + '" placeholder="添加标签" aria-label="标签"></label>' + projectChip + '</div>';
       }
 
       function footer() {
         const switchButton = issue ? "" : '<button class="better-codex-switch-mode" type="button" data-dialog-switch>' + icon("switch") + (draft.mode === "agent" ? "切换到手动" : "切换到智能体") + '</button>';
         const submitText = issue ? "保存" : draft.mode === "agent" ? "创建" : "创建任务";
-        return '<div class="better-codex-dialog-footer"><button class="better-codex-icon-button" type="button" aria-label="添加附件">' + icon("paperclip") + '</button><div class="better-codex-dialog-footer-right">' + switchButton + '<label class="better-codex-keep-open"><input class="better-codex-toggle" name="keep" type="checkbox"' + (state.keepCreate ? " checked" : "") + '>继续创建</label><button class="better-codex-submit" type="submit">' + submitText + '<span class="better-codex-keycap">⌘</span><span class="better-codex-keycap">↵</span></button></div></div>';
+        return '<div class="better-codex-dialog-footer"><button class="better-codex-icon-button" type="button" aria-label="添加附件">' + icon("paperclip") + '</button><div class="better-codex-dialog-footer-right">' + switchButton + '<label class="better-codex-keep-open"><input class="better-codex-toggle" name="keep" type="checkbox"' + (state.keepCreate ? " checked" : "") + '>继续创建</label><button class="better-codex-submit" type="submit">' + submitText + '</button></div></div>';
       }
 
       function renderDialog() {
         if (projectDismiss) document.removeEventListener("pointerdown", projectDismiss, true);
+        if (selectDismiss) document.removeEventListener("pointerdown", selectDismiss, true);
         projectDismiss = null;
+        selectDismiss = null;
         dialog.dataset.mode = draft.mode;
         dialog.dataset.expanded = String(draft.expanded);
         if (draft.mode === "agent") {
           const selectedAgent = state.agents.find(agent => agent.id === draft.agentId);
           const selectedName = selectedAgent?.name || "Codex";
           dialog.innerHTML = '<form>' + header() + agentPicker() + '<textarea class="better-codex-dialog-editor" name="prompt" placeholder="告诉智能体要做什么，例如：&quot;修复项目里任务运行状态不可见的问题&quot;">' + escapeHtml(draft.prompt) + '</textarea>' + propertyRows() + '<div class="better-codex-dialog-error" hidden></div>' + footer() + '</form>';
-          dialog.querySelector(".better-codex-dialog-properties")?.insertAdjacentHTML("beforebegin", '<div class="better-codex-run-hint"><span class="better-codex-agent-avatar">' + escapeHtml(Array.from(selectedName.trim())[0] || "AI") + '</span><span>创建后将由 ' + escapeHtml(selectedName) + ' 自动开始工作。</span></div>');
+          dialog.querySelector(".better-codex-dialog-properties")?.insertAdjacentHTML("beforebegin", '<div class="better-codex-run-hint">' + agentAvatarMarkup(selectedAgent, "better-codex-agent-avatar") + '<span>创建后将由 ' + escapeHtml(selectedName) + ' 自动开始工作。</span></div>');
         } else {
           dialog.innerHTML = '<form>' + header() + '<input class="better-codex-manual-title" name="title" maxlength="500" placeholder="任务标题" value="' + escapeHtml(draft.title) + '"><textarea class="better-codex-dialog-editor" name="description" placeholder="添加描述...">' + escapeHtml(draft.description) + '</textarea>' + propertyRows() + '<div class="better-codex-dialog-error" hidden></div>' + footer() + '</form>';
         }
@@ -1358,20 +1634,60 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const updateSubmit = () => { submit.disabled = !String(content?.value || "").trim(); };
         updateSubmit();
         content?.addEventListener("input", updateSubmit);
-        dialog.querySelector('[name="agent_id"]')?.addEventListener("change", event => {
-          draft.agentId = event.currentTarget.value;
-          const selectedAgent = state.agents.find(agent => agent.id === draft.agentId);
-          const selectedName = selectedAgent?.name || "Codex";
-          dialog.querySelectorAll(".better-codex-agent-avatar").forEach(avatar => { avatar.textContent = Array.from(selectedName.trim())[0] || "AI"; });
-          const hint = dialog.querySelector(".better-codex-run-hint span:last-child");
-          if (hint) hint.textContent = "创建后将由 " + selectedName + " 自动开始工作。";
-        });
         dialog.querySelector('[name="keep"]')?.addEventListener("change", event => { state.keepCreate = event.currentTarget.checked; });
-        dialog.querySelector('[name="status"]')?.addEventListener("change", event => {
-          draft.status = event.currentTarget.value;
-          const hint = dialog.querySelector(".better-codex-run-hint");
-          if (hint) hint.hidden = draft.status !== "todo";
-        });
+        const closeDialogSelects = () => {
+          dialog.querySelectorAll("[data-dialog-select]").forEach(picker => {
+            picker.classList.remove("is-open");
+            picker.querySelector("[data-dialog-select-toggle]")?.setAttribute("aria-expanded", "false");
+            const menu = picker.querySelector(".better-codex-dialog-select-menu");
+            if (menu) menu.hidden = true;
+          });
+          if (selectDismiss) document.removeEventListener("pointerdown", selectDismiss, true);
+          selectDismiss = null;
+        };
+        dialog.querySelectorAll("[data-dialog-select-toggle]").forEach(toggle => toggle.addEventListener("click", event => {
+          event.stopPropagation();
+          const picker = toggle.closest("[data-dialog-select]");
+          const opening = !picker.classList.contains("is-open");
+          closeDialogSelects();
+          if (!opening) return;
+          picker.classList.add("is-open");
+          toggle.setAttribute("aria-expanded", "true");
+          picker.querySelector(".better-codex-dialog-select-menu").hidden = false;
+          selectDismiss = dismissEvent => {
+            if (picker.contains(dismissEvent.target)) return;
+            closeDialogSelects();
+          };
+          setTimeout(() => document.addEventListener("pointerdown", selectDismiss, true), 0);
+        }));
+        dialog.querySelectorAll("[data-dialog-select-option]").forEach(option => option.addEventListener("click", event => {
+          event.stopPropagation();
+          const picker = option.closest("[data-dialog-select]");
+          const name = option.dataset.dialogSelectOption;
+          const value = option.dataset.dialogSelectValue;
+          picker.querySelector('input[type="hidden"]').value = value;
+          picker.querySelector("[data-dialog-select-label]").textContent = option.querySelector(":scope > span:nth-child(2)").textContent;
+          picker.querySelector(".better-codex-dialog-select-trigger-visual").innerHTML = option.querySelector(".better-codex-dialog-select-option-visual").innerHTML;
+          picker.querySelectorAll("[data-dialog-select-option]").forEach(item => {
+            const selected = item === option;
+            item.classList.toggle("is-selected", selected);
+            item.setAttribute("aria-selected", String(selected));
+            item.querySelector(".better-codex-dialog-select-check").innerHTML = selected ? icon("check") : "";
+          });
+          if (name === "status") draft.status = value;
+          if (name === "priority") draft.priority = value;
+          if (name === "agent_id") {
+            draft.agentId = value;
+            const selectedAgent = state.agents.find(agent => agent.id === draft.agentId);
+            const selectedName = selectedAgent?.name || "Codex";
+            const runAvatar = dialog.querySelector(".better-codex-run-hint .better-codex-agent-avatar");
+            syncAgentAvatar(runAvatar, selectedAgent);
+            const hint = dialog.querySelector(".better-codex-run-hint span:last-child");
+            if (hint) hint.textContent = "创建后将由 " + selectedName + " 自动开始工作。";
+          }
+          closeDialogSelects();
+          picker.querySelector("[data-dialog-select-toggle]")?.focus();
+        }));
         const projectButton = dialog.querySelector("[data-dialog-project]");
         const projectMenu = dialog.querySelector(".better-codex-project-menu");
         const projectSearch = dialog.querySelector(".better-codex-project-search");
@@ -1483,8 +1799,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       document.body.append(dialog);
       dialog.addEventListener("close", () => {
         if (projectDismiss) document.removeEventListener("pointerdown", projectDismiss, true);
+        if (selectDismiss) document.removeEventListener("pointerdown", selectDismiss, true);
         dialog.remove();
       }, { once: true });
+      bindModalDismiss(dialog, () => dialog.close());
       renderDialog();
       dialog.showModal();
       dialog.querySelector(draft.mode === "agent" ? '[name="prompt"]' : '[name="title"]')?.focus();
@@ -1492,7 +1810,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     function onBoardClick(event) {
       const add = event.target.closest("[data-add-status]");
-      if (add) return openEditor(null, add.dataset.addStatus);
+      if (add) return void perform(() => openEditor(null, add.dataset.addStatus));
       const thread = event.target.closest("[data-thread]");
       if (thread) return void perform(() => openThread(thread.dataset.thread));
       const pin = event.target.closest("[data-pin]");
@@ -1544,16 +1862,21 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     function open(surface = state.surface) {
       if (destroyed) return;
       state.surface = surface;
+      sessionStorage.setItem(RESUME_SURFACE_KEY, surface);
       active = true;
       ensureEntry();
       mountPanel();
       void load();
-      if (pollTimer === null) pollTimer = setInterval(() => { if (active) void perform(loadSurface); }, 3000);
+      if (pollTimer === null) pollTimer = setInterval(() => { if (active) void perform(() => loadSurface({ background: true })); }, 3000);
     }
 
-    function close() {
+    function close(options = {}) {
+      const resume = Boolean(options.resume);
+      if (resume) sessionStorage.setItem(RESUME_SURFACE_KEY, state.surface);
+      else sessionStorage.removeItem(RESUME_SURFACE_KEY);
       active = false;
       closeFilterMenu();
+      closeCreateMenu();
       closeIssueMenu();
       if (pollTimer !== null) {
         clearInterval(pollTimer);
@@ -1592,22 +1915,30 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function refresh() {
-      ensureEntry();
+      const entriesAvailable = ensureEntry();
+      if (!entriesAvailable) {
+        if (active) close({ resume: true });
+        return;
+      }
+      const resumeSurface = sessionStorage.getItem(RESUME_SURFACE_KEY);
+      if (!active && ["issues", "agents"].includes(resumeSurface)) return open(resumeSurface);
       if (active) mountPanel();
     }
 
     function scheduleRefresh() {
-      if (timer !== null || destroyed) return;
-      timer = setTimeout(() => {
-        timer = null;
+      if (refreshPending || destroyed) return;
+      refreshPending = true;
+      queueMicrotask(() => {
+        refreshPending = false;
+        if (destroyed) return;
         refresh();
-      }, 160);
+      });
     }
 
     function destroy() {
       if (destroyed) return;
       destroyed = true;
-      if (timer !== null) clearTimeout(timer);
+      refreshPending = false;
       if (pollTimer !== null) clearInterval(pollTimer);
       if (updateTimer !== null) clearInterval(updateTimer);
       closeFilterMenu();
@@ -1622,6 +1953,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       document.removeEventListener("click", onClick, true);
       close();
       document.querySelectorAll('[' + OWNED + '="true"]').forEach(node => node.remove());
+      ["light", "dark"].forEach(mode => ["canvas", "ink", "accent", "surface", "control", "raised", "hover", "pressed", "hairline"].forEach(token => document.documentElement.style.removeProperty("--bc-host-" + mode + "-" + token)));
       delete window.__betterCodexBridgeResolve;
       delete window.__betterCodexInjection__;
     }
@@ -1631,7 +1963,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (destroyed || observer || !document.documentElement) return;
       observer = new MutationObserver(scheduleRefresh);
       observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "data-theme", "aria-current", ATTRIBUTES.threadActive] });
-      ensureEntry();
+      refresh();
       void checkUpdateNotice();
       updateTimer = setInterval(checkUpdateNotice, 15000);
     }

@@ -72,7 +72,12 @@ test("gateway completes the issue workflow and survives restart", async () => {
     const health = await (await fetch(`http://127.0.0.1:${port}/health`)).json() as { database: { schemaVersion: number } };
     assert.equal(health.database.schemaVersion, 2);
 
-    const bootstrap = await (await request("/api/bootstrap")).json() as { agents: Array<{ id: string; name: string; is_default?: boolean }> };
+    const bootstrap = await (await request("/api/bootstrap")).json() as { agents: Array<{ id: string; name: string; is_default?: boolean }>; appearance: unknown };
+    assert.deepEqual(bootstrap.appearance, {
+      theme: "system",
+      light: { accent: "#339cff", contrast: 45, ink: "#1a1c1f", surface: "#ffffff" },
+      dark: { accent: "#007acc", contrast: 50, ink: "#d4d4d4", surface: "#1e1e1e" },
+    });
     assert.deepEqual(bootstrap.agents[0], {
       id: "",
       role: "codex",
@@ -85,22 +90,34 @@ test("gateway completes the issue workflow and survives restart", async () => {
       created_at: "",
       updated_at: "",
       is_default: true,
+      avatar: "",
     });
 
+    const avatar = "data:image/webp;base64,UklGRg==";
     const defaultAgentResponse = await request("/api/agents/default", {
       method: "PATCH",
-      body: JSON.stringify({ model: "gpt-5.6-luna", reasoning_effort: "high" }),
+      body: JSON.stringify({ model: "gpt-5.6-luna", reasoning_effort: "high", avatar }),
     });
     assert.equal(defaultAgentResponse.status, 200);
     const defaultAgent = await defaultAgentResponse.json() as { model: string; reasoning_effort: string };
     assert.equal(defaultAgent.model, "gpt-5.6-luna");
     assert.equal(defaultAgent.reasoning_effort, "high");
+    assert.equal((defaultAgent as { avatar: string }).avatar, avatar);
 
     const optionalAgentResponse = await request("/api/agents", {
       method: "POST",
-      body: JSON.stringify({ name: "Optional fields", description: "", instructions: "", model: "gpt-5.4-mini", reasoning_effort: "medium" }),
+      body: JSON.stringify({ name: "Optional fields", description: "", instructions: "", model: "gpt-5.4-mini", reasoning_effort: "medium", avatar }),
     });
     assert.equal(optionalAgentResponse.status, 201);
+    const optionalAgent = await optionalAgentResponse.json() as { id: string; avatar: string };
+    assert.equal(optionalAgent.avatar, avatar);
+
+    const invalidAvatarResponse = await request(`/api/agents/${optionalAgent.id}/avatar`, {
+      method: "PATCH",
+      body: JSON.stringify({ avatar: "https://example.com/avatar.png" }),
+    });
+    assert.equal(invalidAvatarResponse.status, 400);
+    assert.deepEqual(await invalidAvatarResponse.json(), { error: "invalid_agent_avatar" });
 
     const preflight = await fetch(`http://127.0.0.1:${port}/api/bootstrap`, {
       method: "OPTIONS",
@@ -141,6 +158,8 @@ test("gateway completes the issue workflow and survives restart", async () => {
     const restored = await restoredResponse.json() as { status: string; thread_id: string };
     assert.equal(restored.status, "in_progress");
     assert.equal(restored.thread_id, "local:gateway-thread");
+    const restoredAgents = await (await request("/api/agents")).json() as Array<{ id: string; avatar: string }>;
+    assert.equal(restoredAgents.find(agent => agent.id === optionalAgent.id)?.avatar, avatar);
   } finally {
     await stopGateway(gateway);
     rmSync(home, { recursive: true, force: true });

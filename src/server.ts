@@ -5,6 +5,7 @@ import { isSea } from "node:sea";
 import { coreVersion, readCompatibilityStatus } from "./compatibility.js";
 import { issuePriorities, issueStatuses, Store, type AgentModel, type AgentReasoningEffort, type IssuePriority, type IssueStatus } from "./db.js";
 import { defaultAgentProfile, syncAgentProfiles, updateDefaultAgentProfile } from "./agent-profiles.js";
+import { readCodexAppearance } from "./appearance.js";
 import { readModelCatalog } from "./model-catalog.js";
 import { runtimePort, token, updateLogPath } from "./config.js";
 import { acquireRuntimeLock, clearRuntimeState, createRuntimeIdentity, publishRuntimeState } from "./runtime-state.js";
@@ -114,6 +115,14 @@ function defaultAgentInput(body: Record<string, unknown>) {
   return { model, reasoning_effort };
 }
 
+function asAgentAvatar(value: unknown) {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || value.length > 400000) throw new Error("invalid_agent_avatar");
+  if (!value) return "";
+  if (!/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(value)) throw new Error("invalid_agent_avatar");
+  return value;
+}
+
 function parseIssuePatch(body: Record<string, unknown>) {
   const patch: Record<string, unknown> = {};
   if ("title" in body) patch.title = cleanString(body.title, 500);
@@ -177,7 +186,11 @@ export function startServer() {
   }
   let cleaned = false;
   const worker = new IssueWorker(store);
-  const visibleAgentProfiles = () => [defaultAgentProfile(), ...store.listAgentProfiles()];
+  const withAvatar = <T extends { id: string; is_default?: boolean }>(profile: T) => ({
+    ...profile,
+    avatar: store.getAgentAvatar(profile.is_default ? "default" : profile.id),
+  });
+  const visibleAgentProfiles = () => [withAvatar(defaultAgentProfile()), ...store.listAgentProfiles().map(withAvatar)];
   const stopUpdateChecks = startGatewayUpdateChecks();
   const cleanup = () => {
     if (cleaned) return;
@@ -206,7 +219,7 @@ export function startServer() {
         const agentModelCatalog = await readModelCatalog();
         const agentModels = agentModelCatalog.map(model => model.id);
         const agentReasoningEfforts = [...new Set(agentModelCatalog.flatMap(model => model.supportedReasoningEfforts.map(effort => effort.value)))];
-        return sendJson(response, 200, { projects: store.listProjects(), agents: visibleAgentProfiles(), statuses: issueStatuses, priorities: issuePriorities, agentModelCatalog, agentModels, agentReasoningEfforts });
+        return sendJson(response, 200, { projects: store.listProjects(), agents: visibleAgentProfiles(), statuses: issueStatuses, priorities: issuePriorities, appearance: readCodexAppearance(), agentModelCatalog, agentModels, agentReasoningEfforts });
       }
       if (url.pathname === "/api/update" && method === "GET") return sendJson(response, 200, getGatewayUpdateState());
       if (url.pathname === "/api/update/install" && method === "POST") {
@@ -223,24 +236,45 @@ export function startServer() {
       }
       if (url.pathname === "/api/agents" && method === "GET") return sendJson(response, 200, visibleAgentProfiles());
       if (url.pathname === "/api/agents" && method === "POST") {
-        const profile = store.createAgentProfile(agentProfileInput(await readBody(request)));
+        const body = await readBody(request);
+        const profile = store.createAgentProfile(agentProfileInput(body));
+        const avatar = asAgentAvatar(body.avatar);
+        if (avatar !== undefined) store.setAgentAvatar(profile.id, avatar);
         syncAgentProfiles(store.listAgentProfiles());
-        return sendJson(response, 201, profile);
+        return sendJson(response, 201, withAvatar(profile));
       }
       if (url.pathname === "/api/agents/default" && method === "PATCH") {
-        return sendJson(response, 200, updateDefaultAgentProfile(defaultAgentInput(await readBody(request))));
+        const body = await readBody(request);
+        const profile = updateDefaultAgentProfile(defaultAgentInput(body));
+        const avatar = asAgentAvatar(body.avatar);
+        if (avatar !== undefined) store.setAgentAvatar("default", avatar);
+        return sendJson(response, 200, withAvatar(profile));
+      }
+      if (url.pathname === "/api/agents/default/avatar" && method === "PATCH") {
+        const avatar = asAgentAvatar((await readBody(request)).avatar);
+        if (avatar === undefined) throw new Error("invalid_agent_avatar");
+        store.setAgentAvatar("default", avatar);
+        return sendJson(response, 200, withAvatar(defaultAgentProfile()));
       }
       if (path[0] === "api" && path[1] === "agents" && path[2]) {
         const profile = store.getAgentProfile(decodeURIComponent(path[2]));
         if (!profile) return sendJson(response, 404, { error: "agent_not_found" });
-        if (method === "GET" && path.length === 3) return sendJson(response, 200, profile);
+        if (method === "GET" && path.length === 3) return sendJson(response, 200, withAvatar(profile));
+        if (method === "PATCH" && path.length === 4 && path[3] === "avatar") {
+          const avatar = asAgentAvatar((await readBody(request)).avatar);
+          if (avatar === undefined) throw new Error("invalid_agent_avatar");
+          store.setAgentAvatar(profile.id, avatar);
+          return sendJson(response, 200, withAvatar(profile));
+        }
         if (method === "PATCH" && path.length === 3) {
           const body = await readBody(request);
           const version = Number(body.version);
           if (!Number.isInteger(version) || version < 1) throw new Error("invalid_version");
           const updated = store.updateAgentProfile(profile.id, version, agentProfileInput(body));
+          const avatar = asAgentAvatar(body.avatar);
+          if (avatar !== undefined) store.setAgentAvatar(profile.id, avatar);
           syncAgentProfiles(store.listAgentProfiles());
-          return sendJson(response, 200, updated);
+          return sendJson(response, 200, withAvatar(updated));
         }
         if (method === "DELETE" && path.length === 3) {
           const body = await readBody(request);

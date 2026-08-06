@@ -6,11 +6,43 @@ import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { Store } from "../src/db.js";
 import { defaultAgentProfile, updateDefaultAgentProfile } from "../src/agent-profiles.js";
+import { readCodexAppearance } from "../src/appearance.js";
 
 function temporaryDatabase() {
   const directory = mkdtempSync(join(tmpdir(), "better-codex-test-"));
   return { directory, file: join(directory, "better-codex.db") };
 }
+
+test("Codex appearance reads the active theme surfaces from config.toml", () => {
+  const directory = mkdtempSync(join(tmpdir(), "better-codex-appearance-test-"));
+  const config = join(directory, "config.toml");
+  try {
+    writeFileSync(config, [
+      "[desktop]",
+      'appearanceTheme = "dark"',
+      "",
+      "[desktop.appearanceLightChromeTheme]",
+      'accent = "#339cff"',
+      "contrast = 45",
+      'ink = "#1a1c1f"',
+      'surface = "#ffffff"',
+      "",
+      "[desktop.appearanceDarkChromeTheme]",
+      'accent = "#007acc"',
+      "contrast = 50",
+      'ink = "#d4d4d4"',
+      'surface = "#1e1e1e"',
+      "",
+    ].join("\n"));
+    assert.deepEqual(readCodexAppearance(config), {
+      theme: "dark",
+      light: { accent: "#339cff", contrast: 45, ink: "#1a1c1f", surface: "#ffffff" },
+      dark: { accent: "#007acc", contrast: 50, ink: "#d4d4d4", surface: "#1e1e1e" },
+    });
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 test("default Codex agent reflects the root config.toml model settings", () => {
   const directory = mkdtempSync(join(tmpdir(), "better-codex-agent-test-"));
@@ -86,6 +118,27 @@ test("core workflow persists, orders status moves, and rejects stale writes", ()
     assert.equal(restored?.status, "in_progress");
     assert.equal(restored?.thread_id, "local:thread-1");
     assert.equal(store.health().schemaVersion, 2);
+    store.close();
+  } finally {
+    rmSync(target.directory, { recursive: true, force: true });
+  }
+});
+
+test("agent avatars persist independently and are removed with their profile", () => {
+  const target = temporaryDatabase();
+  try {
+    let store = new Store(target.file);
+    const profile = store.createAgentProfile({ name: "Avatar", description: "", instructions: "", model: "gpt-test", reasoning_effort: "medium" });
+    const avatar = "data:image/webp;base64,UklGRg==";
+    store.setAgentAvatar("default", avatar);
+    store.setAgentAvatar(profile.id, avatar);
+    store.close();
+
+    store = new Store(target.file);
+    assert.equal(store.getAgentAvatar("default"), avatar);
+    assert.equal(store.getAgentAvatar(profile.id), avatar);
+    store.deleteAgentProfile(profile.id, profile.version);
+    assert.equal(store.getAgentAvatar(profile.id), "");
     store.close();
   } finally {
     rmSync(target.directory, { recursive: true, force: true });

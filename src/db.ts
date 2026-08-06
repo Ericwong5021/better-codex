@@ -23,6 +23,7 @@ export type AgentProfile = {
   version: number;
   created_at: string;
   updated_at: string;
+  avatar?: string;
 };
 
 export type Project = {
@@ -160,6 +161,7 @@ export class Store {
     this.migrate(currentVersion);
     this.ensureAgentColumn();
     this.ensureAgentProfileTable();
+    this.ensureAgentAvatarTable();
     this.ensureRunTable();
     const integrity = this.db.prepare("PRAGMA quick_check").get() as Record<string, unknown> | undefined;
     if (String(integrity?.quick_check ?? "") !== "ok") {
@@ -273,6 +275,16 @@ export class Store {
     `);
   }
 
+  private ensureAgentAvatarTable() {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS agent_avatars (
+        agent_id TEXT PRIMARY KEY,
+        data_url TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `);
+  }
+
   private ensureRunTable() {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS issue_runs (
@@ -365,6 +377,23 @@ export class Store {
     return this.db.prepare("SELECT * FROM agent_profiles WHERE id = ? OR role = ?").get(id, id) as AgentProfile | undefined;
   }
 
+  getAgentAvatar(id: string) {
+    const row = this.db.prepare("SELECT data_url FROM agent_avatars WHERE agent_id = ?").get(id) as { data_url: string } | undefined;
+    return row?.data_url ?? "";
+  }
+
+  setAgentAvatar(id: string, dataUrl: string) {
+    if (!dataUrl) {
+      this.db.prepare("DELETE FROM agent_avatars WHERE agent_id = ?").run(id);
+      return "";
+    }
+    this.db.prepare(`
+      INSERT INTO agent_avatars (agent_id, data_url, updated_at) VALUES (?, ?, ?)
+      ON CONFLICT(agent_id) DO UPDATE SET data_url = excluded.data_url, updated_at = excluded.updated_at
+    `).run(id, dataUrl, now());
+    return dataUrl;
+  }
+
   createAgentProfile(input: AgentProfileInput) {
     const profile = cleanAgentProfile(input);
     const id = randomUUID();
@@ -403,6 +432,7 @@ export class Store {
     this.db.exec("BEGIN IMMEDIATE");
     try {
       this.db.prepare("UPDATE issues SET agent_id = NULL, version = version + 1, updated_at = ? WHERE agent_id = ?").run(now(), profile.id);
+      this.db.prepare("DELETE FROM agent_avatars WHERE agent_id = ?").run(profile.id);
       const result = this.db.prepare("DELETE FROM agent_profiles WHERE id = ? AND version = ?").run(profile.id, version);
       if (result.changes !== 1) throw new Error("version_conflict");
       this.db.exec("COMMIT");
