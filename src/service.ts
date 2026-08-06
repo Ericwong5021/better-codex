@@ -20,12 +20,14 @@ function command() {
   return isSea() ? [process.execPath, "runtime"] : [process.execPath, ...process.execArgv, process.argv[1], "runtime"];
 }
 
-function quoteWindows(value: string) {
-  return `"${value.replace(/"/g, '\\"')}"`;
+function quotePowerShell(value: string) {
+  return `'${value.replace(/'/g, "''")}'`;
 }
 
-function windowsCommand() {
-  return command().map(quoteWindows).join(" ");
+function windowsStartupCommand() {
+  const [executable, ...args] = command();
+  const script = `Start-Process -FilePath ${quotePowerShell(executable)} -ArgumentList @(${args.map(quotePowerShell).join(",")}) -WindowStyle Hidden`;
+  return `powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ${Buffer.from(script, "utf16le").toString("base64")}`;
 }
 
 function windowsRuntime() {
@@ -90,7 +92,7 @@ function domain() {
 export function installService() {
   ensureDirectories();
   if (process.platform === "win32") {
-    reg(["ADD", windowsRunKey, "/V", windowsTask, "/T", "REG_SZ", "/D", windowsCommand(), "/F"]);
+    reg(["ADD", windowsRunKey, "/V", windowsTask, "/T", "REG_SZ", "/D", windowsStartupCommand(), "/F"]);
     startService();
     return { installed: true, label: windowsTask, path: null };
   }

@@ -90,6 +90,7 @@ function spawnSelf(args: string[], logFile: string, detached = true) {
     detached,
     env: { ...process.env, BETTER_CODEX_TOKEN: accessToken() },
     stdio: ["ignore", descriptor, descriptor],
+    windowsHide: true,
   });
   if (detached) child.unref();
   closeSync(descriptor);
