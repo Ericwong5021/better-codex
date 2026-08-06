@@ -559,7 +559,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #better-codex-dialog[data-mode="manual"] .better-codex-switch-mode { color: #5b6472; background: #f7f9ff; box-shadow: inset 0 0 0 1px rgba(75,107,251,.08); }
         #better-codex-dialog .better-codex-switch-mode:hover { color: #27272a; background: #f4f4f5; }
         #better-codex-dialog .better-codex-keep-open { display: flex; align-items: center; gap: 6px; color: #71717a; font-size: var(--bc-text-md); cursor: pointer; user-select: none; }
-        #better-codex-dialog .better-codex-toggle { position: relative; width: 23px; height: 13px; appearance: none; border: 0; border-radius: 999px; background: #d4d4d8; padding: 0; cursor: pointer; transition: background .15s; }
+        #better-codex-dialog .better-codex-toggle { position: relative; width: 23px; height: 13px; appearance: none; -webkit-appearance: none; border: 0; outline: 0; border-radius: 999px; background: #d4d4d8; box-shadow: none; padding: 0; cursor: pointer; transition: background .15s; }
+        #better-codex-dialog .better-codex-toggle:focus, #better-codex-dialog .better-codex-toggle:focus-visible { outline: 0; box-shadow: none; }
         #better-codex-dialog .better-codex-toggle::after { position: absolute; top: 2px; left: 2px; width: 9px; height: 9px; border-radius: 999px; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.2); content: ""; transition: transform .15s; }
         #better-codex-dialog .better-codex-toggle:checked { background: #27272a; }
         #better-codex-dialog .better-codex-toggle:checked::after { transform: translateX(10px); }
@@ -1321,7 +1322,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       autoDispatch.classList.add("better-codex-auto-dispatch", "is-bordered");
       autoDispatch.setAttribute("aria-pressed", "false");
       autoDispatch.setAttribute("aria-label", "切换为自动运行");
-      autoDispatch.innerHTML = icon("refresh") + "<span>手动运行</span>";
+      autoDispatch.innerHTML = icon("user") + "<span>手动运行</span>";
       autoDispatch.addEventListener("click", () => {
         const next = !state.autoDispatch;
         state.autoDispatch = next;
@@ -1802,7 +1803,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       button.setAttribute("aria-pressed", String(state.autoDispatch));
       button.removeAttribute("title");
       button.setAttribute("aria-label", state.autoDispatch ? "切换为手动运行" : "切换为自动运行");
-      button.innerHTML = icon("refresh") + "<span>" + label + "</span>";
+      button.innerHTML = icon(state.autoDispatch ? "refresh" : "user") + "<span>" + label + "</span>";
     }
 
     function render() {

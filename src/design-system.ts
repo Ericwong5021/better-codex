@@ -362,8 +362,16 @@ export function betterCodexDesignSystemCss() {
       background: color-mix(in oklch, var(--bc-success) 12%, var(--bc-color-control));
     }
 
-    #better-codex-panel .better-codex-auto-dispatch.is-on > svg {
-      animation: better-codex-auto-dispatch-spin 2.8s linear infinite;
+    @media (hover: hover) {
+      #better-codex-panel .better-codex-auto-dispatch:hover {
+        color: var(--bc-color-text);
+        background: var(--bc-color-hover);
+      }
+
+      #better-codex-panel .better-codex-auto-dispatch.is-on:hover {
+        color: var(--bc-success);
+        background: color-mix(in oklch, var(--bc-success) 22%, var(--bc-color-control));
+      }
     }
 
     #better-codex-panel .better-codex-auto-dispatch-help {
@@ -483,9 +491,11 @@ export function betterCodexDesignSystemCss() {
 
     #better-codex-auto-dispatch-help-dialog .better-codex-auto-dispatch-help-heading {
       display: flex;
+      width: 100%;
       flex-direction: column;
-      align-items: flex-start;
+      align-items: center;
       gap: 10px;
+      text-align: center;
     }
 
     #better-codex-auto-dispatch-help-dialog .better-codex-auto-dispatch-help-heading > svg {
@@ -513,10 +523,12 @@ export function betterCodexDesignSystemCss() {
 
     #better-codex-auto-dispatch-help-dialog .better-codex-auto-dispatch-help-panel p {
       margin: 0;
-      max-width: 24em;
+      align-self: stretch;
+      max-width: none;
       color: var(--bc-color-text-muted);
       font-size: var(--bc-text-lg);
       line-height: 1.6;
+      text-align: left;
     }
 
     #better-codex-auto-dispatch-help-dialog footer {
@@ -549,10 +561,6 @@ export function betterCodexDesignSystemCss() {
         width: 100%;
         height: 1px;
       }
-    }
-
-    @keyframes better-codex-auto-dispatch-spin {
-      to { transform: rotate(360deg); }
     }
 
     #better-codex-panel .better-codex-filter-menu,
@@ -2543,8 +2551,18 @@ export function betterCodexDesignSystemCss() {
     #better-codex-dialog .better-codex-toggle {
       width: calc(var(--bc-text-base) * 1.85);
       height: calc(var(--bc-text-base) * 1.05);
+      appearance: none;
+      -webkit-appearance: none;
+      border: 0;
+      outline: 0;
       background: var(--bc-color-control);
-      box-shadow: var(--bc-inset-hairline);
+      box-shadow: none;
+    }
+
+    #better-codex-dialog .better-codex-toggle:focus,
+    #better-codex-dialog .better-codex-toggle:focus-visible {
+      outline: 0;
+      box-shadow: none;
     }
 
     #better-codex-dialog .better-codex-toggle::after {
@@ -3094,10 +3112,6 @@ export function betterCodexDesignSystemCss() {
       #better-codex-avatar-picker,
       #better-codex-avatar-cropper,
       #better-codex-update-notice {
-        animation: none;
-      }
-
-      #better-codex-panel .better-codex-auto-dispatch.is-on > svg {
         animation: none;
       }
 

@@ -129,15 +129,18 @@ test("issues toolbar has a toggleable auto-dispatch icon between filter and crea
   assert.ok(source.includes("已指派智能体、且还需要智能体继续处理的任务"));
   assert.ok(!source.includes("「待处理」标志"));
   assert.ok(!source.includes('better-codex-attention'));
-  assert.ok(source.includes('icon("user")'));
-  assert.ok(source.includes('icon("refresh")'));
+  assert.ok(source.includes('icon(state.autoDispatch ? "refresh" : "user")'));
+  assert.ok(source.includes('icon("user") + "<span>手动运行</span>"'));
+  assert.ok(source.includes('icon("user") + "<h3>手动运行</h3></div>"'));
+  assert.ok(source.includes('icon("refresh") + "<h3>自动运行</h3></div>"'));
   assert.ok(!source.includes('button.title = state.autoDispatch'));
   assert.match(css, /\.better-codex-auto-dispatch\.is-on\s*\{[^}]*color:\s*var\(--bc-success\)/s);
-  assert.match(css, /\.better-codex-auto-dispatch\.is-on > svg\s*\{[^}]*animation:\s*better-codex-auto-dispatch-spin/s);
-  assert.match(css, /@keyframes better-codex-auto-dispatch-spin/);
+  assert.doesNotMatch(css, /better-codex-auto-dispatch-spin/);
   assert.match(css, /\.better-codex-auto-dispatch-help\s*\{/s);
+  assert.match(css, /#better-codex-auto-dispatch-help-dialog \.better-codex-auto-dispatch-help-heading\s*\{[^}]*align-items:\s*center/s);
   assert.match(css, /#better-codex-auto-dispatch-help-dialog \.better-codex-auto-dispatch-help-heading h3\s*\{[^}]*font-size:\s*calc\(var\(--bc-text-xl\) \+ 2px\)/s);
   assert.match(css, /#better-codex-auto-dispatch-help-dialog \.better-codex-auto-dispatch-help-panel\s*\{[^}]*text-align:\s*left/s);
+  assert.match(css, /#better-codex-auto-dispatch-help-dialog \.better-codex-auto-dispatch-help-panel p\s*\{[^}]*text-align:\s*left/s);
   assert.match(css, /\.better-codex-auto-dispatch-help-divider\s*\{/s);
 });
 
