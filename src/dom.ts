@@ -77,9 +77,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         html[data-better-codex-open="true"] \${SELECTORS.sidebarNavigation} [aria-current="page"]:not(#\${ENTRY_ID}):not(#\${AGENTS_ENTRY_ID}) .text-token-list-active-selection-foreground { color: var(--color-token-foreground) !important; }
         [\${HOST}="true"] { position: relative !important; z-index: 31 !important; pointer-events: none !important; }
         [\${HIDDEN}="true"] { visibility: hidden !important; pointer-events: none !important; }
+        html { --bc-page: oklch(.988087 0 0); --bc-surface: oklch(1 0 0); --bc-raised: oklch(1 0 0); --bc-hover: oklch(.967 .001 286.375); --bc-selected: oklch(.95 .002 286.375); --bc-foreground: oklch(.141 .005 285.823); --bc-muted: oklch(.505 .016 285.938); --bc-faint: oklch(.606 .016 285.938); --bc-border: oklch(.92 .004 286.32); --bc-divider: oklch(.945 .003 286.32); --bc-input: oklch(.92 .004 286.32); --bc-ring: oklch(.705 .015 286.067); --bc-primary: oklch(.21 .006 285.885); --bc-primary-foreground: oklch(.985 0 0); --bc-warning: oklch(.75 .16 85); --bc-success: oklch(.55 .16 145); --bc-info: oklch(.55 .18 250); --bc-danger: oklch(.577 .245 27.325); --bc-surface-shadow: 0 1px 2px rgb(15 23 42 / .04),0 1px 1px rgb(15 23 42 / .03); --bc-card-shadow: 0 1px 3px rgb(15 23 42 / .10); --bc-floating-shadow: 0 16px 40px rgb(15 23 42 / .14),0 3px 10px rgb(15 23 42 / .08); --bc-menu-shadow: 0 8px 24px rgb(15 23 42 / .08),0 2px 6px rgb(15 23 42 / .05); --bc-scrim: rgb(24 24 27 / .22); color-scheme: light; }
+        html.electron-dark, html.dark, html[data-theme="dark"] { --bc-page: oklch(.18 .005 285.823); --bc-surface: oklch(.21 .006 285.885); --bc-raised: oklch(.235 .007 285.885); --bc-hover: oklch(.274 .006 286.033); --bc-selected: oklch(.3 .006 286.033); --bc-foreground: oklch(.985 0 0); --bc-muted: oklch(.705 .015 286.067); --bc-faint: oklch(.60 .015 286.067); --bc-border: oklch(1 0 0 / 10%); --bc-divider: oklch(1 0 0 / 6%); --bc-input: oklch(1 0 0 / 15%); --bc-ring: oklch(.552 .016 285.938); --bc-primary: oklch(.92 .004 286.32); --bc-primary-foreground: oklch(.21 .006 285.885); --bc-warning: oklch(.70 .16 85); --bc-success: oklch(.65 .15 145); --bc-info: oklch(.65 .18 250); --bc-danger: oklch(.704 .191 22.216); --bc-surface-shadow: 0 1px 2px rgb(0 0 0 / .2),0 1px 1px rgb(0 0 0 / .16); --bc-card-shadow: 0 0 0 1px rgb(255 255 255 / .03); --bc-floating-shadow: 0 20px 48px rgb(0 0 0 / .46),0 4px 12px rgb(0 0 0 / .28); --bc-menu-shadow: 0 10px 28px rgb(0 0 0 / .3),0 2px 8px rgb(0 0 0 / .18); --bc-scrim: rgb(0 0 0 / .5); color-scheme: dark; }
         #\${PANEL_ID} { position: absolute; inset: 0; z-index: 2; display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; color: var(--color-text-foreground, inherit); background: var(--color-background-surface, var(--wb-surface-primary, var(--color-token-bg-primary, Canvas))); pointer-events: auto; }
         #\${PANEL_ID}[hidden] { display: none !important; }
-        #\${PANEL_ID} { --bc-muted: #71717a; --bc-border: #e5e5e7; --bc-surface: #fff; --bc-hover: #f7f7f8; --bc-warning: #d89b16; --bc-success: #2e9c5a; --bc-info: #2583d8; --bc-danger: #e5484d; font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #fcfcfc; }
+        #\${PANEL_ID} { font-family: Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif; background: var(--bc-page); }
         #\${PANEL_ID} .better-codex-error { margin-left: auto; color: var(--bc-danger); font-size: 11px; }
         #\${PANEL_ID} .better-codex-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 50px; padding: 0 18px; background: #fcfcfc; }
         #\${PANEL_ID} .better-codex-tabs, #\${PANEL_ID} .better-codex-actions { display: flex; align-items: center; gap: 4px; }
@@ -263,6 +265,70 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #better-codex-dialog .better-codex-submit:disabled { color: #fff; background: #a1a1aa; cursor: not-allowed; opacity: .72; }
         #better-codex-dialog .better-codex-keycap { display: inline-flex; min-width: 17px; height: 17px; align-items: center; justify-content: center; border-radius: 4px; background: rgba(255,255,255,.14); font-size: 10px; }
         #better-codex-dialog .better-codex-dialog-error { padding: 0 20px 6px; color: #e5484d; font-size: 11px; }
+        #\${PANEL_ID} { color: var(--bc-foreground); background: var(--bc-page); }
+        #\${PANEL_ID} .better-codex-toolbar { background: var(--bc-page); }
+        #\${PANEL_ID} .better-codex-button, #better-codex-dialog .better-codex-button { color: var(--bc-muted); }
+        #\${PANEL_ID} .better-codex-button:hover, #better-codex-dialog .better-codex-button:hover { color: var(--bc-foreground); background: var(--bc-hover); }
+        #\${PANEL_ID} .better-codex-button.is-active { color: var(--bc-foreground); background: var(--bc-selected); }
+        #\${PANEL_ID} .better-codex-button.is-bordered { border-color: var(--bc-border); background: var(--bc-surface); box-shadow: var(--bc-surface-shadow); }
+        #\${PANEL_ID} .better-codex-working-chip.has-work { border-color: color-mix(in oklch,var(--bc-warning) 35%,var(--bc-border)); color: color-mix(in oklch,var(--bc-warning) 72%,var(--bc-foreground)); background: color-mix(in oklch,var(--bc-warning) 9%,var(--bc-surface)); }
+        #\${PANEL_ID} .better-codex-search { border-color: var(--bc-input); color: var(--bc-foreground); background: var(--bc-surface); }
+        #\${PANEL_ID} .better-codex-search::placeholder { color: var(--bc-muted); }
+        #\${PANEL_ID} .better-codex-search:focus { border-color: var(--bc-ring); box-shadow: 0 0 0 2px color-mix(in oklch,var(--bc-ring) 20%,transparent); }
+        #\${PANEL_ID} .better-codex-filter-menu, #\${PANEL_ID} .better-codex-filter-submenu, #better-codex-context-menu, #better-codex-context-menu .better-codex-context-submenu { border-color: var(--bc-border); color: var(--bc-foreground); background: var(--bc-raised); box-shadow: var(--bc-menu-shadow); }
+        #\${PANEL_ID} .better-codex-filter-row:hover, #\${PANEL_ID} .better-codex-filter-row.is-active, #better-codex-context-menu .better-codex-context-item:hover, #better-codex-context-menu .better-codex-context-item:focus-visible, #better-codex-context-menu .better-codex-context-item-wrap:hover > .better-codex-context-item { background: var(--bc-hover); }
+        #\${PANEL_ID} .better-codex-filter-count, #\${PANEL_ID} .better-codex-filter-chevron, #better-codex-context-menu .better-codex-status-icon { color: var(--bc-muted); }
+        #\${PANEL_ID} .better-codex-filter-check, #better-codex-context-menu .better-codex-context-check { color: var(--bc-foreground); }
+        #\${PANEL_ID} .better-codex-filter-separator, #better-codex-context-menu .better-codex-context-divider { background: var(--bc-divider); }
+        #better-codex-context-menu .better-codex-context-item.is-danger { color: var(--bc-danger); }
+        #\${PANEL_ID} .better-codex-column[data-status="backlog"], #\${PANEL_ID} .better-codex-column[data-status="todo"], #\${PANEL_ID} .better-codex-column[data-status="cancelled"] { background: color-mix(in oklch,var(--bc-hover) 70%,transparent); }
+        #\${PANEL_ID} .better-codex-column[data-status="in_progress"] { background: color-mix(in oklch,var(--bc-warning) 8%,transparent); }
+        #\${PANEL_ID} .better-codex-column[data-status="in_review"] { background: color-mix(in oklch,var(--bc-success) 8%,transparent); }
+        #\${PANEL_ID} .better-codex-column[data-status="done"] { background: color-mix(in oklch,var(--bc-info) 8%,transparent); }
+        #\${PANEL_ID} .better-codex-column[data-status="blocked"] { background: color-mix(in oklch,var(--bc-danger) 8%,transparent); }
+        #\${PANEL_ID} .better-codex-column-icon:hover { background: var(--bc-hover); }
+        #\${PANEL_ID} .better-codex-card { border-color: var(--bc-border); color: var(--bc-foreground); background: var(--bc-surface); box-shadow: var(--bc-surface-shadow); }
+        #\${PANEL_ID} .better-codex-card:hover { border-color: var(--bc-ring); background: var(--bc-hover); }
+        #\${PANEL_ID} .better-codex-card-title { color: var(--bc-foreground); }
+        #\${PANEL_ID} .better-codex-chip { color: var(--bc-muted); background: var(--bc-hover); }
+        #\${PANEL_ID} .better-codex-avatar, #\${PANEL_ID} .better-codex-agent-card-avatar { color: var(--bc-primary-foreground); background: var(--bc-primary); }
+        #\${PANEL_ID} .better-codex-activity[data-run="running"] { color: var(--bc-foreground); }
+        #\${PANEL_ID} .better-codex-shimmer { background-image: linear-gradient(90deg,var(--bc-muted) 0%,var(--bc-muted) 35%,var(--bc-foreground) 50%,var(--bc-muted) 65%,var(--bc-muted) 100%); }
+        #\${PANEL_ID} .better-codex-empty { color: var(--bc-faint); }
+        #\${PANEL_ID} .better-codex-agent-heading strong, #\${PANEL_ID} .better-codex-agents-empty strong { color: var(--bc-foreground); }
+        #\${PANEL_ID} .better-codex-agent-card { border-color: var(--bc-border); color: var(--bc-foreground); background: var(--bc-surface); box-shadow: var(--bc-card-shadow); }
+        #\${PANEL_ID} .better-codex-agent-card:hover { border-color: var(--bc-ring); }
+        #\${PANEL_ID} .better-codex-agent-card-instructions { color: color-mix(in oklch,var(--bc-foreground) 72%,var(--bc-muted)); }
+        #\${PANEL_ID} .better-codex-agent-card-action { color: var(--bc-muted); }
+        #\${PANEL_ID} .better-codex-agent-card-action:hover { color: var(--bc-foreground); background: var(--bc-hover); }
+        #\${PANEL_ID} .better-codex-agent-card-action.is-danger:hover { color: var(--bc-danger); background: color-mix(in oklch,var(--bc-danger) 10%,var(--bc-surface)); }
+        #\${PANEL_ID} .better-codex-agents-empty-icon { border-color: var(--bc-border); color: var(--bc-muted); background: var(--bc-surface); box-shadow: var(--bc-card-shadow); }
+        #better-codex-agent-dialog, #better-codex-dialog { border-color: var(--bc-border); color: var(--bc-foreground); background: var(--bc-page); box-shadow: var(--bc-floating-shadow); }
+        #better-codex-agent-dialog::backdrop, #better-codex-dialog::backdrop { background: var(--bc-scrim); }
+        #better-codex-agent-dialog .better-codex-agent-dialog-head, #better-codex-agent-dialog .better-codex-agent-dialog-footer { border-color: var(--bc-divider); background: var(--bc-raised); }
+        #better-codex-agent-dialog .better-codex-agent-dialog-head span, #better-codex-agent-dialog .better-codex-agent-section-title span { color: var(--bc-muted); }
+        #better-codex-agent-dialog .better-codex-agent-settings { border-color: var(--bc-border); background: var(--bc-surface); box-shadow: var(--bc-surface-shadow); }
+        #better-codex-agent-dialog .better-codex-agent-field + .better-codex-agent-field { border-color: var(--bc-divider); }
+        #better-codex-agent-dialog .better-codex-agent-field > label, #better-codex-agent-dialog .better-codex-agent-execution label { color: var(--bc-muted); }
+        #better-codex-agent-dialog input, #better-codex-agent-dialog textarea, #better-codex-agent-dialog select { border-color: var(--bc-input); color: var(--bc-foreground); background: var(--bc-raised); }
+        #better-codex-agent-dialog input::placeholder, #better-codex-agent-dialog textarea::placeholder { color: var(--bc-muted); }
+        #better-codex-agent-dialog input:focus, #better-codex-agent-dialog textarea:focus, #better-codex-agent-dialog select:focus { border-color: var(--bc-ring); box-shadow: 0 0 0 2px color-mix(in oklch,var(--bc-ring) 20%,transparent); }
+        #better-codex-agent-dialog .better-codex-button { border-color: var(--bc-border); color: var(--bc-muted); background: var(--bc-surface); }
+        #better-codex-agent-dialog .better-codex-submit, #better-codex-dialog .better-codex-submit { border-color: var(--bc-primary); color: var(--bc-primary-foreground); background: var(--bc-primary); }
+        #better-codex-dialog .better-codex-dialog-breadcrumb, #better-codex-dialog .better-codex-manual-title::placeholder, #better-codex-dialog .better-codex-agent-picker, #better-codex-dialog .better-codex-run-hint, #better-codex-dialog .better-codex-switch-mode, #better-codex-dialog .better-codex-keep-open, #better-codex-dialog .better-codex-project-empty { color: var(--bc-muted); }
+        #better-codex-dialog .better-codex-dialog-breadcrumb strong, #better-codex-dialog .better-codex-manual-title, #better-codex-dialog .better-codex-agent-picker strong { color: var(--bc-foreground); }
+        #better-codex-dialog .better-codex-icon-button, #better-codex-dialog .better-codex-dialog-editor { color: color-mix(in oklch,var(--bc-foreground) 78%,var(--bc-muted)); }
+        #better-codex-dialog .better-codex-icon-button:hover, #better-codex-dialog .better-codex-switch-mode:hover, #better-codex-dialog .better-codex-project-option:hover, #better-codex-dialog .better-codex-project-option:focus-visible { color: var(--bc-foreground); background: var(--bc-hover); }
+        #better-codex-dialog .better-codex-dialog-editor::placeholder { color: var(--bc-muted); }
+        #better-codex-dialog .better-codex-agent-avatar { color: var(--bc-primary-foreground); background: var(--bc-primary); }
+        #better-codex-dialog .better-codex-property { border-color: var(--bc-border); color: var(--bc-muted); background: var(--bc-surface); }
+        #better-codex-dialog .better-codex-project-menu { border-color: var(--bc-border); color: var(--bc-foreground); background: var(--bc-raised); box-shadow: var(--bc-menu-shadow); }
+        #better-codex-dialog .better-codex-project-search, #better-codex-dialog .better-codex-dialog-footer { border-color: var(--bc-divider); }
+        #better-codex-dialog[data-mode="manual"] .better-codex-switch-mode { color: var(--bc-foreground); background: var(--bc-selected); box-shadow: inset 0 0 0 1px var(--bc-divider); }
+        #better-codex-dialog .better-codex-toggle { background: var(--bc-input); }
+        #better-codex-dialog .better-codex-toggle::after { background: var(--bc-primary-foreground); }
+        #better-codex-dialog .better-codex-toggle:checked { background: var(--bc-primary); }
+        #better-codex-dialog .better-codex-dialog-error, #better-codex-agent-dialog .better-codex-agent-dialog-error { color: var(--bc-danger); }
       \`;
       (document.head || document.documentElement).appendChild(style);
     }
