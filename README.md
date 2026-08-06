@@ -26,7 +26,11 @@
 Better Codex is a local workflow extension for Codex Desktop. It adds task and project management to the Codex sidebar and stores task data locally in SQLite.
 
 <p align="center">
-  <img src="assets/better-codex-board.png" width="1200" alt="Better Codex running inside Codex Desktop" />
+  <img src="assets/better-codex-board.png" width="1200" alt="Better Codex task board inside Codex Desktop" />
+</p>
+
+<p align="center">
+  <img src="assets/better-codex-agents.png" width="1200" alt="Better Codex Agents manager inside Codex Desktop" />
 </p>
 
 ## Quick Start

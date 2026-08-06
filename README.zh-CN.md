@@ -26,7 +26,11 @@
 Better Codex 是 Codex 桌面端的本地工作流扩展。它在 Codex 侧边栏中加入任务和项目管理，任务数据保存在本地 SQLite 数据库中。
 
 <p align="center">
-  <img src="assets/better-codex-board.png" width="1200" alt="Better Codex 在 Codex 桌面端中运行" />
+  <img src="assets/better-codex-board.png" width="1200" alt="Better Codex 任务看板" />
+</p>
+
+<p align="center">
+  <img src="assets/better-codex-agents.png" width="1200" alt="Better Codex 智能体管理" />
 </p>
 
 ## 快速使用
