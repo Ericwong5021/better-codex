@@ -2,7 +2,7 @@ import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { compatibilityCurrentPath, compatibilityStatusPath, compatibilityVersionsPath, ensureDirectories } from "./config.js";
 
-export const coreVersion = "0.3.8";
+export const coreVersion = "0.3.9";
 
 export type CompatibilityManifest = {
   version: string;
@@ -34,7 +34,7 @@ export type CompatibilityManifest = {
 };
 
 export const bundledCompatibility: CompatibilityManifest = {
-  version: "0.3.8",
+  version: "0.3.9",
   minimumCoreVersion: "0.2.0",
   supportedPlatforms: ["darwin", "win32"],
   supportedCodexVersions: {
