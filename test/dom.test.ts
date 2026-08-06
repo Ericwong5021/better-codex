@@ -22,7 +22,7 @@ test("leaving the app surface suspends the panel and immediately restores its pr
   assert.ok(source.includes('createEntry("任务看板", ENTRY_ID, "打开任务看板", "issues")'));
   assert.ok(source.includes('syncEntryLabel(entry, "任务看板", "打开任务看板")'));
   assert.ok(source.includes('syncEntryIcon(entry, "issues")'));
-  assert.ok(source.includes('"issues":{"name":"layout-dashboard"'));
+  assert.ok(source.includes('"issues":{"name":"square-kanban"'));
   assert.ok(source.includes('"bot":{"name":"bot"'));
   assert.ok(source.includes("return entry.isConnected && agentsEntry.isConnected"));
   assert.ok(source.includes("const entriesAvailable = ensureEntry()"));
@@ -39,15 +39,16 @@ test("all interface icons use Lucide definitions", () => {
 
   for (const name of [
     "plus", "ellipsis", "list-filter", "sliders-horizontal", "columns-3", "arrow-left-right",
-    "maximize-2", "x", "paperclip", "folder", "tag", "calendar", "user", "user-round-pen",
-    "bot", "image", "search", "file-check-corner", "panel-top", "pencil", "chevron-right",
-    "chevron-down", "check", "circle", "minus", "trash-2", "refresh-cw", "layout-dashboard",
+    "maximize-2", "minimize-2", "x", "paperclip", "folder", "tag", "calendar", "user", "user-round-pen",
+    "bot", "image", "search", "search-code", "layout-template", "bug", "terminal", "wrench",
+    "file-code-corner", "flask-conical", "book-open", "shield-check", "database", "sparkles", "pencil", "chevron-right",
+    "chevron-down", "check", "circle", "minus", "trash-2", "refresh-cw", "square-kanban",
     "circle-dashed", "loader-circle", "circle-dot", "circle-check-big", "circle-slash-2",
     "circle-x", "signal-low", "signal-medium", "signal-high", "circle-alert",
   ]) assert.ok(source.includes('"name":"' + name + '"'), `missing Lucide icon: ${name}`);
 
   assert.ok(source.includes('const classes = "lucide lucide-" + definition.name'));
-  assert.ok(source.includes('return icon(names[status] || "statusTodo", "better-codex-status-icon")'));
+  assert.ok(source.includes('icon(names[status] || "statusTodo", "better-codex-status-icon", "2.35")'));
   assert.ok(source.includes('const markup = icon(names[priority] || "priorityNone", "better-codex-priority")'));
   assert.doesNotMatch(source, /Array\.from\(\{ length: 16 \}/);
 });
@@ -60,8 +61,13 @@ test("status and priority menus keep their Lucide icons visible", () => {
   assert.ok(source.includes('filterOptionIcon(key, option.value)'));
   assert.ok(source.includes('if (key === "status") return statusIcon(value)'));
   assert.ok(source.includes('if (key === "priority") return priorityIcon(value)'));
-  assert.match(css, /\.better-codex-dialog-select-trigger-visual,[\s\S]*?\.better-codex-dialog-select-option-visual\s*\{[^}]*width:\s*14px;[^}]*height:\s*14px;/s);
-  assert.match(css, /\.better-codex-dialog-select-trigger-visual > svg,[\s\S]*?\.better-codex-dialog-select-option-visual > svg\s*\{[^}]*width:\s*14px;[^}]*height:\s*14px;/s);
+  assert.ok(source.includes('icon(names[status] || "statusTodo", "better-codex-status-icon", "2.35")'));
+  assert.ok(source.includes("escapeHtml(status)") && source.includes("data-status="));
+  assert.match(source, /#better-codex-filter > svg \{ color: var\(--bc-info\); \}/);
+  assert.match(css, /#better-codex-panel #better-codex-filter > svg\s*\{[^}]*color:\s*var\(--bc-info\);/s);
+  assert.match(css, /\.better-codex-status-icon\[data-status="in_progress"\]/);
+  assert.match(css, /\.better-codex-dialog-select-trigger-visual,[\s\S]*?\.better-codex-dialog-select-option-visual\s*\{[^}]*width:\s*var\(--bc-icon-sm\);[^}]*height:\s*var\(--bc-icon-sm\);/s);
+  assert.match(css, /\.better-codex-dialog-select-trigger-visual > svg,[\s\S]*?\.better-codex-dialog-select-option-visual > svg\s*\{[^}]*width:\s*var\(--bc-icon-sm\);[^}]*height:\s*var\(--bc-icon-sm\);/s);
 });
 
 test("square icon controls center their SVG geometry instead of using the text baseline", () => {
@@ -140,6 +146,30 @@ test("opening an agent inspector hides the toolbar create action", () => {
   assert.match(betterCodexDesignSystemCss(), /\.better-codex-agent-actions\[hidden\]\s*\{[^}]*display:\s*none\s*!important/s);
 });
 
+test("clicking the agent directory outside the inspector closes the side pane", () => {
+  const source = injectionScript(4317, "test-token", "install");
+
+  assert.ok(source.includes('event.target.closest(".better-codex-agent-directory [data-agent-key]")'));
+  assert.ok(source.includes('state.agentPane !== "preview" && event.target.closest(".better-codex-agent-directory")'));
+  assert.ok(source.includes('if (event.target.closest("[data-agent-close-pane]")'));
+});
+
+test("agent suggestion icons use thicker strokes and semantic tones", () => {
+  const source = injectionScript(4317, "test-token", "install");
+  const css = betterCodexDesignSystemCss();
+
+  assert.ok(source.includes('"tone":"info"'));
+  assert.ok(source.includes('"tone":"success"'));
+  assert.ok(source.includes('"tone":"warning"'));
+  assert.ok(source.includes('"key":"debugger"'));
+  assert.ok(source.includes('"name":"问题排查"'));
+  assert.ok(source.includes('icon(item.icon, "", "2.4")'));
+  assert.ok(source.includes("data-tone=") && source.includes("escapeHtml(item.tone)"));
+  assert.match(css, /\.better-codex-agent-suggestion-icon\[data-tone="info"\]\s*\{[^}]*color:\s*var\(--bc-info\)/s);
+  assert.match(css, /\.better-codex-agent-suggestion-icon\[data-tone="success"\]\s*\{[^}]*color:\s*var\(--bc-success\)/s);
+  assert.match(css, /\.better-codex-agent-suggestion-icon\[data-tone="warning"\]\s*\{[^}]*color:\s*var\(--bc-warning\)/s);
+});
+
 test("agent toolbar and inspector occupy separate Codex-style grid regions", () => {
   const css = betterCodexDesignSystemCss();
   const source = injectionScript(4317, "test-token", "install");
@@ -184,15 +214,23 @@ test("agent issue creation refreshes profiles and reuses their names and avatars
   assert.ok(source.includes("syncAgentAvatar(runAvatar, selectedAgent)"));
 });
 
-test("agent detail avatars use a robot fallback and open a drag-to-crop editor", () => {
+test("agent detail avatars use preset icons and open an avatar picker", () => {
   const source = injectionScript(4317, "test-token", "install");
 
   assert.ok(source.includes('branded ? codexLogo() : icon("bot")'));
   assert.ok(source.includes('data-agent-avatar-form'));
+  assert.ok(source.includes("chooseAgentAvatar("));
+  assert.ok(source.includes('id = "better-codex-avatar-picker"'));
+  assert.ok(source.includes("position: fixed") || source.includes('style.top = top + "px"'));
+  assert.ok(source.includes(".better-codex-agent-avatar-field, .better-codex-agent-profile-head"));
+  assert.ok(source.includes("AGENT_AVATAR_PRESETS"));
+  assert.ok(source.includes('"id":"reviewer"'));
   assert.ok(source.includes('better-codex-agent-profile-head'));
   assert.ok(source.includes('const heading = creating ? "新建" : "智能体"'));
   assert.ok(source.includes('<h2>创建智能体</h2><div class="better-codex-agent-avatar-field">'));
-  assert.ok(source.includes("悬停头像即可选择并裁剪图片"));
+  assert.ok(source.includes("点击选择预设图标，或上传图片"));
+  assert.ok(source.includes('avatar: draft.avatar || ("icon:" + draft.key)'));
+  assert.ok(source.includes("state.agentDraft?.key === item.key"));
   assert.ok(!source.includes('class="better-codex-agent-profile-name" name="name"'));
   assert.ok(!source.includes('data-agent-avatar-edit'));
   assert.ok(source.includes('id = "better-codex-avatar-cropper"'));
@@ -238,6 +276,21 @@ test("issue submit buttons omit visual keyboard shortcut badges", () => {
   assert.ok(source.includes('event.key === "Enter"'));
 });
 
+test("issue cards open details first and keep session entry points explicit", () => {
+  const source = injectionScript(4317, "test-token", "install");
+  const css = betterCodexDesignSystemCss();
+
+  assert.ok(source.includes('class="better-codex-link" type="button" data-thread="'));
+  assert.ok(source.includes("打开 Session"));
+  assert.ok(source.includes("在对话中打开"));
+  assert.ok(source.includes("data-dialog-open-thread"));
+  assert.ok(source.includes("Issue 详情"));
+  assert.ok(source.includes("if (issue) return void perform(() => openEditor(issue))"));
+  assert.ok(!source.includes("(sessionId ? ' data-thread=\""));
+  assert.doesNotMatch(source, /任务尚未关联 Session/);
+  assert.match(css, /\.better-codex-dialog-open-thread\s*\{[^}]*background:\s*var\(--bc-color-primary\)/s);
+});
+
 test("issue keep-open toggle keeps a visible track in light mode", () => {
   const css = betterCodexDesignSystemCss();
   const toggleRule = css.match(/#better-codex-dialog \.better-codex-toggle\s*\{([^}]*)\}/)?.[1] || "";
@@ -271,7 +324,7 @@ test("Codex-native visual values live behind semantic design tokens", () => {
   assert.ok(css.includes("--bc-color-canvas:"));
   assert.ok(css.includes("--bc-radius-xl:"));
   assert.ok(css.includes("--bc-motion-fast:"));
-  assert.match(css, /\.better-codex-card\s*\{[^}]*border:\s*0;/s);
+  assert.match(css, /\.better-codex-card\s*\{[^}]*border:\s*1px solid var\(--bc-color-hairline\);[^}]*background:\s*transparent;[^}]*box-shadow:\s*var\(--bc-card-shadow\);/s);
   assert.match(css, /\.better-codex-search\s*\{[^}]*border:\s*0;/s);
   assert.ok(source.includes("--bc-color-surface-raised:"));
 });

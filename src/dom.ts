@@ -2,7 +2,9 @@ import { activeCompatibility } from "./compatibility.js";
 import { betterCodexDesignSystemCss } from "./design-system.js";
 import {
   ArrowLeftRight,
+  BookOpen,
   Bot,
+  Bug,
   Calendar,
   Check,
   ChevronDown,
@@ -15,29 +17,37 @@ import {
   CircleSlash2,
   CircleX,
   Columns3,
+  Database,
   Ellipsis,
-  FileCheck2,
+  FileCode2,
+  FlaskConical,
   Folder,
   Image,
-  LayoutDashboard,
+  LayoutTemplate,
   ListFilter,
   LoaderCircle,
   Maximize2,
+  Minimize2,
   Minus,
-  PanelTop,
   Paperclip,
   Pencil,
   Plus,
   RefreshCw,
   Search,
+  SearchCode,
+  ShieldCheck,
   SignalHigh,
   SignalLow,
   SignalMedium,
   SlidersHorizontal,
+  Sparkles,
+  SquareKanban,
   Tag,
+  Terminal,
   Trash2,
   User,
   UserRoundPen,
+  Wrench,
   X,
 } from "lucide-static";
 
@@ -56,6 +66,7 @@ const lucideIcons = Object.fromEntries(Object.entries({
   board: Columns3,
   switch: ArrowLeftRight,
   expand: Maximize2,
+  shrink: Minimize2,
   close: X,
   paperclip: Paperclip,
   folder: Folder,
@@ -66,8 +77,17 @@ const lucideIcons = Object.fromEntries(Object.entries({
   bot: Bot,
   image: Image,
   search: Search,
-  review: FileCheck2,
-  layout: PanelTop,
+  review: SearchCode,
+  layout: LayoutTemplate,
+  bug: Bug,
+  terminal: Terminal,
+  wrench: Wrench,
+  code: FileCode2,
+  test: FlaskConical,
+  docs: BookOpen,
+  shield: ShieldCheck,
+  database: Database,
+  sparkles: Sparkles,
   edit: Pencil,
   chevron: ChevronRight,
   chevronDown: ChevronDown,
@@ -76,7 +96,7 @@ const lucideIcons = Object.fromEntries(Object.entries({
   dash: Minus,
   trash: Trash2,
   refresh: RefreshCw,
-  issues: LayoutDashboard,
+  issues: SquareKanban,
   statusBacklog: CircleDashed,
   statusTodo: Circle,
   statusInProgress: LoaderCircle,
@@ -90,6 +110,100 @@ const lucideIcons = Object.fromEntries(Object.entries({
   priorityHigh: SignalHigh,
   priorityUrgent: CircleAlert,
 }).map(([key, svg]) => [key, lucideDefinition(svg)]));
+
+const agentAvatarPresets = [
+  { id: "reviewer", icon: "review", tone: "info", label: "代码审查" },
+  { id: "frontend", icon: "layout", tone: "success", label: "前端实现" },
+  { id: "debugger", icon: "bug", tone: "warning", label: "问题排查" },
+  { id: "bot", icon: "bot", tone: "muted", label: "通用助手" },
+  { id: "terminal", icon: "terminal", tone: "info", label: "终端工程" },
+  { id: "wrench", icon: "wrench", tone: "warning", label: "修复工具" },
+  { id: "code", icon: "code", tone: "success", label: "代码实现" },
+  { id: "test", icon: "test", tone: "warning", label: "测试验证" },
+  { id: "docs", icon: "docs", tone: "info", label: "文档写作" },
+  { id: "shield", icon: "shield", tone: "success", label: "安全审查" },
+  { id: "database", icon: "database", tone: "info", label: "数据与存储" },
+  { id: "sparkles", icon: "sparkles", tone: "warning", label: "创意探索" },
+] as const;
+
+const suggestedAgents = [
+  {
+    key: "reviewer",
+    name: "代码审查",
+    description: "检查改动的正确性、回归风险和可维护性",
+    instructions: [
+      "你是代码审查智能体。目标不是重写实现，而是拦住会伤到正确性、回归、安全与可维护性的问题。",
+      "",
+      "审查时优先看：",
+      "1. 行为是否与需求一致，边界条件和失败路径是否漏掉",
+      "2. 是否引入回归、竞态、错误处理吞掉、状态不一致",
+      "3. 安全与数据风险：注入、权限、密钥、路径穿越、不可信输入",
+      "4. 可维护性：不必要抽象、重复逻辑、命名误导、隐式约定",
+      "5. 测试缺口：关键路径是否缺少可复现的覆盖",
+      "",
+      "输出要求：",
+      "- 先给结论：通过 / 需修改后再合",
+      "- 按严重度列出问题：阻断、重要、建议",
+      "- 每条问题写清：位置、原因、复现或触发条件、建议改法",
+      "- 没有把握时明确标注假设，不要臆造未读到的代码行为",
+      "- 不要大段复述代码；只引用必要片段",
+    ].join("\n"),
+    model: "gpt-5.6-sol",
+    reasoning_effort: "high",
+    icon: "review",
+    tone: "info",
+  },
+  {
+    key: "frontend",
+    name: "前端实现",
+    description: "负责 Codex 原生风格的界面实现与视觉验证",
+    instructions: [
+      "你是前端实现智能体。负责把需求做成符合现有产品气质的可上线界面，而不是另起一套视觉系统。",
+      "",
+      "实现原则：",
+      "1. 先复用现有组件、token、布局和交互模式，再考虑新增样式",
+      "2. 颜色、圆角、间距、阴影、字体都走设计 token；禁止散落魔法数",
+      "3. 一个区块只做一件事；避免卡片堆叠、装饰性渐变、过度阴影",
+      "4. 交互要完整：hover、focus-visible、disabled、空态、加载态、错误态",
+      "5. 同时兼顾桌面和窄屏，不破坏现有信息层级",
+      "",
+      "完成标准：",
+      "- 改动范围克制，只动完成任务所需的文件",
+      "- 在真实渲染页面做视觉核对，不只看静态代码",
+      "- 交付时说明改了哪些界面状态，以及如何本地验证",
+      "- 若设计与现有系统冲突，优先对齐现有系统并指出取舍",
+    ].join("\n"),
+    model: "gpt-5.6-terra",
+    reasoning_effort: "medium",
+    icon: "layout",
+    tone: "success",
+  },
+  {
+    key: "debugger",
+    name: "问题排查",
+    description: "定位崩溃、回归和异常行为的根因",
+    instructions: [
+      "你是问题排查智能体。先取证、再定根因，最后给最小修复；不要一上来大面积改代码。",
+      "",
+      "排查顺序：",
+      "1. 明确期望行为、实际行为、首次出现版本/提交、复现步骤",
+      "2. 收集证据：报错栈、日志、测试失败、相关 diff、配置和环境差异",
+      "3. 形成 1-3 个可证伪假设，用最小实验逐个验证",
+      "4. 锁定根因后，给影响面评估和最小修复方案",
+      "5. 补上能防止复发的回归验证（测试或手工检查清单）",
+      "",
+      "输出要求：",
+      "- 用「现象 / 根因 / 证据 / 修复 / 验证」结构回答",
+      "- 区分已证实事实和推断",
+      "- 如果暂时无法复现，说明缺口证据和下一步取证动作",
+      "- 避免顺便重构；修复以外的清理单独列出，不默认执行",
+    ].join("\n"),
+    model: "gpt-5.6-sol",
+    reasoning_effort: "high",
+    icon: "bug",
+    tone: "warning",
+  },
+];
 
 export function injectionVersion() {
   return activeCompatibility().version;
@@ -133,6 +247,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const ATTRIBUTES = ${JSON.stringify(compatibility.attributes)};
     const NAVIGATION = ${JSON.stringify(compatibility.navigation)};
     const LUCIDE_ICONS = ${JSON.stringify(lucideIcons)};
+    const AGENT_AVATAR_PRESETS = ${JSON.stringify(agentAvatarPresets)};
     const RESUME_SURFACE_KEY = "better-codex-resume-surface";
     const statusLabels = { backlog: "待规划", todo: "待办", in_progress: "进行中", in_review: "审核中", done: "已完成", blocked: "已阻塞", cancelled: "已取消" };
     const priorityLabels = { none: "无", low: "低", medium: "中", high: "高", urgent: "紧急" };
@@ -153,6 +268,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     let createMenuDismiss = null;
     let issueMenu = null;
     let issueMenuDismiss = null;
+    let avatarPickerClose = null;
     let codexLogoSequence = 0;
     let active = false;
     let destroyed = false;
@@ -187,11 +303,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #better-codex-update-notice .better-codex-update-icon svg { width: 15px; height: 15px; }
         #better-codex-update-notice[data-status="installing"] .better-codex-update-icon svg { animation: better-codex-update-spin 1s linear infinite; }
         #better-codex-update-notice .better-codex-update-copy { min-width: 0; flex: 1; }
-        #better-codex-update-notice .better-codex-update-title { margin: 1px 0 0; font-size: 13px; font-weight: 650; line-height: 1.4; }
-        #better-codex-update-notice .better-codex-update-description { margin: 3px 0 0; color: var(--bc-muted); font-size: 11px; line-height: 1.55; text-wrap: pretty; }
-        #better-codex-update-notice .better-codex-update-error { margin: 6px 0 0; color: var(--bc-danger); font-size: 11px; line-height: 1.45; }
+        #better-codex-update-notice .better-codex-update-title { margin: 1px 0 0; font-size: var(--bc-text-md); font-weight: 650; line-height: 1.4; }
+        #better-codex-update-notice .better-codex-update-description { margin: 3px 0 0; color: var(--bc-muted); font-size: var(--bc-text-sm); line-height: 1.55; text-wrap: pretty; }
+        #better-codex-update-notice .better-codex-update-error { margin: 6px 0 0; color: var(--bc-danger); font-size: var(--bc-text-sm); line-height: 1.45; }
         #better-codex-update-notice .better-codex-update-actions { display: flex; align-items: center; gap: 7px; margin-top: 11px; }
-        #better-codex-update-notice .better-codex-update-button { display: inline-flex; min-height: 40px; align-items: center; justify-content: center; border: 0; border-radius: 8px; padding: 0 13px; color: var(--bc-foreground); background: var(--bc-hover); font: inherit; font-size: 11px; font-weight: 600; cursor: pointer; transition: transform .15s,color .15s,background-color .15s; }
+        #better-codex-update-notice .better-codex-update-button { display: inline-flex; min-height: 40px; align-items: center; justify-content: center; border: 0; border-radius: 8px; padding: 0 13px; color: var(--bc-foreground); background: var(--bc-hover); font: inherit; font-size: var(--bc-text-sm); font-weight: 600; cursor: pointer; transition: transform .15s,color .15s,background-color .15s; }
         #better-codex-update-notice .better-codex-update-button.is-primary { color: var(--bc-primary-foreground); background: var(--bc-primary); }
         #better-codex-update-notice .better-codex-update-button:active { transform: scale(.96); }
         #better-codex-update-notice .better-codex-update-button:focus-visible, #better-codex-update-notice .better-codex-update-close:focus-visible { outline: 2px solid var(--bc-ring); outline-offset: 2px; }
@@ -201,43 +317,42 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         @media (hover: hover) { #better-codex-update-notice .better-codex-update-close:hover { color: var(--bc-foreground); background: var(--bc-hover); } #better-codex-update-notice .better-codex-update-button:hover { background: var(--bc-selected); } #better-codex-update-notice .better-codex-update-button.is-primary:hover { background: color-mix(in srgb,var(--bc-primary) 90%,var(--bc-surface)); } }
         @media (prefers-reduced-motion: reduce) { #better-codex-update-notice, #better-codex-update-notice[data-status="installing"] .better-codex-update-icon svg { animation: none; } }
         #\${PANEL_ID} { font-family: Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif; background: var(--bc-page); }
-        #\${PANEL_ID} .better-codex-error { margin-left: auto; color: var(--bc-danger); font-size: 11px; }
+        #\${PANEL_ID} .better-codex-error { margin-left: auto; color: var(--bc-danger); font-size: var(--bc-text-sm); }
         #\${PANEL_ID} .better-codex-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 50px; padding: 0 18px; background: #fcfcfc; }
         #\${PANEL_ID} .better-codex-tabs, #\${PANEL_ID} .better-codex-actions { display: flex; align-items: center; gap: 4px; }
-        #\${PANEL_ID} .better-codex-button, #better-codex-dialog .better-codex-button { display: inline-flex; flex: 0 0 auto; width: auto; min-height: 28px; align-items: center; justify-content: center; gap: 6px; border: 1px solid transparent; border-radius: 7px; color: #52525b; background: transparent; padding: 0 9px; font: inherit; font-size: 12px; cursor: pointer; }
+        #\${PANEL_ID} .better-codex-button, #better-codex-dialog .better-codex-button { display: inline-flex; flex: 0 0 auto; width: auto; min-height: var(--bc-control-height, 32px); align-items: center; justify-content: center; gap: 6px; border: 1px solid transparent; border-radius: 7px; color: #52525b; background: transparent; padding: 0 9px; font: inherit; font-size: var(--bc-text-md); cursor: pointer; }
         #\${PANEL_ID} .better-codex-button:hover, #better-codex-dialog .better-codex-button:hover { background: #f0f0f1; }
         #\${PANEL_ID} .better-codex-button.is-active { color: #18181b; background: #f0f0f1; font-weight: 550; }
         #\${PANEL_ID} .better-codex-button.is-bordered { border-color: var(--bc-border); background: var(--bc-surface); box-shadow: 0 1px 2px rgba(15,23,42,.03); }
         #\${PANEL_ID} .better-codex-working-chip.has-work { border-color: #f1d59c; color: #936512; background: #fffaf0; }
         #\${PANEL_ID} .better-codex-working-dot { width: 6px; height: 6px; margin-right: 6px; border-radius: 999px; background: currentColor; box-shadow: 0 0 0 3px rgba(216,155,22,.12); }
-        #\${PANEL_ID} .better-codex-search { box-sizing: border-box; width: 142px; height: 28px; border: 1px solid var(--bc-border); border-radius: 7px; color: inherit; background: var(--bc-surface); padding: 0 9px; font: inherit; font-size: 12px; outline: none; }
+        #\${PANEL_ID} .better-codex-search { box-sizing: border-box; width: 142px; height: var(--bc-control-height, 32px); border: 1px solid var(--bc-border); border-radius: 7px; color: inherit; background: var(--bc-surface); padding: 0 9px; font: inherit; font-size: var(--bc-text-md); outline: none; }
         #\${PANEL_ID} .better-codex-search:focus { border-color: #b9b9bd; box-shadow: 0 0 0 2px rgba(24,24,27,.06); }
         #\${PANEL_ID} .better-codex-filter-wrap { position: relative; display: flex; }
         #\${PANEL_ID} .better-codex-filter-menu, #\${PANEL_ID} .better-codex-filter-submenu { position: absolute; z-index: 80; box-sizing: border-box; min-width: 164px; border: 1px solid #e4e4e7; border-radius: 9px; color: #27272a; background: #fff; padding: 5px; box-shadow: 0 10px 28px rgba(15,23,42,.14),0 2px 7px rgba(15,23,42,.08); }
         #\${PANEL_ID} .better-codex-filter-menu { top: calc(100% + 5px); right: 0; }
         #\${PANEL_ID} .better-codex-filter-submenu { min-width: 190px; }
-        #\${PANEL_ID} .better-codex-filter-row { display: flex; width: 100%; min-height: 32px; align-items: center; gap: 9px; border: 0; border-radius: 6px; color: inherit; background: transparent; padding: 0 8px; font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+        #\${PANEL_ID} .better-codex-filter-row { display: flex; width: 100%; min-height: 32px; align-items: center; gap: 9px; border: 0; border-radius: 6px; color: inherit; background: transparent; padding: 0 8px; font: inherit; font-size: var(--bc-text-md); text-align: left; cursor: pointer; }
         #\${PANEL_ID} .better-codex-filter-row:hover, #\${PANEL_ID} .better-codex-filter-row.is-active { background: #f1f1f2; }
         #\${PANEL_ID} .better-codex-filter-row svg { flex: 0 0 auto; }
         #\${PANEL_ID} .better-codex-filter-label { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        #\${PANEL_ID} .better-codex-filter-count { color: #71717a; font-size: 10px; }
-        #\${PANEL_ID} .better-codex-filter-chevron { color: #71717a; font-size: 16px; }
-        #\${PANEL_ID} .better-codex-filter-check { width: 14px; color: #18181b; font-size: 12px; }
+        #\${PANEL_ID} .better-codex-filter-count { color: #71717a; font-size: var(--bc-text-caption); }
+        #\${PANEL_ID} .better-codex-filter-chevron { color: #71717a; font-size: var(--bc-text-icon); }
+        #\${PANEL_ID} .better-codex-filter-check { width: 14px; color: #18181b; font-size: var(--bc-text-md); }
         #\${PANEL_ID} .better-codex-filter-separator { height: 1px; margin: 4px 2px; background: #ededee; }
-        #better-codex-context-menu, #better-codex-context-menu .better-codex-context-submenu { box-sizing: border-box; width: 210px; border: 1px solid #e4e4e7; border-radius: 10px; color: #27272a; background: #fff; padding: 5px; box-shadow: 0 12px 32px rgba(15,23,42,.16),0 2px 8px rgba(15,23,42,.08); font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-        #better-codex-context-menu { position: fixed; z-index: 110; }
+        #better-codex-context-menu, #better-codex-context-menu .better-codex-context-submenu { box-sizing: border-box; width: max-content; border: 1px solid #e4e4e7; border-radius: 10px; color: #27272a; background: #fff; padding: 5px; box-shadow: 0 12px 32px rgba(15,23,42,.16),0 2px 8px rgba(15,23,42,.08); font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+        #better-codex-context-menu { position: fixed; z-index: 110; min-width: 188px; max-width: min(280px, calc(100vw - 24px)); }
         #better-codex-context-menu .better-codex-context-item-wrap { position: relative; }
-        #better-codex-context-menu .better-codex-context-item { display: flex; width: 100%; min-height: 34px; align-items: center; gap: 9px; border: 0; border-radius: 6px; color: inherit; background: transparent; padding: 0 8px; font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+        #better-codex-context-menu .better-codex-context-item { display: flex; width: 100%; min-height: 34px; align-items: center; gap: 9px; border: 0; border-radius: 6px; color: inherit; background: transparent; padding: 0 10px; font: inherit; font-size: var(--bc-text-md); text-align: left; cursor: pointer; white-space: nowrap; }
         #better-codex-context-menu .better-codex-context-item:hover, #better-codex-context-menu .better-codex-context-item:focus-visible, #better-codex-context-menu .better-codex-context-item-wrap:hover > .better-codex-context-item { background: #f1f1f2; outline: none; }
-        #better-codex-context-menu .better-codex-context-item > span { min-width: 0; flex: 1; }
+        #better-codex-context-menu .better-codex-context-item > span:not(.better-codex-context-check) { min-width: 0; flex: 1; }
         #better-codex-context-menu .better-codex-status-icon, #better-codex-context-menu .better-codex-priority { width: 16px; height: 16px; flex: 0 0 auto; }
-        #better-codex-context-menu .better-codex-status-icon { color: var(--bc-muted, #71717a); }
         #better-codex-context-menu .better-codex-context-item.is-danger { color: #ef4444; }
         #better-codex-context-menu .better-codex-context-divider { height: 1px; margin: 5px 3px; background: #ededee; }
-        #better-codex-context-menu .better-codex-context-submenu { position: absolute; top: -5px; left: calc(100% + 5px); display: none; }
+        #better-codex-context-menu .better-codex-context-submenu { position: absolute; top: -5px; left: calc(100% + 5px); display: none; min-width: 148px; max-width: min(220px, calc(100vw - 24px)); }
         #better-codex-context-menu[data-align="left"] .better-codex-context-submenu { right: calc(100% + 5px); left: auto; }
         #better-codex-context-menu .better-codex-context-item-wrap:hover > .better-codex-context-submenu, #better-codex-context-menu .better-codex-context-item-wrap:focus-within > .better-codex-context-submenu { display: block; }
-        #better-codex-context-menu .better-codex-context-check { width: 14px; flex: 0 0 auto; color: #18181b; }
+        #better-codex-context-menu .better-codex-context-check { display: inline-flex; width: 14px; flex: 0 0 14px; align-items: center; justify-content: center; color: #18181b; }
         #\${PANEL_ID} .better-codex-board { display: flex; gap: 12px; min-height: 0; flex: 1; overflow-x: auto; overflow-y: hidden; padding: 0 16px 10px; }
         #\${PANEL_ID} .better-codex-column { box-sizing: border-box; display: flex; width: 280px; min-width: 280px; min-height: 200px; flex-direction: column; border-radius: 12px; padding: 8px; }
         #\${PANEL_ID} .better-codex-column[data-status="backlog"], #\${PANEL_ID} .better-codex-column[data-status="todo"], #\${PANEL_ID} .better-codex-column[data-status="cancelled"] { background: rgba(228,228,231,.42); }
@@ -245,42 +360,44 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #\${PANEL_ID} .better-codex-column[data-status="in_review"] { background: rgba(46,156,90,.07); }
         #\${PANEL_ID} .better-codex-column[data-status="done"] { background: rgba(37,131,216,.07); }
         #\${PANEL_ID} .better-codex-column[data-status="blocked"] { background: rgba(229,72,77,.07); }
-        #\${PANEL_ID} .better-codex-column-head { display: flex; min-height: 30px; align-items: center; justify-content: space-between; padding: 0 6px 6px; font-size: 12px; font-weight: 600; }
+        #\${PANEL_ID} .better-codex-column-head { display: flex; min-height: 30px; align-items: center; justify-content: space-between; padding: 0 6px 6px; font-size: var(--bc-text-md); font-weight: 600; }
         #\${PANEL_ID} .better-codex-column-title, #\${PANEL_ID} .better-codex-column-actions { display: flex; align-items: center; gap: 6px; }
-        #\${PANEL_ID} .better-codex-status-icon { width: 14px; height: 14px; color: var(--bc-muted); }
-        #\${PANEL_ID} [data-status="in_progress"] .better-codex-status-icon { color: var(--bc-warning); }
-        #\${PANEL_ID} [data-status="in_review"] .better-codex-status-icon { color: var(--bc-success); }
-        #\${PANEL_ID} [data-status="done"] .better-codex-status-icon { color: var(--bc-info); }
-        #\${PANEL_ID} [data-status="blocked"] .better-codex-status-icon { color: var(--bc-danger); }
-        #\${PANEL_ID} .better-codex-column-icon { width: 24px; height: 24px; border: 0; border-radius: 999px; color: var(--bc-muted); background: transparent; padding: 0; font-size: 17px; line-height: 20px; cursor: pointer; }
+        #\${PANEL_ID} #better-codex-filter > svg { color: var(--bc-info); }
+        #\${PANEL_ID} .better-codex-status-icon, #better-codex-context-menu .better-codex-status-icon, #better-codex-dialog .better-codex-status-icon { width: 14px; height: 14px; color: var(--bc-muted); }
+        #\${PANEL_ID} .better-codex-status-icon[data-status="in_progress"], #\${PANEL_ID} [data-status="in_progress"] .better-codex-status-icon, #better-codex-context-menu .better-codex-status-icon[data-status="in_progress"], #better-codex-dialog .better-codex-status-icon[data-status="in_progress"] { color: var(--bc-warning); }
+        #\${PANEL_ID} .better-codex-status-icon[data-status="in_review"], #\${PANEL_ID} [data-status="in_review"] .better-codex-status-icon, #better-codex-context-menu .better-codex-status-icon[data-status="in_review"], #better-codex-dialog .better-codex-status-icon[data-status="in_review"] { color: var(--bc-success); }
+        #\${PANEL_ID} .better-codex-status-icon[data-status="done"], #\${PANEL_ID} [data-status="done"] .better-codex-status-icon, #better-codex-context-menu .better-codex-status-icon[data-status="done"], #better-codex-dialog .better-codex-status-icon[data-status="done"] { color: var(--bc-info); }
+        #\${PANEL_ID} .better-codex-status-icon[data-status="blocked"], #\${PANEL_ID} [data-status="blocked"] .better-codex-status-icon, #better-codex-context-menu .better-codex-status-icon[data-status="blocked"], #better-codex-dialog .better-codex-status-icon[data-status="blocked"] { color: var(--bc-danger); }
+        #\${PANEL_ID} .better-codex-column-icon { width: 24px; height: 24px; border: 0; border-radius: 999px; color: var(--bc-muted); background: transparent; padding: 0; font-size: var(--bc-text-icon-lg); line-height: 20px; cursor: pointer; }
         #\${PANEL_ID} .better-codex-column-icon:hover { background: rgba(113,113,122,.1); }
         #\${PANEL_ID} .better-codex-cards { min-height: 0; flex: 1; overflow-y: auto; padding: 4px; border-radius: 8px; }
-        #\${PANEL_ID} .better-codex-card { box-sizing: border-box; width: 256px; margin-bottom: 8px; border: .5px solid var(--bc-border); border-radius: 8px; background: var(--bc-surface); padding: 12px 10px; box-shadow: 0 1px 2px rgba(15,23,42,.04),0 1px 1px rgba(15,23,42,.03); cursor: pointer; transition: border-color .15s, background .15s, transform .15s; }
-        #\${PANEL_ID} .better-codex-card:hover { border-color: #d0d0d4; background: var(--bc-hover); }
+        #\${PANEL_ID} .better-codex-card { box-sizing: border-box; width: 256px; margin-bottom: 8px; border: 1px solid var(--bc-color-hairline, #e5e5e6); border-radius: 8px; background: transparent; padding: 12px 10px; box-shadow: var(--bc-card-shadow, 0 1px 2px rgba(15,23,42,.04),0 4px 14px rgba(15,23,42,.07)); cursor: pointer; transition: border-color .15s, box-shadow .15s, transform .15s; }
+        #\${PANEL_ID} .better-codex-card:hover { border-color: color-mix(in srgb, var(--bc-color-text, #1a1c1f) 16%, var(--bc-color-hairline, #e5e5e6)); background: transparent; }
         #\${PANEL_ID} .better-codex-card:active { transform: scale(.995); }
         #\${PANEL_ID} .better-codex-card-row, #\${PANEL_ID} .better-codex-card-id, #\${PANEL_ID} .better-codex-card-meta { display: flex; align-items: center; }
         #\${PANEL_ID} .better-codex-card-row { justify-content: space-between; gap: 8px; }
-        #\${PANEL_ID} .better-codex-card-id { min-width: 0; gap: 6px; color: var(--bc-muted); font-size: 11px; }
+        #\${PANEL_ID} .better-codex-card-id { min-width: 0; gap: 6px; color: var(--bc-muted); font-size: var(--bc-text-sm); }
         #\${PANEL_ID} .better-codex-priority { width: 14px; height: 14px; flex: 0 0 auto; }
         #\${PANEL_ID} .better-codex-priority[data-priority="urgent"] { color: var(--bc-danger); }
         #\${PANEL_ID} .better-codex-priority[data-priority="high"], #\${PANEL_ID} .better-codex-priority[data-priority="medium"] { color: var(--bc-warning); }
         #\${PANEL_ID} .better-codex-priority[data-priority="low"] { color: var(--bc-info); }
-        #\${PANEL_ID} .better-codex-card-title { display: -webkit-box; margin: 5px 0 0; overflow: hidden; color: #202024; font-size: 13px; font-weight: 550; line-height: 1.38; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-        #\${PANEL_ID} .better-codex-card-description { margin-top: 4px; overflow: hidden; color: var(--bc-muted); font-size: 11px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+        #\${PANEL_ID} .better-codex-card-title { display: -webkit-box; margin: 5px 0 0; overflow: hidden; color: #202024; font-size: var(--bc-text-md); font-weight: 550; line-height: 1.38; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+        #\${PANEL_ID} .better-codex-card-description { margin-top: 4px; overflow: hidden; color: var(--bc-muted); font-size: var(--bc-text-sm); line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
         #\${PANEL_ID} .better-codex-chip-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
-        #\${PANEL_ID} .better-codex-chip { display: inline-flex; max-width: 155px; align-items: center; gap: 4px; overflow: hidden; border-radius: 999px; background: #f2f2f3; padding: 2px 6px; color: var(--bc-muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-        #\${PANEL_ID} .better-codex-card-meta { justify-content: space-between; gap: 8px; margin-top: 8px; color: var(--bc-muted); font-size: 11px; }
-        #\${PANEL_ID} .better-codex-link { overflow: hidden; border: 0; color: inherit; background: transparent; padding: 0; font: inherit; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
-        #\${PANEL_ID} .better-codex-activity { display: inline-flex; align-items: center; gap: 5px; flex: 0 0 auto; font-size: 10px; font-weight: 600; }
-        #\${PANEL_ID} .better-codex-avatar { display: inline-flex; width: 16px; height: 16px; align-items: center; justify-content: center; border: 1.5px solid #fff; border-radius: 999px; color: #fff; background: #27272a; font-size: 8px; }
+        #\${PANEL_ID} .better-codex-chip { display: inline-flex; max-width: 155px; align-items: center; gap: 4px; overflow: hidden; border-radius: 999px; background: #f2f2f3; padding: 2px 6px; color: var(--bc-muted); font-size: var(--bc-text-caption); text-overflow: ellipsis; white-space: nowrap; }
+        #\${PANEL_ID} .better-codex-card-meta { justify-content: space-between; gap: 8px; margin-top: 8px; color: var(--bc-muted); font-size: var(--bc-text-sm); }
+        #\${PANEL_ID} .better-codex-link { overflow: hidden; border: 0; color: var(--bc-info, #2563eb); background: transparent; padding: 0; font: inherit; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+        #\${PANEL_ID} .better-codex-link:hover { text-decoration: underline; }
+        #\${PANEL_ID} .better-codex-activity { display: inline-flex; align-items: center; gap: 5px; flex: 0 0 auto; font-size: var(--bc-text-caption); font-weight: 600; }
+        #\${PANEL_ID} .better-codex-avatar { display: inline-flex; width: 16px; height: 16px; align-items: center; justify-content: center; border: 1.5px solid #fff; border-radius: 999px; color: #fff; background: #27272a; font-size: var(--bc-text-avatar); }
         #\${PANEL_ID} .better-codex-activity[data-run="running"] { color: #52525b; }
         #\${PANEL_ID} .better-codex-activity[data-run="claimed"] { color: var(--bc-muted); opacity: .62; }
         @keyframes better-codex-shimmer { 0% { background-position: 200% 0 } 100% { background-position: -200% 0 } }
         #\${PANEL_ID} .better-codex-shimmer { background-image: linear-gradient(90deg,#71717a 0%,#71717a 35%,#18181b 50%,#71717a 65%,#71717a 100%); background-size: 200% 100%; background-clip: text; -webkit-background-clip: text; color: transparent; -webkit-text-fill-color: transparent; animation: better-codex-shimmer 2.5s linear infinite; }
-        #\${PANEL_ID} .better-codex-empty { padding: 18px 4px; text-align: center; color: #a1a1aa; font-size: 11px; }
+        #\${PANEL_ID} .better-codex-empty { padding: 18px 4px; text-align: center; color: #a1a1aa; font-size: var(--bc-text-sm); }
         #\${PANEL_ID} .better-codex-agent-heading { display: none; min-width: 0; align-items: baseline; gap: 10px; }
-        #\${PANEL_ID} .better-codex-agent-heading strong { color: #18181b; font-size: 14px; font-weight: 650; }
-        #\${PANEL_ID} .better-codex-agent-heading span { color: var(--bc-muted); font-size: 11px; }
+        #\${PANEL_ID} .better-codex-agent-heading strong { color: #18181b; font-size: var(--bc-text-md); font-weight: 650; }
+        #\${PANEL_ID} .better-codex-agent-heading span { color: var(--bc-muted); font-size: var(--bc-text-sm); }
         #\${PANEL_ID} .better-codex-agent-actions { display: none; align-items: center; gap: 8px; }
         #\${PANEL_ID}[data-surface="agents"] .better-codex-issue-only { display: none; }
         #\${PANEL_ID}[data-surface="agents"] .better-codex-agent-heading, #\${PANEL_ID}[data-surface="agents"] .better-codex-agent-actions { display: flex; }
@@ -291,15 +408,15 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #\${PANEL_ID} .better-codex-agent-card:hover { border-color: #cfcfd4; }
         #\${PANEL_ID} .better-codex-agent-card:active { transform: scale(.99); }
         #\${PANEL_ID} .better-codex-agent-card-head { display: flex; align-items: flex-start; gap: 11px; }
-        #\${PANEL_ID} .better-codex-agent-card-avatar { display: inline-flex; width: 36px; height: 36px; flex: 0 0 auto; align-items: center; justify-content: center; border-radius: 10px; color: #fff; background: #27272a; font-size: 12px; font-weight: 700; letter-spacing: -.02em; }
+        #\${PANEL_ID} .better-codex-agent-card-avatar { display: inline-flex; width: 36px; height: 36px; flex: 0 0 auto; align-items: center; justify-content: center; border-radius: 10px; color: #fff; background: #27272a; font-size: var(--bc-text-md); font-weight: 700; letter-spacing: -.02em; }
         #\${PANEL_ID} .better-codex-agent-card-avatar.is-codex { overflow: hidden; color: inherit; background: transparent; }
         #\${PANEL_ID} .better-codex-agent-card-avatar.is-codex svg { width: 36px; height: 36px; }
         #\${PANEL_ID} .better-codex-agent-card-title { min-width: 0; flex: 1; }
         #\${PANEL_ID} .better-codex-agent-card-title-line { display: flex; min-width: 0; align-items: center; gap: 7px; }
-        #\${PANEL_ID} .better-codex-agent-card-title strong { display: block; overflow: hidden; font-size: 13px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
-        #\${PANEL_ID} .better-codex-agent-default-badge { flex: 0 0 auto; border: 1px solid var(--bc-divider); border-radius: 999px; color: var(--bc-muted); background: var(--bc-hover); padding: 1px 6px; font-size: 9px; font-weight: 600; line-height: 1.4; }
-        #\${PANEL_ID} .better-codex-agent-card-description { display: -webkit-box; margin-top: 3px; overflow: hidden; color: var(--bc-muted); font-size: 11px; line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-        #\${PANEL_ID} .better-codex-agent-card-instructions { display: -webkit-box; min-height: 54px; margin-top: 14px; overflow: hidden; color: #52525b; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; font-size: 10.5px; line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+        #\${PANEL_ID} .better-codex-agent-card-title strong { display: block; overflow: hidden; font-size: var(--bc-text-md); font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+        #\${PANEL_ID} .better-codex-agent-default-badge { flex: 0 0 auto; border: 1px solid var(--bc-divider); border-radius: 999px; color: var(--bc-muted); background: var(--bc-hover); padding: 1px 6px; font-size: var(--bc-text-xs); font-weight: 600; line-height: 1.4; }
+        #\${PANEL_ID} .better-codex-agent-card-description { display: -webkit-box; margin-top: 3px; overflow: hidden; color: var(--bc-muted); font-size: var(--bc-text-sm); line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+        #\${PANEL_ID} .better-codex-agent-card-instructions { display: -webkit-box; min-height: 54px; margin-top: 14px; overflow: hidden; color: #52525b; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; font-size: var(--bc-text-caption); line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
         #\${PANEL_ID} .better-codex-agent-card-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: auto; padding-top: 14px; }
         #\${PANEL_ID} .better-codex-agent-card-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; }
         #\${PANEL_ID} .better-codex-agent-card-action { display: inline-flex; width: 26px; height: 26px; align-items: center; justify-content: center; border: 0; border-radius: 6px; color: #71717a; background: transparent; padding: 0; cursor: pointer; }
@@ -308,33 +425,33 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #\${PANEL_ID} .better-codex-agent-card-action:active, #\${PANEL_ID} .better-codex-button:active { transform: scale(.96); }
         #\${PANEL_ID} .better-codex-agents-empty { max-width: 460px; margin: 12vh auto 0; text-align: center; }
         #\${PANEL_ID} .better-codex-agents-empty-icon { display: inline-flex; width: 48px; height: 48px; align-items: center; justify-content: center; border: 1px solid var(--bc-border); border-radius: 14px; color: #52525b; background: #fff; box-shadow: 0 1px 3px rgba(15,23,42,.08); }
-        #\${PANEL_ID} .better-codex-agents-empty strong { display: block; margin-top: 14px; color: #27272a; font-size: 14px; }
-        #\${PANEL_ID} .better-codex-agents-empty p { margin: 6px 0 14px; color: var(--bc-muted); font-size: 12px; line-height: 1.6; }
+        #\${PANEL_ID} .better-codex-agents-empty strong { display: block; margin-top: 14px; color: #27272a; font-size: var(--bc-text-md); }
+        #\${PANEL_ID} .better-codex-agents-empty p { margin: 6px 0 14px; color: var(--bc-muted); font-size: var(--bc-text-md); line-height: 1.6; }
         #better-codex-agent-dialog { position: fixed; inset: 0; box-sizing: border-box; width: min(720px,calc(100vw - 40px)); height: min(86vh,760px); margin: auto; overflow: hidden; border: 1px solid #dedee2; border-radius: 14px; color: #27272a; background: #f8f8f9; padding: 0; box-shadow: 0 24px 64px rgba(15,23,42,.18),0 4px 14px rgba(15,23,42,.08); font-family: Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
         #better-codex-agent-dialog::backdrop { background: rgba(24,24,27,.22); backdrop-filter: blur(4px); }
         #better-codex-agent-dialog form { display: flex; height: 100%; min-height: 0; flex-direction: column; }
         #better-codex-agent-dialog .better-codex-agent-dialog-head { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; border-bottom: 1px solid #e4e4e7; background: #fff; padding: 15px 18px; }
-        #better-codex-agent-dialog .better-codex-agent-dialog-head strong { display: block; font-size: 14px; font-weight: 650; }
-        #better-codex-agent-dialog .better-codex-agent-dialog-head span { display: block; margin-top: 3px; color: #71717a; font-size: 11px; }
+        #better-codex-agent-dialog .better-codex-agent-dialog-head strong { display: block; font-size: var(--bc-text-md); font-weight: 650; }
+        #better-codex-agent-dialog .better-codex-agent-dialog-head span { display: block; margin-top: 3px; color: #71717a; font-size: var(--bc-text-sm); }
         #better-codex-agent-dialog .better-codex-agent-dialog-body { min-height: 0; flex: 1; overflow-y: auto; padding: 20px; }
         #better-codex-agent-dialog .better-codex-agent-section { max-width: 620px; margin: 0 auto 22px; }
         #better-codex-agent-dialog .better-codex-agent-section-title { margin: 0 0 9px 2px; }
-        #better-codex-agent-dialog .better-codex-agent-section-title strong { display: block; font-size: 12px; font-weight: 650; }
-        #better-codex-agent-dialog .better-codex-agent-section-title span { display: block; margin-top: 2px; color: #71717a; font-size: 10.5px; }
+        #better-codex-agent-dialog .better-codex-agent-section-title strong { display: block; font-size: var(--bc-text-md); font-weight: 650; }
+        #better-codex-agent-dialog .better-codex-agent-section-title span { display: block; margin-top: 2px; color: #71717a; font-size: var(--bc-text-caption); }
         #better-codex-agent-dialog .better-codex-agent-settings { overflow: hidden; border: 1px solid #e2e2e5; border-radius: 11px; background: #fff; box-shadow: 0 1px 3px rgba(15,23,42,.06); }
         #better-codex-agent-dialog .better-codex-agent-field { display: grid; grid-template-columns: 132px minmax(0,1fr); gap: 16px; align-items: center; padding: 13px 15px; }
         #better-codex-agent-dialog .better-codex-agent-field + .better-codex-agent-field { border-top: 1px solid #ededee; }
         #better-codex-agent-dialog .better-codex-agent-field.is-top { align-items: start; }
-        #better-codex-agent-dialog .better-codex-agent-field > label { padding-top: 7px; color: #52525b; font-size: 11px; font-weight: 550; }
-        #better-codex-agent-dialog input, #better-codex-agent-dialog textarea, #better-codex-agent-dialog select { box-sizing: border-box; width: 100%; border: 1px solid #dedee2; border-radius: 7px; color: #27272a; background: #fff; padding: 8px 10px; font: inherit; font-size: 12px; outline: none; }
+        #better-codex-agent-dialog .better-codex-agent-field > label { padding-top: 7px; color: #52525b; font-size: var(--bc-text-sm); font-weight: 550; }
+        #better-codex-agent-dialog input, #better-codex-agent-dialog textarea, #better-codex-agent-dialog select { box-sizing: border-box; width: 100%; border: 1px solid #dedee2; border-radius: 7px; color: #27272a; background: #fff; padding: 8px 10px; font: inherit; font-size: var(--bc-text-md); outline: none; }
         #better-codex-agent-dialog input:focus, #better-codex-agent-dialog textarea:focus, #better-codex-agent-dialog select:focus { border-color: #a1a1aa; box-shadow: 0 0 0 2px rgba(24,24,27,.06); }
         #better-codex-agent-dialog textarea { min-height: 74px; line-height: 1.55; resize: vertical; }
-        #better-codex-agent-dialog textarea[name="instructions"] { min-height: 190px; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; font-size: 11px; }
+        #better-codex-agent-dialog textarea[name="instructions"] { min-height: 190px; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; font-size: var(--bc-text-sm); }
         #better-codex-agent-dialog .better-codex-agent-execution { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 15px; }
-        #better-codex-agent-dialog .better-codex-agent-execution label { display: block; margin-bottom: 6px; color: #52525b; font-size: 11px; font-weight: 550; }
-        #better-codex-agent-dialog .better-codex-agent-dialog-error { max-width: 620px; margin: 0 auto 8px; color: var(--bc-danger,#e5484d); font-size: 11px; }
+        #better-codex-agent-dialog .better-codex-agent-execution label { display: block; margin-bottom: 6px; color: #52525b; font-size: var(--bc-text-sm); font-weight: 550; }
+        #better-codex-agent-dialog .better-codex-agent-dialog-error { max-width: 620px; margin: 0 auto 8px; color: var(--bc-danger,#e5484d); font-size: var(--bc-text-sm); }
         #better-codex-agent-dialog .better-codex-agent-dialog-footer { display: flex; min-height: 58px; flex: 0 0 auto; align-items: center; justify-content: flex-end; gap: 8px; border-top: 1px solid #e4e4e7; background: #fff; padding: 0 18px; }
-        #better-codex-agent-dialog .better-codex-button, #better-codex-agent-dialog .better-codex-submit { display: inline-flex; min-height: 30px; align-items: center; justify-content: center; border-radius: 7px; padding: 0 12px; font: inherit; font-size: 11px; cursor: pointer; }
+        #better-codex-agent-dialog .better-codex-button, #better-codex-agent-dialog .better-codex-submit { display: inline-flex; min-height: 30px; align-items: center; justify-content: center; border-radius: 7px; padding: 0 12px; font: inherit; font-size: var(--bc-text-sm); cursor: pointer; }
         #better-codex-agent-dialog .better-codex-button { border: 1px solid #dedee2; color: #52525b; background: #fff; }
         #better-codex-agent-dialog .better-codex-submit { min-width: 92px; border: 1px solid #27272a; color: #fff; background: #27272a; font-weight: 600; }
         #better-codex-agent-dialog .better-codex-button:active, #better-codex-agent-dialog .better-codex-submit:active { transform: scale(.96); }
@@ -343,67 +460,67 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #better-codex-confirm { position: fixed; inset: 0; box-sizing: border-box; width: min(420px,calc(100vw - 40px)); margin: auto; overflow: hidden; border: 1px solid var(--bc-border); border-radius: 13px; color: var(--bc-foreground); background: var(--bc-raised); padding: 0; box-shadow: var(--bc-floating-shadow); font-family: Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; }
         #better-codex-confirm::backdrop { background: var(--bc-scrim); backdrop-filter: blur(4px); }
         #better-codex-confirm .better-codex-confirm-body { padding: 20px 20px 17px; }
-        #better-codex-confirm .better-codex-confirm-title { margin: 0; font-size: 14px; font-weight: 650; line-height: 1.45; }
-        #better-codex-confirm .better-codex-confirm-message { margin: 7px 0 0; color: var(--bc-muted); font-size: 12px; line-height: 1.6; }
+        #better-codex-confirm .better-codex-confirm-title { margin: 0; font-size: var(--bc-text-md); font-weight: 650; line-height: 1.45; }
+        #better-codex-confirm .better-codex-confirm-message { margin: 7px 0 0; color: var(--bc-muted); font-size: var(--bc-text-md); line-height: 1.6; }
         #better-codex-confirm .better-codex-confirm-actions { display: flex; min-height: 52px; align-items: center; justify-content: flex-end; gap: 8px; border-top: 1px solid var(--bc-divider); padding: 0 16px; }
-        #better-codex-confirm button { display: inline-flex; min-width: 72px; height: 30px; align-items: center; justify-content: center; border: 1px solid var(--bc-border); border-radius: 7px; color: var(--bc-foreground); background: var(--bc-surface); padding: 0 12px; font: inherit; font-size: 12px; font-weight: 550; cursor: pointer; }
+        #better-codex-confirm button { display: inline-flex; min-width: 72px; height: 30px; align-items: center; justify-content: center; border: 1px solid var(--bc-border); border-radius: 7px; color: var(--bc-foreground); background: var(--bc-surface); padding: 0 12px; font: inherit; font-size: var(--bc-text-md); font-weight: 550; cursor: pointer; }
         #better-codex-confirm button:hover, #better-codex-confirm button:focus-visible { background: var(--bc-hover); outline: none; }
         #better-codex-confirm button:focus-visible { box-shadow: 0 0 0 2px color-mix(in oklch,var(--bc-ring) 28%,transparent); }
         #better-codex-confirm .better-codex-confirm-primary { border-color: var(--bc-danger); color: #fff; background: var(--bc-danger); }
         #better-codex-confirm .better-codex-confirm-primary:hover, #better-codex-confirm .better-codex-confirm-primary:focus-visible { background: color-mix(in oklch,var(--bc-danger) 88%,#000); }
-        #better-codex-dialog { position: fixed; inset: 0; box-sizing: border-box; width: min(806px, calc(100vw - 48px)); height: 461px; max-height: calc(100vh - 48px); margin: auto; overflow: visible; border: 1px solid #e4e4e7; border-radius: 14px; color: #27272a; background: #fff; padding: 0; box-shadow: 0 24px 64px rgba(15,23,42,.18),0 4px 14px rgba(15,23,42,.08); font-family: Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; transition: width .3s ease,height .3s ease; }
+        #better-codex-dialog { position: fixed; inset: 0; box-sizing: border-box; width: min(806px, calc(100vw - 48px)); height: calc(var(--bc-text-base, 14px) * 38); max-height: calc(100vh - 48px); margin: auto; overflow: visible; border: 1px solid #e4e4e7; border-radius: 14px; color: #27272a; background: #fff; padding: 0; box-shadow: 0 24px 64px rgba(15,23,42,.18),0 4px 14px rgba(15,23,42,.08); font-family: Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; transition: width .3s ease,height .3s ease; }
         #better-codex-dialog[data-mode="agent"] { width: min(691px, calc(100vw - 48px)); height: min(var(--bc-dialog-agent-height, 400px), calc(100vh - 48px)); }
         #better-codex-dialog[data-expanded="true"] { width: min(1075px, calc(100vw - 48px)); height: min(84vh, 912px); }
         #better-codex-dialog::backdrop { background: rgba(24,24,27,.19); backdrop-filter: blur(4px); }
-        #better-codex-dialog form { display: flex; width: 100%; height: 100%; min-height: 0; flex-direction: column; zoom: 1.2; }
+        #better-codex-dialog form { display: flex; width: 100%; height: 100%; min-height: 0; flex-direction: column; }
         #better-codex-dialog .better-codex-dialog-head { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; padding: 12px 18px 8px 20px; }
-        #better-codex-dialog .better-codex-dialog-breadcrumb { display: flex; min-width: 0; align-items: center; gap: 6px; color: #71717a; font-size: 12px; }
+        #better-codex-dialog .better-codex-dialog-breadcrumb { display: flex; min-width: 0; align-items: center; gap: 6px; color: #71717a; font-size: var(--bc-text-md); }
         #better-codex-dialog .better-codex-dialog-breadcrumb strong { overflow: hidden; color: #27272a; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
         #better-codex-dialog .better-codex-dialog-head-actions { display: flex; align-items: center; gap: 2px; }
-        #better-codex-dialog .better-codex-icon-button { display: inline-flex; width: 28px; height: 28px; align-items: center; justify-content: center; border: 0; border-radius: 5px; color: #52525b; background: transparent; padding: 0; cursor: pointer; opacity: .72; }
+        #better-codex-dialog .better-codex-icon-button { display: inline-flex; width: var(--bc-control-height, 32px); height: var(--bc-control-height, 32px); align-items: center; justify-content: center; border: 0; border-radius: 5px; color: #52525b; background: transparent; padding: 0; cursor: pointer; opacity: .72; }
         #better-codex-dialog .better-codex-icon-button:hover { background: #f4f4f5; opacity: 1; }
-        #better-codex-dialog .better-codex-manual-title { width: auto; margin: 0 20px 4px; border: 0; color: #27272a; background: transparent; padding: 0; font: inherit; font-size: 19px; font-weight: 600; line-height: 28px; outline: none; }
+        #better-codex-dialog .better-codex-manual-title { width: auto; margin: 0 20px 4px; border: 0; color: #27272a; background: transparent; padding: 0; font: inherit; font-size: var(--bc-text-xl); font-weight: 600; line-height: 1.45; outline: none; }
         #better-codex-dialog .better-codex-manual-title::placeholder { color: #71717a; opacity: 1; }
-        #better-codex-dialog .better-codex-dialog-editor { box-sizing: border-box; width: auto; min-height: 0; flex: 1; margin: 0 20px; overflow-y: auto; border: 0; color: #3f3f46; background: transparent; padding: 2px 0; font: inherit; font-size: 13px; line-height: 1.55; outline: none; resize: none; }
+        #better-codex-dialog .better-codex-dialog-editor { box-sizing: border-box; width: auto; min-height: 0; flex: 1; margin: 0 20px; overflow-y: auto; border: 0; color: #3f3f46; background: transparent; padding: 2px 0; font: inherit; font-size: var(--bc-text-md); line-height: 1.55; outline: none; resize: none; }
         #better-codex-dialog .better-codex-dialog-editor::placeholder { color: #8b8b94; opacity: 1; }
         #better-codex-dialog[data-mode="agent"] .better-codex-dialog-editor { margin-top: 2px; min-height: 120px; }
-        #better-codex-dialog .better-codex-agent-picker { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; padding: 5px 20px 8px; color: #71717a; font-size: 12px; }
+        #better-codex-dialog .better-codex-agent-picker { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; padding: 5px 20px 8px; color: #71717a; font-size: var(--bc-text-md); }
         #better-codex-dialog .better-codex-agent-assignee { display: flex; min-width: 0; align-items: center; gap: 6px; color: #3f3f46; font-weight: 550; }
         #better-codex-dialog .better-codex-agent-assignee select { max-width: 260px; border: 0; color: inherit; background: transparent; padding: 2px 20px 2px 0; font: inherit; font-weight: inherit; outline: none; cursor: pointer; }
         #better-codex-dialog .better-codex-agent-assignee:focus-within { border-radius: 5px; box-shadow: 0 0 0 2px rgba(24,24,27,.08); }
-        #better-codex-dialog .better-codex-agent-avatar { display: inline-flex; width: 18px; height: 18px; align-items: center; justify-content: center; border-radius: 999px; color: #fff; background: #3f3f46; font-size: 8px; }
+        #better-codex-dialog .better-codex-agent-avatar { display: inline-flex; width: 18px; height: 18px; align-items: center; justify-content: center; border-radius: 999px; color: #fff; background: #3f3f46; font-size: var(--bc-text-avatar); }
         #better-codex-dialog .better-codex-agent-avatar.is-codex { overflow: hidden; color: inherit; background: transparent; }
         #better-codex-dialog .better-codex-agent-avatar svg { width: 18px; height: 18px; }
         #better-codex-dialog .better-codex-agent-avatar.has-image { overflow: hidden; }
         #better-codex-dialog .better-codex-agent-avatar img { width: 100%; height: 100%; object-fit: cover; }
-        #better-codex-dialog .better-codex-run-hint { display: flex; flex: 0 0 auto; align-items: center; gap: 7px; padding: 1px 20px 4px; color: #8b8b94; font-size: 11px; }
+        #better-codex-dialog .better-codex-run-hint { display: flex; flex: 0 0 auto; align-items: center; gap: 7px; padding: 1px 20px 4px; color: #8b8b94; font-size: var(--bc-text-md); }
         #better-codex-dialog .better-codex-dialog-properties { display: flex; flex: 0 0 auto; align-items: center; flex-wrap: wrap; gap: 6px; padding: 6px 16px 9px; }
-        #better-codex-dialog .better-codex-property { display: inline-flex; height: 26px; max-width: 190px; align-items: center; gap: 6px; overflow: hidden; border: 1px solid #e5e5e7; border-radius: 999px; color: #52525b; background: #fff; padding: 0 9px; font: inherit; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+        #better-codex-dialog .better-codex-property { display: inline-flex; height: var(--bc-control-height, 32px); max-width: 190px; align-items: center; gap: 6px; overflow: hidden; border: 1px solid #e5e5e7; border-radius: 999px; color: #52525b; background: #fff; padding: 0 9px; font: inherit; font-size: var(--bc-text-md); text-overflow: ellipsis; white-space: nowrap; }
         #better-codex-dialog button.better-codex-property { cursor: pointer; }
         #better-codex-dialog .better-codex-property select, #better-codex-dialog .better-codex-property input { width: auto; max-width: 128px; border: 0; color: inherit; background: transparent; padding: 0; font: inherit; font-size: inherit; outline: none; }
         #better-codex-dialog .better-codex-property input { width: 72px; }
         #better-codex-dialog .better-codex-project-picker { position: relative; display: inline-flex; }
         #better-codex-dialog .better-codex-project-menu { position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; box-sizing: border-box; width: 220px; border: 1px solid #e4e4e7; border-radius: 9px; color: #3f3f46; background: #fff; padding: 5px; box-shadow: 0 12px 30px rgba(15,23,42,.14),0 2px 7px rgba(15,23,42,.08); }
         #better-codex-dialog .better-codex-project-menu[hidden] { display: none; }
-        #better-codex-dialog .better-codex-project-search { box-sizing: border-box; width: 100%; height: 30px; border: 0; border-bottom: 1px solid #ededee; color: inherit; background: transparent; padding: 0 7px 4px; font: inherit; font-size: 11px; outline: none; }
-        #better-codex-dialog .better-codex-project-option { display: flex; width: 100%; min-height: 31px; align-items: center; gap: 7px; border: 0; border-radius: 6px; color: inherit; background: transparent; padding: 0 7px; font: inherit; font-size: 11px; text-align: left; cursor: pointer; }
+        #better-codex-dialog .better-codex-project-search { box-sizing: border-box; width: 100%; height: var(--bc-control-height, 32px); border: 0; border-bottom: 1px solid #ededee; color: inherit; background: transparent; padding: 0 7px 4px; font: inherit; font-size: var(--bc-text-md); outline: none; }
+        #better-codex-dialog .better-codex-project-option { display: flex; width: 100%; min-height: var(--bc-row-height, 34px); align-items: center; gap: 7px; border: 0; border-radius: 6px; color: inherit; background: transparent; padding: 0 7px; font: inherit; font-size: var(--bc-text-md); text-align: left; cursor: pointer; }
         #better-codex-dialog .better-codex-project-option:hover, #better-codex-dialog .better-codex-project-option:focus-visible { background: #f4f4f5; outline: none; }
         #better-codex-dialog .better-codex-project-option > span:first-of-type { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         #better-codex-dialog .better-codex-project-check { width: 14px; flex: 0 0 auto; }
-        #better-codex-dialog .better-codex-project-empty { padding: 8px 7px; color: #a1a1aa; font-size: 11px; }
+        #better-codex-dialog .better-codex-project-empty { padding: 8px 7px; color: #a1a1aa; font-size: var(--bc-text-md); }
         #better-codex-dialog .better-codex-dialog-footer { display: flex; min-height: 48px; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 10px; border-top: 1px solid #ededee; padding: 0 14px 0 18px; }
         #better-codex-dialog .better-codex-dialog-footer-right { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
-        #better-codex-dialog .better-codex-switch-mode { display: inline-flex; height: 28px; align-items: center; gap: 6px; border: 0; border-radius: 5px; color: #71717a; background: transparent; padding: 0 8px; font: inherit; font-size: 11px; cursor: pointer; }
+        #better-codex-dialog .better-codex-switch-mode { display: inline-flex; height: var(--bc-control-height, 32px); align-items: center; gap: 6px; border: 0; border-radius: 5px; color: #71717a; background: transparent; padding: 0 8px; font: inherit; font-size: var(--bc-text-md); cursor: pointer; }
         #better-codex-dialog[data-mode="manual"] .better-codex-switch-mode { color: #5b6472; background: #f7f9ff; box-shadow: inset 0 0 0 1px rgba(75,107,251,.08); }
         #better-codex-dialog .better-codex-switch-mode:hover { color: #27272a; background: #f4f4f5; }
-        #better-codex-dialog .better-codex-keep-open { display: flex; align-items: center; gap: 6px; color: #71717a; font-size: 11px; cursor: pointer; user-select: none; }
+        #better-codex-dialog .better-codex-keep-open { display: flex; align-items: center; gap: 6px; color: #71717a; font-size: var(--bc-text-md); cursor: pointer; user-select: none; }
         #better-codex-dialog .better-codex-toggle { position: relative; width: 23px; height: 13px; appearance: none; border: 0; border-radius: 999px; background: #d4d4d8; padding: 0; cursor: pointer; transition: background .15s; }
         #better-codex-dialog .better-codex-toggle::after { position: absolute; top: 2px; left: 2px; width: 9px; height: 9px; border-radius: 999px; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.2); content: ""; transition: transform .15s; }
         #better-codex-dialog .better-codex-toggle:checked { background: #27272a; }
         #better-codex-dialog .better-codex-toggle:checked::after { transform: translateX(10px); }
-        #better-codex-dialog .better-codex-submit { display: inline-flex; min-width: 112px; height: 30px; align-items: center; justify-content: center; gap: 6px; border: 0; border-radius: 7px; color: #fff; background: #27272a; padding: 0 11px; font: inherit; font-size: 11px; font-weight: 550; cursor: pointer; }
+        #better-codex-dialog .better-codex-submit { display: inline-flex; min-width: 112px; height: var(--bc-control-height, 32px); align-items: center; justify-content: center; gap: 6px; border: 0; border-radius: 7px; color: #fff; background: #27272a; padding: 0 11px; font: inherit; font-size: var(--bc-text-md); font-weight: 550; cursor: pointer; }
         #better-codex-dialog .better-codex-submit:disabled { color: #fff; background: #a1a1aa; cursor: not-allowed; opacity: .72; }
-        #better-codex-dialog .better-codex-dialog-error { padding: 0 20px 6px; color: #e5484d; font-size: 11px; }
+        #better-codex-dialog .better-codex-dialog-error { padding: 0 20px 6px; color: #e5484d; font-size: var(--bc-text-md); }
         #\${PANEL_ID} { color: var(--bc-foreground); background: var(--bc-page); }
         #\${PANEL_ID} .better-codex-toolbar { background: var(--bc-page); }
         #\${PANEL_ID} .better-codex-button, #better-codex-dialog .better-codex-button { color: var(--bc-muted); }
@@ -416,7 +533,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #\${PANEL_ID} .better-codex-search:focus { border-color: var(--bc-ring); box-shadow: 0 0 0 2px color-mix(in oklch,var(--bc-ring) 20%,transparent); }
         #\${PANEL_ID} .better-codex-filter-menu, #\${PANEL_ID} .better-codex-filter-submenu, #better-codex-context-menu, #better-codex-context-menu .better-codex-context-submenu { border-color: var(--bc-border); color: var(--bc-foreground); background: var(--bc-raised); box-shadow: var(--bc-menu-shadow); }
         #\${PANEL_ID} .better-codex-filter-row:hover, #\${PANEL_ID} .better-codex-filter-row.is-active, #better-codex-context-menu .better-codex-context-item:hover, #better-codex-context-menu .better-codex-context-item:focus-visible, #better-codex-context-menu .better-codex-context-item-wrap:hover > .better-codex-context-item { background: var(--bc-hover); }
-        #\${PANEL_ID} .better-codex-filter-count, #\${PANEL_ID} .better-codex-filter-chevron, #better-codex-context-menu .better-codex-status-icon { color: var(--bc-muted); }
+        #\${PANEL_ID} .better-codex-filter-count, #\${PANEL_ID} .better-codex-filter-chevron { color: var(--bc-muted); }
         #\${PANEL_ID} .better-codex-filter-check, #better-codex-context-menu .better-codex-context-check { color: var(--bc-foreground); }
         #\${PANEL_ID} .better-codex-filter-separator, #better-codex-context-menu .better-codex-context-divider { background: var(--bc-divider); }
         #better-codex-context-menu .better-codex-context-item.is-danger { color: var(--bc-danger); }
@@ -426,8 +543,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #\${PANEL_ID} .better-codex-column[data-status="done"] { background: color-mix(in oklch,var(--bc-info) 8%,transparent); }
         #\${PANEL_ID} .better-codex-column[data-status="blocked"] { background: color-mix(in oklch,var(--bc-danger) 8%,transparent); }
         #\${PANEL_ID} .better-codex-column-icon:hover { background: var(--bc-hover); }
-        #\${PANEL_ID} .better-codex-card { border-color: var(--bc-border); color: var(--bc-foreground); background: var(--bc-surface); box-shadow: var(--bc-surface-shadow); }
-        #\${PANEL_ID} .better-codex-card:hover { border-color: var(--bc-ring); background: var(--bc-hover); }
+        #\${PANEL_ID} .better-codex-card { border-color: var(--bc-color-hairline); color: var(--bc-foreground); background: transparent; box-shadow: var(--bc-card-shadow); }
+        #\${PANEL_ID} .better-codex-card:hover { border-color: color-mix(in srgb, var(--bc-color-text) 16%, var(--bc-color-hairline)); background: transparent; }
         #\${PANEL_ID} .better-codex-card-title { color: var(--bc-foreground); }
         #\${PANEL_ID} .better-codex-chip { color: var(--bc-muted); background: var(--bc-hover); }
         #\${PANEL_ID} .better-codex-avatar, #\${PANEL_ID} .better-codex-agent-card-avatar { color: var(--bc-primary-foreground); background: var(--bc-primary); }
@@ -464,6 +581,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #better-codex-dialog .better-codex-agent-avatar.is-codex { color: inherit; background: transparent; }
         #better-codex-dialog .better-codex-agent-avatar.is-fallback { border-radius: var(--bc-radius-xs); color: var(--bc-color-text-muted); background: var(--bc-color-control); }
         #better-codex-dialog .better-codex-agent-avatar.is-fallback svg { width: 12px; height: 12px; }
+        #better-codex-dialog .better-codex-agent-avatar.is-icon svg { width: 12px; height: 12px; }
         #better-codex-dialog .better-codex-property { border-color: var(--bc-border); color: var(--bc-muted); background: var(--bc-surface); }
         #better-codex-dialog .better-codex-project-menu { border-color: var(--bc-border); color: var(--bc-foreground); background: var(--bc-raised); box-shadow: var(--bc-menu-shadow); }
         #better-codex-dialog .better-codex-project-search, #better-codex-dialog .better-codex-dialog-footer { border-color: var(--bc-divider); }
@@ -756,16 +874,17 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       return '<svg viewBox="0 0 24 24" width="36" height="36" role="img" aria-label="Codex"><path d="M19.503 0H4.496A4.496 4.496 0 000 4.496v15.007A4.496 4.496 0 004.496 24h15.007A4.496 4.496 0 0024 19.503V4.496A4.496 4.496 0 0019.503 0z" fill="#fff"></path><path d="M9.064 3.344a4.578 4.578 0 012.285-.312c1 .115 1.891.54 2.673 1.275.01.01.024.017.037.021a.09.09 0 00.043 0 4.55 4.55 0 013.046.275l.047.022.116.057a4.581 4.581 0 012.188 2.399c.209.51.313 1.041.315 1.595a4.24 4.24 0 01-.134 1.223.123.123 0 00.03.115c.594.607.988 1.33 1.183 2.17.289 1.425-.007 2.71-.887 3.854l-.136.166a4.548 4.548 0 01-2.201 1.388.123.123 0 00-.081.076c-.191.551-.383 1.023-.74 1.494-.9 1.187-2.222 1.846-3.711 1.838-1.187-.006-2.239-.44-3.157-1.302a.107.107 0 00-.105-.024c-.388.125-.78.143-1.204.138a4.441 4.441 0 01-1.945-.466 4.544 4.544 0 01-1.61-1.335c-.152-.202-.303-.392-.414-.617a5.81 5.81 0 01-.37-.961 4.582 4.582 0 01-.014-2.298.124.124 0 00.006-.056.085.085 0 00-.027-.048 4.467 4.467 0 01-1.034-1.651 3.896 3.896 0 01-.251-1.192 5.189 5.189 0 01.141-1.6c.337-1.112.982-1.985 1.933-2.618.212-.141.413-.251.601-.33.215-.089.43-.164.646-.227a.098.098 0 00.065-.066 4.51 4.51 0 01.829-1.615 4.535 4.535 0 011.837-1.388zm3.482 10.565a.637.637 0 000 1.272h3.636a.637.637 0 100-1.272h-3.636zM8.462 9.23a.637.637 0 00-1.106.631l1.272 2.224-1.266 2.136a.636.636 0 101.095.649l1.454-2.455a.636.636 0 00.005-.64L8.462 9.23z" fill="url(#' + gradientId + ')"></path><defs><linearGradient gradientUnits="userSpaceOnUse" id="' + gradientId + '" x1="12" x2="12" y1="3" y2="21"><stop stop-color="#B1A7FF"></stop><stop offset=".5" stop-color="#7A9DFF"></stop><stop offset="1" stop-color="#3941FF"></stop></linearGradient></defs></svg>';
     }
 
-    function icon(name, className = "") {
+    function icon(name, className = "", strokeWidth = "1.7") {
       const definition = LUCIDE_ICONS[name];
       if (!definition) return "";
       const classes = "lucide lucide-" + definition.name + (className ? " " + escapeHtml(className) : "");
-      return '<svg class="' + classes + '" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + definition.nodes + '</svg>';
+      return '<svg class="' + classes + '" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="' + escapeHtml(strokeWidth) + '" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + definition.nodes + '</svg>';
     }
 
     function statusIcon(status) {
       const names = { backlog: "statusBacklog", todo: "statusTodo", in_progress: "statusInProgress", in_review: "statusInReview", done: "statusDone", blocked: "statusBlocked", cancelled: "statusCancelled" };
-      return icon(names[status] || "statusTodo", "better-codex-status-icon");
+      const markup = icon(names[status] || "statusTodo", "better-codex-status-icon", "2.35");
+      return markup.replace("<svg ", '<svg data-status="' + escapeHtml(status) + '" ');
     }
 
     function priorityIcon(priority) {
@@ -1156,27 +1275,105 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       return agent.is_default ? "default" : agent.id;
     }
 
+    function parseIconAvatar(avatar) {
+      const match = String(avatar || "").match(/^icon:([a-z0-9_-]+)$/i);
+      if (!match) return null;
+      return AGENT_AVATAR_PRESETS.find(item => item.id === match[1]) || null;
+    }
+
     function agentAvatarMarkup(agent, className) {
       const branded = Boolean(agent?.is_default);
-      const customized = Boolean(agent?.avatar);
+      const preset = parseIconAvatar(agent?.avatar);
+      const customized = Boolean(agent?.avatar) && !preset;
       const content = customized
         ? '<img src="' + escapeHtml(agent.avatar) + '" alt="">'
+        : preset ? icon(preset.icon, "", "2.2")
         : branded ? codexLogo() : icon("bot");
-      return '<span class="' + className + (customized ? " has-image" : branded ? " is-codex" : " is-fallback") + '">' + content + '</span>';
+      const tone = preset ? ' data-tone="' + escapeHtml(preset.tone) + '"' : "";
+      return '<span class="' + className + (customized ? " has-image" : preset ? " is-icon" : branded ? " is-codex" : " is-fallback") + '"' + tone + '>' + content + '</span>';
     }
 
     function syncAgentAvatar(node, agent) {
       if (!node) return;
       const branded = Boolean(agent?.is_default);
-      const customized = Boolean(agent?.avatar);
+      const preset = parseIconAvatar(agent?.avatar);
+      const customized = Boolean(agent?.avatar) && !preset;
       node.classList.toggle("has-image", customized);
-      node.classList.toggle("is-codex", !customized && branded);
-      node.classList.toggle("is-fallback", !customized && !branded);
-      node.innerHTML = customized ? '<img src="' + escapeHtml(agent.avatar) + '" alt="">' : branded ? codexLogo() : icon("bot");
+      node.classList.toggle("is-icon", Boolean(preset));
+      node.classList.toggle("is-codex", !customized && !preset && branded);
+      node.classList.toggle("is-fallback", !customized && !preset && !branded);
+      if (preset) node.setAttribute("data-tone", preset.tone);
+      else node.removeAttribute("data-tone");
+      node.innerHTML = customized ? '<img src="' + escapeHtml(agent.avatar) + '" alt="">' : preset ? icon(preset.icon, "", "2.2") : branded ? codexLogo() : icon("bot");
     }
 
     function agentAvatarEditorMarkup(agent, key) {
       return '<button class="better-codex-agent-avatar-editor" type="button" data-agent-avatar-form="' + escapeHtml(key) + '" aria-label="更换 ' + escapeHtml(agent?.name || "智能体") + ' 的头像">' + agentAvatarMarkup(agent, "better-codex-agent-list-avatar") + '<span class="better-codex-agent-avatar-overlay" aria-hidden="true">' + icon("plus") + '</span></button>';
+    }
+
+    function chooseAgentAvatar(current = "", anchor = null) {
+      avatarPickerClose?.();
+      document.getElementById("better-codex-avatar-picker")?.remove();
+      return new Promise(resolve => {
+        const picker = document.createElement("div");
+        picker.id = "better-codex-avatar-picker";
+        picker.setAttribute(OWNED, "true");
+        picker.setAttribute("role", "dialog");
+        picker.setAttribute("aria-label", "选择头像");
+        const currentPreset = parseIconAvatar(current)?.id || "";
+        const presets = AGENT_AVATAR_PRESETS.map(item => '<button class="better-codex-avatar-preset' + (item.id === currentPreset ? " is-selected" : "") + '" type="button" data-avatar-preset="' + escapeHtml(item.id) + '" title="' + escapeHtml(item.label) + '" aria-label="' + escapeHtml(item.label) + '" aria-pressed="' + (item.id === currentPreset) + '"><span class="better-codex-avatar-preset-visual is-icon" data-tone="' + escapeHtml(item.tone) + '">' + icon(item.icon, "", "2.25") + '</span><span class="better-codex-avatar-preset-label">' + escapeHtml(item.label) + "</span></button>").join("");
+        picker.innerHTML = '<div class="better-codex-avatar-picker-shell"><header><div><strong>选择头像</strong><span>从预设图标中选择，也可以上传图片</span></div><button type="button" data-avatar-picker-cancel aria-label="关闭">' + icon("close") + '</button></header><div class="better-codex-avatar-preset-grid" role="listbox" aria-label="预设头像">' + presets + '</div><footer><button type="button" data-avatar-picker-cancel>取消</button><button class="is-primary" type="button" data-avatar-picker-upload>' + icon("image") + '<span>上传图片</span></button></footer></div>';
+        let settled = false;
+        const finish = value => {
+          if (settled) return;
+          settled = true;
+          avatarPickerClose = null;
+          document.removeEventListener("mousedown", onDismiss, true);
+          document.removeEventListener("keydown", onKeydown, true);
+          window.removeEventListener("resize", position);
+          picker.remove();
+          resolve(value);
+        };
+        avatarPickerClose = () => finish(null);
+        const onDismiss = event => {
+          if (picker.contains(event.target) || anchor?.contains?.(event.target)) return;
+          finish(null);
+        };
+        const onKeydown = event => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            finish(null);
+          }
+        };
+        const position = () => {
+          const width = Math.min(360, window.innerWidth - 16);
+          const anchorRect = (anchor || document.body).getBoundingClientRect();
+          picker.style.width = width + "px";
+          picker.style.left = Math.max(8, Math.min(anchorRect.left, window.innerWidth - width - 8)) + "px";
+          picker.style.visibility = "hidden";
+          picker.style.top = "0px";
+          const height = picker.offsetHeight || 280;
+          const below = anchorRect.bottom + 8;
+          const top = below + height <= window.innerHeight - 8
+            ? below
+            : Math.max(8, anchorRect.top - height - 8);
+          picker.style.top = top + "px";
+          picker.style.visibility = "";
+        };
+        document.body.appendChild(picker);
+        position();
+        picker.querySelectorAll("[data-avatar-preset]").forEach(button => button.addEventListener("click", () => finish("icon:" + button.dataset.avatarPreset)));
+        picker.querySelectorAll("[data-avatar-picker-cancel]").forEach(button => button.addEventListener("click", () => finish(null)));
+        picker.querySelector("[data-avatar-picker-upload]").addEventListener("click", () => finish("__upload__"));
+        window.addEventListener("resize", position);
+        setTimeout(() => {
+          document.addEventListener("mousedown", onDismiss, true);
+          document.addEventListener("keydown", onKeydown, true);
+        }, 0);
+      }).then(async value => {
+        if (value !== "__upload__") return value;
+        return pickAgentAvatar();
+      });
     }
 
     function cropAgentAvatar(file) {
@@ -1318,10 +1515,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       return '<div class="better-codex-agent-setting" data-agent-picker="' + escapeHtml(name) + '"><span>' + escapeHtml(label) + '</span><input type="hidden" name="' + escapeHtml(name) + '" value="' + escapeHtml(current.value) + '"><button class="better-codex-agent-picker-trigger" type="button" role="combobox" aria-haspopup="listbox" aria-expanded="false" data-agent-picker-toggle="' + escapeHtml(name) + '"><span data-agent-picker-label>' + escapeHtml(current.label) + '</span>' + icon("chevron") + '</button><div class="better-codex-agent-menu" role="listbox"><div class="better-codex-agent-menu-title">' + escapeHtml(label) + '</div>' + rows + '</div></div>';
     }
 
-    const suggestedAgents = [
-      { key: "reviewer", name: "代码审查", description: "检查改动的正确性、回归风险和可维护性", instructions: "审查代码改动，优先指出可复现的问题、潜在回归和缺失测试。", model: "gpt-5.6-sol", reasoning_effort: "high", icon: "review" },
-      { key: "frontend", name: "前端实现", description: "负责 Codex 原生风格的界面实现与视觉验证", instructions: "实现生产级前端界面，遵循现有设计 token，并在真实渲染页面完成视觉检查。", model: "gpt-5.6-terra", reasoning_effort: "medium", icon: "layout" }
-    ];
+    const suggestedAgents = ${JSON.stringify(suggestedAgents)};
 
     function agentInspector(agent) {
       if (state.agentPane === "preview") return "";
@@ -1340,7 +1534,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const heading = creating ? "新建" : "智能体";
       const avatarInput = '<input type="hidden" name="avatar" value="' + escapeHtml(draft.avatar || "") + '">';
       const profileHead = creating
-        ? '<h2>创建智能体</h2><div class="better-codex-agent-avatar-field">' + agentAvatarEditorMarkup(draft, "") + '<div><strong>头像</strong><span>悬停头像即可选择并裁剪图片</span></div>' + avatarInput + '</div>'
+        ? '<h2>创建智能体</h2><div class="better-codex-agent-avatar-field">' + agentAvatarEditorMarkup(draft, "") + '<div><strong>头像</strong><span>点击选择预设图标，或上传图片</span></div>' + avatarInput + '</div>'
         : '<div class="better-codex-agent-profile-head">' + agentAvatarEditorMarkup(draft, agentKey(draft)) + '<h2>' + escapeHtml(draft.name) + '</h2>' + avatarInput + '</div>';
       const identity = isDefault
         ? '<div class="better-codex-agent-summary"><div><strong>Codex 默认智能体</strong><p>此处修改会写入根 config.toml，并影响之后新建的 Codex 窗口。</p></div></div>'
@@ -1371,7 +1565,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         return '<button class="better-codex-agent-row' + (key === state.selectedAgentId ? " is-selected" : "") + '" type="button" data-agent-key="' + escapeHtml(key) + '">' + avatar + '<span class="better-codex-agent-row-copy"><strong>' + escapeHtml(agent.name) + (agent.is_default ? '<small>默认</small>' : "") + '</strong><span>' + escapeHtml(agent.description || "尚未添加介绍") + '</span><em>' + escapeHtml(meta) + '</em></span><span class="better-codex-agent-row-chevron">' + icon("chevron") + '</span></button>';
       }).join("");
       const empty = '<div class="better-codex-agent-list-empty">' + (query ? "没有匹配的智能体" : "此分类暂无智能体") + '</div>';
-      const suggestions = suggestedAgents.map(item => '<button class="better-codex-agent-suggestion" type="button" data-agent-template="' + item.key + '"><span class="better-codex-agent-suggestion-icon">' + icon(item.icon) + '</span><span><strong>' + escapeHtml(item.name) + '</strong><small>' + escapeHtml(item.description) + '</small></span></button>').join("");
+      const suggestions = suggestedAgents.map(item => {
+        const selected = state.agentPane === "create" && state.agentDraft?.key === item.key;
+        return '<button class="better-codex-agent-suggestion' + (selected ? " is-selected" : "") + '" type="button" data-agent-template="' + item.key + '" aria-pressed="' + selected + '"><span class="better-codex-agent-suggestion-icon" data-tone="' + escapeHtml(item.tone) + '">' + icon(item.icon, "", "2.4") + '</span><span><strong>' + escapeHtml(item.name) + '</strong><small>' + escapeHtml(item.description) + '</small></span></button>';
+      }).join("");
       container.innerHTML = '<div class="better-codex-agent-shell" data-pane="' + state.agentPane + '"><section class="better-codex-agent-directory"><div class="better-codex-agent-search-wrap">' + icon("search") + '<input class="better-codex-search" data-agent-search type="search" value="' + escapeHtml(state.agentSearch) + '" placeholder="搜索智能体" aria-label="搜索智能体"></div><div class="better-codex-agent-list">' + (rows || empty) + '</div>' + (state.agentView === "all" && !query ? '<div class="better-codex-agent-suggestions"><h3>建议</h3>' + suggestions + '</div>' : "") + '</section>' + agentInspector(selected) + '</div>';
     }
 
@@ -1402,15 +1599,17 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       panel.querySelector("#better-codex-board").innerHTML = Object.entries(statusLabels).map(([status, statusLabel]) => {
         const issues = visible.filter(issue => issue.status === status);
         const cards = issues.map(issue => {
-          const sessionId = issue.run_thread_id || "";
+          const sessionId = issue.run_thread_id || issue.thread_id || "";
           const assignedAgent = state.agents.find(agent => agent.id === issue.agent_id);
           const agentName = issue.agent_enabled ? assignedAgent?.name || "Codex" : "";
           const agentInitial = Array.from(agentName.trim())[0] || "AI";
           const activity = issue.active_run_status ? '<span class="better-codex-activity" data-run="' + escapeHtml(issue.active_run_status) + '"><span class="better-codex-avatar">' + escapeHtml(agentInitial) + '</span><span class="' + (issue.active_run_status === "running" ? "better-codex-shimmer" : "") + '">' + (issue.active_run_status === "running" ? "Working" : "Queued") + '</span></span>' : "";
           const description = String(issue.description || "").replace(/[#*_\`~>\[\]()]/g, "").replace(/\s+/g, " ").trim();
           const chips = [project?.name, agentName, ...(issue.labels || [])].filter(Boolean).map(value => '<span class="better-codex-chip">' + escapeHtml(value) + '</span>').join("");
-          const meta = sessionId ? '<span>打开 Session</span>' : '<span>等待 Session</span>';
-          return '<article class="better-codex-card" draggable="true" data-issue-id="' + escapeHtml(issue.id) + '"' + (sessionId ? ' data-thread="' + escapeHtml(sessionId) + '"' : "") + '><div class="better-codex-card-row"><div class="better-codex-card-id">' + priorityIcon(issue.priority) + '<span>' + escapeHtml(issue.identifier) + '</span></div>' + activity + '</div><div class="better-codex-card-title">' + escapeHtml(issue.title) + '</div>' + (description ? '<div class="better-codex-card-description">' + escapeHtml(description) + '</div>' : "") + (chips ? '<div class="better-codex-chip-row">' + chips + '</div>' : "") + '<div class="better-codex-card-meta">' + meta + '<span>更新于 ' + timeAgo(issue.updated_at) + '</span></div></article>';
+          const meta = sessionId
+            ? '<button class="better-codex-link" type="button" data-thread="' + escapeHtml(sessionId) + '">打开 Session</button>'
+            : '<span>等待 Session</span>';
+          return '<article class="better-codex-card" draggable="true" data-issue-id="' + escapeHtml(issue.id) + '"><div class="better-codex-card-row"><div class="better-codex-card-id">' + priorityIcon(issue.priority) + '<span>' + escapeHtml(issue.identifier) + '</span></div>' + activity + '</div><div class="better-codex-card-title">' + escapeHtml(issue.title) + '</div>' + (description ? '<div class="better-codex-card-description">' + escapeHtml(description) + '</div>' : "") + (chips ? '<div class="better-codex-chip-row">' + chips + '</div>' : "") + '<div class="better-codex-card-meta">' + meta + '<span>更新于 ' + timeAgo(issue.updated_at) + '</span></div></article>';
         }).join("");
         return '<section class="better-codex-column" data-status="' + status + '"><div class="better-codex-column-head"><span class="better-codex-column-title">' + statusIcon(status) + '<span>' + statusLabel + '</span><span>' + issues.length + '</span></span><span class="better-codex-column-actions"><button class="better-codex-column-icon" type="button" data-add-status="' + status + '" aria-label="新建任务">' + icon("plus") + '</button></span></div><div class="better-codex-cards">' + (cards || '<div class="better-codex-empty">暂无任务</div>') + '</div></section>';
       }).join("");
@@ -1472,7 +1671,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     function startAgentCreate(draft = null) {
       state.agentPane = "create";
       state.selectedAgentId = "";
-      state.agentDraft = draft;
+      state.agentDraft = draft
+        ? { ...draft, avatar: draft.avatar || ("icon:" + draft.key) }
+        : { avatar: "icon:bot" };
       renderAgents();
       setTimeout(() => panel?.querySelector('[data-agent-form="create"] [name="name"]')?.focus(), 0);
     }
@@ -1517,8 +1718,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (formAvatarButton) {
         const form = formAvatarButton.closest("form");
         if (!form) return;
+        if (document.getElementById("better-codex-avatar-picker")) {
+          avatarPickerClose?.();
+          return;
+        }
         void perform(async () => {
-          const avatar = await pickAgentAvatar();
+          const anchor = formAvatarButton.closest(".better-codex-agent-avatar-field, .better-codex-agent-profile-head") || formAvatarButton;
+          const avatar = await chooseAgentAvatar(form.elements.avatar?.value || "", anchor);
           if (!avatar) return;
           form.elements.avatar.value = avatar;
           const selected = state.agents.find(agent => agentKey(agent) === form.dataset.agentKey);
@@ -1593,14 +1799,21 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         });
         return;
       }
-      const row = event.target.closest("[data-agent-key]");
-      if (!row) return;
-      const agent = state.agents.find(item => agentKey(item) === row.dataset.agentKey);
-      if (!agent) return;
-      state.selectedAgentId = agentKey(agent);
-      state.agentPane = "detail";
-      state.agentDraft = null;
-      renderAgents();
+      const row = event.target.closest(".better-codex-agent-directory [data-agent-key]");
+      if (row) {
+        const agent = state.agents.find(item => agentKey(item) === row.dataset.agentKey);
+        if (!agent) return;
+        state.selectedAgentId = agentKey(agent);
+        state.agentPane = "detail";
+        state.agentDraft = null;
+        return renderAgents();
+      }
+      if (state.agentPane !== "preview" && event.target.closest(".better-codex-agent-directory")) {
+        state.agentPane = "preview";
+        state.selectedAgentId = "";
+        state.agentDraft = null;
+        return renderAgents();
+      }
     }
 
     async function openEditor(issue = null, initialStatus = "todo") {
@@ -1644,7 +1857,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       }
 
       function header() {
-        return '<div class="better-codex-dialog-head"><div class="better-codex-dialog-breadcrumb"><span>' + escapeHtml(project?.name || "Better Codex") + '</span><span aria-hidden="true">' + icon("chevron") + '</span><strong>' + (draft.mode === "agent" ? "通过智能体创建" : issue ? "编辑 issue" : "手动创建") + '</strong></div><div class="better-codex-dialog-head-actions"><button class="better-codex-icon-button" type="button" data-dialog-expand aria-label="展开">' + icon("expand") + '</button><button class="better-codex-icon-button" type="button" data-dialog-close aria-label="关闭">' + icon("close") + '</button></div></div>';
+        const sessionId = issue?.run_thread_id || issue?.thread_id || "";
+        const openThreadButton = issue && sessionId
+          ? '<button class="better-codex-dialog-open-thread" type="button" data-dialog-open-thread="' + escapeHtml(sessionId) + '">在对话中打开</button>'
+          : "";
+        return '<div class="better-codex-dialog-head"><div class="better-codex-dialog-breadcrumb"><span>' + escapeHtml(project?.name || "Better Codex") + '</span><span aria-hidden="true">' + icon("chevron") + '</span><strong>' + (draft.mode === "agent" ? "通过智能体创建" : issue ? "Issue 详情" : "手动创建") + '</strong></div><div class="better-codex-dialog-head-actions">' + openThreadButton + '<button class="better-codex-icon-button" type="button" data-dialog-expand aria-label="' + (draft.expanded ? "缩小" : "展开") + '">' + icon(draft.expanded ? "shrink" : "expand") + '</button><button class="better-codex-icon-button" type="button" data-dialog-close aria-label="关闭">' + icon("close") + '</button></div></div>';
       }
 
       function projectPicker() {
@@ -1797,7 +2014,19 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           projectDismiss = null;
         }));
         dialog.querySelector("[data-dialog-close]")?.addEventListener("click", () => dialog.close());
-        dialog.querySelector("[data-dialog-expand]")?.addEventListener("click", () => { draft.expanded = !draft.expanded; dialog.dataset.expanded = String(draft.expanded); });
+        dialog.querySelector("[data-dialog-open-thread]")?.addEventListener("click", event => {
+          const threadId = event.currentTarget.dataset.dialogOpenThread;
+          if (!threadId) return;
+          dialog.close();
+          void perform(() => openThread(threadId));
+        });
+        dialog.querySelector("[data-dialog-expand]")?.addEventListener("click", event => {
+          draft.expanded = !draft.expanded;
+          dialog.dataset.expanded = String(draft.expanded);
+          const button = event.currentTarget;
+          button.setAttribute("aria-label", draft.expanded ? "缩小" : "展开");
+          button.innerHTML = icon(draft.expanded ? "shrink" : "expand");
+        });
         dialog.querySelector("[data-dialog-switch]")?.addEventListener("click", () => {
           syncDraft();
           if (draft.mode === "manual") {
@@ -1884,7 +2113,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const add = event.target.closest("[data-add-status]");
       if (add) return void perform(() => openEditor(null, add.dataset.addStatus));
       const thread = event.target.closest("[data-thread]");
-      if (thread) return void perform(() => openThread(thread.dataset.thread));
+      if (thread) {
+        event.stopPropagation();
+        return void perform(() => openThread(thread.dataset.thread));
+      }
       const pin = event.target.closest("[data-pin]");
       if (pin) {
         const issue = state.issues.find(item => item.id === pin.dataset.pin);
@@ -1896,7 +2128,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       }
       const card = event.target.closest("[data-issue-id]");
       const issue = state.issues.find(item => item.id === card?.dataset.issueId);
-      if (issue) showError(new Error("任务尚未关联 Session"));
+      if (issue) return void perform(() => openEditor(issue));
     }
 
     function onDrop(event) {

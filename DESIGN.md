@@ -19,7 +19,7 @@ All production values live in `src/design-system.ts`. Components must consume se
 
 ## 3. Typography rules
 
-Use the Codex host font when available, then the operating-system UI stack. Keep dense task content at 11-13px, section titles at 14px, and dialog task titles at 19px. Use tabular numerals for live counters and avoid letter-spacing changes on Chinese text.
+Use the Codex host font when available, then the operating-system UI stack. Size type with `--bc-text-*` tokens that follow Codex Settings → Appearance sans font size (`--font-size-base`, default 14px): primary UI and titles use `--bc-text-md`, supporting copy uses `--bc-text-sm` / `--bc-text-caption`, and dialog task titles use `--bc-text-xl`. Scale interactive chrome with `--bc-control-height`, `--bc-row-height`, `--bc-toolbar-height`, and `--bc-icon-*` derived from the same base. Do not hard-code absolute `px` font sizes or control heights for text UI. Use tabular numerals for live counters and avoid letter-spacing changes on Chinese text.
 
 ## 4. Component styling
 

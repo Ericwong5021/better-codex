@@ -119,6 +119,13 @@ test("gateway completes the issue workflow and survives restart", async () => {
     assert.equal(invalidAvatarResponse.status, 400);
     assert.deepEqual(await invalidAvatarResponse.json(), { error: "invalid_agent_avatar" });
 
+    const iconAvatarResponse = await request(`/api/agents/${optionalAgent.id}/avatar`, {
+      method: "PATCH",
+      body: JSON.stringify({ avatar: "icon:reviewer" }),
+    });
+    assert.equal(iconAvatarResponse.status, 200);
+    assert.equal(((await iconAvatarResponse.json()) as { avatar: string }).avatar, "icon:reviewer");
+
     const preflight = await fetch(`http://127.0.0.1:${port}/api/bootstrap`, {
       method: "OPTIONS",
       headers: {
@@ -159,7 +166,7 @@ test("gateway completes the issue workflow and survives restart", async () => {
     assert.equal(restored.status, "in_progress");
     assert.equal(restored.thread_id, "local:gateway-thread");
     const restoredAgents = await (await request("/api/agents")).json() as Array<{ id: string; avatar: string }>;
-    assert.equal(restoredAgents.find(agent => agent.id === optionalAgent.id)?.avatar, avatar);
+    assert.equal(restoredAgents.find(agent => agent.id === optionalAgent.id)?.avatar, "icon:reviewer");
   } finally {
     await stopGateway(gateway);
     rmSync(home, { recursive: true, force: true });

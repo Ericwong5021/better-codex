@@ -119,6 +119,7 @@ function asAgentAvatar(value: unknown) {
   if (value === undefined) return undefined;
   if (typeof value !== "string" || value.length > 400000) throw new Error("invalid_agent_avatar");
   if (!value) return "";
+  if (/^icon:[a-z0-9_-]{1,32}$/i.test(value)) return value.toLowerCase();
   if (!/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(value)) throw new Error("invalid_agent_avatar");
   return value;
 }
