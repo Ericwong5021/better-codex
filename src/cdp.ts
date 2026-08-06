@@ -210,14 +210,14 @@ function desktopApplicationName(application: string) {
   return basename(application, ".app");
 }
 
-function windowsActivationScript(port: number) {
+function windowsActivationScript(port: number, allowExisting = false) {
   return `$ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 try {
 $runningMainProcess = Get-CimInstance Win32_Process -Filter "Name = 'ChatGPT.exe'" |
   Where-Object { $_.CommandLine -notmatch "--type=" } |
   Select-Object -First 1
-if ($runningMainProcess) {
+if ($runningMainProcess -and ${allowExisting ? "$false" : "$true"}) {
   throw "Codex is already running without CDP. Quit Codex completely and try again."
 }
 
@@ -269,11 +269,11 @@ $arguments = "--remote-debugging-port=${port} --remote-allow-origins=http://127.
 `;
 }
 
-function launchCodex(port: number) {
+export function launchCodex(port: number, activateExisting = false) {
   if (process.platform === "darwin") {
     const application = desktopApplication();
     const child = spawn("/usr/bin/open", [
-      "-n",
+      ...(activateExisting ? [] : ["-n"]),
       "-a",
       application,
       "--args",
@@ -284,7 +284,7 @@ function launchCodex(port: number) {
     return;
   }
   if (process.platform === "win32") {
-    const encoded = Buffer.from(windowsActivationScript(port), "utf16le").toString("base64");
+    const encoded = Buffer.from(windowsActivationScript(port, activateExisting), "utf16le").toString("base64");
     try {
       execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-OutputFormat", "Text", "-EncodedCommand", encoded], {
         encoding: "utf8",

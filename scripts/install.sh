@@ -70,6 +70,9 @@ if [ -n "$EXISTING_BINARY" ]; then
 fi
 
 if [ -n "$CURRENT_VERSION" ] && [ -n "$TARGET_VERSION" ] && version_at_least "$CURRENT_VERSION" "$TARGET_VERSION" && [ -f "$SKILL_DIR/SKILL.md" ]; then
+  if [ "$WITH_SERVICE" = "1" ]; then
+    "$EXISTING_BINARY" launcher install >/dev/null 2>&1 || true
+  fi
   printf '[OK] Better Codex is up to date (v%s)\n' "$CURRENT_VERSION"
   exit 0
 fi
@@ -85,6 +88,7 @@ if [ -n "$CURRENT_VERSION" ] && [ -n "$TARGET_VERSION" ]; then
         if [ "$UPGRADE_READY" = "1" ]; then
           sleep 0.8
           "$EXISTING_BINARY" inject --launch >/dev/null 2>&1 || UPGRADE_READY=0
+          "$EXISTING_BINARY" launcher install >/dev/null 2>&1 || UPGRADE_READY=0
           "$EXISTING_BINARY" doctor >/dev/null 2>&1 || UPGRADE_READY=0
         fi
       fi

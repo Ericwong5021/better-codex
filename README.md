@@ -54,6 +54,13 @@ After installation, Codex has two new sidebar entries:
 - `Better Codex` opens the task and project view.
 - `Agents` opens the Profile Agent manager.
 
+The installer also configures injection-aware launch entry points:
+
+- macOS creates `~/Applications/Better Codex Launcher.app`, which can be pinned to the Dock.
+- Windows rewrites Codex shortcuts in the current user's Desktop, Start Menu, and taskbar to launch through Better Codex. Original shortcut settings are backed up and restored on uninstall.
+
+If Codex is already running without injection support, launching through these entries quits and restarts Codex. Save active work first.
+
 ## Features
 
 | Area | Capabilities |
@@ -103,6 +110,13 @@ Show the current service and board connection:
 
 ```bash
 better-codex status
+```
+
+Reconfigure or inspect system launch entry points:
+
+```bash
+better-codex launcher install
+better-codex launcher status
 ```
 
 Remove the sidebar entries without deleting task data:

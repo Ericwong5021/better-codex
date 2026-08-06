@@ -54,6 +54,13 @@ irm https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scripts/ins
 - `Better Codex`：打开任务和项目界面。
 - `智能体`：打开 Profile Agent 管理界面。
 
+安装程序也会配置支持注入的启动入口：
+
+- macOS：在 `~/Applications` 创建 `Better Codex Launcher.app`，可将它固定到 Dock；以后请从该入口启动 Codex。
+- Windows：将当前用户桌面、开始菜单和任务栏中的 Codex 快捷方式改为通过 Better Codex 启动。原快捷方式配置会被备份，并在卸载时恢复。
+
+如果 Codex 已经以不支持注入的方式运行，从这些入口再次启动会先退出并重新启动 Codex，请先保存正在进行的工作。
+
 ## 当前功能
 
 | 模块 | 功能 |
@@ -103,6 +110,13 @@ better-codex doctor
 
 ```bash
 better-codex status
+```
+
+重新配置或检查系统启动入口：
+
+```bash
+better-codex launcher install
+better-codex launcher status
 ```
 
 移除侧边栏入口，同时保留任务数据：

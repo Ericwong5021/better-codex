@@ -24,6 +24,7 @@
     "dist/db.js",
     "dist/dom.js",
     "dist/injection-state.js",
+    "dist/launch-integration.js",
     "dist/model-catalog.js",
     "dist/runtime-state.js",
     "dist/server.js",

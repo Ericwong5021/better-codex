@@ -27,6 +27,8 @@ export const workerLogPath = join(logPath, "worker.log");
 export const runLogPath = join(logPath, "runs");
 export const injectorPidPath = join(runPath, "injector.pid");
 export const injectionStatePath = join(runPath, "injection.json");
+export const launchIntegrationStatePath = join(runPath, "launch-integration.json");
+export const launchLockPath = join(runPath, "launch.lock");
 export const runtimePort = Number(process.env.BETTER_CODEX_RUNTIME_PORT ?? process.env.BETTER_CODEX_PORT ?? 0);
 export const cdpPort = Number(process.env.BETTER_CODEX_CDP_PORT ?? 9229);
 

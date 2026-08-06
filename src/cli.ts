@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { accessSync, closeSync, constants, existsSync, openSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { accessSync, closeSync, constants, existsSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { isSea } from "node:sea";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
-import { cdpEject, cdpInject, cdpOpenThread, cdpRestartAndInject, cdpStatus, codexInstallationStatus, watchInjection } from "./cdp.js";
+import { cdpEject, cdpInject, cdpOpenThread, cdpRestartAndInject, cdpStatus, codexInstallationStatus, launchCodex, watchInjection } from "./cdp.js";
 import {
   cdpPort,
   databasePath,
@@ -12,6 +13,7 @@ import {
   injectorLogPath,
   injectorPidPath,
   betterCodexHome,
+  launchLockPath,
   logPath,
   managedRuntimePath,
   runPath,
@@ -21,6 +23,7 @@ import {
 } from "./config.js";
 import { readRuntimeState } from "./runtime-state.js";
 import { injectionEnabled, setInjectionEnabled } from "./injection-state.js";
+import { installLaunchIntegration, launchIntegrationStatus, uninstallLaunchIntegration } from "./launch-integration.js";
 import { installService, restartService, serviceLogs, serviceStatus, startService, stopService, uninstallService } from "./service.js";
 import { activeVersions, checkForUpdates, maybeDelegateToActiveCore, rollbackCompatibilityUpdate, updateAll, updateCompatibility } from "./updater.js";
 
@@ -197,12 +200,63 @@ async function applyUpdate(previousRuntimePid: number) {
   setInjectionEnabled(false);
   installService();
   await ensureRuntime();
+  let injection: unknown;
   try {
-    await cdpRestartAndInject(cdpPort, activeRuntimePort(), accessToken());
+    injection = await cdpRestartAndInject(cdpPort, activeRuntimePort(), accessToken());
   } finally {
     setInjectionEnabled(true);
   }
-  return { updated: true, runtime: await health() };
+  const launchIntegration = installLaunchIntegration();
+  return { updated: true, runtime: await health(), injection, launchIntegration };
+}
+
+async function withLaunchLock<T>(operation: () => Promise<T>) {
+  ensureDirectories();
+  const token = randomUUID();
+  let acquired = false;
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    let created = false;
+    try {
+      mkdirSync(launchLockPath, { mode: 0o700 });
+      created = true;
+      writeFileSync(join(launchLockPath, "owner.json"), JSON.stringify({ pid: process.pid, token }), { mode: 0o600 });
+      acquired = true;
+      break;
+    } catch (error) {
+      if (created) {
+        rmSync(launchLockPath, { recursive: true, force: true });
+        throw error;
+      }
+      let owner: { pid?: number } | null = null;
+      try { owner = JSON.parse(readFileSync(join(launchLockPath, "owner.json"), "utf8")) as { pid?: number }; } catch {}
+      let stale = Boolean(owner?.pid && !processAlive(owner.pid));
+      if (!owner?.pid) {
+        try { stale = Date.now() - statSync(launchLockPath).mtimeMs > 30_000; } catch {}
+      }
+      if (stale) {
+        const stalePath = `${launchLockPath}.stale.${token}`;
+        try {
+          renameSync(launchLockPath, stalePath);
+          rmSync(stalePath, { recursive: true, force: true });
+          continue;
+        } catch {}
+      }
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  }
+  if (!acquired) throw new Error("codex_launch_busy");
+  try {
+    return await operation();
+  } finally {
+    try {
+      const owner = JSON.parse(readFileSync(join(launchLockPath, "owner.json"), "utf8")) as { token?: string };
+      if (owner.token === token) {
+        const releasedPath = `${launchLockPath}.released.${token}`;
+        renameSync(launchLockPath, releasedPath);
+        rmSync(releasedPath, { recursive: true, force: true });
+      }
+    } catch {}
+  }
 }
 
 async function stopInjector() {
@@ -221,14 +275,14 @@ function print(value: unknown) {
 }
 
 function usage() {
-  console.log("better-codex version | update [check|compatibility|rollback] [--channel stable|preview] | setup [--yes] | doctor | enable | disable | start [--launch] | stop | status | uninstall | data delete [--yes] | inject [--launch] [--port N] | eject [--port N] | service install|uninstall|start|stop|restart|status|logs | project list|create | issue list|get|create|update|status|link|open");
+  console.log("better-codex version | update [check|compatibility|rollback] [--channel stable|preview] | setup [--yes] | launch | launcher install|uninstall|status | doctor | enable | disable | start [--launch] | stop | status | uninstall | data delete [--yes] | inject [--launch] [--port N] | eject [--port N] | service install|uninstall|start|stop|restart|status|logs | project list|create | issue list|get|create|update|status|link|open");
 }
 
 async function confirmSetup() {
   if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error("setup_requires_interactive_terminal");
   const terminal = createInterface({ input: process.stdin, output: process.stdout });
   try {
-    const answer = await terminal.question("Better Codex needs to quit and restart Codex to enable local injection. Continue? [y/N] ");
+    const answer = await terminal.question("Better Codex needs to restart Codex and configure injection-aware launch shortcuts. Continue? [y/N] ");
     return /^(y|yes)$/i.test(answer.trim());
   } finally {
     terminal.close();
@@ -286,6 +340,7 @@ async function uninstall() {
   let injection: unknown = { removed: false, reason: "cdp_unavailable" };
   try { injection = await cdpEject(cdpPort, accessToken()); } catch {}
   try { await request("/api/shutdown", { method: "POST" }); } catch {}
+  const launchIntegration = uninstallLaunchIntegration();
   const service = uninstallService();
   const programPaths = [runPath, logPath, managedRuntimePath, updatePublicKeyPath];
   const binaries = isSea()
@@ -300,7 +355,7 @@ async function uninstall() {
     for (const path of programPaths) rmSync(path, { recursive: true, force: true });
     for (const path of binaries) rmSync(path, { force: true });
   }
-  return { uninstalled: true, service, injection, binaries, dataPreserved: [databasePath, join(dirname(databasePath), "backups")] };
+  return { uninstalled: true, service, launchIntegration, injection, binaries, dataPreserved: [databasePath, join(dirname(databasePath), "backups")] };
 }
 
 async function deleteData(confirmed: boolean) {
@@ -414,6 +469,40 @@ async function main() {
   if (command === "runtime") return runRuntime();
   if (command === "serve") return (await import("./server.js")).startServer();
   if (command === "watch-inject") return watchInjection(Number(action || cdpPort), accessToken());
+  if (command === "launch") {
+    return print(await withLaunchLock(async () => {
+      if (!injectionEnabled()) {
+        launchCodex(cdpPort, true);
+        return { launched: true, injectionDisabled: true };
+      }
+      await ensureRuntime();
+      const current = await cdpStatus(cdpPort);
+      if (current.available) {
+        setInjectionEnabled(true);
+        await cdpInject(cdpPort, activeRuntimePort(), accessToken(), false);
+        startInjector(cdpPort);
+        launchCodex(cdpPort, true);
+      } else {
+        setInjectionEnabled(false);
+        await stopInjector();
+        try {
+          await cdpRestartAndInject(cdpPort, activeRuntimePort(), accessToken());
+          setInjectionEnabled(true);
+          await waitForInjector();
+        } catch (error) {
+          setInjectionEnabled(false);
+          throw error;
+        }
+      }
+      return { launched: true, injection: await cdpStatus(cdpPort) };
+    }));
+  }
+  if (command === "launcher") {
+    if (action === "install") return print(installLaunchIntegration());
+    if (action === "uninstall") return print(uninstallLaunchIntegration());
+    if (action === "status") return print(launchIntegrationStatus());
+    return usage();
+  }
   if (command === "setup") {
     const values = [action, ...args].filter(Boolean) as string[];
     const json = values.includes("--json");
@@ -432,8 +521,9 @@ async function main() {
       const injection = await cdpRestartAndInject(cdpPort, activeRuntimePort(), accessToken());
       setInjectionEnabled(true);
       const pid = await waitForInjector();
+      const launchIntegration = installLaunchIntegration();
       progress("ready", json);
-      return print({ configured: true, stages: ["installing_runtime", "starting_runtime", "waiting_for_codex", "injecting", "ready"], runtime, injection, injectorPid: pid });
+      return print({ configured: true, stages: ["installing_runtime", "starting_runtime", "waiting_for_codex", "injecting", "installing_launcher", "ready"], runtime, injection, launchIntegration, injectorPid: pid });
     } catch (error) {
       setInjectionEnabled(false);
       await stopInjector();

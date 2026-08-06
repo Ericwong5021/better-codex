@@ -60,6 +60,8 @@ function Invoke-ExistingUpgrade([string]$Executable, [string]$TargetVersion) {
       Start-Sleep -Milliseconds 800
       & $Executable inject --launch 2>&1 | Out-Null
       if ($LASTEXITCODE -ne 0) { return $false }
+      & $Executable launcher install 2>&1 | Out-Null
+      if ($LASTEXITCODE -ne 0) { return $false }
       $doctor = (& $Executable doctor | Out-String | ConvertFrom-Json)
       if (-not $doctor.ok) { return $false }
     }
@@ -79,6 +81,9 @@ $targetVersion = $Version.TrimStart("v")
 $installedVersion = Get-InstalledVersion $executable
 
 if ($installedVersion -and (Test-VersionAtLeast $installedVersion $targetVersion) -and (Test-Path (Join-Path $skillDirectory "SKILL.md"))) {
+  if (-not $NoService) {
+    try { & $executable launcher install 2>&1 | Out-Null } catch {}
+  }
   Write-Ok "Better Codex is up to date (v$installedVersion)"
   return
 }
