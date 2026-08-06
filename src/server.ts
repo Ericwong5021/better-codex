@@ -4,7 +4,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { isSea } from "node:sea";
 import { coreVersion, readCompatibilityStatus } from "./compatibility.js";
 import { agentModels, agentReasoningEfforts, issuePriorities, issueStatuses, Store, type AgentModel, type AgentReasoningEffort, type IssuePriority, type IssueStatus } from "./db.js";
-import { syncAgentProfiles } from "./agent-profiles.js";
+import { defaultAgentProfile, syncAgentProfiles, updateDefaultAgentProfile } from "./agent-profiles.js";
 import { runtimePort, token, updateLogPath } from "./config.js";
 import { acquireRuntimeLock, clearRuntimeState, createRuntimeIdentity, publishRuntimeState } from "./runtime-state.js";
 import { activeCoreExecutable, getGatewayUpdateState, installGatewayUpdate, startGatewayUpdateChecks } from "./updater.js";
@@ -105,6 +105,14 @@ function agentProfileInput(body: Record<string, unknown>) {
   };
 }
 
+function defaultAgentInput(body: Record<string, unknown>) {
+  const model = cleanString(body.model, 80) as AgentModel;
+  const reasoning_effort = cleanString(body.reasoning_effort, 20) as AgentReasoningEffort;
+  if (!agentModels.includes(model)) throw new Error("invalid_agent_model");
+  if (!agentReasoningEfforts.includes(reasoning_effort)) throw new Error("invalid_agent_reasoning_effort");
+  return { model, reasoning_effort };
+}
+
 function parseIssuePatch(body: Record<string, unknown>) {
   const patch: Record<string, unknown> = {};
   if ("title" in body) patch.title = cleanString(body.title, 500);
@@ -168,6 +176,7 @@ export function startServer() {
   }
   let cleaned = false;
   const worker = new IssueWorker(store);
+  const visibleAgentProfiles = () => [defaultAgentProfile(), ...store.listAgentProfiles()];
   const stopUpdateChecks = startGatewayUpdateChecks();
   const cleanup = () => {
     if (cleaned) return;
@@ -193,7 +202,7 @@ export function startServer() {
       }
       if (!authorized(request, url)) return sendJson(response, 401, { error: "unauthorized" });
       if (url.pathname === "/api/bootstrap" && method === "GET") {
-        return sendJson(response, 200, { projects: store.listProjects(), agents: store.listAgentProfiles(), statuses: issueStatuses, priorities: issuePriorities, agentModels, agentReasoningEfforts });
+        return sendJson(response, 200, { projects: store.listProjects(), agents: visibleAgentProfiles(), statuses: issueStatuses, priorities: issuePriorities, agentModels, agentReasoningEfforts });
       }
       if (url.pathname === "/api/update" && method === "GET") return sendJson(response, 200, getGatewayUpdateState());
       if (url.pathname === "/api/update/install" && method === "POST") {
@@ -208,11 +217,14 @@ export function startServer() {
         }, 250);
         return;
       }
-      if (url.pathname === "/api/agents" && method === "GET") return sendJson(response, 200, store.listAgentProfiles());
+      if (url.pathname === "/api/agents" && method === "GET") return sendJson(response, 200, visibleAgentProfiles());
       if (url.pathname === "/api/agents" && method === "POST") {
         const profile = store.createAgentProfile(agentProfileInput(await readBody(request)));
         syncAgentProfiles(store.listAgentProfiles());
         return sendJson(response, 201, profile);
+      }
+      if (url.pathname === "/api/agents/default" && method === "PATCH") {
+        return sendJson(response, 200, updateDefaultAgentProfile(defaultAgentInput(await readBody(request))));
       }
       if (path[0] === "api" && path[1] === "agents" && path[2]) {
         const profile = store.getAgentProfile(decodeURIComponent(path[2]));

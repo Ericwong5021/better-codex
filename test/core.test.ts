@@ -1,15 +1,57 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { Store } from "../src/db.js";
+import { defaultAgentProfile, updateDefaultAgentProfile } from "../src/agent-profiles.js";
 
 function temporaryDatabase() {
   const directory = mkdtempSync(join(tmpdir(), "better-codex-test-"));
   return { directory, file: join(directory, "better-codex.db") };
 }
+
+test("default Codex agent reflects the root config.toml model settings", () => {
+  const directory = mkdtempSync(join(tmpdir(), "better-codex-agent-test-"));
+  const config = join(directory, "config.toml");
+  try {
+    writeFileSync(config, 'model_provider = "custom"\nmodel = "gpt-5.6-sol"\nmodel_reasoning_effort = "high"\n\n[agents.reviewer]\ndescription = "ignored"\n');
+    assert.deepEqual(defaultAgentProfile(config), {
+      id: "",
+      role: "codex",
+      name: "Codex",
+      description: "默认智能体，直接读取 config.toml",
+      instructions: "使用 Codex 默认配置承接并执行 Better Codex Issue。",
+      model: "gpt-5.6-sol",
+      reasoning_effort: "high",
+      version: 1,
+      created_at: "",
+      updated_at: "",
+      is_default: true,
+    });
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("default Codex agent model updates preserve the rest of config.toml", () => {
+  const directory = mkdtempSync(join(tmpdir(), "better-codex-default-agent-update-"));
+  const config = join(directory, "config.toml");
+  try {
+    writeFileSync(config, 'model_provider = "custom"\nmodel = "gpt-5.4"\n\n[projects."demo"]\ntrust_level = "trusted"\n');
+    const profile = updateDefaultAgentProfile({ model: "gpt-5.6-luna", reasoning_effort: "high" }, config);
+    const source = readFileSync(config, "utf8");
+    assert.equal(profile.model, "gpt-5.6-luna");
+    assert.equal(profile.reasoning_effort, "high");
+    assert.match(source, /model_provider = "custom"/);
+    assert.match(source, /model = "gpt-5\.6-luna"/);
+    assert.match(source, /model_reasoning_effort = "high"/);
+    assert.match(source, /\[projects\."demo"\]/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 test("core workflow persists, orders status moves, and rejects stale writes", () => {
   const target = temporaryDatabase();

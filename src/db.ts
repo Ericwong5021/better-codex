@@ -6,7 +6,7 @@ import { databasePath } from "./config.js";
 
 export const issueStatuses = ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"] as const;
 export const issuePriorities = ["none", "low", "medium", "high", "urgent"] as const;
-export const agentModels = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.4", "gpt-5.3-codex", "gpt-5.3-codex-spark"] as const;
+export const agentModels = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex-spark"] as const;
 export const agentReasoningEfforts = ["low", "medium", "high", "xhigh", "max", "ultra"] as const;
 
 export type IssueStatus = typeof issueStatuses[number];
@@ -121,8 +121,8 @@ function cleanAgentProfile(input: AgentProfileInput) {
   const description = input.description.trim();
   const instructions = input.instructions.trim();
   if (!name || name.length > 80) throw new Error("agent_name_required");
-  if (!description || description.length > 500) throw new Error("agent_description_required");
-  if (!instructions || instructions.length > 100000) throw new Error("agent_instructions_required");
+  if (description.length > 500) throw new Error("agent_description_too_long");
+  if (instructions.length > 100000) throw new Error("agent_instructions_too_long");
   if (!agentModels.includes(input.model)) throw new Error("invalid_agent_model");
   if (!agentReasoningEfforts.includes(input.reasoning_effort)) throw new Error("invalid_agent_reasoning_effort");
   return { name, description, instructions, model: input.model, reasoning_effort: input.reasoning_effort };

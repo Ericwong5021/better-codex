@@ -24,6 +24,7 @@ function startGateway(home: string, port: number, token: string) {
     env: {
       ...process.env,
       BETTER_CODEX_HOME: home,
+      CODEX_HOME: home,
       BETTER_CODEX_PORT: String(port),
       BETTER_CODEX_TOKEN: token,
     },
@@ -70,6 +71,21 @@ test("gateway completes the issue workflow and survives restart", async () => {
     await waitForGateway(port, gateway);
     const health = await (await fetch(`http://127.0.0.1:${port}/health`)).json() as { database: { schemaVersion: number } };
     assert.equal(health.database.schemaVersion, 2);
+
+    const bootstrap = await (await request("/api/bootstrap")).json() as { agents: Array<{ id: string; name: string; is_default?: boolean }> };
+    assert.deepEqual(bootstrap.agents[0], {
+      id: "",
+      role: "codex",
+      name: "Codex",
+      description: "默认智能体，直接读取 config.toml",
+      instructions: "使用 Codex 默认配置承接并执行 Better Codex Issue。",
+      model: "默认模型",
+      reasoning_effort: "默认推理等级",
+      version: 1,
+      created_at: "",
+      updated_at: "",
+      is_default: true,
+    });
 
     const preflight = await fetch(`http://127.0.0.1:${port}/api/bootstrap`, {
       method: "OPTIONS",

@@ -1,11 +1,66 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { AgentProfile } from "./db.js";
 
 const codexHome = process.env.CODEX_HOME || join(homedir(), ".codex");
 const configPath = join(codexHome, "config.toml");
 const profilesPath = join(codexHome, "agents", "better-codex");
+
+function topLevelString(source: string, key: string) {
+  for (const line of source.split("\n")) {
+    if (/^\s*\[/.test(line)) break;
+    const match = line.match(new RegExp(`^\\s*${key}\\s*=\\s*("(?:\\\\.|[^"\\\\])*"|'[^']*'|[^#\\s]+)`));
+    if (!match) continue;
+    const value = match[1];
+    if (value.startsWith('"')) {
+      try { return JSON.parse(value) as string; } catch { return value.slice(1, -1); }
+    }
+    if (value.startsWith("'")) return value.slice(1, -1);
+    return value;
+  }
+  return "";
+}
+
+function withTopLevelString(source: string, key: string, value: string) {
+  const assignment = `${key} = ${JSON.stringify(value)}`;
+  const lines = source.split("\n");
+  const sectionIndex = lines.findIndex(line => /^\s*\[/.test(line));
+  const limit = sectionIndex < 0 ? lines.length : sectionIndex;
+  for (let index = 0; index < limit; index += 1) {
+    if (new RegExp(`^\\s*${key}\\s*=`).test(lines[index])) {
+      lines[index] = assignment;
+      return lines.join("\n");
+    }
+  }
+  lines.splice(limit, 0, assignment);
+  return lines.join("\n");
+}
+
+export function defaultAgentProfile(path = configPath) {
+  const source = existsSync(path) ? readFileSync(path, "utf8") : "";
+  return {
+    id: "",
+    role: "codex",
+    name: "Codex",
+    description: "默认智能体，直接读取 config.toml",
+    instructions: "使用 Codex 默认配置承接并执行 Better Codex Issue。",
+    model: topLevelString(source, "model") || "默认模型",
+    reasoning_effort: topLevelString(source, "model_reasoning_effort") || "默认推理等级",
+    version: 1,
+    created_at: "",
+    updated_at: "",
+    is_default: true,
+  };
+}
+
+export function updateDefaultAgentProfile(input: { model: string; reasoning_effort: string }, path = configPath) {
+  const source = existsSync(path) ? readFileSync(path, "utf8") : "";
+  const next = withTopLevelString(withTopLevelString(source, "model", input.model), "model_reasoning_effort", input.reasoning_effort);
+  mkdirSync(dirname(path), { recursive: true });
+  if (next !== source) writeFileSync(path, next, { mode: 0o600 });
+  return defaultAgentProfile(path);
+}
 
 export function agentConfigProfileName(id: string) {
   return `better-codex-${id}`;
