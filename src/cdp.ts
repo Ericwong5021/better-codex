@@ -73,7 +73,7 @@ async function bridgeRequest(connection: Connection, runtimePort: number, access
     requestId = typeof request.id === "string" ? request.id : "";
     const path = typeof request.path === "string" ? request.path : "";
     const method = typeof request.method === "string" ? request.method : "GET";
-    if (!requestId || request.token !== accessToken || !/^\/api\/(?:bootstrap(?:[?]|$)|projects(?:\/ensure)?(?:[?]|$)|issues(?:[/?]|$))/.test(path) || !["GET", "POST", "PATCH"].includes(method)) throw new Error("invalid_bridge_request");
+    if (!requestId || request.token !== accessToken || !/^\/api\/(?:bootstrap(?:[?]|$)|projects(?:\/ensure)?(?:[?]|$)|issues(?:[/?]|$)|agents(?:[/?]|$))/.test(path) || !["GET", "POST", "PATCH", "DELETE"].includes(method)) throw new Error("invalid_bridge_request");
     const response = await fetch(`http://127.0.0.1:${runtimePort}${path}`, {
       method,
       headers: {

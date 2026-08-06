@@ -30,6 +30,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     previous?.destroy?.();
 
     const ENTRY_ID = "better-codex-entry";
+    const AGENTS_ENTRY_ID = "better-codex-agents-entry";
     const PANEL_ID = "better-codex-panel";
     const STYLE_ID = "better-codex-style";
     const OWNED = "data-better-codex-owned";
@@ -42,10 +43,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const NAVIGATION = ${JSON.stringify(compatibility.navigation)};
     const statusLabels = { backlog: "待规划", todo: "待办", in_progress: "进行中", in_review: "审核中", done: "已完成", blocked: "已阻塞", cancelled: "已取消" };
     const priorityLabels = { none: "无", low: "低", medium: "中", high: "高", urgent: "紧急" };
-    const state = { projects: [], issues: [], projectId: "", search: "", view: "all", createMode: "manual", keepCreate: false, selected: null, error: "", filters: { status: [], priority: [], date: [], assignee: [], creator: [], project: [], label: [] } };
+    const state = { projects: [], issues: [], agents: [], agentModels: [], agentReasoningEfforts: [], projectId: "", search: "", agentSearch: "", surface: "issues", view: "all", createMode: "manual", keepCreate: false, selected: null, error: "", filters: { status: [], priority: [], date: [], assignee: [], creator: [], project: [], label: [] } };
     const bridgeRequests = new Map();
     let bridgeSequence = 0;
     let entry = null;
+    let agentsEntry = null;
     let panel = null;
     let observer = null;
     let timer = null;
@@ -70,9 +72,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       style.id = STYLE_ID;
       style.setAttribute(OWNED, "true");
       style.textContent = \`
-        #\${ENTRY_ID}[aria-current="page"] { background: var(--color-background-primary-soft-active, var(--color-token-list-hover-background, color-mix(in srgb, currentColor 8%, transparent))); }
-        html[data-better-codex-open="true"] \${SELECTORS.sidebarNavigation} [aria-current="page"]:not(#\${ENTRY_ID}) { background: transparent !important; }
-        html[data-better-codex-open="true"] \${SELECTORS.sidebarNavigation} [aria-current="page"]:not(#\${ENTRY_ID}) .text-token-list-active-selection-foreground { color: var(--color-token-foreground) !important; }
+        #\${ENTRY_ID}[aria-current="page"], #\${AGENTS_ENTRY_ID}[aria-current="page"] { background: var(--color-background-primary-soft-active, var(--color-token-list-hover-background, color-mix(in srgb, currentColor 8%, transparent))); }
+        html[data-better-codex-open="true"] \${SELECTORS.sidebarNavigation} [aria-current="page"]:not(#\${ENTRY_ID}):not(#\${AGENTS_ENTRY_ID}) { background: transparent !important; }
+        html[data-better-codex-open="true"] \${SELECTORS.sidebarNavigation} [aria-current="page"]:not(#\${ENTRY_ID}):not(#\${AGENTS_ENTRY_ID}) .text-token-list-active-selection-foreground { color: var(--color-token-foreground) !important; }
         [\${HOST}="true"] { position: relative !important; z-index: 31 !important; pointer-events: none !important; }
         [\${HIDDEN}="true"] { visibility: hidden !important; pointer-events: none !important; }
         #\${PANEL_ID} { position: absolute; inset: 0; z-index: 2; display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; color: var(--color-text-foreground, inherit); background: var(--color-background-surface, var(--wb-surface-primary, var(--color-token-bg-primary, Canvas))); pointer-events: auto; }
@@ -155,6 +157,64 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         @keyframes better-codex-shimmer { 0% { background-position: 200% 0 } 100% { background-position: -200% 0 } }
         #\${PANEL_ID} .better-codex-shimmer { background-image: linear-gradient(90deg,#71717a 0%,#71717a 35%,#18181b 50%,#71717a 65%,#71717a 100%); background-size: 200% 100%; background-clip: text; -webkit-background-clip: text; color: transparent; -webkit-text-fill-color: transparent; animation: better-codex-shimmer 2.5s linear infinite; }
         #\${PANEL_ID} .better-codex-empty { padding: 18px 4px; text-align: center; color: #a1a1aa; font-size: 11px; }
+        #\${PANEL_ID} .better-codex-agent-heading { display: none; min-width: 0; align-items: baseline; gap: 10px; }
+        #\${PANEL_ID} .better-codex-agent-heading strong { color: #18181b; font-size: 14px; font-weight: 650; }
+        #\${PANEL_ID} .better-codex-agent-heading span { color: var(--bc-muted); font-size: 11px; }
+        #\${PANEL_ID} .better-codex-agent-actions { display: none; align-items: center; gap: 8px; }
+        #\${PANEL_ID}[data-surface="agents"] .better-codex-issue-only { display: none; }
+        #\${PANEL_ID}[data-surface="agents"] .better-codex-agent-heading, #\${PANEL_ID}[data-surface="agents"] .better-codex-agent-actions { display: flex; }
+        #\${PANEL_ID} .better-codex-agents { display: none; min-height: 0; flex: 1; overflow-y: auto; padding: 12px 22px 28px; }
+        #\${PANEL_ID}[data-surface="agents"] .better-codex-agents { display: block; }
+        #\${PANEL_ID} .better-codex-agent-grid { display: grid; max-width: 1080px; margin: 0 auto; grid-template-columns: repeat(auto-fill,minmax(280px,1fr)); gap: 12px; }
+        #\${PANEL_ID} .better-codex-agent-card { display: flex; min-height: 214px; flex-direction: column; border: 1px solid var(--bc-border); border-radius: 12px; color: #27272a; background: #fff; padding: 16px; box-shadow: 0 1px 3px rgba(15,23,42,.08); transition: border-color .15s,transform .15s; }
+        #\${PANEL_ID} .better-codex-agent-card:hover { border-color: #cfcfd4; }
+        #\${PANEL_ID} .better-codex-agent-card:active { transform: scale(.99); }
+        #\${PANEL_ID} .better-codex-agent-card-head { display: flex; align-items: flex-start; gap: 11px; }
+        #\${PANEL_ID} .better-codex-agent-card-avatar { display: inline-flex; width: 36px; height: 36px; flex: 0 0 auto; align-items: center; justify-content: center; border-radius: 10px; color: #fff; background: #27272a; font-size: 12px; font-weight: 700; letter-spacing: -.02em; }
+        #\${PANEL_ID} .better-codex-agent-card-title { min-width: 0; flex: 1; }
+        #\${PANEL_ID} .better-codex-agent-card-title strong { display: block; overflow: hidden; font-size: 13px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+        #\${PANEL_ID} .better-codex-agent-card-title span { display: -webkit-box; margin-top: 3px; overflow: hidden; color: var(--bc-muted); font-size: 11px; line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+        #\${PANEL_ID} .better-codex-agent-card-instructions { display: -webkit-box; min-height: 54px; margin-top: 14px; overflow: hidden; color: #52525b; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; font-size: 10.5px; line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+        #\${PANEL_ID} .better-codex-agent-card-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: auto; padding-top: 14px; }
+        #\${PANEL_ID} .better-codex-agent-card-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+        #\${PANEL_ID} .better-codex-agent-card-action { display: inline-flex; width: 26px; height: 26px; align-items: center; justify-content: center; border: 0; border-radius: 6px; color: #71717a; background: transparent; padding: 0; cursor: pointer; }
+        #\${PANEL_ID} .better-codex-agent-card-action:hover { color: #27272a; background: #f1f1f2; }
+        #\${PANEL_ID} .better-codex-agent-card-action.is-danger:hover { color: var(--bc-danger); background: #fff1f1; }
+        #\${PANEL_ID} .better-codex-agent-card-action:active, #\${PANEL_ID} .better-codex-button:active { transform: scale(.96); }
+        #\${PANEL_ID} .better-codex-agents-empty { max-width: 460px; margin: 12vh auto 0; text-align: center; }
+        #\${PANEL_ID} .better-codex-agents-empty-icon { display: inline-flex; width: 48px; height: 48px; align-items: center; justify-content: center; border: 1px solid var(--bc-border); border-radius: 14px; color: #52525b; background: #fff; box-shadow: 0 1px 3px rgba(15,23,42,.08); }
+        #\${PANEL_ID} .better-codex-agents-empty strong { display: block; margin-top: 14px; color: #27272a; font-size: 14px; }
+        #\${PANEL_ID} .better-codex-agents-empty p { margin: 6px 0 14px; color: var(--bc-muted); font-size: 12px; line-height: 1.6; }
+        #better-codex-agent-dialog { position: fixed; inset: 0; box-sizing: border-box; width: min(720px,calc(100vw - 40px)); height: min(86vh,760px); margin: auto; overflow: hidden; border: 1px solid #dedee2; border-radius: 14px; color: #27272a; background: #f8f8f9; padding: 0; box-shadow: 0 24px 64px rgba(15,23,42,.18),0 4px 14px rgba(15,23,42,.08); font-family: Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+        #better-codex-agent-dialog::backdrop { background: rgba(24,24,27,.22); backdrop-filter: blur(4px); }
+        #better-codex-agent-dialog form { display: flex; height: 100%; min-height: 0; flex-direction: column; }
+        #better-codex-agent-dialog .better-codex-agent-dialog-head { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; border-bottom: 1px solid #e4e4e7; background: #fff; padding: 15px 18px; }
+        #better-codex-agent-dialog .better-codex-agent-dialog-head strong { display: block; font-size: 14px; font-weight: 650; }
+        #better-codex-agent-dialog .better-codex-agent-dialog-head span { display: block; margin-top: 3px; color: #71717a; font-size: 11px; }
+        #better-codex-agent-dialog .better-codex-agent-dialog-body { min-height: 0; flex: 1; overflow-y: auto; padding: 20px; }
+        #better-codex-agent-dialog .better-codex-agent-section { max-width: 620px; margin: 0 auto 22px; }
+        #better-codex-agent-dialog .better-codex-agent-section-title { margin: 0 0 9px 2px; }
+        #better-codex-agent-dialog .better-codex-agent-section-title strong { display: block; font-size: 12px; font-weight: 650; }
+        #better-codex-agent-dialog .better-codex-agent-section-title span { display: block; margin-top: 2px; color: #71717a; font-size: 10.5px; }
+        #better-codex-agent-dialog .better-codex-agent-settings { overflow: hidden; border: 1px solid #e2e2e5; border-radius: 11px; background: #fff; box-shadow: 0 1px 3px rgba(15,23,42,.06); }
+        #better-codex-agent-dialog .better-codex-agent-field { display: grid; grid-template-columns: 132px minmax(0,1fr); gap: 16px; align-items: center; padding: 13px 15px; }
+        #better-codex-agent-dialog .better-codex-agent-field + .better-codex-agent-field { border-top: 1px solid #ededee; }
+        #better-codex-agent-dialog .better-codex-agent-field.is-top { align-items: start; }
+        #better-codex-agent-dialog .better-codex-agent-field > label { padding-top: 7px; color: #52525b; font-size: 11px; font-weight: 550; }
+        #better-codex-agent-dialog input, #better-codex-agent-dialog textarea, #better-codex-agent-dialog select { box-sizing: border-box; width: 100%; border: 1px solid #dedee2; border-radius: 7px; color: #27272a; background: #fff; padding: 8px 10px; font: inherit; font-size: 12px; outline: none; }
+        #better-codex-agent-dialog input:focus, #better-codex-agent-dialog textarea:focus, #better-codex-agent-dialog select:focus { border-color: #a1a1aa; box-shadow: 0 0 0 2px rgba(24,24,27,.06); }
+        #better-codex-agent-dialog textarea { min-height: 74px; line-height: 1.55; resize: vertical; }
+        #better-codex-agent-dialog textarea[name="instructions"] { min-height: 190px; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; font-size: 11px; }
+        #better-codex-agent-dialog .better-codex-agent-execution { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 15px; }
+        #better-codex-agent-dialog .better-codex-agent-execution label { display: block; margin-bottom: 6px; color: #52525b; font-size: 11px; font-weight: 550; }
+        #better-codex-agent-dialog .better-codex-agent-dialog-error { max-width: 620px; margin: 0 auto 8px; color: var(--bc-danger,#e5484d); font-size: 11px; }
+        #better-codex-agent-dialog .better-codex-agent-dialog-footer { display: flex; min-height: 58px; flex: 0 0 auto; align-items: center; justify-content: flex-end; gap: 8px; border-top: 1px solid #e4e4e7; background: #fff; padding: 0 18px; }
+        #better-codex-agent-dialog .better-codex-button, #better-codex-agent-dialog .better-codex-submit { display: inline-flex; min-height: 30px; align-items: center; justify-content: center; border-radius: 7px; padding: 0 12px; font: inherit; font-size: 11px; cursor: pointer; }
+        #better-codex-agent-dialog .better-codex-button { border: 1px solid #dedee2; color: #52525b; background: #fff; }
+        #better-codex-agent-dialog .better-codex-submit { min-width: 92px; border: 1px solid #27272a; color: #fff; background: #27272a; font-weight: 600; }
+        #better-codex-agent-dialog .better-codex-button:active, #better-codex-agent-dialog .better-codex-submit:active { transform: scale(.96); }
+        #better-codex-agent-dialog .better-codex-submit:disabled { opacity: .55; cursor: not-allowed; }
+        @media (max-width: 640px) { #better-codex-agent-dialog .better-codex-agent-field { grid-template-columns: 1fr; gap: 5px; } #better-codex-agent-dialog .better-codex-agent-field > label { padding-top: 0; } #better-codex-agent-dialog .better-codex-agent-execution { grid-template-columns: 1fr; } }
         #better-codex-dialog { position: fixed; inset: 0; box-sizing: border-box; width: min(806px, calc(100vw - 48px)); height: 461px; max-height: calc(100vh - 48px); margin: auto; overflow: visible; border: 1px solid #e4e4e7; border-radius: 14px; color: #27272a; background: #fff; padding: 0; box-shadow: 0 24px 64px rgba(15,23,42,.18),0 4px 14px rgba(15,23,42,.08); font-family: Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; transition: width .3s ease,height .3s ease; }
         #better-codex-dialog[data-mode="agent"] { width: min(691px, calc(100vw - 48px)); height: min(368px, calc(100vh - 48px)); }
         #better-codex-dialog[data-expanded="true"] { width: min(1075px, calc(100vw - 48px)); height: min(84vh, 912px); }
@@ -241,24 +301,25 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       return button;
     }
 
-    function createEntry(reference) {
-      const button = nativeButton("Better Codex");
-      button.id = ENTRY_ID;
+    function createEntry(text, id, title, surface) {
+      const button = nativeButton(text);
+      button.id = id;
       button.setAttribute(OWNED, "true");
-      button.setAttribute("aria-label", "打开 Better Codex");
-      button.setAttribute("title", "Better Codex");
+      button.setAttribute("aria-label", title);
+      button.setAttribute("title", title);
       const icon = button.querySelector("svg");
       if (icon) {
         icon.setAttribute("viewBox", "0 0 24 24");
         icon.setAttribute("fill", "none");
         icon.setAttribute("stroke", "currentColor");
         icon.setAttribute("stroke-width", "1.8");
-        icon.innerHTML = '<rect x="3.5" y="4" width="17" height="16" rx="2.5"></rect><path d="M9 4v16M14.5 8h2.5M14.5 12h2.5M14.5 16h2.5"></path>';
+        icon.innerHTML = surface === "agents" ? '<rect x="4" y="7" width="16" height="12" rx="4"></rect><path d="M12 3v4M8 12h.01M16 12h.01M8 16h8"></path>' : '<rect x="3.5" y="4" width="17" height="16" rx="2.5"></rect><path d="M9 4v16M14.5 8h2.5M14.5 12h2.5M14.5 16h2.5"></path>';
       }
       button.addEventListener("click", event => {
         event.preventDefault();
         event.stopPropagation();
-        open();
+        state.surface = surface;
+        open(surface);
       });
       return button;
     }
@@ -268,10 +329,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       installStyle();
       const reference = findReferenceButton();
       if (!reference?.parentElement) return;
-      if (!entry) entry = createEntry(reference);
+      if (!entry) entry = createEntry("Better Codex", ENTRY_ID, "打开 Better Codex", "issues");
       if (entry.parentElement !== reference.parentElement || entry.previousElementSibling !== reference) reference.after(entry);
-      entry.toggleAttribute("aria-current", active);
-      if (active) entry.setAttribute("aria-current", "page");
+      if (!agentsEntry) agentsEntry = createEntry("智能体", AGENTS_ENTRY_ID, "管理智能体", "agents");
+      if (agentsEntry.parentElement !== reference.parentElement || agentsEntry.previousElementSibling !== entry) entry.after(agentsEntry);
+      entry.removeAttribute("aria-current");
+      agentsEntry.removeAttribute("aria-current");
+      if (active && state.surface === "issues") entry.setAttribute("aria-current", "page");
+      if (active && state.surface === "agents") agentsEntry.setAttribute("aria-current", "page");
     }
 
     function findMount() {
@@ -370,6 +435,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4M17 3v4M3 10h18"/>',
         user: '<circle cx="12" cy="8" r="4"/><path d="M4.5 21a7.5 7.5 0 0115 0"/>',
         userEdit: '<circle cx="10" cy="8" r="4"/><path d="M3 21a7 7 0 0111-5.7M16 18l4-4 2 2-4 4-3 1z"/>',
+        bot: '<rect x="4" y="7" width="16" height="12" rx="4"/><path d="M12 3v4M8 12h.01M16 12h.01M8 16h8"/>',
+        edit: '<path d="M4 20h4l11-11-4-4L4 16zM13.5 6.5l4 4"/>',
         chevron: '<path d="M9 5l7 7-7 7"/>',
         check: '<path d="M5 12l4 4L19 6"/>',
         circle: '<circle cx="12" cy="12" r="7"/>',
@@ -415,7 +482,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (filters.project.length && !filters.project.includes(issue.project_id)) return false;
       if (filters.label.length && !filters.label.some(value => (issue.labels || []).includes(value))) return false;
       if (filters.assignee.length) {
-        const assignee = issue.run_thread_id || issue.active_run_status ? "codex" : "none";
+        const assignee = issue.agent_enabled ? "codex" : "none";
         if (!filters.assignee.includes(assignee)) return false;
       }
       if (filters.creator.length && !filters.creator.includes("me")) return false;
@@ -623,15 +690,18 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const toolbar = document.createElement("div");
       toolbar.className = "better-codex-toolbar";
       const tabs = document.createElement("div");
-      tabs.className = "better-codex-tabs";
+      tabs.className = "better-codex-tabs better-codex-issue-only";
       for (const [view, text] of [["all", "全部"], ["member", "成员"], ["agent", "智能体"]]) {
         const button = actionButton(text);
         button.dataset.view = view;
         button.addEventListener("click", () => { state.view = view; render(); });
         tabs.append(button);
       }
+      const agentHeading = document.createElement("div");
+      agentHeading.className = "better-codex-agent-heading";
+      agentHeading.innerHTML = "<strong>智能体</strong><span>管理 Codex Profile Agent</span>";
       const actions = document.createElement("div");
-      actions.className = "better-codex-actions";
+      actions.className = "better-codex-actions better-codex-issue-only";
       const working = actionButton("0 个智能体工作中");
       working.id = "better-codex-working";
       working.classList.add("better-codex-working-chip", "is-bordered");
@@ -658,21 +728,53 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       addIssue.insertAdjacentHTML("afterbegin", icon("plus"));
       addIssue.addEventListener("click", () => openEditor());
       actions.append(error, working, search, filterWrap, addProject, addIssue);
-      toolbar.append(tabs, actions);
+      const agentActions = document.createElement("div");
+      agentActions.className = "better-codex-agent-actions";
+      const agentSearch = document.createElement("input");
+      agentSearch.className = "better-codex-search";
+      agentSearch.placeholder = "搜索智能体";
+      agentSearch.addEventListener("input", () => { state.agentSearch = agentSearch.value; renderAgents(); });
+      const addAgent = actionButton("新建智能体");
+      addAgent.classList.add("is-bordered");
+      addAgent.insertAdjacentHTML("afterbegin", icon("plus"));
+      addAgent.addEventListener("click", () => openAgentEditor());
+      agentActions.append(agentSearch, addAgent);
+      toolbar.append(tabs, agentHeading, actions, agentActions);
       const board = document.createElement("main");
       board.id = "better-codex-board";
-      board.className = "better-codex-board";
+      board.className = "better-codex-board better-codex-issue-only";
       board.addEventListener("click", onBoardClick);
       board.addEventListener("contextmenu", openIssueMenu);
       board.addEventListener("dragstart", event => event.dataTransfer?.setData("text/plain", event.target.closest("[data-issue-id]")?.dataset.issueId || ""));
       board.addEventListener("dragover", event => event.preventDefault());
       board.addEventListener("drop", onDrop);
-      section.append(toolbar, board);
+      const agents = document.createElement("main");
+      agents.id = "better-codex-agents";
+      agents.className = "better-codex-agents";
+      agents.addEventListener("click", onAgentsClick);
+      section.append(toolbar, board, agents);
       return section;
+    }
+
+    function renderAgents() {
+      const container = panel?.querySelector("#better-codex-agents");
+      if (!container) return;
+      const query = state.agentSearch.trim().toLowerCase();
+      const agents = state.agents.filter(agent => !query || [agent.name, agent.description, agent.instructions, agent.model].some(value => String(value || "").toLowerCase().includes(query)));
+      if (!agents.length) {
+        container.innerHTML = '<div class="better-codex-agents-empty"><span class="better-codex-agents-empty-icon">' + icon("bot", "") + '</span><strong>' + (query ? "没有匹配的智能体" : "创建第一个智能体") + '</strong><p>' + (query ? "换一个关键词试试。" : "配置名称、职责指令和模型等级，Codex 会将它注册为可协作的 Profile Agent。") + '</p>' + (query ? "" : '<button class="better-codex-button is-bordered" type="button" data-agent-create>' + icon("plus") + '新建智能体</button>') + '</div>';
+        return;
+      }
+      container.innerHTML = '<div class="better-codex-agent-grid">' + agents.map(agent => {
+        const initial = Array.from(agent.name.trim())[0] || "AI";
+        return '<article class="better-codex-agent-card" data-agent-id="' + escapeHtml(agent.id) + '"><div class="better-codex-agent-card-head"><span class="better-codex-agent-card-avatar">' + escapeHtml(initial) + '</span><div class="better-codex-agent-card-title"><strong>' + escapeHtml(agent.name) + '</strong><span>' + escapeHtml(agent.description) + '</span></div></div><div class="better-codex-agent-card-instructions">' + escapeHtml(agent.instructions) + '</div><div class="better-codex-agent-card-meta"><span class="better-codex-chip">' + escapeHtml(agent.model) + '</span><span class="better-codex-chip">' + escapeHtml(agent.reasoning_effort) + '</span><span class="better-codex-agent-card-actions"><button class="better-codex-agent-card-action" type="button" data-agent-edit aria-label="编辑">' + icon("edit") + '</button><button class="better-codex-agent-card-action is-danger" type="button" data-agent-delete aria-label="删除">' + icon("trash") + '</button></span></div></article>';
+      }).join("") + "</div>";
     }
 
     function render() {
       if (!panel) return;
+      panel.dataset.surface = state.surface;
+      renderAgents();
       const runningCount = state.issues.filter(issue => issue.active_run_status === "running" || issue.active_run_status === "claimed").length;
       panel.querySelectorAll("[data-view]").forEach(button => button.classList.toggle("is-active", button.dataset.view === state.view));
       const working = panel.querySelector("#better-codex-working");
@@ -684,7 +786,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const filterCount = Object.values(state.filters).reduce((total, values) => total + values.length, 0);
       filterButton.innerHTML = icon("filter") + (filterCount ? filterCount + " 个筛选" : "筛选");
       filterButton.classList.toggle("is-active", filterCount > 0);
-      const visible = state.issues.filter(issue => (state.view === "all" || (state.view === "member" ? Boolean(issue.thread_id) : Boolean(issue.active_run_status))) && issueMatchesFilters(issue));
+      const visible = state.issues.filter(issue => (state.view === "all" || (state.view === "member" ? Boolean(issue.thread_id) : Boolean(issue.agent_enabled))) && issueMatchesFilters(issue));
       const project = state.projects.find(item => item.id === state.projectId);
       panel.querySelector("#better-codex-board").innerHTML = Object.entries(statusLabels).map(([status, statusLabel]) => {
         const issues = visible.filter(issue => issue.status === status);
@@ -708,11 +810,23 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       render();
     }
 
+    async function loadAgents() {
+      state.agents = await api("/api/agents");
+      render();
+    }
+
+    async function loadSurface() {
+      if (state.surface === "agents") await loadAgents();
+      else await loadIssues();
+    }
+
     async function load() {
       clearError();
       try {
         const bootstrap = await api("/api/bootstrap");
         state.projects = bootstrap.projects;
+        state.agentModels = bootstrap.agentModels || [];
+        state.agentReasoningEfforts = bootstrap.agentReasoningEfforts || [];
         const context = readContext();
         if (context.projectId) {
           let project = state.projects.find(item => item.external_id === context.projectId);
@@ -725,13 +839,76 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         } else if (!state.projects.some(item => item.id === state.projectId)) {
           state.projectId = state.projects[0]?.id || "";
         }
-        await loadIssues();
+        await loadSurface();
       } catch (error) {
         const board = panel?.querySelector("#better-codex-board");
         const message = error instanceof Error ? error.message : "无法连接 Better Codex Runtime";
         showError(message);
         if (board) board.innerHTML = '<div class="better-codex-empty">' + escapeHtml(message) + " · 点击刷新重试</div>";
       }
+    }
+
+    function openAgentEditor(agent = null) {
+      const dialog = document.createElement("dialog");
+      dialog.id = "better-codex-agent-dialog";
+      dialog.setAttribute(OWNED, "true");
+      const modelOptions = state.agentModels.map(value => '<option value="' + escapeHtml(value) + '">' + escapeHtml(value) + "</option>").join("");
+      const effortOptions = state.agentReasoningEfforts.map(value => '<option value="' + escapeHtml(value) + '">' + escapeHtml(value) + "</option>").join("");
+      dialog.innerHTML = '<form><div class="better-codex-agent-dialog-head"><div><strong>' + (agent ? "编辑智能体" : "创建智能体") + '</strong><span>配置一个可供 Codex 调度的 Profile Agent</span></div><button class="better-codex-agent-card-action" type="button" data-agent-close aria-label="关闭">' + icon("close") + '</button></div><div class="better-codex-agent-dialog-body"><section class="better-codex-agent-section"><div class="better-codex-agent-section-title"><strong>身份</strong><span>帮助主智能体理解它是谁，以及适合承担什么工作。</span></div><div class="better-codex-agent-settings"><div class="better-codex-agent-field"><label for="better-codex-agent-name">名称</label><input id="better-codex-agent-name" name="name" maxlength="80" autocomplete="off" placeholder="例如：前端工程师" required></div><div class="better-codex-agent-field is-top"><label for="better-codex-agent-description">描述</label><textarea id="better-codex-agent-description" name="description" maxlength="500" rows="3" placeholder="简要说明这个智能体擅长什么，以及何时应调用它" required></textarea></div></div></section><section class="better-codex-agent-section"><div class="better-codex-agent-section-title"><strong>行为</strong><span>这些指令会作为 developer instructions 注入智能体上下文。</span></div><div class="better-codex-agent-settings"><div class="better-codex-agent-field is-top"><label for="better-codex-agent-instructions">指令</label><textarea id="better-codex-agent-instructions" name="instructions" placeholder="定义职责、工作方式、输出要求和边界" required></textarea></div></div></section><section class="better-codex-agent-section"><div class="better-codex-agent-section-title"><strong>执行</strong><span>选择该智能体使用的模型和推理等级。</span></div><div class="better-codex-agent-settings"><div class="better-codex-agent-execution"><div><label for="better-codex-agent-model">模型</label><select id="better-codex-agent-model" name="model">' + modelOptions + '</select></div><div><label for="better-codex-agent-effort">推理等级</label><select id="better-codex-agent-effort" name="reasoning_effort">' + effortOptions + '</select></div></div></div></section><div class="better-codex-agent-dialog-error" hidden></div></div><div class="better-codex-agent-dialog-footer"><button class="better-codex-button" type="button" data-agent-close>取消</button><button class="better-codex-submit" type="submit">' + (agent ? "保存修改" : "创建智能体") + "</button></div></form>";
+      document.body.appendChild(dialog);
+      const form = dialog.querySelector("form");
+      form.elements.name.value = agent?.name || "";
+      form.elements.description.value = agent?.description || "";
+      form.elements.instructions.value = agent?.instructions || "";
+      form.elements.model.value = agent?.model || (state.agentModels.includes("gpt-5.3-codex-spark") ? "gpt-5.3-codex-spark" : state.agentModels[0] || "");
+      form.elements.reasoning_effort.value = agent?.reasoning_effort || (state.agentReasoningEfforts.includes("medium") ? "medium" : state.agentReasoningEfforts[0] || "");
+      dialog.querySelectorAll("[data-agent-close]").forEach(button => button.addEventListener("click", () => dialog.close()));
+      form.addEventListener("submit", event => {
+        event.preventDefault();
+        void perform(async () => {
+          const submit = form.querySelector('[type="submit"]');
+          const error = form.querySelector(".better-codex-agent-dialog-error");
+          submit.disabled = true;
+          error.hidden = true;
+          try {
+            const body = {
+              name: form.elements.name.value,
+              description: form.elements.description.value,
+              instructions: form.elements.instructions.value,
+              model: form.elements.model.value,
+              reasoning_effort: form.elements.reasoning_effort.value,
+              ...(agent ? { version: agent.version } : {})
+            };
+            await api(agent ? "/api/agents/" + encodeURIComponent(agent.id) : "/api/agents", { method: agent ? "PATCH" : "POST", body: JSON.stringify(body) });
+            await loadAgents();
+            dialog.close();
+          } catch (caught) {
+            error.textContent = caught instanceof Error ? caught.message : "保存失败";
+            error.hidden = false;
+            submit.disabled = false;
+          }
+        });
+      });
+      dialog.addEventListener("close", () => dialog.remove(), { once: true });
+      dialog.showModal();
+      form.elements.name.focus();
+    }
+
+    function onAgentsClick(event) {
+      if (event.target.closest("[data-agent-create]")) return openAgentEditor();
+      const card = event.target.closest("[data-agent-id]");
+      if (!card) return;
+      const agent = state.agents.find(item => item.id === card.dataset.agentId);
+      if (!agent) return;
+      if (event.target.closest("[data-agent-delete]")) {
+        if (!confirm('确定删除智能体“' + agent.name + '”吗？')) return;
+        void perform(async () => {
+          await api("/api/agents/" + encodeURIComponent(agent.id), { method: "DELETE", body: JSON.stringify({ version: agent.version }) });
+          await loadAgents();
+        });
+        return;
+      }
+      if (event.target.closest("[data-agent-edit]") || event.target === card) openAgentEditor(agent);
     }
 
     function openNativeProjectEditor() {
@@ -793,7 +970,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (draft.mode === "agent") return '<div class="better-codex-dialog-properties">' + projectChip + '</div>';
         const statuses = Object.entries(statusLabels).map(([value, text]) => '<option value="' + value + '"' + (draft.status === value ? " selected" : "") + '>' + text + '</option>').join("");
         const priorities = Object.entries(priorityLabels).map(([value, text]) => '<option value="' + value + '"' + (draft.priority === value ? " selected" : "") + '>' + (value === "none" ? "无优先级" : text + "优先级") + '</option>').join("");
-        return '<div class="better-codex-dialog-properties"><label class="better-codex-property">' + statusIcon(draft.status) + '<select name="status" aria-label="状态">' + statuses + '</select></label><label class="better-codex-property">' + priorityIcon(draft.priority) + '<select name="priority" aria-label="优先级">' + priorities + '</select></label><span class="better-codex-property"><span class="better-codex-agent-avatar">AI</span><span>Codex</span></span><label class="better-codex-property">' + icon("tag") + '<input name="labels" value="' + escapeHtml(draft.labels) + '" placeholder="添加标签" aria-label="标签"></label>' + projectChip + '</div>';
+        const agentChip = issue?.agent_enabled ? '<span class="better-codex-property"><span class="better-codex-agent-avatar">AI</span><span>Codex</span></span>' : "";
+        return '<div class="better-codex-dialog-properties"><label class="better-codex-property">' + statusIcon(draft.status) + '<select name="status" aria-label="状态">' + statuses + '</select></label><label class="better-codex-property">' + priorityIcon(draft.priority) + '<select name="priority" aria-label="优先级">' + priorities + '</select></label>' + agentChip + '<label class="better-codex-property">' + icon("tag") + '<input name="labels" value="' + escapeHtml(draft.labels) + '" placeholder="添加标签" aria-label="标签"></label>' + projectChip + '</div>';
       }
 
       function footer() {
@@ -809,9 +987,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         dialog.dataset.expanded = String(draft.expanded);
         if (draft.mode === "agent") {
           dialog.innerHTML = '<form>' + header() + '<div class="better-codex-agent-picker"><span>创建者</span><strong><span class="better-codex-agent-avatar">AI</span>Codex</strong></div><textarea class="better-codex-dialog-editor" name="prompt" placeholder="告诉智能体要做什么，例如：&quot;修复项目里任务运行状态不可见的问题&quot;">' + escapeHtml(draft.prompt) + '</textarea>' + propertyRows() + '<div class="better-codex-dialog-error" hidden></div>' + footer() + '</form>';
+          dialog.querySelector(".better-codex-dialog-properties")?.insertAdjacentHTML("beforebegin", '<div class="better-codex-run-hint"><span class="better-codex-agent-avatar">AI</span><span>创建后 Codex 将自动开始工作。</span></div>');
         } else {
-          const hint = draft.status === "todo" ? '<div class="better-codex-run-hint"><span class="better-codex-agent-avatar">AI</span><span>创建后 Codex 将自动开始工作。</span></div>' : '<div class="better-codex-run-hint" hidden></div>';
-          dialog.innerHTML = '<form>' + header() + '<input class="better-codex-manual-title" name="title" maxlength="500" placeholder="任务标题" value="' + escapeHtml(draft.title) + '"><textarea class="better-codex-dialog-editor" name="description" placeholder="添加描述...">' + escapeHtml(draft.description) + '</textarea>' + hint + propertyRows() + '<div class="better-codex-dialog-error" hidden></div>' + footer() + '</form>';
+          dialog.innerHTML = '<form>' + header() + '<input class="better-codex-manual-title" name="title" maxlength="500" placeholder="任务标题" value="' + escapeHtml(draft.title) + '"><textarea class="better-codex-dialog-editor" name="description" placeholder="添加描述...">' + escapeHtml(draft.description) + '</textarea>' + propertyRows() + '<div class="better-codex-dialog-error" hidden></div>' + footer() + '</form>';
         }
         const submit = dialog.querySelector(".better-codex-submit");
         const content = dialog.querySelector(draft.mode === "agent" ? '[name="prompt"]' : '[name="title"]');
@@ -905,7 +1083,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             priority: draft.priority,
             labels: draft.labels.split(/[,，]/).map(value => value.trim()).filter(Boolean),
             thread_id: context.threadId || issue?.thread_id || "",
-            workspace_path: state.projects.find(item => item.id === draft.projectId)?.workspace_path || context.workspacePath
+            workspace_path: state.projects.find(item => item.id === draft.projectId)?.workspace_path || context.workspacePath,
+            agent_enabled: issue ? issue.agent_enabled : draft.mode === "agent"
           };
           if (issue) await api("/api/issues/" + encodeURIComponent(issue.id), { method: "PATCH", body: JSON.stringify({ ...body, version: issue.version }) });
           else {
@@ -991,13 +1170,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       document.documentElement.removeAttribute("data-better-codex-open");
     }
 
-    function open() {
+    function open(surface = state.surface) {
       if (destroyed) return;
+      state.surface = surface;
       active = true;
       ensureEntry();
       mountPanel();
       void load();
-      if (pollTimer === null) pollTimer = setInterval(() => { if (active) void perform(loadIssues); }, 3000);
+      if (pollTimer === null) pollTimer = setInterval(() => { if (active) void perform(loadSurface); }, 3000);
     }
 
     function close() {
@@ -1036,7 +1216,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     function onClick(event) {
       if (!active) return;
       const target = event.target?.closest?.("button,a,[role='button']," + SELECTORS.threadRow);
-      if (!target || target === entry || target.closest("#" + PANEL_ID) || target.closest("#better-codex-dialog")) return;
+      if (!target || target === entry || target === agentsEntry || target.closest("#" + PANEL_ID) || target.closest("#better-codex-dialog") || target.closest("#better-codex-agent-dialog")) return;
       if (target.closest(SELECTORS.sidebarNavigation)) close();
     }
 
