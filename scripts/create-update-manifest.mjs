@@ -6,6 +6,7 @@ import { bundledCompatibility } from "../dist/compatibility.js";
 const output = resolve(process.argv[2] || "release");
 const tag = process.env.GITHUB_REF_NAME || `v${bundledCompatibility.minimumCoreVersion}`;
 const repository = process.env.GITHUB_REPOSITORY || "Ericwong5021/better-codex";
+const releaseBaseUrl = process.env.BETTER_CODEX_RELEASE_BASE_URL?.replace(/\/$/, "") || `https://github.com/${repository}/releases/download/${tag}`;
 const channel = process.env.BETTER_CODEX_UPDATE_CHANNEL || "stable";
 const privatePem = process.env.BETTER_CODEX_UPDATE_PRIVATE_KEY?.replace(/\\n/g, "\n");
 if (!privatePem) throw new Error("update_private_key_required");
@@ -18,7 +19,7 @@ const stableJson = value => Array.isArray(value)
     : JSON.stringify(value);
 
 const digest = content => createHash("sha256").update(content).digest("hex");
-const releaseUrl = name => `https://github.com/${repository}/releases/download/${tag}/${name}`;
+const releaseUrl = name => `${releaseBaseUrl}/${name}`;
 
 await mkdir(output, { recursive: true });
 const compatibilityName = `better-codex-compatibility-${bundledCompatibility.version}.json`;

@@ -15,6 +15,7 @@ jobs:
         runner:
           - macos-15
           - macos-15-intel
+          - windows-2025
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -26,11 +27,16 @@ jobs:
       - run: |
           version="$(node -p "require('./package.json').version")"
           test "v$version" = "$GITHUB_REF_NAME"
+        shell: bash
       - run: npm run package:binary
+        env:
+          BETTER_CODEX_REQUIRE_SIGNING: "0"
       - uses: actions/upload-artifact@v4
         with:
           name: better-codex-${{ matrix.runner }}
-          path: release/*
+          path: |
+            release/better-codex-cli-*
+            release/better-codex-core-*
 
   release:
     needs: package
@@ -50,7 +56,7 @@ jobs:
       - env:
           BETTER_CODEX_UPDATE_PRIVATE_KEY: ${{ secrets.BETTER_CODEX_UPDATE_PRIVATE_KEY }}
         run: npm run package:update-manifest
-      - run: sha256sum release/*.tar.gz | sed 's#release/##' > release/checksums.txt
+      - run: find release -type f \( -name '*.tar.gz' -o -name '*.zip' \) -exec sha256sum {} \; | sed 's#release/##' > release/checksums.txt
       - env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "${GITHUB_REF_NAME}" release/* --generate-notes --verify-tag

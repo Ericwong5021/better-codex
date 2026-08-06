@@ -175,6 +175,24 @@ function desktopApplication() {
   return application;
 }
 
+export function codexInstallationStatus() {
+  if (process.platform === "darwin") {
+    const path = ["/Applications/Codex.app", "/Applications/ChatGPT.app"].find(existsSync) ?? null;
+    return { installed: Boolean(path), platform: process.platform, path, version: path ? desktopVersion() : null };
+  }
+  if (process.platform === "win32") {
+    try {
+      const value = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "$app = Get-AppxPackage -Name OpenAI.Codex | Select-Object -First 1; if ($app) { $app | Select-Object Name, Version, InstallLocation | ConvertTo-Json -Compress }"], { encoding: "utf8", windowsHide: true }).trim();
+      if (!value) return { installed: false, platform: process.platform, path: null, version: null };
+      const app = JSON.parse(value) as { Version?: string; InstallLocation?: string };
+      return { installed: true, platform: process.platform, path: app.InstallLocation ?? null, version: app.Version ?? desktopVersion() };
+    } catch {
+      return { installed: false, platform: process.platform, path: null, version: null };
+    }
+  }
+  return { installed: false, platform: process.platform, path: null, version: null };
+}
+
 function desktopApplicationName(application: string) {
   return basename(application, ".app");
 }

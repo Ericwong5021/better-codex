@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { readCompatibilityStatus } from "./compatibility.js";
+import { coreVersion, readCompatibilityStatus } from "./compatibility.js";
 import { issuePriorities, issueStatuses, Store, type IssuePriority, type IssueStatus } from "./db.js";
 import { runtimePort, token } from "./config.js";
 import { acquireRuntimeLock, clearRuntimeState, createRuntimeIdentity, publishRuntimeState } from "./runtime-state.js";
@@ -240,7 +240,7 @@ export function startServer() {
     if (typeof address !== "object" || !address) throw new Error("runtime_address_unavailable");
     publishRuntimeState({ ...identity, port: address.port });
     worker.start();
-    console.log(`Better Codex Runtime 0.2.0 listening on http://127.0.0.1:${address.port}`);
+    console.log(`Better Codex Runtime ${coreVersion} listening on http://127.0.0.1:${address.port}`);
   });
   const stop = () => server.close(() => {
     cleanup();

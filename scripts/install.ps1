@@ -1,0 +1,77 @@
+param(
+  [string]$Repository = "Ericwong5021/better-codex",
+  [string]$Version = "",
+  [string]$BinDirectory = "$env:LOCALAPPDATA\BetterCodex\bin",
+  [switch]$NoService
+)
+
+$ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"
+
+if (-not [Environment]::Is64BitOperatingSystem) { throw "Better Codex requires 64-bit Windows." }
+
+$codexProcesses = @(Get-Process -Name "ChatGPT", "Codex" -ErrorAction SilentlyContinue)
+if ($codexProcesses.Count -gt 0) {
+  $choice = Read-Host "Codex is currently running. Quit Codex and continue installation? [Y/n]"
+  if ($choice -and $choice -notin @("y", "Y")) {
+    Write-Output "Installation cancelled."
+    return
+  }
+  $codexProcesses | Stop-Process -Force
+  for ($attempt = 0; $attempt -lt 60; $attempt++) {
+    if (-not (Get-Process -Name "ChatGPT", "Codex" -ErrorAction SilentlyContinue)) { break }
+    Start-Sleep -Milliseconds 250
+  }
+  if (Get-Process -Name "ChatGPT", "Codex" -ErrorAction SilentlyContinue) { throw "Codex did not quit. Quit it manually and run the installer again." }
+}
+
+$workDirectory = Join-Path ([IO.Path]::GetTempPath()) ("better-codex-" + [guid]::NewGuid())
+New-Item -ItemType Directory -Path $workDirectory | Out-Null
+try {
+  if (-not $Version) {
+    $latest = Invoke-WebRequest -UseBasicParsing -Uri "https://api.github.com/repos/$Repository/releases/latest"
+    $Version = (ConvertFrom-Json $latest.Content).tag_name
+  }
+  $tag = $Version
+  $number = $tag.TrimStart("v")
+  $name = "better-codex-cli-$number-win32-amd64.zip"
+  $base = "https://github.com/$Repository/releases/download/$tag"
+  $archive = Join-Path $workDirectory $name
+  $checksums = Join-Path $workDirectory "checksums.txt"
+  $publicKey = Join-Path $workDirectory "update-public-key.pem"
+  Invoke-WebRequest -UseBasicParsing -Uri "$base/$name" -OutFile $archive
+  Invoke-WebRequest -UseBasicParsing -Uri "$base/checksums.txt" -OutFile $checksums
+  Invoke-WebRequest -UseBasicParsing -Uri "$base/update-public-key.pem" -OutFile $publicKey
+  $expected = ((Get-Content $checksums | Where-Object { $_ -match [regex]::Escape($name) }) -split "\s+")[0]
+  if (-not $expected) { throw "No checksum found for $name." }
+  $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+  if ($actual -ne $expected.ToLowerInvariant()) { throw "Checksum mismatch for $name." }
+  Expand-Archive -LiteralPath $archive -DestinationPath $workDirectory -Force
+  New-Item -ItemType Directory -Force -Path $BinDirectory | Out-Null
+  $executable = Join-Path $BinDirectory "better-codex.exe"
+  if (Test-Path $executable) {
+    & $executable disable 2>$null | Out-Null
+    & $executable service stop 2>$null | Out-Null
+    Start-Sleep -Milliseconds 800
+  }
+  Copy-Item -Force (Join-Path $workDirectory "better-codex.exe") $executable
+  $homeDirectory = Join-Path $env:USERPROFILE ".better-codex"
+  New-Item -ItemType Directory -Force -Path $homeDirectory | Out-Null
+  Copy-Item -Force $publicKey (Join-Path $homeDirectory "update-public-key.pem")
+  $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+  if (-not (($userPath -split ";") -contains $BinDirectory)) {
+    [Environment]::SetEnvironmentVariable("Path", (($userPath.TrimEnd(";") + ";" + $BinDirectory).TrimStart(";")), "User")
+  }
+  & $executable version
+  if ($LASTEXITCODE -ne 0) { throw "Better Codex executable verification failed." }
+  if (-not $NoService) {
+    & $executable setup --yes
+    if ($LASTEXITCODE -ne 0) { throw "Better Codex setup failed." }
+    $doctor = (& $executable doctor | Out-String | ConvertFrom-Json)
+    $doctor | ConvertTo-Json -Depth 8
+    if (-not $doctor.ok) { throw "Better Codex installation verification failed." }
+  }
+  Write-Output "Installed Better Codex to $executable"
+} finally {
+  Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $workDirectory
+}

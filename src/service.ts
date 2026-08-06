@@ -7,6 +7,7 @@ import { cdpPort, ensureDirectories, logPath, runtimeLogPath, betterCodexHome } 
 
 const label = "com.better-codex.runtime";
 const legacyLabel = "com.better-codex.gateway";
+const windowsTask = "Better Codex Runtime";
 export const launchAgentPath = join(homedir(), "Library", "LaunchAgents", `${label}.plist`);
 const legacyLaunchAgentPath = join(homedir(), "Library", "LaunchAgents", `${legacyLabel}.plist`);
 
@@ -16,6 +17,14 @@ function xml(value: string) {
 
 function command() {
   return isSea() ? [process.execPath, "runtime"] : [process.execPath, ...process.execArgv, process.argv[1], "runtime"];
+}
+
+function quoteWindows(value: string) {
+  return `"${value.replace(/"/g, '\\"')}"`;
+}
+
+function windowsCommand() {
+  return command().map(quoteWindows).join(" ");
 }
 
 export function servicePlist() {
@@ -50,6 +59,16 @@ function launchctl(args: string[], ignoreFailure = false) {
   }
 }
 
+function schtasks(args: string[], ignoreFailure = false) {
+  try {
+    return execFileSync("schtasks.exe", args, { encoding: "utf8", windowsHide: true, stdio: ["ignore", "pipe", "pipe"] }).trim();
+  } catch (error) {
+    if (ignoreFailure) return "";
+    const message = error && typeof error === "object" && "stderr" in error ? String(error.stderr).trim() : "windows_service_failed";
+    throw new Error(message || "windows_service_failed");
+  }
+}
+
 function domain() {
   const uid = process.getuid?.();
   if (uid === undefined) throw new Error("service_install_requires_macos");
@@ -57,8 +76,13 @@ function domain() {
 }
 
 export function installService() {
-  if (process.platform !== "darwin") throw new Error("service_install_requires_macos");
   ensureDirectories();
+  if (process.platform === "win32") {
+    schtasks(["/Create", "/TN", windowsTask, "/TR", windowsCommand(), "/SC", "ONLOGON", "/RL", "LIMITED", "/F"]);
+    schtasks(["/Run", "/TN", windowsTask]);
+    return { installed: true, label: windowsTask, path: null };
+  }
+  if (process.platform !== "darwin") throw new Error("service_install_unsupported");
   mkdirSync(join(homedir(), "Library", "LaunchAgents"), { recursive: true });
   launchctl(["bootout", domain(), legacyLaunchAgentPath], true);
   if (existsSync(legacyLaunchAgentPath)) unlinkSync(legacyLaunchAgentPath);
@@ -70,6 +94,12 @@ export function installService() {
 }
 
 export function uninstallService() {
+  if (process.platform === "win32") {
+    schtasks(["/End", "/TN", windowsTask], true);
+    schtasks(["/Delete", "/TN", windowsTask, "/F"], true);
+    return { installed: false, label: windowsTask, path: null };
+  }
+  if (process.platform !== "darwin") throw new Error("service_uninstall_unsupported");
   launchctl(["bootout", domain(), launchAgentPath], true);
   launchctl(["bootout", domain(), legacyLaunchAgentPath], true);
   if (existsSync(launchAgentPath)) unlinkSync(launchAgentPath);
@@ -78,6 +108,11 @@ export function uninstallService() {
 }
 
 export function startService() {
+  if (process.platform === "win32") {
+    if (!serviceStatus().installed) throw new Error("service_not_installed");
+    schtasks(["/Run", "/TN", windowsTask]);
+    return { started: true, label: windowsTask };
+  }
   if (!existsSync(launchAgentPath)) throw new Error("service_not_installed");
   launchctl(["bootstrap", domain(), launchAgentPath], true);
   launchctl(["kickstart", "-k", `${domain()}/${label}`]);
@@ -85,6 +120,10 @@ export function startService() {
 }
 
 export function stopService() {
+  if (process.platform === "win32") {
+    schtasks(["/End", "/TN", windowsTask], true);
+    return { stopped: true, label: windowsTask };
+  }
   launchctl(["bootout", domain(), launchAgentPath], true);
   return { stopped: true, label };
 }
@@ -95,6 +134,13 @@ export function restartService() {
 }
 
 export function serviceStatus() {
+  if (process.platform === "win32") {
+    const output = schtasks(["/Query", "/TN", windowsTask, "/FO", "LIST", "/V"], true);
+    const installed = Boolean(output);
+    const running = /(?:Status|状态):\s*(?:Running|正在运行)/i.test(output);
+    return { installed, running, pid: null, label: windowsTask, path: null };
+  }
+  if (process.platform !== "darwin") return { installed: false, running: false, pid: null, label, path: null };
   const installed = existsSync(launchAgentPath);
   const output = installed ? launchctl(["print", `${domain()}/${label}`], true) : "";
   const pid = output.match(/\bpid = (\d+)/)?.[1];

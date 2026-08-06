@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { closeSync, existsSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { ensureDirectories, runtimeLockPath, runtimeStatePath } from "./config.js";
+import { coreVersion } from "./compatibility.js";
 
 export type RuntimeState = {
   pid: number;
@@ -38,7 +39,7 @@ export function createRuntimeIdentity() {
   return {
     pid: process.pid,
     instanceId: randomUUID(),
-    version: "0.2.0",
+    version: coreVersion,
     startedAt: new Date().toISOString(),
   };
 }

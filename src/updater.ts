@@ -1,6 +1,7 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash, verify } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { isSea } from "node:sea";
 import { activeCompatibility, bundledCompatibility, compareVersions, coreVersion, readCompatibilityPointer, rollbackCompatibility, validateCompatibility, writeCompatibilityPointer } from "./compatibility.js";
@@ -130,6 +131,41 @@ function readRuntimePointer() {
   }
 }
 
+async function validateCoreRuntime(executable: string) {
+  const home = mkdtempSync(join(tmpdir(), "better-codex-update-"));
+  const child = spawn(executable, ["runtime"], { stdio: "ignore", windowsHide: true, env: { ...process.env, BETTER_CODEX_HOME: home, BETTER_CODEX_RUNTIME_PORT: "0", BETTER_CODEX_DISABLE_DELEGATION: "1" } });
+  try {
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 200));
+      if (child.exitCode !== null) throw new Error("core_health_validation_failed");
+      try {
+        const state = JSON.parse(readFileSync(join(home, "run", "runtime.json"), "utf8")) as { port?: number; instanceId?: string };
+        if (!state.port || !state.instanceId) continue;
+        const response = await fetch(`http://127.0.0.1:${state.port}/health`, { signal: AbortSignal.timeout(1000) });
+        const health = await response.json() as { ok?: boolean; instanceId?: string };
+        if (response.ok && health.ok && health.instanceId === state.instanceId) return;
+      } catch {}
+    }
+    throw new Error("core_health_validation_failed");
+  } finally {
+    child.kill("SIGTERM");
+    try { rmSync(home, { recursive: true, force: true }); } catch {}
+  }
+}
+
+function rollbackCorePointer(pointer: RuntimePointer) {
+  if (!pointer.previous || pointer.previous === coreVersion) {
+    if (existsSync(runtimeCurrentPath)) unlinkSync(runtimeCurrentPath);
+    return;
+  }
+  const executable = join(runtimeVersionsPath, pointer.previous, process.platform === "win32" ? "better-codex.exe" : "better-codex");
+  if (!existsSync(executable)) {
+    if (existsSync(runtimeCurrentPath)) unlinkSync(runtimeCurrentPath);
+    return;
+  }
+  writeJsonAtomic(runtimeCurrentPath, { current: pointer.previous, previous: coreVersion, executable, updatedAt: new Date().toISOString() } satisfies RuntimePointer);
+}
+
 export function activeVersions() {
   return {
     core: coreVersion,
@@ -194,13 +230,14 @@ export async function updateCore(payload?: UpdatePayload, channel: "stable" | "p
   const directory = join(runtimeVersionsPath, manifest.core.version);
   mkdirSync(directory, { recursive: true });
   const executable = join(directory, process.platform === "win32" ? "better-codex.exe" : "better-codex");
-  const temporary = `${executable}.${process.pid}.tmp`;
+  const temporary = process.platform === "win32" ? `${executable}.${process.pid}.tmp.exe` : `${executable}.${process.pid}.tmp`;
   writeFileSync(temporary, content, { mode: 0o755 });
   if (process.platform !== "win32") chmodSync(temporary, 0o755);
   const validation = spawnSync(temporary, ["version", "--json"], { encoding: "utf8", windowsHide: true, timeout: 15000, env: { ...process.env, BETTER_CODEX_DISABLE_DELEGATION: "1" } });
   if (validation.status !== 0) throw new Error("core_validation_failed");
   const version = JSON.parse(validation.stdout) as { core?: string };
   if (version.core !== manifest.core.version) throw new Error("core_version_mismatch");
+  await validateCoreRuntime(temporary);
   renameSync(temporary, executable);
   const previous = readRuntimePointer();
   writeJsonAtomic(runtimeCurrentPath, { current: manifest.core.version, previous: previous?.current ?? coreVersion, executable, updatedAt: new Date().toISOString() } satisfies RuntimePointer);
@@ -228,9 +265,9 @@ export function maybeDelegateToActiveCore() {
     unlinkSync(runtimeCurrentPath);
     return null;
   }
-  const child = spawnSync(pointer.executable, process.argv.slice(1), { stdio: "inherit", windowsHide: true, env: { ...process.env, BETTER_CODEX_LAUNCHER_PATH: process.env.BETTER_CODEX_LAUNCHER_PATH ?? process.execPath } });
+  const child = spawnSync(pointer.executable, process.argv.slice(2), { stdio: "inherit", windowsHide: true, env: { ...process.env, BETTER_CODEX_LAUNCHER_PATH: process.env.BETTER_CODEX_LAUNCHER_PATH ?? process.execPath } });
   if (child.error) {
-    unlinkSync(runtimeCurrentPath);
+    rollbackCorePointer(pointer);
     return null;
   }
   return child.status ?? 1;

@@ -23,6 +23,38 @@ case "$(uname -m)" in
   *) echo "Unsupported architecture: $(uname -m)" >&2; exit 1 ;;
 esac
 
+CODEX_APP=""
+for CANDIDATE in Codex ChatGPT; do
+  if /usr/bin/pgrep -x "$CANDIDATE" >/dev/null 2>&1; then
+    CODEX_APP="$CANDIDATE"
+    break
+  fi
+done
+
+if [ -n "$CODEX_APP" ]; then
+  if [ ! -r /dev/tty ]; then
+    echo "Codex is running. Quit it completely and run the installer again." >&2
+    exit 1
+  fi
+  printf 'Codex is currently running. Quit Codex and continue installation? [Y/n] ' >/dev/tty
+  read -r CHOICE </dev/tty
+  if [ -n "$CHOICE" ] && [ "$CHOICE" != "y" ] && [ "$CHOICE" != "Y" ]; then
+    echo "Installation cancelled."
+    exit 0
+  fi
+  /usr/bin/osascript -e "tell application \"$CODEX_APP\" to quit" >/dev/null 2>&1 || true
+  for ATTEMPT in $(seq 1 40); do
+    if ! /usr/bin/pgrep -x "$CODEX_APP" >/dev/null 2>&1; then
+      break
+    fi
+    sleep 0.25
+  done
+  if /usr/bin/pgrep -x "$CODEX_APP" >/dev/null 2>&1; then
+    echo "Codex did not quit. Quit it manually and run the installer again." >&2
+    exit 1
+  fi
+fi
+
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT
 
@@ -73,6 +105,7 @@ fi
 
 "$BIN_DIR/better-codex" version
 if [ "$WITH_SERVICE" = "1" ]; then
-  "$BIN_DIR/better-codex" service install
+  "$BIN_DIR/better-codex" setup --yes
+  "$BIN_DIR/better-codex" doctor
 fi
 printf 'Installed Better Codex to %s\n' "$BIN_DIR/better-codex"

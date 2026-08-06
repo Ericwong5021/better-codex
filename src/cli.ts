@@ -1,16 +1,22 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { closeSync, existsSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { accessSync, closeSync, constants, existsSync, openSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { isSea } from "node:sea";
+import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
-import { cdpEject, cdpInject, cdpOpenThread, cdpRestartAndInject, cdpStatus, watchInjection } from "./cdp.js";
+import { cdpEject, cdpInject, cdpOpenThread, cdpRestartAndInject, cdpStatus, codexInstallationStatus, watchInjection } from "./cdp.js";
 import {
   cdpPort,
+  databasePath,
   ensureDirectories,
   injectorLogPath,
   injectorPidPath,
   betterCodexHome,
+  logPath,
+  managedRuntimePath,
+  runPath,
   runtimeLogPath,
+  updatePublicKeyPath,
   token,
 } from "./config.js";
 import { readRuntimeState } from "./runtime-state.js";
@@ -20,6 +26,16 @@ import { activeVersions, checkForUpdates, maybeDelegateToActiveCore, rollbackCom
 
 function accessToken() {
   return token();
+}
+
+function commandArguments() {
+  const values = process.argv.slice(2);
+  const launcher = process.env.BETTER_CODEX_LAUNCHER_PATH;
+  const canonical = (value: string) => {
+    try { return realpathSync(value); } catch { return resolve(value); }
+  };
+  if (launcher && values[0] && canonical(values[0]) === canonical(launcher)) values.shift();
+  return values;
 }
 
 function option(args: string[], name: string) {
@@ -84,7 +100,7 @@ async function ensureRuntime() {
   try {
     return await health();
   } catch {
-    if (process.platform === "darwin" && serviceStatus().installed) startService();
+    if (serviceStatus().installed) startService();
     else spawnSelf(["runtime"], runtimeLogPath);
     for (let attempt = 0; attempt < 60; attempt += 1) {
       try {
@@ -189,7 +205,7 @@ function print(value: unknown) {
 }
 
 function usage() {
-  console.log("better-codex version | update [check|compatibility|rollback] [--channel stable|preview] | setup [--yes] | enable | disable | start [--launch] | stop | status | inject [--launch] [--port N] | eject [--port N] | service install|uninstall|start|stop|restart|status|logs | project list|create | issue list|get|create|update|status|link|open");
+  console.log("better-codex version | update [check|compatibility|rollback] [--channel stable|preview] | setup [--yes] | doctor | enable | disable | start [--launch] | stop | status | uninstall | data delete [--yes] | inject [--launch] [--port N] | eject [--port N] | service install|uninstall|start|stop|restart|status|logs | project list|create | issue list|get|create|update|status|link|open");
 }
 
 async function confirmSetup() {
@@ -201,6 +217,86 @@ async function confirmSetup() {
   } finally {
     terminal.close();
   }
+}
+
+async function confirmDataDelete(paths: string[]) {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error("data_delete_requires_confirmation");
+  const terminal = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer = await terminal.question(`Permanently delete Better Codex data at ${paths.join(", ")}? [y/N] `);
+    return /^(y|yes)$/i.test(answer.trim());
+  } finally {
+    terminal.close();
+  }
+}
+
+function writable(path: string) {
+  try {
+    accessSync(path, constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function doctor() {
+  const service = serviceStatus();
+  const state = readRuntimeState();
+  let runtime: Record<string, unknown> = { ok: false, error: "runtime_unavailable" };
+  if (state) {
+    try { runtime = await health(); } catch (error) { runtime = { ok: false, error: error instanceof Error ? error.message : "runtime_unavailable" }; }
+  }
+  const database = runtime.database && typeof runtime.database === "object"
+    ? runtime.database
+    : { ok: existsSync(databasePath), path: databasePath, directoryWritable: writable(dirname(databasePath)) };
+  const codex = codexInstallationStatus();
+  const injection = await cdpStatus(cdpPort);
+  const compatibility = runtime.compatibility ?? injection.compatibility ?? null;
+  const checks = {
+    core: { ok: true, ...activeVersions(), executable: process.env.BETTER_CODEX_LAUNCHER_PATH ?? process.execPath },
+    service: { ok: service.installed, ...service },
+    runtime,
+    database,
+    codex,
+    compatibility,
+    injection,
+  };
+  return { ok: Boolean(runtime.ok) && Boolean((database as { ok?: boolean }).ok) && codex.installed && Boolean((compatibility as { compatible?: boolean } | null)?.compatible) && injection.available, checks };
+}
+
+async function uninstall() {
+  setInjectionEnabled(false);
+  await stopInjector();
+  let injection: unknown = { removed: false, reason: "cdp_unavailable" };
+  try { injection = await cdpEject(cdpPort, accessToken()); } catch {}
+  try { await request("/api/shutdown", { method: "POST" }); } catch {}
+  const service = uninstallService();
+  const programPaths = [runPath, logPath, managedRuntimePath, updatePublicKeyPath];
+  const binaries = isSea()
+    ? [...new Set([process.env.BETTER_CODEX_LAUNCHER_PATH, process.execPath].filter((value): value is string => Boolean(value)).map(value => resolve(value)))]
+    : [];
+  if (process.platform === "win32" && binaries.length > 0) {
+    const cleanup = [...programPaths, ...binaries].map(path => `Remove-Item -LiteralPath '${path.replace(/'/g, "''")}' -Recurse -Force -ErrorAction SilentlyContinue`).join("; ");
+    const command = `Start-Sleep -Milliseconds 800; ${cleanup}`;
+    const child = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", command], { detached: true, stdio: "ignore", windowsHide: true });
+    child.unref();
+  } else {
+    for (const path of programPaths) rmSync(path, { recursive: true, force: true });
+    for (const path of binaries) rmSync(path, { force: true });
+  }
+  return { uninstalled: true, service, injection, binaries, dataPreserved: [databasePath, join(dirname(databasePath), "backups")] };
+}
+
+async function deleteData(confirmed: boolean) {
+  if (readRuntimeState()) throw new Error("data_delete_requires_stopped_runtime");
+  const paths = [databasePath, `${databasePath}-wal`, `${databasePath}-shm`, join(dirname(databasePath), "backups")];
+  if (!confirmed && !(await confirmDataDelete(paths))) return { deleted: false, paths };
+  for (const path of paths) rmSync(path, { recursive: true, force: true });
+  return { deleted: true, paths };
+}
+
+function progress(stage: string, json: boolean) {
+  if (!json) console.error(stage);
 }
 
 async function issueCommand(action: string | undefined, args: string[]) {
@@ -256,7 +352,7 @@ async function issueCommand(action: string | undefined, args: string[]) {
 }
 
 async function main() {
-  const [command, action, ...args] = process.argv.slice(2);
+  const [command, action, ...args] = commandArguments();
   const delegated = maybeDelegateToActiveCore();
   if (delegated !== null) process.exit(delegated);
   if (command === "version" || command === "--version" || command === "-v") {
@@ -301,21 +397,32 @@ async function main() {
   if (command === "serve") return (await import("./server.js")).startServer();
   if (command === "watch-inject") return watchInjection(Number(action || cdpPort), accessToken());
   if (command === "setup") {
-    if (![action, ...args].includes("--yes") && !(await confirmSetup())) return print({ configured: false });
+    const values = [action, ...args].filter(Boolean) as string[];
+    const json = values.includes("--json");
+    if (!values.includes("--yes") && !(await confirmSetup())) return print({ configured: false });
+    progress("installing_runtime", json);
     setInjectionEnabled(false);
     await stopInjector();
     try {
+      try { await request("/api/shutdown", { method: "POST" }); } catch {}
+      installService();
+      progress("starting_runtime", json);
       const runtime = await ensureRuntime();
+      progress("waiting_for_codex", json);
+      if (!codexInstallationStatus().installed) throw new Error("codex_not_found");
+      progress("injecting", json);
       const injection = await cdpRestartAndInject(cdpPort, activeRuntimePort(), accessToken());
       setInjectionEnabled(true);
       const pid = await waitForInjector();
-      return print({ configured: true, runtime, injection, injectorPid: pid });
+      progress("ready", json);
+      return print({ configured: true, stages: ["installing_runtime", "starting_runtime", "waiting_for_codex", "injecting", "ready"], runtime, injection, injectorPid: pid });
     } catch (error) {
       setInjectionEnabled(false);
       await stopInjector();
       throw error;
     }
   }
+  if (command === "doctor") return print(await doctor());
   if (command === "enable") {
     setInjectionEnabled(false);
     await stopInjector();
@@ -340,6 +447,8 @@ async function main() {
     try { injection = await cdpEject(selectedPort, accessToken()); } catch {}
     return print({ enabled: false, injection });
   }
+  if (command === "uninstall") return print(await uninstall());
+  if (command === "data" && action === "delete") return print(await deleteData(args.includes("--yes")));
   if (command === "service") {
     if (action === "install") {
       try { await request("/api/shutdown", { method: "POST" }); } catch {}
@@ -419,7 +528,7 @@ async function main() {
   usage();
 }
 
-const persistentCommand = ["runtime", "serve", "watch-inject"].includes(process.argv[2]);
+const persistentCommand = ["runtime", "serve", "watch-inject"].includes(commandArguments()[0]);
 
 void main().then(() => {
   if (!persistentCommand) setImmediate(() => process.exit(0));
@@ -430,11 +539,11 @@ void main().then(() => {
 });
 
 process.once("exit", () => {
-  if (process.argv[2] === "watch-inject" && existsSync(injectorPidPath)) {
+  if (commandArguments()[0] === "watch-inject" && existsSync(injectorPidPath)) {
     const recorded = Number(readFileSync(injectorPidPath, "utf8"));
     if (recorded === process.pid) unlinkSync(injectorPidPath);
   }
 });
 
-if (["runtime", "serve"].includes(process.argv[2])) ensureDirectories();
-if (["runtime", "serve"].includes(process.argv[2])) console.log(`Better Codex home: ${betterCodexHome}`);
+if (["runtime", "serve"].includes(commandArguments()[0])) ensureDirectories();
+if (["runtime", "serve"].includes(commandArguments()[0])) console.log(`Better Codex home: ${betterCodexHome}`);
