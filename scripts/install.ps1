@@ -1,6 +1,6 @@
 param(
   [string]$Repository = "Ericwong5021/better-codex",
-  [string]$Version = "",
+  [string]$Version = "v0.3.3",
   [string]$BinDirectory = "$env:LOCALAPPDATA\BetterCodex\bin",
   [switch]$NoService
 )
@@ -34,11 +34,6 @@ if ($codexProcesses.Count -gt 0) {
 $workDirectory = Join-Path ([IO.Path]::GetTempPath()) ("better-codex-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $workDirectory | Out-Null
 try {
-  Write-Step "Resolving release version..."
-  if (-not $Version) {
-    $latest = Invoke-WebRequest -UseBasicParsing -Uri "https://api.github.com/repos/$Repository/releases/latest"
-    $Version = (ConvertFrom-Json $latest.Content).tag_name
-  }
   $tag = $Version
   $number = $tag.TrimStart("v")
   $name = "better-codex-cli-$number-win32-amd64.zip"
