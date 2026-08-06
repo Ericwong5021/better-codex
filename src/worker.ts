@@ -48,9 +48,15 @@ function sessionWorkspace(value: string | null) {
   return visit(root, 0);
 }
 
-function prompt(claim: ClaimedIssue) {
+export function issuePrompt(claim: ClaimedIssue) {
   const details = claim.issue.description.trim();
-  return `处理 Better Codex 任务 ${claim.issue.identifier}：${claim.issue.title}${details ? `\n\n${details}` : ""}\n\n请直接完成任务并验证结果。不要提交或推送代码，完成后简洁说明结果。`;
+  return `/better-codex
+
+使用 $better-codex 处理 Better Codex 任务 ${claim.issue.identifier}：${claim.issue.title}${details ? `\n\n${details}` : ""}
+
+此 Session 已由 Better Codex Issue 接管。开始前读取 Skill，结束前按实际结果同步看板状态：无法继续时移到 blocked，完成但需要用户审查时移到 in_review，圆满完成且无需审查时移到 done。通过 Skill 新建的任务必须放到 backlog。
+
+请直接完成任务并验证结果。不要提交或推送代码，完成后简洁说明结果。`;
 }
 
 export class IssueWorker {
@@ -124,10 +130,19 @@ export class IssueWorker {
       'approval_policy="on-request"',
       "-c",
       'approvals_reviewer="auto_review"',
-      prompt(claim),
+      issuePrompt(claim),
     ];
     const log = createWriteStream(join(runLogPath, `${claim.runId}.log`), { flags: "a" });
-    const child = spawn(codexPath(), args, { cwd: workspacePath, env: process.env, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(codexPath(), args, {
+      cwd: workspacePath,
+      env: {
+        ...process.env,
+        BETTER_CODEX_ISSUE_ID: claim.issue.id,
+        BETTER_CODEX_ISSUE_IDENTIFIER: claim.issue.identifier,
+        BETTER_CODEX_RUN_ID: claim.runId,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     this.active = claim;
     this.child = child;
     this.store.startRun(claim.runId, child.pid || 0);

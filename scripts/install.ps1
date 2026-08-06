@@ -74,7 +74,7 @@ if (-not [Environment]::Is64BitOperatingSystem) { throw "Better Codex requires 6
 
 $executable = Join-Path $BinDirectory "better-codex.exe"
 $codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE ".codex" }
-$skillDirectory = Join-Path $codexHome "skills\better-codex-issues"
+$skillDirectory = Join-Path $codexHome "skills\better-codex"
 $targetVersion = $Version.TrimStart("v")
 $installedVersion = Get-InstalledVersion $executable
 
@@ -135,7 +135,7 @@ try {
     Start-Sleep -Milliseconds 800
   }
   Copy-Item -Force (Join-Path $workDirectory "better-codex.exe") $executable
-  $packagedSkill = Join-Path $workDirectory "skills\better-codex-issues"
+  $packagedSkill = Join-Path $workDirectory "skills\better-codex"
   if (-not (Test-Path (Join-Path $packagedSkill "SKILL.md"))) { throw "Better Codex skill is missing from the package." }
   Write-Step "Installing Better Codex skill to $skillDirectory..."
   New-Item -ItemType Directory -Force -Path (Join-Path $skillDirectory "agents") | Out-Null

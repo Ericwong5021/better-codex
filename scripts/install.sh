@@ -4,7 +4,7 @@ set -euo pipefail
 REPO="${BETTER_CODEX_REPO:-Ericwong5021/better-codex}"
 BIN_DIR="${BETTER_CODEX_BIN_DIR:-$HOME/.local/bin}"
 CODEX_DIR="${CODEX_HOME:-$HOME/.codex}"
-SKILL_DIR="$CODEX_DIR/skills/better-codex-issues"
+SKILL_DIR="$CODEX_DIR/skills/better-codex"
 WITH_SERVICE=1
 
 if [ "${1:-}" = "--no-service" ]; then
@@ -163,14 +163,14 @@ fi
 tar -xzf "$ARCHIVE" -C "$WORK_DIR"
 mkdir -p "$BIN_DIR"
 install -m 755 "$WORK_DIR/better-codex" "$BIN_DIR/better-codex"
-if [ ! -f "$WORK_DIR/skills/better-codex-issues/SKILL.md" ]; then
+if [ ! -f "$WORK_DIR/skills/better-codex/SKILL.md" ]; then
   echo "Better Codex skill is missing from the package." >&2
   exit 1
 fi
 printf '[Better Codex] Installing Better Codex skill to %s...\n' "$SKILL_DIR"
 mkdir -p "$SKILL_DIR/agents"
-install -m 644 "$WORK_DIR/skills/better-codex-issues/SKILL.md" "$SKILL_DIR/SKILL.md"
-install -m 644 "$WORK_DIR/skills/better-codex-issues/agents/openai.yaml" "$SKILL_DIR/agents/openai.yaml"
+install -m 644 "$WORK_DIR/skills/better-codex/SKILL.md" "$SKILL_DIR/SKILL.md"
+install -m 644 "$WORK_DIR/skills/better-codex/agents/openai.yaml" "$SKILL_DIR/agents/openai.yaml"
 if [ -n "$UPDATE_PUBLIC_KEY" ]; then
   mkdir -p "$HOME/.better-codex"
   install -m 600 "$UPDATE_PUBLIC_KEY" "$HOME/.better-codex/update-public-key.pem"

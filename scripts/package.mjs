@@ -64,7 +64,7 @@ try {
   await copyFile(executable, join(output, coreName));
   await mkdir(packageRoot, { recursive: true });
   await copyFile(executable, join(packageRoot, executableName));
-  await cp(join(root, "skills", "better-codex-issues"), join(packageRoot, "skills", "better-codex-issues"), { recursive: true });
+  await cp(join(root, "skills", "better-codex"), join(packageRoot, "skills", "better-codex"), { recursive: true });
   if (platform === "win32") {
     execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `Compress-Archive -Path '${join(packageRoot, "*").replace(/'/g, "''")}' -DestinationPath '${archive.replace(/'/g, "''")}' -Force`], { stdio: "inherit" });
   } else {

@@ -336,6 +336,7 @@ async function issueCommand(action: string | undefined, args: string[]) {
         project_id: projectId,
         title,
         description: option(args, "--description") ?? "",
+        status: option(args, "--status") ?? "backlog",
         priority: option(args, "--priority") ?? "medium",
         thread_id: option(args, "--thread") ?? process.env.CODEX_THREAD_ID ?? "",
         workspace_path: option(args, "--workspace") ?? process.cwd(),
