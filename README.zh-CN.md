@@ -26,7 +26,33 @@ Better Codex 适合使用 Codex 编程、设计、研究或规划工作，并且
 
 ## 安装
 
-Better Codex 支持 macOS 和 Windows 版 Codex 桌面端。请先安装 Node.js 22.5 或更新版本，然后运行：
+Better Codex 支持 macOS 和 Windows 版 Codex 桌面端。安装脚本会下载最新版本、校验 SHA-256、安装本地运行时，并重启 Codex 完成注入。
+
+### macOS
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scripts/install.sh | bash
+```
+
+### Windows
+
+请使用 Microsoft Store 版 Codex，然后在 PowerShell 中运行：
+
+```powershell
+irm https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scripts/install.ps1 | iex
+```
+
+如果 Codex 正在运行，安装程序会询问是否退出 Codex。直接按回车或输入 `Y` 即可继续。安装完成后，Codex 会自动重启，侧边栏中会出现 Better Codex 入口。
+
+### 升级
+
+再次运行对应平台的安装命令即可升级。检测到已安装的 Better Codex 后，安装程序会优先升级现有运行时，无法直接升级时会自动执行完整安装。
+
+从 v0.3.7 开始，Better Codex 还会在后台检查签名更新。发现新版本后，Codex 右下角会显示更新提示。点击**立即更新**后，Better Codex 会完成安装并自动重启 Codex。
+
+### 从源码安装
+
+请先安装 Node.js 22.5 或更新版本，然后运行：
 
 ```bash
 git clone https://github.com/Ericwong5021/better-codex.git
@@ -36,16 +62,6 @@ npm run build
 npm link
 better-codex inject --launch
 ```
-
-### Windows
-
-请使用 Microsoft Store 版 Codex。首次注入前，完全退出 Codex，包括后台进程，然后运行 `better-codex inject --launch`。Better Codex 会冷启动 Codex，并启用本地调试端口。
-
-`better-codex service` 命令目前仅支持 macOS。在 Windows 上，`better-codex inject --launch` 会按需启动本地网关和注入监听进程。
-
-### macOS
-
-运行同一条 `better-codex inject --launch` 命令。注入完成后，Codex 侧边栏会出现 Better Codex 入口。
 
 ## 使用 Better Codex
 

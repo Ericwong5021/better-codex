@@ -26,7 +26,33 @@ Better Codex is for people who use Codex for coding, design, research, or planni
 
 ## Install
 
-Better Codex supports Codex Desktop on macOS and Windows. Install Node.js 22.5 or later, then run:
+Better Codex supports Codex Desktop on macOS and Windows. The installer downloads the latest release, verifies its SHA-256 checksum, installs the local runtime, and restarts Codex to finish injection.
+
+### macOS
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scripts/install.sh | bash
+```
+
+### Windows
+
+Use the Microsoft Store version of Codex, then run this command in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scripts/install.ps1 | iex
+```
+
+If Codex is running, the installer asks for permission to quit it. Press Enter or type `Y` to continue. After installation, Codex restarts with the Better Codex entry in its sidebar.
+
+### Upgrade
+
+Run the same installation command again. If Better Codex is already installed, the installer upgrades the existing runtime and falls back to a full installation when needed.
+
+Starting with v0.3.7, Better Codex also checks for signed updates in the background. When a new version is available, an update notice appears in the lower-right corner of Codex. Choose **Update now** to install it and restart Codex automatically.
+
+### Install from source
+
+Install Node.js 22.5 or later, then run:
 
 ```bash
 git clone https://github.com/Ericwong5021/better-codex.git
@@ -36,16 +62,6 @@ npm run build
 npm link
 better-codex inject --launch
 ```
-
-### Windows
-
-Use the Microsoft Store version of Codex. Before the first injection, quit Codex completely, including background processes, then run `better-codex inject --launch`. Better Codex cold-starts Codex with the local debugging port enabled.
-
-The `better-codex service` command is currently available only on macOS. On Windows, `better-codex inject --launch` starts the local gateway and injection watcher when needed.
-
-### macOS
-
-Run the same `better-codex inject --launch` command. The Better Codex entry will appear in the Codex sidebar after injection.
 
 ## Use Better Codex
 
