@@ -23,6 +23,7 @@
     "dist/db.js",
     "dist/dom.js",
     "dist/injection-state.js",
+    "dist/model-catalog.js",
     "dist/runtime-state.js",
     "dist/server.js",
     "dist/service.js",

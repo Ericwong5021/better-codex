@@ -6,13 +6,11 @@ import { databasePath } from "./config.js";
 
 export const issueStatuses = ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"] as const;
 export const issuePriorities = ["none", "low", "medium", "high", "urgent"] as const;
-export const agentModels = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex-spark"] as const;
-export const agentReasoningEfforts = ["low", "medium", "high", "xhigh", "max", "ultra"] as const;
 
 export type IssueStatus = typeof issueStatuses[number];
 export type IssuePriority = typeof issuePriorities[number];
-export type AgentModel = typeof agentModels[number];
-export type AgentReasoningEffort = typeof agentReasoningEfforts[number];
+export type AgentModel = string;
+export type AgentReasoningEffort = string;
 
 export type AgentProfile = {
   id: string;
@@ -123,8 +121,8 @@ function cleanAgentProfile(input: AgentProfileInput) {
   if (!name || name.length > 80) throw new Error("agent_name_required");
   if (description.length > 500) throw new Error("agent_description_too_long");
   if (instructions.length > 100000) throw new Error("agent_instructions_too_long");
-  if (!agentModels.includes(input.model)) throw new Error("invalid_agent_model");
-  if (!agentReasoningEfforts.includes(input.reasoning_effort)) throw new Error("invalid_agent_reasoning_effort");
+  if (!input.model.trim() || input.model.length > 80) throw new Error("invalid_agent_model");
+  if (!input.reasoning_effort.trim() || input.reasoning_effort.length > 20) throw new Error("invalid_agent_reasoning_effort");
   return { name, description, instructions, model: input.model, reasoning_effort: input.reasoning_effort };
 }
 

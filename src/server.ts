@@ -3,8 +3,9 @@ import { closeSync, openSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { isSea } from "node:sea";
 import { coreVersion, readCompatibilityStatus } from "./compatibility.js";
-import { agentModels, agentReasoningEfforts, issuePriorities, issueStatuses, Store, type AgentModel, type AgentReasoningEffort, type IssuePriority, type IssueStatus } from "./db.js";
+import { issuePriorities, issueStatuses, Store, type AgentModel, type AgentReasoningEffort, type IssuePriority, type IssueStatus } from "./db.js";
 import { defaultAgentProfile, syncAgentProfiles, updateDefaultAgentProfile } from "./agent-profiles.js";
+import { readModelCatalog } from "./model-catalog.js";
 import { runtimePort, token, updateLogPath } from "./config.js";
 import { acquireRuntimeLock, clearRuntimeState, createRuntimeIdentity, publishRuntimeState } from "./runtime-state.js";
 import { activeCoreExecutable, getGatewayUpdateState, installGatewayUpdate, startGatewayUpdateChecks } from "./updater.js";
@@ -108,8 +109,8 @@ function agentProfileInput(body: Record<string, unknown>) {
 function defaultAgentInput(body: Record<string, unknown>) {
   const model = cleanString(body.model, 80) as AgentModel;
   const reasoning_effort = cleanString(body.reasoning_effort, 20) as AgentReasoningEffort;
-  if (!agentModels.includes(model)) throw new Error("invalid_agent_model");
-  if (!agentReasoningEfforts.includes(reasoning_effort)) throw new Error("invalid_agent_reasoning_effort");
+  if (!model) throw new Error("invalid_agent_model");
+  if (!reasoning_effort) throw new Error("invalid_agent_reasoning_effort");
   return { model, reasoning_effort };
 }
 
@@ -202,7 +203,10 @@ export function startServer() {
       }
       if (!authorized(request, url)) return sendJson(response, 401, { error: "unauthorized" });
       if (url.pathname === "/api/bootstrap" && method === "GET") {
-        return sendJson(response, 200, { projects: store.listProjects(), agents: visibleAgentProfiles(), statuses: issueStatuses, priorities: issuePriorities, agentModels, agentReasoningEfforts });
+        const agentModelCatalog = await readModelCatalog();
+        const agentModels = agentModelCatalog.map(model => model.id);
+        const agentReasoningEfforts = [...new Set(agentModelCatalog.flatMap(model => model.supportedReasoningEfforts.map(effort => effort.value)))];
+        return sendJson(response, 200, { projects: store.listProjects(), agents: visibleAgentProfiles(), statuses: issueStatuses, priorities: issuePriorities, agentModelCatalog, agentModels, agentReasoningEfforts });
       }
       if (url.pathname === "/api/update" && method === "GET") return sendJson(response, 200, getGatewayUpdateState());
       if (url.pathname === "/api/update/install" && method === "POST") {

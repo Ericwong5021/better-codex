@@ -87,6 +87,21 @@ test("gateway completes the issue workflow and survives restart", async () => {
       is_default: true,
     });
 
+    const defaultAgentResponse = await request("/api/agents/default", {
+      method: "PATCH",
+      body: JSON.stringify({ model: "gpt-5.6-luna", reasoning_effort: "high" }),
+    });
+    assert.equal(defaultAgentResponse.status, 200);
+    const defaultAgent = await defaultAgentResponse.json() as { model: string; reasoning_effort: string };
+    assert.equal(defaultAgent.model, "gpt-5.6-luna");
+    assert.equal(defaultAgent.reasoning_effort, "high");
+
+    const optionalAgentResponse = await request("/api/agents", {
+      method: "POST",
+      body: JSON.stringify({ name: "Optional fields", description: "", instructions: "", model: "gpt-5.4-mini", reasoning_effort: "medium" }),
+    });
+    assert.equal(optionalAgentResponse.status, 201);
+
     const preflight = await fetch(`http://127.0.0.1:${port}/api/bootstrap`, {
       method: "OPTIONS",
       headers: {
