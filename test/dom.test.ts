@@ -199,6 +199,14 @@ test("issue submit buttons omit visual keyboard shortcut badges", () => {
   assert.ok(source.includes('event.key === "Enter"'));
 });
 
+test("issue keep-open toggle keeps a visible track in light mode", () => {
+  const css = betterCodexDesignSystemCss();
+  const toggleRule = css.match(/#better-codex-dialog \.better-codex-toggle\s*\{([^}]*)\}/)?.[1] || "";
+
+  assert.match(toggleRule, /background:\s*var\(--bc-color-control\)/);
+  assert.match(toggleRule, /box-shadow:\s*var\(--bc-inset-hairline\)/);
+});
+
 test("destructive actions use the branded confirmation dialog", () => {
   const source = injectionScript(4317, "test-token", "install");
 

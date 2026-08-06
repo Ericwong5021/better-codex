@@ -1239,6 +1239,11 @@ export function betterCodexDesignSystemCss() {
       margin-top: var(--bc-space-1);
     }
 
+    #better-codex-dialog .better-codex-toggle {
+      background: var(--bc-color-control);
+      box-shadow: var(--bc-inset-hairline);
+    }
+
     #better-codex-agent-dialog input,
     #better-codex-agent-dialog textarea,
     #better-codex-agent-dialog select,
