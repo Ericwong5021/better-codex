@@ -327,9 +327,11 @@ test("every rendered Codex logo receives an independent SVG gradient id", () => 
 
   assert.ok(source.includes('const gradientId = "better-codex-logo-gradient-" + (++codexLogoSequence)'));
   assert.ok(source.includes("fill=\"url(#' + gradientId + ')\""));
+  assert.ok(source.includes('aria-label="Codex"'));
   assert.ok(source.includes('visual: () => agentAvatarMarkup(agent, "better-codex-agent-avatar")'));
   assert.ok(source.includes('typeof option.visual === "function" ? option.visual()'));
   assert.doesNotMatch(source, /id="better-codex-logo-gradient"/);
+  assert.doesNotMatch(source, />better<\/text>|gradientId \+ '-badge'/);
 });
 
 test("issue agent avatars use the same fallback material as the agent directory", () => {

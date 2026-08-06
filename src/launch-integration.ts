@@ -1,10 +1,11 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { isSea } from "node:sea";
-import { ensureDirectories, launchIntegrationStatePath, logPath } from "./config.js";
+import { appIconIcns, appIconIco } from "./brand-assets.js";
+import { betterCodexHome, ensureDirectories, launchIntegrationStatePath, logPath } from "./config.js";
 
 type WindowsOwnedShortcut = {
   path: string;
@@ -191,18 +192,16 @@ function writeState(state: LaunchIntegrationState) {
   writeFileSync(launchIntegrationStatePath, JSON.stringify(state, null, 2), { mode: 0o600 });
 }
 
-function macCodexApplication() {
-  return ["/Applications/Codex.app", "/Applications/ChatGPT.app"].find(existsSync) ?? null;
+function writeMacAppIcon(resources: string) {
+  mkdirSync(resources, { recursive: true, mode: 0o700 });
+  writeFileSync(join(resources, "AppIcon.icns"), appIconIcns());
 }
 
-function macIcon(application: string | null) {
-  if (!application) return null;
-  const resources = join(application, "Contents", "Resources");
-  for (const name of ["AppIcon.icns", "app.icns", "electron.icns"]) {
-    const path = join(resources, name);
-    if (existsSync(path)) return path;
-  }
-  return null;
+function writeWindowsAppIcon() {
+  ensureDirectories();
+  const path = join(betterCodexHome, "AppIcon.ico");
+  writeFileSync(path, appIconIco());
+  return path;
 }
 
 function assertOwnedMacApp(appPath: string) {
@@ -241,6 +240,7 @@ exit 0
     if (!existsSync(existingExecutable) || lstatSync(existingExecutable).isSymbolicLink() || readFileSync(existingExecutable, "utf8") !== expectedScript) {
       throw new Error("mac_launcher_replacement_required");
     }
+    writeMacAppIcon(join(existingContents, "Resources"));
     try {
       execFileSync("/usr/bin/touch", [appPath]);
       execFileSync("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister", ["-f", appPath], { stdio: "ignore" });
@@ -271,8 +271,7 @@ exit 0
     const executable = join(macos, "better-codex-launcher");
     writeFileSync(executable, expectedScript);
     chmodSync(executable, 0o755);
-    const icon = macIcon(macCodexApplication());
-    if (icon) copyFileSync(icon, join(resources, "AppIcon.icns"));
+    writeMacAppIcon(resources);
     renameSync(temporaryApp, appPath);
   } catch (error) {
     rmSync(temporaryApp, { recursive: true, force: true });
@@ -382,14 +381,7 @@ $paths = @(
   (Join-Path $desktop ${powershellLiteral(WINDOWS_SHORTCUT_NAME)}),
   (Join-Path $startMenu ${powershellLiteral(WINDOWS_SHORTCUT_NAME)})
 ) | Where-Object { $_ }
-$iconLocation = ''
-$candidates = @(
-  (Join-Path $env:LOCALAPPDATA 'Microsoft\\WindowsApps\\Codex.exe'),
-  (Join-Path $env:LOCALAPPDATA 'Programs\\Codex\\Codex.exe')
-)
-foreach ($candidate in $candidates) {
-  if (Test-Path -LiteralPath $candidate) { $iconLocation = "$candidate,0"; break }
-}
+$iconLocation = ${powershellLiteral(`${writeWindowsAppIcon()},0`)}
 $shell = New-Object -ComObject WScript.Shell
 $created = @()
 foreach ($path in $paths) {
@@ -398,7 +390,7 @@ foreach ($path in $paths) {
   $shortcut.Arguments = $launchArguments
   $shortcut.WorkingDirectory = [IO.Path]::GetDirectoryName($launcher)
   $shortcut.Description = 'Better Codex'
-  if ($iconLocation) { $shortcut.IconLocation = $iconLocation }
+  $shortcut.IconLocation = $iconLocation
   $shortcut.Save()
   $created += [pscustomobject]@{ path = $path }
 }

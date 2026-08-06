@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { chmod, copyFile, cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -23,9 +24,24 @@ const packageRoot = join(work, "package");
 const archiveName = `better-codex-cli-${packageJson.version}-${platform}-${architecture}.${platform === "win32" ? "zip" : "tar.gz"}`;
 const archive = join(output, archiveName);
 const coreName = `better-codex-core-${packageJson.version}-${platform}-${architecture}`;
+const embedBrandAssets = {
+  name: "embed-brand-assets",
+  setup(buildApi) {
+    buildApi.onLoad({ filter: /[/\\]brand-assets\.ts$/ }, () => {
+      const icns = readFileSync(join(root, "assets", "AppIcon.icns")).toString("base64");
+      const ico = readFileSync(join(root, "assets", "AppIcon.ico")).toString("base64");
+      return {
+        contents: `export function appIconIcns(){return Buffer.from(${JSON.stringify(icns)},"base64")}
+export function appIconIco(){return Buffer.from(${JSON.stringify(ico)},"base64")}
+`,
+        loader: "js",
+      };
+    });
+  },
+};
 
 try {
-  await build({ entryPoints: [join(root, "src", "cli.ts")], bundle: true, platform: "node", format: "cjs", target: "node22", outfile: bundle });
+  await build({ entryPoints: [join(root, "src", "cli.ts")], bundle: true, platform: "node", format: "cjs", target: "node22", outfile: bundle, plugins: [embedBrandAssets] });
   await writeFile(join(work, "sea.json"), JSON.stringify({ main: bundle, output: blob, disableExperimentalSEAWarning: true }));
   execFileSync(process.execPath, ["--experimental-sea-config", join(work, "sea.json")], { stdio: "inherit" });
   await copyFile(process.execPath, executable);

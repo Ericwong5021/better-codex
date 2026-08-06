@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/better-codex.png" width="560" alt="Better Codex" />
+  <img src="assets/better-codex.png" width="160" alt="Better Codex" />
 </p>
 
 <p align="center">

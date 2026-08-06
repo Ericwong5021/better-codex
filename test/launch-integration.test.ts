@@ -32,6 +32,17 @@ test("Windows creates owned Better Codex shortcuts instead of rewriting Codex sh
   assert.match(source, /windowsLegacyShortcutRoots/);
 });
 
+test("macOS and Windows launchers use the Better Codex brand icon", () => {
+  assert.match(source, /writeMacAppIcon/);
+  assert.match(source, /writeWindowsAppIcon/);
+  assert.match(source, /appIconIcns/);
+  assert.match(source, /appIconIco/);
+  assert.match(source, /AppIcon\.icns/);
+  assert.match(source, /AppIcon\.ico/);
+  assert.match(source, /\$shortcut\.IconLocation = \$iconLocation/);
+  assert.doesNotMatch(source, /macCodexApplication|Codex\.exe.*,0/);
+});
+
 test("launcher serializes concurrent Codex restarts and keeps migration guards", () => {
   assert.match(cliSource, /mkdirSync\(launchLockPath/);
   assert.match(cliSource, /return print\(await withLaunchLock/);
