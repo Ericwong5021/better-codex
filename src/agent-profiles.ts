@@ -42,7 +42,7 @@ export function defaultAgentProfile(path = configPath) {
     id: "",
     role: "codex",
     name: "Codex",
-    description: "默认智能体，直接读取 config.toml",
+    description: "",
     instructions: "使用 Codex 默认配置承接并执行 Better Codex Issue。",
     model: topLevelString(source, "model") || "默认模型",
     reasoning_effort: topLevelString(source, "model_reasoning_effort") || "默认推理等级",

@@ -52,11 +52,7 @@ export function issuePrompt(claim: ClaimedIssue) {
   const details = claim.issue.description.trim();
   return `/better-codex
 
-使用 $better-codex 处理 Better Codex 任务 ${claim.issue.identifier}：${claim.issue.title}${details ? `\n\n${details}` : ""}
-
-此 Session 已由 Better Codex Issue 接管。开始前读取 Skill，结束前按实际结果同步看板状态：无法继续时移到 blocked，完成但需要用户审查时移到 in_review，圆满完成且无需审查时移到 done。通过 Skill 新建的任务必须放到 backlog。
-
-请直接完成任务并验证结果。不要提交或推送代码，完成后简洁说明结果。`;
+处理 Better Codex 任务 ${claim.issue.identifier}：${claim.issue.title}${details ? `\n\n${details}` : ""}`;
 }
 
 export class IssueWorker {

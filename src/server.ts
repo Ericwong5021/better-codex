@@ -6,10 +6,13 @@ import { coreVersion, readCompatibilityStatus } from "./compatibility.js";
 import { issuePriorities, issueStatuses, Store, type AgentModel, type AgentReasoningEffort, type IssuePriority, type IssueStatus } from "./db.js";
 import { defaultAgentProfile, syncAgentProfiles, updateDefaultAgentProfile } from "./agent-profiles.js";
 import { readCodexAppearance } from "./appearance.js";
+import { readCodexUserProfile } from "./user-profile.js";
 import { readModelCatalog } from "./model-catalog.js";
 import { runtimePort, token, updateLogPath } from "./config.js";
 import { acquireRuntimeLock, clearRuntimeState, createRuntimeIdentity, publishRuntimeState } from "./runtime-state.js";
 import { activeCoreExecutable, getGatewayUpdateState, installGatewayUpdate, startGatewayUpdateChecks } from "./updater.js";
+import { getIssueReplyState, startIssueReply } from "./session-reply.js";
+import { readConversationResult } from "./session-transcript.js";
 import { IssueWorker } from "./worker.js";
 
 const accessToken = token();
@@ -145,6 +148,18 @@ function parseIssuePatch(body: Record<string, unknown>) {
     patch.agent_enabled = body.agent_enabled;
   }
   if ("agent_id" in body) patch.agent_id = cleanString(body.agent_id, 200) || null;
+  if ("user_assigned" in body) {
+    if (typeof body.user_assigned !== "boolean") throw new Error("invalid_user_assigned");
+    patch.user_assigned = body.user_assigned;
+  }
+  if ("needs_attention" in body) {
+    if (typeof body.needs_attention !== "boolean") throw new Error("invalid_needs_attention");
+    patch.needs_attention = body.needs_attention;
+  }
+  if ("pending_actor" in body) {
+    if (body.pending_actor !== "user" && body.pending_actor !== "agent") throw new Error("invalid_pending_actor");
+    patch.pending_actor = body.pending_actor;
+  }
   if ("labels" in body) {
     patch.labels = asLabels(body.labels);
   }
@@ -158,7 +173,7 @@ function errorCode(error: unknown) {
 }
 
 function errorStatus(code: string) {
-  if (code === "version_conflict") return 409;
+  if (code === "version_conflict" || code === "reply_busy") return 409;
   if (code.endsWith("_not_found")) return 404;
   if (code === "database_unavailable" || code === "database_integrity_check_failed") return 503;
   return 400;
@@ -220,7 +235,17 @@ export function startServer() {
         const agentModelCatalog = await readModelCatalog();
         const agentModels = agentModelCatalog.map(model => model.id);
         const agentReasoningEfforts = [...new Set(agentModelCatalog.flatMap(model => model.supportedReasoningEfforts.map(effort => effort.value)))];
-        return sendJson(response, 200, { projects: store.listProjects(), agents: visibleAgentProfiles(), statuses: issueStatuses, priorities: issuePriorities, appearance: readCodexAppearance(), agentModelCatalog, agentModels, agentReasoningEfforts });
+        return sendJson(response, 200, { projects: store.listProjects(), agents: visibleAgentProfiles(), statuses: issueStatuses, priorities: issuePriorities, appearance: readCodexAppearance(), user: readCodexUserProfile(), agentModelCatalog, agentModels, agentReasoningEfforts, autoDispatch: store.getAutoDispatch() });
+      }
+      if (url.pathname === "/api/settings/auto-dispatch" && method === "GET") {
+        return sendJson(response, 200, { enabled: store.getAutoDispatch() });
+      }
+      if (url.pathname === "/api/settings/auto-dispatch" && method === "PATCH") {
+        const body = await readBody(request);
+        if (typeof body.enabled !== "boolean") throw new Error("invalid_auto_dispatch");
+        const enabled = store.setAutoDispatch(body.enabled);
+        if (enabled) worker.wake();
+        return sendJson(response, 200, { enabled });
       }
       if (url.pathname === "/api/update" && method === "GET") return sendJson(response, 200, getGatewayUpdateState());
       if (url.pathname === "/api/update/install" && method === "POST") {
@@ -322,8 +347,9 @@ export function startServer() {
           workspacePath: cleanString(body.workspace_path, 4096),
           agentEnabled: body.agent_enabled === true,
           agentId: cleanString(body.agent_id, 200),
+          userAssigned: body.user_assigned === true,
         });
-        if (issue.agent_enabled && issue.status === "todo") worker.wake();
+        if (issue.agent_enabled && store.isDispatchable(issue)) worker.wake();
         return sendJson(response, 201, issue);
       }
       if (path[0] === "api" && path[1] === "issues" && path[2]) {
@@ -335,13 +361,35 @@ export function startServer() {
           const version = Number(body.version);
           if (!Number.isInteger(version) || version < 1) throw new Error("invalid_version");
           const updated = store.updateIssue(issue.id, version, parseIssuePatch(body));
-          if (updated.agent_enabled && updated.status === "todo") worker.wake();
+          if (store.isDispatchable(updated)) worker.wake();
           return sendJson(response, 200, updated);
         }
         if (method === "POST" && path[3] === "archive") {
           const body = await readBody(request);
           const updated = store.archiveIssue(issue.id, Number(body.version));
           return sendJson(response, 200, updated);
+        }
+        if (method === "GET" && path[3] === "conversation" && path.length === 4) {
+          const threadId = issue.run_thread_id || issue.thread_id || "";
+          const conversation = await readConversationResult(threadId);
+          return sendJson(response, 200, {
+            ...conversation,
+            issue_id: issue.id,
+            reply: getIssueReplyState(issue.id),
+            user: readCodexUserProfile(),
+          });
+        }
+        if (method === "POST" && path[3] === "reply" && path.length === 4) {
+          const body = await readBody(request);
+          const threadId = issue.run_thread_id || issue.thread_id || "";
+          const reply = startIssueReply({
+            issueId: issue.id,
+            threadId,
+            workspacePath: issue.workspace_path,
+            message: cleanString(body.message, 100000),
+            agentId: issue.agent_id,
+          });
+          return sendJson(response, 202, reply);
         }
       }
       if (url.pathname === "/api/shutdown" && method === "POST") {

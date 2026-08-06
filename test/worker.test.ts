@@ -16,10 +16,9 @@ test("worker injects Better Codex issue management instructions", () => {
 
   const prompt = issuePrompt(claim);
   assert.match(prompt, /^\/better-codex/m);
-  assert.match(prompt, /\$better-codex/);
-  assert.match(prompt, /BCX-12：Ship the feature/);
-  assert.match(prompt, /blocked/);
-  assert.match(prompt, /in_review/);
-  assert.match(prompt, /done/);
-  assert.match(prompt, /backlog/);
+  assert.match(prompt, /处理 Better Codex 任务 BCX-12：Ship the feature/);
+  assert.match(prompt, /Implement and verify it\./);
+  assert.doesNotMatch(prompt, /不要提交或推送代码/);
+  assert.doesNotMatch(prompt, /此 Session 已由 Better Codex Issue 接管/);
+  assert.doesNotMatch(prompt, /使用 \$better-codex/);
 });

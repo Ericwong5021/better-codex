@@ -1,6 +1,6 @@
 ---
 name: better-codex
-description: Operate Better Codex issues through its local CLI. Use when a Codex session is processing a Better Codex issue and needs to inspect or change that issue's board status, or when Codex needs to create a new issue for the user to review or act on.
+description: Operate Better Codex issues through its local CLI. Use when a Codex session is processing a Better Codex issue and needs to inspect or change that issue's board status, pending actor, or create a new issue for the user to review or act on.
 ---
 
 # Better Codex
@@ -17,22 +17,51 @@ better-codex issue get BCX-12
 
 If the prompt does not identify an issue, do not guess one. If the CLI or runtime is unavailable, report the problem once and continue the user's work without changing the board.
 
-## Change the current status
+## Understand dispatch ownership
 
-Run:
+Each issue has:
+
+- `needs_attention`: whether the issue currently waits for someone
+- `pending_actor`: who should act next (`user` or `agent`)
+- `agent_enabled` / `agent_id`: the assigned Agent, if any
+
+Auto-dispatch only starts sessions when all of these are true:
+
+1. Auto-dispatch is enabled in the board toolbar
+2. `needs_attention` is true
+3. `pending_actor` is `agent`
+4. An Agent is assigned
+5. Status is not `backlog`, `done`, or `cancelled`
+
+If `pending_actor` is `user`, do not continue acting on the issue. Stop and wait for the user. The user must reassign the issue to an Agent before another automatic session may start.
+
+## Change status and pending actor
+
+Always update both the board status and the next actor before finishing:
+
+```text
+better-codex issue update BCX-12 --status in_review --pending-actor user --needs-attention true
+```
+
+Or in two steps if needed:
 
 ```text
 better-codex issue status BCX-12 in_review
+better-codex issue update BCX-12 --pending-actor user --needs-attention true
 ```
 
 Use only these statuses: `backlog`, `todo`, `in_progress`, `in_review`, `done`, `blocked`, `cancelled`.
 
-- Set `blocked` when a problem prevents completing the work.
-- Set `in_review` after completing and verifying work that needs user review.
-- Set `done` only when the work is fully complete, verified, and needs no further review.
-- Do not move an actively running issue back to `todo` or `backlog`.
+Rules:
 
-Always synchronize exactly one final status before replying with the result. Use the identifier verified from the task prompt. Do not modify unrelated issues unless the user explicitly asks.
+- Set `blocked` when a problem prevents completing the work, and usually leave `pending_actor` as `user` or the assigned Agent only if that Agent can self-retry.
+- Set `in_review` after completing and verifying work that needs user review. Set `pending_actor=user` and `needs_attention=true`.
+- Set `done` only when the work is fully complete, verified, and needs no further review. Set `needs_attention=false`.
+- Never claim or reprocess work when `pending_actor=user`.
+- Do not move an actively running issue back to `todo` or `backlog`.
+- Do not leave an Agent as `pending_actor` after you need a human decision.
+
+Always synchronize the final status and pending actor before replying with the result. Use the identifier verified from the task prompt. Do not modify unrelated issues unless the user explicitly asks.
 
 ## Create an issue for the user
 
