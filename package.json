@@ -24,7 +24,8 @@
     "dist/runtime-state.js",
     "dist/server.js",
     "dist/service.js",
-    "dist/updater.js"
+    "dist/updater.js",
+    "dist/worker.js"
   ],
   "scripts": {
     "build": "tsc",

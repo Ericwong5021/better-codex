@@ -231,7 +231,7 @@ async function issueCommand(action: string | undefined, args: string[]) {
     }));
   }
   const id = args[0] ?? "";
-  const issue = await request(`/api/issues/${encodeURIComponent(id)}`) as { version?: number; thread_id?: string };
+  const issue = await request(`/api/issues/${encodeURIComponent(id)}`) as { version?: number; thread_id?: string; run_thread_id?: string };
   if (action === "status") {
     return print(await request(`/api/issues/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ version: issue.version, status: args[1] }) }));
   }
@@ -249,8 +249,8 @@ async function issueCommand(action: string | undefined, args: string[]) {
     return print(await request(`/api/issues/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(patch) }));
   }
   if (action === "open") {
-    if (!issue.thread_id) throw new Error("issue_has_no_thread");
-    return print(await cdpOpenThread(Number(option(args, "--port") ?? cdpPort), issue.thread_id));
+    if (!issue.run_thread_id) throw new Error("issue_has_no_thread");
+    return print(await cdpOpenThread(Number(option(args, "--port") ?? cdpPort), issue.run_thread_id));
   }
   usage();
 }

@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { databasePath } from "./config.js";
 
-export const issueStatuses = ["backlog", "todo", "in_progress", "blocked", "in_review", "done"] as const;
+export const issueStatuses = ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"] as const;
 export const issuePriorities = ["none", "low", "medium", "high", "urgent"] as const;
 
 export type IssueStatus = typeof issueStatuses[number];
@@ -38,6 +38,15 @@ export type Issue = {
   version: number;
   created_at: string;
   updated_at: string;
+  active_run_status?: "claimed" | "running" | null;
+  active_run_started_at?: string | null;
+  run_thread_id?: string | null;
+};
+
+export type ClaimedIssue = {
+  runId: string;
+  issue: Issue;
+  workspacePath: string;
 };
 
 type ProjectInput = {
@@ -114,6 +123,7 @@ export class Store {
     }
     if (existing && currentVersion < latestSchemaVersion) this.lastBackupPath = this.backup();
     this.migrate(currentVersion);
+    this.ensureRunTable();
     const integrity = this.db.prepare("PRAGMA quick_check").get() as Record<string, unknown> | undefined;
     if (String(integrity?.quick_check ?? "") !== "ok") {
       this.db.close();
@@ -202,6 +212,23 @@ export class Store {
     }
   }
 
+  private ensureRunTable() {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS issue_runs (
+        id TEXT PRIMARY KEY,
+        issue_id TEXT NOT NULL REFERENCES issues(id),
+        status TEXT NOT NULL,
+        thread_id TEXT,
+        pid INTEGER,
+        started_at TEXT NOT NULL,
+        finished_at TEXT,
+        error TEXT
+      );
+      CREATE INDEX IF NOT EXISTS issue_runs_status ON issue_runs(status, started_at);
+      CREATE INDEX IF NOT EXISTS issue_runs_issue ON issue_runs(issue_id, started_at);
+    `);
+  }
+
   private upgradeLegacyProjects() {
     const columns = new Set((this.db.prepare("PRAGMA table_info(projects)").all() as Array<{ name: string }>).map((item) => item.name));
     for (const [name, definition] of [
@@ -270,27 +297,63 @@ export class Store {
   }
 
   listIssues(filters: { projectId?: string; search?: string; archived?: boolean } = {}) {
-    const conditions = [filters.archived ? "archived_at IS NOT NULL" : "archived_at IS NULL"];
+    const conditions = [filters.archived ? "issues.archived_at IS NOT NULL" : "issues.archived_at IS NULL"];
     const values: Array<string> = [];
     if (filters.projectId) {
-      conditions.push("project_id = ?");
+      conditions.push("issues.project_id = ?");
       values.push(filters.projectId);
     }
     if (filters.search) {
-      conditions.push("(identifier LIKE ? OR title LIKE ? OR description LIKE ? OR thread_id LIKE ?)");
+      conditions.push("(issues.identifier LIKE ? OR issues.title LIKE ? OR issues.description LIKE ? OR issues.thread_id LIKE ?)");
       const query = `%${filters.search}%`;
       values.push(query, query, query, query);
     }
     const rows = this.db.prepare(`
-      SELECT * FROM issues
+      SELECT issues.*, active_run.status AS active_run_status, active_run.started_at AS active_run_started_at,
+        latest_run.thread_id AS run_thread_id
+      FROM issues
+      LEFT JOIN issue_runs AS active_run
+        ON active_run.id = (
+          SELECT issue_runs.id
+          FROM issue_runs
+          WHERE issue_runs.issue_id = issues.id
+            AND issue_runs.status IN ('claimed', 'running')
+          ORDER BY issue_runs.started_at DESC
+          LIMIT 1
+        )
+      LEFT JOIN issue_runs AS latest_run
+        ON latest_run.id = (
+          SELECT issue_runs.id
+          FROM issue_runs
+          WHERE issue_runs.issue_id = issues.id
+            AND issue_runs.thread_id IS NOT NULL
+            AND issue_runs.thread_id NOT LIKE 'local:%'
+            AND issue_runs.thread_id NOT LIKE 'cloud:%'
+          ORDER BY issue_runs.started_at DESC
+          LIMIT 1
+        )
       WHERE ${conditions.join(" AND ")}
-      ORDER BY pinned DESC, sort_order, created_at
+      ORDER BY issues.pinned DESC, issues.sort_order, issues.created_at
     `).all(...values) as Record<string, unknown>[];
     return rows.map(issueFromRow);
   }
 
   getIssue(id: string) {
-    const row = this.db.prepare("SELECT * FROM issues WHERE id = ? OR identifier = ?").get(id, id) as Record<string, unknown> | undefined;
+    const row = this.db.prepare(`
+      SELECT issues.*,
+        (
+          SELECT issue_runs.thread_id
+          FROM issue_runs
+          WHERE issue_runs.issue_id = issues.id
+            AND issue_runs.thread_id IS NOT NULL
+            AND issue_runs.thread_id NOT LIKE 'local:%'
+            AND issue_runs.thread_id NOT LIKE 'cloud:%'
+          ORDER BY issue_runs.started_at DESC
+          LIMIT 1
+        ) AS run_thread_id
+      FROM issues
+      WHERE issues.id = ? OR issues.identifier = ?
+    `).get(id, id) as Record<string, unknown> | undefined;
     return row ? issueFromRow(row) : undefined;
   }
 
@@ -404,5 +467,120 @@ export class Store {
       .run(now(), now(), issue.id, version);
     if (result.changes !== 1) throw new Error("version_conflict");
     return this.getIssue(issue.id)!;
+  }
+
+  recoverInterruptedRuns() {
+    const timestamp = now();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const rows = this.db.prepare("SELECT id, issue_id FROM issue_runs WHERE status IN ('claimed', 'running')").all() as Array<{ id: string; issue_id: string }>;
+      for (const row of rows) {
+        this.db.prepare("UPDATE issue_runs SET status = 'interrupted', finished_at = ?, error = 'runtime_restarted' WHERE id = ?").run(timestamp, row.id);
+        this.db.prepare("UPDATE issues SET status = 'blocked', version = version + 1, updated_at = ? WHERE id = ? AND status = 'in_progress'").run(timestamp, row.issue_id);
+      }
+      this.db.exec("COMMIT");
+      return rows.length;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  claimNextIssue(): ClaimedIssue | null {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const active = this.db.prepare("SELECT 1 AS value FROM issue_runs WHERE status IN ('claimed', 'running') LIMIT 1").get();
+      if (active) {
+        this.db.exec("COMMIT");
+        return null;
+      }
+      const row = this.db.prepare(`
+        SELECT issues.*, COALESCE(NULLIF(issues.workspace_path, ''), NULLIF(projects.workspace_path, ''), '') AS resolved_workspace
+        FROM issues
+        JOIN projects ON projects.id = issues.project_id
+        WHERE issues.status = 'todo'
+          AND issues.archived_at IS NULL
+          AND (issues.thread_id IS NOT NULL OR issues.workspace_path IS NOT NULL OR projects.workspace_path != '')
+        ORDER BY issues.pinned DESC,
+          CASE issues.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END,
+          issues.sort_order,
+          issues.created_at
+        LIMIT 1
+      `).get() as (Record<string, unknown> & { resolved_workspace: string }) | undefined;
+      if (!row) {
+        this.db.exec("COMMIT");
+        return null;
+      }
+      const { resolved_workspace, ...issueRow } = row;
+      const issue = issueFromRow(issueRow);
+      const runId = randomUUID();
+      const timestamp = now();
+      this.db.prepare("INSERT INTO issue_runs (id, issue_id, status, thread_id, started_at) VALUES (?, ?, 'claimed', NULL, ?)").run(runId, issue.id, timestamp);
+      const result = this.db.prepare("UPDATE issues SET status = 'in_progress', version = version + 1, updated_at = ? WHERE id = ? AND version = ? AND status = 'todo'").run(timestamp, issue.id, issue.version);
+      if (result.changes !== 1) throw new Error("claim_conflict");
+      this.db.exec("COMMIT");
+      return { runId, issue: this.getIssue(issue.id)!, workspacePath: resolved_workspace };
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  startRun(runId: string, pid: number) {
+    this.db.prepare("UPDATE issue_runs SET status = 'running', pid = ? WHERE id = ? AND status = 'claimed'").run(pid, runId);
+  }
+
+  setRunWorkspace(issueId: string, workspacePath: string) {
+    const timestamp = now();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const issue = this.getIssue(issueId);
+      if (!issue) throw new Error("issue_not_found");
+      this.db.prepare("UPDATE issues SET workspace_path = ?, version = version + 1, updated_at = ? WHERE id = ?").run(workspacePath, timestamp, issue.id);
+      this.db.prepare("UPDATE projects SET workspace_path = ?, updated_at = ? WHERE id = ? AND workspace_path = ''").run(workspacePath, timestamp, issue.project_id);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  linkRunThread(runId: string, issueId: string, threadId: string) {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare("UPDATE issue_runs SET thread_id = ? WHERE id = ?").run(threadId, runId);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  finishRun(runId: string, issueId: string, success: boolean, error?: string) {
+    const timestamp = now();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare("UPDATE issue_runs SET status = ?, finished_at = ?, error = ? WHERE id = ? AND status IN ('claimed', 'running')")
+        .run(success ? "completed" : "failed", timestamp, error ?? null, runId);
+      this.db.prepare("UPDATE issues SET status = ?, version = version + 1, updated_at = ? WHERE id = ? AND status = 'in_progress'")
+        .run(success ? "in_review" : "blocked", timestamp, issueId);
+      this.db.exec("COMMIT");
+    } catch (caught) {
+      this.db.exec("ROLLBACK");
+      throw caught;
+    }
+  }
+
+  interruptRun(runId: string, issueId: string) {
+    const timestamp = now();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare("UPDATE issue_runs SET status = 'interrupted', finished_at = ?, error = 'runtime_stopped' WHERE id = ? AND status IN ('claimed', 'running')").run(timestamp, runId);
+      this.db.prepare("UPDATE issues SET status = 'blocked', version = version + 1, updated_at = ? WHERE id = ? AND status = 'in_progress'").run(timestamp, issueId);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 }

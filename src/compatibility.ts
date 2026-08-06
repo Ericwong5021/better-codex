@@ -234,7 +234,9 @@ export function navigationExpression(threadId: string) {
     window.postMessage({ type: navigation.messageType, path: navigation.threadRoutePrefix + encodeURIComponent(expected) }, window.location.origin);
     await new Promise(resolve => setTimeout(resolve, 400));
     const current = location.pathname.match(/\\/local\\/([^/?#]+)/)?.[1] || "";
-    if (decodeURIComponent(current) === expected) {
+    const activeRow = Array.from(document.querySelectorAll(selectors.threadRow)).find(item => item.getAttribute(attributes.threadActive) === "true");
+    const activeThread = String(activeRow?.getAttribute(attributes.threadId) || "").replace(/^(local|cloud):/i, "");
+    if (decodeURIComponent(current) === expected || activeThread === expected) {
       window.__betterCodexInjection__?.close?.();
       return { opened: true, via: "route" };
     }

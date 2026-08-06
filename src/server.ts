@@ -3,6 +3,7 @@ import { readCompatibilityStatus } from "./compatibility.js";
 import { issuePriorities, issueStatuses, Store, type IssuePriority, type IssueStatus } from "./db.js";
 import { runtimePort, token } from "./config.js";
 import { acquireRuntimeLock, clearRuntimeState, createRuntimeIdentity, publishRuntimeState } from "./runtime-state.js";
+import { IssueWorker } from "./worker.js";
 
 const accessToken = token();
 
@@ -136,9 +137,11 @@ export function startServer() {
     throw error;
   }
   let cleaned = false;
+  const worker = new IssueWorker(store);
   const cleanup = () => {
     if (cleaned) return;
     cleaned = true;
+    worker.stop();
     clearRuntimeState(identity.instanceId);
     store.close();
   };
@@ -236,6 +239,7 @@ export function startServer() {
     const address = server.address();
     if (typeof address !== "object" || !address) throw new Error("runtime_address_unavailable");
     publishRuntimeState({ ...identity, port: address.port });
+    worker.start();
     console.log(`Better Codex Runtime 0.2.0 listening on http://127.0.0.1:${address.port}`);
   });
   const stop = () => server.close(() => {
