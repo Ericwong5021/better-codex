@@ -1,0 +1,4 @@
+interface:
+  display_name: "Better Codex Issues"
+  short_description: "Update and create Better Codex issues"
+  default_prompt: "Use $better-codex-issues to update the current Better Codex issue or create a new one for me."

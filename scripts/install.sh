@@ -3,6 +3,8 @@ set -euo pipefail
 
 REPO="${BETTER_CODEX_REPO:-Ericwong5021/better-codex}"
 BIN_DIR="${BETTER_CODEX_BIN_DIR:-$HOME/.local/bin}"
+CODEX_DIR="${CODEX_HOME:-$HOME/.codex}"
+SKILL_DIR="$CODEX_DIR/skills/better-codex-issues"
 WITH_SERVICE=1
 
 if [ "${1:-}" = "--no-service" ]; then
@@ -67,7 +69,7 @@ if [ -n "$EXISTING_BINARY" ]; then
   CURRENT_VERSION="$(installed_version "$EXISTING_BINARY" || true)"
 fi
 
-if [ -n "$CURRENT_VERSION" ] && [ -n "$TARGET_VERSION" ] && version_at_least "$CURRENT_VERSION" "$TARGET_VERSION"; then
+if [ -n "$CURRENT_VERSION" ] && [ -n "$TARGET_VERSION" ] && version_at_least "$CURRENT_VERSION" "$TARGET_VERSION" && [ -f "$SKILL_DIR/SKILL.md" ]; then
   printf '[OK] Better Codex is up to date (v%s)\n' "$CURRENT_VERSION"
   exit 0
 fi
@@ -86,7 +88,7 @@ if [ -n "$CURRENT_VERSION" ] && [ -n "$TARGET_VERSION" ]; then
           "$EXISTING_BINARY" doctor >/dev/null 2>&1 || UPGRADE_READY=0
         fi
       fi
-      if [ "$UPGRADE_READY" = "1" ]; then
+      if [ "$UPGRADE_READY" = "1" ] && [ -f "$SKILL_DIR/SKILL.md" ]; then
         printf '[OK] Better Codex upgraded to v%s\n' "$UPDATED_VERSION"
         exit 0
       fi
@@ -161,6 +163,14 @@ fi
 tar -xzf "$ARCHIVE" -C "$WORK_DIR"
 mkdir -p "$BIN_DIR"
 install -m 755 "$WORK_DIR/better-codex" "$BIN_DIR/better-codex"
+if [ ! -f "$WORK_DIR/skills/better-codex-issues/SKILL.md" ]; then
+  echo "Better Codex skill is missing from the package." >&2
+  exit 1
+fi
+printf '[Better Codex] Installing Better Codex skill to %s...\n' "$SKILL_DIR"
+mkdir -p "$SKILL_DIR/agents"
+install -m 644 "$WORK_DIR/skills/better-codex-issues/SKILL.md" "$SKILL_DIR/SKILL.md"
+install -m 644 "$WORK_DIR/skills/better-codex-issues/agents/openai.yaml" "$SKILL_DIR/agents/openai.yaml"
 if [ -n "$UPDATE_PUBLIC_KEY" ]; then
   mkdir -p "$HOME/.better-codex"
   install -m 600 "$UPDATE_PUBLIC_KEY" "$HOME/.better-codex/update-public-key.pem"

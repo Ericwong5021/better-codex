@@ -73,17 +73,19 @@ function Invoke-ExistingUpgrade([string]$Executable, [string]$TargetVersion) {
 if (-not [Environment]::Is64BitOperatingSystem) { throw "Better Codex requires 64-bit Windows." }
 
 $executable = Join-Path $BinDirectory "better-codex.exe"
+$codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE ".codex" }
+$skillDirectory = Join-Path $codexHome "skills\better-codex-issues"
 $targetVersion = $Version.TrimStart("v")
 $installedVersion = Get-InstalledVersion $executable
 
-if ($installedVersion -and (Test-VersionAtLeast $installedVersion $targetVersion)) {
+if ($installedVersion -and (Test-VersionAtLeast $installedVersion $targetVersion) -and (Test-Path (Join-Path $skillDirectory "SKILL.md"))) {
   Write-Ok "Better Codex is up to date (v$installedVersion)"
   return
 }
 
 if ($installedVersion) {
   Write-Step "Better Codex v$installedVersion is installed; upgrading to v$targetVersion..."
-  if (Invoke-ExistingUpgrade $executable $targetVersion) { return }
+  if ((Test-Path (Join-Path $skillDirectory "SKILL.md")) -and (Invoke-ExistingUpgrade $executable $targetVersion)) { return }
   Write-Step "Automatic upgrade unavailable; continuing with full installation..."
 }
 
@@ -133,6 +135,12 @@ try {
     Start-Sleep -Milliseconds 800
   }
   Copy-Item -Force (Join-Path $workDirectory "better-codex.exe") $executable
+  $packagedSkill = Join-Path $workDirectory "skills\better-codex-issues"
+  if (-not (Test-Path (Join-Path $packagedSkill "SKILL.md"))) { throw "Better Codex skill is missing from the package." }
+  Write-Step "Installing Better Codex skill to $skillDirectory..."
+  New-Item -ItemType Directory -Force -Path (Join-Path $skillDirectory "agents") | Out-Null
+  Copy-Item -Force (Join-Path $packagedSkill "SKILL.md") (Join-Path $skillDirectory "SKILL.md")
+  Copy-Item -Force (Join-Path $packagedSkill "agents\openai.yaml") (Join-Path $skillDirectory "agents\openai.yaml")
   $homeDirectory = Join-Path $env:USERPROFILE ".better-codex"
   New-Item -ItemType Directory -Force -Path $homeDirectory | Out-Null
   Copy-Item -Force $publicKey (Join-Path $homeDirectory "update-public-key.pem")

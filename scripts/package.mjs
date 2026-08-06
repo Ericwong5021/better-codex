@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmod, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, copyFile, cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,6 +19,7 @@ const bundle = join(work, "better-codex.cjs");
 const blob = join(work, "better-codex.blob");
 const executableName = platform === "win32" ? "better-codex.exe" : "better-codex";
 const executable = join(work, executableName);
+const packageRoot = join(work, "package");
 const archiveName = `better-codex-cli-${packageJson.version}-${platform}-${architecture}.${platform === "win32" ? "zip" : "tar.gz"}`;
 const archive = join(output, archiveName);
 const coreName = `better-codex-core-${packageJson.version}-${platform}-${architecture}`;
@@ -61,10 +62,13 @@ try {
   execFileSync(executable, ["version"], { stdio: "inherit", env: { ...process.env, BETTER_CODEX_HOME: join(work, "home") } });
   await mkdir(output, { recursive: true });
   await copyFile(executable, join(output, coreName));
+  await mkdir(packageRoot, { recursive: true });
+  await copyFile(executable, join(packageRoot, executableName));
+  await cp(join(root, "skills", "better-codex-issues"), join(packageRoot, "skills", "better-codex-issues"), { recursive: true });
   if (platform === "win32") {
-    execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `Compress-Archive -LiteralPath '${executable.replace(/'/g, "''")}' -DestinationPath '${archive.replace(/'/g, "''")}' -Force`], { stdio: "inherit" });
+    execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `Compress-Archive -Path '${join(packageRoot, "*").replace(/'/g, "''")}' -DestinationPath '${archive.replace(/'/g, "''")}' -Force`], { stdio: "inherit" });
   } else {
-    execFileSync("/usr/bin/tar", ["-czf", archive, "-C", work, executableName], { stdio: "inherit" });
+    execFileSync("/usr/bin/tar", ["-czf", archive, "-C", packageRoot, "."], { stdio: "inherit" });
   }
   const digest = createHash("sha256").update(await readFile(archive)).digest("hex");
   await writeFile(join(output, "checksums.txt"), `${digest}  ${archiveName}\n`);
