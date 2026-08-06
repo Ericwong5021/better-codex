@@ -63,7 +63,12 @@ export class IssueWorker {
   start() {
     this.stopped = false;
     this.store.recoverInterruptedRuns();
-    this.schedule();
+    this.schedule(0);
+  }
+
+  wake() {
+    if (this.stopped || this.child) return;
+    this.schedule(0);
   }
 
   stop() {
@@ -76,9 +81,10 @@ export class IssueWorker {
     this.active = null;
   }
 
-  private schedule() {
+  private schedule(delay = interval) {
     if (this.stopped) return;
-    this.timer = setTimeout(() => void this.tick(), interval);
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = setTimeout(() => void this.tick(), delay);
     this.timer.unref();
   }
 
@@ -141,6 +147,7 @@ export class IssueWorker {
       if (!this.stopped) this.store.finishRun(claim.runId, claim.issue.id, code === 0, code === 0 ? undefined : `codex_exit_${code ?? signal ?? "unknown"}`);
       this.child = null;
       this.active = null;
+      this.wake();
     });
   }
 }

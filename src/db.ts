@@ -6,9 +6,26 @@ import { databasePath } from "./config.js";
 
 export const issueStatuses = ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"] as const;
 export const issuePriorities = ["none", "low", "medium", "high", "urgent"] as const;
+export const agentModels = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.4", "gpt-5.3-codex", "gpt-5.3-codex-spark"] as const;
+export const agentReasoningEfforts = ["low", "medium", "high", "xhigh", "max", "ultra"] as const;
 
 export type IssueStatus = typeof issueStatuses[number];
 export type IssuePriority = typeof issuePriorities[number];
+export type AgentModel = typeof agentModels[number];
+export type AgentReasoningEffort = typeof agentReasoningEfforts[number];
+
+export type AgentProfile = {
+  id: string;
+  role: string;
+  name: string;
+  description: string;
+  instructions: string;
+  model: AgentModel;
+  reasoning_effort: AgentReasoningEffort;
+  version: number;
+  created_at: string;
+  updated_at: string;
+};
 
 export type Project = {
   id: string;
@@ -35,6 +52,7 @@ export type Issue = {
   archived_at: string | null;
   thread_id: string | null;
   workspace_path: string | null;
+  agent_enabled: boolean;
   version: number;
   created_at: string;
   updated_at: string;
@@ -65,9 +83,13 @@ type IssueInput = {
   labels?: string[];
   threadId?: string;
   workspacePath?: string;
+  agentEnabled?: boolean;
 };
 
-type IssuePatch = Partial<Pick<Issue, "title" | "description" | "status" | "priority" | "labels" | "sort_order" | "pinned" | "thread_id" | "workspace_path">>;
+type IssuePatch = Partial<Pick<Issue, "title" | "description" | "status" | "priority" | "labels" | "sort_order" | "pinned" | "thread_id" | "workspace_path" | "agent_enabled">>;
+
+type AgentProfileInput = Pick<AgentProfile, "name" | "description" | "instructions" | "model" | "reasoning_effort">;
+type AgentProfilePatch = Partial<AgentProfileInput>;
 
 const latestSchemaVersion = 2;
 
@@ -92,6 +114,18 @@ function cleanTitle(value: string) {
   return title;
 }
 
+function cleanAgentProfile(input: AgentProfileInput) {
+  const name = input.name.trim();
+  const description = input.description.trim();
+  const instructions = input.instructions.trim();
+  if (!name || name.length > 80) throw new Error("agent_name_required");
+  if (!description || description.length > 500) throw new Error("agent_description_required");
+  if (!instructions || instructions.length > 100000) throw new Error("agent_instructions_required");
+  if (!agentModels.includes(input.model)) throw new Error("invalid_agent_model");
+  if (!agentReasoningEfforts.includes(input.reasoning_effort)) throw new Error("invalid_agent_reasoning_effort");
+  return { name, description, instructions, model: input.model, reasoning_effort: input.reasoning_effort };
+}
+
 function cleanLabels(values: string[]) {
   return [...new Set(values.map(value => value.trim()).filter(Boolean))].slice(0, 20);
 }
@@ -102,6 +136,7 @@ function issueFromRow(row: Record<string, unknown>): Issue {
     ...values,
     labels: JSON.parse(String(labels_json ?? "[]")),
     pinned: Boolean(row.pinned),
+    agent_enabled: Boolean(row.agent_enabled),
   } as Issue;
 }
 
@@ -123,6 +158,8 @@ export class Store {
     }
     if (existing && currentVersion < latestSchemaVersion) this.lastBackupPath = this.backup();
     this.migrate(currentVersion);
+    this.ensureAgentColumn();
+    this.ensureAgentProfileTable();
     this.ensureRunTable();
     const integrity = this.db.prepare("PRAGMA quick_check").get() as Record<string, unknown> | undefined;
     if (String(integrity?.quick_check ?? "") !== "ok") {
@@ -212,6 +249,28 @@ export class Store {
     }
   }
 
+  private ensureAgentColumn() {
+    const columns = new Set((this.db.prepare("PRAGMA table_info(issues)").all() as Array<{ name: string }>).map(item => item.name));
+    if (!columns.has("agent_enabled")) this.db.exec("ALTER TABLE issues ADD COLUMN agent_enabled INTEGER NOT NULL DEFAULT 0");
+  }
+
+  private ensureAgentProfileTable() {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS agent_profiles (
+        id TEXT PRIMARY KEY,
+        role TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        description TEXT NOT NULL,
+        instructions TEXT NOT NULL,
+        model TEXT NOT NULL,
+        reasoning_effort TEXT NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `);
+  }
+
   private ensureRunTable() {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS issue_runs (
@@ -294,6 +353,54 @@ export class Store {
       ) VALUES (?, ?, ?, ?, ?, 1, 'main', ?, ?)
     `).run(id, input.externalId ?? null, projectPrefix(name), name, input.workspacePath ?? "", timestamp, timestamp);
     return this.getProject(id)!;
+  }
+
+  listAgentProfiles() {
+    return this.db.prepare("SELECT * FROM agent_profiles ORDER BY name COLLATE NOCASE, created_at").all() as AgentProfile[];
+  }
+
+  getAgentProfile(id: string) {
+    return this.db.prepare("SELECT * FROM agent_profiles WHERE id = ? OR role = ?").get(id, id) as AgentProfile | undefined;
+  }
+
+  createAgentProfile(input: AgentProfileInput) {
+    const profile = cleanAgentProfile(input);
+    const id = randomUUID();
+    const role = `better_codex_${id.replaceAll("-", "")}`;
+    const timestamp = now();
+    this.db.prepare(`
+      INSERT INTO agent_profiles (id, role, name, description, instructions, model, reasoning_effort, version, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+    `).run(id, role, profile.name, profile.description, profile.instructions, profile.model, profile.reasoning_effort, timestamp, timestamp);
+    return this.getAgentProfile(id)!;
+  }
+
+  updateAgentProfile(id: string, version: number, patch: AgentProfilePatch) {
+    const current = this.getAgentProfile(id);
+    if (!current) throw new Error("agent_not_found");
+    if (current.version !== version) throw new Error("version_conflict");
+    const profile = cleanAgentProfile({
+      name: patch.name ?? current.name,
+      description: patch.description ?? current.description,
+      instructions: patch.instructions ?? current.instructions,
+      model: patch.model ?? current.model,
+      reasoning_effort: patch.reasoning_effort ?? current.reasoning_effort,
+    });
+    const result = this.db.prepare(`
+      UPDATE agent_profiles SET name = ?, description = ?, instructions = ?, model = ?, reasoning_effort = ?, version = version + 1, updated_at = ?
+      WHERE id = ? AND version = ?
+    `).run(profile.name, profile.description, profile.instructions, profile.model, profile.reasoning_effort, now(), current.id, version);
+    if (result.changes !== 1) throw new Error("version_conflict");
+    return this.getAgentProfile(current.id)!;
+  }
+
+  deleteAgentProfile(id: string, version: number) {
+    const profile = this.getAgentProfile(id);
+    if (!profile) throw new Error("agent_not_found");
+    if (profile.version !== version) throw new Error("version_conflict");
+    const result = this.db.prepare("DELETE FROM agent_profiles WHERE id = ? AND version = ?").run(profile.id, version);
+    if (result.changes !== 1) throw new Error("version_conflict");
+    return profile;
   }
 
   listIssues(filters: { projectId?: string; search?: string; archived?: boolean } = {}) {
@@ -379,8 +486,8 @@ export class Store {
       this.db.prepare(`
         INSERT INTO issues (
           id, identifier, project_id, title, description, status, priority, labels_json,
-          sort_order, pinned, archived_at, thread_id, workspace_path, version, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, 1, ?, ?)
+          sort_order, pinned, archived_at, thread_id, workspace_path, agent_enabled, version, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?, 1, ?, ?)
       `).run(
         id,
         identifier,
@@ -393,6 +500,7 @@ export class Store {
         Number(row.value) + 1000,
         input.threadId || null,
         input.workspacePath || null,
+        Number(input.agentEnabled ?? false),
         timestamp,
         timestamp,
       );
@@ -433,13 +541,14 @@ export class Store {
         pinned: "pinned",
         thread_id: "thread_id",
         workspace_path: "workspace_path",
+        agent_enabled: "agent_enabled",
       };
       const assignments: string[] = [];
       const values: unknown[] = [];
       for (const [key, value] of Object.entries(patch) as Array<[keyof IssuePatch, IssuePatch[keyof IssuePatch]]>) {
         if (value === undefined) continue;
         assignments.push(`${columns[key]} = ?`);
-        values.push(key === "labels" ? JSON.stringify(value) : key === "pinned" ? Number(value) : key === "thread_id" || key === "workspace_path" ? value || null : value);
+        values.push(key === "labels" ? JSON.stringify(value) : key === "pinned" || key === "agent_enabled" ? Number(value) : key === "thread_id" || key === "workspace_path" ? value || null : value);
       }
       if (assignments.length === 0) {
         this.db.exec("COMMIT");
@@ -499,6 +608,7 @@ export class Store {
         FROM issues
         JOIN projects ON projects.id = issues.project_id
         WHERE issues.status = 'todo'
+          AND issues.agent_enabled = 1
           AND issues.archived_at IS NULL
           AND (issues.thread_id IS NOT NULL OR issues.workspace_path IS NOT NULL OR projects.workspace_path != '')
         ORDER BY issues.pinned DESC,

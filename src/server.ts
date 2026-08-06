@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { coreVersion, readCompatibilityStatus } from "./compatibility.js";
-import { issuePriorities, issueStatuses, Store, type IssuePriority, type IssueStatus } from "./db.js";
+import { agentModels, agentReasoningEfforts, issuePriorities, issueStatuses, Store, type AgentModel, type AgentReasoningEffort, type IssuePriority, type IssueStatus } from "./db.js";
+import { syncAgentProfiles } from "./agent-profiles.js";
 import { runtimePort, token } from "./config.js";
 import { acquireRuntimeLock, clearRuntimeState, createRuntimeIdentity, publishRuntimeState } from "./runtime-state.js";
 import { IssueWorker } from "./worker.js";
@@ -14,7 +15,7 @@ function sendJson(response: ServerResponse, status: number, value: unknown) {
     "content-length": Buffer.byteLength(body),
     "content-type": "application/json; charset=utf-8",
     "access-control-allow-origin": "app://-",
-    "access-control-allow-methods": "GET, POST, PATCH, OPTIONS",
+    "access-control-allow-methods": "GET, POST, PATCH, DELETE, OPTIONS",
     "access-control-allow-headers": "authorization, content-type",
     "access-control-allow-private-network": "true",
     "cross-origin-resource-policy": "cross-origin",
@@ -26,7 +27,7 @@ function sendJson(response: ServerResponse, status: number, value: unknown) {
 function sendPreflight(response: ServerResponse) {
   response.writeHead(204, {
     "access-control-allow-origin": "app://-",
-    "access-control-allow-methods": "GET, POST, PATCH, OPTIONS",
+    "access-control-allow-methods": "GET, POST, PATCH, DELETE, OPTIONS",
     "access-control-allow-headers": "authorization, content-type",
     "access-control-allow-private-network": "true",
     "access-control-max-age": "600",
@@ -90,6 +91,16 @@ function asLabels(value: unknown) {
   return value.map(item => item.trim()).filter(Boolean).slice(0, 20);
 }
 
+function agentProfileInput(body: Record<string, unknown>) {
+  return {
+    name: cleanString(body.name, 80),
+    description: cleanString(body.description, 500),
+    instructions: cleanString(body.instructions, 100000),
+    model: cleanString(body.model, 80) as AgentModel,
+    reasoning_effort: cleanString(body.reasoning_effort, 20) as AgentReasoningEffort,
+  };
+}
+
 function parseIssuePatch(body: Record<string, unknown>) {
   const patch: Record<string, unknown> = {};
   if ("title" in body) patch.title = cleanString(body.title, 500);
@@ -106,6 +117,10 @@ function parseIssuePatch(body: Record<string, unknown>) {
   }
   if ("thread_id" in body) patch.thread_id = cleanString(body.thread_id, 200) || null;
   if ("workspace_path" in body) patch.workspace_path = cleanString(body.workspace_path, 4096) || null;
+  if ("agent_enabled" in body) {
+    if (typeof body.agent_enabled !== "boolean") throw new Error("invalid_agent_enabled");
+    patch.agent_enabled = body.agent_enabled;
+  }
   if ("labels" in body) {
     patch.labels = asLabels(body.labels);
   }
@@ -132,6 +147,7 @@ export function startServer() {
   let store: Store;
   try {
     store = new Store();
+    syncAgentProfiles(store.listAgentProfiles());
   } catch (error) {
     clearRuntimeState(identity.instanceId);
     throw error;
@@ -161,7 +177,32 @@ export function startServer() {
       }
       if (!authorized(request, url)) return sendJson(response, 401, { error: "unauthorized" });
       if (url.pathname === "/api/bootstrap" && method === "GET") {
-        return sendJson(response, 200, { projects: store.listProjects(), statuses: issueStatuses, priorities: issuePriorities });
+        return sendJson(response, 200, { projects: store.listProjects(), statuses: issueStatuses, priorities: issuePriorities, agentModels, agentReasoningEfforts });
+      }
+      if (url.pathname === "/api/agents" && method === "GET") return sendJson(response, 200, store.listAgentProfiles());
+      if (url.pathname === "/api/agents" && method === "POST") {
+        const profile = store.createAgentProfile(agentProfileInput(await readBody(request)));
+        syncAgentProfiles(store.listAgentProfiles());
+        return sendJson(response, 201, profile);
+      }
+      if (path[0] === "api" && path[1] === "agents" && path[2]) {
+        const profile = store.getAgentProfile(decodeURIComponent(path[2]));
+        if (!profile) return sendJson(response, 404, { error: "agent_not_found" });
+        if (method === "GET" && path.length === 3) return sendJson(response, 200, profile);
+        if (method === "PATCH" && path.length === 3) {
+          const body = await readBody(request);
+          const version = Number(body.version);
+          if (!Number.isInteger(version) || version < 1) throw new Error("invalid_version");
+          const updated = store.updateAgentProfile(profile.id, version, agentProfileInput(body));
+          syncAgentProfiles(store.listAgentProfiles());
+          return sendJson(response, 200, updated);
+        }
+        if (method === "DELETE" && path.length === 3) {
+          const body = await readBody(request);
+          store.deleteAgentProfile(profile.id, Number(body.version));
+          syncAgentProfiles(store.listAgentProfiles());
+          return sendJson(response, 200, { ok: true });
+        }
       }
       if (url.pathname === "/api/projects" && method === "GET") return sendJson(response, 200, store.listProjects());
       if (url.pathname === "/api/projects" && method === "POST") {
@@ -199,7 +240,9 @@ export function startServer() {
           labels: asLabels(body.labels),
           threadId: cleanString(body.thread_id, 200),
           workspacePath: cleanString(body.workspace_path, 4096),
+          agentEnabled: body.agent_enabled === true,
         });
+        if (issue.agent_enabled && issue.status === "todo") worker.wake();
         return sendJson(response, 201, issue);
       }
       if (path[0] === "api" && path[1] === "issues" && path[2]) {
@@ -211,6 +254,7 @@ export function startServer() {
           const version = Number(body.version);
           if (!Number.isInteger(version) || version < 1) throw new Error("invalid_version");
           const updated = store.updateIssue(issue.id, version, parseIssuePatch(body));
+          if (updated.agent_enabled && updated.status === "todo") worker.wake();
           return sendJson(response, 200, updated);
         }
         if (method === "POST" && path[3] === "archive") {
