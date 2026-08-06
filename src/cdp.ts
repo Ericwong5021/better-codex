@@ -73,7 +73,7 @@ async function bridgeRequest(connection: Connection, runtimePort: number, access
     requestId = typeof request.id === "string" ? request.id : "";
     const path = typeof request.path === "string" ? request.path : "";
     const method = typeof request.method === "string" ? request.method : "GET";
-    if (!requestId || request.token !== accessToken || !/^\/api\/(?:bootstrap(?:[?]|$)|projects(?:\/ensure)?(?:[?]|$)|issues(?:[/?]|$)|agents(?:[/?]|$))/.test(path) || !["GET", "POST", "PATCH", "DELETE"].includes(method)) throw new Error("invalid_bridge_request");
+    if (!requestId || request.token !== accessToken || !/^\/api\/(?:bootstrap(?:[?]|$)|update(?:\/install)?(?:[?]|$)|projects(?:\/ensure)?(?:[?]|$)|issues(?:[/?]|$)|agents(?:[/?]|$))/.test(path) || !["GET", "POST", "PATCH", "DELETE"].includes(method)) throw new Error("invalid_bridge_request");
     const response = await fetch(`http://127.0.0.1:${runtimePort}${path}`, {
       method,
       headers: {
@@ -290,6 +290,15 @@ function launchCodex(port: number) {
 }
 
 async function quitCodex() {
+  if (process.platform === "win32") {
+    execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "Get-Process -Name 'ChatGPT','Codex' -ErrorAction SilentlyContinue | Stop-Process -Force"], { stdio: "ignore", windowsHide: true });
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const count = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "@(Get-Process -Name 'ChatGPT','Codex' -ErrorAction SilentlyContinue).Count"], { encoding: "utf8", windowsHide: true }).trim();
+      if (Number(count) === 0) return;
+      await new Promise(resolve => setTimeout(resolve, 250));
+    }
+    throw new Error("codex_quit_timeout");
+  }
   const application = desktopApplication();
   const name = desktopApplicationName(application);
   try {
@@ -405,8 +414,8 @@ export async function cdpInject(port: number, runtimePort: number, accessToken: 
 }
 
 export async function cdpRestartAndInject(port: number, runtimePort: number, accessToken: string) {
-  if (process.platform === "darwin") await quitCodex();
   if (!['darwin', 'win32'].includes(process.platform)) throw new Error(`setup_unsupported_${process.platform}`);
+  await quitCodex();
   return cdpInject(port, runtimePort, accessToken, true);
 }
 

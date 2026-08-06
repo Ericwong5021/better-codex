@@ -37,6 +37,24 @@ type RuntimePointer = {
   updatedAt: string;
 };
 
+export type GatewayUpdateState = {
+  status: "idle" | "checking" | "current" | "available" | "installing" | "restarting" | "error";
+  currentVersion: string;
+  latestVersion: string | null;
+  checkedAt: string | null;
+  error: string | null;
+};
+
+let gatewayUpdateState: GatewayUpdateState = {
+  status: "idle",
+  currentVersion: coreVersion,
+  latestVersion: null,
+  checkedAt: null,
+  error: null,
+};
+let gatewayCheckPromise: Promise<GatewayUpdateState> | null = null;
+let gatewayInstallPromise: Promise<Awaited<ReturnType<typeof updateAll>>> | null = null;
+
 function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
   if (value && typeof value === "object") return `{${Object.keys(value as Record<string, unknown>).sort().map(key => `${JSON.stringify(key)}:${stableJson((value as Record<string, unknown>)[key])}`).join(",")}}`;
@@ -131,6 +149,68 @@ function readRuntimePointer() {
   }
 }
 
+export function activeCoreExecutable() {
+  return readRuntimePointer()?.executable ?? process.execPath;
+}
+
+function effectiveCoreVersion() {
+  const managed = readRuntimePointer()?.current;
+  return managed && compareVersions(managed, coreVersion) > 0 ? managed : coreVersion;
+}
+
+export function getGatewayUpdateState() {
+  return { ...gatewayUpdateState, currentVersion: effectiveCoreVersion() };
+}
+
+export function checkGatewayUpdate() {
+  if (gatewayCheckPromise) return gatewayCheckPromise;
+  if (["installing", "restarting"].includes(gatewayUpdateState.status)) return Promise.resolve(getGatewayUpdateState());
+  gatewayUpdateState = { ...getGatewayUpdateState(), status: "checking", error: null };
+  const promise = checkForUpdates().then(result => {
+    const checkedAt = new Date().toISOString();
+    if (!result.checked || !("core" in result)) {
+      gatewayUpdateState = { ...getGatewayUpdateState(), status: "error", checkedAt, error: "error" in result ? result.error : "update_check_failed" };
+      return getGatewayUpdateState();
+    }
+    const available = Boolean(result.core?.available || result.compatibility?.available);
+    const latestVersion = result.core?.version ?? result.compatibility?.version ?? effectiveCoreVersion();
+    gatewayUpdateState = { status: available ? "available" : "current", currentVersion: effectiveCoreVersion(), latestVersion, checkedAt, error: null };
+    return getGatewayUpdateState();
+  }).finally(() => {
+    if (gatewayCheckPromise === promise) gatewayCheckPromise = null;
+  });
+  gatewayCheckPromise = promise;
+  return promise;
+}
+
+export function startGatewayUpdateChecks() {
+  const initial = setTimeout(() => void checkGatewayUpdate(), 5_000);
+  const periodic = setInterval(() => void checkGatewayUpdate(), 60 * 60 * 1000);
+  initial.unref();
+  periodic.unref();
+  return () => {
+    clearTimeout(initial);
+    clearInterval(periodic);
+  };
+}
+
+export function installGatewayUpdate() {
+  if (gatewayInstallPromise) return gatewayInstallPromise;
+  if (gatewayUpdateState.status !== "available" && !(gatewayUpdateState.status === "error" && gatewayUpdateState.latestVersion)) return Promise.reject(new Error("update_not_available"));
+  gatewayUpdateState = { ...getGatewayUpdateState(), status: "installing", error: null };
+  const promise = updateAll().then(result => {
+    gatewayUpdateState = { ...getGatewayUpdateState(), status: "restarting", latestVersion: result.core.version ?? result.compatibility.version ?? gatewayUpdateState.latestVersion, error: null };
+    return result;
+  }).catch(error => {
+    gatewayUpdateState = { ...getGatewayUpdateState(), status: "error", error: error instanceof Error ? error.message : "update_install_failed" };
+    throw error;
+  }).finally(() => {
+    if (gatewayInstallPromise === promise) gatewayInstallPromise = null;
+  });
+  gatewayInstallPromise = promise;
+  return promise;
+}
+
 async function validateCoreRuntime(executable: string) {
   const home = mkdtempSync(join(tmpdir(), "better-codex-update-"));
   const child = spawn(executable, ["runtime"], { stdio: "ignore", windowsHide: true, env: { ...process.env, BETTER_CODEX_HOME: home, BETTER_CODEX_RUNTIME_PORT: "0", BETTER_CODEX_DISABLE_DELEGATION: "1" } });
@@ -200,7 +280,7 @@ export async function updateCompatibility(payload?: UpdatePayload, channel: "sta
   const manifest = payload ?? await fetchUpdateManifest(channel);
   const asset = manifest.compatibility;
   if (!asset) return { updated: false, reason: "compatibility_update_unavailable", version: activeCompatibility().version };
-  if (compareVersions(coreVersion, asset.minimumCoreVersion ?? "0.0.0") < 0) throw new Error("compatibility_core_incompatible");
+  if (compareVersions(effectiveCoreVersion(), asset.minimumCoreVersion ?? "0.0.0") < 0) throw new Error("compatibility_core_incompatible");
   if (compareVersions(asset.version, activeCompatibility().version) <= 0) return { updated: false, reason: "compatibility_current", version: activeCompatibility().version };
   const content = await download(httpsUrl(asset.url));
   verifyDigest(content, asset.sha256);

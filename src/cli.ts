@@ -22,7 +22,7 @@ import {
 import { readRuntimeState } from "./runtime-state.js";
 import { injectionEnabled, setInjectionEnabled } from "./injection-state.js";
 import { installService, restartService, serviceLogs, serviceStatus, startService, stopService, uninstallService } from "./service.js";
-import { activeVersions, checkForUpdates, maybeDelegateToActiveCore, rollbackCompatibilityUpdate, shouldCheckForUpdates, updateAll, updateCompatibility } from "./updater.js";
+import { activeVersions, checkForUpdates, maybeDelegateToActiveCore, rollbackCompatibilityUpdate, updateAll, updateCompatibility } from "./updater.js";
 
 function accessToken() {
   return token();
@@ -155,7 +155,6 @@ async function waitForInjector() {
 
 async function runRuntime() {
   const server = (await import("./server.js")).startServer();
-  if (shouldCheckForUpdates()) void checkForUpdates().catch(() => undefined);
   await stopInjector();
   let stopping = false;
   let watcher: ReturnType<typeof spawn> | null = null;
@@ -188,6 +187,22 @@ async function runRuntime() {
     }
   });
   return server;
+}
+
+async function applyUpdate(previousRuntimePid: number) {
+  for (let attempt = 0; attempt < 100 && processAlive(previousRuntimePid); attempt += 1) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  if (processAlive(previousRuntimePid)) throw new Error("update_runtime_stop_timeout");
+  setInjectionEnabled(false);
+  installService();
+  await ensureRuntime();
+  try {
+    await cdpRestartAndInject(cdpPort, activeRuntimePort(), accessToken());
+  } finally {
+    setInjectionEnabled(true);
+  }
+  return { updated: true, runtime: await health() };
 }
 
 async function stopInjector() {
@@ -356,6 +371,7 @@ async function main() {
   const [command, action, ...args] = commandArguments();
   const delegated = maybeDelegateToActiveCore();
   if (delegated !== null) process.exit(delegated);
+  if (command === "apply-update") return print(await applyUpdate(Number(action)));
   if (command === "version" || command === "--version" || command === "-v") {
     const versions = activeVersions();
     if ([action, ...args].includes("--json")) return console.log(JSON.stringify(versions));

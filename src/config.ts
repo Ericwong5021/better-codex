@@ -22,6 +22,7 @@ export const runtimeStatePath = join(runPath, "runtime.json");
 export const runtimeLockPath = join(runPath, "runtime.lock");
 export const runtimeLogPath = join(logPath, "runtime.log");
 export const injectorLogPath = join(logPath, "injector.log");
+export const updateLogPath = join(logPath, "update.log");
 export const workerLogPath = join(logPath, "worker.log");
 export const runLogPath = join(logPath, "runs");
 export const injectorPidPath = join(runPath, "injector.pid");

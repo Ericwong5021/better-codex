@@ -52,6 +52,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     let observer = null;
     let timer = null;
     let pollTimer = null;
+    let updateTimer = null;
+    let updateNotice = null;
+    let dismissedUpdateVersion = sessionStorage.getItem("better-codex-dismissed-update") || "";
     let filterDismiss = null;
     let issueMenu = null;
     let issueMenuDismiss = null;
@@ -81,6 +84,26 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         html.electron-dark, html.dark, html[data-theme="dark"] { --bc-page: oklch(.18 .005 285.823); --bc-surface: oklch(.21 .006 285.885); --bc-raised: oklch(.235 .007 285.885); --bc-hover: oklch(.274 .006 286.033); --bc-selected: oklch(.3 .006 286.033); --bc-foreground: oklch(.985 0 0); --bc-muted: oklch(.705 .015 286.067); --bc-faint: oklch(.60 .015 286.067); --bc-border: oklch(1 0 0 / 10%); --bc-divider: oklch(1 0 0 / 6%); --bc-input: oklch(1 0 0 / 15%); --bc-ring: oklch(.552 .016 285.938); --bc-primary: oklch(.92 .004 286.32); --bc-primary-foreground: oklch(.21 .006 285.885); --bc-warning: oklch(.70 .16 85); --bc-success: oklch(.65 .15 145); --bc-info: oklch(.65 .18 250); --bc-danger: oklch(.704 .191 22.216); --bc-surface-shadow: 0 1px 2px rgb(0 0 0 / .2),0 1px 1px rgb(0 0 0 / .16); --bc-card-shadow: 0 0 0 1px rgb(255 255 255 / .03); --bc-floating-shadow: 0 20px 48px rgb(0 0 0 / .46),0 4px 12px rgb(0 0 0 / .28); --bc-menu-shadow: 0 10px 28px rgb(0 0 0 / .3),0 2px 8px rgb(0 0 0 / .18); --bc-scrim: rgb(0 0 0 / .5); color-scheme: dark; }
         #\${PANEL_ID} { position: absolute; inset: 0; z-index: 2; display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; color: var(--color-text-foreground, inherit); background: var(--color-background-surface, var(--wb-surface-primary, var(--color-token-bg-primary, Canvas))); pointer-events: auto; }
         #\${PANEL_ID}[hidden] { display: none !important; }
+        #better-codex-update-notice { position: fixed; right: 16px; bottom: 16px; z-index: 2147483000; box-sizing: border-box; width: min(320px,calc(100vw - 32px)); color: var(--bc-foreground); background: var(--bc-raised); padding: 16px; border-radius: 12px; box-shadow: var(--bc-floating-shadow); outline: 1px solid color-mix(in srgb,var(--bc-foreground) 10%,transparent); outline-offset: -1px; font-family: Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif; animation: better-codex-update-enter .3s cubic-bezier(.16,1,.3,1); }
+        #better-codex-update-notice .better-codex-update-close { position: absolute; top: 6px; right: 6px; display: inline-flex; width: 40px; height: 40px; align-items: center; justify-content: center; border: 0; border-radius: 8px; color: var(--bc-muted); background: transparent; cursor: pointer; }
+        #better-codex-update-notice .better-codex-update-layout { display: flex; align-items: flex-start; gap: 11px; padding-right: 22px; }
+        #better-codex-update-notice .better-codex-update-icon { display: inline-flex; width: 28px; height: 28px; flex: 0 0 auto; align-items: center; justify-content: center; border-radius: 8px; color: var(--bc-success); background: color-mix(in srgb,var(--bc-success) 12%,transparent); }
+        #better-codex-update-notice .better-codex-update-icon svg { width: 15px; height: 15px; }
+        #better-codex-update-notice[data-status="installing"] .better-codex-update-icon svg { animation: better-codex-update-spin 1s linear infinite; }
+        #better-codex-update-notice .better-codex-update-copy { min-width: 0; flex: 1; }
+        #better-codex-update-notice .better-codex-update-title { margin: 1px 0 0; font-size: 13px; font-weight: 650; line-height: 1.4; }
+        #better-codex-update-notice .better-codex-update-description { margin: 3px 0 0; color: var(--bc-muted); font-size: 11px; line-height: 1.55; text-wrap: pretty; }
+        #better-codex-update-notice .better-codex-update-error { margin: 6px 0 0; color: var(--bc-danger); font-size: 11px; line-height: 1.45; }
+        #better-codex-update-notice .better-codex-update-actions { display: flex; align-items: center; gap: 7px; margin-top: 11px; }
+        #better-codex-update-notice .better-codex-update-button { display: inline-flex; min-height: 40px; align-items: center; justify-content: center; border: 0; border-radius: 8px; padding: 0 13px; color: var(--bc-foreground); background: var(--bc-hover); font: inherit; font-size: 11px; font-weight: 600; cursor: pointer; transition: transform .15s,color .15s,background-color .15s; }
+        #better-codex-update-notice .better-codex-update-button.is-primary { color: var(--bc-primary-foreground); background: var(--bc-primary); }
+        #better-codex-update-notice .better-codex-update-button:active { transform: scale(.96); }
+        #better-codex-update-notice .better-codex-update-button:focus-visible, #better-codex-update-notice .better-codex-update-close:focus-visible { outline: 2px solid var(--bc-ring); outline-offset: 2px; }
+        #better-codex-update-notice .better-codex-update-button:disabled, #better-codex-update-notice .better-codex-update-close:disabled { cursor: default; opacity: .48; }
+        @keyframes better-codex-update-enter { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes better-codex-update-spin { to { transform: rotate(360deg); } }
+        @media (hover: hover) { #better-codex-update-notice .better-codex-update-close:hover { color: var(--bc-foreground); background: var(--bc-hover); } #better-codex-update-notice .better-codex-update-button:hover { background: var(--bc-selected); } #better-codex-update-notice .better-codex-update-button.is-primary:hover { background: color-mix(in srgb,var(--bc-primary) 90%,var(--bc-surface)); } }
+        @media (prefers-reduced-motion: reduce) { #better-codex-update-notice, #better-codex-update-notice[data-status="installing"] .better-codex-update-icon svg { animation: none; } }
         #\${PANEL_ID} { font-family: Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif; background: var(--bc-page); }
         #\${PANEL_ID} .better-codex-error { margin-left: auto; color: var(--bc-danger); font-size: 11px; }
         #\${PANEL_ID} .better-codex-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 50px; padding: 0 18px; background: #fcfcfc; }
@@ -478,6 +501,69 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       }
     }
 
+    function dismissUpdate(version) {
+      dismissedUpdateVersion = version;
+      sessionStorage.setItem("better-codex-dismissed-update", version);
+      updateNotice?.remove();
+      updateNotice = null;
+    }
+
+    function renderUpdateNotice(update) {
+      const version = String(update?.latestVersion || "");
+      if (update?.status !== "available" || !version || dismissedUpdateVersion === version) return;
+      if (updateNotice?.dataset.version === version) return;
+      updateNotice?.remove();
+      updateNotice = document.createElement("section");
+      updateNotice.id = "better-codex-update-notice";
+      updateNotice.dataset.version = version;
+      updateNotice.dataset.status = "available";
+      updateNotice.setAttribute(OWNED, "true");
+      updateNotice.setAttribute("role", "status");
+      updateNotice.setAttribute("aria-live", "polite");
+      updateNotice.innerHTML = '<button class="better-codex-update-close" type="button" aria-label="稍后提醒">' + icon("close") + '</button><div class="better-codex-update-layout"><span class="better-codex-update-icon">' + icon("refresh") + '</span><div class="better-codex-update-copy"><p class="better-codex-update-title">Better Codex 有新版本</p><p class="better-codex-update-description">v' + escapeHtml(version) + ' 已可用，更新完成后将自动重启 Codex。</p><p class="better-codex-update-error" hidden></p><div class="better-codex-update-actions"><button class="better-codex-update-button" type="button" data-update-later>稍后</button><button class="better-codex-update-button is-primary" type="button" data-update-install>立即更新</button></div></div></div>';
+      document.body.appendChild(updateNotice);
+      updateNotice.querySelector(".better-codex-update-close").addEventListener("click", () => dismissUpdate(version));
+      updateNotice.querySelector("[data-update-later]").addEventListener("click", () => dismissUpdate(version));
+      updateNotice.querySelector("[data-update-install]").addEventListener("click", async event => {
+        const install = event.currentTarget;
+        const close = updateNotice.querySelector(".better-codex-update-close");
+        const later = updateNotice.querySelector("[data-update-later]");
+        const title = updateNotice.querySelector(".better-codex-update-title");
+        const description = updateNotice.querySelector(".better-codex-update-description");
+        const error = updateNotice.querySelector(".better-codex-update-error");
+        updateNotice.dataset.status = "installing";
+        install.disabled = true;
+        close.disabled = true;
+        later.disabled = true;
+        install.textContent = "正在更新";
+        title.textContent = "正在更新 Better Codex";
+        description.textContent = "正在下载并校验新版本，请不要关闭 Codex。";
+        error.hidden = true;
+        try {
+          await api("/api/update/install", { method: "POST" });
+          title.textContent = "更新完成";
+          description.textContent = "正在重启 Codex，稍后会自动恢复。";
+        } catch (reason) {
+          updateNotice.dataset.status = "available";
+          install.disabled = false;
+          close.disabled = false;
+          later.disabled = false;
+          install.textContent = "重试";
+          title.textContent = "更新未完成";
+          description.textContent = "Better Codex 保持当前版本运行。";
+          error.textContent = reason instanceof Error ? reason.message : "update_install_failed";
+          error.hidden = false;
+        }
+      });
+    }
+
+    async function checkUpdateNotice() {
+      try {
+        renderUpdateNotice(await api("/api/update"));
+      } catch {
+      }
+    }
+
     async function perform(action) {
       clearError();
       try {
@@ -510,7 +596,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         check: '<path d="M5 12l4 4L19 6"/>',
         circle: '<circle cx="12" cy="12" r="7"/>',
         dash: '<path d="M5 12h14"/>',
-        trash: '<path d="M4 7h16M9 3h6l1 4H8zM7 7l1 14h8l1-14M10 11v6M14 11v6"/>'
+        trash: '<path d="M4 7h16M9 3h6l1 4H8zM7 7l1 14h8l1-14M10 11v6M14 11v6"/>',
+        refresh: '<path d="M20 11a8 8 0 10-2.3 5.7M20 4v7h-7"/>'
       };
       return '<svg class="' + className + '" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + paths[name] + '</svg>';
     }
@@ -1331,6 +1418,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       destroyed = true;
       if (timer !== null) clearTimeout(timer);
       if (pollTimer !== null) clearInterval(pollTimer);
+      if (updateTimer !== null) clearInterval(updateTimer);
       closeFilterMenu();
       closeIssueMenu();
       observer?.disconnect();
@@ -1353,6 +1441,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       observer = new MutationObserver(scheduleRefresh);
       observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "data-theme", "aria-current", ATTRIBUTES.threadActive] });
       ensureEntry();
+      void checkUpdateNotice();
+      updateTimer = setInterval(checkUpdateNotice, 15000);
     }
 
     window.__betterCodexInjection__ = { version: VERSION, endpoint: BASE_URL, refresh, open, close, destroy };

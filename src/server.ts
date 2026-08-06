@@ -1,9 +1,13 @@
+import { spawn } from "node:child_process";
+import { closeSync, openSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { isSea } from "node:sea";
 import { coreVersion, readCompatibilityStatus } from "./compatibility.js";
 import { agentModels, agentReasoningEfforts, issuePriorities, issueStatuses, Store, type AgentModel, type AgentReasoningEffort, type IssuePriority, type IssueStatus } from "./db.js";
 import { syncAgentProfiles } from "./agent-profiles.js";
-import { runtimePort, token } from "./config.js";
+import { runtimePort, token, updateLogPath } from "./config.js";
 import { acquireRuntimeLock, clearRuntimeState, createRuntimeIdentity, publishRuntimeState } from "./runtime-state.js";
+import { activeCoreExecutable, getGatewayUpdateState, installGatewayUpdate, startGatewayUpdateChecks } from "./updater.js";
 import { IssueWorker } from "./worker.js";
 
 const accessToken = token();
@@ -141,6 +145,15 @@ function errorStatus(code: string) {
   return 400;
 }
 
+function spawnUpdateRelaunch(runtimePid: number) {
+  const descriptor = openSync(updateLogPath, "a");
+  const executable = isSea() ? activeCoreExecutable() : process.execPath;
+  const args = isSea() ? ["apply-update", String(runtimePid)] : [...process.execArgv, process.argv[1], "apply-update", String(runtimePid)];
+  const child = spawn(executable, args, { cwd: process.cwd(), detached: true, env: process.env, stdio: ["ignore", descriptor, descriptor], windowsHide: true });
+  child.unref();
+  closeSync(descriptor);
+}
+
 export function startServer() {
   if (!Number.isInteger(runtimePort) || runtimePort < 0 || runtimePort > 65535) throw new Error("invalid_runtime_port");
   const identity = createRuntimeIdentity();
@@ -155,10 +168,12 @@ export function startServer() {
   }
   let cleaned = false;
   const worker = new IssueWorker(store);
+  const stopUpdateChecks = startGatewayUpdateChecks();
   const cleanup = () => {
     if (cleaned) return;
     cleaned = true;
     worker.stop();
+    stopUpdateChecks();
     clearRuntimeState(identity.instanceId);
     store.close();
   };
@@ -179,6 +194,19 @@ export function startServer() {
       if (!authorized(request, url)) return sendJson(response, 401, { error: "unauthorized" });
       if (url.pathname === "/api/bootstrap" && method === "GET") {
         return sendJson(response, 200, { projects: store.listProjects(), agents: store.listAgentProfiles(), statuses: issueStatuses, priorities: issuePriorities, agentModels, agentReasoningEfforts });
+      }
+      if (url.pathname === "/api/update" && method === "GET") return sendJson(response, 200, getGatewayUpdateState());
+      if (url.pathname === "/api/update/install" && method === "POST") {
+        const result = await installGatewayUpdate();
+        sendJson(response, 200, { ok: true, state: getGatewayUpdateState(), result });
+        setTimeout(() => {
+          spawnUpdateRelaunch(process.pid);
+          server.close(() => {
+            cleanup();
+            process.exit(0);
+          });
+        }, 250);
+        return;
       }
       if (url.pathname === "/api/agents" && method === "GET") return sendJson(response, 200, store.listAgentProfiles());
       if (url.pathname === "/api/agents" && method === "POST") {
