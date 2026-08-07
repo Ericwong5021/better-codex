@@ -5,11 +5,11 @@
 <h1 align="center">Better Codex</h1>
 
 <p align="center">
-  <strong>把 Codex 对话，变成能持续推进的工作。</strong>
+  <strong>为了更好的编程体验，我们做了一款更好的 Codex。</strong>
 </p>
 
 <p align="center">
-  直接运行在 Codex Desktop 里的本地任务看板与智能体工作流。
+  直接运行在 Codex Desktop 里的任务看板与 Agent 系统。本地优先，一行命令安装。
 </p>
 
 <p align="center">
@@ -25,110 +25,90 @@
   <a href="README.md">English</a> · 简体中文
 </p>
 
-Better Codex 给 Codex Desktop 补上了一条真正能推进工作的闭环：把当前对话收进任务，在看板上持续推进，交给一个明确负责人，并在需要判断时回到原始对话继续处理。
-
-它不是另一个需要维护的 Web 工作台。任务看板、智能体配置、执行状态和人工审核都在 Codex 里面。
-
 <p align="center">
   <img src="assets/better-codex-board.png" width="1200" alt="Codex Desktop 中的 Better Codex 任务看板" />
 </p>
 
-## Better Codex 的产品特色
-
-| | 能力 | 带来的变化 |
-| --- | --- | --- |
-| **01** | 对话与任务双向关联 | 从当前 Codex 对话创建任务，也能从任务重新打开对应会话。上下文始终跟着工作走。 |
-| **02** | 一眼看清全部进度 | 按项目、状态、优先级、标签和负责人管理任务。拖动卡片即可推进，并清楚看到等待中、执行中、审核中、已阻塞和已完成的工作。 |
-| **03** | 可复用的智能体配置 | 为代码审查、前端实现、问题排查等角色分别设置指令、模型、推理等级和头像。每个任务仍然只有一个明确负责人。 |
-| **04** | 手动运行与自动运行 | 你可以亲自决定每次何时开始，也可以让自动运行领取已经就绪的智能体任务。遇到审核、决策或阻塞时，控制权会回到你。 |
-| **05** | 本地优先 | 项目、任务、负责人和运行状态保存在本机 SQLite 数据库，不需要注册 Better Codex 账号，也不依赖托管任务服务。 |
-
-<p align="center">
-  <img src="assets/better-codex-agents.png" width="1200" alt="Better Codex 中可复用的智能体配置" />
-</p>
-
-## 安装
-
-### macOS
-
-支持 Apple Silicon 和 Intel Mac。
+**30 秒装好** — macOS：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scripts/install.sh | bash
 ```
 
-### Windows
-
-支持 Windows x64 与 Microsoft Store 版本的 Codex。请在 PowerShell 中运行：
+Windows（PowerShell）：
 
 ```powershell
 irm https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scripts/install.ps1 | iex
 ```
 
-安装程序会下载对应版本、校验 SHA-256、安装本地运行时、配置 Codex 集成，并确认安装结果。
+从 Better Codex 启动入口重启 Codex，看板就在你的侧边栏里了。随时可以用 `better-codex eject` 卸载，任务数据会保留。
 
-如果 Codex 正在运行，安装程序会先征求关闭许可。继续前请保存当前工作。
+## 为什么会有这个项目
 
-安装完成后：
+如果你是 Codex 的重度用户，下面这些场景你多半不陌生：
 
-- Codex 侧边栏会出现 `Better Codex`，用于管理任务和项目。
-- 侧边栏会出现 `智能体`，用于管理可复用的智能体配置。
-- macOS 会创建 `/Applications/Better Codex.app`，可以固定到 Dock。
-- Windows 会在桌面和开始菜单创建 `Better Codex` 快捷方式。
+- **会话列表成了坟场。** 几十上百个对话堆在一起，标题大同小异，也没法按项目归类。想找回"上次调 auth 那个会话"，只能一边滚动一边靠猜。
+- **一份模型配置管着所有会话。** 为了一个复杂重构调高推理等级，之后每个新会话都跟着买单；为了快速问答换了个轻量模型，下次深度排查开局就先天不足。全局只有这一个旋钮，所有任务都在抢它。
+- **想法没有地方放。** 聊着聊着又想到三件值得做的事，但 Codex 没有任何地方能记下它们——最后要么丢进备忘录，要么写成 TODO 注释，要么干脆忘了。那些"本来打算做的事"就这么悄悄蒸发了。
+- **Codex 长成了聊天的样子，但你的工作不是。** 真实的工作是一个跨越好几天、横跨好多会话的项目。Codex 只递给你一堆聊天记录，剩下的自求多福。
 
-以后请从 Better Codex 创建的启动入口打开 Codex，确保本地集成正常启用。
+这些都不是模型的问题——模型很强。缺的是模型之上的那一层**工作系统**。所以我们动手做了一款更好的 Codex：Better Codex。
 
-## 一套完整的工作流程
+## 你会得到什么
+
+Better Codex 基于原生 Codex Desktop 二次开发。所有东西都在 Codex *里面*——同一个窗口、同一套视觉语言，接近原生的体验。不用多开网页工作台，不用注册账号，数据也不出你这台机器。
+
+**会话找不到 → 任务和会话双向关联。** 把任何对话一键收进看板，按项目、状态、优先级、标签和负责人组织起来。三天后回来，不用再翻聊天记录——打开任务卡片，直接落在关联的那个会话里，上下文原封不动。
+
+**全局配置互相打架 → 每个 Agent 一套配置。** 给每类工作建一个角色：高推理等级的代码审查员、带专属指令的前端工程师、跑在快速模型上的问答助手。每个角色的模型、推理等级、指令、头像都是独立的。改一个不影响其他，新会话也不再继承你上次随手调的参数。
+
+**想法没处放 → 一个真正的待办池。** 聊到一半想到新点子？几秒钟丢进看板，然后继续手头的事。明天它还在那儿，带着状态和负责人，而不是消失在聊天记录里。
+
+**聊天式工作 → 看得见的工作闭环。** 把任务分配给自己或某个 Agent。手动逐个启动，或者开启自动模式让就绪的任务依次跑起来。需要你审核、拍板或解除阻塞时，任务会回到你手上——就在看板上，一眼就能看到。
+
+<p align="center">
+  <img src="assets/better-codex-agents.png" width="1200" alt="Better Codex 中可复用的智能体配置" />
+</p>
+
+## 用起来是什么样
 
 1. 从 Codex 侧边栏打开 `Better Codex`。
-2. 创建项目，并手动添加任务，或者直接把当前对话收进任务。
-3. 把任务分配给自己、默认 Codex 配置或自定义智能体配置。
-4. 需要完整控制时使用手动运行，需要持续推进时开启自动运行。
-5. 在看板上跟踪进度。任务需要审核或决定时，会重新交给你。
+2. 创建项目，手动添加任务，或者直接把当前对话收进任务。
+3. 把任务分配给自己、默认 Codex 配置或某个自定义智能体。
+4. 想完全掌控就用手动运行；想持续推进就开自动运行。
+5. 在看板上跟踪进度。任务需要审核或决定时，会回到你手上。
 6. 打开任务，回到关联的 Codex 对话继续工作。
 
-同一套流程可以用于编程、调研、写作、文档整理，以及其他已经在 Codex 中完成的工作。
+同一套流程可以用于编程、调研、写作、文档整理——所有你已经在 Codex 里做的事。
 
-## 本地数据与隐私
+## 常见问题
 
-| 平台 | 数据库路径 |
-| --- | --- |
-| macOS | `~/.better-codex/better-codex.db` |
-| Windows | `%USERPROFILE%\.better-codex\better-codex.db` |
+**这是 OpenAI 官方产品吗？**
+不是。Better Codex 是一个独立的开源项目，基于 Codex Desktop 二次开发，与 OpenAI 没有隶属或背书关系。
 
-Better Codex 运行时只监听 `127.0.0.1`。它不需要 Better Codex 云端服务，也不会向此类服务上传任务内容。
+**我的数据会去哪里？**
+哪儿也不去。项目、任务、分配关系和运行状态全部保存在本机 SQLite 数据库（macOS 在 `~/.better-codex/better-codex.db`，Windows 在 `%USERPROFILE%\.better-codex\better-codex.db`）。运行时只监听 `127.0.0.1`，没有云端服务，也不需要账号。
 
-## 版本更新
+**它会搞坏我的 Codex 吗？**
+集成使用桌面应用的本地 CDP 接口和页面结构，不修改 Codex 的二进制文件。Codex 更新后偶尔需要安装对应的兼容性更新，届时 Codex 内会出现提示。感觉哪里不对时，运行 `better-codex doctor` 检查。
 
-Better Codex 会在后台检查带签名的更新清单。发现新版本后，Codex 内会显示更新提示。完成安装后，Codex 会自动重启并重新验证集成状态。
+**怎么卸载？**
+`better-codex eject` 会移除侧边栏集成，任务数据原样保留。
 
-你也可以随时重新运行安装命令。Better Codex 会优先升级现有运行时，需要时再执行完整安装。
+**更新怎么做？**
+Better Codex 会在后台检查带签名的更新清单，发现新版本时在 Codex 内提示。你也可以随时重新运行安装命令，它会优先原地升级。
+
+**支持哪些平台？**
+macOS 版 Codex Desktop（Apple Silicon 和 Intel），以及 Windows x64 上 Microsoft Store 版本的 Codex。Release 安装包和 CI 覆盖全部三个平台。
 
 ## 常用命令
 
-检查运行时、数据库、Codex 兼容性和注入状态：
-
 ```bash
-better-codex doctor
-```
-
-查看当前服务与看板连接：
-
-```bash
-better-codex status
-```
-
-安装或检查系统启动入口：
-
-```bash
-better-codex launcher install
-better-codex launcher status
-```
-
-移除 Codex 侧边栏集成，同时保留任务数据：
-
-```bash
-better-codex eject
+better-codex doctor            # 检查运行时、数据库、Codex 兼容性和注入状态
+better-codex status            # 查看当前服务与看板连接
+better-codex launcher install  # 安装系统启动入口
+better-codex launcher status   # 检查系统启动入口
+better-codex eject             # 移除侧边栏集成，保留任务数据
 ```
 
 ## 从源码安装
@@ -145,14 +125,15 @@ better-codex inject --launch
 better-codex launcher install
 ```
 
-## 兼容性
-
-Better Codex 支持 macOS 版 Codex Desktop，以及 Windows 上通过 Microsoft Store 安装的 Codex。Release 安装包和 CI 覆盖 Apple Silicon、Intel Mac 和 Windows x64。
-
-Better Codex 使用桌面应用的本地 CDP 接口和页面结构。Codex 更新后，偶尔可能需要安装对应的 Better Codex 兼容性更新。
-
 ## 社区
 
-请通过 [GitHub Issues](https://github.com/Ericwong5021/better-codex/issues) 提交问题和功能建议，通过 [GitHub Discussions](https://github.com/Ericwong5021/better-codex/discussions) 交流使用问题和工作流想法。
+- 发现 Bug 或想要新功能？提交 [GitHub Issue](https://github.com/Ericwong5021/better-codex/issues)。
+- 使用问题和工作流想法欢迎到 [GitHub Discussions](https://github.com/Ericwong5021/better-codex/discussions) 交流。
 
-请在 GitHub 的公开讨论中使用英文，方便所有人阅读和参与。
+如果 Better Codex 让你的 Codex 变得更好用，点个 Star 能帮更多重度用户找到它。
+
+<p align="center">
+  <a href="https://star-history.com/#Ericwong5021/better-codex&Date">
+    <img src="https://api.star-history.com/svg?repos=Ericwong5021/better-codex&type=Date" width="600" alt="Star History Chart" />
+  </a>
+</p>
