@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { isSea } from "node:sea";
@@ -210,25 +210,6 @@ function writeMacAppIcon(resources: string) {
   writeFileSync(join(resources, "AppIcon.icns"), appIconIcns());
 }
 
-function refreshMacLauncher(appPath: string) {
-  const temporaryApp = `${appPath}.tmp.${randomUUID()}`;
-  const backupApp = `${appPath}.backup.${randomUUID()}`;
-  try {
-    cpSync(appPath, temporaryApp, { recursive: true, force: true });
-    renameSync(appPath, backupApp);
-    try {
-      renameSync(temporaryApp, appPath);
-    } catch (error) {
-      renameSync(backupApp, appPath);
-      throw error;
-    }
-    rmSync(backupApp, { recursive: true, force: true });
-  } catch (error) {
-    rmSync(temporaryApp, { recursive: true, force: true });
-    throw error;
-  }
-}
-
 function writeWindowsAppIcon() {
   ensureDirectories();
   const path = join(betterCodexHome, "AppIcon.ico");
@@ -269,11 +250,12 @@ exit 0
 `;
   if (existsSync(appPath)) {
     const existingExecutable = join(existingContents, "MacOS", "better-codex-launcher");
-    if (!existsSync(existingExecutable) || lstatSync(existingExecutable).isSymbolicLink() || readFileSync(existingExecutable, "utf8") !== expectedScript) {
+    if (!existsSync(existingExecutable) || lstatSync(existingExecutable).isSymbolicLink()) {
       throw new Error("mac_launcher_replacement_required");
     }
+    writeFileSync(existingExecutable, expectedScript, { mode: 0o755 });
+    chmodSync(existingExecutable, 0o755);
     writeMacAppIcon(join(existingContents, "Resources"));
-    refreshMacLauncher(appPath);
     try {
       execFileSync("/usr/bin/touch", [appPath]);
       execFileSync("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister", ["-f", appPath], { stdio: "ignore" });
