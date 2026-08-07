@@ -259,7 +259,9 @@ export function startServer() {
       if (url.pathname === "/api/update" && method === "GET") return sendJson(response, 200, getGatewayUpdateState());
       if (url.pathname === "/api/update/install" && method === "POST") {
         const result = await installGatewayUpdate();
-        sendJson(response, 200, { ok: true, state: getGatewayUpdateState(), result });
+        const updated = result.core.updated || result.compatibility.updated;
+        sendJson(response, 200, { ok: true, updated, state: getGatewayUpdateState(), result });
+        if (!updated) return;
         setTimeout(() => {
           spawnUpdateRelaunch(process.pid);
           server.close(() => {

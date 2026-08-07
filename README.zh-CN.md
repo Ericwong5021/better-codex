@@ -5,7 +5,7 @@
 <h1 align="center">Better Codex</h1>
 
 <p align="center">
-  <strong>为了更好的编程体验，我们做了一款更好的 Codex。</strong>
+  <strong>从开始到完成，让 Codex 里的工作清晰可见。</strong>
 </p>
 
 <p align="center">

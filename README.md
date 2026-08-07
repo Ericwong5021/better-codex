@@ -5,7 +5,7 @@
 <h1 align="center">Better Codex</h1>
 
 <p align="center">
-  <strong>For a better coding experience, we built a better Codex.</strong>
+  <strong>From start to finish, keep your work in Codex clear and visible.</strong>
 </p>
 
 <p align="center">

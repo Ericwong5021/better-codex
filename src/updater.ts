@@ -82,7 +82,7 @@ function manifestUrl(channel: "stable" | "preview") {
 }
 
 async function download(url: URL) {
-  const response = await fetch(url, { signal: AbortSignal.timeout(15000), redirect: "follow" });
+  const response = await fetch(url, { signal: AbortSignal.timeout(15000), redirect: "follow", cache: "no-store", headers: { "cache-control": "no-cache", pragma: "no-cache" } });
   if (!response.ok) throw new Error(`update_http_${response.status}`);
   return Buffer.from(await response.arrayBuffer());
 }
@@ -196,10 +196,25 @@ export function startGatewayUpdateChecks() {
 
 export function installGatewayUpdate() {
   if (gatewayInstallPromise) return gatewayInstallPromise;
-  if (gatewayUpdateState.status !== "available" && !(gatewayUpdateState.status === "error" && gatewayUpdateState.latestVersion)) return Promise.reject(new Error("update_not_available"));
-  gatewayUpdateState = { ...getGatewayUpdateState(), status: "installing", error: null };
-  const promise = updateAll().then(result => {
-    gatewayUpdateState = { ...getGatewayUpdateState(), status: "restarting", latestVersion: result.core.version ?? result.compatibility.version ?? gatewayUpdateState.latestVersion, error: null };
+  const promise = checkGatewayUpdate().then(state => {
+    if (state.status === "current") {
+      return {
+        channel: "stable" as const,
+        core: { updated: false, reason: "core_current", version: state.currentVersion },
+        compatibility: { updated: false, reason: "compatibility_current", version: activeCompatibility().version },
+      };
+    }
+    if (state.status !== "available") throw new Error(state.error || "update_not_available");
+    gatewayUpdateState = { ...getGatewayUpdateState(), status: "installing", error: null };
+    return updateAll();
+  }).then(result => {
+    const updated = result.core.updated || result.compatibility.updated;
+    gatewayUpdateState = {
+      ...getGatewayUpdateState(),
+      status: updated ? "restarting" : "current",
+      latestVersion: result.core.version ?? result.compatibility.version ?? gatewayUpdateState.latestVersion,
+      error: null,
+    };
     return result;
   }).catch(error => {
     gatewayUpdateState = { ...getGatewayUpdateState(), status: "error", error: error instanceof Error ? error.message : "update_install_failed" };
@@ -263,7 +278,7 @@ export async function checkForUpdates(channel: "stable" | "preview" = "stable") 
       offline: false,
       channel,
       current: activeVersions(),
-      core: manifest.core ? { version: manifest.core.version, available: Boolean(coreAsset) && compareVersions(manifest.core.version, coreVersion) > 0 } : null,
+      core: manifest.core ? { version: manifest.core.version, available: Boolean(coreAsset) && compareVersions(manifest.core.version, effectiveCoreVersion()) > 0 } : null,
       compatibility: manifest.compatibility ? { version: manifest.compatibility.version, available: compareVersions(manifest.compatibility.version, activeCompatibility().version) > 0, minimumCoreVersion: manifest.compatibility.minimumCoreVersion } : null,
     };
     writeJsonAtomic(updateStatePath, { checkedAt: new Date().toISOString(), channel, result });
@@ -301,7 +316,7 @@ export async function updateCompatibility(payload?: UpdatePayload, channel: "sta
 export async function updateCore(payload?: UpdatePayload, channel: "stable" | "preview" = "stable") {
   if (!isSea()) return { updated: false, reason: "core_update_requires_binary", version: coreVersion };
   const manifest = payload ?? await fetchUpdateManifest(channel);
-  if (!manifest.core || compareVersions(manifest.core.version, coreVersion) <= 0) return { updated: false, reason: "core_current", version: coreVersion };
+  if (!manifest.core || compareVersions(manifest.core.version, effectiveCoreVersion()) <= 0) return { updated: false, reason: "core_current", version: effectiveCoreVersion() };
   const asset = manifest.core.assets[platformAssetKey()];
   if (!asset) throw new Error("core_asset_unavailable");
   const content = await download(httpsUrl(asset.url));
@@ -325,6 +340,15 @@ export async function updateCore(payload?: UpdatePayload, channel: "stable" | "p
 }
 
 export async function updateAll(channel: "stable" | "preview" = "stable") {
+  const check = await checkForUpdates(channel);
+  if ("error" in check || !check.checked) throw new Error("error" in check ? check.error : "update_check_failed");
+  if (!check.core?.available && !check.compatibility?.available) {
+    return {
+      channel,
+      core: { updated: false, reason: "core_current", version: effectiveCoreVersion() },
+      compatibility: { updated: false, reason: "compatibility_current", version: activeCompatibility().version },
+    };
+  }
   const manifest = await fetchUpdateManifest(channel);
   const core = await updateCore(manifest, channel);
   const compatibility = await updateCompatibility(manifest, channel);

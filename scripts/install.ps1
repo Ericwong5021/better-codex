@@ -24,7 +24,8 @@ function Resolve-ReleaseTag([string]$RepositoryName, [string]$RequestedVersion) 
     return "v$candidate"
   }
   Write-Step "Resolving latest release..."
-  $request = [System.Net.HttpWebRequest]::Create("https://github.com/$RepositoryName/releases/latest")
+  $cacheBust = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+  $request = [System.Net.HttpWebRequest]::Create("https://github.com/$RepositoryName/releases/latest?better_codex_cache_bust=$cacheBust")
   $request.Method = "HEAD"
   $request.AllowAutoRedirect = $false
   $request.UserAgent = "better-codex-installer"
@@ -40,7 +41,7 @@ function Resolve-ReleaseTag([string]$RepositoryName, [string]$RequestedVersion) 
     $response.Close()
   }
   if (-not $location) { throw "Unable to resolve the latest Better Codex release." }
-  $tag = ($location.TrimEnd("/") -split "/")[-1]
+  $tag = (($location.TrimEnd("/") -split "/")[-1]).Split("?")[0]
   if (-not $tag) { throw "Unable to resolve the latest Better Codex release." }
   return $tag
 }
@@ -110,15 +111,32 @@ $targetVersion = $Version.TrimStart("v")
 $installedVersion = Get-InstalledVersion $executable
 
 if ($installedVersion -and (Test-VersionAtLeast $installedVersion $targetVersion) -and (Test-Path (Join-Path $skillDirectory "SKILL.md"))) {
-  if (-not $NoService) {
-    try { & $executable launcher install 2>&1 | Out-Null } catch {}
+  try {
+    $updateCheck = (& $executable update check 2>$null | Out-String | ConvertFrom-Json)
+    if ($updateCheck.checked -and -not (($updateCheck.core.available) -or ($updateCheck.compatibility.available))) {
+      if (-not $NoService) {
+        try { & $executable launcher install 2>&1 | Out-Null } catch {}
+      }
+      Write-Ok "Better Codex is up to date (v$installedVersion)"
+      return
+    }
+  } catch {
+    Write-Step "Live update check unavailable; continuing with upgrade..."
   }
-  Write-Ok "Better Codex is up to date (v$installedVersion)"
-  return
 }
 
 if ($installedVersion) {
   Write-Step "Better Codex v$installedVersion is installed; upgrading to v$targetVersion..."
+  $updateCheck = $null
+  try {
+    $updateCheck = (& $executable update check 2>$null | Out-String | ConvertFrom-Json)
+    if ((Test-VersionAtLeast $installedVersion $targetVersion) -and $updateCheck.checked -and -not (($updateCheck.core.available) -or ($updateCheck.compatibility.available))) {
+      Write-Ok "Better Codex is up to date (v$installedVersion)"
+      return
+    }
+  } catch {
+    Write-Step "Live update check unavailable; continuing with upgrade..."
+  }
   if ((Test-Path (Join-Path $skillDirectory "SKILL.md")) -and (Invoke-ExistingUpgrade $executable $targetVersion)) { return }
   Write-Step "Automatic upgrade unavailable; continuing with full installation..."
 }

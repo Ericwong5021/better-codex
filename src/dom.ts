@@ -898,7 +898,17 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         description.textContent = "正在下载并校验新版本，请不要关闭 Codex。";
         error.hidden = true;
         try {
-          await api("/api/update/install", { method: "POST" });
+          const result = await api("/api/update/install", { method: "POST" });
+          if (result?.updated === false) {
+            updateNotice.dataset.status = "current";
+            title.textContent = "Better Codex 已是最新版本";
+            description.textContent = "刚刚完成检查，无需更新。";
+            setTimeout(() => {
+              updateNotice?.remove();
+              updateNotice = null;
+            }, 1800);
+            return;
+          }
           title.textContent = "更新完成";
           description.textContent = "正在重启 Codex，稍后会自动恢复。";
         } catch (reason) {

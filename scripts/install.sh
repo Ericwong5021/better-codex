@@ -53,7 +53,7 @@ installed_version() {
 
 TARGET_VERSION=""
 if [ -z "${BETTER_CODEX_ARCHIVE:-}" ]; then
-  TAG="${BETTER_CODEX_VERSION:-$(curl -fsSIL -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest" | sed 's#.*/##')}"
+  TAG="${BETTER_CODEX_VERSION:-$(curl -fsSIL -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest?better_codex_cache_bust=$(date +%s)" | sed 's#.*/##; s/[?].*$//')}"
   TARGET_VERSION="${TAG#v}"
 fi
 
@@ -70,15 +70,27 @@ if [ -n "$EXISTING_BINARY" ]; then
 fi
 
 if [ -n "$CURRENT_VERSION" ] && [ -n "$TARGET_VERSION" ] && version_at_least "$CURRENT_VERSION" "$TARGET_VERSION" && [ -f "$SKILL_DIR/SKILL.md" ]; then
-  if [ "$WITH_SERVICE" = "1" ]; then
-    "$EXISTING_BINARY" launcher install >/dev/null 2>&1 || true
+  UPDATE_CHECK=""
+  if UPDATE_CHECK="$($EXISTING_BINARY update check 2>/dev/null)" && printf '%s' "$UPDATE_CHECK" | grep -q '"checked":true' && ! printf '%s' "$UPDATE_CHECK" | grep -q '"available":true'; then
+    if [ "$WITH_SERVICE" = "1" ]; then
+      "$EXISTING_BINARY" launcher install >/dev/null 2>&1 || true
+    fi
+    printf '[OK] Better Codex is up to date (v%s)\n' "$CURRENT_VERSION"
+    exit 0
   fi
-  printf '[OK] Better Codex is up to date (v%s)\n' "$CURRENT_VERSION"
-  exit 0
 fi
 
 if [ -n "$CURRENT_VERSION" ] && [ -n "$TARGET_VERSION" ]; then
   printf '[Better Codex] Better Codex v%s is installed; upgrading to v%s...\n' "$CURRENT_VERSION" "$TARGET_VERSION"
+  UPDATE_CHECK=""
+  if UPDATE_CHECK="$($EXISTING_BINARY update check 2>/dev/null)" && printf '%s' "$UPDATE_CHECK" | grep -q '"checked":true'; then
+    if version_at_least "$CURRENT_VERSION" "$TARGET_VERSION" && ! printf '%s' "$UPDATE_CHECK" | grep -q '"available":true'; then
+      printf '[OK] Better Codex is up to date (v%s)\n' "$CURRENT_VERSION"
+      exit 0
+    fi
+  else
+    printf '[Better Codex] Live update check unavailable; continuing with upgrade...\n' >&2
+  fi
   if "$EXISTING_BINARY" update >/dev/null 2>&1; then
     UPDATED_VERSION="$(installed_version "$EXISTING_BINARY" || true)"
     if [ -n "$UPDATED_VERSION" ] && version_at_least "$UPDATED_VERSION" "$TARGET_VERSION"; then
