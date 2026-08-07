@@ -29,20 +29,6 @@
   <img src="assets/better-codex-board.png" width="1200" alt="Better Codex task board inside Codex Desktop" />
 </p>
 
-**Install in 30 seconds** — macOS:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scripts/install.sh | bash
-```
-
-Windows (PowerShell):
-
-```powershell
-irm https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scripts/install.ps1 | iex
-```
-
-Restart Codex from the Better Codex launcher, and the board is in your sidebar. Uninstall anytime with `better-codex eject` — your task data stays.
-
 ## Why this exists
 
 If you use Codex heavily, some of this probably sounds familiar:
@@ -60,11 +46,11 @@ Better Codex extends the native Codex Desktop app. Everything lives *inside* Cod
 
 **Lost sessions → tasks linked to conversations.** Capture any conversation as a task on a board, organized by project, status, priority, label, and owner. When you come back three days later, you don't scroll through chat history — you open the task and land in the exact linked thread, context intact.
 
-**One global config → per-Agent profiles.** Create a profile for each kind of work: a code reviewer with high reasoning, a frontend builder with its own instructions, a quick-answer assistant on a faster model. Each profile keeps its own model, reasoning level, instructions, and avatar. Changing one never touches the others, and new sessions stop inheriting whatever you tweaked last.
-
 **Ideas with nowhere to go → a real backlog.** Thought of something mid-conversation? Add it to the board in seconds and get back to what you were doing. It'll be there tomorrow, with a status and an owner, instead of dissolving into your chat history.
 
 **Chat-shaped work → a visible work loop.** Assign tasks to yourself or to an Agent. Run them manually, or let automatic mode pick up ready tasks and work through them. When something needs your review, a decision, or unblocking, it comes back to you — on the board, where you can see it.
+
+**Flexible Agent and model configuration.** You can create Agent profiles with dedicated instructions for different kinds of work: a high-reasoning code reviewer, a frontend engineer with dedicated instructions, or a quick-answer assistant running on a faster model. Each profile can have its own model, reasoning level, instructions, and avatar; or you can save a model configuration that works well for you and reuse it across tasks.
 
 <p align="center">
   <img src="assets/better-codex-agents.png" width="1200" alt="Reusable Agent profiles inside Better Codex" />
@@ -80,6 +66,22 @@ Better Codex extends the native Codex Desktop app. Everything lives *inside* Cod
 6. Open the task and continue in its linked Codex conversation.
 
 The same loop works for coding, research, writing, document prep — anything you already do in Codex.
+
+## Installation
+
+macOS:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scripts/install.sh | bash
+```
+
+Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scripts/install.ps1 | iex
+```
+
+Restart Codex from the Better Codex launcher, and the board is in your sidebar. Uninstall anytime with `better-codex eject` — your task data stays.
 
 ## FAQ
 
