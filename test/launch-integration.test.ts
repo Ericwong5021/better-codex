@@ -65,14 +65,13 @@ test("launcher serializes concurrent Codex restarts and keeps migration guards",
   assert.match(source, /migrateLegacyMacLauncher/);
 });
 
-test("shortcut launch reopens Codex when the existing renderer is not injected", () => {
+test("shortcut launch offers a full restart or opens the current Codex", () => {
   assert.match(cliSource, /function confirmLaunchRestart\(\)/);
   assert.match(cliSource, /Better Codex 已在运行/);
   assert.match(cliSource, /openedCurrentCodex: true/);
   assert.match(cliSource, /async function restartRuntime\(\)/);
   assert.match(cliSource, /restarted: true/);
-  assert.match(cliSource, /current\.available && current\.targets\.length > 0 && current\.targets\.every\(target => \(target as \{ entry\?: boolean \}\)\.entry === true\)/);
-  assert.match(cliSource, /if \(injected\)/);
-  assert.match(cliSource, /await cdpRestartAndInject\(cdpPort, activeRuntimePort\(\), accessToken\(\), \{ confirmQuit: true \}\)/);
-  assert.match(cliSource, /codex_quit_cancelled/);
+  assert.match(cliSource, /const codexRunning = codexProcessRunning\(\) \|\| current\.available \|\| current\.targets\.length > 0/);
+  assert.match(cliSource, /codexStarted: true/);
+  assert.match(cliSource, /await cdpRestartAndInject\(cdpPort, activeRuntimePort\(\), accessToken\(\), \{ confirmQuit: false \}\)/);
 });

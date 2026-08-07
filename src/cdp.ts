@@ -311,7 +311,7 @@ export function launchCodex(port: number, activateExisting = false) {
   throw new Error(`codex_launch_unsupported_${process.platform}`);
 }
 
-function codexProcessRunning() {
+export function codexProcessRunning() {
   if (process.platform === "win32") {
     const count = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "$count = @(Get-CimInstance Win32_Process -Filter \"Name = 'ChatGPT.exe'\" | Where-Object { $_.CommandLine -notmatch \"--type=\" }).Count; Write-Output $count; exit 0"], { encoding: "utf8", windowsHide: true }).trim();
     return Number(count) > 0;

@@ -5,7 +5,7 @@ import { accessSync, closeSync, constants, existsSync, mkdirSync, openSync, read
 import { isSea } from "node:sea";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
-import { cdpEject, cdpInject, cdpOpenThread, cdpRestartAndInject, cdpStatus, codexInstallationStatus, launchCodex, watchInjection } from "./cdp.js";
+import { cdpEject, cdpInject, cdpOpenThread, cdpRestartAndInject, cdpStatus, codexInstallationStatus, codexProcessRunning, launchCodex, watchInjection } from "./cdp.js";
 import {
   cdpPort,
   databasePath,
@@ -514,53 +514,29 @@ async function main() {
   if (command === "watch-inject") return watchInjection(Number(action || cdpPort), accessToken());
   if (command === "launch") {
     return print(await withLaunchLock(async () => {
-      let runtimeRunning = false;
-      try {
-        await health();
-        runtimeRunning = true;
-      } catch {}
-      if (runtimeRunning) {
-        if (!confirmLaunchRestart()) {
-          launchCodex(cdpPort, true);
-          return { launched: true, restarted: false, openedCurrentCodex: true };
-        }
-        await restartRuntime();
-        setInjectionEnabled(true);
-        try {
-          const injection = await cdpRestartAndInject(cdpPort, activeRuntimePort(), accessToken(), { confirmQuit: false });
-          await waitForInjector();
-          return { launched: true, restarted: true, injection };
-        } catch (error) {
-          setInjectionEnabled(false);
-          throw error;
-        }
-      }
-      if (!injectionEnabled()) {
-        launchCodex(cdpPort, true);
-        return { launched: true, injectionDisabled: true };
-      }
-      await ensureRuntime();
       const current = await cdpStatus(cdpPort);
-      const injected = current.available && current.targets.length > 0 && current.targets.every(target => (target as { entry?: boolean }).entry === true);
-      if (injected) {
+      const codexRunning = codexProcessRunning() || current.available || current.targets.length > 0;
+      if (!codexRunning) {
         setInjectionEnabled(true);
-        await cdpInject(cdpPort, activeRuntimePort(), accessToken(), false);
+        await ensureRuntime();
+        const injection = await cdpInject(cdpPort, activeRuntimePort(), accessToken(), true);
         startInjector(cdpPort);
-        launchCodex(cdpPort, true);
-      } else {
-        setInjectionEnabled(false);
-        await stopInjector();
-        try {
-          await cdpRestartAndInject(cdpPort, activeRuntimePort(), accessToken(), { confirmQuit: true });
-          setInjectionEnabled(true);
-          await waitForInjector();
-        } catch (error) {
-          setInjectionEnabled(false);
-          if (error instanceof Error && error.message === "codex_quit_cancelled") return { launched: false, cancelled: true };
-          throw error;
-        }
+        return { launched: true, restarted: false, codexStarted: true, injection };
       }
-      return { launched: true, injection: await cdpStatus(cdpPort) };
+      if (!confirmLaunchRestart()) {
+        launchCodex(cdpPort, true);
+        return { launched: true, restarted: false, openedCurrentCodex: true };
+      }
+      await restartRuntime();
+      setInjectionEnabled(true);
+      try {
+        const injection = await cdpRestartAndInject(cdpPort, activeRuntimePort(), accessToken(), { confirmQuit: false });
+        await waitForInjector();
+        return { launched: true, restarted: true, injection };
+      } catch (error) {
+        setInjectionEnabled(false);
+        throw error;
+      }
     }));
   }
   if (command === "launcher") {
