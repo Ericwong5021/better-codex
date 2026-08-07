@@ -62,10 +62,14 @@ curl -fsSL https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scri
 支持 Windows x64 与 Microsoft Store 版本的 Codex。请在 PowerShell 中运行：
 
 ```powershell
-iex (iwr -UseBasicParsing -Headers @{'Cache-Control'='no-cache'} https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scripts/install.ps1).Content
+irm https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scripts/install.ps1 | iex
 ```
 
-PowerShell 的 `irm` 可能缓存旧安装脚本；加上 `Cache-Control` 可强制拉取最新脚本，并由脚本解析 GitHub 最新 release。
+如果一直装到旧版本，多半是 PowerShell 缓存了旧安装脚本。改用：
+
+```powershell
+irm "https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scripts/install.ps1?$(Get-Random)" | iex
+```
 
 安装程序会下载对应版本、校验 SHA-256、安装本地运行时、配置 Codex 集成，并确认安装结果。
 
