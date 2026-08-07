@@ -1,0 +1,23 @@
+changelog:
+  exclude:
+    labels:
+      - skip-changelog
+    authors:
+      - dependabot
+  categories:
+    - title: "Features"
+      labels:
+        - enhancement
+    - title: "Bug fixes"
+      labels:
+        - bug
+    - title: "Documentation"
+      labels:
+        - documentation
+    - title: "Community"
+      labels:
+        - "good first issue"
+        - "help wanted"
+    - title: "Other changes"
+      labels:
+        - "*"
