@@ -13,7 +13,7 @@ body:
     attributes:
       label: Better Codex version
       description: Run `better-codex version` or check the version shown by the installer.
-      placeholder: 0.3.12
+      placeholder: 0.3.13
     validations:
       required: true
   - type: dropdown

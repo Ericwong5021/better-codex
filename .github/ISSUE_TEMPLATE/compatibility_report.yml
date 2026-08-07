@@ -12,7 +12,7 @@ body:
     id: better_codex_version
     attributes:
       label: Better Codex version
-      placeholder: 0.3.12
+      placeholder: 0.3.13
     validations:
       required: true
   - type: input
