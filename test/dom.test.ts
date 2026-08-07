@@ -164,8 +164,8 @@ test("issue creation uses a primary split button with an agent creation menu", (
   assert.ok(source.includes('state.createMode = "agent"'));
   assert.ok(source.includes('const crumb = issue'));
   assert.ok(source.includes(': \'<strong>\' + title + \'</strong>\''));
-  assert.match(css, /\.better-codex-create-split\s*\{[^}]*background:\s*transparent;/s);
-  assert.match(css, /\.better-codex-create-primary,[\s\S]*?\.better-codex-create-toggle\s*\{[^}]*background:\s*var\(--bc-codex-control-background\);/s);
+  assert.match(css, /#better-codex-panel \.better-codex-create-split\s*\{[^}]*background:\s*var\(--bc-color-primary\);/s);
+  assert.match(css, /#better-codex-panel \.better-codex-create-primary,[\s\S]*?#better-codex-panel \.better-codex-create-toggle\s*\{[^}]*background:\s*transparent;/s);
   assert.match(css, /\.better-codex-create-menu\s*\{[^}]*box-shadow:\s*var\(--bc-elevation-menu\);/s);
 });
 
@@ -609,17 +609,16 @@ test("Codex-native visual values live behind semantic design tokens", () => {
   assert.match(css, /\.better-codex-card\.is-dragging\s*\{[^}]*opacity:\s*\.42;/s);
   assert.match(css, /\.better-codex-card\.is-dragging:active\s*\{[^}]*transform:\s*none;/s);
   assert.ok(source.includes("function onCardDragStart(event)"));
-  assert.ok(source.includes("function onCardDragMove(event)"));
-  assert.ok(source.includes("function onCardDragOver(event)"));
-  assert.ok(source.includes("updateDraggingGhostPosition(event)"));
-  assert.ok(source.includes("setDragImage(transparentDragImage"));
-  assert.ok(source.includes('ghost.classList.add("is-drag-ghost")'));
-  assert.ok(source.includes("host.appendChild(ghost)"));
+  assert.ok(source.includes("function onCardDragEnd(event)"));
+  assert.ok(source.includes("function onDrop(event)"));
+  assert.ok(source.includes('board.addEventListener("dragstart", onCardDragStart)'));
+  assert.ok(source.includes('board.addEventListener("dragend", onCardDragEnd)'));
+  assert.ok(source.includes('board.addEventListener("dragover", event => event.preventDefault())'));
+  assert.ok(source.includes('board.addEventListener("drop", onDrop)'));
   assert.ok(source.includes("draggingIssueId"));
-  assert.ok(source.includes("draggingGhost.style.left"));
-  assert.ok(source.includes('options.background && draggingIssueId'));
-  assert.ok(source.includes('issue.id === draggingIssueId ? " is-dragging" : ""'));
-  assert.match(css, /\.better-codex-card\.is-drag-ghost\s*\{[^}]*border:\s*1px solid/s);
+  assert.ok(source.includes('card.classList.add("is-dragging")'));
+  assert.ok(source.includes('event.dataTransfer.setData("text/plain", issueId)'));
+  assert.ok(source.includes("issuePermissions(issue).boardLocked"));
   assert.ok(source.includes("--bc-color-surface-raised:"));
 });
 
