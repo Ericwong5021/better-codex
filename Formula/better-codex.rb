@@ -1,16 +1,16 @@
 class BetterCodex < Formula
   desc "Local task board for Codex desktop"
   homepage "https://github.com/Ericwong5021/better-codex"
-  version "0.3.9"
+  version "0.3.10"
 
   on_arm do
     url "https://github.com/Ericwong5021/better-codex/releases/download/v#{version}/better-codex-cli-#{version}-darwin-arm64.tar.gz"
-    sha256 "69f8cccd417345a6c2f36f68b634a9d180b0455e23713eae041e255b7b2f97de"
+    sha256 "b1a1aff2f34caf5b9388f706180a2bb8733ca265c3a27270e43065cbec3619d2"
   end
 
   on_intel do
     url "https://github.com/Ericwong5021/better-codex/releases/download/v#{version}/better-codex-cli-#{version}-darwin-amd64.tar.gz"
-    sha256 "f17ab057b66bcc991dd0b284f0c87d88e0f75c6de511e183a7815215e986235f"
+    sha256 "9e490d500740a0551a0a0d8fe22896c4ee38559556897412c733c9e44670b3d7"
   end
 
   def install
