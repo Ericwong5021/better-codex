@@ -160,6 +160,10 @@ export function betterCodexDesignSystemCss() {
       gap: var(--bc-space-1);
     }
 
+    #better-codex-panel .better-codex-actions {
+      gap: var(--bc-space-2);
+    }
+
     #better-codex-panel .better-codex-button {
       min-height: 30px;
       border-radius: 8px;
@@ -389,7 +393,7 @@ export function betterCodexDesignSystemCss() {
       display: inline-flex;
       flex: 0 0 auto;
       align-items: center;
-      gap: 0;
+      gap: var(--bc-space-1);
     }
 
     #better-codex-panel .better-codex-auto-dispatch {
@@ -431,8 +435,8 @@ export function betterCodexDesignSystemCss() {
     #better-codex-panel .better-codex-auto-dispatch-help {
       display: inline-flex;
       width: 24px;
-      height: 30px;
-      flex: 0 0 auto;
+      height: 24px;
+      flex: 0 0 24px;
       align-items: center;
       justify-content: center;
       border: 0;
@@ -1432,15 +1436,36 @@ export function betterCodexDesignSystemCss() {
       min-width: 0;
       flex: 1;
       overflow-y: auto;
-      padding: 24px 32px 48px;
+      padding: 12px 32px 48px;
     }
 
+    #better-codex-panel .better-codex-agent-page-heading,
     #better-codex-panel .better-codex-agent-search-wrap,
     #better-codex-panel .better-codex-agent-list,
     #better-codex-panel .better-codex-agent-suggestions {
       width: min(100%, 802px);
       margin-inline: auto;
     }
+
+    #better-codex-panel .better-codex-agent-page-heading {
+      margin-bottom: 20px;
+    }
+
+    #better-codex-panel .better-codex-agent-page-heading h1 {
+      margin: 0;
+      color: var(--bc-color-text);
+      font-size: calc(var(--bc-text-base) + 12px);
+      font-weight: 650;
+      line-height: 1.2;
+    }
+
+    #better-codex-panel .better-codex-agent-page-heading p {
+      margin: 5px 0 0;
+      color: var(--bc-color-text-muted);
+      font-size: var(--bc-text-md);
+      line-height: 1.45;
+    }
+
 
     #better-codex-panel .better-codex-agent-search-wrap {
       position: relative;
@@ -1462,8 +1487,17 @@ export function betterCodexDesignSystemCss() {
     #better-codex-panel .better-codex-agent-search-wrap .better-codex-search {
       width: 100%;
       height: 36px;
+      border: 1px solid var(--bc-color-hairline);
+      background: var(--bc-color-canvas);
       padding-left: 38px;
       border-radius: var(--bc-radius-md);
+      box-shadow: none;
+    }
+
+    #better-codex-panel .better-codex-agent-search-wrap .better-codex-search:focus {
+      border-color: var(--bc-color-focus);
+      background: var(--bc-color-canvas);
+      box-shadow: 0 0 0 2px color-mix(in oklch, var(--bc-color-focus) 18%, transparent);
     }
 
     #better-codex-panel .better-codex-agent-list {

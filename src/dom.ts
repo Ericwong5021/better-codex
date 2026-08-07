@@ -270,7 +270,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       return project?.external_id === "inbox" ? "未分配" : project?.name || "";
     }
     const englishText = {
-      "任务看板": "Task board", "打开任务看板": "Open task board", "智能体": "Agents", "管理智能体": "Manage agents",
+      "任务看板": "Task board", "打开任务看板": "Open task board", "智能体": "Agents", "管理智能体": "Manage agents", "创建和管理你的智能体": "Create and manage your agents",
       "全部": "All", "已分配": "Assigned", "未分配": "Unassigned", "待规划": "Backlog", "待办": "Todo", "进行中": "In progress", "审核中": "In review", "已完成": "Done", "已阻塞": "Blocked", "已取消": "Canceled",
       "无": "None", "低": "Low", "中": "Medium", "高": "High", "紧急": "Urgent", "超高": "Urgent", "无优先级": "No priority", "优先级": "Priority", "状态": "Status", "日期": "Date", "筛选": "Filter", "标签": "Labels",
       "新建": "New", "新建 issue": "New issue", "新建任务": "New task", "新建智能体": "New agent", "创建": "Create", "创建任务": "Create task", "删除": "Delete", "删除任务": "Delete task", "删除智能体": "Delete agent", "保存": "Save", "确认": "Confirm", "取消": "Cancel", "关闭": "Close", "重试": "Retry", "稍后": "Later", "展开": "Expand", "缩小": "Minimize", "缩放头像": "Zoom avatar",
@@ -333,6 +333,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (core === "本次启动关闭") return leading + "Disable for this launch" + trailing;
       let match = core.match(/^(\\d+) 个智能体工作中$/);
       if (match) return leading + match[1] + " agents working" + trailing;
+      match = core.match(/^正在理解任务 (\\d+)$/);
+      if (match) return leading + "Understanding " + match[1] + " tasks" + trailing;
       match = core.match(/^(\\d+) 个筛选$/);
       if (match) return leading + match[1] + " filters" + trailing;
       match = core.match(/^更新于 (.+)$/);
@@ -1559,6 +1561,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       }
       const actions = document.createElement("div");
       actions.className = "better-codex-actions better-codex-issue-only";
+      const enriching = document.createElement("div");
+      enriching.id = "better-codex-enriching";
+      enriching.className = "better-codex-button better-codex-working-chip is-bordered";
+      enriching.setAttribute("role", "status");
+      enriching.setAttribute("aria-live", "polite");
+      enriching.hidden = true;
       const working = actionButton("0 个智能体工作中");
       working.id = "better-codex-working";
       working.classList.add("better-codex-working-chip", "is-bordered");
@@ -1637,6 +1645,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       createSplit.className = "better-codex-create-split";
       createSplit.append(addIssue, createToggle);
       actions.append(error, working, searchWrap, filterWrap, autoDispatchWrap, createSplit);
+      actions.insertBefore(enriching, working);
       const agentActions = document.createElement("div");
       agentActions.className = "better-codex-agent-actions";
       const addAgent = actionButton("新建智能体");
@@ -2054,7 +2063,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         return '<button class="better-codex-agent-suggestion' + (selected ? " is-selected" : "") + '" type="button" data-agent-template="' + item.key + '" aria-pressed="' + selected + '"><span class="better-codex-agent-suggestion-icon" data-tone="' + escapeHtml(item.tone) + '">' + icon(item.icon, "", "2.4") + '</span><span><strong>' + escapeHtml(item.name) + '</strong><small>' + escapeHtml(item.description) + '</small></span></button>';
       }).join("");
       const animateEnter = previousPane === "preview" && state.agentPane !== "preview";
-      container.innerHTML = '<div class="better-codex-agent-shell" data-pane="' + state.agentPane + '"><section class="better-codex-agent-directory"><div class="better-codex-agent-search-wrap">' + icon("search") + '<input class="better-codex-search" data-agent-search type="search" value="' + escapeHtml(state.agentSearch) + '" placeholder="搜索智能体" aria-label="搜索智能体"></div><div class="better-codex-agent-list">' + (rows || empty) + '</div>' + (state.agentView === "all" && !query ? '<div class="better-codex-agent-suggestions"><h3>建议</h3>' + suggestions + '</div>' : "") + '</section>' + agentInspector(selected, { animateEnter }) + '</div>';
+      container.innerHTML = '<div class="better-codex-agent-shell" data-pane="' + state.agentPane + '"><section class="better-codex-agent-directory"><header class="better-codex-agent-page-heading"><h1>智能体</h1><p>创建和管理你的智能体</p></header><div class="better-codex-agent-search-wrap">' + icon("search") + '<input class="better-codex-search" data-agent-search type="search" value="' + escapeHtml(state.agentSearch) + '" placeholder="搜索智能体" aria-label="搜索智能体"></div><div class="better-codex-agent-list">' + (rows || empty) + '</div>' + (state.agentView === "all" && !query ? '<div class="better-codex-agent-suggestions"><h3>建议</h3>' + suggestions + '</div>' : "") + '</section>' + agentInspector(selected, { animateEnter }) + '</div>';
     }
 
     function showAutoDispatchHelp() {
@@ -2106,8 +2115,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       panel.dataset.surface = state.surface;
       renderAgents();
       syncAutoDispatch();
+      const enrichingCount = state.issues.filter(issue => issue.enrichment_status === "pending").length;
       const runningCount = state.issues.filter(issue => issue.active_run_status === "running" || issue.active_run_status === "claimed" || issue.reply_status === "running").length;
       panel.querySelectorAll("[data-view]").forEach(button => button.classList.toggle("is-active", button.dataset.view === state.view));
+      const enriching = panel.querySelector("#better-codex-enriching");
+      enriching.innerHTML = '<span class="better-codex-working-dot"></span>正在理解任务 ' + enrichingCount;
+      enriching.hidden = enrichingCount === 0;
+      enriching.title = enrichingCount ? "任务理解完成后即可打开卡片" : "";
+      enriching.classList.toggle("has-work", enrichingCount > 0);
       const working = panel.querySelector("#better-codex-working");
       working.innerHTML = '<span class="better-codex-working-dot"></span>' + runningCount + " 个智能体工作中";
       working.title = runningCount ? "查看运行中的任务" : "当前没有运行中的任务";
@@ -2130,8 +2145,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const issues = visible.filter(issue => issue.status === status);
         const cards = issues.map(issue => {
           const enrichmentLocked = issue.enrichment_status === "pending";
-          const executionLocked = Boolean(issue.run_thread_id);
-          const issueLocked = enrichmentLocked;
+          const executionRunning = issue.active_run_status === "claimed" || issue.active_run_status === "running";
+          const issueLocked = enrichmentLocked || executionRunning;
           const assignedAgent = state.agents.find(agent => agent.id === issue.agent_id);
           const defaultAgent = state.agents.find(agent => agent.is_default);
           const assignee = issue.agent_enabled
@@ -2158,7 +2173,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             : issue.user_assigned
               ? '<span class="better-codex-card-assignee"><span class="better-codex-card-avatar is-user is-initials" style="background:' + escapeHtml(state.user.color || "#16a34a") + '">' + escapeHtml(state.user.initials || "你") + '</span><span>' + escapeHtml(state.user.name || "我") + '</span></span>'
               : '<span class="better-codex-card-assignee is-empty">' + icon("user") + '<span>未分配</span></span>';
-          return '<article class="better-codex-card' + (issue.id === draggingIssueId ? " is-dragging" : "") + (enrichmentLocked ? " is-enrichment-pending" : "") + '" draggable="' + String(!issueLocked) + '" aria-disabled="' + String(issueLocked) + '" data-issue-id="' + escapeHtml(issue.id) + '"><div class="better-codex-card-row"><div class="better-codex-card-id">' + priorityIcon(issue.priority) + '<span>' + escapeHtml(issue.identifier) + '</span></div>' + activity + '</div><div class="better-codex-card-title">' + escapeHtml(issue.title) + '</div>' + (description ? '<div class="better-codex-card-description">' + escapeHtml(description) + '</div>' : "") + (chips ? '<div class="better-codex-chip-row">' + chips + '</div>' : "") + '<div class="better-codex-card-meta">' + meta + '<span>更新于 ' + timeAgo(issue.updated_at) + '</span></div></article>';
+          return '<article class="better-codex-card' + (issue.id === draggingIssueId ? " is-dragging" : "") + (enrichmentLocked ? " is-enrichment-pending" : "") + (executionRunning ? " is-execution-running" : "") + '" draggable="' + String(!issueLocked) + '" aria-disabled="' + String(enrichmentLocked) + '" data-issue-id="' + escapeHtml(issue.id) + '"><div class="better-codex-card-row"><div class="better-codex-card-id">' + priorityIcon(issue.priority) + '<span>' + escapeHtml(issue.identifier) + '</span></div>' + activity + '</div><div class="better-codex-card-title">' + escapeHtml(issue.title) + '</div>' + (description ? '<div class="better-codex-card-description">' + escapeHtml(description) + '</div>' : "") + (chips ? '<div class="better-codex-chip-row">' + chips + '</div>' : "") + '<div class="better-codex-card-meta">' + meta + '<span>更新于 ' + timeAgo(issue.updated_at) + '</span></div></article>';
         }).join("");
         return '<section class="better-codex-column" data-status="' + status + '"><div class="better-codex-column-head"><span class="better-codex-column-title">' + statusIcon(status) + '<span>' + statusLabel + '</span><span>' + issues.length + '</span></span><span class="better-codex-column-actions"><button class="better-codex-column-icon" type="button" data-add-status="' + status + '" aria-label="新建任务">' + icon("plus") + '</button></span></div><div class="better-codex-cards">' + (cards || '<div class="better-codex-empty">暂无任务</div>') + '</div></section>';
       }).join("");
@@ -2396,7 +2411,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       let conversationTimer = null;
       const sessionId = issueSessionId(issue);
       const enrichmentLocked = Boolean(issue?.enrichment_status === "pending");
-      const executionLocked = Boolean(issue?.run_thread_id);
+      const executionRunning = issue?.active_run_status === "claimed" || issue?.active_run_status === "running";
+      const executionLocked = executionRunning || Boolean(issue?.run_thread_id);
       const editingLocked = enrichmentLocked || executionLocked;
 
       function stopConversationPoll() {
@@ -2425,8 +2441,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       }
 
       function header() {
-        const openThreadButton = issue && sessionId && !enrichmentLocked
-          ? '<button class="better-codex-dialog-open-thread" type="button" data-dialog-open-thread="' + escapeHtml(sessionId) + '">在会话中打开</button>'
+        const openThreadButton = issue && (sessionId || executionRunning) && !enrichmentLocked
+          ? '<button class="better-codex-dialog-open-thread' + (executionRunning ? ' is-running' : '') + '" type="button" data-dialog-open-thread="' + escapeHtml(sessionId) + '" data-dialog-open-thread-running="' + String(executionRunning) + '">' + (executionRunning ? "任务正在进行中" : "在会话中打开") + '</button>'
           : "";
         const startNowButton = issue && !enrichmentLocked && !sessionId && !state.autoDispatch && issue.agent_enabled && !issue.active_run_status
           ? '<button class="better-codex-dialog-start-now" type="button" data-dialog-start-now>立即开始任务</button>'
@@ -2678,7 +2694,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             control.disabled = true;
           });
         }
-        if (executionLocked) dialog.querySelectorAll('[name="title"], [name="description"]').forEach(control => { control.disabled = true; });
+        if (executionLocked) {
+          dialog.querySelectorAll("input, textarea, select, button").forEach(control => {
+            if (control.matches("[data-dialog-close], [data-dialog-expand], [data-dialog-open-thread]")) return;
+            control.disabled = true;
+          });
+        }
         content?.addEventListener("input", updateSubmit);
         dialog.querySelector('[name="keep"]')?.addEventListener("change", event => { state.keepCreate = event.currentTarget.checked; });
         const replyInput = dialog.querySelector('[name="reply"]');
@@ -2791,17 +2812,31 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         dialog.querySelector("[data-dialog-open-thread]")?.addEventListener("click", event => {
           const button = event.currentTarget;
           const threadId = normalizeSessionId(event.currentTarget.dataset.dialogOpenThread);
-          if (!threadId || button.disabled) return;
+          const executionRunning = button.dataset.dialogOpenThreadRunning === "true";
+          if ((!threadId && !executionRunning) || button.disabled) return;
           const errorOutput = dialog.querySelector(".better-codex-dialog-error");
           const idleLabel = button.textContent || "在对话中打开";
           clearError();
-          button.disabled = true;
-          button.classList.add("is-loading");
-          button.setAttribute("aria-busy", "true");
-          button.innerHTML = icon("refresh") + "<span>正在打开…</span>";
           void (async () => {
             try {
-              await openThread(threadId);
+              if (executionRunning) {
+                const confirmed = await confirmAction("任务正在进行中", "终止任务后才能打开对话，是否终止任务？", "终止并打开");
+                if (!confirmed) return;
+                button.disabled = true;
+                button.classList.add("is-loading");
+                button.setAttribute("aria-busy", "true");
+                button.innerHTML = icon("refresh") + "<span>正在终止…</span>";
+                await api("/api/issues/" + encodeURIComponent(issue.id) + "/stop", { method: "POST" });
+              } else {
+                button.disabled = true;
+                button.classList.add("is-loading");
+                button.setAttribute("aria-busy", "true");
+                button.innerHTML = icon("refresh") + "<span>正在打开…</span>";
+              }
+              if (threadId) await openThread(threadId);
+              else {
+                await loadIssues();
+              }
               dialog.close();
             } catch (error) {
               showError(error);
@@ -3017,7 +3052,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (!card || !event.dataTransfer) return;
       const issueId = card.dataset.issueId || "";
       const issue = state.issues.find(item => item.id === issueId);
-      if (issue?.enrichment_status === "pending") return;
+      if (issue?.enrichment_status === "pending" || issue?.active_run_status === "claimed" || issue?.active_run_status === "running") return;
       draggingIssueId = issueId;
       event.dataTransfer.setData("text/plain", issueId);
       event.dataTransfer.effectAllowed = "move";
@@ -3087,7 +3122,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const id = event.dataTransfer?.getData("text/plain");
       const status = event.target.closest("[data-status]")?.dataset.status;
       const issue = state.issues.find(item => item.id === id);
-      if (!issue || issue.enrichment_status === "pending" || !status || issue.status === status) return;
+      if (!issue || issue.enrichment_status === "pending" || issue.active_run_status === "claimed" || issue.active_run_status === "running" || !status || issue.status === status) return;
       void perform(async () => {
         await api("/api/issues/" + encodeURIComponent(issue.id), { method: "PATCH", body: JSON.stringify({ version: issue.version, status }) });
         await loadIssues();
