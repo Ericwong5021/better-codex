@@ -2517,7 +2517,7 @@ export function betterCodexDesignSystemCss() {
 
     #better-codex-dialog .better-codex-composer textarea {
       box-sizing: border-box;
-      height: calc(6.525em + 12px);
+      height: calc(3.625em + 12px);
       flex: 1;
       border: 0;
       color: var(--bc-foreground);
@@ -2529,6 +2529,10 @@ export function betterCodexDesignSystemCss() {
       outline: none;
       overflow-y: auto;
       resize: none;
+    }
+
+    #better-codex-dialog[data-detail="true"][data-expanded="true"] .better-codex-composer textarea {
+      height: calc(6.525em + 12px);
     }
 
     #better-codex-dialog .better-codex-composer textarea::placeholder {

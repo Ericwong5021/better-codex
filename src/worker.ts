@@ -3,10 +3,22 @@ import { createWriteStream, existsSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
 import { agentConfigProfileName } from "./agent-profiles.js";
-import { runLogPath, workerLogPath } from "./config.js";
+import { debugLoggingEnabled, runLogPath, workerLogPath } from "./config.js";
 import { Store, type ClaimedIssue, type Issue } from "./db.js";
 
 const interval = 60000;
+
+function workerDebug(event: string, fields: Record<string, unknown> = {}) {
+  if (!debugLoggingEnabled) return;
+  try {
+    createWriteStream(workerLogPath, { flags: "a" }).end(JSON.stringify({
+      timestamp: new Date().toISOString(),
+      scope: "worker",
+      event,
+      ...fields,
+    }) + "\n");
+  } catch {}
+}
 
 function codexPath() {
   const configured = process.env.BETTER_CODEX_CODEX_PATH;
@@ -17,9 +29,18 @@ function codexPath() {
 
 export function issuePrompt(claim: ClaimedIssue) {
   const details = claim.issue.description.trim();
-  return `/better-codex
+  return `/better-codex-issue
 
-处理 Better Codex 任务 ${claim.issue.identifier}：${claim.issue.title}${details ? `\n\n${details}` : ""}`;
+title: ${claim.issue.title}
+
+details:
+<<<BETTER_CODEX_ISSUE_DETAILS>>>
+${details}
+<<<END_BETTER_CODEX_ISSUE_DETAILS>>>
+
+taskid: ${claim.issue.identifier}
+
+按照 better-codex-issue skill 处理以上 Issue`;
 }
 
 export class IssueWorker {
@@ -64,7 +85,20 @@ export class IssueWorker {
 
   enrichIssue(issue: Issue, prompt: string, agentId: string) {
     const workspacePath = issue.workspace_path || "";
-    if (!workspacePath || this.stopped) return;
+    if (!workspacePath || this.stopped) {
+      workerDebug("enrichment_skipped", {
+        issue_id: issue.id,
+        identifier: issue.identifier,
+        reason: !workspacePath ? "workspace_missing" : "worker_stopped",
+      });
+      return;
+    }
+    workerDebug("enrichment_started", {
+      issue_id: issue.id,
+      identifier: issue.identifier,
+      agent_id: agentId || null,
+      prompt_length: prompt.length,
+    });
     const args = [
       "exec",
       ...(agentId ? ["--profile", agentConfigProfileName(agentId)] : []),
@@ -95,13 +129,42 @@ export class IssueWorker {
       const message = enrichmentMessage(line);
       if (message) messages.push(message);
     });
-    const finish = () => {
+    const finish = (event: "error" | "close", code?: number | null, signal?: NodeJS.Signals | null) => {
       lines.close();
       this.enrichments.delete(issue.id);
-      if (this.stopped) return;
+      const raw = messages.at(-1) || "";
+      const result = parseEnrichment(raw);
+      workerDebug("enrichment_finished", {
+        issue_id: issue.id,
+        identifier: issue.identifier,
+        finish_event: event,
+        exit_code: code ?? null,
+        signal: signal ?? null,
+        message_count: messages.length,
+        last_message_length: raw.length,
+        parse_succeeded: Boolean(result),
+        title_same_as_input: result ? result.title === issue.title : null,
+        description_same_as_input: result ? result.description === issue.description : null,
+      });
+      if (this.stopped) {
+        workerDebug("enrichment_discarded", {
+          issue_id: issue.id,
+          identifier: issue.identifier,
+          reason: "worker_stopped",
+        });
+        return;
+      }
       const current = this.store.getIssue(issue.id);
-      if (!current || current.version !== issue.version) return;
-      const result = parseEnrichment(messages.at(-1) || "");
+      if (!current || current.version !== issue.version) {
+        workerDebug("enrichment_discarded", {
+          issue_id: issue.id,
+          identifier: issue.identifier,
+          reason: !current ? "issue_missing" : "version_changed",
+          expected_version: issue.version,
+          current_version: current?.version ?? null,
+        });
+        return;
+      }
       const fallback = fallbackEnrichment(issue.identifier, issue.description);
       try {
         const updated = this.store.updateIssue(issue.id, current.version, {
@@ -114,11 +177,32 @@ export class IssueWorker {
           pending_actor: "agent",
           needs_attention: true,
         });
+        workerDebug("enrichment_applied", {
+          issue_id: issue.id,
+          identifier: issue.identifier,
+          version: updated.version,
+          used_fallback: !result,
+          title_same_as_input: updated.title === issue.title,
+          description_same_as_input: updated.description === issue.description,
+        });
         if (this.store.isDispatchable(updated)) this.wake();
-      } catch {}
+      } catch (error) {
+        workerDebug("enrichment_apply_failed", {
+          issue_id: issue.id,
+          identifier: issue.identifier,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     };
-    child.once("error", finish);
-    child.once("close", finish);
+    child.once("error", error => {
+      workerDebug("enrichment_process_error", {
+        issue_id: issue.id,
+        identifier: issue.identifier,
+        error: error.message,
+      });
+      finish("error");
+    });
+    child.once("close", (code, signal) => finish("close", code, signal));
   }
 
   private schedule(delay = interval) {

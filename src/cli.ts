@@ -176,10 +176,23 @@ function processAlive(pid: number) {
   }
 }
 
+function isInjectorProcess(pid: number) {
+  try {
+    if (process.platform === "win32") {
+      const commandLine = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `(Get-CimInstance Win32_Process -Filter \"ProcessId = ${pid}\").CommandLine`], { encoding: "utf8", windowsHide: true }).trim();
+      return /\bwatch-inject\b/.test(commandLine);
+    }
+    const commandLine = execFileSync("ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8" }).trim();
+    return /\bwatch-inject\b/.test(commandLine);
+  } catch {
+    return false;
+  }
+}
+
 function injectorPid() {
   if (!existsSync(injectorPidPath)) return null;
   const pid = Number(readFileSync(injectorPidPath, "utf8"));
-  return Number.isInteger(pid) && processAlive(pid) ? pid : null;
+  return Number.isInteger(pid) && processAlive(pid) && isInjectorProcess(pid) ? pid : null;
 }
 
 function startInjector(portNumber: number) {
@@ -524,8 +537,17 @@ async function main() {
         return { launched: true, restarted: false, codexStarted: true, injection };
       }
       if (!confirmLaunchRestart()) {
+        setInjectionEnabled(true);
+        await ensureRuntime();
         launchCodex(cdpPort, true);
-        return { launched: true, restarted: false, openedCurrentCodex: true };
+        try {
+          const injection = await cdpInject(cdpPort, activeRuntimePort(), accessToken(), true);
+          startInjector(cdpPort);
+          return { launched: true, restarted: false, openedCurrentCodex: true, injection };
+        } catch (error) {
+          setInjectionEnabled(false);
+          throw error;
+        }
       }
       await restartRuntime();
       setInjectionEnabled(true);

@@ -139,6 +139,7 @@ function asAgentAvatar(value: unknown) {
 function parseIssuePatch(body: Record<string, unknown>) {
   const patch: Record<string, unknown> = {};
   if ("thread_id" in body) throw new Error("issue_session_binding_disabled");
+  if ("project_id" in body) patch.project_id = cleanString(body.project_id, 200);
   if ("title" in body) patch.title = cleanString(body.title, 500);
   if ("description" in body) patch.description = cleanString(body.description, 100000);
   if ("status" in body) patch.status = asStatus(body.status);

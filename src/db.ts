@@ -94,7 +94,7 @@ type IssueInput = {
   userAssigned?: boolean;
 };
 
-type IssuePatch = Partial<Pick<Issue, "title" | "description" | "status" | "priority" | "labels" | "sort_order" | "pinned" | "thread_id" | "workspace_path" | "agent_enabled" | "agent_id" | "user_assigned" | "needs_attention" | "pending_actor">>;
+type IssuePatch = Partial<Pick<Issue, "project_id" | "title" | "description" | "status" | "priority" | "labels" | "sort_order" | "pinned" | "thread_id" | "workspace_path" | "agent_enabled" | "agent_id" | "user_assigned" | "needs_attention" | "pending_actor">>;
 
 type AgentProfileInput = Pick<AgentProfile, "name" | "description" | "instructions" | "model" | "reasoning_effort"> & { max_concurrency?: number };
 type AgentProfilePatch = Partial<AgentProfileInput>;
@@ -702,6 +702,7 @@ export class Store {
       const issue = this.getIssue(id);
       if (!issue) throw new Error("issue_not_found");
       if (issue.version !== version) throw new Error("version_conflict");
+      if (patch.project_id !== undefined && !this.getProject(patch.project_id)) throw new Error("project_not_found");
       if (patch.user_assigned !== undefined) patch.user_assigned = Boolean(patch.user_assigned);
       if (patch.user_assigned === true) {
         patch.agent_enabled = false;
@@ -723,12 +724,17 @@ export class Store {
         if (agentOwned && nextStatus !== "backlog" && nextStatus !== "done" && nextStatus !== "cancelled") patch.needs_attention = true;
       }
       if (patch.status === "backlog" && patch.needs_attention === undefined) patch.needs_attention = false;
-      if (patch.status !== undefined && patch.status !== issue.status && patch.sort_order === undefined) {
+      const projectChanged = patch.project_id !== undefined && patch.project_id !== issue.project_id;
+      const statusChanged = patch.status !== undefined && patch.status !== issue.status;
+      if ((projectChanged || statusChanged) && patch.sort_order === undefined) {
+        const projectId = patch.project_id ?? issue.project_id;
+        const status = patch.status ?? issue.status;
         const row = this.db.prepare("SELECT COALESCE(MAX(sort_order), 0) AS value FROM issues WHERE project_id = ? AND status = ? AND archived_at IS NULL")
-          .get(issue.project_id, patch.status) as { value: number };
+          .get(projectId, status) as { value: number };
         patch.sort_order = Number(row.value) + 1000;
       }
       const columns: Record<keyof IssuePatch, string> = {
+        project_id: "project_id",
         title: "title",
         description: "description",
         status: "status",

@@ -1528,6 +1528,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       board.addEventListener("click", onBoardClick);
       board.addEventListener("contextmenu", openIssueMenu);
       board.addEventListener("dragstart", onCardDragStart);
+      board.addEventListener("drag", onCardDragMove);
       board.addEventListener("dragend", onCardDragEnd);
       board.addEventListener("dragover", onCardDragOver);
       board.addEventListener("drop", onDrop);
@@ -2406,9 +2407,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
       function projectPicker() {
         const selectedProject = state.projects.find(item => item.id === draft.projectId);
-        if (issue) return '<span class="better-codex-property">' + icon("folder") + '<span>' + escapeHtml(selectedProject?.name || "无项目") + '</span></span>';
         const options = state.projects.map(item => '<button class="better-codex-project-option" type="button" data-dialog-project-option="' + escapeHtml(item.id) + '">' + icon("folder") + '<span>' + escapeHtml(item.name) + '</span><span class="better-codex-project-check">' + (item.id === draft.projectId ? icon("check") : "") + '</span></button>').join("");
-        return '<span class="better-codex-project-picker"><button class="better-codex-property" type="button" data-dialog-project>' + icon("folder") + '<span data-project-label>' + escapeHtml(selectedProject?.name || "选择项目") + '</span></button><span class="better-codex-project-menu" hidden><input class="better-codex-project-search" type="search" placeholder="搜索项目..." aria-label="搜索项目"><span data-project-options>' + (options || '<span class="better-codex-project-empty">暂无项目</span>') + '</span></span></span>';
+        return '<span class="better-codex-project-picker"><button class="better-codex-property" type="button" data-dialog-project>' + icon("folder") + '<span data-project-label>' + escapeHtml(selectedProject?.name || "选择项目") + '</span>' + icon("chevron") + '</button><span class="better-codex-project-menu" hidden><input class="better-codex-project-search" type="search" placeholder="搜索项目..." aria-label="搜索项目"><span data-project-options>' + (options || '<span class="better-codex-project-empty">暂无项目</span>') + '</span></span></span>';
       }
 
       function dialogSelect(name, ariaLabel, selected, options, modifier = "") {
@@ -2763,10 +2763,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             const ensured = await ensureContextProject(latestContext);
             workspacePath = ensured?.workspace_path || "";
           }
-          if (draft.mode === "agent" && !issue && !threadId && !workspacePath) {
+          if (draft.mode === "agent" && !issue && !workspacePath) {
             throw new Error("创建智能体 Issue 需要本地工作区：请先打开该项目下的一个 Codex 会话");
           }
           const body = {
+            project_id: draft.projectId,
             title,
             description: withAttachments(draft.mode === "agent" ? prompt : draft.description),
             status: draft.mode === "agent" && !issue ? "todo" : draft.status,
@@ -2907,12 +2908,19 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       event.dataTransfer.setDragImage(transparentDragImage, 0, 0);
       card.classList.add("is-dragging");
       requestAnimationFrame(() => transparentDragImage.remove());
-      onCardDragOver(event);
+    }
+
+    function onCardDragMove(event) {
+      updateDraggingGhostPosition(event);
     }
 
     function onCardDragOver(event) {
       event.preventDefault();
-      if (!draggingGhost) return;
+      updateDraggingGhostPosition(event);
+    }
+
+    function updateDraggingGhostPosition(event) {
+      if (!draggingGhost || (!event.clientX && !event.clientY)) return;
       draggingGhost.style.left = Math.round(event.clientX - draggingGhostOffsetX) + "px";
       draggingGhost.style.top = Math.round(event.clientY - draggingGhostOffsetY) + "px";
     }

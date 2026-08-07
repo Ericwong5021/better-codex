@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
+import { isSea } from "node:sea";
 import { join, resolve } from "node:path";
 
 const defaultHome = join(homedir(), ".better-codex");
@@ -31,6 +32,7 @@ export const launchIntegrationStatePath = join(runPath, "launch-integration.json
 export const launchLockPath = join(runPath, "launch.lock");
 export const runtimePort = Number(process.env.BETTER_CODEX_RUNTIME_PORT ?? process.env.BETTER_CODEX_PORT ?? 0);
 export const cdpPort = Number(process.env.BETTER_CODEX_CDP_PORT ?? 9229);
+export const debugLoggingEnabled = !isSea();
 
 export function ensureDirectories() {
   mkdirSync(runPath, { recursive: true });

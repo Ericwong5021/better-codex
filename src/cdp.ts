@@ -451,10 +451,12 @@ export async function cdpInject(port: number, runtimePort: number, accessToken: 
   try {
     values = await mainTargets(port);
   } catch (error) {
-    if (error instanceof Error && error.message.startsWith("codex_incompatible_")) throw error;
     if (!launch) throw error;
-    launchCodex(port);
-    values = await waitForTargets(port);
+    if (error instanceof Error && error.message.startsWith("codex_incompatible_")) values = await waitForTargets(port);
+    else {
+      launchCodex(port);
+      values = await waitForTargets(port);
+    }
   }
   if (values.length === 0 && launch) {
     launchCodex(port);
