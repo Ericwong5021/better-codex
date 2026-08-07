@@ -75,3 +75,18 @@ test("shortcut launch offers a full restart or opens the current Codex", () => {
   assert.match(cliSource, /codexStarted: true/);
   assert.match(cliSource, /await cdpRestartAndInject\(cdpPort, activeRuntimePort\(\), accessToken\(\), \{ confirmQuit: false \}\)/);
 });
+
+test("shortcut launch restores the bridge when keeping the current Codex", () => {
+  const start = cliSource.indexOf("if (!confirmLaunchRestart()) {");
+  const end = cliSource.indexOf("return { launched: true, restarted: false, openedCurrentCodex: true, injection }", start);
+  assert.ok(start >= 0 && end > start);
+  const branch = cliSource.slice(start, end);
+  assert.match(branch, /setInjectionEnabled\(true\)/);
+  assert.match(branch, /cdpInject\(cdpPort, activeRuntimePort\(\), accessToken\(\), true\)/);
+  assert.match(branch, /startInjector\(cdpPort\)/);
+});
+
+test("injector pid validation checks the process command", () => {
+  assert.match(cliSource, /function isInjectorProcess\(pid: number\)/);
+  assert.match(cliSource, /processAlive\(pid\) && isInjectorProcess\(pid\)/);
+});

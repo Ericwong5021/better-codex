@@ -295,6 +295,10 @@ test("issue editor uses branded listboxes instead of native selects", () => {
   assert.ok(source.includes('assignee: issue'));
   assert.ok(source.includes(': "none"'));
   assert.ok(source.includes('user_assigned: true'));
+  assert.ok(source.includes('data-dialog-project'));
+  assert.ok(source.includes('project_id: draft.projectId'));
+  assert.ok(source.includes('data-project-label'));
+  assert.ok(source.includes('icon("chevron")'));
   assert.match(css, /\.better-codex-dialog-select-menu\s*\{[^}]*position:\s*absolute;/s);
   assert.match(css, /\.better-codex-dialog-select-option\s*\{[^}]*border:\s*0;/s);
 });
@@ -345,6 +349,15 @@ test("panel binds project workspace from the active session cwd", () => {
   assert.ok(source.includes("创建智能体 Issue 需要本地工作区：请先打开该项目下的一个 Codex 会话"));
   assert.ok(source.includes("const latestContext = readContext()"));
   assert.ok(source.includes("let workspacePath = selectedProject?.workspace_path || await resolveWorkspacePath(latestContext)"));
+});
+
+test("agent issue creation does not require or bind the current session", () => {
+  const source = injectionScript(4317, "test-token", "install");
+
+  assert.ok(source.includes('if (draft.mode === "agent" && !issue && !workspacePath)'));
+  assert.doesNotMatch(source, /draft\.mode === "agent" && !issue && !threadId/);
+  assert.ok(source.includes('ai_enrich: draft.mode === "agent" && !issue'));
+  assert.doesNotMatch(source, /thread_id:\s*threadId/);
 });
 
 test("agent detail avatars use preset icons and open an avatar picker", () => {
@@ -534,7 +547,8 @@ test("issue details render the latest conversation result and reply composer", (
   assert.match(css, /\.better-codex-timeline\s*\{/s);
   assert.match(css, /\.better-codex-bubble\s*\{/s);
   assert.match(css, /\.better-codex-composer\s*\{/s);
-  assert.match(css, /\.better-codex-composer textarea\s*\{[^}]*height:\s*calc\(6\.525em\s*\+\s*12px\);/s);
+  assert.match(css, /\.better-codex-composer textarea\s*\{[^}]*height:\s*calc\(3\.625em\s*\+\s*12px\);/s);
+  assert.match(css, /#better-codex-dialog\[data-detail="true"\]\[data-expanded="true"\] \.better-codex-composer textarea\s*\{[^}]*height:\s*calc\(6\.525em\s*\+\s*12px\);/s);
   assert.match(css, /\.better-codex-composer textarea\s*\{[^}]*resize:\s*none;/s);
 });
 
@@ -589,7 +603,9 @@ test("Codex-native visual values live behind semantic design tokens", () => {
   assert.match(css, /\.better-codex-card\.is-dragging\s*\{[^}]*opacity:\s*\.42;/s);
   assert.match(css, /\.better-codex-card\.is-dragging:active\s*\{[^}]*transform:\s*none;/s);
   assert.ok(source.includes("function onCardDragStart(event)"));
+  assert.ok(source.includes("function onCardDragMove(event)"));
   assert.ok(source.includes("function onCardDragOver(event)"));
+  assert.ok(source.includes("updateDraggingGhostPosition(event)"));
   assert.ok(source.includes("setDragImage(transparentDragImage"));
   assert.ok(source.includes('ghost.classList.add("is-drag-ghost")'));
   assert.ok(source.includes("host.appendChild(ghost)"));

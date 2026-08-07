@@ -143,6 +143,9 @@ test("gateway completes the issue workflow and survives restart", async () => {
     const projectResponse = await request("/api/projects", { method: "POST", body: JSON.stringify({ name: "Gateway" }) });
     assert.equal(projectResponse.status, 201);
     const project = await projectResponse.json() as { id: string };
+    const targetProjectResponse = await request("/api/projects", { method: "POST", body: JSON.stringify({ name: "Gateway target" }) });
+    assert.equal(targetProjectResponse.status, 201);
+    const targetProject = await targetProjectResponse.json() as { id: string };
 
     const issueResponse = await request("/api/issues", { method: "POST", body: JSON.stringify({ project_id: project.id, title: "Round trip" }) });
     assert.equal(issueResponse.status, 201);
@@ -156,8 +159,10 @@ test("gateway completes the issue workflow and survives restart", async () => {
     assert.equal(invalidResponse.status, 400);
     assert.deepEqual(await invalidResponse.json(), { error: "invalid_pinned" });
 
-    const updatedResponse = await request(`/api/issues/${issue.id}`, { method: "PATCH", body: JSON.stringify({ version: issue.version, status: "in_progress" }) });
+    const updatedResponse = await request(`/api/issues/${issue.id}`, { method: "PATCH", body: JSON.stringify({ version: issue.version, project_id: targetProject.id, status: "in_progress" }) });
     assert.equal(updatedResponse.status, 200);
+    const updated = await updatedResponse.json() as { project_id: string };
+    assert.equal(updated.project_id, targetProject.id);
     const staleResponse = await request(`/api/issues/${issue.id}`, { method: "PATCH", body: JSON.stringify({ version: issue.version, title: "Stale" }) });
     assert.equal(staleResponse.status, 409);
     assert.deepEqual(await staleResponse.json(), { error: "version_conflict" });
@@ -167,8 +172,9 @@ test("gateway completes the issue workflow and survives restart", async () => {
     await waitForGateway(port, gateway);
     const restoredResponse = await request(`/api/issues/${issue.id}`);
     assert.equal(restoredResponse.status, 200);
-    const restored = await restoredResponse.json() as { status: string; thread_id: string | null };
+    const restored = await restoredResponse.json() as { status: string; project_id: string; thread_id: string | null };
     assert.equal(restored.status, "in_progress");
+    assert.equal(restored.project_id, targetProject.id);
     assert.equal(restored.thread_id, null);
     const restoredAgents = await (await request("/api/agents")).json() as Array<{ id: string; avatar: string }>;
     assert.equal(restoredAgents.find(agent => agent.id === optionalAgent.id)?.avatar, "icon:reviewer");

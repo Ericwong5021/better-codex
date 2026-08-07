@@ -101,6 +101,10 @@ test("core workflow persists, orders status moves, and rejects stale writes", ()
     assert.notEqual(globallyUnique.identifier, active.identifier);
     assert.ok(second.sort_order > first.sort_order);
 
+    const reassigned = store.updateIssue(second.id, second.version, { project_id: samePrefixProject.id });
+    assert.equal(reassigned.project_id, samePrefixProject.id);
+    assert.ok(reassigned.sort_order > globallyUnique.sort_order);
+
     const moved = store.updateIssue(first.id, first.version, { status: "in_progress", description: "" });
     assert.equal(moved.status, "in_progress");
     assert.equal(moved.description, "");
@@ -108,7 +112,7 @@ test("core workflow persists, orders status moves, and rejects stale writes", ()
     assert.throws(() => store.updateIssue(first.id, first.version, { title: "Stale" }), /version_conflict/);
     assert.throws(() => store.updateIssue(second.id, second.version, { title: " " }), /title_required/);
     assert.equal(store.listIssues({ projectId: project.id, search: "thread-1" }).length, 1);
-    const archived = store.archiveIssue(second.id, second.version);
+    const archived = store.archiveIssue(reassigned.id, reassigned.version);
     assert.ok(archived.archived_at);
     assert.equal(store.listIssues({ projectId: project.id }).some(issue => issue.id === second.id), false);
 

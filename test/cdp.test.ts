@@ -15,6 +15,7 @@ test("injector reacts to renderer target changes instead of waiting for its fall
 test("injection waits for the first capable renderer without a multi-second stability hold", () => {
   assert.match(source, /async function waitForTargets\(port: number\)/);
   assert.match(source, /if \(values\.length > 0\) return values;/);
+  assert.match(source, /if \(error instanceof Error && error\.message\.startsWith\("codex_incompatible_"\)\) values = await waitForTargets\(port\);/);
   assert.doesNotMatch(source, /stableCount\s*>=\s*4/);
   assert.doesNotMatch(source, /stableCount/);
   assert.match(source, /setTimeout\(resolve, 150\)/);
