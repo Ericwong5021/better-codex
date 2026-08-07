@@ -68,6 +68,28 @@ export class IssueWorker {
     return true;
   }
 
+  stopIssue(issueId: string) {
+    const active = Array.from(this.runs.values()).find(({ claim }) => claim.issue.id === issueId);
+    if (!active) return Promise.resolve(false);
+    this.store.interruptRun(active.claim.runId, issueId);
+    active.child.kill("SIGTERM");
+    return new Promise<boolean>(resolve => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(true);
+      };
+      const timer = setTimeout(() => {
+        active.child.kill("SIGKILL");
+        setTimeout(finish, 1000).unref();
+      }, 5000);
+      timer.unref();
+      active.child.once("close", finish);
+    });
+  }
+
   stop() {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);

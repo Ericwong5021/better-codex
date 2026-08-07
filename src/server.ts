@@ -425,6 +425,10 @@ export function startServer() {
           if (!worker.startIssue(updated.id)) throw new Error("issue_not_started");
           return sendJson(response, 202, store.getIssue(updated.id));
         }
+        if (method === "POST" && path[3] === "stop" && path.length === 4) {
+          await worker.stopIssue(issue.id);
+          return sendJson(response, 200, store.getIssue(issue.id));
+        }
         if (method === "POST" && path[3] === "archive") {
           const body = await readBody(request);
           const updated = store.archiveIssue(issue.id, Number(body.version));
