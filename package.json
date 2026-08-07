@@ -2,6 +2,7 @@
   "name": "better-codex",
   "version": "0.3.12",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "engines": {
     "node": ">=22.5.0"
