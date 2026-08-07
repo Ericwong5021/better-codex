@@ -101,6 +101,30 @@ test("core workflow persists, orders status moves, and rejects stale writes", ()
     assert.notEqual(globallyUnique.identifier, active.identifier);
     assert.ok(second.sort_order > first.sort_order);
 
+    const enriching = store.createIssue({
+      projectId: project.id,
+      title: "原始需求",
+      description: "原始需求",
+      agentEnabled: true,
+      workspacePath: target.directory,
+      enrichmentStatus: "pending",
+    });
+    assert.equal(enriching.title, "正在理解任务");
+    assert.equal(enriching.status, "backlog");
+    assert.equal(enriching.enrichment_status, "pending");
+    assert.equal(store.isDispatchable(enriching), false);
+    assert.throws(() => store.updateIssue(enriching.id, enriching.version, { title: "不能编辑" }), /issue_enrichment_pending/);
+    const enriched = store.updateIssue(enriching.id, enriching.version, {
+      title: "整理后的标题",
+      description: "整理后的详情",
+      status: "todo",
+      pending_actor: "agent",
+      needs_attention: true,
+      enrichment_status: null,
+    });
+    assert.equal(enriched.enrichment_status, null);
+    assert.equal(store.isDispatchable(enriched), true);
+
     const reassigned = store.updateIssue(second.id, second.version, { project_id: samePrefixProject.id });
     assert.equal(reassigned.project_id, samePrefixProject.id);
     assert.ok(reassigned.sort_order > globallyUnique.sort_order);

@@ -392,6 +392,7 @@ export function startServer() {
           agentEnabled,
           agentId,
           userAssigned: body.user_assigned === true,
+          enrichmentStatus: aiEnrich ? "pending" : null,
         });
         if (aiEnrich) worker.enrichIssue(issue, issue.description, agentId);
         else if (issue.agent_enabled && store.isDispatchable(issue)) worker.wake();
@@ -430,6 +431,7 @@ export function startServer() {
           return sendJson(response, 200, updated);
         }
         if (method === "GET" && path[3] === "conversation" && path.length === 4) {
+          if (store.isEnrichmentPending(issue)) throw new Error("issue_enrichment_pending");
           const threadId = issue.run_thread_id || "";
           const conversation = await readConversationResult(threadId);
           return sendJson(response, 200, {

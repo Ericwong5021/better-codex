@@ -7,6 +7,7 @@ import { debugLoggingEnabled, runLogPath, workerLogPath } from "./config.js";
 import { Store, type ClaimedIssue, type Issue } from "./db.js";
 
 const interval = 60000;
+const enrichmentTimeout = 30000;
 
 function workerDebug(event: string, fields: Record<string, unknown> = {}) {
   if (!debugLoggingEnabled) return;
@@ -54,6 +55,7 @@ export class IssueWorker {
   start() {
     this.stopped = false;
     this.store.recoverInterruptedRuns();
+    for (const issue of this.store.listPendingEnrichmentIssues()) this.enrichIssue(issue, issue.description, issue.agent_id || "");
     this.schedule(0);
   }
 
@@ -85,12 +87,16 @@ export class IssueWorker {
 
   enrichIssue(issue: Issue, prompt: string, agentId: string) {
     const workspacePath = issue.workspace_path || "";
-    if (!workspacePath || this.stopped) {
+    if (this.enrichments.has(issue.id) || this.stopped) {
       workerDebug("enrichment_skipped", {
         issue_id: issue.id,
         identifier: issue.identifier,
-        reason: !workspacePath ? "workspace_missing" : "worker_stopped",
+        reason: this.stopped ? "worker_stopped" : "already_running",
       });
+      return;
+    }
+    if (!workspacePath) {
+      this.failEnrichment(issue, "workspace_missing");
       return;
     }
     workerDebug("enrichment_started", {
@@ -124,16 +130,26 @@ export class IssueWorker {
     });
     this.enrichments.set(issue.id, child);
     const messages: string[] = [];
+    let finished = false;
+    let timeout: NodeJS.Timeout | null = setTimeout(() => {
+      workerDebug("enrichment_timeout", { issue_id: issue.id, identifier: issue.identifier, timeout_ms: enrichmentTimeout });
+      finish("timeout");
+      child.kill("SIGTERM");
+    }, enrichmentTimeout);
     const lines = createInterface({ input: child.stdout! });
     lines.on("line", line => {
       const message = enrichmentMessage(line);
       if (message) messages.push(message);
     });
-    const finish = (event: "error" | "close", code?: number | null, signal?: NodeJS.Signals | null) => {
+    const finish = (event: "error" | "close" | "timeout", code?: number | null, signal?: NodeJS.Signals | null) => {
+      if (finished) return;
+      finished = true;
+      if (timeout) clearTimeout(timeout);
+      timeout = null;
       lines.close();
       this.enrichments.delete(issue.id);
       const raw = messages.at(-1) || "";
-      const result = parseEnrichment(raw);
+      const result = event === "close" && code === 0 ? parseEnrichment(raw) : null;
       workerDebug("enrichment_finished", {
         issue_id: issue.id,
         identifier: issue.identifier,
@@ -165,17 +181,30 @@ export class IssueWorker {
         });
         return;
       }
-      const fallback = fallbackEnrichment(issue.identifier, issue.description);
       try {
         const updated = this.store.updateIssue(issue.id, current.version, {
-          title: result?.title || fallback.title,
-          description: result?.description || fallback.description,
-          status: "todo",
-          agent_enabled: true,
-          agent_id: agentId,
-          user_assigned: false,
-          pending_actor: "agent",
-          needs_attention: true,
+          ...(result
+            ? {
+                title: result.title,
+                description: result.description,
+                status: "todo",
+                agent_enabled: true,
+                agent_id: agentId,
+                user_assigned: false,
+                pending_actor: "agent",
+                needs_attention: true,
+                enrichment_status: null,
+              }
+            : {
+                title: "任务理解失败",
+                status: "blocked",
+                agent_enabled: true,
+                agent_id: agentId,
+                user_assigned: false,
+                pending_actor: "user",
+                needs_attention: true,
+                enrichment_status: "failed",
+              }),
         });
         workerDebug("enrichment_applied", {
           issue_id: issue.id,
@@ -203,6 +232,28 @@ export class IssueWorker {
       finish("error");
     });
     child.once("close", (code, signal) => finish("close", code, signal));
+  }
+
+  private failEnrichment(issue: Issue, reason: string) {
+    workerDebug("enrichment_failed", { issue_id: issue.id, identifier: issue.identifier, reason });
+    try {
+      this.store.updateIssue(issue.id, issue.version, {
+        title: "任务理解失败",
+        status: "blocked",
+        agent_enabled: true,
+        agent_id: issue.agent_id,
+        user_assigned: false,
+        pending_actor: "user",
+        needs_attention: true,
+        enrichment_status: "failed",
+      });
+    } catch (error) {
+      workerDebug("enrichment_apply_failed", {
+        issue_id: issue.id,
+        identifier: issue.identifier,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   private schedule(delay = interval) {

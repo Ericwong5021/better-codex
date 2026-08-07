@@ -39,6 +39,7 @@ export type Project = {
 };
 
 export type PendingActor = "user" | "agent";
+export type EnrichmentStatus = "pending" | "failed" | null;
 
 export type Issue = {
   id: string;
@@ -59,6 +60,7 @@ export type Issue = {
   user_assigned: boolean;
   needs_attention: boolean;
   pending_actor: PendingActor;
+  enrichment_status: EnrichmentStatus;
   version: number;
   created_at: string;
   updated_at: string;
@@ -92,9 +94,10 @@ type IssueInput = {
   agentEnabled?: boolean;
   agentId?: string;
   userAssigned?: boolean;
+  enrichmentStatus?: EnrichmentStatus;
 };
 
-type IssuePatch = Partial<Pick<Issue, "project_id" | "title" | "description" | "status" | "priority" | "labels" | "sort_order" | "pinned" | "thread_id" | "workspace_path" | "agent_enabled" | "agent_id" | "user_assigned" | "needs_attention" | "pending_actor">>;
+type IssuePatch = Partial<Pick<Issue, "project_id" | "title" | "description" | "status" | "priority" | "labels" | "sort_order" | "pinned" | "thread_id" | "workspace_path" | "agent_enabled" | "agent_id" | "user_assigned" | "needs_attention" | "pending_actor" | "enrichment_status">>;
 
 type AgentProfileInput = Pick<AgentProfile, "name" | "description" | "instructions" | "model" | "reasoning_effort"> & { max_concurrency?: number };
 type AgentProfilePatch = Partial<AgentProfileInput>;
@@ -189,6 +192,7 @@ export class Store {
     this.ensureRunTable();
     this.ensureSettingsTable();
     this.ensureDispatchColumns();
+    this.ensureEnrichmentColumn();
     const integrity = this.db.prepare("PRAGMA quick_check").get() as Record<string, unknown> | undefined;
     if (String(integrity?.quick_check ?? "") !== "ok") {
       this.db.close();
@@ -312,6 +316,12 @@ export class Store {
     }
   }
 
+  private ensureEnrichmentColumn() {
+    const columns = new Set((this.db.prepare("PRAGMA table_info(issues)").all() as Array<{ name: string }>).map(item => item.name));
+    if (!columns.has("enrichment_status")) this.db.exec("ALTER TABLE issues ADD COLUMN enrichment_status TEXT");
+    this.db.exec("CREATE INDEX IF NOT EXISTS issues_enrichment_status ON issues(enrichment_status)");
+  }
+
   private ensureSettingsTable() {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS settings (
@@ -425,6 +435,8 @@ export class Store {
 
   isDispatchable(issue: Issue) {
     return Boolean(
+      issue.enrichment_status !== "pending"
+      &&
       issue.needs_attention
       && issue.pending_actor === "agent"
       && issue.agent_enabled
@@ -433,6 +445,14 @@ export class Store {
       && issue.status !== "done"
       && issue.status !== "cancelled",
     );
+  }
+
+  isEnrichmentPending(issue: Issue) {
+    return issue.enrichment_status === "pending";
+  }
+
+  listPendingEnrichmentIssues() {
+    return this.listIssues().filter(issue => issue.enrichment_status === "pending");
   }
 
   canAutoStartFromUserMessage(issue: Issue) {
@@ -628,14 +648,16 @@ export class Store {
   createIssue(input: IssueInput) {
     const project = this.getProject(input.projectId);
     if (!project) throw new Error("project_not_found");
-    const title = cleanTitle(input.title);
+    const enrichmentStatus = input.enrichmentStatus ?? null;
+    const title = enrichmentStatus === "pending" ? "正在理解任务" : cleanTitle(input.title);
     if (input.status && !issueStatuses.includes(input.status)) throw new Error("invalid_status");
     if (input.priority && !issuePriorities.includes(input.priority)) throw new Error("invalid_priority");
     const userAssigned = Boolean(input.userAssigned) && !Boolean(input.agentEnabled);
     const agentId = input.agentEnabled && input.agentId ? input.agentId : null;
     if (agentId && !this.getAgentProfile(agentId)) throw new Error("agent_not_found");
     const agentEnabled = Boolean(input.agentEnabled) && !userAssigned;
-    const status = input.status ?? "todo";
+    if (enrichmentStatus !== null && enrichmentStatus !== "pending" && enrichmentStatus !== "failed") throw new Error("invalid_enrichment_status");
+    const status = enrichmentStatus === "pending" ? "backlog" : input.status ?? "todo";
     const needsAttention = agentEnabled && status !== "backlog" && status !== "done" && status !== "cancelled" ? 1 : 0;
     const pendingActor = agentEnabled ? "agent" : "user";
     const id = randomUUID();
@@ -655,8 +677,8 @@ export class Store {
         INSERT INTO issues (
           id, identifier, project_id, title, description, status, priority, labels_json,
           sort_order, pinned, archived_at, thread_id, workspace_path, agent_enabled, agent_id, user_assigned,
-          needs_attention, pending_actor, version, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+           needs_attention, pending_actor, enrichment_status, version, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
       `).run(
         id,
         identifier,
@@ -674,6 +696,7 @@ export class Store {
         Number(userAssigned),
         needsAttention,
         pendingActor,
+        enrichmentStatus,
         timestamp,
         timestamp,
       );
@@ -702,6 +725,7 @@ export class Store {
       const issue = this.getIssue(id);
       if (!issue) throw new Error("issue_not_found");
       if (issue.version !== version) throw new Error("version_conflict");
+      if (issue.enrichment_status === "pending" && patch.enrichment_status === undefined) throw new Error("issue_enrichment_pending");
       if (patch.project_id !== undefined && !this.getProject(patch.project_id)) throw new Error("project_not_found");
       if (patch.user_assigned !== undefined) patch.user_assigned = Boolean(patch.user_assigned);
       if (patch.user_assigned === true) {
@@ -749,6 +773,7 @@ export class Store {
         user_assigned: "user_assigned",
         needs_attention: "needs_attention",
         pending_actor: "pending_actor",
+        enrichment_status: "enrichment_status",
       };
       const assignments: string[] = [];
       const values: unknown[] = [];
@@ -758,7 +783,7 @@ export class Store {
         values.push(
           key === "labels" ? JSON.stringify(value)
             : key === "pinned" || key === "agent_enabled" || key === "user_assigned" || key === "needs_attention" ? Number(value)
-              : key === "thread_id" || key === "workspace_path" || key === "agent_id" ? value || null
+              : key === "thread_id" || key === "workspace_path" || key === "agent_id" || key === "enrichment_status" ? value || null
                 : value,
         );
       }
@@ -784,6 +809,7 @@ export class Store {
     const issue = this.getIssue(id);
     if (!issue) throw new Error("issue_not_found");
     if (issue.version !== version) throw new Error("version_conflict");
+    if (issue.enrichment_status === "pending") throw new Error("issue_enrichment_pending");
     const result = this.db.prepare("UPDATE issues SET archived_at = ?, version = version + 1, updated_at = ? WHERE id = ? AND version = ?")
       .run(now(), now(), issue.id, version);
     if (result.changes !== 1) throw new Error("version_conflict");
@@ -877,6 +903,7 @@ export class Store {
           AND pending_actor = 'agent'
           AND agent_enabled = 1
           AND status NOT IN ('backlog', 'done', 'cancelled')
+          AND (enrichment_status IS NULL OR enrichment_status != 'pending')
       `).run(timestamp, issue.id, issue.version);
       if (result.changes !== 1) throw new Error("claim_conflict");
       this.db.exec("COMMIT");
