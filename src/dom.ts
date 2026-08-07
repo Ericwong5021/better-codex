@@ -406,6 +406,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #better-codex-context-menu .better-codex-context-item.is-danger { color: #ef4444; }
         #better-codex-context-menu .better-codex-context-divider { height: 1px; margin: 5px 3px; background: #ededee; }
         #better-codex-context-menu .better-codex-context-submenu { position: absolute; top: -5px; left: 100%; display: none; min-width: 148px; max-width: min(240px, calc(100vw - 24px)); max-height: min(320px, calc(100vh - 24px)); overflow-y: auto; }
+        #better-codex-context-menu .better-codex-context-submenu.is-assignee { min-width: 214px; }
         #better-codex-context-menu[data-align="left"] .better-codex-context-submenu { right: 100%; left: auto; }
         #better-codex-context-menu .better-codex-context-item-wrap:hover > .better-codex-context-submenu, #better-codex-context-menu .better-codex-context-item-wrap:focus-within > .better-codex-context-submenu { display: block; }
         #better-codex-context-menu .better-codex-context-check { display: inline-flex; width: 14px; flex: 0 0 14px; align-items: center; justify-content: center; color: #18181b; }
@@ -415,6 +416,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #better-codex-context-menu .better-codex-context-avatar img, #better-codex-context-menu .better-codex-context-avatar svg { display: block; width: 100%; height: 100%; object-fit: cover; }
         #better-codex-context-menu .better-codex-context-avatar.is-fallback svg, #better-codex-context-menu .better-codex-context-avatar.is-icon svg { width: 10px; height: 10px; margin: auto; }
         #better-codex-context-menu .better-codex-context-avatar.is-user.is-initials { color: #fff; font-size: 9px; font-weight: 700; line-height: 1; }
+        #better-codex-context-menu .better-codex-context-assignee-label { display: inline-flex; min-width: 0; flex: 1; align-items: center; gap: 5px; overflow: hidden; }
+        #better-codex-context-menu .better-codex-context-assignee-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        #better-codex-context-menu .better-codex-context-tag { flex: 0 0 auto; border-radius: 999px; padding: 1px 5px; font-size: 10px; font-weight: 650; line-height: 1.25; }
+        #better-codex-context-menu .better-codex-context-tag[data-tone="model"] { color: #1684c4; background: #e8f5fc; }
+        #better-codex-context-menu .better-codex-context-tag[data-tone="reasoning"] { color: #198754; background: #eaf7ef; }
         #\${PANEL_ID} .better-codex-board { display: flex; gap: 12px; min-height: 0; flex: 1; overflow-x: auto; overflow-y: hidden; padding: 0 16px 10px; }
         #\${PANEL_ID} .better-codex-column { box-sizing: border-box; display: flex; width: 280px; min-width: 280px; min-height: 200px; flex-direction: column; border-radius: 12px; padding: 8px; }
         #\${PANEL_ID} .better-codex-column[data-status="backlog"], #\${PANEL_ID} .better-codex-column[data-status="todo"], #\${PANEL_ID} .better-codex-column[data-status="cancelled"] { background: rgba(228,228,231,.42); }
@@ -849,6 +855,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const value = error instanceof Error ? error.message : String(error || "request_failed");
       if (value === "thread_open_timeout" || value === "thread_open_unconfirmed") return "对话仍在加载，请稍后重试。";
       if (value === "thread_id_invalid") return "对话链接无效。";
+      if (value === "manual_start_required") return "当前为手动运行，请先点击“立即开始任务”。";
+      if (value === "backlog_reply_blocked") return "待规划中的 Issue 不会自动触发任务，请先移出待规划区。";
       return value;
     }
 
@@ -1233,15 +1241,16 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const noneSelected = !issue.user_assigned && !issue.agent_enabled;
       const userName = state.user.name || "我";
       const userAvatar = '<span class="better-codex-context-avatar is-user is-initials" style="background:' + escapeHtml(state.user.color || "#16a34a") + '">' + escapeHtml(state.user.initials || "你") + '</span>';
+      const contextAssigneeTags = agent => agentConfigTags(agent).map(tag => '<span class="better-codex-context-tag" data-tone="' + escapeHtml(tag.tone) + '">' + escapeHtml(tag.value) + '</span>').join("");
+      const contextAssigneeLabel = (name, tags = "") => '<span class="better-codex-context-assignee-label"><span class="better-codex-context-assignee-name">' + escapeHtml(name) + '</span>' + tags + '</span>';
+      const unassignedAvatar = '<span class="better-codex-context-avatar is-fallback">' + icon("user") + '</span>';
       const assigneeItems = [
-        '<button class="better-codex-context-item" type="button" data-context-action="assign" data-assignee-kind="me"><span class="better-codex-context-check">' + (userSelected ? icon("check") : "") + '</span>' + userAvatar + '<span>' + escapeHtml(userName) + '</span></button>',
+        '<button class="better-codex-context-item" type="button" data-context-action="assign" data-assignee-kind="none"><span class="better-codex-context-check">' + (noneSelected ? icon("check") : "") + '</span>' + unassignedAvatar + contextAssigneeLabel("未指派") + '</button>',
+        '<button class="better-codex-context-item" type="button" data-context-action="assign" data-assignee-kind="me"><span class="better-codex-context-check">' + (userSelected ? icon("check") : "") + '</span>' + userAvatar + contextAssigneeLabel(userName) + '</button>',
         ...state.agents.map(agent => {
           const selected = Boolean(issue.agent_enabled) && (agent.is_default ? !issue.agent_id : issue.agent_id === agent.id);
-          const label = agent.is_default ? agent.name + "（默认）" : agent.name;
-          return '<button class="better-codex-context-item" type="button" data-context-action="assign" data-assignee-kind="agent" data-context-agent-id="' + escapeHtml(agent.id || "") + '"><span class="better-codex-context-check">' + (selected ? icon("check") : "") + '</span>' + agentAvatarMarkup(agent, "better-codex-context-avatar") + '<span>' + escapeHtml(label) + "</span></button>";
+          return '<button class="better-codex-context-item" type="button" data-context-action="assign" data-assignee-kind="agent" data-context-agent-id="' + escapeHtml(agent.id || "") + '"><span class="better-codex-context-check">' + (selected ? icon("check") : "") + '</span>' + agentAvatarMarkup(agent, "better-codex-context-avatar") + contextAssigneeLabel(agent.name, contextAssigneeTags(agent)) + '</button>';
         }),
-        '<div class="better-codex-context-divider"></div>',
-        '<button class="better-codex-context-item" type="button" data-context-action="assign" data-assignee-kind="none"><span class="better-codex-context-check">' + (noneSelected ? icon("check") : "") + '</span>' + icon("user") + '<span>取消分配</span></button>'
       ].join("");
       const menu = document.createElement("div");
       menu.id = "better-codex-context-menu";
@@ -1855,12 +1864,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         '<div class="better-codex-auto-dispatch-help-panels">',
         '<section class="better-codex-auto-dispatch-help-panel is-manual">',
         '<div class="better-codex-auto-dispatch-help-heading">' + icon("user") + "<h3>手动运行</h3></div>",
-        "<p>关闭后，未指派或指派给你的任务不会自动开工；直接指派给智能体的任务仍会自动开始。你也可以随时手动新建智能体任务、打开 Session，或在对话里回复来触发会话。</p>",
+        "<p>手动运行时，只有点击“立即开始任务”才会触发智能体任务。</p>",
         "</section>",
         '<div class="better-codex-auto-dispatch-help-divider" aria-hidden="true"></div>',
         '<section class="better-codex-auto-dispatch-help-panel is-auto">',
         '<div class="better-codex-auto-dispatch-help-heading">' + icon("refresh") + "<h3>自动运行</h3></div>",
-        "<p>开启后，已指派智能体、且还需要智能体继续处理的任务会自动开对话；「待规划」里的任务不会动。智能体做完会交回给你确认。如果任务在等你回复或拍板，系统会停着等你，直到你重新指派给智能体。</p>",
+        "<p>自动运行时，只要 Issue 不在「待规划」区，你发送的新消息都会触发任务；「待规划」里的 Issue 不会自动触发。</p>",
         "</section>",
         "</div>",
         '<footer><button type="button" data-help-close>知道了</button></footer>',
@@ -2196,13 +2205,16 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
       function header() {
         const openThreadButton = issue && sessionId
-          ? '<button class="better-codex-dialog-open-thread" type="button" data-dialog-open-thread="' + escapeHtml(sessionId) + '">在对话中打开</button>'
+          ? '<button class="better-codex-dialog-open-thread" type="button" data-dialog-open-thread="' + escapeHtml(sessionId) + '">在会话中打开</button>'
+          : "";
+        const startNowButton = issue && !sessionId && !state.autoDispatch && issue.agent_enabled && !issue.active_run_status
+          ? '<button class="better-codex-dialog-start-now" type="button" data-dialog-start-now>立即开始任务</button>'
           : "";
         const title = draft.mode === "agent" ? "通过智能体创建" : issue ? "Issue 详情" : "手动创建";
         const crumb = issue
           ? '<span>' + escapeHtml(project?.name || "Better Codex") + '</span><span aria-hidden="true">' + icon("chevron") + '</span><strong>' + title + '</strong>'
           : '<strong>' + title + '</strong>';
-        return '<div class="better-codex-dialog-head"><div class="better-codex-dialog-breadcrumb">' + crumb + '</div><div class="better-codex-dialog-head-actions">' + openThreadButton + '<button class="better-codex-icon-button" type="button" data-dialog-expand aria-label="' + (draft.expanded ? "缩小" : "展开") + '">' + icon(draft.expanded ? "shrink" : "expand") + '</button><button class="better-codex-icon-button" type="button" data-dialog-close aria-label="关闭">' + icon("close") + '</button></div></div>';
+        return '<div class="better-codex-dialog-head"><div class="better-codex-dialog-breadcrumb">' + crumb + '</div><div class="better-codex-dialog-head-actions">' + openThreadButton + startNowButton + '<button class="better-codex-icon-button" type="button" data-dialog-expand aria-label="' + (draft.expanded ? "缩小" : "展开") + '">' + icon(draft.expanded ? "shrink" : "expand") + '</button><button class="better-codex-icon-button" type="button" data-dialog-close aria-label="关闭">' + icon("close") + '</button></div></div>';
       }
 
       function conversationPanel() {
@@ -2402,12 +2414,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
       function footer() {
         const switchButton = issue ? "" : '<button class="better-codex-switch-mode" type="button" data-dialog-switch>' + icon("switch") + (draft.mode === "agent" ? "切换到手动" : "切换到智能体") + '</button>';
-        const startNowButton = issue && !state.autoDispatch && issue.agent_enabled && !issue.active_run_status
-          ? '<button class="better-codex-dialog-start-now" type="button" data-dialog-start-now>立即开始任务</button>'
-          : "";
         const submitText = issue ? "保存" : draft.mode === "agent" ? "创建" : "创建任务";
         const keepOpen = issue ? "" : '<label class="better-codex-keep-open"><input class="better-codex-toggle" name="keep" type="checkbox"' + (state.keepCreate ? " checked" : "") + '>继续创建</label>';
-        return '<div class="better-codex-dialog-footer"><button class="better-codex-icon-button" type="button" data-dialog-attach aria-label="添加附件">' + icon("paperclip") + '</button><div class="better-codex-dialog-footer-right">' + switchButton + startNowButton + keepOpen + '<button class="better-codex-submit" type="submit">' + submitText + '</button></div></div>';
+        return '<div class="better-codex-dialog-footer"><button class="better-codex-icon-button" type="button" data-dialog-attach aria-label="添加附件">' + icon("paperclip") + '</button><div class="better-codex-dialog-footer-right">' + switchButton + keepOpen + '<button class="better-codex-submit" type="submit">' + submitText + '</button></div></div>';
       }
 
       function renderDialog() {

@@ -435,6 +435,10 @@ export class Store {
     );
   }
 
+  canAutoStartFromUserMessage(issue: Issue) {
+    return Boolean(this.getAutoDispatch() && !issue.archived_at && issue.status !== "backlog");
+  }
+
   listProjects() {
     return this.db.prepare(`
       SELECT id, external_id, identifier_prefix, name, workspace_path, next_issue_number, created_at, updated_at

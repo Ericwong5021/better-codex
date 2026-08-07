@@ -476,7 +476,8 @@ async function main() {
       }
       await ensureRuntime();
       const current = await cdpStatus(cdpPort);
-      if (current.available) {
+      const injected = current.available && current.targets.length > 0 && current.targets.every(target => (target as { entry?: boolean }).entry === true);
+      if (injected) {
         setInjectionEnabled(true);
         await cdpInject(cdpPort, activeRuntimePort(), accessToken(), false);
         startInjector(cdpPort);
@@ -485,11 +486,12 @@ async function main() {
         setInjectionEnabled(false);
         await stopInjector();
         try {
-          await cdpRestartAndInject(cdpPort, activeRuntimePort(), accessToken());
+          await cdpRestartAndInject(cdpPort, activeRuntimePort(), accessToken(), { confirmQuit: true });
           setInjectionEnabled(true);
           await waitForInjector();
         } catch (error) {
           setInjectionEnabled(false);
+          if (error instanceof Error && error.message === "codex_quit_cancelled") return { launched: false, cancelled: true };
           throw error;
         }
       }

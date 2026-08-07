@@ -64,3 +64,10 @@ test("launcher serializes concurrent Codex restarts and keeps migration guards",
   assert.match(source, /previous\?\.platform === "darwin"/);
   assert.match(source, /migrateLegacyMacLauncher/);
 });
+
+test("shortcut launch reopens Codex when the existing renderer is not injected", () => {
+  assert.match(cliSource, /current\.available && current\.targets\.length > 0 && current\.targets\.every\(target => \(target as \{ entry\?: boolean \}\)\.entry === true\)/);
+  assert.match(cliSource, /if \(injected\)/);
+  assert.match(cliSource, /await cdpRestartAndInject\(cdpPort, activeRuntimePort\(\), accessToken\(\), \{ confirmQuit: true \}\)/);
+  assert.match(cliSource, /codex_quit_cancelled/);
+});

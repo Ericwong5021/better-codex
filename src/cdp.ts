@@ -1,6 +1,6 @@
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { activeCompatibility, capabilityExpression, clearCompatibilityStatus, missingCapabilities, navigationExpression, readCompatibilityStatus, targetAllowed, type RendererCapabilities, writeCompatibilityStatus } from "./compatibility.js";
 import { injectionScript, injectionVersion } from "./dom.js";
 import { readRuntimeState } from "./runtime-state.js";
@@ -212,8 +212,10 @@ export function codexInstallationStatus() {
   return { installed: false, platform: process.platform, path: null, version: null };
 }
 
-function desktopApplicationName(application: string) {
-  return basename(application, ".app");
+function desktopApplicationBundleId(application: string) {
+  const bundleId = execFileSync("/usr/libexec/PlistBuddy", ["-c", "Print :CFBundleIdentifier", join(application, "Contents", "Info.plist")], { encoding: "utf8" }).trim();
+  if (!bundleId) throw new Error("codex_app_bundle_id_unavailable");
+  return bundleId;
 }
 
 function windowsActivationScript(port: number, allowExisting = false) {
@@ -308,45 +310,70 @@ export function launchCodex(port: number, activateExisting = false) {
   throw new Error(`codex_launch_unsupported_${process.platform}`);
 }
 
+function codexProcessRunning() {
+  if (process.platform === "win32") {
+    const count = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "$count = @(Get-CimInstance Win32_Process -Filter \"Name = 'ChatGPT.exe'\" | Where-Object { $_.CommandLine -notmatch \"--type=\" }).Count; Write-Output $count; exit 0"], { encoding: "utf8", windowsHide: true }).trim();
+    return Number(count) > 0;
+  }
+  if (process.platform !== "darwin") return false;
+  const application = desktopApplication();
+  const bundleId = desktopApplicationBundleId(application);
+  const appleScriptBundleId = bundleId.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  try {
+    const result = execFileSync("/usr/bin/osascript", ["-e", `tell application id "${appleScriptBundleId}" to return running`], { encoding: "utf8" }).trim();
+    return result === "true";
+  } catch {
+    return false;
+  }
+}
+
+function confirmCodexQuit() {
+  if (process.platform === "win32") {
+    const script = "$ErrorActionPreference = 'Stop'; Add-Type -AssemblyName System.Windows.Forms; $result = [System.Windows.Forms.MessageBox]::Show('Codex 当前正在运行，Better Codex 需要先关闭它才能启动注入。是否继续？', 'Better Codex', [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Warning); if ($result -eq [System.Windows.Forms.DialogResult]::Yes) { Write-Output 'yes' } else { Write-Output 'no' }";
+    const output = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-STA", "-Command", script], { encoding: "utf8", windowsHide: true }).trim();
+    return output === "yes";
+  }
+  if (process.platform === "darwin") {
+    try {
+      const output = execFileSync("/usr/bin/osascript", ["-e", 'display dialog "Codex 当前正在运行，Better Codex 需要先关闭它才能启动注入。是否继续？" with title "Better Codex" buttons {"取消", "继续"} default button "继续" cancel button "取消" with icon caution'], { encoding: "utf8" }).trim();
+      return output.includes("继续");
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
 async function quitCodex() {
   if (process.platform === "win32") {
-    execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "$processes = @(Get-Process -Name 'ChatGPT','Codex' -ErrorAction SilentlyContinue); if ($processes.Count -gt 0) { $processes | Stop-Process -Force -ErrorAction Stop }; exit 0"], { stdio: "ignore", windowsHide: true });
+    const desktopProcesses = "$processes = @(Get-CimInstance Win32_Process -Filter \"Name = 'ChatGPT.exe'\" | Where-Object { $_.CommandLine -notmatch \"--type=\" }); if ($processes.Count -gt 0) { $processes | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } }; exit 0";
+    execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", desktopProcesses], { stdio: "ignore", windowsHide: true });
     for (let attempt = 0; attempt < 40; attempt += 1) {
-      const count = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "$count = @(Get-Process -Name 'ChatGPT','Codex' -ErrorAction SilentlyContinue).Count; Write-Output $count; exit 0"], { encoding: "utf8", windowsHide: true }).trim();
+      const count = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "$count = @(Get-CimInstance Win32_Process -Filter \"Name = 'ChatGPT.exe'\" | Where-Object { $_.CommandLine -notmatch \"--type=\" }).Count; Write-Output $count; exit 0"], { encoding: "utf8", windowsHide: true }).trim();
       if (Number(count) === 0) return;
       await new Promise(resolve => setTimeout(resolve, 250));
     }
     throw new Error("codex_quit_timeout");
   }
   if (process.platform !== "darwin") throw new Error(`codex_quit_unsupported_${process.platform}`);
-  const names = ["ChatGPT", "Codex"];
-  const running = () => names.some(name => {
+  const application = desktopApplication();
+  const bundleId = desktopApplicationBundleId(application);
+  const appleScriptBundleId = bundleId.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  const running = () => {
     try {
-      execFileSync("/usr/bin/pgrep", ["-x", name], { stdio: "ignore" });
-      return true;
+      const result = execFileSync("/usr/bin/osascript", ["-e", `tell application id "${appleScriptBundleId}" to return running`], { encoding: "utf8" }).trim();
+      return result === "true";
     } catch {
       return false;
     }
-  });
-  for (const name of names) {
-    try {
-      execFileSync("/usr/bin/osascript", ["-e", `tell application \"${name}\" to quit`], { stdio: "ignore" });
-    } catch {
-    }
+  };
+  try {
+    execFileSync("/usr/bin/osascript", ["-e", `tell application id "${appleScriptBundleId}" to quit`], { stdio: "ignore" });
+  } catch {
   }
   for (let attempt = 0; attempt < 40; attempt += 1) {
     if (!running()) return;
     await new Promise(resolve => setTimeout(resolve, 250));
-  }
-  for (const signal of ["", "-9"] as const) {
-    for (const name of names) {
-      try {
-        execFileSync("/usr/bin/killall", signal ? [signal, name] : [name], { stdio: "ignore" });
-      } catch {
-      }
-    }
-    await new Promise(resolve => setTimeout(resolve, 500));
-    if (!running()) return;
   }
   throw new Error("codex_quit_timeout");
 }
@@ -436,8 +463,9 @@ export async function cdpInject(port: number, runtimePort: number, accessToken: 
   return Promise.all(values.map(target => installTarget(target, runtimePort, accessToken)));
 }
 
-export async function cdpRestartAndInject(port: number, runtimePort: number, accessToken: string) {
+export async function cdpRestartAndInject(port: number, runtimePort: number, accessToken: string, options: { confirmQuit?: boolean } = {}) {
   if (!['darwin', 'win32'].includes(process.platform)) throw new Error(`setup_unsupported_${process.platform}`);
+  if (options.confirmQuit && codexProcessRunning() && !confirmCodexQuit()) throw new Error("codex_quit_cancelled");
   await quitCodex();
   return cdpInject(port, runtimePort, accessToken, true);
 }

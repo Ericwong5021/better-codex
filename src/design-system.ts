@@ -601,6 +601,10 @@ export function betterCodexDesignSystemCss() {
       overflow-y: auto;
     }
 
+    #better-codex-context-menu .better-codex-context-submenu.is-assignee {
+      min-width: 214px;
+    }
+
     #better-codex-context-menu[data-align="left"] .better-codex-context-submenu {
       right: 100%;
       left: auto;
@@ -618,6 +622,41 @@ export function betterCodexDesignSystemCss() {
       gap: var(--bc-space-2);
       padding-inline: 10px;
       white-space: nowrap;
+    }
+
+    #better-codex-context-menu .better-codex-context-assignee-label {
+      display: inline-flex;
+      min-width: 0;
+      flex: 1;
+      align-items: center;
+      gap: 5px;
+      overflow: hidden;
+    }
+
+    #better-codex-context-menu .better-codex-context-assignee-name {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #better-codex-context-menu .better-codex-context-tag {
+      flex: 0 0 auto;
+      border-radius: 999px;
+      padding: 1px 5px;
+      font-size: var(--bc-text-xs);
+      font-weight: 650;
+      line-height: 1.25;
+    }
+
+    #better-codex-context-menu .better-codex-context-tag[data-tone="model"] {
+      color: var(--bc-info);
+      background: color-mix(in srgb, var(--bc-info) 13%, var(--bc-color-control));
+    }
+
+    #better-codex-context-menu .better-codex-context-tag[data-tone="reasoning"] {
+      color: var(--bc-success);
+      background: color-mix(in srgb, var(--bc-success) 13%, var(--bc-color-control));
     }
 
     #better-codex-context-menu .better-codex-context-check,
@@ -877,10 +916,6 @@ export function betterCodexDesignSystemCss() {
     }
 
     #better-codex-panel .better-codex-card:active { transform: scale(.98); }
-
-    #better-codex-panel .better-codex-card.is-dragging {
-      opacity: .42;
-    }
 
     #better-codex-panel .better-codex-card.is-dragging:active {
       transform: none;
@@ -1178,6 +1213,12 @@ export function betterCodexDesignSystemCss() {
     #better-codex-dialog .better-codex-dialog-select-menu[hidden] { display: none; }
 
     #better-codex-dialog .better-codex-dialog-select.is-agent .better-codex-dialog-select-menu {
+      top: calc(100% + var(--bc-space-2));
+      right: auto;
+      bottom: auto;
+    }
+
+    #better-codex-dialog .better-codex-dialog-select.is-assignee .better-codex-dialog-select-menu {
       top: calc(100% + var(--bc-space-2));
       right: auto;
       bottom: auto;

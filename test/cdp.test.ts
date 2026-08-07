@@ -42,3 +42,27 @@ test("thread navigation waits for Codex app activation instead of sending a manu
   assert.doesNotMatch(navigation, /window\.postMessage/);
   assert.doesNotMatch(navigation, /threadRoutePrefix/);
 });
+
+test("Windows restart only terminates the Codex Desktop main process", () => {
+  assert.match(source, /Get-CimInstance Win32_Process -Filter \\\"Name = 'ChatGPT\.exe'\\\"/);
+  assert.match(source, /CommandLine -notmatch \\\"--type=\\\"/);
+  assert.match(source, /Stop-Process -Id \$_.ProcessId/);
+  assert.doesNotMatch(source, /Get-Process -Name 'ChatGPT','Codex'/);
+});
+
+test("macOS restart quits only the installed Desktop app by Bundle ID", () => {
+  assert.match(source, /function desktopApplicationBundleId\(application: string\)/);
+  assert.match(source, /tell application id/);
+  assert.match(source, /return running/);
+  assert.doesNotMatch(source, /const names = \["ChatGPT", "Codex"\]/);
+  assert.doesNotMatch(source, /\/usr\/bin\/killall/);
+});
+
+test("launch restart asks before terminating Codex", () => {
+  assert.match(source, /function codexProcessRunning\(\)/);
+  assert.match(source, /function confirmCodexQuit\(\)/);
+  assert.match(source, /MessageBoxButtons\]::YesNo/);
+  assert.match(source, /buttons \{\"取消\", \"继续\"\}/);
+  assert.match(source, /options\.confirmQuit && codexProcessRunning\(\) && !confirmCodexQuit\(\)/);
+  assert.match(source, /codex_quit_cancelled/);
+});

@@ -433,6 +433,9 @@ export function startServer() {
           });
         }
         if (method === "POST" && path[3] === "reply" && path.length === 4) {
+          if (!store.canAutoStartFromUserMessage(issue)) {
+            throw new Error(store.getAutoDispatch() ? "backlog_reply_blocked" : "manual_start_required");
+          }
           const body = await readBody(request);
           const threadId = issue.run_thread_id || "";
           const reply = startIssueReply({

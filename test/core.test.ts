@@ -230,6 +230,25 @@ test("manual mode requires an explicit issue start", () => {
   }
 });
 
+test("user messages only auto-start non-backlog issues in automatic mode", () => {
+  const target = temporaryDatabase();
+  try {
+    const store = new Store(target.file);
+    const project = store.createProject({ name: "Reply dispatch", workspacePath: target.directory });
+    const todo = store.createIssue({ projectId: project.id, title: "Todo", status: "todo" });
+    const backlog = store.createIssue({ projectId: project.id, title: "Backlog", status: "backlog" });
+
+    assert.equal(store.canAutoStartFromUserMessage(todo), false);
+    store.setAutoDispatch(true);
+    assert.equal(store.canAutoStartFromUserMessage(todo), true);
+    assert.equal(store.canAutoStartFromUserMessage(backlog), false);
+
+    store.close();
+  } finally {
+    rmSync(target.directory, { recursive: true, force: true });
+  }
+});
+
 test("deleting an agent unassigns its issues", () => {
   const target = temporaryDatabase();
   try {

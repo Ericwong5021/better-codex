@@ -130,7 +130,10 @@ test("issues toolbar has a toggleable auto-dispatch icon between filter and crea
   assert.ok(source.includes('"自动运行"'));
   assert.ok(source.includes('id = "better-codex-auto-dispatch-help-dialog"'));
   assert.ok(source.includes("better-codex-auto-dispatch-help-divider"));
-  assert.ok(source.includes("已指派智能体、且还需要智能体继续处理的任务"));
+  assert.ok(source.includes("只有点击“立即开始任务”才会触发智能体任务"));
+  assert.ok(source.includes("只要 Issue 不在「待规划」区，你发送的新消息都会触发任务"));
+  assert.ok(source.includes("manual_start_required"));
+  assert.ok(source.includes("backlog_reply_blocked"));
   assert.ok(!source.includes("「待处理」标志"));
   assert.ok(!source.includes('better-codex-attention'));
   assert.ok(source.includes('icon(state.autoDispatch ? "refresh" : "user")'));
@@ -315,7 +318,11 @@ test("agent assignment options expose compact model and reasoning tags", () => {
   assert.ok(source.includes('agentOptionLabel(defaultAgent, defaultAgent.name || "Codex")'));
   assert.doesNotMatch(source, /Codex（默认配置）/);
   assert.match(source, /better-codex-dialog-select-tag/);
+  assert.match(source, /better-codex-context-tag/);
+  assert.match(source, /contextAssigneeLabel\("未指派"\)/);
   assert.match(betterCodexDesignSystemCss(), /better-codex-dialog-select-tag\[data-tone="model"\]/);
+  assert.match(betterCodexDesignSystemCss(), /better-codex-context-submenu\.is-assignee\s*\{[^}]*min-width:\s*214px;/s);
+  assert.match(betterCodexDesignSystemCss(), /better-codex-dialog-select\.is-assignee \.better-codex-dialog-select-menu\s*\{[^}]*top:\s*calc\(100% \+ var\(--bc-space-2\)\);[^}]*bottom:\s*auto;/s);
 });
 
 test("agent issue creation refreshes profiles and reuses their names and avatars", () => {
@@ -411,8 +418,10 @@ test("issue context menu can assign the current user or an agent", () => {
   assert.ok(source.includes('data-assignee-kind="me"'));
   assert.ok(source.includes('data-assignee-kind="agent"'));
   assert.ok(source.includes('data-assignee-kind="none"'));
-  assert.ok(source.includes("取消分配"));
+  assert.ok(source.includes('contextAssigneeLabel("未指派")'));
+  assert.doesNotMatch(source, /取消分配/);
   assert.ok(source.includes("better-codex-context-avatar is-user is-initials"));
+  assert.ok(source.includes("better-codex-context-tag"));
   assert.ok(source.includes("user_assigned: true"));
   assert.ok(source.includes("const assigned = Boolean(issue.agent_enabled || issue.user_assigned)"));
 });
@@ -437,7 +446,7 @@ test("issue cards show project icon and assignee instead of session entry", () =
   assert.ok(source.includes("未分配"));
   assert.ok(!source.includes('class="better-codex-link" type="button" data-thread="'));
   assert.ok(!source.includes(">打开 Session</button>"));
-  assert.ok(source.includes("在对话中打开"));
+  assert.ok(source.includes("在会话中打开"));
   assert.ok(source.includes("data-dialog-open-thread"));
   assert.ok(source.includes("function normalizeSessionId(value)"));
   assert.ok(source.includes("function issueSessionId(issue)"));
@@ -462,7 +471,12 @@ test("issue cards show project icon and assignee instead of session entry", () =
   assert.ok(source.includes('data-dialog-start-now'));
   assert.ok(source.includes('/start'));
   assert.ok(source.includes('立即开始任务'));
-  assert.ok(source.includes('!state.autoDispatch && issue.agent_enabled && !issue.active_run_status'));
+  assert.ok(source.includes('!sessionId && !state.autoDispatch && issue.agent_enabled && !issue.active_run_status'));
+  const headerStart = source.indexOf("function header()");
+  const footerStart = source.indexOf("function footer()");
+  const startNowMarkup = source.indexOf("data-dialog-start-now");
+  assert.ok(startNowMarkup > headerStart && startNowMarkup < footerStart);
+  assert.equal(source.slice(footerStart, source.indexOf("function renderDialog()", footerStart)).includes("data-dialog-start-now"), false);
   assert.ok(source.includes("if (issue) return void perform(() => openEditor(issue))"));
   assert.ok(!source.includes("issue?.run_thread_id || issue?.thread_id || \"\""));
   assert.ok(!source.includes("(sessionId ? ' data-thread=\""));
@@ -555,7 +569,8 @@ test("Codex-native visual values live behind semantic design tokens", () => {
   assert.ok(css.includes("--bc-radius-xl:"));
   assert.ok(css.includes("--bc-motion-fast:"));
   assert.match(css, /\.better-codex-card\s*\{[^}]*border:\s*1px solid var\(--bc-color-hairline\);[^}]*background:\s*var\(--bc-color-canvas\);[^}]*box-shadow:\s*var\(--bc-card-shadow\);/s);
-  assert.match(css, /\.better-codex-card\.is-dragging\s*\{[^}]*opacity:\s*\.42;/s);
+  assert.doesNotMatch(css, /\.better-codex-card\.is-dragging\s*\{[^}]*opacity:/s);
+  assert.match(css, /\.better-codex-card\.is-dragging:active\s*\{[^}]*transform:\s*none;/s);
   assert.ok(source.includes("function onCardDragStart(event)"));
   assert.ok(source.includes("setDragImage(ghost"));
   assert.ok(source.includes('ghost.classList.add("is-drag-ghost")'));
