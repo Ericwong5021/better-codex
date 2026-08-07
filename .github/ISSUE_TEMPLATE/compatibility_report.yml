@@ -1,0 +1,72 @@
+name: Codex compatibility report
+description: Report a problem caused by a Codex, platform, or launcher update
+title: "[Compatibility]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form when the problem is specific to a Codex version, operating system, installer, launcher, or injection path. Redact private data before submitting.
+  - type: input
+    id: better_codex_version
+    attributes:
+      label: Better Codex version
+      placeholder: 0.3.12
+    validations:
+      required: true
+  - type: input
+    id: codex_version
+    attributes:
+      label: Codex version
+      placeholder: Version shown in Codex Desktop
+    validations:
+      required: true
+  - type: dropdown
+    id: operating_system
+    attributes:
+      label: Operating system
+      options:
+        - macOS Apple Silicon
+        - macOS Intel
+        - Windows x64
+    validations:
+      required: true
+  - type: input
+    id: codex_distribution
+    attributes:
+      label: Codex distribution
+      placeholder: Microsoft Store or macOS app
+    validations:
+      required: true
+  - type: textarea
+    id: changed
+    attributes:
+      label: What changed?
+      description: Include the Codex or platform update after which the problem began.
+    validations:
+      required: true
+  - type: textarea
+    id: symptoms
+    attributes:
+      label: Symptoms and reproduction steps
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Paste a redacted `better-codex doctor` result and relevant error output.
+      render: text
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots or logs
+      description: Remove credentials, private task content, conversation content, and personal paths.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I removed private task content, conversation content, credentials, and secrets.
+          required: true

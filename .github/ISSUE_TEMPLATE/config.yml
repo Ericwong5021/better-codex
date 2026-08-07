@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and workflow ideas
+    url: https://github.com/Ericwong5021/better-codex/discussions
+    about: Ask questions and share Codex workflow ideas in GitHub Discussions.
+  - name: Security vulnerability
+    url: https://github.com/Ericwong5021/better-codex/security/policy
+    about: Read the security policy before reporting a vulnerability.

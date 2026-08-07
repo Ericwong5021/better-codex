@@ -1,0 +1,83 @@
+name: Bug report
+description: Report a reproducible problem in Better Codex
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please search existing issues first. Do not include API keys, private task content, conversation transcripts, or unredacted logs.
+  - type: input
+    id: better_codex_version
+    attributes:
+      label: Better Codex version
+      description: Run `better-codex version` or check the version shown by the installer.
+      placeholder: 0.3.12
+    validations:
+      required: true
+  - type: dropdown
+    id: operating_system
+    attributes:
+      label: Operating system
+      options:
+        - macOS Apple Silicon
+        - macOS Intel
+        - Windows x64
+    validations:
+      required: true
+  - type: input
+    id: codex_version
+    attributes:
+      label: Codex version
+      placeholder: Version shown in Codex Desktop
+    validations:
+      required: true
+  - type: input
+    id: codex_distribution
+    attributes:
+      label: Codex distribution
+      description: For example, macOS app or Microsoft Store version.
+      placeholder: Microsoft Store
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open...
+        2. Create...
+        3. Select...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Paste a redacted `better-codex doctor` result when relevant.
+      render: json
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots or logs
+      description: Remove private content, credentials, tokens, and local paths before attaching files or logs.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I removed private task content, conversation content, credentials, and secrets.
+          required: true

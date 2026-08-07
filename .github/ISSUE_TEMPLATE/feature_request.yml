@@ -1,0 +1,52 @@
+name: Feature request
+description: Suggest an improvement to the Better Codex workflow
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Start with the workflow problem. A clear user need is more useful than a prescriptive implementation.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      placeholder: When I work on..., I currently...
+    validations:
+      required: true
+  - type: textarea
+    id: workflow
+    attributes:
+      label: Describe the desired workflow
+      description: Explain what should happen from the user's point of view.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Include an implementation idea only after describing the problem and workflow.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Affected platform
+      multiple: true
+      options:
+        - macOS Apple Silicon
+        - macOS Intel
+        - Windows x64
+        - All platforms
+    validations:
+      required: true
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Project scope
+      options:
+        - label: This request keeps the primary workflow inside Codex Desktop.
+          required: true
