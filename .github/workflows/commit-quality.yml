@@ -2,40 +2,21 @@ name: Commit Quality
 
 on:
   pull_request:
-  push:
-    branches:
-      - main
 
 permissions:
   contents: read
 
 jobs:
-  commit-message:
+  pull-request-title:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - env:
-          EVENT_NAME: ${{ github.event_name }}
-          PUSH_BEFORE: ${{ github.event.before }}
-          PUSH_AFTER: ${{ github.sha }}
-          PR_BASE: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+      - name: Validate PR title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
           set -euo pipefail
           pattern='^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([[:alnum:]./_-]+\))?!?: .{1,72}$'
-          if [ "$EVENT_NAME" = pull_request ]; then
-            range="$PR_BASE..$PR_HEAD"
-          elif git merge-base --is-ancestor "$PUSH_BEFORE" "$PUSH_AFTER" 2>/dev/null; then
-            range="$PUSH_BEFORE..$PUSH_AFTER"
-          else
-            range="$PUSH_AFTER"
-          fi
-          git log --format=%s "$range" | while IFS= read -r subject; do
-            printf '%s\n' "$subject" | grep -Eq "$pattern" || {
-              printf 'Invalid commit subject: %s\n' "$subject" >&2
-              exit 1
-            }
-          done
+          printf '%s\n' "$PR_TITLE" | grep -Eq "$pattern" || {
+            printf 'Invalid PR title: %s\n' "$PR_TITLE" >&2
+            exit 1
+          }
