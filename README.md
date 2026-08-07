@@ -65,12 +65,6 @@ Supports Windows x64 with the Microsoft Store version of Codex. Run in PowerShel
 irm https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scripts/install.ps1 | iex
 ```
 
-If it keeps installing an older release, PowerShell likely cached the installer. Rerun with:
-
-```powershell
-irm "https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scripts/install.ps1?$(Get-Random)" | iex
-```
-
 The installer downloads the matching release, verifies its SHA-256 checksum, installs the local runtime, configures the Codex integration, and verifies that it is ready.
 
 If Codex is open, the installer asks before closing it. Save active work first.

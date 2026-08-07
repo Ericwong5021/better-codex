@@ -318,19 +318,35 @@ async function quitCodex() {
     }
     throw new Error("codex_quit_timeout");
   }
-  const application = desktopApplication();
-  const name = desktopApplicationName(application);
-  try {
-    execFileSync("/usr/bin/osascript", ["-e", `tell application \"${name}\" to quit`], { stdio: "ignore" });
-  } catch {
-  }
-  for (let attempt = 0; attempt < 40; attempt += 1) {
+  if (process.platform !== "darwin") throw new Error(`codex_quit_unsupported_${process.platform}`);
+  const names = ["ChatGPT", "Codex"];
+  const running = () => names.some(name => {
     try {
       execFileSync("/usr/bin/pgrep", ["-x", name], { stdio: "ignore" });
+      return true;
     } catch {
-      return;
+      return false;
     }
+  });
+  for (const name of names) {
+    try {
+      execFileSync("/usr/bin/osascript", ["-e", `tell application \"${name}\" to quit`], { stdio: "ignore" });
+    } catch {
+    }
+  }
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    if (!running()) return;
     await new Promise(resolve => setTimeout(resolve, 250));
+  }
+  for (const signal of ["", "-9"] as const) {
+    for (const name of names) {
+      try {
+        execFileSync("/usr/bin/killall", signal ? [signal, name] : [name], { stdio: "ignore" });
+      } catch {
+      }
+    }
+    await new Promise(resolve => setTimeout(resolve, 500));
+    if (!running()) return;
   }
   throw new Error("codex_quit_timeout");
 }

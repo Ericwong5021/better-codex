@@ -101,15 +101,41 @@ if [ -n "$CURRENT_VERSION" ] && [ -n "$TARGET_VERSION" ]; then
   printf '[Better Codex] Automatic upgrade unavailable; continuing with full installation...\n'
 fi
 
-CODEX_APP=""
-for CANDIDATE in Codex ChatGPT; do
-  if /usr/bin/pgrep -x "$CANDIDATE" >/dev/null 2>&1; then
-    CODEX_APP="$CANDIDATE"
-    break
-  fi
-done
+codex_running() {
+  /usr/bin/pgrep -x ChatGPT >/dev/null 2>&1 || /usr/bin/pgrep -x Codex >/dev/null 2>&1
+}
 
-if [ -n "$CODEX_APP" ]; then
+quit_codex() {
+  # Stop Better Codex first so watch-inject does not relaunch Codex mid-quit.
+  if [ -n "${EXISTING_BINARY:-}" ]; then
+    "$EXISTING_BINARY" disable >/dev/null 2>&1 || true
+    "$EXISTING_BINARY" service stop >/dev/null 2>&1 || true
+  fi
+  for APP in ChatGPT Codex; do
+    /usr/bin/osascript -e "tell application \"$APP\" to quit" >/dev/null 2>&1 || true
+  done
+  for _ in $(seq 1 40); do
+    if ! codex_running; then
+      return 0
+    fi
+    sleep 0.25
+  done
+  # Soft quit often fails without Automation permission or when Electron ignores it.
+  /usr/bin/killall ChatGPT >/dev/null 2>&1 || true
+  /usr/bin/killall Codex >/dev/null 2>&1 || true
+  sleep 0.5
+  if codex_running; then
+    /usr/bin/killall -9 ChatGPT >/dev/null 2>&1 || true
+    /usr/bin/killall -9 Codex >/dev/null 2>&1 || true
+    sleep 0.5
+  fi
+  if codex_running; then
+    return 1
+  fi
+  return 0
+}
+
+if codex_running; then
   if [ ! -r /dev/tty ]; then
     echo "Codex is running. Quit it completely and run the installer again." >&2
     exit 1
@@ -120,14 +146,8 @@ if [ -n "$CODEX_APP" ]; then
     echo "Installation cancelled."
     exit 0
   fi
-  /usr/bin/osascript -e "tell application \"$CODEX_APP\" to quit" >/dev/null 2>&1 || true
-  for ATTEMPT in $(seq 1 40); do
-    if ! /usr/bin/pgrep -x "$CODEX_APP" >/dev/null 2>&1; then
-      break
-    fi
-    sleep 0.25
-  done
-  if /usr/bin/pgrep -x "$CODEX_APP" >/dev/null 2>&1; then
+  printf '[Better Codex] Stopping Codex...\n'
+  if ! quit_codex; then
     echo "Codex did not quit. Quit it manually and run the installer again." >&2
     exit 1
   fi

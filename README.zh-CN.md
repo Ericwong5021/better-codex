@@ -65,12 +65,6 @@ curl -fsSL https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scri
 irm https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scripts/install.ps1 | iex
 ```
 
-如果一直装到旧版本，多半是 PowerShell 缓存了旧安装脚本。改用：
-
-```powershell
-irm "https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scripts/install.ps1?$(Get-Random)" | iex
-```
-
 安装程序会下载对应版本、校验 SHA-256、安装本地运行时、配置 Codex 集成，并确认安装结果。
 
 如果 Codex 正在运行，安装程序会先征求关闭许可。继续前请保存当前工作。
