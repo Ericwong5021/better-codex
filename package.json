@@ -39,7 +39,7 @@
     "dist/worker.js"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node scripts/refresh-injector.mjs",
     "dev": "tsx src/cli.ts serve",
     "package:binary": "node scripts/package.mjs",
     "package:update-manifest": "node scripts/create-update-manifest.mjs release",

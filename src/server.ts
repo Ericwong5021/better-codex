@@ -183,7 +183,7 @@ function errorCode(error: unknown) {
 }
 
 function errorStatus(code: string) {
-  if (code === "version_conflict" || code === "reply_busy") return 409;
+  if (code === "version_conflict" || code === "reply_busy" || code === "issue_execution_locked") return 409;
   if (code.endsWith("_not_found")) return 404;
   if (code === "database_unavailable" || code === "database_integrity_check_failed") return 503;
   return 400;

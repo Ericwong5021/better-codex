@@ -142,9 +142,9 @@ export function betterCodexDesignSystemCss() {
     }
 
     #better-codex-panel .better-codex-toolbar {
-      min-height: 56px;
-      gap: var(--bc-space-3);
-      padding: 0 var(--bc-space-5);
+      min-height: 50px;
+      gap: var(--bc-space-2);
+      padding: 0 8px 0 var(--bc-space-4);
       background: var(--bc-color-canvas);
       -webkit-app-region: drag;
     }
@@ -158,6 +158,31 @@ export function betterCodexDesignSystemCss() {
     #better-codex-panel .better-codex-actions,
     #better-codex-panel .better-codex-agent-actions {
       gap: var(--bc-space-1);
+    }
+
+    #better-codex-panel .better-codex-button {
+      min-height: 30px;
+      border-radius: 8px;
+      padding-inline: 10px;
+      font-size: var(--bc-text-md);
+    }
+
+    #better-codex-panel .better-codex-working-dot {
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      flex: 0 0 7px;
+      margin-right: 0;
+      border: 1.5px solid currentColor;
+      border-radius: 50%;
+      background: transparent;
+      box-shadow: none;
+    }
+
+    #better-codex-panel .better-codex-working-chip.has-work .better-codex-working-dot {
+      border-color: currentColor;
+      background: currentColor;
+      box-shadow: 0 0 0 3px color-mix(in oklch, var(--bc-warning) 12%, transparent);
     }
 
     #better-codex-panel .better-codex-agent-actions[hidden] {
@@ -225,9 +250,9 @@ export function betterCodexDesignSystemCss() {
       position: relative;
       display: inline-flex;
       flex: 0 0 auto;
-      height: var(--bc-control-height);
+      height: 30px;
       align-items: stretch;
-      border-radius: var(--bc-radius-sm);
+      border-radius: 8px;
       color: var(--bc-color-on-primary);
       background: var(--bc-color-primary);
     }
@@ -235,14 +260,14 @@ export function betterCodexDesignSystemCss() {
     #better-codex-panel .better-codex-create-primary,
     #better-codex-panel .better-codex-create-toggle {
       display: inline-flex;
-      min-height: var(--bc-control-height);
+      min-height: 30px;
       align-items: center;
       justify-content: center;
       gap: 6px;
       border: 0;
       color: inherit;
       background: transparent;
-      padding: 0 var(--bc-control-padding);
+      padding: 0 10px;
       font: inherit;
       font-size: var(--bc-text-md);
       cursor: pointer;
@@ -250,13 +275,13 @@ export function betterCodexDesignSystemCss() {
     }
 
     #better-codex-panel .better-codex-create-primary {
-      border-radius: var(--bc-radius-sm) 0 0 var(--bc-radius-sm);
+      border-radius: 8px 0 0 8px;
     }
 
     #better-codex-panel .better-codex-create-toggle {
-      width: 30px;
+      width: 26px;
       border-inline-start: 1px solid color-mix(in oklch, var(--bc-color-on-primary) 16%, transparent);
-      border-radius: 0 var(--bc-radius-sm) var(--bc-radius-sm) 0;
+      border-radius: 0 8px 8px 0;
       padding: 0;
     }
 
@@ -316,20 +341,42 @@ export function betterCodexDesignSystemCss() {
     }
 
     #better-codex-panel .better-codex-search {
-      height: var(--bc-control-height);
+      width: 100%;
+      height: 28px;
       border: 0;
-      border-radius: var(--bc-radius-sm);
+      border-radius: 8px;
       color: var(--bc-color-text);
-      background: var(--bc-color-input);
-      padding-inline: var(--bc-control-padding);
-      box-shadow: var(--bc-inset-hairline);
+      background: transparent;
+      padding: 0 8px 0 0;
+      box-shadow: none;
       transition: background-color var(--bc-motion-fast) ease-out, box-shadow var(--bc-motion-fast) ease-out;
     }
 
     #better-codex-panel .better-codex-search:focus {
       border: 0;
-      background: var(--bc-color-input);
-      box-shadow: var(--bc-inset-hairline), var(--bc-focus-ring);
+      background: transparent;
+      box-shadow: none;
+    }
+
+    #better-codex-panel .better-codex-search-wrap {
+      display: flex;
+      width: 124px;
+      height: 30px;
+      flex: 0 0 124px;
+      align-items: center;
+      gap: 7px;
+      border-radius: 8px;
+      background: var(--bc-color-control);
+      box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--bc-color-text) 8%, transparent);
+      padding-inline: 9px;
+      -webkit-app-region: no-drag;
+    }
+
+    #better-codex-panel .better-codex-search-wrap > svg {
+      width: 14px;
+      height: 14px;
+      flex: 0 0 auto;
+      color: var(--bc-color-text-muted);
     }
 
     #better-codex-panel .better-codex-working-chip.has-work {
@@ -342,7 +389,7 @@ export function betterCodexDesignSystemCss() {
       display: inline-flex;
       flex: 0 0 auto;
       align-items: center;
-      gap: 2px;
+      gap: 0;
     }
 
     #better-codex-panel .better-codex-auto-dispatch {
@@ -383,8 +430,8 @@ export function betterCodexDesignSystemCss() {
 
     #better-codex-panel .better-codex-auto-dispatch-help {
       display: inline-flex;
-      width: calc(var(--bc-control-height) - 4px);
-      height: calc(var(--bc-control-height) - 4px);
+      width: 24px;
+      height: 30px;
       flex: 0 0 auto;
       align-items: center;
       justify-content: center;
@@ -740,6 +787,54 @@ export function betterCodexDesignSystemCss() {
       width: var(--bc-icon-sm);
       height: var(--bc-icon-sm);
       flex: 0 0 auto;
+    }
+
+    #better-codex-panel .better-codex-filter-avatar {
+      display: inline-flex;
+      width: var(--bc-icon-sm);
+      height: var(--bc-icon-sm);
+      flex: 0 0 var(--bc-icon-sm);
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      border-radius: var(--bc-radius-pill);
+      color: var(--bc-color-on-primary);
+      background: var(--bc-color-primary);
+      line-height: 0;
+    }
+
+    #better-codex-panel .better-codex-filter-avatar.is-codex {
+      color: inherit;
+      background: transparent;
+      border-radius: var(--bc-radius-xs);
+    }
+
+    #better-codex-panel .better-codex-filter-avatar.is-fallback,
+    #better-codex-panel .better-codex-filter-avatar.is-icon {
+      color: var(--bc-color-text-muted);
+      background: var(--bc-color-control);
+    }
+
+    #better-codex-panel .better-codex-filter-avatar img,
+    #better-codex-panel .better-codex-filter-avatar svg {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    #better-codex-panel .better-codex-filter-avatar.is-fallback svg,
+    #better-codex-panel .better-codex-filter-avatar.is-icon svg {
+      width: 10px;
+      height: 10px;
+      margin: auto;
+    }
+
+    #better-codex-panel .better-codex-filter-avatar.is-user.is-initials {
+      color: #fff;
+      font-size: var(--bc-text-avatar);
+      font-weight: 700;
+      line-height: 1;
     }
 
     #better-codex-panel .better-codex-status-icon,
@@ -1595,8 +1690,9 @@ export function betterCodexDesignSystemCss() {
       background: var(--bc-color-control);
     }
 
-    #better-codex-panel .better-codex-agent-list-avatar.is-icon,
-    #better-codex-dialog .better-codex-agent-avatar.is-icon {
+    #better-codex-panel :is(.better-codex-filter-avatar, .better-codex-card-avatar, .better-codex-agent-list-avatar).is-icon,
+    #better-codex-context-menu .better-codex-context-avatar.is-icon,
+    #better-codex-dialog :is(.better-codex-agent-avatar, .better-codex-bubble-avatar).is-icon {
       color: var(--bc-color-text-muted);
       background: var(--bc-color-control);
     }
@@ -1606,26 +1702,30 @@ export function betterCodexDesignSystemCss() {
       height: 18px;
     }
 
-    #better-codex-panel .better-codex-agent-list-avatar.is-icon[data-tone="info"],
-    #better-codex-dialog .better-codex-agent-avatar.is-icon[data-tone="info"] {
+    #better-codex-panel :is(.better-codex-filter-avatar, .better-codex-card-avatar, .better-codex-agent-list-avatar).is-icon[data-tone="info"],
+    #better-codex-context-menu .better-codex-context-avatar.is-icon[data-tone="info"],
+    #better-codex-dialog :is(.better-codex-agent-avatar, .better-codex-bubble-avatar).is-icon[data-tone="info"] {
       color: var(--bc-info);
       background: color-mix(in oklch, var(--bc-info) 14%, var(--bc-color-surface));
     }
 
-    #better-codex-panel .better-codex-agent-list-avatar.is-icon[data-tone="success"],
-    #better-codex-dialog .better-codex-agent-avatar.is-icon[data-tone="success"] {
+    #better-codex-panel :is(.better-codex-filter-avatar, .better-codex-card-avatar, .better-codex-agent-list-avatar).is-icon[data-tone="success"],
+    #better-codex-context-menu .better-codex-context-avatar.is-icon[data-tone="success"],
+    #better-codex-dialog :is(.better-codex-agent-avatar, .better-codex-bubble-avatar).is-icon[data-tone="success"] {
       color: var(--bc-success);
       background: color-mix(in oklch, var(--bc-success) 14%, var(--bc-color-surface));
     }
 
-    #better-codex-panel .better-codex-agent-list-avatar.is-icon[data-tone="warning"],
-    #better-codex-dialog .better-codex-agent-avatar.is-icon[data-tone="warning"] {
+    #better-codex-panel :is(.better-codex-filter-avatar, .better-codex-card-avatar, .better-codex-agent-list-avatar).is-icon[data-tone="warning"],
+    #better-codex-context-menu .better-codex-context-avatar.is-icon[data-tone="warning"],
+    #better-codex-dialog :is(.better-codex-agent-avatar, .better-codex-bubble-avatar).is-icon[data-tone="warning"] {
       color: var(--bc-warning);
       background: color-mix(in oklch, var(--bc-warning) 16%, var(--bc-color-surface));
     }
 
-    #better-codex-panel .better-codex-agent-list-avatar.is-icon[data-tone="muted"],
-    #better-codex-dialog .better-codex-agent-avatar.is-icon[data-tone="muted"] {
+    #better-codex-panel :is(.better-codex-filter-avatar, .better-codex-card-avatar, .better-codex-agent-list-avatar).is-icon[data-tone="muted"],
+    #better-codex-context-menu .better-codex-context-avatar.is-icon[data-tone="muted"],
+    #better-codex-dialog :is(.better-codex-agent-avatar, .better-codex-bubble-avatar).is-icon[data-tone="muted"] {
       color: var(--bc-color-text-muted);
       background: var(--bc-color-control);
     }

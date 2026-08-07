@@ -30,18 +30,14 @@ function codexPath() {
 
 export function issuePrompt(claim: ClaimedIssue) {
   const details = claim.issue.description.trim();
-  return `/better-codex-issue
-
-title: ${claim.issue.title}
+  return `title: ${claim.issue.title}
 
 details:
-<<<BETTER_CODEX_ISSUE_DETAILS>>>
 ${details}
-<<<END_BETTER_CODEX_ISSUE_DETAILS>>>
 
 taskid: ${claim.issue.identifier}
 
-按照 better-codex-issue skill 处理以上 Issue`;
+请按照/better-codex-issue 的规则完成任务`;
 }
 
 export class IssueWorker {

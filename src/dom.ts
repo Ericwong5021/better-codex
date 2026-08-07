@@ -266,6 +266,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const rememberedSurface = sessionStorage.getItem(RESUME_SURFACE_KEY);
     const rememberedProjectId = localStorage.getItem(PROJECT_KEY) || "";
     const state = { projects: [], issues: [], agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, surface: ["issues", "agents"].includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, createMode: "manual", keepCreate: false, selected: null, error: "", locale: INITIAL_LOCALE === "zh-CN" ? "zh-CN" : "en", filters: { status: [], priority: [], date: [], assignee: [], creator: [], project: [], label: [] } };
+    function projectLabel(project) {
+      return project?.external_id === "inbox" ? "未分配" : project?.name || "";
+    }
     const englishText = {
       "任务看板": "Task board", "打开任务看板": "Open task board", "智能体": "Agents", "管理智能体": "Manage agents",
       "全部": "All", "已分配": "Assigned", "未分配": "Unassigned", "待规划": "Backlog", "待办": "Todo", "进行中": "In progress", "审核中": "In review", "已完成": "Done", "已阻塞": "Blocked", "已取消": "Canceled",
@@ -276,7 +279,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "自动运行": "Auto-run", "手动运行": "Manual run", "切换为自动运行": "Switch to auto-run", "切换为手动运行": "Switch to manual run", "切换到智能体": "Switch to agents", "手动创建": "Manual creation", "通过智能体创建": "Create with agent", "运行模式说明": "Run mode", "最大并发": "Max concurrency", "模型": "Model", "推理": "Reasoning", "默认": "Default", "自定义": "Custom",
       "代码审查": "Code review", "问题排查": "Troubleshooting", "前端实现": "Frontend implementation", "文档写作": "Documentation", "创意探索": "Creative exploration", "终端工程": "Terminal engineering", "通用助手": "General assistant", "修复工具": "Fixer", "安全审查": "Security review", "测试验证": "Test verification", "插件": "Plugins", "数据与存储": "Data and storage", "检查改动的正确性、回归风险和可维护性": "Review changes for correctness, regression risk, and maintainability", "负责 Codex 原生风格的界面实现与视觉验证": "Build and visually verify interfaces in the native Codex style", "定位崩溃、回归和异常行为的根因": "Find the root cause of crashes, regressions, and unexpected behavior",
       "选择头像": "Choose avatar", "预设头像": "Preset avatars", "自定义": "Custom", "更换": "Change", "保存失败": "Save failed", "创建失败": "Creation failed", "加载失败": "Loading failed", "启动失败": "Start failed", "发送失败": "Send failed", "回复失败": "Reply failed", "回复": "Reply", "回复中": "Replying", "回复完成": "Reply completed", "回复进行中…": "Replying…", "回复已完成": "Reply completed", "等待对话": "Waiting for conversation", "加载中…": "Loading…", "加载对话…": "Loading conversation…", "正在打开…": "Opening…", "在对话中打开": "Open in conversation", "在此回复智能体…": "Reply to the agent here…", "对话": "Conversation", "详情": "Details", "关闭详情": "Close details", "Issue 详情": "Issue details", "名称": "Name", "介绍": "Description", "智能体名称": "Agent name", "尚未添加介绍": "No description yet", "没有匹配的智能体": "No matching agents", "此分类暂无智能体": "No agents in this category",
-      "裁剪头像": "Crop avatar", "拖动图片调整位置": "Drag the image to adjust its position", "正在更新": "Updating", "正在更新 Better Codex": "Updating Better Codex", "更新完成": "Update complete", "更新未完成": "Update incomplete", "稍后提醒": "Remind me later", "Better Codex 有新版本": "A new Better Codex version is available", "Better Codex 已是最新版本": "Better Codex is up to date", "Better Codex 保持当前版本运行。": "Better Codex will continue running on the current version.", "正在下载并校验新版本，请不要关闭 Codex。": "Downloading and verifying the update. Please do not close Codex.", "正在重启 Codex，稍后会自动恢复。": "Restarting Codex. It will resume shortly.", "刚刚完成检查，无需更新。": "Just checked. No update is needed.", "部分文件无法读取本地路径，已跳过": "Some files could not be read locally and were skipped", "当前环境无法读取本地文件路径": "The current environment cannot read local file paths", "无关联对话。": "No linked conversation.", "暂无对话，可在下方回复或打开完整对话。": "No conversation yet. Reply below or open the full conversation.", "图片不能超过 10 MB": "Images must be 10 MB or smaller", "请选择 PNG、JPEG 或 WebP 图片": "Choose a PNG, JPEG, or WebP image", "无法读取这张图片": "Unable to read this image", "创建智能体 Issue 需要本地工作区：请先打开该项目下的一个 Codex 会话": "Creating an agent issue requires a local workspace. Open a Codex conversation in this project first.",
+      "裁剪头像": "Crop avatar", "拖动图片调整位置": "Drag the image to adjust its position", "正在更新": "Updating", "正在更新 Better Codex": "Updating Better Codex", "更新完成": "Update complete", "更新未完成": "Update incomplete", "稍后提醒": "Remind me later", "Better Codex 有新版本": "A new Better Codex version is available", "Better Codex 已是最新版本": "Better Codex is up to date", "Better Codex 保持当前版本运行。": "Better Codex will continue running on the current version.", "正在下载并校验新版本，请不要关闭 Codex。": "Downloading and verifying the update. Please do not close Codex.", "正在重启 Codex，稍后会自动恢复。": "Restarting Codex. It will resume shortly.", "刚刚完成检查，无需更新。": "Just checked. No update is needed.", "任务已完成": "Task completed", "知道了": "Got it", "关闭": "Close", "部分文件无法读取本地路径，已跳过": "Some files could not be read locally and were skipped", "当前环境无法读取本地文件路径": "The current environment cannot read local file paths", "无关联对话。": "No linked conversation.", "暂无对话，可在下方回复或打开完整对话。": "No conversation yet. Reply below or open the full conversation.", "图片不能超过 10 MB": "Images must be 10 MB or smaller", "请选择 PNG、JPEG 或 WebP 图片": "Choose a PNG, JPEG or WebP image", "无法读取这张图片": "Unable to read this image", "创建智能体 Issue 需要本地工作区：请先打开该项目下的一个 Codex 会话": "Creating an agent issue requires a local workspace. Open a Codex conversation in this project first.",
       "创建任务": "Create task", "添加描述": "Add description", "新建 issue": "New issue", "项目": "Project", "状态": "Status", "优先级": "Priority", "选择项目": "Select project", "保存": "Save", "删除": "Delete",
       "对话链接无效。": "The conversation link is invalid.", "对话仍在加载，请稍后重试。": "The conversation is still loading. Try again shortly.", "当前为手动运行，请先点击“立即开始任务”。": "Manual run is enabled. Click “Start task now” first.", "待规划中的 Issue 不会自动触发任务，请先移出待规划区。": "Issues in Backlog do not trigger tasks automatically. Move it out of Backlog first.", "当前没有运行中的任务": "No agents are currently working", "查看运行中的任务": "View running tasks", "暂无任务": "No tasks", "未分配": "Unassigned", "已分配": "Assigned", "新建任务": "New task", "新建智能体": "New agent", "运行模式说明": "Run mode", "手动运行时，只有点击“立即开始任务”才会触发智能体任务。": "In manual mode, agent tasks start only after you click “Start task now”.", "自动运行时，只要 Issue 不在「待规划」区，你发送的新消息都会触发任务；「待规划」里的 Issue 不会自动触发。": "In auto-run mode, new messages trigger tasks unless the Issue is in Backlog; Issues in Backlog do not trigger tasks automatically.", "未关联对话。": "No linked conversation.",
       "确定删除任务 “": "Delete task “", "吗？": "”?", "创建后先由 ": "After creation, ", " 整理卡片，再自动开始工作。": " will organize the card and start working automatically.", "刚刚": "Just now", "分钟": "minutes", "小时": "hours", "天": "days", "更新于": "Updated", "个筛选": "filters", "个智能体工作中": "agents working", "条": "items"
@@ -288,10 +291,15 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     let panel = null;
     let observer = null;
     let refreshPending = false;
+    let refreshTimer = null;
     let pollTimer = null;
     let updateTimer = null;
     let updateNotice = null;
+    let issueStatusSnapshot = new Map();
+    let completionNoticeTimer = null;
+    let completionNoticeMenuDismiss = null;
     let dismissedUpdateVersion = sessionStorage.getItem("better-codex-dismissed-update") || "";
+    let ignoredUpdateVersion = localStorage.getItem("better-codex-ignored-update") || "";
     let filterDismiss = null;
     let createMenuDismiss = null;
     let issueMenu = null;
@@ -321,6 +329,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const trailing = source.match(/\\s*$/)?.[0] || "";
       const core = source.slice(leading.length, source.length - trailing.length || undefined);
       if (englishText[core]) return leading + englishText[core] + trailing;
+      if (core === "更多操作") return leading + "More actions" + trailing;
+      if (core === "本次启动关闭") return leading + "Disable for this launch" + trailing;
       let match = core.match(/^(\\d+) 个智能体工作中$/);
       if (match) return leading + match[1] + " agents working" + trailing;
       match = core.match(/^(\\d+) 个筛选$/);
@@ -430,6 +440,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #\${PANEL_ID}[hidden] { display: none !important; }
         #better-codex-update-notice { position: fixed; right: 16px; bottom: 16px; z-index: 2147483000; box-sizing: border-box; width: min(320px,calc(100vw - 32px)); color: var(--bc-foreground); background: var(--bc-raised); padding: 16px; border-radius: 12px; box-shadow: var(--bc-floating-shadow); outline: 1px solid color-mix(in srgb,var(--bc-foreground) 10%,transparent); outline-offset: -1px; font-family: var(--bc-font-ui); animation: better-codex-update-enter .3s cubic-bezier(.16,1,.3,1); }
         #better-codex-update-notice .better-codex-update-close { position: absolute; top: 6px; right: 6px; display: inline-flex; width: 40px; height: 40px; align-items: center; justify-content: center; border: 0; border-radius: 8px; color: var(--bc-muted); background: transparent; cursor: pointer; }
+        #better-codex-update-notice .better-codex-update-menu-toggle { position: absolute; top: 10px; right: 46px; display: inline-flex; width: 32px; height: 32px; align-items: center; justify-content: center; border: 0; border-radius: 8px; color: var(--bc-muted); background: transparent; cursor: pointer; }
+        #better-codex-update-notice .better-codex-update-menu { position: absolute; top: 44px; right: 8px; z-index: 2; min-width: 148px; box-sizing: border-box; padding: 4px; border: 1px solid var(--bc-border); border-radius: 10px; background: var(--bc-raised); box-shadow: var(--bc-menu-shadow); }
+        #better-codex-update-notice .better-codex-update-menu[hidden] { display: none; }
+        #better-codex-update-notice .better-codex-update-menu button { display: flex; width: 100%; min-height: 34px; align-items: center; border: 0; border-radius: 7px; padding: 0 10px; color: var(--bc-foreground); background: transparent; font: inherit; font-size: var(--bc-text-sm); text-align: left; cursor: pointer; }
         #better-codex-update-notice .better-codex-update-layout { display: flex; align-items: flex-start; gap: 11px; padding-right: 22px; }
         #better-codex-update-notice .better-codex-update-icon { display: inline-flex; width: 28px; height: 28px; flex: 0 0 auto; align-items: center; justify-content: center; border-radius: 8px; color: var(--bc-success); background: color-mix(in srgb,var(--bc-success) 12%,transparent); }
         #better-codex-update-notice .better-codex-update-icon svg { width: 15px; height: 15px; }
@@ -438,7 +452,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #better-codex-update-notice .better-codex-update-title { margin: 1px 0 0; font-size: var(--bc-text-md); font-weight: 650; line-height: 1.4; }
         #better-codex-update-notice .better-codex-update-description { margin: 3px 0 0; color: var(--bc-muted); font-size: var(--bc-text-sm); line-height: 1.55; text-wrap: pretty; }
         #better-codex-update-notice .better-codex-update-error { margin: 6px 0 0; color: var(--bc-danger); font-size: var(--bc-text-sm); line-height: 1.45; }
-        #better-codex-update-notice .better-codex-update-actions { display: flex; align-items: center; gap: 7px; margin-top: 11px; }
+        #better-codex-update-notice .better-codex-update-actions { display: flex; align-items: center; justify-content: flex-end; gap: 7px; margin-top: 11px; }
         #better-codex-update-notice .better-codex-update-button { display: inline-flex; min-height: 40px; align-items: center; justify-content: center; border: 0; border-radius: 8px; padding: 0 13px; color: var(--bc-foreground); background: var(--bc-hover); font: inherit; font-size: var(--bc-text-sm); font-weight: 600; cursor: pointer; transition: transform .15s,color .15s,background-color .15s; }
         #better-codex-update-notice .better-codex-update-button.is-primary { color: var(--bc-primary-foreground); background: var(--bc-primary); }
         #better-codex-update-notice .better-codex-update-button:active { transform: scale(.96); }
@@ -446,7 +460,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #better-codex-update-notice .better-codex-update-button:disabled, #better-codex-update-notice .better-codex-update-close:disabled { cursor: default; opacity: .48; }
         @keyframes better-codex-update-enter { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes better-codex-update-spin { to { transform: rotate(360deg); } }
-        @media (hover: hover) { #better-codex-update-notice .better-codex-update-close:hover { color: var(--bc-foreground); background: var(--bc-hover); } #better-codex-update-notice .better-codex-update-button:hover { background: var(--bc-selected); } #better-codex-update-notice .better-codex-update-button.is-primary:hover { background: color-mix(in srgb,var(--bc-primary) 90%,var(--bc-surface)); } }
+        @media (hover: hover) { #better-codex-update-notice .better-codex-update-close:hover, #better-codex-update-notice .better-codex-update-menu-toggle:hover { color: var(--bc-foreground); background: var(--bc-hover); } #better-codex-update-notice .better-codex-update-menu button:hover { background: var(--bc-hover); } #better-codex-update-notice .better-codex-update-button:hover { background: var(--bc-selected); } #better-codex-update-notice .better-codex-update-button.is-primary:hover { background: color-mix(in srgb,var(--bc-primary) 90%,var(--bc-surface)); } }
         @media (prefers-reduced-motion: reduce) { #better-codex-update-notice, #better-codex-update-notice[data-status="installing"] .better-codex-update-icon svg { animation: none; } }
         #\${PANEL_ID} { font-family: var(--bc-font-ui); background: var(--bc-page); }
         #\${PANEL_ID} .better-codex-error { margin-left: auto; color: var(--bc-danger); font-size: var(--bc-text-sm); }
@@ -662,7 +676,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #better-codex-dialog .better-codex-property select, #better-codex-dialog .better-codex-property input { width: auto; max-width: 128px; border: 0; color: inherit; background: transparent; padding: 0; font: inherit; font-size: inherit; outline: none; }
         #better-codex-dialog .better-codex-property input { width: 72px; }
         #better-codex-dialog .better-codex-project-picker { position: relative; display: inline-flex; }
-        #better-codex-dialog .better-codex-project-menu { position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; box-sizing: border-box; width: 220px; border: 1px solid #e4e4e7; border-radius: 9px; color: #3f3f46; background: #fff; padding: 5px; box-shadow: 0 12px 30px rgba(15,23,42,.14),0 2px 7px rgba(15,23,42,.08); }
+        #better-codex-dialog .better-codex-project-menu { position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 30; box-sizing: border-box; width: 220px; border: 1px solid #e4e4e7; border-radius: 9px; color: #3f3f46; background: #fff; padding: 5px; box-shadow: 0 12px 30px rgba(15,23,42,.14),0 2px 7px rgba(15,23,42,.08); }
         #better-codex-dialog .better-codex-project-menu[hidden] { display: none; }
         #better-codex-dialog .better-codex-project-search { box-sizing: border-box; width: 100%; height: var(--bc-control-height, 32px); border: 0; border-bottom: 1px solid #ededee; color: inherit; background: transparent; padding: 0 7px 4px; font: inherit; font-size: var(--bc-text-md); outline: none; }
         #better-codex-dialog .better-codex-project-option { display: flex; width: 100%; min-height: var(--bc-row-height, 34px); align-items: center; gap: 7px; border: 0; border-radius: 6px; color: inherit; background: transparent; padding: 0 7px; font: inherit; font-size: var(--bc-text-md); text-align: left; cursor: pointer; }
@@ -937,6 +951,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const value = error instanceof Error ? error.message : String(error || "request_failed");
       if (value === "thread_open_timeout" || value === "thread_open_unconfirmed") return "对话仍在加载，请稍后重试。";
       if (value === "thread_id_invalid") return "对话链接无效。";
+      if (value === "issue_execution_locked") return "已经执行过对话的 Issue 只能修改状态、优先级和指派人。";
       if (value === "manual_start_required") return "当前为手动运行，请先点击“立即开始任务”。";
       if (value === "backlog_reply_blocked") return "待规划中的 Issue 不会自动触发任务，请先移出待规划区。";
       return value;
@@ -967,9 +982,16 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       updateNotice = null;
     }
 
+    function ignoreUpdate(version) {
+      ignoredUpdateVersion = version;
+      localStorage.setItem("better-codex-ignored-update", version);
+      updateNotice?.remove();
+      updateNotice = null;
+    }
+
     function renderUpdateNotice(update) {
       const version = String(update?.latestVersion || "");
-      if (update?.status !== "available" || !version || dismissedUpdateVersion === version) return;
+      if (update?.status !== "available" || !version || dismissedUpdateVersion === version || ignoredUpdateVersion === version) return;
       if (updateNotice?.dataset.version === version) return;
       updateNotice?.remove();
       updateNotice = document.createElement("section");
@@ -979,20 +1001,39 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       updateNotice.setAttribute(OWNED, "true");
       updateNotice.setAttribute("role", "status");
       updateNotice.setAttribute("aria-live", "polite");
-      updateNotice.innerHTML = '<button class="better-codex-update-close" type="button" aria-label="稍后提醒">' + icon("close") + '</button><div class="better-codex-update-layout"><span class="better-codex-update-icon">' + icon("refresh") + '</span><div class="better-codex-update-copy"><p class="better-codex-update-title">Better Codex 有新版本</p><p class="better-codex-update-description">v' + escapeHtml(version) + ' 已可用，更新完成后将自动重启 Codex。</p><p class="better-codex-update-error" hidden></p><div class="better-codex-update-actions"><button class="better-codex-update-button" type="button" data-update-later>稍后</button><button class="better-codex-update-button is-primary" type="button" data-update-install>立即更新</button></div></div></div>';
+      updateNotice.innerHTML = '<button class="better-codex-update-menu-toggle" type="button" aria-label="更多操作" aria-expanded="false" aria-haspopup="menu" data-update-menu-toggle>' + icon("more") + '</button><div class="better-codex-update-menu" data-update-menu hidden><button type="button" role="menuitem" data-update-ignore>忽略当前版本</button></div><button class="better-codex-update-close" type="button" aria-label="稍后提醒">' + icon("close") + '</button><div class="better-codex-update-layout"><span class="better-codex-update-icon">' + icon("refresh") + '</span><div class="better-codex-update-copy"><p class="better-codex-update-title">Better Codex 有新版本</p><p class="better-codex-update-description">v' + escapeHtml(version) + ' 已可用，更新完成后将自动重启 Codex。</p><p class="better-codex-update-error" hidden></p><div class="better-codex-update-actions"><button class="better-codex-update-button" type="button" data-update-later>稍后</button><button class="better-codex-update-button is-primary" type="button" data-update-install>立即更新</button></div></div></div>';
       document.body.appendChild(updateNotice);
+      const notice = updateNotice;
+      const menuToggle = notice.querySelector("[data-update-menu-toggle]");
+      const menu = notice.querySelector("[data-update-menu]");
+      const closeMenu = () => {
+        menu.hidden = true;
+        menuToggle.setAttribute("aria-expanded", "false");
+      };
+      menuToggle.addEventListener("click", event => {
+        event.stopPropagation();
+        menu.hidden = !menu.hidden;
+        menuToggle.setAttribute("aria-expanded", String(!menu.hidden));
+      });
+      menu.querySelector("[data-update-ignore]").addEventListener("click", () => {
+        closeMenu();
+        ignoreUpdate(version);
+      });
       updateNotice.querySelector(".better-codex-update-close").addEventListener("click", () => dismissUpdate(version));
       updateNotice.querySelector("[data-update-later]").addEventListener("click", () => dismissUpdate(version));
       updateNotice.querySelector("[data-update-install]").addEventListener("click", async event => {
         const install = event.currentTarget;
-        const close = updateNotice.querySelector(".better-codex-update-close");
-        const later = updateNotice.querySelector("[data-update-later]");
-        const title = updateNotice.querySelector(".better-codex-update-title");
-        const description = updateNotice.querySelector(".better-codex-update-description");
-        const error = updateNotice.querySelector(".better-codex-update-error");
-        updateNotice.dataset.status = "installing";
+        const close = notice.querySelector(".better-codex-update-close");
+        const ignore = notice.querySelector("[data-update-ignore]");
+        const later = notice.querySelector("[data-update-later]");
+        const title = notice.querySelector(".better-codex-update-title");
+        const description = notice.querySelector(".better-codex-update-description");
+        const error = notice.querySelector(".better-codex-update-error");
+        notice.dataset.status = "installing";
         install.disabled = true;
+        menuToggle.disabled = true;
         close.disabled = true;
+        ignore.disabled = true;
         later.disabled = true;
         install.textContent = "正在更新";
         title.textContent = "正在更新 Better Codex";
@@ -1000,12 +1041,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         error.hidden = true;
         try {
           const result = await api("/api/update/install", { method: "POST" });
+          if (updateNotice !== notice) return;
           if (result?.updated === false) {
-            updateNotice.dataset.status = "current";
+            notice.dataset.status = "current";
             title.textContent = "Better Codex 已是最新版本";
             description.textContent = "刚刚完成检查，无需更新。";
             setTimeout(() => {
-              updateNotice?.remove();
+              if (updateNotice !== notice) return;
+              notice.remove();
               updateNotice = null;
             }, 1800);
             return;
@@ -1013,9 +1056,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           title.textContent = "更新完成";
           description.textContent = "正在重启 Codex，稍后会自动恢复。";
         } catch (reason) {
-          updateNotice.dataset.status = "available";
+          if (updateNotice !== notice) return;
+          notice.dataset.status = "available";
           install.disabled = false;
+          menuToggle.disabled = false;
           close.disabled = false;
+          ignore.disabled = false;
           later.disabled = false;
           install.textContent = "重试";
           title.textContent = "更新未完成";
@@ -1031,6 +1077,67 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         renderUpdateNotice(await api("/api/update"));
       } catch {
       }
+    }
+
+    function completionNoticeSuppressed() {
+      return sessionStorage.getItem("better-codex-completion-notice-disabled") === "true";
+    }
+
+    function renderCompletionNotice(issue) {
+      if (completionNoticeSuppressed()) return;
+      if (completionNoticeTimer !== null) clearTimeout(completionNoticeTimer);
+      completionNoticeTimer = null;
+      if (completionNoticeMenuDismiss) document.removeEventListener("pointerdown", completionNoticeMenuDismiss, true);
+      completionNoticeMenuDismiss = null;
+      updateNotice?.remove();
+      updateNotice = document.createElement("section");
+      updateNotice.id = "better-codex-update-notice";
+      updateNotice.dataset.status = "completed";
+      updateNotice.setAttribute(OWNED, "true");
+      updateNotice.setAttribute("role", "status");
+      updateNotice.setAttribute("aria-live", "polite");
+      const identifier = String(issue?.identifier || "").trim();
+      const title = String(issue?.title || "").trim();
+      const subject = [identifier, title].filter(Boolean).join(" ");
+      const description = state.locale === "zh-CN" ? (subject ? subject + " 已完成。" : "任务已完成。") : (subject ? subject + " is complete." : "The task is complete.");
+      updateNotice.innerHTML = '<button class="better-codex-update-menu-toggle" type="button" aria-label="更多操作" aria-expanded="false" aria-haspopup="menu" data-completion-menu-toggle>' + icon("more") + '</button><div class="better-codex-update-menu" data-completion-menu hidden><button type="button" role="menuitem" data-completion-suppress>本次启动关闭</button></div><button class="better-codex-update-close" type="button" aria-label="关闭">' + icon("close") + '</button><div class="better-codex-update-layout"><span class="better-codex-update-icon">' + icon("check") + '</span><div class="better-codex-update-copy"><p class="better-codex-update-title">任务已完成</p><p class="better-codex-update-description">' + escapeHtml(description) + '</p><p class="better-codex-update-error" hidden></p><div class="better-codex-update-actions"><button class="better-codex-update-button is-primary" type="button" data-completion-dismiss>知道了</button></div></div></div>';
+      document.body.appendChild(updateNotice);
+      const notice = updateNotice;
+      const menuToggle = notice.querySelector("[data-completion-menu-toggle]");
+      const menu = notice.querySelector("[data-completion-menu]");
+      const closeMenu = () => {
+        menu.hidden = true;
+        menuToggle.setAttribute("aria-expanded", "false");
+        if (completionNoticeMenuDismiss) document.removeEventListener("pointerdown", completionNoticeMenuDismiss, true);
+        completionNoticeMenuDismiss = null;
+      };
+      const closeMenuOutside = event => {
+        if (!menu.contains(event.target) && event.target !== menuToggle) closeMenu();
+      };
+      menuToggle.addEventListener("click", event => {
+        event.stopPropagation();
+        if (!menu.hidden) return closeMenu();
+        menu.hidden = false;
+        menuToggle.setAttribute("aria-expanded", "true");
+        completionNoticeMenuDismiss = closeMenuOutside;
+        setTimeout(() => document.addEventListener("pointerdown", closeMenuOutside, true), 0);
+      });
+      menu.querySelectorAll("[data-completion-suppress]").forEach(button => button.addEventListener("click", () => {
+        sessionStorage.setItem("better-codex-completion-notice-disabled", "true");
+        closeMenu();
+        dismiss();
+      }));
+      const dismiss = () => {
+        if (updateNotice !== notice) return;
+        closeMenu();
+        if (completionNoticeTimer !== null) clearTimeout(completionNoticeTimer);
+        completionNoticeTimer = null;
+        notice.remove();
+        updateNotice = null;
+      };
+      notice.querySelector(".better-codex-update-close").addEventListener("click", dismiss);
+      notice.querySelector("[data-completion-dismiss]").addEventListener("click", dismiss);
+      completionNoticeTimer = setTimeout(dismiss, 5000);
     }
 
     async function perform(action) {
@@ -1191,7 +1298,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (key === "date") return [{ value: "1", text: "最近 24 小时" }, { value: "7", text: "最近 7 天" }, { value: "30", text: "最近 30 天" }];
       if (key === "assignee") return [{ value: "user", text: state.user.name || "我" }, { value: "codex", text: "Codex" }, ...state.agents.filter(agent => !agent.is_default).map(agent => ({ value: agent.id, text: agent.name })), { value: "none", text: "未分配" }];
       if (key === "creator") return [{ value: "me", text: "由我创建" }];
-      if (key === "project") return state.projects.map(project => ({ value: project.id, text: project.name }));
+      if (key === "project") return state.projects.map(project => ({ value: project.id, text: projectLabel(project) }));
       if (key === "label") return [...new Set(state.issues.flatMap(issue => issue.labels || []))].map(value => ({ value, text: value }));
       return [];
     }
@@ -1199,6 +1306,16 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     function filterOptionIcon(key, value) {
       if (key === "status") return statusIcon(value);
       if (key === "priority") return priorityIcon(value);
+      if (key === "assignee") {
+        if (value === "user") {
+          return '<span class="better-codex-filter-avatar is-user is-initials" style="background:' + escapeHtml(state.user.color || "#16a34a") + '">' + escapeHtml(state.user.initials || "你") + '</span>';
+        }
+        if (value === "none") return '<span class="better-codex-filter-avatar is-fallback">' + icon("user") + '</span>';
+        const agent = value === "codex"
+          ? state.agents.find(item => item.is_default) || { name: "Codex", is_default: true }
+          : state.agents.find(item => item.id === value);
+        return agentAvatarMarkup(agent, "better-codex-filter-avatar");
+      }
       const names = { date: "calendar", assignee: "user", creator: "userEdit", project: "folder", label: "tag" };
       return icon(names[key] || "circle");
     }
@@ -1446,12 +1563,16 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       working.id = "better-codex-working";
       working.classList.add("better-codex-working-chip", "is-bordered");
       working.addEventListener("click", () => { state.view = state.view === "agent" ? "all" : "agent"; render(); });
+      const searchWrap = document.createElement("div");
+      searchWrap.className = "better-codex-search-wrap";
+      searchWrap.innerHTML = icon("search");
       const search = document.createElement("input");
       search.id = "better-codex-search";
       search.className = "better-codex-search";
       search.placeholder = "搜索任务";
       search.value = "";
       search.addEventListener("input", () => { state.search = search.value; void perform(loadIssues); });
+      searchWrap.appendChild(search);
       const filter = actionButton("筛选");
       filter.id = "better-codex-filter";
       filter.classList.add("is-bordered");
@@ -1515,7 +1636,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const createSplit = document.createElement("div");
       createSplit.className = "better-codex-create-split";
       createSplit.append(addIssue, createToggle);
-      actions.append(error, working, search, filterWrap, autoDispatchWrap, createSplit);
+      actions.append(error, working, searchWrap, filterWrap, autoDispatchWrap, createSplit);
       const agentActions = document.createElement("div");
       agentActions.className = "better-codex-agent-actions";
       const addAgent = actionButton("新建智能体");
@@ -1988,7 +2109,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const runningCount = state.issues.filter(issue => issue.active_run_status === "running" || issue.active_run_status === "claimed" || issue.reply_status === "running").length;
       panel.querySelectorAll("[data-view]").forEach(button => button.classList.toggle("is-active", button.dataset.view === state.view));
       const working = panel.querySelector("#better-codex-working");
-      working.innerHTML = (runningCount ? '<span class="better-codex-working-dot"></span>' : "") + runningCount + " 个智能体工作中";
+      working.innerHTML = '<span class="better-codex-working-dot"></span>' + runningCount + " 个智能体工作中";
       working.title = runningCount ? "查看运行中的任务" : "当前没有运行中的任务";
       working.classList.toggle("has-work", runningCount > 0);
       working.classList.toggle("is-active", state.view === "agent");
@@ -2009,6 +2130,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const issues = visible.filter(issue => issue.status === status);
         const cards = issues.map(issue => {
           const enrichmentLocked = issue.enrichment_status === "pending";
+          const executionLocked = Boolean(issue.run_thread_id);
+          const issueLocked = enrichmentLocked;
           const assignedAgent = state.agents.find(agent => agent.id === issue.agent_id);
           const defaultAgent = state.agents.find(agent => agent.is_default);
           const assignee = issue.agent_enabled
@@ -2025,8 +2148,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             : "";
           const description = String(issue.description || "").replace(/[#*_\`~>\[\]()]/g, "").replace(/\s+/g, " ").trim();
           const issueProject = state.projects.find(item => item.id === issue.project_id) || project;
-          const projectChip = issueProject?.name
-            ? '<span class="better-codex-chip">' + icon("folder") + '<span>' + escapeHtml(issueProject.name) + '</span></span>'
+          const projectChip = projectLabel(issueProject)
+            ? '<span class="better-codex-chip">' + icon("folder") + '<span>' + escapeHtml(projectLabel(issueProject)) + '</span></span>'
             : "";
           const labelChips = (issue.labels || []).map(value => '<span class="better-codex-chip">' + escapeHtml(value) + '</span>').join("");
           const chips = projectChip + labelChips;
@@ -2035,7 +2158,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             : issue.user_assigned
               ? '<span class="better-codex-card-assignee"><span class="better-codex-card-avatar is-user is-initials" style="background:' + escapeHtml(state.user.color || "#16a34a") + '">' + escapeHtml(state.user.initials || "你") + '</span><span>' + escapeHtml(state.user.name || "我") + '</span></span>'
               : '<span class="better-codex-card-assignee is-empty">' + icon("user") + '<span>未分配</span></span>';
-          return '<article class="better-codex-card' + (issue.id === draggingIssueId ? " is-dragging" : "") + (enrichmentLocked ? " is-enrichment-pending" : "") + '" draggable="' + String(!enrichmentLocked) + '" aria-disabled="' + String(enrichmentLocked) + '" data-issue-id="' + escapeHtml(issue.id) + '"><div class="better-codex-card-row"><div class="better-codex-card-id">' + priorityIcon(issue.priority) + '<span>' + escapeHtml(issue.identifier) + '</span></div>' + activity + '</div><div class="better-codex-card-title">' + escapeHtml(issue.title) + '</div>' + (description ? '<div class="better-codex-card-description">' + escapeHtml(description) + '</div>' : "") + (chips ? '<div class="better-codex-chip-row">' + chips + '</div>' : "") + '<div class="better-codex-card-meta">' + meta + '<span>更新于 ' + timeAgo(issue.updated_at) + '</span></div></article>';
+          return '<article class="better-codex-card' + (issue.id === draggingIssueId ? " is-dragging" : "") + (enrichmentLocked ? " is-enrichment-pending" : "") + '" draggable="' + String(!issueLocked) + '" aria-disabled="' + String(issueLocked) + '" data-issue-id="' + escapeHtml(issue.id) + '"><div class="better-codex-card-row"><div class="better-codex-card-id">' + priorityIcon(issue.priority) + '<span>' + escapeHtml(issue.identifier) + '</span></div>' + activity + '</div><div class="better-codex-card-title">' + escapeHtml(issue.title) + '</div>' + (description ? '<div class="better-codex-card-description">' + escapeHtml(description) + '</div>' : "") + (chips ? '<div class="better-codex-chip-row">' + chips + '</div>' : "") + '<div class="better-codex-card-meta">' + meta + '<span>更新于 ' + timeAgo(issue.updated_at) + '</span></div></article>';
         }).join("");
         return '<section class="better-codex-column" data-status="' + status + '"><div class="better-codex-column-head"><span class="better-codex-column-title">' + statusIcon(status) + '<span>' + statusLabel + '</span><span>' + issues.length + '</span></span><span class="better-codex-column-actions"><button class="better-codex-column-icon" type="button" data-add-status="' + status + '" aria-label="新建任务">' + icon("plus") + '</button></span></div><div class="better-codex-cards">' + (cards || '<div class="better-codex-empty">暂无任务</div>') + '</div></section>';
       }).join("");
@@ -2045,7 +2168,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (options.background && draggingIssueId) return;
       const query = new URLSearchParams();
       if (state.search) query.set("search", state.search);
-      state.issues = await api("/api/issues" + (query.toString() ? "?" + query : ""));
+      const issues = await api("/api/issues" + (query.toString() ? "?" + query : ""));
+      if (issueStatusSnapshot.size) {
+        const completed = issues.find(issue => issue.status === "done" && issueStatusSnapshot.get(issue.id) && issueStatusSnapshot.get(issue.id) !== "done");
+        if (completed) renderCompletionNotice(completed);
+      }
+      issueStatusSnapshot = new Map(issues.map(issue => [issue.id, issue.status]));
+      state.issues = issues;
       render();
     }
 
@@ -2059,7 +2188,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     async function loadSurface(options = {}) {
-      if (state.surface === "agents") await loadAgents(options);
+      if (state.surface === "agents") await Promise.all([loadAgents(options), loadIssues(options)]);
       else await loadIssues(options);
     }
 
@@ -2267,6 +2396,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       let conversationTimer = null;
       const sessionId = issueSessionId(issue);
       const enrichmentLocked = Boolean(issue?.enrichment_status === "pending");
+      const executionLocked = Boolean(issue?.run_thread_id);
+      const editingLocked = enrichmentLocked || executionLocked;
 
       function stopConversationPoll() {
         if (conversationTimer !== null) {
@@ -2302,7 +2433,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           : "";
         const title = draft.mode === "agent" ? "通过智能体创建" : issue ? "Issue 详情" : "手动创建";
         const crumb = issue
-          ? '<span>' + escapeHtml(project?.name || "Better Codex") + '</span><span aria-hidden="true">' + icon("chevron") + '</span><strong>' + title + '</strong>'
+          ? '<span>' + escapeHtml(projectLabel(project) || "Better Codex") + '</span><span aria-hidden="true">' + icon("chevron") + '</span><strong>' + title + '</strong>'
           : '<strong>' + title + '</strong>';
         return '<div class="better-codex-dialog-head"><div class="better-codex-dialog-breadcrumb">' + crumb + '</div><div class="better-codex-dialog-head-actions">' + openThreadButton + startNowButton + '<button class="better-codex-icon-button" type="button" data-dialog-expand aria-label="' + (draft.expanded ? "缩小" : "展开") + '">' + icon(draft.expanded ? "shrink" : "expand") + '</button><button class="better-codex-icon-button" type="button" data-dialog-close aria-label="关闭">' + icon("close") + '</button></div></div>';
       }
@@ -2393,7 +2524,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const send = dialog.querySelector("[data-conversation-send]");
         const errorOutput = dialog.querySelector(".better-codex-dialog-error");
         const message = String(textarea?.value || "").trim();
-        if (!issue || !sessionId || !message) return;
+        if (!issue || !sessionId || !message || !send || !errorOutput) return;
         send.disabled = true;
         errorOutput.hidden = true;
         try {
@@ -2411,8 +2542,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
       function projectPicker() {
         const selectedProject = state.projects.find(item => item.id === draft.projectId);
-        const options = state.projects.map(item => '<button class="better-codex-project-option" type="button" data-dialog-project-option="' + escapeHtml(item.id) + '">' + icon("folder") + '<span>' + escapeHtml(item.name) + '</span><span class="better-codex-project-check">' + (item.id === draft.projectId ? icon("check") : "") + '</span></button>').join("");
-        return '<span class="better-codex-project-picker"><button class="better-codex-property" type="button" data-dialog-project>' + icon("folder") + '<span data-project-label>' + escapeHtml(selectedProject?.name || "选择项目") + '</span>' + icon("chevron") + '</button><span class="better-codex-project-menu" hidden><input class="better-codex-project-search" type="search" placeholder="搜索项目..." aria-label="搜索项目"><span data-project-options>' + (options || '<span class="better-codex-project-empty">暂无项目</span>') + '</span></span></span>';
+        const options = state.projects.map(item => '<button class="better-codex-project-option" type="button" data-dialog-project-option="' + escapeHtml(item.id) + '">' + icon("folder") + '<span>' + escapeHtml(projectLabel(item)) + '</span><span class="better-codex-project-check">' + (item.id === draft.projectId ? icon("check") : "") + '</span></button>').join("");
+        return '<span class="better-codex-project-picker"><button class="better-codex-property" type="button" data-dialog-project>' + icon("folder") + '<span data-project-label>' + escapeHtml(projectLabel(selectedProject) || "选择项目") + '</span>' + icon("chevron") + '</button><span class="better-codex-project-menu" hidden><input class="better-codex-project-search" type="search" placeholder="搜索项目..." aria-label="搜索项目"><span data-project-options>' + (options || '<span class="better-codex-project-empty">暂无项目</span>') + '</span></span></span>';
       }
 
       function dialogSelect(name, ariaLabel, selected, options, modifier = "") {
@@ -2502,6 +2633,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       }
 
       function footer() {
+        if (executionLocked) return "";
         const switchButton = issue ? "" : '<button class="better-codex-switch-mode" type="button" data-dialog-switch>' + icon("switch") + (draft.mode === "agent" ? "切换到手动" : "切换到智能体") + '</button>';
         const submitText = issue ? "保存" : draft.mode === "agent" ? "创建" : "创建任务";
         const keepOpen = issue ? "" : '<label class="better-codex-keep-open"><input class="better-codex-toggle" name="keep" type="checkbox"' + (state.keepCreate ? " checked" : "") + '>继续创建</label>';
@@ -2517,7 +2649,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         dialog.dataset.mode = draft.mode;
         dialog.dataset.detail = issue ? "true" : "false";
         dialog.dataset.expanded = String(draft.expanded);
-        dialog.dataset.locked = String(enrichmentLocked);
+        dialog.dataset.locked = String(editingLocked);
         if (draft.mode === "agent") {
           const selectedAgent = state.agents.find(agent => agent.id === draft.agentId);
           const selectedName = selectedAgent?.name || "Codex";
@@ -2536,7 +2668,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const content = dialog.querySelector(draft.mode === "agent" ? '[name="prompt"]' : '[name="title"]');
         const updateSubmit = () => {
           const disabled = !String(content?.value || "").trim();
-          submit.disabled = disabled;
+          if (submit) submit.disabled = editingLocked || disabled;
           if (startNow) startNow.disabled = disabled;
         };
         updateSubmit();
@@ -2546,6 +2678,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             control.disabled = true;
           });
         }
+        if (executionLocked) dialog.querySelectorAll('[name="title"], [name="description"]').forEach(control => { control.disabled = true; });
         content?.addEventListener("input", updateSubmit);
         dialog.querySelector('[name="keep"]')?.addEventListener("change", event => { state.keepCreate = event.currentTarget.checked; });
         const replyInput = dialog.querySelector('[name="reply"]');
@@ -2648,7 +2781,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           event.stopPropagation();
           draft.projectId = option.dataset.dialogProjectOption;
           const selectedProject = state.projects.find(item => item.id === draft.projectId);
-          dialog.querySelector("[data-project-label]").textContent = selectedProject?.name || "选择项目";
+          dialog.querySelector("[data-project-label]").textContent = projectLabel(selectedProject) || "选择项目";
           dialog.querySelectorAll("[data-dialog-project-option]").forEach(item => { item.querySelector(".better-codex-project-check").innerHTML = item.dataset.dialogProjectOption === draft.projectId ? icon("check") : ""; });
           projectMenu.hidden = true;
           if (projectDismiss) document.removeEventListener("pointerdown", projectDismiss, true);
@@ -2752,9 +2885,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       }
 
       async function submitIssue() {
-        if (enrichmentLocked) return;
+        if (editingLocked) return;
         const submit = dialog.querySelector(".better-codex-submit");
         const errorOutput = dialog.querySelector(".better-codex-dialog-error");
+        if (!submit || !errorOutput) return;
         const prompt = draft.prompt.trim();
         const title = draft.mode === "agent" ? prompt.split(/\\n/).find(line => line.trim())?.replace(/^[#*\\s-]+/, "").trim().slice(0, 120) || "" : draft.title.trim();
         if (!title) return;
@@ -2814,9 +2948,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       }
 
       async function startIssueNow() {
-        if (!issue || enrichmentLocked) return;
+        if (!issue || editingLocked) return;
         const button = dialog.querySelector("[data-dialog-start-now]");
         const errorOutput = dialog.querySelector(".better-codex-dialog-error");
+        if (!button || !errorOutput) return;
         const agentId = draft.assignee && !["none", "user", "codex"].includes(draft.assignee) ? draft.assignee : "";
         button.disabled = true;
         errorOutput.hidden = true;
@@ -3075,20 +3210,28 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     function scheduleRefresh() {
       if (refreshPending || destroyed) return;
       refreshPending = true;
-      queueMicrotask(() => {
+      refreshTimer = setTimeout(() => {
+        refreshTimer = null;
         refreshPending = false;
         if (destroyed) return;
         refresh();
         localizeOwnedTree(document.body);
-      });
+      }, 50);
     }
 
     function destroy() {
       if (destroyed) return;
       destroyed = true;
       refreshPending = false;
+      if (refreshTimer !== null) clearTimeout(refreshTimer);
+      refreshTimer = null;
       if (pollTimer !== null) clearInterval(pollTimer);
       if (updateTimer !== null) clearInterval(updateTimer);
+      if (completionNoticeTimer !== null) clearTimeout(completionNoticeTimer);
+      completionNoticeTimer = null;
+      if (completionNoticeMenuDismiss) document.removeEventListener("pointerdown", completionNoticeMenuDismiss, true);
+      completionNoticeMenuDismiss = null;
+      issueStatusSnapshot.clear();
       closeFilterMenu();
       closeIssueMenu();
       observer?.disconnect();
@@ -3110,7 +3253,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       document.removeEventListener("DOMContentLoaded", mount);
       if (destroyed || observer || !document.documentElement) return;
       observer = new MutationObserver(scheduleRefresh);
-      observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "data-theme", "aria-current", ATTRIBUTES.threadActive] });
+      observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-theme", "aria-current", ATTRIBUTES.threadActive] });
       refresh();
       localizeOwnedTree(document.body);
       void checkUpdateNotice();

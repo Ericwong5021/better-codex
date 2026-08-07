@@ -726,6 +726,7 @@ export class Store {
       if (!issue) throw new Error("issue_not_found");
       if (issue.version !== version) throw new Error("version_conflict");
       if (issue.enrichment_status === "pending" && patch.enrichment_status === undefined) throw new Error("issue_enrichment_pending");
+      if (issue.run_thread_id && (patch.title !== undefined || patch.description !== undefined)) throw new Error("issue_execution_locked");
       if (patch.project_id !== undefined && !this.getProject(patch.project_id)) throw new Error("project_not_found");
       if (patch.user_assigned !== undefined) patch.user_assigned = Boolean(patch.user_assigned);
       if (patch.user_assigned === true) {

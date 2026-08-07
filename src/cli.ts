@@ -6,6 +6,7 @@ import { isSea } from "node:sea";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { cdpEject, cdpInject, cdpOpenThread, cdpRestartAndInject, cdpStatus, codexInstallationStatus, codexProcessRunning, launchCodex, watchInjection } from "./cdp.js";
+import { coreVersion } from "./compatibility.js";
 import {
   cdpPort,
   databasePath,
@@ -25,11 +26,33 @@ import { readRuntimeState } from "./runtime-state.js";
 import { injectionEnabled, setInjectionEnabled } from "./injection-state.js";
 import { installLaunchIntegration, launchIntegrationStatus, uninstallLaunchIntegration } from "./launch-integration.js";
 import { readCodexLocale } from "./locale.js";
+import { showNativeChoiceDialog } from "./native-dialog.js";
 import { installService, restartService, serviceLogs, serviceStatus, startService, stopService, uninstallService } from "./service.js";
 import { activeVersions, checkForUpdates, maybeDelegateToActiveCore, rollbackCompatibilityUpdate, updateAll, updateCompatibility } from "./updater.js";
 
 function accessToken() {
   return token();
+}
+
+const legacyRuntimePort = 4317;
+
+async function stopLegacyRuntime() {
+  const current = readRuntimeState();
+  if (current?.port === legacyRuntimePort) return false;
+  try {
+    const healthResponse = await fetch(`http://127.0.0.1:${legacyRuntimePort}/health`, { signal: AbortSignal.timeout(500) });
+    if (!healthResponse.ok) return false;
+    const healthValue = await healthResponse.json() as { name?: string; version?: string };
+    if (!healthValue.version || healthValue.version === coreVersion || (healthValue.name && healthValue.name !== "Better Codex Runtime")) return false;
+    const shutdownResponse = await fetch(`http://127.0.0.1:${legacyRuntimePort}/api/shutdown`, {
+      method: "POST",
+      signal: AbortSignal.timeout(1000),
+      headers: { authorization: `Bearer ${accessToken()}` },
+    });
+    return shutdownResponse.ok;
+  } catch {
+    return false;
+  }
 }
 
 function commandArguments() {
@@ -102,6 +125,7 @@ function spawnSelf(args: string[], logFile: string, detached = true) {
 }
 
 async function ensureRuntime() {
+  await stopLegacyRuntime();
   try {
     return await health();
   } catch {
@@ -121,26 +145,14 @@ async function ensureRuntime() {
 function confirmLaunchRestart() {
   const chinese = readCodexLocale() === "zh-CN";
   const message = chinese
-    ? "Better Codex 已在运行。\n\n选择“是”重启 Better Codex 和 Codex；选择“否”直接打开当前 Codex。\n\n是否重启？"
-    : "Better Codex is already running.\n\nChoose Yes to restart Better Codex and Codex, or No to open the current Codex directly.\n\nRestart now?";
-  const title = "Better Codex";
-  if (process.platform === "win32") {
-    const powershellString = (value: string) => `'${value.replace(/'/g, "''")}'`;
-    const script = `$ErrorActionPreference = 'Stop'; Add-Type -AssemblyName System.Windows.Forms; $result = [System.Windows.Forms.MessageBox]::Show(${powershellString(message)}, ${powershellString(title)}, [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Question); if ($result -eq [System.Windows.Forms.DialogResult]::Yes) { Write-Output 'yes' } else { Write-Output 'no' }`;
-    const output = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-STA", "-Command", script], { encoding: "utf8", windowsHide: true }).trim();
-    return output === "yes";
-  }
-  if (process.platform === "darwin") {
-    try {
-      const buttons = chinese ? '{"否", "是"}' : '{"No", "Yes"}';
-      const yes = chinese ? "是" : "Yes";
-      const output = execFileSync("/usr/bin/osascript", ["-e", `display dialog ${JSON.stringify(message)} with title ${JSON.stringify(title)} buttons ${buttons} default button ${JSON.stringify(yes)} cancel button ${JSON.stringify(chinese ? "否" : "No")} with icon note`], { encoding: "utf8" }).trim();
-      return output.includes(`button returned:${yes}`);
-    } catch {
-      return false;
-    }
-  }
-  return false;
+    ? "当前进程正在运行。\n\n请选择操作。"
+    : "The current process is already running.\n\nChoose an action.";
+  return showNativeChoiceDialog({
+    message,
+    title: "Better Codex",
+    primaryLabel: chinese ? "重启进程" : "Restart process",
+    secondaryLabel: chinese ? "直接打开" : "Open directly",
+  });
 }
 
 async function restartRuntime() {
@@ -214,6 +226,7 @@ async function waitForInjector() {
 }
 
 async function runRuntime() {
+  await stopLegacyRuntime();
   const server = (await import("./server.js")).startServer();
   await stopInjector();
   let stopping = false;

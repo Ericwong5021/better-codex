@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { activeCompatibility, capabilityExpression, clearCompatibilityStatus, missingCapabilities, navigationExpression, readCompatibilityStatus, targetAllowed, type RendererCapabilities, writeCompatibilityStatus } from "./compatibility.js";
 import { injectionScript, injectionVersion } from "./dom.js";
 import { readCodexLocale } from "./locale.js";
+import { showNativeChoiceDialog } from "./native-dialog.js";
 import { readRuntimeState } from "./runtime-state.js";
 
 type Target = {
@@ -329,20 +330,14 @@ export function codexProcessRunning() {
 }
 
 function confirmCodexQuit() {
-  if (process.platform === "win32") {
-    const script = "$ErrorActionPreference = 'Stop'; Add-Type -AssemblyName System.Windows.Forms; $result = [System.Windows.Forms.MessageBox]::Show('Codex 当前正在运行，Better Codex 需要先关闭它才能启动注入。是否继续？', 'Better Codex', [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Warning); if ($result -eq [System.Windows.Forms.DialogResult]::Yes) { Write-Output 'yes' } else { Write-Output 'no' }";
-    const output = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-STA", "-Command", script], { encoding: "utf8", windowsHide: true }).trim();
-    return output === "yes";
-  }
-  if (process.platform === "darwin") {
-    try {
-      const output = execFileSync("/usr/bin/osascript", ["-e", 'display dialog "Codex 当前正在运行，Better Codex 需要先关闭它才能启动注入。是否继续？" with title "Better Codex" buttons {"取消", "继续"} default button "继续" cancel button "取消" with icon caution'], { encoding: "utf8" }).trim();
-      return output.includes("继续");
-    } catch {
-      return false;
-    }
-  }
-  return true;
+  const chinese = readCodexLocale() === "zh-CN";
+  return showNativeChoiceDialog({
+    message: chinese ? "当前进程正在运行。\n\n需要重启进程才能启动注入。" : "The current process is already running.\n\nRestart the process to enable injection.",
+    title: "Better Codex",
+    primaryLabel: chinese ? "重启进程" : "Restart process",
+    secondaryLabel: chinese ? "取消" : "Cancel",
+    icon: "caution",
+  });
 }
 
 async function quitCodex() {
