@@ -5,7 +5,7 @@ import { createInterface } from "node:readline";
 import { join } from "node:path";
 import { agentConfigProfileName } from "./agent-profiles.js";
 import { runLogPath, workerLogPath } from "./config.js";
-import { Store, type ClaimedIssue } from "./db.js";
+import { Store, type ClaimedIssue, type Issue } from "./db.js";
 
 const interval = 60000;
 
@@ -57,8 +57,8 @@ export function issuePrompt(claim: ClaimedIssue) {
 
 export class IssueWorker {
   private timer: NodeJS.Timeout | null = null;
-  private child: ChildProcess | null = null;
-  private active: ClaimedIssue | null = null;
+  private readonly runs = new Map<string, { child: ChildProcess; claim: ClaimedIssue }>();
+  private readonly enrichments = new Map<string, ChildProcess>();
   private stopped = true;
 
   constructor(private readonly store: Store) {}
@@ -70,7 +70,7 @@ export class IssueWorker {
   }
 
   wake() {
-    if (this.stopped || this.child) return;
+    if (this.stopped) return;
     this.schedule(0);
   }
 
@@ -78,10 +78,73 @@ export class IssueWorker {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
-    if (this.active) this.store.interruptRun(this.active.runId, this.active.issue.id);
-    this.child?.kill("SIGTERM");
-    this.child = null;
-    this.active = null;
+    for (const { child, claim } of this.runs.values()) {
+      this.store.interruptRun(claim.runId, claim.issue.id);
+      child.kill("SIGTERM");
+    }
+    this.runs.clear();
+    for (const child of this.enrichments.values()) child.kill("SIGTERM");
+    this.enrichments.clear();
+  }
+
+  enrichIssue(issue: Issue, prompt: string, agentId: string) {
+    const workspacePath = issue.workspace_path || "";
+    if (!workspacePath || this.stopped) return;
+    const args = [
+      "exec",
+      ...(agentId ? ["--profile", agentConfigProfileName(agentId)] : []),
+      "--json",
+      "--color",
+      "never",
+      "-C",
+      workspacePath,
+      "-s",
+      "read-only",
+      enrichmentPrompt(prompt),
+    ];
+    const child = spawn(codexPath(), args, {
+      cwd: workspacePath,
+      env: {
+        ...process.env,
+        BETTER_CODEX_ISSUE_ID: issue.id,
+        BETTER_CODEX_ISSUE_IDENTIFIER: issue.identifier,
+        BETTER_CODEX_ENRICHMENT: "1",
+      },
+      stdio: ["ignore", "pipe", "ignore"],
+      windowsHide: true,
+    });
+    this.enrichments.set(issue.id, child);
+    const messages: string[] = [];
+    const lines = createInterface({ input: child.stdout! });
+    lines.on("line", line => {
+      try {
+        const event = JSON.parse(line) as { type?: string; item?: { type?: string; text?: string } };
+        if (event.type === "item.completed" && event.item?.type === "agent_message" && event.item.text) messages.push(event.item.text);
+      } catch {}
+    });
+    const finish = () => {
+      lines.close();
+      this.enrichments.delete(issue.id);
+      if (this.stopped) return;
+      const current = this.store.getIssue(issue.id);
+      if (!current || current.version !== issue.version) return;
+      const result = parseEnrichment(messages.at(-1) || "");
+      try {
+        const updated = this.store.updateIssue(issue.id, current.version, {
+          title: result?.title || issue.title,
+          description: result?.description || issue.description,
+          status: "todo",
+          agent_enabled: true,
+          agent_id: agentId,
+          user_assigned: false,
+          pending_actor: "agent",
+          needs_attention: true,
+        });
+        if (this.store.isDispatchable(updated)) this.wake();
+      } catch {}
+    };
+    child.once("error", finish);
+    child.once("close", finish);
   }
 
   private schedule(delay = interval) {
@@ -93,10 +156,10 @@ export class IssueWorker {
 
   private async tick() {
     try {
-      if (!this.child) {
-        const claim = this.store.claimNextIssue();
-        if (claim) this.run(claim);
-      }
+      // claimNextIssue enforces per-agent max_concurrency, so keep claiming
+      // until every agent with pending work is at capacity.
+      let claim: ClaimedIssue | null;
+      while (!this.stopped && (claim = this.store.claimNextIssue())) this.run(claim);
     } catch (error) {
       const output = error instanceof Error ? error.stack || error.message : String(error);
       createWriteStream(workerLogPath, { flags: "a" }).end(`${new Date().toISOString()} ${output}\n`);
@@ -140,8 +203,7 @@ export class IssueWorker {
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
     });
-    this.active = claim;
-    this.child = child;
+    this.runs.set(claim.runId, { child, claim });
     this.store.startRun(claim.runId, child.pid || 0);
     const lines = createInterface({ input: child.stdout! });
     lines.on("line", line => {
@@ -159,9 +221,26 @@ export class IssueWorker {
       lines.close();
       log.end();
       if (!this.stopped) this.store.finishRun(claim.runId, claim.issue.id, code === 0, code === 0 ? undefined : `codex_exit_${code ?? signal ?? "unknown"}`);
-      this.child = null;
-      this.active = null;
+      this.runs.delete(claim.runId);
       this.wake();
     });
+  }
+}
+
+function enrichmentPrompt(prompt: string) {
+  return `你是 Better Codex 的 Issue 整理器。只整理用户输入，不执行任务，不修改工作区文件。输出且只输出一个 JSON 对象，不要 Markdown 代码围栏，不要额外文字，格式为 {"title":"...","description":"..."}。title 用简洁、明确、可执行的语义化标题，保留关键对象、目标和引用编号，最长 120 个字符。description 忠实转述用户意图，去掉“帮我建个 issue”等路由废话；可以使用清晰的小标题或列表组织内容，但不得编造用户没有提供的需求、事实、进度或验收标准，必须保留输入中的 URL、PR 编号和文件路径。原始输入如下：\n\n${prompt}`;
+}
+
+function parseEnrichment(value: string) {
+  const start = value.indexOf("{");
+  const end = value.lastIndexOf("}");
+  if (start < 0 || end <= start) return null;
+  try {
+    const parsed = JSON.parse(value.slice(start, end + 1)) as { title?: unknown; description?: unknown };
+    const title = typeof parsed.title === "string" ? parsed.title.trim().slice(0, 500) : "";
+    const description = typeof parsed.description === "string" ? parsed.description.trim().slice(0, 100000) : "";
+    return title && description ? { title, description } : null;
+  } catch {
+    return null;
   }
 }

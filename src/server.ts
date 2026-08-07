@@ -3,7 +3,7 @@ import { closeSync, openSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { isSea } from "node:sea";
 import { coreVersion, readCompatibilityStatus } from "./compatibility.js";
-import { issuePriorities, issueStatuses, Store, type AgentModel, type AgentReasoningEffort, type IssuePriority, type IssueStatus } from "./db.js";
+import { cleanMaxConcurrency, issuePriorities, issueStatuses, Store, type AgentModel, type AgentReasoningEffort, type IssuePriority, type IssueStatus } from "./db.js";
 import { defaultAgentProfile, syncAgentProfiles, updateDefaultAgentProfile } from "./agent-profiles.js";
 import { readCodexAppearance } from "./appearance.js";
 import { readCodexUserProfile } from "./user-profile.js";
@@ -100,6 +100,13 @@ function asLabels(value: unknown) {
   return value.map(item => item.trim()).filter(Boolean).slice(0, 20);
 }
 
+function asMaxConcurrency(value: unknown) {
+  if (value === undefined || value === null) return undefined;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed)) throw new Error("invalid_agent_max_concurrency");
+  return cleanMaxConcurrency(parsed);
+}
+
 function agentProfileInput(body: Record<string, unknown>) {
   return {
     name: cleanString(body.name, 80),
@@ -107,6 +114,7 @@ function agentProfileInput(body: Record<string, unknown>) {
     instructions: cleanString(body.instructions, 100000),
     model: cleanString(body.model, 80) as AgentModel,
     reasoning_effort: cleanString(body.reasoning_effort, 20) as AgentReasoningEffort,
+    max_concurrency: asMaxConcurrency(body.max_concurrency),
   };
 }
 
@@ -115,7 +123,7 @@ function defaultAgentInput(body: Record<string, unknown>) {
   const reasoning_effort = cleanString(body.reasoning_effort, 20) as AgentReasoningEffort;
   if (!model) throw new Error("invalid_agent_model");
   if (!reasoning_effort) throw new Error("invalid_agent_reasoning_effort");
-  return { model, reasoning_effort };
+  return { model, reasoning_effort, max_concurrency: asMaxConcurrency(body.max_concurrency) };
 }
 
 function asAgentAvatar(value: unknown) {
@@ -206,7 +214,8 @@ export function startServer() {
     ...profile,
     avatar: store.getAgentAvatar(profile.is_default ? "default" : profile.id),
   });
-  const visibleAgentProfiles = () => [withAvatar(defaultAgentProfile()), ...store.listAgentProfiles().map(withAvatar)];
+  const withDefaultConcurrency = <T,>(profile: T) => ({ ...profile, max_concurrency: store.getDefaultAgentMaxConcurrency() });
+  const visibleAgentProfiles = () => [withAvatar(withDefaultConcurrency(defaultAgentProfile())), ...store.listAgentProfiles().map(withAvatar)];
   const stopUpdateChecks = startGatewayUpdateChecks();
   const cleanup = () => {
     if (cleaned) return;
@@ -271,16 +280,21 @@ export function startServer() {
       }
       if (url.pathname === "/api/agents/default" && method === "PATCH") {
         const body = await readBody(request);
-        const profile = updateDefaultAgentProfile(defaultAgentInput(body));
+        const input = defaultAgentInput(body);
+        const profile = updateDefaultAgentProfile(input);
+        if (input.max_concurrency !== undefined) {
+          store.setDefaultAgentMaxConcurrency(input.max_concurrency);
+          worker.wake();
+        }
         const avatar = asAgentAvatar(body.avatar);
         if (avatar !== undefined) store.setAgentAvatar("default", avatar);
-        return sendJson(response, 200, withAvatar(profile));
+        return sendJson(response, 200, withAvatar(withDefaultConcurrency(profile)));
       }
       if (url.pathname === "/api/agents/default/avatar" && method === "PATCH") {
         const avatar = asAgentAvatar((await readBody(request)).avatar);
         if (avatar === undefined) throw new Error("invalid_agent_avatar");
         store.setAgentAvatar("default", avatar);
-        return sendJson(response, 200, withAvatar(defaultAgentProfile()));
+        return sendJson(response, 200, withAvatar(withDefaultConcurrency(defaultAgentProfile())));
       }
       if (path[0] === "api" && path[1] === "agents" && path[2]) {
         const profile = store.getAgentProfile(decodeURIComponent(path[2]));
@@ -300,6 +314,7 @@ export function startServer() {
           const avatar = asAgentAvatar(body.avatar);
           if (avatar !== undefined) store.setAgentAvatar(profile.id, avatar);
           syncAgentProfiles(store.listAgentProfiles());
+          if (updated.max_concurrency > profile.max_concurrency) worker.wake();
           return sendJson(response, 200, withAvatar(updated));
         }
         if (method === "DELETE" && path.length === 3) {
@@ -343,29 +358,36 @@ export function startServer() {
       if (url.pathname === "/api/issues" && method === "POST") {
         const body = await readBody(request);
         const projectId = cleanString(body.project_id, 200);
+        if ("ai_enrich" in body && typeof body.ai_enrich !== "boolean") throw new Error("invalid_ai_enrich");
+        const aiEnrich = body.ai_enrich === true;
+        const agentEnabled = body.agent_enabled === true || aiEnrich;
         const threadId = cleanString(body.thread_id, 200);
         const sessionId = normalizeSessionId(threadId);
         let workspacePath = cleanString(body.workspace_path, 4096);
         if (!workspacePath && sessionId) workspacePath = sessionWorkspace(sessionId);
         const project = store.getProject(projectId);
         if (!project) throw new Error("project_not_found");
-        if (body.agent_enabled === true && !sessionId && !workspacePath && !project.workspace_path) {
+        if (!workspacePath) workspacePath = project.workspace_path;
+        if (agentEnabled && !sessionId && !workspacePath && !project.workspace_path) {
           throw new Error("workspace_required");
         }
+        const agentId = cleanString(body.agent_id, 200);
+        if (aiEnrich && agentId && !store.getAgentProfile(agentId)) throw new Error("agent_not_found");
         const issue = store.createIssue({
           projectId,
           title: cleanString(body.title, 500),
           description: cleanString(body.description, 100000),
-          status: "status" in body ? asStatus(body.status) : undefined,
+          status: aiEnrich ? "backlog" : "status" in body ? asStatus(body.status) : undefined,
           priority: "priority" in body ? asPriority(body.priority) : undefined,
           labels: asLabels(body.labels),
           threadId,
           workspacePath,
-          agentEnabled: body.agent_enabled === true,
-          agentId: cleanString(body.agent_id, 200),
+          agentEnabled,
+          agentId,
           userAssigned: body.user_assigned === true,
         });
-        if (issue.agent_enabled && store.isDispatchable(issue)) worker.wake();
+        if (aiEnrich) worker.enrichIssue(issue, issue.description, agentId);
+        else if (issue.agent_enabled && store.isDispatchable(issue)) worker.wake();
         return sendJson(response, 201, issue);
       }
       if (path[0] === "api" && path[1] === "issues" && path[2]) {

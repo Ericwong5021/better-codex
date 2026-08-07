@@ -1660,6 +1660,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       return ({ low: "低", medium: "中", high: "高", xhigh: "超高", max: "最大", ultra: "极致" })[value] || value;
     }
 
+    const concurrencyChoices = [1, 2, 3, 4, 5, 6, 8, 10, 15, 20];
+
+    function concurrencyLabel(value) {
+      return value + " 个任务";
+    }
+
     function applyAppearance(appearance) {
       const root = document.documentElement.style;
       const applyTheme = (mode, profile) => {
@@ -1761,8 +1767,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const instructionField = isDefault ? "" : '<label class="better-codex-agent-inspector-field"><span>Instruct <small>可选</small></span><textarea name="instructions" rows="7" placeholder="定义职责、工作方式和输出要求">' + escapeHtml(instructions) + '</textarea></label>';
       const deleteButton = !creating && !isDefault ? '<button class="better-codex-agent-danger" type="button" data-agent-delete data-agent-key="' + escapeHtml(agentKey(draft)) + '">删除智能体</button>' : "";
       const modelOptions = state.agentModelCatalog.map(item => ({ value: item.id, label: item.displayName, description: item.description || "" }));
+      const concurrencyValue = concurrencyChoices.includes(Number(draft.max_concurrency)) ? String(draft.max_concurrency) : "5";
+      const concurrencyOptions = concurrencyChoices.map(count => ({ value: String(count), label: concurrencyLabel(count) }));
       const animateAttr = options.animateEnter ? ' data-animate="enter"' : "";
-      return '<aside class="better-codex-agent-inspector"' + animateAttr + '><form data-agent-form="' + (creating ? "create" : isDefault ? "default" : "update") + '" data-agent-key="' + escapeHtml(creating ? "" : agentKey(draft)) + '"><header class="better-codex-agent-inspector-head"><span>' + heading + '</span><button class="better-codex-agent-card-action" type="button" data-agent-close-pane aria-label="关闭详情">' + icon("close") + '</button></header><div class="better-codex-agent-inspector-scroll">' + profileHead + identity + '<h3>详情</h3><div class="better-codex-agent-inspector-group">' + agentPicker("model", "模型", model, modelOptions) + agentPicker("reasoning_effort", "推理", effort, effortOptions) + '</div>' + instructionField + '<div class="better-codex-agent-inspector-error" hidden></div></div><footer class="better-codex-agent-inspector-footer">' + deleteButton + '<button class="better-codex-submit" type="submit">' + (creating ? "创建" : "保存") + '</button></footer></form></aside>';
+      return '<aside class="better-codex-agent-inspector"' + animateAttr + '><form data-agent-form="' + (creating ? "create" : isDefault ? "default" : "update") + '" data-agent-key="' + escapeHtml(creating ? "" : agentKey(draft)) + '"><header class="better-codex-agent-inspector-head"><span>' + heading + '</span><button class="better-codex-agent-card-action" type="button" data-agent-close-pane aria-label="关闭详情">' + icon("close") + '</button></header><div class="better-codex-agent-inspector-scroll">' + profileHead + identity + '<h3>详情</h3><div class="better-codex-agent-inspector-group">' + agentPicker("model", "模型", model, modelOptions) + agentPicker("reasoning_effort", "推理", effort, effortOptions) + agentPicker("max_concurrency", "最大并发", concurrencyValue, concurrencyOptions) + '</div>' + instructionField + '<div class="better-codex-agent-inspector-error" hidden></div></div><footer class="better-codex-agent-inspector-footer">' + deleteButton + '<button class="better-codex-submit" type="submit">' + (creating ? "创建" : "保存") + '</button></footer></form></aside>';
     }
 
     function renderAgents() {
@@ -1971,6 +1979,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         instructions: form.elements.instructions?.value || "",
         model: form.elements.model.value,
         reasoning_effort: form.elements.reasoning_effort.value,
+        max_concurrency: Number(form.elements.max_concurrency?.value || 5),
         avatar: form.elements.avatar?.value || "",
         ...(selected && !selected.is_default ? { version: selected.version } : {})
       };
@@ -2022,7 +2031,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const value = option.dataset.agentOptionValue;
         if (!picker || !form || !name) return;
         picker.querySelector('[name="' + name + '"]').value = value;
-        picker.querySelector("[data-agent-picker-label]").textContent = name === "model" ? modelLabel(value) : effortLabel(value);
+        picker.querySelector("[data-agent-picker-label]").textContent = name === "model" ? modelLabel(value) : name === "max_concurrency" ? concurrencyLabel(value) : effortLabel(value);
         picker.querySelectorAll("[data-agent-option]").forEach(row => {
           const selected = row.dataset.agentOptionValue === value;
           row.classList.toggle("is-selected", selected);
@@ -2366,7 +2375,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           const selectedAgent = state.agents.find(agent => agent.id === draft.agentId);
           const selectedName = selectedAgent?.name || "Codex";
           dialog.innerHTML = '<form>' + header() + agentPicker() + '<textarea class="better-codex-dialog-editor" name="prompt" placeholder="告诉智能体要做什么，例如：&quot;修复项目里任务运行状态不可见的问题&quot;">' + escapeHtml(draft.prompt) + '</textarea>' + propertyRows() + attachmentList() + '<div class="better-codex-dialog-error" hidden></div>' + footer() + '</form>';
-          dialog.querySelector(".better-codex-dialog-properties")?.insertAdjacentHTML("beforebegin", '<div class="better-codex-run-hint">' + agentAvatarMarkup(selectedAgent, "better-codex-agent-avatar") + '<span>创建后将由 ' + escapeHtml(selectedName) + ' 自动开始工作。</span></div>');
+          dialog.querySelector(".better-codex-dialog-properties")?.insertAdjacentHTML("beforebegin", '<div class="better-codex-run-hint">' + agentAvatarMarkup(selectedAgent, "better-codex-agent-avatar") + '<span>创建后先由 ' + escapeHtml(selectedName) + ' 整理卡片，再自动开始工作。</span></div>');
         } else if (issue) {
           const descriptionEditor = sessionId
             ? '<textarea class="better-codex-dialog-editor" name="description" placeholder="添加描述..." rows="2" style="flex:0 0 auto;min-height:56px;max-height:96px">' + escapeHtml(draft.description) + '</textarea>'
@@ -2446,7 +2455,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             const runAvatar = dialog.querySelector(".better-codex-run-hint .better-codex-agent-avatar");
             syncAgentAvatar(runAvatar, selectedAgent);
             const hint = dialog.querySelector(".better-codex-run-hint span:last-child");
-            if (hint) hint.textContent = "创建后将由 " + selectedName + " 自动开始工作。";
+            if (hint) hint.textContent = "创建后先由 " + selectedName + " 整理卡片，再自动开始工作。";
           }
           closeDialogSelects();
           picker.querySelector("[data-dialog-select-toggle]")?.focus();
@@ -2591,6 +2600,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             labels: draft.labels.split(/[,，]/).map(value => value.trim()).filter(Boolean),
             thread_id: threadId,
             workspace_path: workspacePath,
+            ai_enrich: draft.mode === "agent" && !issue,
             ...assignee
           };
           if (issue) await api("/api/issues/" + encodeURIComponent(issue.id), { method: "PATCH", body: JSON.stringify({ ...body, version: issue.version }) });

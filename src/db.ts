@@ -20,6 +20,7 @@ export type AgentProfile = {
   instructions: string;
   model: AgentModel;
   reasoning_effort: AgentReasoningEffort;
+  max_concurrency: number;
   version: number;
   created_at: string;
   updated_at: string;
@@ -95,8 +96,17 @@ type IssueInput = {
 
 type IssuePatch = Partial<Pick<Issue, "title" | "description" | "status" | "priority" | "labels" | "sort_order" | "pinned" | "thread_id" | "workspace_path" | "agent_enabled" | "agent_id" | "user_assigned" | "needs_attention" | "pending_actor">>;
 
-type AgentProfileInput = Pick<AgentProfile, "name" | "description" | "instructions" | "model" | "reasoning_effort">;
+type AgentProfileInput = Pick<AgentProfile, "name" | "description" | "instructions" | "model" | "reasoning_effort"> & { max_concurrency?: number };
 type AgentProfilePatch = Partial<AgentProfileInput>;
+
+export const defaultAgentMaxConcurrency = 5;
+export const agentMaxConcurrencyLimit = 20;
+
+export function cleanMaxConcurrency(value: number | undefined) {
+  if (value === undefined) return defaultAgentMaxConcurrency;
+  if (!Number.isInteger(value) || value < 1 || value > agentMaxConcurrencyLimit) throw new Error("invalid_agent_max_concurrency");
+  return value;
+}
 
 const latestSchemaVersion = 2;
 
@@ -135,7 +145,7 @@ function cleanAgentProfile(input: AgentProfileInput) {
   if (instructions.length > 100000) throw new Error("agent_instructions_too_long");
   if (!input.model.trim() || input.model.length > 80) throw new Error("invalid_agent_model");
   if (!input.reasoning_effort.trim() || input.reasoning_effort.length > 20) throw new Error("invalid_agent_reasoning_effort");
-  return { name, description, instructions, model: input.model, reasoning_effort: input.reasoning_effort };
+  return { name, description, instructions, model: input.model, reasoning_effort: input.reasoning_effort, max_concurrency: cleanMaxConcurrency(input.max_concurrency) };
 }
 
 function cleanLabels(values: string[]) {
@@ -321,11 +331,14 @@ export class Store {
         instructions TEXT NOT NULL,
         model TEXT NOT NULL,
         reasoning_effort TEXT NOT NULL,
+        max_concurrency INTEGER NOT NULL DEFAULT ${defaultAgentMaxConcurrency},
         version INTEGER NOT NULL DEFAULT 1,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
     `);
+    const columns = new Set((this.db.prepare("PRAGMA table_info(agent_profiles)").all() as Array<{ name: string }>).map(item => item.name));
+    if (!columns.has("max_concurrency")) this.db.exec(`ALTER TABLE agent_profiles ADD COLUMN max_concurrency INTEGER NOT NULL DEFAULT ${defaultAgentMaxConcurrency}`);
   }
 
   private ensureAgentAvatarTable() {
@@ -393,6 +406,21 @@ export class Store {
       ON CONFLICT(key) DO UPDATE SET value = excluded.value
     `).run(enabled ? "1" : "0");
     return this.getAutoDispatch();
+  }
+
+  getDefaultAgentMaxConcurrency() {
+    const row = this.db.prepare("SELECT value FROM settings WHERE key = 'default_agent_max_concurrency'").get() as { value: string } | undefined;
+    const value = Number(row?.value);
+    return Number.isInteger(value) && value >= 1 && value <= agentMaxConcurrencyLimit ? value : defaultAgentMaxConcurrency;
+  }
+
+  setDefaultAgentMaxConcurrency(value: number) {
+    const cleaned = cleanMaxConcurrency(value);
+    this.db.prepare(`
+      INSERT INTO settings (key, value) VALUES ('default_agent_max_concurrency', ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `).run(String(cleaned));
+    return this.getDefaultAgentMaxConcurrency();
   }
 
   isDispatchable(issue: Issue) {
@@ -478,9 +506,9 @@ export class Store {
     const role = `better_codex_${id.replaceAll("-", "")}`;
     const timestamp = now();
     this.db.prepare(`
-      INSERT INTO agent_profiles (id, role, name, description, instructions, model, reasoning_effort, version, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
-    `).run(id, role, profile.name, profile.description, profile.instructions, profile.model, profile.reasoning_effort, timestamp, timestamp);
+      INSERT INTO agent_profiles (id, role, name, description, instructions, model, reasoning_effort, max_concurrency, version, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+    `).run(id, role, profile.name, profile.description, profile.instructions, profile.model, profile.reasoning_effort, profile.max_concurrency, timestamp, timestamp);
     return this.getAgentProfile(id)!;
   }
 
@@ -494,11 +522,12 @@ export class Store {
       instructions: patch.instructions ?? current.instructions,
       model: patch.model ?? current.model,
       reasoning_effort: patch.reasoning_effort ?? current.reasoning_effort,
+      max_concurrency: patch.max_concurrency ?? current.max_concurrency,
     });
     const result = this.db.prepare(`
-      UPDATE agent_profiles SET name = ?, description = ?, instructions = ?, model = ?, reasoning_effort = ?, version = version + 1, updated_at = ?
+      UPDATE agent_profiles SET name = ?, description = ?, instructions = ?, model = ?, reasoning_effort = ?, max_concurrency = ?, version = version + 1, updated_at = ?
       WHERE id = ? AND version = ?
-    `).run(profile.name, profile.description, profile.instructions, profile.model, profile.reasoning_effort, now(), current.id, version);
+    `).run(profile.name, profile.description, profile.instructions, profile.model, profile.reasoning_effort, profile.max_concurrency, now(), current.id, version);
     if (result.changes !== 1) throw new Error("version_conflict");
     return this.getAgentProfile(current.id)!;
   }
@@ -771,27 +800,38 @@ export class Store {
         this.db.exec("COMMIT");
         return null;
       }
-      const active = this.db.prepare("SELECT 1 AS value FROM issue_runs WHERE status IN ('claimed', 'running') LIMIT 1").get();
-      if (active) {
-        this.db.exec("COMMIT");
-        return null;
-      }
+      // Queueing is per agent: an issue is only claimable while its agent
+      // (custom profile, or the default Codex profile for agent_id NULL) has
+      // fewer active runs than its configured max_concurrency.
       const row = this.db.prepare(`
         SELECT issues.*, COALESCE(NULLIF(issues.workspace_path, ''), NULLIF(projects.workspace_path, ''), '') AS resolved_workspace
         FROM issues
         JOIN projects ON projects.id = issues.project_id
+        LEFT JOIN agent_profiles ON agent_profiles.id = issues.agent_id
         WHERE issues.needs_attention = 1
           AND issues.pending_actor = 'agent'
           AND issues.agent_enabled = 1
           AND issues.archived_at IS NULL
           AND issues.status NOT IN ('backlog', 'done', 'cancelled')
           AND (issues.thread_id IS NOT NULL OR issues.workspace_path IS NOT NULL OR projects.workspace_path != '')
+          AND NOT EXISTS (
+            SELECT 1 FROM issue_runs
+            WHERE issue_runs.issue_id = issues.id
+              AND issue_runs.status IN ('claimed', 'running')
+          )
+          AND (
+            SELECT COUNT(*)
+            FROM issue_runs
+            JOIN issues AS active_issues ON active_issues.id = issue_runs.issue_id
+            WHERE issue_runs.status IN ('claimed', 'running')
+              AND COALESCE(active_issues.agent_id, '') = COALESCE(issues.agent_id, '')
+          ) < COALESCE(agent_profiles.max_concurrency, ?)
         ORDER BY issues.pinned DESC,
           CASE issues.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END,
           issues.sort_order,
           issues.created_at
         LIMIT 1
-      `).get() as (Record<string, unknown> & { resolved_workspace: string }) | undefined;
+      `).get(this.getDefaultAgentMaxConcurrency()) as (Record<string, unknown> & { resolved_workspace: string }) | undefined;
       if (!row) {
         this.db.exec("COMMIT");
         return null;

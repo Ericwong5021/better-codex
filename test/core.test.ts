@@ -221,6 +221,89 @@ test("auto-dispatch claims only attentive agent-owned issues outside backlog", (
   }
 });
 
+test("auto-dispatch queues per-agent by max_concurrency", () => {
+  const target = temporaryDatabase();
+  try {
+    const store = new Store(target.file);
+    const project = store.createProject({ name: "Concurrency", workspacePath: target.directory });
+    const limited = store.createAgentProfile({ name: "Limited", description: "", instructions: "", model: "gpt-test", reasoning_effort: "medium", max_concurrency: 2 });
+    const unset = store.createAgentProfile({ name: "Unset", description: "", instructions: "", model: "gpt-test", reasoning_effort: "medium" });
+    assert.equal(unset.max_concurrency, 5);
+    store.setAutoDispatch(true);
+
+    const createFor = (title: string, agentId?: string) => store.createIssue({
+      projectId: project.id,
+      title,
+      status: "todo",
+      agentEnabled: true,
+      agentId,
+      workspacePath: target.directory,
+    });
+    createFor("Limited 1", limited.id);
+    createFor("Limited 2", limited.id);
+    createFor("Limited 3", limited.id);
+
+    const first = store.claimNextIssue();
+    const second = store.claimNextIssue();
+    assert.ok(first && second);
+    assert.equal(first.issue.agent_id, limited.id);
+    assert.equal(second.issue.agent_id, limited.id);
+    // Limited agent is at capacity: its third issue must wait.
+    assert.equal(store.claimNextIssue(), null);
+
+    // Other agents keep their own budget while Limited is saturated.
+    createFor("Unset 1", unset.id);
+    const other = store.claimNextIssue();
+    assert.equal(other?.issue.agent_id, unset.id);
+
+    // Default Codex profile (no agent_id) is its own bucket too.
+    store.setDefaultAgentMaxConcurrency(1);
+    createFor("Default 1");
+    createFor("Default 2");
+    const defaultClaim = store.claimNextIssue();
+    assert.equal(defaultClaim?.issue.agent_id, null);
+    assert.equal(store.claimNextIssue(), null);
+
+    // Finishing a run frees one slot for the queued issue.
+    store.finishRun(first.runId, first.issue.id, true);
+    const third = store.claimNextIssue();
+    assert.equal(third?.issue.agent_id, limited.id);
+    assert.equal(third?.issue.title, "Limited 3");
+    store.close();
+  } finally {
+    rmSync(target.directory, { recursive: true, force: true });
+  }
+});
+
+test("an issue re-armed mid-run is not claimed twice concurrently", () => {
+  const target = temporaryDatabase();
+  try {
+    const store = new Store(target.file);
+    const project = store.createProject({ name: "Rearm", workspacePath: target.directory });
+    const profile = store.createAgentProfile({ name: "Runner", description: "", instructions: "", model: "gpt-test", reasoning_effort: "medium" });
+    store.setAutoDispatch(true);
+    const issue = store.createIssue({
+      projectId: project.id,
+      title: "Rearmed",
+      status: "todo",
+      agentEnabled: true,
+      agentId: profile.id,
+      workspacePath: target.directory,
+    });
+    const claimed = store.claimNextIssue();
+    assert.equal(claimed?.issue.id, issue.id);
+    // Simulate the agent skill re-queueing the issue while its run is active.
+    store.updateIssue(claimed!.issue.id, claimed!.issue.version, { status: "todo", needs_attention: true, pending_actor: "agent" });
+    assert.equal(store.claimNextIssue(), null);
+    store.finishRun(claimed!.runId, claimed!.issue.id, true);
+    const reclaimed = store.claimNextIssue();
+    assert.equal(reclaimed?.issue.id, issue.id);
+    store.close();
+  } finally {
+    rmSync(target.directory, { recursive: true, force: true });
+  }
+});
+
 test("opening the store does not re-arm resting user-owned agent issues", () => {
   const target = temporaryDatabase();
   try {

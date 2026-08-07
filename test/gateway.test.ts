@@ -86,6 +86,7 @@ test("gateway completes the issue workflow and survives restart", async () => {
       instructions: "使用 Codex 默认配置承接并执行 Better Codex Issue。",
       model: "默认模型",
       reasoning_effort: "默认推理等级",
+      max_concurrency: 5,
       version: 1,
       created_at: "",
       updated_at: "",
