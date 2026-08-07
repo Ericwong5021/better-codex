@@ -507,7 +507,10 @@ test("issue cards show project icon and assignee instead of session entry", () =
   const startNowMarkup = source.indexOf("data-dialog-start-now");
   assert.ok(startNowMarkup > headerStart && startNowMarkup < footerStart);
   assert.equal(source.slice(footerStart, source.indexOf("function renderDialog()", footerStart)).includes("data-dialog-start-now"), false);
-  assert.ok(source.includes("if (issue) return void perform(() => openEditor(issue))"));
+  assert.ok(source.includes('if (issue && issue.enrichment_status !== "pending") return void perform(() => openEditor(issue))'));
+  assert.ok(source.includes('draggable="\' + String(!enrichmentLocked) + \'"'));
+  assert.ok(source.includes('if (!issue || enrichmentLocked) return;'));
+  assert.ok(source.includes('if (enrichmentLocked) return;'));
   assert.ok(!source.includes("issue?.run_thread_id || issue?.thread_id || \"\""));
   assert.ok(!source.includes("(sessionId ? ' data-thread=\""));
   assert.doesNotMatch(source, /任务尚未关联 Session/);
