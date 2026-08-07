@@ -2212,6 +2212,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       }
       issueStatusSnapshot = new Map(issues.map(issue => [issue.id, issue.status]));
       state.issues = issues;
+      if (options.background && state.surface === "agents" && state.agentPane !== "preview") return;
       render();
     }
 
