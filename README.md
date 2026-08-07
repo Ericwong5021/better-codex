@@ -62,8 +62,10 @@ curl -fsSL https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scri
 Supports Windows x64 with the Microsoft Store version of Codex. Run in PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scripts/install.ps1 | iex
+iex (iwr -UseBasicParsing -Headers @{'Cache-Control'='no-cache'} https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scripts/install.ps1).Content
 ```
+
+PowerShell may cache an older `irm` download; the `Cache-Control` header forces a fresh installer that resolves the latest GitHub release.
 
 The installer downloads the matching release, verifies its SHA-256 checksum, installs the local runtime, configures the Codex integration, and verifies that it is ready.
 
