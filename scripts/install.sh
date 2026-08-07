@@ -83,7 +83,9 @@ if [ -n "$CURRENT_VERSION" ] && [ -n "$TARGET_VERSION" ]; then
     UPDATED_VERSION="$(installed_version "$EXISTING_BINARY" || true)"
     if [ -n "$UPDATED_VERSION" ] && version_at_least "$UPDATED_VERSION" "$TARGET_VERSION"; then
       UPGRADE_READY=1
-      if [ "$WITH_SERVICE" = "1" ]; then
+      if [ ! -f "$SKILL_DIR/SKILL.md" ]; then
+        UPGRADE_READY=0
+      elif [ "$WITH_SERVICE" = "1" ]; then
         "$EXISTING_BINARY" service restart >/dev/null 2>&1 || UPGRADE_READY=0
         if [ "$UPGRADE_READY" = "1" ]; then
           sleep 0.8
@@ -92,7 +94,7 @@ if [ -n "$CURRENT_VERSION" ] && [ -n "$TARGET_VERSION" ]; then
           "$EXISTING_BINARY" doctor >/dev/null 2>&1 || UPGRADE_READY=0
         fi
       fi
-      if [ "$UPGRADE_READY" = "1" ] && [ -f "$SKILL_DIR/SKILL.md" ]; then
+      if [ "$UPGRADE_READY" = "1" ]; then
         printf '[OK] Better Codex upgraded to v%s\n' "$UPDATED_VERSION"
         exit 0
       fi
@@ -105,34 +107,37 @@ codex_running() {
   /usr/bin/pgrep -x ChatGPT >/dev/null 2>&1 || /usr/bin/pgrep -x Codex >/dev/null 2>&1
 }
 
-quit_codex() {
-  # Stop Better Codex first so watch-inject does not relaunch Codex mid-quit.
+stop_better_codex_helpers() {
   if [ -n "${EXISTING_BINARY:-}" ]; then
     "$EXISTING_BINARY" disable >/dev/null 2>&1 || true
     "$EXISTING_BINARY" service stop >/dev/null 2>&1 || true
   fi
+  # Dev and packaged injectors both relaunch Codex if left running.
+  /usr/bin/pkill -f 'watch-inject' >/dev/null 2>&1 || true
+  /usr/bin/pkill -x better-codex >/dev/null 2>&1 || true
+}
+
+quit_codex() {
+  stop_better_codex_helpers
+  # osascript quit is unreliable (Automation prompts / Electron); don't block on it.
   for APP in ChatGPT Codex; do
-    /usr/bin/osascript -e "tell application \"$APP\" to quit" >/dev/null 2>&1 || true
+    (/usr/bin/osascript -e "tell application \"$APP\" to quit" >/dev/null 2>&1 || true) &
   done
-  for _ in $(seq 1 40); do
+  sleep 1
+  /usr/bin/killall -9 ChatGPT >/dev/null 2>&1 || true
+  /usr/bin/killall -9 Codex >/dev/null 2>&1 || true
+  /usr/bin/pkill -9 -f '/Applications/ChatGPT.app/' >/dev/null 2>&1 || true
+  /usr/bin/pkill -9 -f '/Applications/Codex.app/' >/dev/null 2>&1 || true
+  for _ in $(seq 1 20); do
     if ! codex_running; then
       return 0
     fi
-    sleep 0.25
-  done
-  # Soft quit often fails without Automation permission or when Electron ignores it.
-  /usr/bin/killall ChatGPT >/dev/null 2>&1 || true
-  /usr/bin/killall Codex >/dev/null 2>&1 || true
-  sleep 0.5
-  if codex_running; then
+    stop_better_codex_helpers
     /usr/bin/killall -9 ChatGPT >/dev/null 2>&1 || true
     /usr/bin/killall -9 Codex >/dev/null 2>&1 || true
-    sleep 0.5
-  fi
-  if codex_running; then
-    return 1
-  fi
-  return 0
+    sleep 0.25
+  done
+  return 1
 }
 
 if codex_running; then
