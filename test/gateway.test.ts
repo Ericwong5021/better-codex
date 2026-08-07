@@ -147,6 +147,10 @@ test("gateway completes the issue workflow and survives restart", async () => {
     const issueResponse = await request("/api/issues", { method: "POST", body: JSON.stringify({ project_id: project.id, title: "Round trip" }) });
     assert.equal(issueResponse.status, 201);
     const issue = await issueResponse.json() as { id: string; version: number };
+    const listedIssues = await (await request("/api/issues")).json() as Array<{ id: string; reply_status: string }>;
+    assert.equal(listedIssues.find(item => item.id === issue.id)?.reply_status, "idle");
+    const directIssue = await (await request(`/api/issues/${issue.id}`)).json() as { reply_status: string };
+    assert.equal(directIssue.reply_status, "idle");
 
     const invalidResponse = await request(`/api/issues/${issue.id}`, { method: "PATCH", body: JSON.stringify({ version: issue.version, pinned: "false" }) });
     assert.equal(invalidResponse.status, 400);

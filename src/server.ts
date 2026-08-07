@@ -12,7 +12,7 @@ import { readModelCatalog } from "./model-catalog.js";
 import { runtimePort, token, updateLogPath } from "./config.js";
 import { acquireRuntimeLock, clearRuntimeState, createRuntimeIdentity, publishRuntimeState } from "./runtime-state.js";
 import { activeCoreExecutable, getGatewayUpdateState, installGatewayUpdate, startGatewayUpdateChecks } from "./updater.js";
-import { getIssueReplyState, startIssueReply } from "./session-reply.js";
+import { getIssueReplyState, startIssueReply, stopIssueReplies } from "./session-reply.js";
 import { normalizeSessionId, readConversationResult, sessionWorkspace } from "./session-transcript.js";
 import { IssueWorker } from "./worker.js";
 
@@ -221,6 +221,7 @@ export function startServer() {
   const cleanup = () => {
     if (cleaned) return;
     cleaned = true;
+    stopIssueReplies();
     worker.stop();
     stopUpdateChecks();
     clearRuntimeState(identity.instanceId);
@@ -352,11 +353,15 @@ export function startServer() {
         return sendJson(response, 200, { workspace_path: sessionWorkspace(threadId) || "" });
       }
       if (url.pathname === "/api/issues" && method === "GET") {
-        return sendJson(response, 200, store.listIssues({
+        const issues = store.listIssues({
           projectId: url.searchParams.get("project_id") || undefined,
           search: url.searchParams.get("search") || undefined,
           archived: url.searchParams.get("archived") === "1",
-        }));
+        });
+        return sendJson(response, 200, issues.map(issue => ({
+          ...issue,
+          reply_status: getIssueReplyState(issue.id).status,
+        })));
       }
       if (url.pathname === "/api/issues" && method === "POST") {
         const body = await readBody(request);
@@ -394,7 +399,7 @@ export function startServer() {
       if (path[0] === "api" && path[1] === "issues" && path[2]) {
         const issue = store.getIssue(decodeURIComponent(path[2]));
         if (!issue) return sendJson(response, 404, { error: "issue_not_found" });
-        if (method === "GET" && path.length === 3) return sendJson(response, 200, issue);
+        if (method === "GET" && path.length === 3) return sendJson(response, 200, { ...issue, reply_status: getIssueReplyState(issue.id).status });
         if (method === "PATCH" && path.length === 3) {
           const body = await readBody(request);
           const version = Number(body.version);

@@ -439,9 +439,16 @@ test("issue working activity uses the agent avatar instead of initials", () => {
   const source = injectionScript(4317, "test-token", "install");
 
   assert.ok(source.includes("issue.active_run_status"));
+  assert.ok(source.includes('issue.reply_status === "running"'));
   assert.ok(source.includes('agentAvatarMarkup(activityAgent, "better-codex-card-avatar")'));
   assert.ok(source.includes('"Working"'));
   assert.ok(source.includes('"Queued"'));
+  assert.ok(source.includes('"回复中"'));
+  assert.ok(source.includes('"回复失败"'));
+  assert.ok(source.includes('"回复完成"'));
+  assert.match(source, /\.better-codex-activity\[data-run="replying"\]/);
+  assert.match(source, /\.better-codex-activity\[data-run="reply-failed"\]/);
+  assert.match(source, /\.better-codex-activity\[data-run="reply-succeeded"\]/);
   assert.ok(!source.includes('class="better-codex-avatar">\' + escapeHtml(agentInitial)'));
 });
 
@@ -469,8 +476,9 @@ test("issue cards show project icon and assignee instead of session entry", () =
   assert.ok(source.includes("state.projects.find(item => item.id === rememberedProjectId)"));
   assert.ok(source.includes("function activeThreadId()"));
   assert.doesNotMatch(source, /\/api\/issues\/.*\/app|message: "\/app"/);
-  assert.doesNotMatch(source, /findThreadRow\(expected\)|row\.click\(\)/);
-  assert.doesNotMatch(source, /window\.postMessage\(\{ type: NAVIGATION/);
+  assert.ok(source.includes("const NAVIGATION ="));
+  assert.ok(source.includes("window.postMessage({ type: NAVIGATION.messageType"));
+  assert.ok(source.includes("function currentRouteThreadId()"));
   assert.doesNotMatch(source, /THREAD_ROUTE_RETRY_MS|THREAD_ROUTE_CONFIRM_DELAY_MS/);
   assert.ok(source.includes('button.classList.add("is-loading")'));
   assert.ok(source.includes('button.innerHTML = icon("refresh") + "<span>正在打开…</span>"'));
@@ -578,13 +586,15 @@ test("Codex-native visual values live behind semantic design tokens", () => {
   assert.ok(css.includes("--bc-radius-xl:"));
   assert.ok(css.includes("--bc-motion-fast:"));
   assert.match(css, /\.better-codex-card\s*\{[^}]*border:\s*1px solid var\(--bc-color-hairline\);[^}]*background:\s*var\(--bc-color-canvas\);[^}]*box-shadow:\s*var\(--bc-card-shadow\);/s);
-  assert.doesNotMatch(css, /\.better-codex-card\.is-dragging\s*\{[^}]*opacity:/s);
+  assert.match(css, /\.better-codex-card\.is-dragging\s*\{[^}]*opacity:\s*\.42;/s);
   assert.match(css, /\.better-codex-card\.is-dragging:active\s*\{[^}]*transform:\s*none;/s);
   assert.ok(source.includes("function onCardDragStart(event)"));
-  assert.ok(source.includes("setDragImage(ghost"));
+  assert.ok(source.includes("function onCardDragOver(event)"));
+  assert.ok(source.includes("setDragImage(transparentDragImage"));
   assert.ok(source.includes('ghost.classList.add("is-drag-ghost")'));
   assert.ok(source.includes("host.appendChild(ghost)"));
   assert.ok(source.includes("draggingIssueId"));
+  assert.ok(source.includes("draggingGhost.style.left"));
   assert.ok(source.includes('options.background && draggingIssueId'));
   assert.ok(source.includes('issue.id === draggingIssueId ? " is-dragging" : ""'));
   assert.match(css, /\.better-codex-card\.is-drag-ghost\s*\{[^}]*border:\s*1px solid/s);

@@ -917,6 +917,10 @@ export function betterCodexDesignSystemCss() {
 
     #better-codex-panel .better-codex-card:active { transform: scale(.98); }
 
+    #better-codex-panel .better-codex-card.is-dragging {
+      opacity: .42;
+    }
+
     #better-codex-panel .better-codex-card.is-dragging:active {
       transform: none;
     }

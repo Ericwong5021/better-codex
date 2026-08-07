@@ -219,28 +219,43 @@ export function navigationExpression(threadId: string) {
   const compatibility = activeCompatibility();
   const selectors = JSON.stringify(compatibility.selectors);
   const attributes = JSON.stringify(compatibility.attributes);
+  const navigation = JSON.stringify(compatibility.navigation);
   return `(async () => {
     const selectors = ${selectors};
     const attributes = ${attributes};
+    const navigation = ${navigation};
     const expected = ${JSON.stringify(threadId)}.replace(/^(local|cloud):/i, "");
     const normalize = value => String(value || "").replace(/^(local|cloud):/i, "");
     const findRow = () => Array.from(document.querySelectorAll(selectors.threadRow)).find(item => normalize(item.getAttribute(attributes.threadId)) === expected);
+    const currentRoute = () => {
+      const match = location.pathname.match(/\\/local\\/([^/?#]+)/);
+      if (!match) return "";
+      try { return normalize(decodeURIComponent(match[1])); } catch { return ""; }
+    };
     const currentState = () => {
       const activeRow = Array.from(document.querySelectorAll(selectors.threadRow)).find(item => item.getAttribute(attributes.threadActive) === "true");
       return { active: normalize(activeRow?.getAttribute(attributes.threadId)) };
     };
     const deadline = Date.now() + 10000;
     let clickedRow = false;
+    let requestedRoute = false;
     while (Date.now() < deadline) {
       const current = currentState();
       if (current.active === expected) {
         window.__betterCodexInjection__?.close?.();
         return { opened: true, via: "sidebar" };
       }
+      if (currentRoute() === expected) {
+        window.__betterCodexInjection__?.close?.();
+        return { opened: true, via: "route" };
+      }
       const row = findRow();
       if (row && !clickedRow) {
         clickedRow = true;
         row.click();
+      } else if (!row && !requestedRoute) {
+        requestedRoute = true;
+        window.postMessage({ type: navigation.messageType, path: navigation.threadRoutePrefix + encodeURIComponent(expected) }, window.location.origin);
       }
       await new Promise(resolve => setTimeout(resolve, 100));
     }

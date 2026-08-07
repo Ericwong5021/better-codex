@@ -36,6 +36,19 @@ export function getIssueReplyState(issueId: string): IssueReplyState {
   return current.state;
 }
 
+export function stopIssueReplies() {
+  const finishedAt = new Date().toISOString();
+  for (const [issueId, current] of replies) {
+    if ("child" in current && current.state.status === "running") {
+      current.state.status = "failed";
+      current.state.error = "runtime_stopped";
+      current.state.finished_at = finishedAt;
+      current.child.kill("SIGTERM");
+      replies.set(issueId, { state: current.state });
+    }
+  }
+}
+
 export function startIssueReply(input: {
   issueId: string;
   threadId: string;

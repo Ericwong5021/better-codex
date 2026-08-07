@@ -217,7 +217,7 @@ export function injectionVersion() {
   return activeCompatibility().version;
 }
 
-export function injectionScript(port: number, accessToken: string, action: "install" | "uninstall") {
+export function injectionScript(port: number, accessToken: string, action: "install" | "uninstall", locale: "zh-CN" | "en" = "zh-CN") {
   if (action === "uninstall") {
     return `(() => {
       window.__betterCodexInjection__?.destroy?.();
@@ -251,8 +251,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const HOST = "data-better-codex-page-host";
     const BASE_URL = ${baseUrl};
     const BRIDGE_TOKEN = ${bridgeToken};
+    const INITIAL_LOCALE = ${JSON.stringify(locale)};
     const SELECTORS = ${JSON.stringify(compatibility.selectors)};
     const ATTRIBUTES = ${JSON.stringify(compatibility.attributes)};
+    const NAVIGATION = ${JSON.stringify(compatibility.navigation)};
     const LUCIDE_ICONS = ${JSON.stringify(lucideIcons)};
     const AGENT_AVATAR_PRESETS = ${JSON.stringify(agentAvatarPresets)};
     const RESUME_SURFACE_KEY = "better-codex-resume-surface";
@@ -263,7 +265,22 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const priorityLabels = { none: "无", low: "低", medium: "中", high: "高", urgent: "紧急" };
     const rememberedSurface = sessionStorage.getItem(RESUME_SURFACE_KEY);
     const rememberedProjectId = localStorage.getItem(PROJECT_KEY) || "";
-    const state = { projects: [], issues: [], agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, surface: ["issues", "agents"].includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, createMode: "manual", keepCreate: false, selected: null, error: "", filters: { status: [], priority: [], date: [], assignee: [], creator: [], project: [], label: [] } };
+    const state = { projects: [], issues: [], agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, surface: ["issues", "agents"].includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, createMode: "manual", keepCreate: false, selected: null, error: "", locale: INITIAL_LOCALE === "zh-CN" ? "zh-CN" : "en", filters: { status: [], priority: [], date: [], assignee: [], creator: [], project: [], label: [] } };
+    const englishText = {
+      "任务看板": "Task board", "打开任务看板": "Open task board", "智能体": "Agents", "管理智能体": "Manage agents",
+      "全部": "All", "已分配": "Assigned", "未分配": "Unassigned", "待规划": "Backlog", "待办": "Todo", "进行中": "In progress", "审核中": "In review", "已完成": "Done", "已阻塞": "Blocked", "已取消": "Canceled",
+      "无": "None", "低": "Low", "中": "Medium", "高": "High", "紧急": "Urgent", "超高": "Urgent", "无优先级": "No priority", "优先级": "Priority", "状态": "Status", "日期": "Date", "筛选": "Filter", "标签": "Labels",
+      "新建": "New", "新建 issue": "New issue", "新建任务": "New task", "新建智能体": "New agent", "创建": "Create", "创建任务": "Create task", "删除": "Delete", "删除任务": "Delete task", "删除智能体": "Delete agent", "保存": "Save", "确认": "Confirm", "取消": "Cancel", "关闭": "Close", "重试": "Retry", "稍后": "Later", "展开": "Expand", "缩小": "Minimize", "缩放头像": "Zoom avatar",
+      "项目": "Project", "无项目": "No project", "选择项目": "Select project", "选择责任人": "Select owner", "选择执行智能体": "Select agent", "选择 issue 创建方式": "Choose how to create the issue", "任务标题": "Task title", "添加描述...": "Add description...", "添加标签": "Add label", "添加附件": "Add attachment", "移除附件": "Remove attachment", "搜索任务": "Search tasks", "搜索项目": "Search projects", "搜索项目...": "Search projects...", "搜索智能体": "Search agents",
+      "负责人": "Owner", "创建者": "Creator", "指定负责人": "Assign owner", "由我创建": "Created by me", "由我": "By me", "我": "Me", "你": "You", "未指派": "Not assigned", "未提供": "Not provided", "已同步": "Synced",
+      "自动运行": "Auto-run", "手动运行": "Manual run", "切换为自动运行": "Switch to auto-run", "切换为手动运行": "Switch to manual run", "切换到智能体": "Switch to agents", "手动创建": "Manual creation", "通过智能体创建": "Create with agent", "运行模式说明": "Run mode", "最大并发": "Max concurrency", "模型": "Model", "推理": "Reasoning", "默认": "Default", "自定义": "Custom",
+      "代码审查": "Code review", "问题排查": "Troubleshooting", "前端实现": "Frontend implementation", "文档写作": "Documentation", "创意探索": "Creative exploration", "终端工程": "Terminal engineering", "通用助手": "General assistant", "修复工具": "Fixer", "安全审查": "Security review", "测试验证": "Test verification", "插件": "Plugins", "数据与存储": "Data and storage", "检查改动的正确性、回归风险和可维护性": "Review changes for correctness, regression risk, and maintainability", "负责 Codex 原生风格的界面实现与视觉验证": "Build and visually verify interfaces in the native Codex style", "定位崩溃、回归和异常行为的根因": "Find the root cause of crashes, regressions, and unexpected behavior",
+      "选择头像": "Choose avatar", "预设头像": "Preset avatars", "自定义": "Custom", "更换": "Change", "保存失败": "Save failed", "创建失败": "Creation failed", "加载失败": "Loading failed", "启动失败": "Start failed", "发送失败": "Send failed", "回复失败": "Reply failed", "回复": "Reply", "回复中": "Replying", "回复完成": "Reply completed", "回复进行中…": "Replying…", "回复已完成": "Reply completed", "等待对话": "Waiting for conversation", "加载中…": "Loading…", "加载对话…": "Loading conversation…", "正在打开…": "Opening…", "在对话中打开": "Open in conversation", "在此回复智能体…": "Reply to the agent here…", "对话": "Conversation", "详情": "Details", "关闭详情": "Close details", "Issue 详情": "Issue details", "名称": "Name", "介绍": "Description", "智能体名称": "Agent name", "尚未添加介绍": "No description yet", "没有匹配的智能体": "No matching agents", "此分类暂无智能体": "No agents in this category",
+      "裁剪头像": "Crop avatar", "拖动图片调整位置": "Drag the image to adjust its position", "正在更新": "Updating", "正在更新 Better Codex": "Updating Better Codex", "更新完成": "Update complete", "更新未完成": "Update incomplete", "稍后提醒": "Remind me later", "Better Codex 有新版本": "A new Better Codex version is available", "Better Codex 已是最新版本": "Better Codex is up to date", "Better Codex 保持当前版本运行。": "Better Codex will continue running on the current version.", "正在下载并校验新版本，请不要关闭 Codex。": "Downloading and verifying the update. Please do not close Codex.", "正在重启 Codex，稍后会自动恢复。": "Restarting Codex. It will resume shortly.", "刚刚完成检查，无需更新。": "Just checked. No update is needed.", "部分文件无法读取本地路径，已跳过": "Some files could not be read locally and were skipped", "当前环境无法读取本地文件路径": "The current environment cannot read local file paths", "无关联对话。": "No linked conversation.", "暂无对话，可在下方回复或打开完整对话。": "No conversation yet. Reply below or open the full conversation.", "图片不能超过 10 MB": "Images must be 10 MB or smaller", "请选择 PNG、JPEG 或 WebP 图片": "Choose a PNG, JPEG, or WebP image", "无法读取这张图片": "Unable to read this image", "创建智能体 Issue 需要本地工作区：请先打开该项目下的一个 Codex 会话": "Creating an agent issue requires a local workspace. Open a Codex conversation in this project first.",
+      "创建任务": "Create task", "添加描述": "Add description", "新建 issue": "New issue", "项目": "Project", "状态": "Status", "优先级": "Priority", "选择项目": "Select project", "保存": "Save", "删除": "Delete",
+      "对话链接无效。": "The conversation link is invalid.", "对话仍在加载，请稍后重试。": "The conversation is still loading. Try again shortly.", "当前为手动运行，请先点击“立即开始任务”。": "Manual run is enabled. Click “Start task now” first.", "待规划中的 Issue 不会自动触发任务，请先移出待规划区。": "Issues in Backlog do not trigger tasks automatically. Move it out of Backlog first.", "当前没有运行中的任务": "No agents are currently working", "查看运行中的任务": "View running tasks", "暂无任务": "No tasks", "未分配": "Unassigned", "已分配": "Assigned", "新建任务": "New task", "新建智能体": "New agent", "运行模式说明": "Run mode", "手动运行时，只有点击“立即开始任务”才会触发智能体任务。": "In manual mode, agent tasks start only after you click “Start task now”.", "自动运行时，只要 Issue 不在「待规划」区，你发送的新消息都会触发任务；「待规划」里的 Issue 不会自动触发。": "In auto-run mode, new messages trigger tasks unless the Issue is in Backlog; Issues in Backlog do not trigger tasks automatically.", "未关联对话。": "No linked conversation.",
+      "确定删除任务 “": "Delete task “", "吗？": "”?", "创建后先由 ": "After creation, ", " 整理卡片，再自动开始工作。": " will organize the card and start working automatically.", "刚刚": "Just now", "分钟": "minutes", "小时": "hours", "天": "days", "更新于": "Updated", "个筛选": "filters", "个智能体工作中": "agents working", "条": "items"
+    };
     const bridgeRequests = new Map();
     let bridgeSequence = 0;
     let entry = null;
@@ -282,6 +299,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     let avatarPickerClose = null;
     let suppressAgentOutside = false;
     let draggingIssueId = "";
+    let draggingGhost = null;
+    let draggingGhostOffsetX = 0;
+    let draggingGhostOffsetY = 0;
     let codexLogoSequence = 0;
     let active = false;
     let destroyed = false;
@@ -292,6 +312,62 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     function escapeHtml(value) {
       return String(value ?? "").replace(/[&<>\"']/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\\\"": "&quot;", "'": "&#39;" })[character]);
+    }
+
+    function translateText(value) {
+      const source = String(value ?? "");
+      if (state.locale === "zh-CN" || !/[\\p{Script=Han}]/u.test(source)) return source;
+      const leading = source.match(/^\\s*/)?.[0] || "";
+      const trailing = source.match(/\\s*$/)?.[0] || "";
+      const core = source.slice(leading.length, source.length - trailing.length || undefined);
+      if (englishText[core]) return leading + englishText[core] + trailing;
+      let match = core.match(/^(\\d+) 个智能体工作中$/);
+      if (match) return leading + match[1] + " agents working" + trailing;
+      match = core.match(/^(\\d+) 个筛选$/);
+      if (match) return leading + match[1] + " filters" + trailing;
+      match = core.match(/^更新于 (.+)$/);
+      if (match) return leading + "Updated " + match[1] + trailing;
+      match = core.match(/^(\\d+) 分钟前$/);
+      if (match) return leading + match[1] + " minutes ago" + trailing;
+      match = core.match(/^(\\d+) 小时前$/);
+      if (match) return leading + match[1] + " hours ago" + trailing;
+      match = core.match(/^(\\d+) 天前$/);
+      if (match) return leading + match[1] + " days ago" + trailing;
+      match = core.match(/^确定删除任务 “(.+)” 吗？$/);
+      if (match) return leading + "Delete task “" + match[1] + "”?" + trailing;
+      match = core.match(/^创建后先由 (.+) 整理卡片，再自动开始工作。$/);
+      if (match) return leading + "After creation, " + match[1] + " will organize the card and start working automatically." + trailing;
+      match = core.match(/^(.+) · 点击刷新重试$/);
+      if (match) return leading + match[1] + " · Click to retry" + trailing;
+      match = core.match(/^v(.+) 已可用，更新完成后将自动重启 Codex。$/);
+      if (match) return leading + "v" + match[1] + " is available. Codex will restart automatically after the update." + trailing;
+      match = core.match(/^更换 (.+) 的头像$/);
+      if (match) return leading + "Change " + match[1] + "'s avatar" + trailing;
+      return source;
+    }
+
+    function localizeOwnedTree(root) {
+      if (!root || state.locale === "zh-CN") return;
+      const isOwned = node => node?.nodeType === 1 && (node.matches?.("[" + OWNED + '=\"true\"]') || node.closest?.("[" + OWNED + '=\"true\"]'));
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      const textNodes = [];
+      while (walker.nextNode()) textNodes.push(walker.currentNode);
+      for (const node of textNodes) {
+        if (!isOwned(node.parentElement)) continue;
+        const translated = translateText(node.nodeValue);
+        if (translated !== node.nodeValue) node.nodeValue = translated;
+      }
+      const descendants = root.querySelectorAll ? Array.from(root.querySelectorAll("*")) : [];
+      const elements = root.nodeType === 1 ? [root, ...descendants] : descendants;
+      for (const element of elements) {
+        if (!isOwned(element)) continue;
+        for (const attribute of ["aria-label", "title", "placeholder"]) {
+          if (!element.hasAttribute(attribute)) continue;
+          const value = element.getAttribute(attribute);
+          const translated = translateText(value);
+          if (translated !== value) element.setAttribute(attribute, translated);
+        }
+      }
     }
 
     function normalizeSessionId(value) {
@@ -472,7 +548,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #\${PANEL_ID} .better-codex-link:hover { text-decoration: underline; }
         #\${PANEL_ID} .better-codex-activity { display: inline-flex; align-items: center; gap: 5px; flex: 0 0 auto; font-size: var(--bc-text-caption); font-weight: 600; }
         #\${PANEL_ID} .better-codex-avatar { display: inline-flex; width: 16px; height: 16px; align-items: center; justify-content: center; border: 1.5px solid #fff; border-radius: 999px; color: #fff; background: #27272a; font-size: var(--bc-text-avatar); }
-        #\${PANEL_ID} .better-codex-activity[data-run="running"] { color: #52525b; }
+        #\${PANEL_ID} .better-codex-activity[data-run="running"], #\${PANEL_ID} .better-codex-activity[data-run="replying"] { color: #52525b; }
+        #\${PANEL_ID} .better-codex-activity[data-run="reply-failed"] { color: #dc2626; }
+        #\${PANEL_ID} .better-codex-activity[data-run="reply-succeeded"] { color: #15803d; }
         #\${PANEL_ID} .better-codex-activity[data-run="claimed"] { color: var(--bc-muted); opacity: .62; }
         @keyframes better-codex-shimmer { 0% { background-position: 200% 0 } 100% { background-position: -200% 0 } }
         #\${PANEL_ID} .better-codex-shimmer { background-image: linear-gradient(90deg,#71717a 0%,#71717a 35%,#18181b 50%,#71717a 65%,#71717a 100%); background-size: 200% 100%; background-clip: text; -webkit-background-clip: text; color: transparent; -webkit-text-fill-color: transparent; animation: better-codex-shimmer 2.5s linear infinite; }
@@ -640,7 +718,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #\${PANEL_ID} .better-codex-card-avatar.is-fallback, #\${PANEL_ID} .better-codex-card-avatar.is-icon { color: var(--bc-muted); background: var(--bc-hover); }
         #\${PANEL_ID} .better-codex-card-avatar.is-codex { color: inherit; background: transparent; }
         #\${PANEL_ID} .better-codex-avatar, #\${PANEL_ID} .better-codex-agent-card-avatar { color: var(--bc-primary-foreground); background: var(--bc-primary); }
-        #\${PANEL_ID} .better-codex-activity[data-run="running"] { color: var(--bc-foreground); }
+        #\${PANEL_ID} .better-codex-activity[data-run="running"], #\${PANEL_ID} .better-codex-activity[data-run="replying"] { color: var(--bc-foreground); }
+        #\${PANEL_ID} .better-codex-activity[data-run="reply-failed"] { color: var(--bc-danger); }
+        #\${PANEL_ID} .better-codex-activity[data-run="reply-succeeded"] { color: #65c18c; }
         #\${PANEL_ID} .better-codex-shimmer { background-image: linear-gradient(90deg,var(--bc-muted) 0%,var(--bc-muted) 35%,var(--bc-foreground) 50%,var(--bc-muted) 65%,var(--bc-muted) 100%); }
         #\${PANEL_ID} .better-codex-empty { color: var(--bc-faint); }
         #\${PANEL_ID} .better-codex-agent-heading strong, #\${PANEL_ID} .better-codex-agents-empty strong { color: var(--bc-foreground); }
@@ -1449,7 +1529,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       board.addEventListener("contextmenu", openIssueMenu);
       board.addEventListener("dragstart", onCardDragStart);
       board.addEventListener("dragend", onCardDragEnd);
-      board.addEventListener("dragover", event => event.preventDefault());
+      board.addEventListener("dragover", onCardDragOver);
       board.addEventListener("drop", onDrop);
       const agents = document.createElement("main");
       agents.id = "better-codex-agents";
@@ -1902,7 +1982,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       panel.dataset.surface = state.surface;
       renderAgents();
       syncAutoDispatch();
-      const runningCount = state.issues.filter(issue => issue.active_run_status === "running" || issue.active_run_status === "claimed").length;
+      const runningCount = state.issues.filter(issue => issue.active_run_status === "running" || issue.active_run_status === "claimed" || issue.reply_status === "running").length;
       panel.querySelectorAll("[data-view]").forEach(button => button.classList.toggle("is-active", button.dataset.view === state.view));
       const working = panel.querySelector("#better-codex-working");
       working.innerHTML = (runningCount ? '<span class="better-codex-working-dot"></span>' : "") + runningCount + " 个智能体工作中";
@@ -1932,8 +2012,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             : null;
           const agentName = assignee?.name || "";
           const activityAgent = assignee || defaultAgent || { name: "Codex", is_default: true };
-          const activity = issue.active_run_status
-            ? '<span class="better-codex-activity" data-run="' + escapeHtml(issue.active_run_status) + '">' + agentAvatarMarkup(activityAgent, "better-codex-card-avatar") + '<span class="' + (issue.active_run_status === "running" ? "better-codex-shimmer" : "") + '">' + (issue.active_run_status === "running" ? "Working" : "Queued") + '</span></span>'
+          const replyStatus = issue.reply_status || "idle";
+          const replyActivityState = replyStatus === "running" ? "replying" : replyStatus === "failed" ? "reply-failed" : replyStatus === "succeeded" ? "reply-succeeded" : "";
+          const activityState = issue.active_run_status || replyActivityState;
+          const replyActivity = !issue.active_run_status && Boolean(replyActivityState);
+          const activity = activityState
+            ? '<span class="better-codex-activity" data-run="' + escapeHtml(activityState) + '">' + agentAvatarMarkup(activityAgent, "better-codex-card-avatar") + '<span class="' + (replyActivityState === "replying" || issue.active_run_status === "running" ? "better-codex-shimmer" : "") + '">' + (replyActivity ? (replyStatus === "running" ? "回复中" : replyStatus === "failed" ? "回复失败" : "回复完成") : issue.active_run_status === "running" ? "Working" : "Queued") + '</span></span>'
             : "";
           const description = String(issue.description || "").replace(/[#*_\`~>\[\]()]/g, "").replace(/\s+/g, " ").trim();
           const issueProject = state.projects.find(item => item.id === issue.project_id) || project;
@@ -1980,6 +2064,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       try {
         const bootstrap = await api("/api/bootstrap");
         applyAppearance(bootstrap.appearance);
+        state.locale = bootstrap.locale === "zh-CN" ? "zh-CN" : "en";
         if (bootstrap.user && typeof bootstrap.user === "object") state.user = bootstrap.user;
         state.projects = bootstrap.projects;
         state.agents = bootstrap.agents || [];
@@ -2810,13 +2895,32 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         "background:" + canvas,
       ].join(";");
       host.appendChild(ghost);
-      event.dataTransfer.setDragImage(ghost, Math.max(12, event.clientX - rect.left), Math.max(12, event.clientY - rect.top));
+      draggingGhost = ghost;
+      draggingGhostOffsetX = Math.max(12, event.clientX - rect.left);
+      draggingGhostOffsetY = Math.max(12, event.clientY - rect.top);
+      const transparentDragImage = document.createElement("canvas");
+      transparentDragImage.width = 1;
+      transparentDragImage.height = 1;
+      transparentDragImage.style.position = "fixed";
+      transparentDragImage.style.left = "-10000px";
+      host.appendChild(transparentDragImage);
+      event.dataTransfer.setDragImage(transparentDragImage, 0, 0);
       card.classList.add("is-dragging");
-      requestAnimationFrame(() => requestAnimationFrame(() => ghost.remove()));
+      requestAnimationFrame(() => transparentDragImage.remove());
+      onCardDragOver(event);
+    }
+
+    function onCardDragOver(event) {
+      event.preventDefault();
+      if (!draggingGhost) return;
+      draggingGhost.style.left = Math.round(event.clientX - draggingGhostOffsetX) + "px";
+      draggingGhost.style.top = Math.round(event.clientY - draggingGhostOffsetY) + "px";
     }
 
     function onCardDragEnd(event) {
       draggingIssueId = "";
+      draggingGhost?.remove();
+      draggingGhost = null;
       event.target.closest("[data-issue-id]")?.classList.remove("is-dragging");
       document.querySelectorAll(".better-codex-card.is-dragging").forEach(node => node.classList.remove("is-dragging"));
     }
@@ -2881,6 +2985,20 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       ensureEntry();
     }
 
+    function findThreadRow(expected) {
+      return Array.from(document.querySelectorAll(SELECTORS.threadRow)).find(item => normalizeSessionId(item.getAttribute(ATTRIBUTES.threadId)) === expected);
+    }
+
+    function currentRouteThreadId() {
+      const match = location.pathname.match(/\\/local\\/([^/?#]+)/);
+      if (!match) return "";
+      try {
+        return normalizeSessionId(decodeURIComponent(match[1]));
+      } catch {
+        return "";
+      }
+    }
+
     function activeThreadId() {
       const activeRow = Array.from(document.querySelectorAll(SELECTORS.threadRow)).find(item => item.getAttribute(ATTRIBUTES.threadActive) === "true");
       return normalizeSessionId(activeRow?.getAttribute(ATTRIBUTES.threadId));
@@ -2888,9 +3006,16 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     async function waitForThreadOpen(expected) {
       const deadline = Date.now() + THREAD_OPEN_TIMEOUT_MS;
+      let clickedRow = false;
       while (Date.now() < deadline) {
         const active = activeThreadId();
         if (active === expected) return { opened: true, via: "sidebar" };
+        if (currentRouteThreadId() === expected) return { opened: true, via: "route" };
+        const row = findThreadRow(expected);
+        if (row && !clickedRow) {
+          clickedRow = true;
+          row.click();
+        }
         await new Promise(resolve => setTimeout(resolve, THREAD_OPEN_POLL_MS));
       }
       throw new Error("thread_open_timeout");
@@ -2899,6 +3024,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     async function openThread(threadId) {
       const expected = normalizeSessionId(threadId);
       if (!expected) throw new Error("thread_id_invalid");
+      const row = findThreadRow(expected);
+      close();
+      if (!row) window.postMessage({ type: NAVIGATION.messageType, path: NAVIGATION.threadRoutePrefix + encodeURIComponent(expected) }, window.location.origin);
       const result = await waitForThreadOpen(expected);
       close();
       return result;
@@ -2929,6 +3057,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         refreshPending = false;
         if (destroyed) return;
         refresh();
+        localizeOwnedTree(document.body);
       });
     }
 
@@ -2961,6 +3090,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       observer = new MutationObserver(scheduleRefresh);
       observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "data-theme", "aria-current", ATTRIBUTES.threadActive] });
       refresh();
+      localizeOwnedTree(document.body);
       void checkUpdateNotice();
       updateTimer = setInterval(checkUpdateNotice, 15000);
     }
