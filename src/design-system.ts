@@ -2177,7 +2177,7 @@ export function betterCodexDesignSystemCss() {
     }
 
     #better-codex-dialog .better-codex-bubble-avatar.is-user.is-initials {
-      font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-family: var(--bc-font-ui);
     }
 
     #better-codex-dialog .better-codex-bubble-avatar.is-codex {
