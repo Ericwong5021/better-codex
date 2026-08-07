@@ -128,6 +128,7 @@ export function betterCodexDesignSystemCss() {
     #better-codex-auto-dispatch-help-dialog,
     #better-codex-context-menu,
     #better-codex-update-notice,
+    #better-codex-completion-notice,
     #better-codex-avatar-picker,
     #better-codex-avatar-cropper {
       font-family: var(--bc-font-ui);
@@ -2994,6 +2995,14 @@ export function betterCodexDesignSystemCss() {
       box-shadow: var(--bc-elevation-float);
     }
 
+    #better-codex-completion-notice {
+      border-color: var(--bc-color-hairline);
+      border-radius: var(--bc-radius-sm);
+      color: var(--bc-color-text);
+      background: var(--bc-color-surface-raised);
+      box-shadow: var(--bc-elevation-menu);
+    }
+
     #better-codex-avatar-picker {
       position: fixed;
       z-index: 120;
@@ -3347,7 +3356,8 @@ export function betterCodexDesignSystemCss() {
     #better-codex-context-menu button:focus-visible,
     #better-codex-avatar-cropper button:focus-visible,
     #better-codex-avatar-cropper input:focus-visible,
-    #better-codex-update-notice button:focus-visible {
+    #better-codex-update-notice button:focus-visible,
+    #better-codex-completion-notice button:focus-visible {
       outline: 0;
       box-shadow: var(--bc-focus-ring);
     }
@@ -3358,7 +3368,8 @@ export function betterCodexDesignSystemCss() {
     #better-codex-confirm button:active,
     #better-codex-context-menu button:active,
     #better-codex-avatar-cropper button:active,
-    #better-codex-update-notice button:active {
+    #better-codex-update-notice button:active,
+    #better-codex-completion-notice button:active {
       transform: scale(.96);
     }
 
@@ -3369,7 +3380,8 @@ export function betterCodexDesignSystemCss() {
       #better-codex-dialog .better-codex-icon-button:hover,
       #better-codex-dialog .better-codex-switch-mode:hover,
       #better-codex-confirm button:hover,
-      #better-codex-update-notice button:hover {
+      #better-codex-update-notice button:hover,
+      #better-codex-completion-notice button:hover {
         color: var(--bc-color-text);
         background: var(--bc-color-hover);
       }
@@ -3485,7 +3497,8 @@ export function betterCodexDesignSystemCss() {
       #better-codex-confirm,
       #better-codex-avatar-picker,
       #better-codex-avatar-cropper,
-      #better-codex-update-notice {
+      #better-codex-update-notice,
+      #better-codex-completion-notice {
         animation: none;
       }
 
@@ -3502,7 +3515,8 @@ export function betterCodexDesignSystemCss() {
       #better-codex-context-menu button,
       #better-codex-avatar-picker button,
       #better-codex-avatar-cropper button,
-      #better-codex-update-notice button {
+      #better-codex-update-notice button,
+      #better-codex-completion-notice button {
         transition: none;
       }
     }

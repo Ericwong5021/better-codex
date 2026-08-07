@@ -470,6 +470,18 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         @keyframes better-codex-update-spin { to { transform: rotate(360deg); } }
         @media (hover: hover) { #better-codex-update-notice .better-codex-update-close:hover, #better-codex-update-notice .better-codex-update-menu-toggle:hover { color: var(--bc-foreground); background: var(--bc-hover); } #better-codex-update-notice .better-codex-update-menu button:hover { background: var(--bc-hover); } #better-codex-update-notice .better-codex-update-button:hover { background: var(--bc-selected); } #better-codex-update-notice .better-codex-update-button.is-primary:hover { background: color-mix(in srgb,var(--bc-primary) 90%,var(--bc-surface)); } }
         @media (prefers-reduced-motion: reduce) { #better-codex-update-notice, #better-codex-update-notice[data-status="installing"] .better-codex-update-icon svg { animation: none; } }
+        #better-codex-completion-notice { position: fixed; right: 16px; bottom: 16px; z-index: 2147483000; display: flex; width: max-content; max-width: min(420px,calc(100vw - 32px)); min-height: 40px; box-sizing: border-box; align-items: center; gap: 8px; padding: 6px 6px 6px 12px; color: var(--color-token-foreground, var(--bc-foreground)); background: var(--color-token-bg-primary, var(--color-background-surface, var(--bc-raised))); border: 1px solid var(--color-token-border, color-mix(in srgb,var(--color-token-foreground, var(--bc-foreground)) 12%,transparent)); border-radius: 10px; box-shadow: var(--shadow-md, 0 8px 24px rgb(0 0 0 / .12)); font-family: var(--font-sans, var(--bc-font-ui)); font-size: var(--font-size-small, var(--bc-text-sm)); animation: better-codex-update-enter .2s cubic-bezier(.16,1,.3,1); }
+        #better-codex-completion-notice .better-codex-completion-layout { display: flex; min-width: 0; align-items: center; gap: 8px; }
+        #better-codex-completion-notice .better-codex-completion-icon { display: inline-flex; width: 16px; height: 16px; flex: 0 0 auto; align-items: center; justify-content: center; color: var(--color-token-foreground, var(--bc-foreground)); }
+        #better-codex-completion-notice .better-codex-completion-icon svg { width: 16px; height: 16px; }
+        #better-codex-completion-notice .better-codex-completion-message { min-width: 0; margin: 0; overflow: hidden; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
+        #better-codex-completion-notice .better-codex-completion-menu-toggle, #better-codex-completion-notice .better-codex-completion-close { display: inline-flex; width: 28px; height: 28px; flex: 0 0 auto; align-items: center; justify-content: center; border: 0; border-radius: 7px; color: var(--color-token-text-secondary, var(--bc-muted)); background: transparent; cursor: pointer; }
+        #better-codex-completion-notice .better-codex-completion-menu { position: absolute; right: 38px; bottom: 38px; z-index: 2; min-width: 148px; box-sizing: border-box; padding: 4px; border: 1px solid var(--color-token-border, var(--bc-border)); border-radius: 8px; color: var(--color-token-foreground, var(--bc-foreground)); background: var(--color-token-bg-primary, var(--bc-raised)); box-shadow: var(--shadow-md, var(--bc-menu-shadow)); }
+        #better-codex-completion-notice .better-codex-completion-menu[hidden] { display: none; }
+        #better-codex-completion-notice .better-codex-completion-menu button { display: flex; width: 100%; min-height: 32px; align-items: center; border: 0; border-radius: 6px; padding: 0 9px; color: inherit; background: transparent; font: inherit; font-size: inherit; text-align: left; cursor: pointer; }
+        #better-codex-completion-notice button:focus-visible { outline: 2px solid var(--color-token-focus-ring, var(--bc-ring)); outline-offset: 1px; }
+        @media (hover: hover) { #better-codex-completion-notice :is(.better-codex-completion-menu-toggle, .better-codex-completion-close):hover, #better-codex-completion-notice .better-codex-completion-menu button:hover { color: var(--color-token-foreground, var(--bc-foreground)); background: var(--color-token-bg-secondary, var(--bc-hover)); } }
+        @media (prefers-reduced-motion: reduce) { #better-codex-completion-notice { animation: none; } }
         #\${PANEL_ID} { font-family: var(--bc-font-ui); background: var(--bc-page); }
         #\${PANEL_ID} .better-codex-error { margin-left: auto; color: var(--bc-danger); font-size: var(--bc-text-sm); }
         #\${PANEL_ID} .better-codex-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 50px; padding: 0 18px; background: #fcfcfc; }
@@ -572,9 +584,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #\${PANEL_ID} .better-codex-link:hover { text-decoration: underline; }
         #\${PANEL_ID} .better-codex-activity { display: inline-flex; align-items: center; gap: 5px; flex: 0 0 auto; font-size: var(--bc-text-caption); font-weight: 600; }
         #\${PANEL_ID} .better-codex-avatar { display: inline-flex; width: 16px; height: 16px; align-items: center; justify-content: center; border: 1.5px solid #fff; border-radius: 999px; color: #fff; background: #27272a; font-size: var(--bc-text-avatar); }
-        #\${PANEL_ID} .better-codex-activity[data-run="running"], #\${PANEL_ID} .better-codex-activity[data-run="replying"] { color: #52525b; }
+        #\${PANEL_ID} .better-codex-activity[data-run="running"], #\${PANEL_ID} .better-codex-activity[data-run="thinking"], #\${PANEL_ID} .better-codex-activity[data-run="replying"] { color: #52525b; }
         #\${PANEL_ID} .better-codex-activity[data-run="reply-failed"] { color: #dc2626; }
-        #\${PANEL_ID} .better-codex-activity[data-run="reply-succeeded"] { color: #15803d; }
+        #\${PANEL_ID} .better-codex-activity[data-run="reply-succeeded"], #\${PANEL_ID} .better-codex-activity[data-run="completed"] { color: #15803d; }
+        #\${PANEL_ID} .better-codex-activity[data-run="failed"], #\${PANEL_ID} .better-codex-activity[data-run="interrupted"] { color: #dc2626; }
+        #\${PANEL_ID} .better-codex-activity[data-run="not-started"] { color: var(--bc-muted); font-weight: 500; }
         #\${PANEL_ID} .better-codex-activity[data-run="claimed"] { color: var(--bc-muted); opacity: .62; }
         @keyframes better-codex-shimmer { 0% { background-position: 200% 0 } 100% { background-position: -200% 0 } }
         #\${PANEL_ID} .better-codex-shimmer { background-image: linear-gradient(90deg,#71717a 0%,#71717a 35%,#18181b 50%,#71717a 65%,#71717a 100%); background-size: 200% 100%; background-clip: text; -webkit-background-clip: text; color: transparent; -webkit-text-fill-color: transparent; animation: better-codex-shimmer 2.5s linear infinite; }
@@ -742,9 +756,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #\${PANEL_ID} .better-codex-card-avatar.is-fallback, #\${PANEL_ID} .better-codex-card-avatar.is-icon { color: var(--bc-muted); background: var(--bc-hover); }
         #\${PANEL_ID} .better-codex-card-avatar.is-codex { color: inherit; background: transparent; }
         #\${PANEL_ID} .better-codex-avatar, #\${PANEL_ID} .better-codex-agent-card-avatar { color: var(--bc-primary-foreground); background: var(--bc-primary); }
-        #\${PANEL_ID} .better-codex-activity[data-run="running"], #\${PANEL_ID} .better-codex-activity[data-run="replying"] { color: var(--bc-foreground); }
+        #\${PANEL_ID} .better-codex-activity[data-run="running"], #\${PANEL_ID} .better-codex-activity[data-run="thinking"], #\${PANEL_ID} .better-codex-activity[data-run="replying"] { color: var(--bc-foreground); }
         #\${PANEL_ID} .better-codex-activity[data-run="reply-failed"] { color: var(--bc-danger); }
-        #\${PANEL_ID} .better-codex-activity[data-run="reply-succeeded"] { color: #65c18c; }
+        #\${PANEL_ID} .better-codex-activity[data-run="reply-succeeded"], #\${PANEL_ID} .better-codex-activity[data-run="completed"] { color: #65c18c; }
+        #\${PANEL_ID} .better-codex-activity[data-run="failed"], #\${PANEL_ID} .better-codex-activity[data-run="interrupted"] { color: var(--bc-danger); }
+        #\${PANEL_ID} .better-codex-activity[data-run="not-started"] { color: var(--bc-muted); font-weight: 500; }
         #\${PANEL_ID} .better-codex-shimmer { background-image: linear-gradient(90deg,var(--bc-muted) 0%,var(--bc-muted) 35%,var(--bc-foreground) 50%,var(--bc-muted) 65%,var(--bc-muted) 100%); }
         #\${PANEL_ID} .better-codex-empty { color: var(--bc-faint); }
         #\${PANEL_ID} .better-codex-agent-heading strong, #\${PANEL_ID} .better-codex-agents-empty strong { color: var(--bc-foreground); }
@@ -1099,7 +1115,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       completionNoticeMenuDismiss = null;
       updateNotice?.remove();
       updateNotice = document.createElement("section");
-      updateNotice.id = "better-codex-update-notice";
+      updateNotice.id = "better-codex-completion-notice";
       updateNotice.dataset.status = "completed";
       updateNotice.setAttribute(OWNED, "true");
       updateNotice.setAttribute("role", "status");
@@ -1108,7 +1124,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const title = String(issue?.title || "").trim();
       const subject = [identifier, title].filter(Boolean).join(" ");
       const description = state.locale === "zh-CN" ? (subject ? subject + " 已完成。" : "任务已完成。") : (subject ? subject + " is complete." : "The task is complete.");
-      updateNotice.innerHTML = '<button class="better-codex-update-menu-toggle" type="button" aria-label="更多操作" aria-expanded="false" aria-haspopup="menu" data-completion-menu-toggle>' + icon("more") + '</button><div class="better-codex-update-menu" data-completion-menu hidden><button type="button" role="menuitem" data-completion-suppress>本次启动关闭</button></div><button class="better-codex-update-close" type="button" aria-label="关闭">' + icon("close") + '</button><div class="better-codex-update-layout"><span class="better-codex-update-icon">' + icon("check") + '</span><div class="better-codex-update-copy"><p class="better-codex-update-title">任务已完成</p><p class="better-codex-update-description">' + escapeHtml(description) + '</p><p class="better-codex-update-error" hidden></p><div class="better-codex-update-actions"><button class="better-codex-update-button is-primary" type="button" data-completion-dismiss>知道了</button></div></div></div>';
+      updateNotice.innerHTML = '<div class="better-codex-completion-layout"><span class="better-codex-completion-icon">' + icon("check") + '</span><p class="better-codex-completion-message">' + escapeHtml(description) + '</p></div><button class="better-codex-completion-menu-toggle" type="button" aria-label="更多操作" aria-expanded="false" aria-haspopup="menu" data-completion-menu-toggle>' + icon("more") + '</button><div class="better-codex-completion-menu" data-completion-menu hidden><button type="button" role="menuitem" data-completion-suppress>本次启动关闭</button></div><button class="better-codex-completion-close" type="button" aria-label="关闭">' + icon("close") + '</button>';
       document.body.appendChild(updateNotice);
       const notice = updateNotice;
       const menuToggle = notice.querySelector("[data-completion-menu-toggle]");
@@ -1143,8 +1159,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         notice.remove();
         updateNotice = null;
       };
-      notice.querySelector(".better-codex-update-close").addEventListener("click", dismiss);
-      notice.querySelector("[data-completion-dismiss]").addEventListener("click", dismiss);
+      notice.querySelector(".better-codex-completion-close").addEventListener("click", dismiss);
       completionNoticeTimer = setTimeout(dismiss, 5000);
     }
 
@@ -2178,10 +2193,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           const activityAgent = assignee || defaultAgent || { name: "Codex", is_default: true };
           const replyStatus = issue.reply_status || "idle";
           const replyActivityState = replyStatus === "running" ? "replying" : replyStatus === "failed" ? "reply-failed" : replyStatus === "succeeded" ? "reply-succeeded" : "";
-          const activityState = issue.active_run_status || replyActivityState;
+          const latestRunStatus = issue.latest_run_status || "";
+          const executionState = latestRunStatus === "completed" ? "completed" : latestRunStatus === "failed" ? "failed" : latestRunStatus === "interrupted" ? "interrupted" : latestRunStatus === "running" ? "running" : latestRunStatus === "claimed" ? "claimed" : issue.agent_enabled ? "not-started" : "";
+          const activityState = enrichmentLocked ? "thinking" : issue.active_run_status || replyActivityState || executionState;
           const replyActivity = !issue.active_run_status && Boolean(replyActivityState);
+          const activityLabel = enrichmentLocked ? "Thinking" : replyActivity ? (replyStatus === "running" ? "回复中" : replyStatus === "failed" ? "回复失败" : "回复完成") : activityState === "running" ? "Working" : activityState === "claimed" ? "Queued" : activityState === "completed" ? "已完成" : activityState === "failed" ? "执行失败" : activityState === "interrupted" ? "已中断" : activityState === "not-started" ? "未开始" : "";
+          const activityIcon = ["completed", "failed", "interrupted", "not-started"].includes(activityState) ? icon(activityState === "completed" ? "check" : activityState === "not-started" ? "circle" : "close") : agentAvatarMarkup(activityAgent, "better-codex-card-avatar");
           const activity = activityState
-            ? '<span class="better-codex-activity" data-run="' + escapeHtml(activityState) + '">' + agentAvatarMarkup(activityAgent, "better-codex-card-avatar") + '<span class="' + (replyActivityState === "replying" || issue.active_run_status === "running" ? "better-codex-shimmer" : "") + '">' + (replyActivity ? (replyStatus === "running" ? "回复中" : replyStatus === "failed" ? "回复失败" : "回复完成") : issue.active_run_status === "running" ? "Working" : "Queued") + '</span></span>'
+            ? '<span class="better-codex-activity" data-run="' + escapeHtml(activityState) + '">' + activityIcon + '<span class="' + (enrichmentLocked || replyActivityState === "replying" || issue.active_run_status === "running" ? "better-codex-shimmer" : "") + '">' + activityLabel + '</span></span>'
             : "";
           const description = String(issue.description || "").replace(/[#*_\`~>\[\]()]/g, "").replace(/\s+/g, " ").trim();
           const issueProject = state.projects.find(item => item.id === issue.project_id) || project;
@@ -2212,6 +2231,18 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       }
       issueStatusSnapshot = new Map(issues.map(issue => [issue.id, issue.status]));
       state.issues = issues;
+      const dialog = document.getElementById("better-codex-dialog");
+      const dialogIssue = dialog?.dataset.issueId ? issues.find(issue => issue.id === dialog.dataset.issueId) : null;
+      const dialogExecutionRunning = dialogIssue?.active_run_status === "claimed" || dialogIssue?.active_run_status === "running";
+      if (dialog && dialogIssue && dialogExecutionRunning && dialog.dataset.executionLocked !== "true") {
+        dialog.dataset.executionLocked = "true";
+        dialog.dataset.locked = "true";
+        dialog.querySelectorAll("input, textarea, select, button").forEach(control => {
+          if (control.matches("[data-dialog-close], [data-dialog-expand], [data-dialog-open-thread]")) return;
+          control.disabled = true;
+        });
+        dialog.querySelector(".better-codex-dialog-footer")?.remove();
+      }
       if (options.background && state.surface === "agents" && state.agentPane !== "preview") return;
       render();
     }
@@ -2406,6 +2437,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     async function openEditor(issue = null, initialStatus = "todo") {
       state.agents = await api("/api/agents");
+      if (issue) issue = await api("/api/issues/" + encodeURIComponent(issue.id));
       state.selected = issue;
       document.getElementById("better-codex-dialog")?.remove();
       const context = readContext();
@@ -2437,7 +2469,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const enrichmentLocked = Boolean(issue?.enrichment_status === "pending");
       const executionRunning = issue?.active_run_status === "claimed" || issue?.active_run_status === "running";
       const executionLocked = executionRunning || Boolean(issue?.run_thread_id);
+      const completedIssue = Boolean(issue?.run_thread_id) && !executionRunning;
       const editingLocked = enrichmentLocked || executionLocked;
+      let completedIssueUpdate = Promise.resolve();
 
       function stopConversationPoll() {
         if (conversationTimer !== null) {
@@ -2462,6 +2496,19 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           draft.prompt = String(values.get("prompt") || "");
           draft.agentId = String(values.get("agent_id") || "");
         }
+      }
+
+      function persistCompletedIssuePatch(patch) {
+        if (!completedIssue || !issue) return;
+        completedIssueUpdate = completedIssueUpdate.then(async () => {
+          try {
+            const updated = await api("/api/issues/" + encodeURIComponent(issue.id), { method: "PATCH", body: JSON.stringify({ version: issue.version, ...patch }) });
+            Object.assign(issue, updated);
+            await loadIssues();
+          } catch (error) {
+            showError(error);
+          }
+        });
       }
 
       function header() {
@@ -2688,6 +2735,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         stopConversationPoll();
         dialog.dataset.mode = draft.mode;
         dialog.dataset.detail = issue ? "true" : "false";
+        dialog.dataset.issueId = issue?.id || "";
+        dialog.dataset.executionLocked = String(executionRunning);
         dialog.dataset.expanded = String(draft.expanded);
         dialog.dataset.locked = String(editingLocked);
         if (draft.mode === "agent") {
@@ -2721,6 +2770,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (executionLocked) {
           dialog.querySelectorAll("input, textarea, select, button").forEach(control => {
             if (control.matches("[data-dialog-close], [data-dialog-expand], [data-dialog-open-thread]")) return;
+            if (completedIssue && (control.matches('[name="reply"], [data-conversation-send]') || control.closest('[data-dialog-select="status"], [data-dialog-select="priority"], [data-dialog-select="assignee"]'))) return;
             control.disabled = true;
           });
         }
@@ -2784,6 +2834,15 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           if (name === "status") draft.status = value;
           if (name === "priority") draft.priority = value;
           if (name === "assignee") draft.assignee = value;
+          if (completedIssue) {
+            if (name === "status") persistCompletedIssuePatch({ status: value });
+            if (name === "priority") persistCompletedIssuePatch({ priority: value });
+            if (name === "assignee") persistCompletedIssuePatch(value === "user"
+              ? { user_assigned: true, agent_enabled: false, agent_id: "" }
+              : value === "none"
+                ? { user_assigned: false, agent_enabled: false, agent_id: "" }
+                : { user_assigned: false, agent_enabled: true, agent_id: value === "codex" ? "" : value });
+          }
           if (name === "agent_id") {
             draft.agentId = value;
             const selectedAgent = state.agents.find(agent => agent.id === draft.agentId);
