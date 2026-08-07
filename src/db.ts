@@ -11,6 +11,7 @@ export type IssueStatus = typeof issueStatuses[number];
 export type IssuePriority = typeof issuePriorities[number];
 export type AgentModel = string;
 export type AgentReasoningEffort = string;
+export type AgentSandboxMode = "read-only" | "workspace-write" | "danger-full-access";
 
 export type AgentProfile = {
   id: string;
@@ -20,6 +21,7 @@ export type AgentProfile = {
   instructions: string;
   model: AgentModel;
   reasoning_effort: AgentReasoningEffort;
+  sandbox_mode: AgentSandboxMode;
   max_concurrency: number;
   version: number;
   created_at: string;
@@ -66,6 +68,7 @@ export type Issue = {
   updated_at: string;
   active_run_status?: "claimed" | "running" | null;
   active_run_started_at?: string | null;
+  latest_run_status?: "claimed" | "running" | "completed" | "failed" | "interrupted" | null;
   run_thread_id?: string | null;
 };
 
@@ -99,11 +102,12 @@ type IssueInput = {
 
 type IssuePatch = Partial<Pick<Issue, "project_id" | "title" | "description" | "status" | "priority" | "labels" | "sort_order" | "pinned" | "thread_id" | "workspace_path" | "agent_enabled" | "agent_id" | "user_assigned" | "needs_attention" | "pending_actor" | "enrichment_status">>;
 
-type AgentProfileInput = Pick<AgentProfile, "name" | "description" | "instructions" | "model" | "reasoning_effort"> & { max_concurrency?: number };
+type AgentProfileInput = Pick<AgentProfile, "name" | "description" | "instructions" | "model" | "reasoning_effort"> & { sandbox_mode?: AgentSandboxMode; max_concurrency?: number };
 type AgentProfilePatch = Partial<AgentProfileInput>;
 
 export const defaultAgentMaxConcurrency = 5;
 export const agentMaxConcurrencyLimit = 20;
+export const agentSandboxModes: AgentSandboxMode[] = ["read-only", "workspace-write", "danger-full-access"];
 
 export function cleanMaxConcurrency(value: number | undefined) {
   if (value === undefined) return defaultAgentMaxConcurrency;
@@ -148,7 +152,9 @@ function cleanAgentProfile(input: AgentProfileInput) {
   if (instructions.length > 100000) throw new Error("agent_instructions_too_long");
   if (!input.model.trim() || input.model.length > 80) throw new Error("invalid_agent_model");
   if (!input.reasoning_effort.trim() || input.reasoning_effort.length > 20) throw new Error("invalid_agent_reasoning_effort");
-  return { name, description, instructions, model: input.model, reasoning_effort: input.reasoning_effort, max_concurrency: cleanMaxConcurrency(input.max_concurrency) };
+  const sandbox_mode = input.sandbox_mode || "workspace-write";
+  if (!agentSandboxModes.includes(sandbox_mode)) throw new Error("invalid_agent_sandbox_mode");
+  return { name, description, instructions, model: input.model, reasoning_effort: input.reasoning_effort, sandbox_mode, max_concurrency: cleanMaxConcurrency(input.max_concurrency) };
 }
 
 function cleanLabels(values: string[]) {
@@ -341,6 +347,7 @@ export class Store {
         instructions TEXT NOT NULL,
         model TEXT NOT NULL,
         reasoning_effort TEXT NOT NULL,
+        sandbox_mode TEXT NOT NULL DEFAULT 'workspace-write',
         max_concurrency INTEGER NOT NULL DEFAULT ${defaultAgentMaxConcurrency},
         version INTEGER NOT NULL DEFAULT 1,
         created_at TEXT NOT NULL,
@@ -348,6 +355,7 @@ export class Store {
       );
     `);
     const columns = new Set((this.db.prepare("PRAGMA table_info(agent_profiles)").all() as Array<{ name: string }>).map(item => item.name));
+    if (!columns.has("sandbox_mode")) this.db.exec("ALTER TABLE agent_profiles ADD COLUMN sandbox_mode TEXT NOT NULL DEFAULT 'workspace-write'");
     if (!columns.has("max_concurrency")) this.db.exec(`ALTER TABLE agent_profiles ADD COLUMN max_concurrency INTEGER NOT NULL DEFAULT ${defaultAgentMaxConcurrency}`);
   }
 
@@ -530,9 +538,9 @@ export class Store {
     const role = `better_codex_${id.replaceAll("-", "")}`;
     const timestamp = now();
     this.db.prepare(`
-      INSERT INTO agent_profiles (id, role, name, description, instructions, model, reasoning_effort, max_concurrency, version, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
-    `).run(id, role, profile.name, profile.description, profile.instructions, profile.model, profile.reasoning_effort, profile.max_concurrency, timestamp, timestamp);
+      INSERT INTO agent_profiles (id, role, name, description, instructions, model, reasoning_effort, sandbox_mode, max_concurrency, version, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+    `).run(id, role, profile.name, profile.description, profile.instructions, profile.model, profile.reasoning_effort, profile.sandbox_mode, profile.max_concurrency, timestamp, timestamp);
     return this.getAgentProfile(id)!;
   }
 
@@ -546,12 +554,13 @@ export class Store {
       instructions: patch.instructions ?? current.instructions,
       model: patch.model ?? current.model,
       reasoning_effort: patch.reasoning_effort ?? current.reasoning_effort,
+      sandbox_mode: patch.sandbox_mode ?? current.sandbox_mode ?? "workspace-write",
       max_concurrency: patch.max_concurrency ?? current.max_concurrency,
     });
     const result = this.db.prepare(`
-      UPDATE agent_profiles SET name = ?, description = ?, instructions = ?, model = ?, reasoning_effort = ?, max_concurrency = ?, version = version + 1, updated_at = ?
+      UPDATE agent_profiles SET name = ?, description = ?, instructions = ?, model = ?, reasoning_effort = ?, sandbox_mode = ?, max_concurrency = ?, version = version + 1, updated_at = ?
       WHERE id = ? AND version = ?
-    `).run(profile.name, profile.description, profile.instructions, profile.model, profile.reasoning_effort, profile.max_concurrency, now(), current.id, version);
+    `).run(profile.name, profile.description, profile.instructions, profile.model, profile.reasoning_effort, profile.sandbox_mode, profile.max_concurrency, now(), current.id, version);
     if (result.changes !== 1) throw new Error("version_conflict");
     return this.getAgentProfile(current.id)!;
   }
@@ -598,7 +607,7 @@ export class Store {
     }
     const rows = this.db.prepare(`
       SELECT issues.*, active_run.status AS active_run_status, active_run.started_at AS active_run_started_at,
-        latest_run.thread_id AS run_thread_id
+        latest_run.status AS latest_run_status, latest_run.thread_id AS run_thread_id
       FROM issues
       LEFT JOIN issue_runs AS active_run
         ON active_run.id = (
@@ -629,6 +638,32 @@ export class Store {
   getIssue(id: string) {
     const row = this.db.prepare(`
       SELECT issues.*,
+        (
+          SELECT issue_runs.status
+          FROM issue_runs
+          WHERE issue_runs.issue_id = issues.id
+            AND issue_runs.status IN ('claimed', 'running')
+          ORDER BY issue_runs.started_at DESC
+          LIMIT 1
+        ) AS active_run_status,
+        (
+          SELECT issue_runs.started_at
+          FROM issue_runs
+          WHERE issue_runs.issue_id = issues.id
+            AND issue_runs.status IN ('claimed', 'running')
+          ORDER BY issue_runs.started_at DESC
+          LIMIT 1
+        ) AS active_run_started_at,
+        (
+          SELECT issue_runs.status
+          FROM issue_runs
+          WHERE issue_runs.issue_id = issues.id
+            AND issue_runs.thread_id IS NOT NULL
+            AND issue_runs.thread_id NOT LIKE 'local:%'
+            AND issue_runs.thread_id NOT LIKE 'cloud:%'
+          ORDER BY issue_runs.started_at DESC
+          LIMIT 1
+        ) AS latest_run_status,
         (
           SELECT issue_runs.thread_id
           FROM issue_runs
@@ -726,7 +761,7 @@ export class Store {
       if (!issue) throw new Error("issue_not_found");
       if (issue.version !== version) throw new Error("version_conflict");
       if (issue.enrichment_status === "pending" && patch.enrichment_status === undefined) throw new Error("issue_enrichment_pending");
-      if (issue.run_thread_id && (patch.title !== undefined || patch.description !== undefined)) throw new Error("issue_execution_locked");
+      if ((issue.run_thread_id || issue.active_run_status) && (patch.title !== undefined || patch.description !== undefined)) throw new Error("issue_execution_locked");
       if (patch.project_id !== undefined && !this.getProject(patch.project_id)) throw new Error("project_not_found");
       if (patch.user_assigned !== undefined) patch.user_assigned = Boolean(patch.user_assigned);
       if (patch.user_assigned === true) {

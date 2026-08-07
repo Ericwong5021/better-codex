@@ -2,9 +2,9 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { createWriteStream, existsSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
-import { agentConfigProfileName } from "./agent-profiles.js";
+import { agentConfigProfileName, defaultAgentProfile } from "./agent-profiles.js";
 import { debugLoggingEnabled, runLogPath, workerLogPath } from "./config.js";
-import { Store, type ClaimedIssue, type Issue } from "./db.js";
+import { agentSandboxModes, Store, type AgentSandboxMode, type ClaimedIssue, type Issue } from "./db.js";
 
 const interval = 60000;
 const enrichmentTimeout = 30000;
@@ -101,6 +101,11 @@ export class IssueWorker {
     this.runs.clear();
     for (const child of this.enrichments.values()) child.kill("SIGTERM");
     this.enrichments.clear();
+  }
+
+  private sandboxMode(agentId: string | null) {
+    const mode = agentId ? this.store.getAgentProfile(agentId)?.sandbox_mode : defaultAgentProfile().sandbox_mode;
+    return agentSandboxModes.includes(mode as AgentSandboxMode) ? mode as AgentSandboxMode : "workspace-write";
   }
 
   enrichIssue(issue: Issue, prompt: string, agentId: string) {
@@ -311,7 +316,7 @@ export class IssueWorker {
       "-C",
       workspacePath,
       "-s",
-      "workspace-write",
+      this.sandboxMode(claim.issue.agent_id),
       "-c",
       'approval_policy="on-request"',
       "-c",

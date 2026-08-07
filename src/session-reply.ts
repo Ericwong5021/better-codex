@@ -3,6 +3,7 @@ import { createWriteStream, existsSync } from "node:fs";
 import { join } from "node:path";
 import { agentConfigProfileName } from "./agent-profiles.js";
 import { runLogPath } from "./config.js";
+import type { AgentSandboxMode } from "./db.js";
 import { normalizeSessionId, sessionWorkspace } from "./session-transcript.js";
 
 function codexPath() {
@@ -55,6 +56,7 @@ export function startIssueReply(input: {
   workspacePath?: string | null;
   message: string;
   agentId?: string | null;
+  sandboxMode: AgentSandboxMode;
 }) {
   const issueId = input.issueId;
   const current = replies.get(issueId);
@@ -81,7 +83,7 @@ export function startIssueReply(input: {
     "-C",
     workspacePath,
     "-s",
-    "workspace-write",
+    input.sandboxMode,
     "-c",
     'approval_policy="on-request"',
     "-c",

@@ -1,10 +1,12 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import type { AgentProfile } from "./db.js";
+import type { AgentProfile, AgentSandboxMode } from "./db.js";
 
 const codexHome = process.env.CODEX_HOME || join(homedir(), ".codex");
 const configPath = join(codexHome, "config.toml");
+const defaultSandboxMode: AgentSandboxMode = "workspace-write";
+const sandboxModes: AgentSandboxMode[] = ["read-only", "workspace-write", "danger-full-access"];
 
 function topLevelString(source: string, key: string) {
   for (const line of source.split("\n")) {
@@ -36,6 +38,11 @@ function withTopLevelString(source: string, key: string, value: string) {
   return lines.join("\n");
 }
 
+function sandboxMode(source: string) {
+  const value = topLevelString(source, "sandbox_mode") as AgentSandboxMode;
+  return sandboxModes.includes(value) ? value : defaultSandboxMode;
+}
+
 export function defaultAgentProfile(path = configPath) {
   const source = existsSync(path) ? readFileSync(path, "utf8") : "";
   return {
@@ -46,6 +53,7 @@ export function defaultAgentProfile(path = configPath) {
     instructions: "使用 Codex 默认配置承接并执行 Better Codex Issue。",
     model: topLevelString(source, "model") || "默认模型",
     reasoning_effort: topLevelString(source, "model_reasoning_effort") || "默认推理等级",
+    sandbox_mode: sandboxMode(source),
     version: 1,
     created_at: "",
     updated_at: "",
@@ -53,9 +61,9 @@ export function defaultAgentProfile(path = configPath) {
   };
 }
 
-export function updateDefaultAgentProfile(input: { model: string; reasoning_effort: string }, path = configPath) {
+export function updateDefaultAgentProfile(input: { model: string; reasoning_effort: string; sandbox_mode?: AgentSandboxMode }, path = configPath) {
   const source = existsSync(path) ? readFileSync(path, "utf8") : "";
-  const next = withTopLevelString(withTopLevelString(source, "model", input.model), "model_reasoning_effort", input.reasoning_effort);
+  const next = withTopLevelString(withTopLevelString(withTopLevelString(source, "model", input.model), "model_reasoning_effort", input.reasoning_effort), "sandbox_mode", input.sandbox_mode || defaultSandboxMode);
   mkdirSync(dirname(path), { recursive: true });
   if (next !== source) writeFileSync(path, next, { mode: 0o600 });
   return defaultAgentProfile(path);
@@ -95,6 +103,7 @@ export function syncAgentProfiles(profiles: AgentProfile[], home = codexHome) {
     const configuration = [
       `model = ${quoted(profile.model)}`,
       `model_reasoning_effort = ${quoted(profile.reasoning_effort)}`,
+      `sandbox_mode = ${quoted(profile.sandbox_mode)}`,
       profile.instructions ? `developer_instructions = ${quoted(profile.instructions)}` : "",
       "",
     ].filter(Boolean).join("\n") + "\n";

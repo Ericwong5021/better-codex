@@ -3,7 +3,7 @@ import { closeSync, openSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { isSea } from "node:sea";
 import { coreVersion, readCompatibilityStatus } from "./compatibility.js";
-import { cleanMaxConcurrency, issuePriorities, issueStatuses, Store, type AgentModel, type AgentReasoningEffort, type IssuePriority, type IssueStatus } from "./db.js";
+import { agentSandboxModes, cleanMaxConcurrency, issuePriorities, issueStatuses, Store, type AgentModel, type AgentReasoningEffort, type AgentSandboxMode, type IssuePriority, type IssueStatus } from "./db.js";
 import { defaultAgentProfile, syncAgentProfiles, updateDefaultAgentProfile } from "./agent-profiles.js";
 import { readCodexAppearance } from "./appearance.js";
 import { readCodexLocale } from "./locale.js";
@@ -108,6 +108,12 @@ function asMaxConcurrency(value: unknown) {
   return cleanMaxConcurrency(parsed);
 }
 
+function asSandboxMode(value: unknown): AgentSandboxMode {
+  if (value === undefined || value === null || value === "") return "workspace-write";
+  if (!agentSandboxModes.includes(value as AgentSandboxMode)) throw new Error("invalid_agent_sandbox_mode");
+  return value as AgentSandboxMode;
+}
+
 function agentProfileInput(body: Record<string, unknown>) {
   return {
     name: cleanString(body.name, 80),
@@ -115,6 +121,7 @@ function agentProfileInput(body: Record<string, unknown>) {
     instructions: cleanString(body.instructions, 100000),
     model: cleanString(body.model, 80) as AgentModel,
     reasoning_effort: cleanString(body.reasoning_effort, 20) as AgentReasoningEffort,
+    sandbox_mode: asSandboxMode(body.sandbox_mode),
     max_concurrency: asMaxConcurrency(body.max_concurrency),
   };
 }
@@ -124,7 +131,7 @@ function defaultAgentInput(body: Record<string, unknown>) {
   const reasoning_effort = cleanString(body.reasoning_effort, 20) as AgentReasoningEffort;
   if (!model) throw new Error("invalid_agent_model");
   if (!reasoning_effort) throw new Error("invalid_agent_reasoning_effort");
-  return { model, reasoning_effort, max_concurrency: asMaxConcurrency(body.max_concurrency) };
+  return { model, reasoning_effort, sandbox_mode: asSandboxMode(body.sandbox_mode), max_concurrency: asMaxConcurrency(body.max_concurrency) };
 }
 
 function asAgentAvatar(value: unknown) {
@@ -217,6 +224,7 @@ export function startServer() {
     avatar: store.getAgentAvatar(profile.is_default ? "default" : profile.id),
   });
   const withDefaultConcurrency = <T,>(profile: T) => ({ ...profile, max_concurrency: store.getDefaultAgentMaxConcurrency() });
+  const sandboxModeForAgent = (agentId: string | null | undefined) => agentId ? store.getAgentProfile(agentId)?.sandbox_mode || defaultAgentProfile().sandbox_mode : defaultAgentProfile().sandbox_mode;
   const visibleAgentProfiles = () => [withAvatar(withDefaultConcurrency(defaultAgentProfile())), ...store.listAgentProfiles().map(withAvatar)];
   const stopUpdateChecks = startGatewayUpdateChecks();
   const cleanup = () => {
@@ -446,7 +454,7 @@ export function startServer() {
           });
         }
         if (method === "POST" && path[3] === "reply" && path.length === 4) {
-          if (!store.canAutoStartFromUserMessage(issue)) {
+          if (!issue.run_thread_id && !store.canAutoStartFromUserMessage(issue)) {
             throw new Error(store.getAutoDispatch() ? "backlog_reply_blocked" : "manual_start_required");
           }
           const body = await readBody(request);
@@ -457,6 +465,7 @@ export function startServer() {
             workspacePath: issue.workspace_path,
             message: cleanString(body.message, 100000),
             agentId: issue.agent_id,
+            sandboxMode: sandboxModeForAgent(issue.agent_id),
           });
           return sendJson(response, 202, reply);
         }
