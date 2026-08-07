@@ -5,7 +5,7 @@ description: Operate Better Codex issues through its local CLI. Use when a Codex
 
 # Better Codex
 
-`better-codex-issue` is the structured-session entry skill. When a session prompt contains a title, details, taskid, and asks you to follow `/better-codex-issue` rules, use this skill for Issue operations and board synchronization.
+`better-codex-issue` is the structured-session entry skill. When a session prompt contains issue details, a taskid, and asks you to follow `/better-codex-issue` rules, use this skill for Issue operations and board synchronization.
 
 Use the `better-codex` CLI as the only interface. Do not edit the Better Codex database directly.
 
@@ -20,7 +20,7 @@ The normal queue still requires all of these conditions: the issue needs attenti
 
 ## Identify the current issue
 
-Treat the session as managed only when its task prompt identifies a Better Codex issue with a non-empty taskid. Capture that identifier and use it for all later CLI commands. The title and details supplied in the prompt are the current task context; do not re-fetch the Issue just to rebuild that context.
+Treat the session as managed only when its task prompt identifies a Better Codex issue with a non-empty taskid. Capture that identifier and use it for all later CLI commands. The issue details supplied in the prompt are the current task context; do not re-fetch the Issue just to rebuild that context.
 
 If the prompt does not identify an issue, do not guess one. If the CLI or runtime is unavailable, report the problem once and continue the user's work without changing the board.
 

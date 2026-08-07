@@ -63,6 +63,7 @@ export type Issue = {
   needs_attention: boolean;
   pending_actor: PendingActor;
   enrichment_status: EnrichmentStatus;
+  reply_draft: string;
   version: number;
   created_at: string;
   updated_at: string;
@@ -100,7 +101,7 @@ type IssueInput = {
   enrichmentStatus?: EnrichmentStatus;
 };
 
-type IssuePatch = Partial<Pick<Issue, "project_id" | "title" | "description" | "status" | "priority" | "labels" | "sort_order" | "pinned" | "thread_id" | "workspace_path" | "agent_enabled" | "agent_id" | "user_assigned" | "needs_attention" | "pending_actor" | "enrichment_status">>;
+type IssuePatch = Partial<Pick<Issue, "project_id" | "title" | "description" | "status" | "priority" | "labels" | "sort_order" | "pinned" | "thread_id" | "workspace_path" | "agent_enabled" | "agent_id" | "user_assigned" | "needs_attention" | "pending_actor" | "enrichment_status" | "reply_draft">>;
 
 type AgentProfileInput = Pick<AgentProfile, "name" | "description" | "instructions" | "model" | "reasoning_effort"> & { sandbox_mode?: AgentSandboxMode; max_concurrency?: number };
 type AgentProfilePatch = Partial<AgentProfileInput>;
@@ -199,6 +200,7 @@ export class Store {
     this.ensureSettingsTable();
     this.ensureDispatchColumns();
     this.ensureEnrichmentColumn();
+    this.ensureReplyDraftColumn();
     const integrity = this.db.prepare("PRAGMA quick_check").get() as Record<string, unknown> | undefined;
     if (String(integrity?.quick_check ?? "") !== "ok") {
       this.db.close();
@@ -326,6 +328,11 @@ export class Store {
     const columns = new Set((this.db.prepare("PRAGMA table_info(issues)").all() as Array<{ name: string }>).map(item => item.name));
     if (!columns.has("enrichment_status")) this.db.exec("ALTER TABLE issues ADD COLUMN enrichment_status TEXT");
     this.db.exec("CREATE INDEX IF NOT EXISTS issues_enrichment_status ON issues(enrichment_status)");
+  }
+
+  private ensureReplyDraftColumn() {
+    const columns = new Set((this.db.prepare("PRAGMA table_info(issues)").all() as Array<{ name: string }>).map(item => item.name));
+    if (!columns.has("reply_draft")) this.db.exec("ALTER TABLE issues ADD COLUMN reply_draft TEXT NOT NULL DEFAULT ''");
   }
 
   private ensureSettingsTable() {
@@ -810,6 +817,7 @@ export class Store {
         needs_attention: "needs_attention",
         pending_actor: "pending_actor",
         enrichment_status: "enrichment_status",
+        reply_draft: "reply_draft",
       };
       const assignments: string[] = [];
       const values: unknown[] = [];

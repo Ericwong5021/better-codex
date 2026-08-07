@@ -27,7 +27,7 @@ test("injected panel opts out of the native Electron drag region", () => {
   assert.match(css, /\.better-codex-toolbar :is\(button, input, a, select, textarea, label\)[^}]*-webkit-app-region:\s*no-drag;/s);
 });
 
-test("leaving the app surface suspends the panel and immediately restores its previous surface", () => {
+test("leaving the app surface suspends the panel and restores its previous surface", () => {
   const source = injectionScript(4317, "test-token", "install");
 
   assert.ok(source.includes('createEntry("任务看板", ENTRY_ID, "打开任务看板", "issues")'));
@@ -39,7 +39,9 @@ test("leaving the app surface suspends the panel and immediately restores its pr
   assert.ok(source.includes("const entriesAvailable = ensureEntry()"));
   assert.ok(source.includes("if (active) close({ resume: true })"));
   assert.ok(source.includes('if (!active && ["issues", "agents"].includes(resumeSurface)) return open(resumeSurface)'));
-  assert.ok(source.includes("queueMicrotask(() =>"));
+  assert.ok(source.includes("function scheduleRefresh()"));
+  assert.ok(source.includes("refreshTimer = setTimeout(() =>"));
+  assert.ok(source.includes("}, 50);"));
   assert.ok(source.includes("if (content && content.textContent !== text) content.textContent = text"));
   assert.ok(source.includes("if (svg.innerHTML !== definition.nodes) svg.innerHTML = definition.nodes"));
   assert.doesNotMatch(source, /function scheduleRefresh\(\)[\s\S]*?setTimeout\([\s\S]*?160/);
@@ -122,7 +124,7 @@ test("issues toolbar has a toggleable auto-dispatch icon between filter and crea
   const css = betterCodexDesignSystemCss();
 
   assert.ok(source.includes('id = "better-codex-auto-dispatch"'));
-  assert.ok(source.includes("actions.append(error, working, search, filterWrap, autoDispatchWrap, createSplit)"));
+  assert.ok(source.includes("actions.append(error, working, searchWrap, filterWrap, autoDispatchWrap, createSplit)"));
   assert.ok(source.includes('api("/api/settings/auto-dispatch"'));
   assert.ok(source.includes("state.autoDispatch = Boolean(bootstrap.autoDispatch)"));
   assert.ok(source.includes("syncAutoDispatch()"));
@@ -162,7 +164,8 @@ test("issue creation uses a primary split button with an agent creation menu", (
   assert.ok(source.includes('state.createMode = "agent"'));
   assert.ok(source.includes('const crumb = issue'));
   assert.ok(source.includes(': \'<strong>\' + title + \'</strong>\''));
-  assert.match(css, /\.better-codex-create-split\s*\{[^}]*background:\s*var\(--bc-color-primary\);/s);
+  assert.match(css, /\.better-codex-create-split\s*\{[^}]*background:\s*transparent;/s);
+  assert.match(css, /\.better-codex-create-primary,[\s\S]*?\.better-codex-create-toggle\s*\{[^}]*background:\s*var\(--bc-codex-control-background\);/s);
   assert.match(css, /\.better-codex-create-menu\s*\{[^}]*box-shadow:\s*var\(--bc-elevation-menu\);/s);
 });
 
@@ -454,8 +457,8 @@ test("issue working activity uses the agent avatar instead of initials", () => {
   assert.ok(source.includes("issue.active_run_status"));
   assert.ok(source.includes('issue.reply_status === "running"'));
   assert.ok(source.includes('agentAvatarMarkup(activityAgent, "better-codex-card-avatar")'));
-  assert.ok(source.includes('"Working"'));
-  assert.ok(source.includes('"Queued"'));
+  assert.ok(source.includes('"工作中"'));
+  assert.ok(source.includes('"排队中"'));
   assert.ok(source.includes('"回复中"'));
   assert.ok(source.includes('"回复失败"'));
   assert.ok(source.includes('"回复完成"'));
@@ -479,7 +482,7 @@ test("issue cards show project icon and assignee instead of session entry", () =
   assert.ok(source.includes("data-dialog-open-thread"));
   assert.ok(source.includes("function normalizeSessionId(value)"));
   assert.ok(source.includes("function issueSessionId(issue)"));
-  assert.ok(source.includes("const sessionId = issueSessionId(issue)"));
+  assert.ok(source.includes("sessionId = issueSessionId(issue)"));
   assert.ok(!source.includes('thread_id: threadId'));
   assert.ok(source.includes("const expected = normalizeSessionId(threadId)"));
   assert.ok(source.includes('if (!expected) throw new Error("thread_id_invalid")'));
@@ -504,13 +507,13 @@ test("issue cards show project icon and assignee instead of session entry", () =
   assert.ok(source.includes('!sessionId && !state.autoDispatch && issue.agent_enabled && !issue.active_run_status'));
   const headerStart = source.indexOf("function header()");
   const footerStart = source.indexOf("function footer()");
-  const startNowMarkup = source.indexOf("data-dialog-start-now");
-  assert.ok(startNowMarkup > headerStart && startNowMarkup < footerStart);
+  const headerSource = source.slice(headerStart, footerStart);
+  assert.ok(headerSource.includes('data-dialog-start-now>立即开始任务'));
   assert.equal(source.slice(footerStart, source.indexOf("function renderDialog()", footerStart)).includes("data-dialog-start-now"), false);
-  assert.ok(source.includes('if (issue && issue.enrichment_status !== "pending") return void perform(() => openEditor(issue))'));
-  assert.ok(source.includes('draggable="\' + String(!enrichmentLocked) + \'"'));
-  assert.ok(source.includes('if (!issue || enrichmentLocked) return;'));
-  assert.ok(source.includes('if (enrichmentLocked) return;'));
+  assert.ok(source.includes('if (issue && !issuePermissions(issue).enrichmentPending) return void perform(() => openEditor(issue))'));
+  assert.ok(source.includes('draggable="\' + String(!issueLocked) + \'"'));
+  assert.ok(source.includes('if (!issue || editingLocked) return;'));
+  assert.ok(source.includes('if (editingLocked) return;'));
   assert.ok(!source.includes("issue?.run_thread_id || issue?.thread_id || \"\""));
   assert.ok(!source.includes("(sessionId ? ' data-thread=\""));
   assert.doesNotMatch(source, /任务尚未关联 Session/);
@@ -527,7 +530,7 @@ test("open-in-conversation requires a valid session uuid", () => {
   assert.ok(source.includes("function normalizeSessionId(value)"));
   assert.ok(source.includes("/^[a-f0-9-]{36}$/i.test(id)"));
   assert.ok(source.includes("return normalizeSessionId(issue?.run_thread_id) || \"\""));
-  assert.ok(source.includes("const openThreadButton = issue && sessionId"));
+  assert.ok(source.includes("const openThreadButton = issue && (sessionId || executionRunning)"));
   assert.ok(source.includes("if (!issue || !sessionId) return \"\""));
   assert.ok(source.includes('if (!expected) throw new Error("thread_id_invalid")'));
 });
@@ -644,7 +647,7 @@ test("semantic surface hierarchy is derived from the Codex appearance configurat
   assert.doesNotMatch(source, /agentPicker\("max_concurrency"/);
   assert.match(css, /\.better-codex-agent-inspector-group\s*\{[^}]*box-shadow:\s*var\(--bc-inset-hairline\);/s);
   assert.match(css, /\.better-codex-agent-profile-name\s*\{[^}]*box-shadow:\s*var\(--bc-inset-hairline\);/s);
-  assert.match(css, /\.better-codex-search\s*\{[^}]*background:\s*var\(--bc-color-input\);/s);
+  assert.match(css, /\.better-codex-search-wrap\s*\{[^}]*background:\s*var\(--bc-color-control\);/s);
   assert.match(css, /\.better-codex-agent-profile-name\s*\{[^}]*background:\s*var\(--bc-color-control\);/s);
   assert.match(css, /\.better-codex-agent-inspector-group\s*\{[^}]*background:\s*var\(--bc-color-input\);/s);
   assert.match(css, /\.better-codex-agent-inspector-field textarea\s*\{[^}]*background:\s*var\(--bc-color-input\);/s);

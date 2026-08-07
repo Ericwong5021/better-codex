@@ -30,7 +30,7 @@ Use the Codex host font when available, then the operating-system UI stack. Size
 - Dialogs: raised surface, 20px radius, no header or footer divider.
 - Chips: pill radius, muted text, control background.
 - Agent management: a centered searchable list in preview state, plus a right-side inspector for detail and creation states. Do not reintroduce card grids or modal editors for this workflow.
-- Agent pickers: use Better Codex popovers, never operating-system `<select>` menus. Model names, defaults, and model-specific reasoning choices come from Codex app-server `model/list` through `src/model-catalog.ts`.
+- Agent pickers: use Better Codex popovers, never operating-system `<select>` menus. Model names, defaults, and model-specific reasoning choices come from Codex app-server `model/list` through `src/model-catalog.ts`; sandbox permissions and concurrency limits remain explicit Agent settings.
 
 ## 5. Layout principles
 

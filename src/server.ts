@@ -149,6 +149,7 @@ function parseIssuePatch(body: Record<string, unknown>) {
   if ("project_id" in body) patch.project_id = cleanString(body.project_id, 200);
   if ("title" in body) patch.title = cleanString(body.title, 500);
   if ("description" in body) patch.description = cleanString(body.description, 100000);
+  if ("reply_draft" in body) patch.reply_draft = cleanString(body.reply_draft, 100000);
   if ("status" in body) patch.status = asStatus(body.status);
   if ("priority" in body) patch.priority = asPriority(body.priority);
   if ("pinned" in body) {
@@ -439,7 +440,17 @@ export function startServer() {
         }
         if (method === "POST" && path[3] === "archive") {
           const body = await readBody(request);
-          const updated = store.archiveIssue(issue.id, Number(body.version));
+          const version = Number(body.version);
+          if (!Number.isInteger(version) || version < 1) throw new Error("invalid_version");
+          if (issue.active_run_status === "claimed" || issue.active_run_status === "running") {
+            await worker.stopIssue(issue.id);
+            const current = store.getIssue(issue.id);
+            if (!current) throw new Error("issue_not_found");
+            if (current.active_run_status === "claimed" || current.active_run_status === "running") throw new Error("issue_execution_running");
+            const updated = store.archiveIssue(issue.id, current.version);
+            return sendJson(response, 200, updated);
+          }
+          const updated = store.archiveIssue(issue.id, version);
           return sendJson(response, 200, updated);
         }
         if (method === "GET" && path[3] === "conversation" && path.length === 4) {
@@ -454,6 +465,7 @@ export function startServer() {
           });
         }
         if (method === "POST" && path[3] === "reply" && path.length === 4) {
+          if (issue.active_run_status === "claimed" || issue.active_run_status === "running") throw new Error("issue_execution_running");
           if (!issue.run_thread_id && !store.canAutoStartFromUserMessage(issue)) {
             throw new Error(store.getAutoDispatch() ? "backlog_reply_blocked" : "manual_start_required");
           }

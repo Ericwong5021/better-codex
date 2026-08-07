@@ -40,11 +40,10 @@ test("worker injects Better Codex issue management instructions", () => {
   } as ClaimedIssue;
 
   const prompt = issuePrompt(claim);
-  assert.match(prompt, /^\/better-codex-issue\n\ntitle: Ship the feature/m);
-  assert.match(prompt, /details:\n<<<BETTER_CODEX_ISSUE_DETAILS>>>\nImplement and verify it\./);
-  assert.match(prompt, /<<<END_BETTER_CODEX_ISSUE_DETAILS>>>/);
-  assert.match(prompt, /taskid: BCX-12/);
-  assert.match(prompt, /按照 better-codex-issue skill 处理以上 Issue/);
+  assert.equal(prompt, "Implement and verify it.\n\n按照 /better-codex-issue skill 完成以上任务\ntaskid: BCX-12");
+  assert.doesNotMatch(prompt, /title: Ship the feature/);
+  assert.doesNotMatch(prompt, /<<<BETTER_CODEX_ISSUE_DETAILS>>>/);
+  assert.doesNotMatch(prompt, /<<<END_BETTER_CODEX_ISSUE_DETAILS>>>/);
   assert.doesNotMatch(prompt, /不要提交或推送代码/);
   assert.doesNotMatch(prompt, /此 Session 已由 Better Codex Issue 接管/);
   assert.doesNotMatch(prompt, /使用 \$better-codex/);

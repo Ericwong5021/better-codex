@@ -67,7 +67,7 @@ test("launcher serializes concurrent Codex restarts and keeps migration guards",
 
 test("shortcut launch offers a full restart or opens the current Codex", () => {
   assert.match(cliSource, /function confirmLaunchRestart\(\)/);
-  assert.match(cliSource, /Better Codex 已在运行/);
+  assert.match(cliSource, /当前进程正在运行/);
   assert.match(cliSource, /openedCurrentCodex: true/);
   assert.match(cliSource, /async function restartRuntime\(\)/);
   assert.match(cliSource, /restarted: true/);

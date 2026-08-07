@@ -57,6 +57,7 @@ test("default Codex agent reflects the root config.toml model settings", () => {
       instructions: "使用 Codex 默认配置承接并执行 Better Codex Issue。",
       model: "gpt-5.6-sol",
       reasoning_effort: "high",
+      sandbox_mode: "workspace-write",
       version: 1,
       created_at: "",
       updated_at: "",

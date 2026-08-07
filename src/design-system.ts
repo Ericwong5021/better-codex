@@ -676,6 +676,20 @@ export function betterCodexDesignSystemCss() {
       white-space: nowrap;
     }
 
+    #better-codex-context-menu .better-codex-context-item-wrap.is-disabled > .better-codex-context-submenu {
+      display: none !important;
+    }
+
+    #better-codex-context-menu .better-codex-context-item:disabled {
+      color: var(--bc-color-text-faint);
+      cursor: not-allowed;
+      opacity: .65;
+    }
+
+    #better-codex-context-menu .better-codex-context-item-wrap.is-disabled:hover > .better-codex-context-item {
+      background: transparent;
+    }
+
     #better-codex-context-menu .better-codex-context-assignee-label {
       display: inline-flex;
       min-width: 0;
@@ -1263,6 +1277,18 @@ export function betterCodexDesignSystemCss() {
     #better-codex-dialog .better-codex-dialog-select.is-open .better-codex-dialog-select-trigger {
       color: var(--bc-color-text);
       background: var(--bc-color-hover);
+    }
+
+    #better-codex-dialog .better-codex-property:disabled,
+    #better-codex-dialog .better-codex-property:disabled:hover,
+    #better-codex-dialog .better-codex-property:has(:disabled),
+    #better-codex-dialog .better-codex-property:has(:disabled):hover,
+    #better-codex-dialog .better-codex-dialog-select-trigger:disabled,
+    #better-codex-dialog .better-codex-dialog-select-trigger:disabled:hover {
+      color: var(--bc-color-text-muted);
+      background: var(--bc-color-control);
+      cursor: not-allowed;
+      opacity: .55;
     }
 
     #better-codex-dialog .better-codex-dialog-select-trigger:focus-visible {
@@ -2987,12 +3013,36 @@ export function betterCodexDesignSystemCss() {
     }
 
     #better-codex-update-notice {
-      border: 0;
+      border: 1px solid var(--color-token-border, var(--bc-color-hairline));
       border-radius: var(--bc-radius-lg);
       outline: 0;
-      color: var(--bc-color-text);
-      background: var(--bc-color-surface-raised);
-      box-shadow: var(--bc-elevation-float);
+      color: var(--color-token-foreground, var(--bc-color-text));
+      background: var(--color-token-dropdown-background, var(--bc-color-surface-raised));
+      box-shadow: var(--shadow-lg, var(--bc-elevation-menu));
+    }
+
+    #better-codex-update-notice :is(.better-codex-update-close, .better-codex-update-menu-toggle) {
+      width: 16px;
+      height: 16px;
+      flex: 0 0 16px;
+      margin-top: 2px;
+      border-radius: var(--bc-radius-pill);
+      color: var(--color-token-foreground, var(--bc-color-text));
+      background: transparent;
+      opacity: .5;
+    }
+
+    #better-codex-update-notice .better-codex-update-button {
+      min-height: 32px;
+      border-radius: var(--bc-radius-pill);
+      padding-inline: 10px;
+      color: var(--color-token-foreground, var(--bc-color-text));
+      background: var(--color-token-button-secondary-background, var(--bc-color-control));
+    }
+
+    #better-codex-update-notice .better-codex-update-button.is-primary {
+      color: var(--color-token-background-primary, var(--bc-color-on-primary));
+      background: var(--color-token-foreground, var(--bc-color-primary));
     }
 
     #better-codex-completion-notice {

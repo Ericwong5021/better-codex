@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const source = readFileSync(new URL("../src/cdp.ts", import.meta.url), "utf8");
+const nativeDialogSource = readFileSync(new URL("../src/native-dialog.ts", import.meta.url), "utf8");
 
 test("injector reacts to renderer target changes instead of waiting for its fallback sweep", () => {
   assert.ok(source.includes('connection.send("Target.setDiscoverTargets", { discover: true })'));
@@ -63,8 +64,10 @@ test("macOS restart quits only the installed Desktop app by Bundle ID", () => {
 test("launch restart asks before terminating Codex", () => {
   assert.match(source, /function codexProcessRunning\(\)/);
   assert.match(source, /function confirmCodexQuit\(\)/);
-  assert.match(source, /MessageBoxButtons\]::YesNo/);
-  assert.match(source, /buttons \{\"取消\", \"继续\"\}/);
+  assert.match(source, /showNativeChoiceDialog\(/);
+  assert.match(nativeDialogSource, /Add-Type -AssemblyName System\.Windows\.Forms/);
+  assert.match(nativeDialogSource, /DialogResult\]::No/);
+  assert.match(nativeDialogSource, /DialogResult\]::Yes/);
   assert.match(source, /options\.confirmQuit && codexProcessRunning\(\) && !confirmCodexQuit\(\)/);
   assert.match(source, /codex_quit_cancelled/);
 });
