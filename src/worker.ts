@@ -28,18 +28,13 @@ function codexPath() {
   return existsSync(bundled) ? bundled : "codex";
 }
 
+// 这是给 AI 的自然语言任务提示，不是固定协议；任务详情、Skill 要求和 taskid 已足够，千万不要增加标题、标签、分隔符或其他复杂编排。
 export function issuePrompt(claim: ClaimedIssue) {
   const details = claim.issue.description.trim();
-  return `/better-codex-issue
+  return `${details}
 
-details:
-<<<BETTER_CODEX_ISSUE_DETAILS>>>
-${details}
-<<<END_BETTER_CODEX_ISSUE_DETAILS>>>
-
-taskid: ${claim.issue.identifier}
-
-按照 better-codex-issue skill 处理以上 Issue`;
+按照 /better-codex-issue skill 完成以上任务
+taskid: ${claim.issue.identifier}`;
 }
 
 export class IssueWorker {
