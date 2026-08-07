@@ -1,11 +1,20 @@
 ---
 name: better-codex
-description: Operate Better Codex issues through its local CLI. Use when a Codex session is processing a Better Codex issue and needs to inspect or change that issue's board status, pending actor, or create a new issue for the user to review or act on.
+description: Operate Better Codex issues through its local CLI. Use when a Codex session is processing a Better Codex issue identified by an issue key, or when the user asks to create, inspect, advance, block, re-queue, or hand back a Better Codex issue.
 ---
 
 # Better Codex
 
 Use the `better-codex` CLI as the only interface. Do not edit the Better Codex database directly.
+
+## Run modes
+
+The board has two dispatch modes:
+
+- **Manual mode** (`auto-dispatch=false`): assigning an issue to an Agent does not start it, and conversation replies are not a dispatch path. The user must click **立即开始任务** to launch a run; do not pretend that changing board fields is equivalent to that action.
+- **Automatic mode** (`auto-dispatch=true`): dispatchable Agent-owned issues are queued automatically. A user reply resumes an existing conversation for any non-archived issue outside `backlog`; replies on `backlog` issues are rejected. A reply is an explicit user action, so it may continue an issue whose `pending_actor` is `user`; do not change ownership merely to make the reply work.
+
+The normal queue still requires all of these conditions: the issue needs attention, `pending_actor=agent`, an Agent is assigned, a workspace is available, and status is not `backlog`, `done`, or `cancelled`.
 
 ## Identify the current issue
 
@@ -33,7 +42,7 @@ Auto-dispatch only starts sessions when all of these are true:
 4. An Agent is assigned
 5. Status is not `backlog`, `done`, or `cancelled`
 
-If `pending_actor` is `user`, do not continue acting on the issue. Stop and wait for the user. The user must reassign the issue to an Agent before another automatic session may start.
+If `pending_actor` is `user`, do not start another automatic queue run. Stop and wait for the user unless the current user message explicitly asks you to continue the issue; in automatic mode, the app can resume the issue conversation directly. Do not silently reassign the issue to an Agent.
 
 ## Change status and pending actor
 
@@ -57,12 +66,15 @@ Rules:
 - Set `blocked` when a problem prevents completing the work, and leave `pending_actor=user` with `needs_attention=true`. Only set `pending_actor=agent` when you intentionally want auto-dispatch to retry.
 - Set `in_review` after completing and verifying work that needs user review. Set `pending_actor=user` and `needs_attention=true`.
 - Set `done` only when the work is fully complete, verified, and needs no further review. Set `needs_attention=false`.
+- When handing work back to the Agent queue, use a non-terminal status such as `todo`, `pending_actor=agent`, and `needs_attention=true`; never queue `backlog`, `done`, or `cancelled`.
 - Never claim or reprocess work when `pending_actor=user`.
 - Do not move an actively running issue back to `todo` or `backlog`.
 - Do not leave an Agent as `pending_actor` after you need a human decision.
 - Update the board before the session exits. If status is still `in_progress` when the process ends, the runtime applies a safety net (`in_review`/`blocked` + `pending_actor=user`). If you already moved the issue off `in_progress`, the runtime keeps your board update.
 
 Always synchronize the final status and pending actor before replying with the result. Use the identifier verified from the task prompt. Do not modify unrelated issues unless the user explicitly asks.
+
+If a user asks to continue an issue while automatic mode is enabled, treat that message as the authorization to continue the existing conversation. Finish by applying the same status/actor rules above; do not create a duplicate issue or a second run.
 
 ## Create an issue for the user
 
