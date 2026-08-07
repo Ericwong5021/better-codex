@@ -2209,6 +2209,18 @@ export function betterCodexDesignSystemCss() {
       width: 14px;
     }
 
+    #better-codex-panel .better-codex-agent-setting[data-agent-picker="sandbox_mode"] .better-codex-agent-menu {
+      width: min(340px, calc(100vw - 48px));
+    }
+
+    #better-codex-panel .better-codex-agent-setting[data-agent-picker="sandbox_mode"] .better-codex-agent-menu-item {
+      box-sizing: border-box;
+      height: 64px;
+      min-height: 64px;
+      align-items: center;
+      padding: 8px 9px;
+    }
+
     #better-codex-panel .better-codex-agent-menu-item.is-warning,
     #better-codex-panel .better-codex-agent-menu-item.is-warning .better-codex-agent-menu-item-icon {
       color: var(--bc-warning, #c2410c);
