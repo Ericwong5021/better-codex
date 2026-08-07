@@ -2105,7 +2105,7 @@ export function betterCodexDesignSystemCss() {
       z-index: 120;
       box-sizing: border-box;
       display: none;
-      width: min(232px, calc(100vw - 48px));
+      width: min(300px, calc(100vw - 48px));
       max-height: 330px;
       overflow-y: auto;
       border: 0;
@@ -2158,6 +2158,64 @@ export function betterCodexDesignSystemCss() {
       height: 13px;
       flex: 0 0 auto;
       color: var(--bc-color-text-muted);
+    }
+
+    #better-codex-panel .better-codex-agent-menu-item-copy {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      gap: 9px;
+    }
+
+    #better-codex-panel .better-codex-agent-menu-item-copy > span:last-child {
+      display: flex;
+      min-width: 0;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    #better-codex-panel .better-codex-agent-menu-item-copy strong {
+      font-size: var(--bc-text-sm);
+      font-weight: 600;
+    }
+
+    #better-codex-panel .better-codex-agent-menu-item-copy small {
+      color: var(--bc-color-text-faint);
+      font-size: var(--bc-text-caption);
+      line-height: 1.35;
+      white-space: normal;
+    }
+
+    #better-codex-panel .better-codex-agent-menu-item-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 18px;
+      height: 18px;
+      flex: 0 0 18px;
+      color: var(--bc-color-text-muted);
+    }
+
+    #better-codex-panel .better-codex-agent-menu-item-icon svg {
+      width: 16px;
+      height: 16px;
+    }
+
+    #better-codex-panel .better-codex-agent-menu-item-check {
+      display: inline-flex;
+      flex: 0 0 auto;
+      align-items: center;
+      justify-content: center;
+      width: 14px;
+    }
+
+    #better-codex-panel .better-codex-agent-menu-item.is-warning,
+    #better-codex-panel .better-codex-agent-menu-item.is-warning .better-codex-agent-menu-item-icon {
+      color: var(--bc-warning, #c2410c);
+    }
+
+    #better-codex-panel .better-codex-agent-menu-item.is-warning small {
+      color: color-mix(in oklch, var(--bc-warning, #c2410c) 78%, var(--bc-color-text));
     }
 
     #better-codex-panel .better-codex-agent-inspector-field {

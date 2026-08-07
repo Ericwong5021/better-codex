@@ -21,7 +21,9 @@ import {
   Ellipsis,
   FileCode2,
   FlaskConical,
+  FolderOpen,
   Folder,
+  Hand,
   Image,
   LayoutTemplate,
   ListFilter,
@@ -44,6 +46,7 @@ import {
   SquareKanban,
   Tag,
   Terminal,
+  TriangleAlert,
   Trash2,
   User,
   UserRoundPen,
@@ -86,6 +89,9 @@ const lucideIcons = Object.fromEntries(Object.entries({
   test: FlaskConical,
   docs: BookOpen,
   shield: ShieldCheck,
+  permissionReadOnly: Hand,
+  permissionWorkspace: FolderOpen,
+  permissionDanger: TriangleAlert,
   database: Database,
   sparkles: Sparkles,
   edit: Pencil,
@@ -1903,6 +1909,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       return ({ low: "低", medium: "中", high: "高", xhigh: "超高", max: "最大", ultra: "极致" })[value] || value;
     }
 
+    function sandboxModeLabel(value) {
+      return ({ "read-only": "只读", "workspace-write": "工作区可写", "danger-full-access": "完全访问" })[value] || value;
+    }
+
     function modelTag(value) {
       const raw = String(value || "").trim();
       if (!raw || /^默认/.test(raw)) return "";
@@ -1957,7 +1967,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     function agentPicker(name, label, selected, options) {
       const current = options.find(option => option.value === selected) || options[0] || { value: "", label: "未提供" };
-      const rows = options.map(option => '<button class="better-codex-agent-menu-item' + (option.value === current.value ? " is-selected" : "") + '" type="button" role="option" aria-selected="' + (option.value === current.value) + '" data-agent-option="' + escapeHtml(name) + '" data-agent-option-value="' + escapeHtml(option.value) + '"><span>' + escapeHtml(option.label) + '</span>' + (option.value === current.value ? icon("check") : "") + '</button>').join("");
+      const rows = options.map(option => {
+        const hasDescription = Boolean(option.description);
+        const copy = hasDescription
+          ? '<span class="better-codex-agent-menu-item-copy">' + (option.icon ? '<span class="better-codex-agent-menu-item-icon">' + icon(option.icon) + '</span>' : "") + '<span><strong>' + escapeHtml(option.label) + '</strong><small>' + escapeHtml(option.description) + '</small></span></span>'
+          : '<span class="better-codex-agent-menu-item-copy">' + (option.icon ? '<span class="better-codex-agent-menu-item-icon">' + icon(option.icon) + '</span>' : "") + '<span>' + escapeHtml(option.label) + '</span></span>';
+        return '<button class="better-codex-agent-menu-item' + (option.value === current.value ? " is-selected" : "") + (option.tone === "warning" ? " is-warning" : "") + '" type="button" role="option" aria-selected="' + (option.value === current.value) + '" data-agent-option="' + escapeHtml(name) + '" data-agent-option-value="' + escapeHtml(option.value) + '">' + copy + '<span class="better-codex-agent-menu-item-check">' + (option.value === current.value ? icon("check") : "") + '</span></button>';
+      }).join("");
       return '<div class="better-codex-agent-setting" data-agent-picker="' + escapeHtml(name) + '"><span>' + escapeHtml(label) + '</span><input type="hidden" name="' + escapeHtml(name) + '" value="' + escapeHtml(current.value) + '"><button class="better-codex-agent-picker-trigger" type="button" role="combobox" aria-haspopup="listbox" aria-expanded="false" data-agent-picker-toggle="' + escapeHtml(name) + '"><span data-agent-picker-label>' + escapeHtml(current.label) + '</span>' + icon("chevron") + '</button><div class="better-codex-agent-menu" role="listbox"><div class="better-codex-agent-menu-title">' + escapeHtml(label) + '</div>' + rows + '</div></div>';
     }
 
@@ -2021,6 +2037,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const effortOptions = effortsForModel(model);
       const preferredEffort = draft.reasoning_effort || state.agentModelCatalog.find(item => item.id === model)?.defaultReasoningEffort;
       const effort = effortOptions.some(item => item.value === preferredEffort) ? preferredEffort : effortOptions[0]?.value || "medium";
+      const sandboxMode = ["read-only", "workspace-write", "danger-full-access"].includes(draft.sandbox_mode) ? draft.sandbox_mode : "workspace-write";
       const heading = creating ? "新建" : "智能体";
       const avatarInput = '<input type="hidden" name="avatar" value="' + escapeHtml(draft.avatar || "") + '">';
       const profileHead = creating
@@ -2032,8 +2049,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const instructionField = isDefault ? "" : '<label class="better-codex-agent-inspector-field"><span>Instruct <small>可选</small></span><textarea name="instructions" rows="7" placeholder="定义职责、工作方式和输出要求">' + escapeHtml(instructions) + '</textarea></label>';
       const deleteButton = !creating && !isDefault ? '<button class="better-codex-agent-danger" type="button" data-agent-delete data-agent-key="' + escapeHtml(agentKey(draft)) + '">删除智能体</button>' : "";
       const modelOptions = state.agentModelCatalog.map(item => ({ value: item.id, label: item.displayName, description: item.description || "" }));
-       const animateAttr = options.animateEnter ? ' data-animate="enter"' : "";
-       return '<aside class="better-codex-agent-inspector"' + animateAttr + '><form data-agent-form="' + (creating ? "create" : isDefault ? "default" : "update") + '" data-agent-key="' + escapeHtml(creating ? "" : agentKey(draft)) + '"><header class="better-codex-agent-inspector-head"><span>' + heading + '</span><button class="better-codex-agent-card-action" type="button" data-agent-close-pane aria-label="关闭详情">' + icon("close") + '</button></header><div class="better-codex-agent-inspector-scroll">' + profileHead + identity + '<h3>详情</h3><div class="better-codex-agent-inspector-group">' + agentPicker("model", "模型", model, modelOptions) + agentPicker("reasoning_effort", "推理", effort, effortOptions) + agentNumberInput("max_concurrency", "最大并发", draft.max_concurrency, 1, 20) + '</div>' + instructionField + '<div class="better-codex-agent-inspector-error" hidden></div></div><footer class="better-codex-agent-inspector-footer">' + deleteButton + '<button class="better-codex-submit" type="submit">' + (creating ? "创建" : "保存") + '</button></footer></form></aside>';
+      const sandboxOptions = [
+        { value: "read-only", label: "只读", description: "仅可读取工作区文件，不能修改", icon: "permissionReadOnly" },
+        { value: "workspace-write", label: "工作区可写", description: "可修改当前工作区内的文件", icon: "permissionWorkspace" },
+        { value: "danger-full-access", label: "完全访问", description: "可不受限制地访问互联网和电脑上的任何文件", icon: "permissionDanger", tone: "warning" },
+      ];
+      const animateAttr = options.animateEnter ? ' data-animate="enter"' : "";
+       return '<aside class="better-codex-agent-inspector"' + animateAttr + '><form data-agent-form="' + (creating ? "create" : isDefault ? "default" : "update") + '" data-agent-key="' + escapeHtml(creating ? "" : agentKey(draft)) + '"><header class="better-codex-agent-inspector-head"><span>' + heading + '</span><button class="better-codex-agent-card-action" type="button" data-agent-close-pane aria-label="关闭详情">' + icon("close") + '</button></header><div class="better-codex-agent-inspector-scroll">' + profileHead + identity + '<h3>详情</h3><div class="better-codex-agent-inspector-group">' + agentPicker("model", "模型", model, modelOptions) + agentPicker("reasoning_effort", "推理", effort, effortOptions) + agentPicker("sandbox_mode", "权限", sandboxMode, sandboxOptions) + agentNumberInput("max_concurrency", "最大并发", draft.max_concurrency, 1, 20) + '</div>' + instructionField + '<div class="better-codex-agent-inspector-error" hidden></div></div><footer class="better-codex-agent-inspector-footer">' + deleteButton + '<button class="better-codex-submit" type="submit">' + (creating ? "创建" : "保存") + '</button></footer></form></aside>';
     }
 
     function renderAgents() {
@@ -2262,6 +2284,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         instructions: form.elements.instructions?.value || "",
         model: form.elements.model.value,
         reasoning_effort: form.elements.reasoning_effort.value,
+        sandbox_mode: form.elements.sandbox_mode.value,
         max_concurrency: Number(form.elements.max_concurrency?.value || 5),
         avatar: form.elements.avatar?.value || "",
         ...(selected && !selected.is_default ? { version: selected.version } : {})
@@ -2314,13 +2337,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const value = option.dataset.agentOptionValue;
         if (!picker || !form || !name) return;
         picker.querySelector('[name="' + name + '"]').value = value;
-         picker.querySelector("[data-agent-picker-label]").textContent = name === "model" ? modelLabel(value) : effortLabel(value);
+        picker.querySelector("[data-agent-picker-label]").textContent = name === "model" ? modelLabel(value) : name === "reasoning_effort" ? effortLabel(value) : sandboxModeLabel(value);
         picker.querySelectorAll("[data-agent-option]").forEach(row => {
           const selected = row.dataset.agentOptionValue === value;
           row.classList.toggle("is-selected", selected);
           row.setAttribute("aria-selected", String(selected));
-          row.querySelector("svg")?.remove();
-          if (selected) row.insertAdjacentHTML("beforeend", icon("check"));
+          const check = row.querySelector(".better-codex-agent-menu-item-check");
+          if (check) check.innerHTML = selected ? icon("check") : "";
         });
         picker.classList.remove("is-open");
         picker.querySelector("[data-agent-picker-toggle]").setAttribute("aria-expanded", "false");
