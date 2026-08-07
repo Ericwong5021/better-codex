@@ -25,6 +25,7 @@
     "dist/db.js",
     "dist/dom.js",
     "dist/injection-state.js",
+    "dist/locale.js",
     "dist/launch-integration.js",
     "dist/model-catalog.js",
     "dist/runtime-state.js",

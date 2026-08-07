@@ -1196,6 +1196,14 @@ export function betterCodexDesignSystemCss() {
       flex: 0 0 auto;
     }
 
+    #better-codex-dialog .better-codex-dialog-select-trigger-visual > .better-codex-agent-avatar,
+    #better-codex-dialog .better-codex-dialog-select-option-visual > .better-codex-agent-avatar {
+      width: var(--bc-icon-sm);
+      height: var(--bc-icon-sm);
+      flex: 0 0 var(--bc-icon-sm);
+      aspect-ratio: 1;
+    }
+
     #better-codex-dialog .better-codex-dialog-select-menu {
       position: absolute;
       bottom: calc(100% + var(--bc-space-2));
@@ -2231,8 +2239,14 @@ export function betterCodexDesignSystemCss() {
       opacity: .5;
     }
 
-    #better-codex-dialog[data-detail="true"] {
-      height: min(78vh, 820px);
+    #better-codex-dialog[data-detail="true"][data-expanded="false"] {
+      width: min(720px, calc(100vw - 48px));
+      height: min(62vh, 640px);
+    }
+
+    #better-codex-dialog[data-detail="true"][data-expanded="true"] {
+      width: min(1200px, calc(100vw - 48px));
+      height: min(90vh, 960px);
     }
 
     #better-codex-dialog .better-codex-conversation {
@@ -2499,7 +2513,7 @@ export function betterCodexDesignSystemCss() {
 
     #better-codex-dialog .better-codex-composer textarea {
       box-sizing: border-box;
-      height: calc(var(--bc-control-height) * 1.6);
+      height: calc(6.525em + 12px);
       flex: 1;
       border: 0;
       color: var(--bc-foreground);
@@ -3247,6 +3261,8 @@ export function betterCodexDesignSystemCss() {
       }
       #better-codex-panel .better-codex-agent-grid { grid-template-columns: 1fr; }
       #better-codex-dialog, #better-codex-agent-dialog, #better-codex-confirm, #better-codex-auto-dispatch-help-dialog, #better-codex-avatar-picker, #better-codex-avatar-cropper { width: calc(100vw - 24px); }
+      #better-codex-dialog[data-detail="true"][data-expanded="false"],
+      #better-codex-dialog[data-detail="true"][data-expanded="true"] { width: calc(100vw - 24px); }
       #better-codex-dialog .better-codex-dialog-footer { align-items: flex-end; padding-block: var(--bc-space-2); }
       #better-codex-dialog .better-codex-dialog-footer-right { flex-wrap: wrap; }
     }

@@ -84,6 +84,7 @@ test("status and priority menus keep their Lucide icons visible", () => {
   assert.match(css, /\.better-codex-priority\[data-priority="low"\][^{]*\{[^}]*--bc-priority-low/);
   assert.match(css, /\.better-codex-dialog-select-trigger-visual,[\s\S]*?\.better-codex-dialog-select-option-visual\s*\{[^}]*width:\s*var\(--bc-icon-sm\);[^}]*height:\s*var\(--bc-icon-sm\);/s);
   assert.match(css, /\.better-codex-dialog-select-trigger-visual > svg,[\s\S]*?\.better-codex-dialog-select-option-visual > svg\s*\{[^}]*width:\s*var\(--bc-icon-sm\);[^}]*height:\s*var\(--bc-icon-sm\);/s);
+  assert.match(css, /\.better-codex-dialog-select-trigger-visual > \.better-codex-agent-avatar,[\s\S]*?\.better-codex-dialog-select-option-visual > \.better-codex-agent-avatar\s*\{[^}]*width:\s*var\(--bc-icon-sm\);[^}]*height:\s*var\(--bc-icon-sm\);[^}]*flex:\s*0 0 var\(--bc-icon-sm\);/s);
 });
 
 test("square icon controls center their SVG geometry instead of using the text baseline", () => {
@@ -402,6 +403,14 @@ test("agent issue creation reserves enough height for its scaled footer", () => 
   assert.doesNotMatch(source, /#better-codex-dialog\[data-mode="agent"\]\s*\{[^}]*height:\s*min\(368px/s);
 });
 
+test("issue detail dialog separates compact and expanded sizes", () => {
+  const css = betterCodexDesignSystemCss();
+
+  assert.match(css, /#better-codex-dialog\[data-detail="true"\]\[data-expanded="false"\]\s*\{[^}]*width:\s*min\(720px,[^}]*height:\s*min\(62vh,\s*640px\)/s);
+  assert.match(css, /#better-codex-dialog\[data-detail="true"\]\[data-expanded="true"\]\s*\{[^}]*width:\s*min\(1200px,[^}]*height:\s*min\(90vh,\s*960px\)/s);
+  assert.match(css, /#better-codex-dialog\[data-detail="true"\]\[data-expanded="false"\],[\s\S]*?#better-codex-dialog\[data-detail="true"\]\[data-expanded="true"\]\s*\{\s*width:\s*calc\(100vw - 24px\);/s);
+});
+
 test("issue submit buttons omit visual keyboard shortcut badges", () => {
   const source = injectionScript(4317, "test-token", "install");
 
@@ -517,7 +526,7 @@ test("issue details render the latest conversation result and reply composer", (
   assert.match(css, /\.better-codex-timeline\s*\{/s);
   assert.match(css, /\.better-codex-bubble\s*\{/s);
   assert.match(css, /\.better-codex-composer\s*\{/s);
-  assert.match(css, /\.better-codex-composer textarea\s*\{[^}]*height:\s*calc\(var\(--bc-control-height\) \* 1\.6\);/s);
+  assert.match(css, /\.better-codex-composer textarea\s*\{[^}]*height:\s*calc\(6\.525em\s*\+\s*12px\);/s);
   assert.match(css, /\.better-codex-composer textarea\s*\{[^}]*resize:\s*none;/s);
 });
 

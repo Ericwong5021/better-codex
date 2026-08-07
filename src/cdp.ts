@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { activeCompatibility, capabilityExpression, clearCompatibilityStatus, missingCapabilities, navigationExpression, readCompatibilityStatus, targetAllowed, type RendererCapabilities, writeCompatibilityStatus } from "./compatibility.js";
 import { injectionScript, injectionVersion } from "./dom.js";
+import { readCodexLocale } from "./locale.js";
 import { readRuntimeState } from "./runtime-state.js";
 
 type Target = {
@@ -411,7 +412,7 @@ async function installTarget(target: Target, runtimePort: number, accessToken: s
       writeCompatibilityStatus({ codexVersion: current?.codexVersion ?? desktopVersion(), compatible: true, reason: null, targetId: target.id, capabilities: current?.capabilities ?? null }, true);
       return { targetId: target.id, title: target.title, installed: true, reused: true, identifier: typeof storedIdentifier === "string" ? storedIdentifier : undefined };
     }
-    const source = injectionScript(runtimePort, accessToken, "install");
+    const source = injectionScript(runtimePort, accessToken, "install", readCodexLocale());
     const registration = await connection.send("Page.addScriptToEvaluateOnNewDocument", { source });
     const identifier = String(registration.identifier ?? "");
     await evaluate(connection, source);
@@ -604,7 +605,7 @@ export async function watchInjection(port: number, accessToken: string) {
           identifier = typeof stored === "string" ? stored : undefined;
           await evaluate(connection, "window.__betterCodexInjection__.refresh()");
         } else {
-          const source = injectionScript(activeRuntimePort, accessToken, "install");
+          const source = injectionScript(activeRuntimePort, accessToken, "install", readCodexLocale());
           const registration = await connection.send("Page.addScriptToEvaluateOnNewDocument", { source });
           identifier = String(registration.identifier ?? "") || undefined;
           await evaluate(connection, source);
