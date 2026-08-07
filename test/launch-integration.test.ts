@@ -66,6 +66,11 @@ test("launcher serializes concurrent Codex restarts and keeps migration guards",
 });
 
 test("shortcut launch reopens Codex when the existing renderer is not injected", () => {
+  assert.match(cliSource, /function confirmLaunchRestart\(\)/);
+  assert.match(cliSource, /Better Codex 已在运行/);
+  assert.match(cliSource, /openedCurrentCodex: true/);
+  assert.match(cliSource, /async function restartRuntime\(\)/);
+  assert.match(cliSource, /restarted: true/);
   assert.match(cliSource, /current\.available && current\.targets\.length > 0 && current\.targets\.every\(target => \(target as \{ entry\?: boolean \}\)\.entry === true\)/);
   assert.match(cliSource, /if \(injected\)/);
   assert.match(cliSource, /await cdpRestartAndInject\(cdpPort, activeRuntimePort\(\), accessToken\(\), \{ confirmQuit: true \}\)/);

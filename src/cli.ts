@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { accessSync, closeSync, constants, existsSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { isSea } from "node:sea";
@@ -24,6 +24,7 @@ import {
 import { readRuntimeState } from "./runtime-state.js";
 import { injectionEnabled, setInjectionEnabled } from "./injection-state.js";
 import { installLaunchIntegration, launchIntegrationStatus, uninstallLaunchIntegration } from "./launch-integration.js";
+import { readCodexLocale } from "./locale.js";
 import { installService, restartService, serviceLogs, serviceStatus, startService, stopService, uninstallService } from "./service.js";
 import { activeVersions, checkForUpdates, maybeDelegateToActiveCore, rollbackCompatibilityUpdate, updateAll, updateCompatibility } from "./updater.js";
 
@@ -115,6 +116,49 @@ async function ensureRuntime() {
     }
     throw new Error("runtime_start_failed");
   }
+}
+
+function confirmLaunchRestart() {
+  const chinese = readCodexLocale() === "zh-CN";
+  const message = chinese
+    ? "Better Codex 已在运行。\n\n选择“是”重启 Better Codex 和 Codex；选择“否”直接打开当前 Codex。\n\n是否重启？"
+    : "Better Codex is already running.\n\nChoose Yes to restart Better Codex and Codex, or No to open the current Codex directly.\n\nRestart now?";
+  const title = "Better Codex";
+  if (process.platform === "win32") {
+    const powershellString = (value: string) => `'${value.replace(/'/g, "''")}'`;
+    const script = `$ErrorActionPreference = 'Stop'; Add-Type -AssemblyName System.Windows.Forms; $result = [System.Windows.Forms.MessageBox]::Show(${powershellString(message)}, ${powershellString(title)}, [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Question); if ($result -eq [System.Windows.Forms.DialogResult]::Yes) { Write-Output 'yes' } else { Write-Output 'no' }`;
+    const output = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-STA", "-Command", script], { encoding: "utf8", windowsHide: true }).trim();
+    return output === "yes";
+  }
+  if (process.platform === "darwin") {
+    try {
+      const buttons = chinese ? '{"否", "是"}' : '{"No", "Yes"}';
+      const yes = chinese ? "是" : "Yes";
+      const output = execFileSync("/usr/bin/osascript", ["-e", `display dialog ${JSON.stringify(message)} with title ${JSON.stringify(title)} buttons ${buttons} default button ${JSON.stringify(yes)} cancel button ${JSON.stringify(chinese ? "否" : "No")} with icon note`], { encoding: "utf8" }).trim();
+      return output.includes(`button returned:${yes}`);
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+async function restartRuntime() {
+  setInjectionEnabled(false);
+  await stopInjector();
+  try { await request("/api/shutdown", { method: "POST" }); } catch {}
+  let stopped = false;
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    try {
+      await health();
+    } catch {
+      stopped = true;
+      break;
+    }
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  if (!stopped) throw new Error("runtime_restart_timeout");
+  return ensureRuntime();
 }
 
 function activeRuntimePort() {
@@ -470,6 +514,27 @@ async function main() {
   if (command === "watch-inject") return watchInjection(Number(action || cdpPort), accessToken());
   if (command === "launch") {
     return print(await withLaunchLock(async () => {
+      let runtimeRunning = false;
+      try {
+        await health();
+        runtimeRunning = true;
+      } catch {}
+      if (runtimeRunning) {
+        if (!confirmLaunchRestart()) {
+          launchCodex(cdpPort, true);
+          return { launched: true, restarted: false, openedCurrentCodex: true };
+        }
+        await restartRuntime();
+        setInjectionEnabled(true);
+        try {
+          const injection = await cdpRestartAndInject(cdpPort, activeRuntimePort(), accessToken(), { confirmQuit: false });
+          await waitForInjector();
+          return { launched: true, restarted: true, injection };
+        } catch (error) {
+          setInjectionEnabled(false);
+          throw error;
+        }
+      }
       if (!injectionEnabled()) {
         launchCodex(cdpPort, true);
         return { launched: true, injectionDisabled: true };
