@@ -1,6 +1,6 @@
 param(
   [string]$Repository = "Ericwong5021/better-codex",
-  [string]$Version = "v0.3.8",
+  [string]$Version = "",
   [string]$BinDirectory = "$env:LOCALAPPDATA\BetterCodex\bin",
   [switch]$NoService
 )
@@ -15,6 +15,34 @@ function Write-Step([string]$Message) {
 
 function Write-Ok([string]$Message) {
   Write-Host "[OK] $Message" -ForegroundColor Green
+}
+
+function Resolve-ReleaseTag([string]$RepositoryName, [string]$RequestedVersion) {
+  $candidate = if ($RequestedVersion) { $RequestedVersion } elseif ($env:BETTER_CODEX_VERSION) { $env:BETTER_CODEX_VERSION } else { "" }
+  if ($candidate -and $candidate -ne "latest") {
+    if ($candidate.StartsWith("v")) { return $candidate }
+    return "v$candidate"
+  }
+  Write-Step "Resolving latest release..."
+  $request = [System.Net.HttpWebRequest]::Create("https://github.com/$RepositoryName/releases/latest")
+  $request.Method = "HEAD"
+  $request.AllowAutoRedirect = $false
+  $request.UserAgent = "better-codex-installer"
+  try {
+    $response = $request.GetResponse()
+  } catch [System.Net.WebException] {
+    $response = $_.Exception.Response
+  }
+  if (-not $response) { throw "Unable to resolve the latest Better Codex release." }
+  try {
+    $location = $response.Headers["Location"]
+  } finally {
+    $response.Close()
+  }
+  if (-not $location) { throw "Unable to resolve the latest Better Codex release." }
+  $tag = ($location.TrimEnd("/") -split "/")[-1]
+  if (-not $tag) { throw "Unable to resolve the latest Better Codex release." }
+  return $tag
 }
 
 function Get-InstalledVersion([string]$Executable) {
@@ -77,6 +105,7 @@ if (-not [Environment]::Is64BitOperatingSystem) { throw "Better Codex requires 6
 $executable = Join-Path $BinDirectory "better-codex.exe"
 $codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE ".codex" }
 $skillDirectory = Join-Path $codexHome "skills\better-codex"
+$Version = Resolve-ReleaseTag $Repository $Version
 $targetVersion = $Version.TrimStart("v")
 $installedVersion = Get-InstalledVersion $executable
 
