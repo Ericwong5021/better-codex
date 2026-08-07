@@ -111,7 +111,7 @@ test("issue assignment tabs separate assigned and unassigned work", () => {
   const source = injectionScript(4317, "test-token", "install");
 
   assert.ok(source.includes('[["all", "全部"], ["assigned", "已分配"], ["unassigned", "未分配"]]'));
-  assert.ok(source.includes("const assigned = Boolean(issue.agent_enabled || issue.user_assigned || issue.thread_id)"));
+  assert.ok(source.includes("const assigned = Boolean(issue.agent_enabled || issue.user_assigned)"));
   assert.ok(source.includes('state.view === "unassigned" && !assigned'));
   assert.ok(!source.includes('[["all", "全部"], ["member", "成员"], ["agent", "智能体"]]'));
 });
@@ -295,6 +295,29 @@ test("issue editor uses branded listboxes instead of native selects", () => {
   assert.match(css, /\.better-codex-dialog-select-option\s*\{[^}]*border:\s*0;/s);
 });
 
+test("issue board loads every project by default and filters projects explicitly", () => {
+  const source = injectionScript(4317, "test-token", "install");
+
+  assert.ok(source.includes("const query = new URLSearchParams();"));
+  assert.ok(source.includes('"/api/issues" + (query.toString() ? "?" + query : "")'));
+  assert.ok(source.includes("if (filters.project.length && !filters.project.includes(issue.project_id)) return false"));
+  assert.doesNotMatch(source, /new URLSearchParams\(\{ project_id: state\.projectId \}\)/);
+});
+
+test("agent assignment options expose compact model and reasoning tags", () => {
+  const source = injectionScript(4317, "test-token", "install");
+
+  assert.ok(source.includes("function modelTag(value)"));
+  assert.ok(source.includes("function reasoningTag(value)"));
+  assert.ok(source.includes("function agentConfigTags(agent)"));
+  assert.ok(source.includes('medium: "mid"'));
+  assert.ok(source.includes('agentOptionLabel(agent, agent.name)'));
+  assert.ok(source.includes('agentOptionLabel(defaultAgent, defaultAgent.name || "Codex")'));
+  assert.doesNotMatch(source, /Codex（默认配置）/);
+  assert.match(source, /better-codex-dialog-select-tag/);
+  assert.match(betterCodexDesignSystemCss(), /better-codex-dialog-select-tag\[data-tone="model"\]/);
+});
+
 test("agent issue creation refreshes profiles and reuses their names and avatars", () => {
   const source = injectionScript(4317, "test-token", "install");
 
@@ -391,7 +414,7 @@ test("issue context menu can assign the current user or an agent", () => {
   assert.ok(source.includes("取消分配"));
   assert.ok(source.includes("better-codex-context-avatar is-user is-initials"));
   assert.ok(source.includes("user_assigned: true"));
-  assert.ok(source.includes("const assigned = Boolean(issue.agent_enabled || issue.user_assigned || issue.thread_id)"));
+  assert.ok(source.includes("const assigned = Boolean(issue.agent_enabled || issue.user_assigned)"));
 });
 
 test("issue working activity uses the agent avatar instead of initials", () => {
@@ -419,14 +442,34 @@ test("issue cards show project icon and assignee instead of session entry", () =
   assert.ok(source.includes("function normalizeSessionId(value)"));
   assert.ok(source.includes("function issueSessionId(issue)"));
   assert.ok(source.includes("const sessionId = issueSessionId(issue)"));
+  assert.ok(!source.includes('thread_id: threadId'));
   assert.ok(source.includes("const expected = normalizeSessionId(threadId)"));
   assert.ok(source.includes('if (!expected) throw new Error("thread_id_invalid")'));
+  assert.ok(source.includes("THREAD_OPEN_TIMEOUT_MS = 10000"));
+  assert.ok(source.includes('const PROJECT_KEY = "better-codex-project-id"'));
+  assert.ok(source.includes("localStorage.getItem(PROJECT_KEY)"));
+  assert.ok(source.includes("state.projects.find(item => item.id === rememberedProjectId)"));
+  assert.ok(source.includes("function activeThreadId()"));
+  assert.doesNotMatch(source, /\/api\/issues\/.*\/app|message: "\/app"/);
+  assert.doesNotMatch(source, /findThreadRow\(expected\)|row\.click\(\)/);
+  assert.doesNotMatch(source, /window\.postMessage\(\{ type: NAVIGATION/);
+  assert.doesNotMatch(source, /THREAD_ROUTE_RETRY_MS|THREAD_ROUTE_CONFIRM_DELAY_MS/);
+  assert.ok(source.includes('button.classList.add("is-loading")'));
+  assert.ok(source.includes('button.innerHTML = icon("refresh") + "<span>正在打开…</span>"'));
+  assert.ok(source.includes('button.removeAttribute("aria-busy")'));
+  assert.ok(source.includes('throw new Error("thread_open_timeout")'));
   assert.ok(source.includes("Issue 详情"));
+  assert.ok(source.includes('data-dialog-start-now'));
+  assert.ok(source.includes('/start'));
+  assert.ok(source.includes('立即开始任务'));
+  assert.ok(source.includes('!state.autoDispatch && issue.agent_enabled && !issue.active_run_status'));
   assert.ok(source.includes("if (issue) return void perform(() => openEditor(issue))"));
   assert.ok(!source.includes("issue?.run_thread_id || issue?.thread_id || \"\""));
   assert.ok(!source.includes("(sessionId ? ' data-thread=\""));
   assert.doesNotMatch(source, /任务尚未关联 Session/);
   assert.match(css, /\.better-codex-dialog-open-thread\s*\{[^}]*background:\s*var\(--bc-color-primary\)/s);
+  assert.match(css, /\.better-codex-dialog-open-thread\.is-loading svg\s*\{[^}]*animation:/s);
+  assert.match(css, /\.better-codex-dialog-start-now\s*\{/s);
   assert.match(css, /\.better-codex-card-assignee\s*\{/s);
   assert.match(css, /\.better-codex-chip\s*>\s*svg\s*\{/s);
 });
@@ -436,7 +479,7 @@ test("open-in-conversation requires a valid session uuid", () => {
 
   assert.ok(source.includes("function normalizeSessionId(value)"));
   assert.ok(source.includes("/^[a-f0-9-]{36}$/i.test(id)"));
-  assert.ok(source.includes("return normalizeSessionId(issue?.run_thread_id) || normalizeSessionId(issue?.thread_id) || \"\""));
+  assert.ok(source.includes("return normalizeSessionId(issue?.run_thread_id) || \"\""));
   assert.ok(source.includes("const openThreadButton = issue && sessionId"));
   assert.ok(source.includes("if (!issue || !sessionId) return \"\""));
   assert.ok(source.includes('if (!expected) throw new Error("thread_id_invalid")'));
@@ -460,6 +503,8 @@ test("issue details render the latest conversation result and reply composer", (
   assert.match(css, /\.better-codex-timeline\s*\{/s);
   assert.match(css, /\.better-codex-bubble\s*\{/s);
   assert.match(css, /\.better-codex-composer\s*\{/s);
+  assert.match(css, /\.better-codex-composer textarea\s*\{[^}]*height:\s*calc\(var\(--bc-control-height\) \* 1\.6\);/s);
+  assert.match(css, /\.better-codex-composer textarea\s*\{[^}]*resize:\s*none;/s);
 });
 
 test("issue keep-open toggle keeps a visible track in light mode", () => {
@@ -538,7 +583,12 @@ test("semantic surface hierarchy is derived from the Codex appearance configurat
   assert.match(css, /\.better-codex-agent-inspector-field textarea\s*\{[^}]*box-shadow:\s*var\(--bc-inset-hairline\);/s);
   assert.match(css, /\.better-codex-agent-inspector-field textarea\s*\{[^}]*resize:\s*none;/s);
   assert.match(css, /textarea\[name="description"\]\s*\{[^}]*height:\s*calc\(\(var\(--bc-text-md\) \* 1\.55 \* 4\) \+ 26px\);/s);
-  assert.match(css, /textarea\[name="instructions"\]\s*\{[^}]*height:\s*calc\(\(var\(--bc-text-sm\) \* 1\.55 \* 12\) \+ 26px\);/s);
+  assert.match(css, /textarea\[name="instructions"\]\s*\{[^}]*height:\s*calc\(\(var\(--bc-text-md\) \* 1\.55 \* 12\) \+ 26px\);/s);
+  assert.match(css, /\.better-codex-agent-number-input\s*\{[^}]*width:\s*76px;/s);
+  assert.ok(source.includes('agentNumberInput("max_concurrency", "最大并发", draft.max_concurrency, 1, 20)'));
+  assert.ok(source.includes('function agentNumberInput(name, label, value, min, max)'));
+  assert.ok(source.includes('type="number"'));
+  assert.doesNotMatch(source, /agentPicker\("max_concurrency"/);
   assert.match(css, /\.better-codex-agent-inspector-group\s*\{[^}]*box-shadow:\s*var\(--bc-inset-hairline\);/s);
   assert.match(css, /\.better-codex-agent-profile-name\s*\{[^}]*box-shadow:\s*var\(--bc-inset-hairline\);/s);
   assert.match(css, /\.better-codex-search\s*\{[^}]*background:\s*var\(--bc-color-input\);/s);

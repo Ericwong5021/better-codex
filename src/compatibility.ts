@@ -219,28 +219,32 @@ export function navigationExpression(threadId: string) {
   const compatibility = activeCompatibility();
   const selectors = JSON.stringify(compatibility.selectors);
   const attributes = JSON.stringify(compatibility.attributes);
-  const navigation = JSON.stringify(compatibility.navigation);
   return `(async () => {
     const selectors = ${selectors};
     const attributes = ${attributes};
-    const navigation = ${navigation};
     const expected = ${JSON.stringify(threadId)}.replace(/^(local|cloud):/i, "");
-    const row = Array.from(document.querySelectorAll(selectors.threadRow)).find(item => String(item.getAttribute(attributes.threadId) || "").replace(/^(local|cloud):/i, "") === expected);
-    if (row) {
-      window.__betterCodexInjection__?.close?.();
-      row.click();
-      return { opened: true, via: "sidebar" };
+    const normalize = value => String(value || "").replace(/^(local|cloud):/i, "");
+    const findRow = () => Array.from(document.querySelectorAll(selectors.threadRow)).find(item => normalize(item.getAttribute(attributes.threadId)) === expected);
+    const currentState = () => {
+      const activeRow = Array.from(document.querySelectorAll(selectors.threadRow)).find(item => item.getAttribute(attributes.threadActive) === "true");
+      return { active: normalize(activeRow?.getAttribute(attributes.threadId)) };
+    };
+    const deadline = Date.now() + 10000;
+    let clickedRow = false;
+    while (Date.now() < deadline) {
+      const current = currentState();
+      if (current.active === expected) {
+        window.__betterCodexInjection__?.close?.();
+        return { opened: true, via: "sidebar" };
+      }
+      const row = findRow();
+      if (row && !clickedRow) {
+        clickedRow = true;
+        row.click();
+      }
+      await new Promise(resolve => setTimeout(resolve, 100));
     }
-    window.postMessage({ type: navigation.messageType, path: navigation.threadRoutePrefix + encodeURIComponent(expected) }, window.location.origin);
-    await new Promise(resolve => setTimeout(resolve, 400));
-    const current = location.pathname.match(/\\/local\\/([^/?#]+)/)?.[1] || "";
-    const activeRow = Array.from(document.querySelectorAll(selectors.threadRow)).find(item => item.getAttribute(attributes.threadActive) === "true");
-    const activeThread = String(activeRow?.getAttribute(attributes.threadId) || "").replace(/^(local|cloud):/i, "");
-    if (decodeURIComponent(current) === expected || activeThread === expected) {
-      window.__betterCodexInjection__?.close?.();
-      return { opened: true, via: "route" };
-    }
-    return { opened: false, requested: true, via: "route", error: "thread_open_unconfirmed" };
+    return { opened: false, requested: false, via: "sidebar", error: "thread_open_timeout" };
   })()`;
 }
 

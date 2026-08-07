@@ -161,9 +161,22 @@ function validateLegacyWindowsState(state: LaunchIntegrationState) {
 }
 
 function launcherCommand() {
-  if (process.env.BETTER_CODEX_LAUNCHER_PATH) return [resolve(process.env.BETTER_CODEX_LAUNCHER_PATH)];
-  if (isSea()) return [resolve(process.execPath)];
-  return [resolve(process.execPath), ...process.execArgv, resolve(process.argv[1])];
+  const command = process.env.BETTER_CODEX_LAUNCHER_PATH
+    ? [resolve(process.env.BETTER_CODEX_LAUNCHER_PATH)]
+    : isSea()
+      ? [resolve(process.execPath)]
+      : [resolve(process.execPath), ...process.execArgv, resolve(process.argv[1])];
+  if (process.platform !== "win32") return command;
+
+  ensureDirectories();
+  const scriptPath = join(betterCodexHome, "Better Codex Launcher.vbs");
+  const commandLine = command.map(value => `"${value.replace(/"/g, "\"\"")}"`).join(" ");
+  writeFileSync(scriptPath, `Option Explicit
+Dim shell
+Set shell = CreateObject("WScript.Shell")
+shell.Run "${commandLine.replace(/"/g, '""')}" & " launch", 0, False
+`, { mode: 0o600 });
+  return [join(process.env.SystemRoot ?? "C:\\Windows", "System32", "wscript.exe"), scriptPath];
 }
 
 function shellSingleQuoted(value: string) {
@@ -362,15 +375,8 @@ function installWindowsShortcuts(command: string[], previous: LaunchIntegrationS
     cleanupLegacyWindowsBackups();
   }
   const [launcher, ...launcherArguments] = command;
-  const argumentsValue = [...launcherArguments, "launch"].map(windowsArgument).join(" ");
-  const stableCommand = previous?.platform === "win32" && !isLegacyWindowsState(previous)
-    ? [previous.launcher, ...(previous.launcherArguments ?? [])]
-    : command;
-  const [stableLauncher, ...stableLauncherArguments] = stableCommand;
-  const stableArgumentsValue = [...stableLauncherArguments, "launch"].map(windowsArgument).join(" ");
-  const useStable = previous?.platform === "win32" && !isLegacyWindowsState(previous) && previous.shortcuts?.length;
-  const target = useStable ? stableLauncher : launcher;
-  const targetArguments = useStable ? stableArgumentsValue : argumentsValue;
+  const target = launcher;
+  const targetArguments = [...launcherArguments, "launch"].map(windowsArgument).join(" ");
   const script = `$ErrorActionPreference = "Stop"
 $launcher = ${powershellLiteral(target)}
 $launchArguments = ${powershellLiteral(targetArguments)}
@@ -404,7 +410,7 @@ foreach ($path in $paths) {
   return {
     platform: "win32",
     launcher: target,
-    launcherArguments: useStable ? stableLauncherArguments : launcherArguments,
+    launcherArguments,
     shortcuts: Array.isArray(shortcuts) ? shortcuts : [shortcuts],
   } satisfies LaunchIntegrationState;
 }

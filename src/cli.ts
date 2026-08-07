@@ -275,7 +275,7 @@ function print(value: unknown) {
 }
 
 function usage() {
-  console.log("better-codex version | update [check|compatibility|rollback] [--channel stable|preview] | setup [--yes] | launch | launcher install|uninstall|status | doctor | enable | disable | start [--launch] | stop | status | uninstall | data delete [--yes] | inject [--launch] [--port N] | eject [--port N] | service install|uninstall|start|stop|restart|status|logs | project list|create | issue list|get|create|update|status|link|open");
+  console.log("better-codex version | update [check|compatibility|rollback] [--channel stable|preview] | setup [--yes] | launch | launcher install|uninstall|status | doctor | enable | disable | start [--launch] | stop | status | uninstall | data delete [--yes] | inject [--launch] [--port N] | eject [--port N] | service install|uninstall|start|stop|restart|status|logs | project list|create | issue list|get|create|update|status|open");
 }
 
 async function confirmSetup() {
@@ -393,7 +393,6 @@ async function issueCommand(action: string | undefined, args: string[]) {
         description: option(args, "--description") ?? "",
         status: option(args, "--status") ?? "backlog",
         priority: option(args, "--priority") ?? "medium",
-        thread_id: option(args, "--thread") ?? process.env.CODEX_THREAD_ID ?? "",
         workspace_path: option(args, "--workspace") ?? process.cwd(),
       }),
     }));
@@ -402,11 +401,6 @@ async function issueCommand(action: string | undefined, args: string[]) {
   const issue = await request(`/api/issues/${encodeURIComponent(id)}`) as { version?: number; thread_id?: string; run_thread_id?: string };
   if (action === "status") {
     return print(await request(`/api/issues/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ version: issue.version, status: args[1] }) }));
-  }
-  if (action === "link") {
-    const threadId = args[1] ?? process.env.CODEX_THREAD_ID;
-    if (!threadId) throw new Error("thread_required");
-    return print(await request(`/api/issues/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ version: issue.version, thread_id: threadId }) }));
   }
   if (action === "update") {
     const patch: Record<string, unknown> = { version: issue.version };

@@ -144,7 +144,7 @@ test("gateway completes the issue workflow and survives restart", async () => {
     assert.equal(projectResponse.status, 201);
     const project = await projectResponse.json() as { id: string };
 
-    const issueResponse = await request("/api/issues", { method: "POST", body: JSON.stringify({ project_id: project.id, title: "Round trip", thread_id: "local:gateway-thread" }) });
+    const issueResponse = await request("/api/issues", { method: "POST", body: JSON.stringify({ project_id: project.id, title: "Round trip" }) });
     assert.equal(issueResponse.status, 201);
     const issue = await issueResponse.json() as { id: string; version: number };
 
@@ -163,9 +163,9 @@ test("gateway completes the issue workflow and survives restart", async () => {
     await waitForGateway(port, gateway);
     const restoredResponse = await request(`/api/issues/${issue.id}`);
     assert.equal(restoredResponse.status, 200);
-    const restored = await restoredResponse.json() as { status: string; thread_id: string };
+    const restored = await restoredResponse.json() as { status: string; thread_id: string | null };
     assert.equal(restored.status, "in_progress");
-    assert.equal(restored.thread_id, "local:gateway-thread");
+    assert.equal(restored.thread_id, null);
     const restoredAgents = await (await request("/api/agents")).json() as Array<{ id: string; avatar: string }>;
     assert.equal(restoredAgents.find(agent => agent.id === optionalAgent.id)?.avatar, "icon:reviewer");
   } finally {

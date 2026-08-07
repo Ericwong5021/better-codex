@@ -164,7 +164,7 @@ test("issue assignee can be the current user or an agent", () => {
   }
 });
 
-test("auto-dispatch claims only attentive agent-owned issues outside backlog", () => {
+test("manual mode requires an explicit issue start", () => {
   const target = temporaryDatabase();
   try {
     const store = new Store(target.file);
@@ -184,6 +184,9 @@ test("auto-dispatch claims only attentive agent-owned issues outside backlog", (
     assert.equal(quiet.needs_attention, true);
     assert.equal(quiet.pending_actor, "agent");
     assert.equal(store.claimNextIssue(), null);
+    const initialClaim = store.claimNextIssue(quiet.id);
+    assert.equal(initialClaim?.issue.id, quiet.id);
+    store.finishRun(initialClaim!.runId, quiet.id, true);
 
     store.setAutoDispatch(true);
     const backlog = store.createIssue({
@@ -198,7 +201,13 @@ test("auto-dispatch claims only attentive agent-owned issues outside backlog", (
     assert.equal(backlog.needs_attention, false);
     assert.equal(backlog.pending_actor, "agent");
 
-    const userOwned = store.updateIssue(quiet.id, quiet.version, { pending_actor: "user", needs_attention: true });
+    const reopened = store.updateIssue(backlog.id, backlog.version, { status: "todo" });
+    assert.equal(reopened.needs_attention, true);
+    const backlogClaim = store.claimNextIssue();
+    assert.equal(backlogClaim?.issue.id, backlog.id);
+    store.finishRun(backlogClaim!.runId, backlog.id, true);
+
+    const userOwned = store.updateIssue(quiet.id, store.getIssue(quiet.id)!.version, { pending_actor: "user", needs_attention: true });
     assert.equal(store.claimNextIssue(), null);
 
     const ready = store.updateIssue(userOwned.id, userOwned.version, { pending_actor: "agent", needs_attention: true });
@@ -215,6 +224,36 @@ test("auto-dispatch claims only attentive agent-owned issues outside backlog", (
     assert.equal(finished.pending_actor, "user");
     assert.equal(store.claimNextIssue(), null);
 
+    store.close();
+  } finally {
+    rmSync(target.directory, { recursive: true, force: true });
+  }
+});
+
+test("deleting an agent unassigns its issues", () => {
+  const target = temporaryDatabase();
+  try {
+    const store = new Store(target.file);
+    const project = store.createProject({ name: "Delete assignment", workspacePath: target.directory });
+    const profile = store.createAgentProfile({ name: "Temporary", description: "", instructions: "", model: "gpt-test", reasoning_effort: "medium" });
+    const issue = store.createIssue({
+      projectId: project.id,
+      title: "Assigned issue",
+      status: "todo",
+      agentEnabled: true,
+      agentId: profile.id,
+      workspacePath: target.directory,
+    });
+
+    store.deleteAgentProfile(profile.id, profile.version);
+
+    const unassigned = store.getIssue(issue.id)!;
+    assert.equal(unassigned.agent_enabled, false);
+    assert.equal(unassigned.agent_id, null);
+    assert.equal(unassigned.user_assigned, false);
+    assert.equal(unassigned.needs_attention, false);
+    assert.equal(unassigned.pending_actor, "user");
+    assert.equal(store.claimNextIssue(), null);
     store.close();
   } finally {
     rmSync(target.directory, { recursive: true, force: true });

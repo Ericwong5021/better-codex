@@ -538,7 +538,17 @@ export class Store {
     if (profile.version !== version) throw new Error("version_conflict");
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      this.db.prepare("UPDATE issues SET agent_id = NULL, version = version + 1, updated_at = ? WHERE agent_id = ?").run(now(), profile.id);
+      this.db.prepare(`
+        UPDATE issues
+        SET agent_enabled = 0,
+            agent_id = NULL,
+            user_assigned = 0,
+            needs_attention = 0,
+            pending_actor = 'user',
+            version = version + 1,
+            updated_at = ?
+        WHERE agent_id = ?
+      `).run(now(), profile.id);
       this.db.prepare("DELETE FROM agent_avatars WHERE agent_id = ?").run(profile.id);
       const result = this.db.prepare("DELETE FROM agent_profiles WHERE id = ? AND version = ?").run(profile.id, version);
       if (result.changes !== 1) throw new Error("version_conflict");
@@ -702,9 +712,11 @@ export class Store {
         patch.user_assigned = false;
         if (patch.pending_actor === undefined) patch.pending_actor = "agent";
       }
-      if (patch.pending_actor === "agent" && patch.needs_attention === undefined) {
+      if (patch.needs_attention === undefined) {
         const nextStatus = patch.status ?? issue.status;
-        if (nextStatus !== "backlog" && nextStatus !== "done" && nextStatus !== "cancelled") patch.needs_attention = true;
+        const agentOwned = patch.pending_actor === "agent"
+          || (patch.status !== undefined && issue.agent_enabled && issue.pending_actor === "agent");
+        if (agentOwned && nextStatus !== "backlog" && nextStatus !== "done" && nextStatus !== "cancelled") patch.needs_attention = true;
       }
       if (patch.status === "backlog" && patch.needs_attention === undefined) patch.needs_attention = false;
       if (patch.status !== undefined && patch.status !== issue.status && patch.sort_order === undefined) {
@@ -793,16 +805,17 @@ export class Store {
     }
   }
 
-  claimNextIssue(): ClaimedIssue | null {
+  claimNextIssue(issueId?: string): ClaimedIssue | null {
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      if (!this.getAutoDispatch()) {
+      if (!issueId && !this.getAutoDispatch()) {
         this.db.exec("COMMIT");
         return null;
       }
       // Queueing is per agent: an issue is only claimable while its agent
       // (custom profile, or the default Codex profile for agent_id NULL) has
       // fewer active runs than its configured max_concurrency.
+      const defaultAgentConcurrency = this.getDefaultAgentMaxConcurrency();
       const row = this.db.prepare(`
         SELECT issues.*, COALESCE(NULLIF(issues.workspace_path, ''), NULLIF(projects.workspace_path, ''), '') AS resolved_workspace
         FROM issues
@@ -811,9 +824,10 @@ export class Store {
         WHERE issues.needs_attention = 1
           AND issues.pending_actor = 'agent'
           AND issues.agent_enabled = 1
+          ${issueId ? "AND issues.id = ?" : ""}
           AND issues.archived_at IS NULL
           AND issues.status NOT IN ('backlog', 'done', 'cancelled')
-          AND (issues.thread_id IS NOT NULL OR issues.workspace_path IS NOT NULL OR projects.workspace_path != '')
+          AND (issues.workspace_path IS NOT NULL OR projects.workspace_path != '')
           AND NOT EXISTS (
             SELECT 1 FROM issue_runs
             WHERE issue_runs.issue_id = issues.id
@@ -831,7 +845,7 @@ export class Store {
           issues.sort_order,
           issues.created_at
         LIMIT 1
-      `).get(this.getDefaultAgentMaxConcurrency()) as (Record<string, unknown> & { resolved_workspace: string }) | undefined;
+      `).get(...(issueId ? [issueId, defaultAgentConcurrency] : [defaultAgentConcurrency])) as (Record<string, unknown> & { resolved_workspace: string }) | undefined;
       if (!row) {
         this.db.exec("COMMIT");
         return null;

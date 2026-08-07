@@ -137,6 +137,7 @@ function asAgentAvatar(value: unknown) {
 
 function parseIssuePatch(body: Record<string, unknown>) {
   const patch: Record<string, unknown> = {};
+  if ("thread_id" in body) throw new Error("issue_session_binding_disabled");
   if ("title" in body) patch.title = cleanString(body.title, 500);
   if ("description" in body) patch.description = cleanString(body.description, 100000);
   if ("status" in body) patch.status = asStatus(body.status);
@@ -149,7 +150,6 @@ function parseIssuePatch(body: Record<string, unknown>) {
     if (typeof body.sort_order !== "number" || !Number.isFinite(body.sort_order)) throw new Error("invalid_sort_order");
     patch.sort_order = body.sort_order;
   }
-  if ("thread_id" in body) patch.thread_id = cleanString(body.thread_id, 200) || null;
   if ("workspace_path" in body) patch.workspace_path = cleanString(body.workspace_path, 4096) || null;
   if ("agent_enabled" in body) {
     if (typeof body.agent_enabled !== "boolean") throw new Error("invalid_agent_enabled");
@@ -363,14 +363,12 @@ export function startServer() {
         if ("ai_enrich" in body && typeof body.ai_enrich !== "boolean") throw new Error("invalid_ai_enrich");
         const aiEnrich = body.ai_enrich === true;
         const agentEnabled = body.agent_enabled === true || aiEnrich;
-        const threadId = cleanString(body.thread_id, 200);
-        const sessionId = normalizeSessionId(threadId);
+        if ("thread_id" in body) throw new Error("issue_session_binding_disabled");
         let workspacePath = cleanString(body.workspace_path, 4096);
-        if (!workspacePath && sessionId) workspacePath = sessionWorkspace(sessionId);
         const project = store.getProject(projectId);
         if (!project) throw new Error("project_not_found");
         if (!workspacePath) workspacePath = project.workspace_path;
-        if (agentEnabled && !sessionId && !workspacePath && !project.workspace_path) {
+        if (agentEnabled && !workspacePath) {
           throw new Error("workspace_required");
         }
         const agentId = cleanString(body.agent_id, 200);
@@ -382,7 +380,7 @@ export function startServer() {
           status: aiEnrich ? "backlog" : "status" in body ? asStatus(body.status) : undefined,
           priority: "priority" in body ? asPriority(body.priority) : undefined,
           labels: asLabels(body.labels),
-          threadId,
+          threadId: "",
           workspacePath,
           agentEnabled,
           agentId,
@@ -404,13 +402,28 @@ export function startServer() {
           if (store.isDispatchable(updated)) worker.wake();
           return sendJson(response, 200, updated);
         }
+        if (method === "POST" && path[3] === "start" && path.length === 4) {
+          const body = await readBody(request);
+          const version = Number(body.version);
+          if (!Number.isInteger(version) || version < 1) throw new Error("invalid_version");
+          const updated = store.updateIssue(issue.id, version, {
+            ...parseIssuePatch(body),
+            agent_enabled: true,
+            user_assigned: false,
+            agent_id: cleanString(body.agent_id, 200) || null,
+            pending_actor: "agent",
+            needs_attention: true,
+          });
+          if (!worker.startIssue(updated.id)) throw new Error("issue_not_started");
+          return sendJson(response, 202, store.getIssue(updated.id));
+        }
         if (method === "POST" && path[3] === "archive") {
           const body = await readBody(request);
           const updated = store.archiveIssue(issue.id, Number(body.version));
           return sendJson(response, 200, updated);
         }
         if (method === "GET" && path[3] === "conversation" && path.length === 4) {
-          const threadId = issue.run_thread_id || issue.thread_id || "";
+          const threadId = issue.run_thread_id || "";
           const conversation = await readConversationResult(threadId);
           return sendJson(response, 200, {
             ...conversation,
@@ -421,7 +434,7 @@ export function startServer() {
         }
         if (method === "POST" && path[3] === "reply" && path.length === 4) {
           const body = await readBody(request);
-          const threadId = issue.run_thread_id || issue.thread_id || "";
+          const threadId = issue.run_thread_id || "";
           const reply = startIssueReply({
             issueId: issue.id,
             threadId,

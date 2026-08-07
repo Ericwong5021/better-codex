@@ -1,7 +1,32 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ClaimedIssue } from "../src/db.js";
-import { issuePrompt } from "../src/worker.js";
+import { enrichmentMessage, fallbackEnrichment, issuePrompt, parseEnrichment } from "../src/worker.js";
+
+test("enrichment parses current Codex event messages", () => {
+  const message = JSON.stringify({
+    type: "event_msg",
+    payload: {
+      type: "agent_message",
+      message: '{"title":"编写 Better Codex 微信群冷启动文案","description":"撰写一份简短、礼貌、友好的微信群冷启动文案。"}'
+    }
+  });
+  const parsed = parseEnrichment(enrichmentMessage(message));
+  assert.deepEqual(parsed, {
+    title: "编写 Better Codex 微信群冷启动文案",
+    description: "撰写一份简短、礼貌、友好的微信群冷启动文案。"
+  });
+});
+
+test("enrichment fallback keeps a concise title separate from the original description", () => {
+  assert.deepEqual(fallbackEnrichment(
+    "BET-3",
+    "帮我写一份简短的微信群冷启动文案,发给AI交流群的群友,要求礼貌,友好"
+  ), {
+    title: "BET-3",
+    description: "帮我写一份简短的微信群冷启动文案,发给AI交流群的群友,要求礼貌,友好"
+  });
+});
 
 test("worker injects Better Codex issue management instructions", () => {
   const claim = {

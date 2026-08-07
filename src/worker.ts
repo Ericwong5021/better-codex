@@ -1,6 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { closeSync, createWriteStream, existsSync, openSync, readSync, readdirSync } from "node:fs";
-import { homedir } from "node:os";
+import { createWriteStream, existsSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
 import { agentConfigProfileName } from "./agent-profiles.js";
@@ -14,38 +13,6 @@ function codexPath() {
   if (configured) return configured;
   const bundled = "/Applications/ChatGPT.app/Contents/Resources/codex";
   return existsSync(bundled) ? bundled : "codex";
-}
-
-function sessionWorkspace(value: string | null) {
-  const id = value?.replace(/^(local|cloud):/i, "") || "";
-  if (!/^[a-f0-9-]{36}$/i.test(id)) return "";
-  const root = join(homedir(), ".codex", "sessions");
-  const visit = (directory: string, depth: number): string => {
-    if (depth > 3) return "";
-    let entries;
-    try { entries = readdirSync(directory, { withFileTypes: true }); } catch { return ""; }
-    for (const entry of entries) {
-      const path = join(directory, entry.name);
-      if (entry.isDirectory()) {
-        const found = visit(path, depth + 1);
-        if (found) return found;
-      } else if (entry.name.endsWith(`-${id}.jsonl`)) {
-        const descriptor = openSync(path, "r");
-        try {
-          const buffer = Buffer.alloc(4096);
-          const length = readSync(descriptor, buffer, 0, buffer.length, 0);
-          const match = buffer.subarray(0, length).toString("utf8").match(/"cwd":("(?:\\.|[^"\\])*")/);
-          if (!match) return "";
-          const workspace = JSON.parse(match[1]) as string;
-          return existsSync(workspace) ? workspace : "";
-        } finally {
-          closeSync(descriptor);
-        }
-      }
-    }
-    return "";
-  };
-  return visit(root, 0);
 }
 
 export function issuePrompt(claim: ClaimedIssue) {
@@ -72,6 +39,14 @@ export class IssueWorker {
   wake() {
     if (this.stopped) return;
     this.schedule(0);
+  }
+
+  startIssue(issueId: string) {
+    if (this.stopped) return false;
+    const claim = this.store.claimNextIssue(issueId);
+    if (!claim) return false;
+    this.run(claim);
+    return true;
   }
 
   stop() {
@@ -117,10 +92,8 @@ export class IssueWorker {
     const messages: string[] = [];
     const lines = createInterface({ input: child.stdout! });
     lines.on("line", line => {
-      try {
-        const event = JSON.parse(line) as { type?: string; item?: { type?: string; text?: string } };
-        if (event.type === "item.completed" && event.item?.type === "agent_message" && event.item.text) messages.push(event.item.text);
-      } catch {}
+      const message = enrichmentMessage(line);
+      if (message) messages.push(message);
     });
     const finish = () => {
       lines.close();
@@ -129,10 +102,11 @@ export class IssueWorker {
       const current = this.store.getIssue(issue.id);
       if (!current || current.version !== issue.version) return;
       const result = parseEnrichment(messages.at(-1) || "");
+      const fallback = fallbackEnrichment(issue.identifier, issue.description);
       try {
         const updated = this.store.updateIssue(issue.id, current.version, {
-          title: result?.title || issue.title,
-          description: result?.description || issue.description,
+          title: result?.title || fallback.title,
+          description: result?.description || fallback.description,
           status: "todo",
           agent_enabled: true,
           agent_id: agentId,
@@ -169,7 +143,7 @@ export class IssueWorker {
   }
 
   private run(claim: ClaimedIssue) {
-    const workspacePath = claim.workspacePath && existsSync(claim.workspacePath) ? claim.workspacePath : sessionWorkspace(claim.issue.thread_id);
+    const workspacePath = claim.workspacePath && existsSync(claim.workspacePath) ? claim.workspacePath : "";
     if (!workspacePath) {
       this.store.finishRun(claim.runId, claim.issue.id, false, "workspace_required");
       return;
@@ -231,7 +205,23 @@ function enrichmentPrompt(prompt: string) {
   return `你是 Better Codex 的 Issue 整理器。只整理用户输入，不执行任务，不修改工作区文件。输出且只输出一个 JSON 对象，不要 Markdown 代码围栏，不要额外文字，格式为 {"title":"...","description":"..."}。title 用简洁、明确、可执行的语义化标题，保留关键对象、目标和引用编号，最长 120 个字符。description 忠实转述用户意图，去掉“帮我建个 issue”等路由废话；可以使用清晰的小标题或列表组织内容，但不得编造用户没有提供的需求、事实、进度或验收标准，必须保留输入中的 URL、PR 编号和文件路径。原始输入如下：\n\n${prompt}`;
 }
 
-function parseEnrichment(value: string) {
+export function enrichmentMessage(line: string) {
+  try {
+    const event = JSON.parse(line) as {
+      type?: string;
+      item?: { type?: string; text?: string };
+      payload?: { type?: string; message?: string; content?: Array<{ type?: string; text?: string }> };
+    };
+    if (event.type === "item.completed" && event.item?.type === "agent_message") return event.item.text || "";
+    if (event.type === "event_msg" && event.payload?.type === "agent_message") return event.payload.message || "";
+    if (event.type === "response_item" && event.payload?.type === "message") {
+      return (event.payload.content || []).filter(item => item.type === "output_text").map(item => item.text || "").join("\n");
+    }
+  } catch {}
+  return "";
+}
+
+export function parseEnrichment(value: string) {
   const start = value.indexOf("{");
   const end = value.lastIndexOf("}");
   if (start < 0 || end <= start) return null;
@@ -243,4 +233,12 @@ function parseEnrichment(value: string) {
   } catch {
     return null;
   }
+}
+
+export function fallbackEnrichment(identifier: string, description: string) {
+  const source = description.trim();
+  return {
+    title: identifier.trim() || "未命名 Issue",
+    description: source,
+  };
 }

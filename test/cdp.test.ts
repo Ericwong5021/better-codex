@@ -31,3 +31,14 @@ test("bridge allows auto-dispatch settings updates", () => {
   assert.match(source, /settings\\\/auto-dispatch/);
   assert.match(source, /\["GET", "POST", "PATCH", "DELETE"\]/);
 });
+
+test("thread navigation waits for Codex app activation instead of sending a manual route", () => {
+  const compatibility = readFileSync(new URL("../src/compatibility.ts", import.meta.url), "utf8");
+  const navigation = compatibility.slice(compatibility.indexOf("export function navigationExpression"), compatibility.indexOf("export function readCompatibilityStatus"));
+
+  assert.match(navigation, /const deadline = Date\.now\(\) \+ 10000/);
+  assert.match(navigation, /if \(current\.active === expected\)/);
+  assert.match(navigation, /thread_open_timeout/);
+  assert.doesNotMatch(navigation, /window\.postMessage/);
+  assert.doesNotMatch(navigation, /threadRoutePrefix/);
+});

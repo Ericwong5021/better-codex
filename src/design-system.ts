@@ -196,6 +196,7 @@ export function betterCodexDesignSystemCss() {
     #better-codex-agent-dialog .better-codex-button,
     #better-codex-dialog .better-codex-button,
     #better-codex-dialog .better-codex-submit,
+    #better-codex-dialog .better-codex-dialog-start-now,
     #better-codex-agent-dialog .better-codex-submit,
     #better-codex-update-notice .better-codex-update-button {
       min-height: var(--bc-control-height);
@@ -1205,11 +1206,42 @@ export function betterCodexDesignSystemCss() {
     }
 
     #better-codex-dialog .better-codex-dialog-select-option > span:nth-child(2) {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
       min-width: 0;
       flex: 1;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+
+    #better-codex-dialog .better-codex-dialog-select-label {
+      display: inline-flex;
+      min-width: 0;
+      align-items: center;
+      gap: 4px;
+      overflow: hidden;
+      white-space: nowrap;
+    }
+
+    #better-codex-dialog .better-codex-dialog-select-tag {
+      flex: 0 0 auto;
+      border-radius: 999px;
+      padding: 1px 5px;
+      font-size: var(--bc-text-xs);
+      font-weight: 650;
+      line-height: 1.25;
+    }
+
+    #better-codex-dialog .better-codex-dialog-select-tag[data-tone="model"] {
+      color: var(--bc-info);
+      background: color-mix(in srgb, var(--bc-info) 13%, var(--bc-color-control));
+    }
+
+    #better-codex-dialog .better-codex-dialog-select-tag[data-tone="reasoning"] {
+      color: var(--bc-success);
+      background: color-mix(in srgb, var(--bc-success) 13%, var(--bc-color-control));
     }
 
     #better-codex-dialog .better-codex-dialog-select-check {
@@ -1633,7 +1665,7 @@ export function betterCodexDesignSystemCss() {
       min-width: 0;
       margin: 0;
       overflow: hidden;
-      font-size: var(--bc-text-xl);
+      font-size: var(--bc-text-lg);
       font-weight: 570;
       letter-spacing: -.012em;
       line-height: 1.3;
@@ -1705,7 +1737,7 @@ export function betterCodexDesignSystemCss() {
 
     #better-codex-panel .better-codex-agent-inspector-scroll > h2 {
       margin: 0 0 22px;
-      font-size: var(--bc-text-xl);
+      font-size: var(--bc-text-lg);
       font-weight: 570;
       letter-spacing: -.012em;
       line-height: 1.3;
@@ -1791,7 +1823,7 @@ export function betterCodexDesignSystemCss() {
     #better-codex-panel .better-codex-agent-summary p {
       margin: 5px 0 0;
       color: var(--bc-color-text-muted);
-      font-size: var(--bc-text-sm);
+      font-size: var(--bc-text-md);
       line-height: 1.55;
       text-wrap: pretty;
     }
@@ -1850,6 +1882,25 @@ export function betterCodexDesignSystemCss() {
       color: var(--bc-color-text-faint);
       transform: rotate(90deg);
       transition: transform var(--bc-motion-fast) var(--bc-ease-out);
+    }
+
+    #better-codex-panel .better-codex-agent-number-input {
+      box-sizing: border-box;
+      width: 76px;
+      min-height: 32px;
+      border: 0;
+      border-radius: var(--bc-radius-pill);
+      color: var(--bc-color-text);
+      background: transparent;
+      padding: 7px 9px;
+      font: inherit;
+      text-align: right;
+      outline: 0;
+    }
+
+    #better-codex-panel .better-codex-agent-number-input:focus {
+      background: var(--bc-color-hover);
+      box-shadow: var(--bc-focus-ring);
     }
 
     #better-codex-panel .better-codex-agent-setting.is-open .better-codex-agent-picker-trigger {
@@ -1928,12 +1979,12 @@ export function betterCodexDesignSystemCss() {
       flex-direction: column;
       gap: 8px;
       color: var(--bc-color-text-muted);
-      font-size: var(--bc-text-sm);
+      font-size: var(--bc-text-md);
     }
 
     #better-codex-panel .better-codex-agent-inspector-field small {
       color: var(--bc-color-text-faint);
-      font-size: var(--bc-text-caption);
+      font-size: var(--bc-text-sm);
       font-weight: 400;
     }
 
@@ -1964,9 +2015,8 @@ export function betterCodexDesignSystemCss() {
     }
 
     #better-codex-panel .better-codex-agent-inspector-field textarea[name="instructions"] {
-      height: calc((var(--bc-text-sm) * 1.55 * 12) + 26px);
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      font-size: var(--bc-text-sm);
+      height: calc((var(--bc-text-md) * 1.55 * 12) + 26px);
+      font-size: var(--bc-text-md);
     }
 
     #better-codex-panel .better-codex-agent-inspector-field input:focus,
@@ -2081,6 +2131,7 @@ export function betterCodexDesignSystemCss() {
       font: inherit;
       font-size: var(--bc-text-md);
       font-weight: 600;
+      gap: var(--bc-space-2);
       cursor: pointer;
       transition: transform var(--bc-motion-fast) var(--bc-ease-out), background-color var(--bc-motion-fast) ease-out, opacity var(--bc-motion-fast) ease-out;
     }
@@ -2091,6 +2142,52 @@ export function betterCodexDesignSystemCss() {
 
     #better-codex-dialog .better-codex-dialog-open-thread:active {
       transform: scale(.96);
+    }
+
+    #better-codex-dialog .better-codex-dialog-open-thread:disabled {
+      cursor: wait;
+      opacity: .72;
+    }
+
+    #better-codex-dialog .better-codex-dialog-open-thread.is-loading svg {
+      animation: better-codex-dialog-open-thread-spin .85s linear infinite;
+    }
+
+    @keyframes better-codex-dialog-open-thread-spin { to { transform: rotate(360deg); } }
+
+    @media (prefers-reduced-motion: reduce) {
+      #better-codex-dialog .better-codex-dialog-open-thread.is-loading svg { animation: none; }
+    }
+
+    #better-codex-dialog .better-codex-dialog-start-now {
+      display: inline-flex;
+      min-height: var(--bc-control-height);
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--bc-color-hairline);
+      border-radius: var(--bc-radius-sm);
+      color: var(--bc-color-text);
+      background: var(--bc-color-control);
+      padding: 0 var(--bc-control-padding);
+      font: inherit;
+      font-size: var(--bc-text-md);
+      font-weight: 560;
+      cursor: pointer;
+      transition: transform var(--bc-motion-fast) var(--bc-ease-out), background-color var(--bc-motion-fast) ease-out, opacity var(--bc-motion-fast) ease-out;
+    }
+
+    #better-codex-dialog .better-codex-dialog-start-now:hover {
+      background: color-mix(in oklch, var(--bc-color-control) 82%, var(--bc-color-text));
+    }
+
+    #better-codex-dialog .better-codex-dialog-start-now:active {
+      transform: scale(.96);
+    }
+
+    #better-codex-dialog .better-codex-dialog-start-now:disabled,
+    #better-codex-dialog .better-codex-submit:disabled {
+      cursor: not-allowed;
+      opacity: .5;
     }
 
     #better-codex-dialog[data-detail="true"] {
@@ -2361,8 +2458,7 @@ export function betterCodexDesignSystemCss() {
 
     #better-codex-dialog .better-codex-composer textarea {
       box-sizing: border-box;
-      min-height: calc(var(--bc-control-height) * 1.4);
-      max-height: 120px;
+      height: calc(var(--bc-control-height) * 1.6);
       flex: 1;
       border: 0;
       color: var(--bc-foreground);
@@ -2372,7 +2468,8 @@ export function betterCodexDesignSystemCss() {
       font-size: var(--bc-text-md);
       line-height: 1.45;
       outline: none;
-      resize: vertical;
+      overflow-y: auto;
+      resize: none;
     }
 
     #better-codex-dialog .better-codex-composer textarea::placeholder {
@@ -2411,6 +2508,7 @@ export function betterCodexDesignSystemCss() {
     #better-codex-dialog .better-codex-switch-mode,
     #better-codex-dialog .better-codex-keep-open,
     #better-codex-dialog .better-codex-submit,
+    #better-codex-dialog .better-codex-dialog-start-now,
     #better-codex-dialog .better-codex-run-hint,
     #better-codex-dialog .better-codex-dialog-error,
     #better-codex-confirm .better-codex-confirm-title,

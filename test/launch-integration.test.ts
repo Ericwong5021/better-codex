@@ -30,6 +30,9 @@ test("Windows creates owned Better Codex shortcuts instead of rewriting Codex sh
   assert.match(source, /healthy = \$healthy; drifted = \$drifted; missing = \$missing/);
   assert.doesNotMatch(source, /looksLikeCodex|ownedByPrevious/);
   assert.match(source, /windowsLegacyShortcutRoots/);
+  assert.match(source, /wscript\.exe/);
+  assert.match(source, /shell\.Run/);
+  assert.match(source, /Better Codex Launcher\.vbs/);
 });
 
 test("macOS and Windows launchers use the Better Codex brand icon", () => {
