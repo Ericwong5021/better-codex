@@ -1,0 +1,4 @@
+interface:
+  display_name: "Better Codex Issue"
+  short_description: "Process structured Better Codex issue prompts"
+  default_prompt: "Use $better-codex-issue to process a structured Better Codex issue prompt."

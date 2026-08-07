@@ -5,6 +5,8 @@ description: Operate Better Codex issues through its local CLI. Use when a Codex
 
 # Better Codex
 
+`better-codex-issue` is the structured-session entry skill. When a session starts with its `/better-codex-issue` envelope, use this skill's rules for all verified Issue operations and board synchronization.
+
 Use the `better-codex` CLI as the only interface. Do not edit the Better Codex database directly.
 
 ## Run modes
