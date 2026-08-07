@@ -304,6 +304,18 @@ test("agent issue creation refreshes profiles and reuses their names and avatars
   assert.ok(source.includes("syncAgentAvatar(runAvatar, selectedAgent)"));
 });
 
+test("panel binds project workspace from the active session cwd", () => {
+  const source = injectionScript(4317, "test-token", "install");
+
+  assert.ok(source.includes("async function resolveWorkspacePath(context)"));
+  assert.ok(source.includes("async function ensureContextProject(context)"));
+  assert.ok(source.includes('"/api/sessions/" + encodeURIComponent(threadId) + "/workspace"'));
+  assert.ok(source.includes("await ensureContextProject(context)"));
+  assert.ok(source.includes("创建智能体 Issue 需要本地工作区：请先打开该项目下的一个 Codex 会话"));
+  assert.ok(source.includes("const latestContext = readContext()"));
+  assert.ok(source.includes("let workspacePath = selectedProject?.workspace_path || await resolveWorkspacePath(latestContext)"));
+});
+
 test("agent detail avatars use preset icons and open an avatar picker", () => {
   const source = injectionScript(4317, "test-token", "install");
 

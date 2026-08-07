@@ -3,7 +3,30 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { normalizeSessionId, readConversationResult } from "../src/session-transcript.js";
+import { normalizeSessionId, readConversationResult, sessionWorkspace } from "../src/session-transcript.js";
+
+test("sessionWorkspace reads cwd from the session rollout meta", () => {
+  const codexHome = mkdtempSync(join(tmpdir(), "better-codex-session-cwd-"));
+  const previous = process.env.CODEX_HOME;
+  process.env.CODEX_HOME = codexHome;
+  try {
+    const id = "019fd63c-15b5-7bc1-8110-22dbe0117e75";
+    const directory = join(codexHome, "sessions", "2026", "08", "07");
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(join(directory, `rollout-2026-08-07T09-00-00-${id}.jsonl`), [
+      JSON.stringify({ type: "session_meta", payload: { cwd: codexHome } }),
+      "",
+    ].join("\n"), "utf8");
+
+    assert.equal(sessionWorkspace(`local:${id}`), codexHome);
+    assert.equal(sessionWorkspace(id), codexHome);
+    assert.equal(sessionWorkspace("missing"), "");
+  } finally {
+    if (previous === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previous;
+    rmSync(codexHome, { recursive: true, force: true });
+  }
+});
 
 test("readConversationResult builds a user/commentary/final_answer bubble timeline", async () => {
   const codexHome = mkdtempSync(join(tmpdir(), "better-codex-session-"));

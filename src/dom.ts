@@ -300,6 +300,39 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       return normalizeSessionId(issue?.run_thread_id) || normalizeSessionId(issue?.thread_id) || "";
     }
 
+    async function resolveWorkspacePath(context) {
+      const fromUrl = String(context?.workspacePath || "").trim();
+      if (fromUrl) return fromUrl;
+      const threadId = normalizeSessionId(context?.threadId);
+      if (!threadId) return "";
+      try {
+        const result = await api("/api/sessions/" + encodeURIComponent(threadId) + "/workspace");
+        return String(result?.workspace_path || "").trim();
+      } catch {
+        return "";
+      }
+    }
+
+    async function ensureContextProject(context) {
+      if (!context.projectId) return null;
+      const source = context.projects.find(item => item.id === context.projectId);
+      const existing = state.projects.find(item => item.external_id === context.projectId);
+      const workspacePath = await resolveWorkspacePath(context);
+      const project = await api("/api/projects/ensure", {
+        method: "POST",
+        body: JSON.stringify({
+          external_id: context.projectId,
+          name: source?.name || existing?.name || "Codex",
+          workspace_path: workspacePath,
+        }),
+      });
+      const index = state.projects.findIndex(item => item.id === project.id || item.external_id === project.external_id);
+      if (index >= 0) state.projects[index] = project;
+      else state.projects.push(project);
+      state.projectId = project.id;
+      return project;
+    }
+
     function installStyle() {
       if (document.getElementById(STYLE_ID)) return;
       const style = document.createElement("style");
@@ -1900,13 +1933,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         syncAutoDispatch();
         const context = readContext();
         if (context.projectId) {
-          let project = state.projects.find(item => item.external_id === context.projectId);
-          if (!project) {
-            const source = context.projects.find(item => item.id === context.projectId);
-            project = await api("/api/projects/ensure", { method: "POST", body: JSON.stringify({ external_id: context.projectId, name: source?.name || "Codex", workspace_path: context.workspacePath }) });
-            state.projects.push(project);
-          }
-          state.projectId = project.id;
+          await ensureContextProject(context);
         } else if (!state.projects.some(item => item.id === state.projectId)) {
           state.projectId = state.projects[0]?.id || "";
         }
@@ -2545,14 +2572,25 @@ export function injectionScript(port: number, accessToken: string, action: "inst
               : draft.assignee === "none"
                 ? { user_assigned: false, agent_enabled: false, agent_id: "" }
                 : { user_assigned: false, agent_enabled: true, agent_id: draft.assignee === "codex" ? "" : draft.assignee };
+          const latestContext = readContext();
+          const selectedProject = state.projects.find(item => item.id === draft.projectId);
+          const threadId = normalizeSessionId(latestContext.threadId) || normalizeSessionId(issue?.thread_id) || "";
+          let workspacePath = selectedProject?.workspace_path || await resolveWorkspacePath(latestContext);
+          if (!workspacePath && selectedProject?.external_id && latestContext.projectId === selectedProject.external_id) {
+            const ensured = await ensureContextProject(latestContext);
+            workspacePath = ensured?.workspace_path || "";
+          }
+          if (draft.mode === "agent" && !issue && !threadId && !workspacePath) {
+            throw new Error("创建智能体 Issue 需要本地工作区：请先打开该项目下的一个 Codex 会话");
+          }
           const body = {
             title,
             description: withAttachments(draft.mode === "agent" ? prompt : draft.description),
             status: draft.mode === "agent" && !issue ? "todo" : draft.status,
             priority: draft.priority,
             labels: draft.labels.split(/[,，]/).map(value => value.trim()).filter(Boolean),
-            thread_id: normalizeSessionId(context.threadId) || normalizeSessionId(issue?.thread_id) || "",
-            workspace_path: state.projects.find(item => item.id === draft.projectId)?.workspace_path || context.workspacePath,
+            thread_id: threadId,
+            workspace_path: workspacePath,
             ...assignee
           };
           if (issue) await api("/api/issues/" + encodeURIComponent(issue.id), { method: "PATCH", body: JSON.stringify({ ...body, version: issue.version }) });

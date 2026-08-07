@@ -95,6 +95,7 @@ export function startIssueReply(input: {
       BETTER_CODEX_REPLY: "1",
     },
     stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
   });
   const active: ActiveReply = { state, child };
   replies.set(issueId, active);

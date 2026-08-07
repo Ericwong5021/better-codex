@@ -363,6 +363,43 @@ test("interrupted runs hand blocked issues back to the user", () => {
   }
 });
 
+test("auto-dispatch skips agent issues until a project workspace is bound", () => {
+  const target = temporaryDatabase();
+  try {
+    const store = new Store(target.file);
+    const project = store.createProject({
+      name: "Empty Workspace",
+      externalId: "external-empty",
+      workspacePath: "",
+    });
+    const profile = store.createAgentProfile({ name: "Runner", description: "", instructions: "", model: "gpt-test", reasoning_effort: "medium" });
+    store.setAutoDispatch(true);
+    const issue = store.createIssue({
+      projectId: project.id,
+      title: "Needs cwd",
+      status: "todo",
+      agentEnabled: true,
+      agentId: profile.id,
+    });
+    assert.equal(issue.needs_attention, true);
+    assert.equal(issue.pending_actor, "agent");
+    assert.equal(store.claimNextIssue(), null);
+
+    const bound = store.ensureProject({
+      externalId: "external-empty",
+      name: "Empty Workspace",
+      workspacePath: target.directory,
+    });
+    assert.equal(bound.workspace_path, target.directory);
+    const claimed = store.claimNextIssue();
+    assert.equal(claimed?.issue.id, issue.id);
+    assert.equal(claimed?.workspacePath, target.directory);
+    store.close();
+  } finally {
+    rmSync(target.directory, { recursive: true, force: true });
+  }
+});
+
 test("agent avatars persist independently and are removed with their profile", () => {
   const target = temporaryDatabase();
   try {

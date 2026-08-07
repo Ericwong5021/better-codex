@@ -138,6 +138,7 @@ export class IssueWorker {
         BETTER_CODEX_RUN_ID: claim.runId,
       },
       stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
     });
     this.active = claim;
     this.child = child;

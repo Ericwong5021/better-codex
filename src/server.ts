@@ -12,7 +12,7 @@ import { runtimePort, token, updateLogPath } from "./config.js";
 import { acquireRuntimeLock, clearRuntimeState, createRuntimeIdentity, publishRuntimeState } from "./runtime-state.js";
 import { activeCoreExecutable, getGatewayUpdateState, installGatewayUpdate, startGatewayUpdateChecks } from "./updater.js";
 import { getIssueReplyState, startIssueReply } from "./session-reply.js";
-import { readConversationResult } from "./session-transcript.js";
+import { normalizeSessionId, readConversationResult, sessionWorkspace } from "./session-transcript.js";
 import { IssueWorker } from "./worker.js";
 
 const accessToken = token();
@@ -325,7 +325,13 @@ export function startServer() {
           name: cleanString(body.name, 120) || "Codex",
           workspacePath: cleanString(body.workspace_path, 4096),
         });
+        if (project.workspace_path) worker.wake();
         return sendJson(response, 200, project);
+      }
+      if (path[0] === "api" && path[1] === "sessions" && path[2] && path[3] === "workspace" && path.length === 4 && method === "GET") {
+        const threadId = normalizeSessionId(decodeURIComponent(path[2]));
+        if (!threadId) throw new Error("session_required");
+        return sendJson(response, 200, { workspace_path: sessionWorkspace(threadId) || "" });
       }
       if (url.pathname === "/api/issues" && method === "GET") {
         return sendJson(response, 200, store.listIssues({
@@ -336,15 +342,25 @@ export function startServer() {
       }
       if (url.pathname === "/api/issues" && method === "POST") {
         const body = await readBody(request);
+        const projectId = cleanString(body.project_id, 200);
+        const threadId = cleanString(body.thread_id, 200);
+        const sessionId = normalizeSessionId(threadId);
+        let workspacePath = cleanString(body.workspace_path, 4096);
+        if (!workspacePath && sessionId) workspacePath = sessionWorkspace(sessionId);
+        const project = store.getProject(projectId);
+        if (!project) throw new Error("project_not_found");
+        if (body.agent_enabled === true && !sessionId && !workspacePath && !project.workspace_path) {
+          throw new Error("workspace_required");
+        }
         const issue = store.createIssue({
-          projectId: cleanString(body.project_id, 200),
+          projectId,
           title: cleanString(body.title, 500),
           description: cleanString(body.description, 100000),
           status: "status" in body ? asStatus(body.status) : undefined,
           priority: "priority" in body ? asPriority(body.priority) : undefined,
           labels: asLabels(body.labels),
-          threadId: cleanString(body.thread_id, 200),
-          workspacePath: cleanString(body.workspace_path, 4096),
+          threadId,
+          workspacePath,
           agentEnabled: body.agent_enabled === true,
           agentId: cleanString(body.agent_id, 200),
           userAssigned: body.user_assigned === true,
