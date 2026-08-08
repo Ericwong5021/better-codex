@@ -13,7 +13,7 @@ import { readModelCatalog } from "./model-catalog.js";
 import { runPath, runtimePort, token, updateLogPath } from "./config.js";
 import { acquireRuntimeLock, clearRuntimeState, createRuntimeIdentity, publishRuntimeState } from "./runtime-state.js";
 import { activeCoreExecutable, checkGatewayUpdate, getGatewayUpdateState, installGatewayUpdate, recordGatewayUpdateActivation, startGatewayUpdateChecks } from "./updater.js";
-import { getIssueReplyState, hasActiveIssueReplies, startIssueReply, stopIssueReplies } from "./session-reply.js";
+import { getIssueReplyState, hasActiveIssueReplies, startIssueReply, stopIssueReply, stopIssueReplies } from "./session-reply.js";
 import { join } from "node:path";
 import { normalizeSessionId, readConversationResult, sessionWorkspace } from "./session-transcript.js";
 import { IssueWorker } from "./worker.js";
@@ -781,7 +781,8 @@ export function startServer() {
         }
         if (method === "POST" && path[3] === "stop" && path.length === 4) {
           const stopped = await worker.stopIssue(issue.id);
-          if (!stopped && store.getIssue(issue.id)?.active_run_status) throw new Error("issue_stop_timeout");
+          const replyStopped = stopIssueReply(store, issue.id);
+          if (!stopped && !replyStopped && store.getIssue(issue.id)?.active_run_status) throw new Error("issue_stop_timeout");
           return sendJson(response, 200, store.getIssue(issue.id));
         }
         if (method === "POST" && path[3] === "archive") {

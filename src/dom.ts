@@ -3820,22 +3820,45 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         dialog.querySelector("[data-dialog-close]")?.addEventListener("click", () => dialog.close());
         dialog.querySelector("[data-dialog-open-thread]")?.addEventListener("click", event => {
           const button = event.currentTarget;
+          const issueId = issue?.id || "";
           const threadId = normalizeSessionId(event.currentTarget.dataset.dialogOpenThread);
           const executionRunning = button.dataset.dialogOpenThreadRunning === "true";
           if ((!threadId && !executionRunning) || button.disabled) return;
           const errorOutput = dialog.querySelector(".better-codex-dialog-error");
           const idleLabel = button.textContent || t("在会话中打开");
+          let loadingButton = button;
+          const setLoading = (target, label) => {
+            target.disabled = true;
+            if (target === button) {
+              button.classList.add("is-loading");
+              button.setAttribute("aria-busy", "true");
+              if (label === "正在打开…") button.innerHTML = icon("refresh") + "<span>" + te("正在打开…") + "</span>";
+              else button.innerHTML = icon("refresh") + "<span>" + te(label) + "</span>";
+            } else {
+              target.classList.add("is-loading");
+              target.setAttribute("aria-busy", "true");
+              target.innerHTML = icon("refresh") + "<span>" + te(label) + "</span>";
+            }
+          };
           clearError();
           void (async () => {
             try {
-              button.disabled = true;
-              button.classList.add("is-loading");
-              button.setAttribute("aria-busy", "true");
-              button.innerHTML = icon("refresh") + "<span>" + te("正在打开…") + "</span>";
-              if (threadId) await openThread(threadId);
-              else {
-                await loadIssues();
+              let nextThreadId = threadId;
+              if (executionRunning) {
+                const confirmed = await confirmAction("任务正在进行中", "终止任务后才能打开对话，是否终止任务？", "终止并打开");
+                if (!confirmed) return;
+                setLoading(loadingButton, "正在终止…");
+                await api("/api/issues/" + encodeURIComponent(issueId) + "/stop", { method: "POST" });
+                const current = await api("/api/issues/" + encodeURIComponent(issueId));
+                refreshIssueState(current);
+                nextThreadId = issueSessionId(current) || nextThreadId;
+                loadingButton = dialog.querySelector("[data-dialog-open-thread]") || loadingButton;
+                setLoading(loadingButton, "正在打开…");
+              } else {
+                setLoading(loadingButton, "正在打开…");
               }
+              if (nextThreadId) await openThread(nextThreadId);
+              else await loadIssues();
               dialog.close();
             } catch (error) {
               showError(error);
@@ -3843,11 +3866,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
                 errorOutput.textContent = errorLabel(error);
                 errorOutput.hidden = false;
               }
-              if (button.isConnected) {
-                button.disabled = false;
-                button.classList.remove("is-loading");
-                button.removeAttribute("aria-busy");
-                button.textContent = idleLabel;
+              if (loadingButton.isConnected) {
+                loadingButton.disabled = false;
+                loadingButton.classList.remove("is-loading");
+                if (loadingButton === button) button.removeAttribute("aria-busy");
+                else loadingButton.removeAttribute("aria-busy");
+                loadingButton.textContent = idleLabel;
               }
             }
           })();

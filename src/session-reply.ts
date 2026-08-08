@@ -36,19 +36,21 @@ export function hasActiveIssueReplies() {
   return [...replies.values()].some(current => current.state.status === "running");
 }
 
+export function stopIssueReply(store: Store, issueId: string) {
+  const current = replies.get(issueId);
+  if (!current || current.state.status !== "running") return false;
+  current.state.status = "interrupted";
+  current.state.error = "runtime_stopped";
+  current.state.finished_at = new Date().toISOString();
+  current.child.kill("SIGTERM");
+  store.setIssueReplyState(current.state);
+  store.finishReplyRun(issueId, false);
+  replies.delete(issueId);
+  return true;
+}
+
 export function stopIssueReplies(store: Store) {
-  const finishedAt = new Date().toISOString();
-  for (const [issueId, current] of replies) {
-    if (current.state.status === "running") {
-      current.state.status = "interrupted";
-      current.state.error = "runtime_stopped";
-      current.state.finished_at = finishedAt;
-      current.child.kill("SIGTERM");
-      store.setIssueReplyState(current.state);
-      store.finishReplyRun(issueId, false);
-      replies.delete(issueId);
-    }
-  }
+  for (const issueId of [...replies.keys()]) stopIssueReply(store, issueId);
 }
 
 export function startIssueReply(store: Store, input: {
