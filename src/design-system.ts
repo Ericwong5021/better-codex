@@ -3678,16 +3678,67 @@ export function betterCodexDesignSystemCss() {
     }
 
     #better-codex-dialog .better-codex-conversation-status {
+      display: inline-flex;
+      align-items: center;
       color: var(--bc-faint);
       font-weight: 500;
     }
 
-    #better-codex-dialog .better-codex-conversation-status[data-state="running"] {
-      color: var(--bc-warning);
+    #better-codex-dialog .better-codex-conversation-status .better-codex-activity {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      color: var(--bc-muted);
+      font-size: var(--bc-text-caption);
+      font-weight: 600;
     }
 
-    #better-codex-dialog .better-codex-conversation-status[data-state="failed"] {
+    #better-codex-dialog .better-codex-conversation-status .better-codex-activity[data-run="replying"] {
+      color: var(--bc-foreground);
+    }
+
+    #better-codex-dialog .better-codex-conversation-status .better-codex-activity[data-run="reply-succeeded"] {
+      color: var(--bc-success);
+    }
+
+    #better-codex-dialog .better-codex-conversation-status .better-codex-activity[data-run="reply-failed"],
+    #better-codex-dialog .better-codex-conversation-status .better-codex-activity[data-run="interrupted"] {
       color: var(--bc-danger);
+    }
+
+    #better-codex-dialog .better-codex-conversation-status-avatar {
+      width: 16px;
+      height: 16px;
+      border: 0;
+    }
+
+    #better-codex-dialog .better-codex-conversation-status-avatar.is-fallback svg,
+    #better-codex-dialog .better-codex-conversation-status-avatar.is-icon svg {
+      width: 10px;
+      height: 10px;
+    }
+
+    #better-codex-dialog .better-codex-conversation-status-avatar.is-codex svg {
+      width: 16px;
+      height: 16px;
+    }
+
+    #better-codex-dialog .better-codex-conversation-status .better-codex-activity-dot {
+      width: 6px;
+      height: 6px;
+      flex: 0 0 auto;
+      border-radius: var(--bc-radius-pill);
+      background: currentColor;
+    }
+
+    #better-codex-dialog .better-codex-conversation-status .better-codex-shimmer {
+      background-image: linear-gradient(90deg, var(--bc-muted) 0%, var(--bc-muted) 35%, var(--bc-foreground) 50%, var(--bc-muted) 65%, var(--bc-muted) 100%);
+      background-size: 200% 100%;
+      background-clip: text;
+      color: transparent;
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      animation: better-codex-shimmer 2.5s linear infinite;
     }
 
     #better-codex-dialog .better-codex-timeline {
@@ -4307,6 +4358,25 @@ export function betterCodexDesignSystemCss() {
       color: var(--bc-color-text);
       background: var(--bc-color-surface-raised);
       box-shadow: var(--bc-elevation-menu);
+    }
+
+    #better-codex-completion-notice .better-codex-completion-logo {
+      width: 24px;
+      height: 24px;
+      flex: 0 0 auto;
+      border-radius: var(--bc-radius-sm);
+      object-fit: cover;
+    }
+
+    #better-codex-completion-notice .better-codex-completion-status {
+      flex: 0 0 auto;
+      border-radius: var(--bc-radius-pill);
+      padding: 2px 7px;
+      color: var(--bc-color-text-muted);
+      background: var(--bc-color-control);
+      font-size: var(--bc-text-xs);
+      font-weight: 500;
+      line-height: 1.4;
     }
 
     #better-codex-avatar-picker {

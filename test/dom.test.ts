@@ -365,7 +365,7 @@ test("panel binds project workspace from the active session cwd", () => {
 test("agent issue creation does not require or bind the current session", () => {
   const source = injectionScript(4317, "test-token", "install");
 
-  assert.ok(source.includes('if (draft.mode === "agent" && !issue && !workspacePath)'));
+  assert.ok(source.includes('if (draft.mode === "agent" && !issue && !workspacePath && !state.mockup)'));
   assert.doesNotMatch(source, /draft\.mode === "agent" && !issue && !threadId/);
   assert.ok(source.includes('ai_enrich: draft.mode === "agent" && !issue'));
   assert.doesNotMatch(source, /thread_id:\s*threadId/);

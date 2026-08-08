@@ -380,7 +380,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "新建": "New", "新建 issue": "New issue", "新建任务": "New task", "新建智能体": "New agent", "创建": "Create", "创建任务": "Create task", "删除": "Delete", "删除任务": "Delete task", "删除智能体": "Delete agent", "保存": "Save", "确认": "Confirm", "取消": "Cancel", "关闭": "Close", "重试": "Retry", "稍后": "Later", "展开": "Expand", "缩小": "Minimize", "缩放头像": "Zoom avatar",
       "项目": "Project", "无项目": "No project", "选择项目": "Select project", "选择责任人": "Select owner", "选择执行智能体": "Select agent", "选择 issue 创建方式": "Choose how to create the issue", "任务标题": "Task title", "添加描述...": "Add description...", "添加标签": "Add label", "添加附件": "Add attachment", "移除附件": "Remove attachment", "搜索任务": "Search tasks", "搜索项目": "Search projects", "搜索项目...": "Search projects...", "搜索智能体": "Search agents",
       "负责人": "Owner", "创建者": "Creator", "指定负责人": "Assign owner", "由我创建": "Created by me", "由我": "By me", "我": "Me", "你": "You", "未指派": "Not assigned", "未提供": "Not provided", "已同步": "Synced",
-      "自动运行": "Auto-run", "手动运行": "Manual run", "切换为自动运行": "Switch to auto-run", "切换为手动运行": "Switch to manual run", "切换到智能体": "Switch to agents", "手动创建": "Manual creation", "通过智能体创建": "Create with agent", "运行模式说明": "Run mode", "帮助与设置": "Help and settings", "设置": "Settings", "关于": "About", "任务完成提醒": "Task completion alerts", "任务完成后在当前窗口显示提醒": "Show an alert in the current window when a task is completed", "通知": "Notifications", "语言": "Language", "界面语言": "Interface language", "选择 Better Codex 的界面语言": "Choose the language used by Better Codex", "跟随系统": "System", "中文": "Chinese", "软件更新": "Software updates", "更新状态": "Update status", "检查新版本": "Check for updates", "检查中…": "Checking…", "发现新版本": "Update available", "无法检查更新": "Unable to check", "版本信息": "Version info", "兼容版本": "Compatibility version", "运行状态": "Runtime status", "运行正常": "Running", "正在检查": "Checking", "已是最新版本": "Up to date", "从开始到完成，让 Codex 里的工作清晰可见。": "From start to finish, keep your work in Codex clear and visible.", "如果你喜欢 Better Codex，欢迎给我们一个 Star。": "If you like Better Codex, please give us a Star.", "最大并发": "Max concurrency", "模型": "Model", "推理": "Reasoning", "指令": "Instructions", "默认": "Default", "自定义": "Custom",
+      "自动运行": "Auto-run", "手动运行": "Manual run", "切换为自动运行": "Switch to auto-run", "切换为手动运行": "Switch to manual run", "切换到智能体": "Switch to agents", "手动创建": "Manual creation", "通过智能体创建": "Create with agent", "运行模式说明": "Run mode", "帮助与设置": "Help and settings", "设置": "Settings", "关于": "About", "会话结束提醒": "Session completion alerts", "Issue 会话结束后在当前窗口显示提醒": "Show an alert in the current window when an issue session ends", "会话已结束": "Session ended", "通知": "Notifications", "语言": "Language", "界面语言": "Interface language", "选择 Better Codex 的界面语言": "Choose the language used by Better Codex", "跟随系统": "System", "中文": "Chinese", "软件更新": "Software updates", "更新状态": "Update status", "检查新版本": "Check for updates", "检查中…": "Checking…", "发现新版本": "Update available", "无法检查更新": "Unable to check", "版本信息": "Version info", "兼容版本": "Compatibility version", "运行状态": "Runtime status", "运行正常": "Running", "正在检查": "Checking", "已是最新版本": "Up to date", "从开始到完成，让 Codex 里的工作清晰可见。": "From start to finish, keep your work in Codex clear and visible.", "如果你喜欢 Better Codex，欢迎给我们一个 Star。": "If you like Better Codex, please give us a Star.", "最大并发": "Max concurrency", "模型": "Model", "推理": "Reasoning", "指令": "Instructions", "默认": "Default", "自定义": "Custom",
       "点击": "Click", "，或者在已完成的会话卡片中": ", or use", "新消息，智能体才会执行任务。": "to post a new message in a completed conversation card. Only then will the agent run the task.", "会主动执行分配给自己的任务，但是不会执行": "automatically runs tasks assigned to it, but does not run", "区域的任务。": "tasks.",
       "代码审查": "Code review", "问题排查": "Troubleshooting", "前端实现": "Frontend implementation", "文档写作": "Documentation", "创意探索": "Creative exploration", "终端工程": "Terminal engineering", "通用助手": "General assistant", "修复工具": "Fixer", "安全审查": "Security review", "测试验证": "Test verification", "插件": "Plugins", "数据与存储": "Data and storage", "检查改动的正确性、回归风险和可维护性": "Review changes for correctness, regression risk, and maintainability", "负责 Codex 原生风格的界面实现与视觉验证": "Build and visually verify interfaces in the native Codex style", "定位崩溃、回归和异常行为的根因": "Find the root cause of crashes, regressions, and unexpected behavior",
       "通用任务处理": "General task handling", "代码实现": "Code implementation", "最大": "Maximum", "极致": "Ultra", "发送": "Send", "副本": "Copy", "复制卡片": "Copy card", "更多操作": "More actions", "本次启动关闭": "Disable for this launch", "正在重启 Better Codex": "Restarting Better Codex", "Better Codex 已恢复到上一版本。": "Better Codex has been restored to the previous version.",
@@ -408,7 +408,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     let pollTimer = null;
     let updateTimer = null;
     let updateNotice = null;
-    let issueStatusSnapshot = new Map();
+    let issueSessionSnapshot = new Map();
     let completionNoticeTimer = null;
     let completionNoticeMenuDismiss = null;
     let dismissedUpdateVersion = sessionStorage.getItem("better-codex-dismissed-update") || "";
@@ -594,9 +594,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         @media (prefers-reduced-motion: reduce) { #better-codex-update-notice, #better-codex-update-notice[data-status="installing"] .better-codex-update-icon svg { animation: none; } }
         #better-codex-completion-notice { position: fixed; right: 16px; bottom: 16px; z-index: 2147483000; display: flex; width: max-content; max-width: min(420px,calc(100vw - 32px)); min-height: 40px; box-sizing: border-box; align-items: center; gap: 8px; padding: 6px 6px 6px 12px; color: var(--color-token-foreground, var(--bc-foreground)); background: var(--color-token-bg-primary, var(--color-background-surface, var(--bc-raised))); border: 1px solid var(--color-token-border, color-mix(in srgb,var(--color-token-foreground, var(--bc-foreground)) 12%,transparent)); border-radius: 10px; box-shadow: var(--shadow-md, 0 8px 24px rgb(0 0 0 / .12)); font-family: var(--font-sans, var(--bc-font-ui)); font-size: var(--font-size-small, var(--bc-text-sm)); animation: better-codex-update-enter .2s cubic-bezier(.16,1,.3,1); }
         #better-codex-completion-notice .better-codex-completion-layout { display: flex; min-width: 0; align-items: center; gap: 8px; }
-        #better-codex-completion-notice .better-codex-completion-icon { display: inline-flex; width: 16px; height: 16px; flex: 0 0 auto; align-items: center; justify-content: center; color: var(--color-token-foreground, var(--bc-foreground)); }
-        #better-codex-completion-notice .better-codex-completion-icon svg { width: 16px; height: 16px; }
+        #better-codex-completion-notice .better-codex-completion-logo { width: 24px; height: 24px; flex: 0 0 auto; border-radius: 6px; object-fit: cover; }
         #better-codex-completion-notice .better-codex-completion-message { min-width: 0; margin: 0; overflow: hidden; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
+        #better-codex-completion-notice .better-codex-completion-status { flex: 0 0 auto; border-radius: 999px; padding: 2px 7px; color: var(--color-token-text-secondary, var(--bc-muted)); background: var(--color-token-bg-secondary, var(--bc-hover)); font-size: 11px; font-weight: 500; line-height: 1.4; }
         #better-codex-completion-notice .better-codex-completion-menu-toggle, #better-codex-completion-notice .better-codex-completion-close { display: inline-flex; width: 28px; height: 28px; flex: 0 0 auto; align-items: center; justify-content: center; border: 0; border-radius: 7px; color: var(--color-token-text-secondary, var(--bc-muted)); background: transparent; cursor: pointer; }
         #better-codex-completion-notice .better-codex-completion-menu { position: absolute; right: 38px; bottom: 38px; z-index: 2; min-width: 148px; box-sizing: border-box; padding: 4px; border: 1px solid var(--color-token-border, var(--bc-border)); border-radius: 8px; color: var(--color-token-foreground, var(--bc-foreground)); background: var(--color-token-bg-primary, var(--bc-raised)); box-shadow: var(--shadow-md, var(--bc-menu-shadow)); }
         #better-codex-completion-notice .better-codex-completion-menu[hidden] { display: none; }
@@ -1276,7 +1276,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       return sessionStorage.getItem("better-codex-completion-notice-disabled") === "true";
     }
 
-    function renderCompletionNotice(issue) {
+    function renderSessionEndNotice(issue) {
       if (completionNoticeSuppressed()) return;
       if (completionNoticeTimer !== null) clearTimeout(completionNoticeTimer);
       completionNoticeTimer = null;
@@ -1285,15 +1285,15 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       updateNotice?.remove();
       updateNotice = document.createElement("section");
       updateNotice.id = "better-codex-completion-notice";
-      updateNotice.dataset.status = "completed";
+      updateNotice.dataset.status = String(issue?.status || "");
       updateNotice.setAttribute(OWNED, "true");
       updateNotice.setAttribute("role", "status");
       updateNotice.setAttribute("aria-live", "polite");
       const identifier = String(issue?.identifier || "").trim();
       const title = String(issue?.title || "").trim();
       const subject = [identifier, title].filter(Boolean).join(" ");
-      const description = state.locale === "zh-CN" ? (subject ? subject + " 已完成。" : "任务已完成。") : (subject ? subject + " is complete." : "The task is complete.");
-      updateNotice.innerHTML = '<div class="better-codex-completion-layout"><span class="better-codex-completion-icon">' + icon("check") + '</span><p class="better-codex-completion-message">' + escapeHtml(description) + '</p></div><button class="better-codex-completion-menu-toggle" type="button" aria-label="' + escapeHtml(t("更多操作")) + '" aria-expanded="false" aria-haspopup="menu" data-completion-menu-toggle>' + icon("more") + '</button><div class="better-codex-completion-menu" data-completion-menu hidden><button type="button" role="menuitem" data-completion-suppress>' + escapeHtml(t("本次启动关闭")) + '</button></div><button class="better-codex-completion-close" type="button" aria-label="' + escapeHtml(t("关闭")) + '">' + icon("close") + '</button>';
+      const status = t(statusLabels[issue?.status] || String(issue?.status || ""));
+      updateNotice.innerHTML = '<div class="better-codex-completion-layout"><img class="better-codex-completion-logo" src="' + BETTER_CODEX_LOGO_URL + '" alt=""><p class="better-codex-completion-message">' + escapeHtml(subject || t("会话已结束")) + '</p><span class="better-codex-completion-status">' + escapeHtml(status) + '</span></div><button class="better-codex-completion-menu-toggle" type="button" aria-label="' + escapeHtml(t("更多操作")) + '" aria-expanded="false" aria-haspopup="menu" data-completion-menu-toggle>' + icon("more") + '</button><div class="better-codex-completion-menu" data-completion-menu hidden><button type="button" role="menuitem" data-completion-suppress>' + escapeHtml(t("本次启动关闭")) + '</button></div><button class="better-codex-completion-close" type="button" aria-label="' + escapeHtml(t("关闭")) + '">' + icon("close") + '</button>';
       document.body.appendChild(updateNotice);
       const notice = updateNotice;
       const menuToggle = notice.querySelector("[data-completion-menu-toggle]");
@@ -2489,7 +2489,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         '<section class="better-codex-help-page is-active" data-help-page="mode"><div class="better-codex-auto-dispatch-help-panels"><article class="better-codex-auto-dispatch-help-panel is-manual"><div class="better-codex-auto-dispatch-help-heading">' + icon("user") + "<h3>" + te("手动运行") + "</h3></div>" + modeDescription(helpMode.manual) + "</article>",
         '<div class="better-codex-auto-dispatch-help-divider" aria-hidden="true"></div>',
         '<article class="better-codex-auto-dispatch-help-panel is-auto"><div class="better-codex-auto-dispatch-help-heading">' + icon("refresh") + "<h3>" + te("自动运行") + "</h3></div>" + modeDescription(helpMode.auto) + "</article></div></section>",
-        '<section class="better-codex-help-page" data-help-page="settings" hidden><div class="better-codex-help-setting-group"><h3>' + te("语言") + '</h3><div class="better-codex-help-setting-row is-language"><span><strong>' + te("界面语言") + '</strong><small>' + te("选择 Better Codex 的界面语言") + '</small></span><div class="better-codex-language-switch" role="radiogroup" aria-label="' + te("界面语言") + '" data-language-value="' + state.languageSetting + '"><button type="button" role="radio" data-language="system" aria-checked="' + String(state.languageSetting === "system") + '">' + te("跟随系统") + '</button><button type="button" role="radio" data-language="zh-CN" aria-checked="' + String(state.languageSetting === "zh-CN") + '">' + te("中文") + '</button><button type="button" role="radio" data-language="en" aria-checked="' + String(state.languageSetting === "en") + '">English</button></div></div></div><div class="better-codex-help-setting-group"><h3>' + te("通知") + '</h3><label class="better-codex-help-setting-row"><span><strong>' + te("任务完成提醒") + '</strong><small>' + te("任务完成后在当前窗口显示提醒") + '</small></span><input type="checkbox" data-setting-completion' + (completionEnabled ? " checked" : "") + '></label></div></section>',
+        '<section class="better-codex-help-page" data-help-page="settings" hidden><div class="better-codex-help-setting-group"><h3>' + te("语言") + '</h3><div class="better-codex-help-setting-row is-language"><span><strong>' + te("界面语言") + '</strong><small>' + te("选择 Better Codex 的界面语言") + '</small></span><div class="better-codex-language-switch" role="radiogroup" aria-label="' + te("界面语言") + '" data-language-value="' + state.languageSetting + '"><button type="button" role="radio" data-language="system" aria-checked="' + String(state.languageSetting === "system") + '">' + te("跟随系统") + '</button><button type="button" role="radio" data-language="zh-CN" aria-checked="' + String(state.languageSetting === "zh-CN") + '">' + te("中文") + '</button><button type="button" role="radio" data-language="en" aria-checked="' + String(state.languageSetting === "en") + '">English</button></div></div></div><div class="better-codex-help-setting-group"><h3>' + te("通知") + '</h3><label class="better-codex-help-setting-row"><span><strong>' + te("会话结束提醒") + '</strong><small>' + te("Issue 会话结束后在当前窗口显示提醒") + '</small></span><input type="checkbox" data-setting-completion' + (completionEnabled ? " checked" : "") + '></label></div></section>',
         '<section class="better-codex-help-page" data-help-page="about" hidden><div class="better-codex-help-about"><span class="better-codex-help-about-logo">' + betterCodexLogo() + '</span><div><h2>Better Codex</h2><p class="better-codex-help-about-slogan">' + te("从开始到完成，让 Codex 里的工作清晰可见。") + '</p></div><span class="better-codex-help-runtime-status"><span class="better-codex-help-status-dot"></span>' + te("运行正常") + '</span></div><dl class="better-codex-help-about-details"><div><dt>' + te("版本信息") + '</dt><dd><button class="better-codex-help-check-update" type="button" data-check-update>' + te("检查新版本") + '</button><span data-product-core></span></dd></div></dl><div class="better-codex-help-github-row"><a class="better-codex-help-github" href="https://github.com/Ericwong5021/better-codex" target="_blank" rel="noreferrer">' + githubLogo() + '<span class="better-codex-help-github-name">Better Codex</span><span class="better-codex-help-github-stars">' + icon("star", "better-codex-help-star") + '</span></a><p>' + te("如果你喜欢 Better Codex，欢迎给我们一个 Star。") + '</p></div></section>',
         "</main>",
         "</div>",
@@ -2672,7 +2672,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           const agentName = assignee?.name || "";
           const activityAgent = assignee || defaultAgent || { name: "Codex", is_default: true };
           const replyStatus = issue.reply_status || "idle";
-          const replyActivityState = replyStatus === "running" ? "replying" : replyStatus === "failed" ? "reply-failed" : replyStatus === "interrupted" ? "interrupted" : replyStatus === "succeeded" ? "reply-succeeded" : "";
+          const replyActivityState = replyStatus === "running" ? "replying" : replyStatus === "failed" ? "reply-failed" : replyStatus === "interrupted" ? "interrupted" : "";
           const latestRunStatus = issue.latest_run_status || "";
           const executionState = latestRunStatus === "completed" ? "completed" : latestRunStatus === "failed" ? "failed" : latestRunStatus === "interrupted" ? "interrupted" : latestRunStatus === "running" ? "running" : latestRunStatus === "claimed" ? "claimed" : issue.agent_enabled ? "not-started" : "";
           const activeExecutionState = issue.active_run_status === "running" && issue.status === "in_review" ? "in_review" : issue.active_run_status || "";
@@ -2710,11 +2710,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (state.search) query.set("search", state.search);
       const issues = await api("/api/issues" + (query.toString() ? "?" + query : ""));
       const changed = JSON.stringify(issues) !== JSON.stringify(state.issues);
-      if (issueStatusSnapshot.size) {
-        const completed = issues.find(issue => issue.status === "done" && issueStatusSnapshot.get(issue.id) && issueStatusSnapshot.get(issue.id) !== "done");
-        if (completed) renderCompletionNotice(completed);
+      if (issueSessionSnapshot.size) {
+        const ended = issues.find(issue => {
+          const previous = issueSessionSnapshot.get(issue.id);
+          return previous && ((["claimed", "running"].includes(previous.activeRunStatus) && !issue.active_run_status) || (previous.replyStatus === "running" && issue.reply_status !== "running"));
+        });
+        if (ended) renderSessionEndNotice(ended);
       }
-      issueStatusSnapshot = new Map(issues.map(issue => [issue.id, issue.status]));
+      issueSessionSnapshot = new Map(issues.map(issue => [issue.id, { activeRunStatus: issue.active_run_status || "", replyStatus: issue.reply_status || "idle" }]));
       state.issues = issues;
       const dialog = document.getElementById("better-codex-dialog");
       const dialogIssue = dialog?.dataset.issueId ? issues.find(issue => issue.id === dialog.dataset.issueId) : null;
@@ -3143,9 +3146,29 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
       function conversationPanel() {
         if (!issue || (!sessionId && !executionRunning)) return "";
-        const conversationState = t(sessionId ? "加载中…" : "等待对话");
+        const conversationState = issue.reply_status || "idle";
+        const conversationStatus = conversationStatusMarkup(conversationState);
         const conversationBody = sessionId ? '<p class="better-codex-markdown-empty">' + te("加载对话…") + '</p>' : conversationActivityMarkup();
-        return '<section class="better-codex-conversation"><div class="better-codex-conversation-head"><span>' + te("对话") + '</span><span class="better-codex-conversation-status" data-conversation-status data-state="idle">' + escapeHtml(conversationState) + '</span></div><div class="better-codex-timeline" data-conversation-body>' + conversationBody + '</div></section><div class="better-codex-conversation-feedback" data-conversation-feedback hidden></div>' + conversationComposer();
+        return '<section class="better-codex-conversation"><div class="better-codex-conversation-head"><span>' + te("对话") + '</span><span class="better-codex-conversation-status" data-conversation-status data-state="' + escapeHtml(conversationState) + '"' + (conversationStatus ? "" : " hidden") + '>' + conversationStatus + '</span></div><div class="better-codex-timeline" data-conversation-body>' + conversationBody + '</div></section><div class="better-codex-conversation-feedback" data-conversation-feedback hidden></div>' + conversationComposer();
+      }
+
+      function conversationStatusMarkup(replyStatus) {
+        const activityState = replyStatus === "running" ? "replying" : replyStatus === "failed" ? "reply-failed" : replyStatus === "interrupted" ? "interrupted" : replyStatus === "succeeded" ? "reply-succeeded" : "";
+        if (!activityState) return "";
+        const activityLabel = t(replyStatus === "running" ? "回复中" : replyStatus === "failed" ? "回复失败" : replyStatus === "interrupted" ? "已中断" : "回复完成");
+        const agent = state.agents.find(item => item.id === issue?.agent_id) || state.agents.find(item => item.is_default) || { name: "Codex", is_default: true };
+        const activityIcon = activityState === "interrupted"
+          ? '<span class="better-codex-activity-dot" aria-hidden="true"></span>'
+          : agentAvatarMarkup(agent, "better-codex-bubble-avatar better-codex-conversation-status-avatar");
+        return '<span class="better-codex-activity" data-run="' + activityState + '">' + activityIcon + '<span class="' + (activityState === "replying" ? "better-codex-shimmer" : "") + '">' + activityLabel + '</span></span>';
+      }
+
+      function syncConversationStatus(replyStatus) {
+        const status = dialog.querySelector("[data-conversation-status]");
+        if (!status) return;
+        status.dataset.state = replyStatus;
+        status.innerHTML = conversationStatusMarkup(replyStatus);
+        status.hidden = !status.innerHTML;
       }
 
       function conversationComposer() {
@@ -3272,9 +3295,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (reply.message) lastReplyMessage = reply.message;
         if (reply.request_id) lastReplyRequestId = reply.request_id;
         const stateName = reply.status || "idle";
-        status.dataset.state = stateName;
-        const countLabel = messages.length ? (messages.length + " 条") : "";
-        status.textContent = t(stateName === "running" ? "回复进行中…" : stateName === "failed" ? "回复失败" : stateName === "interrupted" ? "已中断" : stateName === "succeeded" ? "回复已完成" : (countLabel || (data?.found ? "已同步" : "等待对话")));
+        syncConversationStatus(stateName);
         if (stateName === "failed" || stateName === "interrupted") showConversationFailure(reply.error, "reply", reply.message);
         else clearConversationFailure();
         if (send) updateReplySendState();
@@ -3294,11 +3315,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           if (options.quiet && conversationLoadFailures < 2) {
             conversationTimer = setTimeout(() => void loadConversation({ quiet: true }), 2500);
             return;
-          }
-          const status = dialog.querySelector("[data-conversation-status]");
-          if (status) {
-            status.dataset.state = "failed";
-            status.textContent = t("加载失败");
           }
           showConversationFailure(error instanceof Error ? error.message : "加载失败", "load");
         }
@@ -4010,7 +4026,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       completionNoticeTimer = null;
       if (completionNoticeMenuDismiss) document.removeEventListener("pointerdown", completionNoticeMenuDismiss, true);
       completionNoticeMenuDismiss = null;
-      issueStatusSnapshot.clear();
+      issueSessionSnapshot.clear();
       closeFilterMenu();
       closeIssueMenu();
       observer?.disconnect();

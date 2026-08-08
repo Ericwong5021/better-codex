@@ -14,7 +14,7 @@ The runtime sends a prompt with this structure:
 ```text
 <issue description>
 
-按照 /better-codex-issue skill 完成以上任务
+按照 /better-codex-issue skill 完成任务:
 taskid: <issue identifier, for example BCX-12>
 ```
 

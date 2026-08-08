@@ -34,7 +34,7 @@ export function issuePrompt(claim: ClaimedIssue) {
   const details = claim.issue.description.trim();
   return `${details}
 
-按照 /better-codex-issue skill 完成以上任务
+按照 /better-codex-issue skill 完成任务:
 taskid: ${claim.issue.identifier}`;
 }
 

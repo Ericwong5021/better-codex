@@ -40,7 +40,7 @@ test("worker injects Better Codex issue management instructions", () => {
   } as ClaimedIssue;
 
   const prompt = issuePrompt(claim);
-  assert.equal(prompt, "Implement and verify it.\n\n按照 /better-codex-issue skill 完成以上任务\ntaskid: BCX-12");
+  assert.equal(prompt, "Implement and verify it.\n\n按照 /better-codex-issue skill 完成任务:\ntaskid: BCX-12");
   assert.doesNotMatch(prompt, /title: Ship the feature/);
   assert.doesNotMatch(prompt, /<<<BETTER_CODEX_ISSUE_DETAILS>>>/);
   assert.doesNotMatch(prompt, /<<<END_BETTER_CODEX_ISSUE_DETAILS>>>/);
