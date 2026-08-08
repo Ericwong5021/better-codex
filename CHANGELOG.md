@@ -4,6 +4,32 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+### Added
+
+- Open the task board and Agent management from separate entries in the Codex Desktop sidebar.
+- Use the new Help and settings dialog to review run modes, check for updates manually, and see core, compatibility, and runtime status.
+- Install the `better-codex` and `better-codex-issue` skills with release packages. `better-codex doctor` now reports missing skills or update verification keys.
+- List Agents and assign an Issue to an Agent from the CLI.
+
+### Changed
+
+- Make generated Issue titles shorter while keeping the full request in the description.
+- Repair an existing installation when required skills or the update verification key are missing, even if the installed core version is already current.
+
+### Fixed
+
+- Roll back core and compatibility updates when the updated runtime cannot restart or reconnect to Codex successfully.
+- Validate downloaded runtimes in an isolated environment before activation and preserve activation failures across restarts so they remain visible.
+- Avoid premature compatibility rollback immediately after an update, and report the correct available version for compatibility-only updates.
+- Keep Homebrew-managed binaries under package-manager control during uninstall, and avoid reusing stale macOS launcher paths after an executable changes.
+- Verify the recorded Windows runtime process before treating it as active.
+
+### Known limitations
+
+- Better Codex still depends on Codex Desktop's local CDP interface and page structure. A Codex Desktop update can require a matching compatibility update.
+- Data remains local to one device; cloud sync, shared workspaces, and multi-user collaboration are not included.
+- The updated Windows install, startup, and uninstall paths are implemented but have not yet completed real-machine acceptance for this release candidate.
+
 ## [0.3.13] - 2026-08-08
 
 ### Added
