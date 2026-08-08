@@ -2677,6 +2677,29 @@ export function betterCodexDesignSystemCss() {
       line-height: 1;
     }
 
+    #better-codex-panel .better-codex-scheduler-logo,
+    #better-codex-dialog .better-codex-scheduler-logo {
+      display: inline-flex;
+      width: 16px;
+      height: 16px;
+      flex: 0 0 auto;
+      overflow: hidden;
+      border-radius: 4px;
+    }
+
+    #better-codex-panel .better-codex-scheduler-logo img,
+    #better-codex-dialog .better-codex-scheduler-logo img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    #better-codex-panel .better-codex-activity[data-run="blocked"],
+    #better-codex-dialog .better-codex-conversation-status .better-codex-activity[data-run="blocked"] {
+      color: var(--bc-danger);
+    }
+
     #better-codex-dialog .better-codex-dialog-select {
       position: relative;
       display: inline-flex;

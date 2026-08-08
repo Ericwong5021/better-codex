@@ -1176,7 +1176,7 @@ export class Store {
             scheduler_result = ?
         WHERE id = ? AND issue_id = ? AND status = 'scheduling'
       `).run(
-        executionSuccess ? "completed" : "failed",
+        status === "blocked" ? "failed" : "completed",
         timestamp,
         decision ? "completed" : "failed",
         finalSchedulerError,
