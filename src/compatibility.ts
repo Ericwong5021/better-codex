@@ -275,9 +275,11 @@ export function writeCompatibilityStatus(input: Omit<CompatibilityStatus, "versi
   ensureDirectories();
   let compatibility = activeCompatibility();
   const pointer = readCompatibilityPointer();
+  const updatedAt = pointer ? Date.parse(pointer.updatedAt) : Number.NaN;
+  const rollbackReady = Number.isFinite(updatedAt) && Date.now() - updatedAt >= 30000;
   if (pointer && pointer.current === compatibility.version) {
     if (successful && pointer.failures !== 0) writeCompatibilityPointer({ ...pointer, failures: 0, updatedAt: new Date().toISOString() });
-    if (!successful && input.reason?.startsWith("missing_") && pointer.previous) {
+    if (!successful && rollbackReady && input.reason?.startsWith("missing_") && pointer.previous) {
       const failures = pointer.failures + 1;
       writeCompatibilityPointer({ ...pointer, failures, updatedAt: new Date().toISOString() });
       if (failures >= 3) compatibility = rollbackCompatibility();

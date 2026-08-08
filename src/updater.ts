@@ -173,7 +173,11 @@ export function checkGatewayUpdate() {
       return getGatewayUpdateState();
     }
     const available = Boolean(result.core?.available || result.compatibility?.available);
-    const latestVersion = result.core?.version ?? result.compatibility?.version ?? effectiveCoreVersion();
+    const latestVersion = result.core?.available
+      ? result.core.version
+      : result.compatibility?.available
+        ? result.compatibility.version
+        : effectiveCoreVersion();
     gatewayUpdateState = { status: available ? "available" : "current", currentVersion: effectiveCoreVersion(), latestVersion, checkedAt, error: null };
     return getGatewayUpdateState();
   }).finally(() => {
@@ -212,7 +216,11 @@ export function installGatewayUpdate() {
     gatewayUpdateState = {
       ...getGatewayUpdateState(),
       status: updated ? "restarting" : "current",
-      latestVersion: result.core.version ?? result.compatibility.version ?? gatewayUpdateState.latestVersion,
+      latestVersion: result.core.updated
+        ? result.core.version
+        : result.compatibility.updated
+          ? result.compatibility.version
+          : gatewayUpdateState.latestVersion,
       error: null,
     };
     return result;

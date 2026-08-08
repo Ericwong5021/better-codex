@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  直接运行在 Codex Desktop 里的任务看板与 Agent 系统。本地优先，一行命令安装。
+  直接运行在 Codex Desktop 里的任务看板与 Agent 系统，在侧边栏提供两个独立入口。本地优先，一行命令安装。
 </p>
 
 <p align="center">
@@ -42,7 +42,7 @@
 
 ## 你会得到什么
 
-Better Codex 基于原生 Codex Desktop 二次开发。所有东西都在 Codex *里面*，同一个窗口、同一套视觉语言，接近原生的体验。不用多开网页工作台，不用注册账号，数据也不出你这台机器。
+Better Codex 基于原生 Codex Desktop 二次开发。侧边栏有两个独立入口：`任务看板` 用于组织和运行任务，`智能体` 用于创建和管理智能体。所有东西都在 Codex *里面*，同一个窗口、同一套视觉语言，接近原生的体验。不用多开网页工作台，不用注册账号，数据也不出你这台机器。
 
 **会话找不到 → 任务和会话双向关联。** 把任何对话一键收进看板，按项目、状态、优先级、标签和负责人组织起来。三天后回来，不用再翻聊天记录，打开任务卡片，直接落在关联的那个会话里，上下文原封不动。
 
@@ -58,7 +58,7 @@ Better Codex 基于原生 Codex Desktop 二次开发。所有东西都在 Codex 
 
 ## 用起来是什么样
 
-1. 从 Codex 侧边栏打开 `Better Codex`。
+1. 从 Codex 侧边栏打开 `任务看板` 管理任务，或打开 `智能体` 配置智能体。
 2. 创建项目，手动添加任务，或者直接把当前对话收进任务。
 3. 把任务分配给自己、默认 Codex 智能体或某个自定义智能体。
 4. 想完全掌控就用手动运行；想持续推进就开自动运行。
@@ -81,7 +81,7 @@ Windows（PowerShell）：
 irm https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scripts/install.ps1 | iex
 ```
 
-从 Better Codex 启动入口重启 Codex，看板就在你的侧边栏里了。随时可以用 `better-codex eject` 卸载，任务数据会保留。
+从 Better Codex 启动入口重启 Codex，侧边栏会出现 `任务看板` 和 `智能体` 两个入口。随时可以用 `better-codex eject` 卸载，任务数据会保留。
 
 ## 常见问题
 

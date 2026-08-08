@@ -178,9 +178,8 @@ export function betterCodexDesignSystemCss() {
       height: 7px;
       flex: 0 0 7px;
       margin-right: 0;
-      border: 1.5px solid currentColor;
       border-radius: 50%;
-      background: transparent;
+      background: #a1a1aa;
       box-shadow: none;
     }
 

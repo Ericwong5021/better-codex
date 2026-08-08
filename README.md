@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  A task board and Agent system that live inside Codex Desktop. Local-first, one-command install.
+  A task board and Agent system with two dedicated entries in the Codex Desktop sidebar. Local-first, one-command install.
 </p>
 
 <p align="center">
@@ -42,7 +42,7 @@ None of this is the model's fault. The model is great. What's missing is a **wor
 
 ## What you get
 
-Better Codex extends the native Codex Desktop app. Everything lives *inside* Codex, with the same window, same look, and near-native feel. No separate web dashboard, no account, no data leaving your machine.
+Better Codex extends the native Codex Desktop app. The sidebar gives you two dedicated entries: `Task board` for organizing and running work, and `Agents` for creating and managing Agent profiles. Everything lives *inside* Codex, with the same window, same look, and near-native feel. No separate web dashboard, no account, no data leaving your machine.
 
 **Lost sessions → tasks linked to conversations.** Capture any conversation as a task on a board, organized by project, status, priority, label, and owner. When you come back three days later, you don't scroll through chat history. You open the task and land in the exact linked thread, context intact.
 
@@ -58,7 +58,7 @@ Better Codex extends the native Codex Desktop app. Everything lives *inside* Cod
 
 ## A day with Better Codex
 
-1. Open `Better Codex` from the Codex sidebar.
+1. Open `Task board` from the Codex sidebar to manage work, or `Agents` to configure Agent profiles.
 2. Create a project and capture a task, manually or straight from the conversation you're in.
 3. Assign it to yourself, the default Codex profile, or one of your Agent profiles.
 4. Keep manual mode for full control, or enable automatic mode and let ready Agent-owned tasks run.
@@ -81,7 +81,7 @@ Windows (PowerShell):
 irm https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scripts/install.ps1 | iex
 ```
 
-Restart Codex from the Better Codex launcher, and the board is in your sidebar. Uninstall anytime with `better-codex eject`; your task data stays.
+Restart Codex from the Better Codex launcher, and `Task board` and `Agents` appear as two entries in your sidebar. Uninstall anytime with `better-codex eject`; your task data stays.
 
 ## FAQ
 
