@@ -8,6 +8,14 @@ test("generated injection script is valid JavaScript", () => {
 
   assert.doesNotThrow(() => new Function(source));
   assert.ok(source.includes("location.pathname.match(/\\/local\\/([^/?#]+)/)"));
+  assert.ok(source.includes("if (options.background && !changed) return"));
+  assert.ok(source.includes("state.languageSetting = setting"));
+  assert.ok(source.includes('state.locale = setting === "system" ? state.systemLocale : setting'));
+  assert.ok(source.includes("panel?.remove()"));
+  assert.ok(source.includes("showAutoDispatchHelp(\"settings\")"));
+  assert.ok(source.includes("resolveSystemLocale(bootstrap.locale)"));
+  assert.doesNotMatch(source, /window\.location\.reload\(\)/);
+  assert.doesNotMatch(source, /localizeOwnedTree|localizedText|translateText/);
 });
 
 test("board bridge requests retry once after runtime_bridge_timeout", () => {
@@ -107,7 +115,7 @@ test("task columns only render controls backed by working actions", () => {
   assert.doesNotMatch(source, /aria-label="更多"/);
   assert.doesNotMatch(source, /新建项目|openNativeProjectEditor|data-app-action-sidebar-project-create/);
   assert.match(source, /data-add-status=/);
-  assert.match(source, /aria-label="新建任务"/);
+  assert.ok(source.includes('te("新建任务")'));
 });
 
 test("issue assignment tabs separate assigned and unassigned work", () => {
@@ -140,9 +148,9 @@ test("issues toolbar has a toggleable auto-dispatch icon between filter and crea
   assert.ok(!source.includes("「待处理」标志"));
   assert.ok(!source.includes('better-codex-attention'));
   assert.ok(source.includes('icon(state.autoDispatch ? "refresh" : "user")'));
-  assert.ok(source.includes('icon("user") + "<span>手动运行</span>"'));
-  assert.ok(source.includes('icon("user") + "<h3>手动运行</h3></div>"'));
-  assert.ok(source.includes('icon("refresh") + "<h3>自动运行</h3></div>"'));
+  assert.ok(source.includes('icon("user") + "<span>" + escapeHtml(t("手动运行")) + "</span>"'));
+  assert.ok(source.includes('icon("user") + "<h3>" + te("手动运行") + "</h3></div>"'));
+  assert.ok(source.includes('icon("refresh") + "<h3>" + te("自动运行") + "</h3></div>"'));
   assert.ok(!source.includes('button.title = state.autoDispatch'));
   assert.match(css, /\.better-codex-auto-dispatch\.is-on\s*\{[^}]*color:\s*var\(--bc-success\)/s);
   assert.doesNotMatch(css, /better-codex-auto-dispatch-spin/);
@@ -159,7 +167,7 @@ test("issue creation uses a primary split button with an agent creation menu", (
   const css = betterCodexDesignSystemCss();
 
   assert.ok(source.includes('className = "better-codex-create-split"'));
-  assert.ok(source.includes('setAttribute("aria-label", "选择 issue 创建方式")'));
+  assert.ok(source.includes('setAttribute("aria-label", t("选择 issue 创建方式"))'));
   assert.ok(source.includes("通过智能体创建"));
   assert.ok(source.includes('state.createMode = "agent"'));
   assert.ok(source.includes('const crumb = issue'));
@@ -184,7 +192,7 @@ test("default Codex agent opens a branded config editor", () => {
   assert.ok(source.includes('aria-label="Better Codex"') || source.includes('aria-label="Codex"'));
   assert.ok(source.includes("const isDefault = Boolean(draft.is_default);"));
   assert.ok(source.includes('"/api/agents/default"'));
-  assert.ok(source.includes("<strong>Codex 默认智能体</strong>"));
+  assert.ok(source.includes('te("Codex 默认智能体")'));
   assert.ok(!source.includes("影响之后新建的 Codex 窗口"));
   assert.ok(source.includes("if (!agent || agent.is_default) return;"));
 });
@@ -292,7 +300,7 @@ test("issue editor uses branded listboxes instead of native selects", () => {
   assert.ok(source.includes('data-dialog-select-toggle="assignee"') || source.includes('dialogSelect("assignee"'));
   assert.ok(source.includes("assigneePicker"));
   assert.ok(source.includes('header() + assigneePicker()'));
-  assert.ok(source.includes('<span>指派给</span>') && source.includes('dialogSelect("assignee"'));
+  assert.ok(source.includes('te("指派给")') && source.includes('dialogSelect("assignee"'));
   assert.ok(!source.includes("assigneePicker() + '<label class=\"better-codex-property\">'"));
   assert.ok(source.includes('aria-label="选择责任人"') || source.includes('"选择责任人"'));
   assert.ok(source.includes('assignee: issue'));
@@ -327,7 +335,7 @@ test("agent assignment options expose compact model and reasoning tags", () => {
   assert.doesNotMatch(source, /Codex（默认配置）/);
   assert.match(source, /better-codex-dialog-select-tag/);
   assert.match(source, /better-codex-context-tag/);
-  assert.match(source, /contextAssigneeLabel\("未指派"\)/);
+  assert.match(source, /contextAssigneeLabel\(t\("未指派"\)\)/);
   assert.match(betterCodexDesignSystemCss(), /better-codex-dialog-select-tag\[data-tone="model"\]/);
   assert.match(betterCodexDesignSystemCss(), /better-codex-context-submenu\.is-assignee\s*\{[^}]*min-width:\s*214px;/s);
   assert.match(betterCodexDesignSystemCss(), /better-codex-dialog-select\.is-assignee \.better-codex-dialog-select-menu\s*\{[^}]*top:\s*calc\(100% \+ var\(--bc-space-2\)\);[^}]*bottom:\s*auto;/s);
@@ -375,8 +383,8 @@ test("agent detail avatars use preset icons and open an avatar picker", () => {
   assert.ok(source.includes("AGENT_AVATAR_PRESETS"));
   assert.ok(source.includes('"id":"reviewer"'));
   assert.ok(source.includes('better-codex-agent-profile-head'));
-  assert.ok(source.includes('const heading = creating ? "新建" : "智能体"'));
-  assert.ok(source.includes('<h2>创建智能体</h2><div class="better-codex-agent-avatar-field">'));
+  assert.ok(source.includes('const heading = t(creating ? "新建" : "智能体")'));
+  assert.ok(source.includes('<h2>\' + te("创建智能体") + \'</h2><div class="better-codex-agent-avatar-field">'));
   assert.ok(source.includes("点击选择预设图标，或上传图片"));
   assert.ok(source.includes('avatar: draft.avatar || ("icon:" + draft.key)'));
   assert.ok(source.includes("state.agentDraft?.key === item.key"));
@@ -443,7 +451,7 @@ test("issue context menu can assign the current user or an agent", () => {
   assert.ok(source.includes('data-assignee-kind="me"'));
   assert.ok(source.includes('data-assignee-kind="agent"'));
   assert.ok(source.includes('data-assignee-kind="none"'));
-  assert.ok(source.includes('contextAssigneeLabel("未指派")'));
+  assert.ok(source.includes('contextAssigneeLabel(t("未指派"))'));
   assert.doesNotMatch(source, /取消分配/);
   assert.ok(source.includes("better-codex-context-avatar is-user is-initials"));
   assert.ok(source.includes("better-codex-context-tag"));
@@ -497,7 +505,7 @@ test("issue cards show project icon and assignee instead of session entry", () =
   assert.ok(source.includes("function currentRouteThreadId()"));
   assert.doesNotMatch(source, /THREAD_ROUTE_RETRY_MS|THREAD_ROUTE_CONFIRM_DELAY_MS/);
   assert.ok(source.includes('button.classList.add("is-loading")'));
-  assert.ok(source.includes('button.innerHTML = icon("refresh") + "<span>正在打开…</span>"'));
+  assert.ok(source.includes('button.innerHTML = icon("refresh") + "<span>" + te("正在打开…") + "</span>"'));
   assert.ok(source.includes('button.removeAttribute("aria-busy")'));
   assert.ok(source.includes('throw new Error("thread_open_timeout")'));
   assert.ok(source.includes("Issue 详情"));
@@ -508,7 +516,7 @@ test("issue cards show project icon and assignee instead of session entry", () =
   const headerStart = source.indexOf("function header()");
   const footerStart = source.indexOf("function footer()");
   const headerSource = source.slice(headerStart, footerStart);
-  assert.ok(headerSource.includes('data-dialog-start-now>立即开始任务'));
+  assert.ok(headerSource.includes('data-dialog-start-now>\' + te("立即开始任务")'));
   assert.equal(source.slice(footerStart, source.indexOf("function renderDialog()", footerStart)).includes("data-dialog-start-now"), false);
   assert.ok(source.includes('if (issue && !issuePermissions(issue).enrichmentPending) return void perform(() => openEditor(issue))'));
   assert.ok(source.includes('draggable="\' + String(!issueLocked) + \'"'));
@@ -540,7 +548,7 @@ test("issue details render the latest conversation result and reply composer", (
   const css = betterCodexDesignSystemCss();
 
   assert.ok(source.includes('mode: issue ? "manual" : state.createMode'));
-  assert.ok(source.includes(">对话<"));
+  assert.ok(source.includes('te("对话")'));
   assert.ok(source.includes("data-conversation-body"));
   assert.ok(source.includes("better-codex-bubble"));
   assert.ok(source.includes("conversationBubbles"));
@@ -569,12 +577,12 @@ test("issue keep-open toggle keeps a visible track in light mode", () => {
 test("create dialog paperclip attaches local file paths into the issue description", () => {
   const source = injectionScript(4317, "test-token", "install");
 
-  assert.ok(source.includes('data-dialog-attach aria-label="添加附件"'));
+  assert.ok(source.includes('data-dialog-attach aria-label="\' + te("添加附件")'));
   assert.ok(source.includes("attachments: []"));
   assert.ok(source.includes("function pickAttachments()"));
   assert.ok(source.includes("function withAttachments(text)"));
   assert.ok(source.includes('const path = String(file.path || "").trim()'));
-  assert.ok(source.includes('const block = "附带文件：\\n"'));
+  assert.ok(source.includes('const block = t("附带文件：") + "\\n"'));
   assert.ok(source.includes("description: withAttachments(draft.mode === \"agent\" ? prompt : draft.description)"));
   assert.ok(source.includes("data-dialog-detach"));
   assert.ok(source.includes("当前环境无法读取本地文件路径"));
@@ -640,7 +648,7 @@ test("semantic surface hierarchy is derived from the Codex appearance configurat
   assert.match(css, /textarea\[name="description"\]\s*\{[^}]*height:\s*calc\(\(var\(--bc-text-md\) \* 1\.55 \* 4\) \+ 26px\);/s);
   assert.match(css, /textarea\[name="instructions"\]\s*\{[^}]*height:\s*calc\(\(var\(--bc-text-md\) \* 1\.55 \* 12\) \+ 26px\);/s);
   assert.match(css, /\.better-codex-agent-number-input\s*\{[^}]*width:\s*76px;/s);
-  assert.ok(source.includes('agentNumberInput("max_concurrency", "最大并发", draft.max_concurrency, 1, 20)'));
+  assert.ok(source.includes('agentNumberInput("max_concurrency", t("最大并发"), draft.max_concurrency, 1, 20)'));
   assert.ok(source.includes('function agentNumberInput(name, label, value, min, max)'));
   assert.ok(source.includes('type="number"'));
   assert.doesNotMatch(source, /agentPicker\("max_concurrency"/);

@@ -1491,6 +1491,179 @@ export function betterCodexDesignSystemCss() {
       height: var(--bc-icon-sm);
     }
 
+    #better-codex-panel[data-recovery="true"] .better-codex-toolbar,
+    #better-codex-panel[data-recovery="true"] .better-codex-board,
+    #better-codex-panel[data-recovery="true"] .better-codex-agents {
+      display: none;
+    }
+
+    #better-codex-panel .better-codex-recovery {
+      box-sizing: border-box;
+      display: flex;
+      min-width: 0;
+      min-height: 0;
+      flex: 1;
+      align-items: center;
+      justify-content: center;
+      padding: calc(var(--bc-space-5) * 2);
+      overflow-y: auto;
+    }
+
+    #better-codex-panel .better-codex-recovery[hidden] {
+      display: none;
+    }
+
+    #better-codex-panel .better-codex-recovery-card {
+      display: flex;
+      width: min(440px, 100%);
+      align-items: center;
+      flex-direction: column;
+      text-align: center;
+    }
+
+    #better-codex-panel .better-codex-recovery-icon {
+      display: inline-flex;
+      width: 44px;
+      height: 44px;
+      align-items: center;
+      justify-content: center;
+      border-radius: var(--bc-radius-md);
+      color: var(--bc-foreground);
+      background: var(--bc-surface);
+      box-shadow: var(--bc-inset-hairline), var(--bc-surface-shadow);
+    }
+
+    #better-codex-panel .better-codex-recovery-icon svg {
+      width: 20px;
+      height: 20px;
+    }
+
+    #better-codex-panel .better-codex-recovery h2 {
+      margin: var(--bc-space-4) 0 0;
+      color: var(--bc-foreground);
+      font-size: var(--bc-text-xl);
+      font-weight: 650;
+      letter-spacing: -.02em;
+    }
+
+    #better-codex-panel .better-codex-recovery p {
+      max-width: 400px;
+      margin: var(--bc-space-2) 0 0;
+      color: var(--bc-muted);
+      font-size: var(--bc-text-md);
+      line-height: 1.55;
+    }
+
+    #better-codex-panel .better-codex-recovery-command {
+      box-sizing: border-box;
+      display: flex;
+      width: 100%;
+      min-width: 0;
+      align-items: center;
+      gap: var(--bc-space-2);
+      margin-top: var(--bc-space-5);
+      border-radius: var(--bc-radius-sm);
+      background: var(--bc-surface);
+      padding: var(--bc-space-2);
+      box-shadow: var(--bc-inset-hairline);
+    }
+
+    #better-codex-panel .better-codex-recovery-command code {
+      min-width: 0;
+      flex: 1;
+      overflow-x: auto;
+      color: var(--bc-foreground);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: var(--bc-text-sm);
+      text-align: left;
+      white-space: nowrap;
+    }
+
+    #better-codex-panel .better-codex-recovery-command button {
+      height: var(--bc-control-height);
+      flex: 0 0 auto;
+      border: 0;
+      border-radius: var(--bc-radius-xs);
+      color: var(--bc-foreground);
+      background: var(--bc-hover);
+      padding: 0 var(--bc-space-3);
+      font: inherit;
+      font-size: var(--bc-text-sm);
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    #better-codex-panel .better-codex-recovery-command button:hover {
+      background: var(--bc-selected);
+    }
+
+    #better-codex-panel .better-codex-recovery-retry {
+      display: inline-flex;
+      height: var(--bc-control-height);
+      align-items: center;
+      gap: var(--bc-space-2);
+      margin-top: var(--bc-space-3);
+      border: 0;
+      border-radius: var(--bc-radius-sm);
+      color: var(--bc-primary-foreground);
+      background: var(--bc-primary);
+      padding: 0 var(--bc-space-4);
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    #better-codex-panel .better-codex-recovery-retry:hover {
+      background: color-mix(in oklch, var(--bc-primary) 88%, white);
+    }
+
+    #better-codex-panel .better-codex-recovery-retry:disabled {
+      cursor: wait;
+      opacity: .62;
+    }
+
+    #better-codex-panel .better-codex-recovery-retry svg {
+      width: var(--bc-icon-sm);
+      height: var(--bc-icon-sm);
+    }
+
+    #better-codex-panel .better-codex-recovery-retry:disabled svg {
+      animation: better-codex-spin .8s linear infinite;
+    }
+
+    #better-codex-panel .better-codex-recovery details {
+      margin-top: var(--bc-space-4);
+      color: var(--bc-faint);
+      font-size: var(--bc-text-sm);
+    }
+
+    #better-codex-panel .better-codex-recovery summary {
+      cursor: pointer;
+    }
+
+    #better-codex-panel .better-codex-recovery details code {
+      display: block;
+      margin-top: var(--bc-space-2);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+
+    @media (max-width: 480px) {
+      #better-codex-panel .better-codex-recovery {
+        padding: var(--bc-space-5);
+      }
+
+      #better-codex-panel .better-codex-recovery-command {
+        align-items: stretch;
+        flex-direction: column;
+      }
+
+      #better-codex-panel .better-codex-recovery-command code {
+        width: 100%;
+        overflow: visible;
+        text-align: center;
+      }
+    }
+
     #better-codex-panel .better-codex-column {
       width: 292px;
       min-width: 292px;

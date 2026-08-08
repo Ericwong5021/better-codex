@@ -244,8 +244,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
   const bridgeToken = JSON.stringify(accessToken);
   const betterCodexLogoUrl = `data:image/png;base64,${betterCodexLogoPng().toString("base64")}`;
   const helpModeMarkdown = JSON.stringify({
-    manual: renderMarkdown("点击 {{start}}，或者在已完成的会话卡片中 {{send}} 新消息，智能体才会执行任务。"),
-    auto: renderMarkdown("{{agent}} 会主动执行分配给自己的任务，但是不会执行 {{backlog}} 区域的任务。"),
+    "zh-CN": {
+      manual: renderMarkdown("点击 {{start}}，或者在已完成的会话卡片中 {{send}} 新消息，智能体才会执行任务。"),
+      auto: renderMarkdown("{{agent}} 会主动执行分配给自己的任务，但是不会执行 {{backlog}} 区域的任务。"),
+    },
+    en: {
+      manual: renderMarkdown("Click {{start}}, or use {{send}} to post a new message in a completed conversation card. Only then will the agent run the task."),
+      auto: renderMarkdown("{{agent}} automatically runs tasks assigned to it, but does not run {{backlog}} tasks."),
+    },
   });
   return `(() => {
     "use strict";
@@ -287,72 +293,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const rememberedProjectId = localStorage.getItem(PROJECT_KEY) || "";
     const rememberedLanguage = localStorage.getItem(LANGUAGE_KEY);
     const languageSetting = ["system", "zh-CN", "en"].includes(rememberedLanguage) ? rememberedLanguage : "system";
-    const MOCKUP_KEY = "better-codex-mockup-v2";
+    function resolveSystemLocale(fallback) {
+      const locale = String(document.documentElement.lang || navigator.language || fallback || "").trim().toLowerCase().replace(/_/g, "-");
+      return ["zh-cn", "zh-hans", "zh-hans-cn"].includes(locale) ? "zh-CN" : "en";
+    }
+    const systemLocale = resolveSystemLocale(INITIAL_LOCALE);
     const MOCKUP_PROJECT_ID = "mockup-better-codex";
-    const state = { projects: [], issues: [], agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, surface: ["issues", "agents"].includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, mockup: false, createMode: "manual", keepCreate: false, selected: null, error: "", systemLocale: INITIAL_LOCALE === "zh-CN" ? "zh-CN" : "en", languageSetting, locale: languageSetting === "system" ? (INITIAL_LOCALE === "zh-CN" ? "zh-CN" : "en") : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], creator: [], project: [], label: [] } };
-    function cloneMockupValue(value) {
-      return JSON.parse(JSON.stringify(value));
-    }
-    function mockupAgents() {
-      return [
-        { id: "", role: "codex", name: "Codex", description: "通用任务处理", model: "gpt-5.6-sol", reasoning_effort: "medium", sandbox_mode: "danger-full-access", is_default: true, max_concurrency: 5, avatar: "" },
-        { id: "mockup-reviewer", role: "reviewer", name: "代码审查", description: "检查改动的正确性、回归风险和可维护性", model: "gpt-5.6-sol", reasoning_effort: "high", sandbox_mode: "workspace-write", max_concurrency: 5, avatar: "icon:reviewer" },
-        { id: "mockup-frontend", role: "frontend", name: "前端实现", description: "负责 Codex 原生风格的界面实现与视觉验证", model: "gpt-5.6-terra", reasoning_effort: "medium", sandbox_mode: "workspace-write", max_concurrency: 5, avatar: "icon:frontend" },
-        { id: "mockup-debugger", role: "debugger", name: "问题排查", description: "定位崩溃、回归和异常行为的根因", model: "gpt-5.6-sol", reasoning_effort: "high", sandbox_mode: "workspace-write", max_concurrency: 5, avatar: "icon:debugger" },
-      ];
-    }
-    function mockupAgentId(name) {
-      if (name === "Codex") return null;
-      return state.agents.find(agent => agent.name === name)?.id || null;
-    }
-    function seedMockupIssues() {
-      const specs = [
-        ["BET-20", "修复任务卡片拖拽错位", "复现缩放状态下的卡片拖拽偏移，并修正坐标计算与落点反馈。", "backlog", "urgent", "问题排查", ["问题排查"], "not-started"],
-        ["BET-21", "重写首页首屏价值主张", "提炼 Better Codex 的核心价值，让新访客快速理解产品用途。", "backlog", "high", "Codex", ["文案"], "not-started"],
-        ["BET-22", "调研独立开发者工作流", "整理从想法到交付的常见流程、主要痛点和决策节点。", "backlog", "medium", "Codex", ["调研"], "not-started"],
-        ["BET-23", "整理本地安装步骤", "核对安装、启动与常见异常处理步骤，统一文档表达。", "backlog", "high", "Codex", ["文档"], "not-started"],
-        ["BET-24", "优化首次启动加载速度", "定位启动阶段主要耗时，缩短进入任务看板前的等待时间。", "todo", "urgent", "问题排查", ["性能"], "claimed"],
-        ["BET-25", "整理功能亮点短文案", "为任务分派、会话协作和代码审核分别撰写简洁说明。", "todo", "medium", "Codex", ["文案"], "not-started"],
-        ["BET-26", "对比三款任务看板体验", "对比 Linear、Notion 和 Trello 的卡片密度、拖拽与筛选体验。", "todo", "medium", "前端实现", ["调研"], "claimed"],
-        ["BET-27", "撰写产品发布介绍", "围绕目标用户、核心问题和使用方式准备公开发布稿。", "todo", "high", "Codex", ["写作"], "not-started"],
-        ["BET-28", "完善会话回复失败提示", "梳理超时、网络异常和权限问题的提示文案与重试入口。", "in_progress", "urgent", "问题排查", ["问题排查"], "running"],
-        ["BET-29", "优化空状态引导语", "重写空看板与空会话的标题、说明和首个行动提示。", "in_progress", "medium", "前端实现", ["前端实现"], "running"],
-        ["BET-30", "收集首批用户常见问题", "汇总安装、任务分派、运行状态和数据存储相关问题。", "in_progress", "medium", "Codex", ["调研"], "running"],
-        ["BET-31", "准备更新日志发布稿", "整理本次新增、修复和已知限制，形成可直接发布的更新日志。", "in_progress", "medium", "Codex", ["写作"], "claimed"],
-        ["BET-32", "统一看板筛选状态", "检查筛选逻辑与顶部计数，确保切换后卡片结果同步更新。", "in_review", "high", "代码审查", ["代码审查"], "completed"],
-        ["BET-33", "检查 Windows 安装流程", "核对安装、启动、权限与卸载流程，记录关键异常。", "in_review", "high", "问题排查", ["问题排查"], "running"],
-        ["BET-34", "起草用户访谈邀请信", "说明访谈目的、所需时间和隐私边界，给出清晰回复方式。", "in_review", "low", "Codex", ["写作"], "completed"],
-        ["BET-35", "归档版本发布资料", "整理版本说明、截图、校验结果和发布链接，方便后续复盘。", "in_review", "low", "Codex", ["文档"], "completed"],
-      ];
-      const now = Date.now();
-      return specs.map((spec, index) => ({
-        id: "mockup-" + spec[0].slice(4),
-        identifier: spec[0],
-        project_id: MOCKUP_PROJECT_ID,
-        title: spec[1],
-        description: spec[2],
-        status: spec[3],
-        priority: spec[4],
-        sort_order: (index + 1) * 1000,
-        pinned: false,
-        archived_at: null,
-        thread_id: null,
-        workspace_path: "",
-        version: 1,
-        created_at: new Date(now - (index + 20) * 60000).toISOString(),
-        updated_at: new Date(now - (index + 3) * 60000).toISOString(),
-        agent_enabled: true,
-        agent_id: mockupAgentId(spec[5]),
-        mockup_agent_name: spec[5],
-        user_assigned: false,
-        needs_attention: false,
-        pending_actor: "user",
-        enrichment_status: null,
-        reply_draft: "",
-        labels: spec[6],
-        mockup_run_status: spec[7],
-      }));
-    }
+    const state = { projects: [], issues: [], agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, surface: ["issues", "agents"].includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, mockup: false, createMode: "manual", keepCreate: false, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], creator: [], project: [], label: [] } };
     function normalizeMockupIssues(value) {
       const source = Array.isArray(value) ? value : value?.issues;
       if (!Array.isArray(source)) throw new Error("展示数据格式无效");
@@ -394,28 +341,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         };
       });
     }
-    function saveMockupIssues(issues) {
-      localStorage.setItem(MOCKUP_KEY, JSON.stringify({ version: 1, issues }));
-      return issues;
-    }
-    function loadMockupIssues() {
-      const saved = localStorage.getItem(MOCKUP_KEY);
-      if (!saved) return saveMockupIssues(seedMockupIssues());
-      try {
-        const issues = normalizeMockupIssues(JSON.parse(saved));
-        issues.forEach(issue => {
-          if (issue.agent_enabled && issue.agent_id === null && issue.mockup_agent_name && issue.mockup_agent_name !== "Codex") issue.agent_id = mockupAgentId(issue.mockup_agent_name);
-        });
-        return issues;
-      } catch {
-        return saveMockupIssues(seedMockupIssues());
-      }
-    }
-    function resetMockupIssues() {
-      return saveMockupIssues(seedMockupIssues());
-    }
-    function exportMockupIssues() {
-      const blob = new Blob([JSON.stringify({ version: 1, issues: loadMockupIssues() }, null, 2)], { type: "application/json" });
+    async function exportMockupIssues() {
+      const data = await api("/api/mockup/state");
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
@@ -424,112 +352,27 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       URL.revokeObjectURL(url);
     }
     async function importMockupIssues(file) {
-      if (file.size > 1024 * 1024) throw new Error("展示数据不能超过 1 MB");
-      const issues = normalizeMockupIssues(JSON.parse(await file.text()));
-      saveMockupIssues(issues);
-      await loadIssues();
+      if (file.size > 16 * 1024 * 1024) throw new Error("展示数据不能超过 16 MB");
+      const imported = JSON.parse(await file.text());
+      const data = Array.isArray(imported) || !Array.isArray(imported?.agents)
+        ? { ...await api("/api/mockup/state"), version: 1, issues: normalizeMockupIssues(imported) }
+        : imported;
+      await api("/api/mockup/state", { method: "PUT", body: JSON.stringify(data) });
+      await load();
     }
     function confirmMockupReset() {
       return confirmAction("重置展示数据", "恢复默认展示卡片和布局吗？", "重置").then(confirmed => {
         if (!confirmed) return;
-        resetMockupIssues();
-        return loadIssues();
-      });
+        return api("/api/mockup/reset", { method: "POST" });
+      }).then(result => result ? load() : undefined);
     }
-    function moveMockupIssue(id, status, beforeId = "") {
-      const issues = loadMockupIssues();
-      const sourceIndex = issues.findIndex(issue => issue.id === id);
-      if (sourceIndex < 0) return;
-      const [moving] = issues.splice(sourceIndex, 1);
-      moving.status = status;
-      moving.version += 1;
-      moving.updated_at = new Date().toISOString();
-      const targetIndex = beforeId ? issues.findIndex(issue => issue.id === beforeId) : -1;
-      if (targetIndex >= 0) issues.splice(targetIndex, 0, moving);
-      else {
-        const lastStatusIndex = issues.reduce((last, issue, index) => issue.status === status ? index : last, -1);
-        issues.splice(lastStatusIndex + 1, 0, moving);
-      }
-      issues.forEach((issue, index) => { issue.sort_order = (index + 1) * 1000; });
-      saveMockupIssues(issues);
+    function moveMockupIssue(id, version, status, beforeId = "") {
+      return api("/api/issues/" + encodeURIComponent(id) + "/move", { method: "POST", body: JSON.stringify({ version, status, before_id: beforeId }) });
     }
-    function mockupApi(path, options = {}) {
-      const url = new URL(path, "http://mockup.local");
-      const method = options.method || "GET";
-      const body = options.body ? JSON.parse(options.body) : {};
-      if (url.pathname === "/api/agents" && method === "GET") return Promise.resolve(cloneMockupValue(state.agents));
-      if (url.pathname === "/api/agents" && method === "POST") {
-        const agent = { ...body, id: "mockup-agent-" + Date.now(), role: "custom", is_default: false, version: 1 };
-        state.agents = [...state.agents, agent];
-        return Promise.resolve(cloneMockupValue(agent));
-      }
-      if (url.pathname === "/api/agents/default" && method === "PATCH") {
-        state.agents[0] = { ...state.agents[0], ...body, id: "", is_default: true };
-        return Promise.resolve(cloneMockupValue(state.agents[0]));
-      }
-      const agentMatch = url.pathname.match(/^\\/api\\/agents\\/([^/]+)$/);
-      if (agentMatch && ["PATCH", "DELETE"].includes(method)) {
-        const agentId = decodeURIComponent(agentMatch[1]);
-        const agentIndex = state.agents.findIndex(agent => agent.id === agentId && !agent.is_default);
-        if (agentIndex < 0) return Promise.reject(new Error("智能体不存在"));
-        if (method === "DELETE") {
-          state.agents.splice(agentIndex, 1);
-          return Promise.resolve({ deleted: true });
-        }
-        state.agents[agentIndex] = { ...state.agents[agentIndex], ...body, id: agentId, is_default: false, version: Number(state.agents[agentIndex].version || 0) + 1 };
-        return Promise.resolve(cloneMockupValue(state.agents[agentIndex]));
-      }
-      if (url.pathname === "/api/settings/auto-dispatch" && method === "PATCH") return Promise.resolve({ enabled: false });
-      if (url.pathname === "/api/issues" && method === "GET") {
-        const query = String(url.searchParams.get("search") || "").trim().toLowerCase();
-        const issues = loadMockupIssues().filter(issue => !query || [issue.identifier, issue.title, issue.description, ...(issue.labels || [])].join(" ").toLowerCase().includes(query));
-        return Promise.resolve(cloneMockupValue(issues));
-      }
-      if (url.pathname === "/api/issues" && method === "POST") {
-        const issues = loadMockupIssues();
-        const nextNumber = issues.reduce((max, issue) => Math.max(max, Number(String(issue.identifier).replace(/\\D/g, "")) || 0), 19) + 1;
-        const now = new Date().toISOString();
-        const issue = normalizeMockupIssues([{ ...body, id: "mockup-" + nextNumber, identifier: "BET-" + nextNumber, created_at: now, updated_at: now, version: 1 }])[0];
-        saveMockupIssues([...issues, issue]);
-        return Promise.resolve(cloneMockupValue(issue));
-      }
-      const match = url.pathname.match(/^\\/api\\/issues\\/([^/]+)(?:\\/(archive|start|stop|conversation|reply))?$/);
-      if (!match) return Promise.reject(new Error("展示模式不支持此操作"));
-      const id = decodeURIComponent(match[1]);
-      const action = match[2] || "";
-      const issues = loadMockupIssues();
-      const index = issues.findIndex(issue => issue.id === id || issue.identifier === id);
-      if (index < 0) return Promise.reject(new Error("任务不存在"));
-      if (method === "GET" && !action) return Promise.resolve(cloneMockupValue(issues[index]));
-      if (method === "GET" && action === "conversation") return Promise.resolve({ messages: [] });
-      if (method === "POST" && action === "archive") {
-        saveMockupIssues(issues.filter((_, issueIndex) => issueIndex !== index));
-        return Promise.resolve({ archived: true });
-      }
-      if (method === "PATCH" && !action) {
-        const next = {
-          ...issues[index],
-          ...body,
-          id: issues[index].id,
-          identifier: issues[index].identifier,
-          project_id: MOCKUP_PROJECT_ID,
-          agent_id: body.agent_id === "" ? null : body.agent_id === undefined ? issues[index].agent_id : body.agent_id,
-          mockup_agent_name: body.agent_id === undefined ? issues[index].mockup_agent_name : "",
-          version: issues[index].version + 1,
-          updated_at: new Date().toISOString(),
-        };
-        issues[index] = normalizeMockupIssues([next])[0];
-        saveMockupIssues(issues);
-        return Promise.resolve(cloneMockupValue(issues[index]));
-      }
-      return Promise.reject(new Error("展示模式不会运行真实任务"));
-    }
-    function projectLabel(project) {
-      return project?.external_id === "inbox" ? "未分配" : project?.name || "";
-    }
-    const englishText = {
+    const localeResources = { en: {
       "重试回复": "Retry reply", "重新加载": "Reload", "回复等待超时。请检查模型服务连接后重试。": "The reply timed out. Check the model service connection and retry.", "网络连接异常，回复未完成。请检查网络和 Better Codex Runtime 后重试。": "The reply did not finish because of a network problem. Check your network and Better Codex Runtime, then retry.", "当前权限不足，无法完成回复。请调整智能体权限或允许所需操作后重试。": "The reply needs additional permission. Adjust the agent permission or allow the required action, then retry.", "Better Codex Runtime 已停止。请重新启动后重试。": "Better Codex Runtime stopped. Restart it and retry.", "上一条回复仍在进行中。请稍后重新加载。": "The previous reply is still running. Reload shortly.", "回复未完成。请打开完整会话查看详情，然后重试。": "The reply did not finish. Open the full conversation for details, then retry.", "会话加载超时。请确认 Better Codex Runtime 正在运行，然后重新加载。": "The conversation timed out while loading. Make sure Better Codex Runtime is running, then reload.", "无法加载会话。请检查网络和 Better Codex Runtime，然后重新加载。": "Unable to load the conversation. Check your network and Better Codex Runtime, then reload.", "没有权限加载会话。请调整权限后重新加载。": "You do not have permission to load the conversation. Adjust the permission, then reload.",
       "任务看板": "Task board", "打开任务看板": "Open task board", "智能体": "Agents", "管理智能体": "Manage agents", "创建和管理你的智能体": "Create and manage your agents",
+      "Better Codex 服务需要重启": "Better Codex needs to restart", "当前页面与后台服务的连接已失效。请在终端运行下面的命令，完成后重新连接。": "The connection between this page and the background service has expired. Run the command below in your terminal, then reconnect.", "复制重启命令": "Copy restart command", "已复制": "Copied", "重新连接": "Reconnect", "正在连接…": "Connecting…", "错误详情": "Error details",
       "全部": "All", "已分配": "Assigned", "未分配": "Unassigned", "待规划": "Backlog", "待办": "Todo", "进行中": "In progress", "审核中": "In review", "已完成": "Done", "已阻塞": "Blocked", "已取消": "Canceled",
       "无": "None", "低": "Low", "中": "Medium", "高": "High", "紧急": "Urgent", "超高": "Extra high", "无优先级": "No priority", "优先级": "Priority", "状态": "Status", "日期": "Date", "筛选": "Filter", "标签": "Labels",
       "新建": "New", "新建 issue": "New issue", "新建任务": "New task", "新建智能体": "New agent", "创建": "Create", "创建任务": "Create task", "删除": "Delete", "删除任务": "Delete task", "删除智能体": "Delete agent", "保存": "Save", "确认": "Confirm", "取消": "Cancel", "关闭": "Close", "重试": "Retry", "稍后": "Later", "展开": "Expand", "缩小": "Minimize", "缩放头像": "Zoom avatar",
@@ -539,10 +382,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "点击": "Click", "，或者在已完成的会话卡片中": ", or use", "新消息，智能体才会执行任务。": "to post a new message in a completed conversation card. Only then will the agent run the task.", "会主动执行分配给自己的任务，但是不会执行": "automatically runs tasks assigned to it, but does not run", "区域的任务。": "tasks.",
       "代码审查": "Code review", "问题排查": "Troubleshooting", "前端实现": "Frontend implementation", "文档写作": "Documentation", "创意探索": "Creative exploration", "终端工程": "Terminal engineering", "通用助手": "General assistant", "修复工具": "Fixer", "安全审查": "Security review", "测试验证": "Test verification", "插件": "Plugins", "数据与存储": "Data and storage", "检查改动的正确性、回归风险和可维护性": "Review changes for correctness, regression risk, and maintainability", "负责 Codex 原生风格的界面实现与视觉验证": "Build and visually verify interfaces in the native Codex style", "定位崩溃、回归和异常行为的根因": "Find the root cause of crashes, regressions, and unexpected behavior",
       "通用任务处理": "General task handling", "代码实现": "Code implementation", "最大": "Maximum", "极致": "Ultra", "发送": "Send", "副本": "Copy", "复制卡片": "Copy card", "更多操作": "More actions", "本次启动关闭": "Disable for this launch", "正在重启 Better Codex": "Restarting Better Codex", "Better Codex 已恢复到上一版本。": "Better Codex has been restored to the previous version.",
-      "展示模式": "Mockup mode", "导出展示数据": "Export mockup data", "导入展示数据": "Import mockup data", "重置展示数据": "Reset mockup data", "重置布局": "Reset layout", "重置": "Reset", "恢复默认展示卡片和布局吗？": "Restore the default mockup cards and layout?", "展示数据格式无效": "The mockup data format is invalid", "展示卡片缺少标题": "A mockup card is missing a title", "展示模式不支持此操作": "This action is not supported in mockup mode", "展示模式不会运行真实任务": "Mockup mode does not run real tasks", "任务不存在": "Task not found",
+      "展示模式": "Mockup mode", "导出展示数据": "Export mockup data", "导入展示数据": "Import mockup data", "重置展示数据": "Reset mockup data", "重置布局": "Reset layout", "重置": "Reset", "恢复默认展示卡片和布局吗？": "Restore the default mockup cards and layout?", "展示数据不能超过 16 MB": "Mockup data cannot exceed 16 MB", "展示数据格式无效": "The mockup data format is invalid", "展示卡片缺少标题": "A mockup card is missing a title", "展示模式不支持此操作": "This action is not supported in mockup mode", "展示模式不会运行真实任务": "Mockup mode does not run real tasks", "任务不存在": "Task not found",
       "修复任务卡片拖拽错位": "Fix task card drag misalignment", "复现缩放状态下的卡片拖拽偏移，并修正坐标计算与落点反馈。": "Reproduce card drag offset while zoomed, then correct the coordinate calculation and drop feedback.", "重写首页首屏价值主张": "Rewrite the homepage value proposition", "提炼 Better Codex 的核心价值，让新访客快速理解产品用途。": "Clarify Better Codex's core value so new visitors quickly understand what it does.", "调研独立开发者工作流": "Research indie developer workflows", "整理从想法到交付的常见流程、主要痛点和决策节点。": "Document common flows, key pain points, and decision points from idea to delivery.", "整理本地安装步骤": "Organize local installation steps", "核对安装、启动与常见异常处理步骤，统一文档表达。": "Verify installation, startup, and common troubleshooting steps, then unify the documentation.", "优化首次启动加载速度": "Improve first-launch loading speed", "定位启动阶段主要耗时，缩短进入任务看板前的等待时间。": "Identify the main startup costs and shorten the wait before the task board opens.", "整理功能亮点短文案": "Write concise feature highlights", "为任务分派、会话协作和代码审核分别撰写简洁说明。": "Write concise descriptions for task assignment, conversation collaboration, and code review.", "对比三款任务看板体验": "Compare three task board experiences", "对比 Linear、Notion 和 Trello 的卡片密度、拖拽与筛选体验。": "Compare card density, drag and drop, and filtering in Linear, Notion, and Trello.", "撰写产品发布介绍": "Write a product launch introduction", "围绕目标用户、核心问题和使用方式准备公开发布稿。": "Prepare launch copy around target users, the core problem, and how the product is used.", "完善会话回复失败提示": "Improve failed reply messages", "梳理超时、网络异常和权限问题的提示文案与重试入口。": "Refine messages and retry paths for timeouts, network failures, and permission issues.", "优化空状态引导语": "Improve empty-state guidance", "重写空看板与空会话的标题、说明和首个行动提示。": "Rewrite the title, explanation, and first action prompt for empty boards and conversations.", "收集首批用户常见问题": "Collect early user FAQs", "汇总安装、任务分派、运行状态和数据存储相关问题。": "Compile questions about installation, task assignment, runtime status, and data storage.", "准备更新日志发布稿": "Prepare release notes", "整理本次新增、修复和已知限制，形成可直接发布的更新日志。": "Organize this release's additions, fixes, and known limitations into publish-ready notes.", "统一看板筛选状态": "Unify task board filter state", "检查筛选逻辑与顶部计数，确保切换后卡片结果同步更新。": "Check filter logic and the top count so card results update together after a change.", "检查 Windows 安装流程": "Check the Windows installation flow", "核对安装、启动、权限与卸载流程，记录关键异常。": "Verify installation, startup, permissions, and uninstall flows, and record key issues.", "起草用户访谈邀请信": "Draft a user interview invitation", "说明访谈目的、所需时间和隐私边界，给出清晰回复方式。": "Explain the interview purpose, time needed, and privacy boundaries, with a clear way to reply.", "归档版本发布资料": "Archive release materials", "整理版本说明、截图、校验结果和发布链接，方便后续复盘。": "Organize release notes, screenshots, verification results, and launch links for later review.", "性能": "Performance", "文案": "Copywriting", "调研": "Research", "文档": "Documentation", "写作": "Writing",
       "选择头像": "Choose avatar", "预设头像": "Preset avatars", "自定义": "Custom", "更换": "Change", "保存失败": "Save failed", "创建失败": "Creation failed", "加载失败": "Loading failed", "启动失败": "Start failed", "发送失败": "Send failed", "回复失败": "Reply failed", "回复": "Reply", "回复中": "Replying", "回复完成": "Reply completed", "回复进行中…": "Replying…", "回复已完成": "Reply completed", "等待对话": "Waiting for conversation", "加载中…": "Loading…", "加载对话…": "Loading conversation…", "正在打开…": "Opening…", "在此回复智能体…": "Reply to the agent here…", "对话": "Conversation", "详情": "Details", "关闭详情": "Close details", "Issue 详情": "Issue details", "名称": "Name", "介绍": "Description", "智能体名称": "Agent name", "尚未添加介绍": "No description yet", "没有匹配的智能体": "No matching agents", "此分类暂无智能体": "No agents in this category",
-      "裁剪头像": "Crop avatar", "拖动图片调整位置": "Drag the image to adjust its position", "正在更新": "Updating", "正在更新 Better Codex": "Updating Better Codex", "更新完成": "Update complete", "更新未完成": "Update incomplete", "稍后提醒": "Remind me later", "Better Codex 有新版本": "A new Better Codex version is available", "Better Codex 已是最新版本": "Better Codex is up to date", "Better Codex 保持当前版本运行。": "Better Codex will continue running on the current version.", "正在下载并校验新版本，请不要关闭 Codex。": "Downloading and verifying the update. Please do not close Codex.", "正在重启 Codex，稍后会自动恢复。": "Restarting Codex. It will resume shortly.", "刚刚完成检查，无需更新。": "Just checked. No update is needed.", "任务已完成": "Task completed", "知道了": "Got it", "关闭": "Close", "部分文件无法读取本地路径，已跳过": "Some files could not be read locally and were skipped", "当前环境无法读取本地文件路径": "The current environment cannot read local file paths", "无关联对话。": "No linked conversation.", "暂无对话，可在下方回复或打开完整对话。": "No conversation yet. Reply below or open the full conversation.", "图片不能超过 10 MB": "Images must be 10 MB or smaller", "请选择 PNG、JPEG 或 WebP 图片": "Choose a PNG, JPEG or WebP image", "无法读取这张图片": "Unable to read this image", "创建智能体 Issue 需要本地工作区：请先打开该项目下的一个 Codex 会话": "Creating an agent issue requires a local workspace. Open a Codex conversation in this project first.",
+      "裁剪头像": "Crop avatar", "拖动图片调整位置": "Drag the image to adjust its position", "正在更新": "Updating", "正在更新 Better Codex": "Updating Better Codex", "更新完成": "Update complete", "更新未完成": "Update incomplete", "稍后提醒": "Remind me later", "Better Codex 有新版本": "A new Better Codex version is available", "Better Codex 已是最新版本": "Better Codex is up to date", "Better Codex 保持当前版本运行。": "Better Codex will continue running on the current version.", "正在下载并校验新版本，请不要关闭 Codex。": "Downloading and verifying the update. Please do not close Codex.", "正在重启 Codex，稍后会自动恢复。": "Restarting Codex. It will resume shortly.", "刚刚完成检查，无需更新。": "Just checked. No update is needed.", "任务已完成": "Task completed", "知道了": "Got it", "关闭": "Close", "附带文件：": "Attached files:", "部分文件无法读取本地路径，已跳过": "Some files could not be read locally and were skipped", "当前环境无法读取本地文件路径": "The current environment cannot read local file paths", "无关联对话。": "No linked conversation.", "暂无对话，可在下方回复或打开完整对话。": "No conversation yet. Reply below or open the full conversation.", "图片不能超过 10 MB": "Images must be 10 MB or smaller", "请选择 PNG、JPEG 或 WebP 图片": "Choose a PNG, JPEG or WebP image", "无法读取这张图片": "Unable to read this image", "创建智能体 Issue 需要本地工作区：请先打开该项目下的一个 Codex 会话": "Creating an agent issue requires a local workspace. Open a Codex conversation in this project first.",
       "创建任务": "Create task", "添加描述": "Add description", "新建 issue": "New issue", "项目": "Project", "状态": "Status", "优先级": "Priority", "选择项目": "Select project", "保存": "Save", "删除": "Delete",
       "对话链接无效。": "The conversation link is invalid.", "对话仍在加载，请稍后重试。": "The conversation is still loading. Try again shortly.", "任务正在执行，请先等待完成。": "The task is still running. Wait for it to finish first.", "任务仍在整理中，请稍后再编辑。": "The task is still being organized. Try editing it again shortly.", "当前为手动运行，请先点击“立即开始任务”。": "Manual run is enabled. Click “Start task now” first.", "待规划中的 Issue 不会自动触发任务，请先移出待规划区。": "Issues in Backlog do not trigger tasks automatically. Move it out of Backlog first.", "当前没有运行中的任务": "No agents are currently working", "查看运行中的任务": "View running tasks", "暂无任务": "No tasks", "未分配": "Unassigned", "已分配": "Assigned", "新建任务": "New task", "新建智能体": "New agent", "运行模式说明": "Run mode", "手动运行时，只有点击“立即开始任务”才会触发智能体任务。": "In manual mode, agent tasks start only after you click “Start task now”.", "自动运行时，只要 Issue 不在「待规划」区，你发送的新消息都会触发任务；「待规划」里的 Issue 不会自动触发。": "In auto-run mode, new messages trigger tasks unless the Issue is in Backlog; Issues in Backlog do not trigger tasks automatically.", "未关联对话。": "No linked conversation.",
       "确定删除任务 “": "Delete task “", "吗？": "”?", "创建后先由 ": "After creation, ", " 整理卡片，再自动开始工作。": " will organize the card and start working automatically.", "刚刚": "Just now", "分钟": "minutes", "小时": "hours", "天": "days", "更新于": "Updated", "个筛选": "filters", "个智能体工作中": "agents working", "条": "items",
@@ -551,10 +394,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "在会话中打开": "Open in conversation", "任务正在进行中": "Task is running", "立即开始任务": "Start task now", "切换到手动": "Switch to manual", "继续创建": "Keep creating", "指派给": "Assign to", "可选": "Optional", "建议": "Suggestions", "创建第一个任务": "Create your first task", "写下要完成的事，交给智能体处理。": "Describe what needs to be done and let an agent handle it.", "开始对话": "Start the conversation", "补充下一步要求，智能体会继续处理。": "Add your next request and the agent will continue.", "在下方输入消息并发送": "Type a message below and send it", "输入下一步要求…": "Enter your next request…",
       "头像": "Avatar", "上传图片": "Upload image", "使用此头像": "Use this avatar", "点击选择预设图标，或上传图片": "Choose a preset icon or upload an image", "从预设图标中选择，也可以上传图片": "Choose a preset icon or upload an image", "创建智能体": "Create agent", "Codex 默认智能体": "Default Codex agent", "说明这个智能体适合承担什么工作": "Describe what this agent is good at", "定义职责、工作方式和输出要求": "Define responsibilities, workflow, and output requirements", "权限": "Permissions", "只读": "Read-only", "工作区可写": "Workspace write access", "完全访问": "Full access", "仅可读取工作区文件，不能修改": "Can read workspace files but cannot modify them", "可修改当前工作区内的文件": "Can modify files in the current workspace", "可不受限制地访问互联网和电脑上的任何文件": "Unrestricted access to the internet and files on this computer",
       "已经执行过对话的 Issue 只能修改状态、优先级和指派人。": "Issues with an executed conversation can only change status, priority, and assignee.", "终止任务后才能打开对话，是否终止任务？": "The task must be stopped before opening the conversation. Stop it now?", "终止并打开": "Stop and open", "正在终止…": "Stopping…", "忽略当前版本": "Ignore this version", "立即更新": "Update now", "暂无项目": "No projects", "告诉智能体要做什么，例如：“修复项目里任务运行状态不可见的问题”": "Tell the agent what to do, for example: “Fix the invisible task run status in the project”"
-    };
+    } };
     const bridgeRequests = new Map();
-    const localizedText = new WeakMap();
-    const localizedAttributes = new WeakMap();
     let bridgeSequence = 0;
     let entry = null;
     let agentsEntry = null;
@@ -589,13 +430,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       return String(value ?? "").replace(/[&<>\"']/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\\\"": "&quot;", "'": "&#39;" })[character]);
     }
 
-    function translateText(value) {
+    function t(value) {
       const source = String(value ?? "");
       if (state.locale === "zh-CN" || !/[\\p{Script=Han}]/u.test(source)) return source;
       const leading = source.match(/^\\s*/)?.[0] || "";
       const trailing = source.match(/\\s*$/)?.[0] || "";
       const core = source.slice(leading.length, source.length - trailing.length || undefined);
-      if (englishText[core]) return leading + englishText[core] + trailing;
+      if (localeResources.en[core]) return leading + localeResources.en[core] + trailing;
       if (core === "更多操作") return leading + "More actions" + trailing;
       if (core === "本次启动关闭") return leading + "Disable for this launch" + trailing;
       let match = core.match(/^(\\d+) 个智能体工作中$/);
@@ -607,7 +448,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       match = core.match(/^(\\d+) 条$/);
       if (match) return leading + match[1] + (match[1] === "1" ? " message" : " messages") + trailing;
       match = core.match(/^更新于 (.+)$/);
-      if (match) return leading + "Updated " + translateText(match[1]) + trailing;
+      if (match) return leading + "Updated " + t(match[1]) + trailing;
       match = core.match(/^(\\d+) 分钟前$/);
       if (match) return leading + match[1] + (match[1] === "1" ? " minute ago" : " minutes ago") + trailing;
       match = core.match(/^(\\d+) 小时前$/);
@@ -615,9 +456,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       match = core.match(/^(\\d+) 天前$/);
       if (match) return leading + match[1] + (match[1] === "1" ? " day ago" : " days ago") + trailing;
       match = core.match(/^(无|低|中|高|紧急|超高)优先级$/);
-      if (match) return leading + englishText[match[1]] + " priority" + trailing;
+      if (match) return leading + localeResources.en[match[1]] + " priority" + trailing;
       match = core.match(/^(.+) · (低|中|高|超高|最大|极致)推理$/);
-      if (match) return leading + match[1] + " · " + englishText[match[2]] + " reasoning" + trailing;
+      if (match) return leading + match[1] + " · " + localeResources.en[match[2]] + " reasoning" + trailing;
       match = core.match(/^确定删除任务 “(.+)” 吗？$/);
       if (match) return leading + "Delete task “" + match[1] + "”?" + trailing;
       match = core.match(/^确定删除智能体 “(.+)” 吗？$/);
@@ -625,7 +466,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       match = core.match(/^创建后先由 (.+) 整理卡片，再自动开始工作。$/);
       if (match) return leading + "After creation, " + match[1] + " will organize the card and start working automatically." + trailing;
       match = core.match(/^(.+) · 点击刷新重试$/);
-      if (match) return leading + translateText(match[1]) + " · Click to retry" + trailing;
+      if (match) return leading + t(match[1]) + " · Click to retry" + trailing;
       match = core.match(/^v(.+) 已可用，更新完成后将自动重启 Codex。$/);
       if (match) return leading + "v" + match[1] + " is available. Codex will restart automatically after the update." + trailing;
       match = core.match(/^更换 (.+) 的头像$/);
@@ -633,37 +474,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       return source;
     }
 
-    function localizeOwnedTree(root) {
-      if (!root) return;
-      const isOwned = node => node?.nodeType === 1 && (node.matches?.("[" + OWNED + '=\"true\"]') || node.closest?.("[" + OWNED + '=\"true\"]'));
-      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-      const textNodes = [];
-      while (walker.nextNode()) textNodes.push(walker.currentNode);
-      for (const node of textNodes) {
-        if (!isOwned(node.parentElement)) continue;
-        const current = node.nodeValue;
-        const previous = localizedText.get(node);
-        const source = previous && current === previous.rendered ? previous.source : current;
-        const rendered = state.locale === "zh-CN" ? source : translateText(source);
-        if (rendered !== current) node.nodeValue = rendered;
-        localizedText.set(node, { source, rendered });
-      }
-      const descendants = root.querySelectorAll ? Array.from(root.querySelectorAll("*")) : [];
-      const elements = root.nodeType === 1 ? [root, ...descendants] : descendants;
-      for (const element of elements) {
-        if (!isOwned(element)) continue;
-        const records = localizedAttributes.get(element) || new Map();
-        for (const attribute of ["aria-label", "title", "placeholder"]) {
-          if (!element.hasAttribute(attribute)) continue;
-          const current = element.getAttribute(attribute);
-          const previous = records.get(attribute);
-          const source = previous && current === previous.rendered ? previous.source : current;
-          const rendered = state.locale === "zh-CN" ? source : translateText(source);
-          if (rendered !== current) element.setAttribute(attribute, rendered);
-          records.set(attribute, { source, rendered });
-        }
-        localizedAttributes.set(element, records);
-      }
+    function te(value) {
+      return escapeHtml(t(value));
+    }
+
+    function projectLabel(project) {
+      return project?.external_id === "inbox" ? t("未分配") : project?.name || "";
     }
 
     function normalizeSessionId(value) {
@@ -884,12 +700,16 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #\${PANEL_ID} .better-codex-link { overflow: hidden; border: 0; color: var(--bc-info, #2563eb); background: transparent; padding: 0; font: inherit; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
         #\${PANEL_ID} .better-codex-link:hover { text-decoration: underline; }
         #\${PANEL_ID} .better-codex-activity { display: inline-flex; align-items: center; gap: 5px; flex: 0 0 auto; font-size: var(--bc-text-caption); font-weight: 600; }
+        #\${PANEL_ID} .better-codex-activity-dot { width: 6px; height: 6px; flex: 0 0 auto; border-radius: 999px; background: currentColor; }
         #\${PANEL_ID} .better-codex-avatar { display: inline-flex; width: 16px; height: 16px; align-items: center; justify-content: center; border: 1.5px solid #fff; border-radius: 999px; color: #fff; background: #27272a; font-size: var(--bc-text-avatar); }
         #\${PANEL_ID} .better-codex-activity[data-run="running"], #\${PANEL_ID} .better-codex-activity[data-run="thinking"], #\${PANEL_ID} .better-codex-activity[data-run="replying"] { color: #52525b; }
         #\${PANEL_ID} .better-codex-activity[data-run="reply-failed"] { color: #dc2626; }
-        #\${PANEL_ID} .better-codex-activity[data-run="reply-succeeded"], #\${PANEL_ID} .better-codex-activity[data-run="completed"] { color: #15803d; }
-        #\${PANEL_ID} .better-codex-activity[data-run="failed"], #\${PANEL_ID} .better-codex-activity[data-run="interrupted"] { color: #dc2626; }
+        #\${PANEL_ID} .better-codex-activity[data-run="reply-succeeded"] { color: #15803d; }
+        #\${PANEL_ID} .better-codex-activity[data-run="completed"] { color: var(--bc-success); }
+        #\${PANEL_ID} .better-codex-activity[data-run="failed"] { color: #dc2626; }
+        #\${PANEL_ID} .better-codex-activity[data-run="interrupted"] { color: var(--bc-danger); }
         #\${PANEL_ID} .better-codex-activity[data-run="not-started"] { color: var(--bc-muted); font-weight: 500; }
+        #\${PANEL_ID} .better-codex-activity[data-run="completed"], #\${PANEL_ID} .better-codex-activity[data-run="interrupted"] { font-weight: 500; }
         #\${PANEL_ID} .better-codex-activity[data-run="claimed"] { color: var(--bc-muted); opacity: .62; }
         @keyframes better-codex-shimmer { 0% { background-position: 200% 0 } 100% { background-position: -200% 0 } }
         #\${PANEL_ID} .better-codex-shimmer { background-image: linear-gradient(90deg,#71717a 0%,#71717a 35%,#18181b 50%,#71717a 65%,#71717a 100%); background-size: 200% 100%; background-clip: text; -webkit-background-clip: text; color: transparent; -webkit-text-fill-color: transparent; animation: better-codex-shimmer 2.5s linear infinite; }
@@ -1059,8 +879,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #\${PANEL_ID} .better-codex-avatar, #\${PANEL_ID} .better-codex-agent-card-avatar { color: var(--bc-primary-foreground); background: var(--bc-primary); }
         #\${PANEL_ID} .better-codex-activity[data-run="running"], #\${PANEL_ID} .better-codex-activity[data-run="thinking"], #\${PANEL_ID} .better-codex-activity[data-run="replying"] { color: var(--bc-foreground); }
         #\${PANEL_ID} .better-codex-activity[data-run="reply-failed"] { color: var(--bc-danger); }
-        #\${PANEL_ID} .better-codex-activity[data-run="reply-succeeded"], #\${PANEL_ID} .better-codex-activity[data-run="completed"] { color: #65c18c; }
-        #\${PANEL_ID} .better-codex-activity[data-run="failed"], #\${PANEL_ID} .better-codex-activity[data-run="interrupted"] { color: var(--bc-danger); }
+        #\${PANEL_ID} .better-codex-activity[data-run="reply-succeeded"] { color: #65c18c; }
+        #\${PANEL_ID} .better-codex-activity[data-run="completed"] { color: var(--bc-success); }
+        #\${PANEL_ID} .better-codex-activity[data-run="failed"] { color: var(--bc-danger); }
+        #\${PANEL_ID} .better-codex-activity[data-run="interrupted"] { color: var(--bc-danger); }
         #\${PANEL_ID} .better-codex-activity[data-run="not-started"] { color: var(--bc-muted); font-weight: 500; }
         #\${PANEL_ID} .better-codex-shimmer { background-image: linear-gradient(90deg,var(--bc-muted) 0%,var(--bc-muted) 35%,var(--bc-foreground) 50%,var(--bc-muted) 65%,var(--bc-muted) 100%); }
         #\${PANEL_ID} .better-codex-empty { color: var(--bc-faint); }
@@ -1142,16 +964,16 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const button = document.createElement("button");
       button.type = "button";
       button.className = "better-codex-button";
-      button.textContent = text;
+      button.textContent = t(text);
       return button;
     }
 
     function createEntry(text, id, title, surface) {
-      const button = nativeButton(text);
+      const button = nativeButton(t(text));
       button.id = id;
       button.setAttribute(OWNED, "true");
-      button.setAttribute("aria-label", title);
-      button.setAttribute("title", title);
+      button.setAttribute("aria-label", t(title));
+      button.setAttribute("title", t(title));
       syncEntryIcon(button, surface);
       button.addEventListener("click", event => {
         event.preventDefault();
@@ -1178,6 +1000,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function syncEntryLabel(button, text, title) {
+      text = t(text);
+      title = t(title);
       const content = button.querySelector(SELECTORS.truncatedText) || Array.from(button.querySelectorAll("span")).at(-1);
       if (content && content.textContent !== text) content.textContent = text;
       else if (!content && button.textContent !== text) button.textContent = text;
@@ -1237,7 +1061,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function api(path, options = {}) {
-      if (state.mockup && path !== "/api/bootstrap") return mockupApi(path, options);
       if (typeof window.betterCodexRequest !== "function") return Promise.reject(new Error("runtime_bridge_unavailable"));
       const attempt = (retriesLeft) => {
         const id = VERSION + ":" + (++bridgeSequence);
@@ -1275,14 +1098,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     function errorLabel(error) {
       const value = error instanceof Error ? error.message : String(error || "request_failed");
-      if (value === "thread_open_timeout" || value === "thread_open_unconfirmed") return "对话仍在加载，请稍后重试。";
-      if (value === "thread_id_invalid") return "对话链接无效。";
-      if (value === "issue_execution_running") return "任务正在执行，请先等待完成。";
-      if (value === "issue_enrichment_pending") return "任务仍在整理中，请稍后再编辑。";
-      if (value === "issue_execution_locked") return "已经执行过对话的 Issue 只能修改状态、优先级和指派人。";
-      if (value === "manual_start_required") return "当前为手动运行，请先点击“立即开始任务”。";
-      if (value === "backlog_reply_blocked") return "待规划中的 Issue 不会自动触发任务，请先移出待规划区。";
-      return value;
+      if (value === "thread_open_timeout" || value === "thread_open_unconfirmed") return t("对话仍在加载，请稍后重试。");
+      if (value === "thread_id_invalid") return t("对话链接无效。");
+      if (value === "issue_execution_running") return t("任务正在执行，请先等待完成。");
+      if (value === "issue_enrichment_pending") return t("任务仍在整理中，请稍后再编辑。");
+      if (value === "issue_execution_locked") return t("已经执行过对话的 Issue 只能修改状态、优先级和指派人。");
+      if (value === "manual_start_required") return t("当前为手动运行，请先点击“立即开始任务”。");
+      if (value === "backlog_reply_blocked") return t("待规划中的 Issue 不会自动触发任务，请先移出待规划区。");
+      return t(value);
     }
 
     function showError(error) {
@@ -1301,6 +1124,33 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         output.textContent = "";
         output.hidden = true;
       }
+    }
+
+    function needsServiceRecovery(error) {
+      const value = error instanceof Error ? error.message : String(error || "");
+      return ["invalid_bridge_request", "runtime_bridge_unavailable", "runtime_bridge_timeout", "runtime_unavailable"].includes(value);
+    }
+
+    function showServiceRecovery(error) {
+      if (!panel) return;
+      clearError();
+      panel.dataset.recovery = "true";
+      const recovery = panel.querySelector("#better-codex-recovery");
+      const detail = recovery?.querySelector("[data-recovery-error]");
+      const retry = recovery?.querySelector("[data-recovery-retry]");
+      if (detail) detail.textContent = error instanceof Error ? error.message : String(error || "runtime_unavailable");
+      if (retry) {
+        retry.disabled = false;
+        retry.innerHTML = icon("refresh") + "<span>" + te("重新连接") + "</span>";
+      }
+      if (recovery) recovery.hidden = false;
+    }
+
+    function hideServiceRecovery() {
+      if (!panel) return;
+      delete panel.dataset.recovery;
+      const recovery = panel.querySelector("#better-codex-recovery");
+      if (recovery) recovery.hidden = true;
     }
 
     function dismissUpdate(version) {
@@ -1331,7 +1181,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       updateNotice.setAttribute(OWNED, "true");
       updateNotice.setAttribute("role", "status");
       updateNotice.setAttribute("aria-live", "polite");
-      updateNotice.innerHTML = '<button class="better-codex-update-menu-toggle" type="button" aria-label="更多操作" aria-expanded="false" aria-haspopup="menu" data-update-menu-toggle>' + icon("more") + '</button><div class="better-codex-update-menu" data-update-menu hidden><button type="button" role="menuitem" data-update-ignore>忽略当前版本</button></div><button class="better-codex-update-close" type="button" aria-label="稍后提醒">' + icon("close") + '</button><div class="better-codex-update-layout"><span class="better-codex-update-icon">' + icon("refresh") + '</span><div class="better-codex-update-copy"><p class="better-codex-update-title">Better Codex 有新版本</p><p class="better-codex-update-description">v' + escapeHtml(version) + ' 已可用，更新完成后将自动重启 Codex。</p><p class="better-codex-update-error" hidden></p></div><div class="better-codex-update-actions"><button class="better-codex-update-button" type="button" data-update-later>稍后</button><button class="better-codex-update-button is-primary" type="button" data-update-install>立即更新</button></div></div>';
+      updateNotice.innerHTML = '<button class="better-codex-update-menu-toggle" type="button" aria-label="' + escapeHtml(t("更多操作")) + '" aria-expanded="false" aria-haspopup="menu" data-update-menu-toggle>' + icon("more") + '</button><div class="better-codex-update-menu" data-update-menu hidden><button type="button" role="menuitem" data-update-ignore>' + escapeHtml(t("忽略当前版本")) + '</button></div><button class="better-codex-update-close" type="button" aria-label="' + escapeHtml(t("稍后提醒")) + '">' + icon("close") + '</button><div class="better-codex-update-layout"><span class="better-codex-update-icon">' + icon("refresh") + '</span><div class="better-codex-update-copy"><p class="better-codex-update-title">' + escapeHtml(t("Better Codex 有新版本")) + '</p><p class="better-codex-update-description">' + escapeHtml(t("v" + version + " 已可用，更新完成后将自动重启 Codex。")) + '</p><p class="better-codex-update-error" hidden></p></div><div class="better-codex-update-actions"><button class="better-codex-update-button" type="button" data-update-later>' + escapeHtml(t("稍后")) + '</button><button class="better-codex-update-button is-primary" type="button" data-update-install>' + escapeHtml(t("立即更新")) + '</button></div></div>';
       document.body.appendChild(updateNotice);
       const notice = updateNotice;
       const menuToggle = notice.querySelector("[data-update-menu-toggle]");
@@ -1352,11 +1202,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       updateNotice.querySelector(".better-codex-update-close").addEventListener("click", () => dismissUpdate(noticeVersion));
       updateNotice.querySelector("[data-update-later]").addEventListener("click", () => dismissUpdate(noticeVersion));
       if (activationError) {
-        updateNotice.querySelector(".better-codex-update-title").textContent = "更新未完成";
-        updateNotice.querySelector(".better-codex-update-description").textContent = "Better Codex 已恢复到上一版本。";
+        updateNotice.querySelector(".better-codex-update-title").textContent = t("更新未完成");
+        updateNotice.querySelector(".better-codex-update-description").textContent = t("Better Codex 已恢复到上一版本。");
         updateNotice.querySelector(".better-codex-update-error").textContent = String(update.error).slice("update_activation_failed:".length);
         updateNotice.querySelector(".better-codex-update-error").hidden = false;
-        updateNotice.querySelector("[data-update-install]").textContent = "重试";
+        updateNotice.querySelector("[data-update-install]").textContent = t("重试");
       }
       updateNotice.querySelector("[data-update-install]").addEventListener("click", async event => {
         const install = event.currentTarget;
@@ -1372,17 +1222,17 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         close.disabled = true;
         ignore.disabled = true;
         later.disabled = true;
-        install.textContent = "正在更新";
-        title.textContent = "正在更新 Better Codex";
-        description.textContent = "正在下载并校验新版本，请不要关闭 Codex。";
+        install.textContent = t("正在更新");
+        title.textContent = t("正在更新 Better Codex");
+        description.textContent = t("正在下载并校验新版本，请不要关闭 Codex。");
         error.hidden = true;
         try {
           const result = await api("/api/update/install", { method: "POST" });
           if (updateNotice !== notice) return;
           if (result?.updated === false) {
             notice.dataset.status = "current";
-            title.textContent = "Better Codex 已是最新版本";
-            description.textContent = "刚刚完成检查，无需更新。";
+            title.textContent = t("Better Codex 已是最新版本");
+            description.textContent = t("刚刚完成检查，无需更新。");
             setTimeout(() => {
               if (updateNotice !== notice) return;
               notice.remove();
@@ -1390,8 +1240,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             }, 1800);
             return;
           }
-          title.textContent = "正在重启 Better Codex";
-          description.textContent = "正在重启 Codex，稍后会自动恢复。";
+          title.textContent = t("正在重启 Better Codex");
+          description.textContent = t("正在重启 Codex，稍后会自动恢复。");
         } catch (reason) {
           if (updateNotice !== notice) return;
           notice.dataset.status = "available";
@@ -1400,9 +1250,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           close.disabled = false;
           ignore.disabled = false;
           later.disabled = false;
-          install.textContent = "重试";
-          title.textContent = "更新未完成";
-          description.textContent = "Better Codex 保持当前版本运行。";
+          install.textContent = t("重试");
+          title.textContent = t("更新未完成");
+          description.textContent = t("Better Codex 保持当前版本运行。");
           error.textContent = reason instanceof Error ? reason.message : "update_install_failed";
           error.hidden = false;
         }
@@ -1437,7 +1287,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const title = String(issue?.title || "").trim();
       const subject = [identifier, title].filter(Boolean).join(" ");
       const description = state.locale === "zh-CN" ? (subject ? subject + " 已完成。" : "任务已完成。") : (subject ? subject + " is complete." : "The task is complete.");
-      updateNotice.innerHTML = '<div class="better-codex-completion-layout"><span class="better-codex-completion-icon">' + icon("check") + '</span><p class="better-codex-completion-message">' + escapeHtml(description) + '</p></div><button class="better-codex-completion-menu-toggle" type="button" aria-label="更多操作" aria-expanded="false" aria-haspopup="menu" data-completion-menu-toggle>' + icon("more") + '</button><div class="better-codex-completion-menu" data-completion-menu hidden><button type="button" role="menuitem" data-completion-suppress>本次启动关闭</button></div><button class="better-codex-completion-close" type="button" aria-label="关闭">' + icon("close") + '</button>';
+      updateNotice.innerHTML = '<div class="better-codex-completion-layout"><span class="better-codex-completion-icon">' + icon("check") + '</span><p class="better-codex-completion-message">' + escapeHtml(description) + '</p></div><button class="better-codex-completion-menu-toggle" type="button" aria-label="' + escapeHtml(t("更多操作")) + '" aria-expanded="false" aria-haspopup="menu" data-completion-menu-toggle>' + icon("more") + '</button><div class="better-codex-completion-menu" data-completion-menu hidden><button type="button" role="menuitem" data-completion-suppress>' + escapeHtml(t("本次启动关闭")) + '</button></div><button class="better-codex-completion-close" type="button" aria-label="' + escapeHtml(t("关闭")) + '">' + icon("close") + '</button>';
       document.body.appendChild(updateNotice);
       const notice = updateNotice;
       const menuToggle = notice.querySelector("[data-completion-menu-toggle]");
@@ -1501,7 +1351,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const dialog = document.createElement("dialog");
         dialog.id = "better-codex-confirm";
         dialog.setAttribute(OWNED, "true");
-        dialog.innerHTML = '<div class="better-codex-confirm-body"><h2 class="better-codex-confirm-title">' + escapeHtml(title) + '</h2><p class="better-codex-confirm-message">' + escapeHtml(message) + '</p></div><div class="better-codex-confirm-actions"><button type="button" data-confirm-cancel>取消</button><button class="better-codex-confirm-primary" type="button" data-confirm-accept>' + escapeHtml(confirmLabel) + '</button></div>';
+        dialog.innerHTML = '<div class="better-codex-confirm-body"><h2 class="better-codex-confirm-title">' + escapeHtml(t(title)) + '</h2><p class="better-codex-confirm-message">' + escapeHtml(t(message)) + '</p></div><div class="better-codex-confirm-actions"><button type="button" data-confirm-cancel>' + escapeHtml(t("取消")) + '</button><button class="better-codex-confirm-primary" type="button" data-confirm-accept>' + escapeHtml(t(confirmLabel)) + '</button></div>';
         document.body.appendChild(dialog);
         let settled = false;
         const finish = value => {
@@ -1618,7 +1468,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       agent.type = "button";
       agent.className = "better-codex-create-menu-item";
       agent.setAttribute("role", "menuitem");
-      agent.innerHTML = icon("bot") + "<span>通过智能体创建</span>";
+      agent.innerHTML = icon("bot") + "<span>" + escapeHtml(t("通过智能体创建")) + "</span>";
       agent.addEventListener("click", event => {
         event.stopPropagation();
         state.createMode = "agent";
@@ -1642,11 +1492,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function filterOptions(key) {
-      if (key === "status") return Object.entries(statusLabels).map(([value, text]) => ({ value, text }));
-      if (key === "priority") return Object.entries(priorityLabels).map(([value, text]) => ({ value, text: value === "none" ? "无优先级" : text + "优先级" }));
-      if (key === "date") return [{ value: "1", text: "最近 24 小时" }, { value: "7", text: "最近 7 天" }, { value: "30", text: "最近 30 天" }];
-      if (key === "assignee") return [{ value: "user", text: state.user.name || "我" }, { value: "codex", text: "Codex" }, ...state.agents.filter(agent => !agent.is_default).map(agent => ({ value: agent.id, text: agent.name })), { value: "none", text: "未分配" }];
-      if (key === "creator") return [{ value: "me", text: "由我创建" }];
+      if (key === "status") return Object.entries(statusLabels).map(([value, text]) => ({ value, text: t(text) }));
+      if (key === "priority") return Object.entries(priorityLabels).map(([value, text]) => ({ value, text: t(value === "none" ? "无优先级" : text + "优先级") }));
+      if (key === "date") return [{ value: "1", text: t("最近 24 小时") }, { value: "7", text: t("最近 7 天") }, { value: "30", text: t("最近 30 天") }];
+      if (key === "assignee") return [{ value: "user", text: state.user.name || t("我") }, { value: "codex", text: "Codex" }, ...state.agents.filter(agent => !agent.is_default).map(agent => ({ value: agent.id, text: agent.name })), { value: "none", text: t("未分配") }];
+      if (key === "creator") return [{ value: "me", text: t("由我创建") }];
       if (key === "project") return state.projects.map(project => ({ value: project.id, text: projectLabel(project) }));
       if (key === "label") return [...new Set(state.issues.flatMap(issue => issue.labels || []))].map(value => ({ value, text: value }));
       return [];
@@ -1657,7 +1507,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (key === "priority") return priorityIcon(value);
       if (key === "assignee") {
         if (value === "user") {
-          return '<span class="better-codex-filter-avatar is-user is-initials" style="background:' + escapeHtml(state.user.color || "#16a34a") + '">' + escapeHtml(state.user.initials || "你") + '</span>';
+          return '<span class="better-codex-filter-avatar is-user is-initials" style="background:' + escapeHtml(state.user.color || "#16a34a") + '">' + escapeHtml(state.user.initials || t("你")) + '</span>';
         }
         if (value === "none") return '<span class="better-codex-filter-avatar is-fallback">' + icon("user") + '</span>';
         const agent = value === "codex"
@@ -1696,7 +1546,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         submenu.style.top = row.offsetTop + "px";
         submenu.style.right = "calc(100% + 4px)";
         if (!options.length) {
-          submenu.innerHTML = '<div class="better-codex-filter-row"><span class="better-codex-filter-label">暂无可选项</span></div>';
+          submenu.innerHTML = '<div class="better-codex-filter-row"><span class="better-codex-filter-label">' + escapeHtml(t("暂无可选项")) + '</span></div>';
         } else {
           for (const option of options) {
             const selected = state.filters[key].includes(option.value);
@@ -1723,7 +1573,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         row.className = "better-codex-filter-row";
         row.dataset.filterCategory = category.key;
         const count = state.filters[category.key].length;
-        row.innerHTML = icon(category.icon) + '<span class="better-codex-filter-label">' + category.text + '</span>' + (count ? '<span class="better-codex-filter-count">' + count + "</span>" : "") + '<span class="better-codex-filter-chevron">' + icon("chevron") + "</span>";
+        row.innerHTML = icon(category.icon) + '<span class="better-codex-filter-label">' + escapeHtml(t(category.text)) + '</span>' + (count ? '<span class="better-codex-filter-count">' + count + "</span>" : "") + '<span class="better-codex-filter-chevron">' + icon("chevron") + "</span>";
         row.addEventListener("mouseenter", () => renderSubmenu(category.key, row));
         row.addEventListener("click", event => { event.stopPropagation(); renderSubmenu(category.key, row); });
         menu.appendChild(row);
@@ -1734,7 +1584,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const reset = document.createElement("button");
         reset.type = "button";
         reset.className = "better-codex-filter-row";
-        reset.innerHTML = '<span class="better-codex-filter-label">清除筛选</span>';
+        reset.innerHTML = '<span class="better-codex-filter-label">' + escapeHtml(t("清除筛选")) + '</span>';
         reset.addEventListener("click", event => {
           event.stopPropagation();
           for (const key of Object.keys(state.filters)) state.filters[key] = [];
@@ -1787,18 +1637,18 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const contextLockAttrs = permissions.contextLocked ? ' disabled aria-disabled="true"' : "";
       const contextLockClass = permissions.contextLocked ? " is-disabled" : "";
       const archiveLockAttrs = permissions.archiveLocked ? ' disabled aria-disabled="true"' : "";
-      const statusItems = Object.entries(statusLabels).map(([value, text]) => '<button class="better-codex-context-item" type="button"' + contextLockAttrs + ' data-context-action="update" data-context-field="status" data-context-value="' + value + '"><span class="better-codex-context-check">' + (issue.status === value ? icon("check") : "") + '</span>' + statusIcon(value) + '<span>' + escapeHtml(text) + "</span></button>").join("");
-      const runStatusItems = Object.entries(mockupRunStatusLabels).map(([value, text]) => '<button class="better-codex-context-item" type="button" data-context-action="update" data-context-field="mockup_run_status" data-context-value="' + value + '"><span class="better-codex-context-check">' + (issue.mockup_run_status === value ? icon("check") : "") + '</span>' + mockupRunStatusIcon(value) + '<span>' + escapeHtml(text) + "</span></button>").join("");
-      const priorityItems = Object.entries(priorityLabels).map(([value, text]) => '<button class="better-codex-context-item" type="button"' + contextLockAttrs + ' data-context-action="update" data-context-field="priority" data-context-value="' + value + '"><span class="better-codex-context-check">' + (issue.priority === value ? icon("check") : "") + '</span>' + priorityIcon(value) + '<span>' + escapeHtml(value === "none" ? "无优先级" : text + "优先级") + "</span></button>").join("");
+      const statusItems = Object.entries(statusLabels).map(([value, text]) => '<button class="better-codex-context-item" type="button"' + contextLockAttrs + ' data-context-action="update" data-context-field="status" data-context-value="' + value + '"><span class="better-codex-context-check">' + (issue.status === value ? icon("check") : "") + '</span>' + statusIcon(value) + '<span>' + escapeHtml(t(text)) + "</span></button>").join("");
+      const runStatusItems = Object.entries(mockupRunStatusLabels).map(([value, text]) => '<button class="better-codex-context-item" type="button" data-context-action="update" data-context-field="mockup_run_status" data-context-value="' + value + '"><span class="better-codex-context-check">' + (issue.mockup_run_status === value ? icon("check") : "") + '</span>' + mockupRunStatusIcon(value) + '<span>' + escapeHtml(t(text)) + "</span></button>").join("");
+      const priorityItems = Object.entries(priorityLabels).map(([value, text]) => '<button class="better-codex-context-item" type="button"' + contextLockAttrs + ' data-context-action="update" data-context-field="priority" data-context-value="' + value + '"><span class="better-codex-context-check">' + (issue.priority === value ? icon("check") : "") + '</span>' + priorityIcon(value) + '<span>' + escapeHtml(t(value === "none" ? "无优先级" : text + "优先级")) + "</span></button>").join("");
       const userSelected = Boolean(issue.user_assigned) && !issue.agent_enabled;
       const noneSelected = !issue.user_assigned && !issue.agent_enabled;
-      const userName = state.user.name || "我";
-      const userAvatar = '<span class="better-codex-context-avatar is-user is-initials" style="background:' + escapeHtml(state.user.color || "#16a34a") + '">' + escapeHtml(state.user.initials || "你") + '</span>';
+      const userName = state.user.name || t("我");
+      const userAvatar = '<span class="better-codex-context-avatar is-user is-initials" style="background:' + escapeHtml(state.user.color || "#16a34a") + '">' + escapeHtml(state.user.initials || t("你")) + '</span>';
       const contextAssigneeTags = agent => agentConfigTags(agent).map(tag => '<span class="better-codex-context-tag" data-tone="' + escapeHtml(tag.tone) + '">' + escapeHtml(tag.value) + '</span>').join("");
       const contextAssigneeLabel = (name, tags = "") => '<span class="better-codex-context-assignee-label"><span class="better-codex-context-assignee-name">' + escapeHtml(name) + '</span>' + tags + '</span>';
       const unassignedAvatar = '<span class="better-codex-context-avatar is-fallback">' + icon("user") + '</span>';
       const assigneeItems = [
-        '<button class="better-codex-context-item" type="button"' + contextLockAttrs + ' data-context-action="assign" data-assignee-kind="none"><span class="better-codex-context-check">' + (noneSelected ? icon("check") : "") + '</span>' + unassignedAvatar + contextAssigneeLabel("未指派") + '</button>',
+        '<button class="better-codex-context-item" type="button"' + contextLockAttrs + ' data-context-action="assign" data-assignee-kind="none"><span class="better-codex-context-check">' + (noneSelected ? icon("check") : "") + '</span>' + unassignedAvatar + contextAssigneeLabel(t("未指派")) + '</button>',
         '<button class="better-codex-context-item" type="button"' + contextLockAttrs + ' data-context-action="assign" data-assignee-kind="me"><span class="better-codex-context-check">' + (userSelected ? icon("check") : "") + '</span>' + userAvatar + contextAssigneeLabel(userName) + '</button>',
         ...state.agents.map(agent => {
           const selected = Boolean(issue.agent_enabled) && (agent.is_default ? !issue.agent_id : issue.agent_id === agent.id);
@@ -1810,9 +1660,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       menu.setAttribute(OWNED, "true");
       menu.dataset.issueId = issue.id;
       menu.dataset.align = event.clientX + 430 > window.innerWidth ? "left" : "right";
-      const duplicateItem = state.mockup ? '<div class="better-codex-context-divider"></div><button class="better-codex-context-item" type="button" data-context-action="duplicate">' + icon("plus") + '<span>复制卡片</span></button>' : "";
-      const runStatusMenu = state.mockup ? '<div class="better-codex-context-item-wrap"><button class="better-codex-context-item" type="button">' + mockupRunStatusIcon(issue.mockup_run_status) + '<span>运行状态</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu">' + runStatusItems + '</div></div>' : "";
-      menu.innerHTML = '<div class="better-codex-context-item-wrap' + contextLockClass + '"><button class="better-codex-context-item" type="button"' + contextLockAttrs + '>' + statusIcon(issue.status) + '<span>状态</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu">' + statusItems + '</div></div>' + runStatusMenu + '<div class="better-codex-context-item-wrap' + contextLockClass + '"><button class="better-codex-context-item" type="button"' + contextLockAttrs + '>' + priorityIcon(issue.priority) + '<span>优先级</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu">' + priorityItems + '</div></div><div class="better-codex-context-item-wrap' + contextLockClass + '"><button class="better-codex-context-item" type="button"' + contextLockAttrs + '>' + icon("user") + '<span>指定负责人</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu is-assignee">' + assigneeItems + '</div></div>' + (workspacePath ? '<div class="better-codex-context-divider"></div><button class="better-codex-context-item" type="button" data-context-action="copy-workspace">' + icon("folder") + '<span>复制本地 workdir 路径</span></button>' : "") + duplicateItem + '<div class="better-codex-context-divider"></div><button class="better-codex-context-item is-danger" type="button"' + archiveLockAttrs + ' data-context-action="archive">' + icon("trash") + '<span>删除任务</span></button>';
+      const duplicateItem = state.mockup ? '<div class="better-codex-context-divider"></div><button class="better-codex-context-item" type="button" data-context-action="duplicate">' + icon("plus") + '<span>' + escapeHtml(t("复制卡片")) + '</span></button>' : "";
+      const runStatusMenu = state.mockup ? '<div class="better-codex-context-item-wrap"><button class="better-codex-context-item" type="button">' + mockupRunStatusIcon(issue.mockup_run_status) + '<span>' + escapeHtml(t("运行状态")) + '</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu">' + runStatusItems + '</div></div>' : "";
+      menu.innerHTML = '<div class="better-codex-context-item-wrap' + contextLockClass + '"><button class="better-codex-context-item" type="button"' + contextLockAttrs + '>' + statusIcon(issue.status) + '<span>' + escapeHtml(t("状态")) + '</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu">' + statusItems + '</div></div>' + runStatusMenu + '<div class="better-codex-context-item-wrap' + contextLockClass + '"><button class="better-codex-context-item" type="button"' + contextLockAttrs + '>' + priorityIcon(issue.priority) + '<span>' + escapeHtml(t("优先级")) + '</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu">' + priorityItems + '</div></div><div class="better-codex-context-item-wrap' + contextLockClass + '"><button class="better-codex-context-item" type="button"' + contextLockAttrs + '>' + icon("user") + '<span>' + escapeHtml(t("指定负责人")) + '</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu is-assignee">' + assigneeItems + '</div></div>' + (workspacePath ? '<div class="better-codex-context-divider"></div><button class="better-codex-context-item" type="button" data-context-action="copy-workspace">' + icon("folder") + '<span>' + escapeHtml(t("复制本地 workdir 路径")) + '</span></button>' : "") + duplicateItem + '<div class="better-codex-context-divider"></div><button class="better-codex-context-item is-danger" type="button"' + archiveLockAttrs + ' data-context-action="archive">' + icon("trash") + '<span>' + escapeHtml(t("删除任务")) + '</span></button>';
       document.body.appendChild(menu);
       const rect = menu.getBoundingClientRect();
       menu.style.left = Math.max(8, Math.min(event.clientX, window.innerWidth - rect.width - 8)) + "px";
@@ -1854,7 +1704,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (item.dataset.contextAction === "duplicate") {
           closeIssueMenu();
           return void perform(async () => {
-            await api("/api/issues", { method: "POST", body: JSON.stringify({ ...current, title: current.title + " 副本" }) });
+            await api("/api/issues", { method: "POST", body: JSON.stringify({ ...current, title: current.title + " " + t("副本") }) });
             await loadIssues();
           });
         }
@@ -1941,7 +1791,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const search = document.createElement("input");
       search.id = "better-codex-search";
       search.className = "better-codex-search";
-      search.placeholder = "搜索任务";
+      search.placeholder = t("搜索任务");
       search.value = "";
       search.addEventListener("input", () => { state.search = search.value; void perform(loadIssues); });
       searchWrap.appendChild(search);
@@ -1959,8 +1809,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       autoDispatch.id = "better-codex-auto-dispatch";
       autoDispatch.classList.add("better-codex-auto-dispatch", "is-bordered");
       autoDispatch.setAttribute("aria-pressed", "false");
-      autoDispatch.setAttribute("aria-label", "切换为自动运行");
-      autoDispatch.innerHTML = icon("user") + "<span>手动运行</span>";
+      autoDispatch.setAttribute("aria-label", t("切换为自动运行"));
+      autoDispatch.innerHTML = icon("user") + "<span>" + escapeHtml(t("手动运行")) + "</span>";
       autoDispatch.addEventListener("click", () => {
         const next = !state.autoDispatch;
         state.autoDispatch = next;
@@ -1979,7 +1829,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       });
       const autoDispatchHelp = actionButton("");
       autoDispatchHelp.className = "better-codex-auto-dispatch-help";
-      autoDispatchHelp.setAttribute("aria-label", "帮助与设置");
+      autoDispatchHelp.setAttribute("aria-label", t("帮助与设置"));
       autoDispatchHelp.innerHTML = icon("help");
       autoDispatchHelp.addEventListener("click", event => {
         event.stopPropagation();
@@ -1998,7 +1848,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       createToggle.id = "better-codex-create-toggle";
       createToggle.className = "better-codex-create-toggle";
       createToggle.dataset.createMenuToggle = "true";
-      createToggle.setAttribute("aria-label", "选择 issue 创建方式");
+      createToggle.setAttribute("aria-label", t("选择 issue 创建方式"));
       createToggle.setAttribute("aria-haspopup", "menu");
       createToggle.setAttribute("aria-expanded", "false");
       createToggle.innerHTML = icon("chevronDown");
@@ -2028,6 +1878,23 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       board.addEventListener("dragend", onCardDragEnd);
       board.addEventListener("dragover", event => event.preventDefault());
       board.addEventListener("drop", onDrop);
+      const recovery = document.createElement("main");
+      recovery.id = "better-codex-recovery";
+      recovery.className = "better-codex-recovery";
+      recovery.hidden = true;
+      recovery.innerHTML = '<section class="better-codex-recovery-card"><span class="better-codex-recovery-icon">' + icon("terminal") + '</span><h2>' + te("Better Codex 服务需要重启") + '</h2><p>' + te("当前页面与后台服务的连接已失效。请在终端运行下面的命令，完成后重新连接。") + '</p><div class="better-codex-recovery-command"><code>better-codex service restart</code><button type="button" data-recovery-copy>' + te("复制重启命令") + '</button></div><button class="better-codex-recovery-retry" type="button" data-recovery-retry>' + icon("refresh") + '<span>' + te("重新连接") + '</span></button><details><summary>' + te("错误详情") + '</summary><code data-recovery-error></code></details></section>';
+      recovery.querySelector("[data-recovery-copy]").addEventListener("click", async event => {
+        await copyText("better-codex service restart");
+        const button = event.currentTarget;
+        button.textContent = t("已复制");
+        setTimeout(() => { if (button.isConnected) button.textContent = t("复制重启命令"); }, 1600);
+      });
+      recovery.querySelector("[data-recovery-retry]").addEventListener("click", event => {
+        const button = event.currentTarget;
+        button.disabled = true;
+        button.innerHTML = icon("refresh") + "<span>" + te("正在连接…") + "</span>";
+        void load();
+      });
       const agents = document.createElement("main");
       agents.id = "better-codex-agents";
       agents.className = "better-codex-agents";
@@ -2049,7 +1916,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (search) { search.focus(); search.setSelectionRange(search.value.length, search.value.length); }
       });
       agents.addEventListener("submit", onAgentSubmit);
-      section.append(toolbar, board, agents);
+      section.append(toolbar, board, agents, recovery);
       return section;
     }
 
@@ -2090,7 +1957,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function agentAvatarEditorMarkup(agent, key) {
-      return '<button class="better-codex-agent-avatar-editor" type="button" data-agent-avatar-form="' + escapeHtml(key) + '" aria-label="更换 ' + escapeHtml(agent?.name || "智能体") + ' 的头像">' + agentAvatarMarkup(agent, "better-codex-agent-list-avatar") + '<span class="better-codex-agent-avatar-overlay" aria-hidden="true">' + icon("plus") + '</span></button>';
+      return '<button class="better-codex-agent-avatar-editor" type="button" data-agent-avatar-form="' + escapeHtml(key) + '" aria-label="' + te("更换 " + (agent?.name || t("智能体")) + " 的头像") + '">' + agentAvatarMarkup(agent, "better-codex-agent-list-avatar") + '<span class="better-codex-agent-avatar-overlay" aria-hidden="true">' + icon("plus") + '</span></button>';
     }
 
     function chooseAgentAvatar(current = "", anchor = null) {
@@ -2101,10 +1968,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         picker.id = "better-codex-avatar-picker";
         picker.setAttribute(OWNED, "true");
         picker.setAttribute("role", "dialog");
-        picker.setAttribute("aria-label", "选择头像");
+        picker.setAttribute("aria-label", t("选择头像"));
         const currentPreset = parseIconAvatar(current)?.id || "";
-        const presets = AGENT_AVATAR_PRESETS.map(item => '<button class="better-codex-avatar-preset' + (item.id === currentPreset ? " is-selected" : "") + '" type="button" data-avatar-preset="' + escapeHtml(item.id) + '" title="' + escapeHtml(item.label) + '" aria-label="' + escapeHtml(item.label) + '" aria-pressed="' + (item.id === currentPreset) + '"><span class="better-codex-avatar-preset-visual is-icon" data-tone="' + escapeHtml(item.tone) + '">' + icon(item.icon, "", "2.25") + '</span><span class="better-codex-avatar-preset-label">' + escapeHtml(item.label) + "</span></button>").join("");
-        picker.innerHTML = '<div class="better-codex-avatar-picker-shell"><header><div><strong>选择头像</strong><span>从预设图标中选择，也可以上传图片</span></div><button type="button" data-avatar-picker-cancel aria-label="关闭">' + icon("close") + '</button></header><div class="better-codex-avatar-preset-grid" role="listbox" aria-label="预设头像">' + presets + '</div><footer><button type="button" data-avatar-picker-cancel>取消</button><button class="is-primary" type="button" data-avatar-picker-upload>' + icon("image") + '<span>上传图片</span></button></footer></div>';
+        const presets = AGENT_AVATAR_PRESETS.map(item => '<button class="better-codex-avatar-preset' + (item.id === currentPreset ? " is-selected" : "") + '" type="button" data-avatar-preset="' + escapeHtml(item.id) + '" title="' + te(item.label) + '" aria-label="' + te(item.label) + '" aria-pressed="' + (item.id === currentPreset) + '"><span class="better-codex-avatar-preset-visual is-icon" data-tone="' + escapeHtml(item.tone) + '">' + icon(item.icon, "", "2.25") + '</span><span class="better-codex-avatar-preset-label">' + te(item.label) + "</span></button>").join("");
+        picker.innerHTML = '<div class="better-codex-avatar-picker-shell"><header><div><strong>' + te("选择头像") + '</strong><span>' + te("从预设图标中选择，也可以上传图片") + '</span></div><button type="button" data-avatar-picker-cancel aria-label="' + te("关闭") + '">' + icon("close") + '</button></header><div class="better-codex-avatar-preset-grid" role="listbox" aria-label="' + te("预设头像") + '">' + presets + '</div><footer><button type="button" data-avatar-picker-cancel>' + te("取消") + '</button><button class="is-primary" type="button" data-avatar-picker-upload>' + icon("image") + '<span>' + te("上传图片") + '</span></button></footer></div>';
         let settled = false;
         const finish = value => {
           if (settled) return;
@@ -2182,7 +2049,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           const dialog = document.createElement("dialog");
           dialog.id = "better-codex-avatar-cropper";
           dialog.setAttribute(OWNED, "true");
-          dialog.innerHTML = '<div class="better-codex-avatar-cropper-shell"><header><div><strong>裁剪头像</strong><span>拖动图片调整位置</span></div><button type="button" data-avatar-crop-cancel aria-label="关闭">' + icon("close") + '</button></header><div class="better-codex-avatar-canvas-wrap"><canvas width="' + size + '" height="' + size + '"></canvas><span class="better-codex-avatar-crop-guide" aria-hidden="true"></span></div><label class="better-codex-avatar-zoom"><span>' + icon("image") + '</span><input type="range" min="1" max="3" value="1" step="0.01" aria-label="缩放头像"><span>' + icon("image") + '</span></label><footer><button type="button" data-avatar-crop-cancel>取消</button><button class="is-primary" type="button" data-avatar-crop-save>使用此头像</button></footer></div>';
+          dialog.innerHTML = '<div class="better-codex-avatar-cropper-shell"><header><div><strong>' + te("裁剪头像") + '</strong><span>' + te("拖动图片调整位置") + '</span></div><button type="button" data-avatar-crop-cancel aria-label="' + te("关闭") + '">' + icon("close") + '</button></header><div class="better-codex-avatar-canvas-wrap"><canvas width="' + size + '" height="' + size + '"></canvas><span class="better-codex-avatar-crop-guide" aria-hidden="true"></span></div><label class="better-codex-avatar-zoom"><span>' + icon("image") + '</span><input type="range" min="1" max="3" value="1" step="0.01" aria-label="' + te("缩放头像") + '"><span>' + icon("image") + '</span></label><footer><button type="button" data-avatar-crop-cancel>' + te("取消") + '</button><button class="is-primary" type="button" data-avatar-crop-save>' + te("使用此头像") + '</button></footer></div>';
           const canvas = dialog.querySelector("canvas");
           const context = canvas.getContext("2d");
           const range = dialog.querySelector('input[type="range"]');
@@ -2264,11 +2131,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function effortLabel(value) {
-      return ({ low: "低", medium: "中", high: "高", xhigh: "超高", max: "最大", ultra: "极致" })[value] || value;
+      return t(({ low: "低", medium: "中", high: "高", xhigh: "超高", max: "最大", ultra: "极致" })[value] || value);
     }
 
     function sandboxModeLabel(value) {
-      return ({ "read-only": "只读", "workspace-write": "工作区可写", "danger-full-access": "完全访问" })[value] || value;
+      return t(({ "read-only": "只读", "workspace-write": "工作区可写", "danger-full-access": "完全访问" })[value] || value);
     }
 
     function modelTag(value) {
@@ -2396,24 +2263,24 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const preferredEffort = draft.reasoning_effort || state.agentModelCatalog.find(item => item.id === model)?.defaultReasoningEffort;
       const effort = effortOptions.some(item => item.value === preferredEffort) ? preferredEffort : effortOptions[0]?.value || "medium";
       const sandboxMode = ["read-only", "workspace-write", "danger-full-access"].includes(draft.sandbox_mode) ? draft.sandbox_mode : "workspace-write";
-      const heading = creating ? "新建" : "智能体";
+      const heading = t(creating ? "新建" : "智能体");
       const avatarInput = '<input type="hidden" name="avatar" value="' + escapeHtml(draft.avatar || "") + '">';
       const profileHead = creating
-        ? '<h2>创建智能体</h2><div class="better-codex-agent-avatar-field">' + agentAvatarEditorMarkup(draft, "") + '<div><strong>头像</strong><span>点击选择预设图标，或上传图片</span></div>' + avatarInput + '</div>'
+        ? '<h2>' + te("创建智能体") + '</h2><div class="better-codex-agent-avatar-field">' + agentAvatarEditorMarkup(draft, "") + '<div><strong>' + te("头像") + '</strong><span>' + te("点击选择预设图标，或上传图片") + '</span></div>' + avatarInput + '</div>'
         : '<div class="better-codex-agent-profile-head">' + agentAvatarEditorMarkup(draft, agentKey(draft)) + '<h2>' + escapeHtml(draft.name) + '</h2>' + avatarInput + '</div>';
       const identity = isDefault
-        ? '<div class="better-codex-agent-summary"><div><strong>Codex 默认智能体</strong></div></div>'
-        : '<label class="better-codex-agent-inspector-field"><span>名称</span><input name="name" maxlength="80" value="' + escapeHtml(name) + '" placeholder="智能体名称" required></label><label class="better-codex-agent-inspector-field"><span>介绍 <small>可选</small></span><textarea name="description" maxlength="500" rows="3" placeholder="说明这个智能体适合承担什么工作">' + escapeHtml(description) + '</textarea></label>';
-      const instructionField = isDefault ? "" : '<label class="better-codex-agent-inspector-field"><span>指令 <small>可选</small></span><textarea name="instructions" rows="7" placeholder="定义职责、工作方式和输出要求">' + escapeHtml(instructions) + '</textarea></label>';
-      const deleteButton = !creating && !isDefault ? '<button class="better-codex-agent-danger" type="button" data-agent-delete data-agent-key="' + escapeHtml(agentKey(draft)) + '">删除智能体</button>' : "";
+        ? '<div class="better-codex-agent-summary"><div><strong>' + te("Codex 默认智能体") + '</strong></div></div>'
+        : '<label class="better-codex-agent-inspector-field"><span>' + te("名称") + '</span><input name="name" maxlength="80" value="' + escapeHtml(name) + '" placeholder="' + te("智能体名称") + '" required></label><label class="better-codex-agent-inspector-field"><span>' + te("介绍") + ' <small>' + te("可选") + '</small></span><textarea name="description" maxlength="500" rows="3" placeholder="' + te("说明这个智能体适合承担什么工作") + '">' + escapeHtml(description) + '</textarea></label>';
+      const instructionField = isDefault ? "" : '<label class="better-codex-agent-inspector-field"><span>' + te("指令") + ' <small>' + te("可选") + '</small></span><textarea name="instructions" rows="7" placeholder="' + te("定义职责、工作方式和输出要求") + '">' + escapeHtml(instructions) + '</textarea></label>';
+      const deleteButton = !creating && !isDefault ? '<button class="better-codex-agent-danger" type="button" data-agent-delete data-agent-key="' + escapeHtml(agentKey(draft)) + '">' + te("删除智能体") + '</button>' : "";
       const modelOptions = state.agentModelCatalog.map(item => ({ value: item.id, label: item.displayName, description: item.description || "" }));
       const sandboxOptions = [
-        { value: "read-only", label: "只读", description: "仅可读取工作区文件，不能修改", icon: "permissionReadOnly" },
-        { value: "workspace-write", label: "工作区可写", description: "可修改当前工作区内的文件", icon: "permissionWorkspace" },
-        { value: "danger-full-access", label: "完全访问", description: "可不受限制地访问互联网和电脑上的任何文件", icon: "permissionDanger", tone: "warning" },
+        { value: "read-only", label: t("只读"), description: t("仅可读取工作区文件，不能修改"), icon: "permissionReadOnly" },
+        { value: "workspace-write", label: t("工作区可写"), description: t("可修改当前工作区内的文件"), icon: "permissionWorkspace" },
+        { value: "danger-full-access", label: t("完全访问"), description: t("可不受限制地访问互联网和电脑上的任何文件"), icon: "permissionDanger", tone: "warning" },
       ];
       const animateAttr = options.animateEnter ? ' data-animate="enter"' : "";
-       return '<aside class="better-codex-agent-inspector"' + animateAttr + '><form data-agent-form="' + (creating ? "create" : isDefault ? "default" : "update") + '" data-agent-key="' + escapeHtml(creating ? "" : agentKey(draft)) + '"><header class="better-codex-agent-inspector-head"><span>' + heading + '</span><button class="better-codex-agent-card-action" type="button" data-agent-close-pane aria-label="关闭详情">' + icon("close") + '</button></header><div class="better-codex-agent-inspector-scroll">' + profileHead + identity + '<h3>详情</h3><div class="better-codex-agent-inspector-group">' + agentPicker("model", "模型", model, modelOptions) + agentPicker("reasoning_effort", "推理", effort, effortOptions) + agentPicker("sandbox_mode", "权限", sandboxMode, sandboxOptions) + agentNumberInput("max_concurrency", "最大并发", draft.max_concurrency, 1, 20) + '</div>' + instructionField + '<div class="better-codex-agent-inspector-error" hidden></div></div><footer class="better-codex-agent-inspector-footer">' + deleteButton + '<button class="better-codex-submit" type="submit">' + (creating ? "创建" : "保存") + '</button></footer></form></aside>';
+       return '<aside class="better-codex-agent-inspector"' + animateAttr + '><form data-agent-form="' + (creating ? "create" : isDefault ? "default" : "update") + '" data-agent-key="' + escapeHtml(creating ? "" : agentKey(draft)) + '"><header class="better-codex-agent-inspector-head"><span>' + heading + '</span><button class="better-codex-agent-card-action" type="button" data-agent-close-pane aria-label="' + te("关闭详情") + '">' + icon("close") + '</button></header><div class="better-codex-agent-inspector-scroll">' + profileHead + identity + '<h3>' + te("详情") + '</h3><div class="better-codex-agent-inspector-group">' + agentPicker("model", t("模型"), model, modelOptions) + agentPicker("reasoning_effort", t("推理"), effort, effortOptions) + agentPicker("sandbox_mode", t("权限"), sandboxMode, sandboxOptions) + agentNumberInput("max_concurrency", t("最大并发"), draft.max_concurrency, 1, 20) + '</div>' + instructionField + '<div class="better-codex-agent-inspector-error" hidden></div></div><footer class="better-codex-agent-inspector-footer">' + deleteButton + '<button class="better-codex-submit" type="submit">' + te(creating ? "创建" : "保存") + '</button></footer></form></aside>';
     }
 
     function renderAgents() {
@@ -2433,42 +2300,43 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const rows = agents.map(agent => {
         const key = agentKey(agent);
         const avatar = agentAvatarMarkup(agent, "better-codex-agent-list-avatar");
-        const meta = modelLabel(agent.model) + " · " + effortLabel(agent.reasoning_effort) + "推理";
-        const description = agent.description || (agent.is_default ? "" : "尚未添加介绍");
-        return '<button class="better-codex-agent-row' + (key === state.selectedAgentId ? " is-selected" : "") + '" type="button" data-agent-key="' + escapeHtml(key) + '">' + avatar + '<span class="better-codex-agent-row-copy"><strong>' + escapeHtml(agent.name) + (agent.is_default ? '<small>默认</small>' : "") + '</strong>' + (description ? '<span>' + escapeHtml(description) + '</span>' : '') + '<em>' + escapeHtml(meta) + '</em></span><span class="better-codex-agent-row-chevron">' + icon("chevron") + '</span></button>';
+        const meta = modelLabel(agent.model) + " · " + effortLabel(agent.reasoning_effort) + (state.locale === "zh-CN" ? "推理" : " reasoning");
+        const description = agent.description || (agent.is_default ? "" : t("尚未添加介绍"));
+        return '<button class="better-codex-agent-row' + (key === state.selectedAgentId ? " is-selected" : "") + '" type="button" data-agent-key="' + escapeHtml(key) + '">' + avatar + '<span class="better-codex-agent-row-copy"><strong>' + escapeHtml(agent.name) + (agent.is_default ? '<small>' + te("默认") + '</small>' : "") + '</strong>' + (description ? '<span>' + escapeHtml(description) + '</span>' : '') + '<em>' + escapeHtml(meta) + '</em></span><span class="better-codex-agent-row-chevron">' + icon("chevron") + '</span></button>';
       }).join("");
-      const empty = '<div class="better-codex-agent-list-empty">' + (query ? "没有匹配的智能体" : "此分类暂无智能体") + '</div>';
+      const empty = '<div class="better-codex-agent-list-empty">' + te(query ? "没有匹配的智能体" : "此分类暂无智能体") + '</div>';
       const suggestions = suggestedAgents.map(item => {
         const selected = state.agentPane === "create" && state.agentDraft?.key === item.key;
-        return '<button class="better-codex-agent-suggestion' + (selected ? " is-selected" : "") + '" type="button" data-agent-template="' + item.key + '" aria-pressed="' + selected + '"><span class="better-codex-agent-suggestion-icon" data-tone="' + escapeHtml(item.tone) + '">' + icon(item.icon, "", "2.4") + '</span><span><strong>' + escapeHtml(item.name) + '</strong><small>' + escapeHtml(item.description) + '</small></span></button>';
+        return '<button class="better-codex-agent-suggestion' + (selected ? " is-selected" : "") + '" type="button" data-agent-template="' + item.key + '" aria-pressed="' + selected + '"><span class="better-codex-agent-suggestion-icon" data-tone="' + escapeHtml(item.tone) + '">' + icon(item.icon, "", "2.4") + '</span><span><strong>' + te(item.name) + '</strong><small>' + te(item.description) + '</small></span></button>';
       }).join("");
       const animateEnter = previousPane === "preview" && state.agentPane !== "preview";
-      container.innerHTML = '<div class="better-codex-agent-shell" data-pane="' + state.agentPane + '"><section class="better-codex-agent-directory"><header class="better-codex-agent-page-heading"><h1>智能体</h1><p>创建和管理你的智能体</p></header><div class="better-codex-agent-search-wrap">' + icon("search") + '<input class="better-codex-search" data-agent-search type="search" value="' + escapeHtml(state.agentSearch) + '" placeholder="搜索智能体" aria-label="搜索智能体"></div><div class="better-codex-agent-list">' + (rows || empty) + '</div>' + (state.agentView === "all" && !query ? '<div class="better-codex-agent-suggestions"><h3>建议</h3>' + suggestions + '</div>' : "") + '</section>' + agentInspector(selected, { animateEnter }) + '</div>';
+      container.innerHTML = '<div class="better-codex-agent-shell" data-pane="' + state.agentPane + '"><section class="better-codex-agent-directory"><header class="better-codex-agent-page-heading"><h1>' + te("智能体") + '</h1><p>' + te("创建和管理你的智能体") + '</p></header><div class="better-codex-agent-search-wrap">' + icon("search") + '<input class="better-codex-search" data-agent-search type="search" value="' + escapeHtml(state.agentSearch) + '" placeholder="' + te("搜索智能体") + '" aria-label="' + te("搜索智能体") + '"></div><div class="better-codex-agent-list">' + (rows || empty) + '</div>' + (state.agentView === "all" && !query ? '<div class="better-codex-agent-suggestions"><h3>' + te("建议") + '</h3>' + suggestions + '</div>' : "") + '</section>' + agentInspector(selected, { animateEnter }) + '</div>';
     }
 
-    function showAutoDispatchHelp() {
+    function showAutoDispatchHelp(initialView = "mode") {
       document.getElementById("better-codex-auto-dispatch-help-dialog")?.remove();
       const dialog = document.createElement("dialog");
       dialog.id = "better-codex-auto-dispatch-help-dialog";
       dialog.setAttribute(OWNED, "true");
       const completionEnabled = !completionNoticeSuppressed();
       const mockupTools = state.mockup
-        ? '<div class="better-codex-help-mockup"><button type="button" data-mockup-menu-toggle aria-haspopup="menu" aria-expanded="false">' + icon("test") + '<span>展示模式</span>' + icon("chevronDown") + '</button><div class="better-codex-help-mockup-menu" role="menu" hidden><button type="button" role="menuitem" data-mockup-export>导出展示数据</button><button type="button" role="menuitem" data-mockup-import>导入展示数据</button><button type="button" role="menuitem" data-mockup-reset>重置布局</button><input type="file" accept="application/json,.json" data-mockup-import-input hidden></div></div>'
+        ? '<div class="better-codex-help-mockup"><button type="button" data-mockup-menu-toggle aria-haspopup="menu" aria-expanded="false">' + icon("test") + '<span>' + te("展示模式") + '</span>' + icon("chevronDown") + '</button><div class="better-codex-help-mockup-menu" role="menu" hidden><button type="button" role="menuitem" data-mockup-export>' + te("导出展示数据") + '</button><button type="button" role="menuitem" data-mockup-import>' + te("导入展示数据") + '</button><button type="button" role="menuitem" data-mockup-reset>' + te("重置布局") + '</button><input type="file" accept="application/json,.json" data-mockup-import-input hidden></div></div>'
         : "";
       const modeDescription = markdown => '<div class="better-codex-help-mode-markdown">' + markdown
-        .replace("{{start}}", '<span class="better-codex-help-inline-control is-start">立即开始任务</span>')
-        .replace("{{send}}", '<span class="better-codex-help-inline-control is-send">发送</span>')
-        .replace("{{agent}}", '<span class="better-codex-help-inline-state is-agent">' + icon("bot") + '<span>智能体</span></span>')
-        .replace("{{backlog}}", '<span class="better-codex-help-inline-state is-backlog">' + icon("statusBacklog") + '<span>待规划</span></span>') + '</div>';
+        .replace("{{start}}", '<span class="better-codex-help-inline-control is-start">' + te("立即开始任务") + '</span>')
+        .replace("{{send}}", '<span class="better-codex-help-inline-control is-send">' + te("发送") + '</span>')
+        .replace("{{agent}}", '<span class="better-codex-help-inline-state is-agent">' + icon("bot") + '<span>' + te("智能体") + '</span></span>')
+        .replace("{{backlog}}", '<span class="better-codex-help-inline-state is-backlog">' + icon("statusBacklog") + '<span>' + te("待规划") + '</span></span>') + '</div>';
+      const helpMode = HELP_MODE_MARKDOWN[state.locale] || HELP_MODE_MARKDOWN.en;
       dialog.innerHTML = [
         '<div class="better-codex-auto-dispatch-help-shell" data-help-view="mode">',
-        '<header><div class="better-codex-help-tabs" role="tablist" aria-label="帮助与设置"><button type="button" class="is-active" data-help-view="mode" aria-selected="true">运行模式说明</button><button type="button" data-help-view="settings" aria-selected="false">设置</button><button type="button" data-help-view="about" aria-selected="false">关于</button></div>' + mockupTools + '<button type="button" data-help-close aria-label="关闭">' + icon("close") + "</button></header>",
+        '<header><div class="better-codex-help-tabs" role="tablist" aria-label="' + te("帮助与设置") + '"><button type="button" class="is-active" data-help-view="mode" aria-selected="true">' + te("运行模式说明") + '</button><button type="button" data-help-view="settings" aria-selected="false">' + te("设置") + '</button><button type="button" data-help-view="about" aria-selected="false">' + te("关于") + '</button></div>' + mockupTools + '<button type="button" data-help-close aria-label="' + te("关闭") + '">' + icon("close") + "</button></header>",
         '<main class="better-codex-help-content">',
-        '<section class="better-codex-help-page is-active" data-help-page="mode"><div class="better-codex-auto-dispatch-help-panels"><article class="better-codex-auto-dispatch-help-panel is-manual"><div class="better-codex-auto-dispatch-help-heading">' + icon("user") + "<h3>手动运行</h3></div>" + modeDescription(HELP_MODE_MARKDOWN.manual) + "</article>",
+        '<section class="better-codex-help-page is-active" data-help-page="mode"><div class="better-codex-auto-dispatch-help-panels"><article class="better-codex-auto-dispatch-help-panel is-manual"><div class="better-codex-auto-dispatch-help-heading">' + icon("user") + "<h3>" + te("手动运行") + "</h3></div>" + modeDescription(helpMode.manual) + "</article>",
         '<div class="better-codex-auto-dispatch-help-divider" aria-hidden="true"></div>',
-        '<article class="better-codex-auto-dispatch-help-panel is-auto"><div class="better-codex-auto-dispatch-help-heading">' + icon("refresh") + "<h3>自动运行</h3></div>" + modeDescription(HELP_MODE_MARKDOWN.auto) + "</article></div></section>",
-        '<section class="better-codex-help-page" data-help-page="settings" hidden><div class="better-codex-help-setting-group"><h3>语言</h3><div class="better-codex-help-setting-row is-language"><span><strong>界面语言</strong><small>选择 Better Codex 的界面语言</small></span><div class="better-codex-language-switch" role="radiogroup" aria-label="界面语言" data-language-value="' + state.languageSetting + '"><button type="button" role="radio" data-language="system" aria-checked="' + String(state.languageSetting === "system") + '">跟随系统</button><button type="button" role="radio" data-language="zh-CN" aria-checked="' + String(state.languageSetting === "zh-CN") + '">中文</button><button type="button" role="radio" data-language="en" aria-checked="' + String(state.languageSetting === "en") + '">English</button></div></div></div><div class="better-codex-help-setting-group"><h3>通知</h3><label class="better-codex-help-setting-row"><span><strong>任务完成提醒</strong><small>任务完成后在当前窗口显示提醒</small></span><input type="checkbox" data-setting-completion' + (completionEnabled ? " checked" : "") + '></label></div></section>',
-        '<section class="better-codex-help-page" data-help-page="about" hidden><div class="better-codex-help-about"><span class="better-codex-help-about-logo">' + betterCodexLogo() + '</span><div><h2>Better Codex</h2><p class="better-codex-help-about-slogan">从开始到完成，让 Codex 里的工作清晰可见。</p></div><span class="better-codex-help-runtime-status"><span class="better-codex-help-status-dot"></span>运行正常</span></div><dl class="better-codex-help-about-details"><div><dt>版本信息</dt><dd><button class="better-codex-help-check-update" type="button" data-check-update>检查新版本</button><span data-product-core></span></dd></div></dl><div class="better-codex-help-github-row"><a class="better-codex-help-github" href="https://github.com/Ericwong5021/better-codex" target="_blank" rel="noreferrer">' + githubLogo() + '<span class="better-codex-help-github-name">Better Codex</span><span class="better-codex-help-github-stars">' + icon("star", "better-codex-help-star") + '</span></a><p>如果你喜欢 Better Codex，欢迎给我们一个 Star。</p></div></section>',
+        '<article class="better-codex-auto-dispatch-help-panel is-auto"><div class="better-codex-auto-dispatch-help-heading">' + icon("refresh") + "<h3>" + te("自动运行") + "</h3></div>" + modeDescription(helpMode.auto) + "</article></div></section>",
+        '<section class="better-codex-help-page" data-help-page="settings" hidden><div class="better-codex-help-setting-group"><h3>' + te("语言") + '</h3><div class="better-codex-help-setting-row is-language"><span><strong>' + te("界面语言") + '</strong><small>' + te("选择 Better Codex 的界面语言") + '</small></span><div class="better-codex-language-switch" role="radiogroup" aria-label="' + te("界面语言") + '" data-language-value="' + state.languageSetting + '"><button type="button" role="radio" data-language="system" aria-checked="' + String(state.languageSetting === "system") + '">' + te("跟随系统") + '</button><button type="button" role="radio" data-language="zh-CN" aria-checked="' + String(state.languageSetting === "zh-CN") + '">' + te("中文") + '</button><button type="button" role="radio" data-language="en" aria-checked="' + String(state.languageSetting === "en") + '">English</button></div></div></div><div class="better-codex-help-setting-group"><h3>' + te("通知") + '</h3><label class="better-codex-help-setting-row"><span><strong>' + te("任务完成提醒") + '</strong><small>' + te("任务完成后在当前窗口显示提醒") + '</small></span><input type="checkbox" data-setting-completion' + (completionEnabled ? " checked" : "") + '></label></div></section>',
+        '<section class="better-codex-help-page" data-help-page="about" hidden><div class="better-codex-help-about"><span class="better-codex-help-about-logo">' + betterCodexLogo() + '</span><div><h2>Better Codex</h2><p class="better-codex-help-about-slogan">' + te("从开始到完成，让 Codex 里的工作清晰可见。") + '</p></div><span class="better-codex-help-runtime-status"><span class="better-codex-help-status-dot"></span>' + te("运行正常") + '</span></div><dl class="better-codex-help-about-details"><div><dt>' + te("版本信息") + '</dt><dd><button class="better-codex-help-check-update" type="button" data-check-update>' + te("检查新版本") + '</button><span data-product-core></span></dd></div></dl><div class="better-codex-help-github-row"><a class="better-codex-help-github" href="https://github.com/Ericwong5021/better-codex" target="_blank" rel="noreferrer">' + githubLogo() + '<span class="better-codex-help-github-name">Better Codex</span><span class="better-codex-help-github-stars">' + icon("star", "better-codex-help-star") + '</span></a><p>' + te("如果你喜欢 Better Codex，欢迎给我们一个 Star。") + '</p></div></section>',
         "</main>",
         "</div>",
       ].join("");
@@ -2500,7 +2368,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       document.addEventListener("pointerdown", closeMockupOutside, true);
       dialog.querySelector("[data-mockup-export]")?.addEventListener("click", () => {
         closeMockupMenu();
-        exportMockupIssues();
+        void perform(exportMockupIssues);
       });
       const mockupImportInput = dialog.querySelector("[data-mockup-import-input]");
       dialog.querySelector("[data-mockup-import]")?.addEventListener("click", () => mockupImportInput.click());
@@ -2515,8 +2383,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         void perform(confirmMockupReset);
       });
       dialog.querySelectorAll("[data-help-close]").forEach(button => button.addEventListener("click", finish));
-      dialog.querySelectorAll("[data-help-view]").forEach(button => button.addEventListener("click", () => {
-        const view = button.dataset.helpView;
+      const setHelpView = view => {
         dialog.querySelector(".better-codex-auto-dispatch-help-shell").dataset.helpView = view;
         dialog.querySelectorAll("[data-help-view]").forEach(item => {
           const selected = item.dataset.helpView === view;
@@ -2528,45 +2395,48 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           page.hidden = !selected;
           page.classList.toggle("is-active", selected);
         });
-      }));
+      };
+      dialog.querySelectorAll("[data-help-view]").forEach(button => button.addEventListener("click", () => setHelpView(button.dataset.helpView)));
       const languageSwitch = dialog.querySelector("[data-language-value]");
       languageSwitch.querySelectorAll("[data-language]").forEach(button => button.addEventListener("click", () => {
         const setting = button.dataset.language;
-        if (!["system", "zh-CN", "en"].includes(setting)) return;
-        state.languageSetting = setting;
-        state.locale = setting === "system" ? state.systemLocale : setting;
+        if (!["system", "zh-CN", "en"].includes(setting) || setting === state.languageSetting) return;
         localStorage.setItem(LANGUAGE_KEY, setting);
-        languageSwitch.dataset.languageValue = setting;
-        languageSwitch.querySelectorAll("[data-language]").forEach(item => item.setAttribute("aria-checked", String(item.dataset.language === setting)));
+        state.languageSetting = setting;
+        state.systemLocale = resolveSystemLocale(state.systemLocale);
+        state.locale = setting === "system" ? state.systemLocale : setting;
+        finish();
+        panel?.remove();
+        panel = null;
+        ensureEntry();
+        mountPanel();
         render();
-        localizeOwnedTree(document.body);
+        showAutoDispatchHelp("settings");
       }));
       dialog.querySelector("[data-setting-completion]").addEventListener("change", event => {
         sessionStorage.setItem("better-codex-completion-notice-disabled", String(!event.currentTarget.checked));
       });
       const checkUpdate = dialog.querySelector("[data-check-update]");
       const renderUpdateState = (update, checked = false) => {
-        checkUpdate.textContent = update?.status === "available" ? "发现新版本" : update?.status === "error" ? "无法检查更新" : checked ? "已是最新版本" : "检查新版本";
-        localizeOwnedTree(dialog);
+        checkUpdate.textContent = t(update?.status === "available" ? "发现新版本" : update?.status === "error" ? "无法检查更新" : checked ? "已是最新版本" : "检查新版本");
       };
       checkUpdate.addEventListener("click", async () => {
         checkUpdate.disabled = true;
-        checkUpdate.textContent = "检查中…";
+        checkUpdate.textContent = t("检查中…");
         try {
           renderUpdateState(await api("/api/update/check", { method: "POST" }), true);
         } catch {
-          checkUpdate.textContent = "无法检查更新";
+          checkUpdate.textContent = t("无法检查更新");
         } finally {
           checkUpdate.disabled = false;
-          localizeOwnedTree(dialog);
         }
       });
       dialog.addEventListener("cancel", event => { event.preventDefault(); finish(); });
       bindModalDismiss(dialog, finish);
       document.body.appendChild(dialog);
       dialog.showModal();
+      setHelpView(initialView);
       dialog.querySelector("[data-product-core]").textContent = "v" + CORE_VERSION;
-      localizeOwnedTree(dialog);
       void api("/api/update").then(update => {
         if (!dialog.isConnected) return;
         renderUpdateState(update);
@@ -2580,8 +2450,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       button.classList.toggle("is-on", state.autoDispatch);
       button.setAttribute("aria-pressed", String(state.autoDispatch));
       button.removeAttribute("title");
-      button.setAttribute("aria-label", state.autoDispatch ? "切换为手动运行" : "切换为自动运行");
-      button.innerHTML = icon(state.autoDispatch ? "refresh" : "user") + "<span>" + label + "</span>";
+      button.setAttribute("aria-label", t(state.autoDispatch ? "切换为手动运行" : "切换为自动运行"));
+      button.innerHTML = icon(state.autoDispatch ? "refresh" : "user") + "<span>" + te(label) + "</span>";
     }
 
     function syncMockupUi() {
@@ -2603,19 +2473,19 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const runningCount = state.issues.filter(issue => issue.active_run_status === "running" || issue.active_run_status === "claimed" || issue.reply_status === "running").length;
       panel.querySelectorAll("[data-view]").forEach(button => button.classList.toggle("is-active", button.dataset.view === state.view));
       const enriching = panel.querySelector("#better-codex-enriching");
-      enriching.innerHTML = '<span class="better-codex-working-dot"></span>正在理解任务 ' + enrichingCount;
+      enriching.innerHTML = '<span class="better-codex-working-dot"></span>' + te("正在理解任务 " + enrichingCount);
       enriching.hidden = state.mockup || enrichingCount === 0;
-      enriching.title = enrichingCount ? "任务理解完成后即可打开卡片" : "";
+      enriching.title = enrichingCount ? t("任务理解完成后即可打开卡片") : "";
       enriching.classList.toggle("has-work", enrichingCount > 0);
       const working = panel.querySelector("#better-codex-working");
-      working.innerHTML = '<span class="better-codex-working-dot"></span>' + runningCount + " 个智能体工作中";
-      working.title = runningCount ? "查看运行中的任务" : "当前没有运行中的任务";
+      working.innerHTML = '<span class="better-codex-working-dot"></span>' + te(runningCount + " 个智能体工作中");
+      working.title = t(runningCount ? "查看运行中的任务" : "当前没有运行中的任务");
       working.classList.toggle("has-work", runningCount > 0);
       working.classList.toggle("is-active", state.view === "agent");
       working.hidden = state.mockup;
       const filterButton = panel.querySelector("#better-codex-filter");
       const filterCount = Object.values(state.filters).reduce((total, values) => total + values.length, 0);
-      filterButton.innerHTML = icon("filter") + (filterCount ? filterCount + " 个筛选" : "筛选");
+      filterButton.innerHTML = icon("filter") + te(filterCount ? filterCount + " 个筛选" : "筛选");
       filterButton.classList.toggle("is-active", filterCount > 0);
       const visible = state.issues.filter(issue => {
         const assigned = Boolean(issue.agent_enabled || issue.user_assigned);
@@ -2628,8 +2498,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const project = state.projects.find(item => item.id === state.projectId);
       const board = panel.querySelector("#better-codex-board");
       if (!visible.length && !state.search && filterCount === 0 && state.view === "all") {
-        board.innerHTML = '<section class="better-codex-board-empty"><h2>创建第一个任务</h2><p>写下要完成的事，交给智能体处理。</p><button type="button" data-add-status="todo">' + icon("plus") + '<span>新建任务</span></button></section>';
-        localizeOwnedTree(panel);
+        board.innerHTML = '<section class="better-codex-board-empty"><h2>' + te("创建第一个任务") + '</h2><p>' + te("写下要完成的事，交给智能体处理。") + '</p><button type="button" data-add-status="todo">' + icon("plus") + '<span>' + te("新建任务") + '</span></button></section>';
         return;
       }
       const visibleStatuses = Object.entries(statusLabels);
@@ -2648,14 +2517,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           const agentName = assignee?.name || "";
           const activityAgent = assignee || defaultAgent || { name: "Codex", is_default: true };
           const replyStatus = issue.reply_status || "idle";
-          const replyActivityState = replyStatus === "running" ? "replying" : replyStatus === "failed" ? "reply-failed" : replyStatus === "succeeded" ? "reply-succeeded" : "";
+          const replyActivityState = replyStatus === "running" ? "replying" : replyStatus === "failed" ? "reply-failed" : replyStatus === "interrupted" ? "interrupted" : replyStatus === "succeeded" ? "reply-succeeded" : "";
           const latestRunStatus = issue.latest_run_status || "";
           const executionState = latestRunStatus === "completed" ? "completed" : latestRunStatus === "failed" ? "failed" : latestRunStatus === "interrupted" ? "interrupted" : latestRunStatus === "running" ? "running" : latestRunStatus === "claimed" ? "claimed" : issue.agent_enabled ? "not-started" : "";
           const activeExecutionState = issue.active_run_status === "running" && issue.status === "in_review" ? "in_review" : issue.active_run_status || "";
           const activityState = state.mockup ? issue.mockup_run_status || "not-started" : enrichmentLocked ? "thinking" : activeExecutionState || replyActivityState || executionState;
           const replyActivity = !issue.active_run_status && Boolean(replyActivityState);
-          const activityLabel = enrichmentLocked ? "理解中" : replyActivity ? (replyStatus === "running" ? "回复中" : replyStatus === "failed" ? "回复失败" : "回复完成") : activityState === "running" ? "工作中" : activityState === "claimed" ? "排队中" : activityState === "in_review" ? "审核中" : activityState === "completed" ? "已完成" : activityState === "failed" ? "执行失败" : activityState === "interrupted" ? "已中断" : activityState === "not-started" ? "未开始" : "";
-          const activityIcon = ["completed", "failed", "interrupted", "not-started"].includes(activityState) ? icon(activityState === "completed" ? "check" : activityState === "not-started" ? "circle" : "close") : agentAvatarMarkup(activityAgent, "better-codex-card-avatar");
+          const activityLabel = t(enrichmentLocked ? "理解中" : replyActivity ? (replyStatus === "running" ? "回复中" : replyStatus === "failed" ? "回复失败" : replyStatus === "interrupted" ? "已中断" : "回复完成") : activityState === "running" ? "工作中" : activityState === "claimed" ? "排队中" : activityState === "in_review" ? "审核中" : activityState === "completed" ? "已完成" : activityState === "failed" ? "执行失败" : activityState === "interrupted" ? "已中断" : activityState === "not-started" ? "未开始" : "");
+          const activityIcon = ["completed", "interrupted", "not-started"].includes(activityState) ? '<span class="better-codex-activity-dot" aria-hidden="true"></span>' : activityState === "failed" ? icon("close") : agentAvatarMarkup(activityAgent, "better-codex-card-avatar");
           const activity = activityState
             ? '<span class="better-codex-activity" data-run="' + escapeHtml(activityState) + '">' + activityIcon + '<span class="' + (enrichmentLocked || replyActivityState === "replying" || issue.active_run_status === "running" ? "better-codex-shimmer" : "") + '">' + activityLabel + '</span></span>'
             : "";
@@ -2669,13 +2538,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           const meta = assignee
             ? '<span class="better-codex-card-assignee">' + agentAvatarMarkup(assignee, "better-codex-card-avatar") + '<span>' + escapeHtml(agentName || "Codex") + '</span></span>'
             : issue.user_assigned
-              ? '<span class="better-codex-card-assignee"><span class="better-codex-card-avatar is-user is-initials" style="background:' + escapeHtml(state.user.color || "#16a34a") + '">' + escapeHtml(state.user.initials || "你") + '</span><span>' + escapeHtml(state.user.name || "我") + '</span></span>'
-              : '<span class="better-codex-card-assignee is-empty">' + icon("user") + '<span>未分配</span></span>';
-          return '<article class="better-codex-card' + (issue.id === draggingIssueId ? " is-dragging" : "") + (enrichmentLocked ? " is-enrichment-pending" : "") + (executionRunning ? " is-execution-running" : "") + '" draggable="' + String(!issueLocked) + '" aria-disabled="' + String(issueLocked) + '"' + (issueLocked ? ' aria-busy="' + String(enrichmentLocked || executionRunning) + '"' : "") + ' data-issue-id="' + escapeHtml(issue.id) + '"><div class="better-codex-card-row"><div class="better-codex-card-id">' + priorityIcon(issue.priority) + '<span>' + escapeHtml(issue.identifier) + '</span></div>' + activity + '</div><div class="better-codex-card-title">' + escapeHtml(issue.title) + '</div>' + (description ? '<div class="better-codex-card-description">' + escapeHtml(description) + '</div>' : "") + (chips ? '<div class="better-codex-chip-row">' + chips + '</div>' : "") + '<div class="better-codex-card-meta">' + meta + '<span>更新于 ' + timeAgo(issue.updated_at) + '</span></div></article>';
+              ? '<span class="better-codex-card-assignee"><span class="better-codex-card-avatar is-user is-initials" style="background:' + escapeHtml(state.user.color || "#16a34a") + '">' + escapeHtml(state.user.initials || t("你")) + '</span><span>' + escapeHtml(state.user.name || t("我")) + '</span></span>'
+              : '<span class="better-codex-card-assignee is-empty">' + icon("user") + '<span>' + te("未分配") + '</span></span>';
+          return '<article class="better-codex-card' + (issue.id === draggingIssueId ? " is-dragging" : "") + (enrichmentLocked ? " is-enrichment-pending" : "") + (executionRunning ? " is-execution-running" : "") + '" draggable="' + String(!issueLocked) + '" aria-disabled="' + String(issueLocked) + '"' + (issueLocked ? ' aria-busy="' + String(enrichmentLocked || executionRunning) + '"' : "") + ' data-issue-id="' + escapeHtml(issue.id) + '"><div class="better-codex-card-row"><div class="better-codex-card-id">' + priorityIcon(issue.priority) + '<span>' + escapeHtml(issue.identifier) + '</span></div>' + activity + '</div><div class="better-codex-card-title">' + escapeHtml(issue.title) + '</div>' + (description ? '<div class="better-codex-card-description">' + escapeHtml(description) + '</div>' : "") + (chips ? '<div class="better-codex-chip-row">' + chips + '</div>' : "") + '<div class="better-codex-card-meta">' + meta + '<span>' + te("更新于 " + timeAgo(issue.updated_at)) + '</span></div></article>';
         }).join("");
-        return '<section class="better-codex-column" data-status="' + status + '"><div class="better-codex-column-head"><span class="better-codex-column-title">' + statusIcon(status) + '<span>' + statusLabel + '</span><span>' + issues.length + '</span></span><span class="better-codex-column-actions"><button class="better-codex-column-icon" type="button" data-add-status="' + status + '" aria-label="新建任务">' + icon("plus") + '</button></span></div><div class="better-codex-cards">' + (cards || '<div class="better-codex-empty">暂无任务</div>') + '</div></section>';
+        return '<section class="better-codex-column" data-status="' + status + '"><div class="better-codex-column-head"><span class="better-codex-column-title">' + statusIcon(status) + '<span>' + te(statusLabel) + '</span><span>' + issues.length + '</span></span><span class="better-codex-column-actions"><button class="better-codex-column-icon" type="button" data-add-status="' + status + '" aria-label="' + te("新建任务") + '">' + icon("plus") + '</button></span></div><div class="better-codex-cards">' + (cards || '<div class="better-codex-empty">' + te("暂无任务") + '</div>') + '</div></section>';
       }).join("");
-      localizeOwnedTree(panel);
     }
 
     async function loadIssues(options = {}) {
@@ -2683,6 +2551,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const query = new URLSearchParams();
       if (state.search) query.set("search", state.search);
       const issues = await api("/api/issues" + (query.toString() ? "?" + query : ""));
+      const changed = JSON.stringify(issues) !== JSON.stringify(state.issues);
       if (issueStatusSnapshot.size) {
         const completed = issues.find(issue => issue.status === "done" && issueStatusSnapshot.get(issue.id) && issueStatusSnapshot.get(issue.id) !== "done");
         if (completed) renderCompletionNotice(completed);
@@ -2692,6 +2561,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const dialog = document.getElementById("better-codex-dialog");
       const dialogIssue = dialog?.dataset.issueId ? issues.find(issue => issue.id === dialog.dataset.issueId) : null;
       if (dialog && dialogIssue && typeof dialog.__betterCodexSyncIssue === "function") dialog.__betterCodexSyncIssue(dialogIssue);
+      if (options.background && !changed) return;
       if (options.background && state.surface === "agents" && state.agentPane !== "preview") return;
       render();
     }
@@ -2715,14 +2585,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       try {
         const bootstrap = await api("/api/bootstrap");
         applyAppearance(bootstrap.appearance);
-        state.systemLocale = bootstrap.locale === "zh-CN" ? "zh-CN" : "en";
+        state.systemLocale = resolveSystemLocale(bootstrap.locale);
         state.locale = state.languageSetting === "system" ? state.systemLocale : state.languageSetting;
         if (bootstrap.user && typeof bootstrap.user === "object") state.user = bootstrap.user;
         state.mockup = Boolean(bootstrap.mockup);
-        state.agents = state.mockup ? mockupAgents() : bootstrap.agents || [];
-        state.projects = state.mockup
-          ? [{ id: MOCKUP_PROJECT_ID, external_id: "mockup", name: "better-codex", workspace_path: "" }]
-          : bootstrap.projects;
+        state.agents = bootstrap.agents || [];
+        state.projects = bootstrap.projects || [];
         state.agentModelCatalog = bootstrap.agentModelCatalog || (bootstrap.agentModels || []).map(id => ({ id, displayName: id, description: "", isDefault: false, defaultReasoningEffort: "medium", supportedReasoningEfforts: (bootstrap.agentReasoningEfforts || []).map(value => ({ value, description: "" })) }));
         state.agentModels = state.agentModelCatalog.map(model => model.id);
         state.agentReasoningEfforts = bootstrap.agentReasoningEfforts || [];
@@ -2745,11 +2613,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           if (state.projectId) localStorage.setItem(PROJECT_KEY, state.projectId);
         }
         await loadSurface({ preserveInspector: true });
+        hideServiceRecovery();
       } catch (error) {
+        if (needsServiceRecovery(error)) return showServiceRecovery(error);
         const board = panel?.querySelector("#better-codex-board");
         const message = error instanceof Error ? error.message : "无法连接 Better Codex Runtime";
         showError(message);
-        if (board) board.innerHTML = '<div class="better-codex-empty">' + escapeHtml(message) + " · 点击刷新重试</div>";
+        if (board) board.innerHTML = '<div class="better-codex-empty">' + te(message + " · 点击刷新重试") + "</div>";
       }
     }
 
@@ -2781,7 +2651,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         sandbox_mode: form.elements.sandbox_mode.value,
         max_concurrency: Number(form.elements.max_concurrency?.value || 5),
         avatar: form.elements.avatar?.value || "",
-        ...(selected && !selected.is_default ? { version: selected.version } : {})
+        ...(selected ? { version: selected.version } : {})
       };
       void perform(async () => {
         submit.disabled = true;
@@ -2794,7 +2664,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           state.agentDraft = null;
           await loadAgents();
         } catch (caught) {
-          error.textContent = caught instanceof Error ? caught.message : "保存失败";
+          error.textContent = t(caught instanceof Error ? caught.message : "保存失败");
           error.hidden = false;
           submit.disabled = false;
         }
@@ -2847,7 +2717,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           const oldEffort = form.elements.reasoning_effort.value;
           const modelDefault = state.agentModelCatalog.find(item => item.id === value)?.defaultReasoningEffort;
           const nextEffort = efforts.some(item => item.value === oldEffort) ? oldEffort : modelDefault || efforts[0]?.value || "medium";
-          effortPicker.outerHTML = agentPicker("reasoning_effort", "推理", nextEffort, efforts);
+          effortPicker.outerHTML = agentPicker("reasoning_effort", t("推理"), nextEffort, efforts);
         }
         return;
       }
@@ -3106,28 +2976,28 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
       function header() {
         const openThreadButton = issue && (sessionId || executionRunning) && !enrichmentLocked
-          ? '<button class="better-codex-dialog-open-thread' + (executionRunning ? ' is-running' : '') + '" type="button" data-dialog-open-thread="' + escapeHtml(sessionId) + '" data-dialog-open-thread-running="' + String(executionRunning) + '">' + (executionRunning ? "任务正在进行中" : "在会话中打开") + '</button>'
+          ? '<button class="better-codex-dialog-open-thread' + (executionRunning ? ' is-running' : '') + '" type="button" data-dialog-open-thread="' + escapeHtml(sessionId) + '" data-dialog-open-thread-running="' + String(executionRunning) + '">' + te(executionRunning ? "任务正在进行中" : "在会话中打开") + '</button>'
           : "";
-        const startNowButton = issue && !state.mockup && !enrichmentLocked && !sessionId && !state.autoDispatch && issue.agent_enabled && !issue.active_run_status
-          ? '<button class="better-codex-dialog-start-now" type="button" data-dialog-start-now>立即开始任务</button>'
+        const startNowButton = issue && !state.mockup && !enrichmentLocked && !sessionId && !state.autoDispatch && issue.agent_enabled && !issue.active_run_status && !["backlog", "done", "cancelled"].includes(issue.status)
+          ? '<button class="better-codex-dialog-start-now" type="button" data-dialog-start-now>' + te("立即开始任务") + '</button>'
           : "";
-        const title = draft.mode === "agent" ? "通过智能体创建" : issue ? "Issue 详情" : "手动创建";
+        const title = t(draft.mode === "agent" ? "通过智能体创建" : issue ? "Issue 详情" : "手动创建");
         const crumb = issue
           ? '<span>' + escapeHtml(projectLabel(project) || "Better Codex") + '</span><span aria-hidden="true">' + icon("chevron") + '</span><strong>' + title + '</strong>'
           : '<strong>' + title + '</strong>';
-        return '<div class="better-codex-dialog-head"><div class="better-codex-dialog-breadcrumb">' + crumb + '</div><div class="better-codex-dialog-head-actions">' + openThreadButton + startNowButton + '<button class="better-codex-icon-button" type="button" data-dialog-expand aria-label="' + (draft.expanded ? "缩小" : "展开") + '">' + icon(draft.expanded ? "shrink" : "expand") + '</button><button class="better-codex-icon-button" type="button" data-dialog-close aria-label="关闭">' + icon("close") + '</button></div></div>';
+        return '<div class="better-codex-dialog-head"><div class="better-codex-dialog-breadcrumb">' + crumb + '</div><div class="better-codex-dialog-head-actions">' + openThreadButton + startNowButton + '<button class="better-codex-icon-button" type="button" data-dialog-expand aria-label="' + te(draft.expanded ? "缩小" : "展开") + '">' + icon(draft.expanded ? "shrink" : "expand") + '</button><button class="better-codex-icon-button" type="button" data-dialog-close aria-label="' + te("关闭") + '">' + icon("close") + '</button></div></div>';
       }
 
       function conversationPanel() {
         if (!issue || (!sessionId && !executionRunning)) return "";
-        const conversationState = sessionId ? "加载中…" : "等待对话";
-        const conversationBody = sessionId ? '<p class="better-codex-markdown-empty">加载对话…</p>' : conversationActivityMarkup();
-        return '<section class="better-codex-conversation"><div class="better-codex-conversation-head"><span>对话</span><span class="better-codex-conversation-status" data-conversation-status data-state="idle">' + conversationState + '</span></div><div class="better-codex-timeline" data-conversation-body>' + conversationBody + '</div></section><div class="better-codex-conversation-feedback" data-conversation-feedback hidden></div>' + conversationComposer();
+        const conversationState = t(sessionId ? "加载中…" : "等待对话");
+        const conversationBody = sessionId ? '<p class="better-codex-markdown-empty">' + te("加载对话…") + '</p>' : conversationActivityMarkup();
+        return '<section class="better-codex-conversation"><div class="better-codex-conversation-head"><span>' + te("对话") + '</span><span class="better-codex-conversation-status" data-conversation-status data-state="idle">' + escapeHtml(conversationState) + '</span></div><div class="better-codex-timeline" data-conversation-body>' + conversationBody + '</div></section><div class="better-codex-conversation-feedback" data-conversation-feedback hidden></div>' + conversationComposer();
       }
 
       function conversationComposer() {
         if (!issue || !sessionId) return "";
-        return '<div class="better-codex-composer"><textarea name="reply" rows="2" placeholder="输入下一步要求…" aria-label="回复">' + escapeHtml(draft.reply) + '</textarea><button class="better-codex-composer-send" type="button" data-conversation-send>发送</button></div>';
+        return '<div class="better-codex-composer"><textarea name="reply" rows="2" placeholder="' + te("输入下一步要求…") + '" aria-label="' + te("回复") + '">' + escapeHtml(draft.reply) + '</textarea><button class="better-codex-composer-send" type="button" data-conversation-send>' + te("发送") + '</button></div>';
       }
 
       function conversationActivity() {
@@ -3141,7 +3011,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const activity = conversationActivity();
         if (!activity) return "";
         const agent = state.agents.find(item => item.id === issue?.agent_id) || state.agents.find(item => item.is_default) || null;
-        return '<div class="better-codex-conversation-activity" data-conversation-activity data-run="' + activity.state + '">' + agentAvatarMarkup(agent, "better-codex-bubble-avatar better-codex-conversation-activity-avatar") + '<span class="' + (activity.shimmer ? "better-codex-shimmer" : "") + '">' + activity.label + '</span></div>';
+        return '<div class="better-codex-conversation-activity" data-conversation-activity data-run="' + activity.state + '">' + agentAvatarMarkup(agent, "better-codex-bubble-avatar better-codex-conversation-activity-avatar") + '<span class="' + (activity.shimmer ? "better-codex-shimmer" : "") + '">' + te(activity.label) + '</span></div>';
       }
 
       function syncConversationActivity() {
@@ -3171,9 +3041,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const feedback = dialog.querySelector("[data-conversation-feedback]");
         if (!feedback) return;
         if (message) lastReplyMessage = message;
-        feedback.innerHTML = '<span>' + escapeHtml(replyFailureMessage(error, action)) + '</span><button type="button" data-conversation-retry="' + action + '">' + (action === "load" ? "重新加载" : "重试回复") + '</button>';
+        feedback.innerHTML = '<span>' + te(replyFailureMessage(error, action)) + '</span><button type="button" data-conversation-retry="' + action + '">' + te(action === "load" ? "重新加载" : "重试回复") + '</button>';
         feedback.hidden = false;
-        localizeOwnedTree(feedback);
         feedback.querySelector("[data-conversation-retry]")?.addEventListener("click", event => {
           if (event.currentTarget.dataset.conversationRetry === "load") void loadConversation();
           else void sendReply(lastReplyMessage, lastReplyRequestId);
@@ -3207,15 +3076,15 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
       function conversationBubbles(messages, profile = null) {
         const agent = state.agents.find(item => item.id === issue?.agent_id) || state.agents.find(item => item.is_default) || null;
-        const agentName = agent?.name || (issue?.agent_enabled ? "Codex" : "智能体");
-        const user = profile && profile.name ? profile : state.user || { name: "你", initials: "你", color: "#16a34a" };
+        const agentName = agent?.name || (issue?.agent_enabled ? "Codex" : t("智能体"));
+        const user = profile && profile.name ? profile : state.user || { name: t("你"), initials: t("你"), color: "#16a34a" };
         if (profile && profile.name) state.user = { ...state.user, ...profile };
         return (messages || []).map(message => {
           const isUser = message.role === "user";
           const avatar = isUser
-            ? '<span class="better-codex-bubble-avatar is-user is-initials" style="background:' + escapeHtml(user.color || "#16a34a") + '" title="' + escapeHtml(user.handle ? "@" + user.handle : user.name || "") + '" aria-hidden="true">' + escapeHtml(user.initials || "你") + '</span>'
+            ? '<span class="better-codex-bubble-avatar is-user is-initials" style="background:' + escapeHtml(user.color || "#16a34a") + '" title="' + escapeHtml(user.handle ? "@" + user.handle : user.name || "") + '" aria-hidden="true">' + escapeHtml(user.initials || t("你")) + '</span>'
             : agentAvatarMarkup(agent, "better-codex-bubble-avatar");
-          const name = isUser ? (user.name || "你") : agentName;
+          const name = isUser ? (user.name || t("你")) : agentName;
           const time = relativeTime(message.timestamp);
           return '<article class="better-codex-bubble ' + (isUser ? "is-user" : "is-agent") + '">' + avatar + '<div class="better-codex-bubble-main"><div class="better-codex-bubble-meta"><strong>' + escapeHtml(name) + '</strong>' + (time ? '<time datetime="' + escapeHtml(message.timestamp || "") + '">' + escapeHtml(time) + '</time>' : "") + '</div><div class="better-codex-bubble-content">' + (message.html || renderPlainBubble(message.markdown || "")) + '</div></div></article>';
         }).join("");
@@ -3242,10 +3111,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           body.scrollTop = body.scrollHeight;
         } else {
           body.innerHTML = sessionId
-            ? '<div class="better-codex-conversation-empty"><h3>开始对话</h3><p>补充下一步要求，智能体会继续处理。</p><span>在下方输入消息并发送</span></div>'
-            : '<p class="better-codex-markdown-empty">未关联对话。</p>';
+            ? '<div class="better-codex-conversation-empty"><h3>' + te("开始对话") + '</h3><p>' + te("补充下一步要求，智能体会继续处理。") + '</p><span>' + te("在下方输入消息并发送") + '</span></div>'
+            : '<p class="better-codex-markdown-empty">' + te("未关联对话。") + '</p>';
           syncConversationActivity();
-          localizeOwnedTree(body);
         }
         const reply = data?.reply || { status: "idle" };
         if (reply.message) lastReplyMessage = reply.message;
@@ -3253,8 +3121,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const stateName = reply.status || "idle";
         status.dataset.state = stateName;
         const countLabel = messages.length ? (messages.length + " 条") : "";
-        status.textContent = stateName === "running" ? "回复进行中…" : stateName === "failed" ? "回复失败" : stateName === "succeeded" ? "回复已完成" : (countLabel || (data?.found ? "已同步" : "等待对话"));
-        if (stateName === "failed") showConversationFailure(reply.error, "reply", reply.message);
+        status.textContent = t(stateName === "running" ? "回复进行中…" : stateName === "failed" ? "回复失败" : stateName === "interrupted" ? "已中断" : stateName === "succeeded" ? "回复已完成" : (countLabel || (data?.found ? "已同步" : "等待对话")));
+        if (stateName === "failed" || stateName === "interrupted") showConversationFailure(reply.error, "reply", reply.message);
         else clearConversationFailure();
         if (send) updateReplySendState();
         stopConversationPoll();
@@ -3277,7 +3145,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           const status = dialog.querySelector("[data-conversation-status]");
           if (status) {
             status.dataset.state = "failed";
-            status.textContent = "加载失败";
+            status.textContent = t("加载失败");
           }
           showConversationFailure(error instanceof Error ? error.message : "加载失败", "load");
         }
@@ -3295,6 +3163,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         clearConversationFailure();
         try {
           const reply = await api("/api/issues/" + encodeURIComponent(issue.id) + "/reply", { method: "POST", body: JSON.stringify({ message, request_id: requestId }) });
+          if (reply.initial_run) {
+            await loadIssues();
+            dialog.close();
+            return;
+          }
           lastReplyRequestId = reply.request_id || requestId;
           draft.reply = "";
           latestReplyDraft = "";
@@ -3313,11 +3186,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       function projectPicker() {
         const selectedProject = state.projects.find(item => item.id === draft.projectId);
         const options = state.projects.map(item => '<button class="better-codex-project-option" type="button" data-dialog-project-option="' + escapeHtml(item.id) + '">' + icon("folder") + '<span>' + escapeHtml(projectLabel(item)) + '</span><span class="better-codex-project-check">' + (item.id === draft.projectId ? icon("check") : "") + '</span></button>').join("");
-        return '<span class="better-codex-project-picker"><button class="better-codex-property" type="button" data-dialog-project>' + icon("folder") + '<span data-project-label>' + escapeHtml(projectLabel(selectedProject) || "选择项目") + '</span>' + icon("chevron") + '</button><span class="better-codex-project-menu" hidden><input class="better-codex-project-search" type="search" placeholder="搜索项目..." aria-label="搜索项目"><span data-project-options>' + (options || '<span class="better-codex-project-empty">暂无项目</span>') + '</span></span></span>';
+        return '<span class="better-codex-project-picker"><button class="better-codex-property" type="button" data-dialog-project>' + icon("folder") + '<span data-project-label>' + escapeHtml(projectLabel(selectedProject) || t("选择项目")) + '</span>' + icon("chevron") + '</button><span class="better-codex-project-menu" hidden><input class="better-codex-project-search" type="search" placeholder="' + te("搜索项目...") + '" aria-label="' + te("搜索项目") + '"><span data-project-options>' + (options || '<span class="better-codex-project-empty">' + te("暂无项目") + '</span>') + '</span></span></span>';
       }
 
       function dialogSelect(name, ariaLabel, selected, options, modifier = "") {
-        const current = options.find(option => option.value === selected) || options[0] || { value: "", label: "未提供", visual: "" };
+        const current = options.find(option => option.value === selected) || options[0] || { value: "", label: t("未提供"), visual: "" };
         const visual = option => typeof option.visual === "function" ? option.visual() : option.visual || "";
         const tagMarkup = option => (option.tags || []).map(tag => '<span class="better-codex-dialog-select-tag" data-tone="' + escapeHtml(tag.tone || "model") + '">' + escapeHtml(tag.value) + '</span>').join("");
         const labelMarkup = option => escapeHtml(option.label) + tagMarkup(option);
@@ -3333,15 +3206,15 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           tags: agentConfigTags(agent),
           visual: () => agentAvatarMarkup(agent, "better-codex-agent-avatar")
         }));
-        return '<div class="better-codex-agent-picker"><span>指派给</span>' + dialogSelect("agent_id", "选择执行智能体", selectedAgent?.id || draft.agentId, options, "is-agent") + '</div>';
+        return '<div class="better-codex-agent-picker"><span>' + te("指派给") + '</span>' + dialogSelect("agent_id", t("选择执行智能体"), selectedAgent?.id || draft.agentId, options, "is-agent") + '</div>';
       }
 
       function assigneePicker() {
         const defaultAgent = state.agents.find(agent => agent.is_default) || { name: "Codex", is_default: true, id: "" };
-        const userVisual = () => '<span class="better-codex-agent-avatar is-user is-initials" style="background:' + escapeHtml(state.user.color || "#16a34a") + '">' + escapeHtml(state.user.initials || "你") + "</span>";
+        const userVisual = () => '<span class="better-codex-agent-avatar is-user is-initials" style="background:' + escapeHtml(state.user.color || "#16a34a") + '">' + escapeHtml(state.user.initials || t("你")) + "</span>";
         const options = [
-          { value: "none", label: "未指派", visual: () => icon("user") },
-          { value: "user", label: state.user.name || "我", visual: userVisual },
+          { value: "none", label: t("未指派"), visual: () => icon("user") },
+          { value: "user", label: state.user.name || t("我"), visual: userVisual },
           { value: "codex", label: agentOptionLabel(defaultAgent, defaultAgent.name || "Codex"), tags: agentConfigTags(defaultAgent), visual: () => agentAvatarMarkup(defaultAgent, "better-codex-agent-avatar") },
           ...state.agents.filter(agent => !agent.is_default).map(agent => ({
             value: agent.id,
@@ -3350,17 +3223,17 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             visual: () => agentAvatarMarkup(agent, "better-codex-agent-avatar")
           }))
         ];
-        return '<div class="better-codex-agent-picker"><span>指派给</span>' + dialogSelect("assignee", "选择责任人", draft.assignee || "none", options, "is-assignee") + '</div>';
+        return '<div class="better-codex-agent-picker"><span>' + te("指派给") + '</span>' + dialogSelect("assignee", t("选择责任人"), draft.assignee || "none", options, "is-assignee") + '</div>';
       }
 
       function propertyRows() {
         const projectChip = projectPicker();
         if (draft.mode === "agent") return '<div class="better-codex-dialog-properties">' + projectChip + '</div>';
-        const statuses = Object.entries(statusLabels).map(([value, text]) => ({ value, label: text, visual: statusIcon(value) }));
-        const priorities = Object.entries(priorityLabels).map(([value, text]) => ({ value, label: value === "none" ? "无优先级" : text + "优先级", visual: priorityIcon(value) }));
-        const runStatuses = Object.entries(mockupRunStatusLabels).map(([value, text]) => ({ value, label: text, visual: mockupRunStatusIcon(value) }));
-        const runStatus = state.mockup ? dialogSelect("mockup_run_status", "运行状态", draft.runStatus, runStatuses, "is-run-status") : "";
-        return '<div class="better-codex-dialog-properties">' + dialogSelect("status", "状态", draft.status, statuses) + runStatus + dialogSelect("priority", "优先级", draft.priority, priorities) + '<label class="better-codex-property">' + icon("tag") + '<input name="labels" value="' + escapeHtml(draft.labels) + '" placeholder="添加标签" aria-label="标签"></label>' + projectChip + '</div>';
+        const statuses = Object.entries(statusLabels).map(([value, text]) => ({ value, label: t(text), visual: statusIcon(value) }));
+        const priorities = Object.entries(priorityLabels).map(([value, text]) => ({ value, label: t(value === "none" ? "无优先级" : text + "优先级"), visual: priorityIcon(value) }));
+        const runStatuses = Object.entries(mockupRunStatusLabels).map(([value, text]) => ({ value, label: t(text), visual: mockupRunStatusIcon(value) }));
+        const runStatus = state.mockup ? dialogSelect("mockup_run_status", t("运行状态"), draft.runStatus, runStatuses, "is-run-status") : "";
+        return '<div class="better-codex-dialog-properties">' + dialogSelect("status", t("状态"), draft.status, statuses) + runStatus + dialogSelect("priority", t("优先级"), draft.priority, priorities) + '<label class="better-codex-property">' + icon("tag") + '<input name="labels" value="' + escapeHtml(draft.labels) + '" placeholder="' + te("添加标签") + '" aria-label="' + te("标签") + '"></label>' + projectChip + '</div>';
       }
 
       function attachmentPaths() {
@@ -3370,13 +3243,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       function withAttachments(text) {
         const paths = attachmentPaths();
         if (!paths.length) return text;
-        const block = "附带文件：\\n" + paths.map(path => "- " + path).join("\\n");
+        const block = t("附带文件：") + "\\n" + paths.map(path => "- " + path).join("\\n");
         return text ? text + "\\n\\n" + block : block;
       }
 
       function attachmentList() {
         if (!draft.attachments.length) return '<div class="better-codex-dialog-attachments" data-dialog-attachments hidden></div>';
-        const chips = draft.attachments.map((item, index) => '<span class="better-codex-attachment-chip" title="' + escapeHtml(item.path) + '">' + icon("paperclip") + '<span>' + escapeHtml(item.name) + '</span><button type="button" data-dialog-detach="' + index + '" aria-label="移除附件">' + icon("close") + '</button></span>').join("");
+        const chips = draft.attachments.map((item, index) => '<span class="better-codex-attachment-chip" title="' + escapeHtml(item.path) + '">' + icon("paperclip") + '<span>' + escapeHtml(item.name) + '</span><button type="button" data-dialog-detach="' + index + '" aria-label="' + te("移除附件") + '">' + icon("close") + '</button></span>').join("");
         return '<div class="better-codex-dialog-attachments" data-dialog-attachments>' + chips + '</div>';
       }
 
@@ -3406,10 +3279,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
       function footer() {
         if (executionLocked) return "";
-        const switchButton = issue || state.mockup ? "" : '<button class="better-codex-switch-mode" type="button" data-dialog-switch>' + icon("switch") + (draft.mode === "agent" ? "切换到手动" : "切换到智能体") + '</button>';
+        const switchButton = issue || state.mockup ? "" : '<button class="better-codex-switch-mode" type="button" data-dialog-switch>' + icon("switch") + te(draft.mode === "agent" ? "切换到手动" : "切换到智能体") + '</button>';
         const submitText = issue ? "保存" : draft.mode === "agent" ? "创建" : "创建任务";
-        const keepOpen = issue ? "" : '<label class="better-codex-keep-open"><input class="better-codex-toggle" name="keep" type="checkbox"' + (state.keepCreate ? " checked" : "") + '>继续创建</label>';
-        return '<div class="better-codex-dialog-footer"><button class="better-codex-icon-button" type="button" data-dialog-attach aria-label="添加附件">' + icon("paperclip") + '</button><div class="better-codex-dialog-footer-right">' + switchButton + keepOpen + '<button class="better-codex-submit" type="submit">' + submitText + '</button></div></div>';
+        const keepOpen = issue ? "" : '<label class="better-codex-keep-open"><input class="better-codex-toggle" name="keep" type="checkbox"' + (state.keepCreate ? " checked" : "") + '>' + te("继续创建") + '</label>';
+        return '<div class="better-codex-dialog-footer"><button class="better-codex-icon-button" type="button" data-dialog-attach aria-label="' + te("添加附件") + '">' + icon("paperclip") + '</button><div class="better-codex-dialog-footer-right">' + switchButton + keepOpen + '<button class="better-codex-submit" type="submit">' + te(submitText) + '</button></div></div>';
       }
 
       function renderDialog() {
@@ -3428,15 +3301,15 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (draft.mode === "agent") {
           const selectedAgent = state.agents.find(agent => agent.id === draft.agentId);
           const selectedName = selectedAgent?.name || "Codex";
-          dialog.innerHTML = '<form>' + header() + agentPicker() + '<textarea class="better-codex-dialog-editor" name="prompt" placeholder="告诉智能体要做什么，例如：“修复项目里任务运行状态不可见的问题”">' + escapeHtml(draft.prompt) + '</textarea>' + propertyRows() + attachmentList() + '<div class="better-codex-dialog-error" hidden></div>' + footer() + '</form>';
-          dialog.querySelector(".better-codex-dialog-properties")?.insertAdjacentHTML("beforebegin", '<div class="better-codex-run-hint">' + agentAvatarMarkup(selectedAgent, "better-codex-agent-avatar") + '<span>创建后先由 ' + escapeHtml(selectedName) + ' 整理卡片，再自动开始工作。</span></div>');
+          dialog.innerHTML = '<form>' + header() + agentPicker() + '<textarea class="better-codex-dialog-editor" name="prompt" placeholder="' + te("告诉智能体要做什么，例如：“修复项目里任务运行状态不可见的问题”") + '">' + escapeHtml(draft.prompt) + '</textarea>' + propertyRows() + attachmentList() + '<div class="better-codex-dialog-error" hidden></div>' + footer() + '</form>';
+          dialog.querySelector(".better-codex-dialog-properties")?.insertAdjacentHTML("beforebegin", '<div class="better-codex-run-hint">' + agentAvatarMarkup(selectedAgent, "better-codex-agent-avatar") + '<span>' + te("创建后先由 " + selectedName + " 整理卡片，再自动开始工作。") + '</span></div>');
         } else if (issue) {
           const descriptionEditor = sessionId
-            ? '<textarea class="better-codex-dialog-editor" name="description" placeholder="添加描述..." rows="2" style="flex:0 0 auto;min-height:56px;max-height:96px">' + escapeHtml(draft.description) + '</textarea>'
-            : '<textarea class="better-codex-dialog-editor" name="description" placeholder="添加描述...">' + escapeHtml(draft.description) + '</textarea>';
-          dialog.innerHTML = '<form>' + header() + assigneePicker() + '<input class="better-codex-manual-title" name="title" maxlength="500" placeholder="任务标题" value="' + escapeHtml(draft.title) + '">' + descriptionEditor + conversationPanel() + propertyRows() + attachmentList() + '<div class="better-codex-dialog-error" hidden></div>' + footer() + '</form>';
+            ? '<textarea class="better-codex-dialog-editor" name="description" placeholder="' + te("添加描述...") + '" rows="2" style="flex:0 0 auto;min-height:56px;max-height:96px">' + escapeHtml(draft.description) + '</textarea>'
+            : '<textarea class="better-codex-dialog-editor" name="description" placeholder="' + te("添加描述...") + '">' + escapeHtml(draft.description) + '</textarea>';
+          dialog.innerHTML = '<form>' + header() + assigneePicker() + '<input class="better-codex-manual-title" name="title" maxlength="500" placeholder="' + te("任务标题") + '" value="' + escapeHtml(draft.title) + '">' + descriptionEditor + conversationPanel() + propertyRows() + attachmentList() + '<div class="better-codex-dialog-error" hidden></div>' + footer() + '</form>';
         } else {
-          dialog.innerHTML = '<form>' + header() + assigneePicker() + '<input class="better-codex-manual-title" name="title" maxlength="500" placeholder="任务标题" value="' + escapeHtml(draft.title) + '"><textarea class="better-codex-dialog-editor" name="description" placeholder="添加描述...">' + escapeHtml(draft.description) + '</textarea>' + propertyRows() + attachmentList() + '<div class="better-codex-dialog-error" hidden></div>' + footer() + '</form>';
+          dialog.innerHTML = '<form>' + header() + assigneePicker() + '<input class="better-codex-manual-title" name="title" maxlength="500" placeholder="' + te("任务标题") + '" value="' + escapeHtml(draft.title) + '"><textarea class="better-codex-dialog-editor" name="description" placeholder="' + te("添加描述...") + '">' + escapeHtml(draft.description) + '</textarea>' + propertyRows() + attachmentList() + '<div class="better-codex-dialog-error" hidden></div>' + footer() + '</form>';
         }
         const content = dialog.querySelector(draft.mode === "agent" ? '[name="prompt"]' : '[name="title"]');
         applyDialogPermissions();
@@ -3517,7 +3390,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             const runAvatar = dialog.querySelector(".better-codex-run-hint .better-codex-agent-avatar");
             syncAgentAvatar(runAvatar, selectedAgent);
             const hint = dialog.querySelector(".better-codex-run-hint span:last-child");
-            if (hint) hint.textContent = "创建后先由 " + selectedName + " 整理卡片，再自动开始工作。";
+            if (hint) hint.textContent = t("创建后先由 " + selectedName + " 整理卡片，再自动开始工作。");
           }
           closeDialogSelects();
           picker.querySelector("[data-dialog-select-toggle]")?.focus();
@@ -3552,7 +3425,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           event.stopPropagation();
           draft.projectId = option.dataset.dialogProjectOption;
           const selectedProject = state.projects.find(item => item.id === draft.projectId);
-          dialog.querySelector("[data-project-label]").textContent = projectLabel(selectedProject) || "选择项目";
+          dialog.querySelector("[data-project-label]").textContent = projectLabel(selectedProject) || t("选择项目");
           dialog.querySelectorAll("[data-dialog-project-option]").forEach(item => { item.querySelector(".better-codex-project-check").innerHTML = item.dataset.dialogProjectOption === draft.projectId ? icon("check") : ""; });
           projectMenu.hidden = true;
           if (projectDismiss) document.removeEventListener("pointerdown", projectDismiss, true);
@@ -3565,7 +3438,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           const executionRunning = button.dataset.dialogOpenThreadRunning === "true";
           if ((!threadId && !executionRunning) || button.disabled) return;
           const errorOutput = dialog.querySelector(".better-codex-dialog-error");
-          const idleLabel = button.textContent || "在会话中打开";
+          const idleLabel = button.textContent || t("在会话中打开");
           clearError();
           void (async () => {
             try {
@@ -3575,13 +3448,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
                 button.disabled = true;
                 button.classList.add("is-loading");
                 button.setAttribute("aria-busy", "true");
-                button.innerHTML = icon("refresh") + "<span>正在终止…</span>";
+                button.innerHTML = icon("refresh") + "<span>" + te("正在终止…") + "</span>";
                 await api("/api/issues/" + encodeURIComponent(issue.id) + "/stop", { method: "POST" });
               } else {
                 button.disabled = true;
                 button.classList.add("is-loading");
                 button.setAttribute("aria-busy", "true");
-                button.innerHTML = icon("refresh") + "<span>正在打开…</span>";
+                button.innerHTML = icon("refresh") + "<span>" + te("正在打开…") + "</span>";
               }
               if (threadId) await openThread(threadId);
               else {
@@ -3612,7 +3485,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           draft.expanded = !draft.expanded;
           dialog.dataset.expanded = String(draft.expanded);
           const button = event.currentTarget;
-          button.setAttribute("aria-label", draft.expanded ? "缩小" : "展开");
+          button.setAttribute("aria-label", t(draft.expanded ? "缩小" : "展开"));
           button.innerHTML = icon(draft.expanded ? "shrink" : "expand");
         });
         dialog.querySelector("[data-dialog-switch]")?.addEventListener("click", () => {
@@ -3634,7 +3507,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             const showAttachError = message => {
               const errorOutput = dialog.querySelector(".better-codex-dialog-error");
               if (!errorOutput) return;
-              errorOutput.textContent = message;
+              errorOutput.textContent = t(message);
               errorOutput.hidden = false;
             };
             if (!result.picked) return;
@@ -3728,7 +3601,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             dialog.close();
           }
         } catch (error) {
-          errorOutput.textContent = error instanceof Error ? error.message : "创建失败";
+          errorOutput.textContent = t(error instanceof Error ? error.message : "创建失败");
           errorOutput.hidden = false;
           submit.disabled = false;
         }
@@ -3758,7 +3631,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           await loadIssues();
           dialog.close();
         } catch (error) {
-          errorOutput.textContent = error instanceof Error ? error.message : "启动失败";
+          errorOutput.textContent = t(error instanceof Error ? error.message : "启动失败");
           errorOutput.hidden = false;
           button.disabled = false;
         }
@@ -3829,7 +3702,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (state.mockup) {
         if (issue.status === status && beforeId === issue.id) return;
         return void perform(async () => {
-          moveMockupIssue(issue.id, status, beforeId);
+          await moveMockupIssue(issue.id, issue.version, status, beforeId);
           await loadIssues();
         });
       }
@@ -3868,7 +3741,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       ensureEntry();
       mountPanel();
       void load();
-      if (pollTimer === null) pollTimer = setInterval(() => { if (active) void perform(() => loadSurface({ background: true })); }, 3000);
+      if (pollTimer === null) pollTimer = setInterval(() => { if (active && !panel?.dataset.recovery) void perform(() => loadSurface({ background: true })); }, 3000);
     }
 
     function close(options = {}) {
@@ -3961,7 +3834,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         refreshPending = false;
         if (destroyed) return;
         refresh();
-        localizeOwnedTree(document.body);
       }, 50);
     }
 
@@ -4001,7 +3873,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       observer = new MutationObserver(scheduleRefresh);
       observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-theme", "aria-current", ATTRIBUTES.threadActive] });
       refresh();
-      localizeOwnedTree(document.body);
       void checkUpdateNotice();
       updateTimer = setInterval(checkUpdateNotice, 15000);
     }

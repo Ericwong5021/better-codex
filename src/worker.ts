@@ -41,6 +41,8 @@ export class IssueWorker {
   private timer: NodeJS.Timeout | null = null;
   private readonly runs = new Map<string, { child: ChildProcess; claim: ClaimedIssue }>();
   private readonly enrichments = new Map<string, ChildProcess>();
+  private readonly manualQueue = new Set<string>();
+  private readonly stoppingRuns = new Set<string>();
   private stopped = true;
 
   constructor(private readonly store: Store) {}
@@ -59,31 +61,39 @@ export class IssueWorker {
 
   startIssue(issueId: string) {
     if (this.stopped) return false;
+    if (Array.from(this.runs.values()).some(({ claim }) => claim.issue.id === issueId)) return false;
     const claim = this.store.claimNextIssue(issueId);
-    if (!claim) return false;
+    if (!claim) {
+      const issue = this.store.getIssue(issueId);
+      if (!issue || !this.store.isDispatchable(issue)) return false;
+      this.manualQueue.add(issueId);
+      this.wake();
+      return true;
+    }
     this.run(claim);
     return true;
   }
 
   stopIssue(issueId: string) {
+    this.manualQueue.delete(issueId);
     const active = Array.from(this.runs.values()).find(({ claim }) => claim.issue.id === issueId);
     if (!active) return Promise.resolve(false);
-    this.store.interruptRun(active.claim.runId, issueId);
+    this.stoppingRuns.add(active.claim.runId);
     active.child.kill("SIGTERM");
     return new Promise<boolean>(resolve => {
       let settled = false;
-      const finish = () => {
+      const finish = (stopped: boolean) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
-        resolve(true);
+        resolve(stopped);
       };
       const timer = setTimeout(() => {
         active.child.kill("SIGKILL");
-        setTimeout(finish, 1000).unref();
+        setTimeout(() => finish(false), 1000).unref();
       }, 5000);
       timer.unref();
-      active.child.once("close", finish);
+      active.child.once("close", () => finish(true));
     });
   }
 
@@ -91,11 +101,13 @@ export class IssueWorker {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+    this.manualQueue.clear();
     for (const { child, claim } of this.runs.values()) {
       this.store.interruptRun(claim.runId, claim.issue.id);
       child.kill("SIGTERM");
     }
     this.runs.clear();
+    this.stoppingRuns.clear();
     for (const child of this.enrichments.values()) child.kill("SIGTERM");
     this.enrichments.clear();
   }
@@ -285,6 +297,17 @@ export class IssueWorker {
 
   private async tick() {
     try {
+      for (const issueId of [...this.manualQueue]) {
+        const issue = this.store.getIssue(issueId);
+        if (!issue || !this.store.isDispatchable(issue)) {
+          this.manualQueue.delete(issueId);
+          continue;
+        }
+        const claim = this.store.claimNextIssue(issueId);
+        if (!claim) continue;
+        this.manualQueue.delete(issueId);
+        this.run(claim);
+      }
       // claimNextIssue enforces per-agent max_concurrency, so keep claiming
       // until every agent with pending work is at capacity.
       let claim: ClaimedIssue | null;
@@ -349,7 +372,11 @@ export class IssueWorker {
     child.once("close", (code, signal) => {
       lines.close();
       log.end();
-      if (!this.stopped) this.store.finishRun(claim.runId, claim.issue.id, code === 0, code === 0 ? undefined : `codex_exit_${code ?? signal ?? "unknown"}`);
+      const interrupted = this.stoppingRuns.delete(claim.runId);
+      if (!this.stopped) {
+        if (interrupted) this.store.interruptRun(claim.runId, claim.issue.id);
+        else this.store.finishRun(claim.runId, claim.issue.id, code === 0, code === 0 ? undefined : `codex_exit_${code ?? signal ?? "unknown"}`);
+      }
       this.runs.delete(claim.runId);
       this.wake();
     });

@@ -17,6 +17,7 @@ import { getIssueReplyState, hasActiveIssueReplies, startIssueReply, stopIssueRe
 import { join } from "node:path";
 import { normalizeSessionId, readConversationResult, sessionWorkspace } from "./session-transcript.js";
 import { IssueWorker } from "./worker.js";
+import { maxMockupBytes, readMockupState, replaceMockupState, resetMockupState, updateMockupState } from "./mockup.js";
 
 const accessToken = token();
 const mockupEnabled = !isSea() && process.argv.includes("--mockup");
@@ -49,12 +50,12 @@ function sendPreflight(response: ServerResponse) {
   response.end();
 }
 
-function readBody(request: IncomingMessage) {
+function readBody(request: IncomingMessage, limit = 1024 * 1024) {
   return new Promise<Record<string, unknown>>((resolve, reject) => {
     let source = "";
     request.on("data", (chunk) => {
       source += chunk;
-      if (source.length > 1024 * 1024) reject(new Error("body_too_large"));
+      if (source.length > limit) reject(new Error("body_too_large"));
     });
     request.on("end", () => {
       try {
@@ -66,6 +67,12 @@ function readBody(request: IncomingMessage) {
       }
     });
   });
+}
+
+function requireVersion(body: Record<string, unknown>, current: Record<string, unknown>) {
+  const version = Number(body.version);
+  if (!Number.isInteger(version) || version < 1) throw new Error("invalid_version");
+  if (version !== Number(current.version)) throw new Error("version_conflict");
 }
 
 function loopback(request: IncomingMessage) {
@@ -238,7 +245,7 @@ export function startServer() {
   const cleanup = () => {
     if (cleaned) return;
     cleaned = true;
-    stopIssueReplies();
+    stopIssueReplies(store);
     worker.stop();
     stopUpdateChecks();
     clearRuntimeState(identity.instanceId);
@@ -263,7 +270,175 @@ export function startServer() {
         const agentModelCatalog = await readModelCatalog();
         const agentModels = agentModelCatalog.map(model => model.id);
         const agentReasoningEfforts = [...new Set(agentModelCatalog.flatMap(model => model.supportedReasoningEfforts.map(effort => effort.value)))];
-        return sendJson(response, 200, { projects: store.listProjects(), agents: visibleAgentProfiles(), statuses: issueStatuses, priorities: issuePriorities, appearance: readCodexAppearance(), locale: readCodexLocale(), user: readCodexUserProfile(), agentModelCatalog, agentModels, agentReasoningEfforts, autoDispatch: store.getAutoDispatch(), mockup: mockupEnabled });
+        const mockup = mockupEnabled ? readMockupState() : null;
+        return sendJson(response, 200, { projects: mockup ? mockup.projects : store.listProjects(), agents: mockup ? mockup.agents : visibleAgentProfiles(), statuses: issueStatuses, priorities: issuePriorities, appearance: readCodexAppearance(), locale: readCodexLocale(), user: readCodexUserProfile(), agentModelCatalog, agentModels, agentReasoningEfforts, autoDispatch: mockup ? false : store.getAutoDispatch(), mockup: mockupEnabled });
+      }
+      if (mockupEnabled && url.pathname === "/api/mockup/state" && method === "GET") {
+        return sendJson(response, 200, readMockupState());
+      }
+      if (mockupEnabled && url.pathname === "/api/mockup/state" && method === "PUT") {
+        return sendJson(response, 200, replaceMockupState(await readBody(request, maxMockupBytes)));
+      }
+      if (mockupEnabled && url.pathname === "/api/mockup/reset" && method === "POST") {
+        return sendJson(response, 200, resetMockupState());
+      }
+      if (mockupEnabled && url.pathname === "/api/settings/auto-dispatch" && ["GET", "PATCH"].includes(method)) {
+        return sendJson(response, 200, { enabled: false });
+      }
+      if (mockupEnabled && url.pathname === "/api/agents" && method === "GET") {
+        return sendJson(response, 200, readMockupState().agents);
+      }
+      if (mockupEnabled && url.pathname === "/api/agents" && method === "POST") {
+        const body = await readBody(request);
+        const agentId = `mockup-agent-${randomUUID()}`;
+        const updated = updateMockupState(state => {
+          state.agents.push({ ...body, id: agentId, role: "custom", is_default: false, version: 1 });
+        }).state;
+        return sendJson(response, 201, updated.agents.find(agent => agent.id === agentId));
+      }
+      if (mockupEnabled && url.pathname === "/api/agents/default" && method === "PATCH") {
+        const body = await readBody(request);
+        const updated = updateMockupState(state => {
+          requireVersion(body, state.agents[0]);
+          state.agents[0] = { ...state.agents[0], ...body, id: "", role: "codex", is_default: true, version: Number(state.agents[0].version) + 1 };
+        }).state;
+        return sendJson(response, 200, updated.agents[0]);
+      }
+      if (mockupEnabled && path[0] === "api" && path[1] === "agents" && path[2] && path.length === 3) {
+        const agentId = decodeURIComponent(path[2]);
+        if (method === "GET") {
+          const agent = readMockupState().agents.find(item => item.id === agentId && item.is_default !== true);
+          return agent ? sendJson(response, 200, agent) : sendJson(response, 404, { error: "agent_not_found" });
+        }
+        if (method === "DELETE") {
+          const body = await readBody(request);
+          updateMockupState(state => {
+            const index = state.agents.findIndex(agent => agent.id === agentId && agent.is_default !== true);
+            if (index < 0) throw new Error("agent_not_found");
+            requireVersion(body, state.agents[index]);
+            state.agents.splice(index, 1);
+            state.issues = state.issues.map(issue => issue.agent_id === agentId ? { ...issue, agent_enabled: false, agent_id: null, mockup_agent_name: "", user_assigned: false, needs_attention: false, pending_actor: "user", version: Number(issue.version) + 1, updated_at: new Date().toISOString() } : issue);
+          });
+          return sendJson(response, 200, { ok: true });
+        }
+        if (method === "PATCH") {
+          const body = await readBody(request);
+          const updated = updateMockupState(state => {
+            const index = state.agents.findIndex(agent => agent.id === agentId && agent.is_default !== true);
+            if (index < 0) throw new Error("agent_not_found");
+            requireVersion(body, state.agents[index]);
+            state.agents[index] = { ...state.agents[index], ...body, id: agentId, is_default: false, version: Number(state.agents[index].version) + 1 };
+          }).state;
+          return sendJson(response, 200, updated.agents.find(agent => agent.id === agentId));
+        }
+      }
+      if (mockupEnabled && url.pathname === "/api/issues" && method === "GET") {
+        const query = String(url.searchParams.get("search") || "").trim().toLowerCase();
+        const issues = readMockupState().issues.filter(issue => !query || [issue.identifier, issue.title, issue.description, ...(Array.isArray(issue.labels) ? issue.labels : [])].join(" ").toLowerCase().includes(query));
+        return sendJson(response, 200, issues);
+      }
+      if (mockupEnabled && url.pathname === "/api/issues" && method === "POST") {
+        const body = await readBody(request);
+        let issueId = "";
+        const updated = updateMockupState(state => {
+          const nextNumber = state.issues.reduce((max, issue) => Math.max(max, Number(String(issue.identifier).replace(/\D/g, "")) || 0), 19) + 1;
+          const now = new Date().toISOString();
+          issueId = `mockup-${nextNumber}`;
+          state.issues.push({
+            ...body,
+            id: issueId,
+            identifier: `BET-${nextNumber}`,
+            project_id: String(body.project_id || state.project.id),
+            sort_order: Number.isFinite(Number(body.sort_order)) ? Number(body.sort_order) : (state.issues.length + 1) * 1000,
+            created_at: now,
+            updated_at: now,
+            version: 1,
+          });
+        }).state;
+        return sendJson(response, 201, updated.issues.find(issue => issue.id === issueId));
+      }
+      if (mockupEnabled && path[0] === "api" && path[1] === "issues" && path[2]) {
+        const issueId = decodeURIComponent(path[2]);
+        if (method === "GET" && path.length === 3) {
+          const issue = readMockupState().issues.find(item => item.id === issueId || item.identifier === issueId);
+          return issue ? sendJson(response, 200, issue) : sendJson(response, 404, { error: "issue_not_found" });
+        }
+        if (method === "GET" && path[3] === "conversation") {
+          const issue = readMockupState().issues.find(item => item.id === issueId || item.identifier === issueId);
+          return issue ? sendJson(response, 200, { messages: [] }) : sendJson(response, 404, { error: "issue_not_found" });
+        }
+        if (method === "POST" && path[3] === "archive") {
+          const body = await readBody(request);
+          let removed: Record<string, unknown> | undefined;
+          updateMockupState(state => {
+            const index = state.issues.findIndex(issue => issue.id === issueId || issue.identifier === issueId);
+            if (index < 0) throw new Error("issue_not_found");
+            requireVersion(body, state.issues[index]);
+            [removed] = state.issues.splice(index, 1);
+          });
+          return sendJson(response, 200, { ...removed, archived_at: new Date().toISOString() });
+        }
+        if (method === "PATCH" && path.length === 3) {
+          const body = await readBody(request);
+          const updated = updateMockupState(state => {
+            const index = state.issues.findIndex(issue => issue.id === issueId || issue.identifier === issueId);
+            if (index < 0) throw new Error("issue_not_found");
+            const current = state.issues[index];
+            requireVersion(body, current);
+            const statusChanged = body.status !== undefined && body.status !== current.status;
+            const sortOrder = statusChanged && body.sort_order === undefined
+              ? state.issues.reduce((max, issue) => issue.status === body.status ? Math.max(max, Number(issue.sort_order)) : max, 0) + 1000
+              : body.sort_order === undefined ? current.sort_order : body.sort_order;
+            let agentEnabled = body.agent_enabled === undefined ? Boolean(current.agent_enabled) : body.agent_enabled === true;
+            let userAssigned = body.user_assigned === undefined ? Boolean(current.user_assigned) : body.user_assigned === true;
+            let agentId = body.agent_id === undefined ? current.agent_id : body.agent_id || null;
+            if (userAssigned) {
+              agentEnabled = false;
+              agentId = null;
+            } else if (agentEnabled) {
+              userAssigned = false;
+            } else {
+              agentId = null;
+            }
+            state.issues[index] = {
+              ...current,
+              ...body,
+              id: current.id,
+              identifier: current.identifier,
+              project_id: body.project_id === undefined ? current.project_id : body.project_id,
+              sort_order: sortOrder,
+              agent_enabled: agentEnabled,
+              agent_id: agentId,
+              user_assigned: userAssigned,
+              version: Number(current.version) + 1,
+              updated_at: new Date().toISOString(),
+            };
+          }).state;
+          return sendJson(response, 200, updated.issues.find(issue => issue.id === issueId || issue.identifier === issueId));
+        }
+        if (method === "POST" && path[3] === "move") {
+          const body = await readBody(request);
+          const status = asStatus(body.status);
+          const beforeId = cleanString(body.before_id, 200);
+          const updated = updateMockupState(state => {
+            const index = state.issues.findIndex(issue => issue.id === issueId || issue.identifier === issueId);
+            if (index < 0) throw new Error("issue_not_found");
+            requireVersion(body, state.issues[index]);
+            const [moving] = state.issues.splice(index, 1);
+            moving.status = status;
+            moving.version = Number(moving.version) + 1;
+            moving.updated_at = new Date().toISOString();
+            const targetIndex = beforeId ? state.issues.findIndex(issue => issue.id === beforeId && issue.status === status) : -1;
+            if (targetIndex >= 0) state.issues.splice(targetIndex, 0, moving);
+            else {
+              const lastStatusIndex = state.issues.reduce((last, issue, issueIndex) => issue.status === status ? issueIndex : last, -1);
+              state.issues.splice(lastStatusIndex + 1, 0, moving);
+            }
+            state.issues.forEach((issue, issueIndex) => { issue.sort_order = (issueIndex + 1) * 1000; });
+          }).state;
+          return sendJson(response, 200, updated.issues.find(issue => issue.id === issueId || issue.identifier === issueId));
+        }
+        return sendJson(response, 400, { error: "mockup_action_not_supported" });
       }
       if (url.pathname === "/api/settings/auto-dispatch" && method === "GET") {
         return sendJson(response, 200, { enabled: store.getAutoDispatch() });
@@ -404,7 +579,7 @@ export function startServer() {
         });
         return sendJson(response, 200, issues.map(issue => ({
           ...issue,
-          reply_status: getIssueReplyState(issue.id).status,
+          reply_status: getIssueReplyState(store, issue.id).status,
         })));
       }
       if (url.pathname === "/api/issues" && method === "POST") {
@@ -444,7 +619,7 @@ export function startServer() {
       if (path[0] === "api" && path[1] === "issues" && path[2]) {
         const issue = store.getIssue(decodeURIComponent(path[2]));
         if (!issue) return sendJson(response, 404, { error: "issue_not_found" });
-        if (method === "GET" && path.length === 3) return sendJson(response, 200, { ...issue, reply_status: getIssueReplyState(issue.id).status });
+        if (method === "GET" && path.length === 3) return sendJson(response, 200, { ...issue, reply_status: getIssueReplyState(store, issue.id).status });
         if (method === "PATCH" && path.length === 3) {
           const body = await readBody(request);
           const version = Number(body.version);
@@ -457,8 +632,15 @@ export function startServer() {
           const body = await readBody(request);
           const version = Number(body.version);
           if (!Number.isInteger(version) || version < 1) throw new Error("invalid_version");
+          const patch = parseIssuePatch(body);
+          const nextStatus = patch.status || issue.status;
+          if (["backlog", "done", "cancelled"].includes(String(nextStatus))) throw new Error("issue_not_startable");
+          if (issue.active_run_status === "claimed" || issue.active_run_status === "running") throw new Error("issue_execution_running");
+          const nextProject = store.getProject(String(patch.project_id || issue.project_id));
+          const nextWorkspace = String(patch.workspace_path || issue.workspace_path || nextProject?.workspace_path || "");
+          if (!nextWorkspace) throw new Error("workspace_required");
           const updated = store.updateIssue(issue.id, version, {
-            ...parseIssuePatch(body),
+            ...patch,
             agent_enabled: true,
             user_assigned: false,
             agent_id: cleanString(body.agent_id, 200) || null,
@@ -469,7 +651,8 @@ export function startServer() {
           return sendJson(response, 202, store.getIssue(updated.id));
         }
         if (method === "POST" && path[3] === "stop" && path.length === 4) {
-          await worker.stopIssue(issue.id);
+          const stopped = await worker.stopIssue(issue.id);
+          if (!stopped && store.getIssue(issue.id)?.active_run_status) throw new Error("issue_stop_timeout");
           return sendJson(response, 200, store.getIssue(issue.id));
         }
         if (method === "POST" && path[3] === "archive") {
@@ -494,24 +677,38 @@ export function startServer() {
           return sendJson(response, 200, {
             ...conversation,
             issue_id: issue.id,
-            reply: getIssueReplyState(issue.id),
+            reply: getIssueReplyState(store, issue.id),
             user: readCodexUserProfile(),
           });
         }
         if (method === "POST" && path[3] === "reply" && path.length === 4) {
           if (updateInstallInProgress) throw new Error("update_in_progress");
           if (issue.active_run_status === "claimed" || issue.active_run_status === "running") throw new Error("issue_execution_running");
+          const body = await readBody(request);
+          const requestId = cleanString(body.request_id, 200) || randomUUID();
+          const message = cleanString(body.message, 100000).trim();
+          if (!message) throw new Error("message_required");
           if (!issue.run_thread_id && !store.canAutoStartFromUserMessage(issue)) {
             throw new Error(store.getAutoDispatch() ? "backlog_reply_blocked" : "manual_start_required");
           }
-          const body = await readBody(request);
+          if (!issue.run_thread_id) {
+            const description = issue.description.trim();
+            const updated = store.updateIssue(issue.id, issue.version, {
+              description: description.endsWith(message) ? description : [description, message].filter(Boolean).join("\n\n"),
+              agent_enabled: true,
+              pending_actor: "agent",
+              needs_attention: true,
+            });
+            if (!worker.startIssue(updated.id)) throw new Error("issue_not_started");
+            return sendJson(response, 202, { issue_id: issue.id, request_id: requestId, status: "running", message, initial_run: true });
+          }
           const threadId = issue.run_thread_id || "";
-          const reply = startIssueReply({
+          const reply = startIssueReply(store, {
             issueId: issue.id,
-            requestId: cleanString(body.request_id, 200) || randomUUID(),
+            requestId,
             threadId,
             workspacePath: issue.workspace_path,
-            message: cleanString(body.message, 100000),
+            message,
             agentId: issue.agent_id,
             sandboxMode: sandboxModeForAgent(issue.agent_id),
           });

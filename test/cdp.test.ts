@@ -29,9 +29,10 @@ test("injector does not open a second debugger against already attached targets"
   assert.match(source, /if \(options\.trustIds\?\.has\(target\.id\)\)/);
 });
 
-test("bridge allows auto-dispatch settings updates", () => {
+test("bridge allows settings and mockup updates", () => {
   assert.match(source, /settings\\\/auto-dispatch/);
-  assert.match(source, /\["GET", "POST", "PATCH", "DELETE"\]/);
+  assert.match(source, /mockup\\\/\(\?:state\|reset\)/);
+  assert.match(source, /\["GET", "POST", "PUT", "PATCH", "DELETE"\]/);
 });
 
 test("thread navigation opens a sidebar row or falls back to the native route", () => {

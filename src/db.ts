@@ -42,6 +42,17 @@ export type Project = {
 
 export type PendingActor = "user" | "agent";
 export type EnrichmentStatus = "pending" | "failed" | null;
+export type IssueReplyStatus = "idle" | "running" | "succeeded" | "failed" | "interrupted";
+
+export type IssueReplyState = {
+  issue_id: string;
+  request_id?: string;
+  status: IssueReplyStatus;
+  message: string;
+  error?: string;
+  started_at?: string;
+  finished_at?: string;
+};
 
 export type Issue = {
   id: string;
@@ -197,6 +208,7 @@ export class Store {
     this.ensureAgentProfileTable();
     this.ensureAgentAvatarTable();
     this.ensureRunTable();
+    this.ensureIssueReplyTable();
     this.ensureSettingsTable();
     this.ensureDispatchColumns();
     this.ensureEnrichmentColumn();
@@ -393,6 +405,22 @@ export class Store {
     `);
   }
 
+  private ensureIssueReplyTable() {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS issue_replies (
+        issue_id TEXT PRIMARY KEY REFERENCES issues(id),
+        request_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        message TEXT NOT NULL,
+        error TEXT,
+        started_at TEXT NOT NULL,
+        finished_at TEXT
+      );
+    `);
+    const timestamp = now();
+    this.db.prepare("UPDATE issue_replies SET status = 'interrupted', error = 'runtime_restarted', finished_at = ? WHERE status = 'running'").run(timestamp);
+  }
+
   private upgradeLegacyProjects() {
     const columns = new Set((this.db.prepare("PRAGMA table_info(projects)").all() as Array<{ name: string }>).map((item) => item.name));
     for (const [name, definition] of [
@@ -471,7 +499,7 @@ export class Store {
   }
 
   canAutoStartFromUserMessage(issue: Issue) {
-    return Boolean(this.getAutoDispatch() && !issue.archived_at && issue.status !== "backlog");
+    return Boolean(this.getAutoDispatch() && !issue.archived_at && !["backlog", "done", "cancelled"].includes(issue.status));
   }
 
   listProjects() {
@@ -614,7 +642,7 @@ export class Store {
     }
     const rows = this.db.prepare(`
       SELECT issues.*, active_run.status AS active_run_status, active_run.started_at AS active_run_started_at,
-        latest_run.status AS latest_run_status, latest_run.thread_id AS run_thread_id
+        latest_run.status AS latest_run_status, latest_thread.thread_id AS run_thread_id
       FROM issues
       LEFT JOIN issue_runs AS active_run
         ON active_run.id = (
@@ -622,7 +650,7 @@ export class Store {
           FROM issue_runs
           WHERE issue_runs.issue_id = issues.id
             AND issue_runs.status IN ('claimed', 'running')
-          ORDER BY issue_runs.started_at DESC
+          ORDER BY issue_runs.started_at DESC, issue_runs.rowid DESC
           LIMIT 1
         )
       LEFT JOIN issue_runs AS latest_run
@@ -630,10 +658,18 @@ export class Store {
           SELECT issue_runs.id
           FROM issue_runs
           WHERE issue_runs.issue_id = issues.id
+          ORDER BY issue_runs.started_at DESC, issue_runs.rowid DESC
+          LIMIT 1
+        )
+      LEFT JOIN issue_runs AS latest_thread
+        ON latest_thread.id = (
+          SELECT issue_runs.id
+          FROM issue_runs
+          WHERE issue_runs.issue_id = issues.id
             AND issue_runs.thread_id IS NOT NULL
             AND issue_runs.thread_id NOT LIKE 'local:%'
             AND issue_runs.thread_id NOT LIKE 'cloud:%'
-          ORDER BY issue_runs.started_at DESC
+          ORDER BY issue_runs.started_at DESC, issue_runs.rowid DESC
           LIMIT 1
         )
       WHERE ${conditions.join(" AND ")}
@@ -650,7 +686,7 @@ export class Store {
           FROM issue_runs
           WHERE issue_runs.issue_id = issues.id
             AND issue_runs.status IN ('claimed', 'running')
-          ORDER BY issue_runs.started_at DESC
+          ORDER BY issue_runs.started_at DESC, issue_runs.rowid DESC
           LIMIT 1
         ) AS active_run_status,
         (
@@ -658,17 +694,14 @@ export class Store {
           FROM issue_runs
           WHERE issue_runs.issue_id = issues.id
             AND issue_runs.status IN ('claimed', 'running')
-          ORDER BY issue_runs.started_at DESC
+          ORDER BY issue_runs.started_at DESC, issue_runs.rowid DESC
           LIMIT 1
         ) AS active_run_started_at,
         (
           SELECT issue_runs.status
           FROM issue_runs
           WHERE issue_runs.issue_id = issues.id
-            AND issue_runs.thread_id IS NOT NULL
-            AND issue_runs.thread_id NOT LIKE 'local:%'
-            AND issue_runs.thread_id NOT LIKE 'cloud:%'
-          ORDER BY issue_runs.started_at DESC
+          ORDER BY issue_runs.started_at DESC, issue_runs.rowid DESC
           LIMIT 1
         ) AS latest_run_status,
         (
@@ -678,7 +711,7 @@ export class Store {
             AND issue_runs.thread_id IS NOT NULL
             AND issue_runs.thread_id NOT LIKE 'local:%'
             AND issue_runs.thread_id NOT LIKE 'cloud:%'
-          ORDER BY issue_runs.started_at DESC
+          ORDER BY issue_runs.started_at DESC, issue_runs.rowid DESC
           LIMIT 1
         ) AS run_thread_id
       FROM issues
@@ -700,8 +733,9 @@ export class Store {
     const agentEnabled = Boolean(input.agentEnabled) && !userAssigned;
     if (enrichmentStatus !== null && enrichmentStatus !== "pending" && enrichmentStatus !== "failed") throw new Error("invalid_enrichment_status");
     const status = enrichmentStatus === "pending" ? "backlog" : input.status ?? "todo";
-    const needsAttention = agentEnabled && status !== "backlog" && status !== "done" && status !== "cancelled" ? 1 : 0;
-    const pendingActor = agentEnabled ? "agent" : "user";
+    const userHandoff = status === "blocked" || status === "in_review";
+    const needsAttention = userHandoff ? 1 : agentEnabled && status !== "backlog" && status !== "done" && status !== "cancelled" ? 1 : 0;
+    const pendingActor = agentEnabled && !userHandoff && status !== "done" && status !== "cancelled" ? "agent" : "user";
     const id = randomUUID();
     const timestamp = now();
     this.db.exec("BEGIN IMMEDIATE");
@@ -753,6 +787,7 @@ export class Store {
   }
 
   updateIssue(id: string, version: number, patch: IssuePatch) {
+    const pendingActorProvided = patch.pending_actor !== undefined;
     if (!Number.isInteger(version) || version < 1) throw new Error("invalid_version");
     if (patch.title !== undefined) patch.title = cleanTitle(patch.title);
     if (patch.status !== undefined && !issueStatuses.includes(patch.status)) throw new Error("invalid_status");
@@ -783,6 +818,13 @@ export class Store {
       if (patch.agent_enabled === true) {
         patch.user_assigned = false;
         if (patch.pending_actor === undefined) patch.pending_actor = "agent";
+      }
+      if (patch.status === "done" || patch.status === "cancelled") {
+        patch.pending_actor = "user";
+        patch.needs_attention = false;
+      } else if ((patch.status === "blocked" || patch.status === "in_review") && !pendingActorProvided) {
+        patch.pending_actor = "user";
+        patch.needs_attention = true;
       }
       if (patch.needs_attention === undefined) {
         const nextStatus = patch.status ?? issue.status;
@@ -869,12 +911,13 @@ export class Store {
         this.db.prepare("UPDATE issue_runs SET status = 'interrupted', finished_at = ?, error = 'runtime_restarted' WHERE id = ?").run(timestamp, row.id);
         this.db.prepare(`
           UPDATE issues
-          SET status = CASE WHEN status = 'in_progress' THEN 'blocked' ELSE status END,
+          SET status = 'blocked',
               needs_attention = 1,
               pending_actor = 'user',
               version = version + 1,
               updated_at = ?
           WHERE id = ?
+            AND status = 'in_progress'
         `).run(timestamp, row.issue_id);
       }
       this.db.exec("COMMIT");
@@ -992,21 +1035,28 @@ export class Store {
     const timestamp = now();
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      this.db.prepare("UPDATE issue_runs SET status = ?, finished_at = ?, error = ? WHERE id = ? AND status IN ('claimed', 'running')")
-        .run(success ? "completed" : "failed", timestamp, error ?? null, runId);
+      const result = this.db.prepare("UPDATE issue_runs SET status = ?, finished_at = ?, error = ? WHERE id = ? AND issue_id = ? AND status IN ('claimed', 'running')")
+        .run(success ? "completed" : "failed", timestamp, error ?? null, runId, issueId);
       // Safety net only while the board was left mid-run. If the agent already
       // finalized via CLI (done / in_review / blocked / re-queued), keep that.
       // Failures hand back to the user so auto-dispatch cannot loop forever.
-      this.db.prepare(`
-        UPDATE issues
-        SET status = ?,
-            needs_attention = 1,
-            pending_actor = 'user',
-            version = version + 1,
-            updated_at = ?
-        WHERE id = ?
-          AND status = 'in_progress'
-      `).run(success ? "in_review" : "blocked", timestamp, issueId);
+      if (result.changes === 1) {
+        this.db.prepare(`
+          UPDATE issues
+          SET status = ?,
+              needs_attention = 1,
+              pending_actor = 'user',
+              version = version + 1,
+              updated_at = ?
+          WHERE id = ?
+            AND status = 'in_progress'
+            AND NOT EXISTS (
+              SELECT 1 FROM issue_runs
+              WHERE issue_runs.issue_id = issues.id
+                AND issue_runs.status IN ('claimed', 'running')
+            )
+        `).run(success ? "in_review" : "blocked", timestamp, issueId);
+      }
       this.db.exec("COMMIT");
     } catch (caught) {
       this.db.exec("ROLLBACK");
@@ -1018,20 +1068,51 @@ export class Store {
     const timestamp = now();
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      this.db.prepare("UPDATE issue_runs SET status = 'interrupted', finished_at = ?, error = 'runtime_stopped' WHERE id = ? AND status IN ('claimed', 'running')").run(timestamp, runId);
-      this.db.prepare(`
-        UPDATE issues
-        SET status = CASE WHEN status = 'in_progress' THEN 'blocked' ELSE status END,
-            needs_attention = 1,
-            pending_actor = 'user',
-            version = version + 1,
-            updated_at = ?
-        WHERE id = ?
-      `).run(timestamp, issueId);
+      const result = this.db.prepare("UPDATE issue_runs SET status = 'interrupted', finished_at = ?, error = 'runtime_stopped' WHERE id = ? AND issue_id = ? AND status IN ('claimed', 'running')").run(timestamp, runId, issueId);
+      if (result.changes === 1) {
+        this.db.prepare(`
+          UPDATE issues
+          SET status = CASE WHEN status = 'in_progress' THEN 'blocked' ELSE status END,
+              needs_attention = CASE WHEN status IN ('done', 'cancelled') THEN needs_attention ELSE 1 END,
+              pending_actor = CASE WHEN status IN ('done', 'cancelled') THEN pending_actor ELSE 'user' END,
+              version = version + 1,
+              updated_at = ?
+          WHERE id = ?
+        `).run(timestamp, issueId);
+      }
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
     }
+  }
+
+  getIssueReplyState(issueId: string): IssueReplyState {
+    const row = this.db.prepare("SELECT * FROM issue_replies WHERE issue_id = ?").get(issueId) as Record<string, unknown> | undefined;
+    if (!row) return { issue_id: issueId, status: "idle", message: "" };
+    return {
+      issue_id: String(row.issue_id),
+      request_id: String(row.request_id),
+      status: String(row.status) as IssueReplyStatus,
+      message: String(row.message),
+      ...(row.error ? { error: String(row.error) } : {}),
+      started_at: String(row.started_at),
+      ...(row.finished_at ? { finished_at: String(row.finished_at) } : {}),
+    };
+  }
+
+  setIssueReplyState(state: IssueReplyState) {
+    this.db.prepare(`
+      INSERT INTO issue_replies (issue_id, request_id, status, message, error, started_at, finished_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(issue_id) DO UPDATE SET
+        request_id = excluded.request_id,
+        status = excluded.status,
+        message = excluded.message,
+        error = excluded.error,
+        started_at = excluded.started_at,
+        finished_at = excluded.finished_at
+    `).run(state.issue_id, state.request_id || "", state.status, state.message, state.error || null, state.started_at || now(), state.finished_at || null);
+    return this.getIssueReplyState(state.issue_id);
   }
 }

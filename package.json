@@ -28,6 +28,7 @@
     "dist/locale.js",
     "dist/launch-integration.js",
     "dist/model-catalog.js",
+    "dist/mockup.js",
     "dist/runtime-state.js",
     "dist/server.js",
     "dist/service.js",

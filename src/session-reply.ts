@@ -3,7 +3,7 @@ import { createWriteStream, existsSync } from "node:fs";
 import { join } from "node:path";
 import { agentConfigProfileName } from "./agent-profiles.js";
 import { runLogPath } from "./config.js";
-import type { AgentSandboxMode } from "./db.js";
+import type { AgentSandboxMode, IssueReplyState, Store } from "./db.js";
 import { normalizeSessionId, sessionWorkspace } from "./session-transcript.js";
 
 function codexPath() {
@@ -13,22 +13,12 @@ function codexPath() {
   return existsSync(bundled) ? bundled : "codex";
 }
 
-export type IssueReplyState = {
-  issue_id: string;
-  request_id?: string;
-  status: "idle" | "running" | "succeeded" | "failed";
-  message: string;
-  error?: string;
-  started_at?: string;
-  finished_at?: string;
-};
-
 type ActiveReply = {
   state: IssueReplyState;
   child: ChildProcess;
 };
 
-const replies = new Map<string, ActiveReply | { state: IssueReplyState }>();
+const replies = new Map<string, ActiveReply>();
 
 function replyFailure(output: string, fallback: string) {
   const value = output.toLowerCase();
@@ -38,32 +28,29 @@ function replyFailure(output: string, fallback: string) {
   return fallback;
 }
 
-export function getIssueReplyState(issueId: string): IssueReplyState {
-  const current = replies.get(issueId);
-  if (!current) {
-    return { issue_id: issueId, status: "idle", message: "" };
-  }
-  return current.state;
+export function getIssueReplyState(store: Store, issueId: string): IssueReplyState {
+  return store.getIssueReplyState(issueId);
 }
 
 export function hasActiveIssueReplies() {
-  return [...replies.values()].some(current => "child" in current && current.state.status === "running");
+  return [...replies.values()].some(current => current.state.status === "running");
 }
 
-export function stopIssueReplies() {
+export function stopIssueReplies(store: Store) {
   const finishedAt = new Date().toISOString();
   for (const [issueId, current] of replies) {
-    if ("child" in current && current.state.status === "running") {
-      current.state.status = "failed";
+    if (current.state.status === "running") {
+      current.state.status = "interrupted";
       current.state.error = "runtime_stopped";
       current.state.finished_at = finishedAt;
       current.child.kill("SIGTERM");
-      replies.set(issueId, { state: current.state });
+      store.setIssueReplyState(current.state);
+      replies.delete(issueId);
     }
   }
 }
 
-export function startIssueReply(input: {
+export function startIssueReply(store: Store, input: {
   issueId: string;
   requestId: string;
   threadId: string;
@@ -73,9 +60,10 @@ export function startIssueReply(input: {
   sandboxMode: AgentSandboxMode;
 }) {
   const issueId = input.issueId;
+  const currentState = store.getIssueReplyState(issueId);
   const current = replies.get(issueId);
-  if (current?.state.request_id === input.requestId && current.state.status !== "failed") return current.state;
-  if (current && "child" in current && current.state.status === "running") {
+  if (currentState.request_id === input.requestId && currentState.status !== "failed" && currentState.status !== "interrupted") return currentState;
+  if (current?.state.status === "running") {
     throw new Error("reply_busy");
   }
 
@@ -116,6 +104,7 @@ export function startIssueReply(input: {
     message,
     started_at: startedAt,
   };
+  store.setIssueReplyState(state);
   const log = createWriteStream(join(runLogPath, `reply-${issueId}.log`), { flags: "a" });
   let failureOutput = "";
   const captureFailureOutput = (chunk: unknown) => {
@@ -144,14 +133,25 @@ export function startIssueReply(input: {
     log.write(chunk);
   });
   child.once("error", error => {
+    if (state.status === "interrupted") {
+      log.end();
+      replies.delete(issueId);
+      return;
+    }
     state.status = "failed";
     state.error = replyFailure(error.message, error.message);
     state.finished_at = new Date().toISOString();
     log.write(error.stack || error.message);
     log.end();
-    replies.set(issueId, { state });
+    store.setIssueReplyState(state);
+    replies.delete(issueId);
   });
   child.once("close", (code, signal) => {
+    if (state.status === "interrupted") {
+      log.end();
+      replies.delete(issueId);
+      return;
+    }
     if (state.status === "running") {
       if (code === 0) {
         state.status = "succeeded";
@@ -162,7 +162,8 @@ export function startIssueReply(input: {
       state.finished_at = new Date().toISOString();
     }
     log.end();
-    replies.set(issueId, { state });
+    store.setIssueReplyState(state);
+    replies.delete(issueId);
   });
 
   return state;
