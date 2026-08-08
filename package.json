@@ -41,6 +41,7 @@
   "scripts": {
     "build": "tsc && node scripts/refresh-local-install.mjs && node scripts/refresh-injector.mjs",
     "dev": "tsx src/cli.ts serve",
+    "dev:mockup": "node scripts/dev-mockup.mjs",
     "package:binary": "node scripts/package.mjs",
     "package:update-manifest": "node scripts/create-update-manifest.mjs release",
     "start": "node dist/cli.js serve",

@@ -116,17 +116,28 @@ function queryCatalog(executable: string) {
 }
 
 let cachedCatalog: { expiresAt: number; value: ModelCatalogEntry[] } | null = null;
+let catalogRefresh: Promise<void> | null = null;
+
+function refreshModelCatalog() {
+  if (catalogRefresh) return catalogRefresh;
+  const candidates = [...new Set([process.env.BETTER_CODEX_CODEX_PATH, desktopCodexCandidate(), "codex"].filter(Boolean) as string[])];
+  const refresh = (async () => {
+    for (const executable of candidates) {
+      try {
+        const value = await queryCatalog(executable);
+        cachedCatalog = { expiresAt: Date.now() + 5 * 60_000, value };
+        return;
+      } catch {}
+    }
+    cachedCatalog = { expiresAt: Date.now() + 30_000, value: fallbackCatalog };
+  })().finally(() => {
+    if (catalogRefresh === refresh) catalogRefresh = null;
+  });
+  catalogRefresh = refresh;
+  return refresh;
+}
 
 export async function readModelCatalog() {
-  if (cachedCatalog && cachedCatalog.expiresAt > Date.now()) return cachedCatalog.value;
-  const candidates = [...new Set([process.env.BETTER_CODEX_CODEX_PATH, desktopCodexCandidate(), "codex"].filter(Boolean) as string[])];
-  for (const executable of candidates) {
-    try {
-      const value = await queryCatalog(executable);
-      cachedCatalog = { expiresAt: Date.now() + 5 * 60_000, value };
-      return value;
-    } catch { /* try the next Codex installation */ }
-  }
-  cachedCatalog = { expiresAt: Date.now() + 30_000, value: fallbackCatalog };
-  return fallbackCatalog;
+  if (!cachedCatalog || cachedCatalog.expiresAt <= Date.now()) await refreshModelCatalog();
+  return cachedCatalog?.value ?? fallbackCatalog;
 }

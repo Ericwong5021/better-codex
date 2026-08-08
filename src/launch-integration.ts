@@ -26,10 +26,12 @@ type LaunchIntegrationState = {
   launcher: string;
   launcherArguments?: string[];
   appPath?: string;
+  ownershipToken?: string;
   shortcuts?: Array<WindowsOwnedShortcut | WindowsLegacyShortcut>;
 };
 
 const MAC_BUNDLE_ID = "com.better-codex.launcher";
+const MAC_OWNERSHIP_FILE = ".better-codex-owner";
 const WINDOWS_SHORTCUT_NAME = "Better Codex.lnk";
 
 function macLauncherPath() {
@@ -217,30 +219,46 @@ function writeWindowsAppIcon() {
   return path;
 }
 
-function assertOwnedMacApp(appPath: string) {
-  const contents = join(appPath, "Contents");
-  const info = join(contents, "Info.plist");
-  if (lstatSync(appPath).isSymbolicLink() || !existsSync(contents) || lstatSync(contents).isSymbolicLink() || !existsSync(info) || lstatSync(info).isSymbolicLink() || macBundleIdentifier(info) !== MAC_BUNDLE_ID) {
-    throw new Error("mac_launcher_path_occupied");
-  }
+function macLauncherScript(command: string[]) {
+  return `#!/bin/sh
+${command.map(shellSingleQuoted).join(" ")} launch >>${shellSingleQuoted(join(logPath, "launcher.log"))} 2>&1 &
+exit 0
+`;
 }
 
-function migrateLegacyMacLauncher(appPath: string) {
-  if (existsSync(appPath)) return;
+function assertOwnedMacApp(appPath: string, state: LaunchIntegrationState | null) {
+  const contents = join(appPath, "Contents");
+  const info = join(contents, "Info.plist");
+  const identified = existsSync(info) && !lstatSync(info).isSymbolicLink() && macBundleIdentifier(info) === MAC_BUNDLE_ID;
+  if (lstatSync(appPath).isSymbolicLink() || !existsSync(contents) || lstatSync(contents).isSymbolicLink() || !identified) {
+    throw new Error("mac_launcher_path_occupied");
+  }
+  if (state?.platform !== "darwin" || !state.appPath || resolve(state.appPath) !== resolve(appPath)) throw new Error("mac_launcher_path_occupied");
+  const marker = join(contents, "Resources", MAC_OWNERSHIP_FILE);
+  if (state.ownershipToken && existsSync(marker) && !lstatSync(marker).isSymbolicLink() && readFileSync(marker, "utf8") === state.ownershipToken) return;
+  const executable = join(contents, "MacOS", "better-codex-launcher");
+  if (!state.ownershipToken && existsSync(executable) && !lstatSync(executable).isSymbolicLink() && readFileSync(executable, "utf8") === macLauncherScript([state.launcher, ...(state.launcherArguments ?? [])])) return;
+  throw new Error("mac_launcher_path_occupied");
+}
+
+function migrateLegacyMacLauncher(appPath: string, previous: LaunchIntegrationState | null) {
+  if (existsSync(appPath)) return false;
   for (const legacyAppPath of legacyMacLauncherPaths()) {
     if (!existsSync(legacyAppPath)) continue;
-    assertOwnedMacApp(legacyAppPath);
+    assertOwnedMacApp(legacyAppPath, previous);
     renameSync(legacyAppPath, appPath);
-    return;
+    return true;
   }
+  return false;
 }
 
 function installMacLauncher(command: string[], previous: LaunchIntegrationState | null) {
   const appPath = macLauncherPath();
-  migrateLegacyMacLauncher(appPath);
-  if (existsSync(appPath)) assertOwnedMacApp(appPath);
+  const migrated = migrateLegacyMacLauncher(appPath, previous);
+  const ownedState = migrated && previous ? { ...previous, appPath } : previous;
+  if (existsSync(appPath)) assertOwnedMacApp(appPath, ownedState);
   const existingContents = join(appPath, "Contents");
-  const stableCommand = existsSync(appPath) && previous?.platform === "darwin"
+  const stableCommand = existsSync(appPath) && previous?.platform === "darwin" && resolve(previous.launcher) === resolve(command[0])
     ? [previous.launcher, ...(previous.launcherArguments ?? [])]
     : command;
   const [launcher, ...launcherArguments] = stableCommand;
@@ -248,6 +266,7 @@ function installMacLauncher(command: string[], previous: LaunchIntegrationState 
 ${stableCommand.map(shellSingleQuoted).join(" ")} launch >>${shellSingleQuoted(join(logPath, "launcher.log"))} 2>&1 &
 exit 0
 `;
+  const ownershipToken = ownedState?.ownershipToken ?? randomUUID();
   if (existsSync(appPath)) {
     const existingExecutable = join(existingContents, "MacOS", "better-codex-launcher");
     if (!existsSync(existingExecutable) || lstatSync(existingExecutable).isSymbolicLink()) {
@@ -255,13 +274,15 @@ exit 0
     }
     writeFileSync(existingExecutable, expectedScript, { mode: 0o755 });
     chmodSync(existingExecutable, 0o755);
-    writeMacAppIcon(join(existingContents, "Resources"));
+    const resources = join(existingContents, "Resources");
+    writeMacAppIcon(resources);
+    writeFileSync(join(resources, MAC_OWNERSHIP_FILE), ownershipToken, { mode: 0o600 });
     try {
       execFileSync("/usr/bin/touch", [appPath]);
       execFileSync("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister", ["-f", appPath], { stdio: "ignore" });
     } catch {
     }
-    return { platform: "darwin", launcher, launcherArguments, appPath } satisfies LaunchIntegrationState;
+    return { platform: "darwin", launcher, launcherArguments, appPath, ownershipToken } satisfies LaunchIntegrationState;
   }
   const temporaryApp = `${appPath}.tmp.${randomUUID()}`;
   const contents = join(temporaryApp, "Contents");
@@ -287,6 +308,7 @@ exit 0
     writeFileSync(executable, expectedScript);
     chmodSync(executable, 0o755);
     writeMacAppIcon(resources);
+    writeFileSync(join(resources, MAC_OWNERSHIP_FILE), ownershipToken, { mode: 0o600 });
     renameSync(temporaryApp, appPath);
   } catch (error) {
     rmSync(temporaryApp, { recursive: true, force: true });
@@ -297,7 +319,7 @@ exit 0
     execFileSync("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister", ["-f", appPath], { stdio: "ignore" });
   } catch {
   }
-  return { platform: "darwin", launcher, launcherArguments, appPath } satisfies LaunchIntegrationState;
+  return { platform: "darwin", launcher, launcherArguments, appPath, ownershipToken } satisfies LaunchIntegrationState;
 }
 
 function restoreLegacyWindowsShortcuts(state: LaunchIntegrationState) {
@@ -521,9 +543,8 @@ export function uninstallLaunchIntegration() {
   }
   if (state.platform === "darwin" && state.appPath && process.platform === "darwin") {
     const appPath = state.appPath;
-    const contents = join(appPath, "Contents");
-    const info = join(contents, "Info.plist");
-    if (existsSync(appPath) && !lstatSync(appPath).isSymbolicLink() && existsSync(contents) && !lstatSync(contents).isSymbolicLink() && existsSync(info) && !lstatSync(info).isSymbolicLink() && macBundleIdentifier(info) === MAC_BUNDLE_ID) {
+    if (existsSync(appPath)) {
+      assertOwnedMacApp(appPath, state);
       rmSync(appPath, { recursive: true, force: true });
       removed = appPath;
     }
@@ -542,8 +563,12 @@ export function launchIntegrationStatus() {
     const shortcuts = windowsShortcutStatus(state);
     return { installed: shortcuts.healthy > 0, ...state, shortcutCount: state.shortcuts?.length ?? 0, ...shortcuts };
   }
-  const installed = state.platform === "darwin"
-    ? Boolean(state.appPath && existsSync(state.appPath))
-    : false;
+  let installed = false;
+  if (state.platform === "darwin" && state.appPath && existsSync(state.appPath)) {
+    try {
+      assertOwnedMacApp(state.appPath, state);
+      installed = true;
+    } catch {}
+  }
   return { installed, ...state, shortcutCount: state.shortcuts?.length ?? undefined };
 }
