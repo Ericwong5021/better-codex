@@ -271,7 +271,7 @@ export function startServer() {
         const agentModels = agentModelCatalog.map(model => model.id);
         const agentReasoningEfforts = [...new Set(agentModelCatalog.flatMap(model => model.supportedReasoningEfforts.map(effort => effort.value)))];
         const mockup = mockupEnabled ? readMockupState() : null;
-        return sendJson(response, 200, { projects: mockup ? mockup.projects : store.listProjects(), agents: mockup ? mockup.agents : visibleAgentProfiles(), statuses: issueStatuses, priorities: issuePriorities, appearance: readCodexAppearance(), locale: readCodexLocale(), user: readCodexUserProfile(), agentModelCatalog, agentModels, agentReasoningEfforts, autoDispatch: mockup ? mockup.auto_dispatch : store.getAutoDispatch(), schedulerModel: mockup ? mockup.scheduler_model : store.getSchedulerModel(), mockup: mockupEnabled });
+        return sendJson(response, 200, { projects: mockup ? mockup.projects : store.listProjects(), agents: mockup ? mockup.agents : visibleAgentProfiles(), statuses: issueStatuses, priorities: issuePriorities, appearance: readCodexAppearance(), locale: readCodexLocale(), user: readCodexUserProfile(), agentModelCatalog, agentModels, agentReasoningEfforts, autoDispatch: mockup ? mockup.auto_dispatch : store.getAutoDispatch(), schedulerModel: mockup ? mockup.scheduler_model : store.getSchedulerModel(defaultAgentProfile().model), schedulerReasoningEffort: mockup ? mockup.scheduler_reasoning_effort : store.getSchedulerReasoningEffort(), mockup: mockupEnabled });
       }
       if (mockupEnabled && url.pathname === "/api/mockup/state" && method === "GET") {
         return sendJson(response, 200, readMockupState());
@@ -290,13 +290,31 @@ export function startServer() {
         return sendJson(response, 200, { enabled: updated.auto_dispatch });
       }
       if (mockupEnabled && url.pathname === "/api/settings/scheduler-model" && ["GET", "PATCH"].includes(method)) {
-        if (method === "GET") return sendJson(response, 200, { model: readMockupState().scheduler_model });
+        if (method === "GET") {
+          const state = readMockupState();
+          return sendJson(response, 200, { model: state.scheduler_model, reasoning_effort: state.scheduler_reasoning_effort });
+        }
         const body = await readBody(request);
         const model = cleanString(body.model, 200);
         const catalog = await readModelCatalog();
-        if (!catalog.some(item => item.id === model)) throw new Error("invalid_model");
-        const updated = updateMockupState(state => { state.scheduler_model = model; }).state;
-        return sendJson(response, 200, { model: updated.scheduler_model });
+        const selected = catalog.find(item => item.id === model);
+        if (!selected) throw new Error("invalid_model");
+        const updated = updateMockupState(state => {
+          state.scheduler_model = model;
+          if (!selected.supportedReasoningEfforts.some(item => item.value === state.scheduler_reasoning_effort)) state.scheduler_reasoning_effort = selected.defaultReasoningEffort;
+        }).state;
+        return sendJson(response, 200, { model: updated.scheduler_model, reasoning_effort: updated.scheduler_reasoning_effort });
+      }
+      if (mockupEnabled && url.pathname === "/api/settings/scheduler-reasoning-effort" && ["GET", "PATCH"].includes(method)) {
+        const state = readMockupState();
+        if (method === "GET") return sendJson(response, 200, { reasoning_effort: state.scheduler_reasoning_effort });
+        const body = await readBody(request);
+        const effort = cleanString(body.reasoning_effort, 20);
+        const catalog = await readModelCatalog();
+        const model = catalog.find(item => item.id === state.scheduler_model);
+        if (!model?.supportedReasoningEfforts.some(item => item.value === effort)) throw new Error("invalid_scheduler_reasoning_effort");
+        const updated = updateMockupState(next => { next.scheduler_reasoning_effort = effort; }).state;
+        return sendJson(response, 200, { reasoning_effort: updated.scheduler_reasoning_effort });
       }
       if (mockupEnabled && url.pathname === "/api/agents" && method === "GET") {
         return sendJson(response, 200, readMockupState().agents);
@@ -532,14 +550,29 @@ export function startServer() {
         return sendJson(response, 200, { enabled });
       }
       if (url.pathname === "/api/settings/scheduler-model" && method === "GET") {
-        return sendJson(response, 200, { model: store.getSchedulerModel() });
+        return sendJson(response, 200, { model: store.getSchedulerModel(defaultAgentProfile().model), reasoning_effort: store.getSchedulerReasoningEffort() });
       }
       if (url.pathname === "/api/settings/scheduler-model" && method === "PATCH") {
         const body = await readBody(request);
         const model = cleanString(body.model, 200);
         const catalog = await readModelCatalog();
-        if (!catalog.some(item => item.id === model)) throw new Error("invalid_model");
-        return sendJson(response, 200, { model: store.setSchedulerModel(model) });
+        const selected = catalog.find(item => item.id === model);
+        if (!selected) throw new Error("invalid_model");
+        store.setSchedulerModel(model);
+        const currentEffort = store.getSchedulerReasoningEffort();
+        const reasoningEffort = selected.supportedReasoningEfforts.some(item => item.value === currentEffort) ? currentEffort : store.setSchedulerReasoningEffort(selected.defaultReasoningEffort);
+        return sendJson(response, 200, { model: store.getSchedulerModel(defaultAgentProfile().model), reasoning_effort: reasoningEffort });
+      }
+      if (url.pathname === "/api/settings/scheduler-reasoning-effort" && method === "GET") {
+        return sendJson(response, 200, { reasoning_effort: store.getSchedulerReasoningEffort() });
+      }
+      if (url.pathname === "/api/settings/scheduler-reasoning-effort" && method === "PATCH") {
+        const body = await readBody(request);
+        const effort = cleanString(body.reasoning_effort, 20);
+        const catalog = await readModelCatalog();
+        const model = catalog.find(item => item.id === store.getSchedulerModel(defaultAgentProfile().model));
+        if (!model?.supportedReasoningEfforts.some(item => item.value === effort)) throw new Error("invalid_scheduler_reasoning_effort");
+        return sendJson(response, 200, { reasoning_effort: store.setSchedulerReasoningEffort(effort) });
       }
       if (url.pathname === "/api/update" && method === "GET") return sendJson(response, 200, getGatewayUpdateState());
       if (url.pathname === "/api/update/check" && method === "POST") return sendJson(response, 200, await checkGatewayUpdate());

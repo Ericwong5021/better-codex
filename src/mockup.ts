@@ -17,6 +17,7 @@ export type MockupState = {
   revision: number;
   auto_dispatch: boolean;
   scheduler_model: string;
+  scheduler_reasoning_effort: string;
   project: MockupRecord;
   projects: MockupRecord[];
   agents: MockupRecord[];
@@ -95,6 +96,7 @@ export function defaultMockupState(): MockupState {
     revision: 1,
     auto_dispatch: false,
     scheduler_model: "gpt-5.6-sol",
+    scheduler_reasoning_effort: "high",
     project,
     projects: [project],
     agents,
@@ -191,7 +193,8 @@ export function normalizeMockupState(value: unknown): MockupState {
   if (new Set(agentIds).size !== agentIds.length) throw new Error("invalid_mockup_data");
   const issues = source.issues.map(normalizeIssue);
   const schedulerModel = String(source.scheduler_model || "gpt-5.6-sol").trim();
-  if (!schedulerModel || schedulerModel.length > 200 || schedulerModel.includes("\0")) throw new Error("invalid_mockup_data");
+  const schedulerReasoningEffort = String(source.scheduler_reasoning_effort || "high").trim();
+  if (!schedulerModel || schedulerModel.length > 200 || schedulerModel.includes("\0") || !schedulerReasoningEffort || schedulerReasoningEffort.length > 20 || schedulerReasoningEffort.includes("\0")) throw new Error("invalid_mockup_data");
   const projectSource = Array.isArray(source.projects) && source.projects.length ? source.projects : [source.project || {}];
   const projects = projectSource.map((value, index) => {
     const item = asRecord(value);
@@ -222,6 +225,7 @@ export function normalizeMockupState(value: unknown): MockupState {
     revision: Number.isInteger(source.revision) && Number(source.revision) > 0 ? source.revision as number : 1,
     auto_dispatch: source.auto_dispatch === true,
     scheduler_model: schedulerModel,
+    scheduler_reasoning_effort: schedulerReasoningEffort,
     project: projects[primaryIndex],
     projects,
     agents,

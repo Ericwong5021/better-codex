@@ -7,6 +7,7 @@ import { databasePath } from "./config.js";
 export const issueStatuses = ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"] as const;
 export const issuePriorities = ["none", "low", "medium", "high", "urgent"] as const;
 const defaultSchedulerModel = "gpt-5.6-sol";
+const defaultSchedulerReasoningEffort = "high";
 
 export type IssueStatus = typeof issueStatuses[number];
 export type IssuePriority = typeof issuePriorities[number];
@@ -501,10 +502,11 @@ export class Store {
     return this.getAutoDispatch();
   }
 
-  getSchedulerModel() {
+  getSchedulerModel(defaultModel = "") {
     const row = this.db.prepare("SELECT value FROM settings WHERE key = 'scheduler_model'").get() as { value: string } | undefined;
     const value = row?.value.trim() || "";
-    return value && value.length <= 200 && !value.includes("\0") ? value : defaultSchedulerModel;
+    const configured = defaultModel.trim();
+    return value && value.length <= 200 && !value.includes("\0") ? value : configured && configured !== "默认模型" && configured.length <= 200 && !configured.includes("\0") ? configured : defaultSchedulerModel;
   }
 
   setSchedulerModel(model: string) {
@@ -515,6 +517,22 @@ export class Store {
       ON CONFLICT(key) DO UPDATE SET value = excluded.value
     `).run(value);
     return this.getSchedulerModel();
+  }
+
+  getSchedulerReasoningEffort() {
+    const row = this.db.prepare("SELECT value FROM settings WHERE key = 'scheduler_reasoning_effort'").get() as { value: string } | undefined;
+    const value = row?.value.trim() || "";
+    return value && value.length <= 20 && !value.includes("\0") ? value : defaultSchedulerReasoningEffort;
+  }
+
+  setSchedulerReasoningEffort(effort: string) {
+    const value = effort.trim();
+    if (!value || value.length > 20 || value.includes("\0")) throw new Error("invalid_scheduler_reasoning_effort");
+    this.db.prepare(`
+      INSERT INTO settings (key, value) VALUES ('scheduler_reasoning_effort', ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `).run(value);
+    return this.getSchedulerReasoningEffort();
   }
 
   getDefaultAgentMaxConcurrency() {
