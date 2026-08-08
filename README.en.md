@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  A task board and Agent system with two dedicated entries in the Codex Desktop sidebar. Local-first, one-command install.
+  A native task board and multi-Agent collaboration system that runs inside the Codex app. Local-first, one-command install.
 </p>
 
 <p align="center">
@@ -33,24 +33,33 @@
 
 If you use Codex heavily, some of this probably sounds familiar:
 
-- **Your session list is a graveyard.** Dozens (hundreds?) of conversations, all titled roughly the same, none of them grouped by what you were actually working on. Finding "that thread where we debugged the auth flow" means scrolling and guessing.
-- **One model config rules everything.** You bump the reasoning level for a hard refactor, and now every new session pays for it. You tune the model for quick Q&A, and your next deep debugging session starts underpowered. There's one global dial, and every task fights over it.
-- **Ideas have nowhere to live.** Mid-conversation, you think of three more things worth doing. Codex gives you no place to put them, so they end up in a notes app, a TODO comment, or nowhere. The work you *meant* to do quietly evaporates.
-- **Codex is conversation-shaped, but your work isn't.** Real work is a project that spans days and many threads. Codex hands you a chat log and wishes you luck.
+- **Your session list is a graveyard.**<br>
+  Dozens (hundreds?) of conversations, all titled roughly the same, none of them grouped by what you were actually working on. Finding "that thread where we debugged the auth flow" means scrolling and guessing.
+
+- **One model config rules everything.**<br>
+  You bump the reasoning level for a hard refactor, and now every new session pays for it. You tune the model for quick Q&A, and your next deep debugging session starts underpowered. There's one global dial, and every task fights over it.
+
+- **Ideas have nowhere to live.**<br>
+  Mid-conversation, you think of three more things worth doing. Codex gives you no place to put them, so they end up in a notes app, a TODO comment, or nowhere. The work you *meant* to do quietly evaporates.
+
+- **Codex is conversation-shaped, but your work isn't.**<br>
+  Real work is a project that spans days and many threads. Codex hands you a chat log and wishes you luck.
 
 None of this is the model's fault. The model is great. What's missing is a **work layer** on top of it. So we built a better Codex, literally Better Codex.
 
 ## What you get
 
-Better Codex extends the native Codex Desktop app. The sidebar gives you two dedicated entries: `Task board` for organizing and running work, and `Agents` for creating and managing Agent profiles. Everything lives *inside* Codex, with the same window, same look, and near-native feel. No separate web dashboard, no account, no data leaving your machine.
+**Find any conversation again.**<br>
+Turn conversations into tasks and organize them by project, status, and owner. Open a task to return to its linked conversation.
 
-**Lost sessions → tasks linked to conversations.** Capture any conversation as a task on a board, organized by project, status, priority, label, and owner. When you come back three days later, you don't scroll through chat history. You open the task and land in the exact linked thread, context intact.
+**Capture ideas before they disappear.**<br>
+Add new tasks as they come up, then get back to your current work.
 
-**Ideas with nowhere to go → a real backlog.** Thought of something mid-conversation? Add it to the board in seconds and get back to what you were doing. It'll be there tomorrow, with a status and an owner, instead of dissolving into your chat history.
+**See task progress at a glance.**<br>
+Assign work to yourself or an Agent, then run it manually or automatically. Tasks return to your board when they need review, a decision, or unblocking.
 
-**Chat-shaped work → a visible work loop.** Assign tasks to yourself or to an Agent. Run them manually, or enable automatic mode for ready Agent-owned tasks. The board shows queued, running, completed, failed, and interrupted work. When something needs your review, a decision, or unblocking, it comes back to you on the board. For linked conversations, you can read the latest result and send a reply from the task details.
-
-**Flexible Agent and model configuration.** You can create Agent profiles with dedicated instructions for different kinds of work: a high-reasoning code reviewer, a frontend engineer with dedicated instructions, or a quick-answer assistant running on a faster model. Each profile can have its own model, reasoning level, sandbox permission, instructions, avatar, and concurrency limit. The default Codex profile follows the model, reasoning, and sandbox settings in your Codex configuration.
+**Configure each Agent separately.**<br>
+Set the model, reasoning level, permissions, instructions, and concurrency limit for each role.
 
 <p align="center">
   <img src="assets/better-codex-agents.png" width="1200" alt="Reusable Agent profiles inside Better Codex" />
@@ -58,8 +67,9 @@ Better Codex extends the native Codex Desktop app. The sidebar gives you two ded
 
 ## Who it's for
 
-Better Codex is not limited to developers. If your work spans several Codex conversations and needs progress tracking, review, or repeated revisions, it can fit the same task workflow.
+Better Codex works across many roles. If your work spans several Codex conversations and needs progress tracking, review, or repeated revisions, it can fit the same task workflow.
 
+- **Developers.** Manage requirements, bugs, refactors, and release checks by project. Each task can stay linked to its original conversation, with progress, results, and pending reviews collected on the board.
 - **Solo companies.** Keep product ideas, customer feedback, operations, and content plans on one board. Give research, drafting, and checking to different Agents while keeping final decisions with you.
 - **Content creators.** Save ideas in the backlog, then organize research, outlines, drafts, and revisions as tasks. Each piece can stay linked to its original conversation, so you know where to continue when you come back later.
 - **Product managers.** Manage requirements, user feedback, competitor research, bugs, and release checks separately. Linked conversations preserve the discussion, while the board shows the next step and current owner.
@@ -95,22 +105,22 @@ Restart Codex from the Better Codex launcher, and `Task board` and `Agents` appe
 
 ## FAQ
 
-**Is this an official OpenAI product?**
+**Is this an official OpenAI product?**<br>
 No. Better Codex is an independent open-source project built on top of Codex Desktop. It is not affiliated with or endorsed by OpenAI.
 
-**Where does my data go?**
+**Where does my data go?**<br>
 Nowhere. Projects, tasks, assignments, and run state live in a local SQLite database (`~/.better-codex/better-codex.db` on macOS, `%USERPROFILE%\.better-codex\better-codex.db` on Windows). The runtime listens on `127.0.0.1` only. There is no Better Codex cloud service and no account.
 
-**Will it break my Codex?**
+**Will it break my Codex?**<br>
 The integration uses the desktop app's local CDP interface and page structure. It doesn't patch Codex binaries. A Codex update can occasionally require a matching Better Codex compatibility update; when that happens, an update notice appears inside Codex. If anything looks off, run `better-codex doctor`.
 
-**How do I uninstall?**
+**How do I uninstall?**<br>
 `better-codex eject` removes the sidebar integration and leaves your task data untouched.
 
-**How do updates work?**
+**How do updates work?**<br>
 Better Codex checks a signed update manifest in the background and shows a notice inside Codex when a new version is available. You can also rerun the install command at any time. It upgrades in place when possible.
 
-**Which platforms are supported?**
+**Which platforms are supported?**<br>
 Codex Desktop on macOS (Apple Silicon and Intel) and the Microsoft Store version of Codex on Windows x64. Release packages and CI cover all three.
 
 ## Useful commands
