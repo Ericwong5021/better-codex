@@ -395,21 +395,24 @@ function writable(path: string) {
 
 function installBundledSkills() {
   const codexHome = process.env.CODEX_HOME || join(homedir(), ".codex");
-  const installed = ["better-codex", "better-codex-issue"].every(name => existsSync(join(codexHome, "skills", name, "SKILL.md"))) && existsSync(updatePublicKeyPath);
+  const installed = existsSync(join(codexHome, "skills", "better-codex", "SKILL.md")) && existsSync(updatePublicKeyPath);
+  const obsoleteIssueSkill = join(codexHome, "skills", "better-codex-issue");
   const launcher = process.env.BETTER_CODEX_LAUNCHER_PATH;
   const candidates = [
     process.env.BETTER_CODEX_SKILLS_PATH,
     join(dirname(process.execPath), "..", "libexec", "skills"),
     launcher ? join(dirname(launcher), "..", "libexec", "skills") : null,
   ].filter((value): value is string => Boolean(value));
-  const source = candidates.find(path => existsSync(join(path, "better-codex", "SKILL.md")) && existsSync(join(path, "better-codex-issue", "SKILL.md")) && existsSync(resolve(path, "..", "update-public-key.pem")));
-  if (!source) return installed
-    ? { installed: true, existing: true, path: join(codexHome, "skills"), updateKey: true }
-    : { installed: false, reason: "bundled_skills_unavailable", updateKey: false };
-  mkdirSync(join(codexHome, "skills"), { recursive: true });
-  for (const name of ["better-codex", "better-codex-issue"]) {
-    cpSync(join(source, name), join(codexHome, "skills", name), { recursive: true, force: true });
+  const source = candidates.find(path => existsSync(join(path, "better-codex", "SKILL.md")) && existsSync(resolve(path, "..", "update-public-key.pem")));
+  if (!source) {
+    if (installed) rmSync(obsoleteIssueSkill, { recursive: true, force: true });
+    return installed
+      ? { installed: true, existing: true, path: join(codexHome, "skills"), updateKey: true }
+      : { installed: false, reason: "bundled_skills_unavailable", updateKey: false };
   }
+  mkdirSync(join(codexHome, "skills"), { recursive: true });
+  cpSync(join(source, "better-codex"), join(codexHome, "skills", "better-codex"), { recursive: true, force: true });
+  rmSync(obsoleteIssueSkill, { recursive: true, force: true });
   const publicKey = resolve(source, "..", "update-public-key.pem");
   mkdirSync(dirname(updatePublicKeyPath), { recursive: true });
   cpSync(publicKey, updatePublicKeyPath, { force: true });
@@ -432,7 +435,6 @@ async function doctor() {
   const codexHome = process.env.CODEX_HOME || join(homedir(), ".codex");
   const skills = {
     betterCodex: existsSync(join(codexHome, "skills", "better-codex", "SKILL.md")),
-    betterCodexIssue: existsSync(join(codexHome, "skills", "better-codex-issue", "SKILL.md")),
   };
   const updateKey = !isSea() || existsSync(updatePublicKeyPath);
   const checks = {
@@ -446,7 +448,7 @@ async function doctor() {
     skills,
     updateKey,
   };
-  return { ok: Boolean(runtime.ok) && Boolean((database as { ok?: boolean }).ok) && codex.installed && Boolean((compatibility as { compatible?: boolean } | null)?.compatible) && injection.available && skills.betterCodex && skills.betterCodexIssue && updateKey, checks };
+  return { ok: Boolean(runtime.ok) && Boolean((database as { ok?: boolean }).ok) && codex.installed && Boolean((compatibility as { compatible?: boolean } | null)?.compatible) && injection.available && skills.betterCodex && updateKey, checks };
 }
 
 async function uninstall() {

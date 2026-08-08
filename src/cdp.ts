@@ -80,7 +80,7 @@ async function bridgeRequest(connection: Connection, runtimePort: number, access
     requestId = typeof request.id === "string" ? request.id : "";
     const path = typeof request.path === "string" ? request.path : "";
     const method = typeof request.method === "string" ? request.method : "GET";
-    if (!requestId || request.token !== accessToken || !/^\/api\/(?:bootstrap(?:[?]|$)|update(?:\/(?:install|check))?(?:[?]|$)|projects(?:\/ensure)?(?:[?]|$)|issues(?:[/?]|$)|agents(?:[/?]|$)|mockup\/(?:state|reset)(?:[?]|$)|settings\/auto-dispatch(?:[?]|$))/.test(path) || !["GET", "POST", "PUT", "PATCH", "DELETE"].includes(method)) throw new Error("invalid_bridge_request");
+    if (!requestId || request.token !== accessToken || !/^\/api\/(?:bootstrap(?:[?]|$)|update(?:\/(?:install|check))?(?:[?]|$)|projects(?:\/ensure)?(?:[?]|$)|issues(?:[/?]|$)|agents(?:[/?]|$)|mockup\/(?:state|reset)(?:[?]|$)|settings\/auto-dispatch(?:[?]|$)|settings\/scheduler-model(?:[?]|$))/.test(path) || !["GET", "POST", "PUT", "PATCH", "DELETE"].includes(method)) throw new Error("invalid_bridge_request");
     const response = await fetch(`http://127.0.0.1:${runtimePort}${path}`, {
       method,
       headers: {

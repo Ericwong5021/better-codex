@@ -112,10 +112,11 @@ if [ -n "$EXISTING_BINARY" ]; then
   CURRENT_VERSION="$(installed_version "$EXISTING_BINARY" || true)"
 fi
 
-if [ -n "$CURRENT_VERSION" ] && [ -n "$TARGET_VERSION" ] && version_at_least "$CURRENT_VERSION" "$TARGET_VERSION" && [ -f "$SKILL_DIR/SKILL.md" ] && [ -f "$ISSUE_SKILL_DIR/SKILL.md" ] && [ -f "$UPDATE_KEY_PATH" ]; then
+if [ -n "$CURRENT_VERSION" ] && [ -n "$TARGET_VERSION" ] && version_at_least "$CURRENT_VERSION" "$TARGET_VERSION" && [ -f "$SKILL_DIR/SKILL.md" ] && [ -f "$UPDATE_KEY_PATH" ]; then
   UPDATE_CHECK=""
   if UPDATE_CHECK="$($EXISTING_BINARY update check 2>/dev/null)" && printf '%s' "$UPDATE_CHECK" | grep -q '"checked":true' && ! printf '%s' "$UPDATE_CHECK" | grep -q '"available":true'; then
     if installation_ready "$EXISTING_BINARY"; then
+      rm -rf "$ISSUE_SKILL_DIR"
       printf '[OK] Better Codex is up to date (v%s)\n' "$CURRENT_VERSION"
       exit 0
     fi
@@ -127,6 +128,7 @@ if [ -n "$CURRENT_VERSION" ] && [ -n "$TARGET_VERSION" ]; then
   UPDATE_CHECK=""
   if UPDATE_CHECK="$($EXISTING_BINARY update check 2>/dev/null)" && printf '%s' "$UPDATE_CHECK" | grep -q '"checked":true'; then
     if version_at_least "$CURRENT_VERSION" "$TARGET_VERSION" && ! printf '%s' "$UPDATE_CHECK" | grep -q '"available":true' && installation_ready "$EXISTING_BINARY"; then
+      rm -rf "$ISSUE_SKILL_DIR"
       printf '[OK] Better Codex is up to date (v%s)\n' "$CURRENT_VERSION"
       exit 0
     fi
@@ -137,7 +139,7 @@ if [ -n "$CURRENT_VERSION" ] && [ -n "$TARGET_VERSION" ]; then
     UPDATED_VERSION="$(installed_version "$EXISTING_BINARY" || true)"
     if [ -n "$UPDATED_VERSION" ] && version_at_least "$UPDATED_VERSION" "$TARGET_VERSION"; then
       UPGRADE_READY=1
-      if [ ! -f "$SKILL_DIR/SKILL.md" ] || [ ! -f "$ISSUE_SKILL_DIR/SKILL.md" ] || [ ! -f "$UPDATE_KEY_PATH" ]; then
+      if [ ! -f "$SKILL_DIR/SKILL.md" ] || [ ! -f "$UPDATE_KEY_PATH" ]; then
         UPGRADE_READY=0
       elif [ "$WITH_SERVICE" = "1" ]; then
         "$EXISTING_BINARY" service restart >/dev/null 2>&1 || UPGRADE_READY=0
@@ -149,6 +151,7 @@ if [ -n "$CURRENT_VERSION" ] && [ -n "$TARGET_VERSION" ]; then
         fi
       fi
       if [ "$UPGRADE_READY" = "1" ]; then
+        rm -rf "$ISSUE_SKILL_DIR"
         printf '[OK] Better Codex upgraded to v%s\n' "$UPDATED_VERSION"
         exit 0
       fi
@@ -292,10 +295,6 @@ if [ ! -f "$WORK_DIR/skills/better-codex/SKILL.md" ]; then
   echo "Better Codex skill is missing from the package." >&2
   exit 1
 fi
-if [ ! -f "$WORK_DIR/skills/better-codex-issue/SKILL.md" ]; then
-  echo "Better Codex issue skill is missing from the package." >&2
-  exit 1
-fi
 if [ "$WITH_SERVICE" = "1" ] && codex_running; then
   if [ ! -r /dev/tty ]; then
     echo "Codex is running. Quit it completely and run the installer again." >&2
@@ -321,10 +320,7 @@ printf '[Better Codex] Installing Better Codex skill to %s...\n' "$SKILL_DIR"
 mkdir -p "$SKILL_DIR/agents"
 install -m 644 "$WORK_DIR/skills/better-codex/SKILL.md" "$SKILL_DIR/SKILL.md"
 install -m 644 "$WORK_DIR/skills/better-codex/agents/openai.yaml" "$SKILL_DIR/agents/openai.yaml"
-printf '[Better Codex] Installing Better Codex issue skill to %s...\n' "$ISSUE_SKILL_DIR"
-mkdir -p "$ISSUE_SKILL_DIR/agents"
-install -m 644 "$WORK_DIR/skills/better-codex-issue/SKILL.md" "$ISSUE_SKILL_DIR/SKILL.md"
-install -m 644 "$WORK_DIR/skills/better-codex-issue/agents/openai.yaml" "$ISSUE_SKILL_DIR/agents/openai.yaml"
+rm -rf "$ISSUE_SKILL_DIR"
 if [ -n "$UPDATE_PUBLIC_KEY" ]; then
   mkdir -p "$BETTER_CODEX_DIR"
   install -m 600 "$UPDATE_PUBLIC_KEY" "$UPDATE_KEY_PATH"

@@ -27,6 +27,8 @@ export const injectorLogPath = join(logPath, "injector.log");
 export const updateLogPath = join(logPath, "update.log");
 export const workerLogPath = join(logPath, "worker.log");
 export const runLogPath = join(logPath, "runs");
+export const schedulerRuntimePath = join(betterCodexHome, "scheduler-runtime");
+export const schedulerSchemaPath = join(schedulerRuntimePath, "output-schema.json");
 export const injectorPidPath = join(runPath, "injector.pid");
 export const injectionStatePath = join(runPath, "injection.json");
 export const mockupSessionPath = join(runPath, "mockup-session.json");
@@ -41,6 +43,7 @@ export function ensureDirectories() {
   mkdirSync(runPath, { recursive: true });
   mkdirSync(logPath, { recursive: true });
   mkdirSync(runLogPath, { recursive: true });
+  mkdirSync(schedulerRuntimePath, { recursive: true });
   mkdirSync(compatibilityPath, { recursive: true });
   mkdirSync(compatibilityVersionsPath, { recursive: true });
   mkdirSync(runtimeVersionsPath, { recursive: true });

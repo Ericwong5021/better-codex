@@ -136,11 +136,12 @@ $Version = Resolve-ReleaseTag $Repository $Version
 $targetVersion = $Version.TrimStart("v")
 $installedVersion = Get-InstalledVersion $executable
 
-if ($installedVersion -and (Test-VersionAtLeast $installedVersion $targetVersion) -and (Test-Path (Join-Path $skillDirectory "SKILL.md")) -and (Test-Path (Join-Path $issueSkillDirectory "SKILL.md")) -and (Test-Path $updatePublicKeyPath)) {
+if ($installedVersion -and (Test-VersionAtLeast $installedVersion $targetVersion) -and (Test-Path (Join-Path $skillDirectory "SKILL.md")) -and (Test-Path $updatePublicKeyPath)) {
   try {
     $updateCheck = (& $executable update check 2>$null | Out-String | ConvertFrom-Json)
     if ($updateCheck.checked -and -not (($updateCheck.core.available) -or ($updateCheck.compatibility.available))) {
       if (Test-InstallationReady $executable) {
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $issueSkillDirectory
         Write-Ok "Better Codex is up to date (v$installedVersion)"
         return
       }
@@ -156,13 +157,17 @@ if ($installedVersion) {
   try {
     $updateCheck = (& $executable update check 2>$null | Out-String | ConvertFrom-Json)
     if ((Test-VersionAtLeast $installedVersion $targetVersion) -and $updateCheck.checked -and -not (($updateCheck.core.available) -or ($updateCheck.compatibility.available)) -and (Test-InstallationReady $executable)) {
+      Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $issueSkillDirectory
       Write-Ok "Better Codex is up to date (v$installedVersion)"
       return
     }
   } catch {
     Write-Step "Live update check unavailable; continuing with upgrade..."
   }
-  if ((Test-Path (Join-Path $skillDirectory "SKILL.md")) -and (Test-Path (Join-Path $issueSkillDirectory "SKILL.md")) -and (Test-Path $updatePublicKeyPath) -and (Invoke-ExistingUpgrade $executable $targetVersion)) { return }
+  if ((Test-Path (Join-Path $skillDirectory "SKILL.md")) -and (Test-Path $updatePublicKeyPath) -and (Invoke-ExistingUpgrade $executable $targetVersion)) {
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $issueSkillDirectory
+    return
+  }
   Write-Step "Automatic upgrade unavailable; continuing with full installation..."
 }
 
@@ -192,10 +197,8 @@ try {
   Expand-Archive -LiteralPath $archive -DestinationPath $workDirectory -Force
   $packagedExecutable = Join-Path $workDirectory "better-codex.exe"
   $packagedSkill = Join-Path $workDirectory "skills\better-codex"
-  $packagedIssueSkill = Join-Path $workDirectory "skills\better-codex-issue"
   if (-not (Test-Path $packagedExecutable)) { throw "Better Codex executable is missing from the package." }
   if (-not (Test-Path (Join-Path $packagedSkill "SKILL.md"))) { throw "Better Codex skill is missing from the package." }
-  if (-not (Test-Path (Join-Path $packagedIssueSkill "SKILL.md"))) { throw "Better Codex issue skill is missing from the package." }
   $backupDirectory = Join-Path $workDirectory "previous"
   New-Item -ItemType Directory -Force -Path $backupDirectory | Out-Null
   $backupExecutable = Join-Path $backupDirectory "better-codex.exe"
@@ -240,10 +243,7 @@ try {
   New-Item -ItemType Directory -Force -Path (Join-Path $skillDirectory "agents") | Out-Null
   Copy-Item -Force (Join-Path $packagedSkill "SKILL.md") (Join-Path $skillDirectory "SKILL.md")
   Copy-Item -Force (Join-Path $packagedSkill "agents\openai.yaml") (Join-Path $skillDirectory "agents\openai.yaml")
-  Write-Step "Installing Better Codex issue skill to $issueSkillDirectory..."
-  New-Item -ItemType Directory -Force -Path (Join-Path $issueSkillDirectory "agents") | Out-Null
-  Copy-Item -Force (Join-Path $packagedIssueSkill "SKILL.md") (Join-Path $issueSkillDirectory "SKILL.md")
-  Copy-Item -Force (Join-Path $packagedIssueSkill "agents\openai.yaml") (Join-Path $issueSkillDirectory "agents\openai.yaml")
+  Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $issueSkillDirectory
   New-Item -ItemType Directory -Force -Path $betterCodexHome | Out-Null
   Copy-Item -Force $publicKey $updatePublicKeyPath
   Write-Step "Verifying executable..."

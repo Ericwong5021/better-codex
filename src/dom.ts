@@ -286,6 +286,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const RESUME_SURFACE_KEY = "better-codex-resume-surface";
     const PROJECT_KEY = "better-codex-project-id";
     const LANGUAGE_KEY = "better-codex-language";
+    const COMPLETION_DURATION_KEY = "better-codex-completion-notice-duration";
     const THREAD_OPEN_TIMEOUT_MS = 10000;
     const THREAD_OPEN_POLL_MS = 100;
     const statusLabels = { backlog: "待规划", todo: "待办", in_progress: "进行中", in_review: "审核中", done: "已完成", blocked: "已阻塞", cancelled: "已取消" };
@@ -301,7 +302,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
     const systemLocale = resolveSystemLocale(INITIAL_LOCALE);
     const MOCKUP_PROJECT_ID = "mockup-better-codex";
-    const state = { projects: [], issues: [], agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, surface: ["issues", "agents"].includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, mockup: false, createMode: "manual", keepCreate: false, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], creator: [], project: [], label: [] } };
+    const state = { projects: [], issues: [], agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, surface: ["issues", "agents"].includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, schedulerModel: "gpt-5.6-sol", mockup: false, createMode: "manual", keepCreate: false, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], creator: [], project: [], label: [] } };
     function normalizeMockupIssues(value) {
       const source = Array.isArray(value) ? value : value?.issues;
       if (!Array.isArray(source)) throw new Error("展示数据格式无效");
@@ -372,15 +373,16 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       return api("/api/issues/" + encodeURIComponent(id) + "/move", { method: "POST", body: JSON.stringify({ version, status, before_id: beforeId }) });
     }
     const localeResources = { en: {
+      "调度器失败，已转人工审核": "Scheduler failed; sent to human review",
       "重试回复": "Retry reply", "重新加载": "Reload", "回复等待超时。请检查模型服务连接后重试。": "The reply timed out. Check the model service connection and retry.", "网络连接异常，回复未完成。请检查网络和 Better Codex Runtime 后重试。": "The reply did not finish because of a network problem. Check your network and Better Codex Runtime, then retry.", "当前权限不足，无法完成回复。请调整智能体权限或允许所需操作后重试。": "The reply needs additional permission. Adjust the agent permission or allow the required action, then retry.", "Better Codex Runtime 已停止。请重新启动后重试。": "Better Codex Runtime stopped. Restart it and retry.", "上一条回复仍在进行中。请稍后重新加载。": "The previous reply is still running. Reload shortly.", "回复未完成。请打开完整会话查看详情，然后重试。": "The reply did not finish. Open the full conversation for details, then retry.", "会话加载超时。请确认 Better Codex Runtime 正在运行，然后重新加载。": "The conversation timed out while loading. Make sure Better Codex Runtime is running, then reload.", "无法加载会话。请检查网络和 Better Codex Runtime，然后重新加载。": "Unable to load the conversation. Check your network and Better Codex Runtime, then reload.", "没有权限加载会话。请调整权限后重新加载。": "You do not have permission to load the conversation. Adjust the permission, then reload.",
       "任务看板": "Task board", "打开任务看板": "Open task board", "智能体": "Agents", "管理智能体": "Manage agents", "创建和管理你的智能体": "Create and manage your agents",
       "Better Codex 服务需要重启": "Better Codex needs to restart", "当前页面与后台服务的连接已失效。请在终端运行下面的命令，完成后重新连接。": "The connection between this page and the background service has expired. Run the command below in your terminal, then reconnect.", "复制重启命令": "Copy restart command", "已复制": "Copied", "重新连接": "Reconnect", "正在连接…": "Connecting…", "错误详情": "Error details",
-      "全部": "All", "已分配": "Assigned", "未分配": "Unassigned", "待规划": "Backlog", "待办": "Todo", "进行中": "In progress", "审核中": "In review", "已完成": "Done", "已阻塞": "Blocked", "已取消": "Canceled", "归档": "Archive", "拖到这里即可归档": "Drop here to archive", "查看已归档卡片": "View archived cards", "已归档任务": "Archived tasks", "搜索已归档任务": "Search archived tasks", "全部聊天": "All chats", "所有项目": "All projects", "全部删除": "Delete all", "删除已归档聊天": "Delete archived chat", "删除项目中的全部内容": "Delete all project content", "确定删除项目中的全部已归档任务吗？": "Delete all archived tasks in this project?", "取消归档": "Unarchive", "已归档卡片": "Archived cards", "暂无已归档卡片": "No archived cards", "归档列表加载失败": "Unable to load archived cards",
+      "全部": "All", "已分配": "Assigned", "未分配": "Unassigned", "待规划": "Backlog", "待办": "Todo", "进行中": "In progress", "审核中": "In review", "调度器运行中": "Scheduling", "已完成": "Done", "已阻塞": "Blocked", "已取消": "Canceled", "归档": "Archive", "拖到这里即可归档": "Drop here to archive", "查看已归档卡片": "View archived cards", "已归档任务": "Archived tasks", "搜索已归档任务": "Search archived tasks", "全部聊天": "All chats", "所有项目": "All projects", "全部删除": "Delete all", "删除已归档聊天": "Delete archived chat", "删除项目中的全部内容": "Delete all project content", "确定删除项目中的全部已归档任务吗？": "Delete all archived tasks in this project?", "取消归档": "Unarchive", "已归档卡片": "Archived cards", "暂无已归档卡片": "No archived cards", "归档列表加载失败": "Unable to load archived cards",
       "无": "None", "低": "Low", "中": "Medium", "高": "High", "紧急": "Urgent", "超高": "Extra high", "无优先级": "No priority", "优先级": "Priority", "状态": "Status", "日期": "Date", "筛选": "Filter", "标签": "Labels",
       "新建": "New", "新建 issue": "New issue", "新建任务": "New task", "新建智能体": "New agent", "创建": "Create", "创建任务": "Create task", "删除": "Delete", "删除任务": "Delete task", "删除智能体": "Delete agent", "保存": "Save", "确认": "Confirm", "取消": "Cancel", "关闭": "Close", "重试": "Retry", "稍后": "Later", "展开": "Expand", "缩小": "Minimize", "缩放头像": "Zoom avatar",
       "项目": "Project", "无项目": "No project", "选择项目": "Select project", "选择责任人": "Select owner", "选择执行智能体": "Select agent", "选择 issue 创建方式": "Choose how to create the issue", "任务标题": "Task title", "添加描述...": "Add description...", "添加标签": "Add label", "添加附件": "Add attachment", "移除附件": "Remove attachment", "搜索任务": "Search tasks", "搜索项目": "Search projects", "搜索项目...": "Search projects...", "搜索智能体": "Search agents",
       "负责人": "Owner", "创建者": "Creator", "指定负责人": "Assign owner", "由我创建": "Created by me", "由我": "By me", "我": "Me", "你": "You", "未指派": "Not assigned", "未提供": "Not provided", "已同步": "Synced",
-      "自动运行": "Auto-run", "手动运行": "Manual run", "切换为自动运行": "Switch to auto-run", "切换为手动运行": "Switch to manual run", "切换到智能体": "Switch to agents", "手动创建": "Manual creation", "通过智能体创建": "Create with agent", "运行模式说明": "Run mode", "帮助与设置": "Help and settings", "设置": "Settings", "关于": "About", "会话结束提醒": "Session completion alerts", "Issue 会话结束后在当前窗口显示提醒": "Show an alert in the current window when an issue session ends", "会话已结束": "Session ended", "通知": "Notifications", "语言": "Language", "界面语言": "Interface language", "选择 Better Codex 的界面语言": "Choose the language used by Better Codex", "跟随系统": "System", "中文": "Chinese", "软件更新": "Software updates", "更新状态": "Update status", "检查新版本": "Check for updates", "检查中…": "Checking…", "发现新版本": "Update available", "无法检查更新": "Unable to check", "版本信息": "Version info", "兼容版本": "Compatibility version", "运行状态": "Runtime status", "运行正常": "Running", "正在检查": "Checking", "已是最新版本": "Up to date", "从开始到完成，让 Codex 里的工作清晰可见。": "From start to finish, keep your work in Codex clear and visible.", "如果你喜欢 Better Codex，欢迎给我们一个 Star。": "If you like Better Codex, please give us a Star.", "最大并发": "Max concurrency", "模型": "Model", "推理": "Reasoning", "指令": "Instructions", "默认": "Default", "自定义": "Custom",
+      "自动运行": "Auto-run", "手动运行": "Manual run", "切换为自动运行": "Switch to auto-run", "切换为手动运行": "Switch to manual run", "切换到智能体": "Switch to agents", "手动创建": "Manual creation", "通过智能体创建": "Create with agent", "运行模式说明": "Run mode", "帮助与设置": "Help and settings", "设置": "Settings", "关于": "About", "会话结束提醒": "Session completion alerts", "Issue 会话结束后在当前窗口显示提醒": "Show an alert in the current window when an issue session ends", "弹窗持续时间": "Popup duration", "1 秒": "1 second", "5 秒": "5 seconds", "10 秒": "10 seconds", "永久": "Permanent", "会话已结束": "Session ended", "通知": "Notifications", "语言": "Language", "界面语言": "Interface language", "选择 Better Codex 的界面语言": "Choose the language used by Better Codex", "调度": "Scheduling", "调度器模型": "Scheduler model", "这个模型用于 Issue 状态调度": "This model is used for Issue status routing", "跟随系统": "System", "中文": "Chinese", "软件更新": "Software updates", "更新状态": "Update status", "检查新版本": "Check for updates", "检查中…": "Checking…", "发现新版本": "Update available", "无法检查更新": "Unable to check", "版本信息": "Version info", "兼容版本": "Compatibility version", "运行状态": "Runtime status", "运行正常": "Running", "正在检查": "Checking", "已是最新版本": "Up to date", "从开始到完成，让 Codex 里的工作清晰可见。": "From start to finish, keep your work in Codex clear and visible.", "如果你喜欢 Better Codex，欢迎给我们一个 Star。": "If you like Better Codex, please give us a Star.", "最大并发": "Max concurrency", "模型": "Model", "推理": "Reasoning", "指令": "Instructions", "默认": "Default", "自定义": "Custom",
       "点击": "Click", "，或者在已完成的会话卡片中": ", or use", "新消息，智能体才会执行任务。": "to post a new message in a completed conversation card. Only then will the agent run the task.", "会主动执行分配给自己的任务，但是不会执行": "automatically runs tasks assigned to it, but does not run", "区域的任务。": "tasks.",
       "代码审查": "Code review", "问题排查": "Troubleshooting", "前端实现": "Frontend implementation", "文档写作": "Documentation", "创意探索": "Creative exploration", "终端工程": "Terminal engineering", "通用助手": "General assistant", "修复工具": "Fixer", "安全审查": "Security review", "测试验证": "Test verification", "插件": "Plugins", "数据与存储": "Data and storage", "检查改动的正确性、回归风险和可维护性": "Review changes for correctness, regression risk, and maintainability", "负责 Codex 原生风格的界面实现与视觉验证": "Build and visually verify interfaces in the native Codex style", "定位崩溃、回归和异常行为的根因": "Find the root cause of crashes, regressions, and unexpected behavior",
       "通用任务处理": "General task handling", "代码实现": "Code implementation", "最大": "Maximum", "极致": "Ultra", "发送": "Send", "副本": "Copy", "复制卡片": "Copy card", "更多操作": "More actions", "本次启动关闭": "Disable for this launch", "正在重启 Better Codex": "Restarting Better Codex", "Better Codex 已恢复到上一版本。": "Better Codex has been restored to the previous version.",
@@ -393,7 +395,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "确定删除任务 “": "Delete task “", "确定删除所有已归档任务吗？": "Delete all archived tasks?", "吗？": "”?", "创建后先由 ": "After creation, ", " 整理卡片，再自动开始工作。": " will organize the card and start working automatically.", "刚刚": "Just now", "分钟": "minutes", "小时": "hours", "天": "days", "更新于": "Updated", "个筛选": "filters", "个智能体工作中": "agents working", "条": "items",
       "代码实现": "Code implementation", "最近 24 小时": "Last 24 hours", "最近 7 天": "Last 7 days", "最近 30 天": "Last 30 days", "暂无可选项": "No options available", "清除筛选": "Clear filters", "复制本地 workdir 路径": "Copy local workdir path",
       "工作中": "Working", "排队中": "Queued", "理解中": "Thinking", "执行失败": "Execution failed", "已中断": "Interrupted", "未开始": "Not started", "任务理解完成后即可打开卡片": "The card will be available when task understanding is complete", "无法连接 Better Codex Runtime": "Unable to connect to Better Codex Runtime",
-      "在会话中打开": "Open in conversation", "任务正在进行中": "Task is running", "立即开始任务": "Start task now", "切换到手动": "Switch to manual", "继续创建": "Keep creating", "指派给": "Assign to", "可选": "Optional", "建议": "Suggestions", "创建第一个任务": "Create your first task", "写下要完成的事，交给智能体处理。": "Describe what needs to be done and let an agent handle it.", "开始对话": "Start the conversation", "补充下一步要求，智能体会继续处理。": "Add your next request and the agent will continue.", "在下方输入消息并发送": "Type a message below and send it", "输入下一步要求…": "Enter your next request…",
+      "在会话中打开": "Open in conversation", "任务正在进行中": "Task is running", "立即开始任务": "Start task now", "切换到手动": "Switch to manual", "继续创建": "Keep creating", "指派给": "Assign to", "可选": "Optional", "建议": "Suggestions", "创建第一个任务": "Create your first task", "写下要完成的事，交给智能体处理。": "Describe what needs to be done and let an agent handle it.", "开始对话": "Start the conversation", "补充下一步要求，智能体会继续处理。": "Add your next request and the agent will continue.", "在下方输入消息并发送": "Type a message below and send it", "正在处理任务": "Working on the task", "智能体回复产生后会显示在这里。": "The agent's response will appear here when available.", "请稍候": "Please wait", "输入下一步要求…": "Enter your next request…",
       "头像": "Avatar", "上传图片": "Upload image", "使用此头像": "Use this avatar", "点击选择预设图标，或上传图片": "Choose a preset icon or upload an image", "从预设图标中选择，也可以上传图片": "Choose a preset icon or upload an image", "创建智能体": "Create agent", "Codex 默认智能体": "Default Codex agent", "说明这个智能体适合承担什么工作": "Describe what this agent is good at", "定义职责、工作方式和输出要求": "Define responsibilities, workflow, and output requirements", "权限": "Permissions", "只读": "Read-only", "工作区可写": "Workspace write access", "完全访问": "Full access", "仅可读取工作区文件，不能修改": "Can read workspace files but cannot modify them", "可修改当前工作区内的文件": "Can modify files in the current workspace", "可不受限制地访问互联网和电脑上的任何文件": "Unrestricted access to the internet and files on this computer",
       "已经执行过对话的 Issue 只能修改状态、优先级和指派人。": "Issues with an executed conversation can only change status, priority, and assignee.", "终止任务后才能打开对话，是否终止任务？": "The task must be stopped before opening the conversation. Stop it now?", "终止并打开": "Stop and open", "正在终止…": "Stopping…", "忽略当前版本": "Ignore this version", "立即更新": "Update now", "暂无项目": "No projects", "告诉智能体要做什么，例如：“修复项目里任务运行状态不可见的问题”": "Tell the agent what to do, for example: “Fix the invisible task run status in the project”"
     } };
@@ -409,8 +411,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     let updateTimer = null;
     let updateNotice = null;
     let issueSessionSnapshot = new Map();
-    let completionNoticeTimer = null;
-    let completionNoticeMenuDismiss = null;
+    let completionNoticeStack = null;
+    const completionNoticeDismissals = new Map();
+    const completionNoticeTimers = new Map();
     let dismissedUpdateVersion = sessionStorage.getItem("better-codex-dismissed-update") || "";
     let ignoredUpdateVersion = localStorage.getItem("better-codex-ignored-update") || "";
     let filterDismiss = null;
@@ -498,7 +501,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function issueExecutionRunning(issue) {
-      return issue?.active_run_status === "claimed" || issue?.active_run_status === "running";
+      return ["claimed", "running", "scheduling"].includes(issue?.active_run_status);
     }
 
     function issuePermissions(issue) {
@@ -592,18 +595,23 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         @keyframes better-codex-update-spin { to { transform: rotate(360deg); } }
         @media (hover: hover) { #better-codex-update-notice .better-codex-update-close:hover, #better-codex-update-notice .better-codex-update-menu-toggle:hover { color: var(--color-token-foreground, var(--bc-foreground)); background: color-mix(in srgb,var(--color-token-button-secondary-hover-background, var(--bc-hover)) 5%,transparent); opacity: .8; } #better-codex-update-notice .better-codex-update-menu button:hover { background: var(--color-token-button-secondary-hover-background, var(--bc-hover)); } #better-codex-update-notice .better-codex-update-button:hover { background: var(--color-token-button-secondary-hover-background, var(--bc-selected)); } #better-codex-update-notice .better-codex-update-button.is-primary:hover { background: color-mix(in srgb,var(--color-token-foreground, var(--bc-primary)) 90%,var(--bc-surface)); } }
         @media (prefers-reduced-motion: reduce) { #better-codex-update-notice, #better-codex-update-notice[data-status="installing"] .better-codex-update-icon svg { animation: none; } }
-        #better-codex-completion-notice { position: fixed; right: 16px; bottom: 16px; z-index: 2147483000; display: flex; width: max-content; max-width: min(420px,calc(100vw - 32px)); min-height: 40px; box-sizing: border-box; align-items: center; gap: 8px; padding: 6px 6px 6px 12px; color: var(--color-token-foreground, var(--bc-foreground)); background: var(--color-token-bg-primary, var(--color-background-surface, var(--bc-raised))); border: 1px solid var(--color-token-border, color-mix(in srgb,var(--color-token-foreground, var(--bc-foreground)) 12%,transparent)); border-radius: 10px; box-shadow: var(--shadow-md, 0 8px 24px rgb(0 0 0 / .12)); font-family: var(--font-sans, var(--bc-font-ui)); font-size: var(--font-size-small, var(--bc-text-sm)); animation: better-codex-update-enter .2s cubic-bezier(.16,1,.3,1); }
-        #better-codex-completion-notice .better-codex-completion-layout { display: flex; min-width: 0; align-items: center; gap: 8px; }
-        #better-codex-completion-notice .better-codex-completion-logo { width: 24px; height: 24px; flex: 0 0 auto; border-radius: 6px; object-fit: cover; }
-        #better-codex-completion-notice .better-codex-completion-message { min-width: 0; margin: 0; overflow: hidden; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
-        #better-codex-completion-notice .better-codex-completion-status { flex: 0 0 auto; border-radius: 999px; padding: 2px 7px; color: var(--color-token-text-secondary, var(--bc-muted)); background: var(--color-token-bg-secondary, var(--bc-hover)); font-size: 11px; font-weight: 500; line-height: 1.4; }
-        #better-codex-completion-notice .better-codex-completion-menu-toggle, #better-codex-completion-notice .better-codex-completion-close { display: inline-flex; width: 28px; height: 28px; flex: 0 0 auto; align-items: center; justify-content: center; border: 0; border-radius: 7px; color: var(--color-token-text-secondary, var(--bc-muted)); background: transparent; cursor: pointer; }
-        #better-codex-completion-notice .better-codex-completion-menu { position: absolute; right: 38px; bottom: 38px; z-index: 2; min-width: 148px; box-sizing: border-box; padding: 4px; border: 1px solid var(--color-token-border, var(--bc-border)); border-radius: 8px; color: var(--color-token-foreground, var(--bc-foreground)); background: var(--color-token-bg-primary, var(--bc-raised)); box-shadow: var(--shadow-md, var(--bc-menu-shadow)); }
-        #better-codex-completion-notice .better-codex-completion-menu[hidden] { display: none; }
-        #better-codex-completion-notice .better-codex-completion-menu button { display: flex; width: 100%; min-height: 32px; align-items: center; border: 0; border-radius: 6px; padding: 0 9px; color: inherit; background: transparent; font: inherit; font-size: inherit; text-align: left; cursor: pointer; }
-        #better-codex-completion-notice button:focus-visible { outline: 2px solid var(--color-token-focus-ring, var(--bc-ring)); outline-offset: 1px; }
-        @media (hover: hover) { #better-codex-completion-notice :is(.better-codex-completion-menu-toggle, .better-codex-completion-close):hover, #better-codex-completion-notice .better-codex-completion-menu button:hover { color: var(--color-token-foreground, var(--bc-foreground)); background: var(--color-token-bg-secondary, var(--bc-hover)); } }
-        @media (prefers-reduced-motion: reduce) { #better-codex-completion-notice { animation: none; } }
+        #better-codex-completion-notices { position: fixed; right: 16px; bottom: 16px; z-index: 2147483000; display: flex; max-width: calc(100vw - 32px); flex-direction: column; align-items: flex-end; gap: 8px; pointer-events: none; }
+        .better-codex-completion-notice { position: relative; display: flex; width: max-content; max-width: min(420px,calc(100vw - 32px)); min-height: 40px; box-sizing: border-box; align-items: center; gap: 8px; padding: 6px 6px 6px 12px; color: var(--color-token-foreground, var(--bc-foreground)); background: var(--color-token-bg-primary, var(--color-background-surface, var(--bc-raised))); border: 1px solid var(--color-token-border, color-mix(in srgb,var(--color-token-foreground, var(--bc-foreground)) 12%,transparent)); border-radius: 10px; box-shadow: var(--shadow-md, 0 8px 24px rgb(0 0 0 / .12)); font-family: var(--font-sans, var(--bc-font-ui)); font-size: var(--font-size-small, var(--bc-text-sm)); pointer-events: auto; animation: better-codex-completion-enter .28s cubic-bezier(.16,1,.3,1); }
+        .better-codex-completion-notice .better-codex-completion-layout { display: flex; min-width: 0; align-items: center; gap: 8px; }
+        .better-codex-completion-notice .better-codex-completion-avatar { width: 24px; height: 24px; flex: 0 0 auto; border-radius: 6px; overflow: hidden; }
+        .better-codex-completion-notice .better-codex-completion-avatar img, .better-codex-completion-notice .better-codex-completion-avatar svg { width: 100%; height: 100%; display: block; object-fit: cover; }
+        .better-codex-completion-notice .better-codex-completion-avatar.is-fallback { display: inline-flex; align-items: center; justify-content: center; color: var(--color-token-text-secondary, var(--bc-muted)); background: var(--color-token-bg-secondary, var(--bc-hover)); }
+        .better-codex-completion-notice .better-codex-completion-avatar.is-fallback svg { width: 14px; height: 14px; }
+        .better-codex-completion-notice .better-codex-completion-message { min-width: 0; margin: 0; overflow: hidden; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
+        .better-codex-completion-notice .better-codex-completion-status { flex: 0 0 auto; border-radius: 999px; padding: 2px 7px; color: var(--color-token-text-secondary, var(--bc-muted)); background: var(--color-token-bg-secondary, var(--bc-hover)); font-size: 11px; font-weight: 500; line-height: 1.4; }
+        .better-codex-completion-notice .better-codex-completion-menu-toggle, .better-codex-completion-notice .better-codex-completion-close { display: inline-flex; width: 28px; height: 28px; flex: 0 0 auto; align-items: center; justify-content: center; border: 0; border-radius: 7px; color: var(--color-token-text-secondary, var(--bc-muted)); background: transparent; cursor: pointer; }
+        .better-codex-completion-notice .better-codex-completion-menu { position: absolute; right: 38px; bottom: 38px; z-index: 2; min-width: 148px; box-sizing: border-box; padding: 4px; border: 1px solid var(--color-token-border, var(--bc-border)); border-radius: 8px; color: var(--color-token-foreground, var(--bc-foreground)); background: var(--color-token-bg-primary, var(--bc-raised)); box-shadow: var(--shadow-md, var(--bc-menu-shadow)); }
+        .better-codex-completion-notice .better-codex-completion-menu[hidden] { display: none; }
+        .better-codex-completion-notice .better-codex-completion-menu button { display: flex; width: 100%; min-height: 32px; align-items: center; border: 0; border-radius: 6px; padding: 0 9px; color: inherit; background: transparent; font: inherit; font-size: inherit; text-align: left; cursor: pointer; }
+        .better-codex-completion-notice button:focus-visible { outline: 2px solid var(--color-token-focus-ring, var(--bc-ring)); outline-offset: 1px; }
+        @keyframes better-codex-completion-enter { from { opacity: 0; translate: 0 18px; } to { opacity: 1; translate: 0 0; } }
+        @media (hover: hover) { .better-codex-completion-notice :is(.better-codex-completion-menu-toggle, .better-codex-completion-close):hover, .better-codex-completion-notice .better-codex-completion-menu button:hover { color: var(--color-token-foreground, var(--bc-foreground)); background: var(--color-token-bg-secondary, var(--bc-hover)); } }
+        @media (prefers-reduced-motion: reduce) { .better-codex-completion-notice { animation: none; } }
         #\${PANEL_ID} { font-family: var(--bc-font-ui); background: var(--bc-page); }
         #\${PANEL_ID} .better-codex-error { margin-left: auto; color: var(--bc-danger); font-size: var(--bc-text-sm); }
         #\${PANEL_ID} .better-codex-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 50px; padding: 0 18px; background: #fcfcfc; }
@@ -708,8 +716,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #\${PANEL_ID} .better-codex-activity { display: inline-flex; align-items: center; gap: 5px; flex: 0 0 auto; font-size: var(--bc-text-caption); font-weight: 600; }
         #\${PANEL_ID} .better-codex-activity-dot { width: 6px; height: 6px; flex: 0 0 auto; border-radius: 999px; background: currentColor; }
         #\${PANEL_ID} .better-codex-avatar { display: inline-flex; width: 16px; height: 16px; align-items: center; justify-content: center; border: 1.5px solid #fff; border-radius: 999px; color: #fff; background: #27272a; font-size: var(--bc-text-avatar); }
-        #\${PANEL_ID} .better-codex-activity[data-run="running"], #\${PANEL_ID} .better-codex-activity[data-run="thinking"], #\${PANEL_ID} .better-codex-activity[data-run="replying"] { color: #52525b; }
-        #\${PANEL_ID} .better-codex-activity[data-run="reply-failed"] { color: #dc2626; }
+        #\${PANEL_ID} .better-codex-activity[data-run="running"], #\${PANEL_ID} .better-codex-activity[data-run="scheduling"], #\${PANEL_ID} .better-codex-activity[data-run="thinking"], #\${PANEL_ID} .better-codex-activity[data-run="replying"] { color: #52525b; }
+        #\${PANEL_ID} .better-codex-activity[data-run="reply-failed"], #\${PANEL_ID} .better-codex-activity[data-run="scheduler-failed"] { color: #dc2626; }
         #\${PANEL_ID} .better-codex-activity[data-run="reply-succeeded"] { color: #15803d; }
         #\${PANEL_ID} .better-codex-activity[data-run="completed"] { color: var(--bc-success); }
         #\${PANEL_ID} .better-codex-activity[data-run="failed"] { color: #dc2626; }
@@ -883,8 +891,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #\${PANEL_ID} .better-codex-card-avatar.is-fallback, #\${PANEL_ID} .better-codex-card-avatar.is-icon { color: var(--bc-muted); background: var(--bc-hover); }
         #\${PANEL_ID} .better-codex-card-avatar.is-codex { color: inherit; background: transparent; }
         #\${PANEL_ID} .better-codex-avatar, #\${PANEL_ID} .better-codex-agent-card-avatar { color: var(--bc-primary-foreground); background: var(--bc-primary); }
-        #\${PANEL_ID} .better-codex-activity[data-run="running"], #\${PANEL_ID} .better-codex-activity[data-run="thinking"], #\${PANEL_ID} .better-codex-activity[data-run="replying"] { color: var(--bc-foreground); }
-        #\${PANEL_ID} .better-codex-activity[data-run="reply-failed"] { color: var(--bc-danger); }
+        #\${PANEL_ID} .better-codex-activity[data-run="running"], #\${PANEL_ID} .better-codex-activity[data-run="scheduling"], #\${PANEL_ID} .better-codex-activity[data-run="thinking"], #\${PANEL_ID} .better-codex-activity[data-run="replying"] { color: var(--bc-foreground); }
+        #\${PANEL_ID} .better-codex-activity[data-run="reply-failed"], #\${PANEL_ID} .better-codex-activity[data-run="scheduler-failed"] { color: var(--bc-danger); }
         #\${PANEL_ID} .better-codex-activity[data-run="reply-succeeded"] { color: #65c18c; }
         #\${PANEL_ID} .better-codex-activity[data-run="completed"] { color: var(--bc-success); }
         #\${PANEL_ID} .better-codex-activity[data-run="failed"] { color: var(--bc-danger); }
@@ -1276,33 +1284,46 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       return sessionStorage.getItem("better-codex-completion-notice-disabled") === "true";
     }
 
+    function completionNoticeDuration() {
+      const duration = Number(localStorage.getItem(COMPLETION_DURATION_KEY) || 5000);
+      return [0, 1000, 5000, 10000].includes(duration) ? duration : 5000;
+    }
+
     function renderSessionEndNotice(issue) {
       if (completionNoticeSuppressed()) return;
-      if (completionNoticeTimer !== null) clearTimeout(completionNoticeTimer);
-      completionNoticeTimer = null;
-      if (completionNoticeMenuDismiss) document.removeEventListener("pointerdown", completionNoticeMenuDismiss, true);
-      completionNoticeMenuDismiss = null;
-      updateNotice?.remove();
-      updateNotice = document.createElement("section");
-      updateNotice.id = "better-codex-completion-notice";
-      updateNotice.dataset.status = String(issue?.status || "");
-      updateNotice.setAttribute(OWNED, "true");
-      updateNotice.setAttribute("role", "status");
-      updateNotice.setAttribute("aria-live", "polite");
+      if (!completionNoticeStack?.isConnected) {
+        completionNoticeStack = document.createElement("div");
+        completionNoticeStack.id = "better-codex-completion-notices";
+        completionNoticeStack.setAttribute(OWNED, "true");
+        document.body.appendChild(completionNoticeStack);
+      }
+      const previousPositions = new Map(Array.from(completionNoticeStack.children, item => [item, item.getBoundingClientRect().top]));
+      const notice = document.createElement("section");
+      notice.className = "better-codex-completion-notice";
+      notice.dataset.status = String(issue?.status || "");
+      notice.setAttribute(OWNED, "true");
+      notice.setAttribute("role", "status");
+      notice.setAttribute("aria-live", "polite");
       const identifier = String(issue?.identifier || "").trim();
       const title = String(issue?.title || "").trim();
       const subject = [identifier, title].filter(Boolean).join(" ");
       const status = t(statusLabels[issue?.status] || String(issue?.status || ""));
-      updateNotice.innerHTML = '<div class="better-codex-completion-layout"><img class="better-codex-completion-logo" src="' + BETTER_CODEX_LOGO_URL + '" alt=""><p class="better-codex-completion-message">' + escapeHtml(subject || t("会话已结束")) + '</p><span class="better-codex-completion-status">' + escapeHtml(status) + '</span></div><button class="better-codex-completion-menu-toggle" type="button" aria-label="' + escapeHtml(t("更多操作")) + '" aria-expanded="false" aria-haspopup="menu" data-completion-menu-toggle>' + icon("more") + '</button><div class="better-codex-completion-menu" data-completion-menu hidden><button type="button" role="menuitem" data-completion-suppress>' + escapeHtml(t("本次启动关闭")) + '</button></div><button class="better-codex-completion-close" type="button" aria-label="' + escapeHtml(t("关闭")) + '">' + icon("close") + '</button>';
-      document.body.appendChild(updateNotice);
-      const notice = updateNotice;
+      const completionAgent = state.agents.find(agent => agent.id === issue?.agent_id) || state.agents.find(agent => agent.is_default) || { name: "Codex", is_default: true };
+      notice.innerHTML = '<div class="better-codex-completion-layout">' + agentAvatarMarkup(completionAgent, "better-codex-completion-avatar") + '<p class="better-codex-completion-message">' + escapeHtml(subject || t("会话已结束")) + '</p><span class="better-codex-completion-status">' + escapeHtml(status) + '</span></div><button class="better-codex-completion-menu-toggle" type="button" aria-label="' + escapeHtml(t("更多操作")) + '" aria-expanded="false" aria-haspopup="menu" data-completion-menu-toggle>' + icon("more") + '</button><div class="better-codex-completion-menu" data-completion-menu hidden><button type="button" role="menuitem" data-completion-suppress>' + escapeHtml(t("本次启动关闭")) + '</button></div><button class="better-codex-completion-close" type="button" aria-label="' + escapeHtml(t("关闭")) + '">' + icon("close") + '</button>';
+      completionNoticeStack.appendChild(notice);
+      requestAnimationFrame(() => previousPositions.forEach((top, item) => {
+        if (!item.isConnected) return;
+        const offset = top - item.getBoundingClientRect().top;
+        if (offset) item.animate([{ transform: "translateY(" + offset + "px)" }, { transform: "translateY(0)" }], { duration: 280, easing: "cubic-bezier(.16,1,.3,1)" });
+      }));
       const menuToggle = notice.querySelector("[data-completion-menu-toggle]");
       const menu = notice.querySelector("[data-completion-menu]");
+      let menuDismiss = null;
       const closeMenu = () => {
         menu.hidden = true;
         menuToggle.setAttribute("aria-expanded", "false");
-        if (completionNoticeMenuDismiss) document.removeEventListener("pointerdown", completionNoticeMenuDismiss, true);
-        completionNoticeMenuDismiss = null;
+        if (menuDismiss) document.removeEventListener("pointerdown", menuDismiss, true);
+        menuDismiss = null;
       };
       const closeMenuOutside = event => {
         if (!menu.contains(event.target) && event.target !== menuToggle) closeMenu();
@@ -1312,24 +1333,31 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (!menu.hidden) return closeMenu();
         menu.hidden = false;
         menuToggle.setAttribute("aria-expanded", "true");
-        completionNoticeMenuDismiss = closeMenuOutside;
+        menuDismiss = closeMenuOutside;
         setTimeout(() => document.addEventListener("pointerdown", closeMenuOutside, true), 0);
       });
       menu.querySelectorAll("[data-completion-suppress]").forEach(button => button.addEventListener("click", () => {
         sessionStorage.setItem("better-codex-completion-notice-disabled", "true");
         closeMenu();
-        dismiss();
+        Array.from(completionNoticeDismissals.values()).forEach(dismissNotice => dismissNotice());
       }));
       const dismiss = () => {
-        if (updateNotice !== notice) return;
+        if (!notice.isConnected) return;
         closeMenu();
-        if (completionNoticeTimer !== null) clearTimeout(completionNoticeTimer);
-        completionNoticeTimer = null;
+        const timer = completionNoticeTimers.get(notice);
+        if (timer !== undefined) clearTimeout(timer);
+        completionNoticeTimers.delete(notice);
+        completionNoticeDismissals.delete(notice);
         notice.remove();
-        updateNotice = null;
+        if (!completionNoticeDismissals.size) {
+          completionNoticeStack?.remove();
+          completionNoticeStack = null;
+        }
       };
+      completionNoticeDismissals.set(notice, dismiss);
       notice.querySelector(".better-codex-completion-close").addEventListener("click", dismiss);
-      completionNoticeTimer = setTimeout(dismiss, 5000);
+      const duration = completionNoticeDuration();
+      if (duration > 0) completionNoticeTimers.set(notice, setTimeout(dismiss, duration));
     }
 
     async function perform(action) {
@@ -2473,6 +2501,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       dialog.id = "better-codex-auto-dispatch-help-dialog";
       dialog.setAttribute(OWNED, "true");
       const completionEnabled = !completionNoticeSuppressed();
+      const completionDuration = completionNoticeDuration();
       const mockupTools = state.mockup
         ? '<div class="better-codex-help-mockup"><button type="button" data-mockup-menu-toggle aria-haspopup="menu" aria-expanded="false">' + icon("test") + '<span>' + te("展示模式") + '</span>' + icon("chevronDown") + '</button><div class="better-codex-help-mockup-menu" role="menu" hidden><button type="button" role="menuitem" data-mockup-export>' + te("导出展示数据") + '</button><button type="button" role="menuitem" data-mockup-import>' + te("导入展示数据") + '</button><button type="button" role="menuitem" data-mockup-reset>' + te("重置布局") + '</button><input type="file" accept="application/json,.json" data-mockup-import-input hidden></div></div>'
         : "";
@@ -2482,6 +2511,17 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         .replace("{{agent}}", '<span class="better-codex-help-inline-state is-agent">' + icon("bot") + '<span>' + te("智能体") + '</span></span>')
         .replace("{{backlog}}", '<span class="better-codex-help-inline-state is-backlog">' + icon("statusBacklog") + '<span>' + te("待规划") + '</span></span>') + '</div>';
       const helpMode = HELP_MODE_MARKDOWN[state.locale] || HELP_MODE_MARKDOWN.en;
+      const defaultSchedulerModel = state.agentModelCatalog.find(model => model.isDefault)?.id || state.agentModelCatalog[0]?.id || "gpt-5.6-sol";
+      const schedulerModel = state.agentModelCatalog.some(model => model.id === state.schedulerModel) ? state.schedulerModel : defaultSchedulerModel;
+      const schedulerModelLabel = modelLabel(schedulerModel);
+      const schedulerModelOptions = state.agentModelCatalog.map(model => '<button type="button" role="option" data-setting-scheduler-model-option="' + escapeHtml(model.id) + '" aria-selected="' + String(model.id === schedulerModel) + '" class="' + (model.id === schedulerModel ? "is-selected" : "") + '"><span>' + escapeHtml(model.displayName) + '</span><span class="better-codex-help-model-check">' + (model.id === schedulerModel ? icon("check") : "") + '</span></button>').join("");
+      const settingsPage = [
+        '<section class="better-codex-help-page" data-help-page="settings" hidden>',
+        '<div class="better-codex-help-setting-group"><h3>' + te("语言") + '</h3><div class="better-codex-help-setting-row is-language"><span><strong>' + te("界面语言") + '</strong><small>' + te("选择 Better Codex 的界面语言") + '</small></span><div class="better-codex-language-switch" role="radiogroup" aria-label="' + te("界面语言") + '" data-language-value="' + state.languageSetting + '"><button type="button" role="radio" data-language="system" aria-checked="' + String(state.languageSetting === "system") + '">' + te("跟随系统") + '</button><button type="button" role="radio" data-language="zh-CN" aria-checked="' + String(state.languageSetting === "zh-CN") + '">' + te("中文") + '</button><button type="button" role="radio" data-language="en" aria-checked="' + String(state.languageSetting === "en") + '">English</button></div></div></div>',
+        '<div class="better-codex-help-setting-group"><h3>' + te("通知") + '</h3><div class="better-codex-help-setting-row is-notification"><span><strong>' + te("会话结束提醒") + '</strong><small>' + te("Issue 会话结束后在当前窗口显示提醒") + '</small></span><span class="better-codex-help-setting-controls"><span class="better-codex-help-duration' + (completionEnabled ? "" : " is-disabled") + '" data-setting-completion-picker><button type="button" class="better-codex-help-duration-toggle" data-setting-completion-duration aria-haspopup="listbox" aria-expanded="false" aria-label="' + te("弹窗持续时间") + '"' + (completionEnabled ? "" : " disabled") + '>' + te(completionDuration === 1000 ? "1 秒" : completionDuration === 10000 ? "10 秒" : completionDuration === 0 ? "永久" : "5 秒") + icon("chevronDown") + '</button><span class="better-codex-help-duration-menu" role="listbox" hidden>' + [[1000, "1 秒"], [5000, "5 秒"], [10000, "10 秒"], [0, "永久"]].map(([value, label]) => '<button type="button" role="option" data-setting-completion-option="' + value + '" aria-selected="' + String(completionDuration === value) + '" class="' + (completionDuration === value ? "is-selected" : "") + '">' + te(label) + (completionDuration === value ? icon("check") : "") + '</button>').join("") + '</span></span><input type="checkbox" data-setting-completion aria-label="' + te("会话结束提醒") + '"' + (completionEnabled ? " checked" : "") + '></span></div></div>',
+        '<div class="better-codex-help-setting-group"><h3>' + te("调度") + '</h3><div class="better-codex-help-setting-row is-model"><span><strong>' + te("调度器模型") + '</strong><small>' + te("这个模型用于 Issue 状态调度") + '</small></span><span class="better-codex-help-model" data-setting-scheduler-model-picker><button type="button" class="better-codex-help-model-toggle" data-setting-scheduler-model aria-haspopup="listbox" aria-expanded="false"><span data-setting-scheduler-model-label>' + escapeHtml(schedulerModelLabel) + '</span>' + icon("chevronDown") + '</button><span class="better-codex-help-model-menu" role="listbox" hidden><span class="better-codex-help-model-title">' + te("模型") + '</span>' + schedulerModelOptions + '</span></span></div></div>',
+        '</section>',
+      ].join("");
       dialog.innerHTML = [
         '<div class="better-codex-auto-dispatch-help-shell" data-help-view="mode">',
         '<header><div class="better-codex-help-tabs" role="tablist" aria-label="' + te("帮助与设置") + '"><button type="button" class="is-active" data-help-view="mode" aria-selected="true">' + te("运行模式说明") + '</button><button type="button" data-help-view="settings" aria-selected="false">' + te("设置") + '</button><button type="button" data-help-view="about" aria-selected="false">' + te("关于") + '</button></div>' + mockupTools + '<button type="button" data-help-close aria-label="' + te("关闭") + '">' + icon("close") + "</button></header>",
@@ -2489,7 +2529,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         '<section class="better-codex-help-page is-active" data-help-page="mode"><div class="better-codex-auto-dispatch-help-panels"><article class="better-codex-auto-dispatch-help-panel is-manual"><div class="better-codex-auto-dispatch-help-heading">' + icon("user") + "<h3>" + te("手动运行") + "</h3></div>" + modeDescription(helpMode.manual) + "</article>",
         '<div class="better-codex-auto-dispatch-help-divider" aria-hidden="true"></div>',
         '<article class="better-codex-auto-dispatch-help-panel is-auto"><div class="better-codex-auto-dispatch-help-heading">' + icon("refresh") + "<h3>" + te("自动运行") + "</h3></div>" + modeDescription(helpMode.auto) + "</article></div></section>",
-        '<section class="better-codex-help-page" data-help-page="settings" hidden><div class="better-codex-help-setting-group"><h3>' + te("语言") + '</h3><div class="better-codex-help-setting-row is-language"><span><strong>' + te("界面语言") + '</strong><small>' + te("选择 Better Codex 的界面语言") + '</small></span><div class="better-codex-language-switch" role="radiogroup" aria-label="' + te("界面语言") + '" data-language-value="' + state.languageSetting + '"><button type="button" role="radio" data-language="system" aria-checked="' + String(state.languageSetting === "system") + '">' + te("跟随系统") + '</button><button type="button" role="radio" data-language="zh-CN" aria-checked="' + String(state.languageSetting === "zh-CN") + '">' + te("中文") + '</button><button type="button" role="radio" data-language="en" aria-checked="' + String(state.languageSetting === "en") + '">English</button></div></div></div><div class="better-codex-help-setting-group"><h3>' + te("通知") + '</h3><label class="better-codex-help-setting-row"><span><strong>' + te("会话结束提醒") + '</strong><small>' + te("Issue 会话结束后在当前窗口显示提醒") + '</small></span><input type="checkbox" data-setting-completion' + (completionEnabled ? " checked" : "") + '></label></div></section>',
+        settingsPage,
         '<section class="better-codex-help-page" data-help-page="about" hidden><div class="better-codex-help-about"><span class="better-codex-help-about-logo">' + betterCodexLogo() + '</span><div><h2>Better Codex</h2><p class="better-codex-help-about-slogan">' + te("从开始到完成，让 Codex 里的工作清晰可见。") + '</p></div><span class="better-codex-help-runtime-status"><span class="better-codex-help-status-dot"></span>' + te("运行正常") + '</span></div><dl class="better-codex-help-about-details"><div><dt>' + te("版本信息") + '</dt><dd><button class="better-codex-help-check-update" type="button" data-check-update>' + te("检查新版本") + '</button><span data-product-core></span></dd></div></dl><div class="better-codex-help-github-row"><a class="better-codex-help-github" href="https://github.com/Ericwong5021/better-codex" target="_blank" rel="noreferrer">' + githubLogo() + '<span class="better-codex-help-github-name">Better Codex</span><span class="better-codex-help-github-stars">' + icon("star", "better-codex-help-star") + '</span></a><p>' + te("如果你喜欢 Better Codex，欢迎给我们一个 Star。") + '</p></div></section>',
         "</main>",
         "</div>",
@@ -2567,8 +2607,94 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         render();
         showAutoDispatchHelp("settings");
       }));
-      dialog.querySelector("[data-setting-completion]").addEventListener("change", event => {
+      const completionToggle = dialog.querySelector("[data-setting-completion]");
+      const completionDurationSelect = dialog.querySelector("[data-setting-completion-duration]");
+      const completionDurationPicker = dialog.querySelector("[data-setting-completion-picker]");
+      const completionDurationMenu = dialog.querySelector(".better-codex-help-duration-menu");
+      const closeCompletionDurationMenu = () => {
+        completionDurationPicker.classList.remove("is-open");
+        completionDurationMenu.hidden = true;
+        completionDurationSelect.setAttribute("aria-expanded", "false");
+      };
+      const schedulerModelPicker = dialog.querySelector("[data-setting-scheduler-model-picker]");
+      const schedulerModelSelect = dialog.querySelector("[data-setting-scheduler-model]");
+      const schedulerModelMenu = dialog.querySelector(".better-codex-help-model-menu");
+      const schedulerModelLabelNode = dialog.querySelector("[data-setting-scheduler-model-label]");
+      const closeSchedulerModelMenu = () => {
+        schedulerModelPicker.classList.remove("is-open");
+        schedulerModelMenu.hidden = true;
+        schedulerModelSelect.setAttribute("aria-expanded", "false");
+      };
+      const syncSchedulerModel = model => {
+        state.schedulerModel = model;
+        schedulerModelLabelNode.textContent = modelLabel(model);
+        schedulerModelMenu.querySelectorAll("[data-setting-scheduler-model-option]").forEach(item => {
+          const selected = item.dataset.settingSchedulerModelOption === model;
+          item.classList.toggle("is-selected", selected);
+          item.setAttribute("aria-selected", String(selected));
+          item.querySelector(".better-codex-help-model-check").innerHTML = selected ? icon("check") : "";
+        });
+      };
+      completionToggle.addEventListener("change", event => {
         sessionStorage.setItem("better-codex-completion-notice-disabled", String(!event.currentTarget.checked));
+        completionDurationSelect.disabled = !event.currentTarget.checked;
+        completionDurationPicker.classList.toggle("is-disabled", !event.currentTarget.checked);
+        if (!event.currentTarget.checked) closeCompletionDurationMenu();
+      });
+      completionDurationSelect.addEventListener("click", event => {
+        event.stopPropagation();
+        if (completionDurationSelect.disabled) return;
+        const opening = completionDurationMenu.hidden;
+        closeCompletionDurationMenu();
+        closeSchedulerModelMenu();
+        if (opening) {
+          completionDurationPicker.classList.add("is-open");
+          completionDurationMenu.hidden = false;
+          completionDurationSelect.setAttribute("aria-expanded", "true");
+        }
+      });
+      completionDurationMenu.querySelectorAll("[data-setting-completion-option]").forEach(option => option.addEventListener("click", () => {
+        const duration = Number(option.dataset.settingCompletionOption);
+        if (![0, 1000, 5000, 10000].includes(duration)) return;
+        localStorage.setItem(COMPLETION_DURATION_KEY, String(duration));
+        completionDurationSelect.firstChild.textContent = te(duration === 1000 ? "1 秒" : duration === 10000 ? "10 秒" : duration === 0 ? "永久" : "5 秒");
+        completionDurationMenu.querySelectorAll("[data-setting-completion-option]").forEach(item => {
+          const selected = Number(item.dataset.settingCompletionOption) === duration;
+          item.classList.toggle("is-selected", selected);
+          item.setAttribute("aria-selected", String(selected));
+          const check = item.querySelector("svg");
+          if (selected && !check) item.insertAdjacentHTML("beforeend", icon("check"));
+          if (!selected && check) check.remove();
+        });
+        closeCompletionDurationMenu();
+      }));
+      schedulerModelSelect.addEventListener("click", event => {
+        event.stopPropagation();
+        const opening = schedulerModelMenu.hidden;
+        closeSchedulerModelMenu();
+        closeCompletionDurationMenu();
+        if (opening) {
+          schedulerModelPicker.classList.add("is-open");
+          schedulerModelMenu.hidden = false;
+          schedulerModelSelect.setAttribute("aria-expanded", "true");
+        }
+      });
+      schedulerModelMenu.querySelectorAll("[data-setting-scheduler-model-option]").forEach(option => option.addEventListener("click", async () => {
+        const model = option.dataset.settingSchedulerModelOption;
+        if (!state.agentModelCatalog.some(item => item.id === model)) return;
+        const previous = state.schedulerModel;
+        syncSchedulerModel(model);
+        closeSchedulerModelMenu();
+        try {
+          const result = await api("/api/settings/scheduler-model", { method: "PATCH", body: JSON.stringify({ model }) });
+          syncSchedulerModel(result.model || model);
+        } catch {
+          syncSchedulerModel(previous);
+        }
+      }));
+      document.addEventListener("pointerdown", event => {
+        if (!completionDurationPicker.contains(event.target)) closeCompletionDurationMenu();
+        if (!schedulerModelPicker.contains(event.target)) closeSchedulerModelMenu();
       });
       const checkUpdate = dialog.querySelector("[data-check-update]");
       const renderUpdateState = (update, checked = false) => {
@@ -2624,7 +2750,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       syncAutoDispatch();
       syncMockupUi();
       const enrichingCount = state.issues.filter(issue => issue.enrichment_status === "pending").length;
-      const runningCount = state.issues.filter(issue => issue.active_run_status === "running" || issue.active_run_status === "claimed" || issue.reply_status === "running").length;
+      const runningCount = state.issues.filter(issue => issueExecutionRunning(issue) || issue.reply_status === "running").length;
       panel.querySelectorAll("[data-view]").forEach(button => button.classList.toggle("is-active", button.dataset.view === state.view));
       const enriching = panel.querySelector("#better-codex-enriching");
       enriching.innerHTML = '<span class="better-codex-working-dot"></span>' + te("正在理解任务 " + enrichingCount);
@@ -2674,14 +2800,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           const replyStatus = issue.reply_status || "idle";
           const replyActivityState = replyStatus === "running" ? "replying" : replyStatus === "failed" ? "reply-failed" : replyStatus === "interrupted" ? "interrupted" : "";
           const latestRunStatus = issue.latest_run_status || "";
-          const executionState = latestRunStatus === "completed" ? "completed" : latestRunStatus === "failed" ? "failed" : latestRunStatus === "interrupted" ? "interrupted" : latestRunStatus === "running" ? "running" : latestRunStatus === "claimed" ? "claimed" : issue.agent_enabled ? "not-started" : "";
-          const activeExecutionState = issue.active_run_status === "running" && issue.status === "in_review" ? "in_review" : issue.active_run_status || "";
+          const executionState = issue.latest_scheduler_error && issue.status === "in_review" ? "scheduler-failed" : latestRunStatus === "completed" ? "completed" : latestRunStatus === "failed" ? "failed" : latestRunStatus === "interrupted" ? "interrupted" : latestRunStatus === "scheduling" ? "scheduling" : latestRunStatus === "running" ? "running" : latestRunStatus === "claimed" ? "claimed" : issue.agent_enabled ? "not-started" : "";
+          const activeExecutionState = issue.active_run_status || "";
           const activityState = enrichmentLocked ? "thinking" : activeExecutionState || replyActivityState || executionState;
           const replyActivity = !issue.active_run_status && Boolean(replyActivityState);
-          const activityLabel = t(enrichmentLocked ? "理解中" : replyActivity ? (replyStatus === "running" ? "回复中" : replyStatus === "failed" ? "回复失败" : replyStatus === "interrupted" ? "已中断" : "回复完成") : activityState === "running" ? "工作中" : activityState === "claimed" ? "排队中" : activityState === "in_review" ? "审核中" : activityState === "completed" ? "已完成" : activityState === "failed" ? "执行失败" : activityState === "interrupted" ? "已中断" : activityState === "not-started" ? "未开始" : "");
-          const activityIcon = ["completed", "interrupted", "not-started"].includes(activityState) ? '<span class="better-codex-activity-dot" aria-hidden="true"></span>' : activityState === "failed" ? icon("close") : agentAvatarMarkup(activityAgent, "better-codex-card-avatar");
+          const activityLabel = t(enrichmentLocked ? "理解中" : replyActivity ? (replyStatus === "running" ? "回复中" : replyStatus === "failed" ? "回复失败" : replyStatus === "interrupted" ? "已中断" : "回复完成") : activityState === "running" ? "工作中" : activityState === "scheduling" ? "调度器运行中" : activityState === "scheduler-failed" ? "调度器失败，已转人工审核" : activityState === "claimed" ? "排队中" : activityState === "in_review" ? "审核中" : activityState === "completed" ? "已完成" : activityState === "failed" ? "执行失败" : activityState === "interrupted" ? "已中断" : activityState === "not-started" ? "未开始" : "");
+          const activityIcon = ["completed", "interrupted", "not-started"].includes(activityState) ? '<span class="better-codex-activity-dot" aria-hidden="true"></span>' : ["failed", "scheduler-failed"].includes(activityState) ? icon("close") : agentAvatarMarkup(activityAgent, "better-codex-card-avatar");
           const activity = activityState
-            ? '<span class="better-codex-activity" data-run="' + escapeHtml(activityState) + '">' + activityIcon + '<span class="' + (enrichmentLocked || replyActivityState === "replying" || issue.active_run_status === "running" ? "better-codex-shimmer" : "") + '">' + activityLabel + '</span></span>'
+            ? '<span class="better-codex-activity" data-run="' + escapeHtml(activityState) + '">' + activityIcon + '<span class="' + (enrichmentLocked || replyActivityState === "replying" || executionRunning ? "better-codex-shimmer" : "") + '">' + activityLabel + '</span></span>'
             : "";
           const description = String(issue.description || "").replace(/[#*_\`~>\[\]()]/g, "").replace(/\s+/g, " ").trim();
           const issueProject = state.projects.find(item => item.id === issue.project_id) || project;
@@ -2711,11 +2837,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const issues = await api("/api/issues" + (query.toString() ? "?" + query : ""));
       const changed = JSON.stringify(issues) !== JSON.stringify(state.issues);
       if (issueSessionSnapshot.size) {
-        const ended = issues.find(issue => {
+        const ended = issues.filter(issue => {
           const previous = issueSessionSnapshot.get(issue.id);
-          return previous && ((["claimed", "running"].includes(previous.activeRunStatus) && !issue.active_run_status) || (previous.replyStatus === "running" && issue.reply_status !== "running"));
+          return previous && ((["claimed", "running", "scheduling"].includes(previous.activeRunStatus) && !issue.active_run_status) || (previous.replyStatus === "running" && issue.reply_status !== "running"));
         });
-        if (ended) renderSessionEndNotice(ended);
+        ended.sort((left, right) => new Date(left.updated_at).getTime() - new Date(right.updated_at).getTime()).forEach(renderSessionEndNotice);
       }
       issueSessionSnapshot = new Map(issues.map(issue => [issue.id, { activeRunStatus: issue.active_run_status || "", replyStatus: issue.reply_status || "idle" }]));
       state.issues = issues;
@@ -2756,6 +2882,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         state.agentModels = state.agentModelCatalog.map(model => model.id);
         state.agentReasoningEfforts = bootstrap.agentReasoningEfforts || [];
         state.autoDispatch = Boolean(bootstrap.autoDispatch);
+        state.schedulerModel = bootstrap.schedulerModel || state.agentModelCatalog.find(model => model.isDefault)?.id || state.agentModels[0] || "gpt-5.6-sol";
         syncAutoDispatch();
         if (state.mockup) {
           state.projectId = MOCKUP_PROJECT_ID;
@@ -3127,7 +3254,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           return;
         }
         applyDialogPermissions();
-        syncConversationActivity();
+        syncConversationStatus(issue.reply_status || "idle");
       }
 
       function header() {
@@ -3148,7 +3275,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (!issue || (!sessionId && !executionRunning)) return "";
         const conversationState = issue.reply_status || "idle";
         const conversationStatus = conversationStatusMarkup(conversationState);
-        const conversationBody = sessionId ? '<p class="better-codex-markdown-empty">' + te("加载对话…") + '</p>' : conversationActivityMarkup();
+        const conversationBody = sessionId ? '<p class="better-codex-markdown-empty">' + te("加载对话…") + '</p>' : "";
         return '<section class="better-codex-conversation"><div class="better-codex-conversation-head"><span>' + te("对话") + '</span><span class="better-codex-conversation-status" data-conversation-status data-state="' + escapeHtml(conversationState) + '"' + (conversationStatus ? "" : " hidden") + '>' + conversationStatus + '</span></div><div class="better-codex-timeline" data-conversation-body>' + conversationBody + '</div></section><div class="better-codex-conversation-feedback" data-conversation-feedback hidden></div>' + conversationComposer();
       }
 
@@ -3156,17 +3283,17 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const enrichmentLocked = issuePermissions(issue).enrichmentPending;
         const replyActivityState = replyStatus === "running" ? "replying" : replyStatus === "failed" ? "reply-failed" : replyStatus === "interrupted" ? "interrupted" : "";
         const latestRunStatus = issue?.latest_run_status || "";
-        const executionState = latestRunStatus === "completed" ? "completed" : latestRunStatus === "failed" ? "failed" : latestRunStatus === "interrupted" ? "interrupted" : latestRunStatus === "running" ? "running" : latestRunStatus === "claimed" ? "claimed" : issue?.agent_enabled ? "not-started" : "";
-        const activeExecutionState = issue?.active_run_status === "running" && issue?.status === "in_review" ? "in_review" : issue?.active_run_status || "";
+        const executionState = issue?.latest_scheduler_error && issue?.status === "in_review" ? "scheduler-failed" : latestRunStatus === "completed" ? "completed" : latestRunStatus === "failed" ? "failed" : latestRunStatus === "interrupted" ? "interrupted" : latestRunStatus === "scheduling" ? "scheduling" : latestRunStatus === "running" ? "running" : latestRunStatus === "claimed" ? "claimed" : issue?.agent_enabled ? "not-started" : "";
+        const activeExecutionState = issue?.active_run_status || "";
         const activityState = enrichmentLocked ? "thinking" : activeExecutionState || replyActivityState || executionState;
         if (!activityState) return "";
         const replyActivity = !issue?.active_run_status && Boolean(replyActivityState);
-        const activityLabel = t(enrichmentLocked ? "理解中" : replyActivity ? (replyStatus === "running" ? "回复中" : replyStatus === "failed" ? "回复失败" : "已中断") : activityState === "running" ? "工作中" : activityState === "claimed" ? "排队中" : activityState === "in_review" ? "审核中" : activityState === "completed" ? "已完成" : activityState === "failed" ? "执行失败" : activityState === "interrupted" ? "已中断" : activityState === "not-started" ? "未开始" : "");
+        const activityLabel = t(enrichmentLocked ? "理解中" : replyActivity ? (replyStatus === "running" ? "回复中" : replyStatus === "failed" ? "回复失败" : "已中断") : activityState === "running" ? "工作中" : activityState === "scheduling" ? "调度器运行中" : activityState === "scheduler-failed" ? "调度器失败，已转人工审核" : activityState === "claimed" ? "排队中" : activityState === "in_review" ? "审核中" : activityState === "completed" ? "已完成" : activityState === "failed" ? "执行失败" : activityState === "interrupted" ? "已中断" : activityState === "not-started" ? "未开始" : "");
         const agent = state.agents.find(item => item.id === issue?.agent_id) || state.agents.find(item => item.is_default) || { name: "Codex", is_default: true };
         const activityIcon = ["completed", "interrupted", "not-started"].includes(activityState)
           ? '<span class="better-codex-activity-dot" aria-hidden="true"></span>'
-          : activityState === "failed" ? icon("close") : agentAvatarMarkup(agent, "better-codex-bubble-avatar better-codex-conversation-status-avatar");
-        return '<span class="better-codex-activity" data-run="' + activityState + '">' + activityIcon + '<span class="' + (enrichmentLocked || activityState === "replying" || issue?.active_run_status === "running" ? "better-codex-shimmer" : "") + '">' + activityLabel + '</span></span>';
+          : ["failed", "scheduler-failed"].includes(activityState) ? icon("close") : agentAvatarMarkup(agent, "better-codex-bubble-avatar better-codex-conversation-status-avatar");
+        return '<span class="better-codex-activity" data-run="' + activityState + '">' + activityIcon + '<span class="' + (enrichmentLocked || activityState === "replying" || issueExecutionRunning(issue) ? "better-codex-shimmer" : "") + '">' + activityLabel + '</span></span>';
       }
 
       function syncConversationStatus(replyStatus) {
@@ -3180,27 +3307,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       function conversationComposer() {
         if (!issue || !sessionId) return "";
         return '<div class="better-codex-composer"><textarea name="reply" rows="2" placeholder="' + te("输入下一步要求…") + '" aria-label="' + te("回复") + '">' + escapeHtml(draft.reply) + '</textarea><button class="better-codex-composer-send" type="button" data-conversation-send>' + te("发送") + '</button></div>';
-      }
-
-      function conversationActivity() {
-        if (!executionRunning) return null;
-        if (issue?.active_run_status === "claimed") return { state: "claimed", label: "排队中", shimmer: false };
-        if (issue?.status === "in_review") return { state: "in_review", label: "审核中", shimmer: true };
-        return { state: "running", label: "工作中", shimmer: true };
-      }
-
-      function conversationActivityMarkup() {
-        const activity = conversationActivity();
-        if (!activity) return "";
-        return '<div class="better-codex-conversation-activity" data-conversation-activity data-run="' + activity.state + '"><span class="better-codex-conversation-activity-indicator" aria-hidden="true"></span><span class="' + (activity.shimmer ? "better-codex-shimmer" : "") + '">' + te(activity.label) + '</span></div>';
-      }
-
-      function syncConversationActivity() {
-        const body = dialog.querySelector("[data-conversation-body]");
-        if (!body) return;
-        body.querySelector("[data-conversation-activity]")?.remove();
-        const markup = conversationActivityMarkup();
-        if (markup) body.insertAdjacentHTML("beforeend", markup);
       }
 
       function replyFailureMessage(error, action) {
@@ -3284,17 +3390,16 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const messages = Array.isArray(data?.messages) ? data.messages : [];
         if (messages.length) {
           body.innerHTML = conversationBubbles(messages, data.user);
-          syncConversationActivity();
           body.scrollTop = body.scrollHeight;
         } else if (data?.html) {
           body.innerHTML = conversationBubbles([{ role: "agent", html: data.html, markdown: data.markdown || "", timestamp: null }], data.user);
-          syncConversationActivity();
           body.scrollTop = body.scrollHeight;
         } else {
           body.innerHTML = sessionId
-            ? '<div class="better-codex-conversation-empty"><h3>' + te("开始对话") + '</h3><p>' + te("补充下一步要求，智能体会继续处理。") + '</p><span>' + te("在下方输入消息并发送") + '</span></div>'
+            ? executionRunning
+              ? '<div class="better-codex-conversation-empty"><h3>' + te("正在处理任务") + '</h3><p>' + te("智能体回复产生后会显示在这里。") + '</p><span>' + te("请稍候") + '</span></div>'
+              : '<div class="better-codex-conversation-empty"><h3>' + te("开始对话") + '</h3><p>' + te("补充下一步要求，智能体会继续处理。") + '</p><span>' + te("在下方输入消息并发送") + '</span></div>'
             : '<p class="better-codex-markdown-empty">' + te("未关联对话。") + '</p>';
-          syncConversationActivity();
         }
         const reply = data?.reply || { status: "idle" };
         if (reply.message) lastReplyMessage = reply.message;
@@ -4027,10 +4132,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       refreshTimer = null;
       if (pollTimer !== null) clearInterval(pollTimer);
       if (updateTimer !== null) clearInterval(updateTimer);
-      if (completionNoticeTimer !== null) clearTimeout(completionNoticeTimer);
-      completionNoticeTimer = null;
-      if (completionNoticeMenuDismiss) document.removeEventListener("pointerdown", completionNoticeMenuDismiss, true);
-      completionNoticeMenuDismiss = null;
+      Array.from(completionNoticeDismissals.values()).forEach(dismissNotice => dismissNotice());
+      completionNoticeTimers.forEach(timer => clearTimeout(timer));
+      completionNoticeTimers.clear();
+      completionNoticeDismissals.clear();
+      completionNoticeStack?.remove();
+      completionNoticeStack = null;
       issueSessionSnapshot.clear();
       closeFilterMenu();
       closeIssueMenu();

@@ -6,6 +6,7 @@ import { databasePath } from "./config.js";
 
 export const issueStatuses = ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"] as const;
 export const issuePriorities = ["none", "low", "medium", "high", "urgent"] as const;
+const defaultSchedulerModel = "gpt-5.6-sol";
 
 export type IssueStatus = typeof issueStatuses[number];
 export type IssuePriority = typeof issuePriorities[number];
@@ -78,9 +79,11 @@ export type Issue = {
   version: number;
   created_at: string;
   updated_at: string;
-  active_run_status?: "claimed" | "running" | null;
+  active_run_status?: "claimed" | "running" | "scheduling" | null;
   active_run_started_at?: string | null;
-  latest_run_status?: "claimed" | "running" | "completed" | "failed" | "interrupted" | null;
+  latest_run_status?: "claimed" | "running" | "scheduling" | "completed" | "failed" | "interrupted" | null;
+  latest_scheduler_status?: "pending" | "running" | "completed" | "failed" | "interrupted" | null;
+  latest_scheduler_error?: string | null;
   run_thread_id?: string | null;
 };
 
@@ -88,6 +91,18 @@ export type ClaimedIssue = {
   runId: string;
   issue: Issue;
   workspacePath: string;
+};
+
+export type SchedulerDecision = {
+  status: "done" | "in_review" | "blocked";
+  reason: string;
+  evidence: string[];
+};
+
+export type PendingSchedulerRun = {
+  claim: ClaimedIssue;
+  executionSuccess: boolean;
+  executionError?: string;
 };
 
 type ProjectInput = {
@@ -127,7 +142,7 @@ export function cleanMaxConcurrency(value: number | undefined) {
   return value;
 }
 
-const latestSchemaVersion = 2;
+const latestSchemaVersion = 3;
 
 function now() {
   return new Date().toISOString();
@@ -299,6 +314,16 @@ export class Store {
         throw error;
       }
     }
+    if (fromVersion < 3) {
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (3, ?)").run(now());
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    }
   }
 
   private ensureAgentColumn() {
@@ -330,7 +355,7 @@ export class Store {
           AND NOT EXISTS (
             SELECT 1 FROM issue_runs
             WHERE issue_runs.issue_id = issues.id
-              AND issue_runs.status IN ('claimed', 'running')
+              AND issue_runs.status IN ('claimed', 'running', 'scheduling')
           )
       `).run();
     }
@@ -398,11 +423,26 @@ export class Store {
         pid INTEGER,
         started_at TEXT NOT NULL,
         finished_at TEXT,
-        error TEXT
+        error TEXT,
+        execution_success INTEGER,
+        execution_error TEXT,
+        scheduler_pid INTEGER,
+        scheduler_status TEXT,
+        scheduler_error TEXT,
+        scheduler_attempts INTEGER NOT NULL DEFAULT 0,
+        scheduler_result TEXT
       );
       CREATE INDEX IF NOT EXISTS issue_runs_status ON issue_runs(status, started_at);
       CREATE INDEX IF NOT EXISTS issue_runs_issue ON issue_runs(issue_id, started_at);
     `);
+    const columns = new Set((this.db.prepare("PRAGMA table_info(issue_runs)").all() as Array<{ name: string }>).map(item => item.name));
+    if (!columns.has("execution_success")) this.db.exec("ALTER TABLE issue_runs ADD COLUMN execution_success INTEGER");
+    if (!columns.has("execution_error")) this.db.exec("ALTER TABLE issue_runs ADD COLUMN execution_error TEXT");
+    if (!columns.has("scheduler_pid")) this.db.exec("ALTER TABLE issue_runs ADD COLUMN scheduler_pid INTEGER");
+    if (!columns.has("scheduler_status")) this.db.exec("ALTER TABLE issue_runs ADD COLUMN scheduler_status TEXT");
+    if (!columns.has("scheduler_error")) this.db.exec("ALTER TABLE issue_runs ADD COLUMN scheduler_error TEXT");
+    if (!columns.has("scheduler_attempts")) this.db.exec("ALTER TABLE issue_runs ADD COLUMN scheduler_attempts INTEGER NOT NULL DEFAULT 0");
+    if (!columns.has("scheduler_result")) this.db.exec("ALTER TABLE issue_runs ADD COLUMN scheduler_result TEXT");
   }
 
   private ensureIssueReplyTable() {
@@ -459,6 +499,22 @@ export class Store {
       ON CONFLICT(key) DO UPDATE SET value = excluded.value
     `).run(enabled ? "1" : "0");
     return this.getAutoDispatch();
+  }
+
+  getSchedulerModel() {
+    const row = this.db.prepare("SELECT value FROM settings WHERE key = 'scheduler_model'").get() as { value: string } | undefined;
+    const value = row?.value.trim() || "";
+    return value && value.length <= 200 && !value.includes("\0") ? value : defaultSchedulerModel;
+  }
+
+  setSchedulerModel(model: string) {
+    const value = model.trim();
+    if (!value || value.length > 200 || value.includes("\0")) throw new Error("invalid_scheduler_model");
+    this.db.prepare(`
+      INSERT INTO settings (key, value) VALUES ('scheduler_model', ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `).run(value);
+    return this.getSchedulerModel();
   }
 
   getDefaultAgentMaxConcurrency() {
@@ -642,14 +698,15 @@ export class Store {
     }
     const rows = this.db.prepare(`
       SELECT issues.*, active_run.status AS active_run_status, active_run.started_at AS active_run_started_at,
-        latest_run.status AS latest_run_status, latest_thread.thread_id AS run_thread_id
+        latest_run.status AS latest_run_status, latest_run.scheduler_status AS latest_scheduler_status,
+        latest_run.scheduler_error AS latest_scheduler_error, latest_thread.thread_id AS run_thread_id
       FROM issues
       LEFT JOIN issue_runs AS active_run
         ON active_run.id = (
           SELECT issue_runs.id
           FROM issue_runs
           WHERE issue_runs.issue_id = issues.id
-            AND issue_runs.status IN ('claimed', 'running')
+            AND issue_runs.status IN ('claimed', 'running', 'scheduling')
           ORDER BY issue_runs.started_at DESC, issue_runs.rowid DESC
           LIMIT 1
         )
@@ -685,7 +742,7 @@ export class Store {
           SELECT issue_runs.status
           FROM issue_runs
           WHERE issue_runs.issue_id = issues.id
-            AND issue_runs.status IN ('claimed', 'running')
+            AND issue_runs.status IN ('claimed', 'running', 'scheduling')
           ORDER BY issue_runs.started_at DESC, issue_runs.rowid DESC
           LIMIT 1
         ) AS active_run_status,
@@ -693,7 +750,7 @@ export class Store {
           SELECT issue_runs.started_at
           FROM issue_runs
           WHERE issue_runs.issue_id = issues.id
-            AND issue_runs.status IN ('claimed', 'running')
+            AND issue_runs.status IN ('claimed', 'running', 'scheduling')
           ORDER BY issue_runs.started_at DESC, issue_runs.rowid DESC
           LIMIT 1
         ) AS active_run_started_at,
@@ -704,6 +761,20 @@ export class Store {
           ORDER BY issue_runs.started_at DESC, issue_runs.rowid DESC
           LIMIT 1
         ) AS latest_run_status,
+        (
+          SELECT issue_runs.scheduler_status
+          FROM issue_runs
+          WHERE issue_runs.issue_id = issues.id
+          ORDER BY issue_runs.started_at DESC, issue_runs.rowid DESC
+          LIMIT 1
+        ) AS latest_scheduler_status,
+        (
+          SELECT issue_runs.scheduler_error
+          FROM issue_runs
+          WHERE issue_runs.issue_id = issues.id
+          ORDER BY issue_runs.started_at DESC, issue_runs.rowid DESC
+          LIMIT 1
+        ) AS latest_scheduler_error,
         (
           SELECT issue_runs.thread_id
           FROM issue_runs
@@ -950,6 +1021,7 @@ export class Store {
             AND status = 'in_progress'
         `).run(timestamp, row.issue_id);
       }
+      this.db.prepare("UPDATE issue_runs SET scheduler_pid = NULL, scheduler_status = 'pending' WHERE status = 'scheduling'").run();
       this.db.exec("COMMIT");
       return rows.length;
     } catch (error) {
@@ -984,7 +1056,7 @@ export class Store {
           AND NOT EXISTS (
             SELECT 1 FROM issue_runs
             WHERE issue_runs.issue_id = issues.id
-              AND issue_runs.status IN ('claimed', 'running')
+            AND issue_runs.status IN ('claimed', 'running', 'scheduling')
           )
           AND (
             SELECT COUNT(*)
@@ -1033,6 +1105,101 @@ export class Store {
 
   startRun(runId: string, pid: number) {
     this.db.prepare("UPDATE issue_runs SET status = 'running', pid = ? WHERE id = ? AND status = 'claimed'").run(pid, runId);
+  }
+
+  beginScheduling(runId: string, issueId: string, executionSuccess: boolean, executionError?: string) {
+    const result = this.db.prepare(`
+      UPDATE issue_runs
+      SET status = 'scheduling',
+          pid = NULL,
+          execution_success = ?,
+          execution_error = ?,
+          scheduler_pid = NULL,
+          scheduler_status = 'pending',
+          scheduler_error = NULL
+      WHERE id = ? AND issue_id = ? AND status IN ('claimed', 'running')
+    `).run(Number(executionSuccess), executionError ?? null, runId, issueId);
+    if (result.changes !== 1) throw new Error("run_transition_conflict");
+  }
+
+  listPendingSchedulerRuns(): PendingSchedulerRun[] {
+    const rows = this.db.prepare(`
+      SELECT issue_runs.id AS run_id,
+        issue_runs.issue_id,
+        issue_runs.execution_success,
+        issue_runs.execution_error,
+        COALESCE(NULLIF(issues.workspace_path, ''), NULLIF(projects.workspace_path, ''), '') AS workspace_path
+      FROM issue_runs
+      JOIN issues ON issues.id = issue_runs.issue_id
+      JOIN projects ON projects.id = issues.project_id
+      WHERE issue_runs.status = 'scheduling'
+      ORDER BY issue_runs.started_at, issue_runs.rowid
+    `).all() as Array<{ run_id: string; issue_id: string; execution_success: number; execution_error: string | null; workspace_path: string }>;
+    return rows.flatMap(row => {
+      const issue = this.getIssue(row.issue_id);
+      if (!issue) return [];
+      return [{
+        claim: { runId: row.run_id, issue, workspacePath: row.workspace_path },
+        executionSuccess: Boolean(row.execution_success),
+        ...(row.execution_error ? { executionError: row.execution_error } : {}),
+      }];
+    });
+  }
+
+  startScheduler(runId: string, pid: number) {
+    const result = this.db.prepare(`
+      UPDATE issue_runs
+      SET scheduler_pid = ?, scheduler_status = 'running', scheduler_error = NULL, scheduler_attempts = scheduler_attempts + 1
+      WHERE id = ? AND status = 'scheduling'
+    `).run(pid, runId);
+    if (result.changes !== 1) throw new Error("run_transition_conflict");
+  }
+
+  pauseScheduler(runId: string) {
+    this.db.prepare("UPDATE issue_runs SET scheduler_pid = NULL, scheduler_status = 'pending' WHERE id = ? AND status = 'scheduling'").run(runId);
+  }
+
+  finalizeScheduler(runId: string, issueId: string, executionSuccess: boolean, decision: SchedulerDecision | null, schedulerError?: string) {
+    const timestamp = now();
+    const status: IssueStatus = executionSuccess ? decision?.status || "in_review" : "blocked";
+    const finalSchedulerError = schedulerError ?? (!decision ? "scheduler_invalid_output" : !executionSuccess && decision.status !== "blocked" ? "scheduler_decision_overridden" : null);
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const result = this.db.prepare(`
+        UPDATE issue_runs
+        SET status = ?,
+            finished_at = ?,
+            error = execution_error,
+            scheduler_pid = NULL,
+            scheduler_status = ?,
+            scheduler_error = ?,
+            scheduler_result = ?
+        WHERE id = ? AND issue_id = ? AND status = 'scheduling'
+      `).run(
+        executionSuccess ? "completed" : "failed",
+        timestamp,
+        decision ? "completed" : "failed",
+        finalSchedulerError,
+        decision ? JSON.stringify(decision) : null,
+        runId,
+        issueId,
+      );
+      if (result.changes !== 1) throw new Error("run_transition_conflict");
+      this.db.prepare(`
+        UPDATE issues
+        SET status = ?,
+            needs_attention = ?,
+            pending_actor = 'user',
+            version = version + 1,
+            updated_at = ?
+        WHERE id = ? AND status = 'in_progress'
+      `).run(status, Number(status !== "done"), timestamp, issueId);
+      this.db.exec("COMMIT");
+      return status;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   setRunWorkspace(issueId: string, workspacePath: string) {
@@ -1098,7 +1265,7 @@ export class Store {
     const timestamp = now();
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      const result = this.db.prepare("UPDATE issue_runs SET status = 'interrupted', finished_at = ?, error = 'runtime_stopped' WHERE id = ? AND issue_id = ? AND status IN ('claimed', 'running')").run(timestamp, runId, issueId);
+      const result = this.db.prepare("UPDATE issue_runs SET status = 'interrupted', finished_at = ?, error = 'runtime_stopped', scheduler_pid = NULL, scheduler_status = CASE WHEN status = 'scheduling' THEN 'interrupted' ELSE scheduler_status END WHERE id = ? AND issue_id = ? AND status IN ('claimed', 'running', 'scheduling')").run(timestamp, runId, issueId);
       if (result.changes === 1) {
         this.db.prepare(`
           UPDATE issues

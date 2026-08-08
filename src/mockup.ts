@@ -4,7 +4,7 @@ import { mockupStatePath } from "./config.js";
 
 const statuses = ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"];
 const priorities = ["none", "low", "medium", "high", "urgent"];
-const runStatuses = ["not-started", "claimed", "running", "completed", "failed", "interrupted"];
+const runStatuses = ["not-started", "claimed", "running", "scheduling", "completed", "failed", "interrupted"];
 const projectId = "mockup-better-codex";
 
 export const mockupPath = mockupStatePath;
@@ -16,6 +16,7 @@ export type MockupState = {
   version: number;
   revision: number;
   auto_dispatch: boolean;
+  scheduler_model: string;
   project: MockupRecord;
   projects: MockupRecord[];
   agents: MockupRecord[];
@@ -93,6 +94,7 @@ export function defaultMockupState(): MockupState {
     version: 1,
     revision: 1,
     auto_dispatch: false,
+    scheduler_model: "gpt-5.6-sol",
     project,
     projects: [project],
     agents,
@@ -174,7 +176,7 @@ function normalizeIssue(value: unknown, index: number): MockupRecord {
     reply_draft: replyDraft,
     labels,
     mockup_run_status: mockupRunStatus,
-    active_run_status: ["claimed", "running"].includes(mockupRunStatus) ? mockupRunStatus : null,
+    active_run_status: ["claimed", "running", "scheduling"].includes(mockupRunStatus) ? mockupRunStatus : null,
     latest_run_status: mockupRunStatus === "not-started" ? null : mockupRunStatus,
   };
 }
@@ -188,6 +190,8 @@ export function normalizeMockupState(value: unknown): MockupState {
   const agentIds = agents.map(agent => String(agent.id || ""));
   if (new Set(agentIds).size !== agentIds.length) throw new Error("invalid_mockup_data");
   const issues = source.issues.map(normalizeIssue);
+  const schedulerModel = String(source.scheduler_model || "gpt-5.6-sol").trim();
+  if (!schedulerModel || schedulerModel.length > 200 || schedulerModel.includes("\0")) throw new Error("invalid_mockup_data");
   const projectSource = Array.isArray(source.projects) && source.projects.length ? source.projects : [source.project || {}];
   const projects = projectSource.map((value, index) => {
     const item = asRecord(value);
@@ -217,6 +221,7 @@ export function normalizeMockupState(value: unknown): MockupState {
     version: Number.isInteger(source.version) ? source.version as number : 1,
     revision: Number.isInteger(source.revision) && Number(source.revision) > 0 ? source.revision as number : 1,
     auto_dispatch: source.auto_dispatch === true,
+    scheduler_model: schedulerModel,
     project: projects[primaryIndex],
     projects,
     agents,

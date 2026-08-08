@@ -84,7 +84,6 @@ try {
   await copyFile(executable, join(packageRoot, executableName));
   await copyFile(join(root, "assets", "update-public-key.pem"), join(packageRoot, "update-public-key.pem"));
   await cp(join(root, "skills", "better-codex"), join(packageRoot, "skills", "better-codex"), { recursive: true });
-  await cp(join(root, "skills", "better-codex-issue"), join(packageRoot, "skills", "better-codex-issue"), { recursive: true });
   if (platform === "win32") {
     execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `Compress-Archive -Path '${join(packageRoot, "*").replace(/'/g, "''")}' -DestinationPath '${archive.replace(/'/g, "''")}' -Force`], { stdio: "inherit" });
   } else {

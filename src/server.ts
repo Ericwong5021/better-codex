@@ -201,7 +201,7 @@ function errorCode(error: unknown) {
 }
 
 function errorStatus(code: string) {
-  if (code === "version_conflict" || code === "reply_busy" || code === "update_in_progress" || code === "issue_execution_locked") return 409;
+  if (code === "version_conflict" || code === "reply_busy" || code === "update_in_progress" || code === "issue_execution_locked" || code === "issue_execution_running") return 409;
   if (code.endsWith("_not_found")) return 404;
   if (code === "database_unavailable" || code === "database_integrity_check_failed") return 503;
   return 400;
@@ -271,7 +271,7 @@ export function startServer() {
         const agentModels = agentModelCatalog.map(model => model.id);
         const agentReasoningEfforts = [...new Set(agentModelCatalog.flatMap(model => model.supportedReasoningEfforts.map(effort => effort.value)))];
         const mockup = mockupEnabled ? readMockupState() : null;
-        return sendJson(response, 200, { projects: mockup ? mockup.projects : store.listProjects(), agents: mockup ? mockup.agents : visibleAgentProfiles(), statuses: issueStatuses, priorities: issuePriorities, appearance: readCodexAppearance(), locale: readCodexLocale(), user: readCodexUserProfile(), agentModelCatalog, agentModels, agentReasoningEfforts, autoDispatch: mockup ? mockup.auto_dispatch : store.getAutoDispatch(), mockup: mockupEnabled });
+        return sendJson(response, 200, { projects: mockup ? mockup.projects : store.listProjects(), agents: mockup ? mockup.agents : visibleAgentProfiles(), statuses: issueStatuses, priorities: issuePriorities, appearance: readCodexAppearance(), locale: readCodexLocale(), user: readCodexUserProfile(), agentModelCatalog, agentModels, agentReasoningEfforts, autoDispatch: mockup ? mockup.auto_dispatch : store.getAutoDispatch(), schedulerModel: mockup ? mockup.scheduler_model : store.getSchedulerModel(), mockup: mockupEnabled });
       }
       if (mockupEnabled && url.pathname === "/api/mockup/state" && method === "GET") {
         return sendJson(response, 200, readMockupState());
@@ -288,6 +288,15 @@ export function startServer() {
         if (typeof body.enabled !== "boolean") throw new Error("invalid_auto_dispatch");
         const updated = updateMockupState(state => { state.auto_dispatch = body.enabled === true; }).state;
         return sendJson(response, 200, { enabled: updated.auto_dispatch });
+      }
+      if (mockupEnabled && url.pathname === "/api/settings/scheduler-model" && ["GET", "PATCH"].includes(method)) {
+        if (method === "GET") return sendJson(response, 200, { model: readMockupState().scheduler_model });
+        const body = await readBody(request);
+        const model = cleanString(body.model, 200);
+        const catalog = await readModelCatalog();
+        if (!catalog.some(item => item.id === model)) throw new Error("invalid_model");
+        const updated = updateMockupState(state => { state.scheduler_model = model; }).state;
+        return sendJson(response, 200, { model: updated.scheduler_model });
       }
       if (mockupEnabled && url.pathname === "/api/agents" && method === "GET") {
         return sendJson(response, 200, readMockupState().agents);
@@ -522,6 +531,16 @@ export function startServer() {
         if (enabled) worker.wake();
         return sendJson(response, 200, { enabled });
       }
+      if (url.pathname === "/api/settings/scheduler-model" && method === "GET") {
+        return sendJson(response, 200, { model: store.getSchedulerModel() });
+      }
+      if (url.pathname === "/api/settings/scheduler-model" && method === "PATCH") {
+        const body = await readBody(request);
+        const model = cleanString(body.model, 200);
+        const catalog = await readModelCatalog();
+        if (!catalog.some(item => item.id === model)) throw new Error("invalid_model");
+        return sendJson(response, 200, { model: store.setSchedulerModel(model) });
+      }
       if (url.pathname === "/api/update" && method === "GET") return sendJson(response, 200, getGatewayUpdateState());
       if (url.pathname === "/api/update/check" && method === "POST") return sendJson(response, 200, await checkGatewayUpdate());
       if (url.pathname === "/api/update/install" && method === "POST") {
@@ -696,7 +715,9 @@ export function startServer() {
           const body = await readBody(request);
           const version = Number(body.version);
           if (!Number.isInteger(version) || version < 1) throw new Error("invalid_version");
-          const updated = store.updateIssue(issue.id, version, parseIssuePatch(body));
+          const patch = parseIssuePatch(body);
+          if (issue.active_run_status && Object.keys(patch).some(key => key !== "reply_draft")) throw new Error("issue_execution_running");
+          const updated = store.updateIssue(issue.id, version, patch);
           if (store.isDispatchable(updated)) worker.wake();
           return sendJson(response, 200, updated);
         }
@@ -707,7 +728,7 @@ export function startServer() {
           const patch = parseIssuePatch(body);
           const nextStatus = patch.status || issue.status;
           if (["backlog", "done", "cancelled"].includes(String(nextStatus))) throw new Error("issue_not_startable");
-          if (issue.active_run_status === "claimed" || issue.active_run_status === "running") throw new Error("issue_execution_running");
+          if (issue.active_run_status) throw new Error("issue_execution_running");
           const nextProject = store.getProject(String(patch.project_id || issue.project_id));
           const nextWorkspace = String(patch.workspace_path || issue.workspace_path || nextProject?.workspace_path || "");
           if (!nextWorkspace) throw new Error("workspace_required");
@@ -731,11 +752,11 @@ export function startServer() {
           const body = await readBody(request);
           const version = Number(body.version);
           if (!Number.isInteger(version) || version < 1) throw new Error("invalid_version");
-          if (issue.active_run_status === "claimed" || issue.active_run_status === "running") {
+          if (issue.active_run_status) {
             await worker.stopIssue(issue.id);
             const current = store.getIssue(issue.id);
             if (!current) throw new Error("issue_not_found");
-            if (current.active_run_status === "claimed" || current.active_run_status === "running") throw new Error("issue_execution_running");
+            if (current.active_run_status) throw new Error("issue_execution_running");
             const updated = store.archiveIssue(issue.id, current.version);
             return sendJson(response, 200, updated);
           }
@@ -765,7 +786,7 @@ export function startServer() {
         }
         if (method === "POST" && path[3] === "reply" && path.length === 4) {
           if (updateInstallInProgress) throw new Error("update_in_progress");
-          if (issue.active_run_status === "claimed" || issue.active_run_status === "running") throw new Error("issue_execution_running");
+          if (issue.active_run_status) throw new Error("issue_execution_running");
           const body = await readBody(request);
           const requestId = cleanString(body.request_id, 200) || randomUUID();
           const message = cleanString(body.message, 100000).trim();
