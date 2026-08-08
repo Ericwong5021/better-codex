@@ -2752,16 +2752,6 @@ export function betterCodexDesignSystemCss() {
       color: var(--bc-danger);
     }
 
-    #better-codex-panel .better-codex-scheduler-dot,
-    #better-codex-dialog .better-codex-scheduler-dot {
-      background: var(--bc-info);
-    }
-
-    #better-codex-panel .better-codex-scheduler-failed-dot,
-    #better-codex-dialog .better-codex-scheduler-failed-dot {
-      background: var(--bc-danger);
-    }
-
     #better-codex-dialog .better-codex-dialog-select {
       position: relative;
       display: inline-flex;
@@ -4062,12 +4052,28 @@ export function betterCodexDesignSystemCss() {
       height: 16px;
     }
 
+    #better-codex-panel .better-codex-activity-dot,
     #better-codex-dialog .better-codex-conversation-status .better-codex-activity-dot {
+      display: block;
       width: 6px;
       height: 6px;
-      flex: 0 0 auto;
+      min-width: 6px;
+      min-height: 6px;
+      flex: 0 0 6px;
+      aspect-ratio: 1;
+      box-sizing: border-box;
       border-radius: var(--bc-radius-pill);
       background: currentColor;
+    }
+
+    #better-codex-panel .better-codex-scheduler-dot,
+    #better-codex-dialog .better-codex-scheduler-dot {
+      background: var(--bc-info);
+    }
+
+    #better-codex-panel .better-codex-scheduler-failed-dot,
+    #better-codex-dialog .better-codex-scheduler-failed-dot {
+      background: var(--bc-danger);
     }
 
     #better-codex-dialog .better-codex-conversation-status .better-codex-shimmer {

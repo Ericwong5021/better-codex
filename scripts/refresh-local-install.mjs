@@ -33,4 +33,5 @@ const serviceNeedsRefresh = process.platform !== "darwin"
   || !existsSync(launchAgentPath)
   || !readFileSync(launchAgentPath, "utf8").includes(executable);
 if (service.installed === true && serviceNeedsRefresh) run(["service", "install"]);
+else if (service.installed === true && service.running === true) run(["service", "restart"]);
 if (existsSync(launchStatePath)) run(["launcher", "install"]);

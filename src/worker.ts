@@ -8,7 +8,6 @@ import { agentSandboxModes, Store, type AgentSandboxMode, type ClaimedIssue, typ
 import { mockupSessionActive } from "./injection-state.js";
 
 const interval = 60000;
-const enrichmentTimeout = 30000;
 const schedulerTimeout = 180000;
 const schedulerSchema = {
   type: "object",
@@ -182,21 +181,14 @@ export class IssueWorker {
     this.enrichments.set(issue.id, child);
     const messages: string[] = [];
     let finished = false;
-    let timeout: NodeJS.Timeout | null = setTimeout(() => {
-      workerDebug("enrichment_timeout", { issue_id: issue.id, identifier: issue.identifier, timeout_ms: enrichmentTimeout });
-      finish("timeout");
-      child.kill("SIGTERM");
-    }, enrichmentTimeout);
     const lines = createInterface({ input: child.stdout! });
     lines.on("line", line => {
       const message = enrichmentMessage(line);
       if (message) messages.push(message);
     });
-    const finish = (event: "error" | "close" | "timeout", code?: number | null, signal?: NodeJS.Signals | null) => {
+    const finish = (event: "error" | "close", code?: number | null, signal?: NodeJS.Signals | null) => {
       if (finished) return;
       finished = true;
-      if (timeout) clearTimeout(timeout);
-      timeout = null;
       lines.close();
       this.enrichments.delete(issue.id);
       const raw = messages.at(-1) || "";
@@ -237,7 +229,7 @@ export class IssueWorker {
           ...(result
             ? {
                 title: result.title,
-                description: result.description,
+                description: current.description,
                 status: "todo",
                 agent_enabled: true,
                 agent_id: agentId,
@@ -519,7 +511,7 @@ function parseSchedulerDecision(value: string): SchedulerDecision | null {
 }
 
 function enrichmentPrompt(prompt: string) {
-  return `你是 Better Codex 的 Issue 整理器。只整理用户输入，不执行任务，不修改工作区文件。输出且只输出一个 JSON 对象，不要 Markdown 代码围栏，不要额外文字，格式为 {"title":"...","description":"..."}。title 压缩成适合卡片展示的短语，只保留核心动作、对象和必要的引用编号，省略背景、原因与实现细节；中文尽量不超过 20 个字，英文最长 160 个字符。description 忠实、完整地转述用户意图，不要仅重复 title，去掉“帮我建个 issue”等路由废话；可以使用清晰的小标题或列表组织内容，但不得编造用户没有提供的需求、事实、进度或验收标准，必须保留输入中的 URL、PR 编号和文件路径。原始输入如下：\n\n${prompt}`;
+  return `你是 Better Codex 的 Issue 整理器。你的唯一任务是理解用户输入并生成一个适合任务卡片展示的标题。不要执行任务，不要分析或解决任务，不要读取工作区，不要访问链接，不要调用工具。只输出一个 JSON 对象，不要 Markdown 代码围栏，不要额外文字，格式为 {"title":"..."}。title 只保留用户想完成的核心动作、对象和必要的引用编号；中文尽量不超过 20 个字，英文最长 160 个字符。不要输出 description，不要复述、总结、改写、翻译或复制用户输入中的任何内容。原始输入如下：\n\n${prompt}`;
 }
 
 export function enrichmentMessage(line: string) {
@@ -546,7 +538,7 @@ export function parseEnrichment(value: string) {
     const parsed = JSON.parse(value.slice(start, end + 1)) as { title?: unknown; description?: unknown };
     const title = typeof parsed.title === "string" ? parsed.title.trim().slice(0, 500) : "";
     const description = typeof parsed.description === "string" ? parsed.description.trim().slice(0, 100000) : "";
-    return title && description ? { title, description } : null;
+    return title ? { title, description } : null;
   } catch {
     return null;
   }

@@ -759,6 +759,9 @@ export function startServer() {
           const version = Number(body.version);
           if (!Number.isInteger(version) || version < 1) throw new Error("invalid_version");
           const patch = parseIssuePatch(body);
+          if (issue.archived_at) throw new Error("issue_not_startable");
+          if (!issue.agent_enabled) throw new Error("issue_agent_required");
+          if (["done", "cancelled"].includes(issue.status)) throw new Error("issue_not_startable");
           const nextStatus = patch.status || issue.status;
           if (["backlog", "done", "cancelled"].includes(String(nextStatus))) throw new Error("issue_not_startable");
           if (issue.active_run_status) throw new Error("issue_execution_running");

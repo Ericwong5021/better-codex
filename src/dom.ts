@@ -3145,6 +3145,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       let editingLocked = issuePermissions(issue).editingLocked;
       let completedIssueUpdate = Promise.resolve();
       let replyDraftUpdate = Promise.resolve();
+      const dirtyDraftFields = new Set();
 
       function isExecutionRunning() {
         return executionRunning;
@@ -3174,6 +3175,18 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           if (value("prompt") !== undefined) draft.prompt = String(value("prompt"));
           if (value("agent_id") !== undefined) draft.agentId = String(value("agent_id"));
         }
+      }
+
+      function syncDraftFromIssue() {
+        if (!issue) return;
+        if (!dirtyDraftFields.has("title")) draft.title = issue.title || "";
+        if (!dirtyDraftFields.has("description")) draft.description = issue.description || "";
+        if (!dirtyDraftFields.has("status")) draft.status = issue.status || "todo";
+        if (!dirtyDraftFields.has("priority")) draft.priority = issue.priority || "none";
+        if (!dirtyDraftFields.has("labels")) draft.labels = (issue.labels || []).join(", ");
+        if (!dirtyDraftFields.has("assignee")) draft.assignee = issue.agent_enabled ? (issue.agent_id || "codex") : issue.user_assigned ? "user" : "none";
+        if (!dirtyDraftFields.has("project_id")) draft.projectId = issue.project_id || draft.projectId;
+        if (!dirtyDraftFields.has("agent_id")) draft.agentId = issue.agent_id || "";
       }
 
       function persistCompletedIssuePatch(patch) {
@@ -3241,8 +3254,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const startNow = dialog.querySelector("[data-dialog-start-now]");
         const content = dialog.querySelector(draft.mode === "agent" ? '[name="prompt"]' : '[name="title"]');
         const disabled = !String(content?.value || "").trim();
+        const draftAgentDisabled = dirtyDraftFields.has("assignee") && ["none", "user"].includes(draft.assignee);
+        const startBlocked = !issue || !issue.agent_enabled || draftAgentDisabled || Boolean(issue.active_run_status) || Boolean(sessionId) || issue.enrichment_status === "pending" || ["done", "cancelled"].includes(issue.status);
         if (submit) submit.disabled = editingLocked || disabled;
-        if (startNow) startNow.disabled = editingLocked || disabled;
+        if (startNow) startNow.disabled = editingLocked || disabled || startBlocked;
       }
 
       function updateReplySendState() {
@@ -3286,6 +3301,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const previousSessionId = sessionId;
         const previousEnrichmentLocked = enrichmentLocked;
         const previousExecutionRunning = executionRunning;
+        const previousTitle = issue.title;
+        const previousDescription = issue.description;
+        const previousStatus = issue.status;
+        const previousPriority = issue.priority;
+        const previousLabels = JSON.stringify(issue.labels || []);
+        const previousAssignee = [issue.agent_enabled, issue.agent_id || "", issue.user_assigned].join(":");
+        const previousProjectId = issue.project_id;
         Object.assign(issue, next);
         const permissions = issuePermissions(issue);
         sessionId = issueSessionId(issue);
@@ -3299,11 +3321,20 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (issueIndex >= 0) state.issues[issueIndex] = issue;
         if (!dialog.isConnected) return;
         const footerPresent = Boolean(dialog.querySelector(".better-codex-dialog-footer"));
-        if (previousSessionId !== sessionId || previousEnrichmentLocked !== enrichmentLocked || previousExecutionRunning !== executionRunning || footerPresent !== !executionLocked) {
+        const draftSourceChanged = previousTitle !== issue.title
+          || previousDescription !== issue.description
+          || previousStatus !== issue.status
+          || previousPriority !== issue.priority
+          || previousLabels !== JSON.stringify(issue.labels || [])
+          || previousAssignee !== [issue.agent_enabled, issue.agent_id || "", issue.user_assigned].join(":")
+          || previousProjectId !== issue.project_id;
+        if (previousSessionId !== sessionId || previousEnrichmentLocked !== enrichmentLocked || previousExecutionRunning !== executionRunning || footerPresent !== !executionLocked || draftSourceChanged) {
           syncDraft();
+          syncDraftFromIssue();
           renderDialog();
           return;
         }
+        syncDraftFromIssue();
         applyDialogPermissions();
         syncConversationStatus(issue.reply_status || "idle");
       }
@@ -3312,8 +3343,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const openThreadButton = issue && (sessionId || executionRunning) && !enrichmentLocked
           ? '<button class="better-codex-dialog-open-thread' + (executionRunning ? ' is-running' : '') + '" type="button" data-dialog-open-thread="' + escapeHtml(sessionId) + '" data-dialog-open-thread-running="' + String(executionRunning) + '">' + te(executionRunning ? "任务正在进行中" : "在会话中打开") + '</button>'
           : "";
-        const startNowButton = issue && !enrichmentLocked && !sessionId && !state.autoDispatch && issue.agent_enabled && !issue.active_run_status && !["backlog", "done", "cancelled"].includes(issue.status)
-          ? '<button class="better-codex-dialog-start-now" type="button" data-dialog-start-now>' + te("立即开始任务") + '</button>'
+        const startNowButton = issue && !sessionId && !issue.active_run_status && !["done", "cancelled"].includes(issue.status)
+          ? '<button class="better-codex-dialog-start-now" type="button"' + (!issue.agent_enabled ? " disabled" : "") + ' data-dialog-start-now>' + te("立即开始任务") + '</button>'
           : "";
         const title = draft.mode === "agent" ? t("通过智能体创建") : issue ? escapeHtml(issue.identifier) : t("手动创建");
         const crumb = issue
@@ -3647,7 +3678,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         }
         const content = dialog.querySelector(draft.mode === "agent" ? '[name="prompt"]' : '[name="title"]');
         applyDialogPermissions();
-        content?.addEventListener("input", updateSubmitState);
+        content?.addEventListener("input", () => {
+          dirtyDraftFields.add(draft.mode === "agent" ? "prompt" : "title");
+          updateSubmitState();
+        });
+        dialog.querySelectorAll('[name="description"], [name="labels"]').forEach(control => control.addEventListener("input", () => {
+          dirtyDraftFields.add(control.getAttribute("name"));
+        }));
         dialog.querySelector('[name="keep"]')?.addEventListener("change", event => { state.keepCreate = event.currentTarget.checked; });
         const replyInput = dialog.querySelector('[name="reply"]');
         const sendButton = dialog.querySelector("[data-conversation-send]");
@@ -3704,10 +3741,22 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             item.setAttribute("aria-selected", String(selected));
             item.querySelector(".better-codex-dialog-select-check").innerHTML = selected ? icon("check") : "";
           });
-          if (name === "status") draft.status = value;
-          if (name === "mockup_run_status") draft.runStatus = value;
-          if (name === "priority") draft.priority = value;
-          if (name === "assignee") draft.assignee = value;
+          if (name === "status") {
+            draft.status = value;
+            dirtyDraftFields.add(name);
+          }
+          if (name === "mockup_run_status") {
+            draft.runStatus = value;
+            dirtyDraftFields.add(name);
+          }
+          if (name === "priority") {
+            draft.priority = value;
+            dirtyDraftFields.add(name);
+          }
+          if (name === "assignee") {
+            draft.assignee = value;
+            dirtyDraftFields.add(name);
+          }
           if (completedIssue) {
             if (name === "status") persistCompletedIssuePatch({ status: value });
             if (name === "priority") persistCompletedIssuePatch({ priority: value });
@@ -3719,6 +3768,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           }
           if (name === "agent_id") {
             draft.agentId = value;
+            dirtyDraftFields.add(name);
             const selectedAgent = state.agents.find(agent => agent.id === draft.agentId);
             const selectedName = selectedAgent?.name || "Codex";
             const runAvatar = dialog.querySelector(".better-codex-run-hint .better-codex-agent-avatar");
@@ -3727,6 +3777,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             if (hint) hint.textContent = t("创建后先由 " + selectedName + " 整理卡片，再自动开始工作。");
           }
           closeDialogSelects();
+          updateSubmitState();
           picker.querySelector("[data-dialog-select-toggle]")?.focus();
         }));
         const projectButton = dialog.querySelector("[data-dialog-project]");
@@ -3758,6 +3809,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         dialog.querySelectorAll("[data-dialog-project-option]").forEach(option => option.addEventListener("click", event => {
           event.stopPropagation();
           draft.projectId = option.dataset.dialogProjectOption;
+          dirtyDraftFields.add("project_id");
           const selectedProject = state.projects.find(item => item.id === draft.projectId);
           dialog.querySelector("[data-project-label]").textContent = projectLabel(selectedProject) || t("选择项目");
           dialog.querySelectorAll("[data-dialog-project-option]").forEach(item => { item.querySelector(".better-codex-project-check").innerHTML = item.dataset.dialogProjectOption === draft.projectId ? icon("check") : ""; });
@@ -3942,23 +3994,32 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       }
 
       async function startIssueNow() {
-        if (!issue || editingLocked) return;
+        if (!issue || editingLocked || !issue.agent_enabled || (dirtyDraftFields.has("assignee") && ["none", "user"].includes(draft.assignee))) return;
         const button = dialog.querySelector("[data-dialog-start-now]");
         const errorOutput = dialog.querySelector(".better-codex-dialog-error");
         if (!button || !errorOutput) return;
-        const agentId = draft.assignee && !["none", "user", "codex"].includes(draft.assignee) ? draft.assignee : "";
         button.disabled = true;
         errorOutput.hidden = true;
         try {
+          const current = await api("/api/issues/" + encodeURIComponent(issue.id));
+          if (!current.agent_enabled || (dirtyDraftFields.has("assignee") && ["none", "user"].includes(draft.assignee)) || current.active_run_status || issueSessionId(current) || current.enrichment_status === "pending" || ["done", "cancelled"].includes(current.status)) {
+            refreshIssueState(current);
+            throw new Error("issue_not_startable");
+          }
+          const agentId = dirtyDraftFields.has("assignee")
+            ? draft.assignee && !["none", "user", "codex"].includes(draft.assignee) ? draft.assignee : ""
+            : current.agent_id || "";
+          const status = current.status === "backlog" ? "todo" : dirtyDraftFields.has("status") ? draft.status : current.status;
           await api("/api/issues/" + encodeURIComponent(issue.id) + "/start", {
             method: "POST",
             body: JSON.stringify({
-              version: issue.version,
-              title: draft.title,
-              description: withAttachments(draft.description),
-              status: draft.status,
-              priority: draft.priority,
-              labels: draft.labels.split(/[,，]/).map(value => value.trim()).filter(Boolean),
+              version: current.version,
+              project_id: dirtyDraftFields.has("project_id") ? draft.projectId : current.project_id,
+              title: dirtyDraftFields.has("title") ? draft.title : current.title,
+              description: withAttachments(dirtyDraftFields.has("description") ? draft.description : current.description),
+              status,
+              priority: dirtyDraftFields.has("priority") ? draft.priority : current.priority,
+              labels: (dirtyDraftFields.has("labels") ? draft.labels : (current.labels || []).join(", ")).split(/[,，]/).map(value => value.trim()).filter(Boolean),
               agent_id: agentId,
             })
           });

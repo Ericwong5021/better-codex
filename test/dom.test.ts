@@ -512,7 +512,7 @@ test("issue cards show project icon and assignee instead of session entry", () =
   assert.ok(source.includes('data-dialog-start-now'));
   assert.ok(source.includes('/start'));
   assert.ok(source.includes('立即开始任务'));
-  assert.ok(source.includes('!sessionId && !state.autoDispatch && issue.agent_enabled && !issue.active_run_status'));
+  assert.ok(source.includes('!sessionId && !issue.active_run_status && !["done", "cancelled"].includes(issue.status)'));
   const headerStart = source.indexOf("function header()");
   const footerStart = source.indexOf("function footer()");
   const headerSource = source.slice(headerStart, footerStart);
@@ -520,7 +520,7 @@ test("issue cards show project icon and assignee instead of session entry", () =
   assert.equal(source.slice(footerStart, source.indexOf("function renderDialog()", footerStart)).includes("data-dialog-start-now"), false);
   assert.ok(source.includes('if (issue && !issuePermissions(issue).enrichmentPending) return void perform(() => openEditor(issue))'));
   assert.ok(source.includes('draggable="\' + String(!issueLocked) + \'"'));
-  assert.ok(source.includes('if (!issue || editingLocked) return;'));
+  assert.ok(source.includes('if (!issue || editingLocked || !issue.agent_enabled ||'));
   assert.ok(source.includes('if (editingLocked) return;'));
   assert.ok(!source.includes("issue?.run_thread_id || issue?.thread_id || \"\""));
   assert.ok(!source.includes("(sessionId ? ' data-thread=\""));
