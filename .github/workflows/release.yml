@@ -28,6 +28,8 @@ jobs:
           version="$(node -p "require('./package.json').version")"
           test "v$version" = "$GITHUB_REF_NAME"
         shell: bash
+      - run: npm run build
+      - run: npm test
       - run: npm run package:binary
         env:
           BETTER_CODEX_REQUIRE_SIGNING: "0"
@@ -71,6 +73,7 @@ jobs:
         with:
           path: release
           merge-multiple: true
+      - run: git fetch origin main && git checkout -B main origin/main
       - run: sha256sum release/*.tar.gz | sed 's#release/##' > release/checksums.txt
       - run: node scripts/render-homebrew-formula.mjs --version "${GITHUB_REF_NAME#v}" --checksums release/checksums.txt --output Formula/better-codex.rb
       - run: |

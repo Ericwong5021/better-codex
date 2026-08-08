@@ -40,6 +40,14 @@ await writeFile(output, `class BetterCodex < Formula
 
   def install
     bin.install "better-codex"
+    libexec.install "skills"
+    libexec.install "update-public-key.pem"
+  end
+
+  def caveats
+    <<~EOS
+      Run \`better-codex setup\` to install the Codex skills and launcher.
+    EOS
   end
 
   test do

@@ -8,6 +8,7 @@ param(
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "Continue"
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new()
+$UpdateKeySha256 = "1007607762db32004da21780e81875bef8453355a2944524a96e5341e1e3963e"
 
 function Write-Step([string]$Message) {
   Write-Host "[Better Codex] $Message"
@@ -101,24 +102,48 @@ function Invoke-ExistingUpgrade([string]$Executable, [string]$TargetVersion) {
   }
 }
 
+function Test-InstallationReady([string]$Executable) {
+  if ($NoService) { return $true }
+  try {
+    & $Executable launcher install 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { return $false }
+    $doctor = (& $Executable doctor 2>$null | Out-String | ConvertFrom-Json)
+    return [bool]$doctor.ok
+  } catch {
+    return $false
+  }
+}
+
 if (-not [Environment]::Is64BitOperatingSystem) { throw "Better Codex requires 64-bit Windows." }
 
 $executable = Join-Path $BinDirectory "better-codex.exe"
 $codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE ".codex" }
 $skillDirectory = Join-Path $codexHome "skills\better-codex"
+$issueSkillDirectory = Join-Path $codexHome "skills\better-codex-issue"
+$betterCodexHome = if ($env:BETTER_CODEX_HOME) { [IO.Path]::GetFullPath($env:BETTER_CODEX_HOME) } else { Join-Path $env:USERPROFILE ".better-codex" }
+$updatePublicKeyPath = Join-Path $betterCodexHome "update-public-key.pem"
+$lockHasher = [Security.Cryptography.SHA256]::Create()
+$lockHash = $lockHasher.ComputeHash([Text.Encoding]::UTF8.GetBytes($betterCodexHome))
+$lockHasher.Dispose()
+$lockId = -join ($lockHash[0..11] | ForEach-Object { $_.ToString("x2") })
+$lockName = "Local\BetterCodexInstaller-$lockId"
+$installMutex = [Threading.Mutex]::new($false, $lockName)
+$installLockAcquired = $false
+try {
+  try { $installLockAcquired = $installMutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $installLockAcquired = $true }
+  if (-not $installLockAcquired) { throw "Another Better Codex installation is already running." }
 $Version = Resolve-ReleaseTag $Repository $Version
 $targetVersion = $Version.TrimStart("v")
 $installedVersion = Get-InstalledVersion $executable
 
-if ($installedVersion -and (Test-VersionAtLeast $installedVersion $targetVersion) -and (Test-Path (Join-Path $skillDirectory "SKILL.md"))) {
+if ($installedVersion -and (Test-VersionAtLeast $installedVersion $targetVersion) -and (Test-Path (Join-Path $skillDirectory "SKILL.md")) -and (Test-Path (Join-Path $issueSkillDirectory "SKILL.md")) -and (Test-Path $updatePublicKeyPath)) {
   try {
     $updateCheck = (& $executable update check 2>$null | Out-String | ConvertFrom-Json)
     if ($updateCheck.checked -and -not (($updateCheck.core.available) -or ($updateCheck.compatibility.available))) {
-      if (-not $NoService) {
-        try { & $executable launcher install 2>&1 | Out-Null } catch {}
+      if (Test-InstallationReady $executable) {
+        Write-Ok "Better Codex is up to date (v$installedVersion)"
+        return
       }
-      Write-Ok "Better Codex is up to date (v$installedVersion)"
-      return
     }
   } catch {
     Write-Step "Live update check unavailable; continuing with upgrade..."
@@ -130,31 +155,15 @@ if ($installedVersion) {
   $updateCheck = $null
   try {
     $updateCheck = (& $executable update check 2>$null | Out-String | ConvertFrom-Json)
-    if ((Test-VersionAtLeast $installedVersion $targetVersion) -and $updateCheck.checked -and -not (($updateCheck.core.available) -or ($updateCheck.compatibility.available))) {
+    if ((Test-VersionAtLeast $installedVersion $targetVersion) -and $updateCheck.checked -and -not (($updateCheck.core.available) -or ($updateCheck.compatibility.available)) -and (Test-InstallationReady $executable)) {
       Write-Ok "Better Codex is up to date (v$installedVersion)"
       return
     }
   } catch {
     Write-Step "Live update check unavailable; continuing with upgrade..."
   }
-  if ((Test-Path (Join-Path $skillDirectory "SKILL.md")) -and (Invoke-ExistingUpgrade $executable $targetVersion)) { return }
+  if ((Test-Path (Join-Path $skillDirectory "SKILL.md")) -and (Test-Path (Join-Path $issueSkillDirectory "SKILL.md")) -and (Test-Path $updatePublicKeyPath) -and (Invoke-ExistingUpgrade $executable $targetVersion)) { return }
   Write-Step "Automatic upgrade unavailable; continuing with full installation..."
-}
-
-$codexProcesses = @(Get-Process -Name "ChatGPT", "Codex" -ErrorAction SilentlyContinue)
-if ($codexProcesses.Count -gt 0) {
-  $choice = Read-Host "Codex is currently running. Quit Codex and continue installation? [Y/n]"
-  if ($choice -and $choice -notin @("y", "Y")) {
-    Write-Output "Installation cancelled."
-    return
-  }
-  $codexProcesses | Stop-Process -Force
-  Write-Step "Stopping Codex..."
-  for ($attempt = 0; $attempt -lt 60; $attempt++) {
-    if (-not (Get-Process -Name "ChatGPT", "Codex" -ErrorAction SilentlyContinue)) { break }
-    Start-Sleep -Milliseconds 250
-  }
-  if (Get-Process -Name "ChatGPT", "Codex" -ErrorAction SilentlyContinue) { throw "Codex did not quit. Quit it manually and run the installer again." }
 }
 
 $workDirectory = Join-Path ([IO.Path]::GetTempPath()) ("better-codex-" + [guid]::NewGuid())
@@ -177,29 +186,66 @@ try {
   if (-not $expected) { throw "No checksum found for $name." }
   $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
   if ($actual -ne $expected.ToLowerInvariant()) { throw "Checksum mismatch for $name." }
+  $actualPublicKey = (Get-FileHash -Algorithm SHA256 $publicKey).Hash.ToLowerInvariant()
+  if ($actualPublicKey -ne $UpdateKeySha256) { throw "Update public key mismatch." }
   Write-Step "Extracting package..."
   Expand-Archive -LiteralPath $archive -DestinationPath $workDirectory -Force
+  $packagedExecutable = Join-Path $workDirectory "better-codex.exe"
+  $packagedSkill = Join-Path $workDirectory "skills\better-codex"
+  $packagedIssueSkill = Join-Path $workDirectory "skills\better-codex-issue"
+  if (-not (Test-Path $packagedExecutable)) { throw "Better Codex executable is missing from the package." }
+  if (-not (Test-Path (Join-Path $packagedSkill "SKILL.md"))) { throw "Better Codex skill is missing from the package." }
+  if (-not (Test-Path (Join-Path $packagedIssueSkill "SKILL.md"))) { throw "Better Codex issue skill is missing from the package." }
+  $backupDirectory = Join-Path $workDirectory "previous"
+  New-Item -ItemType Directory -Force -Path $backupDirectory | Out-Null
+  $backupExecutable = Join-Path $backupDirectory "better-codex.exe"
+  $backupSkill = Join-Path $backupDirectory "better-codex-skill"
+  $backupIssueSkill = Join-Path $backupDirectory "better-codex-issue-skill"
+  $backupUpdateKey = Join-Path $backupDirectory "update-public-key.pem"
+  $hadExecutable = Test-Path $executable
+  $hadSkill = Test-Path $skillDirectory
+  $hadIssueSkill = Test-Path $issueSkillDirectory
+  $hadUpdateKey = Test-Path $updatePublicKeyPath
+  $previousService = if ($hadExecutable) { try { & $executable service status 2>$null | Out-String | ConvertFrom-Json } catch { $null } } else { $null }
+  $previousInjectionEnabled = -not (Test-Path (Join-Path $betterCodexHome "run\injection.json")) -or ((Get-Content (Join-Path $betterCodexHome "run\injection.json") -Raw | ConvertFrom-Json).enabled -eq $true)
+  if ($hadExecutable) { Copy-Item -Force $executable $backupExecutable }
+  if ($hadSkill) { Copy-Item -Recurse -Force $skillDirectory $backupSkill }
+  if ($hadIssueSkill) { Copy-Item -Recurse -Force $issueSkillDirectory $backupIssueSkill }
+  if ($hadUpdateKey) { Copy-Item -Force $updatePublicKeyPath $backupUpdateKey }
+  try {
+  $codexProcesses = if ($NoService) { @() } else { @(Get-CimInstance Win32_Process -Filter "Name = 'ChatGPT.exe'" | Where-Object { $_.CommandLine -notmatch "--type=" -and $_.ExecutablePath -like "*\WindowsApps\OpenAI.Codex_*" }) }
+  if (@($codexProcesses).Count -gt 0) {
+    $choice = Read-Host "Codex is currently running. Quit Codex and continue installation? [Y/n]"
+    if ($choice -and $choice -notin @("y", "Y")) {
+      Write-Output "Installation cancelled."
+      return
+    }
+    $codexProcesses | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+    Write-Step "Stopping Codex..."
+    for ($attempt = 0; $attempt -lt 60; $attempt++) {
+      if (-not (Get-CimInstance Win32_Process -Filter "Name = 'ChatGPT.exe'" | Where-Object { $_.CommandLine -notmatch "--type=" -and $_.ExecutablePath -like "*\WindowsApps\OpenAI.Codex_*" })) { break }
+      Start-Sleep -Milliseconds 250
+    }
+    if (Get-CimInstance Win32_Process -Filter "Name = 'ChatGPT.exe'" | Where-Object { $_.CommandLine -notmatch "--type=" -and $_.ExecutablePath -like "*\WindowsApps\OpenAI.Codex_*" }) { throw "Codex did not quit. Quit it manually and run the installer again." }
+  }
   Write-Step "Installing executable to $BinDirectory..."
   New-Item -ItemType Directory -Force -Path $BinDirectory | Out-Null
-  if (Test-Path $executable) {
+  if ((Test-Path $executable) -and -not $NoService) {
     & $executable disable 2>$null | Out-Null
     & $executable service stop 2>$null | Out-Null
     Start-Sleep -Milliseconds 800
   }
-  Copy-Item -Force (Join-Path $workDirectory "better-codex.exe") $executable
-  $packagedSkill = Join-Path $workDirectory "skills\better-codex"
-  if (-not (Test-Path (Join-Path $packagedSkill "SKILL.md"))) { throw "Better Codex skill is missing from the package." }
+  Copy-Item -Force $packagedExecutable $executable
   Write-Step "Installing Better Codex skill to $skillDirectory..."
   New-Item -ItemType Directory -Force -Path (Join-Path $skillDirectory "agents") | Out-Null
   Copy-Item -Force (Join-Path $packagedSkill "SKILL.md") (Join-Path $skillDirectory "SKILL.md")
   Copy-Item -Force (Join-Path $packagedSkill "agents\openai.yaml") (Join-Path $skillDirectory "agents\openai.yaml")
-  $homeDirectory = Join-Path $env:USERPROFILE ".better-codex"
-  New-Item -ItemType Directory -Force -Path $homeDirectory | Out-Null
-  Copy-Item -Force $publicKey (Join-Path $homeDirectory "update-public-key.pem")
-  $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-  if (-not (($userPath -split ";") -contains $BinDirectory)) {
-    [Environment]::SetEnvironmentVariable("Path", (($userPath.TrimEnd(";") + ";" + $BinDirectory).TrimStart(";")), "User")
-  }
+  Write-Step "Installing Better Codex issue skill to $issueSkillDirectory..."
+  New-Item -ItemType Directory -Force -Path (Join-Path $issueSkillDirectory "agents") | Out-Null
+  Copy-Item -Force (Join-Path $packagedIssueSkill "SKILL.md") (Join-Path $issueSkillDirectory "SKILL.md")
+  Copy-Item -Force (Join-Path $packagedIssueSkill "agents\openai.yaml") (Join-Path $issueSkillDirectory "agents\openai.yaml")
+  New-Item -ItemType Directory -Force -Path $betterCodexHome | Out-Null
+  Copy-Item -Force $publicKey $updatePublicKeyPath
   Write-Step "Verifying executable..."
   & $executable version
   if ($LASTEXITCODE -ne 0) { throw "Better Codex executable verification failed." }
@@ -235,7 +281,43 @@ try {
       throw "Better Codex installation verification failed."
     }
   }
+  $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+  if ($null -eq $userPath) { $userPath = "" }
+  if (-not (($userPath -split ";") -contains $BinDirectory)) {
+    [Environment]::SetEnvironmentVariable("Path", (($userPath.TrimEnd(";") + ";" + $BinDirectory).TrimStart(";")), "User")
+  }
   Write-Ok "Better Codex v$targetVersion is ready"
+  } catch {
+    if ((Test-Path $executable) -and -not $NoService) {
+      & $executable disable 2>$null | Out-Null
+      & $executable service stop 2>$null | Out-Null
+      if (-not $hadExecutable) {
+        & $executable service uninstall 2>$null | Out-Null
+        & $executable launcher uninstall 2>$null | Out-Null
+      }
+      Start-Sleep -Milliseconds 800
+    }
+    if ($hadExecutable) { Copy-Item -Force $backupExecutable $executable } else { Remove-Item -Force -ErrorAction SilentlyContinue $executable }
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $skillDirectory
+    if ($hadSkill) { Copy-Item -Recurse -Force $backupSkill $skillDirectory }
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $issueSkillDirectory
+    if ($hadIssueSkill) { Copy-Item -Recurse -Force $backupIssueSkill $issueSkillDirectory }
+    if ($hadUpdateKey) { Copy-Item -Force $backupUpdateKey $updatePublicKeyPath } else { Remove-Item -Force -ErrorAction SilentlyContinue $updatePublicKeyPath }
+    if ($hadExecutable -and -not $NoService) {
+      if ($previousService.installed) {
+        & $executable service install 2>$null | Out-Null
+        if ($previousService.running) { & $executable service start 2>$null | Out-Null } else { & $executable service stop 2>$null | Out-Null }
+      } else {
+        & $executable service uninstall 2>$null | Out-Null
+      }
+      if ($previousInjectionEnabled) { & $executable enable 2>$null | Out-Null } else { & $executable disable 2>$null | Out-Null }
+    }
+    throw
+  }
 } finally {
   Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $workDirectory
+}
+} finally {
+  if ($installLockAcquired) { $installMutex.ReleaseMutex() }
+  $installMutex.Dispose()
 }

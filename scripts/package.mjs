@@ -30,9 +30,11 @@ const embedBrandAssets = {
     buildApi.onLoad({ filter: /[/\\]brand-assets\.ts$/ }, () => {
       const icns = readFileSync(join(root, "assets", "AppIcon.icns")).toString("base64");
       const ico = readFileSync(join(root, "assets", "AppIcon.ico")).toString("base64");
+      const logo = readFileSync(join(root, "assets", "better-codex.png")).toString("base64");
       return {
         contents: `export function appIconIcns(){return Buffer.from(${JSON.stringify(icns)},"base64")}
 export function appIconIco(){return Buffer.from(${JSON.stringify(ico)},"base64")}
+export function betterCodexLogoPng(){return Buffer.from(${JSON.stringify(logo)},"base64")}
 `,
         loader: "js",
       };
@@ -80,7 +82,9 @@ try {
   await copyFile(executable, join(output, coreName));
   await mkdir(packageRoot, { recursive: true });
   await copyFile(executable, join(packageRoot, executableName));
+  await copyFile(join(root, "assets", "update-public-key.pem"), join(packageRoot, "update-public-key.pem"));
   await cp(join(root, "skills", "better-codex"), join(packageRoot, "skills", "better-codex"), { recursive: true });
+  await cp(join(root, "skills", "better-codex-issue"), join(packageRoot, "skills", "better-codex-issue"), { recursive: true });
   if (platform === "win32") {
     execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `Compress-Archive -Path '${join(packageRoot, "*").replace(/'/g, "''")}' -DestinationPath '${archive.replace(/'/g, "''")}' -Force`], { stdio: "inherit" });
   } else {

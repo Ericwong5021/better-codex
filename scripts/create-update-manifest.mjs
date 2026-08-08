@@ -52,8 +52,11 @@ const payload = {
   core: { version: coreVersion, assets },
 };
 const key = createPrivateKey(privatePem);
+const publicKey = createPublicKey(key).export({ type: "spki", format: "pem" });
+const pinnedPublicKey = await readFile(resolve("assets/update-public-key.pem"), "utf8");
+if (publicKey.trim() !== pinnedPublicKey.trim()) throw new Error("update_public_key_mismatch");
 const signature = sign(null, Buffer.from(stableJson(payload)), key).toString("base64");
 await writeFile(join(output, "update-manifest.json"), JSON.stringify({ payload, signature }), { mode: 0o644 });
-await writeFile(join(output, "update-public-key.pem"), createPublicKey(key).export({ type: "spki", format: "pem" }), { mode: 0o644 });
+await writeFile(join(output, "update-public-key.pem"), publicKey, { mode: 0o644 });
 await chmod(join(output, "update-public-key.pem"), 0o644);
 console.log(JSON.stringify({ manifest: join(output, "update-manifest.json"), compatibility: compatibilityName, coreVersion, assets: Object.keys(assets) }));
