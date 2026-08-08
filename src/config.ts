@@ -29,6 +29,7 @@ export const workerLogPath = join(logPath, "worker.log");
 export const runLogPath = join(logPath, "runs");
 export const injectorPidPath = join(runPath, "injector.pid");
 export const injectionStatePath = join(runPath, "injection.json");
+export const mockupSessionPath = join(runPath, "mockup-session.json");
 export const mockupStatePath = join(betterCodexHome, "mockup.json");
 export const launchIntegrationStatePath = join(runPath, "launch-integration.json");
 export const launchLockPath = join(runPath, "launch.lock");

@@ -1,4 +1,6 @@
 import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { join } from "node:path";
 
 const parentPid = Number(process.argv[2]);
@@ -6,7 +8,10 @@ const root = process.argv[3];
 const productionHome = process.argv[4];
 const mockupHome = process.argv[5];
 const cdpPort = process.argv[6];
-const childPids = process.argv.slice(7).map(Number).filter(pid => Number.isInteger(pid) && pid > 0);
+const restoreInjection = process.argv[7] === "true";
+const sessionPath = process.argv[8];
+const sessionToken = process.argv[9];
+const childPids = process.argv.slice(10).map(Number).filter(pid => Number.isInteger(pid) && pid > 0);
 const executable = join(root, "node_modules", ".bin", process.platform === "win32" ? "tsx.cmd" : "tsx");
 
 function alive(pid) {
@@ -29,14 +34,34 @@ function terminateChildren() {
   });
 }
 
+function restoreInjectionState() {
+  const path = join(productionHome, "run", "injection.json");
+  mkdirSync(dirname(path), { recursive: true });
+  const temporary = `${path}.${process.pid}.tmp`;
+  writeFileSync(temporary, JSON.stringify({ enabled: true }), { mode: 0o600 });
+  renameSync(temporary, path);
+}
+
+function releaseSession() {
+  if (!sessionPath || !existsSync(sessionPath)) return;
+  try {
+    const current = JSON.parse(readFileSync(sessionPath, "utf8"));
+    if (current.token === sessionToken) unlinkSync(sessionPath);
+  } catch {}
+}
+
 const timer = setInterval(() => {
   try {
     process.kill(parentPid, 0);
   } catch {
     clearInterval(timer);
-    terminateChildren();
-    spawnSync(executable, ["src/cli.ts", "eject", "--port", cdpPort], { cwd: root, env: { ...process.env, BETTER_CODEX_HOME: mockupHome }, stdio: "ignore" });
-    spawnSync(executable, ["src/cli.ts", "inject"], { cwd: root, env: { ...process.env, BETTER_CODEX_HOME: productionHome }, stdio: "ignore" });
+    try {
+      terminateChildren();
+      spawnSync(executable, ["src/cli.ts", "eject", "--port", cdpPort], { cwd: root, env: { ...process.env, BETTER_CODEX_HOME: mockupHome }, stdio: "ignore" });
+      if (restoreInjection) restoreInjectionState();
+    } finally {
+      releaseSession();
+    }
     process.exit(0);
   }
 }, 250);

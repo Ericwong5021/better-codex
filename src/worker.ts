@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { agentConfigProfileName, defaultAgentProfile } from "./agent-profiles.js";
 import { debugLoggingEnabled, runLogPath, workerLogPath } from "./config.js";
 import { agentSandboxModes, Store, type AgentSandboxMode, type ClaimedIssue, type Issue } from "./db.js";
+import { mockupSessionActive } from "./injection-state.js";
 
 const interval = 60000;
 const enrichmentTimeout = 30000;
@@ -60,7 +61,7 @@ export class IssueWorker {
   }
 
   startIssue(issueId: string) {
-    if (this.stopped) return false;
+    if (this.stopped || mockupSessionActive()) return false;
     if (Array.from(this.runs.values()).some(({ claim }) => claim.issue.id === issueId)) return false;
     const claim = this.store.claimNextIssue(issueId);
     if (!claim) {
@@ -297,6 +298,7 @@ export class IssueWorker {
 
   private async tick() {
     try {
+      if (mockupSessionActive()) return;
       for (const issueId of [...this.manualQueue]) {
         const issue = this.store.getIssue(issueId);
         if (!issue || !this.store.isDispatchable(issue)) {
