@@ -3137,7 +3137,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const startNowButton = issue && !enrichmentLocked && !sessionId && !state.autoDispatch && issue.agent_enabled && !issue.active_run_status && !["backlog", "done", "cancelled"].includes(issue.status)
           ? '<button class="better-codex-dialog-start-now" type="button" data-dialog-start-now>' + te("立即开始任务") + '</button>'
           : "";
-        const title = t(draft.mode === "agent" ? "通过智能体创建" : issue ? "Issue 详情" : "手动创建");
+        const title = draft.mode === "agent" ? t("通过智能体创建") : issue ? escapeHtml(issue.identifier) : t("手动创建");
         const crumb = issue
           ? '<span>' + escapeHtml(projectLabel(project) || "Better Codex") + '</span><span aria-hidden="true">' + icon("chevron") + '</span><strong>' + title + '</strong>'
           : '<strong>' + title + '</strong>';
@@ -3153,14 +3153,20 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       }
 
       function conversationStatusMarkup(replyStatus) {
-        const activityState = replyStatus === "running" ? "replying" : replyStatus === "failed" ? "reply-failed" : replyStatus === "interrupted" ? "interrupted" : replyStatus === "succeeded" ? "reply-succeeded" : "";
+        const enrichmentLocked = issuePermissions(issue).enrichmentPending;
+        const replyActivityState = replyStatus === "running" ? "replying" : replyStatus === "failed" ? "reply-failed" : replyStatus === "interrupted" ? "interrupted" : "";
+        const latestRunStatus = issue?.latest_run_status || "";
+        const executionState = latestRunStatus === "completed" ? "completed" : latestRunStatus === "failed" ? "failed" : latestRunStatus === "interrupted" ? "interrupted" : latestRunStatus === "running" ? "running" : latestRunStatus === "claimed" ? "claimed" : issue?.agent_enabled ? "not-started" : "";
+        const activeExecutionState = issue?.active_run_status === "running" && issue?.status === "in_review" ? "in_review" : issue?.active_run_status || "";
+        const activityState = enrichmentLocked ? "thinking" : activeExecutionState || replyActivityState || executionState;
         if (!activityState) return "";
-        const activityLabel = t(replyStatus === "running" ? "回复中" : replyStatus === "failed" ? "回复失败" : replyStatus === "interrupted" ? "已中断" : "回复完成");
+        const replyActivity = !issue?.active_run_status && Boolean(replyActivityState);
+        const activityLabel = t(enrichmentLocked ? "理解中" : replyActivity ? (replyStatus === "running" ? "回复中" : replyStatus === "failed" ? "回复失败" : "已中断") : activityState === "running" ? "工作中" : activityState === "claimed" ? "排队中" : activityState === "in_review" ? "审核中" : activityState === "completed" ? "已完成" : activityState === "failed" ? "执行失败" : activityState === "interrupted" ? "已中断" : activityState === "not-started" ? "未开始" : "");
         const agent = state.agents.find(item => item.id === issue?.agent_id) || state.agents.find(item => item.is_default) || { name: "Codex", is_default: true };
-        const activityIcon = activityState === "interrupted"
+        const activityIcon = ["completed", "interrupted", "not-started"].includes(activityState)
           ? '<span class="better-codex-activity-dot" aria-hidden="true"></span>'
-          : agentAvatarMarkup(agent, "better-codex-bubble-avatar better-codex-conversation-status-avatar");
-        return '<span class="better-codex-activity" data-run="' + activityState + '">' + activityIcon + '<span class="' + (activityState === "replying" ? "better-codex-shimmer" : "") + '">' + activityLabel + '</span></span>';
+          : activityState === "failed" ? icon("close") : agentAvatarMarkup(agent, "better-codex-bubble-avatar better-codex-conversation-status-avatar");
+        return '<span class="better-codex-activity" data-run="' + activityState + '">' + activityIcon + '<span class="' + (enrichmentLocked || activityState === "replying" || issue?.active_run_status === "running" ? "better-codex-shimmer" : "") + '">' + activityLabel + '</span></span>';
       }
 
       function syncConversationStatus(replyStatus) {
@@ -3186,8 +3192,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       function conversationActivityMarkup() {
         const activity = conversationActivity();
         if (!activity) return "";
-        const agent = state.agents.find(item => item.id === issue?.agent_id) || state.agents.find(item => item.is_default) || null;
-        return '<div class="better-codex-conversation-activity" data-conversation-activity data-run="' + activity.state + '">' + agentAvatarMarkup(agent, "better-codex-bubble-avatar better-codex-conversation-activity-avatar") + '<span class="' + (activity.shimmer ? "better-codex-shimmer" : "") + '">' + te(activity.label) + '</span></div>';
+        return '<div class="better-codex-conversation-activity" data-conversation-activity data-run="' + activity.state + '"><span class="better-codex-conversation-activity-indicator" aria-hidden="true"></span><span class="' + (activity.shimmer ? "better-codex-shimmer" : "") + '">' + te(activity.label) + '</span></div>';
       }
 
       function syncConversationActivity() {

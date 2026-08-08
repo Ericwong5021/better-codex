@@ -3697,13 +3697,19 @@ export function betterCodexDesignSystemCss() {
       color: var(--bc-foreground);
     }
 
-    #better-codex-dialog .better-codex-conversation-status .better-codex-activity[data-run="reply-succeeded"] {
+    #better-codex-dialog .better-codex-conversation-status .better-codex-activity[data-run="completed"] {
       color: var(--bc-success);
     }
 
     #better-codex-dialog .better-codex-conversation-status .better-codex-activity[data-run="reply-failed"],
+    #better-codex-dialog .better-codex-conversation-status .better-codex-activity[data-run="failed"],
     #better-codex-dialog .better-codex-conversation-status .better-codex-activity[data-run="interrupted"] {
       color: var(--bc-danger);
+    }
+
+    #better-codex-dialog .better-codex-conversation-status .better-codex-activity[data-run="claimed"],
+    #better-codex-dialog .better-codex-conversation-status .better-codex-activity[data-run="not-started"] {
+      color: var(--bc-muted);
     }
 
     #better-codex-dialog .better-codex-conversation-status-avatar {
@@ -3833,20 +3839,13 @@ export function betterCodexDesignSystemCss() {
       opacity: .62;
     }
 
-    #better-codex-dialog .better-codex-conversation-activity-avatar {
-      width: 16px;
-      height: 16px;
-    }
-
-    #better-codex-dialog .better-codex-conversation-activity-avatar.is-fallback svg,
-    #better-codex-dialog .better-codex-conversation-activity-avatar.is-icon svg {
-      width: 10px;
-      height: 10px;
-    }
-
-    #better-codex-dialog .better-codex-conversation-activity-avatar.is-codex svg {
-      width: 16px;
-      height: 16px;
+    #better-codex-dialog .better-codex-conversation-activity-indicator {
+      width: 7px;
+      height: 7px;
+      flex: 0 0 7px;
+      border-radius: var(--bc-radius-pill);
+      background: currentColor;
+      box-shadow: 0 0 0 3px color-mix(in oklch, currentColor 14%, transparent);
     }
 
     #better-codex-dialog .better-codex-conversation-activity .better-codex-shimmer {
