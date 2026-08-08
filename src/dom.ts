@@ -499,7 +499,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function issueExecutionRunning(issue) {
-      return ["claimed", "running", "scheduling"].includes(issue?.active_run_status);
+      return ["claimed", "running", "scheduling"].includes(issue?.active_run_status) || issue?.reply_status === "running";
     }
 
     function issuePermissions(issue) {
@@ -3828,20 +3828,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           clearError();
           void (async () => {
             try {
-              if (executionRunning) {
-                const confirmed = await confirmAction("任务正在进行中", "终止任务后才能打开对话，是否终止任务？", "终止并打开");
-                if (!confirmed) return;
-                button.disabled = true;
-                button.classList.add("is-loading");
-                button.setAttribute("aria-busy", "true");
-                button.innerHTML = icon("refresh") + "<span>" + te("正在终止…") + "</span>";
-                await api("/api/issues/" + encodeURIComponent(issue.id) + "/stop", { method: "POST" });
-              } else {
-                button.disabled = true;
-                button.classList.add("is-loading");
-                button.setAttribute("aria-busy", "true");
-                button.innerHTML = icon("refresh") + "<span>" + te("正在打开…") + "</span>";
-              }
+              button.disabled = true;
+              button.classList.add("is-loading");
+              button.setAttribute("aria-busy", "true");
+              button.innerHTML = icon("refresh") + "<span>" + te("正在打开…") + "</span>";
               if (threadId) await openThread(threadId);
               else {
                 await loadIssues();

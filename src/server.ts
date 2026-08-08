@@ -749,7 +749,7 @@ export function startServer() {
           const version = Number(body.version);
           if (!Number.isInteger(version) || version < 1) throw new Error("invalid_version");
           const patch = parseIssuePatch(body);
-          if (issue.active_run_status && Object.keys(patch).some(key => key !== "reply_draft")) throw new Error("issue_execution_running");
+          if ((issue.active_run_status || getIssueReplyState(store, issue.id).status === "running") && Object.keys(patch).some(key => key !== "reply_draft")) throw new Error("issue_execution_running");
           const updated = store.updateIssue(issue.id, version, patch);
           if (store.isDispatchable(updated)) worker.wake();
           return sendJson(response, 200, updated);
@@ -764,7 +764,7 @@ export function startServer() {
           if (["done", "cancelled"].includes(issue.status)) throw new Error("issue_not_startable");
           const nextStatus = patch.status || issue.status;
           if (["backlog", "done", "cancelled"].includes(String(nextStatus))) throw new Error("issue_not_startable");
-          if (issue.active_run_status) throw new Error("issue_execution_running");
+          if (issue.active_run_status || getIssueReplyState(store, issue.id).status === "running") throw new Error("issue_execution_running");
           const nextProject = store.getProject(String(patch.project_id || issue.project_id));
           const nextWorkspace = String(patch.workspace_path || issue.workspace_path || nextProject?.workspace_path || "");
           if (!nextWorkspace) throw new Error("workspace_required");
@@ -788,6 +788,7 @@ export function startServer() {
           const body = await readBody(request);
           const version = Number(body.version);
           if (!Number.isInteger(version) || version < 1) throw new Error("invalid_version");
+          if (getIssueReplyState(store, issue.id).status === "running") throw new Error("issue_execution_running");
           if (issue.active_run_status) {
             await worker.stopIssue(issue.id);
             const current = store.getIssue(issue.id);

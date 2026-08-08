@@ -459,7 +459,27 @@ export class Store {
       );
     `);
     const timestamp = now();
-    this.db.prepare("UPDATE issue_replies SET status = 'interrupted', error = 'runtime_restarted', finished_at = ? WHERE status = 'running'").run(timestamp);
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const rows = this.db.prepare("SELECT issue_id FROM issue_replies WHERE status = 'running'").all() as Array<{ issue_id: string }>;
+      this.db.prepare("UPDATE issue_replies SET status = 'interrupted', error = 'runtime_restarted', finished_at = ? WHERE status = 'running'").run(timestamp);
+      for (const row of rows) {
+        this.db.prepare(`
+          UPDATE issues
+          SET status = 'blocked',
+              needs_attention = 1,
+              pending_actor = 'user',
+              version = version + 1,
+              updated_at = ?
+          WHERE id = ?
+            AND status = 'in_progress'
+        `).run(timestamp, row.issue_id);
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   private upgradeLegacyProjects() {
@@ -1243,6 +1263,54 @@ export class Store {
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
+    }
+  }
+
+  beginReplyRun(issueId: string) {
+    const timestamp = now();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const issue = this.getIssue(issueId);
+      if (!issue) throw new Error("issue_not_found");
+      if (issue.active_run_status) throw new Error("issue_execution_running");
+      if (this.getIssueReplyState(issueId).status === "running") throw new Error("reply_busy");
+      if (!["done", "cancelled"].includes(issue.status)) {
+        this.db.prepare(`
+          UPDATE issues
+          SET status = 'in_progress',
+              needs_attention = 1,
+              pending_actor = 'user',
+              version = version + 1,
+              updated_at = ?
+          WHERE id = ?
+        `).run(timestamp, issueId);
+      }
+      this.db.exec("COMMIT");
+      return this.getIssue(issueId)!;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  finishReplyRun(issueId: string, success: boolean) {
+    const timestamp = now();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare(`
+        UPDATE issues
+        SET status = CASE WHEN status IN ('done', 'cancelled') THEN status ELSE ? END,
+            needs_attention = CASE WHEN status IN ('done', 'cancelled') THEN needs_attention ELSE 1 END,
+            pending_actor = CASE WHEN status IN ('done', 'cancelled') THEN pending_actor ELSE 'user' END,
+            version = version + 1,
+            updated_at = ?
+        WHERE id = ?
+          AND status = 'in_progress'
+      `).run(success ? "in_review" : "blocked", timestamp, issueId);
+      this.db.exec("COMMIT");
+    } catch (caught) {
+      this.db.exec("ROLLBACK");
+      throw caught;
     }
   }
 

@@ -45,6 +45,7 @@ export function stopIssueReplies(store: Store) {
       current.state.finished_at = finishedAt;
       current.child.kill("SIGTERM");
       store.setIssueReplyState(current.state);
+      store.finishReplyRun(issueId, false);
       replies.delete(issueId);
     }
   }
@@ -77,6 +78,8 @@ export function startIssueReply(store: Store, input: {
     : sessionWorkspace(sessionId);
   if (!workspacePath) throw new Error("workspace_required");
 
+  store.beginReplyRun(issueId);
+
   const args = [
     "exec",
     ...(input.agentId ? ["--profile", agentConfigProfileName(input.agentId)] : []),
@@ -107,6 +110,12 @@ export function startIssueReply(store: Store, input: {
   store.setIssueReplyState(state);
   const log = createWriteStream(join(runLogPath, `reply-${issueId}.log`), { flags: "a" });
   let failureOutput = "";
+  let issueFinished = false;
+  const finishIssue = (success: boolean) => {
+    if (issueFinished) return;
+    issueFinished = true;
+    store.finishReplyRun(issueId, success);
+  };
   const captureFailureOutput = (chunk: unknown) => {
     failureOutput = (failureOutput + String(chunk)).slice(-32768);
   };
@@ -134,6 +143,7 @@ export function startIssueReply(store: Store, input: {
   });
   child.once("error", error => {
     if (state.status === "interrupted") {
+      finishIssue(false);
       log.end();
       replies.delete(issueId);
       return;
@@ -144,10 +154,12 @@ export function startIssueReply(store: Store, input: {
     log.write(error.stack || error.message);
     log.end();
     store.setIssueReplyState(state);
+    finishIssue(false);
     replies.delete(issueId);
   });
   child.once("close", (code, signal) => {
     if (state.status === "interrupted") {
+      finishIssue(false);
       log.end();
       replies.delete(issueId);
       return;
@@ -163,6 +175,7 @@ export function startIssueReply(store: Store, input: {
     }
     log.end();
     store.setIssueReplyState(state);
+    finishIssue(state.status === "succeeded");
     replies.delete(issueId);
   });
 
