@@ -902,6 +902,36 @@ export class Store {
     return this.getIssue(issue.id)!;
   }
 
+  unarchiveIssue(id: string, version: number) {
+    if (!Number.isInteger(version) || version < 1) throw new Error("invalid_version");
+    const issue = this.getIssue(id);
+    if (!issue) throw new Error("issue_not_found");
+    if (issue.version !== version) throw new Error("version_conflict");
+    const result = this.db.prepare("UPDATE issues SET archived_at = NULL, version = version + 1, updated_at = ? WHERE id = ? AND version = ? AND archived_at IS NOT NULL")
+      .run(now(), issue.id, version);
+    if (result.changes !== 1) throw new Error("version_conflict");
+    return this.getIssue(issue.id)!;
+  }
+
+  deleteArchivedIssue(id: string, version: number) {
+    if (!Number.isInteger(version) || version < 1) throw new Error("invalid_version");
+    const issue = this.getIssue(id);
+    if (!issue) throw new Error("issue_not_found");
+    if (issue.version !== version) throw new Error("version_conflict");
+    if (!issue.archived_at) throw new Error("issue_not_archived");
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare("DELETE FROM issue_replies WHERE issue_id = ?").run(issue.id);
+      this.db.prepare("DELETE FROM issue_runs WHERE issue_id = ?").run(issue.id);
+      const result = this.db.prepare("DELETE FROM issues WHERE id = ? AND version = ? AND archived_at IS NOT NULL").run(issue.id, version);
+      if (result.changes !== 1) throw new Error("version_conflict");
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   recoverInterruptedRuns() {
     const timestamp = now();
     this.db.exec("BEGIN IMMEDIATE");

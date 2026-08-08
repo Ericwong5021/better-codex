@@ -15,6 +15,7 @@ type MockupRecord = Record<string, unknown>;
 export type MockupState = {
   version: number;
   revision: number;
+  auto_dispatch: boolean;
   project: MockupRecord;
   projects: MockupRecord[];
   agents: MockupRecord[];
@@ -91,6 +92,7 @@ export function defaultMockupState(): MockupState {
   return {
     version: 1,
     revision: 1,
+    auto_dispatch: false,
     project,
     projects: [project],
     agents,
@@ -143,6 +145,7 @@ function normalizeIssue(value: unknown, index: number): MockupRecord {
   if (!title || title.length > 500 || description.length > 100000 || replyDraft.length > 100000) throw new Error("invalid_mockup_issue");
   if (labels.length > 50 || labels.some(label => label.length > 100)) throw new Error("invalid_mockup_issue");
   const now = new Date().toISOString();
+  const mockupRunStatus = runStatuses.includes(String(source.mockup_run_status)) ? String(source.mockup_run_status) : "not-started";
   return {
     ...source,
     id: String(source.id || `mockup-import-${index + 1}`),
@@ -156,7 +159,7 @@ function normalizeIssue(value: unknown, index: number): MockupRecord {
     pinned: Boolean(source.pinned),
     archived_at: source.archived_at || null,
     thread_id: source.thread_id || null,
-    run_thread_id: source.run_thread_id || null,
+    run_thread_id: null,
     workspace_path: String(source.workspace_path || ""),
     version: Number.isInteger(source.version) ? source.version : 1,
     created_at: String(source.created_at || now),
@@ -167,10 +170,12 @@ function normalizeIssue(value: unknown, index: number): MockupRecord {
     user_assigned: Boolean(source.user_assigned),
     needs_attention: Boolean(source.needs_attention),
     pending_actor: source.pending_actor === "agent" ? "agent" : "user",
-    enrichment_status: source.enrichment_status || null,
+    enrichment_status: source.enrichment_status === "pending" ? "pending" : null,
     reply_draft: replyDraft,
     labels,
-    mockup_run_status: runStatuses.includes(String(source.mockup_run_status)) ? source.mockup_run_status : "not-started",
+    mockup_run_status: mockupRunStatus,
+    active_run_status: ["claimed", "running"].includes(mockupRunStatus) ? mockupRunStatus : null,
+    latest_run_status: mockupRunStatus === "not-started" ? null : mockupRunStatus,
   };
 }
 
@@ -211,6 +216,7 @@ export function normalizeMockupState(value: unknown): MockupState {
   const state = {
     version: Number.isInteger(source.version) ? source.version as number : 1,
     revision: Number.isInteger(source.revision) && Number(source.revision) > 0 ? source.revision as number : 1,
+    auto_dispatch: source.auto_dispatch === true,
     project: projects[primaryIndex],
     projects,
     agents,

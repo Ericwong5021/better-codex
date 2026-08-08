@@ -271,7 +271,7 @@ export function startServer() {
         const agentModels = agentModelCatalog.map(model => model.id);
         const agentReasoningEfforts = [...new Set(agentModelCatalog.flatMap(model => model.supportedReasoningEfforts.map(effort => effort.value)))];
         const mockup = mockupEnabled ? readMockupState() : null;
-        return sendJson(response, 200, { projects: mockup ? mockup.projects : store.listProjects(), agents: mockup ? mockup.agents : visibleAgentProfiles(), statuses: issueStatuses, priorities: issuePriorities, appearance: readCodexAppearance(), locale: readCodexLocale(), user: readCodexUserProfile(), agentModelCatalog, agentModels, agentReasoningEfforts, autoDispatch: mockup ? false : store.getAutoDispatch(), mockup: mockupEnabled });
+        return sendJson(response, 200, { projects: mockup ? mockup.projects : store.listProjects(), agents: mockup ? mockup.agents : visibleAgentProfiles(), statuses: issueStatuses, priorities: issuePriorities, appearance: readCodexAppearance(), locale: readCodexLocale(), user: readCodexUserProfile(), agentModelCatalog, agentModels, agentReasoningEfforts, autoDispatch: mockup ? mockup.auto_dispatch : store.getAutoDispatch(), mockup: mockupEnabled });
       }
       if (mockupEnabled && url.pathname === "/api/mockup/state" && method === "GET") {
         return sendJson(response, 200, readMockupState());
@@ -283,7 +283,11 @@ export function startServer() {
         return sendJson(response, 200, resetMockupState());
       }
       if (mockupEnabled && url.pathname === "/api/settings/auto-dispatch" && ["GET", "PATCH"].includes(method)) {
-        return sendJson(response, 200, { enabled: false });
+        if (method === "GET") return sendJson(response, 200, { enabled: readMockupState().auto_dispatch });
+        const body = await readBody(request);
+        if (typeof body.enabled !== "boolean") throw new Error("invalid_auto_dispatch");
+        const updated = updateMockupState(state => { state.auto_dispatch = body.enabled === true; }).state;
+        return sendJson(response, 200, { enabled: updated.auto_dispatch });
       }
       if (mockupEnabled && url.pathname === "/api/agents" && method === "GET") {
         return sendJson(response, 200, readMockupState().agents);
@@ -334,7 +338,8 @@ export function startServer() {
       }
       if (mockupEnabled && url.pathname === "/api/issues" && method === "GET") {
         const query = String(url.searchParams.get("search") || "").trim().toLowerCase();
-        const issues = readMockupState().issues.filter(issue => !query || [issue.identifier, issue.title, issue.description, ...(Array.isArray(issue.labels) ? issue.labels : [])].join(" ").toLowerCase().includes(query));
+        const archived = url.searchParams.get("archived") === "1";
+        const issues = readMockupState().issues.filter(issue => Boolean(issue.archived_at) === archived && (!query || [issue.identifier, issue.title, issue.description, ...(Array.isArray(issue.labels) ? issue.labels : [])].join(" ").toLowerCase().includes(query)));
         return sendJson(response, 200, issues);
       }
       if (mockupEnabled && url.pathname === "/api/issues" && method === "POST") {
@@ -367,16 +372,83 @@ export function startServer() {
           const issue = readMockupState().issues.find(item => item.id === issueId || item.identifier === issueId);
           return issue ? sendJson(response, 200, { messages: [] }) : sendJson(response, 404, { error: "issue_not_found" });
         }
+        if (method === "POST" && path[3] === "start") {
+          const body = await readBody(request);
+          const updated = updateMockupState(state => {
+            const index = state.issues.findIndex(issue => issue.id === issueId || issue.identifier === issueId);
+            if (index < 0) throw new Error("issue_not_found");
+            const current = state.issues[index];
+            requireVersion(body, current);
+            const status = String(body.status || current.status);
+            if (["backlog", "done", "cancelled"].includes(status)) throw new Error("issue_not_startable");
+            state.issues[index] = {
+              ...current,
+              ...body,
+              id: current.id,
+              identifier: current.identifier,
+              project_id: current.project_id,
+              status: "in_progress",
+              agent_enabled: true,
+              user_assigned: false,
+              agent_id: body.agent_id || null,
+              needs_attention: false,
+              pending_actor: "agent",
+              mockup_run_status: "claimed",
+              version: Number(current.version) + 1,
+              updated_at: new Date().toISOString(),
+            };
+          }).state;
+          return sendJson(response, 202, updated.issues.find(issue => issue.id === issueId || issue.identifier === issueId));
+        }
+        if (method === "POST" && path[3] === "stop") {
+          const updated = updateMockupState(state => {
+            const index = state.issues.findIndex(issue => issue.id === issueId || issue.identifier === issueId);
+            if (index < 0) throw new Error("issue_not_found");
+            const current = state.issues[index];
+            state.issues[index] = {
+              ...current,
+              status: current.status === "in_progress" ? "blocked" : current.status,
+              mockup_run_status: "interrupted",
+              needs_attention: true,
+              pending_actor: "user",
+              version: Number(current.version) + 1,
+              updated_at: new Date().toISOString(),
+            };
+          }).state;
+          return sendJson(response, 200, updated.issues.find(issue => issue.id === issueId || issue.identifier === issueId));
+        }
         if (method === "POST" && path[3] === "archive") {
           const body = await readBody(request);
-          let removed: Record<string, unknown> | undefined;
+          const archived = updateMockupState(state => {
+            const index = state.issues.findIndex(issue => issue.id === issueId || issue.identifier === issueId);
+            if (index < 0) throw new Error("issue_not_found");
+            requireVersion(body, state.issues[index]);
+            const timestamp = new Date().toISOString();
+            state.issues[index] = { ...state.issues[index], archived_at: timestamp, version: Number(state.issues[index].version) + 1, updated_at: timestamp };
+          }).state;
+          return sendJson(response, 200, archived.issues.find(issue => issue.id === issueId || issue.identifier === issueId));
+        }
+        if (method === "POST" && path[3] === "unarchive") {
+          const body = await readBody(request);
+          const restored = updateMockupState(state => {
+            const index = state.issues.findIndex(issue => issue.id === issueId || issue.identifier === issueId);
+            if (index < 0) throw new Error("issue_not_found");
+            requireVersion(body, state.issues[index]);
+            const timestamp = new Date().toISOString();
+            state.issues[index] = { ...state.issues[index], archived_at: null, version: Number(state.issues[index].version) + 1, updated_at: timestamp };
+          }).state;
+          return sendJson(response, 200, restored.issues.find(issue => issue.id === issueId || issue.identifier === issueId));
+        }
+        if (method === "DELETE" && path.length === 3) {
+          const body = await readBody(request);
           updateMockupState(state => {
             const index = state.issues.findIndex(issue => issue.id === issueId || issue.identifier === issueId);
             if (index < 0) throw new Error("issue_not_found");
             requireVersion(body, state.issues[index]);
-            [removed] = state.issues.splice(index, 1);
+            if (!state.issues[index].archived_at) throw new Error("issue_not_archived");
+            state.issues.splice(index, 1);
           });
-          return sendJson(response, 200, { ...removed, archived_at: new Date().toISOString() });
+          return sendJson(response, 200, { ok: true });
         }
         if (method === "PATCH" && path.length === 3) {
           const body = await readBody(request);
@@ -669,6 +741,16 @@ export function startServer() {
           }
           const updated = store.archiveIssue(issue.id, version);
           return sendJson(response, 200, updated);
+        }
+        if (method === "POST" && path[3] === "unarchive") {
+          const body = await readBody(request);
+          const updated = store.unarchiveIssue(issue.id, Number(body.version));
+          return sendJson(response, 200, updated);
+        }
+        if (method === "DELETE" && path.length === 3) {
+          const body = await readBody(request);
+          store.deleteArchivedIssue(issue.id, Number(body.version));
+          return sendJson(response, 200, { ok: true });
         }
         if (method === "GET" && path[3] === "conversation" && path.length === 4) {
           if (store.isEnrichmentPending(issue)) throw new Error("issue_enrichment_pending");
