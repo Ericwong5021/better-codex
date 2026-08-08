@@ -1,7 +1,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { isSea } from "node:sea";
 import { cdpPort, ensureDirectories, logPath, runtimeLogPath, betterCodexHome, runPath } from "./config.js";
 
@@ -17,7 +17,7 @@ function xml(value: string) {
 }
 
 function command() {
-  return isSea() ? [process.execPath, "runtime"] : [process.execPath, ...process.execArgv, process.argv[1], "runtime"];
+  return isSea() ? [process.env.BETTER_CODEX_LAUNCHER_PATH || process.execPath, "runtime"] : [process.execPath, ...process.execArgv, process.argv[1], "runtime"];
 }
 
 function quotePowerShell(value: string) {
@@ -34,6 +34,15 @@ function windowsRuntime() {
   try {
     const value = JSON.parse(readFileSync(join(runPath, "runtime.json"), "utf8")) as { pid?: number };
     if (!Number.isInteger(value.pid) || value.pid! < 1) return null;
+    const output = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `(Get-CimInstance Win32_Process -Filter \"ProcessId = ${value.pid}\" | Select-Object ProcessId,ExecutablePath,CommandLine | ConvertTo-Json -Compress)`], { encoding: "utf8", windowsHide: true }).trim();
+    if (!output) return null;
+    const processInfo = JSON.parse(output) as { ProcessId?: number; ExecutablePath?: string; CommandLine?: string };
+    if (processInfo.ProcessId !== value.pid || !processInfo.ExecutablePath || !processInfo.CommandLine || !/(?:^|\s)runtime(?:\s|$)/i.test(processInfo.CommandLine)) return null;
+    const executable = resolve(processInfo.ExecutablePath).toLowerCase();
+    const expected = [command()[0], process.env.BETTER_CODEX_LAUNCHER_PATH].filter((item): item is string => Boolean(item)).map(item => resolve(item).toLowerCase());
+    const managedRoot = resolve(join(betterCodexHome, "runtime", "versions")).toLowerCase();
+    const managedRelation = relative(managedRoot, executable);
+    if (!expected.includes(executable) && (!managedRelation || managedRelation.startsWith("..") || isAbsolute(managedRelation))) return null;
     process.kill(value.pid!, 0);
     return value.pid!;
   } catch {

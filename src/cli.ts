@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { accessSync, closeSync, constants, existsSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { accessSync, closeSync, constants, cpSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { isSea } from "node:sea";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { cdpEject, cdpInject, cdpOpenThread, cdpRestartAndInject, cdpStatus, codexInstallationStatus, codexProcessRunning, launchCodex, watchInjection } from "./cdp.js";
@@ -28,7 +29,7 @@ import { installLaunchIntegration, launchIntegrationStatus, uninstallLaunchInteg
 import { readCodexLocale } from "./locale.js";
 import { showNativeChoiceDialog } from "./native-dialog.js";
 import { installService, restartService, serviceLogs, serviceStatus, startService, stopService, uninstallService } from "./service.js";
-import { activeVersions, checkForUpdates, maybeDelegateToActiveCore, rollbackCompatibilityUpdate, updateAll, updateCompatibility } from "./updater.js";
+import { activeVersions, checkForUpdates, maybeDelegateToActiveCore, recordGatewayUpdateActivation, rollbackCompatibilityUpdate, rollbackCoreUpdate, updateAll, updateCompatibility } from "./updater.js";
 
 function accessToken() {
   return token();
@@ -262,22 +263,35 @@ async function runRuntime() {
   return server;
 }
 
-async function applyUpdate(previousRuntimePid: number) {
-  for (let attempt = 0; attempt < 100 && processAlive(previousRuntimePid); attempt += 1) {
-    await new Promise(resolve => setTimeout(resolve, 100));
-  }
-  if (processAlive(previousRuntimePid)) throw new Error("update_runtime_stop_timeout");
-  setInjectionEnabled(false);
-  installService();
-  await ensureRuntime();
-  let injection: unknown;
+async function applyUpdate(previousRuntimePid: number, updates: { core: string | null; compatibility: string | null }, drainPath?: string) {
   try {
-    injection = await cdpRestartAndInject(cdpPort, activeRuntimePort(), accessToken());
+    recordGatewayUpdateActivation("activating", null, updates, process.pid);
+    while (processAlive(previousRuntimePid) && (!drainPath || !existsSync(drainPath))) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    if (drainPath && existsSync(drainPath)) unlinkSync(drainPath);
+    setInjectionEnabled(false);
+    installService();
+    await ensureRuntime();
+    const injection = await cdpRestartAndInject(cdpPort, activeRuntimePort(), accessToken());
+    const launchIntegration = installLaunchIntegration();
+    const runtime = await health();
+    if (updates.core && runtime.version !== updates.core) throw new Error("core_activation_version_mismatch");
+    if (updates.compatibility && activeVersions().compatibility !== updates.compatibility) throw new Error("compatibility_activation_version_mismatch");
+    recordGatewayUpdateActivation("success");
+    return { updated: true, runtime, injection, launchIntegration };
+  } catch (error) {
+    if (updates.core) rollbackCoreUpdate(updates.core);
+    if (updates.compatibility) rollbackCompatibilityUpdate(updates.compatibility);
+    try {
+      installService();
+      await ensureRuntime();
+    } catch {}
+    recordGatewayUpdateActivation("error", error instanceof Error ? error.message : "update_activation_failed");
+    throw error;
   } finally {
     setInjectionEnabled(true);
   }
-  const launchIntegration = installLaunchIntegration();
-  return { updated: true, runtime: await health(), injection, launchIntegration };
 }
 
 async function withLaunchLock<T>(operation: () => Promise<T>) {
@@ -345,7 +359,7 @@ function print(value: unknown) {
 }
 
 function usage() {
-  console.log("better-codex version | update [check|compatibility|rollback] [--channel stable|preview] | setup [--yes] | launch | launcher install|uninstall|status | doctor | enable | disable | start [--launch] | stop | status | uninstall | data delete [--yes] | inject [--launch] [--port N] | eject [--port N] | service install|uninstall|start|stop|restart|status|logs | project list|create | issue list|get|create|update|status|open");
+  console.log("better-codex version | update [check|compatibility|rollback] [--channel stable|preview] | setup [--yes] | launch | launcher install|uninstall|status | doctor | enable | disable | start [--launch] | stop | status | uninstall | data delete [--yes] | inject [--launch] [--port N] | eject [--port N] | service install|uninstall|start|stop|restart|status|logs | project list|create | agent list | issue list|get|create|update|status|open");
 }
 
 async function confirmSetup() {
@@ -379,6 +393,29 @@ function writable(path: string) {
   }
 }
 
+function installBundledSkills() {
+  const codexHome = process.env.CODEX_HOME || join(homedir(), ".codex");
+  const installed = ["better-codex", "better-codex-issue"].every(name => existsSync(join(codexHome, "skills", name, "SKILL.md"))) && existsSync(updatePublicKeyPath);
+  const launcher = process.env.BETTER_CODEX_LAUNCHER_PATH;
+  const candidates = [
+    process.env.BETTER_CODEX_SKILLS_PATH,
+    join(dirname(process.execPath), "..", "libexec", "skills"),
+    launcher ? join(dirname(launcher), "..", "libexec", "skills") : null,
+  ].filter((value): value is string => Boolean(value));
+  const source = candidates.find(path => existsSync(join(path, "better-codex", "SKILL.md")) && existsSync(join(path, "better-codex-issue", "SKILL.md")) && existsSync(resolve(path, "..", "update-public-key.pem")));
+  if (!source) return installed
+    ? { installed: true, existing: true, path: join(codexHome, "skills"), updateKey: true }
+    : { installed: false, reason: "bundled_skills_unavailable", updateKey: false };
+  mkdirSync(join(codexHome, "skills"), { recursive: true });
+  for (const name of ["better-codex", "better-codex-issue"]) {
+    cpSync(join(source, name), join(codexHome, "skills", name), { recursive: true, force: true });
+  }
+  const publicKey = resolve(source, "..", "update-public-key.pem");
+  mkdirSync(dirname(updatePublicKeyPath), { recursive: true });
+  cpSync(publicKey, updatePublicKeyPath, { force: true });
+  return { installed: true, path: join(codexHome, "skills"), updateKey: true };
+}
+
 async function doctor() {
   const service = serviceStatus();
   const state = readRuntimeState();
@@ -392,6 +429,12 @@ async function doctor() {
   const codex = codexInstallationStatus();
   const injection = await cdpStatus(cdpPort);
   const compatibility = runtime.compatibility ?? injection.compatibility ?? null;
+  const codexHome = process.env.CODEX_HOME || join(homedir(), ".codex");
+  const skills = {
+    betterCodex: existsSync(join(codexHome, "skills", "better-codex", "SKILL.md")),
+    betterCodexIssue: existsSync(join(codexHome, "skills", "better-codex-issue", "SKILL.md")),
+  };
+  const updateKey = !isSea() || existsSync(updatePublicKeyPath);
   const checks = {
     core: { ok: true, ...activeVersions(), executable: process.env.BETTER_CODEX_LAUNCHER_PATH ?? process.execPath },
     service: { ok: service.installed, ...service },
@@ -400,8 +443,10 @@ async function doctor() {
     codex,
     compatibility,
     injection,
+    skills,
+    updateKey,
   };
-  return { ok: Boolean(runtime.ok) && Boolean((database as { ok?: boolean }).ok) && codex.installed && Boolean((compatibility as { compatible?: boolean } | null)?.compatible) && injection.available, checks };
+  return { ok: Boolean(runtime.ok) && Boolean((database as { ok?: boolean }).ok) && codex.installed && Boolean((compatibility as { compatible?: boolean } | null)?.compatible) && injection.available && skills.betterCodex && skills.betterCodexIssue && updateKey, checks };
 }
 
 async function uninstall() {
@@ -416,16 +461,17 @@ async function uninstall() {
   const binaries = isSea()
     ? [...new Set([process.env.BETTER_CODEX_LAUNCHER_PATH, process.execPath].filter((value): value is string => Boolean(value)).map(value => resolve(value)))]
     : [];
+  const removableBinaries = binaries.filter(path => !path.split(/[\\/]/).some(part => part.toLowerCase() === "cellar"));
   if (process.platform === "win32" && binaries.length > 0) {
-    const cleanup = [...programPaths, ...binaries].map(path => `Remove-Item -LiteralPath '${path.replace(/'/g, "''")}' -Recurse -Force -ErrorAction SilentlyContinue`).join("; ");
+    const cleanup = [...programPaths, ...removableBinaries].map(path => `Remove-Item -LiteralPath '${path.replace(/'/g, "''")}' -Recurse -Force -ErrorAction SilentlyContinue`).join("; ");
     const command = `Start-Sleep -Milliseconds 800; ${cleanup}`;
     const child = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", command], { detached: true, stdio: "ignore", windowsHide: true });
     child.unref();
   } else {
     for (const path of programPaths) rmSync(path, { recursive: true, force: true });
-    for (const path of binaries) rmSync(path, { force: true });
+    for (const path of removableBinaries) rmSync(path, { force: true });
   }
-  return { uninstalled: true, service, launchIntegration, injection, binaries, dataPreserved: [databasePath, join(dirname(databasePath), "backups")] };
+  return { uninstalled: true, service, launchIntegration, injection, binaries: removableBinaries, packageManagedBinaries: binaries.filter(path => !removableBinaries.includes(path)), dataPreserved: [databasePath, join(dirname(databasePath), "backups")] };
 }
 
 async function deleteData(confirmed: boolean) {
@@ -483,6 +529,12 @@ async function issueCommand(action: string | undefined, args: string[]) {
       if (!["true", "false", "1", "0"].includes(needsAttention)) throw new Error("invalid_needs_attention");
       patch.needs_attention = needsAttention === "true" || needsAttention === "1";
     }
+    const agentId = option(args, "--agent-id");
+    if (agentId !== undefined) {
+      patch.user_assigned = false;
+      patch.agent_enabled = agentId !== "none";
+      patch.agent_id = agentId === "none" || agentId === "codex" ? null : agentId;
+    }
     return print(await request(`/api/issues/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(patch) }));
   }
   if (action === "open") {
@@ -496,7 +548,13 @@ async function main() {
   const [command, action, ...args] = commandArguments();
   const delegated = maybeDelegateToActiveCore();
   if (delegated !== null) process.exit(delegated);
-  if (command === "apply-update") return print(await applyUpdate(Number(action)));
+  if (command === "apply-update") {
+    const versions = activeVersions();
+    return print(await applyUpdate(Number(action), {
+      core: option(args, "--expected-core") ?? (args.includes("--core-updated") ? versions.core : null),
+      compatibility: option(args, "--expected-compatibility") ?? (args.includes("--compatibility-updated") ? versions.compatibility : null),
+    }, option(args, "--drain-path")));
+  }
   if (command === "version" || command === "--version" || command === "-v") {
     const versions = activeVersions();
     if ([action, ...args].includes("--json")) return console.log(JSON.stringify(versions));
@@ -589,6 +647,8 @@ async function main() {
     await stopInjector();
     try {
       try { await request("/api/shutdown", { method: "POST" }); } catch {}
+      const skills = installBundledSkills();
+      if (!skills.installed || !skills.updateKey) throw new Error("reason" in skills ? skills.reason : "bundled_assets_unavailable");
       installService();
       progress("starting_runtime", json);
       const runtime = await ensureRuntime();
@@ -600,7 +660,7 @@ async function main() {
       const pid = await waitForInjector();
       const launchIntegration = installLaunchIntegration();
       progress("ready", json);
-      return print({ configured: true, stages: ["installing_runtime", "starting_runtime", "waiting_for_codex", "injecting", "installing_launcher", "ready"], runtime, injection, launchIntegration, injectorPid: pid });
+      return print({ configured: true, stages: ["installing_runtime", "starting_runtime", "waiting_for_codex", "injecting", "installing_launcher", "ready"], runtime, injection, launchIntegration, skills, injectorPid: pid });
     } catch (error) {
       setInjectionEnabled(false);
       await stopInjector();
@@ -708,6 +768,10 @@ async function main() {
     const values = positionals(args);
     const name = option(args, "--name") ?? values.join(" ");
     return print(await request("/api/projects", { method: "POST", body: JSON.stringify({ name, workspace_path: option(args, "--workspace") ?? process.cwd() }) }));
+  }
+  if (command === "agent" && action === "list") {
+    const bootstrap = await request("/api/bootstrap") as { agents?: unknown[] };
+    return print(bootstrap.agents ?? []);
   }
   if (command === "issue") return issueCommand(action, args);
   usage();

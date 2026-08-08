@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { compatibilityCurrentPath, compatibilityStatusPath, compatibilityVersionsPath, ensureDirectories } from "./config.js";
+import { compatibilityCurrentPath, compatibilityStatusPath, compatibilityVersionsPath, ensureDirectories, runtimeCurrentPath } from "./config.js";
 
 export const coreVersion = "0.3.13";
 
@@ -131,13 +131,13 @@ function stringMap(value: unknown, required: string[]) {
     && entries.every(([key, item]) => /^[A-Za-z][A-Za-z0-9]*$/.test(key) && typeof item === "string" && item.length > 0 && item.length <= 512);
 }
 
-export function validateCompatibility(value: unknown): CompatibilityManifest {
+export function validateCompatibility(value: unknown, activeCoreVersion = coreVersion): CompatibilityManifest {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("compatibility_invalid");
   const item = value as Record<string, unknown>;
   const allowed = ["version", "minimumCoreVersion", "supportedPlatforms", "supportedCodexVersions", "targetRules", "selectors", "attributes", "navigation"];
   if (Object.keys(item).some(key => !allowed.includes(key))) throw new Error("compatibility_field_not_allowed");
   if (typeof item.version !== "string" || !/^\d+\.\d+\.\d+(?:[-.][A-Za-z0-9.-]+)?$/.test(item.version)) throw new Error("compatibility_version_invalid");
-  if (typeof item.minimumCoreVersion !== "string" || compareVersions(coreVersion, item.minimumCoreVersion) < 0) throw new Error("compatibility_core_incompatible");
+  if (typeof item.minimumCoreVersion !== "string" || compareVersions(activeCoreVersion, item.minimumCoreVersion) < 0) throw new Error("compatibility_core_incompatible");
   if (!stringArray(item.supportedPlatforms) || !(item.supportedPlatforms as string[]).every(platform => ["darwin", "win32"].includes(platform))) throw new Error("compatibility_platforms_invalid");
   const codex = item.supportedCodexVersions as Record<string, unknown>;
   if (!codex || codex.strategy !== "capability" || ![null, "string"].includes(codex.minimum === null ? null : typeof codex.minimum) || ![null, "string"].includes(codex.maximumExclusive === null ? null : typeof codex.maximumExclusive)) throw new Error("compatibility_codex_range_invalid");
@@ -167,23 +167,33 @@ export function writeCompatibilityPointer(value: CompatibilityPointer) {
   renameSync(temporary, compatibilityCurrentPath);
 }
 
+function activeCoreVersion() {
+  try {
+    const value = JSON.parse(readFileSync(runtimeCurrentPath, "utf8")) as { current?: string };
+    return typeof value.current === "string" && compareVersions(value.current, coreVersion) > 0 ? value.current : coreVersion;
+  } catch {
+    return coreVersion;
+  }
+}
+
 export function activeCompatibility() {
   const pointer = readCompatibilityPointer();
   if (!pointer || pointer.current === bundledCompatibility.version) return bundledCompatibility;
   try {
-    return validateCompatibility(JSON.parse(readFileSync(join(compatibilityVersionsPath, pointer.current, "manifest.json"), "utf8")));
+    return validateCompatibility(JSON.parse(readFileSync(join(compatibilityVersionsPath, pointer.current, "manifest.json"), "utf8")), activeCoreVersion());
   } catch {
     return bundledCompatibility;
   }
 }
 
-export function rollbackCompatibility() {
+export function rollbackCompatibility(expectedVersion?: string | null) {
   const pointer = readCompatibilityPointer();
   if (!pointer?.previous) throw new Error("compatibility_rollback_unavailable");
+  if (expectedVersion && pointer.current !== expectedVersion) return activeCompatibility();
   const target = pointer.previous;
   const manifest = target === bundledCompatibility.version
     ? bundledCompatibility
-    : validateCompatibility(JSON.parse(readFileSync(join(compatibilityVersionsPath, target, "manifest.json"), "utf8")));
+    : validateCompatibility(JSON.parse(readFileSync(join(compatibilityVersionsPath, target, "manifest.json"), "utf8")), activeCoreVersion());
   writeCompatibilityPointer({ current: target, previous: pointer.current, failures: 0, updatedAt: new Date().toISOString() });
   return manifest;
 }

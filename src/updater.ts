@@ -1,11 +1,11 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, verify } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { isSea } from "node:sea";
 import { activeCompatibility, bundledCompatibility, compareVersions, coreVersion, readCompatibilityPointer, rollbackCompatibility, validateCompatibility, writeCompatibilityPointer } from "./compatibility.js";
-import { compatibilityVersionsPath, ensureDirectories, runtimeCurrentPath, runtimeVersionsPath, updatePublicKeyPath, updateStatePath } from "./config.js";
+import { compatibilityVersionsPath, ensureDirectories, runtimeCurrentPath, runtimeVersionsPath, updateActivationPath, updatePublicKeyPath, updateStatePath } from "./config.js";
 
 type UpdateAsset = {
   version: string;
@@ -45,13 +45,83 @@ export type GatewayUpdateState = {
   error: string | null;
 };
 
-let gatewayUpdateState: GatewayUpdateState = {
-  status: "idle",
-  currentVersion: coreVersion,
-  latestVersion: null,
-  checkedAt: null,
-  error: null,
+type ActivationState = {
+  status?: string;
+  error?: string | null;
+  updatedAt?: string;
+  coreVersion?: string | null;
+  compatibilityVersion?: string | null;
+  core?: boolean;
+  compatibility?: boolean;
+  ownerPid?: number | null;
 };
+
+function acquireActivationRecoveryLock() {
+  const path = `${updateActivationPath}.lock`;
+  const token = `${process.pid}:${Date.now()}:${Math.random()}`;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const descriptor = openSync(path, "wx", 0o600);
+      writeFileSync(descriptor, JSON.stringify({ pid: process.pid, token }));
+      closeSync(descriptor);
+      return { path, token };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      try {
+        const owner = JSON.parse(readFileSync(path, "utf8")) as { pid?: number };
+        if (Number.isInteger(owner.pid) && owner.pid && processAlive(owner.pid)) return null;
+      } catch {}
+      try { unlinkSync(path); } catch { return null; }
+    }
+  }
+  return null;
+}
+
+function releaseActivationRecoveryLock(lock: { path: string; token: string }) {
+  try {
+    const owner = JSON.parse(readFileSync(lock.path, "utf8")) as { token?: string };
+    if (owner.token === lock.token) unlinkSync(lock.path);
+  } catch {}
+}
+
+function persistedActivationState(): GatewayUpdateState {
+  try {
+    const value = JSON.parse(readFileSync(updateActivationPath, "utf8")) as ActivationState;
+    if (value.status === "activating") {
+      const startedAt = Date.parse(value.updatedAt || "");
+      if (Number.isFinite(startedAt) && Date.now() - startedAt <= 120_000) return { status: "restarting", currentVersion: coreVersion, latestVersion: null, checkedAt: value.updatedAt ?? null, error: null };
+      if (Number.isInteger(value.ownerPid) && value.ownerPid && processAlive(value.ownerPid)) return { status: "restarting", currentVersion: coreVersion, latestVersion: null, checkedAt: value.updatedAt ?? null, error: null };
+      const lock = acquireActivationRecoveryLock();
+      if (!lock) return { status: "restarting", currentVersion: coreVersion, latestVersion: null, checkedAt: value.updatedAt ?? null, error: null };
+      try {
+        const current = JSON.parse(readFileSync(updateActivationPath, "utf8")) as ActivationState;
+        if (current.status !== "activating" || current.updatedAt !== value.updatedAt) return persistedActivationState();
+        if (!current.coreVersion && current.core) current.coreVersion = readRuntimePointer()?.current ?? null;
+        if (!current.compatibilityVersion && current.compatibility) current.compatibilityVersion = readCompatibilityPointer()?.current ?? null;
+        writeJsonAtomic(updateActivationPath, current);
+        if (current.coreVersion) rollbackCoreUpdate(current.coreVersion);
+        if (current.compatibilityVersion) rollbackCompatibilityUpdate(current.compatibilityVersion);
+        writeJsonAtomic(updateActivationPath, { ...current, status: "error", error: "update_activation_interrupted", ownerPid: null, updatedAt: new Date().toISOString() });
+        return { status: "error", currentVersion: coreVersion, latestVersion: null, checkedAt: current.updatedAt ?? null, error: "update_activation_failed:update_activation_interrupted" };
+      } finally {
+        releaseActivationRecoveryLock(lock);
+      }
+    }
+    if (value.status === "error") return { status: "error", currentVersion: coreVersion, latestVersion: null, checkedAt: value.updatedAt ?? null, error: `update_activation_failed:${value.error || "unknown"}` };
+  } catch {}
+  return { status: "idle", currentVersion: coreVersion, latestVersion: null, checkedAt: null, error: null };
+}
+
+function processAlive(pid: number) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+let gatewayUpdateState: GatewayUpdateState = persistedActivationState();
 let gatewayCheckPromise: Promise<GatewayUpdateState> | null = null;
 let gatewayInstallPromise: Promise<Awaited<ReturnType<typeof updateAll>>> | null = null;
 
@@ -77,8 +147,8 @@ function httpsUrl(value: string) {
 function manifestUrl(channel: "stable" | "preview") {
   const configured = process.env.BETTER_CODEX_UPDATE_MANIFEST_URL;
   if (configured) return httpsUrl(configured);
-  const tag = channel === "stable" ? "latest" : "preview";
-  return new URL(`https://github.com/Ericwong5021/better-codex/releases/${tag}/download/update-manifest.json`);
+  const release = channel === "stable" ? "latest/download" : "download/preview";
+  return new URL(`https://github.com/Ericwong5021/better-codex/releases/${release}/update-manifest.json`);
 }
 
 async function download(url: URL) {
@@ -159,11 +229,23 @@ function effectiveCoreVersion() {
 }
 
 export function getGatewayUpdateState() {
+  if (gatewayUpdateState.status === "restarting") {
+    const persisted = persistedActivationState();
+    if (persisted.status !== "restarting") gatewayUpdateState = persisted.status === "idle" ? { ...persisted, status: "current" } : persisted;
+  }
   return { ...gatewayUpdateState, currentVersion: effectiveCoreVersion() };
+}
+
+export function recordGatewayUpdateActivation(status: "activating" | "success" | "error", error: string | null = null, updates: { core: string | null; compatibility: string | null } = { core: null, compatibility: null }, ownerPid: number | null = null) {
+  writeJsonAtomic(updateActivationPath, { status, error, coreVersion: updates.core, compatibilityVersion: updates.compatibility, ownerPid, updatedAt: new Date().toISOString() });
+  gatewayUpdateState = status === "error"
+    ? { ...getGatewayUpdateState(), status: "error", error: `update_activation_failed:${error || "unknown"}` }
+    : { ...getGatewayUpdateState(), status: status === "activating" ? "restarting" : "current", error: null };
 }
 
 export function checkGatewayUpdate() {
   if (gatewayCheckPromise) return gatewayCheckPromise;
+  getGatewayUpdateState();
   if (["installing", "restarting"].includes(gatewayUpdateState.status)) return Promise.resolve(getGatewayUpdateState());
   gatewayUpdateState = { ...getGatewayUpdateState(), status: "checking", error: null };
   const promise = checkForUpdates().then(result => {
@@ -188,7 +270,9 @@ export function checkGatewayUpdate() {
 }
 
 export function startGatewayUpdateChecks() {
-  const initial = setTimeout(() => void checkGatewayUpdate(), 5_000);
+  const initial = setTimeout(() => {
+    if (!gatewayUpdateState.error?.startsWith("update_activation_failed:")) void checkGatewayUpdate();
+  }, 5_000);
   const periodic = setInterval(() => void checkGatewayUpdate(), 60 * 60 * 1000);
   initial.unref();
   periodic.unref();
@@ -236,7 +320,17 @@ export function installGatewayUpdate() {
 
 async function validateCoreRuntime(executable: string) {
   const home = mkdtempSync(join(tmpdir(), "better-codex-update-"));
-  const child = spawn(executable, ["runtime"], { stdio: "ignore", windowsHide: true, env: { ...process.env, BETTER_CODEX_HOME: home, BETTER_CODEX_RUNTIME_PORT: "0", BETTER_CODEX_DISABLE_DELEGATION: "1" } });
+  mkdirSync(join(home, "run"), { recursive: true });
+  writeFileSync(join(home, "run", "injection.json"), JSON.stringify({ enabled: false }), { mode: 0o600 });
+  const environment: NodeJS.ProcessEnv = {
+    ...process.env,
+    BETTER_CODEX_HOME: home,
+    BETTER_CODEX_RUNTIME_PORT: "0",
+    BETTER_CODEX_DISABLE_DELEGATION: "1",
+    CODEX_HOME: join(home, "codex"),
+  };
+  delete environment.BETTER_CODEX_DB;
+  const child = spawn(executable, ["runtime"], { stdio: "ignore", windowsHide: true, env: environment });
   try {
     for (let attempt = 0; attempt < 60; attempt += 1) {
       await new Promise(resolve => setTimeout(resolve, 200));
@@ -267,6 +361,14 @@ function rollbackCorePointer(pointer: RuntimePointer) {
     return;
   }
   writeJsonAtomic(runtimeCurrentPath, { current: pointer.previous, previous: coreVersion, executable, updatedAt: new Date().toISOString() } satisfies RuntimePointer);
+}
+
+export function rollbackCoreUpdate(expectedVersion?: string | null) {
+  const pointer = readRuntimePointer();
+  if (!pointer || (expectedVersion && pointer.current !== expectedVersion)) return { rolledBack: false };
+  const previous = pointer.current;
+  rollbackCorePointer(pointer);
+  return { rolledBack: true, previous, version: effectiveCoreVersion() };
 }
 
 export function activeVersions() {
@@ -307,7 +409,7 @@ export async function updateCompatibility(payload?: UpdatePayload, channel: "sta
   if (compareVersions(asset.version, activeCompatibility().version) <= 0) return { updated: false, reason: "compatibility_current", version: activeCompatibility().version };
   const content = await download(httpsUrl(asset.url));
   verifyDigest(content, asset.sha256);
-  const compatibility = validateCompatibility(JSON.parse(content.toString("utf8")));
+  const compatibility = validateCompatibility(JSON.parse(content.toString("utf8")), effectiveCoreVersion());
   if (compatibility.version !== asset.version || compatibility.minimumCoreVersion !== asset.minimumCoreVersion) throw new Error("compatibility_manifest_mismatch");
   ensureDirectories();
   const directory = join(compatibilityVersionsPath, compatibility.version);
@@ -359,13 +461,23 @@ export async function updateAll(channel: "stable" | "preview" = "stable") {
   }
   const manifest = await fetchUpdateManifest(channel);
   const core = await updateCore(manifest, channel);
-  const compatibility = await updateCompatibility(manifest, channel);
-  return { channel, core, compatibility };
+  try {
+    const compatibility = await updateCompatibility(manifest, channel);
+    return { channel, core, compatibility };
+  } catch (error) {
+    if (core.updated) {
+      const pointer = readRuntimePointer();
+      if (pointer?.current === core.version) rollbackCorePointer(pointer);
+    }
+    throw error;
+  }
 }
 
-export function rollbackCompatibilityUpdate() {
+export function rollbackCompatibilityUpdate(expectedVersion?: string | null) {
+  const pointer = readCompatibilityPointer();
+  if (expectedVersion && pointer?.current !== expectedVersion) return { rolledBack: false };
   const previous = activeCompatibility().version;
-  const compatibility = rollbackCompatibility();
+  const compatibility = rollbackCompatibility(expectedVersion);
   return { rolledBack: true, previous, version: compatibility.version };
 }
 
@@ -379,6 +491,10 @@ export function maybeDelegateToActiveCore() {
   }
   const child = spawnSync(pointer.executable, process.argv.slice(2), { stdio: "inherit", windowsHide: true, env: { ...process.env, BETTER_CODEX_LAUNCHER_PATH: process.env.BETTER_CODEX_LAUNCHER_PATH ?? process.execPath } });
   if (child.error) {
+    rollbackCorePointer(pointer);
+    return null;
+  }
+  if (process.argv[2] === "runtime" && child.status !== 0) {
     rollbackCorePointer(pointer);
     return null;
   }

@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { closeSync, openSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { closeSync, openSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { isSea } from "node:sea";
 import { coreVersion, readCompatibilityStatus } from "./compatibility.js";
@@ -9,14 +10,16 @@ import { readCodexAppearance } from "./appearance.js";
 import { readCodexLocale } from "./locale.js";
 import { readCodexUserProfile } from "./user-profile.js";
 import { readModelCatalog } from "./model-catalog.js";
-import { runtimePort, token, updateLogPath } from "./config.js";
+import { runPath, runtimePort, token, updateLogPath } from "./config.js";
 import { acquireRuntimeLock, clearRuntimeState, createRuntimeIdentity, publishRuntimeState } from "./runtime-state.js";
-import { activeCoreExecutable, getGatewayUpdateState, installGatewayUpdate, startGatewayUpdateChecks } from "./updater.js";
-import { getIssueReplyState, startIssueReply, stopIssueReplies } from "./session-reply.js";
+import { activeCoreExecutable, checkGatewayUpdate, getGatewayUpdateState, installGatewayUpdate, recordGatewayUpdateActivation, startGatewayUpdateChecks } from "./updater.js";
+import { getIssueReplyState, hasActiveIssueReplies, startIssueReply, stopIssueReplies } from "./session-reply.js";
+import { join } from "node:path";
 import { normalizeSessionId, readConversationResult, sessionWorkspace } from "./session-transcript.js";
 import { IssueWorker } from "./worker.js";
 
 const accessToken = token();
+const mockupEnabled = !isSea() && process.argv.includes("--mockup");
 
 function sendJson(response: ServerResponse, status: number, value: unknown) {
   const body = JSON.stringify(value);
@@ -191,19 +194,21 @@ function errorCode(error: unknown) {
 }
 
 function errorStatus(code: string) {
-  if (code === "version_conflict" || code === "reply_busy" || code === "issue_execution_locked") return 409;
+  if (code === "version_conflict" || code === "reply_busy" || code === "update_in_progress" || code === "issue_execution_locked") return 409;
   if (code.endsWith("_not_found")) return 404;
   if (code === "database_unavailable" || code === "database_integrity_check_failed") return 503;
   return 400;
 }
 
-function spawnUpdateRelaunch(runtimePid: number) {
+function spawnUpdateRelaunch(runtimePid: number, updates: { core: string | null; compatibility: string | null }, drainPath: string) {
   const descriptor = openSync(updateLogPath, "a");
   const executable = isSea() ? activeCoreExecutable() : process.execPath;
-  const args = isSea() ? ["apply-update", String(runtimePid)] : [...process.execArgv, process.argv[1], "apply-update", String(runtimePid)];
-  const child = spawn(executable, args, { cwd: process.cwd(), detached: true, env: process.env, stdio: ["ignore", descriptor, descriptor], windowsHide: true });
+  const updateArgs = ["apply-update", String(runtimePid), "--drain-path", drainPath, ...(updates.core ? ["--expected-core", updates.core] : []), ...(updates.compatibility ? ["--expected-compatibility", updates.compatibility] : [])];
+  const args = isSea() ? updateArgs : [...process.execArgv, process.argv[1], ...updateArgs];
+  const child = spawn(executable, args, { cwd: process.cwd(), detached: true, env: { ...process.env, BETTER_CODEX_LAUNCHER_PATH: process.env.BETTER_CODEX_LAUNCHER_PATH ?? process.execPath }, stdio: ["ignore", descriptor, descriptor], windowsHide: true });
   child.unref();
   closeSync(descriptor);
+  return child.pid ?? null;
 }
 
 export function startServer() {
@@ -213,12 +218,14 @@ export function startServer() {
   let store: Store;
   try {
     store = new Store();
-    syncAgentProfiles(store.listAgentProfiles());
+    if (!mockupEnabled) syncAgentProfiles(store.listAgentProfiles());
   } catch (error) {
     clearRuntimeState(identity.instanceId);
     throw error;
   }
   let cleaned = false;
+  let updateRelaunchScheduled = false;
+  let updateInstallInProgress = false;
   const worker = new IssueWorker(store);
   const withAvatar = <T extends { id: string; is_default?: boolean }>(profile: T) => ({
     ...profile,
@@ -227,7 +234,7 @@ export function startServer() {
   const withDefaultConcurrency = <T,>(profile: T) => ({ ...profile, max_concurrency: store.getDefaultAgentMaxConcurrency() });
   const sandboxModeForAgent = (agentId: string | null | undefined) => agentId ? store.getAgentProfile(agentId)?.sandbox_mode || defaultAgentProfile().sandbox_mode : defaultAgentProfile().sandbox_mode;
   const visibleAgentProfiles = () => [withAvatar(withDefaultConcurrency(defaultAgentProfile())), ...store.listAgentProfiles().map(withAvatar)];
-  const stopUpdateChecks = startGatewayUpdateChecks();
+  const stopUpdateChecks = mockupEnabled ? () => {} : startGatewayUpdateChecks();
   const cleanup = () => {
     if (cleaned) return;
     cleaned = true;
@@ -256,7 +263,7 @@ export function startServer() {
         const agentModelCatalog = await readModelCatalog();
         const agentModels = agentModelCatalog.map(model => model.id);
         const agentReasoningEfforts = [...new Set(agentModelCatalog.flatMap(model => model.supportedReasoningEfforts.map(effort => effort.value)))];
-        return sendJson(response, 200, { projects: store.listProjects(), agents: visibleAgentProfiles(), statuses: issueStatuses, priorities: issuePriorities, appearance: readCodexAppearance(), locale: readCodexLocale(), user: readCodexUserProfile(), agentModelCatalog, agentModels, agentReasoningEfforts, autoDispatch: store.getAutoDispatch() });
+        return sendJson(response, 200, { projects: store.listProjects(), agents: visibleAgentProfiles(), statuses: issueStatuses, priorities: issuePriorities, appearance: readCodexAppearance(), locale: readCodexLocale(), user: readCodexUserProfile(), agentModelCatalog, agentModels, agentReasoningEfforts, autoDispatch: store.getAutoDispatch(), mockup: mockupEnabled });
       }
       if (url.pathname === "/api/settings/auto-dispatch" && method === "GET") {
         return sendJson(response, 200, { enabled: store.getAutoDispatch() });
@@ -269,19 +276,46 @@ export function startServer() {
         return sendJson(response, 200, { enabled });
       }
       if (url.pathname === "/api/update" && method === "GET") return sendJson(response, 200, getGatewayUpdateState());
+      if (url.pathname === "/api/update/check" && method === "POST") return sendJson(response, 200, await checkGatewayUpdate());
       if (url.pathname === "/api/update/install" && method === "POST") {
-        const result = await installGatewayUpdate();
-        const updated = result.core.updated || result.compatibility.updated;
-        sendJson(response, 200, { ok: true, updated, state: getGatewayUpdateState(), result });
-        if (!updated) return;
-        setTimeout(() => {
-          spawnUpdateRelaunch(process.pid);
-          server.close(() => {
-            cleanup();
-            process.exit(0);
-          });
-        }, 250);
-        return;
+        if (updateInstallInProgress) throw new Error("update_in_progress");
+        if (hasActiveIssueReplies()) throw new Error("reply_busy");
+        updateInstallInProgress = true;
+        try {
+          const result = await installGatewayUpdate();
+          const updated = result.core.updated || result.compatibility.updated;
+          const updates = { core: result.core.updated ? result.core.version : null, compatibility: result.compatibility.updated ? result.compatibility.version : null };
+          const shouldRelaunch = updated && !updateRelaunchScheduled;
+          if (shouldRelaunch) {
+            updateRelaunchScheduled = true;
+            recordGatewayUpdateActivation("activating", null, updates);
+          }
+          sendJson(response, updated ? 202 : 200, { accepted: updated, updated, state: getGatewayUpdateState(), result });
+          if (!shouldRelaunch) {
+            updateInstallInProgress = false;
+            return;
+          }
+          const drainPath = join(runPath, `update-drain-${randomUUID()}`);
+          setTimeout(() => {
+            try {
+              const ownerPid = spawnUpdateRelaunch(process.pid, updates, drainPath);
+              recordGatewayUpdateActivation("activating", null, updates, ownerPid);
+              server.close(() => {
+                cleanup();
+                writeFileSync(drainPath, String(process.pid), { mode: 0o600 });
+                process.exit(0);
+              });
+            } catch (error) {
+              updateInstallInProgress = false;
+              updateRelaunchScheduled = false;
+              recordGatewayUpdateActivation("error", error instanceof Error ? error.message : "update_activation_failed");
+            }
+          }, 250);
+          return;
+        } catch (error) {
+          updateInstallInProgress = false;
+          throw error;
+        }
       }
       if (url.pathname === "/api/agents" && method === "GET") return sendJson(response, 200, visibleAgentProfiles());
       if (url.pathname === "/api/agents" && method === "POST") {
@@ -465,6 +499,7 @@ export function startServer() {
           });
         }
         if (method === "POST" && path[3] === "reply" && path.length === 4) {
+          if (updateInstallInProgress) throw new Error("update_in_progress");
           if (issue.active_run_status === "claimed" || issue.active_run_status === "running") throw new Error("issue_execution_running");
           if (!issue.run_thread_id && !store.canAutoStartFromUserMessage(issue)) {
             throw new Error(store.getAutoDispatch() ? "backlog_reply_blocked" : "manual_start_required");
@@ -473,6 +508,7 @@ export function startServer() {
           const threadId = issue.run_thread_id || "";
           const reply = startIssueReply({
             issueId: issue.id,
+            requestId: cleanString(body.request_id, 200) || randomUUID(),
             threadId,
             workspacePath: issue.workspace_path,
             message: cleanString(body.message, 100000),
@@ -502,7 +538,7 @@ export function startServer() {
     const address = server.address();
     if (typeof address !== "object" || !address) throw new Error("runtime_address_unavailable");
     publishRuntimeState({ ...identity, port: address.port });
-    worker.start();
+    if (!mockupEnabled) worker.start();
     console.log(`Better Codex Runtime ${coreVersion} listening on http://127.0.0.1:${address.port}`);
   });
   const stop = () => server.close(() => {

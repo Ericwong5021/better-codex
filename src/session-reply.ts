@@ -15,6 +15,7 @@ function codexPath() {
 
 export type IssueReplyState = {
   issue_id: string;
+  request_id?: string;
   status: "idle" | "running" | "succeeded" | "failed";
   message: string;
   error?: string;
@@ -29,12 +30,24 @@ type ActiveReply = {
 
 const replies = new Map<string, ActiveReply | { state: IssueReplyState }>();
 
+function replyFailure(output: string, fallback: string) {
+  const value = output.toLowerCase();
+  if (["timed out", "timeout", "deadline exceeded"].some(marker => value.includes(marker))) return "reply_timeout";
+  if (["apiconnectionerror", "network", "fetch failed", "econnreset", "econnrefused", "enotfound", "dns", "socket hang up", "connection error"].some(marker => value.includes(marker))) return "reply_network_error";
+  if (["permission denied", "operation not permitted", "eacces", "eperm", "forbidden", "unauthorized", "status 401", "status 403", "approval denied"].some(marker => value.includes(marker))) return "reply_permission_denied";
+  return fallback;
+}
+
 export function getIssueReplyState(issueId: string): IssueReplyState {
   const current = replies.get(issueId);
   if (!current) {
     return { issue_id: issueId, status: "idle", message: "" };
   }
   return current.state;
+}
+
+export function hasActiveIssueReplies() {
+  return [...replies.values()].some(current => "child" in current && current.state.status === "running");
 }
 
 export function stopIssueReplies() {
@@ -52,6 +65,7 @@ export function stopIssueReplies() {
 
 export function startIssueReply(input: {
   issueId: string;
+  requestId: string;
   threadId: string;
   workspacePath?: string | null;
   message: string;
@@ -60,6 +74,7 @@ export function startIssueReply(input: {
 }) {
   const issueId = input.issueId;
   const current = replies.get(issueId);
+  if (current?.state.request_id === input.requestId && current.state.status !== "failed") return current.state;
   if (current && "child" in current && current.state.status === "running") {
     throw new Error("reply_busy");
   }
@@ -96,11 +111,16 @@ export function startIssueReply(input: {
   const startedAt = new Date().toISOString();
   const state: IssueReplyState = {
     issue_id: issueId,
+    request_id: input.requestId,
     status: "running",
     message,
     started_at: startedAt,
   };
   const log = createWriteStream(join(runLogPath, `reply-${issueId}.log`), { flags: "a" });
+  let failureOutput = "";
+  const captureFailureOutput = (chunk: unknown) => {
+    failureOutput = (failureOutput + String(chunk)).slice(-32768);
+  };
   log.write(`\n--- ${startedAt} resume ${sessionId} ---\n`);
   const child = spawn(codexPath(), args, {
     cwd: workspacePath,
@@ -115,11 +135,17 @@ export function startIssueReply(input: {
   const active: ActiveReply = { state, child };
   replies.set(issueId, active);
 
-  child.stdout?.on("data", chunk => log.write(chunk));
-  child.stderr?.on("data", chunk => log.write(chunk));
+  child.stdout?.on("data", chunk => {
+    captureFailureOutput(chunk);
+    log.write(chunk);
+  });
+  child.stderr?.on("data", chunk => {
+    captureFailureOutput(chunk);
+    log.write(chunk);
+  });
   child.once("error", error => {
     state.status = "failed";
-    state.error = error.message;
+    state.error = replyFailure(error.message, error.message);
     state.finished_at = new Date().toISOString();
     log.write(error.stack || error.message);
     log.end();
@@ -131,7 +157,7 @@ export function startIssueReply(input: {
         state.status = "succeeded";
       } else {
         state.status = "failed";
-        state.error = `codex_exit_${code ?? signal ?? "unknown"}`;
+        state.error = replyFailure(failureOutput, `codex_exit_${code ?? signal ?? "unknown"}`);
       }
       state.finished_at = new Date().toISOString();
     }

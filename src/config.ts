@@ -17,6 +17,7 @@ export const compatibilityCurrentPath = join(compatibilityPath, "current.json");
 export const runtimeVersionsPath = join(managedRuntimePath, "versions");
 export const runtimeCurrentPath = join(managedRuntimePath, "current.json");
 export const updateStatePath = join(managedRuntimePath, "update.json");
+export const updateActivationPath = join(managedRuntimePath, "update-activation.json");
 export const updatePublicKeyPath = join(betterCodexHome, "update-public-key.pem");
 export const tokenPath = join(runPath, "token");
 export const runtimeStatePath = join(runPath, "runtime.json");
