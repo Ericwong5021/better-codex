@@ -54,7 +54,10 @@ test("leaving the app surface suspends the panel and restores its previous surfa
   assert.ok(source.includes("return entry.isConnected && agentsEntry.isConnected"));
   assert.ok(source.includes("const entriesAvailable = ensureEntry()"));
   assert.ok(source.includes("if (active) close({ resume: true, suppressRoute: betterCodexRoute })"));
-  assert.ok(source.includes('if (!active && betterCodexRoute && !routeSuppressed) return open(["issues", "agents"].includes(resumeSurface) ? resumeSurface : state.surface)'));
+  assert.ok(source.includes("routeSeen = false"));
+  assert.ok(source.includes("window.postMessage({ type: NAVIGATION.messageType, path: BETTER_CODEX_ROUTE }, window.location.origin)"));
+  assert.ok(source.includes("!target.closest(SELECTORS.projectRow)"));
+  assert.ok(!source.includes("if (!active && betterCodexRoute && !routeSuppressed)"));
   assert.ok(source.includes("function scheduleRefresh()"));
   assert.ok(source.includes("refreshTimer = setTimeout(() =>"));
   assert.ok(source.includes("}, 50);"));

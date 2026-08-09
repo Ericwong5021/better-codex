@@ -1,5 +1,5 @@
 import { activeCompatibility, coreVersion } from "./compatibility.js";
-import { betterCodexBrandLogoPng, betterCodexLogoPng } from "./brand-assets.js";
+import { betterCodexLogoPng } from "./brand-assets.js";
 import { betterCodexDesignSystemCss } from "./design-system.js";
 import { renderMarkdown } from "./markdown.js";
 import { betterCodexMcpRoute } from "./mcp-app.js";
@@ -246,7 +246,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
   const baseUrl = JSON.stringify(`http://127.0.0.1:${port}`);
   const bridgeToken = JSON.stringify(accessToken);
   const betterCodexLogoUrl = `data:image/png;base64,${betterCodexLogoPng().toString("base64")}`;
-  const betterCodexBrandLogoUrl = `data:image/png;base64,${betterCodexBrandLogoPng().toString("base64")}`;
   const helpModeMarkdown = JSON.stringify({
     "zh-CN": {
       manual: renderMarkdown("点击 {{start}}，或者在已完成的会话卡片中 {{send}} 新消息，智能体才会执行任务。"),
@@ -279,7 +278,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const BASE_URL = ${baseUrl};
     const BRIDGE_TOKEN = ${bridgeToken};
     const BETTER_CODEX_LOGO_URL = ${JSON.stringify(betterCodexLogoUrl)};
-    const BETTER_CODEX_BRAND_LOGO_URL = ${JSON.stringify(betterCodexBrandLogoUrl)};
     const INITIAL_LOCALE = ${JSON.stringify(locale)};
     const SELECTORS = ${JSON.stringify(compatibility.selectors)};
     const ATTRIBUTES = ${JSON.stringify(compatibility.attributes)};
@@ -1661,7 +1659,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function betterCodexLogo() {
-      return '<img src="' + BETTER_CODEX_BRAND_LOGO_URL + '" alt="Better Codex">';
+      return '<img src="' + BETTER_CODEX_LOGO_URL + '" alt="Better Codex">';
     }
 
     function githubLogo() {
@@ -2622,7 +2620,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         '<div class="better-codex-auto-dispatch-help-divider" aria-hidden="true"></div>',
         '<article class="better-codex-auto-dispatch-help-panel is-auto"><div class="better-codex-auto-dispatch-help-heading">' + icon("refresh") + "<h3>" + te("自动运行") + "</h3></div>" + modeDescription(helpMode.auto) + "</article></div></section>",
         settingsPage,
-        '<section class="better-codex-help-page" data-help-page="about" hidden><div class="better-codex-help-about"><span class="better-codex-help-about-logo">' + betterCodexLogo() + '</span><div><h2 class="better-codex-help-about-brand"><span class="better-codex-help-about-brand-better">better</span><span>Codex</span></h2><p class="better-codex-help-about-slogan">' + te("从开始到完成，让 Codex 里的工作清晰可见。") + '</p></div><span class="better-codex-help-runtime-status"><span class="better-codex-help-status-dot"></span>' + te("运行正常") + '</span></div><dl class="better-codex-help-about-details"><div><dt>' + te("版本信息") + '</dt><dd><button class="better-codex-help-check-update" type="button" data-check-update>' + te("检查新版本") + '</button><span data-product-core></span></dd></div></dl><div class="better-codex-help-github-row"><a class="better-codex-help-github" href="https://github.com/Ericwong5021/better-codex" target="_blank" rel="noreferrer">' + githubLogo() + '<span class="better-codex-help-github-name">Better Codex</span><span class="better-codex-help-github-stars">' + icon("star", "better-codex-help-star") + '</span></a><p>' + te("如果你喜欢 Better Codex，欢迎给我们一个 Star。") + '</p></div></section>',
+        '<section class="better-codex-help-page" data-help-page="about" hidden><div class="better-codex-help-about"><span class="better-codex-help-about-logo">' + betterCodexLogo() + '</span><div><h2>Better Codex</h2><p class="better-codex-help-about-slogan">' + te("从开始到完成，让 Codex 里的工作清晰可见。") + '</p></div><span class="better-codex-help-runtime-status"><span class="better-codex-help-status-dot"></span>' + te("运行正常") + '</span></div><dl class="better-codex-help-about-details"><div><dt>' + te("版本信息") + '</dt><dd><button class="better-codex-help-check-update" type="button" data-check-update>' + te("检查新版本") + '</button><span data-product-core></span></dd></div></dl><div class="better-codex-help-github-row"><a class="better-codex-help-github" href="https://github.com/Ericwong5021/better-codex" target="_blank" rel="noreferrer">' + githubLogo() + '<span class="better-codex-help-github-name">Better Codex</span><span class="better-codex-help-github-stars">' + icon("star", "better-codex-help-star") + '</span></a><p>' + te("如果你喜欢 Better Codex，欢迎给我们一个 Star。") + '</p></div></section>',
         "</main>",
         "</div>",
       ].join("");
@@ -4456,8 +4454,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     function openRoute(surface = state.surface) {
       routeSuppressed = false;
-      routeSeen = isBetterCodexRoute();
-      if (!routeSeen) window.postMessage({ type: NAVIGATION.messageType, path: BETTER_CODEX_ROUTE }, window.location.origin);
+      routeSeen = false;
+      window.postMessage({ type: NAVIGATION.messageType, path: BETTER_CODEX_ROUTE }, window.location.origin);
       open(surface);
     }
 
@@ -4562,7 +4560,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (!active || suppressAgentOutside) return;
       const target = event.target?.closest?.("button,a,[role='button']," + SELECTORS.threadRow);
       if (!target || target === entry || target === agentsEntry || target.closest("#" + PANEL_ID) || target.closest("#better-codex-dialog") || target.closest("#better-codex-agent-dialog") || target.closest("#better-codex-avatar-picker")) return;
-      if (target.closest(SELECTORS.sidebarNavigation)) close({ resume: true });
+      if (target.closest(SELECTORS.sidebarNavigation) && !target.closest(SELECTORS.projectRow)) close({ resume: true });
     }
 
     function refresh() {
@@ -4573,12 +4571,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (!betterCodexRoute) routeSuppressed = false;
         return;
       }
-      const resumeSurface = sessionStorage.getItem(RESUME_SURFACE_KEY);
       if (betterCodexRoute) routeSeen = true;
       if (!betterCodexRoute) routeSuppressed = false;
       syncSessionHandoffFromHost();
       if (active && routeSeen && !betterCodexRoute) return close({ resume: true, suppressRoute: false });
-      if (!active && betterCodexRoute && !routeSuppressed) return open(["issues", "agents"].includes(resumeSurface) ? resumeSurface : state.surface);
       if (active) mountPanel();
     }
 

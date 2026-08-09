@@ -31,12 +31,10 @@ const embedBrandAssets = {
       const icns = readFileSync(join(root, "assets", "AppIcon.icns")).toString("base64");
       const ico = readFileSync(join(root, "assets", "AppIcon.ico")).toString("base64");
       const logo = readFileSync(join(root, "assets", "better-codex.png")).toString("base64");
-      const brandLogo = readFileSync(join(root, "assets", "better-codex-brand.png")).toString("base64");
       return {
         contents: `export function appIconIcns(){return Buffer.from(${JSON.stringify(icns)},"base64")}
 export function appIconIco(){return Buffer.from(${JSON.stringify(ico)},"base64")}
 export function betterCodexLogoPng(){return Buffer.from(${JSON.stringify(logo)},"base64")}
-export function betterCodexBrandLogoPng(){return Buffer.from(${JSON.stringify(brandLogo)},"base64")}
 `,
         loader: "js",
       };

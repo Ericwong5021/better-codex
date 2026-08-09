@@ -23,7 +23,3 @@ export function appIconIco() {
 export function betterCodexLogoPng() {
   return readAsset("better-codex.png");
 }
-
-export function betterCodexBrandLogoPng() {
-  return readAsset("better-codex-brand.png");
-}
