@@ -2,6 +2,7 @@ import { activeCompatibility, coreVersion } from "./compatibility.js";
 import { betterCodexLogoPng } from "./brand-assets.js";
 import { betterCodexDesignSystemCss } from "./design-system.js";
 import { renderMarkdown } from "./markdown.js";
+import { betterCodexMcpRoute } from "./mcp-app.js";
 import {
   ArrowLeftRight,
   Archive,
@@ -281,12 +282,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const SELECTORS = ${JSON.stringify(compatibility.selectors)};
     const ATTRIBUTES = ${JSON.stringify(compatibility.attributes)};
     const NAVIGATION = ${JSON.stringify(compatibility.navigation)};
+    const BETTER_CODEX_ROUTE = ${JSON.stringify(betterCodexMcpRoute)};
     const LUCIDE_ICONS = ${JSON.stringify(lucideIcons)};
     const AGENT_AVATAR_PRESETS = ${JSON.stringify(agentAvatarPresets)};
     const RESUME_SURFACE_KEY = "better-codex-resume-surface";
     const PROJECT_KEY = "better-codex-project-id";
     const LANGUAGE_KEY = "better-codex-language";
     const COMPLETION_DURATION_KEY = "better-codex-completion-notice-duration";
+    const CREATE_DRAFT_KEY = "better-codex-create-draft";
     const THREAD_OPEN_TIMEOUT_MS = 10000;
     const THREAD_OPEN_POLL_MS = 100;
     const statusLabels = { backlog: "待规划", todo: "待办", in_progress: "进行中", in_review: "审核中", done: "已完成", blocked: "已阻塞", cancelled: "已取消" };
@@ -303,6 +306,29 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const systemLocale = resolveSystemLocale(INITIAL_LOCALE);
     const MOCKUP_PROJECT_ID = "mockup-better-codex";
     const state = { projects: [], issues: [], agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, surface: ["issues", "agents"].includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", mockup: false, createMode: "manual", keepCreate: false, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], creator: [], project: [], label: [] } };
+    function readCreateDraft() {
+      try {
+        const draft = JSON.parse(sessionStorage.getItem(CREATE_DRAFT_KEY) || "null");
+        if (!draft || typeof draft !== "object") return null;
+        return {
+          mode: draft.mode === "agent" ? "agent" : "manual",
+          title: String(draft.title || ""),
+          description: String(draft.description || ""),
+          prompt: String(draft.prompt || "")
+        };
+      } catch {
+        sessionStorage.removeItem(CREATE_DRAFT_KEY);
+        return null;
+      }
+    }
+    function writeCreateDraft(draft) {
+      const cached = { mode: draft.mode, title: draft.title, description: draft.description, prompt: draft.prompt };
+      if (![cached.title, cached.description, cached.prompt].some(value => value.trim())) {
+        sessionStorage.removeItem(CREATE_DRAFT_KEY);
+        return;
+      }
+      sessionStorage.setItem(CREATE_DRAFT_KEY, JSON.stringify(cached));
+    }
     function normalizeMockupIssues(value) {
       const source = Array.isArray(value) ? value : value?.issues;
       if (!Array.isArray(source)) throw new Error("展示数据格式无效");
@@ -390,17 +416,20 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "修复任务卡片拖拽错位": "Fix task card drag misalignment", "复现缩放状态下的卡片拖拽偏移，并修正坐标计算与落点反馈。": "Reproduce card drag offset while zoomed, then correct the coordinate calculation and drop feedback.", "重写首页首屏价值主张": "Rewrite the homepage value proposition", "提炼 Better Codex 的核心价值，让新访客快速理解产品用途。": "Clarify Better Codex's core value so new visitors quickly understand what it does.", "调研独立开发者工作流": "Research indie developer workflows", "整理从想法到交付的常见流程、主要痛点和决策节点。": "Document common flows, key pain points, and decision points from idea to delivery.", "整理本地安装步骤": "Organize local installation steps", "核对安装、启动与常见异常处理步骤，统一文档表达。": "Verify installation, startup, and common troubleshooting steps, then unify the documentation.", "优化首次启动加载速度": "Improve first-launch loading speed", "定位启动阶段主要耗时，缩短进入任务看板前的等待时间。": "Identify the main startup costs and shorten the wait before the task board opens.", "整理功能亮点短文案": "Write concise feature highlights", "为任务分派、会话协作和代码审核分别撰写简洁说明。": "Write concise descriptions for task assignment, conversation collaboration, and code review.", "对比三款任务看板体验": "Compare three task board experiences", "对比 Linear、Notion 和 Trello 的卡片密度、拖拽与筛选体验。": "Compare card density, drag and drop, and filtering in Linear, Notion, and Trello.", "撰写产品发布介绍": "Write a product launch introduction", "围绕目标用户、核心问题和使用方式准备公开发布稿。": "Prepare launch copy around target users, the core problem, and how the product is used.", "完善会话回复失败提示": "Improve failed reply messages", "梳理超时、网络异常和权限问题的提示文案与重试入口。": "Refine messages and retry paths for timeouts, network failures, and permission issues.", "优化空状态引导语": "Improve empty-state guidance", "重写空看板与空会话的标题、说明和首个行动提示。": "Rewrite the title, explanation, and first action prompt for empty boards and conversations.", "收集首批用户常见问题": "Collect early user FAQs", "汇总安装、任务分派、运行状态和数据存储相关问题。": "Compile questions about installation, task assignment, runtime status, and data storage.", "准备更新日志发布稿": "Prepare release notes", "整理本次新增、修复和已知限制，形成可直接发布的更新日志。": "Organize this release's additions, fixes, and known limitations into publish-ready notes.", "统一看板筛选状态": "Unify task board filter state", "检查筛选逻辑与顶部计数，确保切换后卡片结果同步更新。": "Check filter logic and the top count so card results update together after a change.", "检查 Windows 安装流程": "Check the Windows installation flow", "核对安装、启动、权限与卸载流程，记录关键异常。": "Verify installation, startup, permissions, and uninstall flows, and record key issues.", "起草用户访谈邀请信": "Draft a user interview invitation", "说明访谈目的、所需时间和隐私边界，给出清晰回复方式。": "Explain the interview purpose, time needed, and privacy boundaries, with a clear way to reply.", "归档版本发布资料": "Archive release materials", "整理版本说明、截图、校验结果和发布链接，方便后续复盘。": "Organize release notes, screenshots, verification results, and launch links for later review.", "性能": "Performance", "文案": "Copywriting", "调研": "Research", "文档": "Documentation", "写作": "Writing",
       "选择头像": "Choose avatar", "预设头像": "Preset avatars", "自定义": "Custom", "更换": "Change", "保存失败": "Save failed", "创建失败": "Creation failed", "加载失败": "Loading failed", "启动失败": "Start failed", "发送失败": "Send failed", "回复失败": "Reply failed", "回复": "Reply", "回复中": "Replying", "回复完成": "Reply completed", "回复进行中…": "Replying…", "回复已完成": "Reply completed", "等待对话": "Waiting for conversation", "加载中…": "Loading…", "加载对话…": "Loading conversation…", "正在打开…": "Opening…", "在此回复智能体…": "Reply to the agent here…", "对话": "Conversation", "详情": "Details", "关闭详情": "Close details", "Issue 详情": "Issue details", "名称": "Name", "介绍": "Description", "智能体名称": "Agent name", "尚未添加介绍": "No description yet", "没有匹配的智能体": "No matching agents", "此分类暂无智能体": "No agents in this category",
       "裁剪头像": "Crop avatar", "拖动图片调整位置": "Drag the image to adjust its position", "正在更新": "Updating", "正在更新 Better Codex": "Updating Better Codex", "更新完成": "Update complete", "更新未完成": "Update incomplete", "稍后提醒": "Remind me later", "Better Codex 有新版本": "A new Better Codex version is available", "Better Codex 已是最新版本": "Better Codex is up to date", "Better Codex 保持当前版本运行。": "Better Codex will continue running on the current version.", "正在下载并校验新版本，请不要关闭 Codex。": "Downloading and verifying the update. Please do not close Codex.", "正在重启 Codex，稍后会自动恢复。": "Restarting Codex. It will resume shortly.", "刚刚完成检查，无需更新。": "Just checked. No update is needed.", "任务已完成": "Task completed", "知道了": "Got it", "关闭": "Close", "附带文件：": "Attached files:", "部分文件无法读取本地路径，已跳过": "Some files could not be read locally and were skipped", "当前环境无法读取本地文件路径": "The current environment cannot read local file paths", "无关联对话。": "No linked conversation.", "暂无对话，可在下方回复或打开完整对话。": "No conversation yet. Reply below or open the full conversation.", "图片不能超过 10 MB": "Images must be 10 MB or smaller", "请选择 PNG、JPEG 或 WebP 图片": "Choose a PNG, JPEG or WebP image", "无法读取这张图片": "Unable to read this image", "创建智能体 Issue 需要本地工作区：请先打开该项目下的一个 Codex 会话": "Creating an agent issue requires a local workspace. Open a Codex conversation in this project first.",
-      "创建任务": "Create task", "添加描述": "Add description", "新建 issue": "New issue", "项目": "Project", "状态": "Status", "优先级": "Priority", "选择项目": "Select project", "保存": "Save", "删除": "Delete",
+      "粘贴的图片": "Pasted image", "图片保存失败": "Unable to save the image",
+      "创建任务": "Create task", "添加描述": "Add description", "展开描述": "Show more", "收起描述": "Show less", "新建 issue": "New issue", "项目": "Project", "状态": "Status", "优先级": "Priority", "选择项目": "Select project", "保存": "Save", "删除": "Delete",
       "对话链接无效。": "The conversation link is invalid.", "对话仍在加载，请稍后重试。": "The conversation is still loading. Try again shortly.", "任务正在执行，请先等待完成。": "The task is still running. Wait for it to finish first.", "任务仍在整理中，请稍后再编辑。": "The task is still being organized. Try editing it again shortly.", "当前为手动运行，请先点击“立即开始任务”。": "Manual run is enabled. Click “Start task now” first.", "待规划中的 Issue 不会自动触发任务，请先移出待规划区。": "Issues in Backlog do not trigger tasks automatically. Move it out of Backlog first.", "当前没有运行中的任务": "No agents are currently working", "查看运行中的任务": "View running tasks", "暂无任务": "No tasks", "未分配": "Unassigned", "已分配": "Assigned", "新建任务": "New task", "新建智能体": "New agent", "运行模式说明": "Run mode", "手动运行时，只有点击“立即开始任务”才会触发智能体任务。": "In manual mode, agent tasks start only after you click “Start task now”.", "自动运行时，只要 Issue 不在「待规划」区，你发送的新消息都会触发任务；「待规划」里的 Issue 不会自动触发。": "In auto-run mode, new messages trigger tasks unless the Issue is in Backlog; Issues in Backlog do not trigger tasks automatically.", "未关联对话。": "No linked conversation.",
       "确定删除任务 “": "Delete task “", "确定删除所有已归档任务吗？": "Delete all archived tasks?", "吗？": "”?", "创建后先由 ": "After creation, ", " 整理卡片，再自动开始工作。": " will organize the card and start working automatically.", "刚刚": "Just now", "分钟": "minutes", "小时": "hours", "天": "days", "更新于": "Updated", "个筛选": "filters", "个智能体工作中": "agents working", "条": "items",
       "代码实现": "Code implementation", "最近 24 小时": "Last 24 hours", "最近 7 天": "Last 7 days", "最近 30 天": "Last 30 days", "暂无可选项": "No options available", "清除筛选": "Clear filters", "复制本地 workdir 路径": "Copy local workdir path",
       "工作中": "Working", "排队中": "Queued", "理解中": "Thinking", "执行失败": "Execution failed", "已中断": "Interrupted", "未开始": "Not started", "无法连接 Better Codex Runtime": "Unable to connect to Better Codex Runtime",
-      "在会话中打开": "Open in conversation", "任务正在进行中": "Task is running", "立即开始任务": "Start task now", "切换到手动": "Switch to manual", "继续创建": "Keep creating", "指派给": "Assign to", "可选": "Optional", "建议": "Suggestions", "创建第一个任务": "Create your first task", "写下要完成的事，交给智能体处理。": "Describe what needs to be done and let an agent handle it.", "开始对话": "Start the conversation", "补充下一步要求，智能体会继续处理。": "Add your next request and the agent will continue.", "在下方输入消息并发送": "Type a message below and send it", "正在处理任务": "Working on the task", "智能体回复产生后会显示在这里。": "The agent's response will appear here when available.", "请稍候": "Please wait", "输入下一步要求…": "Enter your next request…",
+      "在会话中打开": "Open in conversation", "前往会话": "Open conversation", "请前往会话继续对话": "Continue in the conversation", "任务正在进行中": "Task is running", "立即开始任务": "Start task now", "切换到手动": "Switch to manual", "继续创建": "Keep creating", "指派给": "Assign to", "可选": "Optional", "建议": "Suggestions", "创建第一个任务": "Create your first task", "写下要完成的事，交给智能体处理。": "Describe what needs to be done and let an agent handle it.", "开始对话": "Start the conversation", "补充下一步要求，智能体会继续处理。": "Add your next request and the agent will continue.", "在下方输入消息并发送": "Type a message below and send it", "正在处理任务": "Working on the task", "智能体回复产生后会显示在这里。": "The agent's response will appear here when available.", "请稍候": "Please wait", "输入下一步要求…": "Enter your next request…",
       "头像": "Avatar", "上传图片": "Upload image", "使用此头像": "Use this avatar", "点击选择预设图标，或上传图片": "Choose a preset icon or upload an image", "从预设图标中选择，也可以上传图片": "Choose a preset icon or upload an image", "创建智能体": "Create agent", "Codex 默认智能体": "Default Codex agent", "说明这个智能体适合承担什么工作": "Describe what this agent is good at", "定义职责、工作方式和输出要求": "Define responsibilities, workflow, and output requirements", "权限": "Permissions", "只读": "Read-only", "工作区可写": "Workspace write access", "完全访问": "Full access", "仅可读取工作区文件，不能修改": "Can read workspace files but cannot modify them", "可修改当前工作区内的文件": "Can modify files in the current workspace", "可不受限制地访问互联网和电脑上的任何文件": "Unrestricted access to the internet and files on this computer",
       "已经执行过对话的 Issue 只能修改状态、优先级和指派人。": "Issues with an executed conversation can only change status, priority, and assignee.", "终止任务后才能打开对话，是否终止任务？": "The task must be stopped before opening the conversation. Stop it now?", "终止并打开": "Stop and open", "正在终止…": "Stopping…", "忽略当前版本": "Ignore this version", "立即更新": "Update now", "暂无项目": "No projects", "告诉智能体要做什么，例如：“修复项目里任务运行状态不可见的问题”": "Tell the agent what to do, for example: “Fix the invisible task run status in the project”"
     } };
     const bridgeRequests = new Map();
+    const sessionHandoffPending = new Set();
     let bridgeSequence = 0;
+    let diagnosticSequence = 0;
     let entry = null;
     let agentsEntry = null;
     let panel = null;
@@ -425,6 +454,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     let draggingIssueId = "";
     let codexLogoSequence = 0;
     let active = false;
+    let routeSeen = false;
+    let routeSuppressed = false;
     let destroyed = false;
 
     function label(value) {
@@ -485,6 +516,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       return escapeHtml(t(value));
     }
 
+    function mockupText(value) {
+      const source = String(value ?? "");
+      return state.mockup ? t(source) : source;
+    }
+
     function projectLabel(project) {
       return project?.external_id === "inbox" ? t("未分配") : project?.name || "";
     }
@@ -506,11 +542,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const enrichmentPending = issue?.enrichment_status === "pending";
       const executionRunning = issueExecutionRunning(issue);
       const executed = Boolean(issue?.run_thread_id);
+      const sessionHandoff = Boolean(issue?.session_handoff_at);
       const executionLocked = executionRunning || executed;
       return {
         enrichmentPending,
         executionRunning,
         executed,
+        sessionHandoff,
         executionLocked,
         editingLocked: enrichmentPending || executionLocked,
         boardLocked: enrichmentPending || executionRunning,
@@ -594,7 +632,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         @media (hover: hover) { #better-codex-update-notice .better-codex-update-close:hover, #better-codex-update-notice .better-codex-update-menu-toggle:hover { color: var(--color-token-foreground, var(--bc-foreground)); background: color-mix(in srgb,var(--color-token-button-secondary-hover-background, var(--bc-hover)) 5%,transparent); opacity: .8; } #better-codex-update-notice .better-codex-update-menu button:hover { background: var(--color-token-button-secondary-hover-background, var(--bc-hover)); } #better-codex-update-notice .better-codex-update-button:hover { background: var(--color-token-button-secondary-hover-background, var(--bc-selected)); } #better-codex-update-notice .better-codex-update-button.is-primary:hover { background: color-mix(in srgb,var(--color-token-foreground, var(--bc-primary)) 90%,var(--bc-surface)); } }
         @media (prefers-reduced-motion: reduce) { #better-codex-update-notice, #better-codex-update-notice[data-status="installing"] .better-codex-update-icon svg { animation: none; } }
         #better-codex-completion-notices { position: fixed; right: 16px; bottom: 16px; z-index: 2147483000; display: flex; max-width: calc(100vw - 32px); flex-direction: column; align-items: flex-end; gap: 8px; pointer-events: none; }
-        .better-codex-completion-notice { position: relative; display: flex; width: max-content; max-width: min(420px,calc(100vw - 32px)); min-height: 40px; box-sizing: border-box; align-items: center; gap: 8px; padding: 6px 6px 6px 12px; color: var(--color-token-foreground, var(--bc-foreground)); background: var(--color-token-bg-primary, var(--color-background-surface, var(--bc-raised))); border: 1px solid var(--color-token-border, color-mix(in srgb,var(--color-token-foreground, var(--bc-foreground)) 12%,transparent)); border-radius: 10px; box-shadow: var(--shadow-md, 0 8px 24px rgb(0 0 0 / .12)); font-family: var(--font-sans, var(--bc-font-ui)); font-size: var(--font-size-small, var(--bc-text-sm)); pointer-events: auto; animation: better-codex-completion-enter .28s cubic-bezier(.16,1,.3,1); }
+        .better-codex-completion-notice { position: relative; display: flex; width: max-content; max-width: min(420px,calc(100vw - 32px)); min-height: 40px; box-sizing: border-box; align-items: center; gap: 8px; padding: 6px 6px 6px 12px; color: var(--color-token-foreground, var(--bc-foreground)); background: var(--color-token-bg-primary, var(--color-background-surface, var(--bc-raised))); border: 1px solid var(--color-token-border, color-mix(in srgb,var(--color-token-foreground, var(--bc-foreground)) 12%,transparent)); border-radius: 10px; box-shadow: var(--shadow-md, 0 8px 24px rgb(0 0 0 / .12)); font-family: var(--font-sans, var(--bc-font-ui)); font-size: var(--font-size-small, var(--bc-text-sm)); cursor: pointer; pointer-events: auto; animation: better-codex-completion-enter .28s cubic-bezier(.16,1,.3,1); }
         .better-codex-completion-notice .better-codex-completion-layout { display: flex; min-width: 0; align-items: center; gap: 8px; }
         .better-codex-completion-notice .better-codex-completion-avatar { width: 24px; height: 24px; flex: 0 0 auto; border-radius: 6px; overflow: hidden; }
         .better-codex-completion-notice .better-codex-completion-avatar img, .better-codex-completion-notice .better-codex-completion-avatar svg { width: 100%; height: 100%; display: block; object-fit: cover; }
@@ -714,9 +752,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #\${PANEL_ID} .better-codex-activity { display: inline-flex; align-items: center; gap: 5px; flex: 0 0 auto; font-size: var(--bc-text-caption); font-weight: 600; }
         #\${PANEL_ID} .better-codex-activity-dot { width: 6px; height: 6px; flex: 0 0 auto; border-radius: 999px; background: currentColor; }
         #\${PANEL_ID} .better-codex-avatar { display: inline-flex; width: 16px; height: 16px; align-items: center; justify-content: center; border: 1.5px solid #fff; border-radius: 999px; color: #fff; background: #27272a; font-size: var(--bc-text-avatar); }
-        #\${PANEL_ID} .better-codex-activity[data-run="running"], #\${PANEL_ID} .better-codex-activity[data-run="scheduling"], #\${PANEL_ID} .better-codex-activity[data-run="thinking"], #\${PANEL_ID} .better-codex-activity[data-run="replying"] { color: #52525b; }
-        #\${PANEL_ID} .better-codex-activity[data-run="reply-failed"], #\${PANEL_ID} .better-codex-activity[data-run="scheduler-failed"] { color: #dc2626; }
-        #\${PANEL_ID} .better-codex-activity[data-run="reply-succeeded"] { color: #15803d; }
+        #\${PANEL_ID} .better-codex-activity[data-run="running"], #\${PANEL_ID} .better-codex-activity[data-run="scheduling"], #\${PANEL_ID} .better-codex-activity[data-run="thinking"] { color: #52525b; }
+        #\${PANEL_ID} .better-codex-activity[data-run="scheduler-failed"] { color: #dc2626; }
         #\${PANEL_ID} .better-codex-activity[data-run="completed"] { color: var(--bc-success); }
         #\${PANEL_ID} .better-codex-activity[data-run="failed"] { color: #dc2626; }
         #\${PANEL_ID} .better-codex-activity[data-run="interrupted"] { color: var(--bc-danger); }
@@ -842,6 +879,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #better-codex-dialog .better-codex-dialog-attachments { display: flex; flex: 0 0 auto; flex-wrap: wrap; gap: 6px; padding: 0 16px 8px; }
         #better-codex-dialog .better-codex-dialog-attachments[hidden] { display: none; }
         #better-codex-dialog .better-codex-attachment-chip { display: inline-flex; max-width: 100%; min-height: 28px; align-items: center; gap: 6px; border: 1px solid #e5e5e7; border-radius: 999px; color: #52525b; background: #fff; padding: 0 4px 0 9px; font-size: var(--bc-text-md); }
+        #better-codex-dialog .better-codex-attachment-chip.is-image { height: 38px; border-radius: 8px; padding-left: 4px; }
+        #better-codex-dialog .better-codex-attachment-preview { width: 30px; height: 30px; flex: 0 0 auto; border-radius: 5px; object-fit: cover; outline: 1px solid var(--bc-border); outline-offset: -1px; }
         #better-codex-dialog .better-codex-attachment-chip > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         #better-codex-dialog .better-codex-attachment-chip button { display: inline-flex; width: 22px; height: 22px; flex: 0 0 auto; align-items: center; justify-content: center; border: 0; border-radius: 999px; color: #71717a; background: transparent; padding: 0; cursor: pointer; }
         #better-codex-dialog .better-codex-attachment-chip button:hover { color: #27272a; background: #f4f4f5; }
@@ -889,9 +928,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #\${PANEL_ID} .better-codex-card-avatar.is-fallback, #\${PANEL_ID} .better-codex-card-avatar.is-icon { color: var(--bc-muted); background: var(--bc-hover); }
         #\${PANEL_ID} .better-codex-card-avatar.is-codex { color: inherit; background: transparent; }
         #\${PANEL_ID} .better-codex-avatar, #\${PANEL_ID} .better-codex-agent-card-avatar { color: var(--bc-primary-foreground); background: var(--bc-primary); }
-        #\${PANEL_ID} .better-codex-activity[data-run="running"], #\${PANEL_ID} .better-codex-activity[data-run="scheduling"], #\${PANEL_ID} .better-codex-activity[data-run="thinking"], #\${PANEL_ID} .better-codex-activity[data-run="replying"] { color: var(--bc-foreground); }
-        #\${PANEL_ID} .better-codex-activity[data-run="reply-failed"], #\${PANEL_ID} .better-codex-activity[data-run="scheduler-failed"] { color: var(--bc-danger); }
-        #\${PANEL_ID} .better-codex-activity[data-run="reply-succeeded"] { color: #65c18c; }
+        #\${PANEL_ID} .better-codex-activity[data-run="running"], #\${PANEL_ID} .better-codex-activity[data-run="scheduling"], #\${PANEL_ID} .better-codex-activity[data-run="thinking"] { color: var(--bc-foreground); }
+        #\${PANEL_ID} .better-codex-activity[data-run="scheduler-failed"] { color: var(--bc-danger); }
         #\${PANEL_ID} .better-codex-activity[data-run="completed"] { color: var(--bc-success); }
         #\${PANEL_ID} .better-codex-activity[data-run="failed"] { color: var(--bc-danger); }
         #\${PANEL_ID} .better-codex-activity[data-run="interrupted"] { color: var(--bc-danger); }
@@ -991,7 +1029,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         event.preventDefault();
         event.stopPropagation();
         state.surface = surface;
-        open(surface);
+        openRoute(surface);
       });
       return button;
     }
@@ -1099,6 +1137,61 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       return attempt(1);
     }
 
+    function diagnosticTarget(target) {
+      if (!(target instanceof Element)) return "";
+      const name = target.getAttribute("name");
+      const type = target.getAttribute("type");
+      return [target.tagName.toLowerCase(), name ? "name=" + name : "", type ? "type=" + type : ""].filter(Boolean).join(" ");
+    }
+
+    function traceRendererDiagnostic(event, fields = {}) {
+      const context = readContext();
+      const selected = state.selected;
+      const body = {
+        event,
+        sequence: ++diagnosticSequence,
+        client_time: new Date().toISOString(),
+        performance_ms: Math.round(performance.now() * 1000) / 1000,
+        issue_id: selected?.id || "",
+        issue_identifier: selected?.identifier || "",
+        active_thread_id: context.threadId || "",
+        document_focused: document.hasFocus(),
+        ...fields,
+      };
+      try {
+        void window.electronBridge?.sendMessageFromView?.({
+          type: "log-message",
+          level: "info",
+          message: "BETTER_CODEX_DIAGNOSTIC",
+          tags: { safe: body, sensitive: {} },
+        })?.catch?.(() => {});
+      } catch {}
+    }
+
+    function interruptMessage(detail) {
+      if (!detail || typeof detail !== "object") return null;
+      const candidates = [detail, detail.message, detail.request, detail.params, detail.message?.request, detail.message?.params];
+      for (const candidate of candidates) {
+        if (!candidate || typeof candidate !== "object") continue;
+        const method = String(candidate.method || candidate.requestMethod || "");
+        const type = String(candidate.type || "");
+        if (method !== "turn/interrupt" && type !== "interrupt-conversation") continue;
+        const params = candidate.params && typeof candidate.params === "object" ? candidate.params : candidate;
+        return {
+          message_type: String(detail.type || type || ""),
+          method: method || type,
+          thread_id: String(params.threadId || params.conversationId || ""),
+          turn_id: String(params.turnId || ""),
+        };
+      }
+      return null;
+    }
+
+    function onHostMessageFromView(event) {
+      const message = interruptMessage(event.detail);
+      if (message) traceRendererDiagnostic("host_interrupt_message", message);
+    }
+
     window.__betterCodexBridgeResolve = (id, result) => {
       const pending = bridgeRequests.get(id);
       if (!pending) return;
@@ -1115,6 +1208,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (value === "issue_execution_running") return t("任务正在执行，请先等待完成。");
       if (value === "issue_enrichment_pending") return t("任务仍在整理中，请稍后再编辑。");
       if (value === "issue_execution_locked") return t("已经执行过对话的 Issue 只能修改状态、优先级和指派人。");
+      if (value === "issue_session_handed_off") return t("请前往会话继续对话");
       if (value === "manual_start_required") return t("当前为手动运行，请先点击“立即开始任务”。");
       if (value === "backlog_reply_blocked") return t("待规划中的 Issue 不会自动触发任务，请先移出待规划区。");
       return t(value);
@@ -1353,6 +1447,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         }
       };
       completionNoticeDismissals.set(notice, dismiss);
+      notice.addEventListener("click", event => {
+        if (event.target.closest("button")) return;
+        dismiss();
+        void perform(() => openEditor(issue));
+      });
       notice.querySelector(".better-codex-completion-close").addEventListener("click", dismiss);
       const duration = completionNoticeDuration();
       if (duration > 0) completionNoticeTimers.set(notice, setTimeout(dismiss, duration));
@@ -2845,33 +2944,30 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           const assignee = issue.agent_enabled
             ? (assignedAgent || defaultAgent || { name: "Codex", is_default: true })
             : null;
-          const agentName = assignee?.name || "";
+          const agentName = mockupText(assignee?.name || "");
           const activityAgent = assignee || defaultAgent || { name: "Codex", is_default: true };
-          const replyStatus = issue.reply_status || "idle";
-          const replyActivityState = replyStatus === "running" ? "replying" : replyStatus === "failed" ? "reply-failed" : replyStatus === "interrupted" ? "interrupted" : "";
           const latestRunStatus = issue.latest_run_status || "";
           const executionState = issue.status === "blocked" ? "blocked" : issue.latest_scheduler_error && issue.status === "in_review" ? "scheduler-failed" : latestRunStatus === "completed" ? "completed" : latestRunStatus === "failed" ? "failed" : latestRunStatus === "interrupted" ? "interrupted" : latestRunStatus === "scheduling" ? "scheduling" : latestRunStatus === "running" ? "running" : latestRunStatus === "claimed" ? "claimed" : issue.agent_enabled ? "not-started" : "";
-          const activeExecutionState = issue.active_run_status || "";
-          const activityState = enrichmentLocked ? "thinking" : activeExecutionState || replyActivityState || executionState;
-          const replyActivity = !issue.active_run_status && Boolean(replyActivityState);
-          const activityLabel = t(enrichmentLocked ? "理解中" : replyActivity ? (replyStatus === "running" ? "回复中" : replyStatus === "failed" ? "回复失败" : replyStatus === "interrupted" ? "已中断" : "回复完成") : activityState === "running" ? "工作中" : activityState === "scheduling" ? "调度中" : activityState === "scheduler-failed" ? "调度失败" : activityState === "claimed" ? "排队中" : activityState === "in_review" ? "审核中" : activityState === "completed" ? "已完成" : activityState === "blocked" ? "已阻塞" : activityState === "failed" ? "执行失败" : activityState === "interrupted" ? "已中断" : activityState === "not-started" ? "未开始" : "");
+          const activeExecutionState = issue.active_run_status || (issue.reply_status === "running" ? "running" : "");
+          const activityState = enrichmentLocked ? "thinking" : activeExecutionState || executionState;
+          const activityLabel = t(enrichmentLocked ? "理解中" : activityState === "running" ? "工作中" : activityState === "scheduling" ? "调度中" : activityState === "scheduler-failed" ? "调度失败" : activityState === "claimed" ? "排队中" : activityState === "in_review" ? "审核中" : activityState === "completed" ? "已完成" : activityState === "blocked" ? "已阻塞" : activityState === "failed" ? "执行失败" : activityState === "interrupted" ? "已中断" : activityState === "not-started" ? "未开始" : "");
           const activityIcon = activityState === "scheduling" ? '<span class="better-codex-activity-dot better-codex-scheduler-dot" aria-hidden="true"></span>' : activityState === "scheduler-failed" ? '<span class="better-codex-activity-dot better-codex-scheduler-failed-dot" aria-hidden="true"></span>' : ["completed", "interrupted", "not-started"].includes(activityState) ? '<span class="better-codex-activity-dot" aria-hidden="true"></span>' : ["failed", "blocked"].includes(activityState) ? icon("close") : agentAvatarMarkup(activityAgent, "better-codex-card-avatar");
           const activity = activityState
-            ? '<span class="better-codex-activity" data-run="' + escapeHtml(activityState) + '">' + activityIcon + '<span class="' + (enrichmentLocked || replyActivityState === "replying" || executionRunning ? "better-codex-shimmer" : "") + '">' + activityLabel + '</span></span>'
+            ? '<span class="better-codex-activity" data-run="' + escapeHtml(activityState) + '">' + activityIcon + '<span class="' + (enrichmentLocked || executionRunning ? "better-codex-shimmer" : "") + '">' + activityLabel + '</span></span>'
             : "";
-          const description = String(issue.description || "").replace(/[#*_\`~>\[\]()]/g, "").replace(/\s+/g, " ").trim();
+          const description = mockupText(issue.description).replace(/[#*_\`~>\[\]()]/g, "").replace(/\s+/g, " ").trim();
           const issueProject = state.projects.find(item => item.id === issue.project_id) || project;
           const projectChip = projectLabel(issueProject)
             ? '<span class="better-codex-chip">' + icon("folder") + '<span>' + escapeHtml(projectLabel(issueProject)) + '</span></span>'
             : "";
-          const labelChips = (issue.labels || []).map(value => '<span class="better-codex-chip">' + escapeHtml(value) + '</span>').join("");
+          const labelChips = (issue.labels || []).map(value => '<span class="better-codex-chip">' + escapeHtml(mockupText(value)) + '</span>').join("");
           const chips = projectChip + labelChips;
           const meta = assignee
             ? '<span class="better-codex-card-assignee">' + agentAvatarMarkup(assignee, "better-codex-card-avatar") + '<span>' + escapeHtml(agentName || "Codex") + '</span></span>'
             : issue.user_assigned
               ? '<span class="better-codex-card-assignee"><span class="better-codex-card-avatar is-user is-initials" style="background:' + escapeHtml(state.user.color || "#16a34a") + '">' + escapeHtml(state.user.initials || t("你")) + '</span><span>' + escapeHtml(state.user.name || t("我")) + '</span></span>'
               : '<span class="better-codex-card-assignee is-empty">' + icon("user") + '<span>' + te("未分配") + '</span></span>';
-          return '<article class="better-codex-card' + (issue.id === draggingIssueId ? " is-dragging" : "") + (enrichmentLocked ? " is-enrichment-pending" : "") + (executionRunning ? " is-execution-running" : "") + '" draggable="' + String(!issueLocked) + '" aria-disabled="' + String(issueLocked) + '"' + (issueLocked ? ' aria-busy="' + String(enrichmentLocked || executionRunning) + '"' : "") + ' data-issue-id="' + escapeHtml(issue.id) + '"><div class="better-codex-card-row"><div class="better-codex-card-id">' + priorityIcon(issue.priority) + '<span>' + escapeHtml(issue.identifier) + '</span></div>' + activity + '</div><div class="better-codex-card-title">' + escapeHtml(issue.title) + '</div>' + (description ? '<div class="better-codex-card-description">' + escapeHtml(description) + '</div>' : "") + (chips ? '<div class="better-codex-chip-row">' + chips + '</div>' : "") + '<div class="better-codex-card-meta">' + meta + '<span>' + te("更新于 " + timeAgo(issue.updated_at)) + '</span></div></article>';
+          return '<article class="better-codex-card' + (issue.id === draggingIssueId ? " is-dragging" : "") + (enrichmentLocked ? " is-enrichment-pending" : "") + (executionRunning ? " is-execution-running" : "") + '" draggable="' + String(!issueLocked) + '" aria-disabled="' + String(issueLocked) + '"' + (issueLocked ? ' aria-busy="' + String(enrichmentLocked || executionRunning) + '"' : "") + ' data-issue-id="' + escapeHtml(issue.id) + '"><div class="better-codex-card-row"><div class="better-codex-card-id">' + priorityIcon(issue.priority) + '<span>' + escapeHtml(issue.identifier) + '</span></div>' + activity + '</div><div class="better-codex-card-title">' + escapeHtml(mockupText(issue.title)) + '</div>' + (description ? '<div class="better-codex-card-description">' + escapeHtml(description) + '</div>' : "") + (chips ? '<div class="better-codex-chip-row">' + chips + '</div>' : "") + '<div class="better-codex-card-meta">' + meta + '<span>' + te("更新于 " + timeAgo(issue.updated_at)) + '</span></div></article>';
         }).join("");
         const columnButton = archiveColumn
           ? '<button class="better-codex-column-icon" type="button" data-archive-open aria-label="' + te("查看已归档卡片") + '" title="' + te("查看已归档卡片") + '">' + icon("archive") + '</button>'
@@ -2895,6 +2991,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       }
       issueSessionSnapshot = new Map(issues.map(issue => [issue.id, { activeRunStatus: issue.active_run_status || "", replyStatus: issue.reply_status || "idle" }]));
       state.issues = issues;
+      syncSessionHandoffFromHost();
       const dialog = document.getElementById("better-codex-dialog");
       const dialogIssue = dialog?.dataset.issueId ? issues.find(issue => issue.id === dialog.dataset.issueId) : null;
       if (dialog && dialogIssue && typeof dialog.__betterCodexSyncIssue === "function") dialog.__betterCodexSyncIssue(dialogIssue);
@@ -3108,11 +3205,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       document.getElementById("better-codex-dialog")?.remove();
       const context = readContext();
       const project = state.projects.find(item => item.id === state.projectId);
+      const cachedCreateDraft = issue ? null : readCreateDraft();
       const draft = {
-        mode: issue ? "manual" : state.createMode,
-        title: issue?.title || "",
-        description: issue?.description || "",
-        prompt: issue?.description || "",
+        mode: issue ? "manual" : cachedCreateDraft?.mode || state.createMode,
+        title: issue?.title || cachedCreateDraft?.title || "",
+        description: issue?.description || cachedCreateDraft?.description || "",
+        prompt: issue?.description || cachedCreateDraft?.prompt || "",
         agentId: issue?.agent_id || "",
         assignee: issue
           ? (issue.agent_enabled ? (issue.agent_id || "codex") : issue.user_assigned ? "user" : "none")
@@ -3123,8 +3221,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         labels: (issue?.labels || []).join(", "),
         projectId: issue?.project_id || state.projectId,
         expanded: false,
+        descriptionExpanded: false,
         reply: issue?.reply_draft || "",
-        attachments: []
+        attachments: [],
+        replyAttachments: []
       };
       const dialog = document.createElement("dialog");
       dialog.id = "better-codex-dialog";
@@ -3141,11 +3241,20 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       let enrichmentLocked = issuePermissions(issue).enrichmentPending;
       let executionRunning = issuePermissions(issue).executionRunning;
       let executionLocked = issuePermissions(issue).executionLocked;
+      let sessionHandoff = issuePermissions(issue).sessionHandoff;
       let completedIssue = issuePermissions(issue).executed && !executionRunning;
       let editingLocked = issuePermissions(issue).editingLocked;
       let completedIssueUpdate = Promise.resolve();
       let replyDraftUpdate = Promise.resolve();
+      let retainCreateDraft = !issue;
       const dirtyDraftFields = new Set();
+      const dialogKind = () => issue ? "issue" : draft.mode === "agent" ? "create_agent" : "create_manual";
+      const traceDialog = (event, fields = {}) => traceRendererDiagnostic(event, {
+        dialog_kind: dialogKind(),
+        issue_id: issue?.id || "",
+        issue_identifier: issue?.identifier || "",
+        ...fields,
+      });
 
       function isExecutionRunning() {
         return executionRunning;
@@ -3265,7 +3374,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const reply = dialog.querySelector('[name="reply"]');
         if (!send) return;
         const status = dialog.querySelector("[data-conversation-status]")?.dataset.state;
-        send.disabled = executionRunning || status === "running" || !String(reply?.value || "").trim();
+        if (reply) reply.disabled = sessionHandoff;
+        send.disabled = sessionHandoff || executionRunning || status === "running" || (!String(reply?.value || "").trim() && !draft.replyAttachments.length);
       }
 
       function applyDialogPermissions() {
@@ -3274,7 +3384,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         dialog.dataset.executionLocked = String(executionLocked);
         dialog.dataset.locked = String(editingLocked);
         dialog.querySelectorAll("input, textarea, select, button").forEach(control => {
-          if (control.matches("[data-dialog-close], [data-dialog-expand], [data-dialog-open-thread]")) {
+          if (control.matches("[data-dialog-close], [data-dialog-expand], [data-dialog-open-thread], [data-description-toggle]")) {
             control.disabled = false;
             return;
           }
@@ -3282,12 +3392,16 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             control.disabled = true;
             return;
           }
+          if (sessionHandoff && control.matches('[name="reply"], [data-conversation-send], [data-dialog-attachment-scope="reply"]')) {
+            control.disabled = true;
+            return;
+          }
           if (executionRunning) {
-            control.disabled = !control.matches('[name="reply"]');
+            control.disabled = !control.matches('[name="reply"], [data-dialog-attachment-scope="reply"]');
             return;
           }
           if (executionLocked) {
-            control.disabled = !(control.matches('[name="reply"], [data-conversation-send]') || control.closest('[data-dialog-select="status"], [data-dialog-select="priority"], [data-dialog-select="assignee"]'));
+            control.disabled = !(control.matches('[name="reply"], [data-conversation-send], [data-dialog-attachment-scope="reply"]') || control.closest('[data-dialog-select="status"], [data-dialog-select="priority"], [data-dialog-select="assignee"]'));
             return;
           }
           control.disabled = false;
@@ -3301,6 +3415,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const previousSessionId = sessionId;
         const previousEnrichmentLocked = enrichmentLocked;
         const previousExecutionRunning = executionRunning;
+        const previousSessionHandoff = sessionHandoff;
         const previousTitle = issue.title;
         const previousDescription = issue.description;
         const previousStatus = issue.status;
@@ -3314,6 +3429,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         enrichmentLocked = permissions.enrichmentPending;
         executionRunning = permissions.executionRunning;
         executionLocked = permissions.executionLocked;
+        sessionHandoff = permissions.sessionHandoff;
         completedIssue = permissions.executed && !executionRunning;
         editingLocked = permissions.editingLocked;
         state.selected = issue;
@@ -3328,7 +3444,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           || previousLabels !== JSON.stringify(issue.labels || [])
           || previousAssignee !== [issue.agent_enabled, issue.agent_id || "", issue.user_assigned].join(":")
           || previousProjectId !== issue.project_id;
-        if (previousSessionId !== sessionId || previousEnrichmentLocked !== enrichmentLocked || previousExecutionRunning !== executionRunning || footerPresent !== !executionLocked || draftSourceChanged) {
+        if (previousSessionId !== sessionId || previousEnrichmentLocked !== enrichmentLocked || previousExecutionRunning !== executionRunning || previousSessionHandoff !== sessionHandoff || footerPresent !== !executionLocked || draftSourceChanged) {
           syncDraft();
           syncDraftFromIssue();
           renderDialog();
@@ -3341,7 +3457,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
       function header() {
         const openThreadButton = issue && (sessionId || executionRunning) && !enrichmentLocked
-          ? '<button class="better-codex-dialog-open-thread' + (executionRunning ? ' is-running' : '') + '" type="button" data-dialog-open-thread="' + escapeHtml(sessionId) + '" data-dialog-open-thread-running="' + String(executionRunning) + '">' + te(executionRunning ? "任务正在进行中" : "在会话中打开") + '</button>'
+          ? '<button class="better-codex-dialog-open-thread' + (executionRunning && !sessionHandoff ? ' is-running' : '') + '" type="button" data-dialog-open-thread="' + escapeHtml(sessionId) + '" data-dialog-open-thread-running="' + String(executionRunning && !sessionHandoff) + '">' + te(sessionHandoff ? "前往会话" : executionRunning ? "任务正在进行中" : "在会话中打开") + '</button>'
           : "";
         const startNowButton = issue && !sessionId && !issue.active_run_status && !["done", "cancelled"].includes(issue.status)
           ? '<button class="better-codex-dialog-start-now" type="button"' + (!issue.agent_enabled ? " disabled" : "") + ' data-dialog-start-now>' + te("立即开始任务") + '</button>'
@@ -3363,14 +3479,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
       function conversationStatusMarkup(replyStatus) {
         const enrichmentLocked = issuePermissions(issue).enrichmentPending;
-        const replyActivityState = replyStatus === "running" ? "replying" : replyStatus === "failed" ? "reply-failed" : replyStatus === "interrupted" ? "interrupted" : "";
         const latestRunStatus = issue?.latest_run_status || "";
         const executionState = issue?.status === "blocked" ? "blocked" : issue?.latest_scheduler_error && issue?.status === "in_review" ? "scheduler-failed" : latestRunStatus === "completed" ? "completed" : latestRunStatus === "failed" ? "failed" : latestRunStatus === "interrupted" ? "interrupted" : latestRunStatus === "scheduling" ? "scheduling" : latestRunStatus === "running" ? "running" : latestRunStatus === "claimed" ? "claimed" : issue?.agent_enabled ? "not-started" : "";
-        const activeExecutionState = issue?.active_run_status || "";
-        const activityState = enrichmentLocked ? "thinking" : activeExecutionState || replyActivityState || executionState;
+        const activeExecutionState = issue?.active_run_status || (replyStatus === "running" ? "running" : "");
+        const activityState = enrichmentLocked ? "thinking" : activeExecutionState || executionState;
         if (!activityState) return "";
-        const replyActivity = !issue?.active_run_status && Boolean(replyActivityState);
-        const activityLabel = t(enrichmentLocked ? "理解中" : replyActivity ? (replyStatus === "running" ? "回复中" : replyStatus === "failed" ? "回复失败" : "已中断") : activityState === "running" ? "工作中" : activityState === "scheduling" ? "调度中" : activityState === "scheduler-failed" ? "调度失败" : activityState === "claimed" ? "排队中" : activityState === "in_review" ? "审核中" : activityState === "completed" ? "已完成" : activityState === "blocked" ? "已阻塞" : activityState === "failed" ? "执行失败" : activityState === "interrupted" ? "已中断" : activityState === "not-started" ? "未开始" : "");
+        const activityLabel = t(enrichmentLocked ? "理解中" : activityState === "running" ? "工作中" : activityState === "scheduling" ? "调度中" : activityState === "scheduler-failed" ? "调度失败" : activityState === "claimed" ? "排队中" : activityState === "in_review" ? "审核中" : activityState === "completed" ? "已完成" : activityState === "blocked" ? "已阻塞" : activityState === "failed" ? "执行失败" : activityState === "interrupted" ? "已中断" : activityState === "not-started" ? "未开始" : "");
         const agent = state.agents.find(item => item.id === issue?.agent_id) || state.agents.find(item => item.is_default) || { name: "Codex", is_default: true };
         const activityIcon = activityState === "scheduling"
           ? '<span class="better-codex-activity-dot better-codex-scheduler-dot" aria-hidden="true"></span>'
@@ -3379,7 +3493,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           : ["completed", "interrupted", "not-started"].includes(activityState)
           ? '<span class="better-codex-activity-dot" aria-hidden="true"></span>'
           : ["failed", "blocked"].includes(activityState) ? icon("close") : agentAvatarMarkup(agent, "better-codex-bubble-avatar better-codex-conversation-status-avatar");
-        return '<span class="better-codex-activity" data-run="' + activityState + '">' + activityIcon + '<span class="' + (enrichmentLocked || activityState === "replying" || issueExecutionRunning(issue) ? "better-codex-shimmer" : "") + '">' + activityLabel + '</span></span>';
+        return '<span class="better-codex-activity" data-run="' + activityState + '">' + activityIcon + '<span class="' + (enrichmentLocked || issueExecutionRunning(issue) ? "better-codex-shimmer" : "") + '">' + activityLabel + '</span></span>';
       }
 
       function syncConversationStatus(replyStatus) {
@@ -3392,7 +3506,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
       function conversationComposer() {
         if (!issue || !sessionId) return "";
-        return '<div class="better-codex-composer"><textarea name="reply" rows="2" placeholder="' + te("输入下一步要求…") + '" aria-label="' + te("回复") + '">' + escapeHtml(draft.reply) + '</textarea><button class="better-codex-composer-send" type="button" data-conversation-send>' + te("发送") + '</button></div>';
+        const disabled = sessionHandoff ? " disabled" : "";
+        return '<div class="better-codex-composer">' + attachmentList(draft.replyAttachments, "reply") + '<textarea name="reply" rows="2" placeholder="' + te(sessionHandoff ? "请前往会话继续对话" : "输入下一步要求…") + '" aria-label="' + te("回复") + '"' + disabled + '>' + escapeHtml(draft.reply) + '</textarea><button class="better-codex-composer-send" type="button" data-conversation-send' + disabled + '>' + te("发送") + '</button></div>';
       }
 
       function replyFailureMessage(error, action) {
@@ -3482,7 +3597,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           body.scrollTop = body.scrollHeight;
         } else {
           body.innerHTML = sessionId
-            ? executionRunning
+            ? sessionHandoff
+              ? '<div class="better-codex-conversation-empty"><h3>' + te("开始对话") + '</h3><p>' + te("请前往会话继续对话") + '</p></div>'
+              : executionRunning
               ? '<div class="better-codex-conversation-empty"><h3>' + te("正在处理任务") + '</h3><p>' + te("智能体回复产生后会显示在这里。") + '</p><span>' + te("请稍候") + '</span></div>'
               : '<div class="better-codex-conversation-empty"><h3>' + te("开始对话") + '</h3><p>' + te("补充下一步要求，智能体会继续处理。") + '</p><span>' + te("在下方输入消息并发送") + '</span></div>'
             : '<p class="better-codex-markdown-empty">' + te("未关联对话。") + '</p>';
@@ -3492,7 +3609,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (reply.request_id) lastReplyRequestId = reply.request_id;
         const stateName = reply.status || "idle";
         syncConversationStatus(stateName);
-        if (stateName === "failed" || stateName === "interrupted") showConversationFailure(reply.error, "reply", reply.message);
+        if (!sessionHandoff && (stateName === "failed" || stateName === "interrupted")) showConversationFailure(reply.error, "reply", reply.message);
         else clearConversationFailure();
         if (send) updateReplySendState();
         stopConversationPoll();
@@ -3505,6 +3622,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         try {
           const data = await api("/api/issues/" + encodeURIComponent(issue.id) + "/conversation");
           conversationLoadFailures = 0;
+          if (data?.issue && Number(data.issue.version) !== Number(issue.version)) await loadIssues({ background: true }).catch(() => {});
           applyConversation(data, options);
         } catch (error) {
           conversationLoadFailures += 1;
@@ -3520,12 +3638,25 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const textarea = dialog.querySelector('[name="reply"]');
         const send = dialog.querySelector("[data-conversation-send]");
         const errorOutput = dialog.querySelector(".better-codex-dialog-error");
-        const message = String(retryMessage || textarea?.value || "").trim();
+        const retrying = Boolean(retryMessage);
+        const text = String(retryMessage || textarea?.value || "").trim();
         const requestId = retryRequestId || (globalThis.crypto?.randomUUID?.() || VERSION + "-reply-" + Date.now() + "-" + Math.random().toString(36).slice(2));
-        if (isExecutionRunning() || !issue || !sessionId || !message || !send || !errorOutput) return;
+        if (sessionHandoff || isExecutionRunning() || !issue || !sessionId || (!text && !draft.replyAttachments.length) || !send || !errorOutput) return;
         send.disabled = true;
         errorOutput.hidden = true;
         clearConversationFailure();
+        let message = text;
+        if (!retrying) {
+          try {
+            await uploadPastedImages(draft.replyAttachments);
+            message = withAttachments(text, draft.replyAttachments);
+          } catch (error) {
+            errorOutput.textContent = t(error instanceof Error ? error.message : "图片保存失败");
+            errorOutput.hidden = false;
+            send.disabled = false;
+            return;
+          }
+        }
         try {
           const reply = await api("/api/issues/" + encodeURIComponent(issue.id) + "/reply", { method: "POST", body: JSON.stringify({ message, request_id: requestId }) });
           if (reply.initial_run) {
@@ -3536,9 +3667,17 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           lastReplyRequestId = reply.request_id || requestId;
           draft.reply = "";
           latestReplyDraft = "";
+          draft.replyAttachments.forEach(releaseAttachment);
+          draft.replyAttachments = [];
           if (textarea) textarea.value = "";
+          const attachments = dialog.querySelector("[data-reply-attachments]");
+          if (attachments) {
+            attachments.innerHTML = "";
+            attachments.hidden = true;
+          }
           flushReplyDraft();
           persistReplyDraft("");
+          await loadIssues().catch(() => {});
           applyConversation({ html: dialog.querySelector("[data-conversation-body]")?.innerHTML || "", found: true, reply });
           conversationTimer = setTimeout(() => void loadConversation({ quiet: true }), 1500);
         } catch (error) {
@@ -3601,21 +3740,86 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         return '<div class="better-codex-dialog-properties">' + dialogSelect("status", t("状态"), draft.status, statuses) + runStatus + dialogSelect("priority", t("优先级"), draft.priority, priorities) + '<label class="better-codex-property">' + icon("tag") + '<input name="labels" value="' + escapeHtml(draft.labels) + '" placeholder="' + te("添加标签") + '" aria-label="' + te("标签") + '"></label>' + projectChip + '</div>';
       }
 
-      function attachmentPaths() {
-        return draft.attachments.map(item => item.path);
+      function attachmentPaths(items = draft.attachments) {
+        return items.map(item => item.path).filter(Boolean);
       }
 
-      function withAttachments(text) {
-        const paths = attachmentPaths();
+      function releaseAttachment(item) {
+        if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+      }
+
+      function fileDataUrl(file) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("无法读取这张图片"));
+          reader.onerror = () => reject(new Error("无法读取这张图片"));
+          reader.readAsDataURL(file);
+        });
+      }
+
+      async function uploadPastedImages(items = draft.attachments) {
+        for (const item of items) {
+          if (!item.file || item.path) continue;
+          const data = await fileDataUrl(item.file);
+          let saved;
+          try {
+            saved = await api("/api/issues/attachments", { method: "POST", body: JSON.stringify({ data }) });
+          } catch (error) {
+            if (error instanceof Error && ["invalid_image_attachment", "body_too_large"].includes(error.message)) throw new Error("图片保存失败");
+            throw error;
+          }
+          item.path = saved.path;
+          item.file = null;
+        }
+      }
+
+      function withAttachments(text, items = draft.attachments) {
+        const paths = attachmentPaths(items);
         if (!paths.length) return text;
         const block = t("附带文件：") + "\\n" + paths.map(path => "- " + path).join("\\n");
         return text ? text + "\\n\\n" + block : block;
       }
 
-      function attachmentList() {
-        if (!draft.attachments.length) return '<div class="better-codex-dialog-attachments" data-dialog-attachments hidden></div>';
-        const chips = draft.attachments.map((item, index) => '<span class="better-codex-attachment-chip" title="' + escapeHtml(item.path) + '">' + icon("paperclip") + '<span>' + escapeHtml(item.name) + '</span><button type="button" data-dialog-detach="' + index + '" aria-label="' + te("移除附件") + '">' + icon("close") + '</button></span>').join("");
-        return '<div class="better-codex-dialog-attachments" data-dialog-attachments>' + chips + '</div>';
+      function attachmentList(items = draft.attachments, scope = "issue") {
+        const marker = scope === "reply" ? " data-reply-attachments" : " data-dialog-attachments";
+        if (!items.length) return '<div class="better-codex-dialog-attachments"' + marker + ' hidden></div>';
+        const chips = items.map((item, index) => '<span class="better-codex-attachment-chip' + (item.previewUrl ? ' is-image' : '') + '" title="' + escapeHtml(item.path || item.name) + '">' + (item.previewUrl ? '<img class="better-codex-attachment-preview" src="' + escapeHtml(item.previewUrl) + '" alt="" width="30" height="30">' : icon("paperclip")) + '<span>' + escapeHtml(item.name) + '</span><button type="button" data-dialog-detach="' + index + '" data-dialog-attachment-scope="' + scope + '" aria-label="' + te("移除附件") + '">' + icon("close") + '</button></span>').join("");
+        return '<div class="better-codex-dialog-attachments"' + marker + '>' + chips + '</div>';
+      }
+
+      function pasteImages(event) {
+        const replyPaste = event.target?.matches?.('[name="reply"]');
+        if (editingLocked && !replyPaste) return;
+        const files = Array.from(event.clipboardData?.items || []).flatMap(item => item.kind === "file" && item.type.startsWith("image/") ? [item.getAsFile()].filter(Boolean) : []);
+        if (!files.length) return;
+        const activeName = event.target?.getAttribute("name") || "";
+        const selectionStart = event.target?.selectionStart;
+        const selectionEnd = event.target?.selectionEnd;
+        event.preventDefault();
+        const accepted = files.filter(file => {
+          if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) return false;
+          return file.size <= 10 * 1024 * 1024;
+        });
+        if (!accepted.length) {
+          const errorOutput = dialog.querySelector(".better-codex-dialog-error");
+          if (errorOutput) {
+            errorOutput.textContent = t(files.some(file => file.size > 10 * 1024 * 1024) ? "图片不能超过 10 MB" : "请选择 PNG、JPEG 或 WebP 图片");
+            errorOutput.hidden = false;
+          }
+          return;
+        }
+        syncDraft();
+        const attachments = replyPaste ? draft.replyAttachments : draft.attachments;
+        attachments.push(...accepted.map((file, index) => ({
+          name: file.name || t("粘贴的图片") + (accepted.length > 1 ? " " + (index + 1) : ""),
+          path: "",
+          file,
+          previewUrl: URL.createObjectURL(file)
+        })));
+        renderDialog();
+        const active = activeName ? dialog.querySelector('[name="' + activeName + '"]') : null;
+        active?.focus();
+        if (active?.setSelectionRange && Number.isInteger(selectionStart) && Number.isInteger(selectionEnd)) active.setSelectionRange(selectionStart, selectionEnd);
       }
 
       function pickAttachments() {
@@ -3650,6 +3854,16 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         return '<div class="better-codex-dialog-footer"><button class="better-codex-icon-button" type="button" data-dialog-attach aria-label="' + te("添加附件") + '">' + icon("paperclip") + '</button><div class="better-codex-dialog-footer-right">' + switchButton + keepOpen + '<button class="better-codex-submit" type="submit">' + te(submitText) + '</button></div></div>';
       }
 
+      function updateDescriptionDisclosure() {
+        const editor = dialog.querySelector('[name="description"]');
+        const toggle = dialog.querySelector("[data-description-toggle]");
+        if (!editor || !toggle) return;
+        const hasOverflow = editor.scrollHeight > editor.clientHeight;
+        toggle.hidden = !hasOverflow && !draft.descriptionExpanded;
+        toggle.setAttribute("aria-expanded", String(draft.descriptionExpanded));
+        toggle.textContent = te(draft.descriptionExpanded ? "收起描述" : "展开描述");
+      }
+
       function renderDialog() {
         if (projectDismiss) document.removeEventListener("pointerdown", projectDismiss, true);
         if (selectDismiss) document.removeEventListener("pointerdown", selectDismiss, true);
@@ -3662,6 +3876,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         dialog.dataset.executionRunning = String(executionRunning);
         dialog.dataset.executionLocked = String(executionLocked);
         dialog.dataset.expanded = String(draft.expanded);
+        dialog.dataset.descriptionExpanded = String(draft.descriptionExpanded);
         dialog.dataset.locked = String(editingLocked);
         if (draft.mode === "agent") {
           const selectedAgent = state.agents.find(agent => agent.id === draft.agentId);
@@ -3669,9 +3884,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           dialog.innerHTML = '<form>' + header() + agentPicker() + '<textarea class="better-codex-dialog-editor" name="prompt" placeholder="' + te("告诉智能体要做什么，例如：“修复项目里任务运行状态不可见的问题”") + '">' + escapeHtml(draft.prompt) + '</textarea>' + propertyRows() + attachmentList() + '<div class="better-codex-dialog-error" hidden></div>' + footer() + '</form>';
           dialog.querySelector(".better-codex-dialog-properties")?.insertAdjacentHTML("beforebegin", '<div class="better-codex-run-hint">' + agentAvatarMarkup(selectedAgent, "better-codex-agent-avatar") + '<span>' + te("创建后先由 " + selectedName + " 整理卡片，再自动开始工作。") + '</span></div>');
         } else if (issue) {
-          const descriptionEditor = sessionId
-            ? '<textarea class="better-codex-dialog-editor" name="description" placeholder="' + te("添加描述...") + '" rows="2" style="flex:0 0 auto;min-height:56px;max-height:96px">' + escapeHtml(draft.description) + '</textarea>'
-            : '<textarea class="better-codex-dialog-editor" name="description" placeholder="' + te("添加描述...") + '">' + escapeHtml(draft.description) + '</textarea>';
+          const descriptionEditor = '<div class="better-codex-description-field"><textarea class="better-codex-dialog-editor" name="description" placeholder="' + te("添加描述...") + '" rows="3">' + escapeHtml(draft.description) + '</textarea><button class="better-codex-description-toggle" type="button" data-description-toggle hidden></button></div>';
           dialog.innerHTML = '<form>' + header() + assigneePicker() + '<input class="better-codex-manual-title" name="title" maxlength="500" placeholder="' + te("任务标题") + '" value="' + escapeHtml(draft.title) + '">' + descriptionEditor + conversationPanel() + propertyRows() + attachmentList() + '<div class="better-codex-dialog-error" hidden></div>' + footer() + '</form>';
         } else {
           dialog.innerHTML = '<form>' + header() + assigneePicker() + '<input class="better-codex-manual-title" name="title" maxlength="500" placeholder="' + te("任务标题") + '" value="' + escapeHtml(draft.title) + '"><textarea class="better-codex-dialog-editor" name="description" placeholder="' + te("添加描述...") + '">' + escapeHtml(draft.description) + '</textarea>' + propertyRows() + attachmentList() + '<div class="better-codex-dialog-error" hidden></div>' + footer() + '</form>';
@@ -3684,7 +3897,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         });
         dialog.querySelectorAll('[name="description"], [name="labels"]').forEach(control => control.addEventListener("input", () => {
           dirtyDraftFields.add(control.getAttribute("name"));
+          requestAnimationFrame(updateDescriptionDisclosure);
         }));
+        requestAnimationFrame(updateDescriptionDisclosure);
+        dialog.querySelector("[data-description-toggle]")?.addEventListener("click", () => {
+          draft.descriptionExpanded = !draft.descriptionExpanded;
+          dialog.dataset.descriptionExpanded = String(draft.descriptionExpanded);
+          updateDescriptionDisclosure();
+        });
         dialog.querySelector('[name="keep"]')?.addEventListener("change", event => { state.keepCreate = event.currentTarget.checked; });
         const replyInput = dialog.querySelector('[name="reply"]');
         const sendButton = dialog.querySelector("[data-conversation-send]");
@@ -3851,14 +4071,19 @@ export function injectionScript(port: number, accessToken: string, action: "inst
                 await api("/api/issues/" + encodeURIComponent(issueId) + "/stop", { method: "POST" });
                 const current = await api("/api/issues/" + encodeURIComponent(issueId));
                 refreshIssueState(current);
+                await loadIssues().catch(() => {});
                 nextThreadId = issueSessionId(current) || nextThreadId;
                 loadingButton = dialog.querySelector("[data-dialog-open-thread]") || loadingButton;
                 setLoading(loadingButton, "正在打开…");
               } else {
                 setLoading(loadingButton, "正在打开…");
               }
-              if (nextThreadId) await openThread(nextThreadId);
-              else await loadIssues();
+              if (nextThreadId) {
+                const handedOff = await api("/api/issues/" + encodeURIComponent(issueId) + "/session-handoff", { method: "POST", body: JSON.stringify({ thread_id: nextThreadId }) });
+                refreshIssueState(handedOff);
+                await loadIssues().catch(() => {});
+                await openThread(nextThreadId);
+              } else await loadIssues();
               dialog.close();
             } catch (error) {
               showError(error);
@@ -3926,10 +4151,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           event.preventDefault();
           const index = Number(button.dataset.dialogDetach);
           if (!Number.isInteger(index) || index < 0) return;
-          draft.attachments.splice(index, 1);
+          const scope = button.dataset.dialogAttachmentScope;
+          const attachments = scope === "reply" ? draft.replyAttachments : draft.attachments;
+          const [removed] = attachments.splice(index, 1);
+          if (removed) releaseAttachment(removed);
           renderDialog();
-          dialog.querySelector(draft.mode === "agent" ? '[name="prompt"]' : '[name="title"]')?.focus();
+          dialog.querySelector(scope === "reply" ? '[name="reply"]' : draft.mode === "agent" ? '[name="prompt"]' : '[name="title"]')?.focus();
         }));
+        dialog.querySelector("form")?.addEventListener("paste", pasteImages);
         dialog.querySelector("form")?.addEventListener("keydown", event => {
           if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
             event.preventDefault();
@@ -3953,6 +4182,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (!title) return;
         submit.disabled = true;
         errorOutput.hidden = true;
+        traceDialog("dialog_submit_start", { action: issue ? "update_issue" : "create_issue" });
         try {
           const assignee = draft.mode === "agent"
             ? { user_assigned: false, agent_enabled: true, agent_id: draft.agentId || "" }
@@ -3971,6 +4201,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           if (draft.mode === "agent" && !issue && !workspacePath && !state.mockup) {
             throw new Error("创建智能体 Issue 需要本地工作区：请先打开该项目下的一个 Codex 会话");
           }
+          await uploadPastedImages();
           const body = {
             project_id: draft.projectId,
             title,
@@ -3988,19 +4219,24 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             await api("/api/issues", { method: "POST", body: JSON.stringify({ ...body, project_id: draft.projectId }) });
             state.projectId = draft.projectId;
           }
+          traceDialog("dialog_submit_success", { action: issue ? "update_issue" : "create_issue" });
           state.createMode = draft.mode;
+          if (!issue) sessionStorage.removeItem(CREATE_DRAFT_KEY);
           await loadIssues();
           if (!issue && state.keepCreate) {
             draft.title = "";
             draft.description = "";
             draft.prompt = "";
+            draft.attachments.forEach(releaseAttachment);
             draft.attachments = [];
             renderDialog();
             dialog.querySelector(draft.mode === "agent" ? '[name="prompt"]' : '[name="title"]')?.focus();
           } else {
+            retainCreateDraft = false;
             dialog.close();
           }
         } catch (error) {
+          traceDialog("dialog_submit_error", { action: issue ? "update_issue" : "create_issue", error: String(error instanceof Error ? error.message : "create_failed").slice(0, 200) });
           errorOutput.textContent = t(error instanceof Error ? error.message : "创建失败");
           errorOutput.hidden = false;
           submit.disabled = false;
@@ -4024,6 +4260,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             ? draft.assignee && !["none", "user", "codex"].includes(draft.assignee) ? draft.assignee : ""
             : current.agent_id || "";
           const status = current.status === "backlog" ? "todo" : dirtyDraftFields.has("status") ? draft.status : current.status;
+          await uploadPastedImages();
           await api("/api/issues/" + encodeURIComponent(issue.id) + "/start", {
             method: "POST",
             body: JSON.stringify({
@@ -4048,7 +4285,65 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
       dialog.__betterCodexSyncIssue = refreshIssueState;
       document.body.append(dialog);
+      const dialogAction = target => {
+        const control = target?.closest?.("button");
+        if (!control || !dialog.contains(control)) return "";
+        if (control.matches("[data-dialog-close]")) return "close";
+        if (control.matches(".better-codex-submit")) return "submit";
+        if (control.matches("[data-dialog-open-thread]")) return "open_thread";
+        if (control.matches("[data-dialog-start-now]")) return "start_now";
+        if (control.matches("[data-dialog-switch]")) return "switch_mode";
+        if (control.matches("[data-dialog-expand]")) return "expand";
+        if (control.matches("[data-dialog-attach]")) return "attach";
+        if (control.matches("[data-dialog-detach]")) return "detach";
+        if (control.matches("[data-dialog-project]")) return "project";
+        if (control.matches("[data-dialog-project-option]")) return "project_option";
+        if (control.matches("[data-dialog-select-toggle]")) return "select";
+        if (control.matches("[data-dialog-select-option]")) return "select_option";
+        if (control.matches("[data-reply-send]")) return "reply_send";
+        return "";
+      };
+      const traceDialogAction = event => {
+        const action = dialogAction(event.target);
+        if (!action) return;
+        traceDialog("dialog_action", { input_event: event.type, action, target: diagnosticTarget(event.target) });
+      };
+      dialog.addEventListener("pointerdown", traceDialogAction, true);
+      dialog.addEventListener("click", traceDialogAction, true);
+      dialog.addEventListener("keydown", event => {
+        if (!["Escape", "Enter"].includes(event.key)) return;
+        const fields = {
+          key: event.key,
+          code: event.code,
+          target: diagnosticTarget(event.target),
+          meta_key: event.metaKey,
+          ctrl_key: event.ctrlKey,
+          alt_key: event.altKey,
+          shift_key: event.shiftKey,
+          repeat: event.repeat,
+          default_prevented: event.defaultPrevented,
+          dialog_open: dialog.open,
+        };
+        traceDialog("dialog_keydown_capture", fields);
+        setTimeout(() => traceDialog("dialog_keydown_settled", { ...fields, default_prevented: event.defaultPrevented, dialog_open: dialog.open }), 0);
+      }, true);
+      dialog.addEventListener("cancel", event => {
+        traceDialog("dialog_cancel", { default_prevented: event.defaultPrevented, dialog_open: dialog.open });
+      }, true);
+      dialog.addEventListener("keydown", event => {
+        if (issue || event.key !== "Escape") return;
+        event.preventDefault();
+        traceDialog("dialog_escape_close", { default_prevented: event.defaultPrevented, dialog_open: dialog.open });
+        dialog.close();
+      });
       dialog.addEventListener("close", () => {
+        traceDialog("dialog_close", { dialog_open: dialog.open });
+        if (retainCreateDraft) {
+          syncDraft();
+          writeCreateDraft(draft);
+        }
+        draft.attachments.forEach(releaseAttachment);
+        draft.replyAttachments.forEach(releaseAttachment);
         stopConversationPoll();
         flushReplyDraft();
         if (projectDismiss) document.removeEventListener("pointerdown", projectDismiss, true);
@@ -4058,6 +4353,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       bindModalDismiss(dialog, () => dialog.close());
       renderDialog();
       dialog.showModal();
+      traceDialog("dialog_open", { dialog_open: dialog.open });
       dialog.querySelector(draft.mode === "agent" ? '[name="prompt"]' : '[name="title"]')?.focus();
     }
 
@@ -4150,8 +4446,21 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       document.documentElement.removeAttribute("data-better-codex-open");
     }
 
+    function isBetterCodexRoute() {
+      if (Array.from(document.querySelectorAll("webview")).some(view => view.title === "Better Codex")) return true;
+      return Array.from(document.querySelectorAll("main *")).some(node => ["找不到 MCP 应用视图", "MCP app view not found"].includes(node.textContent?.trim()));
+    }
+
+    function openRoute(surface = state.surface) {
+      routeSuppressed = false;
+      routeSeen = isBetterCodexRoute();
+      if (!routeSeen) window.postMessage({ type: NAVIGATION.messageType, path: BETTER_CODEX_ROUTE }, window.location.origin);
+      open(surface);
+    }
+
     function open(surface = state.surface) {
       if (destroyed) return;
+      routeSuppressed = false;
       state.surface = surface;
       sessionStorage.setItem(RESUME_SURFACE_KEY, surface);
       active = true;
@@ -4165,6 +4474,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const resume = Boolean(options.resume);
       if (resume) sessionStorage.setItem(RESUME_SURFACE_KEY, state.surface);
       else sessionStorage.removeItem(RESUME_SURFACE_KEY);
+      routeSuppressed = options.suppressRoute !== false;
       active = false;
       closeFilterMenu();
       closeCreateMenu();
@@ -4195,6 +4505,24 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     function activeThreadId() {
       const activeRow = Array.from(document.querySelectorAll(SELECTORS.threadRow)).find(item => item.getAttribute(ATTRIBUTES.threadActive) === "true");
       return normalizeSessionId(activeRow?.getAttribute(ATTRIBUTES.threadId));
+    }
+
+    function syncSessionHandoffFromHost() {
+      const threadId = currentRouteThreadId() || activeThreadId();
+      if (!threadId) return;
+      const issue = state.issues.find(candidate => issueSessionId(candidate) === threadId && !candidate.session_handoff_at);
+      if (!issue || sessionHandoffPending.has(issue.id)) return;
+      sessionHandoffPending.add(issue.id);
+      void api("/api/issues/" + encodeURIComponent(issue.id) + "/session-handoff", { method: "POST", body: JSON.stringify({ thread_id: threadId }) })
+        .then(updated => {
+          const index = state.issues.findIndex(candidate => candidate.id === issue.id);
+          if (index >= 0) state.issues[index] = { ...state.issues[index], ...updated };
+          const dialog = document.getElementById("better-codex-dialog");
+          if (dialog?.dataset.issueId === issue.id && typeof dialog.__betterCodexSyncIssue === "function") dialog.__betterCodexSyncIssue(updated);
+          if (active) render();
+        })
+        .catch(() => {})
+        .finally(() => sessionHandoffPending.delete(issue.id));
     }
 
     async function waitForThreadOpen(expected) {
@@ -4229,17 +4557,23 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (!active || suppressAgentOutside) return;
       const target = event.target?.closest?.("button,a,[role='button']," + SELECTORS.threadRow);
       if (!target || target === entry || target === agentsEntry || target.closest("#" + PANEL_ID) || target.closest("#better-codex-dialog") || target.closest("#better-codex-agent-dialog") || target.closest("#better-codex-avatar-picker")) return;
-      if (target.closest(SELECTORS.sidebarNavigation)) close();
+      if (target.closest(SELECTORS.sidebarNavigation)) close({ resume: true });
     }
 
     function refresh() {
+      const betterCodexRoute = isBetterCodexRoute();
       const entriesAvailable = ensureEntry();
       if (!entriesAvailable) {
-        if (active) close({ resume: true });
+        if (active) close({ resume: true, suppressRoute: betterCodexRoute });
+        if (!betterCodexRoute) routeSuppressed = false;
         return;
       }
       const resumeSurface = sessionStorage.getItem(RESUME_SURFACE_KEY);
-      if (!active && ["issues", "agents"].includes(resumeSurface)) return open(resumeSurface);
+      if (betterCodexRoute) routeSeen = true;
+      if (!betterCodexRoute) routeSuppressed = false;
+      syncSessionHandoffFromHost();
+      if (active && routeSeen && !betterCodexRoute) return close({ resume: true, suppressRoute: false });
+      if (!active && betterCodexRoute && !routeSuppressed) return open(["issues", "agents"].includes(resumeSurface) ? resumeSurface : state.surface);
       if (active) mountPanel();
     }
 
@@ -4269,6 +4603,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       completionNoticeStack?.remove();
       completionNoticeStack = null;
       issueSessionSnapshot.clear();
+      sessionHandoffPending.clear();
       closeFilterMenu();
       closeIssueMenu();
       observer?.disconnect();
@@ -4279,6 +4614,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       bridgeRequests.clear();
       document.removeEventListener("DOMContentLoaded", mount);
       document.removeEventListener("click", onClick, true);
+      window.removeEventListener("codex-message-from-view", onHostMessageFromView, true);
       close();
       document.querySelectorAll('[' + OWNED + '="true"]').forEach(node => node.remove());
       ["light", "dark"].forEach(mode => ["canvas", "ink", "accent", "surface", "control", "raised", "hover", "pressed", "hairline"].forEach(token => document.documentElement.style.removeProperty("--bc-host-" + mode + "-" + token)));
@@ -4296,8 +4632,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       updateTimer = setInterval(checkUpdateNotice, 15000);
     }
 
-    window.__betterCodexInjection__ = { version: VERSION, endpoint: BASE_URL, refresh, open, close, destroy };
+    window.__betterCodexInjection__ = { version: VERSION, endpoint: BASE_URL, refresh, open: openRoute, close, destroy };
     document.addEventListener("click", onClick, true);
+    window.addEventListener("codex-message-from-view", onHostMessageFromView, true);
     if (document.documentElement) mount();
     else document.addEventListener("DOMContentLoaded", mount, { once: true });
     return { installed: true, reused: false };

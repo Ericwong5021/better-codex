@@ -3975,10 +3975,64 @@ export function betterCodexDesignSystemCss() {
       height: min(90vh, 960px);
     }
 
+    #better-codex-dialog form {
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    #better-codex-dialog .better-codex-description-field {
+      display: flex;
+      min-height: 0;
+      flex: 0 0 auto;
+      flex-direction: column;
+      align-items: flex-start;
+      margin: 0 var(--bc-space-5);
+    }
+
+    #better-codex-dialog .better-codex-description-field .better-codex-dialog-editor {
+      width: 100%;
+      flex: 0 0 auto;
+      max-height: calc((var(--bc-text-md) * 1.55 * 3) + var(--bc-space-1));
+      margin: 0;
+      overflow-y: hidden;
+    }
+
+    #better-codex-dialog[data-description-expanded="true"] .better-codex-description-field .better-codex-dialog-editor {
+      height: min(36vh, calc((var(--bc-text-md) * 1.55 * 12) + var(--bc-space-1)));
+      max-height: min(36vh, calc((var(--bc-text-md) * 1.55 * 12) + var(--bc-space-1)));
+      overflow-y: auto;
+    }
+
+    #better-codex-dialog .better-codex-description-toggle {
+      min-height: var(--bc-control-height);
+      border: 0;
+      border-radius: var(--bc-radius-sm);
+      color: var(--bc-color-text-muted);
+      background: transparent;
+      padding: 0 var(--bc-space-2);
+      font: inherit;
+      font-size: var(--bc-text-sm);
+      cursor: pointer;
+    }
+
+    #better-codex-dialog .better-codex-description-toggle:hover {
+      color: var(--bc-color-text);
+      background: var(--bc-color-hover);
+    }
+
+    #better-codex-dialog .better-codex-description-toggle:focus-visible {
+      outline: none;
+      box-shadow: var(--bc-focus-ring);
+    }
+
+    #better-codex-dialog .better-codex-description-toggle[hidden] {
+      display: none;
+    }
+
     #better-codex-dialog .better-codex-conversation {
       display: flex;
       min-height: 0;
-      flex: 1;
+      flex: 1 1 0;
       flex-direction: column;
       margin: 0 20px;
       overflow: hidden;
@@ -4089,10 +4143,10 @@ export function betterCodexDesignSystemCss() {
     #better-codex-dialog .better-codex-timeline {
       display: flex;
       min-height: 0;
-      flex: 1;
+      flex: 1 1 0;
       flex-direction: column;
       gap: calc(var(--bc-text-base) * 1.05);
-      overflow: auto;
+      overflow-y: auto;
       padding: calc(var(--bc-text-base) * 0.85) calc(var(--bc-text-base) * 0.95);
     }
 
@@ -4314,6 +4368,7 @@ export function betterCodexDesignSystemCss() {
     #better-codex-dialog .better-codex-composer {
       display: flex;
       flex: 0 0 auto;
+      flex-wrap: wrap;
       align-items: flex-end;
       gap: 8px;
       margin: 8px 20px 0;
@@ -4321,6 +4376,12 @@ export function betterCodexDesignSystemCss() {
       border-radius: var(--bc-radius-md);
       background: var(--bc-surface);
       padding: 8px;
+    }
+
+    #better-codex-dialog .better-codex-composer .better-codex-dialog-attachments {
+      box-sizing: border-box;
+      width: 100%;
+      padding: 0 0 2px;
     }
 
     #better-codex-dialog .better-codex-conversation-feedback {

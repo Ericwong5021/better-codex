@@ -467,12 +467,6 @@ test("issue working activity uses the agent avatar instead of initials", () => {
   assert.ok(source.includes('agentAvatarMarkup(activityAgent, "better-codex-card-avatar")'));
   assert.ok(source.includes('"工作中"'));
   assert.ok(source.includes('"排队中"'));
-  assert.ok(source.includes('"回复中"'));
-  assert.ok(source.includes('"回复失败"'));
-  assert.ok(source.includes('"回复完成"'));
-  assert.match(source, /\.better-codex-activity\[data-run="replying"\]/);
-  assert.match(source, /\.better-codex-activity\[data-run="reply-failed"\]/);
-  assert.match(source, /\.better-codex-activity\[data-run="reply-succeeded"\]/);
   assert.ok(!source.includes('class="better-codex-avatar">\' + escapeHtml(agentInitial)'));
 });
 
