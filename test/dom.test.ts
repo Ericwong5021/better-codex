@@ -18,6 +18,14 @@ test("generated injection script is valid JavaScript", () => {
   assert.doesNotMatch(source, /localizeOwnedTree|localizedText|translateText/);
 });
 
+test("in-review status uses the waiting-for-review label", () => {
+  const source = injectionScript(4317, "test-token", "install");
+
+  assert.ok(source.includes('in_review: "待审核"'));
+  assert.ok(source.includes('activityState === "in_review" ? "待审核"'));
+  assert.doesNotMatch(source, /审核中/);
+});
+
 test("board bridge requests retry once after runtime_bridge_timeout", () => {
   const source = injectionScript(4317, "test-token", "install");
   assert.match(source, /runtime_bridge_timeout/);
