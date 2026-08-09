@@ -56,6 +56,8 @@ type ActivationState = {
   ownerPid?: number | null;
 };
 
+const activationRecoveryTimeout = 120_000;
+
 function acquireActivationRecoveryLock() {
   const path = `${updateActivationPath}.lock`;
   const token = `${process.pid}:${Date.now()}:${Math.random()}`;
@@ -89,8 +91,8 @@ function persistedActivationState(): GatewayUpdateState {
     const value = JSON.parse(readFileSync(updateActivationPath, "utf8")) as ActivationState;
     if (value.status === "activating") {
       const startedAt = Date.parse(value.updatedAt || "");
-      if (Number.isFinite(startedAt) && Date.now() - startedAt <= 120_000) return { status: "restarting", currentVersion: coreVersion, latestVersion: null, checkedAt: value.updatedAt ?? null, error: null };
-      if (Number.isInteger(value.ownerPid) && value.ownerPid && processAlive(value.ownerPid)) return { status: "restarting", currentVersion: coreVersion, latestVersion: null, checkedAt: value.updatedAt ?? null, error: null };
+      if (Number.isFinite(startedAt) && Date.now() - startedAt <= activationRecoveryTimeout) return { status: "restarting", currentVersion: coreVersion, latestVersion: null, checkedAt: value.updatedAt ?? null, error: null };
+      if (!Number.isFinite(startedAt) && Number.isInteger(value.ownerPid) && value.ownerPid && processAlive(value.ownerPid)) return { status: "restarting", currentVersion: coreVersion, latestVersion: null, checkedAt: value.updatedAt ?? null, error: null };
       const lock = acquireActivationRecoveryLock();
       if (!lock) return { status: "restarting", currentVersion: coreVersion, latestVersion: null, checkedAt: value.updatedAt ?? null, error: null };
       try {

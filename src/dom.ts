@@ -295,6 +295,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const CREATE_DRAFT_KEY = "better-codex-create-draft";
     const CREATE_ISSUE_SHORTCUT_KEY = "better-codex-create-issue-shortcut";
     const AGENT_INSPECTOR_WIDTH_KEY = "better-codex-agent-inspector-width";
+    const DIALOG_EXPANDED_KEY = "better-codex-dialog-expanded";
     const AGENT_INSPECTOR_MIN_WIDTH = 320;
     const AGENT_DIRECTORY_MIN_WIDTH = 320;
     const THREAD_OPEN_TIMEOUT_MS = 10000;
@@ -471,6 +472,17 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "头像": "Avatar", "上传图片": "Upload image", "使用此头像": "Use this avatar", "点击选择预设图标，或上传图片": "Choose a preset icon or upload an image", "从预设图标中选择，也可以上传图片": "Choose a preset icon or upload an image", "创建智能体": "Create agent", "Codex 默认智能体": "Default Codex agent", "说明这个智能体适合承担什么工作": "Describe what this agent is good at", "定义职责、工作方式和输出要求": "Define responsibilities, workflow, and output requirements", "权限": "Permissions", "只读": "Read-only", "工作区可写": "Workspace write access", "完全访问": "Full access", "仅可读取工作区文件，不能修改": "Can read workspace files but cannot modify them", "可修改当前工作区内的文件": "Can modify files in the current workspace", "可不受限制地访问互联网和电脑上的任何文件": "Unrestricted access to the internet and files on this computer",
       "已经执行过对话的 Issue 只能修改状态、优先级和指派人。": "Issues with an executed conversation can only change status, priority, and assignee.", "终止任务后才能打开对话，是否终止任务？": "The task must be stopped before opening the conversation. Stop it now?", "终止并打开": "Stop and open", "正在终止…": "Stopping…", "忽略当前版本": "Ignore this version", "立即更新": "Update now", "暂无项目": "No projects", "告诉智能体要做什么，例如：“修复项目里任务运行状态不可见的问题”": "Tell the agent what to do, for example: “Fix the invisible task run status in the project”"
     } };
+    localeResources.en["手动创建 issue"] = "Create issue manually";
+    localeResources.en["有任务正在运行，请等待任务结束后再更新。"] = "A task is running. Wait for it to finish before updating.";
+    localeResources.en["更新正在进行中，请稍候。"] = "An update is already in progress. Please wait.";
+    localeResources.en["下载的更新版本与发布版本不一致，请稍后重试。"] = "The downloaded version does not match the release. Try again later.";
+    localeResources.en["更新包验证失败，已保留当前版本。"] = "The update package could not be verified. The current version was kept.";
+    localeResources.en["更新后的版本验证失败，已恢复到上一版本。"] = "The updated version could not be verified. The previous version was restored.";
+    localeResources.en["Better Codex 重启超时，已恢复到上一版本。"] = "Better Codex took too long to restart. The previous version was restored.";
+    localeResources.en["无法下载更新，请检查网络后重试。"] = "The update could not be downloaded. Check your network and try again.";
+    localeResources.en["更新包安全校验失败，已保留当前版本。"] = "The update failed its security check. The current version was kept.";
+    localeResources.en["更新进程意外中断，已恢复到上一版本。"] = "The update was interrupted. The previous version was restored.";
+    localeResources.en["更新失败，请稍后重试。"] = "The update failed. Try again later.";
     const bridgeRequests = new Map();
     const sessionHandoffPending = new Set();
     let bridgeSequence = 0;
@@ -1262,6 +1274,21 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       return t(value);
     }
 
+    function updateErrorLabel(error) {
+      let value = error instanceof Error ? error.message : String(error || "update_install_failed");
+      if (value.startsWith("update_activation_failed:")) value = value.slice("update_activation_failed:".length);
+      if (value === "reply_busy" || value === "issue_execution_running") return t("有任务正在运行，请等待任务结束后再更新。");
+      if (value === "update_in_progress") return t("更新正在进行中，请稍候。");
+      if (value === "core_version_mismatch" || value === "compatibility_manifest_mismatch") return t("下载的更新版本与发布版本不一致，请稍后重试。");
+      if (value === "core_validation_failed" || value === "core_health_validation_failed" || value === "update_asset_invalid" || value === "update_manifest_invalid" || value === "update_compatibility_invalid" || value === "update_core_invalid") return t("更新包验证失败，已保留当前版本。");
+      if (value === "core_activation_version_mismatch" || value === "compatibility_activation_version_mismatch") return t("更新后的版本验证失败，已恢复到上一版本。");
+      if (value === "update_runtime_stop_timeout" || value === "runtime_restart_timeout") return t("Better Codex 重启超时，已恢复到上一版本。");
+      if (value.startsWith("update_http_") || value === "update_check_failed") return t("无法下载更新，请检查网络后重试。");
+      if (value === "update_public_key_unavailable" || value === "update_https_required" || value === "update_hash_invalid" || value === "update_hash_mismatch" || value === "update_signature_invalid") return t("更新包安全校验失败，已保留当前版本。");
+      if (value === "update_activation_interrupted") return t("更新进程意外中断，已恢复到上一版本。");
+      return t("更新失败，请稍后重试。");
+    }
+
     function showError(error) {
       state.error = errorLabel(error);
       const output = panel?.querySelector("#better-codex-error");
@@ -1324,8 +1351,17 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     function renderUpdateNotice(update) {
       const version = String(update?.latestVersion || "");
       const activationError = update?.status === "error" && String(update?.error || "").startsWith("update_activation_failed:");
+      const installError = update?.status === "error" && updateNotice?.dataset.status === "install-error";
       const noticeVersion = activationError ? String(update?.currentVersion || "activation-error") + ":" + String(update?.checkedAt || Date.now()) : version;
-      if ((!activationError && (update?.status !== "available" || !version)) || dismissedUpdateVersion === noticeVersion || ignoredUpdateVersion === noticeVersion) return;
+      if (!activationError && (update?.status !== "available" || !version)) {
+        if (installError) return;
+        if (!["checking", "installing", "restarting"].includes(update?.status)) {
+          updateNotice?.remove();
+          updateNotice = null;
+        }
+        return;
+      }
+      if (dismissedUpdateVersion === noticeVersion || ignoredUpdateVersion === noticeVersion) return;
       if (updateNotice?.dataset.version === noticeVersion && updateNotice.dataset.status === (activationError ? "error" : "available")) return;
       updateNotice?.remove();
       updateNotice = document.createElement("section");
@@ -1358,7 +1394,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (activationError) {
         updateNotice.querySelector(".better-codex-update-title").textContent = t("更新未完成");
         updateNotice.querySelector(".better-codex-update-description").textContent = t("Better Codex 已恢复到上一版本。");
-        updateNotice.querySelector(".better-codex-update-error").textContent = String(update.error).slice("update_activation_failed:".length);
+        updateNotice.querySelector(".better-codex-update-error").textContent = updateErrorLabel(update.error);
         updateNotice.querySelector(".better-codex-update-error").hidden = false;
         updateNotice.querySelector("[data-update-install]").textContent = t("重试");
       }
@@ -1394,11 +1430,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             }, 1800);
             return;
           }
+          notice.dataset.status = "restarting";
           title.textContent = t("正在重启 Better Codex");
           description.textContent = t("正在重启 Codex，稍后会自动恢复。");
         } catch (reason) {
           if (updateNotice !== notice) return;
-          notice.dataset.status = "available";
+          notice.dataset.status = "install-error";
           install.disabled = false;
           menuToggle.disabled = false;
           close.disabled = false;
@@ -1407,7 +1444,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           install.textContent = t("重试");
           title.textContent = t("更新未完成");
           description.textContent = t("Better Codex 保持当前版本运行。");
-          error.textContent = reason instanceof Error ? reason.message : "update_install_failed";
+          error.textContent = updateErrorLabel(reason);
           error.hidden = false;
         }
       });
@@ -1812,7 +1849,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       manual.type = "button";
       manual.className = "better-codex-create-menu-item";
       manual.setAttribute("role", "menuitem");
-      manual.innerHTML = icon("plus") + "<span>" + escapeHtml(t("手动创建")) + "</span>";
+      manual.innerHTML = icon("plus") + "<span>" + escapeHtml(t("手动创建 issue")) + "</span>";
       manual.addEventListener("click", event => {
         event.stopPropagation();
         state.createMode = "manual";
@@ -2674,7 +2711,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const draft = creating ? (state.agentDraft || {}) : agent;
       if (!draft) return "";
       const isDefault = Boolean(draft.is_default);
-      const name = creating ? draft.name || "" : draft.name;
+      const nameField = state.locale === "en" ? "name_en" : "name";
+      const name = draft[nameField] || "";
       const description = creating ? draft.description || "" : draft.description || "";
       const instructions = creating ? draft.instructions || "" : draft.instructions || "";
       const defaultModel = state.agentModelCatalog.find(item => item.isDefault) || state.agentModelCatalog[0];
@@ -2690,7 +2728,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         : '<div class="better-codex-agent-profile-head">' + agentAvatarEditorMarkup(draft, agentKey(draft)) + '<h2>' + escapeHtml(agentDisplayName(draft)) + '</h2>' + avatarInput + '</div>';
       const identity = isDefault
         ? '<div class="better-codex-agent-summary"><div><strong>' + te("Codex 默认智能体") + '</strong></div></div>'
-        : '<label class="better-codex-agent-inspector-field"><span>' + te("名称") + '</span><input name="name" maxlength="80" value="' + escapeHtml(name) + '" placeholder="' + te("智能体名称") + '" required></label><label class="better-codex-agent-inspector-field"><span>' + te("介绍") + ' <small>' + te("可选") + '</small></span><textarea name="description" maxlength="500" rows="3" placeholder="' + te("说明这个智能体适合承担什么工作") + '">' + escapeHtml(description) + '</textarea></label>';
+        : '<label class="better-codex-agent-inspector-field"><span>' + te("名称") + '</span><input data-agent-name name="' + nameField + '" maxlength="80" value="' + escapeHtml(name) + '" placeholder="' + te("智能体名称") + '" required></label><label class="better-codex-agent-inspector-field"><span>' + te("介绍") + ' <small>' + te("可选") + '</small></span><textarea name="description" maxlength="500" rows="3" placeholder="' + te("说明这个智能体适合承担什么工作") + '">' + escapeHtml(description) + '</textarea></label>';
       const instructionField = isDefault ? "" : '<label class="better-codex-agent-inspector-field"><span>' + te("指令") + ' <small>' + te("可选") + '</small></span><textarea name="instructions" rows="7" placeholder="' + te("定义职责、工作方式和输出要求") + '">' + escapeHtml(instructions) + '</textarea></label>';
       const deleteButton = !creating && !isDefault ? '<button class="better-codex-agent-danger" type="button" data-agent-delete data-agent-key="' + escapeHtml(agentKey(draft)) + '">' + te("删除智能体") + '</button>' : "";
       const modelOptions = state.agentModelCatalog.map(item => ({ value: item.id, label: item.displayName, description: item.description || "" }));
@@ -3249,7 +3287,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         ? { ...draft, avatar: draft.avatar || ("icon:" + draft.key) }
         : { avatar: "icon:bot" };
       renderAgents();
-      setTimeout(() => panel?.querySelector('[data-agent-form="create"] [name="name"]')?.focus(), 0);
+      setTimeout(() => panel?.querySelector('[data-agent-form="create"] [data-agent-name]')?.focus(), 0);
     }
 
     function onAgentSubmit(event) {
@@ -3261,8 +3299,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const submit = form.querySelector('[type="submit"]');
       const error = form.querySelector(".better-codex-agent-inspector-error");
       const body = {
-        name: form.elements.name?.value || selected?.name || "Codex",
-        name_en: selected?.name_en || state.agentDraft?.name_en || "",
+        name: form.elements.name?.value || selected?.name || state.agentDraft?.name || form.elements.name_en?.value || "Codex",
+        name_en: form.elements.name_en?.value || selected?.name_en || state.agentDraft?.name_en || "",
         description: form.elements.description?.value || "",
         instructions: form.elements.instructions?.value || "",
         model: form.elements.model.value,
@@ -3409,7 +3447,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         runStatus: issue?.mockup_run_status || "not-started",
         labels: (issue?.labels || []).join(", "),
         projectId: issue?.project_id || state.projectId,
-        expanded: false,
+        expanded: localStorage.getItem(DIALOG_EXPANDED_KEY) === "true",
         descriptionExpanded: false,
         reply: issue?.reply_draft || "",
         attachments: [],
@@ -4302,6 +4340,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         });
         dialog.querySelector("[data-dialog-expand]")?.addEventListener("click", event => {
           draft.expanded = !draft.expanded;
+          localStorage.setItem(DIALOG_EXPANDED_KEY, String(draft.expanded));
           dialog.dataset.expanded = String(draft.expanded);
           const button = event.currentTarget;
           button.setAttribute("aria-label", t(draft.expanded ? "缩小" : "展开"));

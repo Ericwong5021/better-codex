@@ -67,6 +67,23 @@ function Get-InstalledVersion([string]$Executable) {
   }
 }
 
+function Get-PackagedCoreVersion([string]$Executable, [string]$ValidationHome) {
+  $previousHome = $env:BETTER_CODEX_HOME
+  $previousDelegation = $env:BETTER_CODEX_DISABLE_DELEGATION
+  try {
+    $env:BETTER_CODEX_HOME = $ValidationHome
+    $env:BETTER_CODEX_DISABLE_DELEGATION = "1"
+    $versions = (& $Executable version --json 2>$null | Out-String | ConvertFrom-Json)
+    if ($LASTEXITCODE -ne 0 -or -not $versions.core) { return $null }
+    return [string]$versions.core
+  } catch {
+    return $null
+  } finally {
+    if ($null -eq $previousHome) { Remove-Item Env:BETTER_CODEX_HOME -ErrorAction SilentlyContinue } else { $env:BETTER_CODEX_HOME = $previousHome }
+    if ($null -eq $previousDelegation) { Remove-Item Env:BETTER_CODEX_DISABLE_DELEGATION -ErrorAction SilentlyContinue } else { $env:BETTER_CODEX_DISABLE_DELEGATION = $previousDelegation }
+  }
+}
+
 function Test-VersionAtLeast([string]$Current, [string]$Target) {
   if (-not $Current -or -not $Target) { return $false }
   try {
@@ -199,6 +216,9 @@ try {
   $packagedSkill = Join-Path $workDirectory "skills\better-codex"
   if (-not (Test-Path $packagedExecutable)) { throw "Better Codex executable is missing from the package." }
   if (-not (Test-Path (Join-Path $packagedSkill "SKILL.md"))) { throw "Better Codex skill is missing from the package." }
+  $packagedVersion = Get-PackagedCoreVersion $packagedExecutable (Join-Path $workDirectory "validation-home")
+  if (-not $packagedVersion) { throw "Unable to read the packaged Better Codex version." }
+  if ($packagedVersion -ne $targetVersion) { throw "Package version $packagedVersion does not match target v$targetVersion. Installation cancelled." }
   $backupDirectory = Join-Path $workDirectory "previous"
   New-Item -ItemType Directory -Force -Path $backupDirectory | Out-Null
   $backupExecutable = Join-Path $backupDirectory "better-codex.exe"
@@ -280,6 +300,11 @@ try {
       Write-Host ($doctorOutput.TrimEnd())
       throw "Better Codex installation verification failed."
     }
+  }
+  $readyVersion = Get-InstalledVersion $executable
+  if (-not $readyVersion -or -not (Test-VersionAtLeast $readyVersion $targetVersion)) {
+    $displayVersion = if ($readyVersion) { $readyVersion } else { "unknown" }
+    throw "Installed Better Codex version $displayVersion does not match target v$targetVersion."
   }
   $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
   if ($null -eq $userPath) { $userPath = "" }

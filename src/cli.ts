@@ -38,6 +38,7 @@ function accessToken() {
 }
 
 const legacyRuntimePort = 4317;
+const updateRuntimeStopTimeout = 60_000;
 
 async function stopLegacyRuntime() {
   const current = readRuntimeState();
@@ -268,7 +269,9 @@ async function runRuntime() {
 async function applyUpdate(previousRuntimePid: number, updates: { core: string | null; compatibility: string | null }, drainPath?: string) {
   try {
     recordGatewayUpdateActivation("activating", null, updates, process.pid);
+    const stopDeadline = Date.now() + updateRuntimeStopTimeout;
     while (processAlive(previousRuntimePid) && (!drainPath || !existsSync(drainPath))) {
+      if (Date.now() >= stopDeadline) throw new Error("update_runtime_stop_timeout");
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     if (drainPath && existsSync(drainPath)) unlinkSync(drainPath);

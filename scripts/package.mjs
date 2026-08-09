@@ -77,7 +77,13 @@ try {
       execFileSync(signtool, ["sign", "/fd", "SHA256", "/f", certificatePath, "/p", password, "/tr", "http://timestamp.digicert.com", "/td", "SHA256", executable], { stdio: "inherit" });
     }
   }
-  execFileSync(executable, ["version"], { stdio: "inherit", env: { ...process.env, BETTER_CODEX_HOME: join(work, "home") } });
+  const versionEnv = { ...process.env, BETTER_CODEX_HOME: join(work, "home"), BETTER_CODEX_DISABLE_DELEGATION: "1" };
+  const versionOutput = execFileSync(executable, ["version", "--json"], { encoding: "utf8", env: versionEnv });
+  const versions = JSON.parse(versionOutput);
+  if (versions.core !== packageJson.version || (versions.managedCore && versions.managedCore !== packageJson.version)) {
+    throw new Error(`package_version_mismatch: expected ${packageJson.version}, got core ${versions.core || "unknown"} managed ${versions.managedCore || "unknown"}`);
+  }
+  execFileSync(executable, ["version"], { stdio: "inherit", env: versionEnv });
   await mkdir(output, { recursive: true });
   await copyFile(executable, join(output, coreName));
   await mkdir(packageRoot, { recursive: true });

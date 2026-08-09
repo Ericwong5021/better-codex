@@ -4,6 +4,24 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.3.15] - 2026-08-10
+
+### Added
+
+- Configure a keyboard shortcut to open the Create Issue dialog.
+- Resize the Agent details pane and keep its width for later sessions.
+
+### Changed
+
+- Sync projects from Codex and choose a project when creating or editing an Issue.
+- Show localized names for the built-in suggested Agents in the English interface.
+- Continue a completed Issue by sending a follow-up reply, which moves it back to in progress.
+
+### Fixed
+
+- Keep failed and interrupted reply states visible in the conversation while offering a retry.
+- Keep Agent profile creation compatible with clients that do not send a localized name.
+
 ## [0.3.14] - 2026-08-09
 
 ### Added
@@ -53,7 +71,8 @@ All notable changes to Better Codex are recorded here.
 
 - Use the Codex system font in the Better Codex interface.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.3.14...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.3.15...HEAD
+[0.3.15]: https://github.com/Ericwong5021/better-codex/compare/v0.3.14...v0.3.15
 [0.3.14]: https://github.com/Ericwong5021/better-codex/compare/v0.3.13...v0.3.14
 [0.3.13]: https://github.com/Ericwong5021/better-codex/releases/tag/v0.3.13
 [0.3.12]: https://github.com/Ericwong5021/better-codex/releases/tag/v0.3.12

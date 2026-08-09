@@ -683,6 +683,7 @@ export function startServer() {
       if (url.pathname === "/api/update/install" && method === "POST") {
         if (updateInstallInProgress) throw new Error("update_in_progress");
         if (hasActiveIssueReplies()) throw new Error("reply_busy");
+        if (!worker.pauseForUpdate()) throw new Error("issue_execution_running");
         updateInstallInProgress = true;
         try {
           const result = await installGatewayUpdate();
@@ -696,6 +697,7 @@ export function startServer() {
           sendJson(response, updated ? 202 : 200, { accepted: updated, updated, state: getGatewayUpdateState(), result });
           if (!shouldRelaunch) {
             updateInstallInProgress = false;
+            worker.resumeAfterUpdate();
             return;
           }
           const drainPath = join(runPath, `update-drain-${randomUUID()}`);
@@ -708,15 +710,18 @@ export function startServer() {
                 writeFileSync(drainPath, String(process.pid), { mode: 0o600 });
                 process.exit(0);
               });
+              setTimeout(() => server.closeAllConnections(), 5000).unref();
             } catch (error) {
               updateInstallInProgress = false;
               updateRelaunchScheduled = false;
+              worker.resumeAfterUpdate();
               recordGatewayUpdateActivation("error", error instanceof Error ? error.message : "update_activation_failed");
             }
           }, 250);
           return;
         } catch (error) {
           updateInstallInProgress = false;
+          worker.resumeAfterUpdate();
           throw error;
         }
       }
@@ -865,6 +870,7 @@ export function startServer() {
           return sendJson(response, 200, updated);
         }
         if (method === "POST" && path[3] === "start" && path.length === 4) {
+          if (updateInstallInProgress) throw new Error("update_in_progress");
           const body = await readBody(request);
           const version = Number(body.version);
           if (!Number.isInteger(version) || version < 1) throw new Error("invalid_version");

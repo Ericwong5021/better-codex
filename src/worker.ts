@@ -73,6 +73,19 @@ export class IssueWorker {
     this.schedule(0);
   }
 
+  pauseForUpdate() {
+    if (this.runs.size || this.schedulers.size || this.enrichments.size) return false;
+    this.stopped = true;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    this.manualQueue.clear();
+    return true;
+  }
+
+  resumeAfterUpdate() {
+    if (this.stopped) this.start();
+  }
+
   startIssue(issueId: string) {
     if (this.stopped || mockupSessionActive()) return false;
     if (Array.from(this.runs.values()).some(({ claim }) => claim.issue.id === issueId)) return false;

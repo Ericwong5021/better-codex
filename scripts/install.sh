@@ -84,6 +84,14 @@ installed_version() {
   fi
 }
 
+packaged_core_version() {
+  local binary="$1" validation_home="$2" raw core
+  raw="$(env BETTER_CODEX_HOME="$validation_home" BETTER_CODEX_DISABLE_DELEGATION=1 "$binary" version --json 2>/dev/null)" || return 1
+  core="$(printf '%s' "$raw" | sed -n 's/.*"core":"\([^"]*\)".*/\1/p')"
+  [ -n "$core" ] || return 1
+  printf '%s' "$core"
+}
+
 installation_ready() {
   local binary="$1" output
   if [ "$WITH_SERVICE" != "1" ]; then
@@ -295,6 +303,15 @@ if [ ! -f "$WORK_DIR/skills/better-codex/SKILL.md" ]; then
   echo "Better Codex skill is missing from the package." >&2
   exit 1
 fi
+PACKAGED_VERSION="$(packaged_core_version "$WORK_DIR/better-codex" "$WORK_DIR/validation-home" || true)"
+if [ -z "$PACKAGED_VERSION" ]; then
+  echo "Unable to read the packaged Better Codex version." >&2
+  exit 1
+fi
+if [ -n "$TARGET_VERSION" ] && [ "$PACKAGED_VERSION" != "$TARGET_VERSION" ]; then
+  printf '[Better Codex] Package version %s does not match target v%s. Installation cancelled.\n' "$PACKAGED_VERSION" "$TARGET_VERSION" >&2
+  exit 1
+fi
 if [ "$WITH_SERVICE" = "1" ] && codex_running; then
   if [ ! -r /dev/tty ]; then
     echo "Codex is running. Quit it completely and run the installer again." >&2
@@ -345,6 +362,11 @@ if [ "$WITH_SERVICE" = "1" ]; then
     exit 1
   fi
 fi
+READY_VERSION="$(installed_version "$BIN_DIR/better-codex" || true)"
+if [ -n "$TARGET_VERSION" ] && { [ -z "$READY_VERSION" ] || ! version_at_least "$READY_VERSION" "$TARGET_VERSION"; }; then
+  printf '[Better Codex] Installed version %s does not match target v%s. Installation failed.\n' "${READY_VERSION:-unknown}" "$TARGET_VERSION" >&2
+  exit 1
+fi
 if ! printf '%s' ":$PATH:" | grep -q ":$BIN_DIR:"; then
   for RC in "$HOME/.zshrc" "$HOME/.bashrc"; do
     if [ -f "$RC" ] && ! grep -qF "$BIN_DIR" "$RC"; then
@@ -352,7 +374,6 @@ if ! printf '%s' ":$PATH:" | grep -q ":$BIN_DIR:"; then
     fi
   done
 fi
-READY_VERSION="$(installed_version "$BIN_DIR/better-codex" || true)"
 if [ -n "$READY_VERSION" ]; then
   printf '[OK] Better Codex v%s is ready\n' "$READY_VERSION"
 else
