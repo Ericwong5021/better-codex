@@ -3,11 +3,11 @@
 </p>
 
 <p align="center">
-  <strong>从开始到完成，让 Codex 里的工作清晰可见。</strong>
+  <strong>From start to finish, keep your work in Codex clear and visible.</strong>
 </p>
 
 <p align="center">
-  运行在 Codex 客户端里的原生任务看板与多 Agent 协作系统。本地优先，一行命令安装。
+  A native task board and multi-Agent collaboration system that runs inside the Codex app. Local-first, one-command install.
 </p>
 
 <p align="center">
@@ -20,128 +20,128 @@
 </p>
 
 <p align="center">
-  简体中文 · <a href="README.en.md">English</a>
+  <a href="README.zh.md">简体中文</a> · English
 </p>
 
 <p align="center">
-  <img src="assets/better-codex-board-zh.png" width="1200" alt="Codex Desktop 中的 Better Codex 任务看板" />
+  <img src="assets/better-codex-board-en.png" width="1200" alt="Better Codex task board inside Codex Desktop" />
 </p>
 
-## 为什么会有这个项目
+## Why this exists
 
-如果你是 Codex 的重度用户，下面这些场景你多半不陌生：
+If you use Codex heavily, some of this probably sounds familiar:
 
-- **会话列表杂乱难找。**<br>
-  几十上百个对话堆在一起，标题大同小异，也没法按项目归类。想找回"上次调 auth 那个会话"，只能一边滚动一边靠猜。
+- **Your session list is a graveyard.**<br>
+  Dozens (hundreds?) of conversations, all titled roughly the same, none of them grouped by what you were actually working on. Finding "that thread where we debugged the auth flow" means scrolling and guessing.
 
-- **所有会话共用一套模型配置。**<br>
-  为了一个复杂重构调高推理等级，之后每个新会话都跟着买单；为了快速问答换了个轻量模型，下次深度排查开局就先天不足。全局只有这一个旋钮，所有任务都在抢它。
+- **One model config rules everything.**<br>
+  You bump the reasoning level for a hard refactor, and now every new session pays for it. You tune the model for quick Q&A, and your next deep debugging session starts underpowered. There's one global dial, and every task fights over it.
 
-- **想法没有地方放。**<br>
-  聊着聊着又想到三件值得做的事，但 Codex 没有任何地方能记下它们，最后要么丢进备忘录，要么写成 TODO 注释，要么干脆忘了。那些"本来打算做的事"就这么悄悄蒸发了。
+- **Ideas have nowhere to live.**<br>
+  Mid-conversation, you think of three more things worth doing. Codex gives you no place to put them, so they end up in a notes app, a TODO comment, or nowhere. The work you *meant* to do quietly evaporates.
 
-- **Codex 长成了聊天的样子，但你的工作不是。**<br>
-  真实的工作是一个跨越好几天、横跨好多会话的项目。Codex 只递给你一堆聊天记录，剩下的自求多福。
+- **Codex is conversation-shaped, but your work isn't.**<br>
+  Real work is a project that spans days and many threads. Codex hands you a chat log and wishes you luck.
 
-这些都不是模型的问题，模型很强。缺的是模型之上的那一层**工作系统**。所以我们动手做了一款更好的 Codex：Better Codex。
+None of this is the model's fault. The model is great. What's missing is a **work layer** on top of it. So we built a better Codex, literally Better Codex.
 
-## 你会得到什么
+## What you get
 
-**会话随时找得回来。**<br>
-把对话收进任务，按项目、状态和负责人整理。再次打开任务，就能回到关联会话。
+**Find any conversation again.**<br>
+Turn conversations into tasks and organize them by project, status, and owner. Open a task to return to its linked conversation.
 
-**想法先放进待办池。**<br>
-聊天中冒出的新任务随手记下，之后继续推进。
+**Capture ideas before they disappear.**<br>
+Add new tasks as they come up, then get back to your current work.
 
-**任务进度一眼可见。**<br>
-任务可以交给自己或 Agent，手动运行或自动排队。需要审核、决策或解除阻塞时，它会回到你的看板。
+**See task progress at a glance.**<br>
+Assign work to yourself or an Agent, then run it manually or automatically. Tasks return to your board when they need review, a decision, or unblocking.
 
-**每个 Agent 单独配置。**<br>
-模型、推理等级、权限、指令和并发上限都能按角色设置。
+**Configure each Agent separately.**<br>
+Set the model, reasoning level, permissions, instructions, and concurrency limit for each role.
 
 <p align="center">
-  <img src="assets/better-codex-agents-zh.png" width="1200" alt="Better Codex 中可复用的智能体配置" />
+  <img src="assets/better-codex-agents-en.png" width="1200" alt="Reusable Agent profiles inside Better Codex" />
 </p>
 
-## 谁适合用
+## Who it's for
 
-Better Codex 适用于各种角色。只要你的工作会在 Codex 里持续多个会话，又需要跟踪进度、审核结果或反复修改，就可以放进同一套任务流程。
+Better Codex works across many roles. If your work spans several Codex conversations and needs progress tracking, review, or repeated revisions, it can fit the same task workflow.
 
-- **开发者。** 按项目管理需求、Bug、重构和发布检查。每个任务都能关联原始会话，进度、执行结果和待审核事项集中在看板里。
-- **一人公司。** 把产品想法、用户反馈、运营事项和内容计划放在同一个看板里。调研、起草和检查可以交给不同的 Agent，关键决定仍由你完成。
-- **自媒体工作者。** 用待规划区保存选题，再按调研、提纲、初稿和修改安排任务。每篇内容都能关联原始会话，隔几天回来也知道写到哪里。
-- **产品经理。** 分开管理需求、用户反馈、竞品调研、Bug 和发布检查。讨论过程保留在关联会话里，看板负责显示下一步和当前负责人。
-- **销售。** 整理公开的客户背景资料、拜访准备、方案草稿和跟进事项。可以按客户或机会建立项目，避免调研结果和待办散落在不同会话中。
-- **办公室文员。** 管理会议纪要、通知草稿、报告整理、表格处理和周期性行政事项。把需要 Codex 协助的工作逐项交给 Agent，完成后集中检查。
+- **Developers.** Manage requirements, bugs, refactors, and release checks by project. Each task can stay linked to its original conversation, with progress, results, and pending reviews collected on the board.
+- **Solo companies.** Keep product ideas, customer feedback, operations, and content plans on one board. Give research, drafting, and checking to different Agents while keeping final decisions with you.
+- **Content creators.** Save ideas in the backlog, then organize research, outlines, drafts, and revisions as tasks. Each piece can stay linked to its original conversation, so you know where to continue when you come back later.
+- **Product managers.** Manage requirements, user feedback, competitor research, bugs, and release checks separately. Linked conversations preserve the discussion, while the board shows the next step and current owner.
+- **Sales professionals.** Organize public account research, meeting preparation, proposal drafts, and follow-up tasks. Create a project for each account or opportunity instead of scattering research and next steps across conversations.
+- **Office staff.** Track meeting notes, announcement drafts, report preparation, spreadsheet work, and recurring administrative tasks. Give each Codex-assisted task to an Agent, then review the results in one place.
 
-## 用起来是什么样
+## A day with Better Codex
 
-1. 从 Codex 侧边栏打开 `任务看板` 管理任务，或打开 `智能体` 配置智能体。
-2. 创建项目，手动添加任务，或者直接把当前对话收进任务。
-3. 把任务分配给自己、默认 Codex 智能体或某个自定义智能体。
-4. 想完全掌控就用手动运行；想持续推进就开自动运行。
-5. 在看板上跟踪进度。任务需要审核或决定时，会回到你手上。
-6. 打开任务查看关联会话、回复消息，或回到 Codex 继续工作。
+1. Open `Task board` from the Codex sidebar to manage work, or `Agents` to configure Agent profiles.
+2. Create a project and capture a task, manually or straight from the conversation you're in.
+3. Assign it to yourself, the default Codex profile, or one of your Agent profiles.
+4. Keep manual mode for full control, or enable automatic mode and let ready Agent-owned tasks run.
+5. Watch the board. When a task needs review or a decision, it comes back to you.
+6. Open the task to read its linked conversation, send a reply, or continue in Codex.
 
-同一套流程可以用于编程、调研、写作、文档整理，所有你已经在 Codex 里做的事。
+The same loop works for coding, research, writing, document prep, and anything you already do in Codex.
 
-## 安装方法
+## Installation
 
-macOS：
+macOS:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scripts/install.sh | bash
 ```
 
-Windows（PowerShell）：
+Windows (PowerShell):
 
 ```powershell
 irm https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scripts/install.ps1 | iex
 ```
 
-安装脚本会同时安装 CLI、Skill、本地运行时和系统启动入口，并在 Codex 中注册 `better-codex` MCP。MCP 只在本机运行，用来提供 Better Codex 应用入口和路由；项目、任务和会话数据仍保存在本地数据库中。
+The installer adds the CLI, Skill, local runtime, and system launcher, then registers the `better-codex` MCP server with Codex. The MCP server runs only on your computer and provides the Better Codex app entry and route. Projects, tasks, and conversation data remain in the local database.
 
-从 Better Codex 启动入口重启 Codex，侧边栏会出现 `任务看板` 和 `智能体` 两个入口。完全卸载可运行 `better-codex uninstall`。
+Restart Codex from the Better Codex launcher, and `Task board` and `Agents` appear as two entries in your sidebar. Run `better-codex uninstall` to remove Better Codex completely.
 
-## 常见问题
+## FAQ
 
-**这是 OpenAI 官方产品吗？**<br>
-不是。Better Codex 是一个独立的开源项目，基于 Codex Desktop 二次开发，与 OpenAI 没有隶属或背书关系。
+**Is this an official OpenAI product?**<br>
+No. Better Codex is an independent open-source project built on top of Codex Desktop. It is not affiliated with or endorsed by OpenAI.
 
-**我的数据会去哪里？**<br>
-哪儿也不去。项目、任务、分配关系和运行状态全部保存在本机 SQLite 数据库（macOS 在 `~/.better-codex/better-codex.db`，Windows 在 `%USERPROFILE%\.better-codex\better-codex.db`）。运行时只监听 `127.0.0.1`，没有云端服务，也不需要账号。
+**Where does my data go?**<br>
+Nowhere. Projects, tasks, assignments, and run state live in a local SQLite database (`~/.better-codex/better-codex.db` on macOS, `%USERPROFILE%\.better-codex\better-codex.db` on Windows). The runtime listens on `127.0.0.1` only. There is no Better Codex cloud service and no account.
 
-**为什么需要注册 MCP？**<br>
-Codex 通过本地 MCP 应用识别 Better Codex 的应用入口和路由，让任务看板可以进入 Codex 的导航流程，而不是覆盖在最后访问的会话页面上。MCP 通过本机 stdio 运行，不是云端服务，也不会上传任务数据。
+**Why does Better Codex register an MCP server?**<br>
+Codex uses the local MCP app to recognize the Better Codex app entry and route. This puts the task board into the Codex navigation flow instead of placing it over the last conversation route. The MCP server runs locally over stdio. It is not a cloud service and does not upload task data.
 
-**它会搞坏我的 Codex 吗？**<br>
-应用入口和路由通过本地 MCP 注册，页面集成使用桌面应用的本地 CDP 接口和页面结构，不修改 Codex 的二进制文件。Codex 更新后偶尔需要安装对应的兼容性更新，届时 Codex 内会出现提示。感觉哪里不对时，运行 `better-codex doctor` 检查。
+**Will it break my Codex?**<br>
+The app entry and route are registered through the local MCP server. The page integration uses the desktop app's local CDP interface and page structure. It doesn't patch Codex binaries. A Codex update can occasionally require a matching Better Codex compatibility update; when that happens, an update notice appears inside Codex. If anything looks off, run `better-codex doctor`.
 
-**怎么关闭或卸载？**<br>
-`better-codex eject` 只关闭页面集成，任务数据和安装组件会保留。`better-codex uninstall` 会删除 MCP、后台服务、启动入口、Skill、Agent 配置、本地数据和独立安装的 CLI。
+**How do I disable or uninstall it?**<br>
+`better-codex eject` disables the page integration but keeps your task data and installed components. `better-codex uninstall` removes the MCP server, background service, launcher, Skill, Agent profiles, local data, and standalone CLI.
 
-**更新怎么做？**<br>
-Better Codex 会在后台检查带签名的更新清单，发现新版本时在 Codex 内提示。你也可以随时重新运行安装命令，它会优先原地升级。
+**How do updates work?**<br>
+Better Codex checks a signed update manifest in the background and shows a notice inside Codex when a new version is available. You can also rerun the install command at any time. It upgrades in place when possible.
 
-**支持哪些平台？**<br>
-macOS 版 Codex Desktop（Apple Silicon 和 Intel），以及 Windows x64 上 Microsoft Store 版本的 Codex。Release 安装包和 CI 覆盖全部三个平台。
+**Which platforms are supported?**<br>
+Codex Desktop on macOS (Apple Silicon and Intel) and the Microsoft Store version of Codex on Windows x64. Release packages and CI cover all three.
 
-## 常用命令
+## Useful commands
 
 ```bash
-better-codex doctor            # 检查 MCP、运行时、数据库、Codex 兼容性和注入状态
-better-codex status            # 查看当前服务与看板连接
-better-codex mcp status        # 检查 MCP 注册状态
-better-codex mcp install       # 注册或修复 MCP
-better-codex launcher install  # 安装系统启动入口
-better-codex launcher status   # 检查系统启动入口
-better-codex eject             # 移除侧边栏集成，保留任务数据
-better-codex uninstall         # 完全卸载并删除本地数据
+better-codex doctor            # check MCP, runtime, database, Codex compatibility, injection state
+better-codex status            # show the current service and board connection
+better-codex mcp status        # inspect the MCP registration
+better-codex mcp install       # register or repair the MCP server
+better-codex launcher install  # install the system launcher
+better-codex launcher status   # inspect the system launcher
+better-codex eject             # remove the sidebar integration, keep task data
+better-codex uninstall         # uninstall completely and delete local data
 ```
 
-## 从源码安装
+## Install from source
 
-需要 Node.js 22.5 或更新版本。
+Requires Node.js 22.5 or later.
 
 ```bash
 git clone https://github.com/Ericwong5021/better-codex.git
@@ -154,9 +154,10 @@ better-codex inject --launch
 better-codex launcher install
 ```
 
-## 社区
+## Community
 
-- 发现 Bug 或想要新功能？提交 [GitHub Issue](https://github.com/Ericwong5021/better-codex/issues)。
-- 使用问题和工作流想法欢迎到 [GitHub Discussions](https://github.com/Ericwong5021/better-codex/discussions) 交流。
+- Found a bug or want a feature? Open a [GitHub Issue](https://github.com/Ericwong5021/better-codex/issues).
+- Questions and workflow ideas belong in [GitHub Discussions](https://github.com/Ericwong5021/better-codex/discussions).
+- Please use English in public GitHub conversations so everyone can follow them.
 
-如果 Better Codex 让你的 Codex 变得更好用，点个 Star 能帮更多重度用户找到它。
+If Better Codex makes your Codex better, a star helps other heavy users find it.

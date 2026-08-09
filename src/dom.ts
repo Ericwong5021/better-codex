@@ -3148,7 +3148,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           || (state.view === "agent" && Boolean(issue.agent_enabled));
         return matchesView && issueMatchesFilters(issue);
       });
-      const project = state.projects.find(item => item.id === state.projectId);
       const board = panel.querySelector("#better-codex-board");
       if (!visible.length && !state.search && filterCount === 0 && state.view === "all") {
         board.innerHTML = '<section class="better-codex-board-empty"><h2>' + te("创建第一个任务") + '</h2><p>' + te("写下要完成的事，交给智能体处理。") + '</p><button type="button" data-add-status="todo">' + icon("plus") + '<span>' + te("新建任务") + '</span></button></section>';
@@ -3180,7 +3179,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             ? '<span class="better-codex-activity" data-run="' + escapeHtml(activityState) + '">' + activityIcon + '<span class="' + (enrichmentLocked || executionRunning ? "better-codex-shimmer" : "") + '">' + activityLabel + '</span></span>'
             : "";
           const description = mockupText(issue.description).replace(/[#*_\`~>\[\]()]/g, "").replace(/\s+/g, " ").trim();
-          const issueProject = state.projects.find(item => item.id === issue.project_id) || project;
+          const issueProject = state.projects.find(item => item.id === issue.project_id);
           const projectChip = projectLabel(issueProject)
             ? '<span class="better-codex-chip">' + icon("folder") + '<span>' + escapeHtml(projectLabel(issueProject)) + '</span></span>'
             : "";
@@ -3430,8 +3429,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (issue) issue = await api("/api/issues/" + encodeURIComponent(issue.id));
       state.selected = issue;
       document.getElementById("better-codex-dialog")?.remove();
-      const context = readContext();
-      const project = state.projects.find(item => item.id === state.projectId);
       const cachedCreateDraft = issue ? null : readCreateDraft();
       const draft = {
         mode: issue ? "manual" : cachedCreateDraft?.mode || state.createMode,
@@ -3684,6 +3681,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       }
 
       function header() {
+        const breadcrumbProject = state.projects.find(item => item.id === draft.projectId);
         const openThreadButton = issue && (sessionId || executionRunning) && !enrichmentLocked
           ? '<button class="better-codex-dialog-open-thread' + (executionRunning && !sessionHandoff ? ' is-running' : '') + '" type="button" data-dialog-open-thread="' + escapeHtml(sessionId) + '" data-dialog-open-thread-running="' + String(executionRunning && !sessionHandoff) + '">' + te(sessionHandoff ? "前往会话" : executionRunning ? "任务正在进行中" : "在会话中打开") + '</button>'
           : "";
@@ -3692,7 +3690,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           : "";
         const title = draft.mode === "agent" ? t("通过智能体创建") : issue ? escapeHtml(issue.identifier) : t("手动创建");
         const crumb = issue
-          ? '<span>' + escapeHtml(projectLabel(project) || "Better Codex") + '</span><span aria-hidden="true">' + icon("chevron") + '</span><strong>' + title + '</strong>'
+          ? '<span data-dialog-breadcrumb-project>' + escapeHtml(projectLabel(breadcrumbProject) || t("未提供")) + '</span><span aria-hidden="true">' + icon("chevron") + '</span><strong>' + title + '</strong>'
           : '<strong>' + title + '</strong>';
         return '<div class="better-codex-dialog-head"><div class="better-codex-dialog-breadcrumb">' + crumb + '</div><div class="better-codex-dialog-head-actions">' + openThreadButton + startNowButton + '<button class="better-codex-icon-button" type="button" data-dialog-expand aria-label="' + te(draft.expanded ? "缩小" : "展开") + '">' + icon(draft.expanded ? "shrink" : "expand") + '</button><button class="better-codex-icon-button" type="button" data-dialog-close aria-label="' + te("关闭") + '">' + icon("close") + '</button></div></div>';
       }
@@ -4264,6 +4262,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           dirtyDraftFields.add("project_id");
           const selectedProject = state.projects.find(item => item.id === draft.projectId);
           dialog.querySelector("[data-project-label]").textContent = projectLabel(selectedProject) || t("选择项目");
+          const breadcrumbProject = dialog.querySelector("[data-dialog-breadcrumb-project]");
+          if (breadcrumbProject) breadcrumbProject.textContent = projectLabel(selectedProject) || t("未提供");
           dialog.querySelectorAll("[data-dialog-project-option]").forEach(item => { item.querySelector(".better-codex-project-check").innerHTML = item.dataset.dialogProjectOption === draft.projectId ? icon("check") : ""; });
           projectMenu.hidden = true;
           if (projectDismiss) document.removeEventListener("pointerdown", projectDismiss, true);

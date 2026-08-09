@@ -4642,6 +4642,11 @@ export function betterCodexDesignSystemCss() {
       padding-inline: calc(var(--bc-text-base) * 0.75);
     }
 
+    #better-codex-dialog [data-dialog-project] [data-project-label] {
+      color: var(--bc-color-text);
+      font-weight: 700;
+    }
+
     #better-codex-dialog .better-codex-property svg,
     #better-codex-dialog .better-codex-status-icon,
     #better-codex-dialog .better-codex-priority {

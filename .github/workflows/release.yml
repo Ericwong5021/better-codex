@@ -9,7 +9,55 @@ permissions:
   contents: write
 
 jobs:
+  validate-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.0
+      - name: Validate release version and changelog
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          expected_tag="v$version"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            printf 'Package version %s is not a release version.\n' "$version" >&2
+            exit 1
+          fi
+          if [ "$GITHUB_REF_NAME" != "$expected_tag" ]; then
+            printf 'Release tag %s does not match package version %s.\n' "$GITHUB_REF_NAME" "$version" >&2
+            exit 1
+          fi
+          escaped_version="${version//./\\.}"
+          heading_count="$(grep -Ec "^## \\[$escaped_version\\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$" CHANGELOG.md || true)"
+          if [ "$heading_count" != "1" ]; then
+            printf 'CHANGELOG.md must contain exactly one dated section for version %s.\n' "$version" >&2
+            exit 1
+          fi
+          entry_count="$(awk -v heading="## [$version] - " '
+            index($0, heading) == 1 { inside = 1; next }
+            inside && /^## \[/ { exit }
+            inside && /^- / { count += 1 }
+            END { print count + 0 }
+          ' CHANGELOG.md)"
+          if [ "$entry_count" -lt "1" ]; then
+            printf 'CHANGELOG.md must contain at least one change for version %s.\n' "$version" >&2
+            exit 1
+          fi
+          link_count="$(grep -Fc "[$version]:" CHANGELOG.md || true)"
+          if [ "$link_count" != "1" ]; then
+            printf 'CHANGELOG.md must contain exactly one link for version %s.\n' "$version" >&2
+            exit 1
+          fi
+          if ! grep -Fq "compare/$expected_tag...HEAD" CHANGELOG.md; then
+            printf 'The Unreleased changelog link must start after %s.\n' "$expected_tag" >&2
+            exit 1
+          fi
+
   package:
+    needs: validate-release
     strategy:
       matrix:
         runner:
@@ -24,10 +72,6 @@ jobs:
           node-version: 22.22.0
           cache: npm
       - run: npm ci
-      - run: |
-          version="$(node -p "require('./package.json').version")"
-          test "v$version" = "$GITHUB_REF_NAME"
-        shell: bash
       - run: npm run build
       - run: npm test
       - run: npm run package:binary
