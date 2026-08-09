@@ -1,5 +1,5 @@
 import { activeCompatibility, coreVersion } from "./compatibility.js";
-import { betterCodexLogoPng } from "./brand-assets.js";
+import { betterCodexBrandLogoPng, betterCodexLogoPng } from "./brand-assets.js";
 import { betterCodexDesignSystemCss } from "./design-system.js";
 import { renderMarkdown } from "./markdown.js";
 import { betterCodexMcpRoute } from "./mcp-app.js";
@@ -246,6 +246,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
   const baseUrl = JSON.stringify(`http://127.0.0.1:${port}`);
   const bridgeToken = JSON.stringify(accessToken);
   const betterCodexLogoUrl = `data:image/png;base64,${betterCodexLogoPng().toString("base64")}`;
+  const betterCodexBrandLogoUrl = `data:image/png;base64,${betterCodexBrandLogoPng().toString("base64")}`;
   const helpModeMarkdown = JSON.stringify({
     "zh-CN": {
       manual: renderMarkdown("点击 {{start}}，或者在已完成的会话卡片中 {{send}} 新消息，智能体才会执行任务。"),
@@ -278,6 +279,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const BASE_URL = ${baseUrl};
     const BRIDGE_TOKEN = ${bridgeToken};
     const BETTER_CODEX_LOGO_URL = ${JSON.stringify(betterCodexLogoUrl)};
+    const BETTER_CODEX_BRAND_LOGO_URL = ${JSON.stringify(betterCodexBrandLogoUrl)};
     const INITIAL_LOCALE = ${JSON.stringify(locale)};
     const SELECTORS = ${JSON.stringify(compatibility.selectors)};
     const ATTRIBUTES = ${JSON.stringify(compatibility.attributes)};
@@ -300,7 +302,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const rememberedLanguage = localStorage.getItem(LANGUAGE_KEY);
     const languageSetting = ["system", "zh-CN", "en"].includes(rememberedLanguage) ? rememberedLanguage : "system";
     function resolveSystemLocale(fallback) {
-      const locale = String(document.documentElement.lang || navigator.language || fallback || "").trim().toLowerCase().replace(/_/g, "-");
+      const locale = String(fallback || document.documentElement.lang || navigator.language || "").trim().toLowerCase().replace(/_/g, "-");
       return ["zh-cn", "zh-hans", "zh-hans-cn"].includes(locale) ? "zh-CN" : "en";
     }
     const systemLocale = resolveSystemLocale(INITIAL_LOCALE);
@@ -454,6 +456,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     let draggingIssueId = "";
     let codexLogoSequence = 0;
     let active = false;
+    let bootstrapReady = false;
     let routeSeen = false;
     let routeSuppressed = false;
     let destroyed = false;
@@ -518,7 +521,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     function mockupText(value) {
       const source = String(value ?? "");
-      return state.mockup ? t(source) : source;
+      return source;
     }
 
     function projectLabel(project) {
@@ -699,7 +702,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #better-codex-context-menu .better-codex-context-tag[data-tone="reasoning"] { color: #198754; background: #eaf7ef; }
         #\${PANEL_ID} .better-codex-board { display: flex; gap: 12px; min-height: 0; flex: 1; overflow-x: auto; overflow-y: hidden; padding: 0 16px 10px; }
         #\${PANEL_ID} .better-codex-column { box-sizing: border-box; display: flex; width: 280px; min-width: 280px; min-height: 200px; flex-direction: column; border-radius: 12px; padding: 8px; }
-        #\${PANEL_ID}[data-mockup="true"] .better-codex-column { width: auto; max-width: 420px; flex: 1 0 280px; }
         #\${PANEL_ID} .better-codex-column[data-status="backlog"], #\${PANEL_ID} .better-codex-column[data-status="todo"], #\${PANEL_ID} .better-codex-column[data-status="archive"] { background: rgba(228,228,231,.42); }
         #\${PANEL_ID} .better-codex-column[data-status="in_progress"] { background: rgba(245,181,45,.07); }
         #\${PANEL_ID} .better-codex-column[data-status="in_review"] { background: rgba(46,156,90,.07); }
@@ -1112,6 +1114,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     function api(path, options = {}) {
       if (typeof window.betterCodexRequest !== "function") return Promise.reject(new Error("runtime_bridge_unavailable"));
+      const requestPath = path + (path.includes("?") ? "&" : "?") + "locale=" + encodeURIComponent(state.locale);
       const attempt = (retriesLeft) => {
         const id = VERSION + ":" + (++bridgeSequence);
         return new Promise((resolve, reject) => {
@@ -1121,7 +1124,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           }, 10000);
           bridgeRequests.set(id, { resolve, reject, timer });
           try {
-            window.betterCodexRequest(JSON.stringify({ id, token: BRIDGE_TOKEN, path, method: options.method || "GET", body: options.body }));
+            window.betterCodexRequest(JSON.stringify({ id, token: BRIDGE_TOKEN, path: requestPath, method: options.method || "GET", body: options.body }));
           } catch (error) {
             bridgeRequests.delete(id);
             clearTimeout(timer);
@@ -1658,7 +1661,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function betterCodexLogo() {
-      return '<img src="' + BETTER_CODEX_LOGO_URL + '" alt="Better Codex">';
+      return '<img src="' + BETTER_CODEX_BRAND_LOGO_URL + '" alt="Better Codex">';
     }
 
     function githubLogo() {
@@ -1917,7 +1920,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const contextLockClass = permissions.contextLocked ? " is-disabled" : "";
       const archiveLockAttrs = permissions.archiveLocked ? ' disabled aria-disabled="true"' : "";
       const statusItems = Object.entries(statusLabels).map(([value, text]) => '<button class="better-codex-context-item" type="button"' + contextLockAttrs + ' data-context-action="update" data-context-field="status" data-context-value="' + value + '"><span class="better-codex-context-check">' + (issue.status === value ? icon("check") : "") + '</span>' + statusIcon(value) + '<span>' + escapeHtml(t(text)) + "</span></button>").join("");
-      const runStatusItems = Object.entries(mockupRunStatusLabels).map(([value, text]) => '<button class="better-codex-context-item" type="button" data-context-action="update" data-context-field="mockup_run_status" data-context-value="' + value + '"><span class="better-codex-context-check">' + (issue.mockup_run_status === value ? icon("check") : "") + '</span>' + mockupRunStatusIcon(value) + '<span>' + escapeHtml(t(text)) + "</span></button>").join("");
       const priorityItems = Object.entries(priorityLabels).map(([value, text]) => '<button class="better-codex-context-item" type="button"' + contextLockAttrs + ' data-context-action="update" data-context-field="priority" data-context-value="' + value + '"><span class="better-codex-context-check">' + (issue.priority === value ? icon("check") : "") + '</span>' + priorityIcon(value) + '<span>' + escapeHtml(t(value === "none" ? "无优先级" : text + "优先级")) + "</span></button>").join("");
       const userSelected = Boolean(issue.user_assigned) && !issue.agent_enabled;
       const noneSelected = !issue.user_assigned && !issue.agent_enabled;
@@ -1939,9 +1941,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       menu.setAttribute(OWNED, "true");
       menu.dataset.issueId = issue.id;
       menu.dataset.align = event.clientX + 430 > window.innerWidth ? "left" : "right";
-      const duplicateItem = state.mockup ? '<div class="better-codex-context-divider"></div><button class="better-codex-context-item" type="button" data-context-action="duplicate">' + icon("plus") + '<span>' + escapeHtml(t("复制卡片")) + '</span></button>' : "";
-      const runStatusMenu = state.mockup ? '<div class="better-codex-context-item-wrap"><button class="better-codex-context-item" type="button">' + mockupRunStatusIcon(issue.mockup_run_status) + '<span>' + escapeHtml(t("运行状态")) + '</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu">' + runStatusItems + '</div></div>' : "";
-      menu.innerHTML = '<div class="better-codex-context-item-wrap' + contextLockClass + '"><button class="better-codex-context-item" type="button"' + contextLockAttrs + '>' + statusIcon(issue.status) + '<span>' + escapeHtml(t("状态")) + '</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu">' + statusItems + '</div></div>' + runStatusMenu + '<div class="better-codex-context-item-wrap' + contextLockClass + '"><button class="better-codex-context-item" type="button"' + contextLockAttrs + '>' + priorityIcon(issue.priority) + '<span>' + escapeHtml(t("优先级")) + '</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu">' + priorityItems + '</div></div><div class="better-codex-context-item-wrap' + contextLockClass + '"><button class="better-codex-context-item" type="button"' + contextLockAttrs + '>' + icon("user") + '<span>' + escapeHtml(t("指定负责人")) + '</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu is-assignee">' + assigneeItems + '</div></div>' + (workspacePath ? '<div class="better-codex-context-divider"></div><button class="better-codex-context-item" type="button" data-context-action="copy-workspace">' + icon("folder") + '<span>' + escapeHtml(t("复制本地 workdir 路径")) + '</span></button>' : "") + duplicateItem + '<div class="better-codex-context-divider"></div><button class="better-codex-context-item is-danger" type="button"' + archiveLockAttrs + ' data-context-action="archive">' + icon("trash") + '<span>' + escapeHtml(t("删除任务")) + '</span></button>';
+      menu.innerHTML = '<div class="better-codex-context-item-wrap' + contextLockClass + '"><button class="better-codex-context-item" type="button"' + contextLockAttrs + '>' + statusIcon(issue.status) + '<span>' + escapeHtml(t("状态")) + '</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu">' + statusItems + '</div></div><div class="better-codex-context-item-wrap' + contextLockClass + '"><button class="better-codex-context-item" type="button"' + contextLockAttrs + '>' + priorityIcon(issue.priority) + '<span>' + escapeHtml(t("优先级")) + '</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu">' + priorityItems + '</div></div><div class="better-codex-context-item-wrap' + contextLockClass + '"><button class="better-codex-context-item" type="button"' + contextLockAttrs + '>' + icon("user") + '<span>' + escapeHtml(t("指定负责人")) + '</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu is-assignee">' + assigneeItems + '</div></div>' + (workspacePath ? '<div class="better-codex-context-divider"></div><button class="better-codex-context-item" type="button" data-context-action="copy-workspace">' + icon("folder") + '<span>' + escapeHtml(t("复制本地 workdir 路径")) + '</span></button>' : "") + '<div class="better-codex-context-divider"></div><button class="better-codex-context-item is-danger" type="button"' + archiveLockAttrs + ' data-context-action="archive">' + icon("trash") + '<span>' + escapeHtml(t("删除任务")) + '</span></button>';
       document.body.appendChild(menu);
       const rect = menu.getBoundingClientRect();
       menu.style.left = Math.max(8, Math.min(event.clientX, window.innerWidth - rect.width - 8)) + "px";
@@ -2573,7 +2573,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const key = agentKey(agent);
         const avatar = agentAvatarMarkup(agent, "better-codex-agent-list-avatar");
         const meta = modelLabel(agent.model) + " · " + effortLabel(agent.reasoning_effort) + (state.locale === "zh-CN" ? "推理" : " reasoning");
-        const description = agent.description || (agent.is_default ? "" : t("尚未添加介绍"));
+        const description = state.mockup && agent.is_default ? "" : agent.description || (agent.is_default ? "" : t("尚未添加介绍"));
         return '<button class="better-codex-agent-row' + (key === state.selectedAgentId ? " is-selected" : "") + '" type="button" data-agent-key="' + escapeHtml(key) + '">' + avatar + '<span class="better-codex-agent-row-copy"><strong>' + escapeHtml(agent.name) + (agent.is_default ? '<small>' + te("默认") + '</small>' : "") + '</strong>' + (description ? '<span>' + escapeHtml(description) + '</span>' : '') + '<em>' + escapeHtml(meta) + '</em></span><span class="better-codex-agent-row-chevron">' + icon("chevron") + '</span></button>';
       }).join("");
       const empty = '<div class="better-codex-agent-list-empty">' + te(query ? "没有匹配的智能体" : "此分类暂无智能体") + '</div>';
@@ -2592,9 +2592,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       dialog.setAttribute(OWNED, "true");
       const completionEnabled = !completionNoticeSuppressed();
       const completionDuration = completionNoticeDuration();
-      const mockupTools = state.mockup
-        ? '<div class="better-codex-help-mockup"><button type="button" data-mockup-menu-toggle aria-haspopup="menu" aria-expanded="false">' + icon("test") + '<span>' + te("展示模式") + '</span>' + icon("chevronDown") + '</button><div class="better-codex-help-mockup-menu" role="menu" hidden><button type="button" role="menuitem" data-mockup-export>' + te("导出展示数据") + '</button><button type="button" role="menuitem" data-mockup-import>' + te("导入展示数据") + '</button><button type="button" role="menuitem" data-mockup-reset>' + te("重置布局") + '</button><input type="file" accept="application/json,.json" data-mockup-import-input hidden></div></div>'
-        : "";
+      const mockupTools = "";
       const modeDescription = markdown => '<div class="better-codex-help-mode-markdown">' + markdown
         .replace("{{start}}", '<span class="better-codex-help-inline-control is-start">' + te("立即开始任务") + '</span>')
         .replace("{{send}}", '<span class="better-codex-help-inline-control is-send">' + te("发送") + '</span>')
@@ -2624,7 +2622,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         '<div class="better-codex-auto-dispatch-help-divider" aria-hidden="true"></div>',
         '<article class="better-codex-auto-dispatch-help-panel is-auto"><div class="better-codex-auto-dispatch-help-heading">' + icon("refresh") + "<h3>" + te("自动运行") + "</h3></div>" + modeDescription(helpMode.auto) + "</article></div></section>",
         settingsPage,
-        '<section class="better-codex-help-page" data-help-page="about" hidden><div class="better-codex-help-about"><span class="better-codex-help-about-logo">' + betterCodexLogo() + '</span><div><h2>Better Codex</h2><p class="better-codex-help-about-slogan">' + te("从开始到完成，让 Codex 里的工作清晰可见。") + '</p></div><span class="better-codex-help-runtime-status"><span class="better-codex-help-status-dot"></span>' + te("运行正常") + '</span></div><dl class="better-codex-help-about-details"><div><dt>' + te("版本信息") + '</dt><dd><button class="better-codex-help-check-update" type="button" data-check-update>' + te("检查新版本") + '</button><span data-product-core></span></dd></div></dl><div class="better-codex-help-github-row"><a class="better-codex-help-github" href="https://github.com/Ericwong5021/better-codex" target="_blank" rel="noreferrer">' + githubLogo() + '<span class="better-codex-help-github-name">Better Codex</span><span class="better-codex-help-github-stars">' + icon("star", "better-codex-help-star") + '</span></a><p>' + te("如果你喜欢 Better Codex，欢迎给我们一个 Star。") + '</p></div></section>',
+        '<section class="better-codex-help-page" data-help-page="about" hidden><div class="better-codex-help-about"><span class="better-codex-help-about-logo">' + betterCodexLogo() + '</span><div><h2 class="better-codex-help-about-brand"><span class="better-codex-help-about-brand-better">better</span><span>Codex</span></h2><p class="better-codex-help-about-slogan">' + te("从开始到完成，让 Codex 里的工作清晰可见。") + '</p></div><span class="better-codex-help-runtime-status"><span class="better-codex-help-status-dot"></span>' + te("运行正常") + '</span></div><dl class="better-codex-help-about-details"><div><dt>' + te("版本信息") + '</dt><dd><button class="better-codex-help-check-update" type="button" data-check-update>' + te("检查新版本") + '</button><span data-product-core></span></dd></div></dl><div class="better-codex-help-github-row"><a class="better-codex-help-github" href="https://github.com/Ericwong5021/better-codex" target="_blank" rel="noreferrer">' + githubLogo() + '<span class="better-codex-help-github-name">Better Codex</span><span class="better-codex-help-github-stars">' + icon("star", "better-codex-help-star") + '</span></a><p>' + te("如果你喜欢 Better Codex，欢迎给我们一个 Star。") + '</p></div></section>',
         "</main>",
         "</div>",
       ].join("");
@@ -2698,8 +2696,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         panel = null;
         ensureEntry();
         mountPanel();
-        render();
-        showAutoDispatchHelp("settings");
+        if (!state.mockup) {
+          render();
+          showAutoDispatchHelp("settings");
+          return;
+        }
+        state.issues = [];
+        state.agents = [];
+        void load().then(() => showAutoDispatchHelp("settings")).catch(() => render());
       }));
       const completionToggle = dialog.querySelector("[data-setting-completion]");
       const completionDurationSelect = dialog.querySelector("[data-setting-completion-duration]");
@@ -3010,7 +3014,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     async function loadSurface(options = {}) {
-      if (state.surface === "agents") await Promise.all([loadAgents(options), loadIssues(options)]);
+      if (state.surface === "agents") await loadAgents(options);
       else await loadIssues(options);
     }
 
@@ -3031,6 +3035,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         state.autoDispatch = Boolean(bootstrap.autoDispatch);
         state.schedulerModel = bootstrap.schedulerModel || state.agentModelCatalog.find(model => model.isDefault)?.id || state.agentModels[0] || "gpt-5.6-sol";
         state.schedulerReasoningEffort = bootstrap.schedulerReasoningEffort || "high";
+        bootstrapReady = true;
         syncAutoDispatch();
         if (state.mockup) {
           state.projectId = MOCKUP_PROJECT_ID;
@@ -3735,9 +3740,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (draft.mode === "agent") return '<div class="better-codex-dialog-properties">' + projectChip + '</div>';
         const statuses = Object.entries(statusLabels).map(([value, text]) => ({ value, label: t(text), visual: statusIcon(value) }));
         const priorities = Object.entries(priorityLabels).map(([value, text]) => ({ value, label: t(value === "none" ? "无优先级" : text + "优先级"), visual: priorityIcon(value) }));
-        const runStatuses = Object.entries(mockupRunStatusLabels).map(([value, text]) => ({ value, label: t(text), visual: mockupRunStatusIcon(value) }));
-        const runStatus = state.mockup ? dialogSelect("mockup_run_status", t("运行状态"), draft.runStatus, runStatuses, "is-run-status") : "";
-        return '<div class="better-codex-dialog-properties">' + dialogSelect("status", t("状态"), draft.status, statuses) + runStatus + dialogSelect("priority", t("优先级"), draft.priority, priorities) + '<label class="better-codex-property">' + icon("tag") + '<input name="labels" value="' + escapeHtml(draft.labels) + '" placeholder="' + te("添加标签") + '" aria-label="' + te("标签") + '"></label>' + projectChip + '</div>';
+        return '<div class="better-codex-dialog-properties">' + dialogSelect("status", t("状态"), draft.status, statuses) + dialogSelect("priority", t("优先级"), draft.priority, priorities) + '<label class="better-codex-property">' + icon("tag") + '<input name="labels" value="' + escapeHtml(draft.labels) + '" placeholder="' + te("添加标签") + '" aria-label="' + te("标签") + '"></label>' + projectChip + '</div>';
       }
 
       function attachmentPaths(items = draft.attachments) {
@@ -4460,13 +4463,15 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     function open(surface = state.surface) {
       if (destroyed) return;
+      const ready = bootstrapReady;
       routeSuppressed = false;
       state.surface = surface;
       sessionStorage.setItem(RESUME_SURFACE_KEY, surface);
       active = true;
       ensureEntry();
       mountPanel();
-      void load();
+      render();
+      void (ready ? loadSurface({ preserveInspector: true }) : load());
       if (pollTimer === null) pollTimer = setInterval(() => { if (active && !panel?.dataset.recovery) void perform(() => loadSurface({ background: true })); }, 3000);
     }
 

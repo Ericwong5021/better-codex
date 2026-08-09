@@ -17,7 +17,7 @@ import { getIssueReplyState, hasActiveIssueReplies, startIssueReply, stopIssueRe
 import { join } from "node:path";
 import { normalizeSessionId, readConversationActivity, readConversationResult, sessionWorkspace } from "./session-transcript.js";
 import { IssueWorker } from "./worker.js";
-import { maxMockupBytes, readMockupState, replaceMockupState, resetMockupState, updateMockupState } from "./mockup.js";
+import { maxMockupBytes, normalizeMockupLocale, readMockupState, replaceMockupState, resetMockupState, updateMockupState } from "./mockup.js";
 
 const accessToken = token();
 const mockupEnabled = !isSea() && process.argv.includes("--mockup");
@@ -314,6 +314,7 @@ export function startServer() {
       const url = new URL(request.url, "http://127.0.0.1");
       const path = url.pathname.split("/").filter(Boolean);
       const method = request.method ?? "GET";
+      const mockupLocale = normalizeMockupLocale(url.searchParams.get("locale"));
 
       if (method === "OPTIONS") return sendPreflight(response);
       if (url.pathname === "/health") {
@@ -331,28 +332,28 @@ export function startServer() {
         const agentModelCatalog = await readModelCatalog();
         const agentModels = agentModelCatalog.map(model => model.id);
         const agentReasoningEfforts = [...new Set(agentModelCatalog.flatMap(model => model.supportedReasoningEfforts.map(effort => effort.value)))];
-        const mockup = mockupEnabled ? readMockupState() : null;
+        const mockup = mockupEnabled ? readMockupState(mockupLocale) : null;
         return sendJson(response, 200, { projects: mockup ? mockup.projects : store.listProjects(), agents: mockup ? mockup.agents : visibleAgentProfiles(), statuses: issueStatuses, priorities: issuePriorities, appearance: readCodexAppearance(), locale: readCodexLocale(), user: readCodexUserProfile(), agentModelCatalog, agentModels, agentReasoningEfforts, autoDispatch: mockup ? mockup.auto_dispatch : store.getAutoDispatch(), schedulerModel: mockup ? mockup.scheduler_model : store.getSchedulerModel(defaultAgentProfile().model), schedulerReasoningEffort: mockup ? mockup.scheduler_reasoning_effort : store.getSchedulerReasoningEffort(), mockup: mockupEnabled });
       }
       if (mockupEnabled && url.pathname === "/api/mockup/state" && method === "GET") {
-        return sendJson(response, 200, readMockupState());
+        return sendJson(response, 200, readMockupState(mockupLocale));
       }
       if (mockupEnabled && url.pathname === "/api/mockup/state" && method === "PUT") {
-        return sendJson(response, 200, replaceMockupState(await readBody(request, maxMockupBytes)));
+        return sendJson(response, 200, replaceMockupState(mockupLocale, await readBody(request, maxMockupBytes)));
       }
       if (mockupEnabled && url.pathname === "/api/mockup/reset" && method === "POST") {
-        return sendJson(response, 200, resetMockupState());
+        return sendJson(response, 200, resetMockupState(mockupLocale));
       }
       if (mockupEnabled && url.pathname === "/api/settings/auto-dispatch" && ["GET", "PATCH"].includes(method)) {
-        if (method === "GET") return sendJson(response, 200, { enabled: readMockupState().auto_dispatch });
+        if (method === "GET") return sendJson(response, 200, { enabled: readMockupState(mockupLocale).auto_dispatch });
         const body = await readBody(request);
         if (typeof body.enabled !== "boolean") throw new Error("invalid_auto_dispatch");
-        const updated = updateMockupState(state => { state.auto_dispatch = body.enabled === true; }).state;
+        const updated = updateMockupState(mockupLocale, state => { state.auto_dispatch = body.enabled === true; }).state;
         return sendJson(response, 200, { enabled: updated.auto_dispatch });
       }
       if (mockupEnabled && url.pathname === "/api/settings/scheduler-model" && ["GET", "PATCH"].includes(method)) {
         if (method === "GET") {
-          const state = readMockupState();
+          const state = readMockupState(mockupLocale);
           return sendJson(response, 200, { model: state.scheduler_model, reasoning_effort: state.scheduler_reasoning_effort });
         }
         const body = await readBody(request);
@@ -360,37 +361,37 @@ export function startServer() {
         const catalog = await readModelCatalog();
         const selected = catalog.find(item => item.id === model);
         if (!selected) throw new Error("invalid_model");
-        const updated = updateMockupState(state => {
+        const updated = updateMockupState(mockupLocale, state => {
           state.scheduler_model = model;
           if (!selected.supportedReasoningEfforts.some(item => item.value === state.scheduler_reasoning_effort)) state.scheduler_reasoning_effort = selected.defaultReasoningEffort;
         }).state;
         return sendJson(response, 200, { model: updated.scheduler_model, reasoning_effort: updated.scheduler_reasoning_effort });
       }
       if (mockupEnabled && url.pathname === "/api/settings/scheduler-reasoning-effort" && ["GET", "PATCH"].includes(method)) {
-        const state = readMockupState();
+        const state = readMockupState(mockupLocale);
         if (method === "GET") return sendJson(response, 200, { reasoning_effort: state.scheduler_reasoning_effort });
         const body = await readBody(request);
         const effort = cleanString(body.reasoning_effort, 20);
         const catalog = await readModelCatalog();
         const model = catalog.find(item => item.id === state.scheduler_model);
         if (!model?.supportedReasoningEfforts.some(item => item.value === effort)) throw new Error("invalid_scheduler_reasoning_effort");
-        const updated = updateMockupState(next => { next.scheduler_reasoning_effort = effort; }).state;
+        const updated = updateMockupState(mockupLocale, next => { next.scheduler_reasoning_effort = effort; }).state;
         return sendJson(response, 200, { reasoning_effort: updated.scheduler_reasoning_effort });
       }
       if (mockupEnabled && url.pathname === "/api/agents" && method === "GET") {
-        return sendJson(response, 200, readMockupState().agents);
+        return sendJson(response, 200, readMockupState(mockupLocale).agents);
       }
       if (mockupEnabled && url.pathname === "/api/agents" && method === "POST") {
         const body = await readBody(request);
         const agentId = `mockup-agent-${randomUUID()}`;
-        const updated = updateMockupState(state => {
+        const updated = updateMockupState(mockupLocale, state => {
           state.agents.push({ ...body, id: agentId, role: "custom", is_default: false, version: 1 });
         }).state;
         return sendJson(response, 201, updated.agents.find(agent => agent.id === agentId));
       }
       if (mockupEnabled && url.pathname === "/api/agents/default" && method === "PATCH") {
         const body = await readBody(request);
-        const updated = updateMockupState(state => {
+        const updated = updateMockupState(mockupLocale, state => {
           requireVersion(body, state.agents[0]);
           state.agents[0] = { ...state.agents[0], ...body, id: "", role: "codex", is_default: true, version: Number(state.agents[0].version) + 1 };
         }).state;
@@ -399,12 +400,12 @@ export function startServer() {
       if (mockupEnabled && path[0] === "api" && path[1] === "agents" && path[2] && path.length === 3) {
         const agentId = decodeURIComponent(path[2]);
         if (method === "GET") {
-          const agent = readMockupState().agents.find(item => item.id === agentId && item.is_default !== true);
+          const agent = readMockupState(mockupLocale).agents.find(item => item.id === agentId && item.is_default !== true);
           return agent ? sendJson(response, 200, agent) : sendJson(response, 404, { error: "agent_not_found" });
         }
         if (method === "DELETE") {
           const body = await readBody(request);
-          updateMockupState(state => {
+          updateMockupState(mockupLocale, state => {
             const index = state.agents.findIndex(agent => agent.id === agentId && agent.is_default !== true);
             if (index < 0) throw new Error("agent_not_found");
             requireVersion(body, state.agents[index]);
@@ -415,7 +416,7 @@ export function startServer() {
         }
         if (method === "PATCH") {
           const body = await readBody(request);
-          const updated = updateMockupState(state => {
+          const updated = updateMockupState(mockupLocale, state => {
             const index = state.agents.findIndex(agent => agent.id === agentId && agent.is_default !== true);
             if (index < 0) throw new Error("agent_not_found");
             requireVersion(body, state.agents[index]);
@@ -427,13 +428,13 @@ export function startServer() {
       if (mockupEnabled && url.pathname === "/api/issues" && method === "GET") {
         const query = String(url.searchParams.get("search") || "").trim().toLowerCase();
         const archived = url.searchParams.get("archived") === "1";
-        const issues = readMockupState().issues.filter(issue => Boolean(issue.archived_at) === archived && (!query || [issue.identifier, issue.title, issue.description, ...(Array.isArray(issue.labels) ? issue.labels : [])].join(" ").toLowerCase().includes(query)));
+        const issues = readMockupState(mockupLocale).issues.filter(issue => Boolean(issue.archived_at) === archived && (!query || [issue.identifier, issue.title, issue.description, ...(Array.isArray(issue.labels) ? issue.labels : [])].join(" ").toLowerCase().includes(query)));
         return sendJson(response, 200, issues);
       }
       if (mockupEnabled && url.pathname === "/api/issues" && method === "POST") {
         const body = await readBody(request);
         let issueId = "";
-        const updated = updateMockupState(state => {
+        const updated = updateMockupState(mockupLocale, state => {
           const nextNumber = state.issues.reduce((max, issue) => Math.max(max, Number(String(issue.identifier).replace(/\D/g, "")) || 0), 19) + 1;
           const now = new Date().toISOString();
           issueId = `mockup-${nextNumber}`;
@@ -453,16 +454,16 @@ export function startServer() {
       if (mockupEnabled && path[0] === "api" && path[1] === "issues" && path[2]) {
         const issueId = decodeURIComponent(path[2]);
         if (method === "GET" && path.length === 3) {
-          const issue = readMockupState().issues.find(item => item.id === issueId || item.identifier === issueId);
+          const issue = readMockupState(mockupLocale).issues.find(item => item.id === issueId || item.identifier === issueId);
           return issue ? sendJson(response, 200, issue) : sendJson(response, 404, { error: "issue_not_found" });
         }
         if (method === "GET" && path[3] === "conversation") {
-          const issue = readMockupState().issues.find(item => item.id === issueId || item.identifier === issueId);
+          const issue = readMockupState(mockupLocale).issues.find(item => item.id === issueId || item.identifier === issueId);
           return issue ? sendJson(response, 200, { messages: [] }) : sendJson(response, 404, { error: "issue_not_found" });
         }
         if (method === "POST" && path[3] === "start") {
           const body = await readBody(request);
-          const updated = updateMockupState(state => {
+          const updated = updateMockupState(mockupLocale, state => {
             const index = state.issues.findIndex(issue => issue.id === issueId || issue.identifier === issueId);
             if (index < 0) throw new Error("issue_not_found");
             const current = state.issues[index];
@@ -489,7 +490,7 @@ export function startServer() {
           return sendJson(response, 202, updated.issues.find(issue => issue.id === issueId || issue.identifier === issueId));
         }
         if (method === "POST" && path[3] === "stop") {
-          const updated = updateMockupState(state => {
+          const updated = updateMockupState(mockupLocale, state => {
             const index = state.issues.findIndex(issue => issue.id === issueId || issue.identifier === issueId);
             if (index < 0) throw new Error("issue_not_found");
             const current = state.issues[index];
@@ -509,7 +510,7 @@ export function startServer() {
           const body = await readBody(request);
           const threadId = normalizeSessionId(cleanString(body.thread_id, 200));
           if (!threadId) throw new Error("session_required");
-          const updated = updateMockupState(state => {
+          const updated = updateMockupState(mockupLocale, state => {
             const index = state.issues.findIndex(issue => issue.id === issueId || issue.identifier === issueId);
             if (index < 0) throw new Error("issue_not_found");
             const current = state.issues[index];
@@ -522,7 +523,7 @@ export function startServer() {
         }
         if (method === "POST" && path[3] === "archive") {
           const body = await readBody(request);
-          const archived = updateMockupState(state => {
+          const archived = updateMockupState(mockupLocale, state => {
             const index = state.issues.findIndex(issue => issue.id === issueId || issue.identifier === issueId);
             if (index < 0) throw new Error("issue_not_found");
             requireVersion(body, state.issues[index]);
@@ -533,7 +534,7 @@ export function startServer() {
         }
         if (method === "POST" && path[3] === "unarchive") {
           const body = await readBody(request);
-          const restored = updateMockupState(state => {
+          const restored = updateMockupState(mockupLocale, state => {
             const index = state.issues.findIndex(issue => issue.id === issueId || issue.identifier === issueId);
             if (index < 0) throw new Error("issue_not_found");
             requireVersion(body, state.issues[index]);
@@ -544,7 +545,7 @@ export function startServer() {
         }
         if (method === "DELETE" && path.length === 3) {
           const body = await readBody(request);
-          updateMockupState(state => {
+          updateMockupState(mockupLocale, state => {
             const index = state.issues.findIndex(issue => issue.id === issueId || issue.identifier === issueId);
             if (index < 0) throw new Error("issue_not_found");
             requireVersion(body, state.issues[index]);
@@ -555,7 +556,7 @@ export function startServer() {
         }
         if (method === "PATCH" && path.length === 3) {
           const body = await readBody(request);
-          const updated = updateMockupState(state => {
+          const updated = updateMockupState(mockupLocale, state => {
             const index = state.issues.findIndex(issue => issue.id === issueId || issue.identifier === issueId);
             if (index < 0) throw new Error("issue_not_found");
             const current = state.issues[index];
@@ -595,7 +596,7 @@ export function startServer() {
           const body = await readBody(request);
           const status = asStatus(body.status);
           const beforeId = cleanString(body.before_id, 200);
-          const updated = updateMockupState(state => {
+          const updated = updateMockupState(mockupLocale, state => {
             const index = state.issues.findIndex(issue => issue.id === issueId || issue.identifier === issueId);
             if (index < 0) throw new Error("issue_not_found");
             requireVersion(body, state.issues[index]);

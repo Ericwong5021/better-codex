@@ -1270,6 +1270,24 @@ export function betterCodexDesignSystemCss() {
       line-height: 1.2;
     }
 
+    #better-codex-auto-dispatch-help-dialog .better-codex-help-about-brand {
+      display: flex;
+      gap: .2em;
+      color: #111216;
+      font-family: "Avenir Next", Avenir, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 26px;
+      font-weight: 700;
+      letter-spacing: -.06em;
+      line-height: 1;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-help-about-brand-better {
+      background: linear-gradient(105deg, #5424f2 0%, #8839f2 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+
     #better-codex-auto-dispatch-help-dialog .better-codex-help-page-heading p,
     #better-codex-auto-dispatch-help-dialog .better-codex-help-about p {
       margin: 7px 0 0;
@@ -1426,7 +1444,7 @@ export function betterCodexDesignSystemCss() {
       padding: 0 9px;
       text-align: left;
       font: inherit;
-      font-size: var(--bc-text-sm);
+      font-size: var(--bc-text-body);
       cursor: pointer;
     }
 
@@ -1465,7 +1483,7 @@ export function betterCodexDesignSystemCss() {
       background: var(--bc-color-control);
       padding: 0 10px 0 12px;
       font: inherit;
-      font-size: var(--bc-text-lg);
+      font-size: var(--bc-text-body);
       cursor: pointer;
     }
 
@@ -1530,7 +1548,7 @@ export function betterCodexDesignSystemCss() {
       padding: 0 10px;
       text-align: left;
       font: inherit;
-      font-size: var(--bc-text-lg);
+      font-size: var(--bc-text-body);
       cursor: pointer;
     }
 
@@ -1691,12 +1709,11 @@ export function betterCodexDesignSystemCss() {
     }
 
     #better-codex-auto-dispatch-help-dialog .better-codex-help-about-logo,
-    #better-codex-auto-dispatch-help-dialog .better-codex-help-about-logo svg,
     #better-codex-auto-dispatch-help-dialog .better-codex-help-about-logo img {
       display: block;
-      width: 50px;
-      height: 50px;
-      flex: 0 0 50px;
+      width: 220px;
+      height: auto;
+      flex: 0 0 220px;
     }
 
     #better-codex-auto-dispatch-help-dialog .better-codex-help-about-details {
