@@ -4,6 +4,13 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.3.17] - 2026-08-10
+
+### Changed
+
+- Refresh the English README and add a complete Simplified Chinese README.
+- Keep release version and changelog validation in the tag-triggered release workflow.
+
 ## [0.3.16] - 2026-08-10
 
 ### Changed
@@ -189,7 +196,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.3.16...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.3.17...HEAD
+[0.3.17]: https://github.com/Ericwong5021/better-codex/compare/v0.3.16...v0.3.17
 [0.3.16]: https://github.com/Ericwong5021/better-codex/compare/v0.3.15...v0.3.16
 [0.3.15]: https://github.com/Ericwong5021/better-codex/compare/v0.3.14...v0.3.15
 [0.3.14]: https://github.com/Ericwong5021/better-codex/compare/v0.3.13...v0.3.14
