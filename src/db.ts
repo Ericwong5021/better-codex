@@ -175,7 +175,7 @@ function cleanTitle(value: string) {
 
 function cleanAgentProfile(input: AgentProfileInput) {
   const name = input.name.trim();
-  const name_en = input.name_en.trim();
+  const name_en = (input.name_en || "").trim();
   const description = input.description.trim();
   const instructions = input.instructions.trim();
   if (!name || name.length > 80) throw new Error("agent_name_required");
