@@ -26,7 +26,7 @@
 </p>
 
 <p align="center">
-  <img src="assets/better-codex-board.png" width="1200" alt="Codex Desktop 中的 Better Codex 任务看板" />
+  <img src="assets/better-codex-board-zh.png" width="1200" alt="Codex Desktop 中的 Better Codex 任务看板" />
 </p>
 
 ## 为什么会有这个项目
@@ -62,7 +62,7 @@
 模型、推理等级、权限、指令和并发上限都能按角色设置。
 
 <p align="center">
-  <img src="assets/better-codex-agents.png" width="1200" alt="Better Codex 中可复用的智能体配置" />
+  <img src="assets/better-codex-agents-zh.png" width="1200" alt="Better Codex 中可复用的智能体配置" />
 </p>
 
 ## 谁适合用
@@ -101,7 +101,9 @@ Windows（PowerShell）：
 irm https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scripts/install.ps1 | iex
 ```
 
-从 Better Codex 启动入口重启 Codex，侧边栏会出现 `任务看板` 和 `智能体` 两个入口。随时可以用 `better-codex eject` 卸载，任务数据会保留。
+安装脚本会同时安装 CLI、Skill、本地运行时和系统启动入口，并在 Codex 中注册 `better-codex` MCP。MCP 只在本机运行，用来提供 Better Codex 应用入口和路由；项目、任务和会话数据仍保存在本地数据库中。
+
+从 Better Codex 启动入口重启 Codex，侧边栏会出现 `任务看板` 和 `智能体` 两个入口。完全卸载可运行 `better-codex uninstall`。
 
 ## 常见问题
 
@@ -111,11 +113,14 @@ irm https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scripts/ins
 **我的数据会去哪里？**<br>
 哪儿也不去。项目、任务、分配关系和运行状态全部保存在本机 SQLite 数据库（macOS 在 `~/.better-codex/better-codex.db`，Windows 在 `%USERPROFILE%\.better-codex\better-codex.db`）。运行时只监听 `127.0.0.1`，没有云端服务，也不需要账号。
 
-**它会搞坏我的 Codex 吗？**<br>
-集成使用桌面应用的本地 CDP 接口和页面结构，不修改 Codex 的二进制文件。Codex 更新后偶尔需要安装对应的兼容性更新，届时 Codex 内会出现提示。感觉哪里不对时，运行 `better-codex doctor` 检查。
+**为什么需要注册 MCP？**<br>
+Codex 通过本地 MCP 应用识别 Better Codex 的应用入口和路由，让任务看板可以进入 Codex 的导航流程，而不是覆盖在最后访问的会话页面上。MCP 通过本机 stdio 运行，不是云端服务，也不会上传任务数据。
 
-**怎么卸载？**<br>
-`better-codex eject` 会移除侧边栏集成，任务数据原样保留。
+**它会搞坏我的 Codex 吗？**<br>
+应用入口和路由通过本地 MCP 注册，页面集成使用桌面应用的本地 CDP 接口和页面结构，不修改 Codex 的二进制文件。Codex 更新后偶尔需要安装对应的兼容性更新，届时 Codex 内会出现提示。感觉哪里不对时，运行 `better-codex doctor` 检查。
+
+**怎么关闭或卸载？**<br>
+`better-codex eject` 只关闭页面集成，任务数据和安装组件会保留。`better-codex uninstall` 会删除 MCP、后台服务、启动入口、Skill、Agent 配置、本地数据和独立安装的 CLI。
 
 **更新怎么做？**<br>
 Better Codex 会在后台检查带签名的更新清单，发现新版本时在 Codex 内提示。你也可以随时重新运行安装命令，它会优先原地升级。
@@ -126,11 +131,14 @@ macOS 版 Codex Desktop（Apple Silicon 和 Intel），以及 Windows x64 上 Mi
 ## 常用命令
 
 ```bash
-better-codex doctor            # 检查运行时、数据库、Codex 兼容性和注入状态
+better-codex doctor            # 检查 MCP、运行时、数据库、Codex 兼容性和注入状态
 better-codex status            # 查看当前服务与看板连接
+better-codex mcp status        # 检查 MCP 注册状态
+better-codex mcp install       # 注册或修复 MCP
 better-codex launcher install  # 安装系统启动入口
 better-codex launcher status   # 检查系统启动入口
 better-codex eject             # 移除侧边栏集成，保留任务数据
+better-codex uninstall         # 完全卸载并删除本地数据
 ```
 
 ## 从源码安装
@@ -143,6 +151,7 @@ cd better-codex
 npm ci
 npm run build
 npm link
+better-codex mcp install
 better-codex inject --launch
 better-codex launcher install
 ```

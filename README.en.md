@@ -26,7 +26,7 @@
 </p>
 
 <p align="center">
-  <img src="assets/better-codex-board.png" width="1200" alt="Better Codex task board inside Codex Desktop" />
+  <img src="assets/better-codex-board-en.png" width="1200" alt="Better Codex task board inside Codex Desktop" />
 </p>
 
 ## Why this exists
@@ -62,7 +62,7 @@ Assign work to yourself or an Agent, then run it manually or automatically. Task
 Set the model, reasoning level, permissions, instructions, and concurrency limit for each role.
 
 <p align="center">
-  <img src="assets/better-codex-agents.png" width="1200" alt="Reusable Agent profiles inside Better Codex" />
+  <img src="assets/better-codex-agents-en.png" width="1200" alt="Reusable Agent profiles inside Better Codex" />
 </p>
 
 ## Who it's for
@@ -101,7 +101,9 @@ Windows (PowerShell):
 irm https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scripts/install.ps1 | iex
 ```
 
-Restart Codex from the Better Codex launcher, and `Task board` and `Agents` appear as two entries in your sidebar. Uninstall anytime with `better-codex eject`; your task data stays.
+The installer adds the CLI, Skill, local runtime, and system launcher, then registers the `better-codex` MCP server with Codex. The MCP server runs only on your computer and provides the Better Codex app entry and route. Projects, tasks, and conversation data remain in the local database.
+
+Restart Codex from the Better Codex launcher, and `Task board` and `Agents` appear as two entries in your sidebar. Run `better-codex uninstall` to remove Better Codex completely.
 
 ## FAQ
 
@@ -111,11 +113,14 @@ No. Better Codex is an independent open-source project built on top of Codex Des
 **Where does my data go?**<br>
 Nowhere. Projects, tasks, assignments, and run state live in a local SQLite database (`~/.better-codex/better-codex.db` on macOS, `%USERPROFILE%\.better-codex\better-codex.db` on Windows). The runtime listens on `127.0.0.1` only. There is no Better Codex cloud service and no account.
 
-**Will it break my Codex?**<br>
-The integration uses the desktop app's local CDP interface and page structure. It doesn't patch Codex binaries. A Codex update can occasionally require a matching Better Codex compatibility update; when that happens, an update notice appears inside Codex. If anything looks off, run `better-codex doctor`.
+**Why does Better Codex register an MCP server?**<br>
+Codex uses the local MCP app to recognize the Better Codex app entry and route. This puts the task board into the Codex navigation flow instead of placing it over the last conversation route. The MCP server runs locally over stdio. It is not a cloud service and does not upload task data.
 
-**How do I uninstall?**<br>
-`better-codex eject` removes the sidebar integration and leaves your task data untouched.
+**Will it break my Codex?**<br>
+The app entry and route are registered through the local MCP server. The page integration uses the desktop app's local CDP interface and page structure. It doesn't patch Codex binaries. A Codex update can occasionally require a matching Better Codex compatibility update; when that happens, an update notice appears inside Codex. If anything looks off, run `better-codex doctor`.
+
+**How do I disable or uninstall it?**<br>
+`better-codex eject` disables the page integration but keeps your task data and installed components. `better-codex uninstall` removes the MCP server, background service, launcher, Skill, Agent profiles, local data, and standalone CLI.
 
 **How do updates work?**<br>
 Better Codex checks a signed update manifest in the background and shows a notice inside Codex when a new version is available. You can also rerun the install command at any time. It upgrades in place when possible.
@@ -126,11 +131,14 @@ Codex Desktop on macOS (Apple Silicon and Intel) and the Microsoft Store version
 ## Useful commands
 
 ```bash
-better-codex doctor            # check runtime, database, Codex compatibility, injection state
+better-codex doctor            # check MCP, runtime, database, Codex compatibility, injection state
 better-codex status            # show the current service and board connection
+better-codex mcp status        # inspect the MCP registration
+better-codex mcp install       # register or repair the MCP server
 better-codex launcher install  # install the system launcher
 better-codex launcher status   # inspect the system launcher
 better-codex eject             # remove the sidebar integration, keep task data
+better-codex uninstall         # uninstall completely and delete local data
 ```
 
 ## Install from source
@@ -143,6 +151,7 @@ cd better-codex
 npm ci
 npm run build
 npm link
+better-codex mcp install
 better-codex inject --launch
 better-codex launcher install
 ```
