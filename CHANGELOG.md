@@ -4,6 +4,18 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.3.16] - 2026-08-10
+
+### Changed
+
+- Remember whether the Issue dialog was expanded and let English users edit an Agent's localized name.
+
+### Fixed
+
+- Reject release packages whose embedded core version does not match the version being installed.
+- Keep running Agent tasks intact by postponing popup updates until current work finishes.
+- Roll back stalled update restarts, clear stale update notices, and show actionable failure messages.
+
 ## [0.3.15] - 2026-08-10
 
 ### Added
@@ -71,7 +83,8 @@ All notable changes to Better Codex are recorded here.
 
 - Use the Codex system font in the Better Codex interface.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.3.15...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.3.16...HEAD
+[0.3.16]: https://github.com/Ericwong5021/better-codex/compare/v0.3.15...v0.3.16
 [0.3.15]: https://github.com/Ericwong5021/better-codex/compare/v0.3.14...v0.3.15
 [0.3.14]: https://github.com/Ericwong5021/better-codex/compare/v0.3.13...v0.3.14
 [0.3.13]: https://github.com/Ericwong5021/better-codex/releases/tag/v0.3.13
