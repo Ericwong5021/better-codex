@@ -19,6 +19,7 @@ export type AgentProfile = {
   id: string;
   role: string;
   name: string;
+  name_en: string;
   description: string;
   instructions: string;
   model: AgentModel;
@@ -131,7 +132,7 @@ type IssueInput = {
 
 type IssuePatch = Partial<Pick<Issue, "project_id" | "title" | "description" | "status" | "priority" | "labels" | "sort_order" | "pinned" | "thread_id" | "workspace_path" | "agent_enabled" | "agent_id" | "user_assigned" | "needs_attention" | "pending_actor" | "enrichment_status" | "reply_draft">>;
 
-type AgentProfileInput = Pick<AgentProfile, "name" | "description" | "instructions" | "model" | "reasoning_effort"> & { sandbox_mode?: AgentSandboxMode; max_concurrency?: number };
+type AgentProfileInput = Pick<AgentProfile, "name" | "name_en" | "description" | "instructions" | "model" | "reasoning_effort"> & { sandbox_mode?: AgentSandboxMode; max_concurrency?: number };
 type AgentProfilePatch = Partial<AgentProfileInput>;
 
 export const defaultAgentMaxConcurrency = 5;
@@ -174,16 +175,18 @@ function cleanTitle(value: string) {
 
 function cleanAgentProfile(input: AgentProfileInput) {
   const name = input.name.trim();
+  const name_en = input.name_en.trim();
   const description = input.description.trim();
   const instructions = input.instructions.trim();
   if (!name || name.length > 80) throw new Error("agent_name_required");
+  if (name_en.length > 80) throw new Error("agent_name_en_too_long");
   if (description.length > 500) throw new Error("agent_description_too_long");
   if (instructions.length > 100000) throw new Error("agent_instructions_too_long");
   if (!input.model.trim() || input.model.length > 80) throw new Error("invalid_agent_model");
   if (!input.reasoning_effort.trim() || input.reasoning_effort.length > 20) throw new Error("invalid_agent_reasoning_effort");
   const sandbox_mode = input.sandbox_mode || "workspace-write";
   if (!agentSandboxModes.includes(sandbox_mode)) throw new Error("invalid_agent_sandbox_mode");
-  return { name, description, instructions, model: input.model, reasoning_effort: input.reasoning_effort, sandbox_mode, max_concurrency: cleanMaxConcurrency(input.max_concurrency) };
+  return { name, name_en, description, instructions, model: input.model, reasoning_effort: input.reasoning_effort, sandbox_mode, max_concurrency: cleanMaxConcurrency(input.max_concurrency) };
 }
 
 function cleanLabels(values: string[]) {
@@ -409,6 +412,15 @@ export class Store {
     const columns = new Set((this.db.prepare("PRAGMA table_info(agent_profiles)").all() as Array<{ name: string }>).map(item => item.name));
     if (!columns.has("sandbox_mode")) this.db.exec("ALTER TABLE agent_profiles ADD COLUMN sandbox_mode TEXT NOT NULL DEFAULT 'workspace-write'");
     if (!columns.has("max_concurrency")) this.db.exec(`ALTER TABLE agent_profiles ADD COLUMN max_concurrency INTEGER NOT NULL DEFAULT ${defaultAgentMaxConcurrency}`);
+    if (!columns.has("name_en")) this.db.exec("ALTER TABLE agent_profiles ADD COLUMN name_en TEXT NOT NULL DEFAULT ''");
+    const englishNames = new Map([
+      ["代码审查", "Code Review"],
+      ["前端实现", "Frontend Implementation"],
+      ["问题排查", "Troubleshooting"],
+      ["部署工程", "Deployment Engineering"],
+      ["简单任务", "Simple Tasks"],
+    ]);
+    for (const [name, nameEn] of englishNames) this.db.prepare("UPDATE agent_profiles SET name_en = ? WHERE name = ? AND (name_en IS NULL OR name_en = '')").run(nameEn, name);
   }
 
   private ensureAgentAvatarTable() {
@@ -701,9 +713,9 @@ export class Store {
     const role = `better_codex_${id.replaceAll("-", "")}`;
     const timestamp = now();
     this.db.prepare(`
-      INSERT INTO agent_profiles (id, role, name, description, instructions, model, reasoning_effort, sandbox_mode, max_concurrency, version, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
-    `).run(id, role, profile.name, profile.description, profile.instructions, profile.model, profile.reasoning_effort, profile.sandbox_mode, profile.max_concurrency, timestamp, timestamp);
+      INSERT INTO agent_profiles (id, role, name, name_en, description, instructions, model, reasoning_effort, sandbox_mode, max_concurrency, version, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+    `).run(id, role, profile.name, profile.name_en, profile.description, profile.instructions, profile.model, profile.reasoning_effort, profile.sandbox_mode, profile.max_concurrency, timestamp, timestamp);
     return this.getAgentProfile(id)!;
   }
 
@@ -713,6 +725,7 @@ export class Store {
     if (current.version !== version) throw new Error("version_conflict");
     const profile = cleanAgentProfile({
       name: patch.name ?? current.name,
+      name_en: patch.name_en ?? current.name_en,
       description: patch.description ?? current.description,
       instructions: patch.instructions ?? current.instructions,
       model: patch.model ?? current.model,
@@ -721,9 +734,9 @@ export class Store {
       max_concurrency: patch.max_concurrency ?? current.max_concurrency,
     });
     const result = this.db.prepare(`
-      UPDATE agent_profiles SET name = ?, description = ?, instructions = ?, model = ?, reasoning_effort = ?, sandbox_mode = ?, max_concurrency = ?, version = version + 1, updated_at = ?
+      UPDATE agent_profiles SET name = ?, name_en = ?, description = ?, instructions = ?, model = ?, reasoning_effort = ?, sandbox_mode = ?, max_concurrency = ?, version = version + 1, updated_at = ?
       WHERE id = ? AND version = ?
-    `).run(profile.name, profile.description, profile.instructions, profile.model, profile.reasoning_effort, profile.sandbox_mode, profile.max_concurrency, now(), current.id, version);
+    `).run(profile.name, profile.name_en, profile.description, profile.instructions, profile.model, profile.reasoning_effort, profile.sandbox_mode, profile.max_concurrency, now(), current.id, version);
     if (result.changes !== 1) throw new Error("version_conflict");
     return this.getAgentProfile(current.id)!;
   }
@@ -1335,7 +1348,7 @@ export class Store {
       if (issue.session_handoff_at) throw new Error("issue_session_handed_off");
       if (issue.active_run_status) throw new Error("issue_execution_running");
       if (this.getIssueReplyState(issueId).status === "running") throw new Error("reply_busy");
-      if (!["done", "cancelled"].includes(issue.status)) {
+      if (issue.status !== "cancelled") {
         this.db.prepare(`
           UPDATE issues
           SET status = 'in_progress',

@@ -151,6 +151,7 @@ const suggestedAgents = [
   {
     key: "reviewer",
     name: "代码审查",
+    name_en: "Code Review",
     description: "检查改动的正确性、回归风险和可维护性",
     instructions: [
       "你是代码审查智能体。目标不是重写实现，而是拦住会伤到正确性、回归、安全与可维护性的问题。",
@@ -177,6 +178,7 @@ const suggestedAgents = [
   {
     key: "frontend",
     name: "前端实现",
+    name_en: "Frontend Implementation",
     description: "负责 Codex 原生风格的界面实现与视觉验证",
     instructions: [
       "你是前端实现智能体。负责把需求做成符合现有产品气质的可上线界面，而不是另起一套视觉系统。",
@@ -202,6 +204,7 @@ const suggestedAgents = [
   {
     key: "debugger",
     name: "问题排查",
+    name_en: "Troubleshooting",
     description: "定位崩溃、回归和异常行为的根因",
     instructions: [
       "你是问题排查智能体。先取证、再定根因，最后给最小修复；不要一上来大面积改代码。",
@@ -290,6 +293,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const LANGUAGE_KEY = "better-codex-language";
     const COMPLETION_DURATION_KEY = "better-codex-completion-notice-duration";
     const CREATE_DRAFT_KEY = "better-codex-create-draft";
+    const CREATE_ISSUE_SHORTCUT_KEY = "better-codex-create-issue-shortcut";
+    const AGENT_INSPECTOR_WIDTH_KEY = "better-codex-agent-inspector-width";
+    const AGENT_INSPECTOR_MIN_WIDTH = 320;
+    const AGENT_DIRECTORY_MIN_WIDTH = 320;
     const THREAD_OPEN_TIMEOUT_MS = 10000;
     const THREAD_OPEN_POLL_MS = 100;
     const statusLabels = { backlog: "待规划", todo: "待办", in_progress: "进行中", in_review: "待审核", done: "已完成", blocked: "已阻塞", cancelled: "已取消" };
@@ -298,6 +305,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const rememberedSurface = sessionStorage.getItem(RESUME_SURFACE_KEY);
     const rememberedProjectId = localStorage.getItem(PROJECT_KEY) || "";
     const rememberedLanguage = localStorage.getItem(LANGUAGE_KEY);
+    const rememberedAgentInspectorWidth = Number(localStorage.getItem(AGENT_INSPECTOR_WIDTH_KEY));
     const languageSetting = ["system", "zh-CN", "en"].includes(rememberedLanguage) ? rememberedLanguage : "system";
     function resolveSystemLocale(fallback) {
       const locale = String(fallback || document.documentElement.lang || navigator.language || "").trim().toLowerCase().replace(/_/g, "-");
@@ -305,7 +313,44 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
     const systemLocale = resolveSystemLocale(INITIAL_LOCALE);
     const MOCKUP_PROJECT_ID = "mockup-better-codex";
-    const state = { projects: [], issues: [], agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, surface: ["issues", "agents"].includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", mockup: false, createMode: "manual", keepCreate: false, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], creator: [], project: [], label: [] } };
+    const state = { projects: [], issues: [], agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: ["issues", "agents"].includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", mockup: false, createMode: "manual", keepCreate: false, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], creator: [], project: [], label: [] } };
+    function shortcutKeyFromCode(code, key) {
+      const source = String(code || "");
+      if (/^Key[A-Z]$/.test(source)) return source.slice(3);
+      if (/^Digit[0-9]$/.test(source)) return source.slice(5);
+      const names = { Space: "Space", Enter: "Enter", Tab: "Tab", Escape: "Escape", Backspace: "Backspace", Delete: "Delete", ArrowUp: "Up", ArrowDown: "Down", ArrowLeft: "Left", ArrowRight: "Right", Comma: "Comma", Period: "Period", Slash: "Slash", Backslash: "Backslash", Semicolon: "Semicolon", Quote: "Quote", BracketLeft: "BracketLeft", BracketRight: "BracketRight", Minus: "Minus", Equal: "Equal", Backquote: "Backquote", NumpadAdd: "NumpadAdd", NumpadSubtract: "NumpadSubtract", NumpadMultiply: "NumpadMultiply", NumpadDivide: "NumpadDivide", NumpadDecimal: "NumpadDecimal" };
+      if (names[source]) return names[source];
+      const value = String(key || "").trim();
+      return value.length === 1 ? value.toUpperCase() : value.replace(/\s+/g, "");
+    }
+    function shortcutFromKeyboardEvent(event) {
+      const key = shortcutKeyFromCode(event.code, event.key);
+      if (!key || ["Meta", "Control", "Alt", "Shift"].includes(key)) return "";
+      const modifiers = [];
+      if (event.metaKey || event.ctrlKey) modifiers.push("Mod");
+      if (event.altKey) modifiers.push("Alt");
+      if (event.shiftKey) modifiers.push("Shift");
+      return [...modifiers, key].join("+");
+    }
+    function normalizeShortcut(value) {
+      const parts = String(value || "").split("+").map(part => part.trim()).filter(Boolean);
+      if (!parts.length) return "";
+      const key = parts.at(-1);
+      if (["Meta", "Control", "Ctrl", "Command", "Cmd", "Alt", "Option", "Shift"].includes(key)) return "";
+      const modifiers = [];
+      if (parts.slice(0, -1).some(part => ["Mod", "Ctrl", "Control", "Command", "Cmd"].includes(part))) modifiers.push("Mod");
+      if (parts.slice(0, -1).some(part => ["Alt", "Option"].includes(part))) modifiers.push("Alt");
+      if (parts.slice(0, -1).includes("Shift")) modifiers.push("Shift");
+      return [...modifiers, key].join("+");
+    }
+    function readCreateIssueShortcut() {
+      return normalizeShortcut(localStorage.getItem(CREATE_ISSUE_SHORTCUT_KEY));
+    }
+    function shortcutLabel(value) {
+      const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "");
+      const labels = { Mod: mac ? "⌘" : "Ctrl", Alt: mac ? "⌥" : "Alt", Shift: mac ? "⇧" : "Shift", Space: "Space", Up: "↑", Down: "↓", Left: "←", Right: "→" };
+      return normalizeShortcut(value).split("+").filter(Boolean).map(part => labels[part] || part).join(mac ? " " : " + ");
+    }
     function readCreateDraft() {
       try {
         const draft = JSON.parse(sessionStorage.getItem(CREATE_DRAFT_KEY) || "null");
@@ -408,7 +453,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "新建": "New", "新建 issue": "New issue", "新建任务": "New task", "新建智能体": "New agent", "创建": "Create", "创建任务": "Create task", "删除": "Delete", "删除任务": "Delete task", "删除智能体": "Delete agent", "保存": "Save", "确认": "Confirm", "取消": "Cancel", "关闭": "Close", "重试": "Retry", "稍后": "Later", "展开": "Expand", "缩小": "Minimize", "缩放头像": "Zoom avatar",
       "项目": "Project", "无项目": "No project", "选择项目": "Select project", "选择责任人": "Select owner", "选择执行智能体": "Select agent", "选择 issue 创建方式": "Choose how to create the issue", "任务标题": "Task title", "添加描述...": "Add description...", "添加标签": "Add label", "添加附件": "Add attachment", "移除附件": "Remove attachment", "搜索任务": "Search tasks", "搜索项目": "Search projects", "搜索项目...": "Search projects...", "搜索智能体": "Search agents",
       "负责人": "Owner", "创建者": "Creator", "指定负责人": "Assign owner", "由我创建": "Created by me", "由我": "By me", "我": "Me", "你": "You", "未指派": "Not assigned", "未提供": "Not provided", "已同步": "Synced",
-      "自动运行": "Auto-run", "手动运行": "Manual run", "切换为自动运行": "Switch to auto-run", "切换为手动运行": "Switch to manual run", "切换到智能体": "Switch to agents", "手动创建": "Manual creation", "通过智能体创建": "Create with agent", "运行模式说明": "Run mode", "帮助与设置": "Help and settings", "设置": "Settings", "关于": "About", "会话结束提醒": "Session completion alerts", "Issue 会话结束后在当前窗口显示提醒": "Show an alert in the current window when an issue session ends", "弹窗持续时间": "Popup duration", "1 秒": "1 second", "5 秒": "5 seconds", "10 秒": "10 seconds", "永久": "Permanent", "会话已结束": "Session ended", "通知": "Notifications", "语言": "Language", "界面语言": "Interface language", "选择 Better Codex 的界面语言": "Choose the language used by Better Codex", "调度": "Scheduling", "调度器模型": "Scheduler model", "这个模型用于 Issue 状态调度": "This model is used for Issue status routing", "调度器思考强度": "Scheduler reasoning effort", "这个强度用于 Issue 状态调度": "This level is used for Issue status routing", "跟随系统": "System", "中文": "Chinese", "软件更新": "Software updates", "更新状态": "Update status", "检查新版本": "Check for updates", "检查中…": "Checking…", "发现新版本": "Update available", "无法检查更新": "Unable to check", "版本信息": "Version info", "兼容版本": "Compatibility version", "运行状态": "Runtime status", "运行正常": "Running", "正在检查": "Checking", "已是最新版本": "Up to date", "从开始到完成，让 Codex 里的工作清晰可见。": "From start to finish, keep your work in Codex clear and visible.", "如果你喜欢 Better Codex，欢迎给我们一个 Star。": "If you like Better Codex, please give us a Star.", "最大并发": "Max concurrency", "模型": "Model", "推理": "Reasoning", "指令": "Instructions", "默认": "Default", "自定义": "Custom",
+      "自动运行": "Auto-run", "手动运行": "Manual run", "切换为自动运行": "Switch to auto-run", "切换为手动运行": "Switch to manual run", "切换到智能体": "Switch to agents", "手动创建": "Manual creation", "通过智能体创建": "Create with agent", "运行模式说明": "Run mode", "帮助与设置": "Help and settings", "设置": "Settings", "快捷键": "Shortcuts", "快捷键设置": "Keyboard shortcuts", "为常用操作设置键盘快捷键。": "Set keyboard shortcuts for common actions.", "创建 Issue": "Create Issue", "打开创建 Issue 窗口": "Open the Create Issue window", "设置快捷键": "Set shortcut", "点击录入": "Click to record", "按下新的快捷键": "Press a new shortcut", "未设置": "Not set", "清除快捷键": "Clear shortcut", "关于": "About", "会话结束提醒": "Session completion alerts", "Issue 会话结束后在当前窗口显示提醒": "Show an alert in the current window when an issue session ends", "弹窗持续时间": "Popup duration", "1 秒": "1 second", "5 秒": "5 seconds", "10 秒": "10 seconds", "永久": "Permanent", "会话已结束": "Session ended", "通知": "Notifications", "语言": "Language", "界面语言": "Interface language", "选择 Better Codex 的界面语言": "Choose the language used by Better Codex", "调度": "Scheduling", "调度器模型": "Scheduler model", "这个模型用于 Issue 状态调度": "This model is used for Issue status routing", "调度器思考强度": "Scheduler reasoning effort", "这个强度用于 Issue 状态调度": "This level is used for Issue status routing", "跟随系统": "System", "中文": "Chinese", "软件更新": "Software updates", "更新状态": "Update status", "检查新版本": "Check for updates", "检查中…": "Checking…", "发现新版本": "Update available", "无法检查更新": "Unable to check", "版本信息": "Version info", "兼容版本": "Compatibility version", "运行状态": "Runtime status", "运行正常": "Running", "正在检查": "Checking", "已是最新版本": "Up to date", "从开始到完成，让 Codex 里的工作清晰可见。": "From start to finish, keep your work in Codex clear and visible.", "如果你喜欢 Better Codex，欢迎给我们一个 Star。": "If you like Better Codex, please give us a Star.", "最大并发": "Max concurrency", "模型": "Model", "推理": "Reasoning", "指令": "Instructions", "默认": "Default", "自定义": "Custom",
       "点击": "Click", "，或者在已完成的会话卡片中": ", or use", "新消息，智能体才会执行任务。": "to post a new message in a completed conversation card. Only then will the agent run the task.", "会主动执行分配给自己的任务，但是不会执行": "automatically runs tasks assigned to it, but does not run", "区域的任务。": "tasks.",
       "代码审查": "Code review", "问题排查": "Troubleshooting", "前端实现": "Frontend implementation", "文档写作": "Documentation", "创意探索": "Creative exploration", "终端工程": "Terminal engineering", "通用助手": "General assistant", "修复工具": "Fixer", "安全审查": "Security review", "测试验证": "Test verification", "插件": "Plugins", "数据与存储": "Data and storage", "检查改动的正确性、回归风险和可维护性": "Review changes for correctness, regression risk, and maintainability", "负责 Codex 原生风格的界面实现与视觉验证": "Build and visually verify interfaces in the native Codex style", "定位崩溃、回归和异常行为的根因": "Find the root cause of crashes, regressions, and unexpected behavior",
       "通用任务处理": "General task handling", "代码实现": "Code implementation", "最大": "Maximum", "极致": "Ultra", "发送": "Send", "副本": "Copy", "复制卡片": "Copy card", "更多操作": "More actions", "本次启动关闭": "Disable for this launch", "正在重启 Better Codex": "Restarting Better Codex", "Better Codex 已恢复到上一版本。": "Better Codex has been restored to the previous version.",
@@ -422,7 +467,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "确定删除任务 “": "Delete task “", "确定删除所有已归档任务吗？": "Delete all archived tasks?", "吗？": "”?", "创建后先由 ": "After creation, ", " 整理卡片，再自动开始工作。": " will organize the card and start working automatically.", "刚刚": "Just now", "分钟": "minutes", "小时": "hours", "天": "days", "更新于": "Updated", "个筛选": "filters", "个智能体工作中": "agents working", "条": "items",
       "代码实现": "Code implementation", "最近 24 小时": "Last 24 hours", "最近 7 天": "Last 7 days", "最近 30 天": "Last 30 days", "暂无可选项": "No options available", "清除筛选": "Clear filters", "复制本地 workdir 路径": "Copy local workdir path",
       "工作中": "Working", "排队中": "Queued", "理解中": "Thinking", "执行失败": "Execution failed", "已中断": "Interrupted", "未开始": "Not started", "无法连接 Better Codex Runtime": "Unable to connect to Better Codex Runtime",
-      "在会话中打开": "Open in conversation", "前往会话": "Open conversation", "请前往会话继续对话": "Continue in the conversation", "任务正在进行中": "Task is running", "立即开始任务": "Start task now", "切换到手动": "Switch to manual", "继续创建": "Keep creating", "指派给": "Assign to", "可选": "Optional", "建议": "Suggestions", "创建第一个任务": "Create your first task", "写下要完成的事，交给智能体处理。": "Describe what needs to be done and let an agent handle it.", "开始对话": "Start the conversation", "补充下一步要求，智能体会继续处理。": "Add your next request and the agent will continue.", "在下方输入消息并发送": "Type a message below and send it", "正在处理任务": "Working on the task", "智能体回复产生后会显示在这里。": "The agent's response will appear here when available.", "请稍候": "Please wait", "输入下一步要求…": "Enter your next request…",
+      "在会话中打开": "Open in conversation", "前往会话": "Open conversation", "请前往会话继续对话": "Continue in the conversation", "任务正在进行中": "Task is running", "立即开始任务": "Start task now", "切换到手动": "Switch to manual", "继续创建": "Keep creating", "指派给": "Assign to", "可选": "Optional", "建议": "Suggestions", "创建第一个任务": "Create your first task", "写下要完成的事，交给智能体处理。": "Describe what needs to be done and let an agent handle it.", "开始对话": "Start the conversation", "补充下一步要求，智能体会继续处理。": "Add your next request and the agent will continue.", "在下方输入消息并发送": "Type a message below and send it", "正在处理任务": "Working on the task", "智能体回复产生后会显示在这里。": "The agent's response will appear here when available.", "请稍候": "Please wait", "输入下一步要求…": "Enter your next request…", "调整侧边栏宽度": "Resize sidebar",
       "头像": "Avatar", "上传图片": "Upload image", "使用此头像": "Use this avatar", "点击选择预设图标，或上传图片": "Choose a preset icon or upload an image", "从预设图标中选择，也可以上传图片": "Choose a preset icon or upload an image", "创建智能体": "Create agent", "Codex 默认智能体": "Default Codex agent", "说明这个智能体适合承担什么工作": "Describe what this agent is good at", "定义职责、工作方式和输出要求": "Define responsibilities, workflow, and output requirements", "权限": "Permissions", "只读": "Read-only", "工作区可写": "Workspace write access", "完全访问": "Full access", "仅可读取工作区文件，不能修改": "Can read workspace files but cannot modify them", "可修改当前工作区内的文件": "Can modify files in the current workspace", "可不受限制地访问互联网和电脑上的任何文件": "Unrestricted access to the internet and files on this computer",
       "已经执行过对话的 Issue 只能修改状态、优先级和指派人。": "Issues with an executed conversation can only change status, priority, and assignee.", "终止任务后才能打开对话，是否终止任务？": "The task must be stopped before opening the conversation. Stop it now?", "终止并打开": "Stop and open", "正在终止…": "Stopping…", "忽略当前版本": "Ignore this version", "立即更新": "Update now", "暂无项目": "No projects", "告诉智能体要做什么，例如：“修复项目里任务运行状态不可见的问题”": "Tell the agent what to do, for example: “Fix the invisible task run status in the project”"
     } };
@@ -451,6 +496,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     let issueMenuDismiss = null;
     let avatarPickerClose = null;
     let suppressAgentOutside = false;
+    let agentInspectorResize = null;
     let draggingIssueId = "";
     let codexLogoSequence = 0;
     let active = false;
@@ -868,9 +914,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #better-codex-dialog .better-codex-property select, #better-codex-dialog .better-codex-property input { width: auto; max-width: 128px; border: 0; color: inherit; background: transparent; padding: 0; font: inherit; font-size: inherit; outline: none; }
         #better-codex-dialog .better-codex-property input { width: 72px; }
         #better-codex-dialog .better-codex-project-picker { position: relative; display: inline-flex; }
-        #better-codex-dialog .better-codex-project-menu { position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 30; box-sizing: border-box; width: 220px; border: 1px solid #e4e4e7; border-radius: 9px; color: #3f3f46; background: #fff; padding: 5px; box-shadow: 0 12px 30px rgba(15,23,42,.14),0 2px 7px rgba(15,23,42,.08); }
+        #better-codex-dialog .better-codex-project-menu { position: absolute; top: calc(100% + 6px); right: 0; bottom: auto; z-index: 30; box-sizing: border-box; width: 220px; max-height: min(320px, calc(100dvh - 32px)); overflow: hidden; border: 1px solid #e4e4e7; border-radius: 9px; color: #3f3f46; background: #fff; padding: 5px; box-shadow: 0 12px 30px rgba(15,23,42,.14),0 2px 7px rgba(15,23,42,.08); }
         #better-codex-dialog .better-codex-project-menu[hidden] { display: none; }
         #better-codex-dialog .better-codex-project-search { box-sizing: border-box; width: 100%; height: var(--bc-control-height, 32px); border: 0; border-bottom: 1px solid #ededee; color: inherit; background: transparent; padding: 0 7px 4px; font: inherit; font-size: var(--bc-text-md); outline: none; }
+        #better-codex-dialog .better-codex-project-menu > [data-project-options] { display: block; max-height: min(260px, calc(100dvh - 96px)); overflow-y: auto; overscroll-behavior: contain; }
         #better-codex-dialog .better-codex-project-option { display: flex; width: 100%; min-height: var(--bc-row-height, 34px); align-items: center; gap: 7px; border: 0; border-radius: 6px; color: inherit; background: transparent; padding: 0 7px; font: inherit; font-size: var(--bc-text-md); text-align: left; cursor: pointer; }
         #better-codex-dialog .better-codex-project-option:hover, #better-codex-dialog .better-codex-project-option:focus-visible { background: #f4f4f5; outline: none; }
         #better-codex-dialog .better-codex-project-option > span:first-of-type { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1468,6 +1515,19 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       }
     }
 
+    function onGlobalShortcut(event) {
+      if (!active || !panel || panel.hidden || event.isComposing) return;
+      const target = event.target;
+      if (target?.closest?.("dialog") || target?.closest?.("input,textarea,select,[contenteditable='true']")) return;
+      const shortcut = readCreateIssueShortcut();
+      if (!shortcut || shortcutFromKeyboardEvent(event) !== shortcut) return;
+      event.preventDefault();
+      event.stopPropagation();
+      closeCreateMenu();
+      state.createMode = "agent";
+      void perform(() => openEditor());
+    }
+
     function bindModalDismiss(dialog, dismiss) {
       dialog.addEventListener("click", event => {
         if (event.target !== dialog) return;
@@ -1532,12 +1592,16 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (state.locale !== "zh-CN") return date.toLocaleString();
         return date.getFullYear() + "年" + (date.getMonth() + 1) + "月" + date.getDate() + "日，" + date.getHours() + ":" + String(date.getMinutes()).padStart(2, "0");
       };
+      const archiveTime = issue => {
+        const value = Date.parse(issue.archived_at || issue.updated_at || issue.created_at || "");
+        return Number.isFinite(value) ? value : 0;
+      };
       const render = () => {
         const query = String(search.value || "").trim().toLowerCase();
         const visible = archivedIssues.filter(issue => {
           const text = [issue.identifier, issue.title, issue.description, ...(Array.isArray(issue.labels) ? issue.labels : [])].join(" ").toLowerCase();
           return (!query || text.includes(query)) && (!projectId || issue.project_id === projectId);
-        });
+        }).sort((left, right) => archiveTime(right) - archiveTime(left) || String(right.id).localeCompare(String(left.id)));
         const groups = new Map();
         visible.forEach(issue => {
           const key = issue.project_id || "";
@@ -1744,18 +1808,18 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       menu.className = "better-codex-create-menu";
       menu.setAttribute("role", "menu");
       menu.setAttribute(OWNED, "true");
-      const agent = document.createElement("button");
-      agent.type = "button";
-      agent.className = "better-codex-create-menu-item";
-      agent.setAttribute("role", "menuitem");
-      agent.innerHTML = icon("bot") + "<span>" + escapeHtml(t("通过智能体创建")) + "</span>";
-      agent.addEventListener("click", event => {
+      const manual = document.createElement("button");
+      manual.type = "button";
+      manual.className = "better-codex-create-menu-item";
+      manual.setAttribute("role", "menuitem");
+      manual.innerHTML = icon("plus") + "<span>" + escapeHtml(t("手动创建")) + "</span>";
+      manual.addEventListener("click", event => {
         event.stopPropagation();
-        state.createMode = "agent";
+        state.createMode = "manual";
         closeCreateMenu();
         void perform(() => openEditor());
       });
-      menu.append(agent);
+      menu.append(manual);
       trigger.closest(".better-codex-create-split")?.append(menu);
       trigger.setAttribute("aria-expanded", "true");
       createMenuDismiss = event => {
@@ -1775,7 +1839,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (key === "status") return Object.entries(statusLabels).map(([value, text]) => ({ value, text: t(text) }));
       if (key === "priority") return Object.entries(priorityLabels).map(([value, text]) => ({ value, text: t(value === "none" ? "无优先级" : text + "优先级") }));
       if (key === "date") return [{ value: "1", text: t("最近 24 小时") }, { value: "7", text: t("最近 7 天") }, { value: "30", text: t("最近 30 天") }];
-      if (key === "assignee") return [{ value: "user", text: state.user.name || t("我") }, { value: "codex", text: "Codex" }, ...state.agents.filter(agent => !agent.is_default).map(agent => ({ value: agent.id, text: agent.name })), { value: "none", text: t("未分配") }];
+      if (key === "assignee") return [{ value: "user", text: state.user.name || t("我") }, { value: "codex", text: "Codex" }, ...state.agents.filter(agent => !agent.is_default).map(agent => ({ value: agent.id, text: agentDisplayName(agent) })), { value: "none", text: t("未分配") }];
       if (key === "creator") return [{ value: "me", text: t("由我创建") }];
       if (key === "project") return state.projects.map(project => ({ value: project.id, text: projectLabel(project) }));
       if (key === "label") return [...new Set(state.issues.flatMap(issue => issue.labels || []))].map(value => ({ value, text: value }));
@@ -1931,7 +1995,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         '<button class="better-codex-context-item" type="button"' + contextLockAttrs + ' data-context-action="assign" data-assignee-kind="me"><span class="better-codex-context-check">' + (userSelected ? icon("check") : "") + '</span>' + userAvatar + contextAssigneeLabel(userName) + '</button>',
         ...state.agents.map(agent => {
           const selected = Boolean(issue.agent_enabled) && (agent.is_default ? !issue.agent_id : issue.agent_id === agent.id);
-          return '<button class="better-codex-context-item" type="button"' + contextLockAttrs + ' data-context-action="assign" data-assignee-kind="agent" data-context-agent-id="' + escapeHtml(agent.id || "") + '"><span class="better-codex-context-check">' + (selected ? icon("check") : "") + '</span>' + agentAvatarMarkup(agent, "better-codex-context-avatar") + contextAssigneeLabel(agent.name, contextAssigneeTags(agent)) + '</button>';
+          return '<button class="better-codex-context-item" type="button"' + contextLockAttrs + ' data-context-action="assign" data-assignee-kind="agent" data-context-agent-id="' + escapeHtml(agent.id || "") + '"><span class="better-codex-context-check">' + (selected ? icon("check") : "") + '</span>' + agentAvatarMarkup(agent, "better-codex-context-avatar") + contextAssigneeLabel(agentDisplayName(agent), contextAssigneeTags(agent)) + '</button>';
         }),
       ].join("");
       const menu = document.createElement("div");
@@ -2112,7 +2176,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       addIssue.insertAdjacentHTML("afterbegin", icon("plus"));
       addIssue.addEventListener("click", () => {
         closeCreateMenu();
-        state.createMode = "manual";
+        state.createMode = "agent";
         void perform(() => openEditor());
       });
       const createToggle = actionButton("");
@@ -2169,7 +2233,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       agents.id = "better-codex-agents";
       agents.className = "better-codex-agents";
       agents.addEventListener("click", onAgentsClick);
+      agents.addEventListener("pointerdown", onAgentInspectorResizeStart);
+      agents.addEventListener("pointermove", onAgentInspectorResizeMove);
+      agents.addEventListener("pointerup", finishAgentInspectorResize);
+      agents.addEventListener("pointercancel", finishAgentInspectorResize);
       agents.addEventListener("keydown", event => {
+        if (onAgentInspectorResizeKeydown(event)) return;
         if (event.key !== "Escape") return;
         const openPicker = agents.querySelector(".better-codex-agent-setting.is-open");
         if (!openPicker) return;
@@ -2427,7 +2496,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function agentOptionLabel(agent, name) {
-      return name;
+      return state.locale === "en" ? String(agent?.name_en || name || "") : name;
+    }
+
+    function agentDisplayName(agent) {
+      return agentOptionLabel(agent, agent?.name || "");
     }
 
     function applyAppearance(appearance) {
@@ -2481,6 +2554,83 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const suggestedAgents = ${JSON.stringify(suggestedAgents)};
 
     let agentInspectorClosing = false;
+
+    function agentInspectorWidthLimit() {
+      const available = panel?.getBoundingClientRect().width || window.innerWidth;
+      return Math.max(AGENT_INSPECTOR_MIN_WIDTH, Math.floor(available - AGENT_DIRECTORY_MIN_WIDTH));
+    }
+
+    function clampAgentInspectorWidth(width) {
+      return Math.round(Math.min(agentInspectorWidthLimit(), Math.max(AGENT_INSPECTOR_MIN_WIDTH, Number(width) || AGENT_INSPECTOR_MIN_WIDTH)));
+    }
+
+    function applyAgentInspectorWidth(inspector, width = state.agentInspectorWidth) {
+      if (!inspector || window.matchMedia?.("(max-width: 720px)")?.matches) return;
+      if (!width) {
+        inspector.style.removeProperty("--bc-agent-inspector-width");
+        delete inspector.dataset.resized;
+        const defaultHandle = inspector.querySelector("[data-agent-inspector-resize]");
+        defaultHandle?.setAttribute("aria-valuemin", String(AGENT_INSPECTOR_MIN_WIDTH));
+        defaultHandle?.setAttribute("aria-valuemax", String(agentInspectorWidthLimit()));
+        defaultHandle?.setAttribute("aria-valuenow", String(Math.round(inspector.getBoundingClientRect().width)));
+        return;
+      }
+      const nextWidth = clampAgentInspectorWidth(width);
+      state.agentInspectorWidth = nextWidth;
+      inspector.dataset.resized = "true";
+      inspector.style.setProperty("--bc-agent-inspector-width", nextWidth + "px");
+      const handle = inspector.querySelector("[data-agent-inspector-resize]");
+      handle?.setAttribute("aria-valuemin", String(AGENT_INSPECTOR_MIN_WIDTH));
+      handle?.setAttribute("aria-valuemax", String(agentInspectorWidthLimit()));
+      handle?.setAttribute("aria-valuenow", String(nextWidth));
+    }
+
+    function persistAgentInspectorWidth() {
+      if (!state.agentInspectorWidth) return;
+      localStorage.setItem(AGENT_INSPECTOR_WIDTH_KEY, String(state.agentInspectorWidth));
+    }
+
+    function onAgentInspectorResizeStart(event) {
+      const handle = event.target.closest("[data-agent-inspector-resize]");
+      if (!handle || event.button !== 0 || window.matchMedia?.("(max-width: 720px)")?.matches) return;
+      const inspector = handle.closest(".better-codex-agent-inspector");
+      if (!inspector) return;
+      agentInspectorResize = { pointerId: event.pointerId, startX: event.clientX, startWidth: inspector.getBoundingClientRect().width, handle, inspector };
+      inspector.classList.add("is-resizing");
+      panel.dataset.agentResizing = "true";
+      handle.setPointerCapture(event.pointerId);
+      event.preventDefault();
+    }
+
+    function onAgentInspectorResizeMove(event) {
+      if (!agentInspectorResize || event.pointerId !== agentInspectorResize.pointerId) return;
+      applyAgentInspectorWidth(agentInspectorResize.inspector, agentInspectorResize.startWidth + agentInspectorResize.startX - event.clientX);
+      event.preventDefault();
+    }
+
+    function finishAgentInspectorResize(event) {
+      if (!agentInspectorResize || event.pointerId !== agentInspectorResize.pointerId) return;
+      const { handle, inspector, pointerId } = agentInspectorResize;
+      agentInspectorResize = null;
+      inspector.classList.remove("is-resizing");
+      delete panel.dataset.agentResizing;
+      if (handle.hasPointerCapture(pointerId)) handle.releasePointerCapture(pointerId);
+      persistAgentInspectorWidth();
+    }
+
+    function onAgentInspectorResizeKeydown(event) {
+      const handle = event.target.closest("[data-agent-inspector-resize]");
+      if (!handle || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return false;
+      const inspector = handle.closest(".better-codex-agent-inspector");
+      if (!inspector) return false;
+      const currentWidth = inspector.getBoundingClientRect().width;
+      const step = event.shiftKey ? 48 : 16;
+      const nextWidth = event.key === "Home" ? AGENT_INSPECTOR_MIN_WIDTH : event.key === "End" ? agentInspectorWidthLimit() : currentWidth + (event.key === "ArrowLeft" ? step : -step);
+      applyAgentInspectorWidth(inspector, nextWidth);
+      persistAgentInspectorWidth();
+      event.preventDefault();
+      return true;
+    }
 
     function closeAgentInspector() {
       if (state.agentPane === "preview") return;
@@ -2537,7 +2687,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const avatarInput = '<input type="hidden" name="avatar" value="' + escapeHtml(draft.avatar || "") + '">';
       const profileHead = creating
         ? '<h2>' + te("创建智能体") + '</h2><div class="better-codex-agent-avatar-field">' + agentAvatarEditorMarkup(draft, "") + '<div><strong>' + te("头像") + '</strong><span>' + te("点击选择预设图标，或上传图片") + '</span></div>' + avatarInput + '</div>'
-        : '<div class="better-codex-agent-profile-head">' + agentAvatarEditorMarkup(draft, agentKey(draft)) + '<h2>' + escapeHtml(draft.name) + '</h2>' + avatarInput + '</div>';
+        : '<div class="better-codex-agent-profile-head">' + agentAvatarEditorMarkup(draft, agentKey(draft)) + '<h2>' + escapeHtml(agentDisplayName(draft)) + '</h2>' + avatarInput + '</div>';
       const identity = isDefault
         ? '<div class="better-codex-agent-summary"><div><strong>' + te("Codex 默认智能体") + '</strong></div></div>'
         : '<label class="better-codex-agent-inspector-field"><span>' + te("名称") + '</span><input name="name" maxlength="80" value="' + escapeHtml(name) + '" placeholder="' + te("智能体名称") + '" required></label><label class="better-codex-agent-inspector-field"><span>' + te("介绍") + ' <small>' + te("可选") + '</small></span><textarea name="description" maxlength="500" rows="3" placeholder="' + te("说明这个智能体适合承担什么工作") + '">' + escapeHtml(description) + '</textarea></label>';
@@ -2550,7 +2700,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         { value: "danger-full-access", label: t("完全访问"), description: t("可不受限制地访问互联网和电脑上的任何文件"), icon: "permissionDanger", tone: "warning" },
       ];
       const animateAttr = options.animateEnter ? ' data-animate="enter"' : "";
-       return '<aside class="better-codex-agent-inspector"' + animateAttr + '><form data-agent-form="' + (creating ? "create" : isDefault ? "default" : "update") + '" data-agent-key="' + escapeHtml(creating ? "" : agentKey(draft)) + '"><header class="better-codex-agent-inspector-head"><span>' + heading + '</span><button class="better-codex-agent-card-action" type="button" data-agent-close-pane aria-label="' + te("关闭详情") + '">' + icon("close") + '</button></header><div class="better-codex-agent-inspector-scroll">' + profileHead + identity + '<h3>' + te("详情") + '</h3><div class="better-codex-agent-inspector-group">' + agentPicker("model", t("模型"), model, modelOptions) + agentPicker("reasoning_effort", t("推理"), effort, effortOptions) + agentPicker("sandbox_mode", t("权限"), sandboxMode, sandboxOptions) + agentNumberInput("max_concurrency", t("最大并发"), draft.max_concurrency, 1, 20) + '</div>' + instructionField + '<div class="better-codex-agent-inspector-error" hidden></div></div><footer class="better-codex-agent-inspector-footer">' + deleteButton + '<button class="better-codex-submit" type="submit">' + te(creating ? "创建" : "保存") + '</button></footer></form></aside>';
+       return '<aside class="better-codex-agent-inspector"' + animateAttr + '><div class="better-codex-agent-inspector-resize" data-agent-inspector-resize role="separator" aria-orientation="vertical" aria-label="' + te("调整侧边栏宽度") + '" tabindex="0"></div><form data-agent-form="' + (creating ? "create" : isDefault ? "default" : "update") + '" data-agent-key="' + escapeHtml(creating ? "" : agentKey(draft)) + '"><header class="better-codex-agent-inspector-head"><span>' + heading + '</span><button class="better-codex-agent-card-action" type="button" data-agent-close-pane aria-label="' + te("关闭详情") + '">' + icon("close") + '</button></header><div class="better-codex-agent-inspector-scroll">' + profileHead + identity + '<h3>' + te("详情") + '</h3><div class="better-codex-agent-inspector-group">' + agentPicker("model", t("模型"), model, modelOptions) + agentPicker("reasoning_effort", t("推理"), effort, effortOptions) + agentPicker("sandbox_mode", t("权限"), sandboxMode, sandboxOptions) + agentNumberInput("max_concurrency", t("最大并发"), draft.max_concurrency, 1, 20) + '</div>' + instructionField + '<div class="better-codex-agent-inspector-error" hidden></div></div><footer class="better-codex-agent-inspector-footer">' + deleteButton + '<button class="better-codex-submit" type="submit">' + te(creating ? "创建" : "保存") + '</button></footer></form></aside>';
     }
 
     function renderAgents() {
@@ -2564,7 +2714,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const query = state.agentSearch.trim().toLowerCase();
       const agents = state.agents.filter(agent => {
         const matchesView = state.agentView === "all" || (state.agentView === "default" ? agent.is_default : !agent.is_default);
-        return matchesView && (!query || [agent.name, agent.description, agent.instructions, agent.model].some(value => String(value || "").toLowerCase().includes(query)));
+        return matchesView && (!query || [agent.name, agent.name_en, agent.description, agent.instructions, agent.model].some(value => String(value || "").toLowerCase().includes(query)));
       });
       const selected = state.agents.find(agent => agentKey(agent) === state.selectedAgentId);
       const rows = agents.map(agent => {
@@ -2572,7 +2722,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const avatar = agentAvatarMarkup(agent, "better-codex-agent-list-avatar");
         const meta = modelLabel(agent.model) + " · " + effortLabel(agent.reasoning_effort) + (state.locale === "zh-CN" ? "推理" : " reasoning");
         const description = state.mockup && agent.is_default ? "" : agent.description || (agent.is_default ? "" : t("尚未添加介绍"));
-        return '<button class="better-codex-agent-row' + (key === state.selectedAgentId ? " is-selected" : "") + '" type="button" data-agent-key="' + escapeHtml(key) + '">' + avatar + '<span class="better-codex-agent-row-copy"><strong>' + escapeHtml(agent.name) + (agent.is_default ? '<small>' + te("默认") + '</small>' : "") + '</strong>' + (description ? '<span>' + escapeHtml(description) + '</span>' : '') + '<em>' + escapeHtml(meta) + '</em></span><span class="better-codex-agent-row-chevron">' + icon("chevron") + '</span></button>';
+        return '<button class="better-codex-agent-row' + (key === state.selectedAgentId ? " is-selected" : "") + '" type="button" data-agent-key="' + escapeHtml(key) + '">' + avatar + '<span class="better-codex-agent-row-copy"><strong>' + escapeHtml(agentDisplayName(agent)) + (agent.is_default ? '<small>' + te("默认") + '</small>' : "") + '</strong>' + (description ? '<span>' + escapeHtml(description) + '</span>' : '') + '<em>' + escapeHtml(meta) + '</em></span><span class="better-codex-agent-row-chevron">' + icon("chevron") + '</span></button>';
       }).join("");
       const empty = '<div class="better-codex-agent-list-empty">' + te(query ? "没有匹配的智能体" : "此分类暂无智能体") + '</div>';
       const suggestions = suggestedAgents.map(item => {
@@ -2581,6 +2731,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       }).join("");
       const animateEnter = previousPane === "preview" && state.agentPane !== "preview";
       container.innerHTML = '<div class="better-codex-agent-shell" data-pane="' + state.agentPane + '"><section class="better-codex-agent-directory"><header class="better-codex-agent-page-heading"><h1>' + te("智能体") + '</h1><p>' + te("创建和管理你的智能体") + '</p></header><div class="better-codex-agent-search-wrap">' + icon("search") + '<input class="better-codex-search" data-agent-search type="search" value="' + escapeHtml(state.agentSearch) + '" placeholder="' + te("搜索智能体") + '" aria-label="' + te("搜索智能体") + '"></div><div class="better-codex-agent-list">' + (rows || empty) + '</div>' + (state.agentView === "all" && !query ? '<div class="better-codex-agent-suggestions"><h3>' + te("建议") + '</h3>' + suggestions + '</div>' : "") + '</section>' + agentInspector(selected, { animateEnter }) + '</div>';
+      applyAgentInspectorWidth(container.querySelector(".better-codex-agent-inspector"));
     }
 
     function showAutoDispatchHelp(initialView = "mode") {
@@ -2605,6 +2756,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const schedulerReasoningEffort = schedulerReasoningOptions.some(item => item.value === state.schedulerReasoningEffort) ? state.schedulerReasoningEffort : state.agentModelCatalog.find(model => model.id === schedulerModel)?.defaultReasoningEffort || schedulerReasoningOptions[0]?.value || "high";
       const schedulerReasoningEffortLabel = effortLabel(schedulerReasoningEffort);
       const schedulerReasoningEffortOptions = schedulerReasoningOptions.map(option => '<button type="button" role="option" data-setting-scheduler-reasoning-option="' + escapeHtml(option.value) + '" aria-selected="' + String(option.value === schedulerReasoningEffort) + '" class="' + (option.value === schedulerReasoningEffort ? "is-selected" : "") + '"><span>' + escapeHtml(option.label) + '</span><span class="better-codex-help-model-check">' + (option.value === schedulerReasoningEffort ? icon("check") : "") + '</span></button>').join("");
+      const createIssueShortcut = readCreateIssueShortcut();
       const settingsPage = [
         '<section class="better-codex-help-page" data-help-page="settings" hidden>',
         '<div class="better-codex-help-setting-group"><h3>' + te("语言") + '</h3><div class="better-codex-help-setting-row is-language"><span><strong>' + te("界面语言") + '</strong><small>' + te("选择 Better Codex 的界面语言") + '</small></span><div class="better-codex-language-switch" role="radiogroup" aria-label="' + te("界面语言") + '" data-language-value="' + state.languageSetting + '"><button type="button" role="radio" data-language="system" aria-checked="' + String(state.languageSetting === "system") + '">' + te("跟随系统") + '</button><button type="button" role="radio" data-language="zh-CN" aria-checked="' + String(state.languageSetting === "zh-CN") + '">' + te("中文") + '</button><button type="button" role="radio" data-language="en" aria-checked="' + String(state.languageSetting === "en") + '">English</button></div></div></div>',
@@ -2612,14 +2764,16 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         '<div class="better-codex-help-setting-group"><h3>' + te("调度") + '</h3><div class="better-codex-help-setting-row is-model"><span><strong>' + te("调度器模型") + '</strong><small>' + te("这个模型用于 Issue 状态调度") + '</small></span><span class="better-codex-help-setting-controls better-codex-help-scheduler-controls"><span class="better-codex-help-model" data-setting-scheduler-model-picker><button type="button" class="better-codex-help-model-toggle" data-setting-scheduler-model aria-haspopup="listbox" aria-expanded="false" aria-label="' + te("调度器模型") + '"><span data-setting-scheduler-model-label>' + escapeHtml(schedulerModelLabel) + '</span>' + icon("chevronDown") + '</button><span class="better-codex-help-model-menu" role="listbox" hidden><span class="better-codex-help-model-title">' + te("模型") + '</span>' + schedulerModelOptions + '</span></span><span class="better-codex-help-model" data-setting-scheduler-reasoning-picker><button type="button" class="better-codex-help-model-toggle" data-setting-scheduler-reasoning aria-haspopup="listbox" aria-expanded="false" aria-label="' + te("调度器思考强度") + '"><span data-setting-scheduler-reasoning-label>' + escapeHtml(schedulerReasoningEffortLabel) + '</span>' + icon("chevronDown") + '</button><span class="better-codex-help-model-menu" role="listbox" hidden><span class="better-codex-help-model-title">' + te("调度器思考强度") + '</span>' + schedulerReasoningEffortOptions + '</span></span></span></div></div>',
         '</section>',
       ].join("");
+      const shortcutPage = '<section class="better-codex-help-page" data-help-page="shortcuts" hidden><div class="better-codex-help-page-heading"><h2>' + te("快捷键设置") + '</h2><p>' + te("为常用操作设置键盘快捷键。") + '</p></div><div class="better-codex-help-setting-group"><h3>' + te("快捷键") + '</h3><div class="better-codex-help-setting-row is-shortcut"><span><strong>' + te("创建 Issue") + '</strong><small>' + te("打开创建 Issue 窗口") + '</small></span><span class="better-codex-help-shortcut-controls"><button type="button" class="better-codex-help-shortcut-key" data-setting-create-issue-shortcut aria-pressed="false">' + escapeHtml(createIssueShortcut ? shortcutLabel(createIssueShortcut) : te("点击录入")) + '</button><button type="button" class="better-codex-help-shortcut-clear" data-setting-create-issue-shortcut-clear' + (createIssueShortcut ? "" : " disabled") + '>' + te("清除快捷键") + '</button></span></div></div></section>';
       dialog.innerHTML = [
         '<div class="better-codex-auto-dispatch-help-shell" data-help-view="mode">',
-        '<header><div class="better-codex-help-tabs" role="tablist" aria-label="' + te("帮助与设置") + '"><button type="button" class="is-active" data-help-view="mode" aria-selected="true">' + te("运行模式说明") + '</button><button type="button" data-help-view="settings" aria-selected="false">' + te("设置") + '</button><button type="button" data-help-view="about" aria-selected="false">' + te("关于") + '</button></div>' + mockupTools + '<button type="button" data-help-close aria-label="' + te("关闭") + '">' + icon("close") + "</button></header>",
+        '<header><div class="better-codex-help-tabs" role="tablist" aria-label="' + te("帮助与设置") + '"><button type="button" class="is-active" data-help-view="mode" aria-selected="true">' + te("运行模式说明") + '</button><button type="button" data-help-view="settings" aria-selected="false">' + te("设置") + '</button><button type="button" data-help-view="shortcuts" aria-selected="false">' + te("快捷键") + '</button><button type="button" data-help-view="about" aria-selected="false">' + te("关于") + '</button></div>' + mockupTools + '<button type="button" data-help-close aria-label="' + te("关闭") + '">' + icon("close") + "</button></header>",
         '<main class="better-codex-help-content">',
         '<section class="better-codex-help-page is-active" data-help-page="mode"><div class="better-codex-auto-dispatch-help-panels"><article class="better-codex-auto-dispatch-help-panel is-manual"><div class="better-codex-auto-dispatch-help-heading">' + icon("user") + "<h3>" + te("手动运行") + "</h3></div>" + modeDescription(helpMode.manual) + "</article>",
         '<div class="better-codex-auto-dispatch-help-divider" aria-hidden="true"></div>',
         '<article class="better-codex-auto-dispatch-help-panel is-auto"><div class="better-codex-auto-dispatch-help-heading">' + icon("refresh") + "<h3>" + te("自动运行") + "</h3></div>" + modeDescription(helpMode.auto) + "</article></div></section>",
         settingsPage,
+        shortcutPage,
         '<section class="better-codex-help-page" data-help-page="about" hidden><div class="better-codex-help-about"><span class="better-codex-help-about-logo">' + betterCodexLogo() + '</span><div><h2>Better Codex</h2><p class="better-codex-help-about-slogan">' + te("从开始到完成，让 Codex 里的工作清晰可见。") + '</p></div><span class="better-codex-help-runtime-status"><span class="better-codex-help-status-dot"></span>' + te("运行正常") + '</span></div><dl class="better-codex-help-about-details"><div><dt>' + te("版本信息") + '</dt><dd><button class="better-codex-help-check-update" type="button" data-check-update>' + te("检查新版本") + '</button><span data-product-core></span></dd></div></dl><div class="better-codex-help-github-row"><a class="better-codex-help-github" href="https://github.com/Ericwong5021/better-codex" target="_blank" rel="noreferrer">' + githubLogo() + '<span class="better-codex-help-github-name">Better Codex</span><span class="better-codex-help-github-stars">' + icon("star", "better-codex-help-star") + '</span></a><p>' + te("如果你喜欢 Better Codex，欢迎给我们一个 Star。") + '</p></div></section>',
         "</main>",
         "</div>",
@@ -2703,6 +2857,36 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         state.agents = [];
         void load().then(() => showAutoDispatchHelp("settings")).catch(() => render());
       }));
+      const shortcutButton = dialog.querySelector("[data-setting-create-issue-shortcut]");
+      const shortcutClear = dialog.querySelector("[data-setting-create-issue-shortcut-clear]");
+      let recordingShortcut = false;
+      const syncShortcutControls = shortcut => {
+        const value = normalizeShortcut(shortcut);
+        shortcutButton.textContent = recordingShortcut ? te("按下新的快捷键") : value ? shortcutLabel(value) : te("点击录入");
+        shortcutButton.dataset.settingShortcutRecording = String(recordingShortcut);
+        shortcutButton.setAttribute("aria-pressed", String(recordingShortcut));
+        shortcutClear.disabled = recordingShortcut || !value;
+      };
+      const setShortcutRecording = recording => {
+        recordingShortcut = recording;
+        syncShortcutControls(readCreateIssueShortcut());
+      };
+      shortcutButton.addEventListener("click", () => setShortcutRecording(!recordingShortcut));
+      shortcutClear.addEventListener("click", () => {
+        localStorage.removeItem(CREATE_ISSUE_SHORTCUT_KEY);
+        setShortcutRecording(false);
+      });
+      dialog.addEventListener("keydown", event => {
+        if (!recordingShortcut) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.key === "Escape") return setShortcutRecording(false);
+        const shortcut = shortcutFromKeyboardEvent(event);
+        if (!shortcut) return;
+        localStorage.setItem(CREATE_ISSUE_SHORTCUT_KEY, shortcut);
+        setShortcutRecording(false);
+        syncShortcutControls(shortcut);
+      });
       const completionToggle = dialog.querySelector("[data-setting-completion]");
       const completionDurationSelect = dialog.querySelector("[data-setting-completion-duration]");
       const completionDurationPicker = dialog.querySelector("[data-setting-completion-picker]");
@@ -2946,7 +3130,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           const assignee = issue.agent_enabled
             ? (assignedAgent || defaultAgent || { name: "Codex", is_default: true })
             : null;
-          const agentName = mockupText(assignee?.name || "");
+          const agentName = mockupText(agentDisplayName(assignee));
           const activityAgent = assignee || defaultAgent || { name: "Codex", is_default: true };
           const latestRunStatus = issue.latest_run_status || "";
           const executionState = issue.status === "blocked" ? "blocked" : issue.latest_scheduler_error && issue.status === "in_review" ? "scheduler-failed" : latestRunStatus === "completed" ? "completed" : latestRunStatus === "failed" ? "failed" : latestRunStatus === "interrupted" ? "interrupted" : latestRunStatus === "scheduling" ? "scheduling" : latestRunStatus === "running" ? "running" : latestRunStatus === "claimed" ? "claimed" : issue.agent_enabled ? "not-started" : "";
@@ -3078,6 +3262,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const error = form.querySelector(".better-codex-agent-inspector-error");
       const body = {
         name: form.elements.name?.value || selected?.name || "Codex",
+        name_en: selected?.name_en || state.agentDraft?.name_en || "",
         description: form.elements.description?.value || "",
         instructions: form.elements.instructions?.value || "",
         model: form.elements.model.value,
@@ -3176,7 +3361,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (deleteButton) {
         const agent = state.agents.find(item => agentKey(item) === deleteButton.dataset.agentKey);
         if (!agent || agent.is_default) return;
-        void confirmAction("删除智能体", '确定删除智能体 “' + agent.name + '” 吗？', "删除").then(confirmed => {
+        void confirmAction("删除智能体", '确定删除智能体 “' + agentDisplayName(agent) + '” 吗？', "删除").then(confirmed => {
           if (!confirmed) return;
           return perform(async () => {
             await api("/api/agents/" + encodeURIComponent(agent.id), { method: "DELETE", body: JSON.stringify({ version: agent.version }) });
@@ -3203,6 +3388,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     async function openEditor(issue = null, initialStatus = "todo") {
       state.agents = await api("/api/agents");
+      if (!state.mockup) state.projects = await api("/api/projects");
       if (issue) issue = await api("/api/issues/" + encodeURIComponent(issue.id));
       state.selected = issue;
       document.getElementById("better-codex-dialog")?.remove();
@@ -3236,6 +3422,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       let selectDismiss = null;
       let conversationTimer = null;
       let conversationLoadFailures = 0;
+      let conversationFailureState = "";
       let lastReplyMessage = "";
       let lastReplyRequestId = "";
       let replyDraftTimer = null;
@@ -3485,7 +3672,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const latestRunStatus = issue?.latest_run_status || "";
         const executionState = issue?.status === "blocked" ? "blocked" : issue?.latest_scheduler_error && issue?.status === "in_review" ? "scheduler-failed" : latestRunStatus === "completed" ? "completed" : latestRunStatus === "failed" ? "failed" : latestRunStatus === "interrupted" ? "interrupted" : latestRunStatus === "scheduling" ? "scheduling" : latestRunStatus === "running" ? "running" : latestRunStatus === "claimed" ? "claimed" : issue?.agent_enabled ? "not-started" : "";
         const activeExecutionState = issue?.active_run_status || (replyStatus === "running" ? "running" : "");
-        const activityState = enrichmentLocked ? "thinking" : activeExecutionState || executionState;
+        const replyFailureState = ["failed", "interrupted"].includes(replyStatus) ? replyStatus : conversationFailureState;
+        const activityState = enrichmentLocked ? "thinking" : replyFailureState || activeExecutionState || executionState;
         if (!activityState) return "";
         const activityLabel = t(enrichmentLocked ? "理解中" : activityState === "running" ? "工作中" : activityState === "scheduling" ? "调度中" : activityState === "scheduler-failed" ? "调度失败" : activityState === "claimed" ? "排队中" : activityState === "in_review" ? "待审核" : activityState === "completed" ? "已完成" : activityState === "blocked" ? "已阻塞" : activityState === "failed" ? "执行失败" : activityState === "interrupted" ? "已中断" : activityState === "not-started" ? "未开始" : "");
         const agent = state.agents.find(item => item.id === issue?.agent_id) || state.agents.find(item => item.is_default) || { name: "Codex", is_default: true };
@@ -3531,9 +3719,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       function showConversationFailure(error, action = "reply", message = "") {
         const feedback = dialog.querySelector("[data-conversation-feedback]");
         if (!feedback) return;
+        conversationFailureState = "failed";
         if (message) lastReplyMessage = message;
         feedback.innerHTML = '<span>' + te(replyFailureMessage(error, action)) + '</span><button type="button" data-conversation-retry="' + action + '">' + te(action === "load" ? "重新加载" : "重试回复") + '</button>';
         feedback.hidden = false;
+        syncConversationStatus("failed");
         feedback.querySelector("[data-conversation-retry]")?.addEventListener("click", event => {
           if (event.currentTarget.dataset.conversationRetry === "load") void loadConversation();
           else void sendReply(lastReplyMessage, lastReplyRequestId);
@@ -3543,6 +3733,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       function clearConversationFailure() {
         const feedback = dialog.querySelector("[data-conversation-feedback]");
         if (!feedback) return;
+        conversationFailureState = "";
         feedback.hidden = true;
         feedback.innerHTML = "";
       }
@@ -3567,7 +3758,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
       function conversationBubbles(messages, profile = null) {
         const agent = state.agents.find(item => item.id === issue?.agent_id) || state.agents.find(item => item.is_default) || null;
-        const agentName = agent?.name || (issue?.agent_enabled ? "Codex" : t("智能体"));
+        const agentName = agent ? agentDisplayName(agent) : (issue?.agent_enabled ? "Codex" : t("智能体"));
         const user = profile && profile.name ? profile : state.user || { name: t("你"), initials: t("你"), color: "#16a34a" };
         if (profile && profile.name) state.user = { ...state.user, ...profile };
         return (messages || []).map(message => {
@@ -3611,9 +3802,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (reply.message) lastReplyMessage = reply.message;
         if (reply.request_id) lastReplyRequestId = reply.request_id;
         const stateName = reply.status || "idle";
-        syncConversationStatus(stateName);
         if (!sessionHandoff && (stateName === "failed" || stateName === "interrupted")) showConversationFailure(reply.error, "reply", reply.message);
-        else clearConversationFailure();
+        else {
+          clearConversationFailure();
+          syncConversationStatus(stateName);
+        }
         if (send) updateReplySendState();
         stopConversationPoll();
         if (stateName === "running") conversationTimer = setTimeout(() => void loadConversation({ quiet: true }), 2000);
@@ -4615,6 +4808,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       bridgeRequests.clear();
       document.removeEventListener("DOMContentLoaded", mount);
       document.removeEventListener("click", onClick, true);
+      document.removeEventListener("keydown", onGlobalShortcut, true);
       window.removeEventListener("codex-message-from-view", onHostMessageFromView, true);
       close();
       document.querySelectorAll('[' + OWNED + '="true"]').forEach(node => node.remove());
@@ -4635,6 +4829,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     window.__betterCodexInjection__ = { version: VERSION, endpoint: BASE_URL, refresh, open: openRoute, close, destroy };
     document.addEventListener("click", onClick, true);
+    document.addEventListener("keydown", onGlobalShortcut, true);
     window.addEventListener("codex-message-from-view", onHostMessageFromView, true);
     if (document.documentElement) mount();
     else document.addEventListener("DOMContentLoaded", mount, { once: true });

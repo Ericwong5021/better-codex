@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { closeSync, openSync, writeFileSync } from "node:fs";
+import { closeSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { homedir } from "node:os";
 import { isSea } from "node:sea";
 import { coreVersion, readCompatibilityStatus } from "./compatibility.js";
 import { agentSandboxModes, cleanMaxConcurrency, issuePriorities, issueStatuses, Store, type AgentModel, type AgentReasoningEffort, type AgentSandboxMode, type Issue, type IssuePriority, type IssueStatus } from "./db.js";
@@ -23,6 +24,7 @@ const accessToken = token();
 const mockupEnabled = !isSea() && process.argv.includes("--mockup");
 const maxPastedImageBytes = 10 * 1024 * 1024;
 const maxPastedImageBodyBytes = Math.ceil(maxPastedImageBytes * 4 / 3) + 1024;
+const codexStatePath = join(process.env.CODEX_HOME || join(homedir(), ".codex"), ".codex-global-state.json");
 
 function savePastedImage(value: unknown) {
   const data = cleanString(value, maxPastedImageBodyBytes);
@@ -162,6 +164,29 @@ function cleanString(value: unknown, limit = 10000) {
   return value.trim();
 }
 
+function syncCodexProjects(store: Store) {
+  try {
+    const state = JSON.parse(readFileSync(codexStatePath, "utf8")) as Record<string, unknown>;
+    const projects = state["local-projects"];
+    if (!projects || typeof projects !== "object" || Array.isArray(projects)) return;
+    const existing = new Map(store.listProjects().filter(project => project.external_id).map(project => [project.external_id!, project] as const));
+    for (const [externalId, value] of Object.entries(projects)) {
+      try {
+        if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+        const project = value as Record<string, unknown>;
+        const name = cleanString(project.name, 120);
+        const rootPaths = Array.isArray(project.rootPaths) ? project.rootPaths : [];
+        const workspacePath = cleanString(rootPaths[0], 4096);
+        if (!externalId || !name) continue;
+        const id = cleanString(externalId, 200);
+        const current = existing.get(id);
+        if (current?.name === name && current.workspace_path === workspacePath) continue;
+        existing.set(id, store.ensureProject({ externalId: id, name, workspacePath }));
+      } catch {}
+    }
+  } catch {}
+}
+
 function asLabels(value: unknown) {
   if (value === undefined) return [];
   if (!Array.isArray(value) || value.some(item => typeof item !== "string")) throw new Error("invalid_labels");
@@ -184,6 +209,7 @@ function asSandboxMode(value: unknown): AgentSandboxMode {
 function agentProfileInput(body: Record<string, unknown>) {
   return {
     name: cleanString(body.name, 80),
+    name_en: cleanString(body.name_en, 80),
     description: cleanString(body.description, 500),
     instructions: cleanString(body.instructions, 100000),
     model: cleanString(body.model, 80) as AgentModel,
@@ -333,6 +359,7 @@ export function startServer() {
         const agentModels = agentModelCatalog.map(model => model.id);
         const agentReasoningEfforts = [...new Set(agentModelCatalog.flatMap(model => model.supportedReasoningEfforts.map(effort => effort.value)))];
         const mockup = mockupEnabled ? readMockupState(mockupLocale) : null;
+        if (!mockup) syncCodexProjects(store);
         return sendJson(response, 200, { projects: mockup ? mockup.projects : store.listProjects(), agents: mockup ? mockup.agents : visibleAgentProfiles(), statuses: issueStatuses, priorities: issuePriorities, appearance: readCodexAppearance(), locale: readCodexLocale(), user: readCodexUserProfile(), agentModelCatalog, agentModels, agentReasoningEfforts, autoDispatch: mockup ? mockup.auto_dispatch : store.getAutoDispatch(), schedulerModel: mockup ? mockup.scheduler_model : store.getSchedulerModel(defaultAgentProfile().model), schedulerReasoningEffort: mockup ? mockup.scheduler_reasoning_effort : store.getSchedulerReasoningEffort(), mockup: mockupEnabled });
       }
       if (mockupEnabled && url.pathname === "/api/mockup/state" && method === "GET") {
@@ -748,7 +775,10 @@ export function startServer() {
           return sendJson(response, 200, { ok: true });
         }
       }
-      if (url.pathname === "/api/projects" && method === "GET") return sendJson(response, 200, store.listProjects());
+      if (url.pathname === "/api/projects" && method === "GET") {
+        if (!mockupEnabled) syncCodexProjects(store);
+        return sendJson(response, 200, store.listProjects());
+      }
       if (url.pathname === "/api/projects" && method === "POST") {
         const body = await readBody(request);
         const project = store.createProject({
