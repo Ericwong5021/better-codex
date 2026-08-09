@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { AgentProfile, AgentSandboxMode } from "./db.js";
@@ -90,6 +90,27 @@ function withoutManagedRoles(source: string) {
     if (!skipping) output.push(line);
   }
   return output.join("\n").trimEnd();
+}
+
+export function removeManagedAgentProfiles(home = codexHome) {
+  const homeConfigPath = join(home, "config.toml");
+  const homeProfilesPath = join(home, "agents", "better-codex");
+  let configurationFiles = 0;
+  if (existsSync(home)) {
+    for (const file of readdirSync(home)) {
+      if (!/^better-codex-[a-f0-9-]{36}\.config\.toml$/i.test(file)) continue;
+      unlinkSync(join(home, file));
+      configurationFiles += 1;
+    }
+  }
+  rmSync(homeProfilesPath, { recursive: true, force: true });
+  if (existsSync(homeConfigPath)) {
+    const source = readFileSync(homeConfigPath, "utf8");
+    const base = withoutManagedRoles(source);
+    const next = base ? `${base}\n` : "";
+    if (next !== source) writeFileSync(homeConfigPath, next, { mode: 0o600 });
+  }
+  return { removed: true, path: homeProfilesPath, configurationFiles };
 }
 
 export function syncAgentProfiles(profiles: AgentProfile[], home = codexHome) {

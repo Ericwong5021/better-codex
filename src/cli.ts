@@ -7,6 +7,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { cdpEject, cdpInject, cdpOpenThread, cdpRestartAndInject, cdpStatus, codexInstallationStatus, codexProcessRunning, launchCodex, watchInjection } from "./cdp.js";
+import { removeManagedAgentProfiles } from "./agent-profiles.js";
 import { coreVersion } from "./compatibility.js";
 import {
   cdpPort,
@@ -27,6 +28,7 @@ import { readRuntimeState } from "./runtime-state.js";
 import { injectionEnabled, setInjectionEnabled } from "./injection-state.js";
 import { installLaunchIntegration, launchIntegrationStatus, uninstallLaunchIntegration } from "./launch-integration.js";
 import { readCodexLocale } from "./locale.js";
+import { betterCodexMcpName, startMcpAppServer } from "./mcp-app.js";
 import { showNativeChoiceDialog } from "./native-dialog.js";
 import { installService, restartService, serviceLogs, serviceStatus, startService, stopService, uninstallService } from "./service.js";
 import { activeVersions, checkForUpdates, maybeDelegateToActiveCore, recordGatewayUpdateActivation, rollbackCompatibilityUpdate, rollbackCoreUpdate, updateAll, updateCompatibility } from "./updater.js";
@@ -359,7 +361,55 @@ function print(value: unknown) {
 }
 
 function usage() {
-  console.log("better-codex version | update [check|compatibility|rollback] [--channel stable|preview] | setup [--yes] | launch | launcher install|uninstall|status | doctor | enable | disable | start [--launch] | stop | status | uninstall | data delete [--yes] | inject [--launch] [--port N] | eject [--port N] | service install|uninstall|start|stop|restart|status|logs | project list|create | agent list | issue list|get|create|update|status|open");
+  console.log("better-codex version | update [check|compatibility|rollback] [--channel stable|preview] | setup [--yes] | launch | launcher install|uninstall|status | mcp install|uninstall|status | doctor | enable | disable | start [--launch] | stop | status | uninstall | data delete [--yes] | inject [--launch] [--port N] | eject [--port N] | service install|uninstall|start|stop|restart|status|logs | project list|create | agent list | issue list|get|create|update|status|open");
+}
+
+function selfCommand() {
+  if (isSea()) return [resolve(process.env.BETTER_CODEX_LAUNCHER_PATH ?? process.execPath)];
+  return [resolve(process.execPath), ...process.execArgv, resolve(process.argv[1])];
+}
+
+function codexCliPath() {
+  const application = codexInstallationStatus().path;
+  const candidates = [
+    process.env.CODEX_CLI_PATH,
+    application && process.platform === "darwin" ? join(application, "Contents", "Resources", "codex") : null,
+    application && process.platform === "win32" ? join(application, "app", "resources", "codex.exe") : null,
+    application && process.platform === "win32" ? join(application, "resources", "codex.exe") : null,
+    application && process.platform === "win32" ? join(application, "codex.exe") : null,
+  ].find((value): value is string => typeof value === "string" && existsSync(value));
+  if (!candidates) throw new Error("codex_cli_not_found");
+  return candidates;
+}
+
+function mcpStatus() {
+  try {
+    const value = execFileSync(codexCliPath(), ["mcp", "get", betterCodexMcpName, "--json"], { encoding: "utf8", windowsHide: true });
+    return { installed: true, configuration: JSON.parse(value) as unknown };
+  } catch {
+    return { installed: false };
+  }
+}
+
+function installMcp() {
+  const cli = codexCliPath();
+  const [command, ...commandArgs] = selfCommand();
+  const expectedArgs = [...commandArgs, "mcp"];
+  const current = mcpStatus();
+  if (current.installed) {
+    const transport = (current.configuration as { transport?: { command?: string; args?: string[] } }).transport;
+    if (transport?.command === command && JSON.stringify(transport.args ?? []) === JSON.stringify(expectedArgs)) return { ...current, existing: true };
+    execFileSync(cli, ["mcp", "remove", betterCodexMcpName], { stdio: "pipe", windowsHide: true });
+  }
+  execFileSync(cli, ["mcp", "add", betterCodexMcpName, "--", command, ...expectedArgs], { stdio: "pipe", windowsHide: true });
+  return { ...mcpStatus(), existing: false };
+}
+
+function uninstallMcp() {
+  const current = mcpStatus();
+  if (!current.installed) return { installed: false, removed: false };
+  execFileSync(codexCliPath(), ["mcp", "remove", betterCodexMcpName], { stdio: "pipe", windowsHide: true });
+  return { installed: false, removed: true };
 }
 
 async function confirmSetup() {
@@ -436,6 +486,7 @@ async function doctor() {
   const skills = {
     betterCodex: existsSync(join(codexHome, "skills", "better-codex", "SKILL.md")),
   };
+  const mcp = mcpStatus();
   const updateKey = !isSea() || existsSync(updatePublicKeyPath);
   const checks = {
     core: { ok: true, ...activeVersions(), executable: process.env.BETTER_CODEX_LAUNCHER_PATH ?? process.execPath },
@@ -446,20 +497,34 @@ async function doctor() {
     compatibility,
     injection,
     skills,
+    mcp,
     updateKey,
   };
-  return { ok: Boolean(runtime.ok) && Boolean((database as { ok?: boolean }).ok) && codex.installed && Boolean((compatibility as { compatible?: boolean } | null)?.compatible) && injection.available && skills.betterCodex && updateKey, checks };
+  return { ok: Boolean(runtime.ok) && Boolean((database as { ok?: boolean }).ok) && codex.installed && Boolean((compatibility as { compatible?: boolean } | null)?.compatible) && injection.available && skills.betterCodex && mcp.installed && updateKey, checks };
 }
 
 async function uninstall() {
+  const dataHome = resolve(betterCodexHome);
+  if (dataHome === resolve(homedir()) || dirname(dataHome) === dataHome) throw new Error("unsafe_better_codex_home");
   setInjectionEnabled(false);
   await stopInjector();
   let injection: unknown = { removed: false, reason: "cdp_unavailable" };
   try { injection = await cdpEject(cdpPort, accessToken()); } catch {}
   try { await request("/api/shutdown", { method: "POST" }); } catch {}
   const launchIntegration = uninstallLaunchIntegration();
+  const mcp = uninstallMcp();
   const service = uninstallService();
-  const programPaths = [runPath, logPath, managedRuntimePath, updatePublicKeyPath];
+  const codexHome = process.env.CODEX_HOME || join(homedir(), ".codex");
+  const agentProfiles = removeManagedAgentProfiles(codexHome);
+  const programPaths = [...new Set([
+    dataHome,
+    databasePath,
+    `${databasePath}-wal`,
+    `${databasePath}-shm`,
+    join(dirname(databasePath), "backups"),
+    join(codexHome, "skills", "better-codex"),
+    join(codexHome, "skills", "better-codex-issue"),
+  ].map(path => resolve(path)))];
   const binaries = isSea()
     ? [...new Set([process.env.BETTER_CODEX_LAUNCHER_PATH, process.execPath].filter((value): value is string => Boolean(value)).map(value => resolve(value)))]
     : [];
@@ -473,7 +538,7 @@ async function uninstall() {
     for (const path of programPaths) rmSync(path, { recursive: true, force: true });
     for (const path of removableBinaries) rmSync(path, { force: true });
   }
-  return { uninstalled: true, service, launchIntegration, injection, binaries: removableBinaries, packageManagedBinaries: binaries.filter(path => !removableBinaries.includes(path)), dataPreserved: [databasePath, join(dirname(databasePath), "backups")] };
+  return { uninstalled: true, service, launchIntegration, mcp, injection, agentProfiles, removed: programPaths, binaries: removableBinaries, packageManagedBinaries: binaries.filter(path => !removableBinaries.includes(path)), dataPreserved: [] };
 }
 
 async function deleteData(confirmed: boolean) {
@@ -598,6 +663,13 @@ async function main() {
   if (command === "runtime") return runRuntime();
   if (command === "serve") return (await import("./server.js")).startServer();
   if (command === "watch-inject") return watchInjection(Number(action || cdpPort), accessToken());
+  if (command === "mcp" && !action) return startMcpAppServer();
+  if (command === "mcp") {
+    if (action === "install") return print(installMcp());
+    if (action === "uninstall") return print(uninstallMcp());
+    if (action === "status") return print(mcpStatus());
+    return usage();
+  }
   if (command === "launch") {
     return print(await withLaunchLock(async () => {
       const current = await cdpStatus(cdpPort);
@@ -651,6 +723,7 @@ async function main() {
       try { await request("/api/shutdown", { method: "POST" }); } catch {}
       const skills = installBundledSkills();
       if (!skills.installed || !skills.updateKey) throw new Error("reason" in skills ? skills.reason : "bundled_assets_unavailable");
+      const mcp = installMcp();
       installService();
       progress("starting_runtime", json);
       const runtime = await ensureRuntime();
@@ -662,7 +735,7 @@ async function main() {
       const pid = await waitForInjector();
       const launchIntegration = installLaunchIntegration();
       progress("ready", json);
-      return print({ configured: true, stages: ["installing_runtime", "starting_runtime", "waiting_for_codex", "injecting", "installing_launcher", "ready"], runtime, injection, launchIntegration, skills, injectorPid: pid });
+      return print({ configured: true, stages: ["installing_runtime", "installing_mcp", "starting_runtime", "waiting_for_codex", "injecting", "installing_launcher", "ready"], runtime, injection, launchIntegration, skills, mcp, injectorPid: pid });
     } catch (error) {
       setInjectionEnabled(false);
       await stopInjector();
