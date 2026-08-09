@@ -220,7 +220,8 @@ function readRuntimePointer() {
 }
 
 export function activeCoreExecutable() {
-  return readRuntimePointer()?.executable ?? process.execPath;
+  const pointer = readRuntimePointer();
+  return pointer && compareVersions(pointer.current, coreVersion) > 0 ? pointer.executable : process.execPath;
 }
 
 function effectiveCoreVersion() {
@@ -484,7 +485,7 @@ export function rollbackCompatibilityUpdate(expectedVersion?: string | null) {
 export function maybeDelegateToActiveCore() {
   if (!isSea() || process.env.BETTER_CODEX_DISABLE_DELEGATION === "1") return null;
   const pointer = readRuntimePointer();
-  if (!pointer || pointer.current === coreVersion || resolve(pointer.executable) === resolve(process.execPath)) return null;
+  if (!pointer || compareVersions(pointer.current, coreVersion) <= 0 || resolve(pointer.executable) === resolve(process.execPath)) return null;
   if (!existsSync(pointer.executable)) {
     unlinkSync(runtimeCurrentPath);
     return null;

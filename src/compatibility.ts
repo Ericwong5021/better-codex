@@ -2,7 +2,7 @@ import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { compatibilityCurrentPath, compatibilityStatusPath, compatibilityVersionsPath, ensureDirectories, runtimeCurrentPath } from "./config.js";
 
-export const coreVersion = "0.3.13";
+export const coreVersion = "0.3.14";
 
 export type CompatibilityManifest = {
   version: string;
@@ -103,18 +103,39 @@ export type CompatibilityStatus = {
 };
 
 function versionParts(version: string) {
-  return version.replace(/^v/, "").split(/[.-]/).map(value => /^\d+$/.test(value) ? Number(value) : value);
+  const normalized = version.replace(/^v/, "").split("+", 1)[0];
+  const match = normalized.match(/^(\d+)\.(\d+)\.(\d+)(?:[-.]([A-Za-z0-9.-]+))?$/);
+  if (!match) return null;
+  return {
+    core: match.slice(1, 4).map(Number),
+    prerelease: match[4] ? match[4].split(".") : [],
+  };
 }
 
 export function compareVersions(left: string, right: string) {
   const a = versionParts(left);
   const b = versionParts(right);
-  for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
-    const x = a[index] ?? 0;
-    const y = b[index] ?? 0;
+  if (!a || !b) return a ? 1 : b ? -1 : left.localeCompare(right);
+  for (let index = 0; index < Math.max(a.core.length, b.core.length); index += 1) {
+    const x = a.core[index] ?? 0;
+    const y = b.core[index] ?? 0;
     if (x === y) continue;
-    if (typeof x === "number" && typeof y === "number") return x < y ? -1 : 1;
-    return String(x).localeCompare(String(y));
+    return x < y ? -1 : 1;
+  }
+  if (!a.prerelease.length || !b.prerelease.length) {
+    if (a.prerelease.length === b.prerelease.length) return 0;
+    return a.prerelease.length ? -1 : 1;
+  }
+  for (let index = 0; index < Math.max(a.prerelease.length, b.prerelease.length); index += 1) {
+    const x = a.prerelease[index];
+    const y = b.prerelease[index];
+    if (x === undefined || y === undefined) return x === undefined ? -1 : 1;
+    if (x === y) continue;
+    const xNumeric = /^\d+$/.test(x);
+    const yNumeric = /^\d+$/.test(y);
+    if (xNumeric && yNumeric) return Number(x) < Number(y) ? -1 : 1;
+    if (xNumeric !== yNumeric) return xNumeric ? -1 : 1;
+    return x < y ? -1 : 1;
   }
   return 0;
 }
@@ -137,7 +158,7 @@ export function validateCompatibility(value: unknown, activeCoreVersion = coreVe
   const allowed = ["version", "minimumCoreVersion", "supportedPlatforms", "supportedCodexVersions", "targetRules", "selectors", "attributes", "navigation"];
   if (Object.keys(item).some(key => !allowed.includes(key))) throw new Error("compatibility_field_not_allowed");
   if (typeof item.version !== "string" || !/^\d+\.\d+\.\d+(?:[-.][A-Za-z0-9.-]+)?$/.test(item.version)) throw new Error("compatibility_version_invalid");
-  if (typeof item.minimumCoreVersion !== "string" || compareVersions(activeCoreVersion, item.minimumCoreVersion) < 0) throw new Error("compatibility_core_incompatible");
+  if (typeof item.minimumCoreVersion !== "string" || !versionParts(item.minimumCoreVersion) || compareVersions(activeCoreVersion, item.minimumCoreVersion) < 0) throw new Error("compatibility_core_incompatible");
   if (!stringArray(item.supportedPlatforms) || !(item.supportedPlatforms as string[]).every(platform => ["darwin", "win32"].includes(platform))) throw new Error("compatibility_platforms_invalid");
   const codex = item.supportedCodexVersions as Record<string, unknown>;
   if (!codex || codex.strategy !== "capability" || ![null, "string"].includes(codex.minimum === null ? null : typeof codex.minimum) || ![null, "string"].includes(codex.maximumExclusive === null ? null : typeof codex.maximumExclusive)) throw new Error("compatibility_codex_range_invalid");
