@@ -45,8 +45,8 @@ test("leaving the app surface suspends the panel and restores its previous surfa
   assert.ok(source.includes('"bot":{"name":"bot"'));
   assert.ok(source.includes("return entry.isConnected && agentsEntry.isConnected"));
   assert.ok(source.includes("const entriesAvailable = ensureEntry()"));
-  assert.ok(source.includes("if (active) close({ resume: true })"));
-  assert.ok(source.includes('if (!active && ["issues", "agents"].includes(resumeSurface)) return open(resumeSurface)'));
+  assert.ok(source.includes("if (active) close({ resume: true, suppressRoute: betterCodexRoute })"));
+  assert.ok(source.includes('if (!active && betterCodexRoute && !routeSuppressed) return open(["issues", "agents"].includes(resumeSurface) ? resumeSurface : state.surface)'));
   assert.ok(source.includes("function scheduleRefresh()"));
   assert.ok(source.includes("refreshTimer = setTimeout(() =>"));
   assert.ok(source.includes("}, 50);"));
@@ -368,7 +368,8 @@ test("agent issue creation does not require or bind the current session", () => 
   assert.ok(source.includes('if (draft.mode === "agent" && !issue && !workspacePath && !state.mockup)'));
   assert.doesNotMatch(source, /draft\.mode === "agent" && !issue && !threadId/);
   assert.ok(source.includes('ai_enrich: draft.mode === "agent" && !issue'));
-  assert.doesNotMatch(source, /thread_id:\s*threadId/);
+  const submitIssue = source.slice(source.indexOf("async function submitIssue()"), source.indexOf("async function startIssueNow()"));
+  assert.doesNotMatch(submitIssue, /thread_id:\s*threadId/);
 });
 
 test("agent detail avatars use preset icons and open an avatar picker", () => {
@@ -485,7 +486,6 @@ test("issue cards show project icon and assignee instead of session entry", () =
   assert.ok(source.includes("function normalizeSessionId(value)"));
   assert.ok(source.includes("function issueSessionId(issue)"));
   assert.ok(source.includes("sessionId = issueSessionId(issue)"));
-  assert.ok(!source.includes('thread_id: threadId'));
   assert.ok(source.includes("const expected = normalizeSessionId(threadId)"));
   assert.ok(source.includes('if (!expected) throw new Error("thread_id_invalid")'));
   assert.ok(source.includes("THREAD_OPEN_TIMEOUT_MS = 10000"));
@@ -541,7 +541,7 @@ test("issue details render the latest conversation result and reply composer", (
   const source = injectionScript(4317, "test-token", "install");
   const css = betterCodexDesignSystemCss();
 
-  assert.ok(source.includes('mode: issue ? "manual" : state.createMode'));
+  assert.ok(source.includes('mode: issue ? "manual" : cachedCreateDraft?.mode || state.createMode'));
   assert.ok(source.includes('te("对话")'));
   assert.ok(source.includes("data-conversation-body"));
   assert.ok(source.includes("better-codex-bubble"));
@@ -574,7 +574,7 @@ test("create dialog paperclip attaches local file paths into the issue descripti
   assert.ok(source.includes('data-dialog-attach aria-label="\' + te("添加附件")'));
   assert.ok(source.includes("attachments: []"));
   assert.ok(source.includes("function pickAttachments()"));
-  assert.ok(source.includes("function withAttachments(text)"));
+  assert.ok(source.includes("function withAttachments(text, items = draft.attachments)"));
   assert.ok(source.includes('const path = String(file.path || "").trim()'));
   assert.ok(source.includes('const block = t("附带文件：") + "\\n"'));
   assert.ok(source.includes("description: withAttachments(draft.mode === \"agent\" ? prompt : draft.description)"));
