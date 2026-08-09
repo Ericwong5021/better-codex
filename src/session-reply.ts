@@ -16,6 +16,8 @@ function codexPath() {
 type ActiveReply = {
   state: IssueReplyState;
   child: ChildProcess;
+  finishIssue: (success: boolean) => void;
+  stopping?: Promise<boolean>;
 };
 
 const replies = new Map<string, ActiveReply>();
@@ -32,25 +34,46 @@ export function getIssueReplyState(store: Store, issueId: string): IssueReplySta
   return store.getIssueReplyState(issueId);
 }
 
-export function hasActiveIssueReplies() {
-  return [...replies.values()].some(current => current.state.status === "running");
+export function hasActiveIssueReplies(issueId?: string) {
+  return issueId ? replies.has(issueId) : replies.size > 0;
 }
 
 export function stopIssueReply(store: Store, issueId: string) {
   const current = replies.get(issueId);
-  if (!current || current.state.status !== "running") return false;
+  if (!current) return Promise.resolve(false);
+  if (current.stopping) return current.stopping;
+  if (current.state.status !== "running") return Promise.resolve(false);
   current.state.status = "interrupted";
   current.state.error = "runtime_stopped";
   current.state.finished_at = new Date().toISOString();
-  current.child.kill("SIGTERM");
   store.setIssueReplyState(current.state);
-  store.finishReplyRun(issueId, false);
-  replies.delete(issueId);
-  return true;
+  current.finishIssue(false);
+  const stopping = new Promise<boolean>(resolve => {
+    let settled = false;
+    let timer: NodeJS.Timeout;
+    let forceTimer: NodeJS.Timeout | null = null;
+    const finish = (stopped: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (forceTimer) clearTimeout(forceTimer);
+      resolve(stopped);
+    };
+    timer = setTimeout(() => {
+      current.child.kill("SIGKILL");
+      forceTimer = setTimeout(() => finish(false), 1000);
+      forceTimer.unref();
+    }, 5000);
+    timer.unref();
+    current.child.once("close", () => finish(true));
+  });
+  current.stopping = stopping;
+  current.child.kill("SIGTERM");
+  return stopping;
 }
 
 export function stopIssueReplies(store: Store) {
-  for (const issueId of [...replies.keys()]) stopIssueReply(store, issueId);
+  for (const issueId of [...replies.keys()]) void stopIssueReply(store, issueId);
 }
 
 export function startIssueReply(store: Store, input: {
@@ -66,7 +89,7 @@ export function startIssueReply(store: Store, input: {
   const currentState = store.getIssueReplyState(issueId);
   const current = replies.get(issueId);
   if (currentState.request_id === input.requestId && currentState.status !== "failed" && currentState.status !== "interrupted") return currentState;
-  if (current?.state.status === "running") {
+  if (current) {
     throw new Error("reply_busy");
   }
 
@@ -132,7 +155,7 @@ export function startIssueReply(store: Store, input: {
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
   });
-  const active: ActiveReply = { state, child };
+  const active: ActiveReply = { state, child, finishIssue };
   replies.set(issueId, active);
 
   child.stdout?.on("data", chunk => {

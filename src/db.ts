@@ -77,6 +77,7 @@ export type Issue = {
   pending_actor: PendingActor;
   enrichment_status: EnrichmentStatus;
   reply_draft: string;
+  session_handoff_at: string | null;
   version: number;
   created_at: string;
   updated_at: string;
@@ -229,6 +230,7 @@ export class Store {
     this.ensureDispatchColumns();
     this.ensureEnrichmentColumn();
     this.ensureReplyDraftColumn();
+    this.ensureSessionHandoffColumn();
     const integrity = this.db.prepare("PRAGMA quick_check").get() as Record<string, unknown> | undefined;
     if (String(integrity?.quick_check ?? "") !== "ok") {
       this.db.close();
@@ -371,6 +373,11 @@ export class Store {
   private ensureReplyDraftColumn() {
     const columns = new Set((this.db.prepare("PRAGMA table_info(issues)").all() as Array<{ name: string }>).map(item => item.name));
     if (!columns.has("reply_draft")) this.db.exec("ALTER TABLE issues ADD COLUMN reply_draft TEXT NOT NULL DEFAULT ''");
+  }
+
+  private ensureSessionHandoffColumn() {
+    const columns = new Set((this.db.prepare("PRAGMA table_info(issues)").all() as Array<{ name: string }>).map(item => item.name));
+    if (!columns.has("session_handoff_at")) this.db.exec("ALTER TABLE issues ADD COLUMN session_handoff_at TEXT");
   }
 
   private ensureSettingsTable() {
@@ -520,6 +527,33 @@ export class Store {
       ON CONFLICT(key) DO UPDATE SET value = excluded.value
     `).run(enabled ? "1" : "0");
     return this.getAutoDispatch();
+  }
+
+  listManualStartQueue() {
+    const row = this.db.prepare("SELECT value FROM settings WHERE key = 'manual_start_queue'").get() as { value: string } | undefined;
+    try {
+      const values = JSON.parse(row?.value || "[]") as unknown;
+      return Array.isArray(values) ? [...new Set(values.filter((value): value is string => typeof value === "string" && /^[a-f0-9-]{36}$/i.test(value)))] : [];
+    } catch {
+      return [];
+    }
+  }
+
+  enqueueManualStart(issueId: string) {
+    const queue = this.listManualStartQueue();
+    if (!queue.includes(issueId)) queue.push(issueId);
+    this.db.prepare(`
+      INSERT INTO settings (key, value) VALUES ('manual_start_queue', ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `).run(JSON.stringify(queue));
+  }
+
+  dequeueManualStart(issueId: string) {
+    const queue = this.listManualStartQueue().filter(value => value !== issueId);
+    this.db.prepare(`
+      INSERT INTO settings (key, value) VALUES ('manual_start_queue', ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `).run(JSON.stringify(queue));
   }
 
   getSchedulerModel(defaultModel = "") {
@@ -1133,6 +1167,8 @@ export class Store {
           AND (enrichment_status IS NULL OR enrichment_status != 'pending')
       `).run(timestamp, issue.id, issue.version);
       if (result.changes !== 1) throw new Error("claim_conflict");
+      this.db.prepare("DELETE FROM issue_replies WHERE issue_id = ?").run(issue.id);
+      if (issueId) this.dequeueManualStart(issue.id);
       this.db.exec("COMMIT");
       return { runId, issue: this.getIssue(issue.id)!, workspacePath: resolved_workspace };
     } catch (error) {
@@ -1266,12 +1302,37 @@ export class Store {
     }
   }
 
+  handoffIssueSession(issueId: string, threadId: string) {
+    const timestamp = now();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const issue = this.getIssue(issueId);
+      if (!issue) throw new Error("issue_not_found");
+      if (!issue.run_thread_id || issue.run_thread_id !== threadId) throw new Error("issue_session_mismatch");
+      if (!issue.session_handoff_at) {
+        this.db.prepare(`
+          UPDATE issues
+          SET session_handoff_at = ?,
+              version = version + 1,
+              updated_at = ?
+          WHERE id = ? AND session_handoff_at IS NULL
+        `).run(timestamp, timestamp, issueId);
+      }
+      this.db.exec("COMMIT");
+      return this.getIssue(issueId)!;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   beginReplyRun(issueId: string) {
     const timestamp = now();
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const issue = this.getIssue(issueId);
       if (!issue) throw new Error("issue_not_found");
+      if (issue.session_handoff_at) throw new Error("issue_session_handed_off");
       if (issue.active_run_status) throw new Error("issue_execution_running");
       if (this.getIssueReplyState(issueId).status === "running") throw new Error("reply_busy");
       if (!["done", "cancelled"].includes(issue.status)) {
@@ -1364,6 +1425,208 @@ export class Store {
         `).run(timestamp, issueId);
       }
       this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  reconcileInterruptedRun(issueId: string, threadId: string, completedAt: string, startedAt?: string | null) {
+    const timestamp = now();
+    const completedTime = Date.parse(completedAt);
+    const startedTime = startedAt ? Date.parse(startedAt) : null;
+    if (!Number.isFinite(completedTime) || (startedTime !== null && !Number.isFinite(startedTime))) return false;
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const run = this.db.prepare(`
+        SELECT interrupted.id, interrupted.finished_at
+        FROM issue_runs AS interrupted
+        JOIN issues ON issues.id = interrupted.issue_id
+        WHERE interrupted.issue_id = ?
+          AND interrupted.thread_id = ?
+          AND interrupted.status = 'interrupted'
+          AND issues.status = 'blocked'
+          AND interrupted.id = (
+            SELECT latest.id
+            FROM issue_runs AS latest
+            WHERE latest.issue_id = interrupted.issue_id
+            ORDER BY latest.started_at DESC, latest.rowid DESC
+            LIMIT 1
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM issue_runs AS active
+            WHERE active.issue_id = interrupted.issue_id
+              AND active.status IN ('claimed', 'running', 'scheduling')
+          )
+      `).get(issueId, threadId) as { id: string; finished_at: string | null } | undefined;
+      const finishedTime = Date.parse(run?.finished_at || "");
+      if (!run || !Number.isFinite(finishedTime) || completedTime <= finishedTime || (startedTime !== null && startedTime > finishedTime)) {
+        this.db.exec("COMMIT");
+        return false;
+      }
+      const issueResult = this.db.prepare(`
+        UPDATE issues
+        SET status = 'in_review',
+            needs_attention = 1,
+            pending_actor = 'user',
+            version = version + 1,
+            updated_at = ?
+        WHERE id = ?
+          AND status = 'blocked'
+          AND ? = (
+            SELECT latest.id
+            FROM issue_runs AS latest
+            WHERE latest.issue_id = issues.id
+            ORDER BY latest.started_at DESC, latest.rowid DESC
+            LIMIT 1
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM issue_runs AS active
+            WHERE active.issue_id = issues.id
+              AND active.status IN ('claimed', 'running', 'scheduling')
+          )
+      `).run(timestamp, issueId, run.id);
+      if (issueResult.changes !== 1) {
+        this.db.exec("COMMIT");
+        return false;
+      }
+      const runResult = this.db.prepare(`
+        UPDATE issue_runs
+        SET status = 'completed', finished_at = ?, error = NULL, execution_success = 1, execution_error = NULL
+        WHERE id = ? AND issue_id = ? AND thread_id = ? AND status = 'interrupted'
+      `).run(completedAt, run.id, issueId, threadId);
+      if (runResult.changes !== 1) throw new Error("run_transition_conflict");
+      this.db.exec("COMMIT");
+      return true;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  syncSessionReply(issueId: string, threadId: string, activity: {
+    status: "idle" | "running" | "completed" | "interrupted";
+    turn_id: string | null;
+    started_at: string | null;
+    completed_at: string | null;
+    updated_at: string | null;
+  }) {
+    if (activity.status === "idle") return false;
+    const startedTime = Date.parse(activity.started_at || "");
+    const evidenceAt = activity.status === "running" ? activity.updated_at : activity.completed_at;
+    const evidenceTime = Date.parse(evidenceAt || "");
+    if (!Number.isFinite(startedTime) || !Number.isFinite(evidenceTime)) return false;
+    const timestamp = now();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const issue = this.db.prepare(`
+        SELECT issues.status, issues.updated_at
+        FROM issues
+        WHERE issues.id = ?
+          AND issues.status NOT IN ('done', 'cancelled')
+          AND issues.archived_at IS NULL
+          AND ? = (
+            SELECT latest.thread_id
+            FROM issue_runs AS latest
+            WHERE latest.issue_id = issues.id
+              AND latest.thread_id IS NOT NULL
+              AND latest.thread_id NOT LIKE 'local:%'
+              AND latest.thread_id NOT LIKE 'cloud:%'
+            ORDER BY latest.started_at DESC, latest.rowid DESC
+            LIMIT 1
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM issue_runs AS active
+            WHERE active.issue_id = issues.id
+              AND active.status IN ('claimed', 'running', 'scheduling')
+          )
+      `).get(issueId, threadId) as { status: IssueStatus; updated_at: string } | undefined;
+      const reply = this.db.prepare("SELECT request_id, status, message, error, started_at, finished_at FROM issue_replies WHERE issue_id = ?").get(issueId) as {
+        request_id: string;
+        status: IssueReplyStatus;
+        message: string;
+        error: string | null;
+        started_at: string;
+        finished_at: string | null;
+      } | undefined;
+      if (!issue) {
+        this.db.exec("COMMIT");
+        return false;
+      }
+      if (activity.status === "running" && reply?.status === "running" && issue.status === "in_progress") {
+        this.db.exec("COMMIT");
+        return false;
+      }
+      if (activity.status === "completed" && reply?.status === "succeeded" && issue.status === "in_review") {
+        this.db.exec("COMMIT");
+        return false;
+      }
+      if (activity.status === "interrupted" && reply?.status === "interrupted" && issue.status === "blocked") {
+        this.db.exec("COMMIT");
+        return false;
+      }
+      const issueUpdatedTime = Date.parse(issue.updated_at) || 0;
+      const replyStartedTime = Date.parse(reply?.started_at || "") || 0;
+      const replyFinishedTime = Date.parse(reply?.finished_at || "") || 0;
+      const baseline = Math.max(issueUpdatedTime, replyFinishedTime);
+      const sessionRequestId = `session:${activity.turn_id || activity.started_at}`;
+      const sameTrackedTurn = reply?.request_id === sessionRequestId;
+      const unchangedRuntimeInterruption = reply?.status === "interrupted"
+        && reply.error === "runtime_restarted"
+        && issue.status === "blocked"
+        && replyFinishedTime > 0
+        && issueUpdatedTime <= replyFinishedTime;
+      if (reply?.status === "interrupted" && reply.error === "runtime_restarted" && !unchangedRuntimeInterruption) {
+        this.db.exec("COMMIT");
+        return false;
+      }
+      const recoverRuntimeTurn = unchangedRuntimeInterruption
+        && startedTime >= replyStartedTime
+        && (sameTrackedTurn || startedTime <= replyFinishedTime);
+      if (!recoverRuntimeTurn && (sameTrackedTurn ? evidenceTime <= baseline : startedTime <= baseline)) {
+        this.db.exec("COMMIT");
+        return false;
+      }
+      const replyStatus: IssueReplyStatus = activity.status === "running" ? "running" : activity.status === "completed" ? "succeeded" : "interrupted";
+      const replyError = activity.status === "interrupted" ? "session_interrupted" : null;
+      this.db.prepare(`
+        INSERT INTO issue_replies (issue_id, request_id, status, message, error, started_at, finished_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(issue_id) DO UPDATE SET
+          request_id = excluded.request_id,
+          status = excluded.status,
+          error = excluded.error,
+          started_at = excluded.started_at,
+          finished_at = excluded.finished_at
+      `).run(
+        issueId,
+        sessionRequestId,
+        replyStatus,
+        reply?.message || "",
+        replyError,
+        activity.started_at,
+        activity.status === "running" ? null : activity.completed_at,
+      );
+      const issueResult = this.db.prepare(`
+        UPDATE issues
+        SET status = ?,
+            needs_attention = ?,
+            pending_actor = ?,
+            version = version + 1,
+            updated_at = ?
+        WHERE id = ? AND status = ? AND updated_at = ? AND archived_at IS NULL
+      `).run(
+        activity.status === "running" ? "in_progress" : activity.status === "completed" ? "in_review" : "blocked",
+        Number(activity.status !== "running"),
+        activity.status === "running" ? "agent" : "user",
+        timestamp,
+        issueId,
+        issue.status,
+        issue.updated_at,
+      );
+      if (issueResult.changes !== 1) throw new Error("reply_transition_conflict");
+      this.db.exec("COMMIT");
+      return true;
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;

@@ -4,23 +4,80 @@ import { closeSync, openSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { isSea } from "node:sea";
 import { coreVersion, readCompatibilityStatus } from "./compatibility.js";
-import { agentSandboxModes, cleanMaxConcurrency, issuePriorities, issueStatuses, Store, type AgentModel, type AgentReasoningEffort, type AgentSandboxMode, type IssuePriority, type IssueStatus } from "./db.js";
+import { agentSandboxModes, cleanMaxConcurrency, issuePriorities, issueStatuses, Store, type AgentModel, type AgentReasoningEffort, type AgentSandboxMode, type Issue, type IssuePriority, type IssueStatus } from "./db.js";
 import { defaultAgentProfile, syncAgentProfiles, updateDefaultAgentProfile } from "./agent-profiles.js";
 import { readCodexAppearance } from "./appearance.js";
 import { readCodexLocale } from "./locale.js";
 import { readCodexUserProfile } from "./user-profile.js";
 import { readModelCatalog } from "./model-catalog.js";
-import { runPath, runtimePort, token, updateLogPath } from "./config.js";
+import { attachmentPath, runPath, runtimePort, token, updateLogPath } from "./config.js";
 import { acquireRuntimeLock, clearRuntimeState, createRuntimeIdentity, publishRuntimeState } from "./runtime-state.js";
 import { activeCoreExecutable, checkGatewayUpdate, getGatewayUpdateState, installGatewayUpdate, recordGatewayUpdateActivation, startGatewayUpdateChecks } from "./updater.js";
 import { getIssueReplyState, hasActiveIssueReplies, startIssueReply, stopIssueReply, stopIssueReplies } from "./session-reply.js";
 import { join } from "node:path";
-import { normalizeSessionId, readConversationResult, sessionWorkspace } from "./session-transcript.js";
+import { normalizeSessionId, readConversationActivity, readConversationResult, sessionWorkspace } from "./session-transcript.js";
 import { IssueWorker } from "./worker.js";
 import { maxMockupBytes, readMockupState, replaceMockupState, resetMockupState, updateMockupState } from "./mockup.js";
 
 const accessToken = token();
 const mockupEnabled = !isSea() && process.argv.includes("--mockup");
+const maxPastedImageBytes = 10 * 1024 * 1024;
+const maxPastedImageBodyBytes = Math.ceil(maxPastedImageBytes * 4 / 3) + 1024;
+
+function savePastedImage(value: unknown) {
+  const data = cleanString(value, maxPastedImageBodyBytes);
+  const match = data.match(/^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/);
+  if (!match) throw new Error("invalid_image_attachment");
+  const bytes = Buffer.from(match[2], "base64");
+  if (!bytes.length || bytes.length > maxPastedImageBytes) throw new Error("invalid_image_attachment");
+  const format = match[1];
+  const valid = format === "png"
+    ? bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+    : format === "jpeg"
+      ? bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
+      : bytes.subarray(0, 4).toString("ascii") === "RIFF" && bytes.subarray(8, 12).toString("ascii") === "WEBP";
+  if (!valid) throw new Error("invalid_image_attachment");
+  const extension = format === "jpeg" ? "jpg" : format;
+  const name = `pasted-${Date.now()}-${randomUUID().slice(0, 8)}.${extension}`;
+  const path = join(attachmentPath, name);
+  writeFileSync(path, bytes, { flag: "wx", mode: 0o600 });
+  return { name, path };
+}
+
+async function reconcileInterruptedIssues(store: Store, issues: Issue[]) {
+  await Promise.all(issues.map(async issue => {
+    if (!issue.run_thread_id || ["done", "cancelled"].includes(issue.status) || issue.active_run_status || hasActiveIssueReplies(issue.id)) return;
+    const conversation = await readConversationActivity(issue.run_thread_id);
+    const completedAt = conversation.activity.status === "completed"
+      ? conversation.activity.completed_at
+      : conversation.activity.status === "idle"
+        ? conversation.last_final_at
+        : null;
+    if (issue.status === "blocked" && issue.latest_run_status === "interrupted" && completedAt) {
+      store.reconcileInterruptedRun(issue.id, issue.run_thread_id, completedAt, conversation.activity.started_at);
+    }
+    if (conversation.activity.status !== "idle") {
+      const reply = getIssueReplyState(store, issue.id);
+      if (conversation.activity.status === "interrupted" && reply.status !== "interrupted") {
+        console.log(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({
+          timestamp: new Date().toISOString(),
+          scope: "session",
+          event: "session_interrupted_observed",
+          issue_id: issue.id,
+          issue_identifier: issue.identifier,
+          thread_id: issue.run_thread_id,
+          turn_id: conversation.activity.turn_id,
+          turn_started_at: conversation.activity.started_at,
+          turn_interrupted_at: conversation.activity.completed_at,
+          previous_reply_status: reply.status,
+          previous_reply_error: reply.error,
+        })}`);
+      }
+      store.syncSessionReply(issue.id, issue.run_thread_id, conversation.activity);
+    }
+  }));
+  return issues.map(issue => store.getIssue(issue.id) || issue);
+}
 
 function sendJson(response: ServerResponse, status: number, value: unknown) {
   const body = JSON.stringify(value);
@@ -201,7 +258,7 @@ function errorCode(error: unknown) {
 }
 
 function errorStatus(code: string) {
-  if (code === "version_conflict" || code === "reply_busy" || code === "update_in_progress" || code === "issue_execution_locked" || code === "issue_execution_running") return 409;
+  if (code === "version_conflict" || code === "reply_busy" || code === "update_in_progress" || code === "issue_execution_locked" || code === "issue_execution_running" || code === "issue_session_handed_off") return 409;
   if (code.endsWith("_not_found")) return 404;
   if (code === "database_unavailable" || code === "database_integrity_check_failed") return 503;
   return 400;
@@ -266,6 +323,10 @@ export function startServer() {
         return sendJson(response, database.ok ? 200 : 503, { ok: database.ok, name: "Better Codex Runtime", version: identity.version, pid: process.pid, port: activePort, instanceId: identity.instanceId, database, compatibility: readCompatibilityStatus() });
       }
       if (!authorized(request, url)) return sendJson(response, 401, { error: "unauthorized" });
+      if (url.pathname === "/api/issues/attachments" && method === "POST") {
+        const body = await readBody(request, maxPastedImageBodyBytes);
+        return sendJson(response, 201, savePastedImage(body.data));
+      }
       if (url.pathname === "/api/bootstrap" && method === "GET") {
         const agentModelCatalog = await readModelCatalog();
         const agentModels = agentModelCatalog.map(model => model.id);
@@ -441,6 +502,21 @@ export function startServer() {
               version: Number(current.version) + 1,
               updated_at: new Date().toISOString(),
             };
+          }).state;
+          return sendJson(response, 200, updated.issues.find(issue => issue.id === issueId || issue.identifier === issueId));
+        }
+        if (method === "POST" && path[3] === "session-handoff") {
+          const body = await readBody(request);
+          const threadId = normalizeSessionId(cleanString(body.thread_id, 200));
+          if (!threadId) throw new Error("session_required");
+          const updated = updateMockupState(state => {
+            const index = state.issues.findIndex(issue => issue.id === issueId || issue.identifier === issueId);
+            if (index < 0) throw new Error("issue_not_found");
+            const current = state.issues[index];
+            if (normalizeSessionId(String(current.run_thread_id || "")) !== threadId) throw new Error("issue_session_mismatch");
+            if (current.session_handoff_at) return;
+            const timestamp = new Date().toISOString();
+            state.issues[index] = { ...current, session_handoff_at: timestamp, version: Number(current.version) + 1, updated_at: timestamp };
           }).state;
           return sendJson(response, 200, updated.issues.find(issue => issue.id === issueId || issue.identifier === issueId));
         }
@@ -696,11 +772,11 @@ export function startServer() {
         return sendJson(response, 200, { workspace_path: sessionWorkspace(threadId) || "" });
       }
       if (url.pathname === "/api/issues" && method === "GET") {
-        const issues = store.listIssues({
+        const issues = await reconcileInterruptedIssues(store, store.listIssues({
           projectId: url.searchParams.get("project_id") || undefined,
           search: url.searchParams.get("search") || undefined,
           archived: url.searchParams.get("archived") === "1",
-        });
+        }));
         return sendJson(response, 200, issues.map(issue => ({
           ...issue,
           reply_status: getIssueReplyState(store, issue.id).status,
@@ -743,13 +819,16 @@ export function startServer() {
       if (path[0] === "api" && path[1] === "issues" && path[2]) {
         const issue = store.getIssue(decodeURIComponent(path[2]));
         if (!issue) return sendJson(response, 404, { error: "issue_not_found" });
-        if (method === "GET" && path.length === 3) return sendJson(response, 200, { ...issue, reply_status: getIssueReplyState(store, issue.id).status });
+        if (method === "GET" && path.length === 3) {
+          const [current] = await reconcileInterruptedIssues(store, [issue]);
+          return sendJson(response, 200, { ...current, reply_status: getIssueReplyState(store, current.id).status });
+        }
         if (method === "PATCH" && path.length === 3) {
           const body = await readBody(request);
           const version = Number(body.version);
           if (!Number.isInteger(version) || version < 1) throw new Error("invalid_version");
           const patch = parseIssuePatch(body);
-          if ((issue.active_run_status || getIssueReplyState(store, issue.id).status === "running") && Object.keys(patch).some(key => key !== "reply_draft")) throw new Error("issue_execution_running");
+          if ((issue.active_run_status || hasActiveIssueReplies(issue.id) || getIssueReplyState(store, issue.id).status === "running") && Object.keys(patch).some(key => key !== "reply_draft")) throw new Error("issue_execution_running");
           const updated = store.updateIssue(issue.id, version, patch);
           if (store.isDispatchable(updated)) worker.wake();
           return sendJson(response, 200, updated);
@@ -764,7 +843,7 @@ export function startServer() {
           if (["done", "cancelled"].includes(issue.status)) throw new Error("issue_not_startable");
           const nextStatus = patch.status || issue.status;
           if (["backlog", "done", "cancelled"].includes(String(nextStatus))) throw new Error("issue_not_startable");
-          if (issue.active_run_status || getIssueReplyState(store, issue.id).status === "running") throw new Error("issue_execution_running");
+          if (issue.active_run_status || hasActiveIssueReplies(issue.id) || getIssueReplyState(store, issue.id).status === "running") throw new Error("issue_execution_running");
           const nextProject = store.getProject(String(patch.project_id || issue.project_id));
           const nextWorkspace = String(patch.workspace_path || issue.workspace_path || nextProject?.workspace_path || "");
           if (!nextWorkspace) throw new Error("workspace_required");
@@ -781,15 +860,21 @@ export function startServer() {
         }
         if (method === "POST" && path[3] === "stop" && path.length === 4) {
           const stopped = await worker.stopIssue(issue.id);
-          const replyStopped = stopIssueReply(store, issue.id);
-          if (!stopped && !replyStopped && store.getIssue(issue.id)?.active_run_status) throw new Error("issue_stop_timeout");
+          const replyStopped = await stopIssueReply(store, issue.id);
+          if (!stopped && !replyStopped && (store.getIssue(issue.id)?.active_run_status || hasActiveIssueReplies(issue.id) || getIssueReplyState(store, issue.id).status === "running")) throw new Error("issue_stop_timeout");
           return sendJson(response, 200, store.getIssue(issue.id));
+        }
+        if (method === "POST" && path[3] === "session-handoff" && path.length === 4) {
+          const body = await readBody(request);
+          const threadId = normalizeSessionId(cleanString(body.thread_id, 200));
+          if (!threadId) throw new Error("session_required");
+          return sendJson(response, 200, store.handoffIssueSession(issue.id, threadId));
         }
         if (method === "POST" && path[3] === "archive") {
           const body = await readBody(request);
           const version = Number(body.version);
           if (!Number.isInteger(version) || version < 1) throw new Error("invalid_version");
-          if (getIssueReplyState(store, issue.id).status === "running") throw new Error("issue_execution_running");
+          if (hasActiveIssueReplies(issue.id) || getIssueReplyState(store, issue.id).status === "running") throw new Error("issue_execution_running");
           if (issue.active_run_status) {
             await worker.stopIssue(issue.id);
             const current = store.getIssue(issue.id);
@@ -813,17 +898,20 @@ export function startServer() {
         }
         if (method === "GET" && path[3] === "conversation" && path.length === 4) {
           if (store.isEnrichmentPending(issue)) throw new Error("issue_enrichment_pending");
-          const threadId = issue.run_thread_id || "";
+          const [current] = await reconcileInterruptedIssues(store, [issue]);
+          const threadId = current.run_thread_id || "";
           const conversation = await readConversationResult(threadId);
           return sendJson(response, 200, {
             ...conversation,
-            issue_id: issue.id,
-            reply: getIssueReplyState(store, issue.id),
+            issue_id: current.id,
+            reply: getIssueReplyState(store, current.id),
             user: readCodexUserProfile(),
+            issue: store.getIssue(current.id),
           });
         }
         if (method === "POST" && path[3] === "reply" && path.length === 4) {
           if (updateInstallInProgress) throw new Error("update_in_progress");
+          if (issue.session_handoff_at) throw new Error("issue_session_handed_off");
           if (issue.active_run_status) throw new Error("issue_execution_running");
           const body = await readBody(request);
           const requestId = cleanString(body.request_id, 200) || randomUUID();

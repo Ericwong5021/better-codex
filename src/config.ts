@@ -9,6 +9,7 @@ export const betterCodexHome = resolve(process.env.BETTER_CODEX_HOME || defaultH
 export const databasePath = resolve(process.env.BETTER_CODEX_DB || join(betterCodexHome, "better-codex.db"));
 export const runPath = join(betterCodexHome, "run");
 export const logPath = join(betterCodexHome, "logs");
+export const attachmentPath = join(betterCodexHome, "attachments");
 export const managedRuntimePath = join(betterCodexHome, "runtime");
 export const compatibilityPath = join(managedRuntimePath, "compatibility");
 export const compatibilityStatusPath = join(compatibilityPath, "status.json");
@@ -42,6 +43,7 @@ export const debugLoggingEnabled = !isSea();
 export function ensureDirectories() {
   mkdirSync(runPath, { recursive: true });
   mkdirSync(logPath, { recursive: true });
+  mkdirSync(attachmentPath, { recursive: true, mode: 0o700 });
   mkdirSync(runLogPath, { recursive: true });
   mkdirSync(schedulerRuntimePath, { recursive: true });
   mkdirSync(compatibilityPath, { recursive: true });

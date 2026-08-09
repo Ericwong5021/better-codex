@@ -83,6 +83,7 @@ function defaultIssues(agents: MockupRecord[]) {
     pending_actor: "user",
     enrichment_status: null,
     reply_draft: "",
+    session_handoff_at: null,
     labels: [...spec[6]],
     mockup_run_status: spec[7],
   }));
@@ -176,6 +177,7 @@ function normalizeIssue(value: unknown, index: number): MockupRecord {
     pending_actor: source.pending_actor === "agent" ? "agent" : "user",
     enrichment_status: source.enrichment_status === "pending" ? "pending" : null,
     reply_draft: replyDraft,
+    session_handoff_at: source.session_handoff_at ? String(source.session_handoff_at) : null,
     labels,
     mockup_run_status: mockupRunStatus,
     active_run_status: ["claimed", "running", "scheduling"].includes(mockupRunStatus) ? mockupRunStatus : null,

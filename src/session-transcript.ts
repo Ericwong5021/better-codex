@@ -1,10 +1,14 @@
-import { closeSync, existsSync, openSync, readSync, readdirSync, createReadStream } from "node:fs";
+import { closeSync, existsSync, openSync, readSync, readdirSync, createReadStream, statSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { renderMarkdown } from "./markdown.js";
 
 const MAX_MESSAGES = 80;
+const MAX_ROLLOUT_PATHS = 1024;
+const MAX_CONVERSATION_RESULTS = 16;
+const MAX_CONVERSATION_ACTIVITIES = 1024;
+const rolloutPaths = new Map<string, string>();
 
 export function normalizeSessionId(value: string | null | undefined) {
   const id = value?.replace(/^(local|cloud):/i, "") || "";
@@ -18,6 +22,13 @@ export function sessionsRoot() {
 export function findRolloutPath(sessionId: string) {
   const id = normalizeSessionId(sessionId);
   if (!id) return "";
+  const cached = rolloutPaths.get(id);
+  if (cached && existsSync(cached)) {
+    rolloutPaths.delete(id);
+    rolloutPaths.set(id, cached);
+    return cached;
+  }
+  rolloutPaths.delete(id);
   const root = sessionsRoot();
   const visit = (directory: string, depth: number): string => {
     if (depth > 3) return "";
@@ -33,6 +44,8 @@ export function findRolloutPath(sessionId: string) {
         const found = visit(path, depth + 1);
         if (found) return found;
       } else if (entry.name.endsWith(`-${id}.jsonl`)) {
+        rolloutPaths.set(id, path);
+        if (rolloutPaths.size > MAX_ROLLOUT_PATHS) rolloutPaths.delete(rolloutPaths.keys().next().value!);
         return path;
       }
     }
@@ -66,6 +79,14 @@ export type ConversationMessage = {
   timestamp: string | null;
 };
 
+export type ConversationActivity = {
+  status: "idle" | "running" | "completed" | "interrupted";
+  turn_id: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  updated_at: string | null;
+};
+
 export type ConversationResult = {
   thread_id: string;
   markdown: string;
@@ -74,7 +95,12 @@ export type ConversationResult = {
   rollout_path: string | null;
   found: boolean;
   messages: ConversationMessage[];
+  activity: ConversationActivity;
 };
+
+const conversationResults = new Map<string, { mtimeMs: number; size: number; result: ConversationResult }>();
+export type ConversationActivityResult = { activity: ConversationActivity; last_final_at: string | null };
+const conversationActivities = new Map<string, { mtimeMs: number; size: number; result: ConversationActivityResult }>();
 
 function shouldIncludeUserMessage(message: string) {
   const trimmed = message.trim();
@@ -115,6 +141,7 @@ type PendingAgent = {
 
 async function readConversationMessages(rolloutPath: string) {
   const messages: ConversationMessage[] = [];
+  let activity: ConversationActivity = { status: "idle", turn_id: null, started_at: null, completed_at: null, updated_at: null };
   let index = 0;
   let lastIncludedUserAt: string | null = null;
   const turnStartedAt = new Map<string, string>();
@@ -175,7 +202,7 @@ async function readConversationMessages(rolloutPath: string) {
 
   const lines = createInterface({ input: createReadStream(rolloutPath, { encoding: "utf8" }), crlfDelay: Infinity });
   for await (const line of lines) {
-    if (!line.includes("user_message") && !line.includes("agent_message") && !line.includes("response_item")) continue;
+    if (!line.includes("user_message") && !line.includes("agent_message") && !line.includes("response_item") && !line.includes("task_started") && !line.includes("task_complete") && !line.includes("turn_aborted")) continue;
     let event: {
       type?: string;
       timestamp?: unknown;
@@ -185,6 +212,7 @@ async function readConversationMessages(rolloutPath: string) {
         message?: unknown;
         phase?: unknown;
         content?: unknown;
+        turn_id?: unknown;
         internal_chat_message_metadata_passthrough?: { turn_id?: unknown };
       };
     };
@@ -195,6 +223,46 @@ async function readConversationMessages(rolloutPath: string) {
     }
 
     const timestamp = typeof event.timestamp === "string" ? event.timestamp : null;
+    if (activity.status === "running" && timestamp) activity.updated_at = timestamp;
+
+    if (event.type === "event_msg" && event.payload?.type === "task_started") {
+      activity = {
+        status: "running",
+        turn_id: typeof event.payload.turn_id === "string" ? event.payload.turn_id : null,
+        started_at: timestamp,
+        completed_at: null,
+        updated_at: timestamp,
+      };
+      continue;
+    }
+
+    if (event.type === "event_msg" && event.payload?.type === "task_complete") {
+      const turnId = typeof event.payload.turn_id === "string" ? event.payload.turn_id : null;
+      if (!activity.turn_id || !turnId || activity.turn_id === turnId) {
+        activity = {
+          status: "completed",
+          turn_id: turnId || activity.turn_id,
+          started_at: activity.started_at,
+          completed_at: timestamp,
+          updated_at: timestamp,
+        };
+      }
+      continue;
+    }
+
+    if (event.type === "event_msg" && event.payload?.type === "turn_aborted") {
+      const turnId = typeof event.payload.turn_id === "string" ? event.payload.turn_id : null;
+      if (!activity.turn_id || !turnId || activity.turn_id === turnId) {
+        activity = {
+          status: "interrupted",
+          turn_id: turnId || activity.turn_id,
+          started_at: activity.started_at,
+          completed_at: timestamp,
+          updated_at: timestamp,
+        };
+      }
+      continue;
+    }
 
     if (event.type === "response_item" && event.payload?.type === "message" && event.payload.role === "assistant") {
       const turnId = typeof event.payload.internal_chat_message_metadata_passthrough?.turn_id === "string"
@@ -229,7 +297,52 @@ async function readConversationMessages(rolloutPath: string) {
     }
   }
   flushPendingAgent(null);
-  return messages.length > MAX_MESSAGES ? messages.slice(-MAX_MESSAGES) : messages;
+  return { messages: messages.length > MAX_MESSAGES ? messages.slice(-MAX_MESSAGES) : messages, activity };
+}
+
+export async function readConversationActivity(threadId: string | null | undefined): Promise<ConversationActivityResult> {
+  const empty = (): ConversationActivityResult => ({ activity: { status: "idle", turn_id: null, started_at: null, completed_at: null, updated_at: null }, last_final_at: null });
+  const id = normalizeSessionId(threadId);
+  if (!id) return empty();
+  const rolloutPath = findRolloutPath(id);
+  if (!rolloutPath) return empty();
+  let initialStats: { mtimeMs: number; size: number };
+  try {
+    initialStats = statSync(rolloutPath);
+    const cached = conversationActivities.get(rolloutPath);
+    if (cached && cached.mtimeMs === initialStats.mtimeMs && cached.size === initialStats.size) return cached.result;
+  } catch {
+    return empty();
+  }
+  let activity: ConversationActivity = { status: "idle", turn_id: null, started_at: null, completed_at: null, updated_at: null };
+  let lastFinalAt: string | null = null;
+  const lines = createInterface({ input: createReadStream(rolloutPath, { encoding: "utf8" }), crlfDelay: Infinity });
+  for await (const line of lines) {
+    if (!line.includes("task_started") && !line.includes("task_complete") && !line.includes("turn_aborted") && !line.includes("agent_message") && !line.includes("response_item")) continue;
+    let event: { type?: string; timestamp?: unknown; payload?: { type?: string; role?: string; phase?: unknown; turn_id?: unknown } };
+    try { event = JSON.parse(line) as typeof event; } catch { continue; }
+    const timestamp = typeof event.timestamp === "string" ? event.timestamp : null;
+    if (activity.status === "running" && timestamp) activity.updated_at = timestamp;
+    if (event.type === "event_msg" && event.payload?.type === "task_started") {
+      activity = { status: "running", turn_id: typeof event.payload.turn_id === "string" ? event.payload.turn_id : null, started_at: timestamp, completed_at: null, updated_at: timestamp };
+    } else if (event.type === "event_msg" && event.payload?.type === "task_complete") {
+      const turnId = typeof event.payload.turn_id === "string" ? event.payload.turn_id : null;
+      if (!activity.turn_id || !turnId || activity.turn_id === turnId) activity = { status: "completed", turn_id: turnId || activity.turn_id, started_at: activity.started_at, completed_at: timestamp, updated_at: timestamp };
+    } else if (event.type === "event_msg" && event.payload?.type === "turn_aborted") {
+      const turnId = typeof event.payload.turn_id === "string" ? event.payload.turn_id : null;
+      if (!activity.turn_id || !turnId || activity.turn_id === turnId) activity = { status: "interrupted", turn_id: turnId || activity.turn_id, started_at: activity.started_at, completed_at: timestamp, updated_at: timestamp };
+    }
+    if (((event.type === "event_msg" && event.payload?.type === "agent_message") || (event.type === "response_item" && event.payload?.type === "message" && event.payload.role === "assistant")) && event.payload?.phase === "final_answer") lastFinalAt = timestamp;
+  }
+  const result = { activity, last_final_at: lastFinalAt };
+  try {
+    const stats = statSync(rolloutPath);
+    if (stats.mtimeMs === initialStats.mtimeMs && stats.size === initialStats.size) {
+      conversationActivities.set(rolloutPath, { mtimeMs: stats.mtimeMs, size: stats.size, result });
+      if (conversationActivities.size > MAX_CONVERSATION_ACTIVITIES) conversationActivities.delete(conversationActivities.keys().next().value!);
+    }
+  } catch {}
+  return result;
 }
 
 export async function readConversationResult(threadId: string | null | undefined): Promise<ConversationResult> {
@@ -241,6 +354,7 @@ export async function readConversationResult(threadId: string | null | undefined
     rollout_path: null,
     found: false,
     messages: [],
+    activity: { status: "idle", turn_id: null, started_at: null, completed_at: null, updated_at: null },
     ...partial,
   });
 
@@ -249,9 +363,22 @@ export async function readConversationResult(threadId: string | null | undefined
   const rolloutPath = findRolloutPath(id);
   if (!rolloutPath) return empty({ thread_id: id });
 
-  const messages = await readConversationMessages(rolloutPath);
+  let initialStats: { mtimeMs: number; size: number };
+  try {
+    initialStats = statSync(rolloutPath);
+    const cached = conversationResults.get(rolloutPath);
+    if (cached && cached.mtimeMs === initialStats.mtimeMs && cached.size === initialStats.size) {
+      conversationResults.delete(rolloutPath);
+      conversationResults.set(rolloutPath, cached);
+      return cached.result;
+    }
+  } catch {
+    return empty({ thread_id: id });
+  }
+
+  const { messages, activity } = await readConversationMessages(rolloutPath);
   const lastAgent = [...messages].reverse().find(item => item.role === "agent") || null;
-  return {
+  const result: ConversationResult = {
     thread_id: id,
     markdown: lastAgent?.markdown || "",
     html: lastAgent?.html || "",
@@ -259,5 +386,17 @@ export async function readConversationResult(threadId: string | null | undefined
     rollout_path: rolloutPath,
     found: messages.length > 0,
     messages,
+    activity,
   };
+  try {
+    const stats = statSync(rolloutPath);
+    if (stats.mtimeMs === initialStats.mtimeMs && stats.size === initialStats.size) {
+      conversationResults.set(rolloutPath, { mtimeMs: stats.mtimeMs, size: stats.size, result });
+      if (conversationResults.size > MAX_CONVERSATION_RESULTS) conversationResults.delete(conversationResults.keys().next().value!);
+      const lastFinalAt = [...messages].reverse().find(item => item.role === "agent" && item.phase === "final_answer")?.timestamp || null;
+      conversationActivities.set(rolloutPath, { mtimeMs: stats.mtimeMs, size: stats.size, result: { activity, last_final_at: lastFinalAt } });
+      if (conversationActivities.size > MAX_CONVERSATION_ACTIVITIES) conversationActivities.delete(conversationActivities.keys().next().value!);
+    }
+  } catch {}
+  return result;
 }

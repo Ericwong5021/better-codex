@@ -57,6 +57,7 @@ export class IssueWorker {
   start() {
     this.stopped = false;
     this.store.recoverInterruptedRuns();
+    for (const issueId of this.store.listManualStartQueue()) this.manualQueue.add(issueId);
     for (const pending of this.store.listPendingSchedulerRuns()) {
       const executionResultPath = join(runLogPath, `${pending.claim.runId}-result.txt`);
       const executionResult = existsSync(executionResultPath) ? readFileSync(executionResultPath, "utf8").trim() : "";
@@ -78,7 +79,11 @@ export class IssueWorker {
     const claim = this.store.claimNextIssue(issueId);
     if (!claim) {
       const issue = this.store.getIssue(issueId);
-      if (!issue || !this.store.isDispatchable(issue)) return false;
+      if (!issue || !this.store.isDispatchable(issue)) {
+        this.store.dequeueManualStart(issueId);
+        return false;
+      }
+      this.store.enqueueManualStart(issueId);
       this.manualQueue.add(issueId);
       this.wake();
       return true;
@@ -88,6 +93,7 @@ export class IssueWorker {
   }
 
   stopIssue(issueId: string) {
+    this.store.dequeueManualStart(issueId);
     this.manualQueue.delete(issueId);
     const active = Array.from([...this.runs.values(), ...this.schedulers.values()]).find(({ claim }) => claim.issue.id === issueId);
     if (!active) return Promise.resolve(false);
@@ -312,6 +318,7 @@ export class IssueWorker {
       for (const issueId of [...this.manualQueue]) {
         const issue = this.store.getIssue(issueId);
         if (!issue || !this.store.isDispatchable(issue)) {
+          this.store.dequeueManualStart(issueId);
           this.manualQueue.delete(issueId);
           continue;
         }
