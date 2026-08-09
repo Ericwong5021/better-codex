@@ -1,8 +1,6 @@
 <p align="center">
-  <img src="assets/better-codex.png" width="132" alt="Better Codex" />
+  <img src="assets/better-codex-brand.png" width="420" alt="Better Codex" />
 </p>
-
-<h1 align="center">Better Codex</h1>
 
 <p align="center">
   <strong>从开始到完成，让 Codex 里的工作清晰可见。</strong>
