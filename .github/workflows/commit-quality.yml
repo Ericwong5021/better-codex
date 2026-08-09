@@ -2,6 +2,9 @@ name: Commit Quality
 
 on:
   pull_request:
+  push:
+    branches:
+      - main
 
 permissions:
   contents: read
@@ -20,3 +23,43 @@ jobs:
             printf 'Invalid PR title: %s\n' "$PR_TITLE" >&2
             exit 1
           }
+
+  commit-message:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Reject Chinese commit messages
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$BEFORE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            commits=$(git rev-list "$AFTER_SHA")
+          else
+            commits=$(git rev-list "$BEFORE_SHA..$AFTER_SHA")
+          fi
+          violations=""
+          format_pattern='^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([[:alnum:]./_-]+\))?!?: .{1,72}$'
+          while IFS= read -r commit; do
+            subject=$(git log -1 --format=%s "$commit")
+            message=$(git log -1 --format=%B "$commit")
+            reasons=""
+            if [[ ! "$subject" =~ $format_pattern ]]; then
+              reasons="invalid format"
+            fi
+            if perl -CSD -e 'exit((join("", <STDIN>) =~ /[\x{3400}-\x{4DBF}\x{4E00}-\x{9FFF}\x{F900}-\x{FAFF}]/) ? 0 : 1)' <<< "$message"; then
+              reasons="${reasons:+$reasons, }contains Chinese characters"
+            fi
+            if [ -n "$reasons" ]; then
+              violations="$violations\n$(git log -1 --format='%h %s' "$commit") [$reasons]"
+            fi
+          done <<< "$commits"
+          if [ -n "$violations" ]; then
+            printf 'Commit messages must use Conventional Commits and English text:%b\n' "$violations" >&2
+            exit 1
+          fi
