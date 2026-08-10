@@ -1,6 +1,6 @@
 {
   "name": "better-codex",
-  "version": "0.4.1-beta.1",
+  "version": "0.4.1-beta.2",
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
@@ -51,7 +51,7 @@
     "package:update-manifest": "node scripts/create-update-manifest.mjs release",
     "start": "node dist/cli.js serve",
     "better-codex": "tsx src/cli.ts",
-    "test": "tsx --test test/*.test.ts"
+    "test": "tsx --test --test-concurrency=2 test/*.test.ts"
   },
   "devDependencies": {
     "@types/node": "^22.15.21",

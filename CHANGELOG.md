@@ -4,6 +4,12 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.1-beta.2] - 2026-08-10
+
+### Fixed
+
+- Limit test-file concurrency so lifecycle and Gateway integration tests remain deterministic on shared Windows CI runners.
+
 ## [0.4.1-beta.1] - 2026-08-10
 
 ### Added
@@ -226,7 +232,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1-beta.1...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1-beta.2...HEAD
+[0.4.1-beta.2]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1-beta.1...v0.4.1-beta.2
 [0.4.1-beta.1]: https://github.com/Ericwong5021/better-codex/compare/v0.4.0...v0.4.1-beta.1
 [0.4.0]: https://github.com/Ericwong5021/better-codex/compare/v0.3.17...v0.4.0
 [0.3.17]: https://github.com/Ericwong5021/better-codex/compare/v0.3.16...v0.3.17
