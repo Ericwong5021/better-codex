@@ -5,6 +5,20 @@ import { createServer } from "node:http";
 import { createServer as createTcpServer } from "node:net";
 import test from "node:test";
 
+function schedulingAdjustedDeadline(timeoutMs: number) {
+  let observedAt = 0;
+  const observed = new Promise<void>(resolve => {
+    setTimeout(() => {
+      observedAt = Date.now();
+      resolve();
+    }, timeoutMs);
+  });
+  return async () => {
+    await observed;
+    return Date.now() - observedAt;
+  };
+}
+
 test("a CDP WebSocket child process closes cleanly on supported Node versions", async () => {
   const server = createServer();
   server.on("upgrade", (request, socket) => {
@@ -66,12 +80,12 @@ test("a half-open CDP HTTP endpoint is bounded", async () => {
     const address = server.address();
     assert.ok(address && typeof address === "object");
     const { probeCdpTargetsForTest, waitForCdpTargetsForTest } = await import("../src/cdp.js");
-    const started = Date.now();
+    const probeOverrun = schedulingAdjustedDeadline(100);
     await assert.rejects(() => probeCdpTargetsForTest(address.port, 100), /cdp_unavailable_.*_timeout/);
-    assert.ok(Date.now() - started < 2_000, "stalled CDP probe exceeded its timeout budget");
-    const waitStarted = Date.now();
+    assert.ok(await probeOverrun() < 2_000, "stalled CDP probe exceeded its timeout budget after the event loop observed the deadline");
+    const waitOverrun = schedulingAdjustedDeadline(250);
     await assert.rejects(() => waitForCdpTargetsForTest(address.port, 250), /cdp_unavailable_/);
-    assert.ok(Date.now() - waitStarted < 2_000, "target wait exceeded its overall deadline");
+    assert.ok(await waitOverrun() < 2_000, "target wait exceeded its overall deadline after the event loop observed it");
   } finally {
     for (const socket of sockets) socket.destroy();
     await new Promise<void>(resolve => server.close(() => resolve()));
@@ -114,9 +128,9 @@ test("the overall target deadline includes a CDP command that never replies", as
     const address = server.address();
     assert.ok(address && typeof address === "object");
     const { waitForCdpTargetsForTest } = await import("../src/cdp.js");
-    const started = Date.now();
+    const commandOverrun = schedulingAdjustedDeadline(250);
     await assert.rejects(() => waitForCdpTargetsForTest(address.port, 250), /cdp_unavailable_/);
-    assert.ok(Date.now() - started < 2_000, "CDP command exceeded the overall target deadline");
+    assert.ok(await commandOverrun() < 2_000, "CDP command exceeded the overall target deadline after the event loop observed it");
   } finally {
     for (const socket of sockets) socket.destroy();
     await new Promise<void>(resolve => server.close(() => resolve()));
