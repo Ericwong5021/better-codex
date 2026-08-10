@@ -93,6 +93,12 @@ macOS:
 curl -fsSL https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scripts/install.sh | bash
 ```
 
+macOS Beta:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scripts/install-beta.sh | bash
+```
+
 Windows (PowerShell):
 
 ```powershell

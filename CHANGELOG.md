@@ -4,6 +4,12 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.1-beta.8] - 2026-08-10
+
+### Added
+
+- Add a one-line macOS Beta installer that resolves the current Preview release for Apple silicon and Intel Macs.
+
 ## [0.4.1-beta.7] - 2026-08-10
 
 ### Fixed
@@ -278,7 +284,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1-beta.7...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1-beta.8...HEAD
+[0.4.1-beta.8]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1-beta.7...v0.4.1-beta.8
 [0.4.1-beta.7]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1-beta.6...v0.4.1-beta.7
 [0.4.1-beta.6]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1-beta.5...v0.4.1-beta.6
 [0.4.1-beta.5]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1-beta.4...v0.4.1-beta.5
