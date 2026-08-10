@@ -164,7 +164,8 @@ test("installers preserve the selected Preview lane during a legacy full migrati
   assert.match(source, /@\("update", "check", "--channel", "preview"\)/);
   assert.match(source, /Unable to resolve the signed Beta release; the existing installation was left unchanged/);
   assert.match(shellSource, /runtime\/channel\.json/);
-  assert.match(shellSource, /update check --channel preview/);
+  assert.match(shellSource, /resolve_preview_version/);
+  assert.match(shellSource, /PRESERVE_PREVIEW_LANE=1/);
   assert.match(shellSource, /Unable to resolve the signed Beta release; the existing installation was left unchanged/);
 });
 
