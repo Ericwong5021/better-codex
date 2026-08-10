@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { windowsCodexPackageProcessPowerShell } from "../src/cdp.js";
 
 const source = readFileSync(new URL("../src/cdp.ts", import.meta.url), "utf8");
 const nativeDialogSource = readFileSync(new URL("../src/native-dialog.ts", import.meta.url), "utf8");
@@ -49,17 +51,33 @@ test("thread navigation opens a sidebar row or falls back to the native route", 
 });
 
 test("Windows restart terminates the complete installed Codex package process tree", () => {
+  const helperStart = source.indexOf("export function windowsCodexPackageProcessPowerShell");
   const start = source.indexOf("async function quitCodex()");
   const end = source.indexOf('if (process.platform !== "darwin")', start);
-  assert.ok(start >= 0 && end > start, "quitCodex Windows implementation is missing");
-  const windowsQuit = source.slice(start, end);
+  assert.ok(helperStart >= 0 && start > helperStart && end > start, "quitCodex Windows implementation is missing");
+  const windowsQuit = source.slice(helperStart, end);
   assert.match(windowsQuit, /Get-CimInstance Win32_Process -Filter \\\"Name = 'ChatGPT\.exe'\\\"/);
   assert.match(windowsQuit, /ExecutablePath -notlike \\\"\*\\\\WindowsApps\\\\OpenAI\.Codex_\*\\\"/);
   assert.match(windowsQuit, /SessionId/);
   assert.match(windowsQuit, /GetOwnerSid/);
   assert.match(windowsQuit, /Stop-Process -Id \$_.ProcessId/);
+  assert.match(windowsQuit, /\$processes = @\(\$\{ownedPackageProcesses\}\)/);
+  assert.match(windowsQuit, /windowsCodexPackageProcessPowerShell\("stop"\)/);
+  assert.match(windowsQuit, /windowsCodexPackageProcessPowerShell\("count"\)/);
   assert.doesNotMatch(windowsQuit, /CommandLine -notmatch/);
   assert.doesNotMatch(windowsQuit, /Get-Process -Name 'ChatGPT','Codex'/);
+});
+
+test("Windows restart process-count command is valid PowerShell", {
+  skip: process.platform !== "win32" ? "requires Windows PowerShell 5.1" : false,
+}, () => {
+  const command = windowsCodexPackageProcessPowerShell("count");
+  const result = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", command], {
+    encoding: "utf8",
+  });
+
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stdout.trim(), /^\d+$/);
 });
 
 test("every main target scan has a total deadline and candidate cap", () => {

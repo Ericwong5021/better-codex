@@ -2,7 +2,8 @@ param(
   [string]$Repository = "Ericwong5021/better-codex",
   [string]$Version = "",
   [string]$BinDirectory = "$env:LOCALAPPDATA\BetterCodex\bin",
-  [switch]$NoService
+  [switch]$NoService,
+  [switch]$Preview
 )
 
 $ErrorActionPreference = "Stop"
@@ -112,6 +113,11 @@ function Invoke-BetterCodexCapture([string]$Entrypoint, [string[]]$Arguments, [i
     return Invoke-NativeCapture $script:NodeExecutable (@($Entrypoint) + $Arguments) $TimeoutMilliseconds
   }
   return Invoke-NativeCapture $Entrypoint $Arguments $TimeoutMilliseconds
+}
+
+function Restore-PreviousExecutable([bool]$HadExecutable, [bool]$PreviousExecutableChanged, [string]$BackupExecutable, [string]$PreviousExecutablePath) {
+  if (-not $HadExecutable -or -not $PreviousExecutableChanged) { return }
+  Copy-Item -LiteralPath $BackupExecutable -Destination $PreviousExecutablePath -Force -ErrorAction Stop
 }
 
 function Assert-UpdatePublicKey([string]$Path) {
@@ -470,7 +476,7 @@ $localArchive = if ($env:BETTER_CODEX_ARCHIVE) { [IO.Path]::GetFullPath($env:BET
 $explicitVersion = [bool]($Version -or $env:BETTER_CODEX_VERSION)
 $previewSelected = $false
 try { $previewSelected = ((Get-Content -LiteralPath $channelPath -Raw | ConvertFrom-Json).channel -eq "preview") } catch {}
-$preservePreviewLane = $false
+$preservePreviewLane = [bool]$Preview
 if (-not $localArchive -and -not $explicitVersion) {
   if ($previewSelected -and (Test-Path -LiteralPath $executable -PathType Leaf)) {
     Write-Step "Resolving the current Beta release..."
@@ -602,6 +608,7 @@ try {
   $hadExecutable = Test-Path $executable
   $hadLauncher = Test-Path $launcherPath
   $legacyMigration = $hadExecutable -and ([IO.Path]::GetFullPath($executable) -eq [IO.Path]::GetFullPath($legacyExecutable))
+  $previousExecutableChanged = $false
   $hadSkill = Test-Path $skillDirectory
   $hadIssueSkill = Test-Path $issueSkillDirectory
   $hadUpdateKey = Test-Path $updatePublicKeyPath
@@ -650,6 +657,7 @@ try {
   Write-Step "Installing Node.js bundle to $BinDirectory..."
   New-Item -ItemType Directory -Force -Path $BinDirectory | Out-Null
   if ($hadExecutable -and -not $NoService) { Start-Sleep -Milliseconds 800 }
+  if ($hadExecutable -and ([IO.Path]::GetFullPath($previousExecutablePath) -eq [IO.Path]::GetFullPath($bundlePath))) { $previousExecutableChanged = $true }
   Copy-Item -Force $packagedExecutable $bundlePath
   Copy-Item -Force $packagedLauncher $launcherPath
   $launcherNode = $script:NodeExecutable.Replace("%", "%%")
@@ -708,6 +716,7 @@ try {
   if ($legacyMigration -and (Test-Path -LiteralPath $legacyExecutable -PathType Leaf)) {
     Write-Step "Removing the verified legacy executable..."
     Remove-Item -LiteralPath $legacyExecutable -Force
+    $previousExecutableChanged = $true
   }
   if ($env:BETTER_CODEX_SKIP_PATH_UPDATE -ne "1") {
     $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
@@ -729,7 +738,7 @@ try {
     }
     Remove-Item -LiteralPath $bundlePath -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $launcherPath -Force -ErrorAction SilentlyContinue
-    if ($hadExecutable) { Copy-Item -Force $backupExecutable $previousExecutablePath }
+    Restore-PreviousExecutable $hadExecutable $previousExecutableChanged $backupExecutable $previousExecutablePath
     if ($hadLauncher) { Copy-Item -Force $backupLauncher $launcherPath }
     $executable = $previousExecutablePath
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $skillDirectory

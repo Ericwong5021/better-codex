@@ -9,7 +9,7 @@ trap 'rm -rf "$WORK"' EXIT
 node scripts/preview-feed.mjs verify "$CANDIDATE" "$PUBLIC_KEY"
 
 if ! gh release view preview >/dev/null 2>&1; then
-  gh release create preview "$CANDIDATE#update-manifest.json" --prerelease --latest=false --target "${GITHUB_SHA}" --title "Better Codex Preview" --notes "The signed update feed for Preview subscribers."
+  gh release create preview "$CANDIDATE#update-manifest.json" "scripts/install-beta.ps1#install.ps1" --prerelease --latest=false --target "${GITHUB_SHA}" --title "Better Codex Preview" --notes "The signed update feed and installer for Preview subscribers."
 else
   mkdir -p "$WORK/current"
   asset_count="$(gh release view preview --json assets --jq '[.assets[] | select(.name == "update-manifest.json")] | length')"
@@ -39,7 +39,34 @@ else
   fi
 fi
 
+installer_uploaded=0
+installer_asset_count="$(gh release view preview --json assets --jq '[.assets[] | select(.name == "install.ps1")] | length')"
+if [ "$installer_asset_count" = "0" ]; then
+  gh release upload preview "scripts/install-beta.ps1#install.ps1"
+  installer_uploaded=1
+else
+  for attempt in 1 2 3; do
+    if gh release upload preview "scripts/install-beta.ps1#install.ps1" --clobber; then
+      installer_uploaded=1
+      break
+    fi
+    sleep "$attempt"
+  done
+fi
+if [ "$installer_uploaded" != "1" ]; then
+  mkdir -p "$WORK/uncertain-installer"
+  if gh release download preview --pattern install.ps1 --dir "$WORK/uncertain-installer" \
+    && cmp scripts/install-beta.ps1 "$WORK/uncertain-installer/install.ps1"; then
+    installer_uploaded=1
+  else
+    exit 1
+  fi
+fi
+
 mkdir -p "$WORK/published"
 gh release download preview --pattern update-manifest.json --dir "$WORK/published"
 cmp "$CANDIDATE" "$WORK/published/update-manifest.json"
 node scripts/preview-feed.mjs verify "$WORK/published/update-manifest.json" "$PUBLIC_KEY"
+mkdir -p "$WORK/published-installer"
+gh release download preview --pattern install.ps1 --dir "$WORK/published-installer"
+cmp scripts/install-beta.ps1 "$WORK/published-installer/install.ps1"

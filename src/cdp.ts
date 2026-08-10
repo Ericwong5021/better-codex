@@ -425,13 +425,21 @@ function confirmCodexQuit() {
   });
 }
 
+export function windowsCodexPackageProcessPowerShell(action: "stop" | "count") {
+  const ownedPackageProcesses = "& { $sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId; $ownerSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value; @(Get-CimInstance Win32_Process -Filter \"Name = 'ChatGPT.exe'\" | Where-Object { if ($_.SessionId -ne $sessionId -or $_.ExecutablePath -notlike \"*\\WindowsApps\\OpenAI.Codex_*\") { return $false }; try { return (Invoke-CimMethod -InputObject $_ -MethodName GetOwnerSid -ErrorAction Stop).Sid -eq $ownerSid } catch { return $false } }) }";
+  if (action === "stop") {
+    return `$processes = @(${ownedPackageProcesses}); if ($processes.Count -gt 0) { $processes | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } }; exit 0`;
+  }
+  return `$processes = @(${ownedPackageProcesses}); $count = @($processes).Count; Write-Output $count; exit 0`;
+}
+
 async function quitCodex() {
   if (process.platform === "win32") {
-    const ownedPackageProcesses = "$sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId; $ownerSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value; @(Get-CimInstance Win32_Process -Filter \"Name = 'ChatGPT.exe'\" | Where-Object { if ($_.SessionId -ne $sessionId -or $_.ExecutablePath -notlike \"*\\WindowsApps\\OpenAI.Codex_*\") { return $false }; try { return (Invoke-CimMethod -InputObject $_ -MethodName GetOwnerSid -ErrorAction Stop).Sid -eq $ownerSid } catch { return $false } })";
-    const packageProcesses = `$processes = ${ownedPackageProcesses}; if ($processes.Count -gt 0) { $processes | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } }; exit 0`;
-    execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", packageProcesses], { stdio: "ignore", windowsHide: true });
+    const stopPackageProcesses = windowsCodexPackageProcessPowerShell("stop");
+    const countPackageProcesses = windowsCodexPackageProcessPowerShell("count");
+    execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", stopPackageProcesses], { stdio: "ignore", windowsHide: true });
     for (let attempt = 0; attempt < 40; attempt += 1) {
-      const count = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `$count = (${ownedPackageProcesses}).Count; Write-Output $count; exit 0`], { encoding: "utf8", windowsHide: true }).trim();
+      const count = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", countPackageProcesses], { encoding: "utf8", windowsHide: true }).trim();
       if (Number(count) === 0) return;
       await new Promise(resolve => setTimeout(resolve, 250));
     }

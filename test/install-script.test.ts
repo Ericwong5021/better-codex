@@ -4,8 +4,11 @@ import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 
 const installerPath = new URL("../scripts/install.ps1", import.meta.url);
+const betaInstallerPath = new URL("../scripts/install-beta.ps1", import.meta.url);
 const source = readFileSync(installerPath, "utf8");
+const betaSource = existsSync(betaInstallerPath) ? readFileSync(betaInstallerPath, "utf8") : "";
 const shellSource = readFileSync(new URL("../scripts/install.sh", import.meta.url), "utf8");
+const previewPromotionSource = readFileSync(new URL("../scripts/promote-preview-feed.sh", import.meta.url), "utf8");
 
 test("Windows installer captures native stderr without turning progress into a terminating error", {
   skip: process.platform !== "win32" ? "requires Windows PowerShell 5.1" : false,
@@ -99,6 +102,49 @@ test("Windows legacy migration removes the EXE only after the new bundle passes 
   assert.doesNotMatch(source, /@\("uninstall"\)/);
 });
 
+test("Windows rollback does not overwrite an unchanged legacy executable", {
+  skip: process.platform !== "win32" ? "requires Windows PowerShell 5.1" : false,
+}, () => {
+  const script = String.raw`
+$source = Get-Content -Raw -LiteralPath $env:BETTER_CODEX_INSTALLER_TEST_PATH
+$tokens = $null
+$parseErrors = $null
+$ast = [Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors.Count -gt 0) { throw ($parseErrors | Out-String) }
+$function = $ast.Find({
+  param($node)
+  $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq "Restore-PreviousExecutable"
+}, $true)
+if (-not $function) { throw "Restore-PreviousExecutable is missing" }
+Invoke-Expression $function.Extent.Text
+
+$directory = Join-Path ([IO.Path]::GetTempPath()) ("better-codex-rollback-" + [Guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path $directory | Out-Null
+$backup = Join-Path $directory "backup.exe"
+$target = Join-Path $directory "better-codex.exe"
+[IO.File]::WriteAllText($backup, "backup")
+[IO.File]::WriteAllText($target, "original")
+$lock = [IO.File]::Open($target, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::None)
+try {
+  Restore-PreviousExecutable $true $false $backup $target
+  if ([IO.File]::ReadAllText($backup) -ne "backup") { throw "backup changed unexpectedly" }
+} finally {
+  $lock.Dispose()
+}
+if ([IO.File]::ReadAllText($target) -ne "original") { throw "unchanged legacy executable was overwritten" }
+Restore-PreviousExecutable $true $true $backup $target
+if ([IO.File]::ReadAllText($target) -ne "backup") { throw "changed executable was not restored" }
+Remove-Item -Recurse -Force $directory
+`;
+
+  const result = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+    encoding: "utf8",
+    env: { ...process.env, BETTER_CODEX_INSTALLER_TEST_PATH: installerPath.pathname.replace(/^\/(.:)/, "$1") },
+  });
+
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+});
+
 test("Windows launcher pins the Node executable that passed dependency validation", () => {
   const copyLauncher = source.indexOf("Copy-Item -Force $packagedLauncher $launcherPath");
   const pinNode = source.indexOf('$launcherNode = $script:NodeExecutable.Replace("%", "%%")', copyLauncher);
@@ -147,6 +193,54 @@ if (($script:CapturedArguments -join " ") -ne "update channel preview") { throw 
     env: { ...process.env, BETTER_CODEX_INSTALLER_TEST_PATH: installerPath.pathname.replace(/^\/(.:)/, "$1") },
   });
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+});
+
+test("Windows Beta bootstrap accepts Beta and promoted release versions from the Preview feed", {
+  skip: process.platform !== "win32" ? "requires Windows PowerShell 5.1" : false,
+}, () => {
+  assert.ok(betaSource, "scripts/install-beta.ps1 is missing");
+  const script = String.raw`
+$source = Get-Content -Raw -LiteralPath $env:BETTER_CODEX_BETA_INSTALLER_TEST_PATH
+$tokens = $null
+$parseErrors = $null
+$ast = [Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors.Count -gt 0) { throw ($parseErrors | Out-String) }
+$function = $ast.Find({
+  param($node)
+  $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq "Get-PreviewReleaseVersion"
+}, $true)
+if (-not $function) { throw "Get-PreviewReleaseVersion is missing" }
+Invoke-Expression $function.Extent.Text
+
+function Manifest([string]$Version, [string]$Channel = "preview", [bool]$IncludeWindows = $true) {
+  $assets = if ($IncludeWindows) { @{ "win32-amd64" = @{ url = "https://example.invalid/core"; sha256 = ("a" * 64) } } } else { @{} }
+  return (@{ payload = @{ schemaVersion = 1; channel = $Channel; core = @{ version = $Version; assets = $assets } }; signature = "signed" } | ConvertTo-Json -Depth 8 -Compress)
+}
+if ((Get-PreviewReleaseVersion (Manifest "0.4.1-beta.5")) -ne "0.4.1-beta.5") { throw "Beta version was not selected" }
+if ((Get-PreviewReleaseVersion (Manifest "0.4.1")) -ne "0.4.1") { throw "promoted release was not selected" }
+try { Get-PreviewReleaseVersion (Manifest "0.4.1-beta.5" "stable"); throw "stable feed was accepted" } catch { if ($_.Exception.Message -eq "stable feed was accepted") { throw } }
+try { Get-PreviewReleaseVersion (Manifest "0.4.1-beta.5" "preview" $false); throw "missing Windows asset was accepted" } catch { if ($_.Exception.Message -eq "missing Windows asset was accepted") { throw } }
+exit 0
+`;
+  const result = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+    encoding: "utf8",
+    env: { ...process.env, BETTER_CODEX_BETA_INSTALLER_TEST_PATH: betaInstallerPath.pathname.replace(/^\/(.:)/, "$1") },
+  });
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+});
+
+test("Windows Beta bootstrap invokes the versioned installer in the Preview lane", () => {
+  assert.match(betaSource, /releases\/download\/preview\/update-manifest\.json/);
+  assert.match(betaSource, /releases\/download\/v\$version\/install\.ps1/);
+  assert.match(betaSource, /-Version "v\$version" -Preview/);
+  assert.match(source, /\[switch\]\$Preview/);
+  assert.match(source, /\$preservePreviewLane = \[bool\]\$Preview/);
+});
+
+test("Preview feed publication exposes and verifies the fixed Beta installer endpoint", () => {
+  assert.match(previewPromotionSource, /scripts\/install-beta\.ps1#install\.ps1/);
+  assert.match(previewPromotionSource, /gh release download preview --pattern install\.ps1/);
+  assert.match(previewPromotionSource, /cmp .*install-beta\.ps1.*install\.ps1/);
 });
 
 test("every successful installer path persists its inferred update channel", () => {

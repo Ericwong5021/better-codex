@@ -4,6 +4,16 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.1-beta.5] - 2026-08-10
+
+### Added
+
+- Publish a fixed one-line Windows installer for the current Preview release and keep installations subscribed to the Preview channel.
+
+### Fixed
+
+- Generate valid PowerShell when waiting for Codex to quit during setup, and avoid overwriting an unchanged legacy executable during rollback.
+
 ## [0.4.1-beta.4] - 2026-08-10
 
 ### Fixed
@@ -255,7 +265,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1-beta.4...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1-beta.5...HEAD
+[0.4.1-beta.5]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1-beta.4...v0.4.1-beta.5
 [0.4.1-beta.4]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1-beta.3...v0.4.1-beta.4
 [0.4.1-beta.3]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1-beta.2...v0.4.1-beta.3
 [0.4.1-beta.2]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1-beta.1...v0.4.1-beta.2
