@@ -238,9 +238,14 @@ test("Windows Beta bootstrap invokes the versioned installer in the Preview lane
 });
 
 test("Preview feed publication exposes and verifies the fixed Beta installer endpoint", () => {
-  assert.match(previewPromotionSource, /scripts\/install-beta\.ps1#install\.ps1/);
+  assert.match(previewPromotionSource, /cp scripts\/install-beta\.ps1 "\$WORK\/install\.ps1"/);
+  assert.match(previewPromotionSource, /gh release upload preview "\$WORK\/install\.ps1"/);
+  assert.doesNotMatch(previewPromotionSource, /install-beta\.ps1#install\.ps1/);
   assert.match(previewPromotionSource, /gh release download preview --pattern install\.ps1/);
   assert.match(previewPromotionSource, /cmp .*install-beta\.ps1.*install\.ps1/);
+  const verifyInstaller = previewPromotionSource.lastIndexOf('cmp scripts/install-beta.ps1 "$WORK/published-installer/install.ps1"');
+  const removeLegacyAsset = previewPromotionSource.indexOf("gh release delete-asset preview install-beta.ps1 --yes");
+  assert.ok(verifyInstaller >= 0 && removeLegacyAsset > verifyInstaller, "legacy asset cleanup must follow fixed endpoint verification");
 });
 
 test("every successful installer path persists its inferred update channel", () => {

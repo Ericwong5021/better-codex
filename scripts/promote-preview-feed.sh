@@ -7,9 +7,10 @@ WORK="$(mktemp -d "${RUNNER_TEMP:-/tmp}/better-codex-preview-feed.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
 
 node scripts/preview-feed.mjs verify "$CANDIDATE" "$PUBLIC_KEY"
+cp scripts/install-beta.ps1 "$WORK/install.ps1"
 
 if ! gh release view preview >/dev/null 2>&1; then
-  gh release create preview "$CANDIDATE#update-manifest.json" "scripts/install-beta.ps1#install.ps1" --prerelease --latest=false --target "${GITHUB_SHA}" --title "Better Codex Preview" --notes "The signed update feed and installer for Preview subscribers."
+  gh release create preview "$CANDIDATE#update-manifest.json" "$WORK/install.ps1" --prerelease --latest=false --target "${GITHUB_SHA}" --title "Better Codex Preview" --notes "The signed update feed and installer for Preview subscribers."
 else
   mkdir -p "$WORK/current"
   asset_count="$(gh release view preview --json assets --jq '[.assets[] | select(.name == "update-manifest.json")] | length')"
@@ -42,11 +43,11 @@ fi
 installer_uploaded=0
 installer_asset_count="$(gh release view preview --json assets --jq '[.assets[] | select(.name == "install.ps1")] | length')"
 if [ "$installer_asset_count" = "0" ]; then
-  gh release upload preview "scripts/install-beta.ps1#install.ps1"
+  gh release upload preview "$WORK/install.ps1"
   installer_uploaded=1
 else
   for attempt in 1 2 3; do
-    if gh release upload preview "scripts/install-beta.ps1#install.ps1" --clobber; then
+    if gh release upload preview "$WORK/install.ps1" --clobber; then
       installer_uploaded=1
       break
     fi
@@ -56,7 +57,7 @@ fi
 if [ "$installer_uploaded" != "1" ]; then
   mkdir -p "$WORK/uncertain-installer"
   if gh release download preview --pattern install.ps1 --dir "$WORK/uncertain-installer" \
-    && cmp scripts/install-beta.ps1 "$WORK/uncertain-installer/install.ps1"; then
+    && cmp "$WORK/install.ps1" "$WORK/uncertain-installer/install.ps1"; then
     installer_uploaded=1
   else
     exit 1
@@ -70,3 +71,7 @@ node scripts/preview-feed.mjs verify "$WORK/published/update-manifest.json" "$PU
 mkdir -p "$WORK/published-installer"
 gh release download preview --pattern install.ps1 --dir "$WORK/published-installer"
 cmp scripts/install-beta.ps1 "$WORK/published-installer/install.ps1"
+legacy_installer_asset_count="$(gh release view preview --json assets --jq '[.assets[] | select(.name == "install-beta.ps1")] | length')"
+if [ "$legacy_installer_asset_count" != "0" ]; then
+  gh release delete-asset preview install-beta.ps1 --yes
+fi
