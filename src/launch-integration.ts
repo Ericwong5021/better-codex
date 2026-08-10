@@ -5,7 +5,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { isSea } from "node:sea";
 import { appIconIcns, appIconIco } from "./brand-assets.js";
-import { betterCodexHome, ensureDirectories, launchIntegrationStatePath, logPath } from "./config.js";
+import { betterCodexHome, betterCodexProfile, ensureDirectories, launchIntegrationStatePath, logPath, peerBetterCodexHome } from "./config.js";
 
 type WindowsOwnedShortcut = {
   path: string;
@@ -30,15 +30,19 @@ type LaunchIntegrationState = {
   shortcuts?: Array<WindowsOwnedShortcut | WindowsLegacyShortcut>;
 };
 
-const MAC_BUNDLE_ID = "com.better-codex.launcher";
+const developmentProfile = betterCodexProfile === "development";
+const launcherDisplayName = developmentProfile ? "Better Codex Dev" : "Better Codex";
+const MAC_BUNDLE_ID = developmentProfile ? "com.better-codex.launcher.dev" : "com.better-codex.launcher";
 const MAC_OWNERSHIP_FILE = ".better-codex-owner";
-const WINDOWS_SHORTCUT_NAME = "Better Codex.lnk";
+const WINDOWS_SHORTCUT_NAME = `${launcherDisplayName}.lnk`;
+const WINDOWS_LAUNCHER_SCRIPT_NAME = `${launcherDisplayName} Launcher.vbs`;
 
 function macLauncherPath() {
-  return "/Applications/Better Codex.app";
+  return `/Applications/${launcherDisplayName}.app`;
 }
 
 function legacyMacLauncherPaths() {
+  if (developmentProfile) return [];
   return [
     "/Applications/Better Codex Launcher.app",
     join(homedir(), "Applications", "Better Codex Launcher.app"),
@@ -171,11 +175,14 @@ function launcherCommand() {
   if (process.platform !== "win32") return command;
 
   ensureDirectories();
-  const scriptPath = join(betterCodexHome, "Better Codex Launcher.vbs");
+  const scriptPath = join(betterCodexHome, WINDOWS_LAUNCHER_SCRIPT_NAME);
   const commandLine = command.map(value => `"${value.replace(/"/g, "\"\"")}"`).join(" ");
   writeFileSync(scriptPath, `Option Explicit
 Dim shell
 Set shell = CreateObject("WScript.Shell")
+shell.Environment("Process")("BETTER_CODEX_PROFILE") = "${betterCodexProfile}"
+shell.Environment("Process")("BETTER_CODEX_HOME") = "${betterCodexHome.replace(/"/g, "\"\"")}"
+shell.Environment("Process")("BETTER_CODEX_PEER_HOME") = "${peerBetterCodexHome.replace(/"/g, "\"\"")}"
 shell.Run "${commandLine.replace(/"/g, '""')}" & " launch", 0, False
 `, { mode: 0o600 });
   return [join(process.env.SystemRoot ?? "C:\\Windows", "System32", "wscript.exe"), scriptPath];
@@ -221,9 +228,20 @@ function writeWindowsAppIcon() {
 
 function macLauncherScript(command: string[]) {
   return `#!/bin/sh
+BETTER_CODEX_PROFILE=${shellSingleQuoted(betterCodexProfile)} BETTER_CODEX_HOME=${shellSingleQuoted(betterCodexHome)} BETTER_CODEX_PEER_HOME=${shellSingleQuoted(peerBetterCodexHome)} ${command.map(shellSingleQuoted).join(" ")} launch >>${shellSingleQuoted(join(logPath, "launcher.log"))} 2>&1 &
+exit 0
+`;
+}
+
+function legacyMacLauncherScript(command: string[]) {
+  return `#!/bin/sh
 ${command.map(shellSingleQuoted).join(" ")} launch >>${shellSingleQuoted(join(logPath, "launcher.log"))} 2>&1 &
 exit 0
 `;
+}
+
+export function macLauncherOwnershipScripts(command: string[]) {
+  return developmentProfile ? [macLauncherScript(command)] : [macLauncherScript(command), legacyMacLauncherScript(command)];
 }
 
 function assertOwnedMacApp(appPath: string, state: LaunchIntegrationState | null) {
@@ -237,7 +255,10 @@ function assertOwnedMacApp(appPath: string, state: LaunchIntegrationState | null
   const marker = join(contents, "Resources", MAC_OWNERSHIP_FILE);
   if (state.ownershipToken && existsSync(marker) && !lstatSync(marker).isSymbolicLink() && readFileSync(marker, "utf8") === state.ownershipToken) return;
   const executable = join(contents, "MacOS", "better-codex-launcher");
-  if (!state.ownershipToken && existsSync(executable) && !lstatSync(executable).isSymbolicLink() && readFileSync(executable, "utf8") === macLauncherScript([state.launcher, ...(state.launcherArguments ?? [])])) return;
+  if (!state.ownershipToken && existsSync(executable) && !lstatSync(executable).isSymbolicLink()) {
+    const scriptContents = readFileSync(executable, "utf8");
+    if (macLauncherOwnershipScripts([state.launcher, ...(state.launcherArguments ?? [])]).includes(scriptContents)) return;
+  }
   throw new Error("mac_launcher_path_occupied");
 }
 
@@ -258,14 +279,11 @@ function installMacLauncher(command: string[], previous: LaunchIntegrationState 
   const ownedState = migrated && previous ? { ...previous, appPath } : previous;
   if (existsSync(appPath)) assertOwnedMacApp(appPath, ownedState);
   const existingContents = join(appPath, "Contents");
-  const stableCommand = existsSync(appPath) && previous?.platform === "darwin" && resolve(previous.launcher) === resolve(command[0])
+  const stableCommand = betterCodexProfile === "stable" && existsSync(appPath) && previous?.platform === "darwin" && resolve(previous.launcher) === resolve(command[0])
     ? [previous.launcher, ...(previous.launcherArguments ?? [])]
     : command;
   const [launcher, ...launcherArguments] = stableCommand;
-  const expectedScript = `#!/bin/sh
-${stableCommand.map(shellSingleQuoted).join(" ")} launch >>${shellSingleQuoted(join(logPath, "launcher.log"))} 2>&1 &
-exit 0
-`;
+  const expectedScript = macLauncherScript(stableCommand);
   const ownershipToken = ownedState?.ownershipToken ?? randomUUID();
   if (existsSync(appPath)) {
     const existingExecutable = join(existingContents, "MacOS", "better-codex-launcher");
@@ -295,11 +313,11 @@ exit 0
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>CFBundleDevelopmentRegion</key><string>en</string>
-<key>CFBundleDisplayName</key><string>Better Codex</string>
+<key>CFBundleDisplayName</key><string>${launcherDisplayName}</string>
 <key>CFBundleExecutable</key><string>better-codex-launcher</string>
 <key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundleIdentifier</key><string>${MAC_BUNDLE_ID}</string>
-<key>CFBundleName</key><string>Better Codex</string>
+<key>CFBundleName</key><string>${launcherDisplayName}</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>1.0</string>
 </dict></plist>
@@ -331,7 +349,8 @@ $launcher = ${powershellLiteral(state.launcher)}
 $launchArguments = ${powershellLiteral(expectedArguments)}
 $backupDirectory = ${powershellLiteral(backupDirectory)}
 $json = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(${powershellLiteral(payload)}))
-$items = @($json | ConvertFrom-Json)
+$items = @(ConvertFrom-Json -InputObject $json)
+if ($items.Count -eq 1 -and $items[0] -is [Array]) { $items = @($items[0]) }
 $roots = @(
   [Environment]::GetFolderPath('Desktop'),
   [Environment]::GetFolderPath('StartMenu'),
@@ -419,7 +438,7 @@ foreach ($path in $paths) {
   $shortcut.TargetPath = $launcher
   $shortcut.Arguments = $launchArguments
   $shortcut.WorkingDirectory = [IO.Path]::GetDirectoryName($launcher)
-  $shortcut.Description = 'Better Codex'
+$shortcut.Description = ${powershellLiteral(launcherDisplayName)}
   $shortcut.IconLocation = $iconLocation
   $shortcut.Save()
   $created += [pscustomobject]@{ path = $path }
@@ -446,7 +465,8 @@ function removeOwnedWindowsShortcuts(state: LaunchIntegrationState) {
 $launcher = ${powershellLiteral(state.launcher)}
 $launchArguments = ${powershellLiteral(expectedArguments)}
 $json = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(${powershellLiteral(payload)}))
-$items = @($json | ConvertFrom-Json)
+$items = @(ConvertFrom-Json -InputObject $json)
+if ($items.Count -eq 1 -and $items[0] -is [Array]) { $items = @($items[0]) }
 $roots = @(
   [Environment]::GetFolderPath('Desktop'),
   (Join-Path ([Environment]::GetFolderPath('StartMenu')) 'Programs')
@@ -494,7 +514,8 @@ function windowsShortcutStatus(state: LaunchIntegrationState) {
 $launcher = ${powershellLiteral(state.launcher)}
 $launchArguments = ${powershellLiteral(expectedArguments)}
 $json = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(${powershellLiteral(payload)}))
-$items = @($json | ConvertFrom-Json)
+$items = @(ConvertFrom-Json -InputObject $json)
+if ($items.Count -eq 1 -and $items[0] -is [Array]) { $items = @($items[0]) }
 $shell = New-Object -ComObject WScript.Shell
 $healthy = 0
 $drifted = 0

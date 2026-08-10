@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { isSea } from "node:sea";
-import { cdpPort, ensureDirectories, logPath, runtimeLogPath, betterCodexHome, runPath } from "./config.js";
+import { betterCodexHome, betterCodexProfile, cdpPort, ensureDirectories, logPath, runPath, runtimeLogPath } from "./config.js";
 
 const label = "com.better-codex.runtime";
 const legacyLabel = "com.better-codex.gateway";
@@ -99,6 +99,7 @@ function domain() {
 }
 
 export function installService() {
+  if (betterCodexProfile === "development") return { installed: false, label: "Better Codex Dev Runtime", path: null, reason: "development_runtime_unmanaged" };
   ensureDirectories();
   if (process.platform === "win32") {
     reg(["ADD", windowsRunKey, "/V", windowsTask, "/T", "REG_SZ", "/D", windowsStartupCommand(), "/F"]);
@@ -117,6 +118,7 @@ export function installService() {
 }
 
 export function uninstallService() {
+  if (betterCodexProfile === "development") return { installed: false, label: "Better Codex Dev Runtime", path: null, reason: "development_runtime_unmanaged" };
   if (process.platform === "win32") {
     stopService();
     reg(["DELETE", windowsRunKey, "/V", windowsTask, "/F"], true);
@@ -131,6 +133,7 @@ export function uninstallService() {
 }
 
 export function startService() {
+  if (betterCodexProfile === "development") throw new Error("development_runtime_unmanaged");
   if (process.platform === "win32") {
     if (!serviceStatus().installed) throw new Error("service_not_installed");
     if (!windowsRuntime()) {
@@ -147,6 +150,7 @@ export function startService() {
 }
 
 export function stopService() {
+  if (betterCodexProfile === "development") return { stopped: true, label: "Better Codex Dev Runtime", unmanaged: true };
   if (process.platform === "win32") {
     const pid = windowsRuntime();
     if (pid) {
@@ -164,6 +168,7 @@ export function restartService() {
 }
 
 export function serviceStatus() {
+  if (betterCodexProfile === "development") return { installed: false, running: false, pid: null, label: "Better Codex Dev Runtime", path: null, reason: "development_runtime_unmanaged" };
   if (process.platform === "win32") {
     const output = reg(["QUERY", windowsRunKey, "/V", windowsTask], true);
     const installed = Boolean(output);

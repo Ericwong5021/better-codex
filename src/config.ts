@@ -4,8 +4,19 @@ import { homedir } from "node:os";
 import { isSea } from "node:sea";
 import { join, resolve } from "node:path";
 
-const defaultHome = join(homedir(), ".better-codex");
+export type BetterCodexProfile = "stable" | "development";
+
+function configuredProfile(): BetterCodexProfile {
+  const value = process.env.BETTER_CODEX_PROFILE || "stable";
+  if (value === "stable" || value === "development") return value;
+  throw new Error("invalid_better_codex_profile");
+}
+
+export const betterCodexProfile = configuredProfile();
+const defaultHome = join(homedir(), betterCodexProfile === "development" ? ".better-codex-dev" : ".better-codex");
+const defaultPeerHome = join(homedir(), betterCodexProfile === "development" ? ".better-codex" : ".better-codex-dev");
 export const betterCodexHome = resolve(process.env.BETTER_CODEX_HOME || defaultHome);
+export const peerBetterCodexHome = resolve(process.env.BETTER_CODEX_PEER_HOME || defaultPeerHome);
 export const databasePath = resolve(process.env.BETTER_CODEX_DB || join(betterCodexHome, "better-codex.db"));
 export const runPath = join(betterCodexHome, "run");
 export const logPath = join(betterCodexHome, "logs");
@@ -35,7 +46,8 @@ export const injectionStatePath = join(runPath, "injection.json");
 export const mockupSessionPath = join(runPath, "mockup-session.json");
 export const mockupStatePath = join(betterCodexHome, "mockup.json");
 export const launchIntegrationStatePath = join(runPath, "launch-integration.json");
-export const launchLockPath = join(runPath, "launch.lock");
+export const launchLockPath = join(homedir(), ".better-codex-launch.lock");
+export const launchIntentPath = join(homedir(), ".better-codex-launch-intents");
 export const runtimePort = Number(process.env.BETTER_CODEX_RUNTIME_PORT ?? process.env.BETTER_CODEX_PORT ?? 0);
 export const cdpPort = Number(process.env.BETTER_CODEX_CDP_PORT ?? 9229);
 export const debugLoggingEnabled = !isSea();

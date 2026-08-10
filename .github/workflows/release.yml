@@ -8,6 +8,11 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: better-codex-release
+  queue: max
+  cancel-in-progress: false
+
 jobs:
   validate-release:
     runs-on: ubuntu-latest
@@ -21,6 +26,8 @@ jobs:
         run: |
           set -euo pipefail
           version="$(node -p "require('./package.json').version")"
+          lock_version="$(node -p "require('./package-lock.json').packages[''].version")"
+          core_version="$(node -e "const source=require('fs').readFileSync('src/compatibility.ts','utf8'); const match=source.match(/export const coreVersion = \"([^\"]+)\"/); process.stdout.write(match?.[1] || '')")"
           expected_tag="v$version"
           if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             printf 'Package version %s is not a release version.\n' "$version" >&2
@@ -28,6 +35,10 @@ jobs:
           fi
           if [ "$GITHUB_REF_NAME" != "$expected_tag" ]; then
             printf 'Release tag %s does not match package version %s.\n' "$GITHUB_REF_NAME" "$version" >&2
+            exit 1
+          fi
+          if [ "$lock_version" != "$version" ] || [ "$core_version" != "$version" ]; then
+            printf 'Version mismatch: package=%s lock=%s core=%s.\n' "$version" "$lock_version" "$core_version" >&2
             exit 1
           fi
           escaped_version="${version//./\\.}"
@@ -77,6 +88,8 @@ jobs:
       - run: npm run package:binary
         env:
           BETTER_CODEX_REQUIRE_SIGNING: "0"
+      - name: Install current local package twice
+        run: node scripts/test-local-install.mjs
       - uses: actions/upload-artifact@v4
         with:
           name: better-codex-${{ matrix.runner }}
@@ -118,6 +131,23 @@ jobs:
           path: release
           merge-multiple: true
       - run: git fetch origin main && git checkout -B main origin/main
+      - name: Refuse to downgrade the Homebrew formula
+        shell: bash
+        run: |
+          set -euo pipefail
+          current="$(sed -n 's/^  version "\([0-9][0-9.]*\)"$/\1/p' Formula/better-codex.rb)"
+          next="${GITHUB_REF_NAME#v}"
+          node -e '
+            const [current, next] = process.argv.slice(1);
+            const parts = value => value.split(".").map(Number);
+            const left = parts(current);
+            const right = parts(next);
+            const comparison = left.findIndex((value, index) => value !== right[index]);
+            if (comparison >= 0 && left[comparison] > right[comparison]) {
+              console.error(`Refusing to downgrade Homebrew formula from ${current} to ${next}.`);
+              process.exit(1);
+            }
+          ' "$current" "$next"
       - run: sha256sum release/*.tar.gz | sed 's#release/##' > release/checksums.txt
       - run: node scripts/render-homebrew-formula.mjs --version "${GITHUB_REF_NAME#v}" --checksums release/checksums.txt --output Formula/better-codex.rb
       - run: |
@@ -125,4 +155,6 @@ jobs:
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add Formula/better-codex.rb
           git commit -m "chore(release): better-codex ${GITHUB_REF_NAME#v}"
+          git fetch origin main
+          git rebase origin/main
           git push origin HEAD:main

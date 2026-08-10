@@ -4,6 +4,23 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-10
+
+### Added
+
+- Run stable binaries and source checkouts side by side with isolated data directories and launchers, handing off the active Codex page injection when switching profiles.
+- Verify that packaged installers can install and reinstall the current archive on Apple silicon, Intel macOS, and Windows during CI and release builds.
+
+### Changed
+
+- Label source checkouts as development builds in the update screen and limit them to compatibility-layer updates.
+
+### Fixed
+
+- Keep native progress written to stderr from becoming a Windows PowerShell 5.1 installation failure.
+- Validate local package inputs and normalize update-key line endings during installer compatibility tests.
+- Preserve legacy injection ownership during profile handoff and coalesce repeated launcher clicks so the latest profile request wins.
+
 ## [0.3.17] - 2026-08-10
 
 ### Changed
@@ -196,7 +213,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.3.17...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/Ericwong5021/better-codex/compare/v0.3.17...v0.4.0
 [0.3.17]: https://github.com/Ericwong5021/better-codex/compare/v0.3.16...v0.3.17
 [0.3.16]: https://github.com/Ericwong5021/better-codex/compare/v0.3.15...v0.3.16
 [0.3.15]: https://github.com/Ericwong5021/better-codex/compare/v0.3.14...v0.3.15

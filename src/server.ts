@@ -304,7 +304,7 @@ function spawnUpdateRelaunch(runtimePid: number, updates: { core: string | null;
 export function startServer() {
   if (!Number.isInteger(runtimePort) || runtimePort < 0 || runtimePort > 65535) throw new Error("invalid_runtime_port");
   const identity = createRuntimeIdentity();
-  acquireRuntimeLock(identity.instanceId);
+  acquireRuntimeLock(identity);
   let store: Store;
   try {
     store = new Store();

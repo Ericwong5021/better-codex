@@ -143,16 +143,16 @@ better-codex uninstall         # 完全卸载并删除本地数据
 
 需要 Node.js 22.5 或更新版本。
 
+如果电脑上已经安装正式版，推荐把源码作为独立开发实例安装。正式版继续使用 `~/.better-codex` 和启动器 `Better Codex`；开发版使用 `~/.better-codex-dev` 和启动器 `Better Codex Dev`。两个实例的数据、日志和更新状态彼此隔离，点击任一启动器时会先停用另一个实例的页面注入。
+
 ```bash
 git clone https://github.com/Ericwong5021/better-codex.git
 cd better-codex
 npm ci
-npm run build
-npm link
-better-codex mcp install
-better-codex inject --launch
-better-codex launcher install
+npm run dev:install
 ```
+
+开发实例不会自动升级核心版本；拉取源码并执行 `npm run build` 即可刷新。使用 `npm run dev:status` 检查开发实例，使用 `npm run dev:uninstall` 移除开发版快捷方式并停止开发实例，开发数据会保留。
 
 ## 社区
 

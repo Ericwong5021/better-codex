@@ -18,6 +18,20 @@ function Write-Ok([string]$Message) {
   Write-Host "[OK] $Message" -ForegroundColor Green
 }
 
+function Invoke-NativeCapture([string]$Executable, [string[]]$Arguments) {
+  $previousErrorActionPreference = $ErrorActionPreference
+  try {
+    # Windows PowerShell 5.1 promotes redirected native stderr to error records.
+    # Keep progress output capturable and use the process exit code as the authority.
+    $ErrorActionPreference = "Continue"
+    $output = (& $Executable @Arguments 2>&1 | Out-String)
+    $exitCode = $LASTEXITCODE
+    return [PSCustomObject]@{ Output = $output; ExitCode = $exitCode }
+  } finally {
+    $ErrorActionPreference = $previousErrorActionPreference
+  }
+}
+
 function Resolve-ReleaseTag([string]$RepositoryName, [string]$RequestedVersion) {
   $candidate = if ($RequestedVersion) { $RequestedVersion } elseif ($env:BETTER_CODEX_VERSION) { $env:BETTER_CODEX_VERSION } else { "" }
   if ($candidate -and $candidate -ne "latest") {
@@ -97,18 +111,18 @@ function Test-VersionAtLeast([string]$Current, [string]$Target) {
 
 function Invoke-ExistingUpgrade([string]$Executable, [string]$TargetVersion) {
   try {
-    & $Executable update 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) { return $false }
+    $updateResult = Invoke-NativeCapture $Executable @("update")
+    if ($updateResult.ExitCode -ne 0) { return $false }
     $updatedVersion = Get-InstalledVersion $Executable
     if (-not (Test-VersionAtLeast $updatedVersion $TargetVersion)) { return $false }
     if (-not $NoService) {
-      & $Executable service restart 2>&1 | Out-Null
-      if ($LASTEXITCODE -ne 0) { return $false }
+      $restartResult = Invoke-NativeCapture $Executable @("service", "restart")
+      if ($restartResult.ExitCode -ne 0) { return $false }
       Start-Sleep -Milliseconds 800
-      & $Executable inject --launch 2>&1 | Out-Null
-      if ($LASTEXITCODE -ne 0) { return $false }
-      & $Executable launcher install 2>&1 | Out-Null
-      if ($LASTEXITCODE -ne 0) { return $false }
+      $injectResult = Invoke-NativeCapture $Executable @("inject", "--launch")
+      if ($injectResult.ExitCode -ne 0) { return $false }
+      $launcherResult = Invoke-NativeCapture $Executable @("launcher", "install")
+      if ($launcherResult.ExitCode -ne 0) { return $false }
       $doctor = (& $Executable doctor | Out-String | ConvertFrom-Json)
       if (-not $doctor.ok) { return $false }
     }
@@ -122,8 +136,8 @@ function Invoke-ExistingUpgrade([string]$Executable, [string]$TargetVersion) {
 function Test-InstallationReady([string]$Executable) {
   if ($NoService) { return $true }
   try {
-    & $Executable launcher install 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) { return $false }
+    $launcherResult = Invoke-NativeCapture $Executable @("launcher", "install")
+    if ($launcherResult.ExitCode -ne 0) { return $false }
     $doctor = (& $Executable doctor 2>$null | Out-String | ConvertFrom-Json)
     return [bool]$doctor.ok
   } catch {
@@ -149,11 +163,12 @@ $installLockAcquired = $false
 try {
   try { $installLockAcquired = $installMutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $installLockAcquired = $true }
   if (-not $installLockAcquired) { throw "Another Better Codex installation is already running." }
-$Version = Resolve-ReleaseTag $Repository $Version
-$targetVersion = $Version.TrimStart("v")
+$localArchive = if ($env:BETTER_CODEX_ARCHIVE) { [IO.Path]::GetFullPath($env:BETTER_CODEX_ARCHIVE) } else { $null }
+if (-not $localArchive) { $Version = Resolve-ReleaseTag $Repository $Version }
+$targetVersion = if ($Version) { $Version.TrimStart("v") } else { "" }
 $installedVersion = Get-InstalledVersion $executable
 
-if ($installedVersion -and (Test-VersionAtLeast $installedVersion $targetVersion) -and (Test-Path (Join-Path $skillDirectory "SKILL.md")) -and (Test-Path $updatePublicKeyPath)) {
+if (-not $localArchive -and $installedVersion -and (Test-VersionAtLeast $installedVersion $targetVersion) -and (Test-Path (Join-Path $skillDirectory "SKILL.md")) -and (Test-Path $updatePublicKeyPath)) {
   try {
     $updateCheck = (& $executable update check 2>$null | Out-String | ConvertFrom-Json)
     if ($updateCheck.checked -and -not (($updateCheck.core.available) -or ($updateCheck.compatibility.available))) {
@@ -168,7 +183,7 @@ if ($installedVersion -and (Test-VersionAtLeast $installedVersion $targetVersion
   }
 }
 
-if ($installedVersion) {
+if (-not $localArchive -and $installedVersion) {
   Write-Step "Better Codex v$installedVersion is installed; upgrading to v$targetVersion..."
   $updateCheck = $null
   try {
@@ -191,34 +206,55 @@ if ($installedVersion) {
 $workDirectory = Join-Path ([IO.Path]::GetTempPath()) ("better-codex-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $workDirectory | Out-Null
 try {
-  $tag = $Version
-  $number = $tag.TrimStart("v")
-  $name = "better-codex-cli-$number-win32-amd64.zip"
-  $base = "https://github.com/$Repository/releases/download/$tag"
-  $archive = Join-Path $workDirectory $name
-  $checksums = Join-Path $workDirectory "checksums.txt"
-  $publicKey = Join-Path $workDirectory "update-public-key.pem"
-  Write-Step "Downloading $name..."
-  Invoke-WebRequest -UseBasicParsing -Uri "$base/$name" -OutFile $archive
-  Write-Step "Downloading checksums and update key..."
-  Invoke-WebRequest -UseBasicParsing -Uri "$base/checksums.txt" -OutFile $checksums
-  Invoke-WebRequest -UseBasicParsing -Uri "$base/update-public-key.pem" -OutFile $publicKey
+  if ($localArchive) {
+    $archive = $localArchive
+    $name = [IO.Path]::GetFileName($archive)
+    $checksums = if ($env:BETTER_CODEX_CHECKSUMS) { [IO.Path]::GetFullPath($env:BETTER_CODEX_CHECKSUMS) } else { Join-Path ([IO.Path]::GetDirectoryName($archive)) "checksums.txt" }
+    $publicKey = if ($env:BETTER_CODEX_UPDATE_PUBLIC_KEY_FILE) { [IO.Path]::GetFullPath($env:BETTER_CODEX_UPDATE_PUBLIC_KEY_FILE) } else { "" }
+    if (-not (Test-Path -LiteralPath $archive -PathType Leaf)) { throw "Local Better Codex archive not found: $archive" }
+    if (-not (Test-Path -LiteralPath $checksums -PathType Leaf)) { throw "Local Better Codex checksums not found: $checksums" }
+    Write-Step "Installing from local package $name..."
+  } else {
+    $tag = $Version
+    $number = $tag.TrimStart("v")
+    $name = "better-codex-cli-$number-win32-amd64.zip"
+    $base = "https://github.com/$Repository/releases/download/$tag"
+    $archive = Join-Path $workDirectory $name
+    $checksums = Join-Path $workDirectory "checksums.txt"
+    $publicKey = Join-Path $workDirectory "update-public-key.pem"
+    Write-Step "Downloading $name..."
+    Invoke-WebRequest -UseBasicParsing -Uri "$base/$name" -OutFile $archive
+    Write-Step "Downloading checksums and update key..."
+    Invoke-WebRequest -UseBasicParsing -Uri "$base/checksums.txt" -OutFile $checksums
+    Invoke-WebRequest -UseBasicParsing -Uri "$base/update-public-key.pem" -OutFile $publicKey
+  }
   Write-Step "Verifying SHA-256 checksum..."
   $expected = ((Get-Content $checksums | Where-Object { $_ -match [regex]::Escape($name) }) -split "\s+")[0]
   if (-not $expected) { throw "No checksum found for $name." }
   $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
   if ($actual -ne $expected.ToLowerInvariant()) { throw "Checksum mismatch for $name." }
-  $actualPublicKey = (Get-FileHash -Algorithm SHA256 $publicKey).Hash.ToLowerInvariant()
-  if ($actualPublicKey -ne $UpdateKeySha256) { throw "Update public key mismatch." }
   Write-Step "Extracting package..."
   Expand-Archive -LiteralPath $archive -DestinationPath $workDirectory -Force
+  if (-not $publicKey -and (Test-Path -LiteralPath (Join-Path $workDirectory "update-public-key.pem") -PathType Leaf)) {
+    $publicKey = Join-Path $workDirectory "update-public-key.pem"
+  }
+  if (-not $publicKey -or -not (Test-Path -LiteralPath $publicKey -PathType Leaf)) { throw "Update public key is missing." }
+  $normalizedPublicKey = [IO.File]::ReadAllText($publicKey).Replace("`r`n", "`n")
+  $publicKeyHasher = [Security.Cryptography.SHA256]::Create()
+  try {
+    $actualPublicKey = -join ($publicKeyHasher.ComputeHash([Text.UTF8Encoding]::new($false).GetBytes($normalizedPublicKey)) | ForEach-Object { $_.ToString("x2") })
+  } finally {
+    $publicKeyHasher.Dispose()
+  }
+  if ($actualPublicKey -ne $UpdateKeySha256) { throw "Update public key mismatch." }
   $packagedExecutable = Join-Path $workDirectory "better-codex.exe"
   $packagedSkill = Join-Path $workDirectory "skills\better-codex"
   if (-not (Test-Path $packagedExecutable)) { throw "Better Codex executable is missing from the package." }
   if (-not (Test-Path (Join-Path $packagedSkill "SKILL.md"))) { throw "Better Codex skill is missing from the package." }
   $packagedVersion = Get-PackagedCoreVersion $packagedExecutable (Join-Path $workDirectory "validation-home")
   if (-not $packagedVersion) { throw "Unable to read the packaged Better Codex version." }
-  if ($packagedVersion -ne $targetVersion) { throw "Package version $packagedVersion does not match target v$targetVersion. Installation cancelled." }
+  if ($targetVersion -and $packagedVersion -ne $targetVersion) { throw "Package version $packagedVersion does not match target v$targetVersion. Installation cancelled." }
+  if (-not $targetVersion) { $targetVersion = $packagedVersion }
   $backupDirectory = Join-Path $workDirectory "previous"
   New-Item -ItemType Directory -Force -Path $backupDirectory | Out-Null
   $backupExecutable = Join-Path $backupDirectory "better-codex.exe"
@@ -271,18 +307,18 @@ try {
   if ($LASTEXITCODE -ne 0) { throw "Better Codex executable verification failed." }
   if (-not $NoService) {
     Write-Step "Registering runtime and injecting Better Codex..."
-    $setupOutput = (& $executable setup --yes 2>&1 | Out-String)
-    $setupExitCode = $LASTEXITCODE
-    if ($setupExitCode -ne 0) {
-      Write-Host ($setupOutput.TrimEnd())
-      throw "Better Codex setup failed with exit code $setupExitCode."
+    $setupResult = Invoke-NativeCapture $executable @("setup", "--yes")
+    if ($setupResult.ExitCode -ne 0) {
+      Write-Host ($setupResult.Output.TrimEnd())
+      throw "Better Codex setup failed with exit code $($setupResult.ExitCode)."
     }
     Write-Step "Running installation diagnostics..."
     $doctor = $null
     $doctorOutput = $null
     for ($attempt = 1; $attempt -le 8; $attempt++) {
-      $doctorOutput = (& $executable doctor 2>&1 | Out-String)
-      $doctorExitCode = $LASTEXITCODE
+      $doctorResult = Invoke-NativeCapture $executable @("doctor")
+      $doctorOutput = $doctorResult.Output
+      $doctorExitCode = $doctorResult.ExitCode
       try {
         $doctor = $doctorOutput | ConvertFrom-Json
       } catch {
@@ -306,10 +342,12 @@ try {
     $displayVersion = if ($readyVersion) { $readyVersion } else { "unknown" }
     throw "Installed Better Codex version $displayVersion does not match target v$targetVersion."
   }
-  $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-  if ($null -eq $userPath) { $userPath = "" }
-  if (-not (($userPath -split ";") -contains $BinDirectory)) {
-    [Environment]::SetEnvironmentVariable("Path", (($userPath.TrimEnd(";") + ";" + $BinDirectory).TrimStart(";")), "User")
+  if ($env:BETTER_CODEX_SKIP_PATH_UPDATE -ne "1") {
+    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    if ($null -eq $userPath) { $userPath = "" }
+    if (-not (($userPath -split ";") -contains $BinDirectory)) {
+      [Environment]::SetEnvironmentVariable("Path", (($userPath.TrimEnd(";") + ";" + $BinDirectory).TrimStart(";")), "User")
+    }
   }
   Write-Ok "Better Codex v$targetVersion is ready"
   } catch {
