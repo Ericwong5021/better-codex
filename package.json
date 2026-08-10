@@ -1,6 +1,6 @@
 {
   "name": "better-codex",
-  "version": "0.3.17",
+  "version": "0.4.0",
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
@@ -43,7 +43,10 @@
   "scripts": {
     "build": "tsc && node scripts/refresh-local-install.mjs && node scripts/refresh-injector.mjs",
     "dev": "tsx src/cli.ts serve",
+    "dev:install": "npm run build && node scripts/development-instance.mjs install",
     "dev:mockup": "node scripts/dev-mockup.mjs",
+    "dev:status": "node scripts/development-instance.mjs status",
+    "dev:uninstall": "node scripts/development-instance.mjs uninstall",
     "package:binary": "node scripts/package.mjs",
     "package:update-manifest": "node scripts/create-update-manifest.mjs release",
     "start": "node dist/cli.js serve",

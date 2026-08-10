@@ -264,6 +264,9 @@ if [ -n "${BETTER_CODEX_ARCHIVE:-}" ]; then
   ARCHIVE="$BETTER_CODEX_ARCHIVE"
   CHECKSUMS="${BETTER_CODEX_CHECKSUMS:-$(dirname "$ARCHIVE")/checksums.txt}"
   UPDATE_PUBLIC_KEY="${BETTER_CODEX_UPDATE_PUBLIC_KEY_FILE:-}"
+  [ -f "$ARCHIVE" ] || { echo "Local Better Codex archive not found: $ARCHIVE" >&2; exit 1; }
+  [ -f "$CHECKSUMS" ] || { echo "Local Better Codex checksums not found: $CHECKSUMS" >&2; exit 1; }
+  printf '[Better Codex] Installing from local package %s...\n' "$(basename "$ARCHIVE")"
 else
   VERSION="$TARGET_VERSION"
   NAME="better-codex-cli-$VERSION-darwin-$ARCH.tar.gz"
@@ -291,7 +294,7 @@ tar -xzf "$ARCHIVE" -C "$WORK_DIR"
 if [ -z "$UPDATE_PUBLIC_KEY" ] && [ -f "$WORK_DIR/update-public-key.pem" ]; then
   UPDATE_PUBLIC_KEY="$WORK_DIR/update-public-key.pem"
 fi
-if [ -z "$UPDATE_PUBLIC_KEY" ] || [ "$(shasum -a 256 "$UPDATE_PUBLIC_KEY" | awk '{print $1}')" != "$UPDATE_KEY_SHA256" ]; then
+if [ -z "$UPDATE_PUBLIC_KEY" ] || [ "$(tr -d '\r' < "$UPDATE_PUBLIC_KEY" | shasum -a 256 | awk '{print $1}')" != "$UPDATE_KEY_SHA256" ]; then
   echo "Update public key mismatch." >&2
   exit 1
 fi
@@ -367,7 +370,7 @@ if [ -n "$TARGET_VERSION" ] && { [ -z "$READY_VERSION" ] || ! version_at_least "
   printf '[Better Codex] Installed version %s does not match target v%s. Installation failed.\n' "${READY_VERSION:-unknown}" "$TARGET_VERSION" >&2
   exit 1
 fi
-if ! printf '%s' ":$PATH:" | grep -q ":$BIN_DIR:"; then
+if [ "${BETTER_CODEX_SKIP_PATH_UPDATE:-0}" != "1" ] && ! printf '%s' ":$PATH:" | grep -q ":$BIN_DIR:"; then
   for RC in "$HOME/.zshrc" "$HOME/.bashrc"; do
     if [ -f "$RC" ] && ! grep -qF "$BIN_DIR" "$RC"; then
       printf '\nexport PATH="%s:$PATH"\n' "$BIN_DIR" >> "$RC"

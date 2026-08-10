@@ -143,16 +143,16 @@ better-codex uninstall         # uninstall completely and delete local data
 
 Requires Node.js 22.5 or later.
 
+If the stable build is already installed, install the source checkout as a separate development instance. Stable keeps `~/.better-codex` and the `Better Codex` launcher; development uses `~/.better-codex-dev` and `Better Codex Dev`. Their data, logs, and update state stay isolated, and opening either launcher deactivates the other instance's page injection first.
+
 ```bash
 git clone https://github.com/Ericwong5021/better-codex.git
 cd better-codex
 npm ci
-npm run build
-npm link
-better-codex mcp install
-better-codex inject --launch
-better-codex launcher install
+npm run dev:install
 ```
+
+The development instance does not auto-update its core. Pull source changes and run `npm run build` to refresh it. Use `npm run dev:status` to inspect the development instance and `npm run dev:uninstall` to remove its launcher and stop it while preserving development data.
 
 ## Community
 

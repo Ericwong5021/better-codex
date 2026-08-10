@@ -35,7 +35,8 @@ function startGateway(home: string, port: number, token: string) {
 async function waitForGateway(port: number, process: ChildProcess) {
   let output = "";
   process.stderr?.on("data", chunk => { output += String(chunk); });
-  for (let attempt = 0; attempt < 80; attempt += 1) {
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline) {
     if (process.exitCode !== null) throw new Error(output || `gateway_exit_${process.exitCode}`);
     try {
       const response = await fetch(`http://127.0.0.1:${port}/health`);

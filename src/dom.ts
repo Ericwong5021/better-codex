@@ -1,5 +1,6 @@
 import { activeCompatibility, coreVersion } from "./compatibility.js";
 import { betterCodexLogoPng } from "./brand-assets.js";
+import { betterCodexProfile } from "./config.js";
 import { betterCodexDesignSystemCss } from "./design-system.js";
 import { renderMarkdown } from "./markdown.js";
 import { betterCodexMcpRoute } from "./mcp-app.js";
@@ -263,9 +264,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     "use strict";
     const VERSION = ${JSON.stringify(compatibility.version)};
     const CORE_VERSION = ${JSON.stringify(coreVersion)};
+    const PROFILE = ${JSON.stringify(betterCodexProfile)};
     const HELP_MODE_MARKDOWN = ${helpModeMarkdown};
     const previous = window.__betterCodexInjection__;
-    if (previous?.version === VERSION && previous?.endpoint === ${baseUrl}) {
+    if (previous?.version === VERSION && previous?.endpoint === ${baseUrl} && previous?.profile === PROFILE) {
       previous.refresh();
       return { installed: true, reused: true };
     }
@@ -473,6 +475,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "已经执行过对话的 Issue 只能修改状态、优先级和指派人。": "Issues with an executed conversation can only change status, priority, and assignee.", "终止任务后才能打开对话，是否终止任务？": "The task must be stopped before opening the conversation. Stop it now?", "终止并打开": "Stop and open", "正在终止…": "Stopping…", "忽略当前版本": "Ignore this version", "立即更新": "Update now", "暂无项目": "No projects", "告诉智能体要做什么，例如：“修复项目里任务运行状态不可见的问题”": "Tell the agent what to do, for example: “Fix the invisible task run status in the project”"
     } };
     localeResources.en["手动创建 issue"] = "Create issue manually";
+    localeResources.en["源码开发版"] = "Source development build";
+    localeResources.en["发现兼容更新"] = "Compatibility update available";
+    localeResources.en["源码开发版仅检查兼容层更新，核心版本请更新源码并重新构建。"] = "Source builds only check for compatibility updates. Update the source and rebuild to change the core version.";
     localeResources.en["有任务正在运行，请等待任务结束后再更新。"] = "A task is running. Wait for it to finish before updating.";
     localeResources.en["更新正在进行中，请稍候。"] = "An update is already in progress. Please wait.";
     localeResources.en["下载的更新版本与发布版本不一致，请稍后重试。"] = "The downloaded version does not match the release. Try again later.";
@@ -3077,7 +3082,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       });
       const checkUpdate = dialog.querySelector("[data-check-update]");
       const renderUpdateState = (update, checked = false) => {
-        checkUpdate.textContent = t(update?.status === "available" ? "发现新版本" : update?.status === "error" ? "无法检查更新" : checked ? "已是最新版本" : "检查新版本");
+        const sourceBuild = update?.coreUpdateSupported === false;
+        checkUpdate.textContent = t(update?.status === "available" ? (sourceBuild ? "发现兼容更新" : "发现新版本") : update?.status === "error" ? "无法检查更新" : sourceBuild ? "源码开发版" : checked ? "已是最新版本" : "检查新版本");
+        checkUpdate.title = sourceBuild ? t("源码开发版仅检查兼容层更新，核心版本请更新源码并重新构建。") : "";
       };
       checkUpdate.addEventListener("click", async () => {
         checkUpdate.disabled = true;
@@ -4866,7 +4873,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       updateTimer = setInterval(checkUpdateNotice, 15000);
     }
 
-    window.__betterCodexInjection__ = { version: VERSION, endpoint: BASE_URL, refresh, open: openRoute, close, destroy };
+    window.__betterCodexInjection__ = { version: VERSION, profile: PROFILE, endpoint: BASE_URL, refresh, open: openRoute, close, destroy };
     document.addEventListener("click", onClick, true);
     document.addEventListener("keydown", onGlobalShortcut, true);
     window.addEventListener("codex-message-from-view", onHostMessageFromView, true);

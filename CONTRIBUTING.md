@@ -27,6 +27,17 @@ npm run better-codex -- version
 npm run better-codex -- doctor
 ```
 
+To keep the released binary and source checkout installed side by side, create the isolated development launcher:
+
+```bash
+npm run dev:install
+npm run dev:status
+```
+
+This uses `~/.better-codex-dev` and creates `Better Codex Dev` separately from the stable `Better Codex` launcher. Only one profile owns the Codex page injection at a time. Run `npm run dev:uninstall` to remove the development launcher without deleting its data.
+
+On Windows, set `BETTER_CODEX_STABLE_EXECUTABLE` before `npm run dev:install` when the stable binary was installed outside its default location.
+
 To build a platform package, run this on the target platform:
 
 ```bash

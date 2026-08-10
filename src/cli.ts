@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { accessSync, closeSync, constants, cpSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { accessSync, closeSync, constants, cpSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { isSea } from "node:sea";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -16,9 +16,12 @@ import {
   injectorLogPath,
   injectorPidPath,
   betterCodexHome,
+  betterCodexProfile,
+  launchIntentPath,
   launchLockPath,
   logPath,
   managedRuntimePath,
+  peerBetterCodexHome,
   runPath,
   runtimeLogPath,
   updatePublicKeyPath,
@@ -29,7 +32,6 @@ import { injectionEnabled, setInjectionEnabled } from "./injection-state.js";
 import { installLaunchIntegration, launchIntegrationStatus, uninstallLaunchIntegration } from "./launch-integration.js";
 import { readCodexLocale } from "./locale.js";
 import { betterCodexMcpName, startMcpAppServer } from "./mcp-app.js";
-import { showNativeChoiceDialog } from "./native-dialog.js";
 import { installService, restartService, serviceLogs, serviceStatus, startService, stopService, uninstallService } from "./service.js";
 import { activeVersions, checkForUpdates, maybeDelegateToActiveCore, recordGatewayUpdateActivation, rollbackCompatibilityUpdate, rollbackCoreUpdate, updateAll, updateCompatibility } from "./updater.js";
 
@@ -133,7 +135,7 @@ async function ensureRuntime() {
   try {
     return await health();
   } catch {
-    if (serviceStatus().installed) startService();
+    if (betterCodexProfile === "stable" && serviceStatus().installed) startService();
     else spawnSelf(["runtime"], runtimeLogPath);
     for (let attempt = 0; attempt < 60; attempt += 1) {
       try {
@@ -144,19 +146,6 @@ async function ensureRuntime() {
     }
     throw new Error("runtime_start_failed");
   }
-}
-
-function confirmLaunchRestart() {
-  const chinese = readCodexLocale() === "zh-CN";
-  const message = chinese
-    ? "当前进程正在运行。\n\n请选择操作。"
-    : "The current process is already running.\n\nChoose an action.";
-  return showNativeChoiceDialog({
-    message,
-    title: "Better Codex",
-    primaryLabel: chinese ? "重启进程" : "Restart process",
-    secondaryLabel: chinese ? "直接打开" : "Open directly",
-  });
 }
 
 async function restartRuntime() {
@@ -183,6 +172,15 @@ function activeRuntimePort() {
   return runtime.port;
 }
 
+function injectionOwnership(profile = betterCodexProfile, stateRunPath = runPath, allowLegacyProfileless = false) {
+  const runtime = readJsonFile<{ port?: unknown }>(join(stateRunPath, "runtime.json"));
+  const injection = readJsonFile<{ endpoint?: unknown }>(join(stateRunPath, "injection.json"));
+  const runtimePort = Number(runtime?.port);
+  const recordedEndpoint = typeof injection?.endpoint === "string" ? injection.endpoint : "";
+  const expectedEndpoint = Number.isInteger(runtimePort) && runtimePort > 0 ? `http://127.0.0.1:${runtimePort}` : recordedEndpoint;
+  return { profile, ...(expectedEndpoint ? { endpoint: expectedEndpoint } : {}), ...(allowLegacyProfileless ? { allowLegacyProfileless: true } : {}) };
+}
+
 function processAlive(pid: number) {
   try {
     process.kill(pid, 0);
@@ -192,17 +190,31 @@ function processAlive(pid: number) {
   }
 }
 
-function isInjectorProcess(pid: number) {
+function processCommandLine(pid: number) {
   try {
     if (process.platform === "win32") {
-      const commandLine = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `(Get-CimInstance Win32_Process -Filter \"ProcessId = ${pid}\").CommandLine`], { encoding: "utf8", windowsHide: true }).trim();
-      return /\bwatch-inject\b/.test(commandLine);
+      return execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `(Get-CimInstance Win32_Process -Filter \"ProcessId = ${pid}\").CommandLine`], { encoding: "utf8", windowsHide: true }).trim();
     }
-    const commandLine = execFileSync("ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8" }).trim();
-    return /\bwatch-inject\b/.test(commandLine);
+    return execFileSync("ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8" }).trim();
   } catch {
-    return false;
+    return "";
   }
+}
+
+function processStartTime(pid: number) {
+  try {
+    const value = process.platform === "win32"
+      ? execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `$process = Get-CimInstance Win32_Process -Filter \"ProcessId = ${pid}\"; if ($process) { $process.CreationDate.ToUniversalTime().ToString('o') }`], { encoding: "utf8", windowsHide: true }).trim()
+      : execFileSync("ps", ["-p", String(pid), "-o", "lstart="], { encoding: "utf8" }).trim();
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function isInjectorProcess(pid: number) {
+  return /\bwatch-inject\b/.test(processCommandLine(pid));
 }
 
 function injectorPid() {
@@ -303,12 +315,12 @@ async function withLaunchLock<T>(operation: () => Promise<T>) {
   ensureDirectories();
   const token = randomUUID();
   let acquired = false;
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  for (let attempt = 0; attempt < 600; attempt += 1) {
     let created = false;
     try {
       mkdirSync(launchLockPath, { mode: 0o700 });
       created = true;
-      writeFileSync(join(launchLockPath, "owner.json"), JSON.stringify({ pid: process.pid, token }), { mode: 0o600 });
+      writeFileSync(join(launchLockPath, "owner.json"), JSON.stringify({ pid: process.pid, token, processStartedAt: new Date(processStartTime(process.pid) ?? Date.now()).toISOString() }), { mode: 0o600 });
       acquired = true;
       break;
     } catch (error) {
@@ -316,12 +328,14 @@ async function withLaunchLock<T>(operation: () => Promise<T>) {
         rmSync(launchLockPath, { recursive: true, force: true });
         throw error;
       }
-      let owner: { pid?: number } | null = null;
-      try { owner = JSON.parse(readFileSync(join(launchLockPath, "owner.json"), "utf8")) as { pid?: number }; } catch {}
-      let stale = Boolean(owner?.pid && !processAlive(owner.pid));
-      if (!owner?.pid) {
-        try { stale = Date.now() - statSync(launchLockPath).mtimeMs > 30_000; } catch {}
-      }
+      let owner: { pid?: number; processStartedAt?: string } | null = null;
+      try { owner = JSON.parse(readFileSync(join(launchLockPath, "owner.json"), "utf8")) as { pid?: number; processStartedAt?: string }; } catch {}
+      let leaseExpired = false;
+      try { leaseExpired = Date.now() - statSync(launchLockPath).mtimeMs > 15_000; } catch {}
+      const expectedStart = owner?.processStartedAt ? Date.parse(owner.processStartedAt) : NaN;
+      const observedStart = owner?.pid && processAlive(owner.pid) ? processStartTime(owner.pid) : null;
+      const identityMismatch = Number.isFinite(expectedStart) && observedStart !== null && Math.abs(expectedStart - observedStart) > 1500;
+      const stale = Boolean(owner?.pid && (!processAlive(owner.pid) || identityMismatch)) || Boolean(leaseExpired && (!owner?.pid || !owner.processStartedAt));
       if (stale) {
         const stalePath = `${launchLockPath}.stale.${token}`;
         try {
@@ -334,9 +348,14 @@ async function withLaunchLock<T>(operation: () => Promise<T>) {
     }
   }
   if (!acquired) throw new Error("codex_launch_busy");
+  const heartbeat = setInterval(() => {
+    try { utimesSync(launchLockPath, new Date(), new Date()); } catch {}
+  }, 1000);
+  heartbeat.unref();
   try {
     return await operation();
   } finally {
+    clearInterval(heartbeat);
     try {
       const owner = JSON.parse(readFileSync(join(launchLockPath, "owner.json"), "utf8")) as { token?: string };
       if (owner.token === token) {
@@ -351,12 +370,254 @@ async function withLaunchLock<T>(operation: () => Promise<T>) {
 async function stopInjector() {
   const pid = injectorPid();
   if (pid) {
-    process.kill(pid, "SIGTERM");
-    for (let attempt = 0; attempt < 30 && processAlive(pid); attempt += 1) {
+    try { process.kill(pid, "SIGTERM"); } catch (error) { if (processAlive(pid)) throw error; }
+    for (let attempt = 0; attempt < 90 && processAlive(pid); attempt += 1) {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
+    if (processAlive(pid) && isInjectorProcess(pid)) {
+      try { process.kill(pid, "SIGKILL"); } catch (error) { if (processAlive(pid)) throw error; }
+      for (let attempt = 0; attempt < 10 && processAlive(pid); attempt += 1) await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    if (processAlive(pid)) throw new Error("injector_stop_failed");
   }
-  if (existsSync(injectorPidPath)) unlinkSync(injectorPidPath);
+  if (existsSync(injectorPidPath)) {
+    const recorded = Number(readFileSync(injectorPidPath, "utf8"));
+    if (!Number.isInteger(recorded) || recorded === pid || !processAlive(recorded) || !isInjectorProcess(recorded)) unlinkSync(injectorPidPath);
+  }
+}
+
+async function nextLaunchIntentSequence() {
+  mkdirSync(launchIntentPath, { recursive: true, mode: 0o700 });
+  const lockPath = join(launchIntentPath, "sequence.lock");
+  const counterPath = join(launchIntentPath, "sequence");
+  const ownerToken = randomUUID();
+  for (let attempt = 0; attempt < 500; attempt += 1) {
+    try {
+      mkdirSync(lockPath, { mode: 0o700 });
+      writeFileSync(join(lockPath, "owner.json"), JSON.stringify({ pid: process.pid, token: ownerToken, processStartedAt: new Date(processStartTime(process.pid) ?? Date.now()).toISOString() }), { mode: 0o600 });
+      try {
+        const current = Number(existsSync(counterPath) ? readFileSync(counterPath, "utf8") : "0");
+        const sequence = Number.isSafeInteger(current) && current >= 0 ? current + 1 : 1;
+        const temporary = `${counterPath}.${process.pid}.tmp`;
+        writeFileSync(temporary, String(sequence), { mode: 0o600 });
+        renameSync(temporary, counterPath);
+        return sequence;
+      } finally {
+        const owner = readJsonFile<{ token?: string }>(join(lockPath, "owner.json"));
+        if (owner?.token === ownerToken) rmSync(lockPath, { recursive: true, force: true });
+      }
+    } catch {
+      const owner = readJsonFile<{ pid?: number; processStartedAt?: string }>(join(lockPath, "owner.json"));
+      try {
+        const expectedStart = owner?.processStartedAt ? Date.parse(owner.processStartedAt) : NaN;
+        const observedStart = owner?.pid && processAlive(owner.pid) ? processStartTime(owner.pid) : null;
+        const identityMismatch = Number.isFinite(expectedStart) && observedStart !== null && Math.abs(expectedStart - observedStart) > 1500;
+        const ownerGone = Boolean(owner?.pid && (!processAlive(owner.pid) || identityMismatch));
+        const ownerMissingAndStale = !owner?.pid && Date.now() - statSync(lockPath).mtimeMs > 5000;
+        if (ownerGone || ownerMissingAndStale) {
+          const stalePath = `${lockPath}.stale.${ownerToken}`;
+          renameSync(lockPath, stalePath);
+          rmSync(stalePath, { recursive: true, force: true });
+        }
+      } catch {}
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+  }
+  throw new Error("launch_intent_busy");
+}
+
+async function recordLaunchIntent(restart: boolean) {
+  const intent = { token: randomUUID(), sequence: await nextLaunchIntentSequence(), profile: betterCodexProfile, restart, requestedAt: new Date().toISOString() };
+  writeFileSync(join(launchIntentPath, `${intent.token}.json`), JSON.stringify(intent), { mode: 0o600 });
+  return intent;
+}
+
+function latestLaunchIntent() {
+  const processed = Number(existsSync(join(launchIntentPath, "processed")) ? readFileSync(join(launchIntentPath, "processed"), "utf8") : "0");
+  const intents = existsSync(launchIntentPath)
+    ? readdirSync(launchIntentPath).filter(name => name.endsWith(".json")).map(name => readJsonFile<{ token?: string; sequence?: number; profile?: string; restart?: boolean }>(join(launchIntentPath, name))).filter(value => value?.token && Number.isSafeInteger(value.sequence))
+    : [];
+  return intents.filter(intent => intent!.sequence! > processed).sort((left, right) => right!.sequence! - left!.sequence!)[0] ?? null;
+}
+
+function markLaunchIntentProcessed(sequence: number) {
+  const path = join(launchIntentPath, "processed");
+  const temporary = `${path}.${process.pid}.tmp`;
+  writeFileSync(temporary, String(sequence), { mode: 0o600 });
+  renameSync(temporary, path);
+  for (const name of readdirSync(launchIntentPath)) {
+    if (!name.endsWith(".json")) continue;
+    const intent = readJsonFile<{ sequence?: number }>(join(launchIntentPath, name));
+    if (Number.isSafeInteger(intent?.sequence) && intent!.sequence! <= sequence) try { unlinkSync(join(launchIntentPath, name)); } catch {}
+  }
+}
+
+type PeerRuntimeState = {
+  pid: number;
+  port: number;
+  instanceId: string;
+  startedAt?: string;
+  processStartedAt?: string;
+};
+
+function readJsonFile<T>(path: string): T | null {
+  try {
+    return JSON.parse(readFileSync(path, "utf8")) as T;
+  } catch {
+    return null;
+  }
+}
+
+function peerInjectorPid(peerRunPath: string) {
+  const path = join(peerRunPath, "injector.pid");
+  const pid = Number(existsSync(path) ? readFileSync(path, "utf8") : "");
+  return Number.isInteger(pid) && processAlive(pid) && isInjectorProcess(pid) ? pid : null;
+}
+
+function peerRuntimeState(peerRunPath: string) {
+  const value = readJsonFile<Partial<PeerRuntimeState>>(join(peerRunPath, "runtime.json"));
+  if (!value || !Number.isInteger(value.pid) || !Number.isInteger(value.port) || typeof value.instanceId !== "string") return null;
+  if (!processAlive(value.pid!)) return null;
+  if (typeof value.processStartedAt === "string" || typeof value.startedAt === "string") {
+    const expectedStart = Date.parse(value.processStartedAt ?? value.startedAt!);
+    const observedStart = processStartTime(value.pid!);
+    const tolerance = value.processStartedAt ? 1500 : 30_000;
+    if (Number.isFinite(expectedStart) && observedStart !== null && Math.abs(expectedStart - observedStart) > tolerance) return null;
+  }
+  return value as PeerRuntimeState;
+}
+
+async function disablePeerInjection(peerRunPath: string) {
+  mkdirSync(peerRunPath, { recursive: true });
+  const path = join(peerRunPath, "injection.json");
+  const temporary = `${path}.${process.pid}.tmp`;
+  const current = readJsonFile<Record<string, unknown>>(path) ?? {};
+  writeFileSync(temporary, JSON.stringify({ ...current, enabled: false }), { mode: 0o600 });
+  try {
+    renameSync(temporary, path);
+  } catch {
+    try { unlinkSync(temporary); } catch {}
+    writeFileSync(path, JSON.stringify({ ...current, enabled: false }), { mode: 0o600 });
+  }
+}
+
+async function stopPeerInjector(peerRunPath: string) {
+  const path = join(peerRunPath, "injector.pid");
+  const pid = peerInjectorPid(peerRunPath);
+  if (pid) {
+    try { process.kill(pid, "SIGTERM"); } catch (error) { if (processAlive(pid)) throw error; }
+    for (let attempt = 0; attempt < 90 && processAlive(pid); attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    if (processAlive(pid) && isInjectorProcess(pid)) {
+      try { process.kill(pid, "SIGKILL"); } catch (error) { if (processAlive(pid)) throw error; }
+      for (let attempt = 0; attempt < 10 && processAlive(pid); attempt += 1) await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  }
+  if (existsSync(path)) {
+    const recorded = Number(readFileSync(path, "utf8"));
+    if (!Number.isInteger(recorded) || !processAlive(recorded)) unlinkSync(path);
+  }
+  return Boolean(pid && !processAlive(pid));
+}
+
+async function stopPeerRuntime(peerHome: string, runtime: PeerRuntimeState | null) {
+  if (!runtime) return false;
+  if (!processAlive(runtime.pid)) return true;
+  const matchesRuntime = async () => {
+    try {
+      const response = await fetch(`http://127.0.0.1:${runtime.port}/health`, { signal: AbortSignal.timeout(750) });
+      const value = await response.json() as { pid?: number; instanceId?: string };
+      return response.ok && value.pid === runtime.pid && value.instanceId === runtime.instanceId;
+    } catch {
+      return false;
+    }
+  };
+  const verified = await matchesRuntime();
+  if (!processAlive(runtime.pid)) return true;
+  if (!verified) return false;
+  try {
+    const peerToken = readFileSync(join(peerHome, "run", "token"), "utf8").trim();
+    await fetch(`http://127.0.0.1:${runtime.port}/api/shutdown`, {
+      method: "POST",
+      signal: AbortSignal.timeout(1500),
+      headers: { authorization: `Bearer ${peerToken}` },
+    });
+  } catch {}
+  for (let attempt = 0; attempt < 30 && processAlive(runtime.pid); attempt += 1) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  if (processAlive(runtime.pid)) {
+    if (await matchesRuntime()) {
+      try { process.kill(runtime.pid, "SIGTERM"); } catch {}
+      for (let attempt = 0; attempt < 10 && processAlive(runtime.pid); attempt += 1) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    }
+  }
+  return !processAlive(runtime.pid);
+}
+
+function stopPeerMacService(peerHome: string) {
+  if (process.platform !== "darwin") return false;
+  const uid = process.getuid?.();
+  if (uid === undefined) return false;
+  const path = join(homedir(), "Library", "LaunchAgents", "com.better-codex.runtime.plist");
+  if (!existsSync(path)) return false;
+  const expectedHome = peerHome.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;");
+  try {
+    const plist = readFileSync(path, "utf8");
+    if (!plist.includes(`<key>BETTER_CODEX_HOME</key><string>${expectedHome}</string>`)) return false;
+  } catch {
+    return false;
+  }
+  const domain = `gui/${uid}`;
+  try {
+    execFileSync("/bin/launchctl", ["bootout", domain, path], { stdio: "ignore" });
+    return true;
+  } catch {
+    try {
+      execFileSync("/bin/launchctl", ["print", `${domain}/com.better-codex.runtime`], { stdio: "ignore" });
+    } catch {
+      return true;
+    }
+    throw new Error("peer_service_stop_failed");
+  }
+}
+
+async function deactivatePeerInstance() {
+  const peerHome = resolve(peerBetterCodexHome);
+  if (peerHome === resolve(betterCodexHome)) return null;
+  const peerRunPath = join(peerHome, "run");
+  const peerProfile = betterCodexProfile === "development" ? "stable" : "development";
+  const peerOwnership = injectionOwnership(peerProfile, peerRunPath, true);
+  const runtime = peerRuntimeState(peerRunPath);
+  const injector = peerInjectorPid(peerRunPath);
+  const serviceStopped = stopPeerMacService(peerHome);
+  const peerInjectionState = readJsonFile<{ enabled?: boolean }>(join(peerRunPath, "injection.json"));
+  const peerEnabled = peerInjectionState?.enabled !== false && peerInjectionState !== null;
+  const peerWasActive = Boolean(runtime || injector || serviceStopped || peerEnabled);
+  if (peerWasActive) await disablePeerInjection(peerRunPath);
+  const injectorStopped = await stopPeerInjector(peerRunPath);
+  if (injector && !injectorStopped) throw new Error("peer_injector_stop_failed");
+  const runtimeStopped = await stopPeerRuntime(peerHome, runtime);
+  if (runtime && !runtimeStopped) throw new Error("peer_runtime_stop_failed");
+  let injectionRemoved = false;
+  try {
+    const peerToken = existsSync(join(peerRunPath, "token")) ? readFileSync(join(peerRunPath, "token"), "utf8").trim() : "";
+    const result = await cdpEject(cdpPort, peerToken, peerOwnership);
+    injectionRemoved = result.some(item => item.uninstalled === true);
+  } catch {}
+  if (injectionRemoved && !peerWasActive) await disablePeerInjection(peerRunPath);
+  if (peerRuntimeState(peerRunPath) || peerInjectorPid(peerRunPath)) throw new Error("peer_instance_still_running");
+  if (!peerWasActive && !injectionRemoved) return null;
+  return {
+    profile: peerProfile,
+    serviceStopped,
+    injectorStopped,
+    runtimeStopped,
+    injectionRemoved,
+  };
 }
 
 function print(value: unknown) {
@@ -364,7 +625,7 @@ function print(value: unknown) {
 }
 
 function usage() {
-  console.log("better-codex version | update [check|compatibility|rollback] [--channel stable|preview] | setup [--yes] | launch | launcher install|uninstall|status | mcp install|uninstall|status | doctor | enable | disable | start [--launch] | stop | status | uninstall | data delete [--yes] | inject [--launch] [--port N] | eject [--port N] | service install|uninstall|start|stop|restart|status|logs | project list|create | agent list | issue list|get|create|update|status|open");
+  console.log("better-codex version | update [check|compatibility|rollback] [--channel stable|preview] | setup [--yes] | launch [--restart] | launcher install|uninstall|status | mcp install|uninstall|status | doctor | enable | disable | start [--launch] | stop | status | uninstall | data delete [--yes] | inject [--launch] [--port N] | eject [--port N] | service install|uninstall|start|stop|restart|status|logs | project list|create | agent list | issue list|get|create|update|status|open");
 }
 
 function selfCommand() {
@@ -492,7 +753,7 @@ async function doctor() {
   const mcp = mcpStatus();
   const updateKey = !isSea() || existsSync(updatePublicKeyPath);
   const checks = {
-    core: { ok: true, ...activeVersions(), executable: process.env.BETTER_CODEX_LAUNCHER_PATH ?? process.execPath },
+    core: { ok: true, ...activeVersions(), profile: betterCodexProfile, home: betterCodexHome, executable: process.env.BETTER_CODEX_LAUNCHER_PATH ?? process.execPath },
     service: { ok: service.installed, ...service },
     runtime,
     database,
@@ -512,7 +773,7 @@ async function uninstall() {
   setInjectionEnabled(false);
   await stopInjector();
   let injection: unknown = { removed: false, reason: "cdp_unavailable" };
-  try { injection = await cdpEject(cdpPort, accessToken()); } catch {}
+  try { injection = await cdpEject(cdpPort, accessToken(), injectionOwnership()); } catch {}
   try { await request("/api/shutdown", { method: "POST" }); } catch {}
   const launchIntegration = uninstallLaunchIntegration();
   const mcp = uninstallMcp();
@@ -627,7 +888,7 @@ async function main() {
   }
   if (command === "version" || command === "--version" || command === "-v") {
     const versions = activeVersions();
-    if ([action, ...args].includes("--json")) return console.log(JSON.stringify(versions));
+    if ([action, ...args].includes("--json")) return console.log(JSON.stringify({ ...versions, profile: betterCodexProfile, home: betterCodexHome }));
     return console.log(`better-codex core ${versions.core} compatibility ${versions.compatibility}`);
   }
   if (command === "update") {
@@ -674,7 +935,13 @@ async function main() {
     return usage();
   }
   if (command === "launch") {
+    const intent = await recordLaunchIntent([action, ...args].includes("--restart"));
     return print(await withLaunchLock(async () => {
+      const latestIntent = latestLaunchIntent();
+      if (latestIntent?.token !== intent.token) return { launched: false, superseded: true, requestedProfile: intent.profile };
+      markLaunchIntentProcessed(intent.sequence);
+      const restartRequested = latestIntent.restart === true;
+      const switchedFrom = await deactivatePeerInstance();
       const current = await cdpStatus(cdpPort);
       const codexRunning = codexProcessRunning() || current.available || current.targets.length > 0;
       if (!codexRunning) {
@@ -682,9 +949,22 @@ async function main() {
         await ensureRuntime();
         const injection = await cdpInject(cdpPort, activeRuntimePort(), accessToken(), true);
         startInjector(cdpPort);
-        return { launched: true, restarted: false, codexStarted: true, injection };
+        return { launched: true, restarted: false, codexStarted: true, switchedFrom, injection };
       }
-      if (!confirmLaunchRestart()) {
+      if (switchedFrom) {
+        setInjectionEnabled(true);
+        await ensureRuntime();
+        launchCodex(cdpPort, true);
+        try {
+          const injection = await cdpInject(cdpPort, activeRuntimePort(), accessToken(), true);
+          startInjector(cdpPort);
+          return { launched: true, restarted: false, openedCurrentCodex: true, switchedFrom, injection };
+        } catch (error) {
+          setInjectionEnabled(false);
+          throw error;
+        }
+      }
+      if (!restartRequested) {
         setInjectionEnabled(true);
         await ensureRuntime();
         launchCodex(cdpPort, true);
@@ -767,7 +1047,7 @@ async function main() {
     await stopInjector();
     const selectedPort = Number(option([action, ...args].filter(Boolean) as string[], "--port") ?? cdpPort);
     let injection: unknown = { available: false, disabled: true };
-    try { injection = await cdpEject(selectedPort, accessToken()); } catch {}
+    try { injection = await cdpEject(selectedPort, accessToken(), injectionOwnership()); } catch {}
     return print({ enabled: false, injection });
   }
   if (command === "uninstall") return print(await uninstall());
@@ -807,7 +1087,7 @@ async function main() {
   }
   if (command === "stop") {
     await stopInjector();
-    try { await cdpEject(cdpPort, accessToken()); } catch {}
+    try { await cdpEject(cdpPort, accessToken(), injectionOwnership()); } catch {}
     let runtime: unknown = { stopped: true, alreadyStopped: true };
     try { runtime = await request("/api/shutdown", { method: "POST" }); } catch {}
     return print({ runtime, injection: { stopped: true } });
@@ -815,7 +1095,30 @@ async function main() {
   if (command === "status") {
     let runtime: unknown;
     try { runtime = await health(); } catch (error) { runtime = { ok: false, error: error instanceof Error ? error.message : "runtime_unavailable" }; }
-    return print({ runtime, injection: await cdpStatus(Number(option([action, ...args].filter(Boolean) as string[], "--port") ?? cdpPort)), injectionEnabled: injectionEnabled(), injectorPid: injectorPid() });
+    return print({ profile: betterCodexProfile, home: betterCodexHome, runtime, injection: await cdpStatus(Number(option([action, ...args].filter(Boolean) as string[], "--port") ?? cdpPort)), injectionEnabled: injectionEnabled(), injectorPid: injectorPid() });
+  }
+  if (command === "refresh-injection") {
+    return print(await withLaunchLock(async () => {
+      const selectedPort = Number(option([action, ...args].filter(Boolean) as string[], "--port") ?? cdpPort);
+      const runtimeBeforeRefresh = readRuntimeState();
+      setInjectionEnabled(false);
+      await stopInjector();
+      try {
+        await ensureRuntime();
+        const removed = await cdpEject(selectedPort, accessToken(), injectionOwnership());
+        const injection = await cdpInject(selectedPort, activeRuntimePort(), accessToken(), false);
+        setInjectionEnabled(true);
+        const injectorPid = await waitForInjector();
+        return { refreshed: true, removed, injection, injectorPid };
+      } catch (error) {
+        setInjectionEnabled(false);
+        await stopInjector();
+        if (!runtimeBeforeRefresh && readRuntimeState()) {
+          try { await request("/api/shutdown", { method: "POST" }); } catch {}
+        }
+        throw error;
+      }
+    }));
   }
   if (command === "inject") {
     setInjectionEnabled(false);
@@ -838,7 +1141,7 @@ async function main() {
     setInjectionEnabled(false);
     const selectedPort = Number(option([action, ...args].filter(Boolean) as string[], "--port") ?? cdpPort);
     await stopInjector();
-    return print(await cdpEject(selectedPort, accessToken()));
+    return print(await cdpEject(selectedPort, accessToken(), injectionOwnership()));
   }
   await ensureRuntime();
   if (command === "project" && action === "list") return print(await request("/api/projects"));
@@ -855,14 +1158,9 @@ async function main() {
   usage();
 }
 
-const persistentCommand = ["runtime", "serve", "watch-inject"].includes(commandArguments()[0]);
-
-void main().then(() => {
-  if (!persistentCommand) setImmediate(() => process.exit(0));
-}).catch(error => {
+void main().catch(error => {
   console.error(error instanceof Error ? error.message : error);
-  if (!persistentCommand) setImmediate(() => process.exit(1));
-  else process.exitCode = 1;
+  process.exitCode = 1;
 });
 
 process.once("exit", () => {

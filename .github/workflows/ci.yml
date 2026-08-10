@@ -14,7 +14,8 @@ jobs:
     strategy:
       matrix:
         runner:
-          - macos-15
+          - macos-26
+          - macos-15-intel
           - windows-2025
     runs-on: ${{ matrix.runner }}
     steps:
@@ -27,3 +28,17 @@ jobs:
       - run: npm run build
       - run: npm test
       - run: npm run package:binary
+      - name: Install current local package twice
+        run: node scripts/test-local-install.mjs
+
+  node-24-lifecycle:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx tsx --test test/cdp-lifecycle.test.ts

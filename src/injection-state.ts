@@ -1,6 +1,23 @@
 import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { ensureDirectories, injectionStatePath, mockupSessionPath } from "./config.js";
 
+type InjectionState = { enabled?: boolean; profile?: string; endpoint?: string };
+
+function readInjectionState(): InjectionState {
+  try {
+    return JSON.parse(readFileSync(injectionStatePath, "utf8")) as InjectionState;
+  } catch {
+    return {};
+  }
+}
+
+function writeInjectionState(state: InjectionState) {
+  ensureDirectories();
+  const temporary = `${injectionStatePath}.${process.pid}.tmp`;
+  writeFileSync(temporary, JSON.stringify(state), { mode: 0o600 });
+  renameSync(temporary, injectionStatePath);
+}
+
 export function mockupSessionActive() {
   if (!existsSync(mockupSessionPath)) return false;
   try {
@@ -19,17 +36,14 @@ export function mockupSessionActive() {
 
 export function injectionEnabled() {
   mockupSessionActive();
-  try {
-    return JSON.parse(readFileSync(injectionStatePath, "utf8")).enabled !== false;
-  } catch {
-    return true;
-  }
+  return readInjectionState().enabled !== false;
 }
 
 export function setInjectionEnabled(enabled: boolean) {
-  ensureDirectories();
-  const temporary = `${injectionStatePath}.${process.pid}.tmp`;
-  writeFileSync(temporary, JSON.stringify({ enabled }), { mode: 0o600 });
-  renameSync(temporary, injectionStatePath);
+  writeInjectionState({ ...readInjectionState(), enabled });
   return enabled;
+}
+
+export function recordInjectionOwnership(profile: string, endpoint: string) {
+  writeInjectionState({ ...readInjectionState(), profile, endpoint });
 }

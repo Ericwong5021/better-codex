@@ -43,6 +43,7 @@ export type GatewayUpdateState = {
   latestVersion: string | null;
   checkedAt: string | null;
   error: string | null;
+  coreUpdateSupported?: boolean;
 };
 
 type ActivationState = {
@@ -236,7 +237,7 @@ export function getGatewayUpdateState() {
     const persisted = persistedActivationState();
     if (persisted.status !== "restarting") gatewayUpdateState = persisted.status === "idle" ? { ...persisted, status: "current" } : persisted;
   }
-  return { ...gatewayUpdateState, currentVersion: effectiveCoreVersion() };
+  return { ...gatewayUpdateState, currentVersion: effectiveCoreVersion(), coreUpdateSupported: isSea() };
 }
 
 export function recordGatewayUpdateActivation(status: "activating" | "success" | "error", error: string | null = null, updates: { core: string | null; compatibility: string | null } = { core: null, compatibility: null }, ownerPid: number | null = null) {
@@ -257,11 +258,13 @@ export function checkGatewayUpdate() {
       gatewayUpdateState = { ...getGatewayUpdateState(), status: "error", checkedAt, error: "error" in result ? result.error : "update_check_failed" };
       return getGatewayUpdateState();
     }
-    const available = Boolean(result.core?.available || result.compatibility?.available);
-    const latestVersion = result.core?.available
-      ? result.core.version
-      : result.compatibility?.available
-        ? result.compatibility.version
+    const coreAvailable = Boolean(isSea() && result.core?.available);
+    const compatibilityAvailable = Boolean(result.compatibility?.available);
+    const available = coreAvailable || compatibilityAvailable;
+    const latestVersion = coreAvailable
+      ? result.core?.version ?? effectiveCoreVersion()
+      : compatibilityAvailable
+        ? result.compatibility?.version ?? effectiveCoreVersion()
         : effectiveCoreVersion();
     gatewayUpdateState = { status: available ? "available" : "current", currentVersion: effectiveCoreVersion(), latestVersion, checkedAt, error: null };
     return getGatewayUpdateState();
