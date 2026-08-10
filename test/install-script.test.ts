@@ -8,6 +8,7 @@ const betaInstallerPath = new URL("../scripts/install-beta.ps1", import.meta.url
 const source = readFileSync(installerPath, "utf8");
 const betaSource = existsSync(betaInstallerPath) ? readFileSync(betaInstallerPath, "utf8") : "";
 const shellSource = readFileSync(new URL("../scripts/install.sh", import.meta.url), "utf8");
+const betaShellSource = readFileSync(new URL("../scripts/install-beta.sh", import.meta.url), "utf8");
 const previewPromotionSource = readFileSync(new URL("../scripts/promote-preview-feed.sh", import.meta.url), "utf8");
 
 test("Windows installer captures native stderr without turning progress into a terminating error", {
@@ -165,6 +166,15 @@ test("installers preserve the selected Preview lane during a legacy full migrati
   assert.match(shellSource, /runtime\/channel\.json/);
   assert.match(shellSource, /update check --channel preview/);
   assert.match(shellSource, /Unable to resolve the signed Beta release; the existing installation was left unchanged/);
+});
+
+test("macOS Beta bootstrap resolves the signed Preview release before installation", () => {
+  assert.match(betaShellSource, /BETTER_CODEX_CHANNEL=preview/);
+  assert.doesNotMatch(betaShellSource, /better-codex" update/);
+  assert.match(shellSource, /BETTER_CODEX_CHANNEL/);
+  assert.match(shellSource, /releases\/download\/preview\/update-manifest\.json/);
+  assert.match(shellSource, /crypto\.verify/);
+  assert.match(shellSource, /"darwin-\$ARCH"/);
 });
 
 test("Windows installer maps an explicit Beta target to the Preview channel", {

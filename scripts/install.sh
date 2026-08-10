@@ -2,6 +2,7 @@
 set -euo pipefail
 
 REPO="${BETTER_CODEX_REPO:-Ericwong5021/better-codex}"
+REQUESTED_CHANNEL="${BETTER_CODEX_CHANNEL:-stable}"
 BIN_DIR="${BETTER_CODEX_BIN_DIR:-$HOME/.local/bin}"
 CODEX_DIR="${CODEX_HOME:-$HOME/.codex}"
 SKILL_DIR="$CODEX_DIR/skills/better-codex"
@@ -21,6 +22,11 @@ elif [ -n "${1:-}" ]; then
   echo "Usage: install.sh [--no-service]" >&2
   exit 1
 fi
+
+case "$REQUESTED_CHANNEL" in
+  stable|preview) ;;
+  *) echo "Invalid Better Codex update channel: $REQUESTED_CHANNEL" >&2; exit 1 ;;
+esac
 
 if [ "$(uname -s)" != "Darwin" ]; then
   echo "Better Codex currently supports macOS only." >&2
@@ -70,6 +76,56 @@ ensure_node() {
 }
 
 ensure_node
+
+resolve_preview_version() {
+  local work manifest public_key version cache_bust
+  work="$(mktemp -d "${TMPDIR:-/tmp}/better-codex-preview.XXXXXX")" || return 1
+  manifest="$work/update-manifest.json"
+  public_key="$work/update-public-key.pem"
+  cache_bust="$(date +%s)"
+  if ! curl -fsSL --connect-timeout 15 --max-time 60 --retry 2 --retry-delay 1 \
+    "https://github.com/$REPO/releases/download/preview/update-manifest.json?better_codex_cache_bust=$cache_bust" -o "$manifest"; then
+    rm -rf "$work"
+    return 1
+  fi
+  if ! curl -fsSL --connect-timeout 15 --max-time 60 --retry 2 --retry-delay 1 \
+    "https://raw.githubusercontent.com/$REPO/main/assets/update-public-key.pem?better_codex_cache_bust=$cache_bust" -o "$public_key"; then
+    rm -rf "$work"
+    return 1
+  fi
+  if [ "$(tr -d '\r' < "$public_key" | shasum -a 256 | awk '{print $1}')" != "$UPDATE_KEY_SHA256" ]; then
+    rm -rf "$work"
+    return 1
+  fi
+  if ! version="$(node -e '
+    const fs = require("fs");
+    const crypto = require("crypto");
+    const [manifestPath, keyPath, assetKey] = process.argv.slice(1);
+    const stableJson = value => Array.isArray(value)
+      ? `[${value.map(stableJson).join(",")}]`
+      : value && typeof value === "object"
+        ? `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(",")}}`
+        : JSON.stringify(value);
+    try {
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+      const payload = manifest.payload;
+      const asset = payload?.core?.assets?.[assetKey];
+      if (payload?.schemaVersion !== 1 || payload?.channel !== "preview" || typeof manifest.signature !== "string") process.exit(1);
+      if (!/^\d+\.\d+\.\d+(?:-[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*)?$/.test(payload.core?.version || "")) process.exit(1);
+      if (!asset || typeof asset.url !== "string" || !asset.url.startsWith("https://") || !/^[a-f0-9]{64}$/i.test(asset.sha256 || "")) process.exit(1);
+      const valid = crypto.verify(null, Buffer.from(stableJson(payload)), fs.readFileSync(keyPath), Buffer.from(manifest.signature, "base64"));
+      if (!valid) process.exit(1);
+      process.stdout.write(payload.core.version);
+    } catch {
+      process.exit(1);
+    }
+  ' "$manifest" "$public_key" "darwin-$ARCH")"; then
+    rm -rf "$work"
+    return 1
+  fi
+  rm -rf "$work"
+  printf '%s' "$version"
+}
 
 verify_update_key() {
   [ -n "$UPDATE_PUBLIC_KEY" ] && [ -f "$UPDATE_PUBLIC_KEY" ] && [ "$(tr -d '\r' < "$UPDATE_PUBLIC_KEY" | shasum -a 256 | awk '{print $1}')" = "$UPDATE_KEY_SHA256" ]
@@ -266,13 +322,13 @@ PRESERVE_PREVIEW_LANE=0
 if [ -z "${BETTER_CODEX_ARCHIVE:-}" ]; then
   if [ -n "${BETTER_CODEX_VERSION:-}" ]; then
     TAG="$BETTER_CODEX_VERSION"
-  elif [ -n "$EXISTING_BINARY" ] && [ -f "$BETTER_CODEX_DIR/runtime/channel.json" ] && grep -Eq '"channel"[[:space:]]*:[[:space:]]*"preview"' "$BETTER_CODEX_DIR/runtime/channel.json"; then
+    if [ "$REQUESTED_CHANNEL" = "preview" ]; then PRESERVE_PREVIEW_LANE=1; fi
+  elif [ "$REQUESTED_CHANNEL" = "preview" ] || { [ -n "$EXISTING_BINARY" ] && [ -f "$BETTER_CODEX_DIR/runtime/channel.json" ] && grep -Eq '"channel"[[:space:]]*:[[:space:]]*"preview"' "$BETTER_CODEX_DIR/runtime/channel.json"; }; then
     printf '[Better Codex] Resolving the current Beta release...\n'
-    if ! PREVIEW_CHECK="$(run_with_timeout 20 "$EXISTING_BINARY" update check --channel preview 2>/dev/null)"; then
+    if ! PREVIEW_VERSION="$(resolve_preview_version)"; then
       echo "Unable to resolve the signed Beta release; the existing installation was left unchanged." >&2
       exit 1
     fi
-    PREVIEW_VERSION="$(printf '%s' "$PREVIEW_CHECK" | node -e 'let value=""; process.stdin.on("data", chunk => value += chunk); process.stdin.on("end", () => { try { const parsed=JSON.parse(value); if (parsed.checked && parsed.core?.version) process.stdout.write(parsed.core.version); } catch {} });')"
     if [ -z "$PREVIEW_VERSION" ]; then
       echo "Unable to resolve the signed Beta release; the existing installation was left unchanged." >&2
       exit 1
