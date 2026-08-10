@@ -1,0 +1,23 @@
+services:
+  hub:
+    build:
+      context: ../..
+      dockerfile: deploy/hub/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:4318:4318"
+    volumes:
+      - better-codex-hub:/data
+    secrets:
+      - admin_token
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+secrets:
+  admin_token:
+    file: ./secrets/admin-token
+
+volumes:
+  better-codex-hub:

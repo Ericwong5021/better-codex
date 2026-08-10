@@ -111,10 +111,13 @@ Better Codex 以轻量 Node.js bundle 运行，需要 Node.js 22.5 或更新版�
 不是。Better Codex 是一个独立的开源项目，基于 Codex Desktop 二次开发，与 OpenAI 没有隶属或背书关系。
 
 **我的数据会去哪里？**<br>
-哪儿也不去。项目、任务、分配关系和运行状态全部保存在本机 SQLite 数据库（macOS 在 `~/.better-codex/better-codex.db`，Windows 在 `%USERPROFILE%\.better-codex\better-codex.db`）。运行时只监听 `127.0.0.1`，没有云端服务，也不需要账号。
+默认不会离开本机。项目、任务、分配关系和运行状态保存在本地 SQLite 数据库（macOS 在 `~/.better-codex/better-codex.db`，Windows 在 `%USERPROFILE%\.better-codex\better-codex.db`），运行时只监听 `127.0.0.1`。只有在你主动连接自托管 Hub 后，Better Codex 才会把文档列明的看板投影上传到你的服务器；工作区路径、对话、Agent 指令、执行日志和凭据始终留在本机。Better Codex 不运营云端服务或账号系统。
 
 **为什么需要注册 MCP？**<br>
-Codex 通过本地 MCP 应用识别 Better Codex 的应用入口和路由，让任务看板可以进入 Codex 的导航流程，而不是覆盖在最后访问的会话页面上。MCP 通过本机 stdio 运行，不是云端服务，也不会上传任务数据。
+Codex 通过本地 MCP 应用识别 Better Codex 的应用入口和路由，让任务看板可以进入 Codex 的导航流程，而不是覆盖在最后访问的会话页面上。MCP 通过本机 stdio 运行，不会上传任务数据；可选的 Hub 同步是独立功能，必须由你显式配置。
+
+**可以远程访问任务看板吗？**<br>
+可以。把可选的自托管 Hub 部署到 VPS，通过 Tailscale Serve 私有暴露，再运行 `better-codex sync connect` 连接本地运行时。数据边界、部署、备份和回滚步骤见[自托管 Hub 文档](docs/SELF_HOSTING.md)。
 
 **它会搞坏我的 Codex 吗？**<br>
 应用入口和路由通过本地 MCP 注册，页面集成使用桌面应用的本地 CDP 接口和页面结构，不修改 Codex 的二进制文件。Codex 更新后偶尔需要安装对应的兼容性更新，届时 Codex 内会出现提示。感觉哪里不对时，运行 `better-codex doctor` 检查。

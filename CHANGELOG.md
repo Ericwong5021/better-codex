@@ -4,6 +4,14 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+### Added
+
+- Add an opt-in self-hosted Hub with a responsive remote task board, outbound local synchronization, offline command queueing, explicit conflict reporting, device pairing, and Tailscale-first Docker deployment.
+
+### Changed
+
+- Document the Hub data boundary and keep workspace paths, Codex conversations, Agent instructions, execution logs, attachments, and credentials local.
+
 ## [0.4.1-beta.3] - 2026-08-10
 
 ### Changed

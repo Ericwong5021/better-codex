@@ -89,7 +89,9 @@ jobs:
       - run: npm run build
       - run: npm test
       - run: npm run package:binary
-      - name: Install current local package twice
+        env:
+          BETTER_CODEX_REQUIRE_SIGNING: "0"
+      - name: Install current local package twice and sync an Issue
         run: node scripts/test-local-install.mjs
       - uses: actions/upload-artifact@v4
         with:

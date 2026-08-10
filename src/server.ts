@@ -20,6 +20,8 @@ import { join } from "node:path";
 import { normalizeSessionId, readConversationActivity, readConversationResult, sessionWorkspace } from "./session-transcript.js";
 import { IssueWorker } from "./worker.js";
 import { maxMockupBytes, normalizeMockupLocale, readMockupState, replaceMockupState, resetMockupState, updateMockupState } from "./mockup.js";
+import { SyncClient } from "./sync-client.js";
+import { removeSyncConfiguration } from "./sync-config.js";
 
 const accessToken = token();
 const mockupEnabled = !isSea() && !packagedBuild && process.argv.includes("--mockup");
@@ -319,6 +321,7 @@ export function startServer() {
   let updateRelaunchScheduled = false;
   let updateInstallInProgress = false;
   const worker = new IssueWorker(store);
+  const syncClient = new SyncClient(store);
   const withAvatar = <T extends { id: string; is_default?: boolean }>(profile: T) => ({
     ...profile,
     avatar: store.getAgentAvatar(profile.is_default ? "default" : profile.id),
@@ -332,6 +335,7 @@ export function startServer() {
     cleaned = true;
     stopIssueReplies(store);
     worker.stop();
+    syncClient.stop();
     stopUpdateChecks();
     clearRuntimeState(identity.instanceId);
     store.close();
@@ -352,6 +356,17 @@ export function startServer() {
         return sendJson(response, database.ok ? 200 : 503, { ok: database.ok, name: "Better Codex Runtime", version: identity.version, pid: process.pid, port: activePort, instanceId: identity.instanceId, database, compatibility: readCompatibilityStatus() });
       }
       if (!authorized(request, url)) return sendJson(response, 401, { error: "unauthorized" });
+      if (url.pathname === "/api/sync/status" && method === "GET") return sendJson(response, 200, syncClient.status());
+      if (url.pathname === "/api/sync/now" && method === "POST") return sendJson(response, 200, await syncClient.syncNow());
+      if (url.pathname === "/api/sync/connect" && method === "POST") {
+        store.resetSyncQueue();
+        return sendJson(response, 200, await syncClient.syncNow());
+      }
+      if (url.pathname === "/api/sync/disconnect" && method === "POST") {
+        removeSyncConfiguration();
+        store.resetSyncQueue();
+        return sendJson(response, 200, syncClient.status());
+      }
       if (url.pathname === "/api/issues/attachments" && method === "POST") {
         const body = await readBody(request, maxPastedImageBodyBytes);
         return sendJson(response, 201, savePastedImage(body.data));
@@ -1004,6 +1019,7 @@ export function startServer() {
     if (typeof address !== "object" || !address) throw new Error("runtime_address_unavailable");
     publishRuntimeState({ ...identity, port: address.port });
     if (!mockupEnabled) worker.start();
+    if (!mockupEnabled) syncClient.start();
     console.log(`Better Codex Runtime ${coreVersion} listening on http://127.0.0.1:${address.port}`);
   });
   const stop = () => server.close(() => {

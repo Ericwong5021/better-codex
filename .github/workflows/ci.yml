@@ -28,7 +28,7 @@ jobs:
       - run: npm run build
       - run: npm test
       - run: npm run package:binary
-      - name: Install current local package twice
+      - name: Install current local package twice and sync an Issue
         run: node scripts/test-local-install.mjs
 
   node-24-lifecycle:

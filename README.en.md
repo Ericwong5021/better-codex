@@ -111,10 +111,13 @@ Restart Codex from the Better Codex launcher, and `Task board` and `Agents` appe
 No. Better Codex is an independent open-source project built on top of Codex Desktop. It is not affiliated with or endorsed by OpenAI.
 
 **Where does my data go?**<br>
-Nowhere. Projects, tasks, assignments, and run state live in a local SQLite database (`~/.better-codex/better-codex.db` on macOS, `%USERPROFILE%\.better-codex\better-codex.db` on Windows). The runtime listens on `127.0.0.1` only. There is no Better Codex cloud service and no account.
+By default, nowhere. Projects, tasks, assignments, and run state live in a local SQLite database (`~/.better-codex/better-codex.db` on macOS, `%USERPROFILE%\.better-codex\better-codex.db` on Windows), and the runtime listens on `127.0.0.1` only. If you explicitly connect a self-hosted Hub, Better Codex uploads only the documented board projection to your server; workspace paths, conversations, Agent instructions, execution logs, and credentials stay local. There is no Better Codex-operated cloud service or account.
 
 **Why does Better Codex register an MCP server?**<br>
-Codex uses the local MCP app to recognize the Better Codex app entry and route. This puts the task board into the Codex navigation flow instead of placing it over the last conversation route. The MCP server runs locally over stdio. It is not a cloud service and does not upload task data.
+Codex uses the local MCP app to recognize the Better Codex app entry and route. This puts the task board into the Codex navigation flow instead of placing it over the last conversation route. The MCP server runs locally over stdio. It does not upload task data; optional Hub sync is handled separately and only after explicit setup.
+
+**Can I access the board remotely?**<br>
+Yes. Deploy the optional self-hosted Hub on a VPS, expose it privately with Tailscale Serve, then connect the desktop runtime with `better-codex sync connect`. See [Self-hosted Hub](docs/SELF_HOSTING.md) for the data boundary, deployment, backup, and rollback steps.
 
 **Will it break my Codex?**<br>
 The app entry and route are registered through the local MCP server. The page integration uses the desktop app's local CDP interface and page structure. It doesn't patch Codex binaries. A Codex update can occasionally require a matching Better Codex compatibility update; when that happens, an update notice appears inside Codex. If anything looks off, run `better-codex doctor`.

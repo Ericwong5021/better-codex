@@ -146,7 +146,7 @@ test("core workflow persists, orders status moves, and rejects stale writes", ()
     const restored = store.getIssue(first.id);
     assert.equal(restored?.status, "in_progress");
     assert.equal(restored?.thread_id, "local:thread-1");
-    assert.equal(store.health().schemaVersion, 3);
+    assert.equal(store.health().schemaVersion, 4);
     store.close();
   } finally {
     rmSync(target.directory, { recursive: true, force: true });
@@ -595,7 +595,7 @@ test("newer database schema is rejected without migration", () => {
   const target = temporaryDatabase();
   try {
     const future = new DatabaseSync(target.file);
-    future.exec("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL); INSERT INTO schema_migrations VALUES (4, '2026-01-01T00:00:00.000Z')");
+    future.exec("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL); INSERT INTO schema_migrations VALUES (5, '2026-01-01T00:00:00.000Z')");
     future.close();
     assert.throws(() => new Store(target.file), /database_schema_too_new/);
   } finally {
@@ -639,7 +639,7 @@ test("legacy database is backed up before migration", () => {
     legacy.close();
 
     const store = new Store(target.file);
-    assert.equal(store.health().schemaVersion, 3);
+    assert.equal(store.health().schemaVersion, 4);
     assert.ok(store.lastBackupPath);
     assert.ok(existsSync(store.lastBackupPath!));
     assert.equal(store.getProject("legacy")?.name, "Legacy");

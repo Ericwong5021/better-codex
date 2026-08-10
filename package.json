@@ -15,6 +15,7 @@
     "better-codex": "dist/cli.js"
   },
   "files": [
+    "docs/SELF_HOSTING.md",
     "dist/cdp.js",
     "dist/cli.js",
     "dist/design-system.js",
@@ -25,6 +26,10 @@
     "dist/db.js",
     "dist/dom.js",
     "dist/injection-state.js",
+    "dist/hub-cli.js",
+    "dist/hub-server.js",
+    "dist/hub-store.js",
+    "dist/hub-web.js",
     "dist/locale.js",
     "dist/launch-integration.js",
     "dist/mcp-app.js",
@@ -32,6 +37,9 @@
     "dist/mockup.js",
     "dist/runtime-state.js",
     "dist/server.js",
+    "dist/sync-client.js",
+    "dist/sync-config.js",
+    "dist/sync-contract.js",
     "dist/service.js",
     "dist/session-reply.js",
     "dist/session-transcript.js",
@@ -43,6 +51,8 @@
   "scripts": {
     "build": "tsc && node scripts/refresh-local-install.mjs && node scripts/refresh-injector.mjs",
     "dev": "tsx src/cli.ts serve",
+    "hub": "tsx src/hub-cli.ts",
+    "hub:start": "node dist/hub-cli.js",
     "dev:install": "npm run build && node scripts/development-instance.mjs install",
     "dev:mockup": "node scripts/dev-mockup.mjs",
     "dev:status": "node scripts/development-instance.mjs status",
@@ -51,7 +61,8 @@
     "package:update-manifest": "node scripts/create-update-manifest.mjs release",
     "start": "node dist/cli.js serve",
     "better-codex": "tsx src/cli.ts",
-    "test": "tsx --test --test-concurrency=2 test/*.test.ts"
+    "test": "tsx --test --test-concurrency=2 test/*.test.ts",
+    "test:install": "node scripts/test-local-install.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.15.21",
