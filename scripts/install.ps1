@@ -389,7 +389,19 @@ function Test-VersionAtLeast([string]$Current, [string]$Target) {
   try { return (Compare-SemVer $Current $Target) -ge 0 } catch { return $false }
 }
 
-function Invoke-ExistingUpgrade([string]$Executable, [string]$TargetVersion) {
+function Get-DesiredUpdateChannel([string]$TargetVersion, [bool]$PreservePreviewLane) {
+  if ($PreservePreviewLane -or $TargetVersion -match '-beta\.[1-9][0-9]*$') { return "preview" }
+  return "stable"
+}
+
+function Set-InstalledUpdateChannel([string]$Executable, [string]$Channel) {
+  $result = Invoke-BetterCodexCapture $Executable @("update", "channel", $Channel) 10000
+  if ($result.ExitCode -ne 0) { throw "Unable to select the $Channel update channel." }
+  try { $state = $result.Stdout | ConvertFrom-Json } catch { throw "Better Codex returned an invalid update channel response." }
+  if ($state.channel -ne $Channel) { throw "Better Codex did not persist the $Channel update channel." }
+}
+
+function Invoke-ExistingUpgrade([string]$Executable, [string]$TargetVersion, [string]$DesiredChannel) {
   try {
     $updateResult = Invoke-BetterCodexCapture $Executable @("update") 600000
     if ($updateResult.ExitCode -ne 0) { return $false }
@@ -408,6 +420,7 @@ function Invoke-ExistingUpgrade([string]$Executable, [string]$TargetVersion) {
       $doctor = $doctorResult.Stdout | ConvertFrom-Json
       if (-not $doctor.ok) { return $false }
     }
+    Set-InstalledUpdateChannel $Executable $desiredChannel
     Write-Ok "Better Codex upgraded to v$updatedVersion"
     return $true
   } catch {
@@ -442,6 +455,7 @@ $skillDirectory = Join-Path $codexHome "skills\better-codex"
 $issueSkillDirectory = Join-Path $codexHome "skills\better-codex-issue"
 $betterCodexHome = if ($env:BETTER_CODEX_HOME) { [IO.Path]::GetFullPath($env:BETTER_CODEX_HOME) } else { Join-Path $env:USERPROFILE ".better-codex" }
 $updatePublicKeyPath = Join-Path $betterCodexHome "update-public-key.pem"
+$channelPath = Join-Path $betterCodexHome "runtime\channel.json"
 $lockHasher = [Security.Cryptography.SHA256]::Create()
 $lockHash = $lockHasher.ComputeHash([Text.Encoding]::UTF8.GetBytes($betterCodexHome))
 $lockHasher.Dispose()
@@ -454,10 +468,10 @@ try {
   if (-not $installLockAcquired) { throw "Another Better Codex installation is already running." }
 $localArchive = if ($env:BETTER_CODEX_ARCHIVE) { [IO.Path]::GetFullPath($env:BETTER_CODEX_ARCHIVE) } else { $null }
 $explicitVersion = [bool]($Version -or $env:BETTER_CODEX_VERSION)
+$previewSelected = $false
+try { $previewSelected = ((Get-Content -LiteralPath $channelPath -Raw | ConvertFrom-Json).channel -eq "preview") } catch {}
+$preservePreviewLane = $false
 if (-not $localArchive -and -not $explicitVersion) {
-  $channelPath = Join-Path $betterCodexHome "runtime\channel.json"
-  $previewSelected = $false
-  try { $previewSelected = ((Get-Content -LiteralPath $channelPath -Raw | ConvertFrom-Json).channel -eq "preview") } catch {}
   if ($previewSelected -and (Test-Path -LiteralPath $executable -PathType Leaf)) {
     Write-Step "Resolving the current Beta release..."
     try {
@@ -467,6 +481,7 @@ if (-not $localArchive -and -not $explicitVersion) {
       $previewVersion = if ($previewCheck.checked -and $previewCheck.core.version) { [string]$previewCheck.core.version } else { "" }
       if (-not $previewVersion) { throw "preview_version_unavailable" }
       $Version = "v$previewVersion"
+      $preservePreviewLane = $true
     } catch {
       throw "Unable to resolve the signed Beta release; the existing installation was left unchanged."
     }
@@ -477,6 +492,7 @@ if (-not $localArchive -and -not $explicitVersion) {
   $Version = Resolve-ReleaseTag $Repository $Version
 }
 $targetVersion = if ($Version) { $Version.TrimStart("v") } else { "" }
+$desiredChannel = Get-DesiredUpdateChannel $targetVersion $preservePreviewLane
 $installedVersion = Get-InstalledVersion $executable
 
 if (-not $localArchive -and $installedVersion -and (Test-VersionAtLeast $installedVersion $targetVersion) -and (Test-Path (Join-Path $skillDirectory "SKILL.md")) -and (Test-Path $updatePublicKeyPath)) {
@@ -486,6 +502,7 @@ if (-not $localArchive -and $installedVersion -and (Test-VersionAtLeast $install
     $updateCheck = $updateCheckResult.Stdout | ConvertFrom-Json
     if ($updateCheck.checked -and -not (($updateCheck.core.available) -or ($updateCheck.compatibility.available))) {
       if (Test-InstallationReady $executable) {
+        Set-InstalledUpdateChannel $executable $desiredChannel
         Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $issueSkillDirectory
         Write-Ok "Better Codex is up to date (v$installedVersion)"
         return
@@ -504,6 +521,7 @@ if (-not $localArchive -and $installedVersion) {
     if ($updateCheckResult.ExitCode -ne 0) { throw "Update check failed." }
     $updateCheck = $updateCheckResult.Stdout | ConvertFrom-Json
     if ((Test-VersionAtLeast $installedVersion $targetVersion) -and $updateCheck.checked -and -not (($updateCheck.core.available) -or ($updateCheck.compatibility.available)) -and (Test-InstallationReady $executable)) {
+      Set-InstalledUpdateChannel $executable $desiredChannel
       Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $issueSkillDirectory
       Write-Ok "Better Codex is up to date (v$installedVersion)"
       return
@@ -511,7 +529,7 @@ if (-not $localArchive -and $installedVersion) {
   } catch {
     Write-Step "Live update check unavailable; continuing with upgrade..."
   }
-  if ((Test-Path (Join-Path $skillDirectory "SKILL.md")) -and (Test-Path $updatePublicKeyPath) -and (Invoke-ExistingUpgrade $executable $targetVersion)) {
+  if ((Test-Path (Join-Path $skillDirectory "SKILL.md")) -and (Test-Path $updatePublicKeyPath) -and (Invoke-ExistingUpgrade $executable $targetVersion $desiredChannel)) {
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $issueSkillDirectory
     return
   }
@@ -572,6 +590,7 @@ try {
   if (-not $packagedVersion) { throw "Unable to read the packaged Better Codex version." }
   if ($targetVersion -and $packagedVersion -ne $targetVersion) { throw "Package version $packagedVersion does not match target v$targetVersion. Installation cancelled." }
   if (-not $targetVersion) { $targetVersion = $packagedVersion }
+  $desiredChannel = Get-DesiredUpdateChannel $targetVersion $preservePreviewLane
   $backupDirectory = Join-Path $workDirectory "previous"
   New-Item -ItemType Directory -Force -Path $backupDirectory | Out-Null
   $backupExecutable = Join-Path $backupDirectory "better-codex-entrypoint"
@@ -579,12 +598,14 @@ try {
   $backupSkill = Join-Path $backupDirectory "better-codex-skill"
   $backupIssueSkill = Join-Path $backupDirectory "better-codex-issue-skill"
   $backupUpdateKey = Join-Path $backupDirectory "update-public-key.pem"
+  $backupChannel = Join-Path $backupDirectory "channel.json"
   $hadExecutable = Test-Path $executable
   $hadLauncher = Test-Path $launcherPath
   $legacyMigration = $hadExecutable -and ([IO.Path]::GetFullPath($executable) -eq [IO.Path]::GetFullPath($legacyExecutable))
   $hadSkill = Test-Path $skillDirectory
   $hadIssueSkill = Test-Path $issueSkillDirectory
   $hadUpdateKey = Test-Path $updatePublicKeyPath
+  $hadChannel = Test-Path $channelPath
   $previousService = if ($hadExecutable -and -not $NoService) {
     try {
       $statusResult = Invoke-BetterCodexCapture $executable @("service", "status") 10000
@@ -600,6 +621,7 @@ try {
   if ($hadSkill) { Copy-Item -Recurse -Force $skillDirectory $backupSkill }
   if ($hadIssueSkill) { Copy-Item -Recurse -Force $issueSkillDirectory $backupIssueSkill }
   if ($hadUpdateKey) { Copy-Item -Force $updatePublicKeyPath $backupUpdateKey }
+  if ($hadChannel) { Copy-Item -Force $channelPath $backupChannel }
   try {
   $codexProcesses = if ($NoService) { @() } else { @(Get-CodexProcesses) }
   if (@($codexProcesses).Count -gt 0) {
@@ -682,6 +704,7 @@ try {
     $displayVersion = if ($readyVersion) { $readyVersion } else { "unknown" }
     throw "Installed Better Codex version $displayVersion does not match target v$targetVersion."
   }
+  Set-InstalledUpdateChannel $executable $desiredChannel
   if ($legacyMigration -and (Test-Path -LiteralPath $legacyExecutable -PathType Leaf)) {
     Write-Step "Removing the verified legacy executable..."
     Remove-Item -LiteralPath $legacyExecutable -Force
@@ -714,6 +737,12 @@ try {
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $issueSkillDirectory
     if ($hadIssueSkill) { Copy-Item -Recurse -Force $backupIssueSkill $issueSkillDirectory }
     if ($hadUpdateKey) { Copy-Item -Force $backupUpdateKey $updatePublicKeyPath } else { Remove-Item -Force -ErrorAction SilentlyContinue $updatePublicKeyPath }
+    if ($hadChannel) {
+      New-Item -ItemType Directory -Force -Path ([IO.Path]::GetDirectoryName($channelPath)) | Out-Null
+      Copy-Item -Force $backupChannel $channelPath
+    } else {
+      Remove-Item -LiteralPath $channelPath -Force -ErrorAction SilentlyContinue
+    }
     if ($hadExecutable -and -not $NoService) {
       if ($previousService.installed) {
         $null = Invoke-BetterCodexCapture $executable @("service", "install") 10000

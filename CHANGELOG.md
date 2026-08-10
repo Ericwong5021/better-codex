@@ -4,6 +4,14 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.1-beta.4] - 2026-08-10
+
+### Fixed
+
+- Automatically select and persist the Preview update channel when installing a Beta release, including upgrades and reinstalls.
+- Validate downloaded core updates in a temporary staging directory so failed packages do not leave version directories behind.
+- Let Issue detail dialogs size to their content when no conversation is shown, with clearer hover and focus feedback for editable fields.
+
 ## [0.4.1-beta.3] - 2026-08-10
 
 ### Changed
@@ -247,7 +255,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1-beta.3...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1-beta.4...HEAD
+[0.4.1-beta.4]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1-beta.3...v0.4.1-beta.4
 [0.4.1-beta.3]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1-beta.2...v0.4.1-beta.3
 [0.4.1-beta.2]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1-beta.1...v0.4.1-beta.2
 [0.4.1-beta.1]: https://github.com/Ericwong5021/better-codex/compare/v0.4.0...v0.4.1-beta.1

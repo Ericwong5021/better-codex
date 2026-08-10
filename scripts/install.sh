@@ -8,6 +8,7 @@ SKILL_DIR="$CODEX_DIR/skills/better-codex"
 ISSUE_SKILL_DIR="$CODEX_DIR/skills/better-codex-issue"
 BETTER_CODEX_DIR="${BETTER_CODEX_HOME:-$HOME/.better-codex}"
 UPDATE_KEY_PATH="$BETTER_CODEX_DIR/update-public-key.pem"
+CHANNEL_PATH="$BETTER_CODEX_DIR/runtime/channel.json"
 INSTALL_LOCK_PATH="$BETTER_CODEX_DIR/install.lock"
 UPDATE_KEY_SHA256="1007607762db32004da21780e81875bef8453355a2944524a96e5341e1e3963e"
 MINIMUM_NODE_VERSION="22.5.0"
@@ -236,6 +237,18 @@ installation_ready() {
   printf '%s' "$output" | awk '/"ok":/ { found=1; ok=($0 ~ /true/); exit } END { if (!found || !ok) exit 1 }'
 }
 
+desired_update_channel() {
+  local version="$1" preserve_preview="$2"
+  if [ "$preserve_preview" = "1" ]; then printf 'preview'; return; fi
+  if printf '%s' "$version" | grep -Eq -- '-beta\.[1-9][0-9]*$'; then printf 'preview'; else printf 'stable'; fi
+}
+
+set_installed_channel() {
+  local binary="$1" channel="$2"
+  run_with_timeout 10 "$binary" update channel "$channel" >/dev/null
+  grep -Eq '"channel"[[:space:]]*:[[:space:]]*"'"$channel"'"' "$CHANNEL_PATH"
+}
+
 EXISTING_BINARY=""
 if [ -x "$BIN_DIR/better-codex" ]; then
   EXISTING_BINARY="$BIN_DIR/better-codex"
@@ -249,6 +262,7 @@ if [ -n "$EXISTING_BINARY" ]; then
 fi
 
 TARGET_VERSION=""
+PRESERVE_PREVIEW_LANE=0
 if [ -z "${BETTER_CODEX_ARCHIVE:-}" ]; then
   if [ -n "${BETTER_CODEX_VERSION:-}" ]; then
     TAG="$BETTER_CODEX_VERSION"
@@ -264,17 +278,20 @@ if [ -z "${BETTER_CODEX_ARCHIVE:-}" ]; then
       exit 1
     fi
     TAG="v$PREVIEW_VERSION"
+    PRESERVE_PREVIEW_LANE=1
   else
     TAG="$(curl -fsSIL --connect-timeout 15 --max-time 60 --retry 2 --retry-delay 1 -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest?better_codex_cache_bust=$(date +%s)" | sed 's#.*/##; s/[?].*$//')"
   fi
   case "$TAG" in v*) ;; *) TAG="v$TAG" ;; esac
   TARGET_VERSION="${TAG#v}"
 fi
+DESIRED_CHANNEL="$(desired_update_channel "$TARGET_VERSION" "$PRESERVE_PREVIEW_LANE")"
 
 if [ -n "$CURRENT_VERSION" ] && [ -n "$TARGET_VERSION" ] && version_at_least "$CURRENT_VERSION" "$TARGET_VERSION" && [ -f "$SKILL_DIR/SKILL.md" ] && [ -f "$UPDATE_KEY_PATH" ]; then
   UPDATE_CHECK=""
   if UPDATE_CHECK="$(run_with_timeout 20 "$EXISTING_BINARY" update check 2>/dev/null)" && printf '%s' "$UPDATE_CHECK" | grep -q '"checked":true' && ! printf '%s' "$UPDATE_CHECK" | grep -q '"available":true'; then
     if installation_ready "$EXISTING_BINARY"; then
+      set_installed_channel "$EXISTING_BINARY" "$DESIRED_CHANNEL"
       rm -rf "$ISSUE_SKILL_DIR"
       printf '[OK] Better Codex is up to date (v%s)\n' "$CURRENT_VERSION"
       exit 0
@@ -287,6 +304,7 @@ if [ -n "$CURRENT_VERSION" ] && [ -n "$TARGET_VERSION" ]; then
   UPDATE_CHECK=""
   if UPDATE_CHECK="$(run_with_timeout 20 "$EXISTING_BINARY" update check 2>/dev/null)" && printf '%s' "$UPDATE_CHECK" | grep -q '"checked":true'; then
     if version_at_least "$CURRENT_VERSION" "$TARGET_VERSION" && ! printf '%s' "$UPDATE_CHECK" | grep -q '"available":true' && installation_ready "$EXISTING_BINARY"; then
+      set_installed_channel "$EXISTING_BINARY" "$DESIRED_CHANNEL"
       rm -rf "$ISSUE_SKILL_DIR"
       printf '[OK] Better Codex is up to date (v%s)\n' "$CURRENT_VERSION"
       exit 0
@@ -310,6 +328,7 @@ if [ -n "$CURRENT_VERSION" ] && [ -n "$TARGET_VERSION" ]; then
         fi
       fi
       if [ "$UPGRADE_READY" = "1" ]; then
+        set_installed_channel "$EXISTING_BINARY" "$DESIRED_CHANNEL"
         rm -rf "$ISSUE_SKILL_DIR"
         printf '[OK] Better Codex upgraded to v%s\n' "$UPDATED_VERSION"
         exit 0
@@ -367,6 +386,7 @@ HAD_BUNDLE=0
 HAD_SKILL=0
 HAD_ISSUE_SKILL=0
 HAD_UPDATE_KEY=0
+HAD_CHANNEL=0
 PREVIOUS_SERVICE_INSTALLED=0
 PREVIOUS_SERVICE_RUNNING=0
 PREVIOUS_INJECTION_ENABLED=1
@@ -375,6 +395,7 @@ PREVIOUS_INJECTION_ENABLED=1
 [ -e "$SKILL_DIR" ] && { cp -R "$SKILL_DIR" "$BACKUP_DIR/better-codex-skill"; HAD_SKILL=1; }
 [ -e "$ISSUE_SKILL_DIR" ] && { cp -R "$ISSUE_SKILL_DIR" "$BACKUP_DIR/better-codex-issue-skill"; HAD_ISSUE_SKILL=1; }
 [ -e "$UPDATE_KEY_PATH" ] && { cp -p "$UPDATE_KEY_PATH" "$BACKUP_DIR/update-public-key.pem"; HAD_UPDATE_KEY=1; }
+[ -e "$CHANNEL_PATH" ] && { cp -p "$CHANNEL_PATH" "$BACKUP_DIR/channel.json"; HAD_CHANNEL=1; }
 if [ "$HAD_BINARY" = "1" ] && [ "$WITH_SERVICE" = "1" ]; then
   if ! PREVIOUS_SERVICE_STATUS="$(run_with_timeout 10 "$BIN_DIR/better-codex" service status 2>/dev/null)"; then
     echo "Unable to read the existing Better Codex service state; no installation changes were made." >&2
@@ -405,6 +426,7 @@ finish_install() {
     rm -rf "$ISSUE_SKILL_DIR"
     [ "$HAD_ISSUE_SKILL" = "1" ] && cp -R "$BACKUP_DIR/better-codex-issue-skill" "$ISSUE_SKILL_DIR"
     if [ "$HAD_UPDATE_KEY" = "1" ]; then cp -p "$BACKUP_DIR/update-public-key.pem" "$UPDATE_KEY_PATH"; else rm -f "$UPDATE_KEY_PATH"; fi
+    if [ "$HAD_CHANNEL" = "1" ]; then mkdir -p "$(dirname "$CHANNEL_PATH")"; cp -p "$BACKUP_DIR/channel.json" "$CHANNEL_PATH"; else rm -f "$CHANNEL_PATH"; fi
     if [ "$WITH_SERVICE" = "1" ] && [ "$HAD_BINARY" = "1" ]; then
       if [ "$PREVIOUS_SERVICE_INSTALLED" = "1" ]; then
         run_with_timeout 10 "$BIN_DIR/better-codex" service install >/dev/null 2>&1
@@ -552,6 +574,9 @@ if [ -n "$TARGET_VERSION" ] && { [ -z "$READY_VERSION" ] || ! version_at_least "
   printf '[Better Codex] Installed version %s does not match target v%s. Installation failed.\n' "${READY_VERSION:-unknown}" "$TARGET_VERSION" >&2
   exit 1
 fi
+if [ -z "$TARGET_VERSION" ]; then TARGET_VERSION="$PACKAGED_VERSION"; fi
+DESIRED_CHANNEL="$(desired_update_channel "$TARGET_VERSION" "$PRESERVE_PREVIEW_LANE")"
+set_installed_channel "$BIN_DIR/better-codex" "$DESIRED_CHANNEL"
 if [ "${BETTER_CODEX_SKIP_PATH_UPDATE:-0}" != "1" ] && ! printf '%s' ":$PATH:" | grep -q ":$BIN_DIR:"; then
   for RC in "$HOME/.zshrc" "$HOME/.bashrc"; do
     if [ -f "$RC" ] && ! grep -qF "$BIN_DIR" "$RC"; then

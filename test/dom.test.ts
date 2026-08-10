@@ -442,9 +442,17 @@ test("agent issue creation reserves enough height for its scaled footer", () => 
 test("issue detail dialog separates compact and expanded sizes", () => {
   const css = betterCodexDesignSystemCss();
 
-  assert.match(css, /#better-codex-dialog\[data-detail="true"\]\[data-expanded="false"\]\s*\{[^}]*width:\s*min\(720px,[^}]*height:\s*min\(62vh,\s*640px\)/s);
-  assert.match(css, /#better-codex-dialog\[data-detail="true"\]\[data-expanded="true"\]\s*\{[^}]*width:\s*min\(1200px,[^}]*height:\s*min\(90vh,\s*960px\)/s);
+  assert.match(css, /#better-codex-dialog\[data-detail="true"\]\[data-expanded="false"\]\s*\{[^}]*width:\s*min\(720px,[^}]*height:\s*fit-content;/s);
+  assert.match(css, /#better-codex-dialog\[data-detail="true"\]\[data-expanded="false"\]:has\(\.better-codex-conversation\)\s*\{[^}]*height:\s*min\(62vh,\s*640px\)/s);
+  assert.match(css, /#better-codex-dialog\[data-detail="true"\]\[data-expanded="true"\]\s*\{[^}]*width:\s*min\(1200px,[^}]*height:\s*fit-content;/s);
+  assert.match(css, /#better-codex-dialog\[data-detail="true"\]\[data-expanded="true"\]:has\(\.better-codex-conversation\)\s*\{[^}]*height:\s*min\(90vh,\s*960px\)/s);
   assert.match(css, /#better-codex-dialog\[data-detail="true"\]\[data-expanded="false"\],[\s\S]*?#better-codex-dialog\[data-detail="true"\]\[data-expanded="true"\]\s*\{\s*width:\s*calc\(100vw - 24px\);/s);
+});
+
+test("issue detail editors reveal their affordance on hover and focus", () => {
+  const css = betterCodexDesignSystemCss();
+
+  assert.match(css, /#better-codex-dialog\[data-detail="true"\] \.better-codex-manual-title:focus,[\s\S]*?\.better-codex-description-field:focus-within\s*\{[^}]*background:\s*var\(--bc-color-input\);[^}]*box-shadow:\s*var\(--bc-inset-hairline\),\s*var\(--bc-focus-ring\);/s);
 });
 
 test("issue submit buttons omit visual keyboard shortcut badges", () => {

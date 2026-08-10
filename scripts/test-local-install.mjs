@@ -86,8 +86,11 @@ try {
   if (versions.core !== packageJson.version) {
     throw new Error(`local_install_version_mismatch:expected=${packageJson.version}:actual=${versions.core ?? "unknown"}`);
   }
+  const expectedInstalledChannel = /-beta\.[1-9][0-9]*$/.test(packageJson.version) ? "preview" : "stable";
+  const installedChannel = JSON.parse(readFileSync(join(betterCodexHome, "runtime", "channel.json"), "utf8"));
+  if (installedChannel.channel !== expectedInstalledChannel) throw new Error(`local_install_channel_mismatch:expected=${expectedInstalledChannel}:actual=${installedChannel.channel}`);
   const preview = JSON.parse(run(["update", "channel", "preview"]));
-  if (preview.channel !== "preview" || preview.previous !== "stable") throw new Error("local_install_preview_channel_failed");
+  if (preview.channel !== "preview" || preview.previous !== expectedInstalledChannel) throw new Error("local_install_preview_channel_failed");
   const stable = JSON.parse(run(["update", "channel", "stable"]));
   if (stable.channel !== "stable" || stable.previous !== "preview") throw new Error("local_install_stable_channel_failed");
   console.log(JSON.stringify({ installed: true, reinstalled: true, platform, architecture, version: versions.core, channels: [preview.channel, stable.channel] }));

@@ -736,26 +736,29 @@ async function updateCoreUnlocked(payload?: UpdatePayload, channel: UpdateChanne
   const directory = resolve(runtimeRoot, manifest.core.version);
   const relation = relative(runtimeRoot, directory);
   if (!relation || relation.startsWith("..") || isAbsolute(relation)) throw new Error("update_core_invalid");
-  mkdirSync(directory, { recursive: true });
-  const executable = join(directory, packagedBuild ? "better-codex.cjs" : process.platform === "win32" ? "better-codex.exe" : "better-codex");
-  const temporary = packagedBuild ? `${executable}.${process.pid}.tmp.cjs` : process.platform === "win32" ? `${executable}.${process.pid}.tmp.exe` : `${executable}.${process.pid}.tmp`;
-  writeFileSync(temporary, content, { mode: 0o755 });
-  if (process.platform !== "win32") chmodSync(temporary, 0o755);
-  const validationInvocation = coreInvocation(temporary, ["version", "--json"]);
-  const validation = spawnSync(validationInvocation.command, validationInvocation.args, { encoding: "utf8", windowsHide: true, timeout: 15000, env: { ...process.env, BETTER_CODEX_DISABLE_DELEGATION: "1" } });
-  if (validation.status !== 0) throw new Error("core_validation_failed");
-  const version = JSON.parse(validation.stdout) as { core?: string };
-  if (version.core !== manifest.core.version) throw new Error("core_version_mismatch");
-  await validateCoreRuntime(temporary);
-  const current = effectiveCoreVersion();
-  if (compareVersions(manifest.core.version, current) <= 0) {
-    rmSync(temporary, { force: true });
-    return { updated: false, reason: "core_current", version: current };
+  const executableName = packagedBuild ? "better-codex.cjs" : process.platform === "win32" ? "better-codex.exe" : "better-codex";
+  const stagingDirectory = mkdtempSync(join(runtimeRoot, ".update-"));
+  const stagedExecutable = join(stagingDirectory, executableName);
+  try {
+    writeFileSync(stagedExecutable, content, { mode: 0o755 });
+    if (process.platform !== "win32") chmodSync(stagedExecutable, 0o755);
+    const validationInvocation = coreInvocation(stagedExecutable, ["version", "--json"]);
+    const validation = spawnSync(validationInvocation.command, validationInvocation.args, { encoding: "utf8", windowsHide: true, timeout: 15000, env: { ...process.env, BETTER_CODEX_DISABLE_DELEGATION: "1" } });
+    if (validation.status !== 0) throw new Error("core_validation_failed");
+    const version = JSON.parse(validation.stdout) as { core?: string };
+    if (version.core !== manifest.core.version) throw new Error("core_version_mismatch");
+    await validateCoreRuntime(stagedExecutable);
+    const current = effectiveCoreVersion();
+    if (compareVersions(manifest.core.version, current) <= 0) return { updated: false, reason: "core_current", version: current };
+    mkdirSync(directory, { recursive: true });
+    const executable = join(directory, executableName);
+    renameSync(stagedExecutable, executable);
+    const previous = readRuntimePointer();
+    writeJsonAtomic(runtimeCurrentPath, { current: manifest.core.version, previous: previous?.current ?? coreVersion, executable, updatedAt: new Date().toISOString() } satisfies RuntimePointer);
+    return { updated: true, previous: previous?.current ?? coreVersion, version: manifest.core.version, pendingRestart: true };
+  } finally {
+    try { rmSync(stagingDirectory, { recursive: true, force: true }); } catch {}
   }
-  renameSync(temporary, executable);
-  const previous = readRuntimePointer();
-  writeJsonAtomic(runtimeCurrentPath, { current: manifest.core.version, previous: previous?.current ?? coreVersion, executable, updatedAt: new Date().toISOString() } satisfies RuntimePointer);
-  return { updated: true, previous: previous?.current ?? coreVersion, version: manifest.core.version, pendingRestart: true };
 }
 
 export async function updateCore(payload?: UpdatePayload, channel: UpdateChannel = selectedUpdateChannel()) {

@@ -116,6 +116,60 @@ test("installers preserve the selected Preview lane during a legacy full migrati
   assert.match(shellSource, /Unable to resolve the signed Beta release; the existing installation was left unchanged/);
 });
 
+test("Windows installer maps an explicit Beta target to the Preview channel", {
+  skip: process.platform !== "win32" ? "requires Windows PowerShell 5.1" : false,
+}, () => {
+  const script = String.raw`
+$source = Get-Content -Raw -LiteralPath $env:BETTER_CODEX_INSTALLER_TEST_PATH
+$tokens = $null
+$parseErrors = $null
+$ast = [Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors.Count -gt 0) { throw ($parseErrors | Out-String) }
+foreach ($name in @("Get-DesiredUpdateChannel", "Set-InstalledUpdateChannel")) {
+  $function = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true)
+  if (-not $function) { throw "$name is missing" }
+  Invoke-Expression $function.Extent.Text
+}
+if ((Get-DesiredUpdateChannel "0.4.1-beta.3" $false) -ne "preview") { throw "Beta did not select Preview" }
+if ((Get-DesiredUpdateChannel "0.4.1" $false) -ne "stable") { throw "release did not select Stable" }
+if ((Get-DesiredUpdateChannel "0.4.1" $true) -ne "preview") { throw "persisted Preview lane was not preserved" }
+$script:CapturedArguments = @()
+function Invoke-BetterCodexCapture {
+  param([string]$Entrypoint, [string[]]$Arguments, [int]$TimeoutMilliseconds)
+  $script:CapturedArguments = @($Arguments)
+  return [pscustomobject]@{ ExitCode = 0; Stdout = '{"channel":"preview","previous":"stable"}' }
+}
+Set-InstalledUpdateChannel "better-codex.exe" "preview"
+if (($script:CapturedArguments -join " ") -ne "update channel preview") { throw "Preview channel command was not issued" }
+`;
+  const result = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+    encoding: "utf8",
+    env: { ...process.env, BETTER_CODEX_INSTALLER_TEST_PATH: installerPath.pathname.replace(/^\/(.:)/, "$1") },
+  });
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+});
+
+test("every successful installer path persists its inferred update channel", () => {
+  assert.match(source, /function Set-InstalledUpdateChannel/);
+  assert.equal((source.match(/Set-InstalledUpdateChannel \$[A-Za-z]+ \$desiredChannel/g) ?? []).length, 4);
+  const windowsReady = source.indexOf("$readyVersion = Get-InstalledVersion $executable");
+  const windowsChannel = source.indexOf("Set-InstalledUpdateChannel $executable $desiredChannel", windowsReady);
+  const windowsLegacyRemoval = source.indexOf("Removing the verified legacy executable", windowsReady);
+  assert.ok(windowsReady >= 0 && windowsChannel > windowsReady && windowsLegacyRemoval > windowsChannel);
+  assert.match(source, /if \(\$hadChannel\) \{ Copy-Item -Force \$channelPath \$backupChannel \}/);
+  assert.match(source, /Copy-Item -Force \$backupChannel \$channelPath/);
+
+  assert.match(shellSource, /desired_update_channel\(\)/);
+  assert.match(shellSource, /-beta\\\.\[1-9\]\[0-9\]\*\$/);
+  assert.match(shellSource, /set_installed_channel\(\)/);
+  assert.equal((shellSource.match(/set_installed_channel "[^"]+" "\$DESIRED_CHANNEL"/g) ?? []).length, 4);
+  const macReady = shellSource.indexOf('READY_VERSION="$(installed_version "$BIN_DIR/better-codex"');
+  const macChannel = shellSource.indexOf('set_installed_channel "$BIN_DIR/better-codex" "$DESIRED_CHANNEL"', macReady);
+  assert.ok(macReady >= 0 && macChannel > macReady);
+  assert.match(shellSource, /cp -p "\$CHANNEL_PATH" "\$BACKUP_DIR\/channel.json"/);
+  assert.match(shellSource, /cp -p "\$BACKUP_DIR\/channel.json" "\$CHANNEL_PATH"/);
+});
+
 test("Windows installer bounds a native command that never exits", {
   skip: process.platform !== "win32" ? "requires Windows PowerShell 5.1" : false,
 }, () => {

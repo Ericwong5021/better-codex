@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -266,6 +266,47 @@ test("update and rollback operations refuse a live cross-process lock", () => {
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /update_in_progress/);
     assert.equal(readFileSync(join(runtime, "update.json.lock"), "utf8"), JSON.stringify({ pid: process.pid, token: "live-test-owner" }));
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("failed core validation never creates a manifest-derived version directory", () => {
+  const home = mkdtempSync(join(tmpdir(), "better-codex-update-staging-"));
+  const nextVersion = "0.4.2-beta.99";
+  const core = Buffer.from("process.exit(3);\n");
+  try {
+    const assetKey = `${process.platform}-${process.arch === "x64" ? "amd64" : process.arch}`;
+    const script = `
+globalThis.__BETTER_CODEX_PACKAGED__ = true;
+const core = Buffer.from(${JSON.stringify(core.toString("base64"))}, "base64");
+const originalFetch = globalThis.fetch;
+globalThis.fetch = (input, init) => String(input instanceof Request ? input.url : input) === "https://example.invalid/untrusted-core"
+  ? Promise.resolve(new Response(core, { status: 200 }))
+  : originalFetch(input, init);
+const updater = await import("./src/updater.ts");
+try {
+  await updater.updateCore({
+    schemaVersion: 1,
+    channel: "preview",
+    generatedAt: new Date().toISOString(),
+    compatibility: null,
+    core: { version: "${nextVersion}", assets: { "${assetKey}": { url: "https://example.invalid/untrusted-core", sha256: "${createHash("sha256").update(core).digest("hex")}" } } },
+  }, "preview");
+  console.log("unexpected_success");
+} catch (error) {
+  console.log(error instanceof Error ? error.message : String(error));
+}
+`;
+    const update = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "--eval", script], {
+      cwd: root,
+      encoding: "utf8",
+      env: { ...process.env, BETTER_CODEX_HOME: home, BETTER_CODEX_DISABLE_DELEGATION: "1" },
+      timeout: 30_000,
+    });
+    assert.equal(update.status, 0, `${update.stdout}\n${update.stderr}`);
+    assert.match(update.stdout, /core_validation_failed/);
+    assert.equal(existsSync(join(home, "runtime", "versions", nextVersion)), false);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
