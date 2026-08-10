@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
+import { createServer as createTcpServer } from "node:net";
 import test from "node:test";
 
 test("a CDP WebSocket child process closes cleanly on supported Node versions", async () => {
@@ -46,6 +47,102 @@ test("a CDP WebSocket child process closes cleanly on supported Node versions", 
     assert.match(stdout, /closed/);
     assert.doesNotMatch(stderr, /Assertion failed|UV_HANDLE_CLOSING/);
   } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});
+
+test("a half-open CDP HTTP endpoint is bounded", async () => {
+  const sockets = new Set<import("node:net").Socket>();
+  const server = createTcpServer(socket => {
+    sockets.add(socket);
+    socket.on("close", () => sockets.delete(socket));
+    setTimeout(() => socket.destroy(), 500).unref();
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => resolve());
+  });
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    const { probeCdpTargetsForTest, waitForCdpTargetsForTest } = await import("../src/cdp.js");
+    const started = Date.now();
+    await assert.rejects(() => probeCdpTargetsForTest(address.port, 100), /cdp_unavailable_.*_timeout/);
+    assert.ok(Date.now() - started < 2_000, "stalled CDP probe exceeded its timeout budget");
+    const waitStarted = Date.now();
+    await assert.rejects(() => waitForCdpTargetsForTest(address.port, 250), /cdp_unavailable_/);
+    assert.ok(Date.now() - waitStarted < 2_000, "target wait exceeded its overall deadline");
+  } finally {
+    for (const socket of sockets) socket.destroy();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});
+
+test("the overall target deadline includes a CDP command that never replies", async () => {
+  const sockets = new Set<import("node:net").Socket>();
+  const server = createServer((_request, response) => {
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify([{
+      id: "stalled-renderer",
+      type: "page",
+      title: "Codex",
+      url: "app://codex/",
+      webSocketDebuggerUrl: `ws://127.0.0.1:${address.port}`,
+    }]));
+  });
+  server.on("upgrade", (request, socket) => {
+    sockets.add(socket);
+    socket.on("close", () => sockets.delete(socket));
+    const key = String(request.headers["sec-websocket-key"] ?? "");
+    const accept = createHash("sha1").update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest("base64");
+    socket.write([
+      "HTTP/1.1 101 Switching Protocols",
+      "Upgrade: websocket",
+      "Connection: Upgrade",
+      `Sec-WebSocket-Accept: ${accept}`,
+      "",
+      "",
+    ].join("\r\n"));
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => resolve());
+  });
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    const { waitForCdpTargetsForTest } = await import("../src/cdp.js");
+    const started = Date.now();
+    await assert.rejects(() => waitForCdpTargetsForTest(address.port, 250), /cdp_unavailable_/);
+    assert.ok(Date.now() - started < 2_000, "CDP command exceeded the overall target deadline");
+  } finally {
+    for (const socket of sockets) socket.destroy();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});
+
+test("a half-open CDP WebSocket handshake is bounded and closed", async () => {
+  const sockets = new Set<import("node:net").Socket>();
+  const server = createTcpServer(socket => {
+    sockets.add(socket);
+    socket.on("close", () => sockets.delete(socket));
+    setTimeout(() => socket.destroy(), 500).unref();
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => resolve());
+  });
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    const { closeCdpConnectionForTest } = await import("../src/cdp.js");
+    const started = Date.now();
+    await assert.rejects(() => closeCdpConnectionForTest(`ws://127.0.0.1:${address.port}`, 100), /cdp_websocket_timeout/);
+    assert.ok(Date.now() - started < 2_000, "stalled WebSocket handshake exceeded its timeout budget");
+  } finally {
+    for (const socket of sockets) socket.destroy();
     await new Promise<void>(resolve => server.close(() => resolve()));
   }
 });

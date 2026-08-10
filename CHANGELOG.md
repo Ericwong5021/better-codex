@@ -4,6 +4,19 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.1-beta.1] - 2026-08-10
+
+### Added
+
+- Add a persistent Preview update channel for Beta testers while keeping the same Better Codex configuration and data directory.
+- Publish signed Beta artifacts through a dedicated GitHub prerelease workflow without changing the stable or Homebrew release lanes.
+
+### Fixed
+
+- Prevent Windows upgrades and rollbacks from stalling when a surviving Codex process leaves the CDP endpoint connected but unresponsive.
+- Bound installer, CDP HTTP, and WebSocket operations with explicit timeouts and clean up the complete Codex process tree after helper shutdown.
+- Apply the same bounded command execution to macOS installation, upgrade, setup, diagnostics, and rollback paths.
+
 ## [0.4.0] - 2026-08-10
 
 ### Added
@@ -213,7 +226,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1-beta.1...HEAD
+[0.4.1-beta.1]: https://github.com/Ericwong5021/better-codex/compare/v0.4.0...v0.4.1-beta.1
 [0.4.0]: https://github.com/Ericwong5021/better-codex/compare/v0.3.17...v0.4.0
 [0.3.17]: https://github.com/Ericwong5021/better-codex/compare/v0.3.16...v0.3.17
 [0.3.16]: https://github.com/Ericwong5021/better-codex/compare/v0.3.15...v0.3.16

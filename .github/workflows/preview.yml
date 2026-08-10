@@ -1,10 +1,9 @@
-name: Release
+name: Preview
 
 on:
   push:
     tags:
-      - "v*"
-      - "!v*-*"
+      - "v*-beta.*"
 
 permissions:
   contents: write
@@ -15,14 +14,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  validate-release:
+  validate-preview:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22.22.0
-      - name: Validate release version and changelog
+      - name: Validate Beta version and changelog
         shell: bash
         run: |
           set -euo pipefail
@@ -30,25 +29,25 @@ jobs:
           lock_version="$(node -p "require('./package-lock.json').packages[''].version")"
           core_version="$(node -e "const source=require('fs').readFileSync('src/compatibility.ts','utf8'); const match=source.match(/export const coreVersion = \"([^\"]+)\"/); process.stdout.write(match?.[1] || '')")"
           expected_tag="v$version"
-          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            printf 'Package version %s is not a release version.\n' "$version" >&2
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-beta\.[1-9][0-9]*$ ]]; then
+            printf 'Package version %s is not a Beta version.\n' "$version" >&2
             exit 1
           fi
           if [ "$GITHUB_REF_NAME" != "$expected_tag" ]; then
-            printf 'Release tag %s does not match package version %s.\n' "$GITHUB_REF_NAME" "$version" >&2
+            printf 'Preview tag %s does not match package version %s.\n' "$GITHUB_REF_NAME" "$version" >&2
             exit 1
           fi
           if [ "$lock_version" != "$version" ] || [ "$core_version" != "$version" ]; then
             printf 'Version mismatch: package=%s lock=%s core=%s.\n' "$version" "$lock_version" "$core_version" >&2
             exit 1
           fi
-          escaped_version="${version//./\\.}"
-          heading_count="$(grep -Ec "^## \\[$escaped_version\\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$" CHANGELOG.md || true)"
+          heading="## [$version] - "
+          heading_count="$(grep -Fc "$heading" CHANGELOG.md || true)"
           if [ "$heading_count" != "1" ]; then
             printf 'CHANGELOG.md must contain exactly one dated section for version %s.\n' "$version" >&2
             exit 1
           fi
-          entry_count="$(awk -v heading="## [$version] - " '
+          entry_count="$(awk -v heading="$heading" '
             index($0, heading) == 1 { inside = 1; next }
             inside && /^## \[/ { exit }
             inside && /^- / { count += 1 }
@@ -58,8 +57,7 @@ jobs:
             printf 'CHANGELOG.md must contain at least one change for version %s.\n' "$version" >&2
             exit 1
           fi
-          link_count="$(grep -Fc "[$version]:" CHANGELOG.md || true)"
-          if [ "$link_count" != "1" ]; then
+          if [ "$(grep -Fc "[$version]:" CHANGELOG.md || true)" != "1" ]; then
             printf 'CHANGELOG.md must contain exactly one link for version %s.\n' "$version" >&2
             exit 1
           fi
@@ -67,9 +65,13 @@ jobs:
             printf 'The Unreleased changelog link must start after %s.\n' "$expected_tag" >&2
             exit 1
           fi
+          stable_tag="$(gh release view --json tagName --jq .tagName)"
+          node scripts/preview-feed.mjs newer "$version" "${stable_tag#v}"
+        env:
+          GH_TOKEN: ${{ github.token }}
 
   package:
-    needs: validate-release
+    needs: validate-preview
     strategy:
       matrix:
         runner:
@@ -95,10 +97,9 @@ jobs:
         with:
           name: better-codex-${{ matrix.runner }}
           path: |
-            release/better-codex-cli-*
             release/better-codex-core-*
 
-  release:
+  release-preview:
     needs: package
     runs-on: ubuntu-latest
     steps:
@@ -113,41 +114,35 @@ jobs:
         with:
           path: release
           merge-multiple: true
-      - env:
-          BETTER_CODEX_UPDATE_PRIVATE_KEY: ${{ secrets.BETTER_CODEX_UPDATE_PRIVATE_KEY }}
-        run: npm run package:update-manifest
-      - run: cp scripts/install.sh scripts/install.ps1 release/
-      - run: find release -type f \( -name '*.tar.gz' -o -name '*.zip' \) -exec sha256sum {} \; | sed 's#release/##' > release/checksums.txt
-      - name: Prepare the promoted Preview feed before publishing
+      - name: Create signed Preview manifest
         env:
           BETTER_CODEX_UPDATE_CHANNEL: preview
           BETTER_CODEX_UPDATE_PRIVATE_KEY: ${{ secrets.BETTER_CODEX_UPDATE_PRIVATE_KEY }}
-        run: |
-          cp -a release preview-release
-          node scripts/create-update-manifest.mjs preview-release
-          node scripts/preview-feed.mjs verify-channel stable release/update-manifest.json assets/update-public-key.pem
-          node scripts/preview-feed.mjs verify-channel preview preview-release/update-manifest.json assets/update-public-key.pem
+        run: npm run package:update-manifest
       - uses: actions/upload-artifact@v4
         with:
           name: preview-feed-manifest
-          path: preview-release/update-manifest.json
-      - env:
+          path: release/update-manifest.json
+      - name: Publish versioned Beta release
+        env:
           GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
           set -euo pipefail
+          assets=(release/better-codex-core-* release/better-codex-compatibility-*.json release/update-manifest.json)
           if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
-            test "$(gh release view "${GITHUB_REF_NAME}" --json tagName,isDraft,isPrerelease --jq '[.tagName, .isDraft, .isPrerelease] | @tsv')" = "${GITHUB_REF_NAME}"$'\tfalse\tfalse'
-            gh release upload "${GITHUB_REF_NAME}" release/* --clobber
+            test "$(gh release view "${GITHUB_REF_NAME}" --json tagName,isDraft,isPrerelease --jq '[.tagName, .isDraft, .isPrerelease] | @tsv')" = "${GITHUB_REF_NAME}"$'\tfalse\ttrue'
+            gh release upload "${GITHUB_REF_NAME}" "${assets[@]}" --clobber
           else
-            gh release create "${GITHUB_REF_NAME}" release/* --generate-notes --verify-tag
+            gh release create "${GITHUB_REF_NAME}" "${assets[@]}" --prerelease --latest=false --generate-notes --verify-tag
           fi
-          for path in release/*; do
+          for path in "${assets[@]}"; do
             name="$(basename "$path")"
             gh release view "${GITHUB_REF_NAME}" --json assets --jq '.assets[].name' | grep -Fxq "$name"
           done
 
   refresh-preview-feed:
-    needs: release
+    needs: release-preview
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -159,41 +154,3 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash scripts/promote-preview-feed.sh preview-feed/update-manifest.json
-
-  update-homebrew-formula:
-    needs: release
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          path: release
-          merge-multiple: true
-      - run: git fetch origin main && git checkout -B main origin/main
-      - name: Refuse to downgrade the Homebrew formula
-        shell: bash
-        run: |
-          set -euo pipefail
-          current="$(sed -n 's/^  version "\([0-9][0-9.]*\)"$/\1/p' Formula/better-codex.rb)"
-          next="${GITHUB_REF_NAME#v}"
-          node -e '
-            const [current, next] = process.argv.slice(1);
-            const parts = value => value.split(".").map(Number);
-            const left = parts(current);
-            const right = parts(next);
-            const comparison = left.findIndex((value, index) => value !== right[index]);
-            if (comparison >= 0 && left[comparison] > right[comparison]) {
-              console.error(`Refusing to downgrade Homebrew formula from ${current} to ${next}.`);
-              process.exit(1);
-            }
-          ' "$current" "$next"
-      - run: sha256sum release/*.tar.gz | sed 's#release/##' > release/checksums.txt
-      - run: node scripts/render-homebrew-formula.mjs --version "${GITHUB_REF_NAME#v}" --checksums release/checksums.txt --output Formula/better-codex.rb
-      - run: |
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add Formula/better-codex.rb
-          git commit -m "chore(release): better-codex ${GITHUB_REF_NAME#v}"
-          git fetch origin main
-          git rebase origin/main
-          git push origin HEAD:main

@@ -23,22 +23,44 @@ type CdpReply = {
   error?: { message?: string };
 };
 
+const cdpHttpTimeoutMs = 1500;
+const cdpWebSocketOpenTimeoutMs = 2000;
+const cdpCommandTimeoutMs = 8000;
+const cdpTargetScanTimeoutMs = 30_000;
+const cdpTargetCandidateLimit = 32;
+
 class Connection {
   private sequence = 0;
   private socket: WebSocket;
 
-  constructor(url: string) {
+  constructor(
+    url: string,
+    private readonly openTimeoutMs = cdpWebSocketOpenTimeoutMs,
+    private readonly commandTimeoutMs = cdpCommandTimeoutMs,
+    private readonly deadlineAt?: number,
+  ) {
     this.socket = new WebSocket(url);
+  }
+
+  private timeoutBudget(limit: number) {
+    if (this.deadlineAt === undefined) return limit;
+    return Math.max(1, Math.min(limit, this.deadlineAt - Date.now()));
   }
 
   open() {
     return new Promise<void>((resolve, reject) => {
       const cleanup = () => {
+        clearTimeout(timer);
         this.socket.removeEventListener("open", onOpen);
         this.socket.removeEventListener("error", onError);
       };
       const onOpen = () => { cleanup(); resolve(); };
       const onError = () => { cleanup(); reject(new Error("cdp_websocket_error")); };
+      const timer = setTimeout(() => {
+        cleanup();
+        try { this.socket.close(); } catch {}
+        reject(new Error("cdp_websocket_timeout"));
+      }, this.timeoutBudget(this.openTimeoutMs));
       this.socket.addEventListener("open", onOpen, { once: true });
       this.socket.addEventListener("error", onError, { once: true });
     });
@@ -47,17 +69,35 @@ class Connection {
   send(method: string, params: Record<string, unknown> = {}) {
     const id = ++this.sequence;
     return new Promise<Record<string, unknown>>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`cdp_timeout_${method}`)), 8000);
-      const onMessage = (event: MessageEvent) => {
-        const reply = JSON.parse(String(event.data)) as CdpReply;
-        if (reply.id !== id) return;
+      const cleanup = () => {
         clearTimeout(timer);
         this.socket.removeEventListener("message", onMessage);
-        if (reply.error) reject(new Error(reply.error.message ?? "cdp_error"));
-        else resolve((reply.result ?? {}) as Record<string, unknown>);
+        this.socket.removeEventListener("close", onClose);
+        this.socket.removeEventListener("error", onError);
       };
+      const finish = (error: Error | null, result?: Record<string, unknown>) => {
+        cleanup();
+        if (error) reject(error);
+        else resolve(result ?? {});
+      };
+      const onMessage = (event: MessageEvent) => {
+        let reply: CdpReply;
+        try { reply = JSON.parse(String(event.data)) as CdpReply; } catch { return; }
+        if (reply.id !== id) return;
+        if (reply.error) finish(new Error(reply.error.message ?? "cdp_error"));
+        else finish(null, (reply.result ?? {}) as Record<string, unknown>);
+      };
+      const onClose = () => finish(new Error(`cdp_closed_${method}`));
+      const onError = () => finish(new Error("cdp_websocket_error"));
+      const timer = setTimeout(() => finish(new Error(`cdp_timeout_${method}`)), this.timeoutBudget(this.commandTimeoutMs));
       this.socket.addEventListener("message", onMessage);
-      this.socket.send(JSON.stringify({ id, method, params }));
+      this.socket.addEventListener("close", onClose, { once: true });
+      this.socket.addEventListener("error", onError, { once: true });
+      try {
+        this.socket.send(JSON.stringify({ id, method, params }));
+      } catch (error) {
+        finish(error instanceof Error ? error : new Error("cdp_send_failed"));
+      }
     });
   }
 
@@ -102,6 +142,7 @@ async function bridgeRequest(connection: Connection, runtimePort: number, access
     if (!requestId || request.token !== accessToken || !/^\/api\/(?:bootstrap(?:[?]|$)|update(?:\/(?:install|check))?(?:[?]|$)|projects(?:\/ensure)?(?:[?]|$)|issues(?:[/?]|$)|agents(?:[/?]|$)|mockup\/(?:state|reset)(?:[?]|$)|settings\/auto-dispatch(?:[?]|$)|settings\/scheduler-model(?:[?]|$)|settings\/scheduler-reasoning-effort(?:[?]|$))/.test(path) || !["GET", "POST", "PUT", "PATCH", "DELETE"].includes(method)) throw new Error("invalid_bridge_request");
     const response = await fetch(`http://127.0.0.1:${runtimePort}${path}`, {
       method,
+      signal: AbortSignal.timeout(cdpCommandTimeoutMs),
       headers: {
         authorization: `Bearer ${accessToken}`,
         "content-type": "application/json",
@@ -116,22 +157,25 @@ async function bridgeRequest(connection: Connection, runtimePort: number, access
   await evaluate(connection, `window.__betterCodexBridgeResolve?.(${JSON.stringify(requestId)}, ${JSON.stringify(result)})`);
 }
 
-async function targets(port: number) {
-  let response: Response;
+async function cdpJson<T>(port: number, path: string, timeoutMs = cdpHttpTimeoutMs) {
   try {
-    response = await fetch(`http://127.0.0.1:${port}/json/list`);
-  } catch {
-    throw new Error(`cdp_unavailable_${port}`);
+    const response = await fetch(`http://127.0.0.1:${port}${path}`, { signal: AbortSignal.timeout(timeoutMs) });
+    if (!response.ok) throw new Error(`cdp_http_${response.status}`);
+    return await response.json() as T;
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("cdp_http_")) throw error;
+    const suffix = error instanceof Error && ["AbortError", "TimeoutError"].includes(error.name) ? "_timeout" : "";
+    throw new Error(`cdp_unavailable_${port}${suffix}`);
   }
-  if (!response.ok) throw new Error(`cdp_http_${response.status}`);
-  const values = await response.json() as Target[];
+}
+
+async function targets(port: number, timeoutMs = cdpHttpTimeoutMs) {
+  const values = await cdpJson<Target[]>(port, "/json/list", timeoutMs);
   return values.filter(target => target.type === "page" && target.webSocketDebuggerUrl && target.id && targetAllowed(target));
 }
 
 async function browserDebuggerUrl(port: number) {
-  const response = await fetch(`http://127.0.0.1:${port}/json/version`);
-  if (!response.ok) throw new Error(`cdp_http_${response.status}`);
-  const value = await response.json() as { webSocketDebuggerUrl?: unknown };
+  const value = await cdpJson<{ webSocketDebuggerUrl?: unknown }>(port, "/json/version");
   if (typeof value.webSocketDebuggerUrl !== "string") throw new Error("cdp_browser_websocket_unavailable");
   return value.webSocketDebuggerUrl;
 }
@@ -142,12 +186,27 @@ async function evaluate(connection: Connection, expression: string) {
   return payload?.value;
 }
 
-async function mainTargets(port: number, options: { trustIds?: Set<string> } = {}) {
+type MainTargetOptions = { trustIds?: Set<string>; requestTimeoutMs?: number; deadlineAt?: number };
+
+function targetTimeout(options: MainTargetOptions, limit: number) {
+  const requestLimit = options.requestTimeoutMs === undefined ? limit : Math.min(limit, options.requestTimeoutMs);
+  if (options.deadlineAt === undefined) return Math.max(1, requestLimit);
+  return Math.max(1, Math.min(requestLimit, options.deadlineAt - Date.now()));
+}
+
+async function mainTargets(port: number, options: MainTargetOptions = {}) {
+  const boundedOptions = { ...options, deadlineAt: options.deadlineAt ?? Date.now() + cdpTargetScanTimeoutMs };
   if (!activeCompatibility().supportedPlatforms.some(platform => platform === process.platform)) {
     writeCompatibilityStatus({ codexVersion: null, compatible: false, reason: "unsupported_platform", targetId: null, capabilities: null });
     throw new Error(`codex_incompatible_unsupported_platform_${process.platform}`);
   }
-  const candidates = await targets(port);
+  const discovered = await targets(port, targetTimeout(boundedOptions, cdpHttpTimeoutMs));
+  const candidates = boundedOptions.trustIds?.size
+    ? [
+        ...discovered.filter(target => boundedOptions.trustIds!.has(target.id)),
+        ...discovered.filter(target => !boundedOptions.trustIds!.has(target.id)),
+      ].slice(0, cdpTargetCandidateLimit)
+    : discovered.slice(0, cdpTargetCandidateLimit);
   const selected: Target[] = [];
   const codexVersion = desktopVersion();
   let lastReason = "renderer_not_found";
@@ -155,11 +214,17 @@ async function mainTargets(port: number, options: { trustIds?: Set<string> } = {
   let lastCapabilities: RendererCapabilities | null = null;
   let compatibleCapabilities: RendererCapabilities | null = null;
   for (const target of candidates) {
-    if (options.trustIds?.has(target.id)) {
+    if (boundedOptions.trustIds?.has(target.id)) {
       selected.push(target);
       continue;
     }
-    const connection = new Connection(target.webSocketDebuggerUrl!);
+    if (Date.now() >= boundedOptions.deadlineAt) throw new Error(`cdp_unavailable_${port}_timeout`);
+    const connection = new Connection(
+      target.webSocketDebuggerUrl!,
+      targetTimeout(boundedOptions, cdpWebSocketOpenTimeoutMs),
+      targetTimeout(boundedOptions, cdpCommandTimeoutMs),
+      boundedOptions.deadlineAt,
+    );
     try {
       await connection.open();
       const capabilities = await evaluate(connection, capabilityExpression()) as RendererCapabilities;
@@ -181,11 +246,12 @@ async function mainTargets(port: number, options: { trustIds?: Set<string> } = {
     }
   }
   if (selected.length > 0) {
-    if (!options.trustIds?.size) {
+    if (!boundedOptions.trustIds?.size) {
       writeCompatibilityStatus({ codexVersion, compatible: true, reason: null, targetId: selected[0].id, capabilities: compatibleCapabilities });
     }
     return selected;
   }
+  if (Date.now() >= boundedOptions.deadlineAt) throw new Error(`cdp_unavailable_${port}_timeout`);
   writeCompatibilityStatus({ codexVersion, compatible: false, reason: lastReason, targetId: lastTargetId, capabilities: lastCapabilities });
   if (candidates.length > 0) throw new Error(`codex_incompatible_${lastReason}`);
   return [];
@@ -361,10 +427,11 @@ function confirmCodexQuit() {
 
 async function quitCodex() {
   if (process.platform === "win32") {
-    const desktopProcesses = "$processes = @(Get-CimInstance Win32_Process -Filter \"Name = 'ChatGPT.exe'\" | Where-Object { $_.CommandLine -notmatch \"--type=\" }); if ($processes.Count -gt 0) { $processes | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } }; exit 0";
-    execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", desktopProcesses], { stdio: "ignore", windowsHide: true });
+    const ownedPackageProcesses = "$sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId; $ownerSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value; @(Get-CimInstance Win32_Process -Filter \"Name = 'ChatGPT.exe'\" | Where-Object { if ($_.SessionId -ne $sessionId -or $_.ExecutablePath -notlike \"*\\WindowsApps\\OpenAI.Codex_*\") { return $false }; try { return (Invoke-CimMethod -InputObject $_ -MethodName GetOwnerSid -ErrorAction Stop).Sid -eq $ownerSid } catch { return $false } })";
+    const packageProcesses = `$processes = ${ownedPackageProcesses}; if ($processes.Count -gt 0) { $processes | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } }; exit 0`;
+    execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", packageProcesses], { stdio: "ignore", windowsHide: true });
     for (let attempt = 0; attempt < 40; attempt += 1) {
-      const count = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "$count = @(Get-CimInstance Win32_Process -Filter \"Name = 'ChatGPT.exe'\" | Where-Object { $_.CommandLine -notmatch \"--type=\" }).Count; Write-Output $count; exit 0"], { encoding: "utf8", windowsHide: true }).trim();
+      const count = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `$count = (${ownedPackageProcesses}).Count; Write-Output $count; exit 0`], { encoding: "utf8", windowsHide: true }).trim();
       if (Number(count) === 0) return;
       await new Promise(resolve => setTimeout(resolve, 250));
     }
@@ -393,27 +460,33 @@ async function quitCodex() {
   throw new Error("codex_quit_timeout");
 }
 
-async function waitForTargets(port: number) {
+async function waitForTargetsWithin(port: number, timeoutMs: number) {
+  const deadline = Date.now() + timeoutMs;
   let incompatibility: Error | null = null;
-  for (let attempt = 0; attempt < 200; attempt += 1) {
+  while (Date.now() < deadline) {
     try {
-      const values = await mainTargets(port);
+      const values = await mainTargets(port, { deadlineAt: deadline });
       if (values.length > 0) return values;
     } catch (error) {
       if (error instanceof Error && error.message.startsWith("codex_incompatible_")) {
         incompatibility = error;
       }
     }
+    if (Date.now() >= deadline) break;
     await new Promise(resolve => setTimeout(resolve, 150));
   }
   if (incompatibility) throw incompatibility;
   throw new Error(`cdp_unavailable_${port}`);
 }
 
+async function waitForTargets(port: number) {
+  return waitForTargetsWithin(port, 30_000);
+}
+
 async function installTarget(target: Target, runtimePort: number, accessToken: string) {
   const connection = new Connection(target.webSocketDebuggerUrl!);
-  await connection.open();
   try {
+    await connection.open();
     await connection.send("Page.enable");
     await connection.send("Page.setBypassCSP", { enabled: true });
     await connection.send("Runtime.enable");
@@ -447,8 +520,8 @@ type InjectionOwnership = { profile: string; endpoint?: string; allowLegacyProfi
 
 async function uninstallTarget(target: Target, accessToken: string, ownership?: InjectionOwnership) {
   const connection = new Connection(target.webSocketDebuggerUrl!);
-  await connection.open();
   try {
+    await connection.open();
     await connection.send("Page.enable");
     await connection.send("Runtime.enable");
     const existing = await evaluate(connection, "({ profile: window.__betterCodexInjection__?.profile || null, endpoint: window.__betterCodexInjection__?.endpoint || null })") as { profile?: string; endpoint?: string };
@@ -517,8 +590,8 @@ export async function cdpStatus(port: number) {
     const rendered = [];
     for (const target of values) {
       const connection = new Connection(target.webSocketDebuggerUrl!);
-      await connection.open();
       try {
+        await connection.open();
         const value = await evaluate(connection, `({
           version: window.__betterCodexInjection__?.version || null,
           profile: window.__betterCodexInjection__?.profile || null,
@@ -543,8 +616,8 @@ export async function cdpOpenThread(port: number, threadId: string) {
   const target = values[0];
   if (!target) throw new Error("cdp_main_renderer_not_found");
   const connection = new Connection(target.webSocketDebuggerUrl!);
-  await connection.open();
   try {
+    await connection.open();
     return await evaluate(connection, navigationExpression(threadId));
   } finally {
     await connection.close();
@@ -709,8 +782,19 @@ export async function watchInjection(port: number, accessToken: string) {
   }
 }
 
-export async function closeCdpConnectionForTest(url: string) {
-  const connection = new Connection(url);
-  await connection.open();
-  await connection.close();
+export async function probeCdpTargetsForTest(port: number, timeoutMs: number) {
+  return targets(port, timeoutMs);
+}
+
+export async function waitForCdpTargetsForTest(port: number, timeoutMs: number) {
+  return waitForTargetsWithin(port, timeoutMs);
+}
+
+export async function closeCdpConnectionForTest(url: string, openTimeoutMs = cdpWebSocketOpenTimeoutMs) {
+  const connection = new Connection(url, openTimeoutMs);
+  try {
+    await connection.open();
+  } finally {
+    await connection.close();
+  }
 }

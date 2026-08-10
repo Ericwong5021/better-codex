@@ -33,7 +33,7 @@ import { installLaunchIntegration, launchIntegrationStatus, uninstallLaunchInteg
 import { readCodexLocale } from "./locale.js";
 import { betterCodexMcpName, startMcpAppServer } from "./mcp-app.js";
 import { installService, restartService, serviceLogs, serviceStatus, startService, stopService, uninstallService } from "./service.js";
-import { activeVersions, checkForUpdates, maybeDelegateToActiveCore, recordGatewayUpdateActivation, rollbackCompatibilityUpdate, rollbackCoreUpdate, updateAll, updateCompatibility } from "./updater.js";
+import { activeVersions, checkForUpdates, maybeDelegateToActiveCore, recordGatewayUpdateActivation, rollbackActivatedUpdate, rollbackAllUpdates, selectedUpdateChannel, setUpdateChannel, updateAll, updateCompatibility, type UpdateChannel } from "./updater.js";
 
 function accessToken() {
   return token();
@@ -298,8 +298,7 @@ async function applyUpdate(previousRuntimePid: number, updates: { core: string |
     recordGatewayUpdateActivation("success");
     return { updated: true, runtime, injection, launchIntegration };
   } catch (error) {
-    if (updates.core) rollbackCoreUpdate(updates.core);
-    if (updates.compatibility) rollbackCompatibilityUpdate(updates.compatibility);
+    rollbackActivatedUpdate(updates);
     try {
       installService();
       await ensureRuntime();
@@ -625,7 +624,7 @@ function print(value: unknown) {
 }
 
 function usage() {
-  console.log("better-codex version | update [check|compatibility|rollback] [--channel stable|preview] | setup [--yes] | launch [--restart] | launcher install|uninstall|status | mcp install|uninstall|status | doctor | enable | disable | start [--launch] | stop | status | uninstall | data delete [--yes] | inject [--launch] [--port N] | eject [--port N] | service install|uninstall|start|stop|restart|status|logs | project list|create | agent list | issue list|get|create|update|status|open");
+  console.log("better-codex version | update [check|compatibility|rollback|channel stable|preview] [--channel stable|preview] | setup [--yes] | launch [--restart] | launcher install|uninstall|status | mcp install|uninstall|status | doctor | enable | disable | start [--launch] | stop | status | uninstall | data delete [--yes] | inject [--launch] [--port N] | eject [--port N] | service install|uninstall|start|stop|restart|status|logs | project list|create | agent list | issue list|get|create|update|status|open");
 }
 
 function selfCommand() {
@@ -893,9 +892,14 @@ async function main() {
   }
   if (command === "update") {
     const values = [action, ...args].filter(Boolean) as string[];
-    const selected = option(values, "--channel") ?? "stable";
+    if (action === "channel") {
+      const requested = args[0];
+      if (!requested || args.length !== 1 || !["stable", "preview"].includes(requested)) throw new Error("update_channel_invalid");
+      return print(setUpdateChannel(requested as UpdateChannel));
+    }
+    const selected = option(values, "--channel") ?? selectedUpdateChannel();
     if (!["stable", "preview"].includes(selected)) throw new Error("update_channel_invalid");
-    const channel = selected as "stable" | "preview";
+    const channel = selected as UpdateChannel;
     if (action === "check") return print(await checkForUpdates(channel));
     if (action === "compatibility") {
       const result = await updateCompatibility(undefined, channel);
@@ -910,7 +914,7 @@ async function main() {
       }
       return print(result);
     }
-    if (action === "rollback") return print(rollbackCompatibilityUpdate());
+    if (action === "rollback") return print(rollbackAllUpdates());
     if (action && !action.startsWith("--")) return usage();
     const result = await updateAll(channel);
     if (result.compatibility.updated && injectionEnabled()) {

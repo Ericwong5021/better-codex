@@ -7,18 +7,40 @@ const packageLock = JSON.parse(readFileSync(new URL("../package-lock.json", impo
 const compatibilitySource = readFileSync(new URL("../src/compatibility.ts", import.meta.url), "utf8");
 const changelog = readFileSync(new URL("../CHANGELOG.md", import.meta.url), "utf8");
 const releaseWorkflow = readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
+const previewWorkflow = readFileSync(new URL("../.github/workflows/preview.yml", import.meta.url), "utf8");
+const previewPromotion = readFileSync(new URL("../scripts/promote-preview-feed.sh", import.meta.url), "utf8");
 
-test("release version sources stay synchronized", () => {
+test("release and preview version sources stay synchronized", () => {
   const version = packageJson.version;
   const coreVersion = compatibilitySource.match(/export const coreVersion = "([^"]+)"/)?.[1];
   const escapedVersion = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  assert.match(version, /^\d+\.\d+\.\d+$/);
+  assert.match(version, /^\d+\.\d+\.\d+(?:-beta\.[1-9]\d*)?$/);
   assert.equal(packageLock.packages[""].version, version);
   assert.equal(coreVersion, version);
   assert.match(changelog, new RegExp(`^## \\[${escapedVersion}\\] - \\d{4}-\\d{2}-\\d{2}$`, "m"));
   assert.ok(changelog.includes(`[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v${version}...HEAD`));
   assert.match(releaseWorkflow, /group: better-codex-release/);
+  assert.match(releaseWorkflow, /"!v\*-\*"/);
   assert.match(releaseWorkflow, /queue: max/);
+  assert.match(releaseWorkflow, /cp -a release preview-release/);
+  assert.doesNotMatch(releaseWorkflow, /cp -al release preview-release/);
+  assert.match(releaseWorkflow, /verify-channel stable release\/update-manifest\.json/);
+  assert.match(releaseWorkflow, /verify-channel preview preview-release\/update-manifest\.json/);
+  assert.match(releaseWorkflow, /gh release upload "\$\{GITHUB_REF_NAME\}" release\/\* --clobber/);
+  assert.match(releaseWorkflow, /\$'\\tfalse\\tfalse'/);
   assert.match(releaseWorkflow, /Refuse to downgrade the Homebrew formula/);
   assert.match(releaseWorkflow, /git rebase origin\/main/);
+  assert.match(previewWorkflow, /"v\*-beta\.\*"/);
+  assert.match(previewWorkflow, /--prerelease --latest=false/);
+  assert.match(previewWorkflow, /gh release upload "\$\{GITHUB_REF_NAME\}" "\$\{assets\[@\]\}" --clobber/);
+  assert.match(previewWorkflow, /\$'\\tfalse\\ttrue'/);
+  assert.match(previewWorkflow, /BETTER_CODEX_UPDATE_CHANNEL: preview/);
+  assert.match(previewWorkflow, /release\/better-codex-core-\*/);
+  assert.doesNotMatch(previewWorkflow, /path: \|\s+release\/better-codex-cli-/);
+  assert.doesNotMatch(previewWorkflow, /release\/\* --prerelease|checksums\.txt|cp scripts\/install/);
+  assert.doesNotMatch(previewWorkflow, /Homebrew|Formula\/better-codex/);
+  assert.match(previewPromotion, /select\(\.name == "update-manifest\.json"\)/);
+  assert.match(previewPromotion, /if \[ "\$asset_count" = "0" \]/);
+  assert.doesNotMatch(previewPromotion, /upload preview "\$WORK\/current\/update-manifest\.json" --clobber/);
+  assert.match(previewPromotion, /\$WORK\/uncertain\/update-manifest\.json/);
 });

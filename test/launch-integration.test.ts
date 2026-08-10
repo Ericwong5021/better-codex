@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { macLauncherOwnershipScripts } from "../src/launch-integration.js";
+import { macLauncherOwnershipScripts, windowsArgumentForTest } from "../src/launch-integration.js";
 
 const source = readFileSync(new URL("../src/launch-integration.ts", import.meta.url), "utf8");
 const cliSource = readFileSync(new URL("../src/cli.ts", import.meta.url), "utf8");
@@ -44,6 +44,14 @@ test("Windows creates owned Better Codex shortcuts instead of rewriting Codex sh
   assert.match(source, /BETTER_CODEX_PROFILE/);
   assert.match(source, /BETTER_CODEX_HOME/);
   assert.match(source, /BETTER_CODEX_PEER_HOME/);
+});
+
+test("Windows shortcut arguments preserve quotes, empty values, and trailing backslashes", () => {
+  assert.equal(windowsArgumentForTest("plain"), "plain");
+  assert.equal(windowsArgumentForTest(""), '""');
+  assert.equal(windowsArgumentForTest("C:\\Program Files\\Better Codex\\"), '"C:\\Program Files\\Better Codex\\\\"');
+  assert.equal(windowsArgumentForTest('value"quoted'), '"value\\"quoted"');
+  assert.equal(windowsArgumentForTest('value\\"quoted'), '"value\\\\\\"quoted"');
 });
 
 test("macOS and Windows launchers use the Better Codex brand icon", () => {

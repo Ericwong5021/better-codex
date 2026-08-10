@@ -38,6 +38,8 @@ for (const name of files.filter(name => /^better-codex-core-/.test(name))) {
   assets[`${match[2]}-${match[3]}`] = { url: releaseUrl(name), sha256: digest(content) };
 }
 if (!coreVersion || Object.keys(assets).length === 0) throw new Error("core_assets_unavailable");
+if (channel === "stable" && coreVersion.includes("-")) throw new Error("stable_channel_prerelease_forbidden");
+if (process.env.GITHUB_REF_NAME && process.env.GITHUB_REF_NAME !== `v${coreVersion}`) throw new Error("release_tag_version_mismatch");
 
 const payload = {
   schemaVersion: 1,

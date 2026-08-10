@@ -26,7 +26,8 @@ test("injection waits for the first capable renderer without a multi-second stab
 test("injector does not open a second debugger against already attached targets", () => {
   assert.match(source, /trustIds\?: Set<string>/);
   assert.match(source, /mainTargets\(port, \{ trustIds: new Set\(attached\.keys\(\)\) \}\)/);
-  assert.match(source, /if \(options\.trustIds\?\.has\(target\.id\)\)/);
+  assert.match(source, /discovered\.filter\(target => boundedOptions\.trustIds!\.has\(target\.id\)\)/);
+  assert.match(source, /if \(boundedOptions\.trustIds\?\.has\(target\.id\)\)/);
 });
 
 test("bridge allows settings and mockup updates", () => {
@@ -47,11 +48,25 @@ test("thread navigation opens a sidebar row or falls back to the native route", 
   assert.match(navigation, /threadRoutePrefix/);
 });
 
-test("Windows restart only terminates the Codex Desktop main process", () => {
-  assert.match(source, /Get-CimInstance Win32_Process -Filter \\\"Name = 'ChatGPT\.exe'\\\"/);
-  assert.match(source, /CommandLine -notmatch \\\"--type=\\\"/);
-  assert.match(source, /Stop-Process -Id \$_.ProcessId/);
-  assert.doesNotMatch(source, /Get-Process -Name 'ChatGPT','Codex'/);
+test("Windows restart terminates the complete installed Codex package process tree", () => {
+  const start = source.indexOf("async function quitCodex()");
+  const end = source.indexOf('if (process.platform !== "darwin")', start);
+  assert.ok(start >= 0 && end > start, "quitCodex Windows implementation is missing");
+  const windowsQuit = source.slice(start, end);
+  assert.match(windowsQuit, /Get-CimInstance Win32_Process -Filter \\\"Name = 'ChatGPT\.exe'\\\"/);
+  assert.match(windowsQuit, /ExecutablePath -notlike \\\"\*\\\\WindowsApps\\\\OpenAI\.Codex_\*\\\"/);
+  assert.match(windowsQuit, /SessionId/);
+  assert.match(windowsQuit, /GetOwnerSid/);
+  assert.match(windowsQuit, /Stop-Process -Id \$_.ProcessId/);
+  assert.doesNotMatch(windowsQuit, /CommandLine -notmatch/);
+  assert.doesNotMatch(windowsQuit, /Get-Process -Name 'ChatGPT','Codex'/);
+});
+
+test("every main target scan has a total deadline and candidate cap", () => {
+  assert.match(source, /const cdpTargetScanTimeoutMs = 30_000/);
+  assert.match(source, /const cdpTargetCandidateLimit = 32/);
+  assert.match(source, /deadlineAt: options\.deadlineAt \?\? Date\.now\(\) \+ cdpTargetScanTimeoutMs/);
+  assert.match(source, /\.slice\(0, cdpTargetCandidateLimit\)/);
 });
 
 test("macOS restart quits only the installed Desktop app by Bundle ID", () => {

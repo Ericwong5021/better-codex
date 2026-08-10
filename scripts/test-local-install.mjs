@@ -73,7 +73,11 @@ try {
   if (versions.core !== packageJson.version) {
     throw new Error(`local_install_version_mismatch:expected=${packageJson.version}:actual=${versions.core ?? "unknown"}`);
   }
-  console.log(JSON.stringify({ installed: true, reinstalled: true, platform, architecture, version: versions.core }));
+  const preview = JSON.parse(execFileSync(executable, ["update", "channel", "preview"], { encoding: "utf8", env: environment }));
+  if (preview.channel !== "preview" || preview.previous !== "stable") throw new Error("local_install_preview_channel_failed");
+  const stable = JSON.parse(execFileSync(executable, ["update", "channel", "stable"], { encoding: "utf8", env: environment }));
+  if (stable.channel !== "stable" || stable.previous !== "preview") throw new Error("local_install_stable_channel_failed");
+  console.log(JSON.stringify({ installed: true, reinstalled: true, platform, architecture, version: versions.core, channels: [preview.channel, stable.channel] }));
 } finally {
   await rm(testRoot, { recursive: true, force: true });
 }

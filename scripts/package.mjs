@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
+import { javascriptStringLiteral } from "./javascript-literal.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const packageJson = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
@@ -32,9 +33,9 @@ const embedBrandAssets = {
       const ico = readFileSync(join(root, "assets", "AppIcon.ico")).toString("base64");
       const logo = readFileSync(join(root, "assets", "better-codex.png")).toString("base64");
       return {
-        contents: `export function appIconIcns(){return Buffer.from(${JSON.stringify(icns)},"base64")}
-export function appIconIco(){return Buffer.from(${JSON.stringify(ico)},"base64")}
-export function betterCodexLogoPng(){return Buffer.from(${JSON.stringify(logo)},"base64")}
+        contents: `export function appIconIcns(){return Buffer.from(${javascriptStringLiteral(icns)},"base64")}
+export function appIconIco(){return Buffer.from(${javascriptStringLiteral(ico)},"base64")}
+export function betterCodexLogoPng(){return Buffer.from(${javascriptStringLiteral(logo)},"base64")}
 `,
         loader: "js",
       };

@@ -5,7 +5,9 @@ import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { isSea } from "node:sea";
 import { activeCompatibility, bundledCompatibility, compareVersions, coreVersion, readCompatibilityPointer, rollbackCompatibility, validateCompatibility, writeCompatibilityPointer } from "./compatibility.js";
-import { compatibilityVersionsPath, ensureDirectories, runtimeCurrentPath, runtimeVersionsPath, updateActivationPath, updatePublicKeyPath, updateStatePath } from "./config.js";
+import { compatibilityCurrentPath, compatibilityVersionsPath, ensureDirectories, runtimeCurrentPath, runtimeVersionsPath, updateActivationPath, updateChannelPath, updatePublicKeyPath, updateRollbackPath, updateStatePath } from "./config.js";
+
+export type UpdateChannel = "stable" | "preview";
 
 type UpdateAsset = {
   version: string;
@@ -16,7 +18,7 @@ type UpdateAsset = {
 
 type UpdatePayload = {
   schemaVersion: 1;
-  channel: "stable" | "preview";
+  channel: UpdateChannel;
   generatedAt: string;
   compatibility: UpdateAsset | null;
   core: {
@@ -44,6 +46,16 @@ export type GatewayUpdateState = {
   checkedAt: string | null;
   error: string | null;
   coreUpdateSupported?: boolean;
+  channel: UpdateChannel;
+};
+
+type CompatibilityPointerState = NonNullable<ReturnType<typeof readCompatibilityPointer>>;
+
+type UpdateRollbackState = {
+  phase?: "applying" | "ready" | "rolling_back";
+  before: { core: RuntimePointer | null; compatibility: CompatibilityPointerState | null };
+  after: { core: string; compatibility: string };
+  updatedAt: string;
 };
 
 type ActivationState = {
@@ -88,31 +100,31 @@ function releaseActivationRecoveryLock(lock: { path: string; token: string }) {
 }
 
 function persistedActivationState(): GatewayUpdateState {
+  recoverInterruptedUpdateTransaction();
   try {
     const value = JSON.parse(readFileSync(updateActivationPath, "utf8")) as ActivationState;
     if (value.status === "activating") {
       const startedAt = Date.parse(value.updatedAt || "");
-      if (Number.isFinite(startedAt) && Date.now() - startedAt <= activationRecoveryTimeout) return { status: "restarting", currentVersion: coreVersion, latestVersion: null, checkedAt: value.updatedAt ?? null, error: null };
-      if (!Number.isFinite(startedAt) && Number.isInteger(value.ownerPid) && value.ownerPid && processAlive(value.ownerPid)) return { status: "restarting", currentVersion: coreVersion, latestVersion: null, checkedAt: value.updatedAt ?? null, error: null };
+      if (Number.isFinite(startedAt) && Date.now() - startedAt <= activationRecoveryTimeout) return { status: "restarting", currentVersion: coreVersion, latestVersion: null, checkedAt: value.updatedAt ?? null, error: null, channel: selectedUpdateChannel() };
+      if (!Number.isFinite(startedAt) && Number.isInteger(value.ownerPid) && value.ownerPid && processAlive(value.ownerPid)) return { status: "restarting", currentVersion: coreVersion, latestVersion: null, checkedAt: value.updatedAt ?? null, error: null, channel: selectedUpdateChannel() };
       const lock = acquireActivationRecoveryLock();
-      if (!lock) return { status: "restarting", currentVersion: coreVersion, latestVersion: null, checkedAt: value.updatedAt ?? null, error: null };
+      if (!lock) return { status: "restarting", currentVersion: coreVersion, latestVersion: null, checkedAt: value.updatedAt ?? null, error: null, channel: selectedUpdateChannel() };
       try {
         const current = JSON.parse(readFileSync(updateActivationPath, "utf8")) as ActivationState;
         if (current.status !== "activating" || current.updatedAt !== value.updatedAt) return persistedActivationState();
         if (!current.coreVersion && current.core) current.coreVersion = readRuntimePointer()?.current ?? null;
         if (!current.compatibilityVersion && current.compatibility) current.compatibilityVersion = readCompatibilityPointer()?.current ?? null;
         writeJsonAtomic(updateActivationPath, current);
-        if (current.coreVersion) rollbackCoreUpdate(current.coreVersion);
-        if (current.compatibilityVersion) rollbackCompatibilityUpdate(current.compatibilityVersion);
+        rollbackActivatedUpdate({ core: current.coreVersion ?? null, compatibility: current.compatibilityVersion ?? null });
         writeJsonAtomic(updateActivationPath, { ...current, status: "error", error: "update_activation_interrupted", ownerPid: null, updatedAt: new Date().toISOString() });
-        return { status: "error", currentVersion: coreVersion, latestVersion: null, checkedAt: current.updatedAt ?? null, error: "update_activation_failed:update_activation_interrupted" };
+        return { status: "error", currentVersion: coreVersion, latestVersion: null, checkedAt: current.updatedAt ?? null, error: "update_activation_failed:update_activation_interrupted", channel: selectedUpdateChannel() };
       } finally {
         releaseActivationRecoveryLock(lock);
       }
     }
-    if (value.status === "error") return { status: "error", currentVersion: coreVersion, latestVersion: null, checkedAt: value.updatedAt ?? null, error: `update_activation_failed:${value.error || "unknown"}` };
+    if (value.status === "error") return { status: "error", currentVersion: coreVersion, latestVersion: null, checkedAt: value.updatedAt ?? null, error: `update_activation_failed:${value.error || "unknown"}`, channel: selectedUpdateChannel() };
   } catch {}
-  return { status: "idle", currentVersion: coreVersion, latestVersion: null, checkedAt: null, error: null };
+  return { status: "idle", currentVersion: coreVersion, latestVersion: null, checkedAt: null, error: null, channel: selectedUpdateChannel() };
 }
 
 function processAlive(pid: number) {
@@ -125,8 +137,66 @@ function processAlive(pid: number) {
 }
 
 let gatewayUpdateState: GatewayUpdateState = persistedActivationState();
-let gatewayCheckPromise: Promise<GatewayUpdateState> | null = null;
+let gatewayCheckPromise: { channel: UpdateChannel; promise: Promise<GatewayUpdateState> } | null = null;
 let gatewayInstallPromise: Promise<Awaited<ReturnType<typeof updateAll>>> | null = null;
+let gatewayCheckGeneration = 0;
+
+function validUpdateChannel(value: unknown): value is UpdateChannel {
+  return value === "stable" || value === "preview";
+}
+
+function acquireUpdateOperationLock() {
+  ensureDirectories();
+  const path = `${updateStatePath}.lock`;
+  const token = `${process.pid}:${Date.now()}:${Math.random()}`;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const descriptor = openSync(path, "wx", 0o600);
+      writeFileSync(descriptor, JSON.stringify({ pid: process.pid, token }));
+      closeSync(descriptor);
+      return { path, token };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      try {
+        const owner = JSON.parse(readFileSync(path, "utf8")) as { pid?: number };
+        if (Number.isInteger(owner.pid) && owner.pid && processAlive(owner.pid)) throw new Error("update_in_progress");
+      } catch (ownerError) {
+        if (ownerError instanceof Error && ownerError.message === "update_in_progress") throw ownerError;
+      }
+      try { unlinkSync(path); } catch { throw new Error("update_in_progress"); }
+    }
+  }
+  throw new Error("update_in_progress");
+}
+
+function releaseUpdateOperationLock(lock: { path: string; token: string }) {
+  try {
+    const owner = JSON.parse(readFileSync(lock.path, "utf8")) as { token?: string };
+    if (owner.token === lock.token) unlinkSync(lock.path);
+  } catch {}
+}
+
+async function withUpdateOperationLock<T>(operation: () => Promise<T>) {
+  const lock = acquireUpdateOperationLock();
+  try { return await operation(); } finally { releaseUpdateOperationLock(lock); }
+}
+
+export function selectedUpdateChannel(): UpdateChannel {
+  try {
+    const value = JSON.parse(readFileSync(updateChannelPath, "utf8")) as { channel?: unknown };
+    return validUpdateChannel(value.channel) ? value.channel : "stable";
+  } catch {
+    return "stable";
+  }
+}
+
+export function setUpdateChannel(channel: UpdateChannel) {
+  if (!validUpdateChannel(channel)) throw new Error("update_channel_invalid");
+  const previous = selectedUpdateChannel();
+  ensureDirectories();
+  writeJsonAtomic(updateChannelPath, { channel, updatedAt: new Date().toISOString() });
+  return { channel, previous, changed: channel !== previous };
+}
 
 function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
@@ -147,7 +217,7 @@ function httpsUrl(value: string) {
   return url;
 }
 
-function manifestUrl(channel: "stable" | "preview") {
+function manifestUrl(channel: UpdateChannel) {
   const configured = process.env.BETTER_CODEX_UPDATE_MANIFEST_URL;
   if (configured) return httpsUrl(configured);
   const release = channel === "stable" ? "latest/download" : "download/preview";
@@ -173,22 +243,35 @@ function validateUpdateAsset(value: unknown) {
   httpsUrl(asset.url);
 }
 
-function validatePayload(value: unknown, channel: "stable" | "preview") {
+function validatePayload(value: unknown, channel: UpdateChannel) {
   if (!value || typeof value !== "object") throw new Error("update_manifest_invalid");
   const payload = value as UpdatePayload;
   if (payload.schemaVersion !== 1 || payload.channel !== channel || !Number.isFinite(Date.parse(payload.generatedAt))) throw new Error("update_manifest_invalid");
   if (payload.compatibility) {
     if (typeof payload.compatibility.version !== "string" || typeof payload.compatibility.minimumCoreVersion !== "string") throw new Error("update_compatibility_invalid");
+    if (channel === "stable" && (payload.compatibility.version.includes("-") || payload.compatibility.minimumCoreVersion.includes("-"))) throw new Error("update_prerelease_not_allowed");
     validateUpdateAsset(payload.compatibility);
   }
   if (payload.core) {
-    if (typeof payload.core.version !== "string" || !payload.core.assets || typeof payload.core.assets !== "object") throw new Error("update_core_invalid");
+    if (
+      typeof payload.core.version !== "string"
+      || payload.core.version.length > 128
+      || !/^\d+\.\d+\.\d+(?:-[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*)?$/.test(payload.core.version)
+      || !payload.core.assets
+      || typeof payload.core.assets !== "object"
+      || Array.isArray(payload.core.assets)
+    ) throw new Error("update_core_invalid");
+    if (channel === "stable" && payload.core.version.includes("-")) throw new Error("update_prerelease_not_allowed");
     Object.values(payload.core.assets).forEach(validateUpdateAsset);
   }
   return payload;
 }
 
-export async function fetchUpdateManifest(channel: "stable" | "preview" = "stable") {
+export function validateUpdatePayloadForTest(value: unknown, channel: UpdateChannel = "stable") {
+  return validatePayload(value, channel);
+}
+
+export async function fetchUpdateManifest(channel: UpdateChannel = selectedUpdateChannel()) {
   const content = await download(manifestUrl(channel));
   const manifest = JSON.parse(content.toString("utf8")) as SignedUpdateManifest;
   if (!manifest.payload || typeof manifest.signature !== "string") throw new Error("update_manifest_invalid");
@@ -209,16 +292,107 @@ function writeJsonAtomic(path: string, value: unknown) {
   renameSync(temporary, path);
 }
 
+function validatedRuntimePointer(value: unknown) {
+  if (!value || typeof value !== "object") return null;
+  const pointer = value as RuntimePointer;
+  if (typeof pointer.current !== "string" || typeof pointer.executable !== "string" || (pointer.previous !== null && typeof pointer.previous !== "string")) return null;
+  const executable = resolve(pointer.executable);
+  const relation = relative(resolve(runtimeVersionsPath), executable);
+  if (!relation || relation.startsWith("..") || isAbsolute(relation)) return null;
+  return { ...pointer, executable };
+}
+
 function readRuntimePointer() {
+  try { return validatedRuntimePointer(JSON.parse(readFileSync(runtimeCurrentPath, "utf8"))); } catch { return null; }
+}
+
+function readRollbackState() {
   try {
-    const value = JSON.parse(readFileSync(runtimeCurrentPath, "utf8")) as RuntimePointer;
-    if (typeof value.current !== "string" || typeof value.executable !== "string") return null;
-    const executable = resolve(value.executable);
-    const relation = relative(resolve(runtimeVersionsPath), executable);
-    if (!relation || relation.startsWith("..") || isAbsolute(relation)) return null;
-    return { ...value, executable };
+    const value = JSON.parse(readFileSync(updateRollbackPath, "utf8")) as UpdateRollbackState;
+    if (!value?.before || !value.after || typeof value.after.core !== "string" || typeof value.after.compatibility !== "string") return null;
+    const core = value.before.core === null ? null : validatedRuntimePointer(value.before.core);
+    if (value.before.core !== null && !core) return null;
+    const compatibility = value.before.compatibility;
+    if (compatibility !== null && (typeof compatibility.current !== "string" || !Number.isInteger(compatibility.failures))) return null;
+    return { ...value, before: { core, compatibility } };
   } catch {
     return null;
+  }
+}
+
+function writeRollbackState(
+  before: UpdateRollbackState["before"],
+  after = { core: effectiveCoreVersion(), compatibility: activeCompatibility().version },
+  phase: "applying" | "ready" | "rolling_back" = "ready",
+) {
+  writeJsonAtomic(updateRollbackPath, {
+    phase,
+    before,
+    after,
+    updatedAt: new Date().toISOString(),
+  } satisfies UpdateRollbackState);
+}
+
+function restorePointerPair(state: UpdateRollbackState["before"]) {
+  if (state.core) writeJsonAtomic(runtimeCurrentPath, state.core);
+  else if (existsSync(runtimeCurrentPath)) unlinkSync(runtimeCurrentPath);
+  if (state.compatibility) writeCompatibilityPointer(state.compatibility);
+  else if (existsSync(compatibilityCurrentPath)) unlinkSync(compatibilityCurrentPath);
+}
+
+function rollbackResult(transaction: UpdateRollbackState) {
+  const targetCoreVersion = transaction.before.core?.current ?? coreVersion;
+  const targetCompatibilityVersion = transaction.before.compatibility?.current ?? bundledCompatibility.version;
+  const coreChanged = transaction.after.core !== targetCoreVersion;
+  const compatibilityChanged = transaction.after.compatibility !== targetCompatibilityVersion;
+  return {
+    rolledBack: coreChanged || compatibilityChanged,
+    core: coreChanged ? { rolledBack: true, previous: transaction.after.core, version: targetCoreVersion, pendingRestart: true } : { rolledBack: false },
+    compatibility: compatibilityChanged ? { rolledBack: true, previous: transaction.after.compatibility, version: targetCompatibilityVersion } : { rolledBack: false },
+    pendingRestart: coreChanged,
+  };
+}
+
+function validateRollbackTarget(transaction: UpdateRollbackState) {
+  const targetCoreVersion = transaction.before.core?.current ?? coreVersion;
+  if (transaction.before.core && !existsSync(transaction.before.core.executable)) throw new Error("rollback_core_unavailable");
+  const targetCompatibilityVersion = transaction.before.compatibility?.current ?? bundledCompatibility.version;
+  if (targetCompatibilityVersion !== bundledCompatibility.version) {
+    validateCompatibility(JSON.parse(readFileSync(join(compatibilityVersionsPath, targetCompatibilityVersion, "manifest.json"), "utf8")), targetCoreVersion);
+  }
+}
+
+function completeRollback(transaction: UpdateRollbackState) {
+  validateRollbackTarget(transaction);
+  restorePointerPair(transaction.before);
+  if (existsSync(updateRollbackPath)) unlinkSync(updateRollbackPath);
+  return rollbackResult(transaction);
+}
+
+function settleInterruptedUpdateTransaction() {
+  const transaction = readRollbackState();
+  if (transaction?.phase === "rolling_back") return completeRollback(transaction);
+  if (transaction?.phase !== "applying") return null;
+  if (effectiveCoreVersion() === transaction.after.core && activeCompatibility().version === transaction.after.compatibility) {
+    writeRollbackState(transaction.before, transaction.after, "ready");
+    return null;
+  }
+  restorePointerPair(transaction.before);
+  if (existsSync(updateRollbackPath)) unlinkSync(updateRollbackPath);
+  return null;
+}
+
+function recoverInterruptedUpdateTransaction() {
+  const phase = readRollbackState()?.phase;
+  if (phase !== "applying" && phase !== "rolling_back") return;
+  let lock: ReturnType<typeof acquireUpdateOperationLock> | null = null;
+  try {
+    lock = acquireUpdateOperationLock();
+    settleInterruptedUpdateTransaction();
+  } catch (error) {
+    if (!(error instanceof Error && error.message === "update_in_progress")) throw error;
+  } finally {
+    if (lock) releaseUpdateOperationLock(lock);
   }
 }
 
@@ -237,6 +411,10 @@ export function getGatewayUpdateState() {
     const persisted = persistedActivationState();
     if (persisted.status !== "restarting") gatewayUpdateState = persisted.status === "idle" ? { ...persisted, status: "current" } : persisted;
   }
+  const channel = selectedUpdateChannel();
+  if (gatewayUpdateState.channel !== channel && !["installing", "restarting"].includes(gatewayUpdateState.status)) {
+    gatewayUpdateState = { status: "idle", currentVersion: effectiveCoreVersion(), latestVersion: null, checkedAt: null, error: null, channel };
+  }
   return { ...gatewayUpdateState, currentVersion: effectiveCoreVersion(), coreUpdateSupported: isSea() };
 }
 
@@ -247,12 +425,14 @@ export function recordGatewayUpdateActivation(status: "activating" | "success" |
     : { ...getGatewayUpdateState(), status: status === "activating" ? "restarting" : "current", error: null };
 }
 
-export function checkGatewayUpdate() {
-  if (gatewayCheckPromise) return gatewayCheckPromise;
+export function checkGatewayUpdate(channel: UpdateChannel = selectedUpdateChannel()) {
+  if (gatewayCheckPromise?.channel === channel) return gatewayCheckPromise.promise;
+  const generation = ++gatewayCheckGeneration;
   getGatewayUpdateState();
-  if (["installing", "restarting"].includes(gatewayUpdateState.status)) return Promise.resolve(getGatewayUpdateState());
-  gatewayUpdateState = { ...getGatewayUpdateState(), status: "checking", error: null };
-  const promise = checkForUpdates().then(result => {
+  if (["installing", "restarting"].includes(gatewayUpdateState.status) && gatewayUpdateState.channel === channel) return Promise.resolve(getGatewayUpdateState());
+  gatewayUpdateState = { ...getGatewayUpdateState(), status: "checking", error: null, channel };
+  const promise = checkForUpdates(channel).then(result => {
+    if (selectedUpdateChannel() !== channel || generation !== gatewayCheckGeneration) return getGatewayUpdateState();
     const checkedAt = new Date().toISOString();
     if (!result.checked || !("core" in result)) {
       gatewayUpdateState = { ...getGatewayUpdateState(), status: "error", checkedAt, error: "error" in result ? result.error : "update_check_failed" };
@@ -266,12 +446,12 @@ export function checkGatewayUpdate() {
       : compatibilityAvailable
         ? result.compatibility?.version ?? effectiveCoreVersion()
         : effectiveCoreVersion();
-    gatewayUpdateState = { status: available ? "available" : "current", currentVersion: effectiveCoreVersion(), latestVersion, checkedAt, error: null };
+    gatewayUpdateState = { status: available ? "available" : "current", currentVersion: effectiveCoreVersion(), latestVersion, checkedAt, error: null, channel };
     return getGatewayUpdateState();
   }).finally(() => {
-    if (gatewayCheckPromise === promise) gatewayCheckPromise = null;
+    if (gatewayCheckPromise?.promise === promise) gatewayCheckPromise = null;
   });
-  gatewayCheckPromise = promise;
+  gatewayCheckPromise = { channel, promise };
   return promise;
 }
 
@@ -290,17 +470,18 @@ export function startGatewayUpdateChecks() {
 
 export function installGatewayUpdate() {
   if (gatewayInstallPromise) return gatewayInstallPromise;
-  const promise = checkGatewayUpdate().then(state => {
+  const channel = selectedUpdateChannel();
+  const promise = checkGatewayUpdate(channel).then(state => {
     if (state.status === "current") {
       return {
-        channel: "stable" as const,
+        channel,
         core: { updated: false, reason: "core_current", version: state.currentVersion },
         compatibility: { updated: false, reason: "compatibility_current", version: activeCompatibility().version },
       };
     }
     if (state.status !== "available") throw new Error(state.error || "update_not_available");
     gatewayUpdateState = { ...getGatewayUpdateState(), status: "installing", error: null };
-    return updateAll();
+    return updateAll(channel);
   }).then(result => {
     const updated = result.core.updated || result.compatibility.updated;
     gatewayUpdateState = {
@@ -377,6 +558,66 @@ export function rollbackCoreUpdate(expectedVersion?: string | null) {
   return { rolledBack: true, previous, version: effectiveCoreVersion() };
 }
 
+function rollbackCoreTargetVersion(pointer: RuntimePointer | null) {
+  if (!pointer) return effectiveCoreVersion();
+  if (!pointer.previous || pointer.previous === coreVersion) return coreVersion;
+  const executable = join(runtimeVersionsPath, pointer.previous, process.platform === "win32" ? "better-codex.exe" : "better-codex");
+  return existsSync(executable) ? pointer.previous : coreVersion;
+}
+
+function rollbackAllUpdatesUnlocked() {
+    const recoveredRollback = settleInterruptedUpdateTransaction();
+    if (recoveredRollback) return recoveredRollback;
+    const corePointer = readRuntimePointer();
+    const compatibilityPointer = readCompatibilityPointer();
+    const rollback = readRollbackState();
+
+    if (rollback) {
+      if (effectiveCoreVersion() !== rollback.after.core || activeCompatibility().version !== rollback.after.compatibility) throw new Error("rollback_state_stale");
+      validateRollbackTarget(rollback);
+      writeRollbackState(rollback.before, rollback.after, "rolling_back");
+      return completeRollback({ ...rollback, phase: "rolling_back" });
+    }
+
+    if (corePointer) {
+      const targetCoreVersion = rollbackCoreTargetVersion(corePointer);
+      rollbackCorePointer(corePointer);
+      return {
+        rolledBack: true,
+        core: { rolledBack: true, previous: corePointer.current, version: targetCoreVersion, pendingRestart: true },
+        compatibility: { rolledBack: false },
+        pendingRestart: true,
+        legacy: true,
+      };
+    }
+    if (compatibilityPointer?.previous) {
+      const previous = activeCompatibility().version;
+      const compatibility = rollbackCompatibility();
+      return { rolledBack: true, core: { rolledBack: false }, compatibility: { rolledBack: true, previous, version: compatibility.version }, pendingRestart: false, legacy: true };
+    }
+    return { rolledBack: false, core: { rolledBack: false }, compatibility: { rolledBack: false }, pendingRestart: false };
+}
+
+export function rollbackAllUpdates() {
+  const lock = acquireUpdateOperationLock();
+  try { return rollbackAllUpdatesUnlocked(); } finally { releaseUpdateOperationLock(lock); }
+}
+
+export function rollbackActivatedUpdate(expected: { core: string | null; compatibility: string | null }) {
+  const lock = acquireUpdateOperationLock();
+  try {
+    if (
+      (expected.core && effectiveCoreVersion() !== expected.core)
+      || (expected.compatibility && activeCompatibility().version !== expected.compatibility)
+    ) {
+      return { rolledBack: false, reason: "update_superseded", core: { rolledBack: false }, compatibility: { rolledBack: false }, pendingRestart: false };
+    }
+    return rollbackAllUpdatesUnlocked();
+  } finally {
+    releaseUpdateOperationLock(lock);
+  }
+}
+
 export function activeVersions() {
   return {
     core: coreVersion,
@@ -385,7 +626,7 @@ export function activeVersions() {
   };
 }
 
-export async function checkForUpdates(channel: "stable" | "preview" = "stable") {
+export async function checkForUpdates(channel: UpdateChannel = selectedUpdateChannel()) {
   try {
     const manifest = await fetchUpdateManifest(channel);
     const coreAsset = manifest.core?.assets[platformAssetKey()];
@@ -407,7 +648,7 @@ export async function checkForUpdates(channel: "stable" | "preview" = "stable") 
   }
 }
 
-export async function updateCompatibility(payload?: UpdatePayload, channel: "stable" | "preview" = "stable") {
+async function updateCompatibilityUnlocked(payload?: UpdatePayload, channel: UpdateChannel = selectedUpdateChannel()) {
   const manifest = payload ?? await fetchUpdateManifest(channel);
   const asset = manifest.compatibility;
   if (!asset) return { updated: false, reason: "compatibility_update_unavailable", version: activeCompatibility().version };
@@ -425,20 +666,49 @@ export async function updateCompatibility(payload?: UpdatePayload, channel: "sta
   writeFileSync(temporary, JSON.stringify(compatibility), { mode: 0o600 });
   renameSync(temporary, target);
   const current = activeCompatibility().version;
+  if (compareVersions(compatibility.version, current) <= 0) return { updated: false, reason: "compatibility_current", version: current };
   writeCompatibilityPointer({ current: compatibility.version, previous: current, failures: 0, updatedAt: new Date().toISOString() });
   return { updated: true, previous: current, version: compatibility.version };
 }
 
-export async function updateCore(payload?: UpdatePayload, channel: "stable" | "preview" = "stable") {
+export async function updateCompatibility(payload?: UpdatePayload, channel: UpdateChannel = selectedUpdateChannel()) {
+  return withUpdateOperationLock(async () => {
+    const before = { core: readRuntimePointer(), compatibility: readCompatibilityPointer() };
+    const manifest = validatePayload(payload ?? await fetchUpdateManifest(channel), channel);
+    const current = { core: effectiveCoreVersion(), compatibility: activeCompatibility().version };
+    const plannedAfter = {
+      core: current.core,
+      compatibility: manifest.compatibility && compareVersions(manifest.compatibility.version, current.compatibility) > 0 ? manifest.compatibility.version : current.compatibility,
+    };
+    if (plannedAfter.compatibility === current.compatibility) return updateCompatibilityUnlocked(manifest, channel);
+    writeRollbackState(before, plannedAfter, "applying");
+    try {
+      const result = await updateCompatibilityUnlocked(manifest, channel);
+      const actualAfter = { core: effectiveCoreVersion(), compatibility: activeCompatibility().version };
+      if (actualAfter.core !== plannedAfter.core || actualAfter.compatibility !== plannedAfter.compatibility) throw new Error("update_transaction_version_mismatch");
+      writeRollbackState(before, actualAfter, "ready");
+      return result;
+    } catch (error) {
+      restorePointerPair(before);
+      if (existsSync(updateRollbackPath)) unlinkSync(updateRollbackPath);
+      throw error;
+    }
+  });
+}
+
+async function updateCoreUnlocked(payload?: UpdatePayload, channel: UpdateChannel = selectedUpdateChannel()) {
   if (!isSea()) return { updated: false, reason: "core_update_requires_binary", version: coreVersion };
-  const manifest = payload ?? await fetchUpdateManifest(channel);
+  const manifest = validatePayload(payload ?? await fetchUpdateManifest(channel), channel);
   if (!manifest.core || compareVersions(manifest.core.version, effectiveCoreVersion()) <= 0) return { updated: false, reason: "core_current", version: effectiveCoreVersion() };
   const asset = manifest.core.assets[platformAssetKey()];
   if (!asset) throw new Error("core_asset_unavailable");
   const content = await download(httpsUrl(asset.url));
   verifyDigest(content, asset.sha256);
   ensureDirectories();
-  const directory = join(runtimeVersionsPath, manifest.core.version);
+  const runtimeRoot = resolve(runtimeVersionsPath);
+  const directory = resolve(runtimeRoot, manifest.core.version);
+  const relation = relative(runtimeRoot, directory);
+  if (!relation || relation.startsWith("..") || isAbsolute(relation)) throw new Error("update_core_invalid");
   mkdirSync(directory, { recursive: true });
   const executable = join(directory, process.platform === "win32" ? "better-codex.exe" : "better-codex");
   const temporary = process.platform === "win32" ? `${executable}.${process.pid}.tmp.exe` : `${executable}.${process.pid}.tmp`;
@@ -449,34 +719,79 @@ export async function updateCore(payload?: UpdatePayload, channel: "stable" | "p
   const version = JSON.parse(validation.stdout) as { core?: string };
   if (version.core !== manifest.core.version) throw new Error("core_version_mismatch");
   await validateCoreRuntime(temporary);
+  const current = effectiveCoreVersion();
+  if (compareVersions(manifest.core.version, current) <= 0) {
+    rmSync(temporary, { force: true });
+    return { updated: false, reason: "core_current", version: current };
+  }
   renameSync(temporary, executable);
   const previous = readRuntimePointer();
   writeJsonAtomic(runtimeCurrentPath, { current: manifest.core.version, previous: previous?.current ?? coreVersion, executable, updatedAt: new Date().toISOString() } satisfies RuntimePointer);
   return { updated: true, previous: previous?.current ?? coreVersion, version: manifest.core.version, pendingRestart: true };
 }
 
-export async function updateAll(channel: "stable" | "preview" = "stable") {
-  const check = await checkForUpdates(channel);
-  if ("error" in check || !check.checked) throw new Error("error" in check ? check.error : "update_check_failed");
-  if (!check.core?.available && !check.compatibility?.available) {
-    return {
-      channel,
-      core: { updated: false, reason: "core_current", version: effectiveCoreVersion() },
-      compatibility: { updated: false, reason: "compatibility_current", version: activeCompatibility().version },
+export async function updateCore(payload?: UpdatePayload, channel: UpdateChannel = selectedUpdateChannel()) {
+  return withUpdateOperationLock(async () => {
+    if (!isSea()) return updateCoreUnlocked(payload, channel);
+    const before = { core: readRuntimePointer(), compatibility: readCompatibilityPointer() };
+    const manifest = validatePayload(payload ?? await fetchUpdateManifest(channel), channel);
+    const current = { core: effectiveCoreVersion(), compatibility: activeCompatibility().version };
+    const plannedAfter = {
+      core: manifest.core && manifest.core.assets[platformAssetKey()] && compareVersions(manifest.core.version, current.core) > 0 ? manifest.core.version : current.core,
+      compatibility: current.compatibility,
     };
-  }
-  const manifest = await fetchUpdateManifest(channel);
-  const core = await updateCore(manifest, channel);
-  try {
-    const compatibility = await updateCompatibility(manifest, channel);
-    return { channel, core, compatibility };
-  } catch (error) {
-    if (core.updated) {
-      const pointer = readRuntimePointer();
-      if (pointer?.current === core.version) rollbackCorePointer(pointer);
+    if (plannedAfter.core === current.core) return updateCoreUnlocked(manifest, channel);
+    writeRollbackState(before, plannedAfter, "applying");
+    try {
+      const result = await updateCoreUnlocked(manifest, channel);
+      const actualAfter = { core: effectiveCoreVersion(), compatibility: activeCompatibility().version };
+      if (actualAfter.core !== plannedAfter.core || actualAfter.compatibility !== plannedAfter.compatibility) throw new Error("update_transaction_version_mismatch");
+      writeRollbackState(before, actualAfter, "ready");
+      return result;
+    } catch (error) {
+      restorePointerPair(before);
+      if (existsSync(updateRollbackPath)) unlinkSync(updateRollbackPath);
+      throw error;
     }
-    throw error;
-  }
+  });
+}
+
+export async function updateAll(channel: UpdateChannel = selectedUpdateChannel()) {
+  return withUpdateOperationLock(async () => {
+    const before = { core: readRuntimePointer(), compatibility: readCompatibilityPointer() };
+    const check = await checkForUpdates(channel);
+    if ("error" in check || !check.checked) throw new Error("error" in check ? check.error : "update_check_failed");
+    if (!check.core?.available && !check.compatibility?.available) {
+      return {
+        channel,
+        core: { updated: false, reason: "core_current", version: effectiveCoreVersion() },
+        compatibility: { updated: false, reason: "compatibility_current", version: activeCompatibility().version },
+      };
+    }
+    const manifest = await fetchUpdateManifest(channel);
+    const plannedAfter = {
+      core: manifest.core && isSea() && manifest.core.assets[platformAssetKey()] && compareVersions(manifest.core.version, effectiveCoreVersion()) > 0
+        ? manifest.core.version
+        : effectiveCoreVersion(),
+      compatibility: manifest.compatibility && compareVersions(manifest.compatibility.version, activeCompatibility().version) > 0
+        ? manifest.compatibility.version
+        : activeCompatibility().version,
+    };
+    writeRollbackState(before, plannedAfter, "applying");
+    try {
+      const core = await updateCoreUnlocked(manifest, channel);
+      const compatibility = await updateCompatibilityUnlocked(manifest, channel);
+      const actualAfter = { core: effectiveCoreVersion(), compatibility: activeCompatibility().version };
+      if (actualAfter.core !== plannedAfter.core || actualAfter.compatibility !== plannedAfter.compatibility) throw new Error("update_transaction_version_mismatch");
+      if (core.updated || compatibility.updated) writeRollbackState(before, actualAfter, "ready");
+      else if (existsSync(updateRollbackPath)) unlinkSync(updateRollbackPath);
+      return { channel, core, compatibility };
+    } catch (error) {
+      restorePointerPair(before);
+      if (existsSync(updateRollbackPath)) unlinkSync(updateRollbackPath);
+      throw error;
+    }
+  });
 }
 
 export function rollbackCompatibilityUpdate(expectedVersion?: string | null) {

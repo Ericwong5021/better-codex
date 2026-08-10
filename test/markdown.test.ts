@@ -25,6 +25,7 @@ test("renderMarkdown escapes HTML and renders common blocks", () => {
     "[link](https://example.com)",
     "",
     "<script>alert(1)</script>",
+    "<SCRIPT src=https://example.invalid/payload.js></SCRIPT>",
   ].join("\n"));
 
   assert.match(html, /<h1>Title<\/h1>/);
@@ -34,5 +35,6 @@ test("renderMarkdown escapes HTML and renders common blocks", () => {
   assert.match(html, /<pre><code class="language-js">const x = 1 &lt; 2<\/code><\/pre>/);
   assert.match(html, /href="https:\/\/example\.com"/);
   assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
-  assert.doesNotMatch(html, /<script>/);
+  assert.match(html, /&lt;SCRIPT src=https:\/\/example\.invalid\/payload\.js&gt;&lt;\/SCRIPT&gt;/);
+  assert.doesNotMatch(html, /<script\b/i);
 });

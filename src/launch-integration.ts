@@ -197,7 +197,27 @@ function powershellLiteral(value: string) {
 }
 
 function windowsArgument(value: string) {
-  return /[\s"]/.test(value) ? `"${value.replace(/"/g, '\\"')}"` : value;
+  if (value && !/[\s"]/.test(value)) return value;
+  let quoted = '"';
+  let backslashes = 0;
+  for (const character of value) {
+    if (character === "\\") {
+      backslashes += 1;
+      continue;
+    }
+    if (character === '"') {
+      quoted += "\\".repeat(backslashes * 2 + 1) + character;
+      backslashes = 0;
+      continue;
+    }
+    quoted += "\\".repeat(backslashes) + character;
+    backslashes = 0;
+  }
+  return quoted + "\\".repeat(backslashes * 2) + '"';
+}
+
+export function windowsArgumentForTest(value: string) {
+  return windowsArgument(value);
 }
 
 function readState(): LaunchIntegrationState | null {

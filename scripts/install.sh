@@ -58,21 +58,107 @@ release_install_lock() {
 acquire_install_lock
 trap release_install_lock EXIT
 
+ACTIVE_COMMAND_GROUP=""
+ACTIVE_WATCHDOG_PID=""
+
+terminate_active_command() {
+  if [ -n "$ACTIVE_COMMAND_GROUP" ]; then
+    kill -TERM -- "-$ACTIVE_COMMAND_GROUP" 2>/dev/null || true
+    sleep 1
+    kill -KILL -- "-$ACTIVE_COMMAND_GROUP" 2>/dev/null || true
+    wait "$ACTIVE_COMMAND_GROUP" 2>/dev/null || true
+    ACTIVE_COMMAND_GROUP=""
+  fi
+  if [ -n "$ACTIVE_WATCHDOG_PID" ]; then
+    kill "$ACTIVE_WATCHDOG_PID" 2>/dev/null || true
+    wait "$ACTIVE_WATCHDOG_PID" 2>/dev/null || true
+    ACTIVE_WATCHDOG_PID=""
+  fi
+}
+
+interrupt_install() {
+  local status="$1"
+  trap - INT TERM
+  terminate_active_command
+  exit "$status"
+}
+
+trap 'interrupt_install 130' INT
+trap 'interrupt_install 143' TERM
+
 version_at_least() {
-  awk -v current="${1#v}" -v target="${2#v}" 'BEGIN {
-    split(current, a, "."); split(target, b, ".")
-    for (i = 1; i <= 4; i++) {
+  awk -v current="${1#v}" -v target="${2#v}" '
+  function compare(left, right, left_dash, right_dash, left_core, right_core, a, b, left_pre, right_pre, left_parts, right_parts, count, i, av, bv, left_numeric, right_numeric) {
+    left_dash = index(left, "-"); right_dash = index(right, "-")
+    left_core = left_dash ? substr(left, 1, left_dash - 1) : left
+    right_core = right_dash ? substr(right, 1, right_dash - 1) : right
+    split(left_core, a, "."); split(right_core, b, ".")
+    for (i = 1; i <= 3; i++) {
       av = a[i] + 0; bv = b[i] + 0
-      if (av > bv) exit 0
-      if (av < bv) exit 1
+      if (av != bv) return av < bv ? -1 : 1
     }
-    exit 0
-  }'
+    left_pre = left_dash ? substr(left, left_dash + 1) : ""
+    right_pre = right_dash ? substr(right, right_dash + 1) : ""
+    if (!length(left_pre) || !length(right_pre)) {
+      if (left_pre == right_pre) return 0
+      return length(left_pre) ? -1 : 1
+    }
+    left_count = split(left_pre, left_parts, ".")
+    right_count = split(right_pre, right_parts, ".")
+    count = left_count > right_count ? left_count : right_count
+    for (i = 1; i <= count; i++) {
+      if (i > left_count) return -1
+      if (i > right_count) return 1
+      if (left_parts[i] == right_parts[i]) continue
+      left_numeric = left_parts[i] ~ /^[0-9]+$/
+      right_numeric = right_parts[i] ~ /^[0-9]+$/
+      if (left_numeric && right_numeric) return (left_parts[i] + 0) < (right_parts[i] + 0) ? -1 : 1
+      if (left_numeric != right_numeric) return left_numeric ? -1 : 1
+      return left_parts[i] < right_parts[i] ? -1 : 1
+    }
+    return 0
+  }
+  BEGIN { exit compare(current, target) >= 0 ? 0 : 1 }
+  '
+}
+
+run_with_timeout() {
+  local seconds="$1" child_pid watchdog_pid status marker marker_directory
+  trap 'interrupt_install 130' INT
+  trap 'interrupt_install 143' TERM
+  shift
+  marker_directory="$(mktemp -d "${TMPDIR:-/tmp}/better-codex-timeout.XXXXXX")" || return 125
+  marker="$marker_directory/timed-out"
+  set -m
+  "$@" &
+  child_pid=$!
+  ACTIVE_COMMAND_GROUP="$child_pid"
+  set +m
+  (
+    sleep "$seconds"
+    if kill -0 "$child_pid" 2>/dev/null; then
+      : > "$marker"
+      kill -TERM -- "-$child_pid" 2>/dev/null || true
+      sleep 1
+      kill -KILL -- "-$child_pid" 2>/dev/null || true
+    fi
+  ) &
+  watchdog_pid=$!
+  ACTIVE_WATCHDOG_PID="$watchdog_pid"
+  if wait "$child_pid"; then status=0; else status=$?; fi
+  ACTIVE_COMMAND_GROUP=""
+  kill "$watchdog_pid" 2>/dev/null || true
+  wait "$watchdog_pid" 2>/dev/null || true
+  ACTIVE_WATCHDOG_PID=""
+  if [ -f "$marker" ]; then status=124; fi
+  rm -f "$marker"
+  rmdir "$marker_directory" 2>/dev/null || true
+  return "$status"
 }
 
 installed_version() {
   local binary="$1" raw core managed
-  raw="$("$binary" version --json 2>/dev/null)" || return 1
+  raw="$(run_with_timeout 10 "$binary" version --json 2>/dev/null)" || return 1
   core="$(printf '%s' "$raw" | sed -n 's/.*"core":"\([^"]*\)".*/\1/p')"
   managed="$(printf '%s' "$raw" | sed -n 's/.*"managedCore":"\([^"]*\)".*/\1/p')"
   if [ -n "$managed" ] && [ -n "$core" ] && version_at_least "$managed" "$core"; then
@@ -86,7 +172,7 @@ installed_version() {
 
 packaged_core_version() {
   local binary="$1" validation_home="$2" raw core
-  raw="$(env BETTER_CODEX_HOME="$validation_home" BETTER_CODEX_DISABLE_DELEGATION=1 "$binary" version --json 2>/dev/null)" || return 1
+  raw="$(run_with_timeout 10 env BETTER_CODEX_HOME="$validation_home" BETTER_CODEX_DISABLE_DELEGATION=1 "$binary" version --json 2>/dev/null)" || return 1
   core="$(printf '%s' "$raw" | sed -n 's/.*"core":"\([^"]*\)".*/\1/p')"
   [ -n "$core" ] || return 1
   printf '%s' "$core"
@@ -97,14 +183,14 @@ installation_ready() {
   if [ "$WITH_SERVICE" != "1" ]; then
     return 0
   fi
-  "$binary" launcher install >/dev/null 2>&1 || return 1
-  output="$("$binary" doctor 2>/dev/null)" || return 1
+  run_with_timeout 15 "$binary" launcher install >/dev/null 2>&1 || return 1
+  output="$(run_with_timeout 20 "$binary" doctor 2>/dev/null)" || return 1
   printf '%s' "$output" | awk '/"ok":/ { found=1; ok=($0 ~ /true/); exit } END { if (!found || !ok) exit 1 }'
 }
 
 TARGET_VERSION=""
 if [ -z "${BETTER_CODEX_ARCHIVE:-}" ]; then
-  TAG="${BETTER_CODEX_VERSION:-$(curl -fsSIL -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest?better_codex_cache_bust=$(date +%s)" | sed 's#.*/##; s/[?].*$//')}"
+  TAG="${BETTER_CODEX_VERSION:-$(curl -fsSIL --connect-timeout 15 --max-time 60 --retry 2 --retry-delay 1 -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest?better_codex_cache_bust=$(date +%s)" | sed 's#.*/##; s/[?].*$//')}"
   TARGET_VERSION="${TAG#v}"
 fi
 
@@ -122,7 +208,7 @@ fi
 
 if [ -n "$CURRENT_VERSION" ] && [ -n "$TARGET_VERSION" ] && version_at_least "$CURRENT_VERSION" "$TARGET_VERSION" && [ -f "$SKILL_DIR/SKILL.md" ] && [ -f "$UPDATE_KEY_PATH" ]; then
   UPDATE_CHECK=""
-  if UPDATE_CHECK="$($EXISTING_BINARY update check 2>/dev/null)" && printf '%s' "$UPDATE_CHECK" | grep -q '"checked":true' && ! printf '%s' "$UPDATE_CHECK" | grep -q '"available":true'; then
+  if UPDATE_CHECK="$(run_with_timeout 20 "$EXISTING_BINARY" update check 2>/dev/null)" && printf '%s' "$UPDATE_CHECK" | grep -q '"checked":true' && ! printf '%s' "$UPDATE_CHECK" | grep -q '"available":true'; then
     if installation_ready "$EXISTING_BINARY"; then
       rm -rf "$ISSUE_SKILL_DIR"
       printf '[OK] Better Codex is up to date (v%s)\n' "$CURRENT_VERSION"
@@ -134,7 +220,7 @@ fi
 if [ -n "$CURRENT_VERSION" ] && [ -n "$TARGET_VERSION" ]; then
   printf '[Better Codex] Better Codex v%s is installed; upgrading to v%s...\n' "$CURRENT_VERSION" "$TARGET_VERSION"
   UPDATE_CHECK=""
-  if UPDATE_CHECK="$($EXISTING_BINARY update check 2>/dev/null)" && printf '%s' "$UPDATE_CHECK" | grep -q '"checked":true'; then
+  if UPDATE_CHECK="$(run_with_timeout 20 "$EXISTING_BINARY" update check 2>/dev/null)" && printf '%s' "$UPDATE_CHECK" | grep -q '"checked":true'; then
     if version_at_least "$CURRENT_VERSION" "$TARGET_VERSION" && ! printf '%s' "$UPDATE_CHECK" | grep -q '"available":true' && installation_ready "$EXISTING_BINARY"; then
       rm -rf "$ISSUE_SKILL_DIR"
       printf '[OK] Better Codex is up to date (v%s)\n' "$CURRENT_VERSION"
@@ -143,18 +229,18 @@ if [ -n "$CURRENT_VERSION" ] && [ -n "$TARGET_VERSION" ]; then
   else
     printf '[Better Codex] Live update check unavailable; continuing with upgrade...\n' >&2
   fi
-  if "$EXISTING_BINARY" update >/dev/null 2>&1; then
+  if run_with_timeout 600 "$EXISTING_BINARY" update >/dev/null 2>&1; then
     UPDATED_VERSION="$(installed_version "$EXISTING_BINARY" || true)"
     if [ -n "$UPDATED_VERSION" ] && version_at_least "$UPDATED_VERSION" "$TARGET_VERSION"; then
       UPGRADE_READY=1
       if [ ! -f "$SKILL_DIR/SKILL.md" ] || [ ! -f "$UPDATE_KEY_PATH" ]; then
         UPGRADE_READY=0
       elif [ "$WITH_SERVICE" = "1" ]; then
-        "$EXISTING_BINARY" service restart >/dev/null 2>&1 || UPGRADE_READY=0
+        run_with_timeout 30 "$EXISTING_BINARY" service restart >/dev/null 2>&1 || UPGRADE_READY=0
         if [ "$UPGRADE_READY" = "1" ]; then
           sleep 0.8
-          "$EXISTING_BINARY" inject --launch >/dev/null 2>&1 || UPGRADE_READY=0
-          "$EXISTING_BINARY" launcher install >/dev/null 2>&1 || UPGRADE_READY=0
+          run_with_timeout 60 "$EXISTING_BINARY" inject --launch >/dev/null 2>&1 || UPGRADE_READY=0
+          run_with_timeout 15 "$EXISTING_BINARY" launcher install >/dev/null 2>&1 || UPGRADE_READY=0
           installation_ready "$EXISTING_BINARY" || UPGRADE_READY=0
         fi
       fi
@@ -180,8 +266,8 @@ codex_running() {
 
 stop_better_codex_helpers() {
   if [ -n "${EXISTING_BINARY:-}" ]; then
-    "$EXISTING_BINARY" disable >/dev/null 2>&1 || true
-    "$EXISTING_BINARY" service stop >/dev/null 2>&1 || true
+    run_with_timeout 10 "$EXISTING_BINARY" disable >/dev/null 2>&1 || true
+    run_with_timeout 10 "$EXISTING_BINARY" service stop >/dev/null 2>&1 || true
   fi
 }
 
@@ -222,10 +308,17 @@ PREVIOUS_INJECTION_ENABLED=1
 [ -e "$SKILL_DIR" ] && { cp -R "$SKILL_DIR" "$BACKUP_DIR/better-codex-skill"; HAD_SKILL=1; }
 [ -e "$ISSUE_SKILL_DIR" ] && { cp -R "$ISSUE_SKILL_DIR" "$BACKUP_DIR/better-codex-issue-skill"; HAD_ISSUE_SKILL=1; }
 [ -e "$UPDATE_KEY_PATH" ] && { cp -p "$UPDATE_KEY_PATH" "$BACKUP_DIR/update-public-key.pem"; HAD_UPDATE_KEY=1; }
-if [ "$HAD_BINARY" = "1" ]; then
-  PREVIOUS_SERVICE_STATUS="$("$BIN_DIR/better-codex" service status 2>/dev/null || true)"
-  printf '%s' "$PREVIOUS_SERVICE_STATUS" | grep -q '"installed":true' && PREVIOUS_SERVICE_INSTALLED=1
-  printf '%s' "$PREVIOUS_SERVICE_STATUS" | grep -q '"running":true' && PREVIOUS_SERVICE_RUNNING=1
+if [ "$HAD_BINARY" = "1" ] && [ "$WITH_SERVICE" = "1" ]; then
+  if ! PREVIOUS_SERVICE_STATUS="$(run_with_timeout 10 "$BIN_DIR/better-codex" service status 2>/dev/null)"; then
+    echo "Unable to read the existing Better Codex service state; no installation changes were made." >&2
+    exit 1
+  fi
+  if ! printf '%s' "$PREVIOUS_SERVICE_STATUS" | grep -q '"installed":'; then
+    echo "Unable to read the existing Better Codex service state; no installation changes were made." >&2
+    exit 1
+  fi
+  printf '%s' "$PREVIOUS_SERVICE_STATUS" | grep -Eq '"installed"[[:space:]]*:[[:space:]]*true' && PREVIOUS_SERVICE_INSTALLED=1
+  printf '%s' "$PREVIOUS_SERVICE_STATUS" | grep -Eq '"running"[[:space:]]*:[[:space:]]*true' && PREVIOUS_SERVICE_RUNNING=1
   if [ -f "$BETTER_CODEX_DIR/run/injection.json" ] && ! grep -q '"enabled":true' "$BETTER_CODEX_DIR/run/injection.json"; then PREVIOUS_INJECTION_ENABLED=0; fi
 fi
 INSTALL_MUTATED=0
@@ -234,9 +327,9 @@ finish_install() {
   set +e
   if [ "$status" -ne 0 ] && [ "$INSTALL_MUTATED" = "1" ]; then
     if [ "$WITH_SERVICE" = "1" ] && [ "$HAD_BINARY" = "0" ] && [ -x "$BIN_DIR/better-codex" ]; then
-      "$BIN_DIR/better-codex" disable >/dev/null 2>&1
-      "$BIN_DIR/better-codex" service uninstall >/dev/null 2>&1
-      "$BIN_DIR/better-codex" launcher uninstall >/dev/null 2>&1
+      run_with_timeout 10 "$BIN_DIR/better-codex" disable >/dev/null 2>&1
+      run_with_timeout 10 "$BIN_DIR/better-codex" service uninstall >/dev/null 2>&1
+      run_with_timeout 10 "$BIN_DIR/better-codex" launcher uninstall >/dev/null 2>&1
     fi
     if [ "$HAD_BINARY" = "1" ]; then cp -p "$BACKUP_DIR/better-codex" "$BIN_DIR/better-codex"; else rm -f "$BIN_DIR/better-codex"; fi
     rm -rf "$SKILL_DIR"
@@ -246,12 +339,12 @@ finish_install() {
     if [ "$HAD_UPDATE_KEY" = "1" ]; then cp -p "$BACKUP_DIR/update-public-key.pem" "$UPDATE_KEY_PATH"; else rm -f "$UPDATE_KEY_PATH"; fi
     if [ "$WITH_SERVICE" = "1" ] && [ "$HAD_BINARY" = "1" ]; then
       if [ "$PREVIOUS_SERVICE_INSTALLED" = "1" ]; then
-        "$BIN_DIR/better-codex" service install >/dev/null 2>&1
-        if [ "$PREVIOUS_SERVICE_RUNNING" = "1" ]; then "$BIN_DIR/better-codex" service start >/dev/null 2>&1; else "$BIN_DIR/better-codex" service stop >/dev/null 2>&1; fi
+        run_with_timeout 10 "$BIN_DIR/better-codex" service install >/dev/null 2>&1
+        if [ "$PREVIOUS_SERVICE_RUNNING" = "1" ]; then run_with_timeout 10 "$BIN_DIR/better-codex" service start >/dev/null 2>&1; else run_with_timeout 10 "$BIN_DIR/better-codex" service stop >/dev/null 2>&1; fi
       else
-        "$BIN_DIR/better-codex" service uninstall >/dev/null 2>&1
+        run_with_timeout 10 "$BIN_DIR/better-codex" service uninstall >/dev/null 2>&1
       fi
-      if [ "$PREVIOUS_INJECTION_ENABLED" = "1" ]; then "$BIN_DIR/better-codex" enable >/dev/null 2>&1; else "$BIN_DIR/better-codex" disable >/dev/null 2>&1; fi
+      if [ "$PREVIOUS_INJECTION_ENABLED" = "1" ]; then run_with_timeout 30 "$BIN_DIR/better-codex" enable >/dev/null 2>&1; else run_with_timeout 10 "$BIN_DIR/better-codex" disable >/dev/null 2>&1; fi
     fi
   fi
   release_install_lock
@@ -274,9 +367,9 @@ else
   ARCHIVE="$WORK_DIR/$NAME"
   CHECKSUMS="$WORK_DIR/checksums.txt"
   UPDATE_PUBLIC_KEY="$WORK_DIR/update-public-key.pem"
-  curl -fsSL "$BASE/$NAME" -o "$ARCHIVE"
-  curl -fsSL "$BASE/checksums.txt" -o "$CHECKSUMS"
-  curl -fsSL "$BASE/update-public-key.pem" -o "$UPDATE_PUBLIC_KEY"
+  curl -fsSL --connect-timeout 15 --max-time 300 --retry 2 --retry-delay 1 "$BASE/$NAME" -o "$ARCHIVE"
+  curl -fsSL --connect-timeout 15 --max-time 300 --retry 2 --retry-delay 1 "$BASE/checksums.txt" -o "$CHECKSUMS"
+  curl -fsSL --connect-timeout 15 --max-time 300 --retry 2 --retry-delay 1 "$BASE/update-public-key.pem" -o "$UPDATE_PUBLIC_KEY"
 fi
 
 NAME="$(basename "$ARCHIVE")"
@@ -346,17 +439,17 @@ if [ -n "$UPDATE_PUBLIC_KEY" ]; then
   install -m 600 "$UPDATE_PUBLIC_KEY" "$UPDATE_KEY_PATH"
 fi
 
-"$BIN_DIR/better-codex" version
+run_with_timeout 10 "$BIN_DIR/better-codex" version
 if [ "$WITH_SERVICE" = "1" ]; then
   printf '[Better Codex] Registering runtime and injecting Better Codex...\n'
   SETUP_LOG="$WORK_DIR/setup.log"
-  if ! "$BIN_DIR/better-codex" setup --yes >"$SETUP_LOG" 2>&1; then
+  if ! run_with_timeout 120 "$BIN_DIR/better-codex" setup --yes >"$SETUP_LOG" 2>&1; then
     cat "$SETUP_LOG" >&2
     exit 1
   fi
   printf '[Better Codex] Running installation diagnostics...\n'
   DOCTOR_LOG="$WORK_DIR/doctor.log"
-  if ! "$BIN_DIR/better-codex" doctor >"$DOCTOR_LOG" 2>&1; then
+  if ! run_with_timeout 20 "$BIN_DIR/better-codex" doctor >"$DOCTOR_LOG" 2>&1; then
     cat "$DOCTOR_LOG" >&2
     exit 1
   fi

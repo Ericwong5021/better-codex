@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 
 const installerPath = new URL("../scripts/install.ps1", import.meta.url);
 const source = readFileSync(installerPath, "utf8");
+const shellSource = readFileSync(new URL("../scripts/install.sh", import.meta.url), "utf8");
 
 test("Windows installer captures native stderr without turning progress into a terminating error", {
   skip: process.platform !== "win32" ? "requires Windows PowerShell 5.1" : false,
@@ -23,11 +24,14 @@ if (-not $function) { throw "Invoke-NativeCapture is missing" }
 Invoke-Expression $function.Extent.Text
 
 $ErrorActionPreference = "Stop"
-$success = Invoke-NativeCapture $env:ComSpec @("/d", "/c", "echo installing_runtime 1>&2 & exit /b 0")
+$success = Invoke-NativeCapture $env:ComSpec @("/d", "/c", "echo payload & echo installing_runtime 1>&2 & exit /b 0")
 $failure = Invoke-NativeCapture $env:ComSpec @("/d", "/c", "echo actual_failure 1>&2 & exit /b 7")
 
 if ($success.ExitCode -ne 0) { throw "success exit code was $($success.ExitCode)" }
 if ($success.Output -notmatch "installing_runtime") { throw "success stderr was not captured" }
+if ($success.Stdout -notmatch "payload") { throw "success stdout was not captured separately" }
+if ($success.Stdout -match "installing_runtime") { throw "stderr leaked into stdout" }
+if ($success.Stderr -notmatch "installing_runtime") { throw "stderr was not captured separately" }
 if ($failure.ExitCode -ne 7) { throw "failure exit code was $($failure.ExitCode)" }
 if ($failure.Output -notmatch "actual_failure") { throw "failure stderr was not captured" }
 if ($ErrorActionPreference -ne "Stop") { throw "ErrorActionPreference was not restored" }
@@ -43,9 +47,181 @@ if ($ErrorActionPreference -ne "Stop") { throw "ErrorActionPreference was not re
 
 test("all installer commands that merge native stderr use the compatibility wrapper", () => {
   assert.match(source, /function Invoke-NativeCapture/);
-  assert.deepEqual(
-    source.split(/\r?\n/).filter((line) => line.includes("2>&1")).map((line) => line.trim()),
-    ["$output = (& $Executable @Arguments 2>&1 | Out-String)"],
-  );
   assert.match(source, /Invoke-NativeCapture \$executable @\("setup", "--yes"\)/);
+});
+
+test("Windows installer bounds a native command that never exits", {
+  skip: process.platform !== "win32" ? "requires Windows PowerShell 5.1" : false,
+}, () => {
+  const script = String.raw`
+$source = Get-Content -Raw -LiteralPath $env:BETTER_CODEX_INSTALLER_TEST_PATH
+$tokens = $null
+$parseErrors = $null
+$ast = [Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors.Count -gt 0) { throw ($parseErrors | Out-String) }
+$function = $ast.Find({
+  param($node)
+  $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq "Invoke-NativeCapture"
+}, $true)
+if (-not $function) { throw "Invoke-NativeCapture is missing" }
+Invoke-Expression $function.Extent.Text
+
+$watch = [Diagnostics.Stopwatch]::StartNew()
+$result = Invoke-NativeCapture "powershell.exe" @("-NoProfile", "-NonInteractive", "-Command", "Start-Process powershell.exe -NoNewWindow -ArgumentList '-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds 30'; Start-Sleep -Seconds 30") 250
+$watch.Stop()
+
+if (-not $result.TimedOut) { throw "hung command was not reported as timed out" }
+if ($result.ExitCode -ne 124) { throw "timeout exit code was $($result.ExitCode)" }
+if ($watch.ElapsedMilliseconds -gt 5000) { throw "timeout took $($watch.ElapsedMilliseconds)ms" }
+`;
+
+  const result = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+    encoding: "utf8",
+    timeout: 10_000,
+    env: { ...process.env, BETTER_CODEX_INSTALLER_TEST_PATH: installerPath.pathname.replace(/^\/(.:)/, "$1") },
+  });
+
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+});
+
+test("Windows timeout terminates the complete native process job", () => {
+  assert.match(source, /TerminateJobObject/);
+  assert.match(source, /JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE/);
+  assert.match(source, /SetInformationJobObject/);
+});
+
+test("Windows timeout fallback uses the trusted system taskkill executable", () => {
+  assert.match(source, /\[IO\.Path\]::Combine\(\$env:SystemRoot, "System32", "taskkill\.exe"\)/);
+  assert.doesNotMatch(source, /\.FileName\s*=\s*"taskkill\.exe"/);
+});
+
+test("Windows installer compares Beta and release versions using SemVer", {
+  skip: process.platform !== "win32" ? "requires Windows PowerShell 5.1" : false,
+}, () => {
+  const script = String.raw`
+$source = Get-Content -Raw -LiteralPath $env:BETTER_CODEX_INSTALLER_TEST_PATH
+$tokens = $null
+$parseErrors = $null
+$ast = [Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors.Count -gt 0) { throw ($parseErrors | Out-String) }
+foreach ($name in @("Compare-SemVer", "Test-VersionAtLeast")) {
+  $function = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true)
+  if (-not $function) { throw "$name is missing" }
+  Invoke-Expression $function.Extent.Text
+}
+if (-not (Test-VersionAtLeast "0.4.2-beta.1" "0.4.1")) { throw "next Beta must be newer than the current release" }
+if (-not (Test-VersionAtLeast "0.4.2" "0.4.2-beta.2")) { throw "promoted release must be newer than its Beta" }
+if (Test-VersionAtLeast "0.4.2" "0.4.3-beta.1") { throw "stable must not downgrade a newer Beta" }
+`;
+  const result = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+    encoding: "utf8",
+    env: { ...process.env, BETTER_CODEX_INSTALLER_TEST_PATH: installerPath.pathname.replace(/^\/(.:)/, "$1") },
+  });
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+});
+
+test("Windows installer disables helpers before terminating the full Codex package process tree", () => {
+  const consent = source.indexOf('Read-Host "Codex is currently running. Quit Codex and continue installation? [Y/n]"');
+  const disable = source.indexOf('Invoke-NativeCapture $executable @("disable")', consent);
+  const terminate = source.indexOf("Stop-Process -Id $_.ProcessId -Force", consent);
+
+  assert.ok(consent >= 0, "Codex quit consent is missing");
+  assert.ok(disable > consent, "disable must happen after user consent");
+  assert.ok(terminate > disable, "disable must finish or time out before Codex is terminated");
+  assert.match(source, /function Get-CodexProcesses/);
+  assert.match(source, /ExecutablePath -notlike "\*\\WindowsApps\\OpenAI\.Codex_\*"/);
+  assert.match(source, /\.SessionId -ne \$sessionId/);
+  assert.match(source, /GetOwnerSid/);
+  assert.match(source, /Stop-Process -Id \$_\.ProcessId -Force -ErrorAction SilentlyContinue/);
+  assert.doesNotMatch(source, /& \$executable disable/);
+});
+
+test("Windows installer aborts before mutation when previous service state is unknown", () => {
+  const status = source.indexOf('Invoke-NativeCapture $executable @("service", "status")');
+  const mutation = source.indexOf("$previousInjectionEnabled", status);
+  assert.ok(status >= 0 && mutation > status, "previous service status probe is missing");
+  assert.match(source.slice(status, mutation), /throw "Unable to read the existing Better Codex service state/);
+});
+
+test("Windows release downloads have hard time limits", () => {
+  const downloads = source.split(/\r?\n/).filter(line => line.includes("Invoke-WebRequest") && line.includes("-OutFile"));
+  assert.ok(downloads.length >= 3, "release downloads are missing");
+  for (const line of downloads) assert.match(line, /-TimeoutSec 300/);
+});
+
+test("macOS installer bounds upgrade, shutdown, setup, diagnostics, and rollback commands", () => {
+  assert.match(shellSource, /run_with_timeout\(\)/);
+  assert.match(shellSource, /run_with_timeout 10 "\$EXISTING_BINARY" disable/);
+  assert.match(shellSource, /run_with_timeout 600 "\$EXISTING_BINARY" update/);
+  assert.match(shellSource, /run_with_timeout 120 "\$BIN_DIR\/better-codex" setup --yes/);
+  assert.match(shellSource, /run_with_timeout 20 "\$BIN_DIR\/better-codex" doctor/);
+  assert.match(shellSource, /run_with_timeout 30 "\$BIN_DIR\/better-codex" enable/);
+  assert.doesNotMatch(shellSource, /^\s*"\$EXISTING_BINARY" (?:disable|update|inject|launcher|service)/m);
+  assert.doesNotMatch(shellSource, /^\s*"\$BIN_DIR\/better-codex" (?:disable|doctor|enable|launcher|service|setup|version)/m);
+  assert.match(shellSource, /kill -TERM -- "-\$child_pid"/);
+  assert.match(shellSource, /kill -KILL -- "-\$child_pid"/);
+});
+
+test("macOS timeout state uses a private temporary directory", () => {
+  assert.match(shellSource, /mktemp -d "\$\{TMPDIR:-\/tmp\}\/better-codex-timeout\.XXXXXX"/);
+  assert.doesNotMatch(shellSource, /marker="\$\{TMPDIR:-\/tmp\}\/better-codex-timeout-\$\$-/);
+});
+
+test("macOS installer cancellation terminates the active command group before rollback", () => {
+  assert.match(shellSource, /trap 'interrupt_install 130' INT/);
+  assert.match(shellSource, /trap 'interrupt_install 143' TERM/);
+  assert.match(shellSource, /kill -TERM -- "-\$ACTIVE_COMMAND_GROUP"/);
+  assert.match(shellSource, /ACTIVE_COMMAND_GROUP="\$child_pid"/);
+  assert.match(shellSource, /terminate_active_command\s+exit "\$status"/);
+});
+
+test("macOS installer compares Beta and release versions using SemVer", {
+  skip: process.platform === "win32" && !existsSync("C:\\Program Files\\Git\\bin\\bash.exe") ? "bash is unavailable" : false,
+}, () => {
+  const start = shellSource.indexOf("version_at_least() {");
+  const end = shellSource.indexOf("\nrun_with_timeout()", start);
+  assert.ok(start >= 0 && end > start, "version_at_least function is missing");
+  const bash = process.platform === "win32" ? "C:\\Program Files\\Git\\bin\\bash.exe" : "/bin/bash";
+  const script = `${shellSource.slice(start, end)}
+version_at_least 0.4.2-beta.1 0.4.1
+version_at_least 0.4.2 0.4.2-beta.2
+! version_at_least 0.4.2 0.4.3-beta.1`;
+  const result = spawnSync(bash, ["-c", script], { encoding: "utf8" });
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+});
+
+test("macOS timeout helper terminates a command that never exits", {
+  skip: process.platform === "win32" && !existsSync("C:\\Program Files\\Git\\bin\\bash.exe") ? "bash is unavailable" : false,
+}, () => {
+  const start = shellSource.indexOf("run_with_timeout() {");
+  const end = shellSource.indexOf("\ninstalled_version()", start);
+  assert.ok(start >= 0 && end > start, "run_with_timeout function is missing");
+  const bash = process.platform === "win32" ? "C:\\Program Files\\Git\\bin\\bash.exe" : "/bin/bash";
+  const script = `${shellSource.slice(start, end)}\nrun_with_timeout 1 sh -c 'sleep 30 & wait'\nstatus=$?\n[ "$status" -eq 124 ]`;
+  const result = spawnSync(bash, ["-c", script], { encoding: "utf8", timeout: 5_000 });
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+});
+
+test("macOS installer aborts before mutation when previous service state is unknown", () => {
+  const status = shellSource.indexOf('PREVIOUS_SERVICE_STATUS="$(run_with_timeout 10');
+  const mutation = shellSource.indexOf("INSTALL_MUTATED=0", status);
+  assert.ok(status >= 0 && mutation > status, "previous service state capture is missing");
+  const capture = shellSource.slice(status, mutation);
+  assert.doesNotMatch(capture, /\|\| true/);
+  assert.match(capture, /Unable to read the existing Better Codex service state/);
+});
+
+test("macOS installer preserves pretty-printed service state for rollback", () => {
+  assert.match(shellSource, /grep -Eq '\"installed\"\[\[:space:\]\]\*:\[\[:space:\]\]\*true'/);
+  assert.match(shellSource, /grep -Eq '\"running\"\[\[:space:\]\]\*:\[\[:space:\]\]\*true'/);
+  assert.doesNotMatch(shellSource, /grep -q '\"(?:installed|running)\":true'/);
+});
+
+test("macOS release resolution and downloads have hard time limits", () => {
+  const curlLines = shellSource.split(/\r?\n/).filter(line => line.includes("curl "));
+  assert.ok(curlLines.length >= 4, "release curl calls are missing");
+  for (const line of curlLines) {
+    assert.match(line, /--connect-timeout/);
+    assert.match(line, /--max-time/);
+  }
 });
