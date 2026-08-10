@@ -108,11 +108,11 @@ function Ensure-Node {
   return $true
 }
 
-function Invoke-BetterCodexCapture([string]$Entrypoint, [string[]]$Arguments, [int]$TimeoutMilliseconds = 120000) {
+function Invoke-BetterCodexCapture([string]$Entrypoint, [string[]]$Arguments, [int]$TimeoutMilliseconds = 120000, [bool]$PreserveChildProcessesOnSuccess = $false) {
   if ($Entrypoint.ToLowerInvariant().EndsWith(".cjs")) {
-    return Invoke-NativeCapture $script:NodeExecutable (@($Entrypoint) + $Arguments) $TimeoutMilliseconds
+    return Invoke-NativeCapture $script:NodeExecutable (@($Entrypoint) + $Arguments) $TimeoutMilliseconds $PreserveChildProcessesOnSuccess
   }
-  return Invoke-NativeCapture $Entrypoint $Arguments $TimeoutMilliseconds
+  return Invoke-NativeCapture $Entrypoint $Arguments $TimeoutMilliseconds $PreserveChildProcessesOnSuccess
 }
 
 function Restore-PreviousExecutable([bool]$HadExecutable, [bool]$PreviousExecutableChanged, [string]$BackupExecutable, [string]$PreviousExecutablePath) {
@@ -139,7 +139,7 @@ function Assert-ChecksumsSignature([string]$Checksums, [string]$PublicKey, [stri
   if ($result.ExitCode -ne 0) { throw "Checksums signature verification failed." }
 }
 
-function Invoke-NativeCapture([string]$Executable, [string[]]$Arguments, [int]$TimeoutMilliseconds = 120000) {
+function Invoke-NativeCapture([string]$Executable, [string[]]$Arguments, [int]$TimeoutMilliseconds = 120000, [bool]$PreserveChildProcessesOnSuccess = $false) {
   $process = $null
   $jobHandle = [IntPtr]::Zero
   $jobAssigned = $false
@@ -235,9 +235,12 @@ public static class BetterCodexProcessJob {
     $process = [Diagnostics.Process]::new()
     $process.StartInfo = $startInfo
     if (-not $process.Start()) { throw "Unable to start $Executable." }
-    $jobHandle = [BetterCodexProcessJob]::Create()
-    if ($jobHandle -ne [IntPtr]::Zero) {
-      $jobAssigned = [BetterCodexProcessJob]::Assign($jobHandle, $process.Handle)
+    # Runtime launchers need their detached children after a successful exit; timeout cleanup still uses taskkill /T below.
+    if (-not $PreserveChildProcessesOnSuccess) {
+      $jobHandle = [BetterCodexProcessJob]::Create()
+      if ($jobHandle -ne [IntPtr]::Zero) {
+        $jobAssigned = [BetterCodexProcessJob]::Assign($jobHandle, $process.Handle)
+      }
     }
     # Drain both streams while the process runs so a noisy child cannot block on a full pipe.
     $stdoutTask = $process.StandardOutput.ReadToEndAsync()
@@ -414,10 +417,10 @@ function Invoke-ExistingUpgrade([string]$Executable, [string]$TargetVersion, [st
     $updatedVersion = Get-InstalledVersion $Executable
     if (-not (Test-VersionAtLeast $updatedVersion $TargetVersion)) { return $false }
     if (-not $NoService) {
-      $restartResult = Invoke-BetterCodexCapture $Executable @("service", "restart") 30000
+      $restartResult = Invoke-BetterCodexCapture $Executable @("service", "restart") 30000 $true
       if ($restartResult.ExitCode -ne 0) { return $false }
       Start-Sleep -Milliseconds 800
-      $injectResult = Invoke-BetterCodexCapture $Executable @("inject", "--launch") 60000
+      $injectResult = Invoke-BetterCodexCapture $Executable @("inject", "--launch") 60000 $true
       if ($injectResult.ExitCode -ne 0) { return $false }
       $launcherResult = Invoke-BetterCodexCapture $Executable @("launcher", "install") 15000
       if ($launcherResult.ExitCode -ne 0) { return $false }
@@ -456,6 +459,7 @@ $launcherPath = Join-Path $BinDirectory "better-codex.cmd"
 $legacyExecutable = Join-Path $BinDirectory "better-codex.exe"
 $executable = if (Test-Path -LiteralPath $bundlePath -PathType Leaf) { $bundlePath } elseif (Test-Path -LiteralPath $legacyExecutable -PathType Leaf) { $legacyExecutable } else { $bundlePath }
 $previousExecutablePath = $executable
+$legacyNodeMigration = (Test-Path -LiteralPath $legacyExecutable -PathType Leaf) -and ([IO.Path]::GetFullPath($executable) -eq [IO.Path]::GetFullPath($legacyExecutable))
 $codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE ".codex" }
 $skillDirectory = Join-Path $codexHome "skills\better-codex"
 $issueSkillDirectory = Join-Path $codexHome "skills\better-codex-issue"
@@ -535,11 +539,14 @@ if (-not $localArchive -and $installedVersion) {
   } catch {
     Write-Step "Live update check unavailable; continuing with upgrade..."
   }
-  if ((Test-Path (Join-Path $skillDirectory "SKILL.md")) -and (Test-Path $updatePublicKeyPath) -and (Invoke-ExistingUpgrade $executable $targetVersion $desiredChannel)) {
+  if ($legacyNodeMigration) {
+    Write-Step "Migrating the legacy executable to the Node.js bundle..."
+  } elseif ((Test-Path (Join-Path $skillDirectory "SKILL.md")) -and (Test-Path $updatePublicKeyPath) -and (Invoke-ExistingUpgrade $executable $targetVersion $desiredChannel)) {
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $issueSkillDirectory
     return
+  } else {
+    Write-Step "Automatic upgrade unavailable; continuing with full installation..."
   }
-  Write-Step "Automatic upgrade unavailable; continuing with full installation..."
 }
 
 $workDirectory = Join-Path ([IO.Path]::GetTempPath()) ("better-codex-" + [guid]::NewGuid())
@@ -677,7 +684,7 @@ try {
   if ($versionResult.ExitCode -ne 0) { throw "Better Codex executable verification failed." }
   if (-not $NoService) {
     Write-Step "Registering runtime and injecting Better Codex..."
-    $setupResult = Invoke-BetterCodexCapture $executable @("setup", "--yes") 120000
+    $setupResult = Invoke-BetterCodexCapture $executable @("setup", "--yes") 120000 $true
     if ($setupResult.ExitCode -ne 0) {
       Write-Host ($setupResult.Output.TrimEnd())
       throw "Better Codex setup failed with exit code $($setupResult.ExitCode)."
@@ -754,12 +761,12 @@ try {
     }
     if ($hadExecutable -and -not $NoService) {
       if ($previousService.installed) {
-        $null = Invoke-BetterCodexCapture $executable @("service", "install") 10000
-        if ($previousService.running) { $null = Invoke-BetterCodexCapture $executable @("service", "start") 10000 } else { $null = Invoke-BetterCodexCapture $executable @("service", "stop") 10000 }
+        $null = Invoke-BetterCodexCapture $executable @("service", "install") 10000 $true
+        if ($previousService.running) { $null = Invoke-BetterCodexCapture $executable @("service", "start") 10000 $true } else { $null = Invoke-BetterCodexCapture $executable @("service", "stop") 10000 }
       } else {
         $null = Invoke-BetterCodexCapture $executable @("service", "uninstall") 10000
       }
-      if ($previousInjectionEnabled) { $null = Invoke-BetterCodexCapture $executable @("enable") 30000 } else { $null = Invoke-BetterCodexCapture $executable @("disable") 10000 }
+      if ($previousInjectionEnabled) { $null = Invoke-BetterCodexCapture $executable @("enable") 30000 $true } else { $null = Invoke-BetterCodexCapture $executable @("disable") 10000 }
     }
     throw
   }

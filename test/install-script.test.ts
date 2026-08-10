@@ -102,6 +102,11 @@ test("Windows legacy migration removes the EXE only after the new bundle passes 
   assert.doesNotMatch(source, /@\("uninstall"\)/);
 });
 
+test("Windows legacy EXE migration bypasses the incompatible in-place core updater", () => {
+  assert.match(source, /\$legacyNodeMigration = \(Test-Path -LiteralPath \$legacyExecutable -PathType Leaf\)/);
+  assert.match(source, /if \(\$legacyNodeMigration\) \{\s*Write-Step "Migrating the legacy executable to the Node\.js bundle\.\.\."\s*\} elseif \(\(Test-Path \(Join-Path \$skillDirectory "SKILL\.md"\)\)/);
+});
+
 test("Windows rollback does not overwrite an unchanged legacy executable", {
   skip: process.platform !== "win32" ? "requires Windows PowerShell 5.1" : false,
 }, () => {
@@ -307,6 +312,53 @@ test("Windows timeout terminates the complete native process job", () => {
   assert.match(source, /TerminateJobObject/);
   assert.match(source, /JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE/);
   assert.match(source, /SetInformationJobObject/);
+});
+
+test("Windows installer preserves background children after a successful launcher command", {
+  skip: process.platform !== "win32" ? "requires Windows PowerShell 5.1" : false,
+}, () => {
+  const script = String.raw`
+$source = Get-Content -Raw -LiteralPath $env:BETTER_CODEX_INSTALLER_TEST_PATH
+$tokens = $null
+$parseErrors = $null
+$ast = [Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors.Count -gt 0) { throw ($parseErrors | Out-String) }
+$function = $ast.Find({
+  param($node)
+  $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq "Invoke-NativeCapture"
+}, $true)
+if (-not $function) { throw "Invoke-NativeCapture is missing" }
+Invoke-Expression $function.Extent.Text
+
+$childPid = $null
+try {
+  $parentCommand = '$child = Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @(''-NoProfile'',''-NonInteractive'',''-Command'',''Start-Sleep -Seconds 30'') -PassThru; Write-Output $child.Id; exit 0'
+  $result = Invoke-NativeCapture "powershell.exe" @("-NoProfile", "-NonInteractive", "-Command", $parentCommand) 5000 $true
+  if ($result.ExitCode -ne 0) { throw "launcher command failed with $($result.ExitCode)" }
+  $childPid = [int]$result.Stdout.Trim()
+  Start-Sleep -Milliseconds 250
+  if (-not (Get-Process -Id $childPid -ErrorAction SilentlyContinue)) { throw "background child was killed after its launcher exited" }
+} finally {
+  if ($childPid) { Stop-Process -Id $childPid -Force -ErrorAction SilentlyContinue }
+}
+`;
+
+  const result = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+    encoding: "utf8",
+    timeout: 10_000,
+    env: { ...process.env, BETTER_CODEX_INSTALLER_TEST_PATH: installerPath.pathname.replace(/^\/(.:)/, "$1") },
+  });
+
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+});
+
+test("Windows installer opts persistent runtime commands out of success-time job cleanup", () => {
+  assert.match(source, /Invoke-BetterCodexCapture \$executable @\("setup", "--yes"\) 120000 \$true/);
+  assert.match(source, /Invoke-BetterCodexCapture \$Executable @\("service", "restart"\) 30000 \$true/);
+  assert.match(source, /Invoke-BetterCodexCapture \$Executable @\("inject", "--launch"\) 60000 \$true/);
+  assert.match(source, /Invoke-BetterCodexCapture \$executable @\("service", "install"\) 10000 \$true/);
+  assert.match(source, /Invoke-BetterCodexCapture \$executable @\("service", "start"\) 10000 \$true/);
+  assert.match(source, /Invoke-BetterCodexCapture \$executable @\("enable"\) 30000 \$true/);
 });
 
 test("Windows timeout fallback uses the trusted system taskkill executable", () => {

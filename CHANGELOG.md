@@ -4,6 +4,13 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.1-beta.6] - 2026-08-10
+
+### Fixed
+
+- Keep the Windows Runtime and injector alive after successful installer commands while retaining full process-tree cleanup on timeout.
+- Migrate legacy standalone executables directly to the Node.js bundle instead of passing the archive through the incompatible legacy core updater.
+
 ## [0.4.1-beta.5] - 2026-08-10
 
 ### Added
@@ -265,7 +272,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1-beta.5...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1-beta.6...HEAD
+[0.4.1-beta.6]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1-beta.5...v0.4.1-beta.6
 [0.4.1-beta.5]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1-beta.4...v0.4.1-beta.5
 [0.4.1-beta.4]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1-beta.3...v0.4.1-beta.4
 [0.4.1-beta.3]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1-beta.2...v0.4.1-beta.3
