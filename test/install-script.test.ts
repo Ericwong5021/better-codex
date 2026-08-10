@@ -47,7 +47,73 @@ if ($ErrorActionPreference -ne "Stop") { throw "ErrorActionPreference was not re
 
 test("all installer commands that merge native stderr use the compatibility wrapper", () => {
   assert.match(source, /function Invoke-NativeCapture/);
-  assert.match(source, /Invoke-NativeCapture \$executable @\("setup", "--yes"\)/);
+  assert.match(source, /Invoke-BetterCodexCapture \$executable @\("setup", "--yes"\)/);
+});
+
+test("installers require Node interactively before replacing a legacy executable", () => {
+  assert.match(source, /Install Node\.js LTS now\? \[Y\/n\]/);
+  assert.match(source, /OpenJS\.NodeJS\.LTS/);
+  assert.match(source, /https:\/\/nodejs\.org\/en\/download/);
+  assert.match(source, /if \(-not \(Ensure-Node\)\) \{ exit 1 \}/);
+  assert.match(shellSource, /Install Node\.js now\? \[Y\/n\]/);
+  assert.match(shellSource, /brew install node/);
+  assert.match(shellSource, /https:\/\/nodejs\.org\/en\/download/);
+});
+
+test("Windows Node dependency rejection exits before attempting package installation", {
+  skip: process.platform !== "win32" ? "requires Windows PowerShell 5.1" : false,
+}, () => {
+  const script = String.raw`
+$source = Get-Content -Raw -LiteralPath $env:BETTER_CODEX_INSTALLER_TEST_PATH
+$tokens = $null
+$parseErrors = $null
+$ast = [Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors.Count -gt 0) { throw ($parseErrors | Out-String) }
+foreach ($name in @("Get-NodeVersion", "Ensure-Node")) {
+  $function = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true)
+  if (-not $function) { throw "$name is missing" }
+  Invoke-Expression $function.Extent.Text
+}
+$MinimumNodeVersion = "22.5.0"
+$NodeDownloadUrl = "https://nodejs.org/en/download"
+$script:NodeExecutable = ""
+function Get-NodeExecutables { return @() }
+function Read-Host { param([string]$Prompt) return "n" }
+function Write-Step { param([string]$Message) }
+function Write-Ok { param([string]$Message) }
+if (Ensure-Node) { throw "Node rejection was ignored" }
+if ($script:NodeExecutable) { throw "Node executable changed after rejection" }
+`;
+  const result = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+    encoding: "utf8",
+    env: { ...process.env, BETTER_CODEX_INSTALLER_TEST_PATH: installerPath.pathname.replace(/^\/(.:)/, "$1") },
+  });
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+});
+
+test("Windows legacy migration removes the EXE only after the new bundle passes diagnostics", () => {
+  const installBundle = source.indexOf("Copy-Item -Force $packagedExecutable $bundlePath");
+  const diagnostics = source.indexOf('Invoke-BetterCodexCapture $executable @("doctor")', installBundle);
+  const removeLegacy = source.indexOf("Remove-Item -LiteralPath $legacyExecutable -Force", diagnostics);
+  assert.ok(installBundle >= 0 && diagnostics > installBundle && removeLegacy > diagnostics);
+  assert.doesNotMatch(source, /@\("uninstall"\)/);
+});
+
+test("Windows launcher pins the Node executable that passed dependency validation", () => {
+  const copyLauncher = source.indexOf("Copy-Item -Force $packagedLauncher $launcherPath");
+  const pinNode = source.indexOf('$launcherNode = $script:NodeExecutable.Replace("%", "%%")', copyLauncher);
+  const verifyBundle = source.indexOf('Invoke-BetterCodexCapture $executable @("version")', pinNode);
+  assert.ok(copyLauncher >= 0 && pinNode > copyLauncher && verifyBundle > pinNode);
+  assert.match(source, /%~dp0better-codex\.cjs/);
+});
+
+test("installers preserve the selected Preview lane during a legacy full migration", () => {
+  assert.match(source, /runtime\\channel\.json/);
+  assert.match(source, /@\("update", "check", "--channel", "preview"\)/);
+  assert.match(source, /Unable to resolve the signed Beta release; the existing installation was left unchanged/);
+  assert.match(shellSource, /runtime\/channel\.json/);
+  assert.match(shellSource, /update check --channel preview/);
+  assert.match(shellSource, /Unable to resolve the signed Beta release; the existing installation was left unchanged/);
 });
 
 test("Windows installer bounds a native command that never exits", {
@@ -122,7 +188,7 @@ if (Test-VersionAtLeast "0.4.2" "0.4.3-beta.1") { throw "stable must not downgra
 
 test("Windows installer disables helpers before terminating the full Codex package process tree", () => {
   const consent = source.indexOf('Read-Host "Codex is currently running. Quit Codex and continue installation? [Y/n]"');
-  const disable = source.indexOf('Invoke-NativeCapture $executable @("disable")', consent);
+  const disable = source.indexOf('Invoke-BetterCodexCapture $executable @("disable")', consent);
   const terminate = source.indexOf("Stop-Process -Id $_.ProcessId -Force", consent);
 
   assert.ok(consent >= 0, "Codex quit consent is missing");
@@ -137,7 +203,7 @@ test("Windows installer disables helpers before terminating the full Codex packa
 });
 
 test("Windows installer aborts before mutation when previous service state is unknown", () => {
-  const status = source.indexOf('Invoke-NativeCapture $executable @("service", "status")');
+  const status = source.indexOf('Invoke-BetterCodexCapture $executable @("service", "status")');
   const mutation = source.indexOf("$previousInjectionEnabled", status);
   assert.ok(status >= 0 && mutation > status, "previous service status probe is missing");
   assert.match(source.slice(status, mutation), /throw "Unable to read the existing Better Codex service state/);
@@ -147,6 +213,17 @@ test("Windows release downloads have hard time limits", () => {
   const downloads = source.split(/\r?\n/).filter(line => line.includes("Invoke-WebRequest") && line.includes("-OutFile"));
   assert.ok(downloads.length >= 3, "release downloads are missing");
   for (const line of downloads) assert.match(line, /-TimeoutSec 300/);
+});
+
+test("remote installers authenticate checksums before extracting bundles", () => {
+  const windowsSignature = source.indexOf("Assert-ChecksumsSignature $checksums $publicKey $checksumSignature");
+  const windowsExtract = source.indexOf("Expand-Archive");
+  assert.ok(windowsSignature >= 0 && windowsExtract > windowsSignature);
+  assert.match(source, /checksums\.sig/);
+  const macSignature = shellSource.indexOf("verify_checksums_signature ||");
+  const macExtract = shellSource.indexOf('tar -xzf "$ARCHIVE"');
+  assert.ok(macSignature >= 0 && macExtract > macSignature);
+  assert.match(shellSource, /checksums\.sig/);
 });
 
 test("macOS installer bounds upgrade, shutdown, setup, diagnostics, and rollback commands", () => {

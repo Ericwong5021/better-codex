@@ -33,11 +33,16 @@ function run(args, capture = false) {
 
 function ensureStableWindowsLauncher() {
   if (process.platform !== "win32") return { checked: false, reason: "windows_only" };
-  const defaultExecutable = process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, "BetterCodex", "bin", "better-codex.exe") : "";
+  const defaultBin = process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, "BetterCodex", "bin") : "";
+  const defaultExecutable = defaultBin
+    ? [join(defaultBin, "better-codex.cjs"), join(defaultBin, "better-codex.exe")].find(candidate => existsSync(candidate)) || ""
+    : "";
   const configuredExecutable = process.env.BETTER_CODEX_STABLE_EXECUTABLE || defaultExecutable;
   if (!configuredExecutable) throw new Error("stable_binary_required");
   const officialExecutable = resolve(configuredExecutable);
   if (!existsSync(officialExecutable)) throw new Error("stable_binary_required");
+  const stableCommand = officialExecutable.toLowerCase().endsWith(".cjs") ? process.execPath : officialExecutable;
+  const stableArguments = officialExecutable.toLowerCase().endsWith(".cjs") ? [officialExecutable] : [];
   const stableEnvironment = {
     ...process.env,
     BETTER_CODEX_PROFILE: "stable",
@@ -46,15 +51,15 @@ function ensureStableWindowsLauncher() {
     BETTER_CODEX_DISABLE_DELEGATION: "1",
   };
   delete stableEnvironment.BETTER_CODEX_LAUNCHER_PATH;
-  const result = spawnSync(officialExecutable, ["launcher", "install"], { encoding: "utf8", env: stableEnvironment, stdio: "inherit" });
+  const result = spawnSync(stableCommand, [...stableArguments, "launcher", "install"], { encoding: "utf8", env: stableEnvironment, stdio: "inherit" });
   if (result.error) throw result.error;
   if (result.status !== 0) process.exit(result.status ?? 1);
-  const versionResult = spawnSync(officialExecutable, ["version", "--json"], { encoding: "utf8", env: stableEnvironment });
+  const versionResult = spawnSync(stableCommand, [...stableArguments, "version", "--json"], { encoding: "utf8", env: stableEnvironment });
   let supportsProfiles = false;
   try { supportsProfiles = JSON.parse(versionResult.stdout).profile === "stable"; } catch {}
   const launchArguments = supportsProfiles ? "launch" : "start --launch";
   mkdirSync(stableHome, { recursive: true });
-  const commandLine = `"${officialExecutable.replace(/"/g, "\"\"")}"`;
+  const commandLine = [stableCommand, ...stableArguments].map(value => `"${value.replace(/"/g, "\"\"")}"`).join(" ");
   writeFileSync(join(stableHome, "Better Codex Launcher.vbs"), `Option Explicit
 Dim shell
 Set shell = CreateObject("WScript.Shell")

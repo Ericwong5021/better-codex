@@ -4,6 +4,21 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.1-beta.3] - 2026-08-10
+
+### Changed
+
+- Replace the embedded Node.js executable with a small system-Node bundle, reducing Windows installer downloads from about 32 MiB to under 1 MiB and core updates from about 84 MiB to about 2.3 MiB.
+- Check for Node.js 22.5 or later before installation and ask before installing Node.js when the dependency is missing or outdated.
+- Migrate legacy standalone executables transactionally: verify the new bundle and integrations first, preserve the database throughout, and remove the old executable only after diagnostics pass.
+- Authenticate release archive checksums with the existing Ed25519 update key before extracting remotely downloaded bundles.
+
+### Fixed
+
+- Allow packaged Node bundles to download, validate, activate, and roll back managed core updates.
+- Extend the updater download deadline so slower networks are not limited to 15 seconds.
+- Prefer the executable per-user Codex CLI on Windows instead of accepting an inaccessible WindowsApps path during MCP setup and diagnostics.
+
 ## [0.4.1-beta.2] - 2026-08-10
 
 ### Fixed
@@ -232,7 +247,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1-beta.2...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1-beta.3...HEAD
+[0.4.1-beta.3]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1-beta.2...v0.4.1-beta.3
 [0.4.1-beta.2]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1-beta.1...v0.4.1-beta.2
 [0.4.1-beta.1]: https://github.com/Ericwong5021/better-codex/compare/v0.4.0...v0.4.1-beta.1
 [0.4.0]: https://github.com/Ericwong5021/better-codex/compare/v0.3.17...v0.4.0

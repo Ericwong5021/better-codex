@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -26,7 +26,10 @@ const userHome = join(testRoot, "user");
 const codexHome = join(testRoot, "codex");
 const betterCodexHome = join(testRoot, "better-codex");
 const binDirectory = join(testRoot, "bin");
-const executable = join(binDirectory, platform === "win32" ? "better-codex.exe" : "better-codex");
+const bundle = join(binDirectory, "better-codex.cjs");
+const launcher = join(binDirectory, platform === "win32" ? "better-codex.cmd" : "better-codex");
+const legacyExecutable = join(binDirectory, "better-codex.exe");
+const database = join(betterCodexHome, "better-codex.db");
 const environment = {
   ...process.env,
   BETTER_CODEX_ARCHIVE: archive,
@@ -62,20 +65,30 @@ function install() {
 }
 
 try {
+  mkdirSync(binDirectory, { recursive: true });
+  mkdirSync(betterCodexHome, { recursive: true });
+  writeFileSync(database, "preserve-database");
+  if (platform === "win32") copyFileSync(process.execPath, legacyExecutable);
   install();
   install();
-  if (!existsSync(executable)) throw new Error("local_install_executable_missing");
+  if (!existsSync(bundle)) throw new Error("local_install_bundle_missing");
+  if (!existsSync(launcher)) throw new Error("local_install_launcher_missing");
+  if (platform === "win32" && existsSync(legacyExecutable)) throw new Error("local_install_legacy_executable_preserved_after_success");
+  if (readFileSync(database, "utf8") !== "preserve-database") throw new Error("local_install_database_changed");
   if (!existsSync(join(codexHome, "skills", "better-codex", "SKILL.md"))) throw new Error("local_install_skill_missing");
   if (!existsSync(join(betterCodexHome, "update-public-key.pem"))) throw new Error("local_install_update_key_missing");
 
-  const output = execFileSync(executable, ["version", "--json"], { encoding: "utf8", env: environment });
+  const run = args => platform === "win32"
+    ? execFileSync(process.env.ComSpec || "cmd.exe", ["/d", "/c", launcher, ...args], { encoding: "utf8", env: environment })
+    : execFileSync(launcher, args, { encoding: "utf8", env: environment });
+  const output = run(["version", "--json"]);
   const versions = JSON.parse(output);
   if (versions.core !== packageJson.version) {
     throw new Error(`local_install_version_mismatch:expected=${packageJson.version}:actual=${versions.core ?? "unknown"}`);
   }
-  const preview = JSON.parse(execFileSync(executable, ["update", "channel", "preview"], { encoding: "utf8", env: environment }));
+  const preview = JSON.parse(run(["update", "channel", "preview"]));
   if (preview.channel !== "preview" || preview.previous !== "stable") throw new Error("local_install_preview_channel_failed");
-  const stable = JSON.parse(execFileSync(executable, ["update", "channel", "stable"], { encoding: "utf8", env: environment }));
+  const stable = JSON.parse(run(["update", "channel", "stable"]));
   if (stable.channel !== "stable" || stable.previous !== "preview") throw new Error("local_install_stable_channel_failed");
   console.log(JSON.stringify({ installed: true, reinstalled: true, platform, architecture, version: versions.core, channels: [preview.channel, stable.channel] }));
 } finally {

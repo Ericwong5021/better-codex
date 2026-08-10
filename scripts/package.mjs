@@ -17,10 +17,8 @@ if (platform === "win32" && architecture !== "amd64") throw new Error("package_a
 
 const work = await mkdtemp(join(tmpdir(), "better-codex-package-"));
 const output = join(root, "release");
-const bundle = join(work, "better-codex.cjs");
-const blob = join(work, "better-codex.blob");
-const executableName = platform === "win32" ? "better-codex.exe" : "better-codex";
-const executable = join(work, executableName);
+const bundleName = "better-codex.cjs";
+const bundle = join(work, bundleName);
 const packageRoot = join(work, "package");
 const archiveName = `better-codex-cli-${packageJson.version}-${platform}-${architecture}.${platform === "win32" ? "zip" : "tar.gz"}`;
 const archive = join(output, archiveName);
@@ -44,51 +42,33 @@ export function betterCodexLogoPng(){return Buffer.from(${javascriptStringLitera
 };
 
 try {
-  await build({ entryPoints: [join(root, "src", "cli.ts")], bundle: true, platform: "node", format: "cjs", target: "node22", outfile: bundle, plugins: [embedBrandAssets] });
-  await writeFile(join(work, "sea.json"), JSON.stringify({ main: bundle, output: blob, disableExperimentalSEAWarning: true }));
-  execFileSync(process.execPath, ["--experimental-sea-config", join(work, "sea.json")], { stdio: "inherit" });
-  await copyFile(process.execPath, executable);
-  if (platform === "darwin") execFileSync("/usr/bin/codesign", ["--remove-signature", executable], { stdio: "ignore" });
-  const postjectArgs = [
-    join(root, "node_modules", "postject", "dist", "cli.js"),
-    executable,
-    "NODE_SEA_BLOB",
-    blob,
-    "--sentinel-fuse",
-    "NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2",
-  ];
-  if (platform === "darwin") postjectArgs.push("--macho-segment-name", "NODE_SEA");
-  execFileSync(process.execPath, postjectArgs, { stdio: "inherit" });
-  await chmod(executable, 0o755);
-  if (platform === "darwin") {
-    const identity = process.env.BETTER_CODEX_CODESIGN_IDENTITY || "-";
-    if (process.env.BETTER_CODEX_REQUIRE_SIGNING === "1" && identity === "-") throw new Error("macos_signing_identity_required");
-    const signArgs = ["--sign", identity, "--force"];
-    if (identity !== "-") signArgs.push("--options", "runtime", "--timestamp");
-    signArgs.push(executable);
-    execFileSync("/usr/bin/codesign", signArgs, { stdio: "inherit" });
-  } else if (platform === "win32") {
-    const certificate = process.env.BETTER_CODEX_WINDOWS_PFX_BASE64;
-    const password = process.env.BETTER_CODEX_WINDOWS_PFX_PASSWORD;
-    if (process.env.BETTER_CODEX_REQUIRE_SIGNING === "1" && (!certificate || !password)) throw new Error("windows_signing_certificate_required");
-    if (certificate && password) {
-      const certificatePath = join(work, "codesign.pfx");
-      await writeFile(certificatePath, Buffer.from(certificate, "base64"), { mode: 0o600 });
-      const signtool = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "$path = (Get-Command signtool.exe -ErrorAction SilentlyContinue).Source; if (-not $path) { $path = (Get-ChildItem \"${env:ProgramFiles(x86)}\\Windows Kits\\10\\bin\\*\\x64\\signtool.exe\" | Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName) }; if (-not $path) { exit 1 }; $path"], { encoding: "utf8", windowsHide: true }).trim();
-      execFileSync(signtool, ["sign", "/fd", "SHA256", "/f", certificatePath, "/p", password, "/tr", "http://timestamp.digicert.com", "/td", "SHA256", executable], { stdio: "inherit" });
-    }
-  }
+  await build({
+    entryPoints: [join(root, "src", "cli.ts")],
+    bundle: true,
+    platform: "node",
+    format: "cjs",
+    target: "node22",
+    outfile: bundle,
+    define: { __BETTER_CODEX_PACKAGED__: "true" },
+    plugins: [embedBrandAssets],
+  });
+  await chmod(bundle, 0o755);
   const versionEnv = { ...process.env, BETTER_CODEX_HOME: join(work, "home"), BETTER_CODEX_DISABLE_DELEGATION: "1" };
-  const versionOutput = execFileSync(executable, ["version", "--json"], { encoding: "utf8", env: versionEnv });
+  const versionOutput = execFileSync(process.execPath, [bundle, "version", "--json"], { encoding: "utf8", env: versionEnv });
   const versions = JSON.parse(versionOutput);
   if (versions.core !== packageJson.version || (versions.managedCore && versions.managedCore !== packageJson.version)) {
     throw new Error(`package_version_mismatch: expected ${packageJson.version}, got core ${versions.core || "unknown"} managed ${versions.managedCore || "unknown"}`);
   }
-  execFileSync(executable, ["version"], { stdio: "inherit", env: versionEnv });
+  execFileSync(process.execPath, [bundle, "version"], { stdio: "inherit", env: versionEnv });
   await mkdir(output, { recursive: true });
-  await copyFile(executable, join(output, coreName));
+  await copyFile(bundle, join(output, coreName));
   await mkdir(packageRoot, { recursive: true });
-  await copyFile(executable, join(packageRoot, executableName));
+  await copyFile(bundle, join(packageRoot, bundleName));
+  if (platform === "win32") {
+    await writeFile(join(packageRoot, "better-codex.cmd"), "@echo off\r\nnode.exe \"%~dp0better-codex.cjs\" %*\r\n", { mode: 0o755 });
+  } else {
+    await writeFile(join(packageRoot, "better-codex"), "#!/bin/sh\nexec node \"$(dirname \"$0\")/better-codex.cjs\" \"$@\"\n", { mode: 0o755 });
+  }
   await copyFile(join(root, "assets", "update-public-key.pem"), join(packageRoot, "update-public-key.pem"));
   await cp(join(root, "skills", "better-codex"), join(packageRoot, "skills", "better-codex"), { recursive: true });
   if (platform === "win32") {

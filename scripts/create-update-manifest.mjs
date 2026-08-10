@@ -61,4 +61,10 @@ const signature = sign(null, Buffer.from(stableJson(payload)), key).toString("ba
 await writeFile(join(output, "update-manifest.json"), JSON.stringify({ payload, signature }), { mode: 0o644 });
 await writeFile(join(output, "update-public-key.pem"), publicKey, { mode: 0o644 });
 await chmod(join(output, "update-public-key.pem"), 0o644);
+try {
+  const checksums = await readFile(join(output, "checksums.txt"));
+  await writeFile(join(output, "checksums.sig"), `${sign(null, checksums, key).toString("base64")}\n`, { mode: 0o644 });
+} catch (error) {
+  if (error?.code !== "ENOENT") throw error;
+}
 console.log(JSON.stringify({ manifest: join(output, "update-manifest.json"), compatibility: compatibilityName, coreVersion, assets: Object.keys(assets) }));

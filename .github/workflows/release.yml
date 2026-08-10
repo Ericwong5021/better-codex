@@ -87,8 +87,6 @@ jobs:
       - run: npm run build
       - run: npm test
       - run: npm run package:binary
-        env:
-          BETTER_CODEX_REQUIRE_SIGNING: "0"
       - name: Install current local package twice
         run: node scripts/test-local-install.mjs
       - uses: actions/upload-artifact@v4
@@ -113,11 +111,11 @@ jobs:
         with:
           path: release
           merge-multiple: true
+      - run: cp scripts/install.sh scripts/install.ps1 release/
+      - run: find release -type f \( -name '*.tar.gz' -o -name '*.zip' \) -exec sha256sum {} \; | sed 's#release/##' > release/checksums.txt
       - env:
           BETTER_CODEX_UPDATE_PRIVATE_KEY: ${{ secrets.BETTER_CODEX_UPDATE_PRIVATE_KEY }}
         run: npm run package:update-manifest
-      - run: cp scripts/install.sh scripts/install.ps1 release/
-      - run: find release -type f \( -name '*.tar.gz' -o -name '*.zip' \) -exec sha256sum {} \; | sed 's#release/##' > release/checksums.txt
       - name: Prepare the promoted Preview feed before publishing
         env:
           BETTER_CODEX_UPDATE_CHANNEL: preview

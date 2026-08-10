@@ -27,6 +27,7 @@ await writeFile(output, `class BetterCodex < Formula
   desc "Local task board for Codex desktop"
   homepage "https://github.com/Ericwong5021/better-codex"
   version "${version}"
+  depends_on "node"
 
   on_arm do
     url "https://github.com/Ericwong5021/better-codex/releases/download/v#{version}/better-codex-cli-#{version}-darwin-arm64.tar.gz"
@@ -39,7 +40,7 @@ await writeFile(output, `class BetterCodex < Formula
   end
 
   def install
-    bin.install "better-codex"
+    bin.install "better-codex", "better-codex.cjs"
     libexec.install "skills"
     libexec.install "update-public-key.pem"
   end

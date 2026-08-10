@@ -99,7 +99,9 @@ Windows (PowerShell):
 irm https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scripts/install.ps1 | iex
 ```
 
-The installer adds the CLI, Skill, local runtime, and system launcher, then registers the `better-codex` MCP server with Codex. The MCP server runs only on your computer and provides the Better Codex app entry and route. Projects, tasks, and conversation data remain in the local database.
+Better Codex runs as a small Node.js bundle and requires Node.js 22.5 or later. The installer checks this before changing an existing installation. If Node.js is missing or too old, it asks before installing the current LTS release; declining leaves the existing Better Codex installation and database untouched.
+
+The installer adds the CLI, Skill, local runtime, and system launcher, then registers the `better-codex` MCP server with Codex. The MCP server runs only on your computer and provides the Better Codex app entry and route. Projects, tasks, and conversation data remain in the local database. Legacy standalone-EXE installations are removed only after the Node.js bundle passes version and health checks.
 
 Restart Codex from the Better Codex launcher, and `Task board` and `Agents` appear as two entries in your sidebar. Run `better-codex uninstall` to remove Better Codex completely.
 
@@ -118,7 +120,7 @@ Codex uses the local MCP app to recognize the Better Codex app entry and route. 
 The app entry and route are registered through the local MCP server. The page integration uses the desktop app's local CDP interface and page structure. It doesn't patch Codex binaries. A Codex update can occasionally require a matching Better Codex compatibility update; when that happens, an update notice appears inside Codex. If anything looks off, run `better-codex doctor`.
 
 **How do I disable or uninstall it?**<br>
-`better-codex eject` disables the page integration but keeps your task data and installed components. `better-codex uninstall` removes the MCP server, background service, launcher, Skill, Agent profiles, local data, and standalone CLI.
+`better-codex eject` disables the page integration but keeps your task data and installed components. `better-codex uninstall` removes the MCP server, background service, launcher, Skill, Agent profiles, local data, and CLI bundle.
 
 **How do updates work?**<br>
 Better Codex checks a signed update manifest in the background and shows a notice inside Codex when a new version is available. You can also rerun the install command at any time. It upgrades in place when possible.
@@ -148,7 +150,7 @@ better-codex uninstall         # uninstall completely and delete local data
 
 Requires Node.js 22.5 or later.
 
-If the stable build is already installed, install the source checkout as a separate development instance. Stable keeps `~/.better-codex` and the `Better Codex` launcher; development uses `~/.better-codex-dev` and `Better Codex Dev`. Their data, logs, and update state stay isolated, and opening either launcher deactivates the other instance's page injection first.
+If the stable build is already installed, install the source checkout as a separate development instance. Stable keeps `~/.better-codex` and the `Better Codex` launcher; development uses `~/.better-codex-dev` and `Better Codex Dev`. Both profiles use the stable database at `~/.better-codex/better-codex.db` by default, while their runtime files, logs, attachments, and update state stay isolated. Opening either launcher deactivates the other instance's page injection first.
 
 ```bash
 git clone https://github.com/Ericwong5021/better-codex.git

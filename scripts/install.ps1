@@ -9,6 +9,9 @@ $ErrorActionPreference = "Stop"
 $ProgressPreference = "Continue"
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new()
 $UpdateKeySha256 = "1007607762db32004da21780e81875bef8453355a2944524a96e5341e1e3963e"
+$MinimumNodeVersion = "22.5.0"
+$NodeDownloadUrl = "https://nodejs.org/en/download"
+$script:NodeExecutable = ""
 
 function Write-Step([string]$Message) {
   Write-Host "[Better Codex] $Message"
@@ -16,6 +19,118 @@ function Write-Step([string]$Message) {
 
 function Write-Ok([string]$Message) {
   Write-Host "[OK] $Message" -ForegroundColor Green
+}
+
+function Get-NodeExecutables {
+  $candidates = @(
+    $env:BETTER_CODEX_NODE,
+    $(try { (Get-Command node.exe -ErrorAction Stop).Source } catch { $null }),
+    $(if ($env:ProgramFiles) { Join-Path $env:ProgramFiles "nodejs\node.exe" } else { $null }),
+    $(if (${env:ProgramFiles(x86)}) { Join-Path ${env:ProgramFiles(x86)} "nodejs\node.exe" } else { $null })
+  ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
+  return @($candidates | Select-Object -Unique)
+}
+
+function Get-NodeVersion([string]$Executable) {
+  if (-not $Executable) { return $null }
+  try {
+    $result = Invoke-NativeCapture $Executable @("--version") 10000
+    if ($result.ExitCode -ne 0) { return $null }
+    $version = $result.Stdout.Trim().TrimStart("v")
+    if ($version -notmatch '^\d+\.\d+\.\d+') { return $null }
+    return $Matches[0]
+  } catch {
+    return $null
+  }
+}
+
+function Refresh-ProcessPath {
+  $machine = [Environment]::GetEnvironmentVariable("Path", "Machine")
+  $user = [Environment]::GetEnvironmentVariable("Path", "User")
+  $env:Path = @($machine, $user) -join ";"
+}
+
+function Ensure-Node {
+  $node = $null
+  $version = $null
+  $detectedVersion = $null
+  foreach ($candidate in @(Get-NodeExecutables)) {
+    $candidateVersion = Get-NodeVersion $candidate
+    if ($candidateVersion -and -not $detectedVersion) { $detectedVersion = $candidateVersion }
+    try {
+      if ($candidateVersion -and (Compare-SemVer $candidateVersion $MinimumNodeVersion) -ge 0) {
+        $node = $candidate
+        $version = $candidateVersion
+        break
+      }
+    } catch {}
+  }
+  if ($node) {
+    $script:NodeExecutable = $node
+    Write-Ok "Node.js v$version detected"
+    return $true
+  }
+
+  $requirement = if ($detectedVersion) { "Node.js v$detectedVersion is installed, but Better Codex requires v$MinimumNodeVersion or later." } else { "Better Codex requires Node.js v$MinimumNodeVersion or later." }
+  Write-Step $requirement
+  $choice = Read-Host "Install Node.js LTS now? [Y/n]"
+  if ($choice -and $choice -notin @("y", "Y")) {
+    Write-Host "Installation cancelled. Node.js was not installed."
+    return $false
+  }
+
+  $winget = try { (Get-Command winget.exe -ErrorAction Stop).Source } catch { $null }
+  if (-not $winget) {
+    Write-Host "Automatic Node.js installation requires Windows Package Manager. Download Node.js from $NodeDownloadUrl"
+    return $false
+  }
+  Write-Step "Installing Node.js LTS with Windows Package Manager..."
+  $install = Invoke-NativeCapture $winget @("install", "--id", "OpenJS.NodeJS.LTS", "--exact", "--source", "winget", "--accept-package-agreements", "--accept-source-agreements", "--disable-interactivity", "--force") 900000
+  if ($install.Output) { Write-Host ($install.Output.TrimEnd()) }
+  if ($install.ExitCode -ne 0) { throw "Node.js installation failed. Download it from $NodeDownloadUrl and run this installer again." }
+  Refresh-ProcessPath
+  $node = $null
+  $version = $null
+  foreach ($candidate in @(Get-NodeExecutables)) {
+    $candidateVersion = Get-NodeVersion $candidate
+    if ($candidateVersion -and (Compare-SemVer $candidateVersion $MinimumNodeVersion) -ge 0) {
+      $node = $candidate
+      $version = $candidateVersion
+      break
+    }
+  }
+  if (-not $node) {
+    throw "Node.js v$MinimumNodeVersion or later was not detected after installation. Download it from $NodeDownloadUrl and run this installer again."
+  }
+  $script:NodeExecutable = $node
+  Write-Ok "Node.js v$version installed"
+  return $true
+}
+
+function Invoke-BetterCodexCapture([string]$Entrypoint, [string[]]$Arguments, [int]$TimeoutMilliseconds = 120000) {
+  if ($Entrypoint.ToLowerInvariant().EndsWith(".cjs")) {
+    return Invoke-NativeCapture $script:NodeExecutable (@($Entrypoint) + $Arguments) $TimeoutMilliseconds
+  }
+  return Invoke-NativeCapture $Entrypoint $Arguments $TimeoutMilliseconds
+}
+
+function Assert-UpdatePublicKey([string]$Path) {
+  if (-not $Path -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "Update public key is missing." }
+  $normalized = [IO.File]::ReadAllText($Path).Replace("`r`n", "`n")
+  $hasher = [Security.Cryptography.SHA256]::Create()
+  try {
+    $actual = -join ($hasher.ComputeHash([Text.UTF8Encoding]::new($false).GetBytes($normalized)) | ForEach-Object { $_.ToString("x2") })
+  } finally {
+    $hasher.Dispose()
+  }
+  if ($actual -ne $UpdateKeySha256) { throw "Update public key mismatch." }
+}
+
+function Assert-ChecksumsSignature([string]$Checksums, [string]$PublicKey, [string]$Signature) {
+  if (-not $Signature -or -not (Test-Path -LiteralPath $Signature -PathType Leaf)) { throw "Checksums signature is missing." }
+  $verifyScript = 'const fs=require("fs"),crypto=require("crypto"); const [checksums,key,signature]=process.argv.slice(1); const valid=crypto.verify(null,fs.readFileSync(checksums),fs.readFileSync(key),Buffer.from(fs.readFileSync(signature,"utf8").trim(),"base64")); process.exit(valid?0:1);'
+  $result = Invoke-NativeCapture $script:NodeExecutable @("-e", $verifyScript, $Checksums, $PublicKey, $Signature) 10000
+  if ($result.ExitCode -ne 0) { throw "Checksums signature verification failed." }
 }
 
 function Invoke-NativeCapture([string]$Executable, [string[]]$Arguments, [int]$TimeoutMilliseconds = 120000) {
@@ -236,7 +351,7 @@ function Resolve-ReleaseTag([string]$RepositoryName, [string]$RequestedVersion) 
 function Get-InstalledVersion([string]$Executable) {
   if (-not (Test-Path $Executable)) { return $null }
   try {
-    $result = Invoke-NativeCapture $Executable @("version", "--json") 10000
+    $result = Invoke-BetterCodexCapture $Executable @("version", "--json") 10000
     if ($result.ExitCode -ne 0) { return $null }
     $versions = $result.Stdout | ConvertFrom-Json
     $core = if ($versions.core) { [string]$versions.core } else { $null }
@@ -256,7 +371,7 @@ function Get-PackagedCoreVersion([string]$Executable, [string]$ValidationHome) {
   try {
     $env:BETTER_CODEX_HOME = $ValidationHome
     $env:BETTER_CODEX_DISABLE_DELEGATION = "1"
-    $result = Invoke-NativeCapture $Executable @("version", "--json") 10000
+    $result = Invoke-BetterCodexCapture $Executable @("version", "--json") 10000
     if ($result.ExitCode -ne 0) { return $null }
     $versions = $result.Stdout | ConvertFrom-Json
     if (-not $versions.core) { return $null }
@@ -276,19 +391,19 @@ function Test-VersionAtLeast([string]$Current, [string]$Target) {
 
 function Invoke-ExistingUpgrade([string]$Executable, [string]$TargetVersion) {
   try {
-    $updateResult = Invoke-NativeCapture $Executable @("update") 600000
+    $updateResult = Invoke-BetterCodexCapture $Executable @("update") 600000
     if ($updateResult.ExitCode -ne 0) { return $false }
     $updatedVersion = Get-InstalledVersion $Executable
     if (-not (Test-VersionAtLeast $updatedVersion $TargetVersion)) { return $false }
     if (-not $NoService) {
-      $restartResult = Invoke-NativeCapture $Executable @("service", "restart") 30000
+      $restartResult = Invoke-BetterCodexCapture $Executable @("service", "restart") 30000
       if ($restartResult.ExitCode -ne 0) { return $false }
       Start-Sleep -Milliseconds 800
-      $injectResult = Invoke-NativeCapture $Executable @("inject", "--launch") 60000
+      $injectResult = Invoke-BetterCodexCapture $Executable @("inject", "--launch") 60000
       if ($injectResult.ExitCode -ne 0) { return $false }
-      $launcherResult = Invoke-NativeCapture $Executable @("launcher", "install") 15000
+      $launcherResult = Invoke-BetterCodexCapture $Executable @("launcher", "install") 15000
       if ($launcherResult.ExitCode -ne 0) { return $false }
-      $doctorResult = Invoke-NativeCapture $Executable @("doctor") 20000
+      $doctorResult = Invoke-BetterCodexCapture $Executable @("doctor") 20000
       if ($doctorResult.ExitCode -ne 0) { return $false }
       $doctor = $doctorResult.Stdout | ConvertFrom-Json
       if (-not $doctor.ok) { return $false }
@@ -303,9 +418,9 @@ function Invoke-ExistingUpgrade([string]$Executable, [string]$TargetVersion) {
 function Test-InstallationReady([string]$Executable) {
   if ($NoService) { return $true }
   try {
-    $launcherResult = Invoke-NativeCapture $Executable @("launcher", "install") 15000
+    $launcherResult = Invoke-BetterCodexCapture $Executable @("launcher", "install") 15000
     if ($launcherResult.ExitCode -ne 0) { return $false }
-    $doctorResult = Invoke-NativeCapture $Executable @("doctor") 20000
+    $doctorResult = Invoke-BetterCodexCapture $Executable @("doctor") 20000
     if ($doctorResult.ExitCode -ne 0) { return $false }
     $doctor = $doctorResult.Stdout | ConvertFrom-Json
     return [bool]$doctor.ok
@@ -315,8 +430,13 @@ function Test-InstallationReady([string]$Executable) {
 }
 
 if (-not [Environment]::Is64BitOperatingSystem) { throw "Better Codex requires 64-bit Windows." }
+if (-not (Ensure-Node)) { exit 1 }
 
-$executable = Join-Path $BinDirectory "better-codex.exe"
+$bundlePath = Join-Path $BinDirectory "better-codex.cjs"
+$launcherPath = Join-Path $BinDirectory "better-codex.cmd"
+$legacyExecutable = Join-Path $BinDirectory "better-codex.exe"
+$executable = if (Test-Path -LiteralPath $bundlePath -PathType Leaf) { $bundlePath } elseif (Test-Path -LiteralPath $legacyExecutable -PathType Leaf) { $legacyExecutable } else { $bundlePath }
+$previousExecutablePath = $executable
 $codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE ".codex" }
 $skillDirectory = Join-Path $codexHome "skills\better-codex"
 $issueSkillDirectory = Join-Path $codexHome "skills\better-codex-issue"
@@ -333,13 +453,35 @@ try {
   try { $installLockAcquired = $installMutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $installLockAcquired = $true }
   if (-not $installLockAcquired) { throw "Another Better Codex installation is already running." }
 $localArchive = if ($env:BETTER_CODEX_ARCHIVE) { [IO.Path]::GetFullPath($env:BETTER_CODEX_ARCHIVE) } else { $null }
-if (-not $localArchive) { $Version = Resolve-ReleaseTag $Repository $Version }
+$explicitVersion = [bool]($Version -or $env:BETTER_CODEX_VERSION)
+if (-not $localArchive -and -not $explicitVersion) {
+  $channelPath = Join-Path $betterCodexHome "runtime\channel.json"
+  $previewSelected = $false
+  try { $previewSelected = ((Get-Content -LiteralPath $channelPath -Raw | ConvertFrom-Json).channel -eq "preview") } catch {}
+  if ($previewSelected -and (Test-Path -LiteralPath $executable -PathType Leaf)) {
+    Write-Step "Resolving the current Beta release..."
+    try {
+      $previewCheckResult = Invoke-BetterCodexCapture $executable @("update", "check", "--channel", "preview") 20000
+      if ($previewCheckResult.ExitCode -ne 0) { throw "preview_check_exit_$($previewCheckResult.ExitCode)" }
+      $previewCheck = $previewCheckResult.Stdout | ConvertFrom-Json
+      $previewVersion = if ($previewCheck.checked -and $previewCheck.core.version) { [string]$previewCheck.core.version } else { "" }
+      if (-not $previewVersion) { throw "preview_version_unavailable" }
+      $Version = "v$previewVersion"
+    } catch {
+      throw "Unable to resolve the signed Beta release; the existing installation was left unchanged."
+    }
+  } else {
+    $Version = Resolve-ReleaseTag $Repository $Version
+  }
+} elseif (-not $localArchive) {
+  $Version = Resolve-ReleaseTag $Repository $Version
+}
 $targetVersion = if ($Version) { $Version.TrimStart("v") } else { "" }
 $installedVersion = Get-InstalledVersion $executable
 
 if (-not $localArchive -and $installedVersion -and (Test-VersionAtLeast $installedVersion $targetVersion) -and (Test-Path (Join-Path $skillDirectory "SKILL.md")) -and (Test-Path $updatePublicKeyPath)) {
   try {
-    $updateCheckResult = Invoke-NativeCapture $executable @("update", "check") 20000
+    $updateCheckResult = Invoke-BetterCodexCapture $executable @("update", "check") 20000
     if ($updateCheckResult.ExitCode -ne 0) { throw "Update check failed." }
     $updateCheck = $updateCheckResult.Stdout | ConvertFrom-Json
     if ($updateCheck.checked -and -not (($updateCheck.core.available) -or ($updateCheck.compatibility.available))) {
@@ -358,7 +500,7 @@ if (-not $localArchive -and $installedVersion) {
   Write-Step "Better Codex v$installedVersion is installed; upgrading to v$targetVersion..."
   $updateCheck = $null
   try {
-    $updateCheckResult = Invoke-NativeCapture $executable @("update", "check") 20000
+    $updateCheckResult = Invoke-BetterCodexCapture $executable @("update", "check") 20000
     if ($updateCheckResult.ExitCode -ne 0) { throw "Update check failed." }
     $updateCheck = $updateCheckResult.Stdout | ConvertFrom-Json
     if ((Test-VersionAtLeast $installedVersion $targetVersion) -and $updateCheck.checked -and -not (($updateCheck.core.available) -or ($updateCheck.compatibility.available)) -and (Test-InstallationReady $executable)) {
@@ -384,6 +526,7 @@ try {
     $name = [IO.Path]::GetFileName($archive)
     $checksums = if ($env:BETTER_CODEX_CHECKSUMS) { [IO.Path]::GetFullPath($env:BETTER_CODEX_CHECKSUMS) } else { Join-Path ([IO.Path]::GetDirectoryName($archive)) "checksums.txt" }
     $publicKey = if ($env:BETTER_CODEX_UPDATE_PUBLIC_KEY_FILE) { [IO.Path]::GetFullPath($env:BETTER_CODEX_UPDATE_PUBLIC_KEY_FILE) } else { "" }
+    $checksumSignature = if ($env:BETTER_CODEX_CHECKSUMS_SIGNATURE) { [IO.Path]::GetFullPath($env:BETTER_CODEX_CHECKSUMS_SIGNATURE) } else { "" }
     if (-not (Test-Path -LiteralPath $archive -PathType Leaf)) { throw "Local Better Codex archive not found: $archive" }
     if (-not (Test-Path -LiteralPath $checksums -PathType Leaf)) { throw "Local Better Codex checksums not found: $checksums" }
     Write-Step "Installing from local package $name..."
@@ -395,10 +538,12 @@ try {
     $archive = Join-Path $workDirectory $name
     $checksums = Join-Path $workDirectory "checksums.txt"
     $publicKey = Join-Path $workDirectory "update-public-key.pem"
+    $checksumSignature = Join-Path $workDirectory "checksums.sig"
     Write-Step "Downloading $name..."
     Invoke-WebRequest -UseBasicParsing -Uri "$base/$name" -OutFile $archive -TimeoutSec 300
     Write-Step "Downloading checksums and update key..."
     Invoke-WebRequest -UseBasicParsing -Uri "$base/checksums.txt" -OutFile $checksums -TimeoutSec 300
+    Invoke-WebRequest -UseBasicParsing -Uri "$base/checksums.sig" -OutFile $checksumSignature -TimeoutSec 300
     Invoke-WebRequest -UseBasicParsing -Uri "$base/update-public-key.pem" -OutFile $publicKey -TimeoutSec 300
   }
   Write-Step "Verifying SHA-256 checksum..."
@@ -406,23 +551,22 @@ try {
   if (-not $expected) { throw "No checksum found for $name." }
   $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
   if ($actual -ne $expected.ToLowerInvariant()) { throw "Checksum mismatch for $name." }
+  if (-not $localArchive) {
+    Assert-UpdatePublicKey $publicKey
+    Assert-ChecksumsSignature $checksums $publicKey $checksumSignature
+  }
   Write-Step "Extracting package..."
   Expand-Archive -LiteralPath $archive -DestinationPath $workDirectory -Force
   if (-not $publicKey -and (Test-Path -LiteralPath (Join-Path $workDirectory "update-public-key.pem") -PathType Leaf)) {
     $publicKey = Join-Path $workDirectory "update-public-key.pem"
   }
-  if (-not $publicKey -or -not (Test-Path -LiteralPath $publicKey -PathType Leaf)) { throw "Update public key is missing." }
-  $normalizedPublicKey = [IO.File]::ReadAllText($publicKey).Replace("`r`n", "`n")
-  $publicKeyHasher = [Security.Cryptography.SHA256]::Create()
-  try {
-    $actualPublicKey = -join ($publicKeyHasher.ComputeHash([Text.UTF8Encoding]::new($false).GetBytes($normalizedPublicKey)) | ForEach-Object { $_.ToString("x2") })
-  } finally {
-    $publicKeyHasher.Dispose()
-  }
-  if ($actualPublicKey -ne $UpdateKeySha256) { throw "Update public key mismatch." }
-  $packagedExecutable = Join-Path $workDirectory "better-codex.exe"
+  Assert-UpdatePublicKey $publicKey
+  if ($localArchive -and $checksumSignature) { Assert-ChecksumsSignature $checksums $publicKey $checksumSignature }
+  $packagedExecutable = Join-Path $workDirectory "better-codex.cjs"
+  $packagedLauncher = Join-Path $workDirectory "better-codex.cmd"
   $packagedSkill = Join-Path $workDirectory "skills\better-codex"
-  if (-not (Test-Path $packagedExecutable)) { throw "Better Codex executable is missing from the package." }
+  if (-not (Test-Path $packagedExecutable)) { throw "Better Codex bundle is missing from the package." }
+  if (-not (Test-Path $packagedLauncher)) { throw "Better Codex launcher is missing from the package." }
   if (-not (Test-Path (Join-Path $packagedSkill "SKILL.md"))) { throw "Better Codex skill is missing from the package." }
   $packagedVersion = Get-PackagedCoreVersion $packagedExecutable (Join-Path $workDirectory "validation-home")
   if (-not $packagedVersion) { throw "Unable to read the packaged Better Codex version." }
@@ -430,17 +574,20 @@ try {
   if (-not $targetVersion) { $targetVersion = $packagedVersion }
   $backupDirectory = Join-Path $workDirectory "previous"
   New-Item -ItemType Directory -Force -Path $backupDirectory | Out-Null
-  $backupExecutable = Join-Path $backupDirectory "better-codex.exe"
+  $backupExecutable = Join-Path $backupDirectory "better-codex-entrypoint"
+  $backupLauncher = Join-Path $backupDirectory "better-codex.cmd"
   $backupSkill = Join-Path $backupDirectory "better-codex-skill"
   $backupIssueSkill = Join-Path $backupDirectory "better-codex-issue-skill"
   $backupUpdateKey = Join-Path $backupDirectory "update-public-key.pem"
   $hadExecutable = Test-Path $executable
+  $hadLauncher = Test-Path $launcherPath
+  $legacyMigration = $hadExecutable -and ([IO.Path]::GetFullPath($executable) -eq [IO.Path]::GetFullPath($legacyExecutable))
   $hadSkill = Test-Path $skillDirectory
   $hadIssueSkill = Test-Path $issueSkillDirectory
   $hadUpdateKey = Test-Path $updatePublicKeyPath
   $previousService = if ($hadExecutable -and -not $NoService) {
     try {
-      $statusResult = Invoke-NativeCapture $executable @("service", "status") 10000
+      $statusResult = Invoke-BetterCodexCapture $executable @("service", "status") 10000
       if ($statusResult.ExitCode -ne 0) { throw "status_exit_$($statusResult.ExitCode)" }
       $statusResult.Stdout | ConvertFrom-Json
     } catch {
@@ -449,6 +596,7 @@ try {
   } else { $null }
   $previousInjectionEnabled = -not (Test-Path (Join-Path $betterCodexHome "run\injection.json")) -or ((Get-Content (Join-Path $betterCodexHome "run\injection.json") -Raw | ConvertFrom-Json).enabled -eq $true)
   if ($hadExecutable) { Copy-Item -Force $executable $backupExecutable }
+  if ($hadLauncher) { Copy-Item -Force $launcherPath $backupLauncher }
   if ($hadSkill) { Copy-Item -Recurse -Force $skillDirectory $backupSkill }
   if ($hadIssueSkill) { Copy-Item -Recurse -Force $issueSkillDirectory $backupIssueSkill }
   if ($hadUpdateKey) { Copy-Item -Force $updatePublicKeyPath $backupUpdateKey }
@@ -463,9 +611,9 @@ try {
   }
   if ((Test-Path $executable) -and -not $NoService) {
     Write-Step "Stopping the existing Better Codex helpers..."
-    $disableResult = Invoke-NativeCapture $executable @("disable") 10000
+    $disableResult = Invoke-BetterCodexCapture $executable @("disable") 10000
     if ($disableResult.TimedOut) { Write-Step "The existing injection did not respond; continuing with process cleanup..." }
-    $serviceStopResult = Invoke-NativeCapture $executable @("service", "stop") 10000
+    $serviceStopResult = Invoke-BetterCodexCapture $executable @("service", "stop") 10000
     if ($serviceStopResult.TimedOut) { Write-Step "The existing runtime did not stop in time; continuing with process cleanup..." }
   }
   if (@($codexProcesses).Count -gt 0) {
@@ -477,10 +625,15 @@ try {
     }
     if (@(Get-CodexProcesses).Count -gt 0) { throw "Codex did not quit completely. Quit it manually and run the installer again." }
   }
-  Write-Step "Installing executable to $BinDirectory..."
+  Write-Step "Installing Node.js bundle to $BinDirectory..."
   New-Item -ItemType Directory -Force -Path $BinDirectory | Out-Null
   if ($hadExecutable -and -not $NoService) { Start-Sleep -Milliseconds 800 }
-  Copy-Item -Force $packagedExecutable $executable
+  Copy-Item -Force $packagedExecutable $bundlePath
+  Copy-Item -Force $packagedLauncher $launcherPath
+  $launcherNode = $script:NodeExecutable.Replace("%", "%%")
+  $launcherContents = "@echo off`r`n`"$launcherNode`" `"%~dp0better-codex.cjs`" %*`r`n"
+  [IO.File]::WriteAllText($launcherPath, $launcherContents, [Text.UTF8Encoding]::new($false))
+  $executable = $bundlePath
   Write-Step "Installing Better Codex skill to $skillDirectory..."
   New-Item -ItemType Directory -Force -Path (Join-Path $skillDirectory "agents") | Out-Null
   Copy-Item -Force (Join-Path $packagedSkill "SKILL.md") (Join-Path $skillDirectory "SKILL.md")
@@ -488,13 +641,13 @@ try {
   Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $issueSkillDirectory
   New-Item -ItemType Directory -Force -Path $betterCodexHome | Out-Null
   Copy-Item -Force $publicKey $updatePublicKeyPath
-  Write-Step "Verifying executable..."
-  $versionResult = Invoke-NativeCapture $executable @("version") 10000
+  Write-Step "Verifying Node.js bundle..."
+  $versionResult = Invoke-BetterCodexCapture $executable @("version") 10000
   if ($versionResult.Output) { Write-Host ($versionResult.Output.TrimEnd()) }
   if ($versionResult.ExitCode -ne 0) { throw "Better Codex executable verification failed." }
   if (-not $NoService) {
     Write-Step "Registering runtime and injecting Better Codex..."
-    $setupResult = Invoke-NativeCapture $executable @("setup", "--yes") 120000
+    $setupResult = Invoke-BetterCodexCapture $executable @("setup", "--yes") 120000
     if ($setupResult.ExitCode -ne 0) {
       Write-Host ($setupResult.Output.TrimEnd())
       throw "Better Codex setup failed with exit code $($setupResult.ExitCode)."
@@ -503,7 +656,7 @@ try {
     $doctor = $null
     $doctorOutput = $null
     for ($attempt = 1; $attempt -le 8; $attempt++) {
-      $doctorResult = Invoke-NativeCapture $executable @("doctor") 20000
+      $doctorResult = Invoke-BetterCodexCapture $executable @("doctor") 20000
       $doctorOutput = $doctorResult.Output
       $doctorExitCode = $doctorResult.ExitCode
       try {
@@ -529,6 +682,10 @@ try {
     $displayVersion = if ($readyVersion) { $readyVersion } else { "unknown" }
     throw "Installed Better Codex version $displayVersion does not match target v$targetVersion."
   }
+  if ($legacyMigration -and (Test-Path -LiteralPath $legacyExecutable -PathType Leaf)) {
+    Write-Step "Removing the verified legacy executable..."
+    Remove-Item -LiteralPath $legacyExecutable -Force
+  }
   if ($env:BETTER_CODEX_SKIP_PATH_UPDATE -ne "1") {
     $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
     if ($null -eq $userPath) { $userPath = "" }
@@ -539,15 +696,19 @@ try {
   Write-Ok "Better Codex v$targetVersion is ready"
   } catch {
     if ((Test-Path $executable) -and -not $NoService) {
-      $null = Invoke-NativeCapture $executable @("disable") 10000
-      $null = Invoke-NativeCapture $executable @("service", "stop") 10000
+      $null = Invoke-BetterCodexCapture $executable @("disable") 10000
+      $null = Invoke-BetterCodexCapture $executable @("service", "stop") 10000
       if (-not $hadExecutable) {
-        $null = Invoke-NativeCapture $executable @("service", "uninstall") 10000
-        $null = Invoke-NativeCapture $executable @("launcher", "uninstall") 10000
+        $null = Invoke-BetterCodexCapture $executable @("service", "uninstall") 10000
+        $null = Invoke-BetterCodexCapture $executable @("launcher", "uninstall") 10000
       }
       Start-Sleep -Milliseconds 800
     }
-    if ($hadExecutable) { Copy-Item -Force $backupExecutable $executable } else { Remove-Item -Force -ErrorAction SilentlyContinue $executable }
+    Remove-Item -LiteralPath $bundlePath -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $launcherPath -Force -ErrorAction SilentlyContinue
+    if ($hadExecutable) { Copy-Item -Force $backupExecutable $previousExecutablePath }
+    if ($hadLauncher) { Copy-Item -Force $backupLauncher $launcherPath }
+    $executable = $previousExecutablePath
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $skillDirectory
     if ($hadSkill) { Copy-Item -Recurse -Force $backupSkill $skillDirectory }
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $issueSkillDirectory
@@ -555,12 +716,12 @@ try {
     if ($hadUpdateKey) { Copy-Item -Force $backupUpdateKey $updatePublicKeyPath } else { Remove-Item -Force -ErrorAction SilentlyContinue $updatePublicKeyPath }
     if ($hadExecutable -and -not $NoService) {
       if ($previousService.installed) {
-        $null = Invoke-NativeCapture $executable @("service", "install") 10000
-        if ($previousService.running) { $null = Invoke-NativeCapture $executable @("service", "start") 10000 } else { $null = Invoke-NativeCapture $executable @("service", "stop") 10000 }
+        $null = Invoke-BetterCodexCapture $executable @("service", "install") 10000
+        if ($previousService.running) { $null = Invoke-BetterCodexCapture $executable @("service", "start") 10000 } else { $null = Invoke-BetterCodexCapture $executable @("service", "stop") 10000 }
       } else {
-        $null = Invoke-NativeCapture $executable @("service", "uninstall") 10000
+        $null = Invoke-BetterCodexCapture $executable @("service", "uninstall") 10000
       }
-      if ($previousInjectionEnabled) { $null = Invoke-NativeCapture $executable @("enable") 30000 } else { $null = Invoke-NativeCapture $executable @("disable") 10000 }
+      if ($previousInjectionEnabled) { $null = Invoke-BetterCodexCapture $executable @("enable") 30000 } else { $null = Invoke-BetterCodexCapture $executable @("disable") 10000 }
     }
     throw
   }

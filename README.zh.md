@@ -99,7 +99,9 @@ Windows（PowerShell）：
 irm https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scripts/install.ps1 | iex
 ```
 
-安装脚本会同时安装 CLI、Skill、本地运行时和系统启动入口，并在 Codex 中注册 `better-codex` MCP。MCP 只在本机运行，用来提供 Better Codex 应用入口和路由；项目、任务和会话数据仍保存在本地数据库中。
+Better Codex 以轻量 Node.js bundle 运行，需要 Node.js 22.5 或更新版本。安装脚本会先检查依赖，再修改现有安装。如果 Node.js 缺失或版本过低，脚本会询问是否安装当前 LTS 版本；选择不安装会直接终止，原有 Better Codex 和数据库都不会改变。
+
+安装脚本会同时安装 CLI、Skill、本地运行时和系统启动入口，并在 Codex 中注册 `better-codex` MCP。MCP 只在本机运行，用来提供 Better Codex 应用入口和路由；项目、任务和会话数据仍保存在本地数据库中。旧版独立 EXE 只有在新 bundle 通过版本检查和健康检查后才会被移除。
 
 从 Better Codex 启动入口重启 Codex，侧边栏会出现 `任务看板` 和 `智能体` 两个入口。完全卸载可运行 `better-codex uninstall`。
 
@@ -118,7 +120,7 @@ Codex 通过本地 MCP 应用识别 Better Codex 的应用入口和路由，让�
 应用入口和路由通过本地 MCP 注册，页面集成使用桌面应用的本地 CDP 接口和页面结构，不修改 Codex 的二进制文件。Codex 更新后偶尔需要安装对应的兼容性更新，届时 Codex 内会出现提示。感觉哪里不对时，运行 `better-codex doctor` 检查。
 
 **怎么关闭或卸载？**<br>
-`better-codex eject` 只关闭页面集成，任务数据和安装组件会保留。`better-codex uninstall` 会删除 MCP、后台服务、启动入口、Skill、Agent 配置、本地数据和独立安装的 CLI。
+`better-codex eject` 只关闭页面集成，任务数据和安装组件会保留。`better-codex uninstall` 会删除 MCP、后台服务、启动入口、Skill、Agent 配置、本地数据和 CLI bundle。
 
 **更新怎么做？**<br>
 Better Codex 会在后台检查带签名的更新清单，发现新版本时在 Codex 内提示。你也可以随时重新运行安装命令，它会优先原地升级。
@@ -148,7 +150,7 @@ better-codex uninstall         # 完全卸载并删除本地数据
 
 需要 Node.js 22.5 或更新版本。
 
-如果电脑上已经安装正式版，推荐把源码作为独立开发实例安装。正式版继续使用 `~/.better-codex` 和启动器 `Better Codex`；开发版使用 `~/.better-codex-dev` 和启动器 `Better Codex Dev`。两个实例的数据、日志和更新状态彼此隔离，点击任一启动器时会先停用另一个实例的页面注入。
+如果电脑上已经安装正式版，推荐把源码作为独立开发实例安装。正式版继续使用 `~/.better-codex` 和启动器 `Better Codex`；开发版使用 `~/.better-codex-dev` 和启动器 `Better Codex Dev`。两个实例默认共用正式版数据库 `~/.better-codex/better-codex.db`，运行时文件、日志、附件和更新状态仍彼此隔离。点击任一启动器时会先停用另一个实例的页面注入。
 
 ```bash
 git clone https://github.com/Ericwong5021/better-codex.git

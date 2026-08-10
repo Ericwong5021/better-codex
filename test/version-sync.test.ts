@@ -36,8 +36,11 @@ test("release and preview version sources stay synchronized", () => {
   assert.match(previewWorkflow, /\$'\\tfalse\\ttrue'/);
   assert.match(previewWorkflow, /BETTER_CODEX_UPDATE_CHANNEL: preview/);
   assert.match(previewWorkflow, /release\/better-codex-core-\*/);
-  assert.doesNotMatch(previewWorkflow, /path: \|\s+release\/better-codex-cli-/);
-  assert.doesNotMatch(previewWorkflow, /release\/\* --prerelease|checksums\.txt|cp scripts\/install/);
+  assert.match(previewWorkflow, /path: \|\s+release\/better-codex-cli-/);
+  assert.match(previewWorkflow, /checksums\.txt/);
+  assert.match(previewWorkflow, /checksums\.sig/);
+  assert.match(previewWorkflow, /cp scripts\/install\.sh scripts\/install\.ps1 release\//);
+  assert.doesNotMatch(previewWorkflow, /release\/\* --prerelease/);
   assert.doesNotMatch(previewWorkflow, /Homebrew|Formula\/better-codex/);
   assert.match(previewPromotion, /select\(\.name == "update-manifest\.json"\)/);
   assert.match(previewPromotion, /if \[ "\$asset_count" = "0" \]/);

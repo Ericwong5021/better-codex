@@ -10,6 +10,8 @@ BETTER_CODEX_DIR="${BETTER_CODEX_HOME:-$HOME/.better-codex}"
 UPDATE_KEY_PATH="$BETTER_CODEX_DIR/update-public-key.pem"
 INSTALL_LOCK_PATH="$BETTER_CODEX_DIR/install.lock"
 UPDATE_KEY_SHA256="1007607762db32004da21780e81875bef8453355a2944524a96e5341e1e3963e"
+MINIMUM_NODE_VERSION="22.5.0"
+NODE_DOWNLOAD_URL="https://nodejs.org/en/download"
 WITH_SERVICE=1
 
 if [ "${1:-}" = "--no-service" ]; then
@@ -29,6 +31,52 @@ case "$(uname -m)" in
   x86_64) ARCH="amd64" ;;
   *) echo "Unsupported architecture: $(uname -m)" >&2; exit 1 ;;
 esac
+
+node_compatible() {
+  command -v node >/dev/null 2>&1 || return 1
+  node -e 'const [major, minor] = process.versions.node.split(".").map(Number); process.exit(major > 22 || (major === 22 && minor >= 5) ? 0 : 1)' >/dev/null 2>&1
+}
+
+ensure_node() {
+  if node_compatible; then
+    printf '[OK] Node.js %s detected\n' "$(node --version)"
+    return
+  fi
+  printf '[Better Codex] Node.js v%s or later is required.\n' "$MINIMUM_NODE_VERSION"
+  if [ ! -r /dev/tty ]; then
+    printf 'Install Node.js from %s and run this installer again.\n' "$NODE_DOWNLOAD_URL" >&2
+    exit 1
+  fi
+  printf 'Install Node.js now? [Y/n] ' >/dev/tty
+  read -r choice </dev/tty
+  if [ -n "$choice" ] && [ "$choice" != "y" ] && [ "$choice" != "Y" ]; then
+    echo "Installation cancelled. Node.js was not installed."
+    exit 1
+  fi
+  if ! command -v brew >/dev/null 2>&1; then
+    open "$NODE_DOWNLOAD_URL" >/dev/null 2>&1 || true
+    printf 'Automatic installation requires Homebrew. The official Node.js download page was opened; run this installer again after installation.\n' >&2
+    exit 1
+  fi
+  printf '[Better Codex] Installing Node.js with Homebrew...\n'
+  brew install node
+  hash -r
+  if ! node_compatible; then
+    printf 'Node.js v%s or later was not detected after installation. Download it from %s and run this installer again.\n' "$MINIMUM_NODE_VERSION" "$NODE_DOWNLOAD_URL" >&2
+    exit 1
+  fi
+  printf '[OK] Node.js %s installed\n' "$(node --version)"
+}
+
+ensure_node
+
+verify_update_key() {
+  [ -n "$UPDATE_PUBLIC_KEY" ] && [ -f "$UPDATE_PUBLIC_KEY" ] && [ "$(tr -d '\r' < "$UPDATE_PUBLIC_KEY" | shasum -a 256 | awk '{print $1}')" = "$UPDATE_KEY_SHA256" ]
+}
+
+verify_checksums_signature() {
+  [ -n "$CHECKSUM_SIGNATURE" ] && [ -f "$CHECKSUM_SIGNATURE" ] && node -e 'const fs=require("fs"),crypto=require("crypto"); const [checksums,key,signature]=process.argv.slice(1); process.exit(crypto.verify(null,fs.readFileSync(checksums),fs.readFileSync(key),Buffer.from(fs.readFileSync(signature,"utf8").trim(),"base64"))?0:1)' "$CHECKSUMS" "$UPDATE_PUBLIC_KEY" "$CHECKSUM_SIGNATURE"
+}
 
 acquire_install_lock() {
   mkdir -p "$BETTER_CODEX_DIR"
@@ -188,12 +236,6 @@ installation_ready() {
   printf '%s' "$output" | awk '/"ok":/ { found=1; ok=($0 ~ /true/); exit } END { if (!found || !ok) exit 1 }'
 }
 
-TARGET_VERSION=""
-if [ -z "${BETTER_CODEX_ARCHIVE:-}" ]; then
-  TAG="${BETTER_CODEX_VERSION:-$(curl -fsSIL --connect-timeout 15 --max-time 60 --retry 2 --retry-delay 1 -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest?better_codex_cache_bust=$(date +%s)" | sed 's#.*/##; s/[?].*$//')}"
-  TARGET_VERSION="${TAG#v}"
-fi
-
 EXISTING_BINARY=""
 if [ -x "$BIN_DIR/better-codex" ]; then
   EXISTING_BINARY="$BIN_DIR/better-codex"
@@ -204,6 +246,29 @@ fi
 CURRENT_VERSION=""
 if [ -n "$EXISTING_BINARY" ]; then
   CURRENT_VERSION="$(installed_version "$EXISTING_BINARY" || true)"
+fi
+
+TARGET_VERSION=""
+if [ -z "${BETTER_CODEX_ARCHIVE:-}" ]; then
+  if [ -n "${BETTER_CODEX_VERSION:-}" ]; then
+    TAG="$BETTER_CODEX_VERSION"
+  elif [ -n "$EXISTING_BINARY" ] && [ -f "$BETTER_CODEX_DIR/runtime/channel.json" ] && grep -Eq '"channel"[[:space:]]*:[[:space:]]*"preview"' "$BETTER_CODEX_DIR/runtime/channel.json"; then
+    printf '[Better Codex] Resolving the current Beta release...\n'
+    if ! PREVIEW_CHECK="$(run_with_timeout 20 "$EXISTING_BINARY" update check --channel preview 2>/dev/null)"; then
+      echo "Unable to resolve the signed Beta release; the existing installation was left unchanged." >&2
+      exit 1
+    fi
+    PREVIEW_VERSION="$(printf '%s' "$PREVIEW_CHECK" | node -e 'let value=""; process.stdin.on("data", chunk => value += chunk); process.stdin.on("end", () => { try { const parsed=JSON.parse(value); if (parsed.checked && parsed.core?.version) process.stdout.write(parsed.core.version); } catch {} });')"
+    if [ -z "$PREVIEW_VERSION" ]; then
+      echo "Unable to resolve the signed Beta release; the existing installation was left unchanged." >&2
+      exit 1
+    fi
+    TAG="v$PREVIEW_VERSION"
+  else
+    TAG="$(curl -fsSIL --connect-timeout 15 --max-time 60 --retry 2 --retry-delay 1 -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest?better_codex_cache_bust=$(date +%s)" | sed 's#.*/##; s/[?].*$//')"
+  fi
+  case "$TAG" in v*) ;; *) TAG="v$TAG" ;; esac
+  TARGET_VERSION="${TAG#v}"
 fi
 
 if [ -n "$CURRENT_VERSION" ] && [ -n "$TARGET_VERSION" ] && version_at_least "$CURRENT_VERSION" "$TARGET_VERSION" && [ -f "$SKILL_DIR/SKILL.md" ] && [ -f "$UPDATE_KEY_PATH" ]; then
@@ -298,6 +363,7 @@ WORK_DIR="$(mktemp -d)"
 BACKUP_DIR="$WORK_DIR/previous"
 mkdir -p "$BACKUP_DIR"
 HAD_BINARY=0
+HAD_BUNDLE=0
 HAD_SKILL=0
 HAD_ISSUE_SKILL=0
 HAD_UPDATE_KEY=0
@@ -305,6 +371,7 @@ PREVIOUS_SERVICE_INSTALLED=0
 PREVIOUS_SERVICE_RUNNING=0
 PREVIOUS_INJECTION_ENABLED=1
 [ -e "$BIN_DIR/better-codex" ] && { cp -p "$BIN_DIR/better-codex" "$BACKUP_DIR/better-codex"; HAD_BINARY=1; }
+[ -e "$BIN_DIR/better-codex.cjs" ] && { cp -p "$BIN_DIR/better-codex.cjs" "$BACKUP_DIR/better-codex.cjs"; HAD_BUNDLE=1; }
 [ -e "$SKILL_DIR" ] && { cp -R "$SKILL_DIR" "$BACKUP_DIR/better-codex-skill"; HAD_SKILL=1; }
 [ -e "$ISSUE_SKILL_DIR" ] && { cp -R "$ISSUE_SKILL_DIR" "$BACKUP_DIR/better-codex-issue-skill"; HAD_ISSUE_SKILL=1; }
 [ -e "$UPDATE_KEY_PATH" ] && { cp -p "$UPDATE_KEY_PATH" "$BACKUP_DIR/update-public-key.pem"; HAD_UPDATE_KEY=1; }
@@ -332,6 +399,7 @@ finish_install() {
       run_with_timeout 10 "$BIN_DIR/better-codex" launcher uninstall >/dev/null 2>&1
     fi
     if [ "$HAD_BINARY" = "1" ]; then cp -p "$BACKUP_DIR/better-codex" "$BIN_DIR/better-codex"; else rm -f "$BIN_DIR/better-codex"; fi
+    if [ "$HAD_BUNDLE" = "1" ]; then cp -p "$BACKUP_DIR/better-codex.cjs" "$BIN_DIR/better-codex.cjs"; else rm -f "$BIN_DIR/better-codex.cjs"; fi
     rm -rf "$SKILL_DIR"
     [ "$HAD_SKILL" = "1" ] && cp -R "$BACKUP_DIR/better-codex-skill" "$SKILL_DIR"
     rm -rf "$ISSUE_SKILL_DIR"
@@ -357,6 +425,7 @@ if [ -n "${BETTER_CODEX_ARCHIVE:-}" ]; then
   ARCHIVE="$BETTER_CODEX_ARCHIVE"
   CHECKSUMS="${BETTER_CODEX_CHECKSUMS:-$(dirname "$ARCHIVE")/checksums.txt}"
   UPDATE_PUBLIC_KEY="${BETTER_CODEX_UPDATE_PUBLIC_KEY_FILE:-}"
+  CHECKSUM_SIGNATURE="${BETTER_CODEX_CHECKSUMS_SIGNATURE:-}"
   [ -f "$ARCHIVE" ] || { echo "Local Better Codex archive not found: $ARCHIVE" >&2; exit 1; }
   [ -f "$CHECKSUMS" ] || { echo "Local Better Codex checksums not found: $CHECKSUMS" >&2; exit 1; }
   printf '[Better Codex] Installing from local package %s...\n' "$(basename "$ARCHIVE")"
@@ -367,8 +436,10 @@ else
   ARCHIVE="$WORK_DIR/$NAME"
   CHECKSUMS="$WORK_DIR/checksums.txt"
   UPDATE_PUBLIC_KEY="$WORK_DIR/update-public-key.pem"
+  CHECKSUM_SIGNATURE="$WORK_DIR/checksums.sig"
   curl -fsSL --connect-timeout 15 --max-time 300 --retry 2 --retry-delay 1 "$BASE/$NAME" -o "$ARCHIVE"
   curl -fsSL --connect-timeout 15 --max-time 300 --retry 2 --retry-delay 1 "$BASE/checksums.txt" -o "$CHECKSUMS"
+  curl -fsSL --connect-timeout 15 --max-time 300 --retry 2 --retry-delay 1 "$BASE/checksums.sig" -o "$CHECKSUM_SIGNATURE"
   curl -fsSL --connect-timeout 15 --max-time 300 --retry 2 --retry-delay 1 "$BASE/update-public-key.pem" -o "$UPDATE_PUBLIC_KEY"
 fi
 
@@ -383,16 +454,33 @@ if [ "$EXPECTED" != "$ACTUAL" ]; then
   echo "Checksum mismatch for $NAME." >&2
   exit 1
 fi
+if [ -z "${BETTER_CODEX_ARCHIVE:-}" ]; then
+  verify_update_key || { echo "Update public key mismatch." >&2; exit 1; }
+  verify_checksums_signature || { echo "Checksums signature verification failed." >&2; exit 1; }
+fi
 tar -xzf "$ARCHIVE" -C "$WORK_DIR"
 if [ -z "$UPDATE_PUBLIC_KEY" ] && [ -f "$WORK_DIR/update-public-key.pem" ]; then
   UPDATE_PUBLIC_KEY="$WORK_DIR/update-public-key.pem"
 fi
-if [ -z "$UPDATE_PUBLIC_KEY" ] || [ "$(tr -d '\r' < "$UPDATE_PUBLIC_KEY" | shasum -a 256 | awk '{print $1}')" != "$UPDATE_KEY_SHA256" ]; then
+if ! verify_update_key; then
   echo "Update public key mismatch." >&2
   exit 1
 fi
+if [ -n "$CHECKSUM_SIGNATURE" ]; then
+  if ! verify_checksums_signature; then
+    echo "Checksums signature verification failed." >&2
+    exit 1
+  fi
+elif [ -z "${BETTER_CODEX_ARCHIVE:-}" ]; then
+  echo "Checksums signature is missing." >&2
+  exit 1
+fi
 if [ ! -x "$WORK_DIR/better-codex" ]; then
-  echo "Better Codex executable is missing from the package." >&2
+  echo "Better Codex launcher is missing from the package." >&2
+  exit 1
+fi
+if [ ! -f "$WORK_DIR/better-codex.cjs" ]; then
+  echo "Better Codex bundle is missing from the package." >&2
   exit 1
 fi
 if [ ! -f "$WORK_DIR/skills/better-codex/SKILL.md" ]; then
@@ -428,6 +516,7 @@ if [ "$WITH_SERVICE" = "1" ] && codex_running; then
 fi
 mkdir -p "$BIN_DIR"
 INSTALL_MUTATED=1
+install -m 755 "$WORK_DIR/better-codex.cjs" "$BIN_DIR/better-codex.cjs"
 install -m 755 "$WORK_DIR/better-codex" "$BIN_DIR/better-codex"
 printf '[Better Codex] Installing Better Codex skill to %s...\n' "$SKILL_DIR"
 mkdir -p "$SKILL_DIR/agents"

@@ -13,7 +13,8 @@ import { readCodexUserProfile } from "./user-profile.js";
 import { readModelCatalog } from "./model-catalog.js";
 import { attachmentPath, runPath, runtimePort, token, updateLogPath } from "./config.js";
 import { acquireRuntimeLock, clearRuntimeState, createRuntimeIdentity, publishRuntimeState } from "./runtime-state.js";
-import { activeCoreExecutable, checkGatewayUpdate, getGatewayUpdateState, installGatewayUpdate, recordGatewayUpdateActivation, startGatewayUpdateChecks } from "./updater.js";
+import { activeCoreCommand, checkGatewayUpdate, getGatewayUpdateState, installGatewayUpdate, recordGatewayUpdateActivation, startGatewayUpdateChecks } from "./updater.js";
+import { packagedBuild } from "./build.js";
 import { getIssueReplyState, hasActiveIssueReplies, startIssueReply, stopIssueReply, stopIssueReplies } from "./session-reply.js";
 import { join } from "node:path";
 import { normalizeSessionId, readConversationActivity, readConversationResult, sessionWorkspace } from "./session-transcript.js";
@@ -21,7 +22,7 @@ import { IssueWorker } from "./worker.js";
 import { maxMockupBytes, normalizeMockupLocale, readMockupState, replaceMockupState, resetMockupState, updateMockupState } from "./mockup.js";
 
 const accessToken = token();
-const mockupEnabled = !isSea() && process.argv.includes("--mockup");
+const mockupEnabled = !isSea() && !packagedBuild && process.argv.includes("--mockup");
 const maxPastedImageBytes = 10 * 1024 * 1024;
 const maxPastedImageBodyBytes = Math.ceil(maxPastedImageBytes * 4 / 3) + 1024;
 const codexStatePath = join(process.env.CODEX_HOME || join(homedir(), ".codex"), ".codex-global-state.json");
@@ -292,10 +293,11 @@ function errorStatus(code: string) {
 
 function spawnUpdateRelaunch(runtimePid: number, updates: { core: string | null; compatibility: string | null }, drainPath: string) {
   const descriptor = openSync(updateLogPath, "a");
-  const executable = isSea() ? activeCoreExecutable() : process.execPath;
   const updateArgs = ["apply-update", String(runtimePid), "--drain-path", drainPath, ...(updates.core ? ["--expected-core", updates.core] : []), ...(updates.compatibility ? ["--expected-compatibility", updates.compatibility] : [])];
-  const args = isSea() ? updateArgs : [...process.execArgv, process.argv[1], ...updateArgs];
-  const child = spawn(executable, args, { cwd: process.cwd(), detached: true, env: { ...process.env, BETTER_CODEX_LAUNCHER_PATH: process.env.BETTER_CODEX_LAUNCHER_PATH ?? process.execPath }, stdio: ["ignore", descriptor, descriptor], windowsHide: true });
+  const invocation = activeCoreCommand(updateArgs);
+  const environment = { ...process.env };
+  if (isSea()) environment.BETTER_CODEX_LAUNCHER_PATH = process.env.BETTER_CODEX_LAUNCHER_PATH ?? process.execPath;
+  const child = spawn(invocation.command, invocation.args, { cwd: process.cwd(), detached: true, env: environment, stdio: ["ignore", descriptor, descriptor], windowsHide: true });
   child.unref();
   closeSync(descriptor);
   return child.pid ?? null;

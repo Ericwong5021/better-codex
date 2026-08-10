@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isSea } from "node:sea";
 import { join, resolve } from "node:path";
+import { packagedBuild } from "./build.js";
 
 export type BetterCodexProfile = "stable" | "development";
 
@@ -17,7 +18,8 @@ const defaultHome = join(homedir(), betterCodexProfile === "development" ? ".bet
 const defaultPeerHome = join(homedir(), betterCodexProfile === "development" ? ".better-codex" : ".better-codex-dev");
 export const betterCodexHome = resolve(process.env.BETTER_CODEX_HOME || defaultHome);
 export const peerBetterCodexHome = resolve(process.env.BETTER_CODEX_PEER_HOME || defaultPeerHome);
-export const databasePath = resolve(process.env.BETTER_CODEX_DB || join(betterCodexHome, "better-codex.db"));
+const defaultDatabaseHome = betterCodexProfile === "development" ? peerBetterCodexHome : betterCodexHome;
+export const databasePath = resolve(process.env.BETTER_CODEX_DB || join(defaultDatabaseHome, "better-codex.db"));
 export const runPath = join(betterCodexHome, "run");
 export const logPath = join(betterCodexHome, "logs");
 export const attachmentPath = join(betterCodexHome, "attachments");
@@ -52,7 +54,7 @@ export const launchLockPath = join(homedir(), ".better-codex-launch.lock");
 export const launchIntentPath = join(homedir(), ".better-codex-launch-intents");
 export const runtimePort = Number(process.env.BETTER_CODEX_RUNTIME_PORT ?? process.env.BETTER_CODEX_PORT ?? 0);
 export const cdpPort = Number(process.env.BETTER_CODEX_CDP_PORT ?? 9229);
-export const debugLoggingEnabled = !isSea();
+export const debugLoggingEnabled = !isSea() && !packagedBuild;
 
 export function ensureDirectories() {
   mkdirSync(runPath, { recursive: true });

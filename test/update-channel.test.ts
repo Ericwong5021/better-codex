@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import test from "node:test";
 import { bundledCompatibility, compareVersions, coreVersion } from "../src/compatibility.js";
 
@@ -265,6 +266,69 @@ test("update and rollback operations refuse a live cross-process lock", () => {
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /update_in_progress/);
     assert.equal(readFileSync(join(runtime, "update.json.lock"), "utf8"), JSON.stringify({ pid: process.pid, token: "live-test-owner" }));
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("packaged Node bundles install and activate a managed .cjs core", async () => {
+  const home = mkdtempSync(join(tmpdir(), "better-codex-bundle-update-"));
+  const nextVersion = "0.4.2-beta.1";
+  const core = Buffer.from(`
+const fs = require("node:fs");
+const http = require("node:http");
+const path = require("node:path");
+const args = process.argv.slice(2);
+if (args[0] === "version") {
+  console.log(JSON.stringify({ core: "${nextVersion}", compatibility: "${bundledCompatibility.version}", managedCore: null }));
+} else if (args[0] === "runtime") {
+  const instanceId = "bundle-update-health";
+  const server = http.createServer((request, response) => {
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify({ ok: true, pid: process.pid, instanceId }));
+  });
+  server.listen(0, "127.0.0.1", () => {
+    const port = server.address().port;
+    const run = path.join(process.env.BETTER_CODEX_HOME, "run");
+    fs.mkdirSync(run, { recursive: true });
+    fs.writeFileSync(path.join(run, "runtime.json"), JSON.stringify({ pid: process.pid, port, instanceId }));
+  });
+  process.on("SIGTERM", () => server.close(() => process.exit(0)));
+} else {
+  process.exit(2);
+}
+  `);
+  try {
+    const assetKey = `${process.platform}-${process.arch === "x64" ? "amd64" : process.arch}`;
+    const script = `
+globalThis.__BETTER_CODEX_PACKAGED__ = true;
+const core = Buffer.from(${JSON.stringify(core.toString("base64"))}, "base64");
+const originalFetch = globalThis.fetch;
+globalThis.fetch = (input, init) => String(input instanceof Request ? input.url : input) === "https://example.invalid/better-codex-core"
+  ? Promise.resolve(new Response(core, { status: 200 }))
+  : originalFetch(input, init);
+const updater = await import("./src/updater.ts");
+const result = await updater.updateCore({
+  schemaVersion: 1,
+  channel: "preview",
+  generatedAt: new Date().toISOString(),
+  compatibility: null,
+  core: { version: "${nextVersion}", assets: { "${assetKey}": { url: "https://example.invalid/better-codex-core", sha256: "${createHash("sha256").update(core).digest("hex")}" } } },
+}, "preview");
+console.log(JSON.stringify(result));
+`;
+    const update = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "--eval", script], {
+      cwd: root,
+      encoding: "utf8",
+      env: { ...process.env, BETTER_CODEX_HOME: home, BETTER_CODEX_DISABLE_DELEGATION: "1" },
+      timeout: 30_000,
+    });
+    assert.equal(update.status, 0, `${update.stdout}\n${update.stderr}`);
+    assert.equal((JSON.parse(update.stdout) as { updated?: boolean }).updated, true);
+    const pointer = JSON.parse(readFileSync(join(home, "runtime", "current.json"), "utf8")) as { current?: string; executable?: string };
+    assert.equal(pointer.current, nextVersion);
+    assert.equal(pointer.executable, join(home, "runtime", "versions", nextVersion, "better-codex.cjs"));
+    assert.deepEqual(readFileSync(pointer.executable), core);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

@@ -32,6 +32,7 @@ import { injectionEnabled, setInjectionEnabled } from "./injection-state.js";
 import { installLaunchIntegration, launchIntegrationStatus, uninstallLaunchIntegration } from "./launch-integration.js";
 import { readCodexLocale } from "./locale.js";
 import { betterCodexMcpName, startMcpAppServer } from "./mcp-app.js";
+import { packagedBuild } from "./build.js";
 import { installService, restartService, serviceLogs, serviceStatus, startService, stopService, uninstallService } from "./service.js";
 import { activeVersions, checkForUpdates, maybeDelegateToActiveCore, recordGatewayUpdateActivation, rollbackActivatedUpdate, rollbackAllUpdates, selectedUpdateChannel, setUpdateChannel, updateAll, updateCompatibility, type UpdateChannel } from "./updater.js";
 
@@ -634,15 +635,34 @@ function selfCommand() {
 
 function codexCliPath() {
   const application = codexInstallationStatus().path;
+  const localWindowsCliRoot = process.platform === "win32" && process.env.LOCALAPPDATA
+    ? join(process.env.LOCALAPPDATA, "OpenAI", "Codex", "bin")
+    : null;
+  const localWindowsCli = localWindowsCliRoot && existsSync(localWindowsCliRoot)
+    ? readdirSync(localWindowsCliRoot, { withFileTypes: true })
+      .filter(entry => entry.isDirectory())
+      .map(entry => join(localWindowsCliRoot, entry.name, "codex.exe"))
+      .filter(path => existsSync(path))
+      .sort((left, right) => statSync(right).mtimeMs - statSync(left).mtimeMs)
+    : [];
   const candidates = [
     process.env.CODEX_CLI_PATH,
+    ...localWindowsCli,
     application && process.platform === "darwin" ? join(application, "Contents", "Resources", "codex") : null,
     application && process.platform === "win32" ? join(application, "app", "resources", "codex.exe") : null,
     application && process.platform === "win32" ? join(application, "resources", "codex.exe") : null,
     application && process.platform === "win32" ? join(application, "codex.exe") : null,
-  ].find((value): value is string => typeof value === "string" && existsSync(value));
-  if (!candidates) throw new Error("codex_cli_not_found");
-  return candidates;
+  ].filter((value): value is string => typeof value === "string" && existsSync(value));
+  const executable = candidates.find(value => {
+    try {
+      execFileSync(value, ["--version"], { stdio: "ignore", windowsHide: true, timeout: 5000 });
+      return true;
+    } catch {
+      return false;
+    }
+  });
+  if (!executable) throw new Error("codex_cli_not_found");
+  return executable;
 }
 
 function mcpStatus() {
@@ -714,6 +734,7 @@ function installBundledSkills() {
   const candidates = [
     process.env.BETTER_CODEX_SKILLS_PATH,
     join(dirname(process.execPath), "..", "libexec", "skills"),
+    packagedBuild ? join(dirname(resolve(process.argv[1])), "..", "libexec", "skills") : null,
     launcher ? join(dirname(launcher), "..", "libexec", "skills") : null,
   ].filter((value): value is string => Boolean(value));
   const source = candidates.find(path => existsSync(join(path, "better-codex", "SKILL.md")) && existsSync(resolve(path, "..", "update-public-key.pem")));
@@ -750,7 +771,7 @@ async function doctor() {
     betterCodex: existsSync(join(codexHome, "skills", "better-codex", "SKILL.md")),
   };
   const mcp = mcpStatus();
-  const updateKey = !isSea() || existsSync(updatePublicKeyPath);
+  const updateKey = (!isSea() && !packagedBuild) || existsSync(updatePublicKeyPath);
   const checks = {
     core: { ok: true, ...activeVersions(), profile: betterCodexProfile, home: betterCodexHome, executable: process.env.BETTER_CODEX_LAUNCHER_PATH ?? process.execPath },
     service: { ok: service.installed, ...service },
@@ -779,18 +800,29 @@ async function uninstall() {
   const service = uninstallService();
   const codexHome = process.env.CODEX_HOME || join(homedir(), ".codex");
   const agentProfiles = removeManagedAgentProfiles(codexHome);
+  const sharedDataPaths = betterCodexProfile === "development"
+    ? []
+    : [databasePath, `${databasePath}-wal`, `${databasePath}-shm`, join(dirname(databasePath), "backups")];
   const programPaths = [...new Set([
     dataHome,
-    databasePath,
-    `${databasePath}-wal`,
-    `${databasePath}-shm`,
-    join(dirname(databasePath), "backups"),
+    ...sharedDataPaths,
     join(codexHome, "skills", "better-codex"),
     join(codexHome, "skills", "better-codex-issue"),
   ].map(path => resolve(path)))];
+  const packagedEntrypoints = packagedBuild
+    ? [...new Set([process.argv[1], process.env.BETTER_CODEX_BASE_ENTRYPOINT].filter((value): value is string => Boolean(value)).map(value => resolve(value)))]
+    : [];
+  const baseEntrypoint = process.env.BETTER_CODEX_BASE_ENTRYPOINT ? resolve(process.env.BETTER_CODEX_BASE_ENTRYPOINT) : packagedEntrypoints[0];
+  const packagedLaunchers = baseEntrypoint
+    ? process.platform === "win32"
+      ? [join(dirname(baseEntrypoint), "better-codex.cmd")]
+      : [join(dirname(baseEntrypoint), "better-codex")]
+    : [];
   const binaries = isSea()
     ? [...new Set([process.env.BETTER_CODEX_LAUNCHER_PATH, process.execPath].filter((value): value is string => Boolean(value)).map(value => resolve(value)))]
-    : [];
+    : packagedEntrypoints.length > 0
+      ? [...packagedEntrypoints, ...packagedLaunchers]
+      : [];
   const removableBinaries = binaries.filter(path => !path.split(/[\\/]/).some(part => part.toLowerCase() === "cellar"));
   if (process.platform === "win32" && binaries.length > 0) {
     const cleanup = [...programPaths, ...removableBinaries].map(path => `Remove-Item -LiteralPath '${path.replace(/'/g, "''")}' -Recurse -Force -ErrorAction SilentlyContinue`).join("; ");
@@ -801,7 +833,7 @@ async function uninstall() {
     for (const path of programPaths) rmSync(path, { recursive: true, force: true });
     for (const path of removableBinaries) rmSync(path, { force: true });
   }
-  return { uninstalled: true, service, launchIntegration, mcp, injection, agentProfiles, removed: programPaths, binaries: removableBinaries, packageManagedBinaries: binaries.filter(path => !removableBinaries.includes(path)), dataPreserved: [] };
+  return { uninstalled: true, service, launchIntegration, mcp, injection, agentProfiles, removed: programPaths, binaries: removableBinaries, packageManagedBinaries: binaries.filter(path => !removableBinaries.includes(path)), dataPreserved: betterCodexProfile === "development" ? [databasePath] : [] };
 }
 
 async function deleteData(confirmed: boolean) {

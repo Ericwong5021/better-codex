@@ -14,10 +14,14 @@ const refreshInjectorSource = readFileSync(new URL("../scripts/refresh-injector.
 const developmentInstaller = readFileSync(new URL("../scripts/development-instance.mjs", import.meta.url), "utf8");
 const runtimeStateSource = readFileSync(new URL("../src/runtime-state.ts", import.meta.url), "utf8");
 
-test("stable and development profiles use isolated homes and one shared launch lock", () => {
+test("stable and development profiles share the stable database but isolate runtime homes", () => {
   assert.match(configSource, /BetterCodexProfile = "stable" \| "development"/);
   assert.match(configSource, /"\.better-codex-dev" : "\.better-codex"/);
   assert.match(configSource, /peerBetterCodexHome/);
+  assert.match(configSource, /defaultDatabaseHome = betterCodexProfile === "development" \? peerBetterCodexHome : betterCodexHome/);
+  assert.match(configSource, /BETTER_CODEX_DB \|\| join\(defaultDatabaseHome, "better-codex\.db"\)/);
+  assert.match(cliSource, /const sharedDataPaths = betterCodexProfile === "development"\s*\? \[\]/);
+  assert.match(cliSource, /dataPreserved: betterCodexProfile === "development" \? \[databasePath\] : \[\]/);
   assert.match(configSource, /"\.better-codex-launch\.lock"/);
   assert.match(configSource, /"\.better-codex-launch-intents"/);
 });
@@ -80,8 +84,9 @@ test("source builds refresh only the development instance", () => {
 });
 
 test("source mode does not advertise an unsupported core update", () => {
-  assert.match(updaterSource, /coreUpdateSupported: isSea\(\)/);
-  assert.match(updaterSource, /const coreAvailable = Boolean\(isSea\(\) && result\.core\?\.available\)/);
+  assert.match(updaterSource, /const coreUpdatesSupported = isSea\(\) \|\| packagedBuild/);
+  assert.match(updaterSource, /coreUpdateSupported: coreUpdatesSupported/);
+  assert.match(updaterSource, /const coreAvailable = Boolean\(coreUpdatesSupported && result\.core\?\.available\)/);
   assert.match(domSource, /update\?\.coreUpdateSupported === false/);
   assert.match(domSource, /源码开发版仅检查兼容层更新/);
   assert.match(domSource, /profile: PROFILE/);
@@ -90,4 +95,20 @@ test("source mode does not advertise an unsupported core update", () => {
 test("Windows shortcut status expands JSON arrays on Windows PowerShell 5.1", () => {
   assert.match(launchIntegrationSource, /ConvertFrom-Json -InputObject \$json/);
   assert.match(launchIntegrationSource, /\$items\[0\] -is \[Array\]/);
+});
+
+test("development launcher supports the stable Node bundle and legacy executable", () => {
+  assert.match(developmentInstaller, /better-codex\.cjs/);
+  assert.match(developmentInstaller, /better-codex\.exe/);
+  assert.match(developmentInstaller, /officialExecutable\.toLowerCase\(\)\.endsWith\("\.cjs"\) \? process\.execPath/);
+  assert.match(developmentInstaller, /spawnSync\(stableCommand, \[\.\.\.stableArguments, "launcher", "install"\]/);
+});
+
+test("Windows MCP discovery prefers and probes the executable local Codex CLI", () => {
+  const start = cliSource.indexOf("function codexCliPath()");
+  const end = cliSource.indexOf("function mcpStatus()", start);
+  const discovery = cliSource.slice(start, end);
+  assert.ok(discovery.indexOf('join(process.env.LOCALAPPDATA, "OpenAI", "Codex", "bin")') < discovery.indexOf('join(application, "app", "resources", "codex.exe")'));
+  assert.match(discovery, /execFileSync\(value, \["--version"\]/);
+  assert.match(discovery, /timeout: 5000/);
 });

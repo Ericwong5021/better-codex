@@ -4,6 +4,7 @@ import { chmodSync, closeSync, existsSync, mkdirSync, mkdtempSync, openSync, rea
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { isSea } from "node:sea";
+import { packagedBuild } from "./build.js";
 import { activeCompatibility, bundledCompatibility, compareVersions, coreVersion, readCompatibilityPointer, rollbackCompatibility, validateCompatibility, writeCompatibilityPointer } from "./compatibility.js";
 import { compatibilityCurrentPath, compatibilityVersionsPath, ensureDirectories, runtimeCurrentPath, runtimeVersionsPath, updateActivationPath, updateChannelPath, updatePublicKeyPath, updateRollbackPath, updateStatePath } from "./config.js";
 
@@ -70,6 +71,27 @@ type ActivationState = {
 };
 
 const activationRecoveryTimeout = 120_000;
+const coreUpdatesSupported = isSea() || packagedBuild;
+
+function currentCoreEntrypoint() {
+  return isSea() ? resolve(process.execPath) : resolve(process.argv[1] || process.execPath);
+}
+
+function coreInvocation(entrypoint: string, args: string[]) {
+  const resolved = resolve(entrypoint);
+  return resolved.toLowerCase().endsWith(".cjs")
+    ? { command: process.execPath, args: [resolved, ...args] }
+    : { command: resolved, args };
+}
+
+function runtimeEntrypoint(version: string) {
+  const directory = join(runtimeVersionsPath, version);
+  const candidates = [
+    join(directory, "better-codex.cjs"),
+    join(directory, process.platform === "win32" ? "better-codex.exe" : "better-codex"),
+  ];
+  return candidates.find(candidate => existsSync(candidate)) ?? null;
+}
 
 function acquireActivationRecoveryLock() {
   const path = `${updateActivationPath}.lock`;
@@ -225,7 +247,7 @@ function manifestUrl(channel: UpdateChannel) {
 }
 
 async function download(url: URL) {
-  const response = await fetch(url, { signal: AbortSignal.timeout(15000), redirect: "follow", cache: "no-store", headers: { "cache-control": "no-cache", pragma: "no-cache" } });
+  const response = await fetch(url, { signal: AbortSignal.timeout(300000), redirect: "follow", cache: "no-store", headers: { "cache-control": "no-cache", pragma: "no-cache" } });
   if (!response.ok) throw new Error(`update_http_${response.status}`);
   return Buffer.from(await response.arrayBuffer());
 }
@@ -398,7 +420,11 @@ function recoverInterruptedUpdateTransaction() {
 
 export function activeCoreExecutable() {
   const pointer = readRuntimePointer();
-  return pointer && compareVersions(pointer.current, coreVersion) > 0 ? pointer.executable : process.execPath;
+  return pointer && compareVersions(pointer.current, coreVersion) > 0 ? pointer.executable : currentCoreEntrypoint();
+}
+
+export function activeCoreCommand(args: string[]) {
+  return coreInvocation(activeCoreExecutable(), args);
 }
 
 function effectiveCoreVersion() {
@@ -415,7 +441,7 @@ export function getGatewayUpdateState() {
   if (gatewayUpdateState.channel !== channel && !["installing", "restarting"].includes(gatewayUpdateState.status)) {
     gatewayUpdateState = { status: "idle", currentVersion: effectiveCoreVersion(), latestVersion: null, checkedAt: null, error: null, channel };
   }
-  return { ...gatewayUpdateState, currentVersion: effectiveCoreVersion(), coreUpdateSupported: isSea() };
+  return { ...gatewayUpdateState, currentVersion: effectiveCoreVersion(), coreUpdateSupported: coreUpdatesSupported };
 }
 
 export function recordGatewayUpdateActivation(status: "activating" | "success" | "error", error: string | null = null, updates: { core: string | null; compatibility: string | null } = { core: null, compatibility: null }, ownerPid: number | null = null) {
@@ -438,7 +464,7 @@ export function checkGatewayUpdate(channel: UpdateChannel = selectedUpdateChanne
       gatewayUpdateState = { ...getGatewayUpdateState(), status: "error", checkedAt, error: "error" in result ? result.error : "update_check_failed" };
       return getGatewayUpdateState();
     }
-    const coreAvailable = Boolean(isSea() && result.core?.available);
+    const coreAvailable = Boolean(coreUpdatesSupported && result.core?.available);
     const compatibilityAvailable = Boolean(result.compatibility?.available);
     const available = coreAvailable || compatibilityAvailable;
     const latestVersion = coreAvailable
@@ -517,7 +543,8 @@ async function validateCoreRuntime(executable: string) {
     CODEX_HOME: join(home, "codex"),
   };
   delete environment.BETTER_CODEX_DB;
-  const child = spawn(executable, ["runtime"], { stdio: "ignore", windowsHide: true, env: environment });
+  const invocation = coreInvocation(executable, ["runtime"]);
+  const child = spawn(invocation.command, invocation.args, { stdio: "ignore", windowsHide: true, env: environment });
   try {
     for (let attempt = 0; attempt < 60; attempt += 1) {
       await new Promise(resolve => setTimeout(resolve, 200));
@@ -542,8 +569,8 @@ function rollbackCorePointer(pointer: RuntimePointer) {
     if (existsSync(runtimeCurrentPath)) unlinkSync(runtimeCurrentPath);
     return;
   }
-  const executable = join(runtimeVersionsPath, pointer.previous, process.platform === "win32" ? "better-codex.exe" : "better-codex");
-  if (!existsSync(executable)) {
+  const executable = runtimeEntrypoint(pointer.previous);
+  if (!executable) {
     if (existsSync(runtimeCurrentPath)) unlinkSync(runtimeCurrentPath);
     return;
   }
@@ -561,8 +588,8 @@ export function rollbackCoreUpdate(expectedVersion?: string | null) {
 function rollbackCoreTargetVersion(pointer: RuntimePointer | null) {
   if (!pointer) return effectiveCoreVersion();
   if (!pointer.previous || pointer.previous === coreVersion) return coreVersion;
-  const executable = join(runtimeVersionsPath, pointer.previous, process.platform === "win32" ? "better-codex.exe" : "better-codex");
-  return existsSync(executable) ? pointer.previous : coreVersion;
+  const executable = runtimeEntrypoint(pointer.previous);
+  return executable ? pointer.previous : coreVersion;
 }
 
 function rollbackAllUpdatesUnlocked() {
@@ -697,7 +724,7 @@ export async function updateCompatibility(payload?: UpdatePayload, channel: Upda
 }
 
 async function updateCoreUnlocked(payload?: UpdatePayload, channel: UpdateChannel = selectedUpdateChannel()) {
-  if (!isSea()) return { updated: false, reason: "core_update_requires_binary", version: coreVersion };
+  if (!coreUpdatesSupported) return { updated: false, reason: "core_update_requires_packaged_build", version: coreVersion };
   const manifest = validatePayload(payload ?? await fetchUpdateManifest(channel), channel);
   if (!manifest.core || compareVersions(manifest.core.version, effectiveCoreVersion()) <= 0) return { updated: false, reason: "core_current", version: effectiveCoreVersion() };
   const asset = manifest.core.assets[platformAssetKey()];
@@ -710,11 +737,12 @@ async function updateCoreUnlocked(payload?: UpdatePayload, channel: UpdateChanne
   const relation = relative(runtimeRoot, directory);
   if (!relation || relation.startsWith("..") || isAbsolute(relation)) throw new Error("update_core_invalid");
   mkdirSync(directory, { recursive: true });
-  const executable = join(directory, process.platform === "win32" ? "better-codex.exe" : "better-codex");
-  const temporary = process.platform === "win32" ? `${executable}.${process.pid}.tmp.exe` : `${executable}.${process.pid}.tmp`;
+  const executable = join(directory, packagedBuild ? "better-codex.cjs" : process.platform === "win32" ? "better-codex.exe" : "better-codex");
+  const temporary = packagedBuild ? `${executable}.${process.pid}.tmp.cjs` : process.platform === "win32" ? `${executable}.${process.pid}.tmp.exe` : `${executable}.${process.pid}.tmp`;
   writeFileSync(temporary, content, { mode: 0o755 });
   if (process.platform !== "win32") chmodSync(temporary, 0o755);
-  const validation = spawnSync(temporary, ["version", "--json"], { encoding: "utf8", windowsHide: true, timeout: 15000, env: { ...process.env, BETTER_CODEX_DISABLE_DELEGATION: "1" } });
+  const validationInvocation = coreInvocation(temporary, ["version", "--json"]);
+  const validation = spawnSync(validationInvocation.command, validationInvocation.args, { encoding: "utf8", windowsHide: true, timeout: 15000, env: { ...process.env, BETTER_CODEX_DISABLE_DELEGATION: "1" } });
   if (validation.status !== 0) throw new Error("core_validation_failed");
   const version = JSON.parse(validation.stdout) as { core?: string };
   if (version.core !== manifest.core.version) throw new Error("core_version_mismatch");
@@ -732,7 +760,7 @@ async function updateCoreUnlocked(payload?: UpdatePayload, channel: UpdateChanne
 
 export async function updateCore(payload?: UpdatePayload, channel: UpdateChannel = selectedUpdateChannel()) {
   return withUpdateOperationLock(async () => {
-    if (!isSea()) return updateCoreUnlocked(payload, channel);
+    if (!coreUpdatesSupported) return updateCoreUnlocked(payload, channel);
     const before = { core: readRuntimePointer(), compatibility: readCompatibilityPointer() };
     const manifest = validatePayload(payload ?? await fetchUpdateManifest(channel), channel);
     const current = { core: effectiveCoreVersion(), compatibility: activeCompatibility().version };
@@ -770,7 +798,7 @@ export async function updateAll(channel: UpdateChannel = selectedUpdateChannel()
     }
     const manifest = await fetchUpdateManifest(channel);
     const plannedAfter = {
-      core: manifest.core && isSea() && manifest.core.assets[platformAssetKey()] && compareVersions(manifest.core.version, effectiveCoreVersion()) > 0
+      core: manifest.core && coreUpdatesSupported && manifest.core.assets[platformAssetKey()] && compareVersions(manifest.core.version, effectiveCoreVersion()) > 0
         ? manifest.core.version
         : effectiveCoreVersion(),
       compatibility: manifest.compatibility && compareVersions(manifest.compatibility.version, activeCompatibility().version) > 0
@@ -803,14 +831,21 @@ export function rollbackCompatibilityUpdate(expectedVersion?: string | null) {
 }
 
 export function maybeDelegateToActiveCore() {
-  if (!isSea() || process.env.BETTER_CODEX_DISABLE_DELEGATION === "1") return null;
+  if (!coreUpdatesSupported || process.env.BETTER_CODEX_DISABLE_DELEGATION === "1") return null;
   const pointer = readRuntimePointer();
-  if (!pointer || compareVersions(pointer.current, coreVersion) <= 0 || resolve(pointer.executable) === resolve(process.execPath)) return null;
+  if (!pointer || compareVersions(pointer.current, coreVersion) <= 0 || resolve(pointer.executable) === currentCoreEntrypoint()) return null;
   if (!existsSync(pointer.executable)) {
     unlinkSync(runtimeCurrentPath);
     return null;
   }
-  const child = spawnSync(pointer.executable, process.argv.slice(2), { stdio: "inherit", windowsHide: true, env: { ...process.env, BETTER_CODEX_LAUNCHER_PATH: process.env.BETTER_CODEX_LAUNCHER_PATH ?? process.execPath } });
+  const invocation = coreInvocation(pointer.executable, process.argv.slice(2));
+  const environment = { ...process.env };
+  if (isSea()) environment.BETTER_CODEX_LAUNCHER_PATH = process.env.BETTER_CODEX_LAUNCHER_PATH ?? process.execPath;
+  else {
+    delete environment.BETTER_CODEX_LAUNCHER_PATH;
+    environment.BETTER_CODEX_BASE_ENTRYPOINT = process.env.BETTER_CODEX_BASE_ENTRYPOINT ?? currentCoreEntrypoint();
+  }
+  const child = spawnSync(invocation.command, invocation.args, { stdio: "inherit", windowsHide: true, env: environment });
   if (child.error) {
     rollbackCorePointer(pointer);
     return null;
