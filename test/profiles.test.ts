@@ -4,6 +4,7 @@ import test from "node:test";
 
 const configSource = readFileSync(new URL("../src/config.ts", import.meta.url), "utf8");
 const cliSource = readFileSync(new URL("../src/cli.ts", import.meta.url), "utf8");
+const codexCliSource = readFileSync(new URL("../src/codex-cli.ts", import.meta.url), "utf8");
 const updaterSource = readFileSync(new URL("../src/updater.ts", import.meta.url), "utf8");
 const cdpSource = readFileSync(new URL("../src/cdp.ts", import.meta.url), "utf8");
 const domSource = readFileSync(new URL("../src/dom.ts", import.meta.url), "utf8");
@@ -105,10 +106,8 @@ test("development launcher supports the stable Node bundle and legacy executable
 });
 
 test("Windows MCP discovery prefers and probes the executable local Codex CLI", () => {
-  const start = cliSource.indexOf("function codexCliPath()");
-  const end = cliSource.indexOf("function mcpStatus()", start);
-  const discovery = cliSource.slice(start, end);
-  assert.ok(discovery.indexOf('join(process.env.LOCALAPPDATA, "OpenAI", "Codex", "bin")') < discovery.indexOf('join(application, "app", "resources", "codex.exe")'));
-  assert.match(discovery, /execFileSync\(value, \["--version"\]/);
-  assert.match(discovery, /timeout: 5000/);
+  assert.match(cliSource, /requireCodexExecutablePath\(\{ applicationPath: codexInstallationStatus\(\)\.path \}\)/);
+  assert.ok(codexCliSource.indexOf("windowsLocalCliCandidates") < codexCliSource.indexOf("copiedWindowsApplicationCandidates"));
+  assert.match(codexCliSource, /execFileSync\(executable, \["--version"\]/);
+  assert.match(codexCliSource, /timeout: 5000/);
 });

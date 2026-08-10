@@ -6,6 +6,7 @@ import { agentConfigProfileName, defaultAgentProfile } from "./agent-profiles.js
 import { debugLoggingEnabled, schedulerRuntimePath, schedulerSchemaPath, runLogPath, workerLogPath } from "./config.js";
 import { agentSandboxModes, Store, type AgentSandboxMode, type ClaimedIssue, type Issue, type SchedulerDecision } from "./db.js";
 import { mockupSessionActive } from "./injection-state.js";
+import { codexExecutablePath } from "./codex-cli.js";
 
 const interval = 60000;
 const schedulerTimeout = 180000;
@@ -30,13 +31,6 @@ function workerDebug(event: string, fields: Record<string, unknown> = {}) {
       ...fields,
     }) + "\n");
   } catch {}
-}
-
-function codexPath() {
-  const configured = process.env.BETTER_CODEX_CODEX_PATH;
-  if (configured) return configured;
-  const bundled = "/Applications/ChatGPT.app/Contents/Resources/codex";
-  return existsSync(bundled) ? bundled : "codex";
 }
 
 export function issuePrompt(claim: ClaimedIssue) {
@@ -186,7 +180,7 @@ export class IssueWorker {
       "read-only",
       enrichmentPrompt(prompt),
     ];
-    const child = spawn(codexPath(), args, {
+    const child = spawn(codexExecutablePath(), args, {
       cwd: workspacePath,
       env: {
         ...process.env,
@@ -376,7 +370,7 @@ export class IssueWorker {
       issuePrompt(claim),
     ];
     const log = createWriteStream(join(runLogPath, `${claim.runId}.log`), { flags: "a" });
-    const child = spawn(codexPath(), args, {
+    const child = spawn(codexExecutablePath(), args, {
       cwd: workspacePath,
       env: process.env,
       stdio: ["ignore", "pipe", "pipe"],
@@ -446,7 +440,7 @@ export class IssueWorker {
       schedulerPrompt(claim, executionResult, executionSuccess, executionError),
     ];
     const log = createWriteStream(join(runLogPath, `scheduler-${claim.runId}.log`), { flags: "a" });
-    const child = spawn(codexPath(), args, {
+    const child = spawn(codexExecutablePath(), args, {
       cwd: schedulerRuntimePath,
       env: {
         ...process.env,

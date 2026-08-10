@@ -1,9 +1,6 @@
 import { spawn } from "node:child_process";
-import { execFileSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, statSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
 import { coreVersion } from "./compatibility.js";
+import { codexExecutablePath } from "./codex-cli.js";
 
 export type ReasoningEffortOption = {
   value: string;
@@ -63,23 +60,6 @@ export function normalizeModelCatalog(value: unknown): ModelCatalogEntry[] {
   });
 }
 
-function desktopCodexCandidate() {
-  if (process.platform !== "win32") return null;
-  try {
-    const installLocation = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "(Get-AppxPackage -Name OpenAI.Codex | Select-Object -First 1 -ExpandProperty InstallLocation)"], { encoding: "utf8", windowsHide: true }).trim();
-    const source = join(installLocation, "app", "resources", "codex.exe");
-    if (!installLocation || !existsSync(source)) return null;
-    const destinationDir = join(tmpdir(), "better-codex", "model-catalog");
-    mkdirSync(destinationDir, { recursive: true });
-    const sourceStats = statSync(source);
-    const destination = join(destinationDir, `${basename(source, ".exe")}-${sourceStats.size}-${Math.floor(sourceStats.mtimeMs)}.exe`);
-    if (!existsSync(destination)) copyFileSync(source, destination);
-    return destination;
-  } catch {
-    return null;
-  }
-}
-
 function queryCatalog(executable: string) {
   return new Promise<ModelCatalogEntry[]>((resolve, reject) => {
     const child = spawn(executable, ["app-server"], { stdio: ["pipe", "pipe", "ignore"], windowsHide: true });
@@ -120,7 +100,7 @@ let catalogRefresh: Promise<void> | null = null;
 
 function refreshModelCatalog() {
   if (catalogRefresh) return catalogRefresh;
-  const candidates = [...new Set([process.env.BETTER_CODEX_CODEX_PATH, desktopCodexCandidate(), "codex"].filter(Boolean) as string[])];
+  const candidates = [codexExecutablePath()];
   const refresh = (async () => {
     for (const executable of candidates) {
       try {

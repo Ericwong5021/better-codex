@@ -35,6 +35,7 @@ import { betterCodexMcpName, startMcpAppServer } from "./mcp-app.js";
 import { packagedBuild } from "./build.js";
 import { installService, restartService, serviceLogs, serviceStatus, startService, stopService, uninstallService } from "./service.js";
 import { activeVersions, checkForUpdates, maybeDelegateToActiveCore, recordGatewayUpdateActivation, rollbackActivatedUpdate, rollbackAllUpdates, selectedUpdateChannel, setUpdateChannel, updateAll, updateCompatibility, type UpdateChannel } from "./updater.js";
+import { requireCodexExecutablePath } from "./codex-cli.js";
 
 function accessToken() {
   return token();
@@ -634,35 +635,7 @@ function selfCommand() {
 }
 
 function codexCliPath() {
-  const application = codexInstallationStatus().path;
-  const localWindowsCliRoot = process.platform === "win32" && process.env.LOCALAPPDATA
-    ? join(process.env.LOCALAPPDATA, "OpenAI", "Codex", "bin")
-    : null;
-  const localWindowsCli = localWindowsCliRoot && existsSync(localWindowsCliRoot)
-    ? readdirSync(localWindowsCliRoot, { withFileTypes: true })
-      .filter(entry => entry.isDirectory())
-      .map(entry => join(localWindowsCliRoot, entry.name, "codex.exe"))
-      .filter(path => existsSync(path))
-      .sort((left, right) => statSync(right).mtimeMs - statSync(left).mtimeMs)
-    : [];
-  const candidates = [
-    process.env.CODEX_CLI_PATH,
-    ...localWindowsCli,
-    application && process.platform === "darwin" ? join(application, "Contents", "Resources", "codex") : null,
-    application && process.platform === "win32" ? join(application, "app", "resources", "codex.exe") : null,
-    application && process.platform === "win32" ? join(application, "resources", "codex.exe") : null,
-    application && process.platform === "win32" ? join(application, "codex.exe") : null,
-  ].filter((value): value is string => typeof value === "string" && existsSync(value));
-  const executable = candidates.find(value => {
-    try {
-      execFileSync(value, ["--version"], { stdio: "ignore", windowsHide: true, timeout: 5000 });
-      return true;
-    } catch {
-      return false;
-    }
-  });
-  if (!executable) throw new Error("codex_cli_not_found");
-  return executable;
+  return requireCodexExecutablePath({ applicationPath: codexInstallationStatus().path });
 }
 
 function mcpStatus() {

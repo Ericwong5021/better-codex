@@ -5,13 +5,7 @@ import { agentConfigProfileName } from "./agent-profiles.js";
 import { runLogPath } from "./config.js";
 import type { AgentSandboxMode, IssueReplyState, Store } from "./db.js";
 import { normalizeSessionId, sessionWorkspace } from "./session-transcript.js";
-
-function codexPath() {
-  const configured = process.env.BETTER_CODEX_CODEX_PATH;
-  if (configured) return configured;
-  const bundled = "/Applications/ChatGPT.app/Contents/Resources/codex";
-  return existsSync(bundled) ? bundled : "codex";
-}
+import { codexExecutablePath } from "./codex-cli.js";
 
 type ActiveReply = {
   state: IssueReplyState;
@@ -145,7 +139,7 @@ export function startIssueReply(store: Store, input: {
     failureOutput = (failureOutput + String(chunk)).slice(-32768);
   };
   log.write(`\n--- ${startedAt} resume ${sessionId} ---\n`);
-  const child = spawn(codexPath(), args, {
+  const child = spawn(codexExecutablePath(), args, {
     cwd: workspacePath,
     env: {
       ...process.env,
