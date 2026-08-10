@@ -4,6 +4,22 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-08-11
+
+### Added
+
+- Add a signed Preview update channel with one-line Beta installers for macOS and Windows.
+
+### Changed
+
+- Replace the embedded Node.js executable with a system-Node bundle, reducing installer and core update downloads while preserving transactional migration from legacy executables.
+
+### Fixed
+
+- Preserve the Preview channel across upgrades and reinstalls, validate updates in a temporary staging directory, and authenticate release checksums before extraction.
+- Resolve an executable per-user Codex CLI on Windows for Runtime tasks, MCP setup, model discovery, and diagnostics.
+- Bound installer, updater, CDP HTTP, and WebSocket operations with explicit timeouts and reliable process cleanup on macOS and Windows.
+
 ## [0.4.1-beta.8] - 2026-08-10
 
 ### Added
@@ -284,7 +300,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1-beta.8...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/Ericwong5021/better-codex/compare/v0.4.0...v0.4.1
 [0.4.1-beta.8]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1-beta.7...v0.4.1-beta.8
 [0.4.1-beta.7]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1-beta.6...v0.4.1-beta.7
 [0.4.1-beta.6]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1-beta.5...v0.4.1-beta.6
