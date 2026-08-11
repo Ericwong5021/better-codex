@@ -164,6 +164,13 @@ function cleanString(value: unknown, limit = 10000) {
   return value.trim();
 }
 
+function codexProjectCreatedAt(value: unknown) {
+  const timestamp = typeof value === "number" ? value : Number.NaN;
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return undefined;
+  const createdAt = new Date(timestamp);
+  return Number.isFinite(createdAt.getTime()) ? createdAt.toISOString() : undefined;
+}
+
 function syncCodexProjects(store: Store) {
   try {
     const state = JSON.parse(readFileSync(codexStatePath, "utf8")) as Record<string, unknown>;
@@ -177,11 +184,12 @@ function syncCodexProjects(store: Store) {
         const name = cleanString(project.name, 120);
         const rootPaths = Array.isArray(project.rootPaths) ? project.rootPaths : [];
         const workspacePath = cleanString(rootPaths[0], 4096);
+        const createdAt = codexProjectCreatedAt(project.createdAt);
         if (!externalId || !name) continue;
         const id = cleanString(externalId, 200);
         const current = existing.get(id);
-        if (current?.name === name && current.workspace_path === workspacePath) continue;
-        existing.set(id, store.ensureProject({ externalId: id, name, workspacePath }));
+        if (current?.name === name && current.workspace_path === workspacePath && (!createdAt || current.created_at === createdAt)) continue;
+        existing.set(id, store.ensureProject({ externalId: id, name, workspacePath, createdAt }));
       } catch {}
     }
   } catch {}

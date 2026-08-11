@@ -206,6 +206,16 @@ test("issue creation uses a primary split button with an agent creation menu", (
   assert.match(css, /\.better-codex-create-menu\s*\{[^}]*box-shadow:\s*var\(--bc-elevation-menu\);/s);
 });
 
+test("issue creation project picker orders newest projects first", () => {
+  const source = injectionScript(4317, "test-token", "install");
+
+  assert.ok(source.includes("function projectsByNewestCreation(projects)"));
+  assert.ok(source.includes('const timestamp = Date.parse(project?.created_at || "")'));
+  assert.ok(source.includes("return [...projects].sort((left, right) => createdAt(right) - createdAt(left))"));
+  assert.ok(source.includes("projectsByNewestCreation(state.projects).map"));
+  assert.equal(source.match(/projectsByNewestCreation\(state\.projects\)/g)?.length, 1);
+});
+
 test("column cards fill the padded column evenly", () => {
   const css = betterCodexDesignSystemCss();
 

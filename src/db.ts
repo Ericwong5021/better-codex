@@ -161,6 +161,7 @@ type ProjectInput = {
   externalId?: string;
   name: string;
   workspacePath?: string;
+  createdAt?: string;
 };
 
 type IssueInput = {
@@ -920,8 +921,8 @@ export class Store {
       const existing = this.db.prepare("SELECT id FROM projects WHERE external_id = ?").get(input.externalId) as { id: string } | undefined;
       if (existing) {
         const timestamp = now();
-        this.db.prepare("UPDATE projects SET name = ?, workspace_path = COALESCE(NULLIF(?, ''), workspace_path), updated_at = ? WHERE id = ?")
-          .run(name, input.workspacePath ?? "", timestamp, existing.id);
+        this.db.prepare("UPDATE projects SET name = ?, workspace_path = COALESCE(NULLIF(?, ''), workspace_path), created_at = COALESCE(?, created_at), updated_at = ? WHERE id = ?")
+          .run(name, input.workspacePath ?? "", input.createdAt ?? null, timestamp, existing.id);
         return this.getProject(existing.id)!;
       }
     }
@@ -932,11 +933,12 @@ export class Store {
     const name = cleanName(input.name);
     const id = input.id ?? randomUUID();
     const timestamp = now();
+    const createdAt = input.createdAt ?? timestamp;
     this.db.prepare(`
       INSERT INTO projects (
         id, external_id, identifier_prefix, name, workspace_path, next_issue_number, default_branch, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, 1, 'main', ?, ?)
-    `).run(id, input.externalId ?? null, projectPrefix(name), name, input.workspacePath ?? "", timestamp, timestamp);
+    `).run(id, input.externalId ?? null, projectPrefix(name), name, input.workspacePath ?? "", createdAt, timestamp);
     return this.getProject(id)!;
   }
 

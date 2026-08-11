@@ -14,6 +14,33 @@ function temporaryDatabase() {
   return { directory, file: join(directory, "better-codex.db") };
 }
 
+test("syncing an existing Codex project backfills its source creation time", () => {
+  const target = temporaryDatabase();
+  let store: Store | undefined;
+  try {
+    store = new Store(target.file);
+    const project = store.ensureProject({
+      externalId: "codex-project",
+      name: "Codex project",
+      workspacePath: target.directory,
+    });
+    const sourceCreatedAt = "2026-07-15T08:30:00.000Z";
+
+    const synced = store.ensureProject({
+      externalId: project.external_id!,
+      name: project.name,
+      workspacePath: project.workspace_path,
+      createdAt: sourceCreatedAt,
+    } as Parameters<Store["ensureProject"]>[0]);
+
+    assert.equal(synced.id, project.id);
+    assert.equal(synced.created_at, sourceCreatedAt);
+  } finally {
+    store?.close();
+    rmSync(target.directory, { recursive: true, force: true });
+  }
+});
+
 test("Codex appearance reads the active theme surfaces from config.toml", () => {
   const directory = mkdtempSync(join(tmpdir(), "better-codex-appearance-test-"));
   const config = join(directory, "config.toml");

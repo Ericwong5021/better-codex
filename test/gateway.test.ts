@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -58,6 +58,18 @@ test("gateway completes the issue workflow and survives restart", async () => {
   const home = mkdtempSync(join(tmpdir(), "better-codex-gateway-test-"));
   const port = await availablePort();
   const token = "gateway-test-token";
+  const codexProjectCreatedAt = 1_784_254_152_692;
+  writeFileSync(join(home, ".codex-global-state.json"), JSON.stringify({
+    "local-projects": {
+      "codex-source-project": {
+        id: "codex-source-project",
+        name: "Synced from Codex",
+        rootPaths: [home],
+        createdAt: codexProjectCreatedAt,
+        updatedAt: codexProjectCreatedAt,
+      },
+    },
+  }));
   let gateway = startGateway(home, port, token);
   const request = async (path: string, options: RequestInit = {}) => fetch(`http://127.0.0.1:${port}${path}`, {
     ...options,
@@ -73,7 +85,11 @@ test("gateway completes the issue workflow and survives restart", async () => {
     const health = await (await fetch(`http://127.0.0.1:${port}/health`)).json() as { database: { schemaVersion: number } };
     assert.equal(health.database.schemaVersion, 4);
 
-    const bootstrap = await (await request("/api/bootstrap")).json() as { agents: Array<{ id: string; name: string; is_default?: boolean }>; appearance: unknown };
+    const bootstrap = await (await request("/api/bootstrap")).json() as { projects: Array<{ external_id: string | null; created_at: string }>; agents: Array<{ id: string; name: string; is_default?: boolean }>; appearance: unknown };
+    assert.equal(
+      bootstrap.projects.find(project => project.external_id === "codex-source-project")?.created_at,
+      new Date(codexProjectCreatedAt).toISOString(),
+    );
     assert.deepEqual(bootstrap.appearance, {
       theme: "system",
       light: { accent: "#339cff", contrast: 45, ink: "#1a1c1f", surface: "#ffffff" },
@@ -222,6 +238,6 @@ test("gateway completes the issue workflow and survives restart", async () => {
     assert.equal(restoredAgents.find(agent => agent.id === optionalAgent.id)?.avatar, "icon:reviewer");
   } finally {
     await stopGateway(gateway);
-    rmSync(home, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });

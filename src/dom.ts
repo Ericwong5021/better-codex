@@ -613,6 +613,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       return project?.external_id === "inbox" ? t("未分配") : project?.name || "";
     }
 
+    function projectsByNewestCreation(projects) {
+      const createdAt = project => {
+        const timestamp = Date.parse(project?.created_at || "");
+        return Number.isFinite(timestamp) ? timestamp : 0;
+      };
+      return [...projects].sort((left, right) => createdAt(right) - createdAt(left));
+    }
+
     function normalizeSessionId(value) {
       const id = String(value || "").replace(/^(local|cloud):/i, "");
       return /^[a-f0-9-]{36}$/i.test(id) ? id : "";
@@ -4333,7 +4341,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
       function projectPicker() {
         const selectedProject = state.projects.find(item => item.id === draft.projectId);
-        const options = state.projects.map(item => '<button class="better-codex-project-option" type="button" data-dialog-project-option="' + escapeHtml(item.id) + '">' + icon("folder") + '<span>' + escapeHtml(projectLabel(item)) + '</span><span class="better-codex-project-check">' + (item.id === draft.projectId ? icon("check") : "") + '</span></button>').join("");
+        const options = projectsByNewestCreation(state.projects).map(item => '<button class="better-codex-project-option" type="button" data-dialog-project-option="' + escapeHtml(item.id) + '">' + icon("folder") + '<span>' + escapeHtml(projectLabel(item)) + '</span><span class="better-codex-project-check">' + (item.id === draft.projectId ? icon("check") : "") + '</span></button>').join("");
         return '<span class="better-codex-project-picker"><button class="better-codex-property" type="button" data-dialog-project>' + icon("folder") + '<span data-project-label>' + escapeHtml(projectLabel(selectedProject) || t("选择项目")) + '</span>' + icon("chevron") + '</button><span class="better-codex-project-menu" hidden><input class="better-codex-project-search" type="search" placeholder="' + te("搜索项目...") + '" aria-label="' + te("搜索项目") + '"><span data-project-options>' + (options || '<span class="better-codex-project-empty">' + te("暂无项目") + '</span>') + '</span></span></span>';
       }
 
