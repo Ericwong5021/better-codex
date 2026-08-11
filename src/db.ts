@@ -164,6 +164,16 @@ type ProjectInput = {
   createdAt?: string;
 };
 
+type ImportedSessionInput = {
+  threadId: string;
+  configFingerprint: string;
+  hostId?: string;
+  active: boolean;
+  turnId?: string | null;
+  startedAt?: string | null;
+  completedAt?: string | null;
+};
+
 type IssueInput = {
   projectId: string;
   title: string;
@@ -177,11 +187,7 @@ type IssueInput = {
   agentId?: string;
   userAssigned?: boolean;
   enrichmentStatus?: EnrichmentStatus;
-  session?: {
-    threadId: string;
-    configFingerprint: string;
-    hostId?: string;
-  };
+  session?: ImportedSessionInput;
 };
 
 type IssuePatch = Partial<Pick<Issue, "project_id" | "title" | "description" | "status" | "priority" | "labels" | "sort_order" | "pinned" | "thread_id" | "workspace_path" | "agent_enabled" | "agent_id" | "user_assigned" | "needs_attention" | "pending_actor" | "enrichment_status" | "reply_draft">>;
@@ -1112,7 +1118,44 @@ export class Store {
     return rows[0] ? this.getIssue(rows[0].issue_id) : undefined;
   }
 
-  attachImportedSession(issueId: string, threadId: string, configFingerprint: string, hostId = "local") {
+  private writeImportedSession(issueId: string, input: ImportedSessionInput, timestamp: string) {
+    const status: IssueSessionStatus = input.active ? "active" : "idle";
+    const activeTurnId = input.active && input.turnId ? input.turnId : null;
+    const lastTurnId = !input.active && input.turnId ? input.turnId : null;
+    this.db.prepare(`
+      INSERT INTO issue_sessions (
+        issue_id, host_id, thread_id, status, active_turn_id, active_command_id, last_turn_id,
+        config_fingerprint, last_agent_message, last_error, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, '', NULL, ?, ?)
+      ON CONFLICT(issue_id) DO UPDATE SET
+        host_id = excluded.host_id,
+        thread_id = excluded.thread_id,
+        status = excluded.status,
+        active_turn_id = excluded.active_turn_id,
+        last_turn_id = COALESCE(excluded.last_turn_id, issue_sessions.last_turn_id),
+        config_fingerprint = excluded.config_fingerprint,
+        last_error = NULL,
+        updated_at = excluded.updated_at
+    `).run(issueId, input.hostId || "local", input.threadId, status, activeTurnId, lastTurnId, input.configFingerprint, timestamp, timestamp);
+    this.db.prepare(`
+      INSERT INTO issue_replies (issue_id, request_id, status, message, error, started_at, finished_at)
+      VALUES (?, ?, ?, '', NULL, ?, ?)
+      ON CONFLICT(issue_id) DO UPDATE SET
+        request_id = excluded.request_id,
+        status = excluded.status,
+        error = NULL,
+        started_at = excluded.started_at,
+        finished_at = excluded.finished_at
+    `).run(
+      issueId,
+      `import:${input.threadId}`,
+      input.active ? "running" : "succeeded",
+      input.startedAt || timestamp,
+      input.active ? null : input.completedAt || timestamp,
+    );
+  }
+
+  attachImportedSession(issueId: string, input: ImportedSessionInput) {
     const timestamp = now();
     this.db.exec("BEGIN IMMEDIATE");
     try {
@@ -1120,18 +1163,20 @@ export class Store {
       if (!issue) throw new Error("issue_not_found");
       const existing = this.getIssueSession(issueId);
       if (existing) {
-        if (existing.thread_id !== threadId) throw new Error("issue_session_already_bound");
-        this.db.exec("COMMIT");
-        return issue;
+        if (existing.thread_id !== input.threadId) throw new Error("issue_session_already_bound");
+        if (this.getIssueReplyState(issueId).status !== "idle") {
+          this.db.exec("COMMIT");
+          return issue;
+        }
       }
-      const owner = this.getIssueSessionByThread(threadId);
+      const owner = this.getIssueSessionByThread(input.threadId);
       if (owner && owner.issue_id !== issueId) throw new Error("issue_session_already_bound");
       this.db.prepare(`
-        INSERT INTO issue_sessions (
-          issue_id, host_id, thread_id, status, active_turn_id, active_command_id, last_turn_id,
-          config_fingerprint, last_agent_message, last_error, created_at, updated_at
-        ) VALUES (?, ?, ?, 'idle', NULL, NULL, NULL, ?, '', NULL, ?, ?)
-      `).run(issueId, hostId, threadId, configFingerprint, timestamp, timestamp);
+        UPDATE issues
+        SET status = ?, needs_attention = ?, pending_actor = ?, version = version + 1, updated_at = ?
+        WHERE id = ?
+      `).run(input.active ? "in_progress" : "in_review", Number(!input.active), input.active ? "agent" : "user", timestamp, issueId);
+      this.writeImportedSession(issueId, input, timestamp);
       this.db.exec("COMMIT");
       return this.getIssue(issueId)!;
     } catch (error) {
@@ -1236,10 +1281,10 @@ export class Store {
     if (agentId && !this.getAgentProfile(agentId)) throw new Error("agent_not_found");
     const agentEnabled = (Boolean(input.agentEnabled) || Boolean(importedSession)) && !userAssigned;
     if (enrichmentStatus !== null && enrichmentStatus !== "pending" && enrichmentStatus !== "failed") throw new Error("invalid_enrichment_status");
-    const status = enrichmentStatus === "pending" ? "backlog" : input.status ?? "todo";
+    const status = importedSession ? importedSession.active ? "in_progress" : "in_review" : enrichmentStatus === "pending" ? "backlog" : input.status ?? "todo";
     const userHandoff = status === "blocked" || status === "in_review";
-    const needsAttention = importedSession ? 0 : userHandoff ? 1 : agentEnabled && status !== "backlog" && status !== "done" && status !== "cancelled" ? 1 : 0;
-    const pendingActor = importedSession ? "user" : agentEnabled && !userHandoff && status !== "done" && status !== "cancelled" ? "agent" : "user";
+    const needsAttention = importedSession ? Number(!importedSession.active) : userHandoff ? 1 : agentEnabled && status !== "backlog" && status !== "done" && status !== "cancelled" ? 1 : 0;
+    const pendingActor = importedSession ? importedSession.active ? "agent" : "user" : agentEnabled && !userHandoff && status !== "done" && status !== "cancelled" ? "agent" : "user";
     const id = randomUUID();
     const timestamp = now();
     this.db.exec("BEGIN IMMEDIATE");
@@ -1282,14 +1327,7 @@ export class Store {
       );
       this.db.prepare("UPDATE projects SET next_issue_number = ?, updated_at = ? WHERE id = ?")
         .run(issueNumber + 1, timestamp, project.id);
-      if (importedSession) {
-        this.db.prepare(`
-          INSERT INTO issue_sessions (
-            issue_id, host_id, thread_id, status, active_turn_id, active_command_id, last_turn_id,
-            config_fingerprint, last_agent_message, last_error, created_at, updated_at
-          ) VALUES (?, ?, ?, 'idle', NULL, NULL, NULL, ?, '', NULL, ?, ?)
-        `).run(id, importedSession.hostId || "local", importedSession.threadId, importedSession.configFingerprint, timestamp, timestamp);
-      }
+      if (importedSession) this.writeImportedSession(id, importedSession, timestamp);
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");
@@ -2706,31 +2744,12 @@ export class Store {
             WHERE id = ? AND issue_id = ? AND status IN ('claimed', 'running')
           `).run(Number(executionSuccess), executionSuccess ? null : error || "session_turn_failed", message, run.id, String(session.issue_id));
         }
-      } else if (command && (command.kind === "start" || command.kind === "turn")) {
+      } else {
         const replyStatus: IssueReplyStatus = status === "completed" ? "succeeded" : status === "interrupted" ? "interrupted" : "failed";
         this.db.prepare(`
           UPDATE issue_replies SET status = ?, error = ?, finished_at = ?
           WHERE issue_id = ? AND status = 'running'
         `).run(replyStatus, error || (status === "interrupted" ? "session_interrupted" : null), timestamp, String(session.issue_id));
-        if (status === "interrupted") {
-          this.db.prepare(`
-            UPDATE issues
-            SET needs_attention = CASE WHEN status IN ('done', 'cancelled') THEN needs_attention ELSE 1 END,
-                pending_actor = CASE WHEN status IN ('done', 'cancelled') THEN pending_actor ELSE 'user' END,
-                version = version + 1, updated_at = ?
-            WHERE id = ?
-          `).run(timestamp, String(session.issue_id));
-        } else {
-          this.db.prepare(`
-            UPDATE issues
-            SET status = CASE WHEN status = 'cancelled' THEN status ELSE ? END,
-                needs_attention = CASE WHEN status = 'cancelled' THEN needs_attention ELSE 1 END,
-                pending_actor = CASE WHEN status = 'cancelled' THEN pending_actor ELSE 'user' END,
-                version = version + 1, updated_at = ?
-            WHERE id = ?
-          `).run(status === "completed" ? "in_review" : "blocked", timestamp, String(session.issue_id));
-        }
-      } else {
         if (status === "interrupted") {
           this.db.prepare(`
             UPDATE issues

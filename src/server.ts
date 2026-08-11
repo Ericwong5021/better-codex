@@ -326,9 +326,23 @@ export function startServer() {
   let updateRelaunchScheduled = false;
   let updateInstallInProgress = false;
   const worker = new IssueWorker(store);
-  const restoreImportedSession = (issue: Issue, threadId: string) => {
-    if (issue.session_owned || issue.session_handoff_at || normalizeSessionId(issue.thread_id) !== threadId) return issue;
-    return store.attachImportedSession(issue.id, threadId, worker.sessionConfigFingerprint(issue.agent_id));
+  const importedSessionState = async (threadId: string) => {
+    const { activity } = await readConversationActivity(threadId);
+    return {
+      active: activity.status === "running",
+      turnId: activity.turn_id,
+      startedAt: activity.started_at,
+      completedAt: activity.completed_at,
+    };
+  };
+  const withReplyStatus = (issue: Issue) => ({ ...issue, reply_status: store.getIssueReplyState(issue.id).status });
+  const restoreImportedSession = async (issue: Issue, threadId: string) => {
+    if (issue.session_handoff_at || normalizeSessionId(issue.thread_id) !== threadId) return issue;
+    return store.attachImportedSession(issue.id, {
+      threadId,
+      configFingerprint: worker.sessionConfigFingerprint(null),
+      ...await importedSessionState(threadId),
+    });
   };
   const withAvatar = <T extends { id: string; is_default?: boolean }>(profile: T) => ({
     ...profile,
@@ -516,7 +530,7 @@ export function startServer() {
             project_id: projectId,
             title: cleanString(body.title, 500) || (mockupLocale === "en" ? "Untitled issue" : "未命名任务"),
             description: "",
-            status: "todo",
+            status: "in_review",
             priority: "none",
             sort_order: (state.issues.length + 1) * 1000,
             pinned: false,
@@ -534,13 +548,14 @@ export function startServer() {
             agent_id: null,
             mockup_agent_name: "Codex",
             user_assigned: false,
-            needs_attention: false,
+            needs_attention: true,
             pending_actor: "user",
             enrichment_status: null,
             reply_draft: "",
             session_handoff_at: null,
             labels: [],
-            mockup_run_status: "not-started",
+            reply_status: "succeeded",
+            mockup_run_status: "completed",
           });
         }).state;
         return sendJson(response, 201, updated.issues.find(issue => issue.id === issueId));
@@ -935,15 +950,15 @@ export function startServer() {
         const threadId = normalizeSessionId(cleanString(body.thread_id, 200));
         if (!threadId) throw new Error("session_required");
         const existing = store.getIssueByThreadId(threadId);
-        if (existing) return sendJson(response, 200, restoreImportedSession(existing, threadId));
+        if (existing) return sendJson(response, 200, withReplyStatus(await restoreImportedSession(existing, threadId)));
         const projectId = cleanString(body.project_id, 200);
         const project = store.getProject(projectId);
         if (!project) throw new Error("project_not_found");
+        const sessionState = await importedSessionState(threadId);
         const issue = store.createIssue({
           projectId,
           title: cleanString(body.title, 500),
           description: "",
-          status: "todo",
           priority: "none",
           threadId,
           workspacePath: cleanString(body.workspace_path, 4096) || project.workspace_path,
@@ -952,9 +967,10 @@ export function startServer() {
           session: {
             threadId,
             configFingerprint: worker.sessionConfigFingerprint(null),
+            ...sessionState,
           },
         });
-        return sendJson(response, 201, issue);
+        return sendJson(response, 201, withReplyStatus(issue));
       }
       if (url.pathname === "/api/issues" && method === "POST") {
         const body = await readBody(request);

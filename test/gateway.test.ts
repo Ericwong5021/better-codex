@@ -183,9 +183,11 @@ test("gateway completes the issue workflow and survives restart", async () => {
       body: JSON.stringify({ thread_id: legacyThreadId }),
     });
     assert.equal(restoredLegacyResponse.status, 200);
-    const restoredLegacy = await restoredLegacyResponse.json() as { version: number; agent_enabled: boolean; session_owned: boolean; session_thread_id: string };
-    assert.equal(restoredLegacy.version, legacyIssue.version);
+    const restoredLegacy = await restoredLegacyResponse.json() as { version: number; agent_enabled: boolean; status: string; reply_status: string; session_owned: boolean; session_thread_id: string };
+    assert.equal(restoredLegacy.version, legacyIssue.version + 1);
     assert.equal(restoredLegacy.agent_enabled, legacyIssue.agent_enabled);
+    assert.equal(restoredLegacy.status, "in_review");
+    assert.equal(restoredLegacy.reply_status, "succeeded");
     assert.equal(restoredLegacy.session_owned, true);
     assert.equal(restoredLegacy.session_thread_id, legacyThreadId);
 
@@ -213,17 +215,23 @@ test("gateway completes the issue workflow and survives restart", async () => {
       agent_id: string | null;
       needs_attention: boolean;
       pending_actor: string;
+      status: string;
+      reply_status: string;
       session_owned: boolean;
       session_thread_id: string;
+      session_status: string;
       run_thread_id: string;
     };
     assert.equal(importedIssue.thread_id, importedThreadId);
     assert.equal(importedIssue.agent_enabled, true);
     assert.equal(importedIssue.agent_id, null);
-    assert.equal(importedIssue.needs_attention, false);
+    assert.equal(importedIssue.needs_attention, true);
     assert.equal(importedIssue.pending_actor, "user");
+    assert.equal(importedIssue.status, "in_review");
+    assert.equal(importedIssue.reply_status, "succeeded");
     assert.equal(importedIssue.session_owned, true);
     assert.equal(importedIssue.session_thread_id, importedThreadId);
+    assert.equal(importedIssue.session_status, "idle");
     assert.equal(importedIssue.run_thread_id, importedThreadId);
     const importedConversation = await (await request(`/api/issues/${importedIssue.id}/conversation`)).json() as {
       found: boolean;
@@ -263,6 +271,44 @@ test("gateway completes the issue workflow and survives restart", async () => {
     });
     assert.equal(replayedImportResponse.status, 200);
     assert.equal(((await replayedImportResponse.json()) as { id: string }).id, importedIssue.id);
+
+    const runningThreadId = "019fec06-788f-7af3-a031-76b546904fe9";
+    const runningTurnId = "019fec06-788f-7af3-a031-76b546904fea";
+    writeFileSync(join(importedSessionDirectory, `rollout-2026-08-11T10-10-00-${runningThreadId}.jsonl`), [
+      JSON.stringify({ type: "session_meta", payload: { cwd: home } }),
+      JSON.stringify({ type: "event_msg", timestamp: "2026-08-11T10:10:01.000Z", payload: { type: "task_started", turn_id: runningTurnId } }),
+      JSON.stringify({ type: "event_msg", timestamp: "2026-08-11T10:10:02.000Z", payload: { type: "agent_message", phase: "commentary", message: "Still working" } }),
+      "",
+    ].join("\n"), "utf8");
+    const runningImportResponse = await request("/api/issues/from-thread", {
+      method: "POST",
+      body: JSON.stringify({ project_id: project.id, title: "Running native chat", thread_id: runningThreadId }),
+    });
+    assert.equal(runningImportResponse.status, 201);
+    const runningIssue = await runningImportResponse.json() as {
+      id: string;
+      status: string;
+      reply_status: string;
+      needs_attention: boolean;
+      pending_actor: string;
+      session_status: string;
+      session_active_turn_id: string;
+    };
+    assert.equal(runningIssue.status, "in_progress");
+    assert.equal(runningIssue.reply_status, "running");
+    assert.equal(runningIssue.needs_attention, false);
+    assert.equal(runningIssue.pending_actor, "agent");
+    assert.equal(runningIssue.session_status, "active");
+    assert.equal(runningIssue.session_active_turn_id, runningTurnId);
+    const runningCompleteEvent = await request("/api/session-relay/events", {
+      method: "POST",
+      body: JSON.stringify({ relay_id: "relay-test", method: "turn/completed", params: { threadId: runningThreadId, turn: { id: runningTurnId, status: "completed", items: [] } } }),
+    });
+    assert.equal(runningCompleteEvent.status, 200);
+    const completedRunningIssue = await (await request(`/api/issues/${runningIssue.id}`)).json() as { status: string; reply_status: string; session_status: string };
+    assert.equal(completedRunningIssue.status, "in_review");
+    assert.equal(completedRunningIssue.reply_status, "succeeded");
+    assert.equal(completedRunningIssue.session_status, "idle");
 
     const issueResponse = await request("/api/issues", { method: "POST", body: JSON.stringify({ project_id: project.id, title: "Round trip" }) });
     assert.equal(issueResponse.status, 201);

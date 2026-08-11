@@ -838,7 +838,7 @@ test("manual native turns reopen completed issues and return them for review", (
   }
 });
 
-test("legacy imported issues attach resumable sessions without changing assignment", () => {
+test("legacy imported issues attach resumable completed sessions without changing assignment", () => {
   const target = temporaryDatabase();
   try {
     const store = new Store(target.file);
@@ -847,15 +847,20 @@ test("legacy imported issues attach resumable sessions without changing assignme
     const threadId = "019fec06-788f-7af3-a031-76b546904f29";
     const legacy = store.createIssue({ projectId: project.id, title: "Legacy import", status: "blocked", threadId, workspacePath: target.directory, userAssigned: true });
 
-    const upgraded = store.attachImportedSession(legacy.id, threadId, worker.sessionConfigFingerprint(null));
+    const upgraded = store.attachImportedSession(legacy.id, {
+      threadId,
+      configFingerprint: worker.sessionConfigFingerprint(null),
+      active: false,
+    });
     assert.equal(upgraded.agent_enabled, legacy.agent_enabled);
     assert.equal(upgraded.agent_id, null);
     assert.equal(upgraded.user_assigned, true);
-    assert.equal(upgraded.status, "blocked");
-    assert.equal(upgraded.needs_attention, legacy.needs_attention);
-    assert.equal(upgraded.pending_actor, legacy.pending_actor);
+    assert.equal(upgraded.status, "in_review");
+    assert.equal(upgraded.needs_attention, true);
+    assert.equal(upgraded.pending_actor, "user");
     assert.equal(upgraded.session_owned, true);
     assert.equal(upgraded.session_thread_id, threadId);
+    assert.equal(store.getIssueReplyState(upgraded.id).status, "succeeded");
 
     const sent = worker.sendIssueMessage(upgraded.id, "continue-import", "Continue here");
     assert.equal(sent.command.kind, "turn");
