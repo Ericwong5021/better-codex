@@ -565,13 +565,23 @@ test("issue cards show project icon and assignee instead of session entry", () =
 
 test("open-in-conversation requires a valid session uuid", () => {
   const source = injectionScript(4317, "test-token", "install");
+  const openHandler = source.slice(source.indexOf('dialog.querySelector("[data-dialog-open-thread]")'), source.indexOf('const startNow = dialog.querySelector("[data-dialog-start-now]")'));
 
   assert.ok(source.includes("function normalizeSessionId(value)"));
   assert.ok(source.includes("/^[a-f0-9-]{36}$/i.test(id)"));
   assert.ok(source.includes("return normalizeSessionId(issue?.run_thread_id) || \"\""));
-  assert.ok(source.includes("const openThreadButton = issue && (sessionId || executionRunning)"));
+  assert.ok(source.includes("const openThreadButton = issue && sessionId"));
   assert.ok(source.includes("if (!issue || !sessionId) return \"\""));
   assert.ok(source.includes('if (!expected) throw new Error("thread_id_invalid")'));
+  assert.doesNotMatch(openHandler, /\/stop|session-handoff|终止并打开/);
+  assert.ok(source.includes('type: "mcp-request"'));
+  assert.ok(source.includes('sendAppServerRequest("thread/start"'));
+  assert.ok(source.includes('sendAppServerRequest("turn/start"'));
+  assert.ok(source.includes('sendAppServerRequest("turn/steer"'));
+  assert.ok(source.includes('sendAppServerRequest("turn/interrupt"'));
+  assert.ok(source.includes('data-context-action="stop"'));
+  assert.ok(source.includes('data-dialog-stop'));
+  assert.ok(source.includes('encodeURIComponent(issueId) + "/stop"'));
 });
 
 test("issue details render the latest conversation result and reply composer", () => {

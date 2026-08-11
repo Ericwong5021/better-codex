@@ -34,7 +34,6 @@
     "dist/runtime-state.js",
     "dist/server.js",
     "dist/service.js",
-    "dist/session-reply.js",
     "dist/session-transcript.js",
     "dist/markdown.js",
     "dist/updater.js",

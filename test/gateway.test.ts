@@ -71,7 +71,7 @@ test("gateway completes the issue workflow and survives restart", async () => {
   try {
     await waitForGateway(port, gateway);
     const health = await (await fetch(`http://127.0.0.1:${port}/health`)).json() as { database: { schemaVersion: number } };
-    assert.equal(health.database.schemaVersion, 3);
+    assert.equal(health.database.schemaVersion, 4);
 
     const bootstrap = await (await request("/api/bootstrap")).json() as { agents: Array<{ id: string; name: string; is_default?: boolean }>; appearance: unknown };
     assert.deepEqual(bootstrap.appearance, {
@@ -156,6 +156,45 @@ test("gateway completes the issue workflow and survives restart", async () => {
     assert.equal(listedIssues.find(item => item.id === issue.id)?.reply_status, "idle");
     const directIssue = await (await request(`/api/issues/${issue.id}`)).json() as { reply_status: string };
     assert.equal(directIssue.reply_status, "idle");
+
+    const nativeProjectResponse = await request("/api/projects", { method: "POST", body: JSON.stringify({ name: "Native", workspace_path: home }) });
+    const nativeProject = await nativeProjectResponse.json() as { id: string };
+    const nativeIssueResponse = await request("/api/issues", {
+      method: "POST",
+      body: JSON.stringify({ project_id: nativeProject.id, title: "Native thread", description: "Implement it", status: "todo", agent_enabled: true, workspace_path: home }),
+    });
+    const nativeIssue = await nativeIssueResponse.json() as { id: string; version: number; session_thread_id: string | null };
+    assert.equal(nativeIssue.session_thread_id, null);
+    const nativeStart = await request(`/api/issues/${nativeIssue.id}/start`, { method: "POST", body: JSON.stringify({ version: nativeIssue.version }) });
+    assert.equal(nativeStart.status, 202);
+    const relayPoll = await request("/api/session-relay/poll", {
+      method: "POST",
+      body: JSON.stringify({ relay_id: "relay-test", app_session_id: "app-test", capability: "ready" }),
+    });
+    const relay = await relayPoll.json() as { leader: boolean; command: { id: string; kind: string; payload: { message: string } } };
+    assert.equal(relay.leader, true);
+    assert.equal(relay.command.kind, "start");
+    assert.equal(relay.command.payload.message, "Implement it");
+    const nativeThreadId = "019fec06-788f-7af3-a031-76b546904fe6";
+    const nativeTurnId = "019fec06-788f-7af3-a031-76b546904fe7";
+    const relayComplete = await request(`/api/session-relay/commands/${relay.command.id}/complete`, {
+      method: "POST",
+      body: JSON.stringify({ relay_id: "relay-test", result: { thread_id: nativeThreadId, turn_id: nativeTurnId } }),
+    });
+    assert.equal(relayComplete.status, 200);
+    const linkedIssue = await (await request(`/api/issues/${nativeIssue.id}`)).json() as { session_owned: boolean; session_thread_id: string; session_active_turn_id: string };
+    assert.equal(linkedIssue.session_owned, true);
+    assert.equal(linkedIssue.session_thread_id, nativeThreadId);
+    assert.equal(linkedIssue.session_active_turn_id, nativeTurnId);
+    const relayEvent = await request("/api/session-relay/events", {
+      method: "POST",
+      body: JSON.stringify({ relay_id: "relay-test", method: "turn/completed", params: { threadId: nativeThreadId, turn: { id: nativeTurnId, status: "interrupted", items: [] } } }),
+    });
+    assert.equal(relayEvent.status, 200);
+    const interruptedIssue = await (await request(`/api/issues/${nativeIssue.id}`)).json() as { status: string; session_status: string; session_active_turn_id: string | null };
+    assert.equal(interruptedIssue.status, "blocked");
+    assert.equal(interruptedIssue.session_status, "interrupted");
+    assert.equal(interruptedIssue.session_active_turn_id, null);
 
     const invalidResponse = await request(`/api/issues/${issue.id}`, { method: "PATCH", body: JSON.stringify({ version: issue.version, pinned: "false" }) });
     assert.equal(invalidResponse.status, 400);

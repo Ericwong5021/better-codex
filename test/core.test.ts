@@ -146,7 +146,7 @@ test("core workflow persists, orders status moves, and rejects stale writes", ()
     const restored = store.getIssue(first.id);
     assert.equal(restored?.status, "in_progress");
     assert.equal(restored?.thread_id, "local:thread-1");
-    assert.equal(store.health().schemaVersion, 3);
+    assert.equal(store.health().schemaVersion, 4);
     store.close();
   } finally {
     rmSync(target.directory, { recursive: true, force: true });
@@ -591,11 +591,62 @@ test("agent avatars persist independently and are removed with their profile", (
   }
 });
 
+test("desktop session relay binds one native thread and tracks its turn", () => {
+  const target = temporaryDatabase();
+  try {
+    const store = new Store(target.file);
+    const project = store.createProject({ name: "Native session", workspacePath: target.directory });
+    const issue = store.createIssue({
+      projectId: project.id,
+      title: "Use the desktop thread",
+      description: "Implement it",
+      status: "todo",
+      agentEnabled: true,
+      workspacePath: target.directory,
+    });
+    const claim = store.claimNextIssue(issue.id)!;
+    const command = store.enqueueSessionCommand({
+      issueId: issue.id,
+      runId: claim.runId,
+      requestId: `run:${claim.runId}`,
+      kind: "start",
+      payload: { message: issue.description, workspace_path: target.directory },
+    });
+    assert.equal(store.getIssue(issue.id)?.session_thread_id, null);
+    assert.equal(store.heartbeatSessionRelay("relay-a", "app-a", null).leader, true);
+    assert.equal(store.heartbeatSessionRelay("relay-b", "app-b", null).leader, false);
+    assert.equal(store.claimSessionCommand("relay-a")?.id, command.id);
+    const threadId = "019fec06-788f-7af3-a031-76b546904fe6";
+    const turnId = "019fec06-788f-7af3-a031-76b546904fe7";
+    assert.equal(store.sessionTurnStarted(threadId, turnId)?.issue_id, issue.id);
+    assert.equal(store.getSessionCommand(command.id)?.turn_id, turnId);
+    store.completeSessionCommand(command.id, "relay-a", { thread_id: threadId, turn_id: turnId });
+    const linked = store.getIssue(issue.id)!;
+    assert.equal(linked.session_owned, true);
+    assert.equal(linked.session_thread_id, threadId);
+    assert.equal(linked.run_thread_id, threadId);
+    assert.equal(linked.session_active_turn_id, turnId);
+    assert.equal(linked.active_run_status, "running");
+    assert.equal(store.syncSessionThreadStatus(threadId, "active", ["waitingOnApproval"]), true);
+    assert.equal(store.getIssue(issue.id)?.pending_actor, "user");
+    assert.equal(store.syncSessionThreadStatus(threadId, "active"), true);
+    assert.equal(store.getIssue(issue.id)?.pending_actor, "agent");
+    assert.equal(store.recordSessionAgentMessage(threadId, turnId, "Finished"), true);
+    const completion = store.completeSessionTurn(threadId, turnId, "completed")!;
+    assert.equal(completion.run_id, claim.runId);
+    assert.equal(completion.message, "Finished");
+    assert.equal(store.getIssue(issue.id)?.session_status, "idle");
+    store.close();
+  } finally {
+    rmSync(target.directory, { recursive: true, force: true });
+  }
+});
+
 test("newer database schema is rejected without migration", () => {
   const target = temporaryDatabase();
   try {
     const future = new DatabaseSync(target.file);
-    future.exec("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL); INSERT INTO schema_migrations VALUES (4, '2026-01-01T00:00:00.000Z')");
+    future.exec("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL); INSERT INTO schema_migrations VALUES (5, '2026-01-01T00:00:00.000Z')");
     future.close();
     assert.throws(() => new Store(target.file), /database_schema_too_new/);
   } finally {
@@ -639,7 +690,7 @@ test("legacy database is backed up before migration", () => {
     legacy.close();
 
     const store = new Store(target.file);
-    assert.equal(store.health().schemaVersion, 3);
+    assert.equal(store.health().schemaVersion, 4);
     assert.ok(store.lastBackupPath);
     assert.ok(existsSync(store.lastBackupPath!));
     assert.equal(store.getProject("legacy")?.name, "Legacy");

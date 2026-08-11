@@ -131,12 +131,10 @@ test("Windows Store Codex executable is copied outside WindowsApps before use", 
 
 test("all background Codex launches use the shared executable resolver", () => {
   const worker = readFileSync(new URL("../src/worker.ts", import.meta.url), "utf8");
-  const reply = readFileSync(new URL("../src/session-reply.ts", import.meta.url), "utf8");
   const catalog = readFileSync(new URL("../src/model-catalog.ts", import.meta.url), "utf8");
-  for (const source of [worker, reply, catalog]) {
+  for (const source of [worker, catalog]) {
     assert.match(source, /codexExecutablePath/);
     assert.doesNotMatch(source, /function codexPath\(/);
   }
-  assert.equal((worker.match(/spawn\(codexExecutablePath\(\)/g) || []).length, 3);
-  assert.equal((reply.match(/spawn\(codexExecutablePath\(\)/g) || []).length, 1);
+  assert.equal((worker.match(/spawn\(codexExecutablePath\(\)/g) || []).length, 2);
 });

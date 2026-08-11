@@ -48,6 +48,7 @@ import {
   SignalMedium,
   SlidersHorizontal,
   Sparkles,
+  Square,
   SquareKanban,
   Star,
   Tag,
@@ -110,6 +111,7 @@ const lucideIcons = Object.fromEntries(Object.entries({
   dash: Minus,
   trash: Trash2,
   refresh: RefreshCw,
+  stop: Square,
   archive: Archive,
   issues: SquareKanban,
   statusBacklog: CircleDashed,
@@ -489,9 +491,17 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     localeResources.en["更新包安全校验失败，已保留当前版本。"] = "The update failed its security check. The current version was kept.";
     localeResources.en["更新进程意外中断，已恢复到上一版本。"] = "The update was interrupted. The previous version was restored.";
     localeResources.en["更新失败，请稍后重试。"] = "The update failed. Try again later.";
+    localeResources.en["Codex 会话连接失败"] = "Codex connection failed";
+    localeResources.en["原生会话正在创建，请稍后重试。"] = "The native conversation is being created. Try again shortly.";
+    localeResources.en["停止任务"] = "Stop task";
+    localeResources.en["正在停止…"] = "Stopping…";
     const bridgeRequests = new Map();
+    const appServerRequests = new Map();
     const sessionHandoffPending = new Set();
+    const relayId = "better-codex:" + (globalThis.crypto?.randomUUID?.() || Date.now() + ":" + Math.random().toString(36).slice(2));
+    const relayThreads = new Set();
     let bridgeSequence = 0;
+    let appServerSequence = 0;
     let diagnosticSequence = 0;
     let entry = null;
     let agentsEntry = null;
@@ -501,7 +511,16 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     let refreshTimer = null;
     let pollTimer = null;
     let updateTimer = null;
+    let relayTimer = null;
+    let relayBusy = false;
+    let relayCapability = "unknown";
+    let relayCapabilityError = "";
+    let relayCapabilityCheckedAt = 0;
+    let relayAppSessionId = "";
+    let relayCurrentThreadId = "";
+    let relayEventQueue = Promise.resolve();
     let updateNotice = null;
+    let updateNoticeResizeObserver = null;
     let issueSessionSnapshot = new Map();
     let completionNoticeStack = null;
     const completionNoticeDismissals = new Map();
@@ -600,14 +619,16 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function issueExecutionRunning(issue) {
-      return ["claimed", "running", "scheduling"].includes(issue?.active_run_status) || issue?.reply_status === "running";
+      return ["claimed", "running", "scheduling"].includes(issue?.active_run_status)
+        || issue?.reply_status === "running"
+        || Boolean(issue?.session_active_turn_id);
     }
 
     function issuePermissions(issue) {
       const enrichmentPending = issue?.enrichment_status === "pending";
       const executionRunning = issueExecutionRunning(issue);
       const executed = Boolean(issue?.run_thread_id);
-      const sessionHandoff = Boolean(issue?.session_handoff_at);
+      const sessionHandoff = Boolean(issue?.session_handoff_at && !issue?.session_owned);
       const executionLocked = executionRunning || executed;
       return {
         enrichmentPending,
@@ -696,7 +717,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         @keyframes better-codex-update-spin { to { transform: rotate(360deg); } }
         @media (hover: hover) { #better-codex-update-notice .better-codex-update-close:hover, #better-codex-update-notice .better-codex-update-menu-toggle:hover { color: var(--color-token-foreground, var(--bc-foreground)); background: color-mix(in srgb,var(--color-token-button-secondary-hover-background, var(--bc-hover)) 5%,transparent); opacity: .8; } #better-codex-update-notice .better-codex-update-menu button:hover { background: var(--color-token-button-secondary-hover-background, var(--bc-hover)); } #better-codex-update-notice .better-codex-update-button:hover { background: var(--color-token-button-secondary-hover-background, var(--bc-selected)); } #better-codex-update-notice .better-codex-update-button.is-primary:hover { background: color-mix(in srgb,var(--color-token-foreground, var(--bc-primary)) 90%,var(--bc-surface)); } }
         @media (prefers-reduced-motion: reduce) { #better-codex-update-notice, #better-codex-update-notice[data-status="installing"] .better-codex-update-icon svg { animation: none; } }
-        #better-codex-completion-notices { position: fixed; right: 16px; bottom: 16px; z-index: 2147483000; display: flex; max-width: calc(100vw - 32px); flex-direction: column; align-items: flex-end; gap: 8px; pointer-events: none; }
+        #better-codex-completion-notices { position: fixed; right: 16px; bottom: var(--bc-completion-notice-bottom, 16px); z-index: 2147483000; display: flex; max-width: calc(100vw - 32px); flex-direction: column; align-items: flex-end; gap: 8px; pointer-events: none; transition: bottom .2s cubic-bezier(.16,1,.3,1); }
         .better-codex-completion-notice { position: relative; display: flex; width: max-content; max-width: min(420px,calc(100vw - 32px)); min-height: 40px; box-sizing: border-box; align-items: center; gap: 8px; padding: 6px 6px 6px 12px; color: var(--color-token-foreground, var(--bc-foreground)); background: var(--color-token-bg-primary, var(--color-background-surface, var(--bc-raised))); border: 1px solid var(--color-token-border, color-mix(in srgb,var(--color-token-foreground, var(--bc-foreground)) 12%,transparent)); border-radius: 10px; box-shadow: var(--shadow-md, 0 8px 24px rgb(0 0 0 / .12)); font-family: var(--font-sans, var(--bc-font-ui)); font-size: var(--font-size-small, var(--bc-text-sm)); cursor: pointer; pointer-events: auto; animation: better-codex-completion-enter .28s cubic-bezier(.16,1,.3,1); }
         .better-codex-completion-notice .better-codex-completion-layout { display: flex; min-width: 0; align-items: center; gap: 8px; }
         .better-codex-completion-notice .better-codex-completion-avatar { width: 24px; height: 24px; flex: 0 0 auto; border-radius: 6px; overflow: hidden; }
@@ -911,6 +932,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #better-codex-dialog .better-codex-dialog-head-actions { display: flex; align-items: center; gap: 2px; }
         #better-codex-dialog .better-codex-icon-button { display: inline-flex; width: var(--bc-control-height, 32px); height: var(--bc-control-height, 32px); align-items: center; justify-content: center; border: 0; border-radius: 5px; color: #52525b; background: transparent; padding: 0; cursor: pointer; opacity: .72; }
         #better-codex-dialog .better-codex-icon-button:hover { background: #f4f4f5; opacity: 1; }
+        #better-codex-dialog .better-codex-dialog-stop { color: #dc2626; }
+        #better-codex-dialog .better-codex-dialog-stop:hover { color: #b91c1c; background: #fef2f2; }
         #better-codex-dialog .better-codex-manual-title { width: auto; margin: 0 20px 4px; border: 0; color: #27272a; background: transparent; padding: 0; font: inherit; font-size: var(--bc-text-xl); font-weight: 600; line-height: 1.45; outline: none; }
         #better-codex-dialog .better-codex-manual-title::placeholder { color: #71717a; opacity: 1; }
         #better-codex-dialog .better-codex-dialog-editor { box-sizing: border-box; width: auto; min-height: 0; flex: 1; margin: 0 20px; overflow-y: auto; border: 0; color: #3f3f46; background: transparent; padding: 2px 0; font: inherit; font-size: var(--bc-text-md); line-height: 1.55; outline: none; resize: none; }
@@ -1203,6 +1226,240 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       return attempt(1);
     }
 
+    function appServerError(value) {
+      if (!value) return "desktop_bridge_request_failed";
+      if (typeof value === "string") return value;
+      if (typeof value.message === "string") return value.message;
+      if (typeof value.code === "string") return value.code;
+      return "desktop_bridge_request_failed";
+    }
+
+    function appServerEnvelope(value, event = null) {
+      let message = value;
+      if (typeof message === "string") {
+        try { message = JSON.parse(message); } catch { return false; }
+      }
+      if (!message || typeof message !== "object") return false;
+      if (message.type === "mcp-response") {
+        const response = message.message && typeof message.message === "object" ? message.message : {};
+        const id = String(response.id || "");
+        const pending = appServerRequests.get(id);
+        if (!pending) return false;
+        event?.stopImmediatePropagation?.();
+        appServerRequests.delete(id);
+        clearTimeout(pending.timer);
+        if (response.error) pending.reject(new Error(appServerError(response.error)));
+        else pending.resolve(response.result);
+        return true;
+      }
+      if (message.type !== "mcp-notification") return false;
+      const method = String(message.method || "");
+      const params = message.params && typeof message.params === "object" ? message.params : {};
+      const threadId = normalizeSessionId(params.threadId);
+      if (!threadId || (!relayThreads.has(threadId) && threadId !== relayCurrentThreadId)) return false;
+      if (!["thread/status/changed", "turn/started", "turn/completed", "item/completed"].includes(method)) return false;
+      let relayParams = params;
+      if (method === "thread/status/changed") {
+        const status = params.status && typeof params.status === "object" ? params.status : {};
+        relayParams = { threadId, status: { type: String(status.type || ""), activeFlags: Array.isArray(status.activeFlags) ? status.activeFlags.filter(value => typeof value === "string") : [] } };
+      }
+      if (method === "turn/started") {
+        const turn = params.turn && typeof params.turn === "object" ? params.turn : {};
+        relayParams = { threadId, turn: { id: String(turn.id || ""), status: String(turn.status || "") } };
+      }
+      if (method === "item/completed") {
+        const item = params.item && typeof params.item === "object" ? params.item : {};
+        if (item.type !== "agentMessage" || typeof item.text !== "string") return false;
+        relayParams = { threadId, turnId: String(params.turnId || ""), item: { type: "agentMessage", text: item.text } };
+      }
+      if (method === "turn/completed") {
+        const turn = params.turn && typeof params.turn === "object" ? params.turn : {};
+        const error = turn.error && typeof turn.error === "object" ? turn.error : null;
+        const items = Array.isArray(turn.items) ? turn.items.flatMap(item => item && typeof item === "object" && item.type === "agentMessage" && typeof item.text === "string" ? [{ type: "agentMessage", text: item.text }] : []) : [];
+        relayParams = { threadId, turn: { id: String(turn.id || ""), status: String(turn.status || ""), items, error: error ? { message: String(error.message || "") } : null } };
+      }
+      relayEventQueue = relayEventQueue.catch(() => {}).then(() => api("/api/session-relay/events", {
+        method: "POST",
+        body: JSON.stringify({ relay_id: relayId, method, params: relayParams })
+      })).catch(() => {});
+      return true;
+    }
+
+    function onAppServerMessage(event) {
+      appServerEnvelope(event.data, event);
+    }
+
+    function sendAppServerRequest(method, params) {
+      if (typeof window.electronBridge?.sendMessageFromView !== "function") return Promise.reject(new Error("desktop_bridge_unavailable"));
+      const id = relayId + ":" + (++appServerSequence);
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          appServerRequests.delete(id);
+          reject(new Error("desktop_bridge_timeout"));
+        }, 30000);
+        appServerRequests.set(id, { resolve, reject, timer });
+        Promise.resolve(window.electronBridge.sendMessageFromView({
+          type: "mcp-request",
+          hostId: "local",
+          request: { id, method, params },
+          source: "better-codex",
+          timeoutMs: 30000
+        })).catch(error => {
+          const pending = appServerRequests.get(id);
+          if (!pending) return;
+          appServerRequests.delete(id);
+          clearTimeout(timer);
+          reject(error instanceof Error ? error : new Error("desktop_bridge_unavailable"));
+        });
+      });
+    }
+
+    function turnStartParams(threadId, payload) {
+      const params = {
+        threadId,
+        input: [{ type: "text", text: String(payload.message || "") }],
+        approvalPolicy: String(payload.approval_policy || "on-request"),
+        approvalsReviewer: String(payload.approvals_reviewer || "auto_review")
+      };
+      if (payload.workspace_path) params.cwd = String(payload.workspace_path);
+      if (payload.model) params.model = String(payload.model);
+      if (payload.effort) params.effort = String(payload.effort);
+      return params;
+    }
+
+    function heartbeatSessionRelay() {
+      return api("/api/session-relay/poll", {
+        method: "POST",
+        body: JSON.stringify({
+          relay_id: relayId,
+          app_session_id: relayAppSessionId || relayId,
+          capability: relayCapability,
+          capability_error: relayCapabilityError,
+          busy: true
+        })
+      }).catch(() => {});
+    }
+
+    async function executeSessionCommand(command) {
+      const payload = command?.payload && typeof command.payload === "object" ? command.payload : {};
+      let threadId = normalizeSessionId(command?.thread_id);
+      let turnId = normalizeSessionId(command?.turn_id);
+      const heartbeat = setInterval(() => void heartbeatSessionRelay(), 2000);
+      try {
+        if (command.kind === "start") {
+          const params = {
+            cwd: String(payload.workspace_path || ""),
+            approvalPolicy: String(payload.approval_policy || "on-request"),
+            approvalsReviewer: String(payload.approvals_reviewer || "auto_review"),
+            sandbox: String(payload.sandbox_mode || "workspace-write")
+          };
+          if (payload.model) params.model = String(payload.model);
+          if (payload.developer_instructions) params.developerInstructions = String(payload.developer_instructions);
+          const started = await sendAppServerRequest("thread/start", params);
+          threadId = normalizeSessionId(started?.thread?.id);
+          if (!threadId) throw new Error("desktop_thread_start_invalid");
+          relayCurrentThreadId = threadId;
+          try {
+            await sendAppServerRequest("thread/name/set", { threadId, name: String(payload.title || "Better Codex") });
+          } catch {}
+          const turn = await sendAppServerRequest("turn/start", turnStartParams(threadId, payload));
+          turnId = normalizeSessionId(turn?.turn?.id);
+          if (!turnId) throw new Error("desktop_turn_start_invalid");
+        } else if (command.kind === "turn") {
+          if (!threadId) throw new Error("session_thread_invalid");
+          relayCurrentThreadId = threadId;
+          const turn = await sendAppServerRequest("turn/start", turnStartParams(threadId, payload));
+          turnId = normalizeSessionId(turn?.turn?.id);
+          if (!turnId) throw new Error("desktop_turn_start_invalid");
+        } else if (command.kind === "steer") {
+          if (!threadId || !turnId) throw new Error("session_turn_invalid");
+          relayCurrentThreadId = threadId;
+          const steered = await sendAppServerRequest("turn/steer", {
+            threadId,
+            expectedTurnId: turnId,
+            input: [{ type: "text", text: String(payload.message || "") }]
+          });
+          turnId = normalizeSessionId(steered?.turnId) || turnId;
+        } else if (command.kind === "interrupt") {
+          if (!threadId || !turnId) throw new Error("session_turn_invalid");
+          relayCurrentThreadId = threadId;
+          await sendAppServerRequest("turn/interrupt", { threadId, turnId });
+        } else {
+          throw new Error("session_command_invalid");
+        }
+        await api("/api/session-relay/commands/" + encodeURIComponent(command.id) + "/complete", {
+          method: "POST",
+          body: JSON.stringify({ relay_id: relayId, result: { thread_id: threadId, turn_id: turnId } })
+        });
+        if (threadId) relayThreads.add(threadId);
+      } catch (error) {
+        const failed = await api("/api/session-relay/commands/" + encodeURIComponent(command.id) + "/fail", {
+          method: "POST",
+          body: JSON.stringify({ relay_id: relayId, error: error instanceof Error ? error.message : "desktop_bridge_request_failed", thread_id: threadId, turn_id: turnId })
+        }).catch(() => {});
+        if (failed && threadId) relayThreads.add(threadId);
+      } finally {
+        clearInterval(heartbeat);
+        relayCurrentThreadId = "";
+      }
+    }
+
+    async function resolveRelayAppSessionId() {
+      if (relayAppSessionId) return relayAppSessionId;
+      try {
+        const value = await window.electronBridge?.getAppSessionId?.();
+        relayAppSessionId = typeof value === "string" ? value : typeof value?.appSessionId === "string" ? value.appSessionId : relayId;
+      } catch {
+        relayAppSessionId = relayId;
+      }
+      return relayAppSessionId;
+    }
+
+    async function pollSessionRelay() {
+      if (relayBusy || destroyed) return;
+      relayBusy = true;
+      try {
+        if (relayCapability === "failed" && Date.now() - relayCapabilityCheckedAt > 10000) relayCapability = "unknown";
+        const result = await api("/api/session-relay/poll", {
+          method: "POST",
+          body: JSON.stringify({
+            relay_id: relayId,
+            app_session_id: await resolveRelayAppSessionId(),
+            capability: relayCapability,
+            capability_error: relayCapabilityError
+          })
+        });
+        relayThreads.clear();
+        (Array.isArray(result?.thread_ids) ? result.thread_ids : []).forEach(value => {
+          const threadId = normalizeSessionId(value);
+          if (threadId) relayThreads.add(threadId);
+        });
+        if (!result?.leader) return;
+        if (relayCapability === "unknown") {
+          relayCapabilityCheckedAt = Date.now();
+          try {
+            await sendAppServerRequest("thread/list", { limit: 1 });
+            relayCapability = "ready";
+            relayCapabilityError = "";
+          } catch (error) {
+            relayCapability = "failed";
+            relayCapabilityError = error instanceof Error ? error.message : "desktop_bridge_unavailable";
+          }
+          return;
+        }
+        if (relayCapability !== "ready" || !result.command) return;
+        await executeSessionCommand(result.command);
+      } catch {} finally {
+        relayBusy = false;
+      }
+    }
+
+    function startSessionRelay() {
+      if (relayTimer !== null) return;
+      void pollSessionRelay();
+      relayTimer = setInterval(() => void pollSessionRelay(), 1000);
+    }
+
     function diagnosticTarget(target) {
       if (!(target instanceof Element)) return "";
       const name = target.getAttribute("name");
@@ -1254,6 +1511,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function onHostMessageFromView(event) {
+      appServerEnvelope(event.detail);
       const message = interruptMessage(event.detail);
       if (message) traceRendererDiagnostic("host_interrupt_message", message);
     }
@@ -1275,6 +1533,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (value === "issue_enrichment_pending") return t("任务仍在整理中，请稍后再编辑。");
       if (value === "issue_execution_locked") return t("已经执行过对话的 Issue 只能修改状态、优先级和指派人。");
       if (value === "issue_session_handed_off") return t("请前往会话继续对话");
+      if (value === "issue_session_starting") return t("原生会话正在创建，请稍后重试。");
       if (value === "manual_start_required") return t("当前为手动运行，请先点击“立即开始任务”。");
       if (value === "backlog_reply_blocked") return t("待规划中的 Issue 不会自动触发任务，请先移出待规划区。");
       return t(value);
@@ -1340,18 +1599,30 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (recovery) recovery.hidden = true;
     }
 
+    function syncCompletionNoticePosition() {
+      if (!completionNoticeStack?.isConnected) return;
+      const updateOffset = updateNotice?.isConnected ? updateNotice.getBoundingClientRect().height + 24 : 16;
+      completionNoticeStack.style.bottom = updateOffset + "px";
+    }
+
     function dismissUpdate(version) {
       dismissedUpdateVersion = version;
       sessionStorage.setItem("better-codex-dismissed-update", version);
+      updateNoticeResizeObserver?.disconnect();
+      updateNoticeResizeObserver = null;
       updateNotice?.remove();
       updateNotice = null;
+      syncCompletionNoticePosition();
     }
 
     function ignoreUpdate(version) {
       ignoredUpdateVersion = version;
       localStorage.setItem("better-codex-ignored-update", version);
+      updateNoticeResizeObserver?.disconnect();
+      updateNoticeResizeObserver = null;
       updateNotice?.remove();
       updateNotice = null;
+      syncCompletionNoticePosition();
     }
 
     function renderUpdateNotice(update) {
@@ -1362,13 +1633,18 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (!activationError && (update?.status !== "available" || !version)) {
         if (installError) return;
         if (!["checking", "installing", "restarting"].includes(update?.status)) {
+          updateNoticeResizeObserver?.disconnect();
+          updateNoticeResizeObserver = null;
           updateNotice?.remove();
           updateNotice = null;
+          syncCompletionNoticePosition();
         }
         return;
       }
       if (dismissedUpdateVersion === noticeVersion || ignoredUpdateVersion === noticeVersion) return;
       if (updateNotice?.dataset.version === noticeVersion && updateNotice.dataset.status === (activationError ? "error" : "available")) return;
+      updateNoticeResizeObserver?.disconnect();
+      updateNoticeResizeObserver = null;
       updateNotice?.remove();
       updateNotice = document.createElement("section");
       updateNotice.id = "better-codex-update-notice";
@@ -1379,6 +1655,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       updateNotice.setAttribute("aria-live", "polite");
       updateNotice.innerHTML = '<button class="better-codex-update-menu-toggle" type="button" aria-label="' + escapeHtml(t("更多操作")) + '" aria-expanded="false" aria-haspopup="menu" data-update-menu-toggle>' + icon("more") + '</button><div class="better-codex-update-menu" data-update-menu hidden><button type="button" role="menuitem" data-update-ignore>' + escapeHtml(t("忽略当前版本")) + '</button></div><button class="better-codex-update-close" type="button" aria-label="' + escapeHtml(t("稍后提醒")) + '">' + icon("close") + '</button><div class="better-codex-update-layout"><span class="better-codex-update-icon">' + icon("refresh") + '</span><div class="better-codex-update-copy"><p class="better-codex-update-title">' + escapeHtml(t("Better Codex 有新版本")) + '</p><p class="better-codex-update-description">' + escapeHtml(t("v" + version + " 已可用，更新完成后将自动重启 Codex。")) + '</p><p class="better-codex-update-error" hidden></p></div><div class="better-codex-update-actions"><button class="better-codex-update-button" type="button" data-update-later>' + escapeHtml(t("稍后")) + '</button><button class="better-codex-update-button is-primary" type="button" data-update-install>' + escapeHtml(t("立即更新")) + '</button></div></div>';
       document.body.appendChild(updateNotice);
+      updateNoticeResizeObserver = new ResizeObserver(syncCompletionNoticePosition);
+      updateNoticeResizeObserver.observe(updateNotice);
+      syncCompletionNoticePosition();
       const notice = updateNotice;
       const menuToggle = notice.querySelector("[data-update-menu-toggle]");
       const menu = notice.querySelector("[data-update-menu]");
@@ -1433,6 +1712,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
               if (updateNotice !== notice) return;
               notice.remove();
               updateNotice = null;
+              updateNoticeResizeObserver?.disconnect();
+              updateNoticeResizeObserver = null;
+              syncCompletionNoticePosition();
             }, 1800);
             return;
           }
@@ -1480,6 +1762,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         completionNoticeStack.setAttribute(OWNED, "true");
         document.body.appendChild(completionNoticeStack);
       }
+      syncCompletionNoticePosition();
       const previousPositions = new Map(Array.from(completionNoticeStack.children, item => [item, item.getBoundingClientRect().top]));
       const notice = document.createElement("section");
       notice.className = "better-codex-completion-notice";
@@ -2010,6 +2293,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       input.remove();
     }
 
+    async function stopIssueSession(issueId) {
+      const updated = await api("/api/issues/" + encodeURIComponent(issueId) + "/stop", { method: "POST" });
+      await loadIssues();
+      return state.issues.find(issue => issue.id === issueId) || updated;
+    }
+
     function openIssueMenu(event) {
       const card = event.target.closest("[data-issue-id]");
       const issue = state.issues.find(item => item.id === card?.dataset.issueId);
@@ -2024,6 +2313,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const contextLockAttrs = permissions.contextLocked ? ' disabled aria-disabled="true"' : "";
       const contextLockClass = permissions.contextLocked ? " is-disabled" : "";
       const archiveLockAttrs = permissions.archiveLocked ? ' disabled aria-disabled="true"' : "";
+      const stopItem = permissions.executionRunning ? '<div class="better-codex-context-divider"></div><button class="better-codex-context-item is-danger" type="button" data-context-action="stop">' + icon("stop") + '<span>' + escapeHtml(t("停止任务")) + '</span></button>' : "";
       const statusItems = Object.entries(statusLabels).map(([value, text]) => '<button class="better-codex-context-item" type="button"' + contextLockAttrs + ' data-context-action="update" data-context-field="status" data-context-value="' + value + '"><span class="better-codex-context-check">' + (issue.status === value ? icon("check") : "") + '</span>' + statusIcon(value) + '<span>' + escapeHtml(t(text)) + "</span></button>").join("");
       const priorityItems = Object.entries(priorityLabels).map(([value, text]) => '<button class="better-codex-context-item" type="button"' + contextLockAttrs + ' data-context-action="update" data-context-field="priority" data-context-value="' + value + '"><span class="better-codex-context-check">' + (issue.priority === value ? icon("check") : "") + '</span>' + priorityIcon(value) + '<span>' + escapeHtml(t(value === "none" ? "无优先级" : text + "优先级")) + "</span></button>").join("");
       const userSelected = Boolean(issue.user_assigned) && !issue.agent_enabled;
@@ -2046,7 +2336,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       menu.setAttribute(OWNED, "true");
       menu.dataset.issueId = issue.id;
       menu.dataset.align = event.clientX + 430 > window.innerWidth ? "left" : "right";
-      menu.innerHTML = '<div class="better-codex-context-item-wrap' + contextLockClass + '"><button class="better-codex-context-item" type="button"' + contextLockAttrs + '>' + statusIcon(issue.status) + '<span>' + escapeHtml(t("状态")) + '</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu">' + statusItems + '</div></div><div class="better-codex-context-item-wrap' + contextLockClass + '"><button class="better-codex-context-item" type="button"' + contextLockAttrs + '>' + priorityIcon(issue.priority) + '<span>' + escapeHtml(t("优先级")) + '</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu">' + priorityItems + '</div></div><div class="better-codex-context-item-wrap' + contextLockClass + '"><button class="better-codex-context-item" type="button"' + contextLockAttrs + '>' + icon("user") + '<span>' + escapeHtml(t("指定负责人")) + '</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu is-assignee">' + assigneeItems + '</div></div>' + (workspacePath ? '<div class="better-codex-context-divider"></div><button class="better-codex-context-item" type="button" data-context-action="copy-workspace">' + icon("folder") + '<span>' + escapeHtml(t("复制本地 workdir 路径")) + '</span></button>' : "") + '<div class="better-codex-context-divider"></div><button class="better-codex-context-item is-danger" type="button"' + archiveLockAttrs + ' data-context-action="archive">' + icon("trash") + '<span>' + escapeHtml(t("删除任务")) + '</span></button>';
+      menu.innerHTML = '<div class="better-codex-context-item-wrap' + contextLockClass + '"><button class="better-codex-context-item" type="button"' + contextLockAttrs + '>' + statusIcon(issue.status) + '<span>' + escapeHtml(t("状态")) + '</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu">' + statusItems + '</div></div><div class="better-codex-context-item-wrap' + contextLockClass + '"><button class="better-codex-context-item" type="button"' + contextLockAttrs + '>' + priorityIcon(issue.priority) + '<span>' + escapeHtml(t("优先级")) + '</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu">' + priorityItems + '</div></div><div class="better-codex-context-item-wrap' + contextLockClass + '"><button class="better-codex-context-item" type="button"' + contextLockAttrs + '>' + icon("user") + '<span>' + escapeHtml(t("指定负责人")) + '</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu is-assignee">' + assigneeItems + '</div></div>' + stopItem + (workspacePath ? '<div class="better-codex-context-divider"></div><button class="better-codex-context-item" type="button" data-context-action="copy-workspace">' + icon("folder") + '<span>' + escapeHtml(t("复制本地 workdir 路径")) + '</span></button>' : "") + '<div class="better-codex-context-divider"></div><button class="better-codex-context-item is-danger" type="button"' + archiveLockAttrs + ' data-context-action="archive">' + icon("trash") + '<span>' + escapeHtml(t("删除任务")) + '</span></button>';
       document.body.appendChild(menu);
       const rect = menu.getBoundingClientRect();
       menu.style.left = Math.max(8, Math.min(event.clientX, window.innerWidth - rect.width - 8)) + "px";
@@ -2084,6 +2374,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (item.dataset.contextAction === "copy-workspace") {
           closeIssueMenu();
           return void perform(() => copyText(workspacePath));
+        }
+        if (item.dataset.contextAction === "stop") {
+          closeIssueMenu();
+          return void perform(() => stopIssueSession(current.id));
         }
         if (item.dataset.contextAction === "duplicate") {
           closeIssueMenu();
@@ -3489,10 +3783,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         ...fields,
       });
 
-      function isExecutionRunning() {
-        return executionRunning;
-      }
-
       function stopConversationPoll() {
         if (conversationTimer !== null) {
           clearTimeout(conversationTimer);
@@ -3606,9 +3896,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const send = dialog.querySelector("[data-conversation-send]");
         const reply = dialog.querySelector('[name="reply"]');
         if (!send) return;
-        const status = dialog.querySelector("[data-conversation-status]")?.dataset.state;
         if (reply) reply.disabled = sessionHandoff;
-        send.disabled = sessionHandoff || executionRunning || status === "running" || (!String(reply?.value || "").trim() && !draft.replyAttachments.length);
+        send.disabled = sessionHandoff || (!String(reply?.value || "").trim() && !draft.replyAttachments.length);
       }
 
       function applyDialogPermissions() {
@@ -3617,7 +3906,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         dialog.dataset.executionLocked = String(executionLocked);
         dialog.dataset.locked = String(editingLocked);
         dialog.querySelectorAll("input, textarea, select, button").forEach(control => {
-          if (control.matches("[data-dialog-close], [data-dialog-expand], [data-dialog-open-thread], [data-description-toggle]")) {
+          if (control.matches("[data-dialog-close], [data-dialog-expand], [data-dialog-open-thread], [data-dialog-stop], [data-description-toggle]")) {
             control.disabled = false;
             return;
           }
@@ -3630,7 +3919,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             return;
           }
           if (executionRunning) {
-            control.disabled = !control.matches('[name="reply"], [data-dialog-attachment-scope="reply"]');
+            control.disabled = !control.matches('[name="reply"], [data-conversation-send], [data-dialog-attachment-scope="reply"]');
             return;
           }
           if (executionLocked) {
@@ -3690,17 +3979,20 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
       function header() {
         const breadcrumbProject = state.projects.find(item => item.id === draft.projectId);
-        const openThreadButton = issue && (sessionId || executionRunning) && !enrichmentLocked
-          ? '<button class="better-codex-dialog-open-thread' + (executionRunning && !sessionHandoff ? ' is-running' : '') + '" type="button" data-dialog-open-thread="' + escapeHtml(sessionId) + '" data-dialog-open-thread-running="' + String(executionRunning && !sessionHandoff) + '">' + te(sessionHandoff ? "前往会话" : executionRunning ? "任务正在进行中" : "在会话中打开") + '</button>'
+        const openThreadButton = issue && sessionId && !enrichmentLocked
+          ? '<button class="better-codex-dialog-open-thread" type="button" data-dialog-open-thread="' + escapeHtml(sessionId) + '">' + te(sessionHandoff ? "前往会话" : "在会话中打开") + '</button>'
           : "";
         const startNowButton = issue && !sessionId && !issue.active_run_status && !["done", "cancelled"].includes(issue.status)
           ? '<button class="better-codex-dialog-start-now" type="button"' + (!issue.agent_enabled ? " disabled" : "") + ' data-dialog-start-now>' + te("立即开始任务") + '</button>'
+          : "";
+        const stopButton = issue && executionRunning
+          ? '<button class="better-codex-icon-button better-codex-dialog-stop" type="button" data-dialog-stop aria-label="' + te("停止任务") + '" title="' + te("停止任务") + '">' + icon("stop") + '</button>'
           : "";
         const title = draft.mode === "agent" ? t("通过智能体创建") : issue ? escapeHtml(issue.identifier) : t("手动创建");
         const crumb = issue
           ? '<span data-dialog-breadcrumb-project>' + escapeHtml(projectLabel(breadcrumbProject) || t("未提供")) + '</span><span aria-hidden="true">' + icon("chevron") + '</span><strong>' + title + '</strong>'
           : '<strong>' + title + '</strong>';
-        return '<div class="better-codex-dialog-head"><div class="better-codex-dialog-breadcrumb">' + crumb + '</div><div class="better-codex-dialog-head-actions">' + openThreadButton + startNowButton + '<button class="better-codex-icon-button" type="button" data-dialog-expand aria-label="' + te(draft.expanded ? "缩小" : "展开") + '">' + icon(draft.expanded ? "shrink" : "expand") + '</button><button class="better-codex-icon-button" type="button" data-dialog-close aria-label="' + te("关闭") + '">' + icon("close") + '</button></div></div>';
+        return '<div class="better-codex-dialog-head"><div class="better-codex-dialog-breadcrumb">' + crumb + '</div><div class="better-codex-dialog-head-actions">' + openThreadButton + startNowButton + stopButton + '<button class="better-codex-icon-button" type="button" data-dialog-expand aria-label="' + te(draft.expanded ? "缩小" : "展开") + '">' + icon(draft.expanded ? "shrink" : "expand") + '</button><button class="better-codex-icon-button" type="button" data-dialog-close aria-label="' + te("关闭") + '">' + icon("close") + '</button></div></div>';
       }
 
       function conversationPanel() {
@@ -3717,9 +4009,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const executionState = issue?.status === "blocked" ? "blocked" : issue?.latest_scheduler_error && issue?.status === "in_review" ? "scheduler-failed" : latestRunStatus === "completed" ? "completed" : latestRunStatus === "failed" ? "failed" : latestRunStatus === "interrupted" ? "interrupted" : latestRunStatus === "scheduling" ? "scheduling" : latestRunStatus === "running" ? "running" : latestRunStatus === "claimed" ? "claimed" : issue?.agent_enabled ? "not-started" : "";
         const activeExecutionState = issue?.active_run_status || (replyStatus === "running" ? "running" : "");
         const replyFailureState = ["failed", "interrupted"].includes(replyStatus) ? replyStatus : conversationFailureState;
-        const activityState = enrichmentLocked ? "thinking" : replyFailureState || activeExecutionState || executionState;
+        const relayFailure = issue?.session_relay_error && !issue?.session_relay_connected && issue?.active_run_status === "claimed";
+        const activityState = enrichmentLocked ? "thinking" : relayFailure ? "relay-failed" : replyFailureState || activeExecutionState || executionState;
         if (!activityState) return "";
-        const activityLabel = t(enrichmentLocked ? "理解中" : activityState === "running" ? "工作中" : activityState === "scheduling" ? "调度中" : activityState === "scheduler-failed" ? "调度失败" : activityState === "claimed" ? "排队中" : activityState === "in_review" ? "待审核" : activityState === "completed" ? "已完成" : activityState === "blocked" ? "已阻塞" : activityState === "failed" ? "执行失败" : activityState === "interrupted" ? "已中断" : activityState === "not-started" ? "未开始" : "");
+        const activityLabel = t(enrichmentLocked ? "理解中" : activityState === "relay-failed" ? "Codex 会话连接失败" : activityState === "running" ? "工作中" : activityState === "scheduling" ? "调度中" : activityState === "scheduler-failed" ? "调度失败" : activityState === "claimed" ? "排队中" : activityState === "in_review" ? "待审核" : activityState === "completed" ? "已完成" : activityState === "blocked" ? "已阻塞" : activityState === "failed" ? "执行失败" : activityState === "interrupted" ? "已中断" : activityState === "not-started" ? "未开始" : "");
         const agent = state.agents.find(item => item.id === issue?.agent_id) || state.agents.find(item => item.is_default) || { name: "Codex", is_default: true };
         const activityIcon = activityState === "scheduling"
           ? '<span class="better-codex-activity-dot better-codex-scheduler-dot" aria-hidden="true"></span>'
@@ -3727,7 +4020,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             ? '<span class="better-codex-activity-dot better-codex-scheduler-failed-dot" aria-hidden="true"></span>'
           : ["completed", "interrupted", "not-started"].includes(activityState)
           ? '<span class="better-codex-activity-dot" aria-hidden="true"></span>'
-          : ["failed", "blocked"].includes(activityState) ? icon("close") : agentAvatarMarkup(agent, "better-codex-bubble-avatar better-codex-conversation-status-avatar");
+          : ["failed", "blocked", "relay-failed"].includes(activityState) ? icon("close") : agentAvatarMarkup(agent, "better-codex-bubble-avatar better-codex-conversation-status-avatar");
         return '<span class="better-codex-activity" data-run="' + activityState + '">' + activityIcon + '<span class="' + (enrichmentLocked || issueExecutionRunning(issue) ? "better-codex-shimmer" : "") + '">' + activityLabel + '</span></span>';
       }
 
@@ -3853,7 +4146,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         }
         if (send) updateReplySendState();
         stopConversationPoll();
-        if (stateName === "running") conversationTimer = setTimeout(() => void loadConversation({ quiet: true }), 2000);
+        if (stateName === "running" || executionRunning) conversationTimer = setTimeout(() => void loadConversation({ quiet: true }), 2000);
         else if (stateName === "succeeded" && !options.afterSuccess) conversationTimer = setTimeout(() => void loadConversation({ quiet: true, afterSuccess: true }), 1200);
       }
 
@@ -3881,7 +4174,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const retrying = Boolean(retryMessage);
         const text = String(retryMessage || textarea?.value || "").trim();
         const requestId = retryRequestId || (globalThis.crypto?.randomUUID?.() || VERSION + "-reply-" + Date.now() + "-" + Math.random().toString(36).slice(2));
-        if (sessionHandoff || isExecutionRunning() || !issue || !sessionId || (!text && !draft.replyAttachments.length) || !send || !errorOutput) return;
+        if (sessionHandoff || !issue || !sessionId || (!text && !draft.replyAttachments.length) || !send || !errorOutput) return;
         send.disabled = true;
         errorOutput.hidden = true;
         clearConversationFailure();
@@ -4280,50 +4573,18 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         dialog.querySelector("[data-dialog-close]")?.addEventListener("click", () => dialog.close());
         dialog.querySelector("[data-dialog-open-thread]")?.addEventListener("click", event => {
           const button = event.currentTarget;
-          const issueId = issue?.id || "";
           const threadId = normalizeSessionId(event.currentTarget.dataset.dialogOpenThread);
-          const executionRunning = button.dataset.dialogOpenThreadRunning === "true";
-          if ((!threadId && !executionRunning) || button.disabled) return;
+          if (!threadId || button.disabled) return;
           const errorOutput = dialog.querySelector(".better-codex-dialog-error");
           const idleLabel = button.textContent || t("在会话中打开");
-          let loadingButton = button;
-          const setLoading = (target, label) => {
-            target.disabled = true;
-            if (target === button) {
-              button.classList.add("is-loading");
-              button.setAttribute("aria-busy", "true");
-              if (label === "正在打开…") button.innerHTML = icon("refresh") + "<span>" + te("正在打开…") + "</span>";
-              else button.innerHTML = icon("refresh") + "<span>" + te(label) + "</span>";
-            } else {
-              target.classList.add("is-loading");
-              target.setAttribute("aria-busy", "true");
-              target.innerHTML = icon("refresh") + "<span>" + te(label) + "</span>";
-            }
-          };
+          button.disabled = true;
+          button.classList.add("is-loading");
+          button.setAttribute("aria-busy", "true");
+          button.innerHTML = icon("refresh") + "<span>" + te("正在打开…") + "</span>";
           clearError();
           void (async () => {
             try {
-              let nextThreadId = threadId;
-              if (executionRunning) {
-                const confirmed = await confirmAction("任务正在进行中", "终止任务后才能打开对话，是否终止任务？", "终止并打开");
-                if (!confirmed) return;
-                setLoading(loadingButton, "正在终止…");
-                await api("/api/issues/" + encodeURIComponent(issueId) + "/stop", { method: "POST" });
-                const current = await api("/api/issues/" + encodeURIComponent(issueId));
-                refreshIssueState(current);
-                await loadIssues().catch(() => {});
-                nextThreadId = issueSessionId(current) || nextThreadId;
-                loadingButton = dialog.querySelector("[data-dialog-open-thread]") || loadingButton;
-                setLoading(loadingButton, "正在打开…");
-              } else {
-                setLoading(loadingButton, "正在打开…");
-              }
-              if (nextThreadId) {
-                const handedOff = await api("/api/issues/" + encodeURIComponent(issueId) + "/session-handoff", { method: "POST", body: JSON.stringify({ thread_id: nextThreadId }) });
-                refreshIssueState(handedOff);
-                await loadIssues().catch(() => {});
-                await openThread(nextThreadId);
-              } else await loadIssues();
+              await openThread(threadId);
               dialog.close();
             } catch (error) {
               showError(error);
@@ -4331,15 +4592,33 @@ export function injectionScript(port: number, accessToken: string, action: "inst
                 errorOutput.textContent = errorLabel(error);
                 errorOutput.hidden = false;
               }
-              if (loadingButton.isConnected) {
-                loadingButton.disabled = false;
-                loadingButton.classList.remove("is-loading");
-                if (loadingButton === button) button.removeAttribute("aria-busy");
-                else loadingButton.removeAttribute("aria-busy");
-                loadingButton.textContent = idleLabel;
+              if (button.isConnected) {
+                button.disabled = false;
+                button.classList.remove("is-loading");
+                button.removeAttribute("aria-busy");
+                button.textContent = idleLabel;
               }
             }
           })();
+        });
+        dialog.querySelector("[data-dialog-stop]")?.addEventListener("click", event => {
+          const button = event.currentTarget;
+          if (!issue || button.disabled) return;
+          const errorOutput = dialog.querySelector(".better-codex-dialog-error");
+          button.disabled = true;
+          button.setAttribute("aria-busy", "true");
+          button.title = t("正在停止…");
+          void stopIssueSession(issue.id).then(updated => refreshIssueState(updated)).catch(error => {
+            if (errorOutput) {
+              errorOutput.textContent = errorLabel(error);
+              errorOutput.hidden = false;
+            }
+          }).finally(() => {
+            if (!button.isConnected) return;
+            button.disabled = false;
+            button.removeAttribute("aria-busy");
+            button.title = t("停止任务");
+          });
         });
         const startNow = dialog.querySelector("[data-dialog-start-now]");
         startNow?.addEventListener("click", () => {
@@ -4533,6 +4812,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (control.matches(".better-codex-submit")) return "submit";
         if (control.matches("[data-dialog-open-thread]")) return "open_thread";
         if (control.matches("[data-dialog-start-now]")) return "start_now";
+        if (control.matches("[data-dialog-stop]")) return "stop";
         if (control.matches("[data-dialog-switch]")) return "switch_mode";
         if (control.matches("[data-dialog-expand]")) return "expand";
         if (control.matches("[data-dialog-attach]")) return "attach";
@@ -4753,7 +5033,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     function syncSessionHandoffFromHost() {
       const threadId = currentRouteThreadId() || activeThreadId();
       if (!threadId) return;
-      const issue = state.issues.find(candidate => issueSessionId(candidate) === threadId && !candidate.session_handoff_at);
+      const issue = state.issues.find(candidate => issueSessionId(candidate) === threadId && !candidate.session_owned && !candidate.session_handoff_at);
       if (!issue || sessionHandoffPending.has(issue.id)) return;
       sessionHandoffPending.add(issue.id);
       void api("/api/issues/" + encodeURIComponent(issue.id) + "/session-handoff", { method: "POST", body: JSON.stringify({ thread_id: threadId }) })
@@ -4848,6 +5128,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       refreshTimer = null;
       if (pollTimer !== null) clearInterval(pollTimer);
       if (updateTimer !== null) clearInterval(updateTimer);
+      if (relayTimer !== null) clearInterval(relayTimer);
+      relayTimer = null;
+      updateNoticeResizeObserver?.disconnect();
+      updateNoticeResizeObserver = null;
       Array.from(completionNoticeDismissals.values()).forEach(dismissNotice => dismissNotice());
       completionNoticeTimers.forEach(timer => clearTimeout(timer));
       completionNoticeTimers.clear();
@@ -4864,10 +5148,16 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         pending.reject(new Error("injection_destroyed"));
       }
       bridgeRequests.clear();
+      for (const pending of appServerRequests.values()) {
+        clearTimeout(pending.timer);
+        pending.reject(new Error("injection_destroyed"));
+      }
+      appServerRequests.clear();
       document.removeEventListener("DOMContentLoaded", mount);
       document.removeEventListener("click", onClick, true);
       document.removeEventListener("keydown", onGlobalShortcut, true);
       window.removeEventListener("codex-message-from-view", onHostMessageFromView, true);
+      window.removeEventListener("message", onAppServerMessage, true);
       close();
       document.querySelectorAll('[' + OWNED + '="true"]').forEach(node => node.remove());
       ["light", "dark"].forEach(mode => ["canvas", "ink", "accent", "surface", "control", "raised", "hover", "pressed", "hairline"].forEach(token => document.documentElement.style.removeProperty("--bc-host-" + mode + "-" + token)));
@@ -4881,6 +5171,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       observer = new MutationObserver(scheduleRefresh);
       observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-theme", "aria-current", ATTRIBUTES.threadActive] });
       refresh();
+      startSessionRelay();
       void checkUpdateNotice();
       updateTimer = setInterval(checkUpdateNotice, 15000);
     }
@@ -4889,6 +5180,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     document.addEventListener("click", onClick, true);
     document.addEventListener("keydown", onGlobalShortcut, true);
     window.addEventListener("codex-message-from-view", onHostMessageFromView, true);
+    window.addEventListener("message", onAppServerMessage, true);
     if (document.documentElement) mount();
     else document.addEventListener("DOMContentLoaded", mount, { once: true });
     return { installed: true, reused: false };

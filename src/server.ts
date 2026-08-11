@@ -15,7 +15,6 @@ import { attachmentPath, runPath, runtimePort, token, updateLogPath } from "./co
 import { acquireRuntimeLock, clearRuntimeState, createRuntimeIdentity, publishRuntimeState } from "./runtime-state.js";
 import { activeCoreCommand, checkGatewayUpdate, getGatewayUpdateState, installGatewayUpdate, recordGatewayUpdateActivation, startGatewayUpdateChecks } from "./updater.js";
 import { packagedBuild } from "./build.js";
-import { getIssueReplyState, hasActiveIssueReplies, startIssueReply, stopIssueReply, stopIssueReplies } from "./session-reply.js";
 import { join } from "node:path";
 import { normalizeSessionId, readConversationActivity, readConversationResult, sessionWorkspace } from "./session-transcript.js";
 import { IssueWorker } from "./worker.js";
@@ -49,7 +48,7 @@ function savePastedImage(value: unknown) {
 
 async function reconcileInterruptedIssues(store: Store, issues: Issue[]) {
   await Promise.all(issues.map(async issue => {
-    if (!issue.run_thread_id || ["done", "cancelled"].includes(issue.status) || issue.active_run_status || hasActiveIssueReplies(issue.id)) return;
+    if (!issue.run_thread_id || issue.session_owned || ["done", "cancelled"].includes(issue.status) || issue.active_run_status || store.getIssueReplyState(issue.id).status === "running") return;
     const conversation = await readConversationActivity(issue.run_thread_id);
     const completedAt = conversation.activity.status === "completed"
       ? conversation.activity.completed_at
@@ -60,7 +59,7 @@ async function reconcileInterruptedIssues(store: Store, issues: Issue[]) {
       store.reconcileInterruptedRun(issue.id, issue.run_thread_id, completedAt, conversation.activity.started_at);
     }
     if (conversation.activity.status !== "idle") {
-      const reply = getIssueReplyState(store, issue.id);
+      const reply = store.getIssueReplyState(issue.id);
       if (conversation.activity.status === "interrupted" && reply.status !== "interrupted") {
         console.log(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({
           timestamp: new Date().toISOString(),
@@ -285,7 +284,7 @@ function errorCode(error: unknown) {
 }
 
 function errorStatus(code: string) {
-  if (code === "version_conflict" || code === "reply_busy" || code === "update_in_progress" || code === "issue_execution_locked" || code === "issue_execution_running" || code === "issue_session_handed_off") return 409;
+  if (code === "version_conflict" || code === "reply_busy" || code === "update_in_progress" || code === "issue_execution_locked" || code === "issue_execution_running" || code === "issue_session_handed_off" || code === "issue_session_starting" || code === "issue_session_already_bound" || code === "session_relay_not_leader" || code === "session_command_not_claimed") return 409;
   if (code.endsWith("_not_found")) return 404;
   if (code === "database_unavailable" || code === "database_integrity_check_failed") return 503;
   return 400;
@@ -324,13 +323,11 @@ export function startServer() {
     avatar: store.getAgentAvatar(profile.is_default ? "default" : profile.id),
   });
   const withDefaultConcurrency = <T,>(profile: T) => ({ ...profile, max_concurrency: store.getDefaultAgentMaxConcurrency() });
-  const sandboxModeForAgent = (agentId: string | null | undefined) => agentId ? store.getAgentProfile(agentId)?.sandbox_mode || defaultAgentProfile().sandbox_mode : defaultAgentProfile().sandbox_mode;
   const visibleAgentProfiles = () => [withAvatar(withDefaultConcurrency(defaultAgentProfile())), ...store.listAgentProfiles().map(withAvatar)];
   const stopUpdateChecks = mockupEnabled ? () => {} : startGatewayUpdateChecks();
   const cleanup = () => {
     if (cleaned) return;
     cleaned = true;
-    stopIssueReplies(store);
     worker.stop();
     stopUpdateChecks();
     clearRuntimeState(identity.instanceId);
@@ -684,7 +681,6 @@ export function startServer() {
       if (url.pathname === "/api/update/check" && method === "POST") return sendJson(response, 200, await checkGatewayUpdate());
       if (url.pathname === "/api/update/install" && method === "POST") {
         if (updateInstallInProgress) throw new Error("update_in_progress");
-        if (hasActiveIssueReplies()) throw new Error("reply_busy");
         if (!worker.pauseForUpdate()) throw new Error("issue_execution_running");
         updateInstallInProgress = true;
         try {
@@ -809,6 +805,42 @@ export function startServer() {
         if (!threadId) throw new Error("session_required");
         return sendJson(response, 200, { workspace_path: sessionWorkspace(threadId) || "" });
       }
+      if (url.pathname === "/api/session-relay/poll" && method === "POST") {
+        const body = await readBody(request);
+        const relayId = cleanString(body.relay_id, 200);
+        const appSessionId = cleanString(body.app_session_id, 200);
+        const capability = body.capability === "ready" || body.capability === "failed" ? body.capability : "unknown";
+        if (!relayId || !appSessionId) throw new Error("session_relay_identity_required");
+        const result = worker.pollSessionRelay(relayId, appSessionId, capability, cleanString(body.capability_error, 2000), body.busy === true);
+        return sendJson(response, 200, result);
+      }
+      if (path[0] === "api" && path[1] === "session-relay" && path[2] === "commands" && path[3] && path[4] === "complete" && path.length === 5 && method === "POST") {
+        const body = await readBody(request);
+        const relayId = cleanString(body.relay_id, 200);
+        const result = body.result && typeof body.result === "object" && !Array.isArray(body.result) ? body.result as Record<string, unknown> : {};
+        if (!relayId) throw new Error("session_relay_identity_required");
+        const command = worker.completeSessionCommand(decodeURIComponent(path[3]), relayId, result);
+        return sendJson(response, 200, { ok: true, command });
+      }
+      if (path[0] === "api" && path[1] === "session-relay" && path[2] === "commands" && path[3] && path[4] === "fail" && path.length === 5 && method === "POST") {
+        const body = await readBody(request);
+        const relayId = cleanString(body.relay_id, 200);
+        const commandError = cleanString(body.error, 2000) || "desktop_bridge_request_failed";
+        const partialThreadId = normalizeSessionId(cleanString(body.thread_id, 200));
+        const partialTurnId = normalizeSessionId(cleanString(body.turn_id, 200));
+        if (!relayId) throw new Error("session_relay_identity_required");
+        const command = worker.failSessionCommand(decodeURIComponent(path[3]), relayId, commandError, partialThreadId || undefined, partialTurnId || undefined);
+        return sendJson(response, 200, { ok: true, command });
+      }
+      if (url.pathname === "/api/session-relay/events" && method === "POST") {
+        const body = await readBody(request);
+        const relayId = cleanString(body.relay_id, 200);
+        const eventMethod = cleanString(body.method, 100);
+        const params = body.params && typeof body.params === "object" && !Array.isArray(body.params) ? body.params as Record<string, unknown> : {};
+        if (!relayId || !store.sessionRelayIsLeader(relayId)) throw new Error("session_relay_not_leader");
+        if (!["thread/status/changed", "turn/started", "turn/completed", "item/completed"].includes(eventMethod)) throw new Error("session_event_invalid");
+        return sendJson(response, 200, { accepted: worker.handleSessionEvent(eventMethod, params) });
+      }
       if (url.pathname === "/api/issues" && method === "GET") {
         const issues = await reconcileInterruptedIssues(store, store.listIssues({
           projectId: url.searchParams.get("project_id") || undefined,
@@ -817,7 +849,7 @@ export function startServer() {
         }));
         return sendJson(response, 200, issues.map(issue => ({
           ...issue,
-          reply_status: getIssueReplyState(store, issue.id).status,
+          reply_status: store.getIssueReplyState(issue.id).status,
         })));
       }
       if (url.pathname === "/api/issues" && method === "POST") {
@@ -859,14 +891,14 @@ export function startServer() {
         if (!issue) return sendJson(response, 404, { error: "issue_not_found" });
         if (method === "GET" && path.length === 3) {
           const [current] = await reconcileInterruptedIssues(store, [issue]);
-          return sendJson(response, 200, { ...current, reply_status: getIssueReplyState(store, current.id).status });
+          return sendJson(response, 200, { ...current, reply_status: store.getIssueReplyState(current.id).status });
         }
         if (method === "PATCH" && path.length === 3) {
           const body = await readBody(request);
           const version = Number(body.version);
           if (!Number.isInteger(version) || version < 1) throw new Error("invalid_version");
           const patch = parseIssuePatch(body);
-          if ((issue.active_run_status || hasActiveIssueReplies(issue.id) || getIssueReplyState(store, issue.id).status === "running") && Object.keys(patch).some(key => key !== "reply_draft")) throw new Error("issue_execution_running");
+          if ((issue.active_run_status || issue.session_active_turn_id || store.getIssueReplyState(issue.id).status === "running") && Object.keys(patch).some(key => key !== "reply_draft")) throw new Error("issue_execution_running");
           const updated = store.updateIssue(issue.id, version, patch);
           if (store.isDispatchable(updated)) worker.wake();
           return sendJson(response, 200, updated);
@@ -882,7 +914,7 @@ export function startServer() {
           if (["done", "cancelled"].includes(issue.status)) throw new Error("issue_not_startable");
           const nextStatus = patch.status || issue.status;
           if (["backlog", "done", "cancelled"].includes(String(nextStatus))) throw new Error("issue_not_startable");
-          if (issue.active_run_status || hasActiveIssueReplies(issue.id) || getIssueReplyState(store, issue.id).status === "running") throw new Error("issue_execution_running");
+          if (issue.active_run_status || issue.session_active_turn_id || store.getIssueReplyState(issue.id).status === "running") throw new Error("issue_execution_running");
           const nextProject = store.getProject(String(patch.project_id || issue.project_id));
           const nextWorkspace = String(patch.workspace_path || issue.workspace_path || nextProject?.workspace_path || "");
           if (!nextWorkspace) throw new Error("workspace_required");
@@ -899,21 +931,25 @@ export function startServer() {
         }
         if (method === "POST" && path[3] === "stop" && path.length === 4) {
           const stopped = await worker.stopIssue(issue.id);
-          const replyStopped = await stopIssueReply(store, issue.id);
-          if (!stopped && !replyStopped && (store.getIssue(issue.id)?.active_run_status || hasActiveIssueReplies(issue.id) || getIssueReplyState(store, issue.id).status === "running")) throw new Error("issue_stop_timeout");
+          const current = store.getIssue(issue.id);
+          if (!stopped && (current?.active_run_status || current?.session_active_turn_id || store.getIssueReplyState(issue.id).status === "running")) throw new Error("issue_stop_timeout");
           return sendJson(response, 200, store.getIssue(issue.id));
         }
         if (method === "POST" && path[3] === "session-handoff" && path.length === 4) {
           const body = await readBody(request);
           const threadId = normalizeSessionId(cleanString(body.thread_id, 200));
           if (!threadId) throw new Error("session_required");
+          if (issue.session_owned) {
+            if (issue.session_thread_id !== threadId) throw new Error("issue_session_mismatch");
+            return sendJson(response, 200, issue);
+          }
           return sendJson(response, 200, store.handoffIssueSession(issue.id, threadId));
         }
         if (method === "POST" && path[3] === "archive") {
           const body = await readBody(request);
           const version = Number(body.version);
           if (!Number.isInteger(version) || version < 1) throw new Error("invalid_version");
-          if (hasActiveIssueReplies(issue.id) || getIssueReplyState(store, issue.id).status === "running") throw new Error("issue_execution_running");
+          if (issue.session_active_turn_id || store.getIssueReplyState(issue.id).status === "running") throw new Error("issue_execution_running");
           if (issue.active_run_status) {
             await worker.stopIssue(issue.id);
             const current = store.getIssue(issue.id);
@@ -943,23 +979,23 @@ export function startServer() {
           return sendJson(response, 200, {
             ...conversation,
             issue_id: current.id,
-            reply: getIssueReplyState(store, current.id),
+            reply: store.getIssueReplyState(current.id),
             user: readCodexUserProfile(),
             issue: store.getIssue(current.id),
           });
         }
         if (method === "POST" && path[3] === "reply" && path.length === 4) {
           if (updateInstallInProgress) throw new Error("update_in_progress");
-          if (issue.session_handoff_at) throw new Error("issue_session_handed_off");
-          if (issue.active_run_status) throw new Error("issue_execution_running");
+          if (issue.session_handoff_at && !issue.session_owned) throw new Error("issue_session_handed_off");
           const body = await readBody(request);
           const requestId = cleanString(body.request_id, 200) || randomUUID();
           const message = cleanString(body.message, 100000).trim();
           if (!message) throw new Error("message_required");
-          if (!issue.run_thread_id && !store.canAutoStartFromUserMessage(issue)) {
+          if (!issue.session_thread_id && issue.active_run_status) throw new Error("issue_session_starting");
+          if (!issue.session_thread_id && !store.canAutoStartFromUserMessage(issue)) {
             throw new Error(store.getAutoDispatch() ? "backlog_reply_blocked" : "manual_start_required");
           }
-          if (!issue.run_thread_id) {
+          if (!issue.session_thread_id) {
             const description = issue.description.trim();
             const updated = store.updateIssue(issue.id, issue.version, {
               description: description.endsWith(message) ? description : [description, message].filter(Boolean).join("\n\n"),
@@ -970,17 +1006,11 @@ export function startServer() {
             if (!worker.startIssue(updated.id)) throw new Error("issue_not_started");
             return sendJson(response, 202, { issue_id: issue.id, request_id: requestId, status: "running", message, initial_run: true });
           }
-          const threadId = issue.run_thread_id || "";
-          const reply = startIssueReply(store, {
-            issueId: issue.id,
-            requestId,
-            threadId,
-            workspacePath: issue.workspace_path,
-            message,
-            agentId: issue.agent_id,
-            sandboxMode: sandboxModeForAgent(issue.agent_id),
-          });
-          return sendJson(response, 202, reply);
+          const queued = worker.sendIssueMessage(issue.id, requestId, message);
+          const reply = store.getIssueReplyState(issue.id);
+          return sendJson(response, 202, queued.steered
+            ? { issue_id: issue.id, request_id: requestId, status: "running", message, steered: true }
+            : reply);
         }
       }
       if (url.pathname === "/api/shutdown" && method === "POST") {

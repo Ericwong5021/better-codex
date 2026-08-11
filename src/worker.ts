@@ -4,9 +4,10 @@ import { createInterface } from "node:readline";
 import { join } from "node:path";
 import { agentConfigProfileName, defaultAgentProfile } from "./agent-profiles.js";
 import { debugLoggingEnabled, schedulerRuntimePath, schedulerSchemaPath, runLogPath, workerLogPath } from "./config.js";
-import { agentSandboxModes, Store, type AgentSandboxMode, type ClaimedIssue, type Issue, type SchedulerDecision } from "./db.js";
+import { agentSandboxModes, Store, type AgentSandboxMode, type ClaimedIssue, type Issue, type SchedulerDecision, type SessionCommand } from "./db.js";
 import { mockupSessionActive } from "./injection-state.js";
 import { codexExecutablePath } from "./codex-cli.js";
+import { readConversationActivity, readConversationResult } from "./session-transcript.js";
 
 const interval = 60000;
 const schedulerTimeout = 180000;
@@ -39,11 +40,11 @@ export function issuePrompt(claim: ClaimedIssue) {
 
 export class IssueWorker {
   private timer: NodeJS.Timeout | null = null;
-  private readonly runs = new Map<string, { child: ChildProcess; claim: ClaimedIssue }>();
   private readonly schedulers = new Map<string, { child: ChildProcess; claim: ClaimedIssue }>();
   private readonly enrichments = new Map<string, ChildProcess>();
   private readonly manualQueue = new Set<string>();
   private readonly stoppingRuns = new Set<string>();
+  private reconcilingSessions = false;
   private stopped = true;
 
   constructor(private readonly store: Store) {}
@@ -51,6 +52,7 @@ export class IssueWorker {
   start() {
     this.stopped = false;
     this.store.recoverInterruptedRuns();
+    for (const command of this.store.failClaimedSessionCommands()) this.handleSessionCommandFailure(command, command.error || "runtime_restarted");
     for (const issueId of this.store.listManualStartQueue()) this.manualQueue.add(issueId);
     for (const pending of this.store.listPendingSchedulerRuns()) {
       const executionResultPath = join(runLogPath, `${pending.claim.runId}-result.txt`);
@@ -59,6 +61,7 @@ export class IssueWorker {
       else this.store.finalizeScheduler(pending.claim.runId, pending.claim.issue.id, pending.executionSuccess, null, "workspace_required");
     }
     for (const issue of this.store.listPendingEnrichmentIssues()) this.enrichIssue(issue, issue.description, issue.agent_id || "");
+    void this.reconcileDesktopRuns();
     this.schedule(0);
   }
 
@@ -68,7 +71,7 @@ export class IssueWorker {
   }
 
   pauseForUpdate() {
-    if (this.runs.size || this.schedulers.size || this.enrichments.size) return false;
+    if (this.store.hasActiveIssueRuns() || this.schedulers.size || this.enrichments.size) return false;
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
@@ -82,7 +85,7 @@ export class IssueWorker {
 
   startIssue(issueId: string) {
     if (this.stopped || mockupSessionActive()) return false;
-    if (Array.from(this.runs.values()).some(({ claim }) => claim.issue.id === issueId)) return false;
+    if (this.store.getActiveSessionCommand(issueId)) return false;
     const claim = this.store.claimNextIssue(issueId);
     if (!claim) {
       const issue = this.store.getIssue(issueId);
@@ -95,32 +98,62 @@ export class IssueWorker {
       this.wake();
       return true;
     }
-    this.run(claim);
+    this.dispatch(claim);
     return true;
   }
 
   stopIssue(issueId: string) {
     this.store.dequeueManualStart(issueId);
     this.manualQueue.delete(issueId);
-    const active = Array.from([...this.runs.values(), ...this.schedulers.values()]).find(({ claim }) => claim.issue.id === issueId);
-    if (!active) return Promise.resolve(false);
-    this.stoppingRuns.add(active.claim.runId);
-    active.child.kill("SIGTERM");
-    return new Promise<boolean>(resolve => {
-      let settled = false;
-      const finish = (stopped: boolean) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        resolve(stopped);
-      };
-      const timer = setTimeout(() => {
-        active.child.kill("SIGKILL");
-        setTimeout(() => finish(false), 1000).unref();
-      }, 5000);
-      timer.unref();
-      active.child.once("close", () => finish(true));
-    });
+    const scheduler = Array.from(this.schedulers.values()).find(({ claim }) => claim.issue.id === issueId);
+    if (scheduler) {
+      this.stoppingRuns.add(scheduler.claim.runId);
+      scheduler.child.kill("SIGTERM");
+      return new Promise<boolean>(resolve => {
+        let settled = false;
+        const finish = (stopped: boolean) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          resolve(stopped);
+        };
+        const timer = setTimeout(() => {
+          scheduler.child.kill("SIGKILL");
+          setTimeout(() => finish(false), 1000).unref();
+        }, 5000);
+        timer.unref();
+        scheduler.child.once("close", () => finish(true));
+      });
+    }
+    let commandChanged = false;
+    for (const command of this.store.listActiveSessionCommands(issueId)) {
+      if (command.kind === "interrupt") continue;
+      if (command.status === "pending") {
+        const cancelled = this.store.cancelPendingSessionCommand(command.id);
+        if (cancelled) {
+          commandChanged = true;
+          this.handleSessionCommandFailure(cancelled, "user_stopped");
+        }
+      } else if (this.store.requestSessionCommandCancellation(command.id)) {
+        commandChanged = true;
+      }
+    }
+    const interrupt = this.store.enqueueSessionInterrupt(issueId);
+    if (interrupt) return Promise.resolve(true);
+    if (commandChanged) return Promise.resolve(true);
+    const issue = this.store.getIssue(issueId);
+    if (issue?.active_run_status && issue.latest_run_status !== "scheduling") {
+      const claim = this.store.listActiveDesktopRuns().find(item => item.issue.id === issueId);
+      if (claim) {
+        this.store.interruptRun(claim.runId, issueId);
+        return Promise.resolve(true);
+      }
+    }
+    if (this.store.getIssueReplyState(issueId).status === "running") {
+      this.store.finishSessionReply(issueId, "interrupted", "user_stopped");
+      return Promise.resolve(true);
+    }
+    return Promise.resolve(false);
   }
 
   stop() {
@@ -128,11 +161,6 @@ export class IssueWorker {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
     this.manualQueue.clear();
-    for (const { child, claim } of this.runs.values()) {
-      this.store.interruptRun(claim.runId, claim.issue.id);
-      child.kill("SIGTERM");
-    }
-    this.runs.clear();
     for (const { child, claim } of this.schedulers.values()) {
       this.store.pauseScheduler(claim.runId);
       child.kill("SIGTERM");
@@ -322,6 +350,7 @@ export class IssueWorker {
   private async tick() {
     try {
       if (mockupSessionActive()) return;
+      await this.reconcileDesktopRuns();
       for (const issueId of [...this.manualQueue]) {
         const issue = this.store.getIssue(issueId);
         if (!issue || !this.store.isDispatchable(issue)) {
@@ -332,12 +361,12 @@ export class IssueWorker {
         const claim = this.store.claimNextIssue(issueId);
         if (!claim) continue;
         this.manualQueue.delete(issueId);
-        this.run(claim);
+        this.dispatch(claim);
       }
       // claimNextIssue enforces per-agent max_concurrency, so keep claiming
       // until every agent with pending work is at capacity.
       let claim: ClaimedIssue | null;
-      while (!this.stopped && (claim = this.store.claimNextIssue())) this.run(claim);
+      while (!this.stopped && (claim = this.store.claimNextIssue())) this.dispatch(claim);
     } catch (error) {
       const output = error instanceof Error ? error.stack || error.message : String(error);
       createWriteStream(workerLogPath, { flags: "a" }).end(`${new Date().toISOString()} ${output}\n`);
@@ -346,72 +375,201 @@ export class IssueWorker {
     }
   }
 
-  private run(claim: ClaimedIssue) {
+  private dispatch(claim: ClaimedIssue) {
     const workspacePath = claim.workspacePath && existsSync(claim.workspacePath) ? claim.workspacePath : "";
     if (!workspacePath) {
       this.store.finishRun(claim.runId, claim.issue.id, false, "workspace_required");
       return;
     }
     if (workspacePath !== claim.workspacePath) this.store.setRunWorkspace(claim.issue.id, workspacePath);
-    const args = [
-      "exec",
-      ...(claim.issue.agent_id ? ["--profile", agentConfigProfileName(claim.issue.agent_id)] : []),
-      "--json",
-      "--color",
-      "never",
-      "-C",
-      workspacePath,
-      "-s",
-      this.sandboxMode(claim.issue.agent_id),
-      "-c",
-      'approval_policy="on-request"',
-      "-c",
-      'approvals_reviewer="auto_review"',
-      issuePrompt(claim),
-    ];
-    const log = createWriteStream(join(runLogPath, `${claim.runId}.log`), { flags: "a" });
-    const child = spawn(codexExecutablePath(), args, {
-      cwd: workspacePath,
-      env: process.env,
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true,
-    });
-    this.runs.set(claim.runId, { child, claim });
-    this.store.startRun(claim.runId, child.pid || 0);
-    const lines = createInterface({ input: child.stdout! });
-    let lastAgentMessage = "";
-    lines.on("line", line => {
-      log.write(line + "\n");
-      const message = enrichmentMessage(line);
-      if (message) lastAgentMessage = message;
-      try {
-        const event = JSON.parse(line) as { type?: string; thread_id?: string };
-        if (event.type === "thread.started" && event.thread_id) this.store.linkRunThread(claim.runId, claim.issue.id, event.thread_id);
-      } catch {}
-    });
-    child.stderr?.on("data", chunk => log.write(chunk));
-    child.once("error", error => {
-      log.write(error.stack || error.message);
-    });
-    child.once("close", (code, signal) => {
-      lines.close();
-      const interrupted = this.stoppingRuns.delete(claim.runId);
-      this.runs.delete(claim.runId);
-      if (this.stopped) return void log.end();
-      if (interrupted) {
-        this.store.interruptRun(claim.runId, claim.issue.id);
-        log.end();
-        this.wake();
-        return;
-      }
-      const executionSuccess = code === 0;
-      const executionError = executionSuccess ? undefined : `codex_exit_${code ?? signal ?? "unknown"}`;
-      writeFileSync(join(runLogPath, `${claim.runId}-result.txt`), lastAgentMessage.trim());
-      this.store.beginScheduling(claim.runId, claim.issue.id, executionSuccess, executionError);
-      log.end(() => {
-        if (!this.stopped) this.scheduler(claim, executionSuccess, executionError, lastAgentMessage.trim());
+    const session = this.store.getIssueSession(claim.issue.id);
+    const payload = this.sessionPayload(claim.issue, workspacePath, issuePrompt(claim));
+    try {
+      this.store.enqueueSessionCommand({
+        issueId: claim.issue.id,
+        runId: claim.runId,
+        requestId: `run:${claim.runId}`,
+        kind: session ? "turn" : "start",
+        threadId: session?.thread_id || null,
+        payload,
+        hostId: session?.host_id || "local",
       });
-    });
+    } catch (error) {
+      this.store.finishRun(claim.runId, claim.issue.id, false, error instanceof Error ? error.message : "session_command_failed");
+    }
+  }
+
+  private sessionPayload(issue: Issue, workspacePath: string, message: string) {
+    const profile = issue.agent_id ? this.store.getAgentProfile(issue.agent_id) : defaultAgentProfile();
+    const model = profile?.model && profile.model !== "默认模型" ? profile.model : "";
+    const effort = profile?.reasoning_effort && profile.reasoning_effort !== "默认推理等级" ? profile.reasoning_effort : "";
+    return {
+      workspace_path: workspacePath,
+      title: `${issue.identifier} ${issue.title}`.trim().slice(0, 200),
+      message,
+      model,
+      effort,
+      sandbox_mode: this.sandboxMode(issue.agent_id),
+      developer_instructions: issue.agent_id ? profile?.instructions || "" : "",
+      approval_policy: "on-request",
+      approvals_reviewer: "auto_review",
+    };
+  }
+
+  sendIssueMessage(issueId: string, requestId: string, message: string) {
+    const issue = this.store.getIssue(issueId);
+    if (!issue) throw new Error("issue_not_found");
+    const session = this.store.getIssueSession(issueId);
+    if (!session) throw new Error("session_required");
+    const activeTurnId = session.active_turn_id;
+    if (!activeTurnId) {
+      this.store.beginReplyRun(issueId);
+      this.store.setIssueReplyState({
+        issue_id: issueId,
+        request_id: requestId,
+        status: "running",
+        message,
+        started_at: new Date().toISOString(),
+      });
+    }
+    try {
+      const command = this.store.enqueueSessionCommand({
+        issueId,
+        requestId,
+        kind: activeTurnId ? "steer" : "turn",
+        threadId: session.thread_id,
+        turnId: activeTurnId,
+        payload: this.sessionPayload(issue, issue.workspace_path || "", message),
+        hostId: session.host_id,
+      });
+      return { command, steered: Boolean(activeTurnId) };
+    } catch (error) {
+      if (!activeTurnId) this.store.finishSessionReply(issueId, "failed", error instanceof Error ? error.message : "session_command_failed");
+      throw error;
+    }
+  }
+
+  pollSessionRelay(relayId: string, appSessionId: string, capability: "unknown" | "ready" | "failed", capabilityError?: string, busy = false) {
+    const lease = this.store.heartbeatSessionRelay(relayId, appSessionId, capability === "ready" ? null : capability === "failed" ? capabilityError || "desktop_bridge_unavailable" : undefined);
+    if (lease.acquired) {
+      for (const command of this.store.failClaimedSessionCommands(relayId)) this.handleSessionCommandFailure(command, command.error || "relay_replaced");
+    }
+    const command = lease.leader && capability === "ready" && !busy ? this.store.claimSessionCommand(relayId) : undefined;
+    return { ...lease, command: command || null, thread_ids: this.store.listSessionThreadIds() };
+  }
+
+  completeSessionCommand(commandId: string, relayId: string, result: Record<string, unknown>) {
+    const command = this.store.completeSessionCommand(commandId, relayId, result);
+    if (command.cancel_requested) this.store.enqueueSessionInterrupt(command.issue_id);
+    return command;
+  }
+
+  failSessionCommand(commandId: string, relayId: string, error: string, partialThreadId?: string, partialTurnId?: string) {
+    const command = this.store.failSessionCommand(commandId, relayId, error, partialThreadId, partialTurnId);
+    this.handleSessionCommandFailure(command, command.error || error);
+    return command;
+  }
+
+  private handleSessionCommandFailure(command: SessionCommand, error: string) {
+    if (command.kind === "steer" || command.kind === "interrupt" || command.turn_id) return;
+    if (command.run_id) {
+      const claim = this.store.getRunClaim(command.run_id);
+      if (claim?.issue.active_run_status && claim.issue.active_run_status !== "scheduling") {
+        if (error === "user_stopped") this.store.interruptRun(command.run_id, command.issue_id);
+        else this.store.finishRun(command.run_id, command.issue_id, false, error);
+      }
+      return;
+    }
+    if (command.kind === "turn") {
+      if (this.store.getIssueReplyState(command.issue_id).status === "running") this.store.finishSessionReply(command.issue_id, error === "user_stopped" ? "interrupted" : "failed", error);
+    }
+  }
+
+  handleSessionEvent(method: string, params: Record<string, unknown>) {
+    const threadId = typeof params.threadId === "string" ? params.threadId : "";
+    if (!threadId) return false;
+    if (method === "thread/status/changed") {
+      const status = params.status && typeof params.status === "object" ? params.status as Record<string, unknown> : {};
+      const activeFlags = Array.isArray(status.activeFlags) ? status.activeFlags.filter((value): value is string => typeof value === "string") : [];
+      return this.store.syncSessionThreadStatus(threadId, String(status.type || ""), activeFlags);
+    }
+    if (method === "turn/started") {
+      const turn = params.turn && typeof params.turn === "object" ? params.turn as Record<string, unknown> : {};
+      const turnId = typeof turn.id === "string" ? turn.id : "";
+      return Boolean(turnId && this.store.sessionTurnStarted(threadId, turnId));
+    }
+    if (method === "item/completed") {
+      const turnId = typeof params.turnId === "string" ? params.turnId : "";
+      const item = params.item && typeof params.item === "object" ? params.item as Record<string, unknown> : {};
+      return item.type === "agentMessage" && typeof item.text === "string" && Boolean(turnId) ? this.store.recordSessionAgentMessage(threadId, turnId, item.text) : false;
+    }
+    if (method === "turn/completed") {
+      const turn = params.turn && typeof params.turn === "object" ? params.turn as Record<string, unknown> : {};
+      const turnId = typeof turn.id === "string" ? turn.id : "";
+      const status = turn.status === "completed" || turn.status === "interrupted" || turn.status === "failed" ? turn.status : "failed";
+      const items = Array.isArray(turn.items) ? turn.items : [];
+      const lastAgent = items.flatMap(item => item && typeof item === "object" && (item as Record<string, unknown>).type === "agentMessage" && typeof (item as Record<string, unknown>).text === "string" ? [String((item as Record<string, unknown>).text)] : []).at(-1);
+      if (turnId && lastAgent) this.store.recordSessionAgentMessage(threadId, turnId, lastAgent);
+      const turnError = turn.error && typeof turn.error === "object" ? turn.error as Record<string, unknown> : {};
+      const error = typeof turnError.message === "string" ? turnError.message : status === "failed" ? "session_turn_failed" : undefined;
+      const completion = turnId ? this.store.completeSessionTurn(threadId, turnId, status, error) : undefined;
+      if (completion) this.finishSessionTurn(completion);
+      return Boolean(completion);
+    }
+    return false;
+  }
+
+  private finishSessionTurn(completion: {
+    issue_id: string;
+    run_id: string | null;
+    thread_id: string;
+    turn_id: string;
+    status: "completed" | "interrupted" | "failed";
+    error: string | null;
+    message: string;
+  }) {
+    if (!completion.run_id) {
+      this.store.finishSessionReply(completion.issue_id, completion.status, completion.error || undefined);
+      return;
+    }
+    const claim = this.store.getRunClaim(completion.run_id);
+    if (!claim) return;
+    if (completion.status === "interrupted") {
+      this.store.interruptRun(completion.run_id, completion.issue_id);
+      this.wake();
+      return;
+    }
+    const executionSuccess = completion.status === "completed";
+    const executionError = executionSuccess ? undefined : completion.error || "session_turn_failed";
+    writeFileSync(join(runLogPath, `${completion.run_id}-result.txt`), completion.message.trim());
+    this.store.beginScheduling(completion.run_id, completion.issue_id, executionSuccess, executionError);
+    if (!this.stopped) this.scheduler(claim, executionSuccess, executionError, completion.message.trim());
+  }
+
+  private async reconcileDesktopRuns() {
+    if (this.reconcilingSessions || this.stopped) return;
+    this.reconcilingSessions = true;
+    try {
+      for (const session of this.store.listActiveIssueSessions()) {
+        const threadId = session.thread_id;
+        const expectedTurnId = session.active_turn_id || "";
+        if (!threadId || !expectedTurnId) continue;
+        const result = await readConversationActivity(threadId);
+        const activity = result.activity;
+        if (!activity.turn_id || activity.turn_id !== expectedTurnId) continue;
+        if (activity.status === "running") {
+          this.store.sessionTurnStarted(threadId, expectedTurnId);
+          continue;
+        }
+        if (activity.status !== "completed" && activity.status !== "interrupted") continue;
+        const conversation = await readConversationResult(threadId);
+        if (conversation.markdown) this.store.recordSessionAgentMessage(threadId, expectedTurnId, conversation.markdown);
+        const completion = this.store.completeSessionTurn(threadId, expectedTurnId, activity.status);
+        if (completion) this.finishSessionTurn(completion);
+      }
+    } finally {
+      this.reconcilingSessions = false;
+    }
   }
 
   private scheduler(claim: ClaimedIssue, executionSuccess: boolean, executionError: string | undefined, executionResult: string) {
