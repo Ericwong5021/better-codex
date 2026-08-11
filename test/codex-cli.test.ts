@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, w
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
-import { codexExecutableCandidates, resolveCodexExecutable } from "../src/codex-cli.js";
+import { codexExecutableCandidates, createCodexExecutablePathResolver, resolveCodexExecutable } from "../src/codex-cli.js";
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "better-codex-cli-test-"));
@@ -89,6 +89,24 @@ test("explicit Better Codex CLI configuration stays highest priority", () => {
     applicationPath: null,
     probe: value => value === configured,
   }), configured);
+});
+
+test("cached absolute Codex CLI paths are refreshed after an app update removes them", () => {
+  const oldExecutable = "C:\\Codex\\old\\codex.exe";
+  const newExecutable = "C:\\Codex\\new\\codex.exe";
+  const available = new Set([oldExecutable, newExecutable]);
+  const discovered = [oldExecutable, newExecutable];
+  const executablePath = createCodexExecutablePathResolver(
+    () => discovered.shift() ?? null,
+    path => available.has(path),
+    "win32",
+  );
+
+  assert.equal(executablePath(), oldExecutable);
+  assert.equal(executablePath(), oldExecutable);
+  available.delete(oldExecutable);
+  assert.equal(executablePath(), newExecutable);
+  assert.equal(discovered.length, 0);
 });
 
 test("Windows Store Codex executable is copied outside WindowsApps before use", () => {

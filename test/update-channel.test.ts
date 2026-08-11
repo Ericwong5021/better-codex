@@ -23,6 +23,12 @@ function runCli(home: string, args: string[]) {
   return JSON.parse(result.stdout) as Record<string, unknown>;
 }
 
+function nextBetaVersion(version = coreVersion) {
+  const match = version.match(/^(\d+)\.(\d+)\.(\d+)/);
+  if (!match) throw new Error(`invalid_test_version:${version}`);
+  return `${match[1]}.${match[2]}.${Number(match[3]) + 1}-beta.1`;
+}
+
 test("update channel selection persists without changing the shared home", () => {
   const home = mkdtempSync(join(tmpdir(), "better-codex-channel-"));
   try {
@@ -76,31 +82,32 @@ test("release and beta versions only move forward automatically", () => {
 
 test("public rollback restores both managed core and compatibility pointers", () => {
   const home = mkdtempSync(join(tmpdir(), "better-codex-rollback-"));
+  const nextVersion = nextBetaVersion();
   try {
     const runtime = join(home, "runtime");
     mkdirSync(join(runtime, "compatibility"), { recursive: true });
-    mkdirSync(join(runtime, "compatibility", "versions", "0.4.2-beta.1"), { recursive: true });
-    mkdirSync(join(runtime, "versions", "0.4.2-beta.1"), { recursive: true });
+    mkdirSync(join(runtime, "compatibility", "versions", nextVersion), { recursive: true });
+    mkdirSync(join(runtime, "versions", nextVersion), { recursive: true });
     writeFileSync(join(runtime, "current.json"), JSON.stringify({
-      current: "0.4.2-beta.1",
+      current: nextVersion,
       previous: coreVersion,
-      executable: join(runtime, "versions", "0.4.2-beta.1", process.platform === "win32" ? "better-codex.exe" : "better-codex"),
+      executable: join(runtime, "versions", nextVersion, process.platform === "win32" ? "better-codex.exe" : "better-codex"),
       updatedAt: new Date().toISOString(),
     }));
     writeFileSync(join(runtime, "compatibility", "current.json"), JSON.stringify({
-      current: "0.4.2-beta.1",
+      current: nextVersion,
       previous: "0.3.10",
       failures: 0,
       updatedAt: new Date().toISOString(),
     }));
-    writeFileSync(join(runtime, "compatibility", "versions", "0.4.2-beta.1", "manifest.json"), JSON.stringify({
+    writeFileSync(join(runtime, "compatibility", "versions", nextVersion, "manifest.json"), JSON.stringify({
       ...bundledCompatibility,
-      version: "0.4.2-beta.1",
+      version: nextVersion,
       minimumCoreVersion: coreVersion,
     }));
     writeFileSync(join(runtime, "rollback.json"), JSON.stringify({
       before: { core: null, compatibility: null },
-      after: { core: "0.4.2-beta.1", compatibility: "0.4.2-beta.1" },
+      after: { core: nextVersion, compatibility: nextVersion },
       updatedAt: new Date().toISOString(),
     }));
 
@@ -314,7 +321,7 @@ try {
 
 test("packaged Node bundles install and activate a managed .cjs core", async () => {
   const home = mkdtempSync(join(tmpdir(), "better-codex-bundle-update-"));
-  const nextVersion = "0.4.2-beta.1";
+  const nextVersion = nextBetaVersion();
   const core = Buffer.from(`
 const fs = require("node:fs");
 const http = require("node:http");

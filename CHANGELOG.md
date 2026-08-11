@@ -4,6 +4,12 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.2-beta.1] - 2026-08-11
+
+### Fixed
+
+- Refresh a cached Codex CLI path when a Codex Desktop update removes the previous versioned executable, keeping Issue enrichment, execution, scheduling, replies, and model discovery available without restarting Better Codex.
+
 ## [0.4.1] - 2026-08-11
 
 ### Added
@@ -300,7 +306,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.2-beta.1...HEAD
+[0.4.2-beta.1]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1...v0.4.2-beta.1
 [0.4.1]: https://github.com/Ericwong5021/better-codex/compare/v0.4.0...v0.4.1
 [0.4.1-beta.8]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1-beta.7...v0.4.1-beta.8
 [0.4.1-beta.7]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1-beta.6...v0.4.1-beta.7

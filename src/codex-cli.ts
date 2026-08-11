@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, posix, win32 } from "node:path";
 
 export type CodexExecutableDiscoveryOptions = {
   platform?: NodeJS.Platform;
@@ -135,11 +135,23 @@ export function resolveCodexExecutable(options: CodexExecutableDiscoveryOptions 
   return codexExecutableCandidates(options).find(probe) ?? null;
 }
 
-let cachedExecutable: string | undefined;
+export function createCodexExecutablePathResolver(
+  discover: () => string | null = () => resolveCodexExecutable(),
+  pathExists: (path: string) => boolean = existsSync,
+  platform: NodeJS.Platform = process.platform,
+) {
+  let cachedExecutable: string | undefined;
+  return () => {
+    const absolute = cachedExecutable && (platform === "win32" ? win32.isAbsolute(cachedExecutable) : posix.isAbsolute(cachedExecutable));
+    if (!cachedExecutable || (absolute && !pathExists(cachedExecutable))) cachedExecutable = discover() ?? "codex";
+    return cachedExecutable;
+  };
+}
+
+const cachedCodexExecutablePath = createCodexExecutablePathResolver();
 
 export function codexExecutablePath() {
-  cachedExecutable ??= resolveCodexExecutable() ?? "codex";
-  return cachedExecutable;
+  return cachedCodexExecutablePath();
 }
 
 export function requireCodexExecutablePath(options: CodexExecutableDiscoveryOptions = {}) {
