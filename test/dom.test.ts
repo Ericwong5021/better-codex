@@ -56,13 +56,20 @@ test("leaving the app surface suspends the panel and restores its previous surfa
   assert.ok(source.includes("if (active) close({ resume: true, suppressRoute: betterCodexRoute })"));
   assert.ok(source.includes("routeSeen = false"));
   assert.ok(source.includes("window.postMessage({ type: NAVIGATION.messageType, path: BETTER_CODEX_ROUTE }, window.location.origin)"));
-  assert.ok(!source.includes("if (!active && betterCodexRoute && !routeSuppressed)"));
   assert.ok(source.includes("function scheduleRefresh()"));
   assert.ok(source.includes("refreshTimer = setTimeout(() =>"));
   assert.ok(source.includes("}, 50);"));
   assert.ok(source.includes("if (content && content.textContent !== text) content.textContent = text"));
   assert.ok(source.includes("if (svg.innerHTML !== definition.nodes) svg.innerHTML = definition.nodes"));
   assert.doesNotMatch(source, /function scheduleRefresh\(\)[\s\S]*?setTimeout\([\s\S]*?160/);
+});
+
+test("returning from a native settings route resumes the remembered Better Codex surface", () => {
+  const source = injectionScript(4317, "test-token", "install");
+  const refresh = source.slice(source.indexOf("function refresh()"), source.indexOf("function scheduleRefresh()"));
+
+  assert.ok(refresh.includes("const resumeSurface = sessionStorage.getItem(RESUME_SURFACE_KEY)"));
+  assert.ok(refresh.includes('if (!active && betterCodexRoute && !routeSuppressed && ["issues", "agents"].includes(resumeSurface)) return open(resumeSurface)'));
 });
 
 test("sidebar utility controls keep the Better Codex surface mounted", () => {

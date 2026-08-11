@@ -4820,10 +4820,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (!betterCodexRoute) routeSuppressed = false;
         return;
       }
+      const resumeSurface = sessionStorage.getItem(RESUME_SURFACE_KEY);
       if (betterCodexRoute) routeSeen = true;
       if (!betterCodexRoute) routeSuppressed = false;
       syncSessionHandoffFromHost();
       if (active && routeSeen && !betterCodexRoute) return close({ resume: true, suppressRoute: false });
+      if (!active && betterCodexRoute && !routeSuppressed && ["issues", "agents"].includes(resumeSurface)) return open(resumeSurface);
       if (active) mountPanel();
     }
 
