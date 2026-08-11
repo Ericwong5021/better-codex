@@ -321,7 +321,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
     const systemLocale = resolveSystemLocale(INITIAL_LOCALE);
     const MOCKUP_PROJECT_ID = "mockup-better-codex";
-    const state = { projects: [], issues: [], agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: ["issues", "agents"].includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", mockup: false, createMode: "manual", keepCreate: false, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], creator: [], project: [], label: [] } };
+    const state = { projects: [], issues: [], agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: ["issues", "agents"].includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", mockup: false, keepCreate: false, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], creator: [], project: [], label: [] } };
     function shortcutKeyFromCode(code, key) {
       const source = String(code || "");
       if (/^Key[A-Z]$/.test(source)) return source.slice(3);
@@ -657,8 +657,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     async function resolveWorkspacePath(context) {
       const fromUrl = String(context?.workspacePath || "").trim();
-      if (fromUrl) return fromUrl;
       const threadId = normalizeSessionId(context?.threadId);
+      if (fromUrl && (!threadId || currentRouteThreadId() === threadId)) return fromUrl;
       if (!threadId) return "";
       try {
         const result = await api("/api/sessions/" + encodeURIComponent(threadId) + "/workspace");
@@ -1192,8 +1192,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       return rows.find(row => row.getAttribute(ATTRIBUTES.threadActive) === "true") || rows.find(row => ["page", "true"].includes(row.getAttribute("aria-current"))) || null;
     }
 
-    function readContext() {
-      const row = activeThreadRow();
+    function readContext(row = activeThreadRow()) {
       const projectList = row?.closest(SELECTORS.projectList);
       const projectRow = row?.closest(SELECTORS.projectId) || document.querySelector(SELECTORS.currentProjectRow);
       const projects = Array.from(document.querySelectorAll(SELECTORS.projectRow)).flatMap(item => {
@@ -1204,10 +1203,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const url = new URL(location.href);
       return {
         projectId: projectList?.getAttribute(ATTRIBUTES.projectListId) || projectRow?.getAttribute(ATTRIBUTES.projectId) || "",
-        threadId: row?.getAttribute(ATTRIBUTES.threadId) || location.pathname.match(/\\/local\\/([^/?#]+)/)?.[1] || "",
+        threadId: row ? nativeThreadId(row) : location.pathname.match(/\\/local\\/([^/?#]+)/)?.[1] || "",
         workspacePath: url.searchParams.get("workspace") || url.searchParams.get("cwd") || "",
         projects
       };
+    }
+
+    function linkedIssueThreadId(issue) {
+      return issueSessionId(issue) || normalizeSessionId(issue?.thread_id) || "";
     }
 
     function api(path, options = {}) {
@@ -1921,7 +1924,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       event.preventDefault();
       event.stopPropagation();
       closeCreateMenu();
-      state.createMode = "agent";
       void perform(() => openEditor());
     }
 
@@ -2212,9 +2214,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       manual.innerHTML = icon("plus") + "<span>" + escapeHtml(t("手动创建 issue")) + "</span>";
       manual.addEventListener("click", event => {
         event.stopPropagation();
-        state.createMode = "manual";
         closeCreateMenu();
-        void perform(() => openEditor());
+        void perform(() => openEditor(null, "todo", "manual"));
       });
       menu.append(manual);
       trigger.closest(".better-codex-create-split")?.append(menu);
@@ -2584,7 +2585,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       addIssue.insertAdjacentHTML("afterbegin", icon("plus"));
       addIssue.addEventListener("click", () => {
         closeCreateMenu();
-        state.createMode = "agent";
         void perform(() => openEditor());
       });
       const createToggle = actionButton("");
@@ -3797,18 +3797,30 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (state.agentPane !== "preview" && event.target.closest(".better-codex-agent-directory")) return closeAgentInspector();
     }
 
-    async function openEditor(issue = null, initialStatus = "todo") {
+    async function openEditor(issue = null, initialStatus = "todo", createMode = "agent") {
       state.agents = await api("/api/agents");
       if (!state.mockup) state.projects = await api("/api/projects");
       if (issue) issue = await api("/api/issues/" + encodeURIComponent(issue.id));
       state.selected = issue;
       document.getElementById("better-codex-dialog")?.remove();
       const cachedCreateDraft = issue ? null : readCreateDraft();
+      const draftMode = issue ? "manual" : createMode === "manual" ? "manual" : "agent";
+      let cachedTitle = cachedCreateDraft?.title || "";
+      let cachedDescription = cachedCreateDraft?.description || "";
+      let cachedPrompt = cachedCreateDraft?.prompt || "";
+      if (cachedCreateDraft && cachedCreateDraft.mode !== draftMode) {
+        if (draftMode === "agent") {
+          cachedPrompt ||= [cachedTitle, cachedDescription].filter(Boolean).join("\\n\\n");
+        } else {
+          cachedTitle ||= cachedPrompt.split(/\\n/).find(line => line.trim())?.trim().slice(0, 120) || "";
+          cachedDescription ||= cachedPrompt;
+        }
+      }
       const draft = {
-        mode: issue ? "manual" : cachedCreateDraft?.mode || state.createMode,
-        title: issue?.title || cachedCreateDraft?.title || "",
-        description: issue?.description || cachedCreateDraft?.description || "",
-        prompt: issue?.description || cachedCreateDraft?.prompt || "",
+        mode: draftMode,
+        title: issue?.title || cachedTitle,
+        description: issue?.description || cachedDescription,
+        prompt: issue?.description || cachedPrompt,
         agentId: issue?.agent_id || "",
         assignee: issue
           ? (issue.agent_enabled ? (issue.agent_id || "codex") : issue.user_assigned ? "user" : "none")
@@ -4768,7 +4780,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             if (!draft.description) draft.description = draft.prompt;
             draft.mode = "manual";
           }
-          state.createMode = draft.mode;
           renderDialog();
           dialog.querySelector(draft.mode === "agent" ? '[name="prompt"]' : '[name="title"]')?.focus();
         });
@@ -4865,7 +4876,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             state.projectId = draft.projectId;
           }
           traceDialog("dialog_submit_success", { action: issue ? "update_issue" : "create_issue" });
-          state.createMode = draft.mode;
           if (!issue) sessionStorage.removeItem(CREATE_DRAFT_KEY);
           await loadIssues();
           if (!issue && state.keepCreate) {
@@ -5137,7 +5147,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function findThreadRow(expected) {
-      return Array.from(document.querySelectorAll(SELECTORS.threadRow)).find(item => normalizeSessionId(item.getAttribute(ATTRIBUTES.threadId)) === expected);
+      return Array.from(document.querySelectorAll(SELECTORS.threadRow)).find(item => nativeThreadId(item) === expected);
     }
 
     function currentRouteThreadId() {
@@ -5152,7 +5162,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     function activeThreadId() {
       const activeRow = Array.from(document.querySelectorAll(SELECTORS.threadRow)).find(item => item.getAttribute(ATTRIBUTES.threadActive) === "true");
-      return normalizeSessionId(activeRow?.getAttribute(ATTRIBUTES.threadId));
+      return activeRow ? nativeThreadId(activeRow) : "";
     }
 
     function syncSessionHandoffFromHost() {
@@ -5200,6 +5210,183 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const result = await waitForThreadOpen(expected);
       close();
       return result;
+    }
+
+    function nativeThreadMenuController(row) {
+      const fiberKey = Object.keys(row).find(key => key.startsWith("__reactFiber$"));
+      let fiber = fiberKey ? row[fiberKey] : null;
+      let onRowContextMenu = null;
+      while (fiber && typeof fiber.memoizedProps?.getItems !== "function") {
+        if (!onRowContextMenu && typeof fiber.type !== "string" && typeof fiber.memoizedProps?.onContextMenu === "function") {
+          onRowContextMenu = fiber.memoizedProps.onContextMenu;
+        }
+        fiber = fiber.return;
+      }
+      if (!fiber) return null;
+      let context = fiber.dependencies?.firstContext || null;
+      while (context && typeof context.memoizedValue?.formatMessage !== "function") context = context.next;
+      const intl = context?.memoizedValue;
+      const fallbackFormat = (message, values = {}) => String(message?.defaultMessage || message?.id || "").replace(/\{([^}]+)\}/g, (_, key) => String(values[key] ?? ""));
+      return {
+        getItems: fiber.memoizedProps.getItems,
+        onBeforeOpen: fiber.memoizedProps.onBeforeOpen,
+        awaitBeforeOpen: fiber.memoizedProps.awaitBeforeOpen,
+        onRowContextMenu,
+        formatMessage: intl ? intl.formatMessage.bind(intl) : fallbackFormat,
+      };
+    }
+
+    function nativeThreadId(row) {
+      const annotated = normalizeSessionId(row.getAttribute(ATTRIBUTES.threadId));
+      if (annotated) return annotated;
+      const fiberKey = Object.keys(row).find(key => key.startsWith("__reactFiber$"));
+      let fiber = fiberKey ? row[fiberKey] : null;
+      for (let depth = 0; fiber && depth < 40; depth += 1, fiber = fiber.return) {
+        const conversationId = normalizeSessionId(fiber.memoizedProps?.conversationId);
+        if (conversationId) return conversationId;
+      }
+      return "";
+    }
+
+    function localizeNativeMenuItems(items, formatMessage) {
+      return items.map(item => {
+        if (item.type === "separator") return { ...item, nativeLabel: "", submenu: undefined };
+        return {
+          ...item,
+          nativeLabel: item.message ? formatMessage(item.message, item.messageValues) : item.nativeLabel || item.id,
+          nativeTooltip: item.tooltipMessage ? formatMessage(item.tooltipMessage, item.tooltipMessageValues) : item.nativeTooltip,
+          submenu: item.submenu ? localizeNativeMenuItems(item.submenu, formatMessage) : undefined,
+        };
+      });
+    }
+
+    function serializeNativeMenuItems(items) {
+      return items.map(item => ({
+        id: item.id,
+        type: item.type === "separator" ? "separator" : undefined,
+        label: item.type === "separator" ? "" : item.type === "checkbox" && item.checked === true ? "✓ " + item.nativeLabel : item.nativeLabel,
+        icon: item.icon,
+        enabled: item.enabled ?? true,
+        toolTip: item.nativeTooltip,
+        submenu: item.submenu ? serializeNativeMenuItems(item.submenu) : undefined,
+      }));
+    }
+
+    function findNativeMenuItem(items, id) {
+      for (const item of items) {
+        if (item.type === "separator") continue;
+        if (item.id === id) return item;
+        const nested = item.submenu ? findNativeMenuItem(item.submenu, id) : null;
+        if (nested) return nested;
+      }
+      return null;
+    }
+
+    async function openNativeThreadIssue(issue) {
+      openRoute("issues");
+      await openEditor(issue);
+    }
+
+    async function addNativeThreadIssue(context) {
+      try {
+        const existing = await api("/api/issues/from-thread?thread_id=" + encodeURIComponent(context.threadId));
+        if (existing && linkedIssueThreadId(existing) === context.threadId) return restoreNativeThreadIssue(existing, context);
+      } catch (error) {
+        if (String(error instanceof Error ? error.message : error) !== "issue_not_found") throw error;
+      }
+      state.projects = await api("/api/projects");
+      const workspacePath = await resolveWorkspacePath(context);
+      let project = context.projectId ? await ensureContextProject(context) : null;
+      if (!project && workspacePath) project = state.projects.find(item => item.workspace_path === workspacePath) || null;
+      if (!project) throw new Error("project_required");
+      const issue = await api("/api/issues/from-thread", {
+        method: "POST",
+        body: JSON.stringify({
+          project_id: project.id,
+          title: context.threadTitle || t("未命名任务"),
+          thread_id: context.threadId,
+          workspace_path: workspacePath || project.workspace_path || "",
+        }),
+      });
+      const index = state.issues.findIndex(item => item.id === issue.id);
+      if (index >= 0) state.issues[index] = issue;
+      else state.issues.push(issue);
+      await openNativeThreadIssue(issue);
+    }
+
+    async function restoreNativeThreadIssue(issue, context) {
+      const restored = await api("/api/issues/from-thread", {
+        method: "POST",
+        body: JSON.stringify({ thread_id: context.threadId }),
+      });
+      await openNativeThreadIssue(restored || issue);
+    }
+
+    let nativeThreadMenuAdapterDisabled = false;
+
+    function prepareNativeThreadMenu(row, event) {
+      if (nativeThreadMenuAdapterDisabled) return null;
+      try {
+        const controller = nativeThreadMenuController(row);
+        if (!controller) return null;
+        controller.onRowContextMenu?.(event);
+        const beforeOpen = controller.onBeforeOpen?.();
+        if (beforeOpen && typeof beforeOpen.then === "function") {
+          if (controller.awaitBeforeOpen !== false) return null;
+          void Promise.resolve(beforeOpen).catch(() => {});
+        }
+        const rawItems = controller.getItems();
+        if (rawItems && typeof rawItems.then === "function") return null;
+        if (!Array.isArray(rawItems)) return null;
+        const items = localizeNativeMenuItems(rawItems, controller.formatMessage);
+        const serialized = serializeNativeMenuItems(items);
+        if (!Array.isArray(serialized) || serialized.some(item => item.type !== "separator" && typeof item.id !== "string")) return null;
+        return items;
+      } catch {
+        nativeThreadMenuAdapterDisabled = true;
+        return null;
+      }
+    }
+
+    function onNativeThreadContextMenu(event) {
+      const row = event.target?.closest?.(SELECTORS.threadRow);
+      if (!row || row.closest("#" + PANEL_ID) || typeof window.electronBridge?.showContextMenu !== "function") return;
+      const context = readContext(row);
+      context.threadId = nativeThreadId(row);
+      context.threadTitle = String(row.getAttribute(ATTRIBUTES.threadTitle) || row.getAttribute("aria-label") || "").trim();
+      if (!context.threadId) return;
+      const items = prepareNativeThreadMenu(row, event);
+      if (!items) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (typeof PointerEvent === "function") document.dispatchEvent(new PointerEvent("pointercancel"));
+      void (async () => {
+        try {
+          const linked = state.issues.find(issue => linkedIssueThreadId(issue) === context.threadId) || null;
+          items.push(
+            { id: "better-codex-thread-separator", type: "separator", nativeLabel: "" },
+            {
+              id: "better-codex-thread-action",
+              nativeLabel: t(linked ? "在任务看板中打开" : "添加到任务看板"),
+              icon: BETTER_CODEX_LOGO_URL,
+              onSelect: () => linked ? restoreNativeThreadIssue(linked, context) : addNativeThreadIssue(context),
+            },
+          );
+          if (!items.length) return;
+          const selected = await window.electronBridge.showContextMenu(serializeNativeMenuItems(items));
+          const item = selected?.id ? findNativeMenuItem(items, selected.id) : null;
+          if (!item?.onSelect) return;
+          try {
+            await item.onSelect();
+          } catch (error) {
+            openRoute("issues");
+            showError(error);
+          }
+        } catch {
+          // Fall back to the host menu on future opens when the private bridge contract changes.
+          nativeThreadMenuAdapterDisabled = true;
+        }
+      })();
     }
 
     function isSidebarNavigationTarget(target) {
@@ -5281,6 +5468,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       appServerRequests.clear();
       document.removeEventListener("DOMContentLoaded", mount);
       document.removeEventListener("click", onClick, true);
+      document.removeEventListener("contextmenu", onNativeThreadContextMenu, true);
       document.removeEventListener("keydown", onGlobalShortcut, true);
       window.removeEventListener("codex-message-from-view", onHostMessageFromView, true);
       window.removeEventListener("message", onAppServerMessage, true);
@@ -5304,6 +5492,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     window.__betterCodexInjection__ = { version: VERSION, profile: PROFILE, endpoint: BASE_URL, refresh, open: openRoute, openThread, close, destroy };
     document.addEventListener("click", onClick, true);
+    document.addEventListener("contextmenu", onNativeThreadContextMenu, true);
     document.addEventListener("keydown", onGlobalShortcut, true);
     window.addEventListener("codex-message-from-view", onHostMessageFromView, true);
     window.addEventListener("message", onAppServerMessage, true);

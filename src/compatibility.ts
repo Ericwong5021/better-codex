@@ -64,6 +64,7 @@ export const bundledCompatibility: CompatibilityManifest = {
   },
   attributes: {
     threadId: "data-app-action-sidebar-thread-id",
+    threadTitle: "data-app-action-sidebar-thread-title",
     threadActive: "data-app-action-sidebar-thread-active",
     projectListId: "data-app-action-sidebar-project-list-id",
     projectId: "data-app-action-sidebar-project-id",

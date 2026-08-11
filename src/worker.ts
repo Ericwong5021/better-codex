@@ -177,6 +177,16 @@ export class IssueWorker {
     return agentSandboxModes.includes(mode as AgentSandboxMode) ? mode as AgentSandboxMode : "workspace-write";
   }
 
+  sessionConfigFingerprint(agentId: string | null) {
+    const profile = agentId ? this.store.getAgentProfile(agentId) : defaultAgentProfile();
+    const developerInstructions = agentId ? profile?.instructions || "" : "";
+    return createHash("sha256").update(JSON.stringify({
+      agent_id: agentId || "default",
+      developer_instructions: developerInstructions,
+      sandbox_mode: this.sandboxMode(agentId),
+    })).digest("hex");
+  }
+
   enrichIssue(issue: Issue, prompt: string, agentId: string) {
     const workspacePath = issue.workspace_path || "";
     if (this.enrichments.has(issue.id) || this.stopped) {
@@ -409,11 +419,7 @@ export class IssueWorker {
     const effort = profile?.reasoning_effort && profile.reasoning_effort !== "默认推理等级" ? profile.reasoning_effort : "";
     const sandboxMode = this.sandboxMode(issue.agent_id);
     const developerInstructions = issue.agent_id ? profile?.instructions || "" : "";
-    const configFingerprint = createHash("sha256").update(JSON.stringify({
-      agent_id: issue.agent_id || "default",
-      developer_instructions: developerInstructions,
-      sandbox_mode: sandboxMode,
-    })).digest("hex");
+    const configFingerprint = this.sessionConfigFingerprint(issue.agent_id);
     return {
       workspace_path: workspacePath,
       title: `${issue.identifier} ${issue.title}`.trim().slice(0, 200),

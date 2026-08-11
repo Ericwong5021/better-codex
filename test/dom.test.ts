@@ -198,7 +198,11 @@ test("issue creation uses a primary split button with an agent creation menu", (
   assert.ok(source.includes('className = "better-codex-create-split"'));
   assert.ok(source.includes('setAttribute("aria-label", t("选择 issue 创建方式"))'));
   assert.ok(source.includes("通过智能体创建"));
-  assert.ok(source.includes('state.createMode = "agent"'));
+  assert.ok(source.includes('async function openEditor(issue = null, initialStatus = "todo", createMode = "agent")'));
+  assert.ok(source.includes('const draftMode = issue ? "manual" : createMode === "manual" ? "manual" : "agent"'));
+  assert.ok(source.includes('openEditor(null, "todo", "manual")'));
+  assert.doesNotMatch(source, /state\.createMode/);
+  assert.ok(source.includes('te(draft.mode === "agent" ? "切换到手动" : "切换到智能体")'));
   assert.ok(source.includes('const crumb = issue'));
   assert.ok(source.includes(': \'<strong>\' + title + \'</strong>\''));
   assert.match(css, /#better-codex-panel \.better-codex-create-split\s*\{[^}]*background:\s*var\(--bc-color-primary\);/s);
@@ -573,6 +577,34 @@ test("issue cards show project icon and assignee instead of session entry", () =
   assert.match(css, /\.better-codex-chip\s*>\s*svg\s*\{/s);
 });
 
+test("native thread context menus append a branded dynamic task-board action", () => {
+  const source = injectionScript(3210, "token", "install");
+  assert.ok(source.includes('document.addEventListener("contextmenu", onNativeThreadContextMenu, true)'));
+  assert.ok(source.includes('document.removeEventListener("contextmenu", onNativeThreadContextMenu, true)'));
+  assert.ok(source.includes('id: "better-codex-thread-separator", type: "separator"'));
+  assert.ok(source.includes('nativeLabel: t(linked ? "在任务看板中打开" : "添加到任务看板")'));
+  assert.ok(source.includes("icon: BETTER_CODEX_LOGO_URL"));
+  assert.ok(source.includes('api("/api/issues/from-thread"'));
+  assert.ok(source.includes('api("/api/issues/from-thread?thread_id=" + encodeURIComponent(context.threadId))'));
+  assert.ok(source.includes("linkedIssueThreadId(existing) === context.threadId"));
+  assert.ok(source.includes("const items = prepareNativeThreadMenu(row, event)"));
+  assert.ok(source.includes("if (!items) return;"));
+  assert.ok(source.includes("void Promise.resolve(beforeOpen).catch(() => {})"));
+  assert.ok(source.includes("controller.awaitBeforeOpen !== false"));
+  assert.ok(source.includes("controller.onRowContextMenu?.(event)"));
+  const handler = source.slice(source.indexOf("function onNativeThreadContextMenu(event)"), source.indexOf("function isSidebarNavigationTarget(target)"));
+  assert.ok(handler.indexOf("const items = prepareNativeThreadMenu(row, event)") < handler.indexOf("event.preventDefault()"));
+  assert.ok(source.includes("nativeThreadMenuAdapterDisabled = true"));
+  assert.ok(source.includes("restoreNativeThreadIssue(linked, context)"));
+  assert.ok(source.includes("function nativeThreadId(row)"));
+  assert.ok(source.includes("normalizeSessionId(fiber.memoizedProps?.conversationId)"));
+  assert.ok(handler.includes("context.threadId = nativeThreadId(row)"));
+  assert.ok(source.includes("const linked = state.issues.find(issue => linkedIssueThreadId(issue) === context.threadId) || null"));
+  assert.ok(source.includes("if (fromUrl && (!threadId || currentRouteThreadId() === threadId)) return fromUrl"));
+  assert.doesNotMatch(handler, /api\("\/api\/issues\/from-thread/);
+  assert.doesNotMatch(source, /state\.projects\.find\(item => item\.id === rememberedProjectId\) \|\| state\.projects\[0\]/);
+});
+
 test("open-in-conversation requires a valid session uuid", () => {
   const source = injectionScript(4317, "test-token", "install");
   const openHandler = source.slice(source.indexOf('dialog.querySelector("[data-dialog-open-thread]")'), source.indexOf('const startNow = dialog.querySelector("[data-dialog-start-now]")'));
@@ -606,7 +638,7 @@ test("issue details render the latest conversation result and reply composer", (
   const css = betterCodexDesignSystemCss();
   const permissions = source.slice(source.indexOf("function applyDialogPermissions()"), source.indexOf("function refreshIssueState"));
 
-  assert.ok(source.includes('mode: issue ? "manual" : cachedCreateDraft?.mode || state.createMode'));
+  assert.ok(source.includes('mode: draftMode'));
   assert.ok(source.includes('te("对话")'));
   assert.ok(source.includes("data-conversation-body"));
   assert.ok(source.includes("better-codex-bubble"));

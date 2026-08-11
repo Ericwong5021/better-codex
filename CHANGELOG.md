@@ -4,8 +4,13 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+### Added
+
+- Add a task-board action to native Codex thread menus that reuses existing thread associations and keeps imported conversations available for replies.
+
 ### Changed
 
+- Default Issue creation to an Agent, keep manual creation behind explicit controls, and order the project picker by newest project creation.
 - Add a compact two-step jitter banner that settles into a cyan Windows installer logo, and report current, repair, update, and upgrade states without labeling same-version repairs as upgrades.
 
 ## [0.4.2-beta.3] - 2026-08-11

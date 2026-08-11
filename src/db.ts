@@ -177,6 +177,11 @@ type IssueInput = {
   agentId?: string;
   userAssigned?: boolean;
   enrichmentStatus?: EnrichmentStatus;
+  session?: {
+    threadId: string;
+    configFingerprint: string;
+    hostId?: string;
+  };
 };
 
 type IssuePatch = Partial<Pick<Issue, "project_id" | "title" | "description" | "status" | "priority" | "labels" | "sort_order" | "pinned" | "thread_id" | "workspace_path" | "agent_enabled" | "agent_id" | "user_assigned" | "needs_attention" | "pending_actor" | "enrichment_status" | "reply_draft">>;
@@ -1089,6 +1094,52 @@ export class Store {
     return rows.map(issueFromRow);
   }
 
+  getIssueByThreadId(threadId: string) {
+    const candidates = [threadId, `local:${threadId}`, `cloud:${threadId}`];
+    const rows = this.db.prepare(`
+      SELECT issue_id, MIN(source_order) AS source_order
+      FROM (
+        SELECT issue_id, 0 AS source_order FROM issue_sessions WHERE thread_id IN (?, ?, ?)
+        UNION ALL
+        SELECT issue_id, 1 AS source_order FROM issue_runs WHERE thread_id IN (?, ?, ?)
+        UNION ALL
+        SELECT id AS issue_id, 2 AS source_order FROM issues WHERE thread_id IN (?, ?, ?)
+      )
+      GROUP BY issue_id
+      ORDER BY source_order, issue_id
+    `).all(...candidates, ...candidates, ...candidates) as Array<{ issue_id: string }>;
+    if (rows.length > 1) throw new Error("thread_association_conflict");
+    return rows[0] ? this.getIssue(rows[0].issue_id) : undefined;
+  }
+
+  attachImportedSession(issueId: string, threadId: string, configFingerprint: string, hostId = "local") {
+    const timestamp = now();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const issue = this.getIssue(issueId);
+      if (!issue) throw new Error("issue_not_found");
+      const existing = this.getIssueSession(issueId);
+      if (existing) {
+        if (existing.thread_id !== threadId) throw new Error("issue_session_already_bound");
+        this.db.exec("COMMIT");
+        return issue;
+      }
+      const owner = this.getIssueSessionByThread(threadId);
+      if (owner && owner.issue_id !== issueId) throw new Error("issue_session_already_bound");
+      this.db.prepare(`
+        INSERT INTO issue_sessions (
+          issue_id, host_id, thread_id, status, active_turn_id, active_command_id, last_turn_id,
+          config_fingerprint, last_agent_message, last_error, created_at, updated_at
+        ) VALUES (?, ?, ?, 'idle', NULL, NULL, NULL, ?, '', NULL, ?, ?)
+      `).run(issueId, hostId, threadId, configFingerprint, timestamp, timestamp);
+      this.db.exec("COMMIT");
+      return this.getIssue(issueId)!;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   getIssue(id: string) {
     const row = this.db.prepare(`
       SELECT issues.*,
@@ -1179,15 +1230,16 @@ export class Store {
     const title = enrichmentStatus === "pending" ? "正在理解任务" : cleanTitle(input.title);
     if (input.status && !issueStatuses.includes(input.status)) throw new Error("invalid_status");
     if (input.priority && !issuePriorities.includes(input.priority)) throw new Error("invalid_priority");
-    const userAssigned = Boolean(input.userAssigned) && !Boolean(input.agentEnabled);
+    const importedSession = input.session;
+    const userAssigned = Boolean(input.userAssigned) && !Boolean(input.agentEnabled) && !importedSession;
     const agentId = input.agentEnabled && input.agentId ? input.agentId : null;
     if (agentId && !this.getAgentProfile(agentId)) throw new Error("agent_not_found");
-    const agentEnabled = Boolean(input.agentEnabled) && !userAssigned;
+    const agentEnabled = (Boolean(input.agentEnabled) || Boolean(importedSession)) && !userAssigned;
     if (enrichmentStatus !== null && enrichmentStatus !== "pending" && enrichmentStatus !== "failed") throw new Error("invalid_enrichment_status");
     const status = enrichmentStatus === "pending" ? "backlog" : input.status ?? "todo";
     const userHandoff = status === "blocked" || status === "in_review";
-    const needsAttention = userHandoff ? 1 : agentEnabled && status !== "backlog" && status !== "done" && status !== "cancelled" ? 1 : 0;
-    const pendingActor = agentEnabled && !userHandoff && status !== "done" && status !== "cancelled" ? "agent" : "user";
+    const needsAttention = importedSession ? 0 : userHandoff ? 1 : agentEnabled && status !== "backlog" && status !== "done" && status !== "cancelled" ? 1 : 0;
+    const pendingActor = importedSession ? "user" : agentEnabled && !userHandoff && status !== "done" && status !== "cancelled" ? "agent" : "user";
     const id = randomUUID();
     const timestamp = now();
     this.db.exec("BEGIN IMMEDIATE");
@@ -1230,6 +1282,14 @@ export class Store {
       );
       this.db.prepare("UPDATE projects SET next_issue_number = ?, updated_at = ? WHERE id = ?")
         .run(issueNumber + 1, timestamp, project.id);
+      if (importedSession) {
+        this.db.prepare(`
+          INSERT INTO issue_sessions (
+            issue_id, host_id, thread_id, status, active_turn_id, active_command_id, last_turn_id,
+            config_fingerprint, last_agent_message, last_error, created_at, updated_at
+          ) VALUES (?, ?, ?, 'idle', NULL, NULL, NULL, ?, '', NULL, ?, ?)
+        `).run(id, importedSession.hostId || "local", importedSession.threadId, importedSession.configFingerprint, timestamp, timestamp);
+      }
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");

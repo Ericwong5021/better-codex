@@ -326,6 +326,10 @@ export function startServer() {
   let updateRelaunchScheduled = false;
   let updateInstallInProgress = false;
   const worker = new IssueWorker(store);
+  const restoreImportedSession = (issue: Issue, threadId: string) => {
+    if (issue.session_owned || issue.session_handoff_at || normalizeSessionId(issue.thread_id) !== threadId) return issue;
+    return store.attachImportedSession(issue.id, threadId, worker.sessionConfigFingerprint(issue.agent_id));
+  };
   const withAvatar = <T extends { id: string; is_default?: boolean }>(profile: T) => ({
     ...profile,
     avatar: store.getAgentAvatar(profile.is_default ? "default" : profile.id),
@@ -481,6 +485,62 @@ export function startServer() {
             created_at: now,
             updated_at: now,
             version: 1,
+          });
+        }).state;
+        return sendJson(response, 201, updated.issues.find(issue => issue.id === issueId));
+      }
+      if (mockupEnabled && url.pathname === "/api/issues/from-thread" && method === "GET") {
+        const threadId = normalizeSessionId(cleanString(url.searchParams.get("thread_id"), 200));
+        if (!threadId) throw new Error("session_required");
+        const issue = readMockupState(mockupLocale).issues.find(item => normalizeSessionId(String(item.session_thread_id || item.thread_id || "")) === threadId);
+        return issue ? sendJson(response, 200, issue) : sendJson(response, 404, { error: "issue_not_found" });
+      }
+      if (mockupEnabled && url.pathname === "/api/issues/from-thread" && method === "POST") {
+        const body = await readBody(request);
+        const threadId = normalizeSessionId(cleanString(body.thread_id, 200));
+        if (!threadId) throw new Error("session_required");
+        const current = readMockupState(mockupLocale);
+        const existing = current.issues.find(item => normalizeSessionId(String(item.session_thread_id || item.thread_id || "")) === threadId);
+        if (existing) return sendJson(response, 200, existing);
+        let issueId = "";
+        const updated = updateMockupState(mockupLocale, state => {
+          const projectId = cleanString(body.project_id, 200);
+          const project = state.projects.find(item => item.id === projectId);
+          if (!project) throw new Error("project_not_found");
+          const nextNumber = state.issues.reduce((max, issue) => Math.max(max, Number(String(issue.identifier).replace(/\D/g, "")) || 0), 19) + 1;
+          const now = new Date().toISOString();
+          issueId = `mockup-${nextNumber}`;
+          state.issues.push({
+            id: issueId,
+            identifier: `BET-${nextNumber}`,
+            project_id: projectId,
+            title: cleanString(body.title, 500) || (mockupLocale === "en" ? "Untitled issue" : "未命名任务"),
+            description: "",
+            status: "todo",
+            priority: "none",
+            sort_order: (state.issues.length + 1) * 1000,
+            pinned: false,
+            archived_at: null,
+            thread_id: threadId,
+            run_thread_id: threadId,
+            session_thread_id: threadId,
+            session_owned: true,
+            session_status: "idle",
+            workspace_path: cleanString(body.workspace_path, 4096) || String(project.workspace_path || ""),
+            version: 1,
+            created_at: now,
+            updated_at: now,
+            agent_enabled: true,
+            agent_id: null,
+            mockup_agent_name: "Codex",
+            user_assigned: false,
+            needs_attention: false,
+            pending_actor: "user",
+            enrichment_status: null,
+            reply_draft: "",
+            session_handoff_at: null,
+            labels: [],
+            mockup_run_status: "not-started",
           });
         }).state;
         return sendJson(response, 201, updated.issues.find(issue => issue.id === issueId));
@@ -863,6 +923,38 @@ export function startServer() {
           ...issue,
           reply_status: store.getIssueReplyState(issue.id).status,
         })));
+      }
+      if (url.pathname === "/api/issues/from-thread" && method === "GET") {
+        const threadId = normalizeSessionId(cleanString(url.searchParams.get("thread_id"), 200));
+        if (!threadId) throw new Error("session_required");
+        const issue = store.getIssueByThreadId(threadId);
+        return issue ? sendJson(response, 200, issue) : sendJson(response, 404, { error: "issue_not_found" });
+      }
+      if (url.pathname === "/api/issues/from-thread" && method === "POST") {
+        const body = await readBody(request);
+        const threadId = normalizeSessionId(cleanString(body.thread_id, 200));
+        if (!threadId) throw new Error("session_required");
+        const existing = store.getIssueByThreadId(threadId);
+        if (existing) return sendJson(response, 200, restoreImportedSession(existing, threadId));
+        const projectId = cleanString(body.project_id, 200);
+        const project = store.getProject(projectId);
+        if (!project) throw new Error("project_not_found");
+        const issue = store.createIssue({
+          projectId,
+          title: cleanString(body.title, 500),
+          description: "",
+          status: "todo",
+          priority: "none",
+          threadId,
+          workspacePath: cleanString(body.workspace_path, 4096) || project.workspace_path,
+          agentEnabled: true,
+          userAssigned: false,
+          session: {
+            threadId,
+            configFingerprint: worker.sessionConfigFingerprint(null),
+          },
+        });
+        return sendJson(response, 201, issue);
       }
       if (url.pathname === "/api/issues" && method === "POST") {
         const body = await readBody(request);

@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
 import test from "node:test";
+import { Store } from "../src/db.js";
 
 async function availablePort() {
   return new Promise<number>((resolve, reject) => {
@@ -18,8 +19,8 @@ async function availablePort() {
   });
 }
 
-function startGateway(home: string, port: number, token: string) {
-  return spawn(process.execPath, ["--import", "tsx", "src/cli.ts", "serve"], {
+function startGateway(home: string, port: number, token: string, mockup = false) {
+  return spawn(process.execPath, ["--import", "tsx", "src/cli.ts", "serve", ...(mockup ? ["--mockup"] : [])], {
     cwd: process.cwd(),
     env: {
       ...process.env,
@@ -70,6 +71,11 @@ test("gateway completes the issue workflow and survives restart", async () => {
       },
     },
   }));
+  const legacyThreadId = "019fec06-788f-7af3-a031-76b546904f11";
+  const seedStore = new Store(join(home, "better-codex.db"));
+  const seedProject = seedStore.createProject({ name: "Legacy imports", workspacePath: home });
+  const legacyIssue = seedStore.createIssue({ projectId: seedProject.id, title: "Legacy imported chat", threadId: legacyThreadId, workspacePath: home });
+  seedStore.close();
   let gateway = startGateway(home, port, token);
   const request = async (path: string, options: RequestInit = {}) => fetch(`http://127.0.0.1:${port}${path}`, {
     ...options,
@@ -165,6 +171,99 @@ test("gateway completes the issue workflow and survives restart", async () => {
     assert.equal(targetProjectResponse.status, 201);
     const targetProject = await targetProjectResponse.json() as { id: string };
 
+    const legacyLookupResponse = await request(`/api/issues/from-thread?thread_id=${legacyThreadId}`);
+    assert.equal(legacyLookupResponse.status, 200);
+    const legacyLookup = await legacyLookupResponse.json() as { id: string; version: number; agent_enabled: boolean; session_owned: boolean };
+    assert.equal(legacyLookup.id, legacyIssue.id);
+    assert.equal(legacyLookup.version, legacyIssue.version);
+    assert.equal(legacyLookup.agent_enabled, false);
+    assert.equal(legacyLookup.session_owned, false);
+    const restoredLegacyResponse = await request("/api/issues/from-thread", {
+      method: "POST",
+      body: JSON.stringify({ thread_id: legacyThreadId }),
+    });
+    assert.equal(restoredLegacyResponse.status, 200);
+    const restoredLegacy = await restoredLegacyResponse.json() as { version: number; agent_enabled: boolean; session_owned: boolean; session_thread_id: string };
+    assert.equal(restoredLegacy.version, legacyIssue.version);
+    assert.equal(restoredLegacy.agent_enabled, legacyIssue.agent_enabled);
+    assert.equal(restoredLegacy.session_owned, true);
+    assert.equal(restoredLegacy.session_thread_id, legacyThreadId);
+
+    const importedThreadId = "019fec06-788f-7af3-a031-76b546904fe5";
+    const importedTurnId = "019fec06-788f-7af3-a031-76b546904fe8";
+    const importedSessionDirectory = join(home, "sessions", "2026", "08", "11");
+    mkdirSync(importedSessionDirectory, { recursive: true });
+    writeFileSync(join(importedSessionDirectory, `rollout-2026-08-11T10-00-00-${importedThreadId}.jsonl`), [
+      JSON.stringify({ type: "session_meta", payload: { cwd: home } }),
+      JSON.stringify({ type: "event_msg", timestamp: "2026-08-11T10:00:01.000Z", payload: { type: "user_message", message: "Keep this context" } }),
+      JSON.stringify({ type: "event_msg", timestamp: "2026-08-11T10:00:02.000Z", payload: { type: "agent_message", phase: "final_answer", message: "Context retained" } }),
+      "",
+    ].join("\n"), "utf8");
+    const missingImportResponse = await request(`/api/issues/from-thread?thread_id=${importedThreadId}`);
+    assert.equal(missingImportResponse.status, 404);
+    const importedResponse = await request("/api/issues/from-thread", {
+      method: "POST",
+      body: JSON.stringify({ project_id: project.id, title: "Imported native chat", thread_id: `local:${importedThreadId}` }),
+    });
+    assert.equal(importedResponse.status, 201);
+    const importedIssue = await importedResponse.json() as {
+      id: string;
+      thread_id: string;
+      agent_enabled: boolean;
+      agent_id: string | null;
+      needs_attention: boolean;
+      pending_actor: string;
+      session_owned: boolean;
+      session_thread_id: string;
+      run_thread_id: string;
+    };
+    assert.equal(importedIssue.thread_id, importedThreadId);
+    assert.equal(importedIssue.agent_enabled, true);
+    assert.equal(importedIssue.agent_id, null);
+    assert.equal(importedIssue.needs_attention, false);
+    assert.equal(importedIssue.pending_actor, "user");
+    assert.equal(importedIssue.session_owned, true);
+    assert.equal(importedIssue.session_thread_id, importedThreadId);
+    assert.equal(importedIssue.run_thread_id, importedThreadId);
+    const importedConversation = await (await request(`/api/issues/${importedIssue.id}/conversation`)).json() as {
+      found: boolean;
+      messages: Array<{ markdown: string }>;
+    };
+    assert.equal(importedConversation.found, true);
+    assert.deepEqual(importedConversation.messages.map(message => message.markdown), ["Keep this context", "Context retained"]);
+    const importedReply = await request(`/api/issues/${importedIssue.id}/reply`, {
+      method: "POST",
+      body: JSON.stringify({ request_id: "imported-reply", message: "Continue here" }),
+    });
+    assert.equal(importedReply.status, 202);
+    const importedRelayPoll = await request("/api/session-relay/poll", {
+      method: "POST",
+      body: JSON.stringify({ relay_id: "relay-test", app_session_id: "app-test", capability: "ready" }),
+    });
+    const importedRelay = await importedRelayPoll.json() as { command: { id: string; kind: string; thread_id: string; payload: { message: string } } };
+    assert.equal(importedRelay.command.kind, "turn");
+    assert.equal(importedRelay.command.thread_id, importedThreadId);
+    assert.equal(importedRelay.command.payload.message, "Continue here");
+    const importedRelayComplete = await request(`/api/session-relay/commands/${importedRelay.command.id}/complete`, {
+      method: "POST",
+      body: JSON.stringify({ relay_id: "relay-test", result: { thread_id: importedThreadId, turn_id: importedTurnId } }),
+    });
+    assert.equal(importedRelayComplete.status, 200);
+    const importedRelayEvent = await request("/api/session-relay/events", {
+      method: "POST",
+      body: JSON.stringify({ relay_id: "relay-test", method: "turn/completed", params: { threadId: importedThreadId, turn: { id: importedTurnId, status: "completed", items: [] } } }),
+    });
+    assert.equal(importedRelayEvent.status, 200);
+    const resolvedImportResponse = await request(`/api/issues/from-thread?thread_id=${importedThreadId}`);
+    assert.equal(resolvedImportResponse.status, 200);
+    assert.equal(((await resolvedImportResponse.json()) as { id: string }).id, importedIssue.id);
+    const replayedImportResponse = await request("/api/issues/from-thread", {
+      method: "POST",
+      body: JSON.stringify({ project_id: targetProject.id, title: "Duplicate import", thread_id: importedThreadId }),
+    });
+    assert.equal(replayedImportResponse.status, 200);
+    assert.equal(((await replayedImportResponse.json()) as { id: string }).id, importedIssue.id);
+
     const issueResponse = await request("/api/issues", { method: "POST", body: JSON.stringify({ project_id: project.id, title: "Round trip" }) });
     assert.equal(issueResponse.status, 201);
     const issue = await issueResponse.json() as { id: string; version: number };
@@ -236,6 +335,45 @@ test("gateway completes the issue workflow and survives restart", async () => {
     assert.equal(restored.thread_id, null);
     const restoredAgents = await (await request("/api/agents")).json() as Array<{ id: string; avatar: string }>;
     assert.equal(restoredAgents.find(agent => agent.id === optionalAgent.id)?.avatar, "icon:reviewer");
+  } finally {
+    await stopGateway(gateway);
+    rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+});
+
+test("mockup thread imports stay inside mockup issue routing", async () => {
+  const home = mkdtempSync(join(tmpdir(), "better-codex-mockup-gateway-test-"));
+  const port = await availablePort();
+  const token = "mockup-gateway-test-token";
+  const threadId = "019fec06-788f-7af3-a031-76b546904f77";
+  const gateway = startGateway(home, port, token, true);
+  const request = async (path: string, options: RequestInit = {}) => fetch(`http://127.0.0.1:${port}${path}`, {
+    ...options,
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json",
+      ...(options.headers ?? {}),
+    },
+  });
+  try {
+    await waitForGateway(port, gateway);
+    const bootstrap = await (await request("/api/bootstrap")).json() as { projects: Array<{ id: string }> };
+    const missing = await request(`/api/issues/from-thread?thread_id=${threadId}`);
+    assert.equal(missing.status, 404);
+    const createdResponse = await request("/api/issues/from-thread", {
+      method: "POST",
+      body: JSON.stringify({ project_id: bootstrap.projects[0].id, title: "Mockup native chat", thread_id: threadId }),
+    });
+    assert.equal(createdResponse.status, 201);
+    const created = await createdResponse.json() as { id: string; thread_id: string; session_owned: boolean };
+    assert.match(created.id, /^mockup-/);
+    assert.equal(created.thread_id, threadId);
+    assert.equal(created.session_owned, true);
+    const resolved = await request(`/api/issues/from-thread?thread_id=${threadId}`);
+    assert.equal(resolved.status, 200);
+    assert.equal(((await resolved.json()) as { id: string }).id, created.id);
+    const opened = await request(`/api/issues/${created.id}`);
+    assert.equal(opened.status, 200);
   } finally {
     await stopGateway(gateway);
     rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });

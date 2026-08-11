@@ -838,6 +838,49 @@ test("manual native turns reopen completed issues and return them for review", (
   }
 });
 
+test("legacy imported issues attach resumable sessions without changing assignment", () => {
+  const target = temporaryDatabase();
+  try {
+    const store = new Store(target.file);
+    const worker = new IssueWorker(store);
+    const project = store.createProject({ name: "Imported session", workspacePath: target.directory });
+    const threadId = "019fec06-788f-7af3-a031-76b546904f29";
+    const legacy = store.createIssue({ projectId: project.id, title: "Legacy import", status: "blocked", threadId, workspacePath: target.directory, userAssigned: true });
+
+    const upgraded = store.attachImportedSession(legacy.id, threadId, worker.sessionConfigFingerprint(null));
+    assert.equal(upgraded.agent_enabled, legacy.agent_enabled);
+    assert.equal(upgraded.agent_id, null);
+    assert.equal(upgraded.user_assigned, true);
+    assert.equal(upgraded.status, "blocked");
+    assert.equal(upgraded.needs_attention, legacy.needs_attention);
+    assert.equal(upgraded.pending_actor, legacy.pending_actor);
+    assert.equal(upgraded.session_owned, true);
+    assert.equal(upgraded.session_thread_id, threadId);
+
+    const sent = worker.sendIssueMessage(upgraded.id, "continue-import", "Continue here");
+    assert.equal(sent.command.kind, "turn");
+    assert.equal(sent.command.thread_id, threadId);
+    store.close();
+  } finally {
+    rmSync(target.directory, { recursive: true, force: true });
+  }
+});
+
+test("ambiguous legacy thread associations are rejected", () => {
+  const target = temporaryDatabase();
+  try {
+    const store = new Store(target.file);
+    const project = store.createProject({ name: "Ambiguous imports", workspacePath: target.directory });
+    const threadId = "019fec06-788f-7af3-a031-76b546904f55";
+    store.createIssue({ projectId: project.id, title: "First owner", threadId, workspacePath: target.directory });
+    store.createIssue({ projectId: project.id, title: "Second owner", threadId, workspacePath: target.directory });
+    assert.throws(() => store.getIssueByThreadId(threadId), /thread_association_conflict/);
+    store.close();
+  } finally {
+    rmSync(target.directory, { recursive: true, force: true });
+  }
+});
+
 test("changed security configuration replaces an idle native session", () => {
   const target = temporaryDatabase();
   try {
