@@ -3,7 +3,8 @@ param(
   [string]$Version = "",
   [string]$BinDirectory = "$env:LOCALAPPDATA\BetterCodex\bin",
   [switch]$NoService,
-  [switch]$Preview
+  [switch]$Preview,
+  [switch]$SkipBanner
 )
 
 $ErrorActionPreference = "Stop"
@@ -20,6 +21,18 @@ function Write-Step([string]$Message) {
 
 function Write-Ok([string]$Message) {
   Write-Host "[OK] $Message" -ForegroundColor Green
+}
+
+function Show-BetterCodexBanner {
+  $logo = "  >_ BETTER CODEX"
+  $colorEnabled = -not [Console]::IsOutputRedirected -and -not $env:NO_COLOR -and $env:TERM -ne "dumb"
+  Write-Host ""
+  if ($colorEnabled) {
+    Write-Host $logo -ForegroundColor Cyan
+  } else {
+    Write-Host $logo
+  }
+  Write-Host ""
 }
 
 function Get-NodeExecutables {
@@ -398,6 +411,18 @@ function Test-VersionAtLeast([string]$Current, [string]$Target) {
   try { return (Compare-SemVer $Current $Target) -ge 0 } catch { return $false }
 }
 
+function Get-InstallAction([string]$InstalledVersion, [string]$TargetVersion, [bool]$UpdateChecked, [bool]$UpdatesAvailable, [bool]$InstallationReady) {
+  if (-not $InstalledVersion) { return "install" }
+  try {
+    if ((Compare-SemVer $InstalledVersion $TargetVersion) -lt 0) { return "upgrade" }
+  } catch {
+    return "repair"
+  }
+  if ($UpdateChecked -and $UpdatesAvailable) { return "update" }
+  if ($UpdateChecked -and $InstallationReady) { return "current" }
+  return "repair"
+}
+
 function Get-DesiredUpdateChannel([string]$TargetVersion, [bool]$PreservePreviewLane) {
   if ($PreservePreviewLane -or $TargetVersion -match '-beta\.[1-9][0-9]*$') { return "preview" }
   return "stable"
@@ -410,7 +435,7 @@ function Set-InstalledUpdateChannel([string]$Executable, [string]$Channel) {
   if ($state.channel -ne $Channel) { throw "Better Codex did not persist the $Channel update channel." }
 }
 
-function Invoke-ExistingUpgrade([string]$Executable, [string]$TargetVersion, [string]$DesiredChannel) {
+function Invoke-ExistingUpgrade([string]$Executable, [string]$TargetVersion, [string]$DesiredChannel, [string]$Operation = "upgrade") {
   try {
     $updateResult = Invoke-BetterCodexCapture $Executable @("update") 600000
     if ($updateResult.ExitCode -ne 0) { return $false }
@@ -430,7 +455,13 @@ function Invoke-ExistingUpgrade([string]$Executable, [string]$TargetVersion, [st
       if (-not $doctor.ok) { return $false }
     }
     Set-InstalledUpdateChannel $Executable $desiredChannel
-    Write-Ok "Better Codex upgraded to v$updatedVersion"
+    if ($Operation -eq "repair") {
+      Write-Ok "Better Codex v$updatedVersion is ready"
+    } elseif ($Operation -eq "update") {
+      Write-Ok "Better Codex updated to v$updatedVersion"
+    } else {
+      Write-Ok "Better Codex upgraded to v$updatedVersion"
+    }
     return $true
   } catch {
     return $false
@@ -451,6 +482,7 @@ function Test-InstallationReady([string]$Executable) {
   }
 }
 
+if (-not $SkipBanner) { Show-BetterCodexBanner }
 if (-not [Environment]::Is64BitOperatingSystem) { throw "Better Codex requires 64-bit Windows." }
 if (-not (Ensure-Node)) { exit 1 }
 
@@ -504,44 +536,44 @@ if (-not $localArchive -and -not $explicitVersion) {
 $targetVersion = if ($Version) { $Version.TrimStart("v") } else { "" }
 $desiredChannel = Get-DesiredUpdateChannel $targetVersion $preservePreviewLane
 $installedVersion = Get-InstalledVersion $executable
+$updateChecked = $false
+$updatesAvailable = $false
+$installationReady = $false
 
 if (-not $localArchive -and $installedVersion -and (Test-VersionAtLeast $installedVersion $targetVersion) -and (Test-Path (Join-Path $skillDirectory "SKILL.md")) -and (Test-Path $updatePublicKeyPath)) {
   try {
     $updateCheckResult = Invoke-BetterCodexCapture $executable @("update", "check") 20000
     if ($updateCheckResult.ExitCode -ne 0) { throw "Update check failed." }
     $updateCheck = $updateCheckResult.Stdout | ConvertFrom-Json
-    if ($updateCheck.checked -and -not (($updateCheck.core.available) -or ($updateCheck.compatibility.available))) {
-      if (Test-InstallationReady $executable) {
-        Set-InstalledUpdateChannel $executable $desiredChannel
-        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $issueSkillDirectory
-        Write-Ok "Better Codex is up to date (v$installedVersion)"
-        return
-      }
+    $updateChecked = [bool]$updateCheck.checked
+    if ($updateChecked) {
+      $updatesAvailable = [bool](($updateCheck.core.available) -or ($updateCheck.compatibility.available))
+      if (-not $updatesAvailable) { $installationReady = Test-InstallationReady $executable }
     }
   } catch {
-    Write-Step "Live update check unavailable; continuing with upgrade..."
+    Write-Step "Live update check unavailable; checking the existing installation..."
   }
 }
 
+$installAction = Get-InstallAction $installedVersion $targetVersion $updateChecked $updatesAvailable $installationReady
+if ($installAction -eq "current") {
+  Set-InstalledUpdateChannel $executable $desiredChannel
+  Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $issueSkillDirectory
+  Write-Ok "Better Codex v$installedVersion is already up to date"
+  return
+}
+
 if (-not $localArchive -and $installedVersion) {
-  Write-Step "Better Codex v$installedVersion is installed; upgrading to v$targetVersion..."
-  $updateCheck = $null
-  try {
-    $updateCheckResult = Invoke-BetterCodexCapture $executable @("update", "check") 20000
-    if ($updateCheckResult.ExitCode -ne 0) { throw "Update check failed." }
-    $updateCheck = $updateCheckResult.Stdout | ConvertFrom-Json
-    if ((Test-VersionAtLeast $installedVersion $targetVersion) -and $updateCheck.checked -and -not (($updateCheck.core.available) -or ($updateCheck.compatibility.available)) -and (Test-InstallationReady $executable)) {
-      Set-InstalledUpdateChannel $executable $desiredChannel
-      Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $issueSkillDirectory
-      Write-Ok "Better Codex is up to date (v$installedVersion)"
-      return
-    }
-  } catch {
-    Write-Step "Live update check unavailable; continuing with upgrade..."
+  if ($installAction -eq "update") {
+    Write-Step "Applying available updates to Better Codex v$installedVersion..."
+  } elseif ($installAction -eq "repair") {
+    Write-Step "Checking and repairing Better Codex v$installedVersion..."
+  } else {
+    Write-Step "Upgrading Better Codex from v$installedVersion to v$targetVersion..."
   }
   if ($legacyNodeMigration) {
     Write-Step "Migrating the legacy executable to the Node.js bundle..."
-  } elseif ((Test-Path (Join-Path $skillDirectory "SKILL.md")) -and (Test-Path $updatePublicKeyPath) -and (Invoke-ExistingUpgrade $executable $targetVersion $desiredChannel)) {
+  } elseif ((Test-Path (Join-Path $skillDirectory "SKILL.md")) -and (Test-Path $updatePublicKeyPath) -and (Invoke-ExistingUpgrade $executable $targetVersion $desiredChannel $installAction)) {
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $issueSkillDirectory
     return
   } else {

@@ -248,9 +248,80 @@ exit 0
 test("Windows Beta bootstrap invokes the versioned installer in the Preview lane", () => {
   assert.match(betaSource, /releases\/download\/preview\/update-manifest\.json/);
   assert.match(betaSource, /releases\/download\/v\$version\/install\.ps1/);
-  assert.match(betaSource, /-Version "v\$version" -Preview/);
+  assert.match(betaSource, /if \(\$installer -match '\\\[switch\\\]\\\$SkipBanner'\)/);
+  assert.match(betaSource, /\$installerBlock -Repository \$Repository -Version "v\$version" -Preview -SkipBanner/);
+  assert.match(betaSource, /\$installerBlock -Repository \$Repository -Version "v\$version" -Preview\s*\n\}/);
   assert.match(source, /\[switch\]\$Preview/);
+  assert.match(source, /\[switch\]\$SkipBanner/);
   assert.match(source, /\$preservePreviewLane = \[bool\]\$Preview/);
+});
+
+test("Windows installers show one static branded banner with a plain-output fallback", {
+  skip: process.platform !== "win32" ? "requires Windows PowerShell 5.1" : false,
+}, () => {
+  assert.match(source, /function Show-BetterCodexBanner/);
+  assert.match(betaSource, /function Show-BetterCodexBanner/);
+  assert.match(source, /BETTER CODEX/);
+  assert.match(source, /\$env:NO_COLOR/);
+  assert.match(source, /IsOutputRedirected/);
+  assert.match(source, /\$logo = "  >_ BETTER CODEX"/);
+  assert.match(source, /ForegroundColor Cyan/);
+  assert.match(betaSource, /\$logo = "  >_ BETTER CODEX"/);
+  assert.doesNotMatch(source, /\$palette|\$frameCount|\$frameDelayMs|\$durationMs/);
+  assert.doesNotMatch(betaSource, /\$palette|\$frameCount|\$frameDelayMs|\$durationMs/);
+  assert.match(source, /if \(-not \$SkipBanner\) \{ Show-BetterCodexBanner \}/);
+  assert.match(betaSource, /Show-BetterCodexBanner/);
+
+  const script = String.raw`
+$source = Get-Content -Raw -LiteralPath $env:BETTER_CODEX_INSTALLER_TEST_PATH
+$tokens = $null
+$parseErrors = $null
+$ast = [Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors.Count -gt 0) { throw ($parseErrors | Out-String) }
+$function = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq "Show-BetterCodexBanner" }, $true)
+if (-not $function) { throw "Show-BetterCodexBanner is missing" }
+Invoke-Expression $function.Extent.Text
+$env:NO_COLOR = "1"
+Show-BetterCodexBanner
+`;
+  const result = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+    encoding: "utf8",
+    env: { ...process.env, BETTER_CODEX_INSTALLER_TEST_PATH: installerPath.pathname.replace(/^\/(.:)/, "$1") },
+  });
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stdout, /^\s*>_ BETTER CODEX\s*$/m);
+  assert.doesNotMatch(result.stdout, /\u001b\[/);
+});
+
+test("Windows installer distinguishes current, update, repair, and upgrade states", {
+  skip: process.platform !== "win32" ? "requires Windows PowerShell 5.1" : false,
+}, () => {
+  const script = String.raw`
+$source = Get-Content -Raw -LiteralPath $env:BETTER_CODEX_INSTALLER_TEST_PATH
+$tokens = $null
+$parseErrors = $null
+$ast = [Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors.Count -gt 0) { throw ($parseErrors | Out-String) }
+foreach ($name in @("Compare-SemVer", "Test-VersionAtLeast", "Get-InstallAction")) {
+  $function = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true)
+  if (-not $function) { throw "$name is missing" }
+  Invoke-Expression $function.Extent.Text
+}
+if ((Get-InstallAction "0.4.2-beta.2" "0.4.2-beta.2" $true $false $true) -ne "current") { throw "current state was misclassified" }
+if ((Get-InstallAction "0.4.2-beta.2" "0.4.2-beta.2" $true $true $false) -ne "update") { throw "update state was misclassified" }
+if ((Get-InstallAction "0.4.2-beta.2" "0.4.2-beta.2" $false $false $false) -ne "repair") { throw "repair state was misclassified" }
+if ((Get-InstallAction "0.4.2-beta.1" "0.4.2-beta.2" $false $false $false) -ne "upgrade") { throw "upgrade state was misclassified" }
+`;
+  const result = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+    encoding: "utf8",
+    env: { ...process.env, BETTER_CODEX_INSTALLER_TEST_PATH: installerPath.pathname.replace(/^\/(.:)/, "$1") },
+  });
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.match(source, /Better Codex v\$installedVersion is already up to date/);
+  assert.match(source, /Checking and repairing Better Codex v\$installedVersion/);
+  assert.match(source, /Applying available updates to Better Codex v\$installedVersion/);
+  assert.match(source, /Upgrading Better Codex from v\$installedVersion to v\$targetVersion/);
+  assert.doesNotMatch(source, /is installed; upgrading to/);
 });
 
 test("Preview feed publication exposes and verifies the fixed Beta installer endpoint", () => {
@@ -266,7 +337,7 @@ test("Preview feed publication exposes and verifies the fixed Beta installer end
 
 test("every successful installer path persists its inferred update channel", () => {
   assert.match(source, /function Set-InstalledUpdateChannel/);
-  assert.equal((source.match(/Set-InstalledUpdateChannel \$[A-Za-z]+ \$desiredChannel/g) ?? []).length, 4);
+  assert.equal((source.match(/Set-InstalledUpdateChannel \$[A-Za-z]+ \$desiredChannel/g) ?? []).length, 3);
   const windowsReady = source.indexOf("$readyVersion = Get-InstalledVersion $executable");
   const windowsChannel = source.indexOf("Set-InstalledUpdateChannel $executable $desiredChannel", windowsReady);
   const windowsLegacyRemoval = source.indexOf("Removing the verified legacy executable", windowsReady);

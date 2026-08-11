@@ -6,6 +6,18 @@ $ErrorActionPreference = "Stop"
 $ProgressPreference = "Continue"
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new()
 
+function Show-BetterCodexBanner {
+  $logo = "  >_ BETTER CODEX"
+  $colorEnabled = -not [Console]::IsOutputRedirected -and -not $env:NO_COLOR -and $env:TERM -ne "dumb"
+  Write-Host ""
+  if ($colorEnabled) {
+    Write-Host $logo -ForegroundColor Cyan
+  } else {
+    Write-Host $logo
+  }
+  Write-Host ""
+}
+
 function Get-RemoteText([string]$Uri) {
   $request = [System.Net.HttpWebRequest]::Create($Uri)
   $request.Method = "GET"
@@ -39,10 +51,16 @@ function Get-PreviewReleaseVersion([string]$ManifestContent) {
 }
 
 if ($Repository -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') { throw "Invalid Better Codex repository name." }
+Show-BetterCodexBanner
 $cacheBust = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
 Write-Host "[Better Codex] Resolving the current Beta release..."
 $manifestUrl = "https://github.com/$Repository/releases/download/preview/update-manifest.json?better_codex_cache_bust=$cacheBust"
 $version = Get-PreviewReleaseVersion (Get-RemoteText $manifestUrl)
 $installerUrl = "https://github.com/$Repository/releases/download/v$version/install.ps1?better_codex_cache_bust=$cacheBust"
 $installer = Get-RemoteText $installerUrl
-& ([scriptblock]::Create($installer)) -Repository $Repository -Version "v$version" -Preview
+$installerBlock = [scriptblock]::Create($installer)
+if ($installer -match '\[switch\]\$SkipBanner') {
+  & $installerBlock -Repository $Repository -Version "v$version" -Preview -SkipBanner
+} else {
+  & $installerBlock -Repository $Repository -Version "v$version" -Preview
+}

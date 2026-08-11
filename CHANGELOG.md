@@ -4,6 +4,10 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+### Changed
+
+- Add a compact two-step jitter banner that settles into a cyan Windows installer logo, and report current, repair, update, and upgrade states without labeling same-version repairs as upgrades.
+
 ## [0.4.2-beta.2] - 2026-08-11
 
 ### Added
