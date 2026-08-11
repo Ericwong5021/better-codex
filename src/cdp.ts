@@ -397,10 +397,14 @@ export function launchCodex(port: number, activateExisting = false) {
   throw new Error(`codex_launch_unsupported_${process.platform}`);
 }
 
+export function requiresCodexRestartForLaunch(codexRunning: boolean, platform: NodeJS.Platform = process.platform) {
+  return platform === "win32" && codexRunning;
+}
+
 export function codexProcessRunning() {
   if (process.platform === "win32") {
-    const count = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "$count = @(Get-CimInstance Win32_Process -Filter \"Name = 'ChatGPT.exe'\" | Where-Object { $_.CommandLine -notmatch \"--type=\" }).Count; Write-Output $count; exit 0"], { encoding: "utf8", windowsHide: true }).trim();
-    return Number(count) > 0;
+    const processes = execFileSync("tasklist.exe", ["/FI", "IMAGENAME eq ChatGPT.exe", "/NH", "/FO", "CSV"], { encoding: "utf8", windowsHide: true });
+    return /"ChatGPT\.exe"/i.test(processes);
   }
   if (process.platform !== "darwin") return false;
   const application = desktopApplication();
@@ -414,7 +418,7 @@ export function codexProcessRunning() {
   }
 }
 
-function confirmCodexQuit() {
+export function confirmCodexRestart() {
   const chinese = readCodexLocale() === "zh-CN";
   return showNativeChoiceDialog({
     message: chinese ? "当前进程正在运行。\n\n需要重启进程才能启动注入。" : "The current process is already running.\n\nRestart the process to enable injection.",
@@ -578,7 +582,7 @@ export async function cdpInject(port: number, runtimePort: number, accessToken: 
 
 export async function cdpRestartAndInject(port: number, runtimePort: number, accessToken: string, options: { confirmQuit?: boolean } = {}) {
   if (!['darwin', 'win32'].includes(process.platform)) throw new Error(`setup_unsupported_${process.platform}`);
-  if (options.confirmQuit && codexProcessRunning() && !confirmCodexQuit()) throw new Error("codex_quit_cancelled");
+  if (options.confirmQuit && codexProcessRunning() && !confirmCodexRestart()) throw new Error("codex_quit_cancelled");
   await quitCodex();
   return cdpInject(port, runtimePort, accessToken, true);
 }

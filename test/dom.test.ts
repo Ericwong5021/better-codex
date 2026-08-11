@@ -56,7 +56,6 @@ test("leaving the app surface suspends the panel and restores its previous surfa
   assert.ok(source.includes("if (active) close({ resume: true, suppressRoute: betterCodexRoute })"));
   assert.ok(source.includes("routeSeen = false"));
   assert.ok(source.includes("window.postMessage({ type: NAVIGATION.messageType, path: BETTER_CODEX_ROUTE }, window.location.origin)"));
-  assert.ok(source.includes("!target.closest(SELECTORS.projectRow)"));
   assert.ok(!source.includes("if (!active && betterCodexRoute && !routeSuppressed)"));
   assert.ok(source.includes("function scheduleRefresh()"));
   assert.ok(source.includes("refreshTimer = setTimeout(() =>"));
@@ -64,6 +63,18 @@ test("leaving the app surface suspends the panel and restores its previous surfa
   assert.ok(source.includes("if (content && content.textContent !== text) content.textContent = text"));
   assert.ok(source.includes("if (svg.innerHTML !== definition.nodes) svg.innerHTML = definition.nodes"));
   assert.doesNotMatch(source, /function scheduleRefresh\(\)[\s\S]*?setTimeout\([\s\S]*?160/);
+});
+
+test("sidebar utility controls keep the Better Codex surface mounted", () => {
+  const source = injectionScript(4317, "test-token", "install");
+  const onClick = source.slice(source.indexOf("function isSidebarNavigationTarget(target)"), source.indexOf("function refresh()"));
+
+  assert.ok(source.includes('const SIDEBAR_NAVIGATION_ITEM = SELECTORS.sidebarNavigationItem || ".sidebar-item"'));
+  assert.ok(onClick.includes("target.closest(SELECTORS.projectRow)"));
+  assert.ok(onClick.includes("target !== navigationItem"));
+  assert.ok(onClick.includes('target.getAttribute("aria-label")'));
+  assert.ok(onClick.includes("if (isSidebarNavigationTarget(target)) close({ resume: true })"));
+  assert.ok(onClick.includes("else if (target.closest(SELECTORS.sidebarNavigation)) scheduleRefresh()"));
 });
 
 test("all interface icons use Lucide definitions", () => {

@@ -126,7 +126,7 @@ Codex 通过本地 MCP 应用识别 Better Codex 的应用入口和路由，让�
 Better Codex 会在后台检查带签名的更新清单，发现新版本时在 Codex 内提示。你也可以随时重新运行安装命令，它会优先原地升级。
 
 **支持哪些平台？**<br>
-macOS 版 Codex Desktop（Apple Silicon 和 Intel），以及 Windows x64 上 Microsoft Store 版本的 Codex。Release 安装包和 CI 覆盖全部三个平台。
+macOS 版 Codex Desktop（Apple Silicon 和 Intel），以及 Windows x64 上 Microsoft Store 版本的 Codex。Release 安装包和 CI 覆盖全部三个平台。Codex 兼容性按能力检测，而不是绑定一个永久版本列表；缺少必要页面能力时，Better Codex 会停止页面集成并报告不兼容，不修改看板数据。
 
 ## 常用命令
 

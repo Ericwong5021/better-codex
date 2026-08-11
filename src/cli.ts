@@ -6,7 +6,7 @@ import { isSea } from "node:sea";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
-import { cdpEject, cdpInject, cdpOpenThread, cdpRestartAndInject, cdpStatus, codexInstallationStatus, codexProcessRunning, launchCodex, watchInjection } from "./cdp.js";
+import { cdpEject, cdpInject, cdpOpenThread, cdpRestartAndInject, cdpStatus, codexInstallationStatus, codexProcessRunning, confirmCodexRestart, launchCodex, requiresCodexRestartForLaunch, watchInjection } from "./cdp.js";
 import { removeManagedAgentProfiles } from "./agent-profiles.js";
 import { coreVersion } from "./compatibility.js";
 import {
@@ -949,10 +949,15 @@ async function main() {
       const latestIntent = latestLaunchIntent();
       if (latestIntent?.token !== intent.token) return { launched: false, superseded: true, requestedProfile: intent.profile };
       markLaunchIntentProcessed(intent.sequence);
-      const restartRequested = latestIntent.restart === true;
+      const explicitRestartRequested = latestIntent.restart === true;
+      const windowsCodexRunning = process.platform === "win32" && codexProcessRunning();
+      if (windowsCodexRunning && !explicitRestartRequested && !confirmCodexRestart()) {
+        return { launched: false, restarted: false, cancelled: true };
+      }
+      const current = process.platform === "win32" ? { available: false, targets: [] } : await cdpStatus(cdpPort);
+      const codexRunning = process.platform === "win32" ? windowsCodexRunning : codexProcessRunning() || current.available || current.targets.length > 0;
+      const restartRequested = explicitRestartRequested || requiresCodexRestartForLaunch(codexRunning);
       const switchedFrom = await deactivatePeerInstance();
-      const current = await cdpStatus(cdpPort);
-      const codexRunning = codexProcessRunning() || current.available || current.targets.length > 0;
       if (!codexRunning) {
         setInjectionEnabled(true);
         await ensureRuntime();
@@ -960,7 +965,7 @@ async function main() {
         startInjector(cdpPort);
         return { launched: true, restarted: false, codexStarted: true, switchedFrom, injection };
       }
-      if (switchedFrom) {
+      if (switchedFrom && !restartRequested) {
         setInjectionEnabled(true);
         await ensureRuntime();
         launchCodex(cdpPort, true);

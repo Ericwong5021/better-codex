@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { windowsCodexPackageProcessPowerShell } from "../src/cdp.js";
+import { requiresCodexRestartForLaunch, windowsCodexPackageProcessPowerShell } from "../src/cdp.js";
 
 const source = readFileSync(new URL("../src/cdp.ts", import.meta.url), "utf8");
 const nativeDialogSource = readFileSync(new URL("../src/native-dialog.ts", import.meta.url), "utf8");
@@ -80,6 +80,21 @@ test("Windows restart process-count command is valid PowerShell", {
   assert.match(result.stdout.trim(), /^\d+$/);
 });
 
+test("Windows shortcut offers to restart every running Codex instance", () => {
+  assert.equal(requiresCodexRestartForLaunch(true, "win32"), true);
+  assert.equal(requiresCodexRestartForLaunch(false, "win32"), false);
+  assert.equal(requiresCodexRestartForLaunch(true, "darwin"), false);
+});
+
+test("Windows launch detects Codex without starting PowerShell or probing CDP", () => {
+  const start = source.indexOf("export function codexProcessRunning()");
+  const end = source.indexOf("export function confirmCodexRestart()", start);
+  const branch = source.slice(start, end);
+  assert.match(branch, /tasklist\.exe/);
+  assert.match(branch, /IMAGENAME eq ChatGPT\.exe/);
+  assert.doesNotMatch(branch, /Get-CimInstance/);
+});
+
 test("every main target scan has a total deadline and candidate cap", () => {
   assert.match(source, /const cdpTargetScanTimeoutMs = 30_000/);
   assert.match(source, /const cdpTargetCandidateLimit = 32/);
@@ -97,11 +112,27 @@ test("macOS restart quits only the installed Desktop app by Bundle ID", () => {
 
 test("launch restart asks before terminating Codex", () => {
   assert.match(source, /function codexProcessRunning\(\)/);
-  assert.match(source, /function confirmCodexQuit\(\)/);
+  assert.match(source, /function confirmCodexRestart\(\)/);
   assert.match(source, /showNativeChoiceDialog\(/);
   assert.match(nativeDialogSource, /Add-Type -AssemblyName System\.Windows\.Forms/);
   assert.match(nativeDialogSource, /DialogResult\]::No/);
   assert.match(nativeDialogSource, /DialogResult\]::Yes/);
-  assert.match(source, /options\.confirmQuit && codexProcessRunning\(\) && !confirmCodexQuit\(\)/);
+  assert.match(source, /options\.confirmQuit && codexProcessRunning\(\) && !confirmCodexRestart\(\)/);
   assert.match(source, /codex_quit_cancelled/);
+});
+
+test("Windows restart confirmation uses standard Windows dialog chrome and controls", () => {
+  assert.match(nativeDialogSource, /AutoScaleMode.*Dpi/);
+  assert.match(nativeDialogSource, /SystemFonts\]::MessageBoxFont/);
+  assert.match(nativeDialogSource, /SystemColors\]::Control/);
+  assert.match(nativeDialogSource, /FlatStyle.*System/);
+  assert.match(nativeDialogSource, /UseVisualStyleBackColor = \$true/);
+  assert.match(nativeDialogSource, /AccessibleName/);
+  assert.match(nativeDialogSource, /FormBorderStyle.*FixedDialog/);
+  assert.match(nativeDialogSource, /\$form\.ControlBox = \$true/);
+  assert.match(nativeDialogSource, /\$form\.CancelButton = \$secondary/);
+  assert.doesNotMatch(nativeDialogSource, /GraphicsPath/);
+  assert.doesNotMatch(nativeDialogSource, /Set-RoundedRegion/);
+  assert.doesNotMatch(nativeDialogSource, /Add_Paint/);
+  assert.doesNotMatch(nativeDialogSource, /\$close = New-Object System\.Windows\.Forms\.Button/);
 });

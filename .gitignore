@@ -10,3 +10,4 @@ better-codex.db*
 plan/
 homepage/bettercodex-site/
 .vs/
+.tmp-web-preview/

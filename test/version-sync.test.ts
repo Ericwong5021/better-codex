@@ -31,6 +31,7 @@ test("release and preview version sources stay synchronized", () => {
   assert.match(releaseWorkflow, /Refuse to downgrade the Homebrew formula/);
   assert.match(releaseWorkflow, /git rebase origin\/main/);
   assert.match(previewWorkflow, /"v\*-beta\.\*"/);
+  assert.match(previewWorkflow, /node scripts\/release-beta\.mjs check "\$version" --tag "\$GITHUB_REF_NAME"/);
   assert.match(previewWorkflow, /--prerelease --latest=false/);
   assert.match(previewWorkflow, /gh release upload "\$\{GITHUB_REF_NAME\}" "\$\{assets\[@\]\}" --clobber/);
   assert.match(previewWorkflow, /\$'\\tfalse\\ttrue'/);

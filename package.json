@@ -1,6 +1,6 @@
 {
   "name": "better-codex",
-  "version": "0.4.2-beta.1",
+  "version": "0.4.2-beta.2",
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
@@ -50,6 +50,8 @@
     "dev:uninstall": "node scripts/development-instance.mjs uninstall",
     "package:binary": "node scripts/package.mjs",
     "package:update-manifest": "node scripts/create-update-manifest.mjs release",
+    "release:beta": "node scripts/release-beta.mjs prepare",
+    "release:beta:check": "node scripts/release-beta.mjs check",
     "start": "node dist/cli.js serve",
     "better-codex": "tsx src/cli.ts",
     "test": "tsx --test --test-concurrency=2 test/*.test.ts"

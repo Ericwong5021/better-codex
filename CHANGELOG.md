@@ -4,6 +4,19 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.2-beta.2] - 2026-08-11
+
+### Added
+
+- Add one-command Beta release preparation that synchronizes version sources and changelog links, runs local release checks, and shares its validation with the Preview workflow.
+- Add a private security reporting policy and capability-based Codex compatibility guidance.
+
+### Fixed
+
+- Make the Windows shortcut check only for a running Codex process, then ask before restarting it so injection can start; when Codex is not running, launch it immediately.
+- Use the standard Windows dialog frame, system font, colors, controls, and close button for restart confirmation.
+- Keep Better Codex open when sidebar utility controls are clicked, while still leaving the surface for actual navigation items.
+
 ## [0.4.2-beta.1] - 2026-08-11
 
 ### Fixed
@@ -306,7 +319,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.2-beta.1...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.2-beta.2...HEAD
+[0.4.2-beta.2]: https://github.com/Ericwong5021/better-codex/compare/v0.4.2-beta.1...v0.4.2-beta.2
 [0.4.2-beta.1]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1...v0.4.2-beta.1
 [0.4.1]: https://github.com/Ericwong5021/better-codex/compare/v0.4.0...v0.4.1
 [0.4.1-beta.8]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1-beta.7...v0.4.1-beta.8

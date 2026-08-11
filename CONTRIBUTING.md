@@ -108,6 +108,10 @@ Use the bug report template for a confirmed defect. Use the compatibility templa
 
 Include the Better Codex version, Codex version and distribution, operating system, reproduction steps, expected behavior, actual behavior, and a redacted `better-codex doctor` result when relevant.
 
+## Reporting security vulnerabilities
+
+Do not open a public Issue or Discussion for a suspected vulnerability. Follow the private reporting process in [SECURITY.md](SECURITY.md).
+
 ## Feature requests
 
 Describe the user problem and the workflow it interrupts before proposing an implementation. Features should preserve the Codex Desktop-first experience, keep task management as the primary workflow, and avoid adding a separate hosted workspace unless the project direction changes.

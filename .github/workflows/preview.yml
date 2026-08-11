@@ -26,45 +26,7 @@ jobs:
         run: |
           set -euo pipefail
           version="$(node -p "require('./package.json').version")"
-          lock_version="$(node -p "require('./package-lock.json').packages[''].version")"
-          core_version="$(node -e "const source=require('fs').readFileSync('src/compatibility.ts','utf8'); const match=source.match(/export const coreVersion = \"([^\"]+)\"/); process.stdout.write(match?.[1] || '')")"
-          expected_tag="v$version"
-          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-beta\.[1-9][0-9]*$ ]]; then
-            printf 'Package version %s is not a Beta version.\n' "$version" >&2
-            exit 1
-          fi
-          if [ "$GITHUB_REF_NAME" != "$expected_tag" ]; then
-            printf 'Preview tag %s does not match package version %s.\n' "$GITHUB_REF_NAME" "$version" >&2
-            exit 1
-          fi
-          if [ "$lock_version" != "$version" ] || [ "$core_version" != "$version" ]; then
-            printf 'Version mismatch: package=%s lock=%s core=%s.\n' "$version" "$lock_version" "$core_version" >&2
-            exit 1
-          fi
-          heading="## [$version] - "
-          heading_count="$(grep -Fc "$heading" CHANGELOG.md || true)"
-          if [ "$heading_count" != "1" ]; then
-            printf 'CHANGELOG.md must contain exactly one dated section for version %s.\n' "$version" >&2
-            exit 1
-          fi
-          entry_count="$(awk -v heading="$heading" '
-            index($0, heading) == 1 { inside = 1; next }
-            inside && /^## \[/ { exit }
-            inside && /^- / { count += 1 }
-            END { print count + 0 }
-          ' CHANGELOG.md)"
-          if [ "$entry_count" -lt "1" ]; then
-            printf 'CHANGELOG.md must contain at least one change for version %s.\n' "$version" >&2
-            exit 1
-          fi
-          if [ "$(grep -Fc "[$version]:" CHANGELOG.md || true)" != "1" ]; then
-            printf 'CHANGELOG.md must contain exactly one link for version %s.\n' "$version" >&2
-            exit 1
-          fi
-          if ! grep -Fq "compare/$expected_tag...HEAD" CHANGELOG.md; then
-            printf 'The Unreleased changelog link must start after %s.\n' "$expected_tag" >&2
-            exit 1
-          fi
+          node scripts/release-beta.mjs check "$version" --tag "$GITHUB_REF_NAME"
           stable_tag="$(gh release view --json tagName --jq .tagName)"
           node scripts/preview-feed.mjs newer "$version" "${stable_tag#v}"
         env:

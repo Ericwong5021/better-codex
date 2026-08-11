@@ -288,6 +288,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const ATTRIBUTES = ${JSON.stringify(compatibility.attributes)};
     const NAVIGATION = ${JSON.stringify(compatibility.navigation)};
     const BETTER_CODEX_ROUTE = ${JSON.stringify(betterCodexMcpRoute)};
+    const SIDEBAR_NAVIGATION_ITEM = SELECTORS.sidebarNavigationItem || ".sidebar-item";
     const LUCIDE_ICONS = ${JSON.stringify(lucideIcons)};
     const AGENT_AVATAR_PRESETS = ${JSON.stringify(agentAvatarPresets)};
     const RESUME_SURFACE_KEY = "better-codex-resume-surface";
@@ -4795,11 +4796,20 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       return result;
     }
 
+    function isSidebarNavigationTarget(target) {
+      if (!target.closest(SELECTORS.sidebarNavigation) || target.closest(SELECTORS.projectRow)) return false;
+      const navigationItem = target.closest(SIDEBAR_NAVIGATION_ITEM) || target.closest(SELECTORS.threadRow);
+      if (!navigationItem) return false;
+      const nestedUtility = target !== navigationItem && target.matches("button,a,[role='button']") && target.getAttribute("aria-label");
+      return !nestedUtility;
+    }
+
     function onClick(event) {
       if (!active || suppressAgentOutside) return;
       const target = event.target?.closest?.("button,a,[role='button']," + SELECTORS.threadRow);
       if (!target || target === entry || target === agentsEntry || target.closest("#" + PANEL_ID) || target.closest("#better-codex-dialog") || target.closest("#better-codex-agent-dialog") || target.closest("#better-codex-avatar-picker")) return;
-      if (target.closest(SELECTORS.sidebarNavigation) && !target.closest(SELECTORS.projectRow)) close({ resume: true });
+      if (isSidebarNavigationTarget(target)) close({ resume: true });
+      else if (target.closest(SELECTORS.sidebarNavigation)) scheduleRefresh();
     }
 
     function refresh() {

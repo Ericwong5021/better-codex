@@ -126,7 +126,7 @@ The app entry and route are registered through the local MCP server. The page in
 Better Codex checks a signed update manifest in the background and shows a notice inside Codex when a new version is available. You can also rerun the install command at any time. It upgrades in place when possible.
 
 **Which platforms are supported?**<br>
-Codex Desktop on macOS (Apple Silicon and Intel) and the Microsoft Store version of Codex on Windows x64. Release packages and CI cover all three.
+Codex Desktop on macOS (Apple Silicon and Intel) and the Microsoft Store version of Codex on Windows x64. Release packages and CI cover all three. Codex compatibility is capability-based rather than pinned to a permanent version list; if required page capabilities are unavailable, Better Codex stops the page integration and reports the incompatibility without modifying board data.
 
 ## Useful commands
 
