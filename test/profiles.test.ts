@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { Store } from "../src/db.js";
-import { packagedLibexecSkillsPath } from "../src/config.js";
+import { canonicalPath, packagedLibexecSkillsPath } from "../src/config.js";
 
 const configSource = readFileSync(new URL("../src/config.ts", import.meta.url), "utf8");
 const cliSource = readFileSync(new URL("../src/cli.ts", import.meta.url), "utf8");
@@ -34,7 +34,7 @@ test("packaged skill lookup follows Homebrew prefix symlinks into the Cellar", (
 
     assert.equal(
       packagedLibexecSkillsPath(join(prefix, "bin", "better-codex.cjs")),
-      join(cellarRoot, "libexec", "skills"),
+      canonicalPath(join(cellarRoot, "libexec", "skills")),
     );
   } finally {
     rmSync(directory, { recursive: true, force: true });
