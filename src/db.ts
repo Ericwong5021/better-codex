@@ -3,7 +3,7 @@ import { existsSync, linkSync, mkdirSync, unlinkSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { databasePath, developmentDatabaseSnapshotSourcePath } from "./config.js";
-import type { IssueProjection, ProjectProjection, SyncEntityType, SyncProjection } from "./sync-contract.js";
+import type { IssueProjection, ProjectProjection, RemoteCommand, RemoteCommandAck, SyncEntityType, SyncProjection } from "./sync-contract.js";
 
 export const issueStatuses = ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"] as const;
 export const issuePriorities = ["none", "low", "medium", "high", "urgent"] as const;
@@ -207,7 +207,7 @@ export function cleanMaxConcurrency(value: number | undefined) {
   return value;
 }
 
-const latestSchemaVersion = 5;
+const latestSchemaVersion = 6;
 
 function now() {
   return new Date().toISOString();
@@ -559,6 +559,23 @@ export class Store {
           );
         `);
         this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (5, ?)").run(now());
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    }
+    if (fromVersion < 6) {
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS sync_command_receipts (
+            command_id TEXT PRIMARY KEY,
+            result_json TEXT NOT NULL,
+            applied_at TEXT NOT NULL
+          );
+        `);
+        this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (6, ?)").run(now());
         this.db.exec("COMMIT");
       } catch (error) {
         this.db.exec("ROLLBACK");
@@ -950,6 +967,66 @@ export class Store {
       updated_at: issue.updated_at,
       local_revision: issue.version,
     } satisfies IssueProjection;
+  }
+
+  applyRemoteCommand(command: RemoteCommand): RemoteCommandAck {
+    const receipt = this.db.prepare("SELECT result_json FROM sync_command_receipts WHERE command_id = ?").get(command.command_id) as { result_json: string } | undefined;
+    if (receipt) return JSON.parse(receipt.result_json) as RemoteCommandAck;
+    const result = (() => {
+      try {
+        const payload = command.payload;
+        if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("invalid_command_payload");
+        let issue: Issue;
+        if (command.operation === "issue.create") {
+          if (command.base_revision !== null || this.getIssue(command.entity_id)) throw new Error("version_conflict");
+          issue = this.createIssue({
+            id: command.entity_id,
+            projectId: String(payload.project_id || ""),
+            title: String(payload.title || ""),
+            description: typeof payload.description === "string" ? payload.description : "",
+            status: payload.status as IssueStatus | undefined,
+            priority: payload.priority as IssuePriority | undefined,
+            labels: Array.isArray(payload.labels) ? payload.labels as string[] : [],
+            userAssigned: payload.user_assigned === true,
+          });
+        } else {
+          const current = this.getIssue(command.entity_id);
+          if (!current) throw new Error("issue_not_found");
+          if (current.version !== command.base_revision) throw new Error("version_conflict");
+          if (current.active_run_status || current.session_active_turn_id || this.getIssueReplyState(current.id).status === "running") throw new Error("issue_execution_running");
+          if (command.operation === "issue.archive") issue = this.archiveIssue(current.id, current.version);
+          else if (command.operation === "issue.restore") issue = this.unarchiveIssue(current.id, current.version);
+          else {
+            const patch: IssuePatch = {};
+            if (command.operation === "issue.move") {
+              if (payload.status !== undefined) patch.status = payload.status as IssueStatus;
+              if (typeof payload.before_id === "string" && payload.before_id) {
+                const before = this.getIssue(payload.before_id);
+                if (before && before.project_id === current.project_id && before.status === patch.status) patch.sort_order = before.sort_order - 0.5;
+              }
+            } else {
+              if (payload.project_id !== undefined) patch.project_id = String(payload.project_id);
+              if (payload.title !== undefined) patch.title = String(payload.title);
+              if (payload.description !== undefined) patch.description = String(payload.description);
+              if (payload.status !== undefined) patch.status = payload.status as IssueStatus;
+              if (payload.priority !== undefined) patch.priority = payload.priority as IssuePriority;
+              if (payload.labels !== undefined) patch.labels = payload.labels as string[];
+              if (payload.sort_order !== undefined) patch.sort_order = Number(payload.sort_order);
+              if (payload.pinned !== undefined) patch.pinned = Boolean(payload.pinned);
+              if (payload.user_assigned !== undefined) patch.user_assigned = Boolean(payload.user_assigned);
+            }
+            issue = this.updateIssue(current.id, current.version, patch);
+          }
+        }
+        return { command_id: command.command_id, status: "applied", error: null, projection: this.syncProjection("issue", issue.id) as IssueProjection } satisfies RemoteCommandAck;
+      } catch (error) {
+        const code = error instanceof Error ? error.message : "command_rejected";
+        const status = code === "version_conflict" ? "conflict" : "rejected";
+        return { command_id: command.command_id, status, error: code, projection: null } satisfies RemoteCommandAck;
+      }
+    })();
+    this.db.prepare("INSERT INTO sync_command_receipts (command_id, result_json, applied_at) VALUES (?, ?, ?)").run(command.command_id, JSON.stringify(result), now());
+    return result;
   }
 
   getAutoDispatch() {

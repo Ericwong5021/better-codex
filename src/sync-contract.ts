@@ -69,10 +69,46 @@ export type SyncPushResponse = {
   lease_expires_at: string;
 };
 
+export const remoteCommandOperations = ["issue.create", "issue.update", "issue.move", "issue.archive", "issue.restore"] as const;
+export type RemoteCommandOperation = typeof remoteCommandOperations[number];
+export type RemoteCommandStatus = "pending" | "applied" | "rejected" | "conflict" | "expired";
+
+export type RemoteCommand = {
+  command_id: string;
+  device_id: string;
+  operation: RemoteCommandOperation;
+  entity_id: string;
+  base_revision: number | null;
+  payload: Record<string, unknown>;
+  status: RemoteCommandStatus;
+  requested_at: string;
+  expires_at: string;
+  finished_at: string | null;
+  error: string | null;
+};
+
+export type RemoteCommandAck = {
+  command_id: string;
+  status: Exclude<RemoteCommandStatus, "pending" | "expired">;
+  error: string | null;
+  projection: IssueProjection | null;
+};
+
+export type RemoteIssueState = {
+  command_id: string;
+  status: RemoteCommandStatus;
+  operation: RemoteCommandOperation;
+  error: string | null;
+};
+
+export type RemoteIssueProjection = IssueProjection & {
+  remote_state?: RemoteIssueState;
+};
+
 export type HubBoard = {
   revision: number;
   projects: ProjectProjection[];
-  issues: IssueProjection[];
+  issues: RemoteIssueProjection[];
   runtime: RuntimeProjection | null;
 };
 

@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 import { injectionScript } from "./dom.js";
 import { issuePriorities, issueStatuses } from "./db.js";
 import { HubStore } from "./hub-store.js";
-import type { SyncPushRequest } from "./sync-contract.js";
+import type { RemoteCommandAck, SyncPushRequest } from "./sync-contract.js";
 import { betterCodexWebHostCss, betterCodexWebHostHtml, betterCodexWebHostJavaScript } from "./web-host.js";
 
 export type HubServerOptions = {
@@ -104,8 +104,9 @@ function trustedOrigin(request: IncomingMessage) {
 function errorStatus(code: string) {
   if (code === "unauthorized") return 401;
   if (["forbidden", "writer_lease_conflict"].includes(code)) return 403;
-  if (["device_not_found", "issue_not_found"].includes(code)) return 404;
-  if (["entity_owned_by_another_device", "incompatible_protocol"].includes(code)) return 409;
+  if (["device_not_found", "issue_not_found", "command_not_found"].includes(code)) return 404;
+  if (["entity_owned_by_another_device", "incompatible_protocol", "version_conflict", "command_id_conflict", "issue_execution_running"].includes(code)) return 409;
+  if (code === "runtime_not_paired") return 503;
   if (code === "body_too_large") return 413;
   return 400;
 }
@@ -114,6 +115,8 @@ function issueForWeb(issue: ReturnType<HubStore["board"]>["issues"][number]) {
   return {
     ...issue,
     version: issue.local_revision,
+    remote_pending: issue.remote_state?.status === "pending",
+    remote_conflict: issue.remote_state?.status === "conflict",
     thread_id: null,
     workspace_path: null,
     agent_enabled: false,
@@ -215,7 +218,7 @@ export function createHubServer(options: HubServerOptions) {
           schedulerReasoningEffort: "",
           mockup: false,
           runtime: board.runtime,
-          capabilities: { issues: "read-only", agents: "unavailable", nativeThreads: false },
+          capabilities: { issues: "read-write", agents: "unavailable", nativeThreads: false },
         });
       }
       if (url.pathname === "/api/update" && method === "GET") {
@@ -245,6 +248,49 @@ export function createHubServer(options: HubServerOptions) {
         const issue = store.board().issues.find(item => item.id === decodeURIComponent(issueMatch[1]) || item.identifier === decodeURIComponent(issueMatch[1]));
         return issue ? sendJson(response, 200, issueForWeb(issue)) : sendJson(response, 404, { error: "issue_not_found" });
       }
+      if (url.pathname === "/api/issues" && method === "POST") {
+        if (!browser) return sendJson(response, 401, { error: "unauthorized" });
+        const body = await readBody(request);
+        const command = store.createRemoteCommand({
+          command_id: body.command_id ?? request.headers["x-better-codex-command-id"],
+          operation: "issue.create",
+          entity_id: body.id,
+          base_revision: null,
+          payload: { project_id: body.project_id, title: body.title, description: body.description, status: body.status, priority: body.priority, labels: body.labels, user_assigned: body.user_assigned },
+        });
+        const issue = store.board().issues.find(item => item.id === command.entity_id)!;
+        return sendJson(response, 202, issueForWeb(issue));
+      }
+      if (issueMatch && method === "PATCH") {
+        if (!browser) return sendJson(response, 401, { error: "unauthorized" });
+        const body = await readBody(request);
+        const issueId = decodeURIComponent(issueMatch[1]);
+        const command = store.createRemoteCommand({
+          command_id: body.command_id ?? request.headers["x-better-codex-command-id"],
+          operation: "issue.update",
+          entity_id: issueId,
+          base_revision: body.version,
+          payload: { project_id: body.project_id, title: body.title, description: body.description, status: body.status, priority: body.priority, labels: body.labels, sort_order: body.sort_order, pinned: body.pinned, user_assigned: body.user_assigned },
+        });
+        const issue = store.board().issues.find(item => item.id === command.entity_id)!;
+        return sendJson(response, 202, issueForWeb(issue));
+      }
+      const issueAction = url.pathname.match(/^\/api\/issues\/([^/]+)\/(move|archive|unarchive)$/);
+      if (issueAction && method === "POST") {
+        if (!browser) return sendJson(response, 401, { error: "unauthorized" });
+        const body = await readBody(request);
+        const action = issueAction[2];
+        const operation = action === "archive" ? "issue.archive" : action === "unarchive" ? "issue.restore" : "issue.move";
+        const command = store.createRemoteCommand({ command_id: body.command_id ?? request.headers["x-better-codex-command-id"], operation, entity_id: decodeURIComponent(issueAction[1]), base_revision: body.version, payload: action === "move" ? { status: body.status, before_id: body.before_id } : {} });
+        const issue = store.board().issues.find(item => item.id === command.entity_id)!;
+        return sendJson(response, 202, issueForWeb(issue));
+      }
+      const commandStatus = url.pathname.match(/^\/api\/v1\/commands\/([^/]+)$/);
+      if (commandStatus && method === "GET") {
+        if (!browser && !admin) return sendJson(response, 401, { error: "unauthorized" });
+        const command = store.remoteCommand(decodeURIComponent(commandStatus[1]));
+        return command ? sendJson(response, 200, command) : sendJson(response, 404, { error: "command_not_found" });
+      }
       if (url.pathname === "/api/events" && method === "GET") {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" });
         response.writeHead(200, { ...securityHeaders(), "connection": "keep-alive", "content-type": "text/event-stream; charset=utf-8", "x-accel-buffering": "no" });
@@ -263,11 +309,17 @@ export function createHubServer(options: HubServerOptions) {
         request.once("close", () => clearInterval(poll));
         return;
       }
-      if (url.pathname.startsWith("/api/") && browser && method !== "GET") return sendJson(response, 405, { error: "remote_read_only" });
+      if (url.pathname.startsWith("/api/") && browser && method !== "GET") return sendJson(response, 405, { error: "remote_operation_forbidden" });
 
       const device = store.deviceForToken(token);
       if (!device) return sendJson(response, 401, { error: "unauthorized" });
       if (url.pathname === "/api/v1/sync/push" && method === "POST") return sendJson(response, 200, store.push(device.id, await readBody(request) as SyncPushRequest));
+      if (url.pathname === "/api/v1/sync/commands" && method === "GET") return sendJson(response, 200, { commands: store.pendingCommands(device.id, Number(url.searchParams.get("limit") || 100)) });
+      const commandAck = url.pathname.match(/^\/api\/v1\/sync\/commands\/([^/]+)\/ack$/);
+      if (commandAck && method === "POST") {
+        const body = await readBody(request);
+        return sendJson(response, 200, store.ackRemoteCommand(device.id, { ...body, command_id: decodeURIComponent(commandAck[1]) } as RemoteCommandAck));
+      }
       return sendJson(response, 404, { error: "not_found" });
     })().catch(error => {
       const code = error instanceof Error ? error.message : "hub_error";

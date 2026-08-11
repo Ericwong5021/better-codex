@@ -1,7 +1,7 @@
 import { coreVersion } from "./compatibility.js";
 import type { Store } from "./db.js";
 import { readSyncConfiguration, type SyncConfiguration } from "./sync-config.js";
-import { syncProtocolVersion, type RuntimeProjection, type SyncChange, type SyncPushResponse } from "./sync-contract.js";
+import { syncProtocolVersion, type RemoteCommand, type RemoteCommandAck, type RuntimeProjection, type SyncChange, type SyncPushResponse } from "./sync-contract.js";
 
 type SyncState = {
   connected: boolean;
@@ -106,6 +106,8 @@ export class SyncClient {
     try {
       this.store.initializeSyncQueue();
       await this.push(configuration);
+      await this.pullCommands(configuration);
+      await this.push(configuration);
       this.failures = 0;
       this.state = { ...this.state, syncing: false, last_sync_at: new Date().toISOString(), last_error: null };
     } catch (error) {
@@ -143,5 +145,18 @@ export class SyncClient {
       if (entries.length < 100) return;
     }
     throw new Error("sync_queue_drain_limit");
+  }
+
+  private async pullCommands(configuration: SyncConfiguration) {
+    for (let page = 0; page < 100; page += 1) {
+      const result = await hubRequest<{ commands: RemoteCommand[] }>(configuration, "/api/v1/sync/commands?limit=100");
+      if (!Array.isArray(result.commands)) throw new Error("invalid_command_response");
+      for (const command of result.commands) {
+        const ack = this.store.applyRemoteCommand(command);
+        await hubRequest<RemoteCommandAck>(configuration, `/api/v1/sync/commands/${encodeURIComponent(command.command_id)}/ack`, { method: "POST", body: JSON.stringify(ack) });
+      }
+      if (result.commands.length < 100) return;
+    }
+    throw new Error("command_drain_limit");
   }
 }

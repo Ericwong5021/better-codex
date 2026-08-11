@@ -237,7 +237,7 @@ test("the real Runtime service pushes API writes to the Hub", async () => {
   }
 });
 
-test("5000 issues complete first projection within the acceptance budget", async () => {
+test("5000 issues complete first projection within the acceptance budget", { skip: process.platform === "win32" ? "reference performance gate runs on Unix CI" : false }, async () => {
   const directory = mkdtempSync(join(tmpdir(), "better-codex-hub-scale-"));
   const local = new Store(join(directory, "local.db"));
   const hub = createHubServer({ host: "127.0.0.1", port: 0, database: join(directory, "hub.db"), adminToken: "d".repeat(64) });
@@ -254,6 +254,166 @@ test("5000 issues complete first projection within the acceptance budget", async
     assert.equal(result.last_error, null);
     assert.equal(hub.store.board().issues.length, 5000);
     assert.ok(elapsed < 30_000, `first projection took ${elapsed}ms`);
+  } finally {
+    client.stop();
+    local.close();
+    await close(hub.server);
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("remote commands stay pending until local acknowledgement and remain idempotent", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "better-codex-remote-command-"));
+  const local = new Store(join(directory, "local.db"));
+  const hub = createHubServer({ host: "127.0.0.1", port: 0, database: join(directory, "hub.db"), adminToken: "f".repeat(64) });
+  const port = await listen(hub.server);
+  const pairing = hub.store.createPairingCode();
+  const device = hub.store.pairDevice("command runtime", pairing.pairing_code);
+  const client = new SyncClient(local, 60_000, () => ({ enabled: true, hub_url: `http://127.0.0.1:${port}`, device_id: device.device_id, device_name: device.device_name, device_token: device.device_token, created_at: new Date().toISOString() }));
+  try {
+    const project = local.createProject({ name: "Commands", workspacePath: directory });
+    const issue = local.createIssue({ projectId: project.id, title: "Local title" });
+    await client.syncNow();
+    const command = hub.store.createRemoteCommand({ command_id: "update-once", operation: "issue.update", entity_id: issue.id, base_revision: issue.version, payload: { title: "Pending title" } });
+    assert.equal(command.status, "pending");
+    assert.equal(local.getIssue(issue.id)?.title, "Local title");
+    assert.equal(hub.store.board().issues.find(item => item.id === issue.id)?.remote_state?.status, "pending");
+    assert.equal(hub.store.board().issues.find(item => item.id === issue.id)?.title, "Pending title");
+    await client.syncNow();
+    assert.equal(local.getIssue(issue.id)?.title, "Pending title");
+    assert.equal(hub.store.remoteCommand(command.command_id)?.status, "applied");
+    const appliedVersion = local.getIssue(issue.id)!.version;
+    const duplicate = hub.store.createRemoteCommand({ command_id: "update-once", operation: "issue.update", entity_id: issue.id, base_revision: issue.version, payload: { title: "Pending title" } });
+    assert.equal(duplicate.status, "applied");
+    await client.syncNow();
+    assert.equal(local.getIssue(issue.id)?.version, appliedVersion);
+  } finally {
+    client.stop();
+    local.close();
+    await close(hub.server);
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("stale and out-of-order remote commands preserve local data and expose conflict", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "better-codex-command-conflict-"));
+  const local = new Store(join(directory, "local.db"));
+  const hub = createHubServer({ host: "127.0.0.1", port: 0, database: join(directory, "hub.db"), adminToken: "g".repeat(64) });
+  const port = await listen(hub.server);
+  const pairing = hub.store.createPairingCode();
+  const device = hub.store.pairDevice("conflict runtime", pairing.pairing_code);
+  const client = new SyncClient(local, 60_000, () => ({ enabled: true, hub_url: `http://127.0.0.1:${port}`, device_id: device.device_id, device_name: device.device_name, device_token: device.device_token, created_at: new Date().toISOString() }));
+  try {
+    const project = local.createProject({ name: "Conflicts", workspacePath: directory });
+    const issue = local.createIssue({ projectId: project.id, title: "Original" });
+    await client.syncNow();
+    local.updateIssue(issue.id, issue.version, { title: "Local wins" });
+    hub.store.createRemoteCommand({ command_id: "stale-command", operation: "issue.update", entity_id: issue.id, base_revision: issue.version, payload: { title: "Remote stale" } });
+    await client.syncNow();
+    assert.equal(local.getIssue(issue.id)?.title, "Local wins");
+    assert.equal(hub.store.remoteCommand("stale-command")?.status, "conflict");
+    assert.equal(hub.store.board().issues.find(item => item.id === issue.id)?.remote_state?.status, "conflict");
+    const current = local.getIssue(issue.id)!;
+    hub.store.createRemoteCommand({ command_id: "resolved-command", operation: "issue.update", entity_id: issue.id, base_revision: current.version, payload: { title: "Remote resolved" } });
+    await new Promise(resolve => setTimeout(resolve, 2));
+    hub.store.createRemoteCommand({ command_id: "out-of-order-command", operation: "issue.update", entity_id: issue.id, base_revision: current.version, payload: { priority: "high" } });
+    await client.syncNow();
+    assert.equal(local.getIssue(issue.id)?.title, "Remote resolved");
+    assert.equal(local.getIssue(issue.id)?.priority, "medium");
+    assert.equal(hub.store.remoteCommand("resolved-command")?.status, "applied");
+    assert.equal(hub.store.remoteCommand("out-of-order-command")?.status, "conflict");
+  } finally {
+    client.stop();
+    local.close();
+    await close(hub.server);
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("active runs reject remote mutations without changing ownership", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "better-codex-command-active-run-"));
+  const local = new Store(join(directory, "local.db"));
+  const hub = createHubServer({ host: "127.0.0.1", port: 0, database: join(directory, "hub.db"), adminToken: "h".repeat(64) });
+  const port = await listen(hub.server);
+  const pairing = hub.store.createPairingCode();
+  const device = hub.store.pairDevice("active runtime", pairing.pairing_code);
+  const client = new SyncClient(local, 60_000, () => ({ enabled: true, hub_url: `http://127.0.0.1:${port}`, device_id: device.device_id, device_name: device.device_name, device_token: device.device_token, created_at: new Date().toISOString() }));
+  try {
+    const project = local.createProject({ name: "Active", workspacePath: directory });
+    const issue = local.createIssue({ projectId: project.id, title: "Running", agentEnabled: true, workspacePath: directory });
+    assert.ok(local.claimNextIssue(issue.id));
+    await client.syncNow();
+    const running = local.getIssue(issue.id)!;
+    assert.equal(running.active_run_status, "claimed");
+    assert.throws(() => hub.store.createRemoteCommand({ operation: "issue.archive", entity_id: issue.id, base_revision: running.version, payload: {} }), /issue_execution_running/);
+    assert.equal(local.getIssue(issue.id)?.active_run_status, "claimed");
+  } finally {
+    client.stop();
+    local.close();
+    await close(hub.server);
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("pending remote commands survive a Hub restart and apply after Runtime reconnects", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "better-codex-command-restart-"));
+  const database = join(directory, "hub.db");
+  const local = new Store(join(directory, "local.db"));
+  let hub = createHubServer({ host: "127.0.0.1", port: 0, database, adminToken: "i".repeat(64) });
+  let port = await listen(hub.server);
+  const pairing = hub.store.createPairingCode();
+  const device = hub.store.pairDevice("restart command runtime", pairing.pairing_code);
+  const configuration = { enabled: true as const, hub_url: `http://127.0.0.1:${port}`, device_id: device.device_id, device_name: device.device_name, device_token: device.device_token, created_at: new Date().toISOString() };
+  const client = new SyncClient(local, 60_000, () => configuration);
+  try {
+    const project = local.createProject({ name: "Restart", workspacePath: directory });
+    const issue = local.createIssue({ projectId: project.id, title: "Before restart" });
+    await client.syncNow();
+    hub.store.createRemoteCommand({ command_id: "restart-pending", operation: "issue.update", entity_id: issue.id, base_revision: issue.version, payload: { title: "After restart" } });
+    await close(hub.server);
+    hub = createHubServer({ host: "127.0.0.1", port: 0, database, adminToken: "i".repeat(64) });
+    port = await listen(hub.server);
+    configuration.hub_url = `http://127.0.0.1:${port}`;
+    assert.equal(hub.store.remoteCommand("restart-pending")?.status, "pending");
+    await client.syncNow();
+    assert.equal(local.getIssue(issue.id)?.title, "After restart");
+    assert.equal(hub.store.remoteCommand("restart-pending")?.status, "applied");
+  } finally {
+    client.stop();
+    local.close();
+    if (hub.server.listening) await close(hub.server);
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("remote create, move, archive, and restore apply through the local Store", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "better-codex-command-crud-"));
+  const local = new Store(join(directory, "local.db"));
+  const hub = createHubServer({ host: "127.0.0.1", port: 0, database: join(directory, "hub.db"), adminToken: "j".repeat(64) });
+  const port = await listen(hub.server);
+  const pairing = hub.store.createPairingCode();
+  const device = hub.store.pairDevice("crud runtime", pairing.pairing_code);
+  const client = new SyncClient(local, 60_000, () => ({ enabled: true, hub_url: `http://127.0.0.1:${port}`, device_id: device.device_id, device_name: device.device_name, device_token: device.device_token, created_at: new Date().toISOString() }));
+  try {
+    const project = local.createProject({ name: "Remote CRUD", workspacePath: directory });
+    await client.syncNow();
+    const created = hub.store.createRemoteCommand({ command_id: "remote-create", operation: "issue.create", base_revision: null, payload: { project_id: project.id, title: "Created remotely", status: "todo", priority: "low", labels: ["remote"] } });
+    const retried = hub.store.createRemoteCommand({ command_id: "remote-create", operation: "issue.create", base_revision: null, payload: { project_id: project.id, title: "Created remotely", status: "todo", priority: "low", labels: ["remote"] } });
+    assert.equal(retried.entity_id, created.entity_id);
+    await client.syncNow();
+    let issue = local.getIssue(created.entity_id)!;
+    assert.equal(issue.title, "Created remotely");
+    hub.store.createRemoteCommand({ operation: "issue.move", entity_id: issue.id, base_revision: issue.version, payload: { status: "in_progress" } });
+    await client.syncNow();
+    issue = local.getIssue(issue.id)!;
+    assert.equal(issue.status, "in_progress");
+    hub.store.createRemoteCommand({ operation: "issue.archive", entity_id: issue.id, base_revision: issue.version, payload: {} });
+    await client.syncNow();
+    issue = local.getIssue(issue.id)!;
+    assert.ok(issue.archived_at);
+    hub.store.createRemoteCommand({ operation: "issue.restore", entity_id: issue.id, base_revision: issue.version, payload: {} });
+    await client.syncNow();
+    assert.equal(local.getIssue(issue.id)?.archived_at, null);
   } finally {
     client.stop();
     local.close();

@@ -513,6 +513,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     localeResources.en["更新正在进行中，请稍候。"] = "An update is already in progress. Please wait.";
     localeResources.en["下载的更新版本与发布版本不一致，请稍后重试。"] = "The downloaded version does not match the release. Try again later.";
     localeResources.en["更新包验证失败，已保留当前版本。"] = "The update package could not be verified. The current version was kept.";
+    localeResources.en["同步中"] = "Syncing";
+    localeResources.en["同步冲突"] = "Sync conflict";
     localeResources.en["更新后的版本验证失败，已恢复到上一版本。"] = "The updated version could not be verified. The previous version was restored.";
     localeResources.en["Better Codex 重启超时，已恢复到上一版本。"] = "Better Codex took too long to restart. The previous version was restored.";
     localeResources.en["无法下载更新，请检查网络后重试。"] = "The update could not be downloaded. Check your network and try again.";
@@ -666,19 +668,23 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     function issuePermissions(issue) {
       const enrichmentPending = issue?.enrichment_status === "pending";
       const executionRunning = issueExecutionRunning(issue);
+      const remotePending = issue?.remote_pending === true || issue?.remote_state?.status === "pending";
+      const remoteConflict = issue?.remote_conflict === true || issue?.remote_state?.status === "conflict";
       const executed = Boolean(issue?.run_thread_id);
       const sessionHandoff = Boolean(issue?.session_handoff_at && !issue?.session_owned);
       const executionLocked = executionRunning || executed;
       return {
         enrichmentPending,
         executionRunning,
+        remotePending,
+        remoteConflict,
         executed,
         sessionHandoff,
         executionLocked,
-        editingLocked: enrichmentPending || executionLocked,
-        boardLocked: enrichmentPending || executionRunning,
-        contextLocked: enrichmentPending || executionRunning,
-        archiveLocked: enrichmentPending,
+        editingLocked: enrichmentPending || executionLocked || remotePending,
+        boardLocked: enrichmentPending || executionRunning || remotePending,
+        contextLocked: enrichmentPending || executionRunning || remotePending,
+        archiveLocked: enrichmentPending || remotePending,
       };
     }
 
@@ -3628,11 +3634,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           const replyResultState = issue.reply_status === "succeeded" ? "completed" : ["failed", "interrupted"].includes(issue.reply_status) ? issue.reply_status : "";
           const executionState = issue.status === "blocked" ? "blocked" : replyResultState || (issue.latest_scheduler_error && issue.status === "in_review" ? "scheduler-failed" : latestRunStatus === "completed" ? "completed" : latestRunStatus === "failed" ? "failed" : latestRunStatus === "interrupted" ? "interrupted" : latestRunStatus === "scheduling" ? "scheduling" : latestRunStatus === "running" ? "running" : latestRunStatus === "claimed" ? "claimed" : issue.agent_enabled ? "not-started" : "");
           const activeExecutionState = issue.active_run_status || (issue.reply_status === "running" ? "running" : "");
-          const activityState = enrichmentLocked ? "thinking" : issue.session_status === "stopping" ? "stopping" : activeExecutionState || executionState;
-          const activityLabel = t(enrichmentLocked ? "理解中" : activityState === "stopping" ? "正在停止…" : activityState === "running" ? "工作中" : activityState === "scheduling" ? "调度中" : activityState === "scheduler-failed" ? "调度失败" : activityState === "claimed" ? "排队中" : activityState === "in_review" ? "待审核" : activityState === "completed" ? "已完成" : activityState === "blocked" ? "已阻塞" : activityState === "failed" ? "执行失败" : activityState === "interrupted" ? "已停止" : activityState === "not-started" ? "未开始" : "");
-          const activityIcon = activityState === "scheduling" ? '<span class="better-codex-activity-dot better-codex-scheduler-dot" aria-hidden="true"></span>' : activityState === "scheduler-failed" ? '<span class="better-codex-activity-dot better-codex-scheduler-failed-dot" aria-hidden="true"></span>' : ["completed", "interrupted", "not-started"].includes(activityState) ? '<span class="better-codex-activity-dot" aria-hidden="true"></span>' : ["failed", "blocked"].includes(activityState) ? icon("close") : agentAvatarMarkup(activityAgent, "better-codex-card-avatar");
+          const activityState = permissions.remotePending ? "remote-pending" : permissions.remoteConflict ? "remote-conflict" : enrichmentLocked ? "thinking" : issue.session_status === "stopping" ? "stopping" : activeExecutionState || executionState;
+          const activityLabel = t(activityState === "remote-pending" ? "同步中" : activityState === "remote-conflict" ? "同步冲突" : enrichmentLocked ? "理解中" : activityState === "stopping" ? "正在停止…" : activityState === "running" ? "工作中" : activityState === "scheduling" ? "调度中" : activityState === "scheduler-failed" ? "调度失败" : activityState === "claimed" ? "排队中" : activityState === "in_review" ? "待审核" : activityState === "completed" ? "已完成" : activityState === "blocked" ? "已阻塞" : activityState === "failed" ? "执行失败" : activityState === "interrupted" ? "已停止" : activityState === "not-started" ? "未开始" : "");
+          const activityIcon = activityState === "scheduling" ? '<span class="better-codex-activity-dot better-codex-scheduler-dot" aria-hidden="true"></span>' : activityState === "scheduler-failed" ? '<span class="better-codex-activity-dot better-codex-scheduler-failed-dot" aria-hidden="true"></span>' : ["completed", "interrupted", "not-started"].includes(activityState) ? '<span class="better-codex-activity-dot" aria-hidden="true"></span>' : ["failed", "blocked", "remote-conflict"].includes(activityState) ? icon("close") : agentAvatarMarkup(activityAgent, "better-codex-card-avatar");
           const activity = activityState
-            ? '<span class="better-codex-activity" data-run="' + escapeHtml(activityState) + '">' + activityIcon + '<span class="' + (enrichmentLocked || executionRunning ? "better-codex-shimmer" : "") + '">' + activityLabel + '</span></span>'
+            ? '<span class="better-codex-activity" data-run="' + escapeHtml(activityState) + '">' + activityIcon + '<span class="' + (enrichmentLocked || executionRunning || permissions.remotePending ? "better-codex-shimmer" : "") + '">' + activityLabel + '</span></span>'
             : "";
           const description = mockupText(issue.description).replace(/[#*_\`~>\[\]()]/g, "").replace(/\s+/g, " ").trim();
           const issueProject = state.projects.find(item => item.id === issue.project_id);
@@ -3646,7 +3652,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             : issue.user_assigned
               ? '<span class="better-codex-card-assignee"><span class="better-codex-card-avatar is-user is-initials" style="background:' + escapeHtml(state.user.color || "#16a34a") + '">' + escapeHtml(state.user.initials || t("你")) + '</span><span>' + escapeHtml(state.user.name || t("我")) + '</span></span>'
               : '<span class="better-codex-card-assignee is-empty">' + icon("user") + '<span>' + te("未分配") + '</span></span>';
-          return '<article class="better-codex-card' + (issue.id === draggingIssueId ? " is-dragging" : "") + (enrichmentLocked ? " is-enrichment-pending" : "") + (executionRunning ? " is-execution-running" : "") + '" draggable="' + String(!issueLocked) + '" aria-disabled="' + String(issueLocked) + '"' + (issueLocked ? ' aria-busy="' + String(enrichmentLocked || executionRunning) + '"' : "") + ' data-issue-id="' + escapeHtml(issue.id) + '"><div class="better-codex-card-row"><div class="better-codex-card-id">' + priorityIcon(issue.priority) + '<span>' + escapeHtml(issue.identifier) + '</span></div>' + activity + '</div><div class="better-codex-card-title">' + escapeHtml(mockupText(issue.title)) + '</div>' + (description ? '<div class="better-codex-card-description">' + escapeHtml(description) + '</div>' : "") + (chips ? '<div class="better-codex-chip-row">' + chips + '</div>' : "") + '<div class="better-codex-card-meta">' + meta + '<span>' + te("更新于 " + timeAgo(issue.updated_at)) + '</span></div></article>';
+          return '<article class="better-codex-card' + (issue.id === draggingIssueId ? " is-dragging" : "") + (enrichmentLocked ? " is-enrichment-pending" : "") + (executionRunning ? " is-execution-running" : "") + (permissions.remotePending ? " is-remote-pending" : "") + (permissions.remoteConflict ? " is-remote-conflict" : "") + '" draggable="' + String(!issueLocked) + '" aria-disabled="' + String(issueLocked) + '"' + (issueLocked ? ' aria-busy="' + String(enrichmentLocked || executionRunning || permissions.remotePending) + '"' : "") + ' data-issue-id="' + escapeHtml(issue.id) + '"><div class="better-codex-card-row"><div class="better-codex-card-id">' + priorityIcon(issue.priority) + '<span>' + escapeHtml(issue.identifier) + '</span></div>' + activity + '</div><div class="better-codex-card-title">' + escapeHtml(mockupText(issue.title)) + '</div>' + (description ? '<div class="better-codex-card-description">' + escapeHtml(description) + '</div>' : "") + (chips ? '<div class="better-codex-chip-row">' + chips + '</div>' : "") + '<div class="better-codex-card-meta">' + meta + '<span>' + te("更新于 " + timeAgo(issue.updated_at)) + '</span></div></article>';
         }).join("");
         const columnButton = archiveColumn
           ? '<button class="better-codex-column-icon" type="button" data-archive-open aria-label="' + te("查看已归档卡片") + '" title="' + te("查看已归档卡片") + '">' + icon("archive") + '</button>'

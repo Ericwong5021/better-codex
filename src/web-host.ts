@@ -209,12 +209,15 @@ async function requestRuntime(request) {
   if (typeof request.path !== "string" || !request.path.startsWith("/api/")) {
     throw new Error("invalid_bridge_request");
   }
+  const method = String(request.method || "GET").toUpperCase();
+  if (method !== "GET" && !request.commandId) request.commandId = crypto.randomUUID();
   const headers = { authorization: "Bearer " + sessionToken };
+  if (request.commandId) headers["x-better-codex-command-id"] = request.commandId;
   if (request.body !== undefined) headers["content-type"] = "application/json";
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10_000);
   try {
-    const response = await fetch(request.path, { method: request.method || "GET", headers, body: request.body, signal: controller.signal });
+    const response = await fetch(request.path, { method, headers, body: request.body, signal: controller.signal });
     let value;
     try { value = await response.json(); }
     catch { value = { error: response.statusText || "request_failed" }; }
@@ -375,7 +378,7 @@ void boot(consumeFragmentToken());
 
 export function betterCodexWebHostHtml(remote = false) {
   return remote
-    ? webHostHtml.replace("本地工作台", "远端只读工作台").replace("Local connection", "Self-hosted Hub").replace("请运行 <code>better-codex web</code> 自动打开，或粘贴本地访问令牌。令牌只用于连接本机 Runtime。", "输入 Hub 访问令牌以查看经过隐私裁剪的远端看板投影。").replace("访问令牌", "Hub 访问令牌")
+    ? webHostHtml.replace("本地工作台", "远端工作台").replace("Local connection", "Self-hosted Hub").replace("请运行 <code>better-codex web</code> 自动打开，或粘贴本地访问令牌。令牌只用于连接本机 Runtime。", "输入 Hub 访问令牌以管理经过隐私裁剪的远端看板投影。").replace("访问令牌", "Hub 访问令牌")
     : webHostHtml;
 }
 
@@ -387,7 +390,7 @@ export function betterCodexWebHostJavaScript(remote = false) {
   if (!remote) return webHostJavaScript;
   return webHostJavaScript
     .replace('kind: "web",', 'kind: "remote",')
-    .replace('issues: "read-write", agents: "read-write", liveUpdates: true, nativeThreads: false', 'issues: "read-only", agents: "unavailable", liveUpdates: true, nativeThreads: false')
+    .replace('issues: "read-write", agents: "read-write", liveUpdates: true, nativeThreads: false', 'issues: "read-write", agents: "unavailable", liveUpdates: true, nativeThreads: false')
     .replaceAll("Runtime", "Hub")
     .replaceAll("better-codex web", "Hub 管理命令");
 }
