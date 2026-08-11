@@ -131,6 +131,7 @@ macOS 版 Codex Desktop（Apple Silicon 和 Intel），以及 Windows x64 上 Mi
 ## 常用命令
 
 ```bash
+better-codex web               # 在默认浏览器打开本地 Web 工作台
 better-codex doctor            # 检查 MCP、运行时、数据库、Codex 兼容性和注入状态
 better-codex status            # 查看当前服务与看板连接
 better-codex mcp status        # 检查 MCP 注册状态

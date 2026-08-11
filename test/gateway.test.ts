@@ -76,8 +76,8 @@ test("gateway completes the issue workflow and survives restart", async () => {
     const bootstrap = await (await request("/api/bootstrap")).json() as { agents: Array<{ id: string; name: string; is_default?: boolean }>; appearance: unknown };
     assert.deepEqual(bootstrap.appearance, {
       theme: "system",
-      light: { accent: "#339cff", contrast: 45, ink: "#1a1c1f", surface: "#ffffff" },
-      dark: { accent: "#007acc", contrast: 50, ink: "#d4d4d4", surface: "#1e1e1e" },
+      light: { accent: "#339cff", contrast: 45, ink: "#1a1c1f", surface: "#ffffff", uiFont: 'ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif' },
+      dark: { accent: "#007acc", contrast: 50, ink: "#d4d4d4", surface: "#1e1e1e", uiFont: 'ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif' },
     });
     assert.deepEqual(bootstrap.agents[0], {
       id: "",

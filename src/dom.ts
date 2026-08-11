@@ -234,7 +234,7 @@ export function injectionVersion() {
   return activeCompatibility().version;
 }
 
-export function injectionScript(port: number, accessToken: string, action: "install" | "uninstall", locale: "zh-CN" | "en" = "zh-CN") {
+export function injectionScript(port: number, accessToken: string, action: "install" | "uninstall", locale: "zh-CN" | "en" = "zh-CN", host: "codex" | "web" = "codex") {
   if (action === "uninstall") {
     return `(() => {
       window.__betterCodexInjection__?.destroy?.();
@@ -265,9 +265,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const VERSION = ${JSON.stringify(compatibility.version)};
     const CORE_VERSION = ${JSON.stringify(coreVersion)};
     const PROFILE = ${JSON.stringify(betterCodexProfile)};
+    const HOST_KIND = ${JSON.stringify(host)};
     const HELP_MODE_MARKDOWN = ${helpModeMarkdown};
     const previous = window.__betterCodexInjection__;
-    if (previous?.version === VERSION && previous?.endpoint === ${baseUrl} && previous?.profile === PROFILE) {
+    if (previous?.version === VERSION && previous?.endpoint === ${baseUrl} && previous?.profile === PROFILE && previous?.host === HOST_KIND) {
       previous.refresh();
       return { installed: true, reused: true };
     }
@@ -284,9 +285,31 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const BRIDGE_TOKEN = ${bridgeToken};
     const BETTER_CODEX_LOGO_URL = ${JSON.stringify(betterCodexLogoUrl)};
     const INITIAL_LOCALE = ${JSON.stringify(locale)};
-    const SELECTORS = ${JSON.stringify(compatibility.selectors)};
-    const ATTRIBUTES = ${JSON.stringify(compatibility.attributes)};
-    const NAVIGATION = ${JSON.stringify(compatibility.navigation)};
+    const SELECTORS = HOST_KIND === "web" ? {
+      sidebarScroll: "[data-app-action-sidebar-scroll]",
+      sidebarSection: "[data-app-action-sidebar-section]",
+      truncatedText: ".text-fade-truncate",
+      contentFrame: ".app-shell-main-content-frame",
+      contentLayout: "[data-app-shell-main-content-layout]",
+      threadRow: "[data-app-action-sidebar-thread-id]",
+      projectList: "[data-app-action-sidebar-project-list-id]",
+      projectId: "[data-app-action-sidebar-project-id]",
+      currentProjectRow: "[data-app-action-sidebar-project-row][aria-current=\\\"page\\\"]",
+      projectRow: "[data-app-action-sidebar-project-row]",
+      searchInput: "input[type=\\\"search\\\"]",
+      sidebarNavigation: "aside nav[role=\\\"navigation\\\"]",
+    } : ${JSON.stringify(compatibility.selectors)};
+    const ATTRIBUTES = HOST_KIND === "web" ? {
+      threadId: "data-app-action-sidebar-thread-id",
+      threadActive: "data-app-action-sidebar-thread-active",
+      projectListId: "data-app-action-sidebar-project-list-id",
+      projectId: "data-app-action-sidebar-project-id",
+      projectLabel: "data-app-action-sidebar-project-label",
+    } : ${JSON.stringify(compatibility.attributes)};
+    const NAVIGATION = HOST_KIND === "web" ? {
+      messageType: "navigate-to-route",
+      threadRoutePrefix: "/local/",
+    } : ${JSON.stringify(compatibility.navigation)};
     const BETTER_CODEX_ROUTE = ${JSON.stringify(betterCodexMcpRoute)};
     const LUCIDE_ICONS = ${JSON.stringify(lucideIcons)};
     const AGENT_AVATAR_PRESETS = ${JSON.stringify(agentAvatarPresets)};
@@ -1051,7 +1074,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     function findReferenceButton() {
       const scroll = document.querySelector(SELECTORS.sidebarScroll);
       if (!scroll) return null;
-      const buttons = Array.from(scroll.querySelectorAll("button"));
+      const buttons = Array.from(scroll.querySelectorAll("button")).filter(button => !button.hasAttribute(OWNED));
       const plugin = buttons.find(button => ["插件", "plugins"].includes(label(button.textContent || button.getAttribute("aria-label"))));
       if (plugin) return plugin;
       return buttons.find(button => button.closest(SELECTORS.sidebarSection)) || buttons[0] || null;
@@ -1061,6 +1084,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const reference = findReferenceButton();
       const button = reference ? reference.cloneNode(true) : document.createElement("button");
       button.type = "button";
+      if (!reference && HOST_KIND === "web") {
+        button.className = "web-nav-button";
+        button.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"></svg><span class="text-fade-truncate"></span>';
+      }
       ["id", "disabled", "aria-current", "aria-expanded", "aria-controls", "aria-describedby", "data-state"].forEach(name => button.removeAttribute(name));
       button.classList.remove("bg-token-list-hover-background");
       button.querySelectorAll(".text-token-list-active-selection-foreground").forEach(node => {
@@ -1127,15 +1154,20 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (destroyed) return false;
       installStyle();
       const reference = findReferenceButton();
-      if (!reference?.parentElement) return false;
+      const parent = reference?.parentElement || (HOST_KIND === "web" ? document.querySelector(SELECTORS.sidebarSection) : null);
+      if (!parent) return false;
       if (!entry) entry = createEntry("任务看板", ENTRY_ID, "打开任务看板", "issues");
       syncEntryLabel(entry, "任务看板", "打开任务看板");
       syncEntryIcon(entry, "issues");
-      if (entry.parentElement !== reference.parentElement || entry.previousElementSibling !== reference) reference.after(entry);
+      if (reference) {
+        if (entry.parentElement !== parent || entry.previousElementSibling !== reference) reference.after(entry);
+      } else if (entry.parentElement !== parent || entry !== parent.firstElementChild) {
+        parent.prepend(entry);
+      }
       if (!agentsEntry) agentsEntry = createEntry("智能体", AGENTS_ENTRY_ID, "管理智能体", "agents");
       syncEntryLabel(agentsEntry, "智能体", "管理智能体");
       syncEntryIcon(agentsEntry, "agents");
-      if (agentsEntry.parentElement !== reference.parentElement || agentsEntry.previousElementSibling !== entry) entry.after(agentsEntry);
+      if (agentsEntry.parentElement !== parent || agentsEntry.previousElementSibling !== entry) entry.after(agentsEntry);
       const currentEntry = active && state.surface === "issues" ? entry : active && state.surface === "agents" ? agentsEntry : null;
       for (const item of [entry, agentsEntry]) {
         if (item === currentEntry && item.getAttribute("aria-current") !== "page") item.setAttribute("aria-current", "page");
@@ -1145,6 +1177,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function findMount() {
+      if (HOST_KIND === "web") return document.querySelector("[data-better-codex-web-surface]");
       const frame = document.querySelector(SELECTORS.contentFrame);
       const layout = frame?.closest(SELECTORS.contentLayout) || document.querySelector(SELECTORS.contentLayout);
       const surface = layout?.parentElement;
@@ -2563,9 +2596,21 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         root.setProperty("--bc-host-" + mode + "-hover", layer(9));
         root.setProperty("--bc-host-" + mode + "-pressed", layer(12));
         root.setProperty("--bc-host-" + mode + "-hairline", layer(11));
+        const uiFont = String(profile?.uiFont || "");
+        if (uiFont && CSS.supports("font-family", uiFont)) root.setProperty("--bc-host-" + mode + "-font-ui", uiFont);
       };
       applyTheme("light", appearance?.light);
       applyTheme("dark", appearance?.dark);
+      if (HOST_KIND === "web") {
+        const storedTheme = localStorage.getItem("better-codex-web-theme");
+        const configuredTheme = appearance?.theme;
+        const resolvedTheme = storedTheme === "light" || storedTheme === "dark"
+          ? storedTheme
+          : configuredTheme === "light" || configuredTheme === "dark"
+            ? configuredTheme
+            : matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        document.documentElement.dataset.theme = resolvedTheme;
+      }
     }
 
     function effortsForModel(model) {
@@ -3249,7 +3294,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       try {
         const bootstrap = await api("/api/bootstrap");
         applyAppearance(bootstrap.appearance);
-        state.systemLocale = resolveSystemLocale(bootstrap.locale);
+        state.systemLocale = resolveSystemLocale(HOST_KIND === "web" ? INITIAL_LOCALE : bootstrap.locale);
         state.locale = state.languageSetting === "system" ? state.systemLocale : state.languageSetting;
         if (bootstrap.user && typeof bootstrap.user === "object") state.user = bootstrap.user;
         state.mockup = Boolean(bootstrap.mockup);
@@ -4687,6 +4732,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function isBetterCodexRoute() {
+      if (HOST_KIND === "web") return location.pathname === "/web" || location.pathname === "/";
       if (Array.from(document.querySelectorAll("webview")).some(view => view.title === "Better Codex")) return true;
       return Array.from(document.querySelectorAll("main *")).some(node => ["找不到 MCP 应用视图", "MCP app view not found"].includes(node.textContent?.trim()));
     }
@@ -4709,7 +4755,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       mountPanel();
       render();
       void (ready ? loadSurface({ preserveInspector: true }) : load());
-      if (pollTimer === null) pollTimer = setInterval(() => { if (active && !panel?.dataset.recovery) void perform(() => loadSurface({ background: true })); }, 3000);
+      if (pollTimer === null) pollTimer = setInterval(() => { if (!document.hidden && active && !panel?.dataset.recovery) void perform(() => loadSurface({ background: true })); }, 3000);
     }
 
     function close(options = {}) {
@@ -4870,10 +4916,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-theme", "aria-current", ATTRIBUTES.threadActive] });
       refresh();
       void checkUpdateNotice();
-      updateTimer = setInterval(checkUpdateNotice, 15000);
+      updateTimer = setInterval(() => { if (!document.hidden) void checkUpdateNotice(); }, 15000);
     }
 
-    window.__betterCodexInjection__ = { version: VERSION, profile: PROFILE, endpoint: BASE_URL, refresh, open: openRoute, close, destroy };
+    window.__betterCodexInjection__ = { version: VERSION, profile: PROFILE, host: HOST_KIND, endpoint: BASE_URL, refresh, open: openRoute, close, destroy };
     document.addEventListener("click", onClick, true);
     document.addEventListener("keydown", onGlobalShortcut, true);
     window.addEventListener("codex-message-from-view", onHostMessageFromView, true);

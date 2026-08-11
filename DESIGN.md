@@ -65,3 +65,11 @@ The agent inspector occupies a fixed right-side surface on desktop. Below 720px 
 - Task card: use `--bc-color-surface-raised`, `--bc-radius-md`, 12px padding, and no border or shadow.
 - Menu: use `--bc-color-surface-raised`, `--bc-radius-md`, 34px rows, and `--bc-elevation-menu`.
 - Dialog: use `--bc-color-surface-raised`, `--bc-radius-xl`, no internal dividers, and `--bc-elevation-float`.
+
+## 10. Host architecture
+
+`src/dom.ts` is the single renderer for the task board, Agent directory, dialogs, menus, polling, and interactions. Codex Desktop and the browser must run the same generated injection script; host-specific behavior is limited to mounting, navigation, theme tokens, and the runtime request bridge.
+
+- Desktop host: CDP supplies `betterCodexRequest` and mounts into Codex selectors from the active compatibility manifest.
+- Web host: `src/web-host.ts` supplies a minimal Codex shell, a same-origin HTTP bridge, and the stable `[data-better-codex-web-surface]` mount.
+- Do not copy board or Agent markup into the Web host. A Web-only product surface needs an explicit reason and must not duplicate an existing renderer flow.

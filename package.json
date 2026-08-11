@@ -39,6 +39,7 @@
     "dist/markdown.js",
     "dist/updater.js",
     "dist/user-profile.js",
+    "dist/web-host.js",
     "dist/worker.js"
   ],
   "scripts": {

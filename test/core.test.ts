@@ -27,17 +27,23 @@ test("Codex appearance reads the active theme surfaces from config.toml", () => 
       'ink = "#1a1c1f"',
       'surface = "#ffffff"',
       "",
+      "[desktop.appearanceLightChromeTheme.fonts]",
+      'ui = "Inter, sans-serif"',
+      "",
       "[desktop.appearanceDarkChromeTheme]",
       'accent = "#007acc"',
       "contrast = 50",
       'ink = "#d4d4d4"',
       'surface = "#1e1e1e"',
       "",
+      "[desktop.appearanceDarkChromeTheme.fonts]",
+      'ui = "Geist, Inter"',
+      "",
     ].join("\n"));
     assert.deepEqual(readCodexAppearance(config), {
       theme: "dark",
-      light: { accent: "#339cff", contrast: 45, ink: "#1a1c1f", surface: "#ffffff" },
-      dark: { accent: "#007acc", contrast: 50, ink: "#d4d4d4", surface: "#1e1e1e" },
+      light: { accent: "#339cff", contrast: 45, ink: "#1a1c1f", surface: "#ffffff", uiFont: "Inter, sans-serif" },
+      dark: { accent: "#007acc", contrast: 50, ink: "#d4d4d4", surface: "#1e1e1e", uiFont: "Geist, Inter" },
     });
   } finally {
     rmSync(directory, { recursive: true, force: true });

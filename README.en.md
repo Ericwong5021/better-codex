@@ -131,6 +131,7 @@ Codex Desktop on macOS (Apple Silicon and Intel) and the Microsoft Store version
 ## Useful commands
 
 ```bash
+better-codex web               # open the local Web workspace in your default browser
 better-codex doctor            # check MCP, runtime, database, Codex compatibility, injection state
 better-codex status            # show the current service and board connection
 better-codex mcp status        # inspect the MCP registration

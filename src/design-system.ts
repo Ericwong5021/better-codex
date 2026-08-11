@@ -9,7 +9,7 @@
 export function betterCodexDesignSystemCss() {
   return String.raw`
     :root {
-      --bc-font-ui: var(--font-sans, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif);
+      --bc-font-ui: var(--bc-host-light-font-ui, var(--font-sans, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif));
       /* Follow Codex Settings > Appearance sansFontSize via host tokens. */
       --bc-text-base: var(--font-size-base, var(--font-text-md-size, var(--codex-chat-font-size, 14px)));
       --bc-text-md: var(--font-size-normal, var(--bc-text-base));
@@ -98,6 +98,7 @@ export function betterCodexDesignSystemCss() {
     }
 
     html.electron-dark, html.dark, html[data-theme="dark"] {
+      --bc-font-ui: var(--bc-host-dark-font-ui, var(--font-sans, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif));
       --bc-color-canvas: var(--bc-host-dark-canvas, #1e1e1e);
       --bc-color-surface: var(--bc-host-dark-surface, #232323);
       --bc-color-surface-raised: var(--bc-host-dark-raised, #2c2c2c);
@@ -4099,21 +4100,11 @@ export function betterCodexDesignSystemCss() {
 
     #better-codex-dialog[data-detail="true"][data-expanded="false"] {
       width: min(720px, calc(100vw - 48px));
-      height: fit-content;
-      max-height: calc(100vh - 48px);
-    }
-
-    #better-codex-dialog[data-detail="true"][data-expanded="false"]:has(.better-codex-conversation) {
       height: min(62vh, 640px);
     }
 
     #better-codex-dialog[data-detail="true"][data-expanded="true"] {
       width: min(1200px, calc(100vw - 48px));
-      height: fit-content;
-      max-height: calc(100vh - 48px);
-    }
-
-    #better-codex-dialog[data-detail="true"][data-expanded="true"]:has(.better-codex-conversation) {
       height: min(90vh, 960px);
     }
 
@@ -4132,30 +4123,7 @@ export function betterCodexDesignSystemCss() {
       flex: 0 0 auto;
       flex-direction: column;
       align-items: flex-start;
-      margin: 0 var(--bc-space-4);
-      border-radius: var(--bc-radius-sm);
-      padding: var(--bc-space-1) var(--bc-space-2) var(--bc-space-2);
-      transition: background-color var(--bc-motion-fast) ease-out, box-shadow var(--bc-motion-fast) ease-out;
-    }
-
-    #better-codex-dialog[data-detail="true"] .better-codex-manual-title {
-      box-sizing: border-box;
-      width: calc(100% - (var(--bc-space-4) * 2));
-      margin: 0 var(--bc-space-4) var(--bc-space-1);
-      border-radius: var(--bc-radius-sm);
-      padding: var(--bc-space-1) var(--bc-space-2);
-      transition: background-color var(--bc-motion-fast) ease-out, box-shadow var(--bc-motion-fast) ease-out;
-    }
-
-    #better-codex-dialog[data-detail="true"] .better-codex-manual-title:hover,
-    #better-codex-dialog[data-detail="true"] .better-codex-description-field:hover {
-      background: color-mix(in oklch, var(--bc-color-input) 58%, transparent);
-    }
-
-    #better-codex-dialog[data-detail="true"] .better-codex-manual-title:focus,
-    #better-codex-dialog[data-detail="true"] .better-codex-description-field:focus-within {
-      background: var(--bc-color-input);
-      box-shadow: var(--bc-inset-hairline), var(--bc-focus-ring);
+      margin: 0 var(--bc-space-5);
     }
 
     #better-codex-dialog .better-codex-description-field .better-codex-dialog-editor {

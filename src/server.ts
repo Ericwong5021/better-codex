@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { closeSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
@@ -8,7 +8,7 @@ import { coreVersion, readCompatibilityStatus } from "./compatibility.js";
 import { agentSandboxModes, cleanMaxConcurrency, issuePriorities, issueStatuses, Store, type AgentModel, type AgentReasoningEffort, type AgentSandboxMode, type Issue, type IssuePriority, type IssueStatus } from "./db.js";
 import { defaultAgentProfile, syncAgentProfiles, updateDefaultAgentProfile } from "./agent-profiles.js";
 import { readCodexAppearance } from "./appearance.js";
-import { readCodexLocale } from "./locale.js";
+import { normalizeCodexLocale, readCodexLocale } from "./locale.js";
 import { readCodexUserProfile } from "./user-profile.js";
 import { readModelCatalog } from "./model-catalog.js";
 import { attachmentPath, runPath, runtimePort, token, updateLogPath } from "./config.js";
@@ -20,9 +20,13 @@ import { join } from "node:path";
 import { normalizeSessionId, readConversationActivity, readConversationResult, sessionWorkspace } from "./session-transcript.js";
 import { IssueWorker } from "./worker.js";
 import { maxMockupBytes, normalizeMockupLocale, readMockupState, replaceMockupState, resetMockupState, updateMockupState } from "./mockup.js";
+import { injectionScript } from "./dom.js";
+import { betterCodexWebHostCss, betterCodexWebHostHtml, betterCodexWebHostJavaScript } from "./web-host.js";
 
 const accessToken = token();
 const mockupEnabled = !isSea() && !packagedBuild && process.argv.includes("--mockup");
+const webSessionTtlMs = 12 * 60 * 60 * 1000;
+const maxWebSessions = 32;
 const maxPastedImageBytes = 10 * 1024 * 1024;
 const maxPastedImageBodyBytes = Math.ceil(maxPastedImageBytes * 4 / 3) + 1024;
 const codexStatePath = join(process.env.CODEX_HOME || join(homedir(), ".codex"), ".codex-global-state.json");
@@ -98,6 +102,20 @@ function sendJson(response: ServerResponse, status: number, value: unknown) {
   response.end(body);
 }
 
+function sendWeb(response: ServerResponse, status: number, body: string, contentType: string, headers: Record<string, string> = {}) {
+  response.writeHead(status, {
+    "cache-control": "no-store",
+    "content-length": Buffer.byteLength(body),
+    "content-type": contentType,
+    "cross-origin-opener-policy": "same-origin",
+    "cross-origin-resource-policy": "same-origin",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+    ...headers,
+  });
+  response.end(body);
+}
+
 function sendPreflight(response: ServerResponse) {
   response.writeHead(204, {
     "access-control-allow-origin": "app://-",
@@ -112,13 +130,40 @@ function sendPreflight(response: ServerResponse) {
 
 function readBody(request: IncomingMessage, limit = 1024 * 1024) {
   return new Promise<Record<string, unknown>>((resolve, reject) => {
-    let source = "";
-    request.on("data", (chunk) => {
-      source += chunk;
-      if (source.length > limit) reject(new Error("body_too_large"));
-    });
+    const declaredLength = Number(request.headers["content-length"]);
+    if (Number.isFinite(declaredLength) && declaredLength > limit) {
+      request.resume();
+      reject(new Error("body_too_large"));
+      return;
+    }
+    const chunks: Buffer[] = [];
+    let size = 0;
+    let settled = false;
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      chunks.length = 0;
+      reject(error);
+    };
+    const onData = (chunk: Buffer | string) => {
+      if (settled) return;
+      const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      size += value.length;
+      if (size > limit) {
+        request.off("data", onData);
+        request.resume();
+        fail(new Error("body_too_large"));
+        return;
+      }
+      chunks.push(value);
+    };
+    request.on("data", onData);
+    request.on("error", error => fail(error instanceof Error ? error : new Error("request_error")));
     request.on("end", () => {
+      if (settled) return;
+      settled = true;
       try {
+        const source = Buffer.concat(chunks, size).toString("utf8");
         const value = source ? JSON.parse(source) : {};
         if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid_json");
         resolve(value);
@@ -142,11 +187,61 @@ function loopback(request: IncomingMessage) {
 function trustedOrigin(request: IncomingMessage) {
   const origin = request.headers.origin;
   if (!origin) return true;
-  return origin === "app://-";
+  if (origin === "app://-") return true;
+  const port = request.socket.localPort;
+  return Number.isInteger(port) && origin === `http://127.0.0.1:${port}`;
 }
 
-function authorized(request: IncomingMessage, url: URL) {
-  return request.headers.authorization === `Bearer ${accessToken}` || url.searchParams.get("token") === accessToken;
+function validAccessToken(value: unknown) {
+  if (typeof value !== "string") return false;
+  const received = Buffer.from(value);
+  const expected = Buffer.from(accessToken);
+  return received.length === expected.length && timingSafeEqual(received, expected);
+}
+
+function bearerToken(request: IncomingMessage) {
+  const authorization = String(request.headers.authorization || "");
+  return authorization.startsWith("Bearer ") ? authorization.slice("Bearer ".length) : "";
+}
+
+function validWebSession(webSessions: Map<string, number>, value: unknown) {
+  if (typeof value !== "string" || !value) return false;
+  const expiresAt = webSessions.get(value);
+  if (!expiresAt) return false;
+  if (expiresAt <= Date.now()) {
+    webSessions.delete(value);
+    return false;
+  }
+  webSessions.delete(value);
+  webSessions.set(value, Date.now() + webSessionTtlMs);
+  return true;
+}
+
+function createWebSession(webSessions: Map<string, number>) {
+  const now = Date.now();
+  for (const [sessionToken, expiresAt] of webSessions) {
+    if (expiresAt <= now) webSessions.delete(sessionToken);
+  }
+  while (webSessions.size >= maxWebSessions) {
+    const oldest = webSessions.keys().next().value;
+    if (typeof oldest !== "string") break;
+    webSessions.delete(oldest);
+  }
+  const sessionToken = randomUUID();
+  webSessions.set(sessionToken, now + webSessionTtlMs);
+  return sessionToken;
+}
+
+function authorized(request: IncomingMessage, url: URL, webSessions: Map<string, number>) {
+  const bearer = bearerToken(request);
+  return validAccessToken(bearer)
+    || validWebSession(webSessions, bearer)
+    || validAccessToken(url.searchParams.get("token"));
+}
+
+function sameOriginBrowserRequest(request: IncomingMessage) {
+  const site = request.headers["sec-fetch-site"];
+  return !site || site === "same-origin" || site === "none";
 }
 
 function asStatus(value: unknown) {
@@ -318,6 +413,7 @@ export function startServer() {
   let cleaned = false;
   let updateRelaunchScheduled = false;
   let updateInstallInProgress = false;
+  const webSessions = new Map<string, number>();
   const worker = new IssueWorker(store);
   const withAvatar = <T extends { id: string; is_default?: boolean }>(profile: T) => ({
     ...profile,
@@ -351,7 +447,29 @@ export function startServer() {
         const activePort = typeof address === "object" && address ? address.port : 0;
         return sendJson(response, database.ok ? 200 : 503, { ok: database.ok, name: "Better Codex Runtime", version: identity.version, pid: process.pid, port: activePort, instanceId: identity.instanceId, database, compatibility: readCompatibilityStatus() });
       }
-      if (!authorized(request, url)) return sendJson(response, 401, { error: "unauthorized" });
+      if ((url.pathname === "/web" || url.pathname.startsWith("/local/")) && method === "GET") {
+        return sendWeb(response, 200, betterCodexWebHostHtml(), "text/html; charset=utf-8", {
+          "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+        });
+      }
+      if (url.pathname === "/web/host.css" && method === "GET") return sendWeb(response, 200, betterCodexWebHostCss(), "text/css; charset=utf-8");
+      if (url.pathname === "/web/host.js" && method === "GET") return sendWeb(response, 200, betterCodexWebHostJavaScript(), "text/javascript; charset=utf-8");
+      if (url.pathname === "/web/session" && method === "POST") {
+        const body = await readBody(request, 4096);
+        if (!validAccessToken(body.token)) return sendJson(response, 401, { error: "unauthorized" });
+        const sessionToken = createWebSession(webSessions);
+        return sendWeb(response, 200, JSON.stringify({ token: sessionToken }), "application/json; charset=utf-8");
+      }
+      if (url.pathname === "/web/injection.js" && method === "GET") {
+        const sessionToken = url.searchParams.get("session") || "";
+        if (!sameOriginBrowserRequest(request)) return sendJson(response, 403, { error: "forbidden" });
+        if (!validWebSession(webSessions, sessionToken)) return sendJson(response, 401, { error: "unauthorized" });
+        const address = server.address();
+        const activePort = typeof address === "object" && address ? address.port : 0;
+        const locale = normalizeCodexLocale(url.searchParams.get("locale"));
+        return sendWeb(response, 200, injectionScript(activePort, sessionToken, "install", locale, "web"), "text/javascript; charset=utf-8");
+      }
+      if (!authorized(request, url, webSessions)) return sendJson(response, 401, { error: "unauthorized" });
       if (url.pathname === "/api/issues/attachments" && method === "POST") {
         const body = await readBody(request, maxPastedImageBodyBytes);
         return sendJson(response, 201, savePastedImage(body.data));
