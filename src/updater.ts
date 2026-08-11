@@ -26,6 +26,7 @@ type UpdatePayload = {
     version: string;
     assets: Record<string, Omit<UpdateAsset, "version">>;
   } | null;
+  installers?: Record<string, Omit<UpdateAsset, "version">>;
 };
 
 type SignedUpdateManifest = {
@@ -285,6 +286,10 @@ function validatePayload(value: unknown, channel: UpdateChannel) {
     ) throw new Error("update_core_invalid");
     if (channel === "stable" && payload.core.version.includes("-")) throw new Error("update_prerelease_not_allowed");
     Object.values(payload.core.assets).forEach(validateUpdateAsset);
+  }
+  if (payload.installers) {
+    if (typeof payload.installers !== "object" || Array.isArray(payload.installers)) throw new Error("update_installers_invalid");
+    Object.values(payload.installers).forEach(validateUpdateAsset);
   }
   return payload;
 }

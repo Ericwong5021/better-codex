@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { assertPreviewPromotion, compareReleaseVersions, readVerifiedManifest, readVerifiedPreviewManifest, stableJson } from "../scripts/preview-feed.mjs";
+import { assertPreviewPromotion, compareReleaseVersions, readVerifiedManifest, readVerifiedPreviewManifest, samePreviewVersion, stableJson } from "../scripts/preview-feed.mjs";
 
 function signedManifest(version: string, privateKey: KeyObject, channel = "preview") {
   const payload = {
@@ -37,6 +37,8 @@ test("Preview feed promotion is signed and monotonic", () => {
     writeFileSync(downgradePath, JSON.stringify(signedManifest("0.4.1", privateKey)));
 
     assert.equal(assertPreviewPromotion(currentPath, promotedPath, keyPath).core.version, "0.4.2");
+    assert.equal(samePreviewVersion(currentPath, currentPath, keyPath), true);
+    assert.equal(samePreviewVersion(currentPath, promotedPath, keyPath), false);
     assert.equal(readVerifiedManifest(currentPath, keyPath, "preview").channel, "preview");
     assert.throws(() => readVerifiedManifest(currentPath, keyPath, "stable"), /preview_feed_manifest_invalid/);
     assert.throws(() => assertPreviewPromotion(currentPath, downgradePath, keyPath), /preview_feed_core_downgrade/);

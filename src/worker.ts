@@ -458,6 +458,7 @@ export class IssueWorker {
         return { command, steered: true, replayed: false };
       }
       if (existingCommand.kind === "start" || existingCommand.kind === "turn") {
+        if (existingCommand.turn_id || (existingCommand.thread_id && existingCommand.error === "session_outcome_unknown")) throw new Error("session_command_outcome_unknown");
         const retrySession = this.store.getIssueSession(issueId);
         const replaceSession = existingCommand.kind === "start" && Boolean(retrySession && !retrySession.active_turn_id);
         const queued = this.store.enqueueSessionReply({
@@ -531,6 +532,10 @@ export class IssueWorker {
     return command;
   }
 
+  checkpointSessionCommand(commandId: string, relayId: string, result: Record<string, unknown>) {
+    return this.store.checkpointSessionCommand(commandId, relayId, result);
+  }
+
   failSessionCommand(commandId: string, relayId: string, error: string, partialThreadId?: string, partialTurnId?: string) {
     const command = this.store.failSessionCommand(commandId, relayId, error, partialThreadId, partialTurnId);
     this.handleSessionCommandFailure(command, command.error || error);
@@ -538,7 +543,7 @@ export class IssueWorker {
   }
 
   private handleSessionCommandFailure(command: SessionCommand, error: string) {
-    if (command.status === "pending" || command.kind === "steer" || command.kind === "interrupt" || command.turn_id) return;
+    if (command.status === "pending" || command.kind === "steer" || command.kind === "interrupt" || command.turn_id || error === "session_outcome_unknown") return;
     if (command.run_id) {
       const claim = this.store.getRunClaim(command.run_id);
       if (claim?.issue.active_run_status && claim.issue.active_run_status !== "scheduling") {
@@ -615,20 +620,21 @@ export class IssueWorker {
     this.reconcilingSessions = true;
     try {
       for (const session of this.store.listActiveIssueSessions()) {
-        const threadId = session.thread_id;
-        const expectedTurnId = session.active_turn_id || "";
-        if (!threadId || !expectedTurnId) continue;
+      const threadId = session.thread_id;
+      const expectedTurnId = session.active_turn_id || "";
+        if (!threadId) continue;
         const result = await readConversationActivity(threadId);
         const activity = result.activity;
-        if (!activity.turn_id || activity.turn_id !== expectedTurnId) continue;
+        if (!activity.turn_id || (expectedTurnId && activity.turn_id !== expectedTurnId)) continue;
+        if (!expectedTurnId && !this.store.sessionTurnStarted(threadId, activity.turn_id)) continue;
         if (activity.status === "running") {
-          this.store.sessionTurnStarted(threadId, expectedTurnId);
+          this.store.sessionTurnStarted(threadId, activity.turn_id);
           continue;
         }
         if (activity.status !== "completed" && activity.status !== "interrupted") continue;
         const conversation = await readConversationResult(threadId);
-        if (conversation.markdown) this.store.recordSessionAgentMessage(threadId, expectedTurnId, conversation.markdown);
-        const completion = this.store.completeSessionTurn(threadId, expectedTurnId, activity.status);
+        if (conversation.markdown) this.store.recordSessionAgentMessage(threadId, activity.turn_id, conversation.markdown);
+        const completion = this.store.completeSessionTurn(threadId, activity.turn_id, activity.status);
         if (completion) this.finishSessionTurn(completion);
       }
     } finally {

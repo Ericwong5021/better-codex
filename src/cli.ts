@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { accessSync, closeSync, constants, cpSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { accessSync, closeSync, constants, cpSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { isSea } from "node:sea";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -26,6 +26,8 @@ import {
   runtimeLogPath,
   updatePublicKeyPath,
   token,
+  canonicalPath,
+  packagedLibexecSkillsPath,
 } from "./config.js";
 import { readRuntimeState } from "./runtime-state.js";
 import { injectionEnabled, setInjectionEnabled } from "./injection-state.js";
@@ -66,10 +68,7 @@ async function stopLegacyRuntime() {
 function commandArguments() {
   const values = process.argv.slice(2);
   const launcher = process.env.BETTER_CODEX_LAUNCHER_PATH;
-  const canonical = (value: string) => {
-    try { return realpathSync(value); } catch { return resolve(value); }
-  };
-  if (launcher && values[0] && canonical(values[0]) === canonical(launcher)) values.shift();
+  if (launcher && values[0] && canonicalPath(values[0]) === canonicalPath(launcher)) values.shift();
   return values;
 }
 
@@ -707,7 +706,7 @@ function installBundledSkills() {
   const candidates = [
     process.env.BETTER_CODEX_SKILLS_PATH,
     join(dirname(process.execPath), "..", "libexec", "skills"),
-    packagedBuild ? join(dirname(resolve(process.argv[1])), "..", "libexec", "skills") : null,
+    packagedBuild && process.argv[1] ? packagedLibexecSkillsPath(process.argv[1]) : null,
     launcher ? join(dirname(launcher), "..", "libexec", "skills") : null,
   ].filter((value): value is string => Boolean(value));
   const source = candidates.find(path => existsSync(join(path, "better-codex", "SKILL.md")) && existsSync(resolve(path, "..", "update-public-key.pem")));

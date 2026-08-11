@@ -230,7 +230,7 @@ Invoke-Expression $function.Extent.Text
 
 function Manifest([string]$Version, [string]$Channel = "preview", [bool]$IncludeWindows = $true) {
   $assets = if ($IncludeWindows) { @{ "win32-amd64" = @{ url = "https://example.invalid/core"; sha256 = ("a" * 64) } } } else { @{} }
-  return (@{ payload = @{ schemaVersion = 1; channel = $Channel; core = @{ version = $Version; assets = $assets } }; signature = "signed" } | ConvertTo-Json -Depth 8 -Compress)
+  return (@{ payload = @{ schemaVersion = 1; channel = $Channel; core = @{ version = $Version; assets = $assets }; installers = @{ windows = @{ url = "https://example.invalid/install.ps1"; sha256 = ("b" * 64) } } }; signature = "signed" } | ConvertTo-Json -Depth 8 -Compress)
 }
 if ((Get-PreviewReleaseVersion (Manifest "0.4.1-beta.5")) -ne "0.4.1-beta.5") { throw "Beta version was not selected" }
 if ((Get-PreviewReleaseVersion (Manifest "0.4.1")) -ne "0.4.1") { throw "promoted release was not selected" }
@@ -247,10 +247,12 @@ exit 0
 
 test("Windows Beta bootstrap invokes the versioned installer in the Preview lane", () => {
   assert.match(betaSource, /releases\/download\/preview\/update-manifest\.json/);
-  assert.match(betaSource, /releases\/download\/v\$version\/install\.ps1/);
-  assert.match(betaSource, /if \(\$installer -match '\\\[switch\\\]\\\$SkipBanner'\)/);
-  assert.match(betaSource, /\$installerBlock -Repository \$Repository -Version "v\$version" -Preview -SkipBanner/);
-  assert.match(betaSource, /\$installerBlock -Repository \$Repository -Version "v\$version" -Preview\s*\n\}/);
+  assert.match(betaSource, /crypto\.verify/);
+  assert.match(betaSource, /Get-NormalizedSha256/);
+  assert.match(betaSource, /payload\?\.installers\?\.windows/);
+  assert.match(betaSource, /Get-FileHash -LiteralPath \$installerPath -Algorithm SHA256/);
+  assert.match(betaSource, /if \(\$installerContent -match '\\\[switch\\\]\\\$SkipBanner'\)/);
+  assert.match(betaSource, /\$installerBlock -Repository \$Repository -Version \(\"v\" \+ \[string\]\$verified\.version\) -Preview -SkipBanner/);
   assert.match(source, /\[switch\]\$Preview/);
   assert.match(source, /\[switch\]\$SkipBanner/);
   assert.match(source, /\$preservePreviewLane = \[bool\]\$Preview/);
@@ -337,7 +339,11 @@ test("Preview feed publication exposes and verifies the fixed Beta installer end
 
 test("every successful installer path persists its inferred update channel", () => {
   assert.match(source, /function Set-InstalledUpdateChannel/);
-  assert.equal((source.match(/Set-InstalledUpdateChannel \$[A-Za-z]+ \$desiredChannel/g) ?? []).length, 3);
+  assert.equal((source.match(/Set-InstalledUpdateChannel \$[A-Za-z]+ \$desiredChannel/g) ?? []).length, 4);
+  const upgradeFunction = source.indexOf("function Invoke-ExistingUpgrade");
+  const upgradeChannel = source.indexOf("Set-InstalledUpdateChannel $Executable $desiredChannel", upgradeFunction);
+  const upgradeUpdate = source.indexOf('@("update")', upgradeFunction);
+  assert.ok(upgradeFunction >= 0 && upgradeChannel > upgradeFunction && upgradeUpdate > upgradeChannel);
   const windowsReady = source.indexOf("$readyVersion = Get-InstalledVersion $executable");
   const windowsChannel = source.indexOf("Set-InstalledUpdateChannel $executable $desiredChannel", windowsReady);
   const windowsLegacyRemoval = source.indexOf("Removing the verified legacy executable", windowsReady);

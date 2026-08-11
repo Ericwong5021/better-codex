@@ -159,7 +159,7 @@ async function bridgeRequest(connection: Connection, runtimePort: number, access
 
 async function cdpJson<T>(port: number, path: string, timeoutMs = cdpHttpTimeoutMs) {
   try {
-    const response = await fetch(`http://127.0.0.1:${port}${path}`, { signal: AbortSignal.timeout(timeoutMs) });
+    const response = await fetch(`http://127.0.0.1:${port}${path}`, { signal: AbortSignal.timeout(timeoutMs), redirect: "error" });
     if (!response.ok) throw new Error(`cdp_http_${response.status}`);
     return await response.json() as T;
   } catch (error) {
@@ -169,14 +169,69 @@ async function cdpJson<T>(port: number, path: string, timeoutMs = cdpHttpTimeout
   }
 }
 
-async function targets(port: number, timeoutMs = cdpHttpTimeoutMs) {
+function debuggerUrlAllowed(value: string, port: number) {
+  try {
+    const url = new URL(value);
+    const hostname = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+    return url.protocol === "ws:"
+      && ["127.0.0.1", "::1", "localhost"].includes(hostname)
+      && Number(url.port) === port
+      && !url.username
+      && !url.password;
+  } catch {
+    return false;
+  }
+}
+
+function assertTrustedCdpListener(port: number) {
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("cdp_port_invalid");
+  if (process.platform === "win32") {
+    const script = `$ErrorActionPreference = 'Stop'
+$sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
+$ownerSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+$listeners = @(Get-NetTCPConnection -State Listen -LocalPort ${port} -ErrorAction Stop | Select-Object -ExpandProperty OwningProcess -Unique)
+$trusted = @($listeners | ForEach-Object {
+  $process = Get-CimInstance Win32_Process -Filter "ProcessId = $_"
+  if (-not $process -or $process.Name -ne 'ChatGPT.exe' -or $process.SessionId -ne $sessionId -or $process.ExecutablePath -notlike '*\\WindowsApps\\OpenAI.Codex_*') { return }
+  try { if ((Invoke-CimMethod -InputObject $process -MethodName GetOwnerSid -ErrorAction Stop).Sid -eq $ownerSid) { $process.ProcessId } } catch {}
+})
+if ($trusted.Count -ne 1 -or $listeners.Count -ne 1) { exit 1 }
+Write-Output $trusted[0]`;
+    try {
+      const result = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { encoding: "utf8", windowsHide: true, timeout: 5000 }).trim();
+      if (!/^\d+$/.test(result)) throw new Error("cdp_listener_untrusted");
+      return;
+    } catch {
+      throw new Error("cdp_listener_untrusted");
+    }
+  }
+  if (process.platform === "darwin") {
+    try {
+      const pids = execFileSync("/usr/sbin/lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"], { encoding: "utf8", timeout: 5000 })
+        .trim().split(/\s+/).filter(Boolean);
+      if (pids.length !== 1 || !/^\d+$/.test(pids[0])) throw new Error("cdp_listener_untrusted");
+      const uid = execFileSync("/bin/ps", ["-p", pids[0], "-o", "uid="], { encoding: "utf8", timeout: 5000 }).trim();
+      const executable = execFileSync("/usr/sbin/lsof", ["-a", "-p", pids[0], "-d", "txt", "-Fn"], { encoding: "utf8", timeout: 5000 })
+        .split(/\r?\n/).find(line => line.startsWith("n"))?.slice(1) || "";
+      const application = desktopApplication();
+      if (Number(uid) !== process.getuid?.() || !executable.startsWith(`${application}/Contents/`)) throw new Error("cdp_listener_untrusted");
+      return;
+    } catch {
+      throw new Error("cdp_listener_untrusted");
+    }
+  }
+}
+
+async function targets(port: number, timeoutMs = cdpHttpTimeoutMs, verifyListener = true) {
+  if (verifyListener) assertTrustedCdpListener(port);
   const values = await cdpJson<Target[]>(port, "/json/list", timeoutMs);
-  return values.filter(target => target.type === "page" && target.webSocketDebuggerUrl && target.id && targetAllowed(target));
+  return values.filter(target => target.type === "page" && target.webSocketDebuggerUrl && debuggerUrlAllowed(target.webSocketDebuggerUrl, port) && target.id && targetAllowed(target));
 }
 
 async function browserDebuggerUrl(port: number) {
+  assertTrustedCdpListener(port);
   const value = await cdpJson<{ webSocketDebuggerUrl?: unknown }>(port, "/json/version");
-  if (typeof value.webSocketDebuggerUrl !== "string") throw new Error("cdp_browser_websocket_unavailable");
+  if (typeof value.webSocketDebuggerUrl !== "string" || !debuggerUrlAllowed(value.webSocketDebuggerUrl, port)) throw new Error("cdp_browser_websocket_unavailable");
   return value.webSocketDebuggerUrl;
 }
 
@@ -800,7 +855,7 @@ export async function watchInjection(port: number, accessToken: string) {
 }
 
 export async function probeCdpTargetsForTest(port: number, timeoutMs: number) {
-  return targets(port, timeoutMs);
+  return targets(port, timeoutMs, false);
 }
 
 export async function waitForCdpTargetsForTest(port: number, timeoutMs: number) {

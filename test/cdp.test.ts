@@ -103,6 +103,19 @@ test("every main target scan has a total deadline and candidate cap", () => {
   assert.match(source, /\.slice\(0, cdpTargetCandidateLimit\)/);
 });
 
+test("CDP injection trusts only the installed Codex listener and same-port loopback sockets", () => {
+  assert.match(source, /function assertTrustedCdpListener\(port: number\)/);
+  assert.match(source, /Get-NetTCPConnection -State Listen/);
+  assert.match(source, /GetOwnerSid/);
+  assert.match(source, /OpenAI\.Codex_/);
+  assert.match(source, /\/usr\/sbin\/lsof/);
+  assert.match(source, /function debuggerUrlAllowed/);
+  assert.match(source, /\["127\.0\.0\.1", "::1", "localhost"\]/);
+  assert.match(source, /Number\(url\.port\) === port/);
+  assert.match(source, /redirect: "error"/);
+  assert.match(source, /if \(verifyListener\) assertTrustedCdpListener\(port\)/);
+});
+
 test("macOS restart quits only the installed Desktop app by Bundle ID", () => {
   assert.match(source, /function desktopApplicationBundleId\(application: string\)/);
   assert.match(source, /tell application id/);

@@ -26,9 +26,12 @@ test("release and preview version sources stay synchronized", () => {
   assert.doesNotMatch(releaseWorkflow, /cp -al release preview-release/);
   assert.match(releaseWorkflow, /verify-channel stable release\/update-manifest\.json/);
   assert.match(releaseWorkflow, /verify-channel preview preview-release\/update-manifest\.json/);
-  assert.match(releaseWorkflow, /gh release upload "\$\{GITHUB_REF_NAME\}" release\/\* --clobber/);
+  assert.doesNotMatch(releaseWorkflow, /gh release upload "\$\{GITHUB_REF_NAME\}" release\/\* --clobber/);
+  assert.match(releaseWorkflow, /Download immutable published archives/);
+  assert.match(releaseWorkflow, /gh release download "\$\{GITHUB_REF_NAME\}" --pattern '\*\.tar\.gz'/);
   assert.match(releaseWorkflow, /\$'\\tfalse\\tfalse'/);
   assert.match(releaseWorkflow, /Refuse to downgrade the Homebrew formula/);
+  assert.match(releaseWorkflow, /git diff --cached --quiet/);
   assert.match(releaseWorkflow, /git rebase origin\/main/);
   assert.match(previewWorkflow, /"v\*-beta\.\*"/);
   assert.match(previewWorkflow, /node scripts\/release-beta\.mjs check "\$version" --tag "\$GITHUB_REF_NAME"/);

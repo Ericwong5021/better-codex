@@ -577,32 +577,11 @@ test("issue cards show project icon and assignee instead of session entry", () =
   assert.match(css, /\.better-codex-chip\s*>\s*svg\s*\{/s);
 });
 
-test("native thread context menus append a branded dynamic task-board action", () => {
+test("native thread context menus remain owned by Codex", () => {
   const source = injectionScript(3210, "token", "install");
-  assert.ok(source.includes('document.addEventListener("contextmenu", onNativeThreadContextMenu, true)'));
-  assert.ok(source.includes('document.removeEventListener("contextmenu", onNativeThreadContextMenu, true)'));
-  assert.ok(source.includes('id: "better-codex-thread-separator", type: "separator"'));
-  assert.ok(source.includes('nativeLabel: t(linked ? "在任务看板中打开" : "添加到任务看板")'));
-  assert.ok(source.includes("icon: BETTER_CODEX_LOGO_URL"));
-  assert.ok(source.includes('api("/api/issues/from-thread"'));
-  assert.ok(source.includes('api("/api/issues/from-thread?thread_id=" + encodeURIComponent(context.threadId))'));
-  assert.ok(source.includes("linkedIssueThreadId(existing) === context.threadId"));
-  assert.ok(source.includes("const items = prepareNativeThreadMenu(row, event)"));
-  assert.ok(source.includes("if (!items) return;"));
-  assert.ok(source.includes("void Promise.resolve(beforeOpen).catch(() => {})"));
-  assert.ok(source.includes("controller.awaitBeforeOpen !== false"));
-  assert.ok(source.includes("controller.onRowContextMenu?.(event)"));
-  const handler = source.slice(source.indexOf("function onNativeThreadContextMenu(event)"), source.indexOf("function isSidebarNavigationTarget(target)"));
-  assert.ok(handler.indexOf("const items = prepareNativeThreadMenu(row, event)") < handler.indexOf("event.preventDefault()"));
-  assert.ok(source.includes("nativeThreadMenuAdapterDisabled = true"));
-  assert.ok(source.includes("restoreNativeThreadIssue(linked, context)"));
-  assert.ok(source.includes("function nativeThreadId(row)"));
-  assert.ok(source.includes("normalizeSessionId(fiber.memoizedProps?.conversationId)"));
-  assert.ok(handler.includes("context.threadId = nativeThreadId(row)"));
-  assert.ok(source.includes("const linked = state.issues.find(issue => linkedIssueThreadId(issue) === context.threadId) || null"));
-  assert.ok(source.includes("if (fromUrl && (!threadId || currentRouteThreadId() === threadId)) return fromUrl"));
-  assert.doesNotMatch(handler, /api\("\/api\/issues\/from-thread/);
-  assert.doesNotMatch(source, /state\.projects\.find\(item => item\.id === rememberedProjectId\) \|\| state\.projects\[0\]/);
+  assert.doesNotMatch(source, /onNativeThreadContextMenu/);
+  assert.doesNotMatch(source, /electronBridge\?\.showContextMenu/);
+  assert.doesNotMatch(source, /better-codex-thread-action/);
 });
 
 test("open-in-conversation requires a valid session uuid", () => {

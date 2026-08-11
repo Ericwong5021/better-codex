@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { Store } from "../src/db.js";
+import { packagedLibexecSkillsPath } from "../src/config.js";
 
 const configSource = readFileSync(new URL("../src/config.ts", import.meta.url), "utf8");
 const cliSource = readFileSync(new URL("../src/cli.ts", import.meta.url), "utf8");
@@ -18,6 +19,27 @@ const refreshSource = readFileSync(new URL("../scripts/refresh-local-install.mjs
 const refreshInjectorSource = readFileSync(new URL("../scripts/refresh-injector.mjs", import.meta.url), "utf8");
 const developmentInstaller = readFileSync(new URL("../scripts/development-instance.mjs", import.meta.url), "utf8");
 const runtimeStateSource = readFileSync(new URL("../src/runtime-state.ts", import.meta.url), "utf8");
+
+test("packaged skill lookup follows Homebrew prefix symlinks into the Cellar", () => {
+  const directory = mkdtempSync(join(tmpdir(), "better-codex-homebrew-"));
+  try {
+    const cellarRoot = join(directory, "Cellar", "better-codex", "0.4.2");
+    const cellarBin = join(cellarRoot, "bin");
+    const prefix = join(directory, "prefix");
+    mkdirSync(cellarBin, { recursive: true });
+    mkdirSync(join(cellarRoot, "libexec", "skills"), { recursive: true });
+    mkdirSync(prefix, { recursive: true });
+    writeFileSync(join(cellarBin, "better-codex.cjs"), "#!/usr/bin/env node\n");
+    symlinkSync(cellarBin, join(prefix, "bin"), process.platform === "win32" ? "junction" : "dir");
+
+    assert.equal(
+      packagedLibexecSkillsPath(join(prefix, "bin", "better-codex.cjs")),
+      join(cellarRoot, "libexec", "skills"),
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 test("stable and development profiles isolate databases and runtime homes", () => {
   assert.match(configSource, /BetterCodexProfile = "stable" \| "development"/);

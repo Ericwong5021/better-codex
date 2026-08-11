@@ -135,7 +135,12 @@ jobs:
           set -euo pipefail
           if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
             test "$(gh release view "${GITHUB_REF_NAME}" --json tagName,isDraft,isPrerelease --jq '[.tagName, .isDraft, .isPrerelease] | @tsv')" = "${GITHUB_REF_NAME}"$'\tfalse\tfalse'
-            gh release upload "${GITHUB_REF_NAME}" release/* --clobber
+            for path in release/*; do
+              name="$(basename "$path")"
+              if ! gh release view "${GITHUB_REF_NAME}" --json assets --jq '.assets[].name' | grep -Fxq "$name"; then
+                gh release upload "${GITHUB_REF_NAME}" "$path"
+              fi
+            done
           else
             gh release create "${GITHUB_REF_NAME}" release/* --generate-notes --verify-tag
           fi
@@ -163,10 +168,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          path: release
-          merge-multiple: true
+      - name: Download immutable published archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p release
+          gh release download "${GITHUB_REF_NAME}" --pattern '*.tar.gz' --dir release
       - run: git fetch origin main && git checkout -B main origin/main
       - name: Refuse to downgrade the Homebrew formula
         shell: bash
@@ -191,6 +198,10 @@ jobs:
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add Formula/better-codex.rb
+          if git diff --cached --quiet; then
+            echo "Homebrew formula is already current."
+            exit 0
+          fi
           git commit -m "chore(release): better-codex ${GITHUB_REF_NAME#v}"
           git fetch origin main
           git rebase origin/main

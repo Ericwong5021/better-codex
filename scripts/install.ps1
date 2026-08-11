@@ -437,6 +437,7 @@ function Set-InstalledUpdateChannel([string]$Executable, [string]$Channel) {
 
 function Invoke-ExistingUpgrade([string]$Executable, [string]$TargetVersion, [string]$DesiredChannel, [string]$Operation = "upgrade") {
   try {
+    Set-InstalledUpdateChannel $Executable $desiredChannel
     $updateResult = Invoke-BetterCodexCapture $Executable @("update") 600000
     if ($updateResult.ExitCode -ne 0) { return $false }
     $updatedVersion = Get-InstalledVersion $Executable

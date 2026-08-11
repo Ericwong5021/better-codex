@@ -805,6 +805,7 @@ test("manual native turns reopen completed issues and return them for review", (
     assert.equal(active.needs_attention, false);
     assert.equal(active.pending_actor, "agent");
     assert.equal(active.session_active_turn_id, turnId);
+    assert.equal(store.getIssueReplyState(issue.id).status, "running");
 
     store.recordSessionAgentMessage(threadId, turnId, "Follow-up complete");
     const completion = store.completeSessionTurn(threadId, turnId, "completed")!;
@@ -814,6 +815,22 @@ test("manual native turns reopen completed issues and return them for review", (
     assert.equal(reviewed.needs_attention, true);
     assert.equal(reviewed.pending_actor, "user");
     assert.equal(reviewed.session_active_turn_id, null);
+    assert.equal(store.getIssueReplyState(issue.id).status, "succeeded");
+
+    const staleTurnId = "019fec06-788f-7af3-a031-76b546904f26";
+    const replacementTurnId = "019fec06-788f-7af3-a031-76b546904f27";
+    assert.equal(store.sessionTurnStarted(threadId, staleTurnId)?.turn_id, staleTurnId);
+    store.db.prepare(`
+      INSERT INTO issue_runs (id, issue_id, status, thread_id, turn_id, started_at, execution_mode)
+      VALUES (?, ?, 'running', ?, ?, ?, 'desktop')
+    `).run("019fec06-788f-7af3-a031-76b546904f28", issue.id, threadId, staleTurnId, timestamp);
+    assert.equal(store.sessionTurnStarted(threadId, replacementTurnId)?.turn_id, replacementTurnId);
+    assert.equal(store.getIssue(issue.id)?.session_active_turn_id, replacementTurnId);
+    assert.equal(store.getIssue(issue.id)?.latest_run_status, "interrupted");
+    assert.equal(store.getIssueReplyState(issue.id).status, "running");
+    assert.equal(store.completeSessionTurn(threadId, replacementTurnId, "completed")?.turn_id, replacementTurnId);
+    assert.equal(store.getIssue(issue.id)?.session_active_turn_id, null);
+    assert.equal(store.getIssueReplyState(issue.id).status, "succeeded");
 
     const statusIssue = store.createIssue({ projectId: project.id, title: "Continue from thread status", status: "done", agentEnabled: true, workspacePath: target.directory });
     const statusThreadId = "019fec06-788f-7af3-a031-76b546904f24";
@@ -834,6 +851,41 @@ test("manual native turns reopen completed issues and return them for review", (
     assert.equal(store.getIssue(disconnectedIssue.id)?.status, "done");
   } finally {
     store?.close();
+    rmSync(target.directory, { recursive: true, force: true });
+  }
+});
+
+test("session relay checkpoints recover a turn whose final command acknowledgement is lost", () => {
+  const target = temporaryDatabase();
+  try {
+    const store = new Store(target.file);
+    const project = store.createProject({ name: "Checkpoint recovery", workspacePath: target.directory });
+    const issue = store.createIssue({ projectId: project.id, title: "Recover native work", status: "todo", agentEnabled: true, workspacePath: target.directory });
+    const claim = store.claimNextIssue(issue.id)!;
+    const command = store.enqueueSessionCommand({
+      issueId: issue.id,
+      runId: claim.runId,
+      requestId: `run:${claim.runId}`,
+      kind: "start",
+      payload: { message: "Implement it", config_fingerprint: "config" },
+    });
+    store.heartbeatSessionRelay("relay-checkpoint", "app-checkpoint", null);
+    store.claimSessionCommand("relay-checkpoint");
+    const threadId = "019fec06-788f-7af3-a031-76b546904fa0";
+    const turnId = "019fec06-788f-7af3-a031-76b546904fa1";
+    assert.equal(store.checkpointSessionCommand(command.id, "relay-checkpoint", { thread_id: threadId }).thread_id, threadId);
+    assert.equal(store.getIssueSession(issue.id)?.status, "starting");
+    assert.equal(store.sessionTurnStarted(threadId, turnId)?.turn_id, turnId);
+    assert.equal(store.getIssue(issue.id)?.active_run_status, "running");
+    assert.equal(store.getIssueSession(issue.id)?.active_command_id, command.id);
+
+    const [unknown] = store.failClaimedSessionCommands("replacement-relay");
+    assert.equal(unknown.error, "session_outcome_unknown");
+    assert.equal(store.getIssue(issue.id)?.active_run_status, "running");
+    assert.equal(store.completeSessionTurn(threadId, turnId, "completed")?.run_id, claim.runId);
+    assert.equal(store.getIssue(issue.id)?.active_run_status, "scheduling");
+    store.close();
+  } finally {
     rmSync(target.directory, { recursive: true, force: true });
   }
 });
@@ -861,6 +913,18 @@ test("legacy imported issues attach resumable completed sessions without changin
     assert.equal(upgraded.session_owned, true);
     assert.equal(upgraded.session_thread_id, threadId);
     assert.equal(store.getIssueReplyState(upgraded.id).status, "succeeded");
+
+    const activeTurnId = "019fec06-788f-7af3-a031-76b546904f30";
+    const refreshed = store.attachImportedSession(legacy.id, {
+      threadId,
+      configFingerprint: worker.sessionConfigFingerprint(null),
+      active: true,
+      turnId: activeTurnId,
+    });
+    assert.equal(refreshed.status, "in_progress");
+    assert.equal(refreshed.session_active_turn_id, activeTurnId);
+    assert.equal(store.getIssueReplyState(refreshed.id).status, "running");
+    assert.equal(store.completeSessionTurn(threadId, activeTurnId, "completed")?.turn_id, activeTurnId);
 
     const sent = worker.sendIssueMessage(upgraded.id, "continue-import", "Continue here");
     assert.equal(sent.command.kind, "turn");

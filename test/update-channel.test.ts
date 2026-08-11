@@ -280,7 +280,7 @@ test("update and rollback operations refuse a live cross-process lock", () => {
 
 test("failed core validation never creates a manifest-derived version directory", () => {
   const home = mkdtempSync(join(tmpdir(), "better-codex-update-staging-"));
-  const nextVersion = "0.4.2-beta.99";
+  const nextVersion = nextBetaVersion();
   const core = Buffer.from("process.exit(3);\n");
   try {
     const assetKey = `${process.platform}-${process.arch === "x64" ? "amd64" : process.arch}`;

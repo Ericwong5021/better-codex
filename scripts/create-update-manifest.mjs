@@ -28,6 +28,7 @@ await writeFile(join(output, compatibilityName), compatibilityContent, { mode: 0
 
 const files = await readdir(output);
 const assets = {};
+const installers = {};
 let coreVersion = "";
 for (const name of files.filter(name => /^better-codex-core-/.test(name))) {
   const match = name.match(/^better-codex-core-(\d+\.\d+\.\d+(?:[-.][A-Za-z0-9.-]+)?)-(darwin|win32)-(arm64|amd64)(?:\.exe)?$/);
@@ -40,6 +41,11 @@ for (const name of files.filter(name => /^better-codex-core-/.test(name))) {
 if (!coreVersion || Object.keys(assets).length === 0) throw new Error("core_assets_unavailable");
 if (channel === "stable" && coreVersion.includes("-")) throw new Error("stable_channel_prerelease_forbidden");
 if (process.env.GITHUB_REF_NAME && process.env.GITHUB_REF_NAME !== `v${coreVersion}`) throw new Error("release_tag_version_mismatch");
+for (const [platform, name] of [["windows", "install.ps1"], ["macos", "install.sh"]]) {
+  if (!files.includes(name)) continue;
+  const content = await readFile(join(output, name));
+  installers[platform] = { url: releaseUrl(name), sha256: digest(content) };
+}
 
 const payload = {
   schemaVersion: 1,
@@ -52,6 +58,7 @@ const payload = {
     sha256: digest(compatibilityContent),
   },
   core: { version: coreVersion, assets },
+  installers,
 };
 const key = createPrivateKey(privatePem);
 const publicKey = createPublicKey(key).export({ type: "spki", format: "pem" });

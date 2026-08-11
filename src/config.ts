@@ -1,8 +1,8 @@
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isSea } from "node:sea";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { packagedBuild } from "./build.js";
 
 export type BetterCodexProfile = "stable" | "development";
@@ -58,6 +58,14 @@ export const launchIntentPath = join(homedir(), ".better-codex-launch-intents");
 export const runtimePort = Number(process.env.BETTER_CODEX_RUNTIME_PORT ?? process.env.BETTER_CODEX_PORT ?? 0);
 export const cdpPort = Number(process.env.BETTER_CODEX_CDP_PORT ?? 9229);
 export const debugLoggingEnabled = !isSea() && !packagedBuild;
+
+export function canonicalPath(value: string) {
+  try { return realpathSync(value); } catch { return resolve(value); }
+}
+
+export function packagedLibexecSkillsPath(entrypoint: string) {
+  return resolve(dirname(canonicalPath(entrypoint)), "..", "libexec", "skills");
+}
 
 export function ensureDirectories() {
   mkdirSync(runPath, { recursive: true });

@@ -292,7 +292,7 @@ function errorCode(error: unknown) {
 }
 
 function errorStatus(code: string) {
-  if (code === "version_conflict" || code === "reply_busy" || code === "update_in_progress" || code === "issue_execution_locked" || code === "issue_execution_running" || code === "issue_session_handed_off" || code === "issue_session_starting" || code === "issue_session_already_bound" || code === "session_relay_not_leader" || code === "session_command_not_claimed") return 409;
+  if (code === "version_conflict" || code === "reply_busy" || code === "update_in_progress" || code === "issue_execution_locked" || code === "issue_execution_running" || code === "issue_session_handed_off" || code === "issue_session_starting" || code === "issue_session_already_bound" || code === "session_relay_not_leader" || code === "session_command_not_claimed" || code === "session_command_outcome_unknown") return 409;
   if (code.endsWith("_not_found")) return 404;
   if (code === "database_unavailable" || code === "database_integrity_check_failed") return 503;
   return 400;
@@ -938,6 +938,14 @@ export function startServer() {
           ...issue,
           reply_status: store.getIssueReplyState(issue.id).status,
         })));
+      }
+      if (path[0] === "api" && path[1] === "session-relay" && path[2] === "commands" && path[3] && path[4] === "checkpoint" && path.length === 5 && method === "POST") {
+        const body = await readBody(request);
+        const relayId = cleanString(body.relay_id, 200);
+        const result = body.result && typeof body.result === "object" && !Array.isArray(body.result) ? body.result as Record<string, unknown> : {};
+        if (!relayId) throw new Error("session_relay_identity_required");
+        const command = worker.checkpointSessionCommand(decodeURIComponent(path[3]), relayId, result);
+        return sendJson(response, 200, { ok: true, command });
       }
       if (url.pathname === "/api/issues/from-thread" && method === "GET") {
         const threadId = normalizeSessionId(cleanString(url.searchParams.get("thread_id"), 200));

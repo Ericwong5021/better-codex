@@ -36,16 +36,27 @@ export function assertPreviewPromotion(currentPath, candidatePath, publicKeyPath
   return candidate;
 }
 
+export function samePreviewVersion(currentPath, candidatePath, publicKeyPath) {
+  const current = readVerifiedPreviewManifest(currentPath, publicKeyPath);
+  const candidate = readVerifiedPreviewManifest(candidatePath, publicKeyPath);
+  return current.core?.version === candidate.core?.version
+    && current.compatibility?.version === candidate.compatibility?.version;
+}
+
 function main(args) {
   const [command, ...values] = args;
   if (command === "verify" && values.length === 2) return readVerifiedPreviewManifest(values[0], values[1]);
   if (command === "verify-channel" && values.length === 3 && ["stable", "preview"].includes(values[0])) return readVerifiedManifest(values[1], values[2], values[0]);
   if (command === "promote" && values.length === 3) return assertPreviewPromotion(values[0], values[1], values[2]);
+  if (command === "same-version" && values.length === 3) {
+    if (!samePreviewVersion(values[0], values[1], values[2])) throw new Error("preview_feed_version_changed");
+    return { same: true };
+  }
   if (command === "newer" && values.length === 2) {
     if (compareReleaseVersions(values[0], values[1]) <= 0) throw new Error("preview_version_must_exceed_stable");
     return { candidate: values[0], stable: values[1] };
   }
-  throw new Error("Usage: preview-feed.mjs verify <manifest> <public-key> | verify-channel <stable|preview> <manifest> <public-key> | promote <current> <candidate> <public-key> | newer <candidate> <stable>");
+  throw new Error("Usage: preview-feed.mjs verify <manifest> <public-key> | verify-channel <stable|preview> <manifest> <public-key> | promote <current> <candidate> <public-key> | same-version <current> <candidate> <public-key> | newer <candidate> <stable>");
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
