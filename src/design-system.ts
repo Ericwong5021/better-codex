@@ -9,7 +9,7 @@
 export function betterCodexDesignSystemCss() {
   return String.raw`
     :root {
-      --bc-font-ui: var(--font-sans, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif);
+      --bc-font-ui: var(--bc-host-light-font-ui, var(--font-sans, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif));
       /* Follow Codex Settings > Appearance sansFontSize via host tokens. */
       --bc-text-base: var(--font-size-base, var(--font-text-md-size, var(--codex-chat-font-size, 14px)));
       --bc-text-md: var(--font-size-normal, var(--bc-text-base));
@@ -98,6 +98,7 @@ export function betterCodexDesignSystemCss() {
     }
 
     html.electron-dark, html.dark, html[data-theme="dark"] {
+      --bc-font-ui: var(--bc-host-dark-font-ui, var(--font-sans, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif));
       --bc-color-canvas: var(--bc-host-dark-canvas, #1e1e1e);
       --bc-color-surface: var(--bc-host-dark-surface, #232323);
       --bc-color-surface-raised: var(--bc-host-dark-raised, #2c2c2c);
@@ -2253,6 +2254,11 @@ export function betterCodexDesignSystemCss() {
       font-size: var(--bc-text-md);
     }
 
+    #better-codex-panel .better-codex-board-empty > div {
+      display: flex;
+      gap: var(--bc-space-2);
+    }
+
     #better-codex-panel .better-codex-board-empty button {
       display: inline-flex;
       height: var(--bc-control-height);
@@ -2271,6 +2277,16 @@ export function betterCodexDesignSystemCss() {
 
     #better-codex-panel .better-codex-board-empty button:hover {
       background: color-mix(in oklch, var(--bc-primary) 88%, white);
+    }
+
+    #better-codex-panel .better-codex-board-empty [data-archive-open] {
+      border: 1px solid var(--bc-border);
+      color: var(--bc-foreground);
+      background: var(--bc-raised);
+    }
+
+    #better-codex-panel .better-codex-board-empty [data-archive-open]:hover {
+      background: var(--bc-hover);
     }
 
     #better-codex-panel .better-codex-board-empty button svg {

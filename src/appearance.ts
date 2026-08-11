@@ -13,7 +13,10 @@ export type CodexChromeTheme = {
   contrast: number;
   ink: string;
   surface: string;
+  uiFont: string;
 };
+
+const defaultUiFont = 'ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif';
 
 const defaultConfigPath = join(process.env.CODEX_HOME || join(homedir(), ".codex"), "config.toml");
 
@@ -61,6 +64,7 @@ function chromeTheme(source: string, section: string, fallback: CodexChromeTheme
     contrast: sectionNumber(source, section, "contrast", fallback.contrast),
     ink: color(sectionString(source, section, "ink"), fallback.ink),
     surface: color(sectionString(source, section, "surface"), fallback.surface),
+    uiFont: sectionString(source, `${section}.fonts`, "ui") || fallback.uiFont,
   };
 }
 
@@ -70,7 +74,7 @@ export function readCodexAppearance(path = defaultConfigPath): CodexAppearance {
   const theme = configuredTheme === "light" || configuredTheme === "dark" ? configuredTheme : "system";
   return {
     theme,
-    light: chromeTheme(source, "desktop.appearanceLightChromeTheme", { accent: "#339cff", contrast: 45, ink: "#1a1c1f", surface: "#ffffff" }),
-    dark: chromeTheme(source, "desktop.appearanceDarkChromeTheme", { accent: "#007acc", contrast: 50, ink: "#d4d4d4", surface: "#1e1e1e" }),
+    light: chromeTheme(source, "desktop.appearanceLightChromeTheme", { accent: "#339cff", contrast: 45, ink: "#1a1c1f", surface: "#ffffff", uiFont: defaultUiFont }),
+    dark: chromeTheme(source, "desktop.appearanceDarkChromeTheme", { accent: "#007acc", contrast: 50, ink: "#d4d4d4", surface: "#1e1e1e", uiFont: defaultUiFont }),
   };
 }

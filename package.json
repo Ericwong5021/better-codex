@@ -38,6 +38,7 @@
     "dist/markdown.js",
     "dist/updater.js",
     "dist/user-profile.js",
+    "dist/web-host.js",
     "dist/worker.js"
   ],
   "scripts": {
@@ -53,9 +54,15 @@
     "release:beta:check": "node scripts/release-beta.mjs check",
     "start": "node dist/cli.js serve",
     "better-codex": "tsx src/cli.ts",
-    "test": "tsx --test --test-concurrency=2 test/*.test.ts"
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test --test-concurrency=2 test/*.test.ts",
+    "test:web": "playwright test",
+    "test:web:smoke": "playwright test test/e2e/web/local-smoke.spec.ts",
+    "test:web:debug": "playwright test --headed --debug",
+    "test:acceptance": "npm run typecheck && npm test && npm run test:web"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@types/node": "^22.15.21",
     "esbuild": "^0.28.1",
     "tsx": "^4.19.4",

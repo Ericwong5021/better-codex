@@ -13,9 +13,18 @@ test("generated injection script is valid JavaScript", () => {
   assert.ok(source.includes('state.locale = setting === "system" ? state.systemLocale : setting'));
   assert.ok(source.includes("panel?.remove()"));
   assert.ok(source.includes("showAutoDispatchHelp(\"settings\")"));
-  assert.ok(source.includes("resolveSystemLocale(bootstrap.locale)"));
+  assert.ok(source.includes('HOST_KIND === "web" ? INITIAL_LOCALE : bootstrap.locale'));
   assert.doesNotMatch(source, /window\.location\.reload\(\)/);
   assert.doesNotMatch(source, /localizeOwnedTree|localizedText|translateText/);
+});
+
+test("web sidebar entries never become their own native clone reference", () => {
+  const source = injectionScript(4317, "test-token", "install", "zh-CN", "web");
+
+  assert.ok(source.includes("filter(button => !button.hasAttribute(OWNED))"));
+  assert.ok(source.includes('const NAVIGATION = HOST_KIND === "web"'));
+  assert.ok(source.includes('threadRoutePrefix: "/local/"'));
+  assert.ok(source.includes("!document.hidden && active"));
 });
 
 test("in-review status uses the waiting-for-review label", () => {

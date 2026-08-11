@@ -149,6 +149,22 @@ async function ensureRuntime() {
   }
 }
 
+async function openWebApp() {
+  await ensureRuntime();
+  const port = activeRuntimePort();
+  const url = `http://127.0.0.1:${port}/web#token=${encodeURIComponent(accessToken())}`;
+  const invocation = process.platform === "win32"
+    ? { command: "rundll32.exe", args: ["url.dll,FileProtocolHandler", url] }
+    : { command: "open", args: [url] };
+  const child = spawn(invocation.command, invocation.args, {
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true,
+  });
+  child.unref();
+  return { opened: true, url: `http://127.0.0.1:${port}/web` };
+}
+
 async function restartRuntime() {
   setInjectionEnabled(false);
   await stopInjector();
@@ -625,7 +641,7 @@ function print(value: unknown) {
 }
 
 function usage() {
-  console.log("better-codex version | update [check|compatibility|rollback|channel stable|preview] [--channel stable|preview] | setup [--yes] | launch [--restart] | launcher install|uninstall|status | mcp install|uninstall|status | doctor | enable | disable | start [--launch] | stop | status | uninstall | data delete [--yes] | inject [--launch] [--port N] | eject [--port N] | service install|uninstall|start|stop|restart|status|logs | project list|create | agent list | issue list|get|create|update|status|open");
+  console.log("better-codex version | web | update [check|compatibility|rollback|channel stable|preview] [--channel stable|preview] | setup [--yes] | launch [--restart] | launcher install|uninstall|status | mcp install|uninstall|status | doctor | enable | disable | start [--launch] | stop | status | uninstall | data delete [--yes] | inject [--launch] [--port N] | eject [--port N] | service install|uninstall|start|stop|restart|status|logs | project list|create | agent list | issue list|get|create|update|status|open");
 }
 
 function selfCommand() {
@@ -943,6 +959,7 @@ async function main() {
   }
   if (command === "runtime") return runRuntime();
   if (command === "serve") return (await import("./server.js")).startServer();
+  if (command === "web") return print(await openWebApp());
   if (command === "watch-inject") return watchInjection(Number(action || cdpPort), accessToken());
   if (command === "mcp" && !action) return startMcpAppServer();
   if (command === "mcp") {

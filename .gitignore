@@ -11,3 +11,5 @@ plan/
 homepage/bettercodex-site/
 .vs/
 .tmp-web-preview/
+playwright-report/
+test-results/

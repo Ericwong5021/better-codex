@@ -1,0 +1,82 @@
+import { expect, test, type Locator, type Page } from "@playwright/test";
+import { startRuntimeFixture, type RuntimeFixture } from "../fixtures/runtime.js";
+
+let runtime: RuntimeFixture;
+
+async function dragCard(page: Page, source: Locator, target: Locator) {
+  const sourceHandle = await source.elementHandle();
+  if (!sourceHandle) throw new Error("drag_source_missing");
+  const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
+  await sourceHandle.dispatchEvent("dragstart", { dataTransfer });
+  await target.dispatchEvent("dragover", { dataTransfer });
+  await target.dispatchEvent("drop", { dataTransfer });
+  await sourceHandle.dispatchEvent("dragend", { dataTransfer });
+  await dataTransfer.dispose();
+}
+
+test.beforeAll(async () => {
+  runtime = await startRuntimeFixture();
+});
+
+test.afterAll(async () => {
+  await runtime?.stop();
+});
+
+test("rejects an invalid token and accepts the local runtime token", async ({ page }) => {
+  await page.goto(`${runtime.baseUrl}/web`);
+  const connect = page.locator("#web-connect");
+  await expect(connect).toBeVisible();
+  await page.locator("#web-token").fill("invalid-token");
+  await connect.locator('button[type="submit"]').click();
+  await expect(page.locator("#web-connect-error")).toBeVisible();
+  await page.locator("#web-token").fill(runtime.token);
+  await connect.locator('button[type="submit"]').click();
+  await expect(page.locator("#better-codex-panel")).toBeVisible();
+  await expect(page).toHaveURL(`${runtime.baseUrl}/web`);
+});
+
+test("creates, edits, moves, archives, and restores an issue", async ({ page }) => {
+  const originalTitle = `Web 自动化 ${Date.now()}`;
+  const editedTitle = `${originalTitle} 已编辑`;
+  await page.goto(`${runtime.baseUrl}/web#token=${encodeURIComponent(runtime.token)}`);
+  await expect(page.locator("#better-codex-panel")).toBeVisible();
+  await expect(page).toHaveURL(`${runtime.baseUrl}/web`);
+
+  await page.locator(".better-codex-create-primary").click();
+  const editor = page.locator("#better-codex-dialog");
+  await expect(editor).toBeVisible();
+  await editor.locator("[data-dialog-switch]").click();
+  await editor.locator('[name="title"]').fill(originalTitle);
+  await editor.locator('[name="description"]').fill("通过 Playwright 在独立临时数据库中创建");
+  await editor.locator(".better-codex-submit").click();
+
+  const card = page.locator(`[data-issue-id]:has(.better-codex-card-title:text-is("${originalTitle}"))`);
+  await expect(card).toBeVisible();
+  await card.click();
+  await expect(editor).toBeVisible();
+  await editor.locator('[name="title"]').fill(editedTitle);
+  await editor.locator('[data-dialog-select-toggle="status"]').click();
+  await editor.locator('[data-dialog-select-option="status"][data-dialog-select-value="todo"]').click();
+  await editor.locator(".better-codex-submit").click();
+
+  const editedCard = page.locator(`[data-issue-id]:has(.better-codex-card-title:text-is("${editedTitle}"))`);
+  await expect(page.locator('.better-codex-column[data-status="todo"]', { has: editedCard })).toBeVisible();
+  await dragCard(page, editedCard, page.locator('.better-codex-column[data-status="done"] .better-codex-cards'));
+  await expect(page.locator('.better-codex-column[data-status="done"]', { has: editedCard })).toBeVisible();
+  await dragCard(page, editedCard, page.locator('.better-codex-column[data-status="archive"]'));
+  await expect(editedCard).toHaveCount(0);
+
+  await page.locator("[data-archive-open]").click();
+  const archive = page.locator("#better-codex-archive-dialog");
+  await expect(archive).toBeVisible();
+  await expect(archive.getByText(editedTitle, { exact: true })).toBeVisible();
+  await archive.locator("[data-archive-restore]").click();
+  await expect(archive.getByText(editedTitle, { exact: true })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(archive).toHaveCount(0);
+  const restoredCard = page.locator(`[data-issue-id]:has(.better-codex-card-title:text-is("${editedTitle}"))`);
+  await expect(restoredCard).toBeVisible();
+  await page.reload();
+  await expect(page.locator("#better-codex-panel")).toBeVisible();
+  await expect(restoredCard).toBeVisible();
+});
