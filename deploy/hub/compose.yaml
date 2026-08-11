@@ -1,0 +1,29 @@
+services:
+  hub:
+    build:
+      context: ../..
+      dockerfile: deploy/hub/Dockerfile
+    restart: unless-stopped
+    environment:
+      BETTER_CODEX_HUB_HOST: 0.0.0.0
+      BETTER_CODEX_HUB_PORT: 4318
+      BETTER_CODEX_HUB_DB: /data/better-codex-hub.db
+      BETTER_CODEX_HUB_ADMIN_TOKEN_FILE: /run/secrets/hub_admin_token
+    ports:
+      - 127.0.0.1:4318:4318
+    volumes:
+      - hub-data:/data
+    secrets:
+      - hub_admin_token
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4318/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+secrets:
+  hub_admin_token:
+    file: ./secrets/admin-token.txt
+
+volumes:
+  hub-data:

@@ -159,6 +159,12 @@ body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; 
   .web-nav-button .text-fade-truncate { display: block; }
 }
 @media (prefers-reduced-motion: reduce) { .web-sidebar *, .web-native-view *, .web-connect * { transition-duration: .01ms !important; } }
+html[data-better-codex-read-only] .better-codex-create-split,
+html[data-better-codex-read-only] .better-codex-column-icon,
+html[data-better-codex-read-only] [data-add-status],
+html[data-better-codex-read-only] #better-codex-agents-entry,
+html[data-better-codex-read-only] [data-pin],
+html[data-better-codex-read-only] [data-card-more] { display: none !important; }
 `;
 
 const webHostJavaScript = String.raw`
@@ -367,14 +373,21 @@ document.getElementById("web-theme").addEventListener("click", () => {
 void boot(consumeFragmentToken());
 `;
 
-export function betterCodexWebHostHtml() {
-  return webHostHtml;
+export function betterCodexWebHostHtml(remote = false) {
+  return remote
+    ? webHostHtml.replace("本地工作台", "远端只读工作台").replace("Local connection", "Self-hosted Hub").replace("请运行 <code>better-codex web</code> 自动打开，或粘贴本地访问令牌。令牌只用于连接本机 Runtime。", "输入 Hub 访问令牌以查看经过隐私裁剪的远端看板投影。").replace("访问令牌", "Hub 访问令牌")
+    : webHostHtml;
 }
 
 export function betterCodexWebHostCss() {
   return webHostCss;
 }
 
-export function betterCodexWebHostJavaScript() {
-  return webHostJavaScript;
+export function betterCodexWebHostJavaScript(remote = false) {
+  if (!remote) return webHostJavaScript;
+  return webHostJavaScript
+    .replace('kind: "web",', 'kind: "remote",')
+    .replace('issues: "read-write", agents: "read-write", liveUpdates: true, nativeThreads: false', 'issues: "read-only", agents: "unavailable", liveUpdates: true, nativeThreads: false')
+    .replaceAll("Runtime", "Hub")
+    .replaceAll("better-codex web", "Hub 管理命令");
 }

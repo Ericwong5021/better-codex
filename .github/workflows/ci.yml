@@ -23,6 +23,8 @@ jobs:
       - run: npm run typecheck
       - if: github.event_name == 'pull_request'
         run: npm run test:web:smoke
+      - if: github.event_name == 'pull_request'
+        run: npm run test:web:selfhost -- --grep "@critical"
       - if: github.event_name != 'pull_request'
         run: npm run test:web
       - if: failure()

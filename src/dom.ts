@@ -270,6 +270,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const CORE_VERSION = ${JSON.stringify(coreVersion)};
     const PROFILE = ${JSON.stringify(betterCodexProfile)};
     const HOST_KIND = ${JSON.stringify(host)};
+    const HOST_CAPABILITIES = window.betterCodexHost?.capabilities || {};
+    const READ_ONLY = HOST_CAPABILITIES.issues === "read-only";
+    if (READ_ONLY) document.documentElement.setAttribute("data-better-codex-read-only", "true");
     const HELP_MODE_MARKDOWN = ${helpModeMarkdown};
     const previous = window.__betterCodexInjection__;
     if (previous?.version === VERSION && previous?.endpoint === ${baseUrl} && previous?.profile === PROFILE && previous?.host === HOST_KIND) {
@@ -1244,6 +1247,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function api(path, options = {}) {
+      if (READ_ONLY && String(options.method || "GET").toUpperCase() !== "GET") return Promise.reject(new Error("remote_read_only"));
       const requestPath = path + (path.includes("?") ? "&" : "?") + "locale=" + encodeURIComponent(state.locale);
       const attempt = (retriesLeft) => {
         if (typeof window.betterCodexHost?.request === "function") {

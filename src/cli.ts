@@ -3,7 +3,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { accessSync, closeSync, constants, cpSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { isSea } from "node:sea";
-import { homedir } from "node:os";
+import { homedir, hostname } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { cdpEject, cdpInject, cdpOpenThread, cdpRestartAndInject, cdpStatus, codexInstallationStatus, codexProcessRunning, chooseCodexRestartAction, launchCodex, requiresCodexRestartForLaunch, watchInjection } from "./cdp.js";
@@ -28,6 +28,7 @@ import {
   token,
   canonicalPath,
   packagedLibexecSkillsPath,
+  syncConfigPath,
 } from "./config.js";
 import { readRuntimeState } from "./runtime-state.js";
 import { injectionEnabled, setInjectionEnabled } from "./injection-state.js";
@@ -38,6 +39,7 @@ import { packagedBuild } from "./build.js";
 import { installService, restartService, serviceLogs, serviceStatus, startService, stopService, uninstallService } from "./service.js";
 import { activeVersions, checkForUpdates, maybeDelegateToActiveCore, recordGatewayUpdateActivation, rollbackActivatedUpdate, rollbackAllUpdates, selectedUpdateChannel, setUpdateChannel, updateAll, updateCompatibility, type UpdateChannel } from "./updater.js";
 import { requireCodexExecutablePath } from "./codex-cli.js";
+import { normalizeHubUrl, readSyncConfiguration, removeSyncConfiguration, writeSyncConfiguration } from "./sync-config.js";
 
 function accessToken() {
   return token();
@@ -641,7 +643,7 @@ function print(value: unknown) {
 }
 
 function usage() {
-  console.log("better-codex version | web | update [check|compatibility|rollback|channel stable|preview] [--channel stable|preview] | setup [--yes] | launch [--restart] | launcher install|uninstall|status | mcp install|uninstall|status | doctor | enable | disable | start [--launch] | stop | status | uninstall | data delete [--yes] | inject [--launch] [--port N] | eject [--port N] | service install|uninstall|start|stop|restart|status|logs | project list|create | agent list | issue list|get|create|update|status|open");
+  console.log("better-codex version | web | sync connect|status|now|disconnect | update [check|compatibility|rollback|channel stable|preview] [--channel stable|preview] | setup [--yes] | launch [--restart] | launcher install|uninstall|status | mcp install|uninstall|status | doctor | enable | disable | start [--launch] | stop | status | uninstall | data delete [--yes] | inject [--launch] [--port N] | eject [--port N] | service install|uninstall|start|stop|restart|status|logs | project list|create | agent list | issue list|get|create|update|status|open");
 }
 
 function selfCommand() {
@@ -835,7 +837,7 @@ async function uninstall() {
 
 async function deleteData(confirmed: boolean) {
   if (readRuntimeState()) throw new Error("data_delete_requires_stopped_runtime");
-  const paths = [databasePath, `${databasePath}-wal`, `${databasePath}-shm`, join(dirname(databasePath), "backups")];
+  const paths = [databasePath, `${databasePath}-wal`, `${databasePath}-shm`, join(dirname(databasePath), "backups"), syncConfigPath];
   if (!confirmed && !(await confirmDataDelete(paths))) return { deleted: false, paths };
   for (const path of paths) rmSync(path, { recursive: true, force: true });
   return { deleted: true, paths };
@@ -843,6 +845,60 @@ async function deleteData(confirmed: boolean) {
 
 function progress(stage: string, json: boolean) {
   if (!json) console.error(stage);
+}
+
+async function syncCommand(action: string | undefined, args: string[]) {
+  if (action === "connect") {
+    const hubUrl = option(args, "--url") ?? positionals(args)[0];
+    const pairingCode = option(args, "--pairing-code");
+    if (!hubUrl) throw new Error("hub_url_required");
+    if (!pairingCode) throw new Error("pairing_code_required");
+    const base = normalizeHubUrl(hubUrl);
+    const deviceName = option(args, "--name") ?? hostname();
+    const response = await fetch(`${base}/api/v1/devices/pair`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ pairing_code: pairingCode, name: deviceName }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    const body = await response.json().catch(() => ({})) as Record<string, unknown>;
+    if (!response.ok) throw new Error(typeof body.error === "string" ? body.error : `hub_http_${response.status}`);
+    const deviceId = String(body.device_id ?? "");
+    const deviceToken = String(body.device_token ?? "");
+    if (!deviceId || !deviceToken) throw new Error("invalid_pair_response");
+    const configuration = writeSyncConfiguration({ hub_url: base, device_id: deviceId, device_name: deviceName, device_token: deviceToken });
+    try {
+      await ensureRuntime();
+      return print({ connected: true, hub_url: configuration.hub_url, device_id: configuration.device_id, status: await request("/api/sync/connect", { method: "POST" }) });
+    } catch (error) {
+      removeSyncConfiguration();
+      throw error;
+    }
+  }
+  if (action === "status") {
+    const configuration = readSyncConfiguration();
+    if (!configuration) return print({ connected: false });
+    try {
+      await ensureRuntime();
+      return print(await request("/api/sync/status"));
+    } catch {
+      return print({ connected: true, runtime: false, hub_url: configuration.hub_url, device_name: configuration.device_name });
+    }
+  }
+  if (action === "now") {
+    await ensureRuntime();
+    return print(await request("/api/sync/now", { method: "POST" }));
+  }
+  if (action === "disconnect") {
+    try {
+      await ensureRuntime();
+      return print(await request("/api/sync/disconnect", { method: "POST" }));
+    } catch {
+      removeSyncConfiguration();
+      return print({ connected: false, runtime: false });
+    }
+  }
+  usage();
 }
 
 async function issueCommand(action: string | undefined, args: string[]) {
@@ -1078,6 +1134,7 @@ async function main() {
     }
   }
   if (command === "doctor") return print(await doctor());
+  if (command === "sync") return syncCommand(action, args);
   if (command === "enable") {
     setInjectionEnabled(false);
     await stopInjector();

@@ -21,6 +21,8 @@ import { IssueWorker } from "./worker.js";
 import { maxMockupBytes, normalizeMockupLocale, readMockupState, replaceMockupState, resetMockupState, updateMockupState } from "./mockup.js";
 import { injectionScript } from "./dom.js";
 import { betterCodexWebHostCss, betterCodexWebHostHtml, betterCodexWebHostJavaScript } from "./web-host.js";
+import { SyncClient } from "./sync-client.js";
+import { removeSyncConfiguration } from "./sync-config.js";
 
 const accessToken = token();
 const mockupEnabled = !isSea() && !packagedBuild && process.argv.includes("--mockup");
@@ -426,6 +428,7 @@ export function startServer() {
   const eventHistory: number[] = [];
   let eventRevision = 0;
   const worker = new IssueWorker(store);
+  const syncClient = new SyncClient(store);
   const sendEvent = (response: ServerResponse, event: string, revision: number) => {
     response.write(`id: ${revision}\nevent: ${event}\ndata: ${JSON.stringify({ revision })}\n\n`);
   };
@@ -464,6 +467,7 @@ export function startServer() {
     if (cleaned) return;
     cleaned = true;
     worker.stop();
+    syncClient.stop();
     stopUpdateChecks();
     for (const [response, heartbeat] of eventClients) {
       clearInterval(heartbeat);
@@ -517,6 +521,18 @@ export function startServer() {
         return sendWeb(response, 200, injectionScript(activePort, sessionToken, "install", locale, "web"), "text/javascript; charset=utf-8");
       }
       if (!authorized(request, url, webSessions)) return sendJson(response, 401, { error: "unauthorized" });
+      if (url.pathname === "/api/sync/status" && method === "GET") return sendJson(response, 200, syncClient.status());
+      if (url.pathname === "/api/sync/now" && method === "POST") return sendJson(response, 200, await syncClient.syncNow());
+      if (url.pathname === "/api/sync/connect" && method === "POST") {
+        store.rebuildSyncQueue();
+        syncClient.start();
+        return sendJson(response, 200, await syncClient.syncNow());
+      }
+      if (url.pathname === "/api/sync/disconnect" && method === "POST") {
+        syncClient.stop();
+        removeSyncConfiguration();
+        return sendJson(response, 200, syncClient.status());
+      }
       if (url.pathname === "/api/events" && method === "GET") {
         response.writeHead(200, {
           "cache-control": "no-cache, no-store",
@@ -1339,6 +1355,7 @@ export function startServer() {
     if (typeof address !== "object" || !address) throw new Error("runtime_address_unavailable");
     publishRuntimeState({ ...identity, port: address.port });
     if (!mockupEnabled) worker.start();
+    if (!mockupEnabled) syncClient.start();
     console.log(`Better Codex Runtime ${coreVersion} listening on http://127.0.0.1:${address.port}`);
   });
   const stop = () => server.close(() => {

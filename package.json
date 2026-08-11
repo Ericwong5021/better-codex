@@ -7,14 +7,12 @@
   "engines": {
     "node": ">=22.5.0"
   },
-  "os": [
-    "darwin",
-    "win32"
-  ],
   "bin": {
-    "better-codex": "dist/cli.js"
+    "better-codex": "dist/cli.js",
+    "better-codex-hub": "dist/hub-cli.js"
   },
   "files": [
+    "assets/better-codex.png",
     "dist/cdp.js",
     "dist/cli.js",
     "dist/codex-cli.js",
@@ -26,6 +24,9 @@
     "dist/db.js",
     "dist/dom.js",
     "dist/injection-state.js",
+    "dist/hub-cli.js",
+    "dist/hub-server.js",
+    "dist/hub-store.js",
     "dist/locale.js",
     "dist/launch-integration.js",
     "dist/mcp-app.js",
@@ -33,6 +34,9 @@
     "dist/mockup.js",
     "dist/runtime-state.js",
     "dist/server.js",
+    "dist/sync-client.js",
+    "dist/sync-config.js",
+    "dist/sync-contract.js",
     "dist/service.js",
     "dist/session-transcript.js",
     "dist/markdown.js",
@@ -53,6 +57,8 @@
     "release:beta": "node scripts/release-beta.mjs prepare",
     "release:beta:check": "node scripts/release-beta.mjs check",
     "start": "node dist/cli.js serve",
+    "hub": "tsx src/hub-cli.ts",
+    "hub:start": "node dist/hub-cli.js serve",
     "better-codex": "tsx src/cli.ts",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test --test-concurrency=2 test/*.test.ts",
@@ -60,6 +66,7 @@
     "test:web:smoke": "playwright test test/e2e/web/local-smoke.spec.ts",
     "test:web:debug": "playwright test --headed --debug",
     "test:web:stack": "node scripts/test-web-stack.mjs",
+    "test:web:selfhost": "playwright test test/e2e/selfhost",
     "test:acceptance": "npm run test:web:stack"
   },
   "devDependencies": {

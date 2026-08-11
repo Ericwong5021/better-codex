@@ -3,6 +3,7 @@ import { existsSync, linkSync, mkdirSync, unlinkSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { databasePath, developmentDatabaseSnapshotSourcePath } from "./config.js";
+import type { IssueProjection, ProjectProjection, SyncEntityType, SyncProjection } from "./sync-contract.js";
 
 export const issueStatuses = ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"] as const;
 export const issuePriorities = ["none", "low", "medium", "high", "urgent"] as const;
@@ -175,6 +176,7 @@ type ImportedSessionInput = {
 };
 
 type IssueInput = {
+  id?: string;
   projectId: string;
   title: string;
   description?: string;
@@ -190,7 +192,7 @@ type IssueInput = {
   session?: ImportedSessionInput;
 };
 
-type IssuePatch = Partial<Pick<Issue, "project_id" | "title" | "description" | "status" | "priority" | "labels" | "sort_order" | "pinned" | "thread_id" | "workspace_path" | "agent_enabled" | "agent_id" | "user_assigned" | "needs_attention" | "pending_actor" | "enrichment_status" | "reply_draft">>;
+export type IssuePatch = Partial<Pick<Issue, "project_id" | "title" | "description" | "status" | "priority" | "labels" | "sort_order" | "pinned" | "thread_id" | "workspace_path" | "agent_enabled" | "agent_id" | "user_assigned" | "needs_attention" | "pending_actor" | "enrichment_status" | "reply_draft">>;
 
 type AgentProfileInput = Pick<AgentProfile, "name" | "name_en" | "description" | "instructions" | "model" | "reasoning_effort"> & { sandbox_mode?: AgentSandboxMode; max_concurrency?: number };
 type AgentProfilePatch = Partial<AgentProfileInput>;
@@ -205,7 +207,7 @@ export function cleanMaxConcurrency(value: number | undefined) {
   return value;
 }
 
-const latestSchemaVersion = 4;
+const latestSchemaVersion = 5;
 
 function now() {
   return new Date().toISOString();
@@ -377,6 +379,7 @@ export class Store {
     this.ensureEnrichmentColumn();
     this.ensureReplyDraftColumn();
     this.ensureSessionHandoffColumn();
+    this.ensureSyncTriggers();
     const integrity = this.db.prepare("PRAGMA quick_check").get() as Record<string, unknown> | undefined;
     if (String(integrity?.quick_check ?? "") !== "ok") {
       this.db.close();
@@ -532,6 +535,62 @@ export class Store {
         throw error;
       }
     }
+    if (fromVersion < 5) {
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS sync_outbox (
+            entity_type TEXT NOT NULL,
+            entity_id TEXT NOT NULL,
+            event_id TEXT NOT NULL UNIQUE,
+            changed_at TEXT NOT NULL,
+            PRIMARY KEY (entity_type, entity_id)
+          );
+          CREATE TABLE IF NOT EXISTS sync_tombstones (
+            entity_type TEXT NOT NULL,
+            entity_id TEXT NOT NULL,
+            event_id TEXT NOT NULL UNIQUE,
+            changed_at TEXT NOT NULL,
+            PRIMARY KEY (entity_type, entity_id)
+          );
+          CREATE TABLE IF NOT EXISTS sync_cursor (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+          );
+        `);
+        this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (5, ?)").run(now());
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    }
+  }
+
+  private ensureSyncTriggers() {
+    const dirty = (entityType: SyncEntityType, id: string) => `
+      DELETE FROM sync_tombstones WHERE entity_type = '${entityType}' AND entity_id = ${id};
+      INSERT INTO sync_outbox (entity_type, entity_id, event_id, changed_at)
+      VALUES ('${entityType}', ${id}, lower(hex(randomblob(16))), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      ON CONFLICT(entity_type, entity_id) DO UPDATE SET event_id = excluded.event_id, changed_at = excluded.changed_at;
+    `;
+    const removed = (entityType: SyncEntityType, id: string) => `
+      DELETE FROM sync_outbox WHERE entity_type = '${entityType}' AND entity_id = ${id};
+      INSERT INTO sync_tombstones (entity_type, entity_id, event_id, changed_at)
+      VALUES ('${entityType}', ${id}, lower(hex(randomblob(16))), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      ON CONFLICT(entity_type, entity_id) DO UPDATE SET event_id = excluded.event_id, changed_at = excluded.changed_at;
+    `;
+    this.db.exec(`
+      CREATE TRIGGER IF NOT EXISTS sync_project_insert AFTER INSERT ON projects BEGIN ${dirty("project", "NEW.id")} END;
+      CREATE TRIGGER IF NOT EXISTS sync_project_update AFTER UPDATE OF name, identifier_prefix ON projects BEGIN ${dirty("project", "NEW.id")} END;
+      CREATE TRIGGER IF NOT EXISTS sync_project_delete AFTER DELETE ON projects BEGIN ${removed("project", "OLD.id")} END;
+      CREATE TRIGGER IF NOT EXISTS sync_issue_insert AFTER INSERT ON issues BEGIN ${dirty("issue", "NEW.id")} END;
+      CREATE TRIGGER IF NOT EXISTS sync_issue_update AFTER UPDATE OF project_id, title, description, status, priority, labels_json, sort_order, pinned, archived_at, agent_id, agent_enabled, user_assigned, needs_attention, pending_actor ON issues BEGIN ${dirty("issue", "NEW.id")} END;
+      CREATE TRIGGER IF NOT EXISTS sync_issue_delete AFTER DELETE ON issues BEGIN ${removed("issue", "OLD.id")} END;
+      CREATE TRIGGER IF NOT EXISTS sync_run_insert AFTER INSERT ON issue_runs BEGIN ${dirty("issue", "NEW.issue_id")} END;
+      CREATE TRIGGER IF NOT EXISTS sync_run_update AFTER UPDATE OF status, scheduler_status ON issue_runs BEGIN ${dirty("issue", "NEW.issue_id")} END;
+      CREATE TRIGGER IF NOT EXISTS sync_run_delete AFTER DELETE ON issue_runs BEGIN ${dirty("issue", "OLD.issue_id")} END;
+    `);
   }
 
   private ensureAgentColumn() {
@@ -796,6 +855,101 @@ export class Store {
 
   close() {
     this.db.close();
+  }
+
+  initializeSyncQueue() {
+    if (this.db.prepare("SELECT value FROM sync_cursor WHERE key = 'initialized'").get()) return;
+    const timestamp = now();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare("INSERT OR REPLACE INTO sync_outbox (entity_type, entity_id, event_id, changed_at) SELECT 'project', id, lower(hex(randomblob(16))), ? FROM projects").run(timestamp);
+      this.db.prepare("INSERT OR REPLACE INTO sync_outbox (entity_type, entity_id, event_id, changed_at) SELECT 'issue', id, lower(hex(randomblob(16))), ? FROM issues").run(timestamp);
+      this.db.prepare("INSERT OR REPLACE INTO sync_cursor (key, value) VALUES ('initialized', ?)").run(timestamp);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  rebuildSyncQueue() {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.exec("DELETE FROM sync_outbox; DELETE FROM sync_tombstones; DELETE FROM sync_cursor;");
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    this.initializeSyncQueue();
+  }
+
+  getSyncCursor() {
+    const row = this.db.prepare("SELECT value FROM sync_cursor WHERE key = 'hub_revision'").get() as { value: string } | undefined;
+    return Number(row?.value ?? 0) || 0;
+  }
+
+  setSyncCursor(cursor: number) {
+    if (!Number.isSafeInteger(cursor) || cursor < 0) throw new Error("invalid_sync_cursor");
+    this.db.prepare("INSERT OR REPLACE INTO sync_cursor (key, value) VALUES ('hub_revision', ?)").run(String(cursor));
+  }
+
+  syncQueueStatus() {
+    const outbox = this.db.prepare("SELECT COUNT(*) AS value FROM sync_outbox").get() as { value: number };
+    const tombstones = this.db.prepare("SELECT COUNT(*) AS value FROM sync_tombstones").get() as { value: number };
+    return { pending: Number(outbox.value) + Number(tombstones.value), outbox: Number(outbox.value), tombstones: Number(tombstones.value), cursor: this.getSyncCursor() };
+  }
+
+  listSyncQueue(limit = 100) {
+    const cleanLimit = Math.min(Math.max(Math.trunc(limit), 1), 100);
+    return this.db.prepare(`
+      SELECT entity_type, entity_id, event_id, changed_at, 'upsert' AS operation FROM sync_outbox
+      UNION ALL
+      SELECT entity_type, entity_id, event_id, changed_at, 'delete' AS operation FROM sync_tombstones
+      ORDER BY changed_at, entity_type, entity_id
+      LIMIT ?
+    `).all(cleanLimit) as Array<{ entity_type: SyncEntityType; entity_id: string; event_id: string; changed_at: string; operation: "upsert" | "delete" }>;
+  }
+
+  clearSyncQueueEntry(entry: { entity_type: SyncEntityType; entity_id: string; event_id: string; operation: "upsert" | "delete" }) {
+    const table = entry.operation === "delete" ? "sync_tombstones" : "sync_outbox";
+    this.db.prepare(`DELETE FROM ${table} WHERE entity_type = ? AND entity_id = ? AND event_id = ?`).run(entry.entity_type, entry.entity_id, entry.event_id);
+  }
+
+  syncProjection(entityType: SyncEntityType, id: string): SyncProjection | null {
+    if (entityType === "project") {
+      const project = this.getProject(id);
+      if (!project) return null;
+      return {
+        id: project.id,
+        name: project.name,
+        identifier_prefix: project.identifier_prefix,
+        created_at: project.created_at,
+        updated_at: project.updated_at,
+        local_revision: Math.max(1, Date.parse(project.updated_at) || 1),
+      } satisfies ProjectProjection;
+    }
+    const issue = this.getIssue(id);
+    if (!issue) return null;
+    return {
+      id: issue.id,
+      identifier: issue.identifier,
+      project_id: issue.project_id,
+      title: issue.title,
+      description: issue.description,
+      status: issue.status,
+      priority: issue.priority,
+      labels: issue.labels,
+      sort_order: issue.sort_order,
+      pinned: issue.pinned,
+      archived_at: issue.archived_at,
+      assigned: Boolean(issue.agent_enabled || issue.user_assigned),
+      active_run: Boolean(issue.active_run_status || issue.session_owned),
+      needs_attention: issue.needs_attention,
+      created_at: issue.created_at,
+      updated_at: issue.updated_at,
+      local_revision: issue.version,
+    } satisfies IssueProjection;
   }
 
   getAutoDispatch() {
@@ -1290,7 +1444,8 @@ export class Store {
     const userHandoff = status === "blocked" || status === "in_review";
     const needsAttention = importedSession ? Number(!importedSession.active) : userHandoff ? 1 : agentEnabled && status !== "backlog" && status !== "done" && status !== "cancelled" ? 1 : 0;
     const pendingActor = importedSession ? importedSession.active ? "agent" : "user" : agentEnabled && !userHandoff && status !== "done" && status !== "cancelled" ? "agent" : "user";
-    const id = randomUUID();
+    const id = input.id ?? randomUUID();
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,199}$/.test(id)) throw new Error("invalid_issue_id");
     const timestamp = now();
     this.db.exec("BEGIN IMMEDIATE");
     try {
