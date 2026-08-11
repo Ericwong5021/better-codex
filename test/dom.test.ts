@@ -25,6 +25,8 @@ test("web sidebar entries never become their own native clone reference", () => 
   assert.ok(source.includes('const NAVIGATION = HOST_KIND === "web"'));
   assert.ok(source.includes('threadRoutePrefix: "/local/"'));
   assert.ok(source.includes("!document.hidden && active"));
+  assert.ok(source.includes("window.betterCodexHost?.request"));
+  assert.ok(source.includes("startLiveUpdates()"));
 });
 
 test("in-review status uses the waiting-for-review label", () => {

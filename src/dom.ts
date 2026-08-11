@@ -535,6 +535,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     let refreshPending = false;
     let refreshTimer = null;
     let pollTimer = null;
+    let liveUnsubscribe = null;
     let updateTimer = null;
     let relayTimer = null;
     let relayBusy = false;
@@ -1243,9 +1244,15 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function api(path, options = {}) {
-      if (typeof window.betterCodexRequest !== "function") return Promise.reject(new Error("runtime_bridge_unavailable"));
       const requestPath = path + (path.includes("?") ? "&" : "?") + "locale=" + encodeURIComponent(state.locale);
       const attempt = (retriesLeft) => {
+        if (typeof window.betterCodexHost?.request === "function") {
+          return Promise.resolve(window.betterCodexHost.request({ path: requestPath, method: options.method || "GET", body: options.body })).catch(error => {
+            if (retriesLeft > 0 && error instanceof Error && error.message === "runtime_bridge_timeout") return attempt(retriesLeft - 1);
+            throw error;
+          });
+        }
+        if (typeof window.betterCodexRequest !== "function") return Promise.reject(new Error("runtime_bridge_unavailable"));
         const id = VERSION + ":" + (++bridgeSequence);
         return new Promise((resolve, reject) => {
           const timer = setTimeout(() => {
@@ -1268,6 +1275,15 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         });
       };
       return attempt(1);
+    }
+
+    function startLiveUpdates() {
+      if (liveUnsubscribe || typeof window.betterCodexHost?.subscribe !== "function") return false;
+      liveUnsubscribe = window.betterCodexHost.subscribe(event => {
+        if (event?.event === "ready" && !bootstrapReady) return;
+        if (!document.hidden && active && !panel?.dataset.recovery) void perform(() => loadSurface({ background: true }));
+      });
+      return typeof liveUnsubscribe === "function";
     }
 
     function appServerError(value) {
@@ -5188,7 +5204,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       mountPanel();
       render();
       void (ready ? loadSurface({ preserveInspector: true }) : load());
-      if (pollTimer === null) pollTimer = setInterval(() => { if (!document.hidden && active && !panel?.dataset.recovery) void perform(() => loadSurface({ background: true })); }, 3000);
+      if (!startLiveUpdates() && pollTimer === null) pollTimer = setInterval(() => { if (!document.hidden && active && !panel?.dataset.recovery) void perform(() => loadSurface({ background: true })); }, 3000);
     }
 
     function close(options = {}) {
@@ -5364,6 +5380,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         pending.reject(new Error("injection_destroyed"));
       }
       appServerRequests.clear();
+      liveUnsubscribe?.();
+      liveUnsubscribe = null;
       document.removeEventListener("DOMContentLoaded", mount);
       document.removeEventListener("click", onClick, true);
       document.removeEventListener("keydown", onGlobalShortcut, true);
@@ -5381,6 +5399,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (destroyed || observer || !document.documentElement) return;
       observer = new MutationObserver(scheduleRefresh);
       observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-theme", "aria-current", ATTRIBUTES.threadActive] });
+      startLiveUpdates();
       refresh();
       startSessionRelay();
       void checkUpdateNotice();

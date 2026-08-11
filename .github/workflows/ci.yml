@@ -21,7 +21,10 @@ jobs:
       - run: npm ci
       - run: npx playwright install chromium
       - run: npm run typecheck
-      - run: npm run test:web
+      - if: github.event_name == 'pull_request'
+        run: npm run test:web:smoke
+      - if: github.event_name != 'pull_request'
+        run: npm run test:web
       - if: failure()
         uses: actions/upload-artifact@v4
         with:

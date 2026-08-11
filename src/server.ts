@@ -387,6 +387,7 @@ function errorCode(error: unknown) {
 }
 
 function errorStatus(code: string) {
+  if (code === "body_too_large") return 413;
   if (code === "version_conflict" || code === "reply_busy" || code === "update_in_progress" || code === "issue_execution_locked" || code === "issue_execution_running" || code === "issue_session_handed_off" || code === "issue_session_starting" || code === "issue_session_already_bound" || code === "session_relay_not_leader" || code === "session_command_not_claimed" || code === "session_command_outcome_unknown") return 409;
   if (code.endsWith("_not_found")) return 404;
   if (code === "database_unavailable" || code === "database_integrity_check_failed") return 503;
@@ -421,7 +422,19 @@ export function startServer() {
   let updateRelaunchScheduled = false;
   let updateInstallInProgress = false;
   const webSessions = new Map<string, number>();
+  const eventClients = new Map<ServerResponse, ReturnType<typeof setInterval>>();
+  const eventHistory: number[] = [];
+  let eventRevision = 0;
   const worker = new IssueWorker(store);
+  const sendEvent = (response: ServerResponse, event: string, revision: number) => {
+    response.write(`id: ${revision}\nevent: ${event}\ndata: ${JSON.stringify({ revision })}\n\n`);
+  };
+  const publishChange = () => {
+    eventRevision += 1;
+    eventHistory.push(eventRevision);
+    if (eventHistory.length > 64) eventHistory.shift();
+    for (const response of eventClients.keys()) sendEvent(response, "change", eventRevision);
+  };
   const importedSessionState = async (threadId: string) => {
     const { activity } = await readConversationActivity(threadId);
     return {
@@ -452,6 +465,11 @@ export function startServer() {
     cleaned = true;
     worker.stop();
     stopUpdateChecks();
+    for (const [response, heartbeat] of eventClients) {
+      clearInterval(heartbeat);
+      response.end();
+    }
+    eventClients.clear();
     clearRuntimeState(identity.instanceId);
     store.close();
   };
@@ -462,6 +480,12 @@ export function startServer() {
       const path = url.pathname.split("/").filter(Boolean);
       const method = request.method ?? "GET";
       const mockupLocale = normalizeMockupLocale(url.searchParams.get("locale"));
+
+      if (url.pathname.startsWith("/api/") && !["GET", "OPTIONS"].includes(method)) {
+        response.once("finish", () => {
+          if (response.statusCode >= 200 && response.statusCode < 400) publishChange();
+        });
+      }
 
       if (method === "OPTIONS") return sendPreflight(response);
       if (url.pathname === "/health") {
@@ -493,6 +517,33 @@ export function startServer() {
         return sendWeb(response, 200, injectionScript(activePort, sessionToken, "install", locale, "web"), "text/javascript; charset=utf-8");
       }
       if (!authorized(request, url, webSessions)) return sendJson(response, 401, { error: "unauthorized" });
+      if (url.pathname === "/api/events" && method === "GET") {
+        response.writeHead(200, {
+          "cache-control": "no-cache, no-store",
+          "connection": "keep-alive",
+          "content-type": "text/event-stream; charset=utf-8",
+          "x-accel-buffering": "no",
+        });
+        response.flushHeaders();
+        const cursor = Number(request.headers["last-event-id"]);
+        const oldestRevision = eventHistory[0] ?? eventRevision;
+        if (Number.isInteger(cursor) && (cursor > eventRevision || cursor < oldestRevision - 1)) {
+          sendEvent(response, "reset", eventRevision);
+        } else if (Number.isInteger(cursor)) {
+          const missed = eventHistory.filter(revision => revision > cursor);
+          if (missed.length) missed.forEach(revision => sendEvent(response, "change", revision));
+          else sendEvent(response, "ready", eventRevision);
+        } else {
+          sendEvent(response, "ready", eventRevision);
+        }
+        const heartbeat = setInterval(() => response.write(": heartbeat\n\n"), 15_000);
+        eventClients.set(response, heartbeat);
+        request.once("close", () => {
+          clearInterval(heartbeat);
+          eventClients.delete(response);
+        });
+        return;
+      }
       if (url.pathname === "/api/issues/attachments" && method === "POST") {
         const body = await readBody(request, maxPastedImageBodyBytes);
         return sendJson(response, 201, savePastedImage(body.data));

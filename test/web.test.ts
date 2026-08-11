@@ -53,6 +53,18 @@ async function stopRuntime(process: ChildProcess) {
   await new Promise<void>(resolve => process.once("exit", () => resolve()));
 }
 
+async function readStreamChunk(reader: ReadableStreamDefaultReader<Uint8Array>) {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      reader.read(),
+      new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(new Error("event_stream_timeout")), 2000); }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
 test("request body limits stop buffering after rejection", () => {
   const source = readFileSync(new URL("../src/server.ts", import.meta.url), "utf8");
 
@@ -88,6 +100,9 @@ test("web host boots the shared DOM injection behind a local session", async () 
     assert.match(hostScript, /authorization: "Bearer " \+ sessionToken/);
     assert.doesNotMatch(hostScript, /authorization: "Bearer " \+ request\.token/);
     assert.match(hostScript, /response\.status === 401/);
+    assert.match(hostScript, /window\.betterCodexHost = Object\.freeze/);
+    assert.match(hostScript, /subscribe: subscribeRuntime/);
+    assert.match(hostScript, /better-codex-web-event-cursor/);
 
     const hostCss = await (await fetch(`${base}/web/host.css`)).text();
     assert.doesNotMatch(hostCss, /^\s*\*\s*\{/m);
@@ -117,7 +132,7 @@ test("web host boots the shared DOM injection behind a local session", async () 
       headers: { "content-type": "application/json", origin: base },
       body: JSON.stringify({ token: "x".repeat(5000) }),
     });
-    assert.equal(oversizedSession.status, 400);
+    assert.equal(oversizedSession.status, 413);
     assert.deepEqual(await oversizedSession.json(), { error: "body_too_large" });
 
     const session = await fetch(`${base}/web/session`, {
@@ -155,6 +170,56 @@ test("web host boots the shared DOM injection behind a local session", async () 
 
     const webBootstrap = await fetch(`${base}/api/bootstrap`, { headers: { authorization: `Bearer ${sessionToken}` } });
     assert.equal(webBootstrap.status, 200);
+
+    const eventController = new AbortController();
+    const eventResponse = await fetch(`${base}/api/events`, {
+      headers: { authorization: `Bearer ${sessionToken}` },
+      signal: eventController.signal,
+    });
+    assert.equal(eventResponse.status, 200);
+    assert.match(eventResponse.headers.get("content-type") || "", /text\/event-stream/);
+    const eventReader = eventResponse.body?.getReader();
+    assert.ok(eventReader);
+    let eventSource = new TextDecoder().decode((await readStreamChunk(eventReader)).value);
+    assert.match(eventSource, /event: ready/);
+    const eventMutation = await fetch(`${base}/api/projects`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${sessionToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ name: "Event project" }),
+    });
+    assert.equal(eventMutation.status, 201);
+    while (!eventSource.includes("event: change")) {
+      const chunk = await readStreamChunk(eventReader);
+      if (chunk.done) break;
+      eventSource += new TextDecoder().decode(chunk.value);
+    }
+    assert.match(eventSource, /event: change/);
+    assert.match(eventSource, /id: 1/);
+    eventController.abort();
+
+    const replayController = new AbortController();
+    const replayResponse = await fetch(`${base}/api/events`, {
+      headers: { authorization: `Bearer ${sessionToken}`, "last-event-id": "0" },
+      signal: replayController.signal,
+    });
+    const replayReader = replayResponse.body?.getReader();
+    assert.ok(replayReader);
+    const replaySource = new TextDecoder().decode((await readStreamChunk(replayReader)).value);
+    assert.match(replaySource, /event: change/);
+    assert.match(replaySource, /id: 1/);
+    replayController.abort();
+
+    const resetController = new AbortController();
+    const resetResponse = await fetch(`${base}/api/events`, {
+      headers: { authorization: `Bearer ${sessionToken}`, "last-event-id": "999" },
+      signal: resetController.signal,
+    });
+    const resetReader = resetResponse.body?.getReader();
+    assert.ok(resetReader);
+    const resetSource = new TextDecoder().decode((await readStreamChunk(resetReader)).value);
+    assert.match(resetSource, /event: reset/);
+    assert.match(resetSource, /id: 1/);
+    resetController.abort();
 
     const englishInjection = await fetch(`${base}/web/injection.js?locale=en-US&session=${sessionToken}`);
     assert.equal(englishInjection.status, 200);

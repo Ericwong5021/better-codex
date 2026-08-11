@@ -59,7 +59,8 @@
     "test:web": "playwright test",
     "test:web:smoke": "playwright test test/e2e/web/local-smoke.spec.ts",
     "test:web:debug": "playwright test --headed --debug",
-    "test:acceptance": "npm run typecheck && npm test && npm run test:web"
+    "test:web:stack": "node scripts/test-web-stack.mjs",
+    "test:acceptance": "npm run test:web:stack"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",

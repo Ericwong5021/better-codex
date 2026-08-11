@@ -22,6 +22,12 @@ test.afterAll(async () => {
   await runtime?.stop();
 });
 
+test.afterEach(async ({}, testInfo) => {
+  if (testInfo.status !== testInfo.expectedStatus && runtime) {
+    await testInfo.attach("runtime.log", { body: runtime.output(), contentType: "text/plain" });
+  }
+});
+
 test("rejects an invalid token and accepts the local runtime token", async ({ page }) => {
   await page.goto(`${runtime.baseUrl}/web`);
   const connect = page.locator("#web-connect");
@@ -55,12 +61,19 @@ test("creates, edits, moves, archives, and restores an issue", async ({ page }) 
   await card.click();
   await expect(editor).toBeVisible();
   await editor.locator('[name="title"]').fill(editedTitle);
+  await editor.locator('[name="description"]').fill("编辑后的描述");
   await editor.locator('[data-dialog-select-toggle="status"]').click();
   await editor.locator('[data-dialog-select-option="status"][data-dialog-select-value="todo"]').click();
+  await editor.locator('[data-dialog-select-toggle="priority"]').click();
+  await editor.locator('[data-dialog-select-option="priority"][data-dialog-select-value="high"]').click();
+  await editor.locator('[name="labels"]').fill("web-e2e, smoke");
   await editor.locator(".better-codex-submit").click();
 
   const editedCard = page.locator(`[data-issue-id]:has(.better-codex-card-title:text-is("${editedTitle}"))`);
   await expect(page.locator('.better-codex-column[data-status="todo"]', { has: editedCard })).toBeVisible();
+  await expect(editedCard).toContainText("编辑后的描述");
+  await expect(editedCard).toContainText("web-e2e");
+  await expect(editedCard.locator('[data-priority="high"]')).toBeVisible();
   await dragCard(page, editedCard, page.locator('.better-codex-column[data-status="done"] .better-codex-cards'));
   await expect(page.locator('.better-codex-column[data-status="done"]', { has: editedCard })).toBeVisible();
   await dragCard(page, editedCard, page.locator('.better-codex-column[data-status="archive"]'));

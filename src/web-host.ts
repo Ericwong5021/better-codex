@@ -168,6 +168,7 @@ const tokenInput = document.getElementById("web-token");
 const connectError = document.getElementById("web-connect-error");
 let installing = false;
 let sessionToken = sessionStorage.getItem("better-codex-web-session") || "";
+const eventCursorKey = "better-codex-web-event-cursor";
 
 function consumeFragmentToken() {
   const params = new URLSearchParams(location.hash.replace(/^#/, ""));
@@ -198,24 +199,108 @@ function expireSession() {
   if (!connectDialog.open) connectDialog.showModal();
 }
 
+async function requestRuntime(request) {
+  if (typeof request.path !== "string" || !request.path.startsWith("/api/")) {
+    throw new Error("invalid_bridge_request");
+  }
+  const headers = { authorization: "Bearer " + sessionToken };
+  if (request.body !== undefined) headers["content-type"] = "application/json";
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
+  try {
+    const response = await fetch(request.path, { method: request.method || "GET", headers, body: request.body, signal: controller.signal });
+    let value;
+    try { value = await response.json(); }
+    catch { value = { error: response.statusText || "request_failed" }; }
+    if (response.status === 401) setTimeout(expireSession, 0);
+    if (!response.ok) throw new Error(value.error || response.statusText || "request_failed");
+    return value;
+  } catch (error) {
+    if (error?.name === "AbortError") throw new Error("runtime_bridge_timeout");
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function eventBlock(block, listener) {
+  let event = "message";
+  let id = "";
+  const data = [];
+  for (const line of block.split("\n")) {
+    if (line.startsWith("event:")) event = line.slice(6).trim();
+    else if (line.startsWith("id:")) id = line.slice(3).trim();
+    else if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
+  }
+  if (id) sessionStorage.setItem(eventCursorKey, id);
+  if (!data.length) return;
+  let value = {};
+  try { value = JSON.parse(data.join("\n")); } catch {}
+  listener({ event, id, data: value });
+}
+
+function subscribeRuntime(listener) {
+  let stopped = false;
+  let controller = null;
+  const connect = async () => {
+    let delay = 250;
+    while (!stopped) {
+      controller = new AbortController();
+      try {
+        const headers = { authorization: "Bearer " + sessionToken };
+        const cursor = sessionStorage.getItem(eventCursorKey);
+        if (cursor) headers["last-event-id"] = cursor;
+        const response = await fetch("/api/events", { headers, signal: controller.signal });
+        if (response.status === 401) {
+          expireSession();
+          return;
+        }
+        if (!response.ok || !response.body) throw new Error("runtime_events_unavailable");
+        delay = 250;
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (!stopped) {
+          const result = await reader.read();
+          buffer += decoder.decode(result.value || new Uint8Array(), { stream: !result.done }).replace(/\r\n/g, "\n");
+          let boundary = buffer.indexOf("\n\n");
+          while (boundary >= 0) {
+            eventBlock(buffer.slice(0, boundary), listener);
+            buffer = buffer.slice(boundary + 2);
+            boundary = buffer.indexOf("\n\n");
+          }
+          if (result.done) break;
+        }
+      } catch (error) {
+        if (stopped || error?.name === "AbortError") return;
+      }
+      if (!stopped) {
+        await new Promise(resolve => setTimeout(resolve, delay));
+        delay = Math.min(delay * 2, 3000);
+      }
+    }
+  };
+  void connect();
+  return () => {
+    stopped = true;
+    controller?.abort();
+  };
+}
+
+window.betterCodexHost = Object.freeze({
+  version: 1,
+  kind: "web",
+  capabilities: Object.freeze({ issues: "read-write", agents: "read-write", liveUpdates: true, nativeThreads: false }),
+  request: requestRuntime,
+  subscribe: subscribeRuntime,
+});
+
 window.betterCodexRequest = payload => {
   let request;
   try { request = JSON.parse(payload); }
   catch { return; }
-  if (typeof request.path !== "string" || !request.path.startsWith("/api/")) {
-    window.__betterCodexBridgeResolve?.(request.id, { ok: false, value: { error: "invalid_bridge_request" } });
-    return;
-  }
-  const headers = { authorization: "Bearer " + sessionToken };
-  if (request.body !== undefined) headers["content-type"] = "application/json";
-  fetch(request.path, { method: request.method || "GET", headers, body: request.body })
-    .then(async response => {
-      let value;
-      try { value = await response.json(); }
-      catch { value = { error: response.statusText || "request_failed" }; }
-      window.__betterCodexBridgeResolve?.(request.id, { ok: response.ok, value });
-      if (response.status === 401) setTimeout(expireSession, 0);
-    })
+  requestRuntime(request)
+    .then(value => window.__betterCodexBridgeResolve?.(request.id, { ok: true, value }))
     .catch(error => window.__betterCodexBridgeResolve?.(request.id, { ok: false, value: { error: error.message || "runtime_unavailable" } }));
 };
 

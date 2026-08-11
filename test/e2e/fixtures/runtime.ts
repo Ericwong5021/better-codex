@@ -9,6 +9,7 @@ export type RuntimeFixture = {
   baseUrl: string;
   token: string;
   output: () => string;
+  restart: () => Promise<void>;
   stop: () => Promise<void>;
 };
 
@@ -59,21 +60,25 @@ export async function startRuntimeFixture(): Promise<RuntimeFixture> {
   const baseUrl = `http://127.0.0.1:${port}`;
   const token = `web-e2e-${randomUUID()}`;
   const outputLines: string[] = [];
-  const child = spawn(process.execPath, ["--import", "tsx", "src/cli.ts", "serve"], {
-    cwd: process.cwd(),
-    env: {
-      ...process.env,
-      BETTER_CODEX_HOME: fixtureHome,
-      BETTER_CODEX_DB: join(fixtureHome, "better-codex.db"),
-      BETTER_CODEX_PORT: String(port),
-      BETTER_CODEX_TOKEN: token,
-      CODEX_HOME: codexHome,
-    },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  child.stdout?.on("data", chunk => outputLines.push(String(chunk)));
-  child.stderr?.on("data", chunk => outputLines.push(String(chunk)));
   const output = () => outputLines.join("");
+  const spawnRuntime = () => {
+    const child = spawn(process.execPath, ["--import", "tsx", "src/cli.ts", "serve"], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        BETTER_CODEX_HOME: fixtureHome,
+        BETTER_CODEX_DB: join(fixtureHome, "better-codex.db"),
+        BETTER_CODEX_PORT: String(port),
+        BETTER_CODEX_TOKEN: token,
+        CODEX_HOME: codexHome,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    child.stdout?.on("data", chunk => outputLines.push(String(chunk)));
+    child.stderr?.on("data", chunk => outputLines.push(String(chunk)));
+    return child;
+  };
+  let child = spawnRuntime();
   try {
     await waitForHealth(baseUrl, child, output);
   } catch (error) {
@@ -85,6 +90,11 @@ export async function startRuntimeFixture(): Promise<RuntimeFixture> {
     baseUrl,
     token,
     output,
+    restart: async () => {
+      await stopProcess(child);
+      child = spawnRuntime();
+      await waitForHealth(baseUrl, child, output);
+    },
     stop: async () => {
       await stopProcess(child);
       rmSync(fixtureHome, { recursive: true, force: true });
