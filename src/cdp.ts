@@ -418,15 +418,21 @@ export function codexProcessRunning() {
   }
 }
 
-export function confirmCodexRestart() {
+export type CodexRestartChoice = "reset-runtime" | "restart-codex" | "cancelled";
+
+export function chooseCodexRestartAction(): CodexRestartChoice {
   const chinese = readCodexLocale() === "zh-CN";
-  return showNativeChoiceDialog({
-    message: chinese ? "当前进程正在运行。\n\n需要重启进程才能启动注入。" : "The current process is already running.\n\nRestart the process to enable injection.",
+  const choice = showNativeChoiceDialog({
+    message: chinese
+      ? "“重置服务”只会重启 Better Codex Runtime；“重启Codex”会关闭并重新打开整个 Codex。\n\nBetter Codex 已在运行。"
+      : "Reset Service restarts only the Better Codex Runtime. Restart Codex closes and reopens the entire Codex app.\n\nBetter Codex is already running.",
     title: "Better Codex",
-    primaryLabel: chinese ? "重启进程" : "Restart process",
-    secondaryLabel: chinese ? "取消" : "Cancel",
-    icon: "caution",
+    primaryLabel: chinese ? "重启Codex" : "Restart Codex",
+    secondaryLabel: chinese ? "重置服务" : "Reset Service",
   });
+  if (choice === "primary") return "restart-codex";
+  if (choice === "secondary") return "reset-runtime";
+  return "cancelled";
 }
 
 export function windowsCodexPackageProcessPowerShell(action: "stop" | "count") {
@@ -580,9 +586,8 @@ export async function cdpInject(port: number, runtimePort: number, accessToken: 
   return installed;
 }
 
-export async function cdpRestartAndInject(port: number, runtimePort: number, accessToken: string, options: { confirmQuit?: boolean } = {}) {
+export async function cdpRestartAndInject(port: number, runtimePort: number, accessToken: string) {
   if (!['darwin', 'win32'].includes(process.platform)) throw new Error(`setup_unsupported_${process.platform}`);
-  if (options.confirmQuit && codexProcessRunning() && !confirmCodexRestart()) throw new Error("codex_quit_cancelled");
   await quitCodex();
   return cdpInject(port, runtimePort, accessToken, true);
 }

@@ -6,7 +6,7 @@ import { isSea } from "node:sea";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
-import { cdpEject, cdpInject, cdpOpenThread, cdpRestartAndInject, cdpStatus, codexInstallationStatus, codexProcessRunning, confirmCodexRestart, launchCodex, requiresCodexRestartForLaunch, watchInjection } from "./cdp.js";
+import { cdpEject, cdpInject, cdpOpenThread, cdpRestartAndInject, cdpStatus, codexInstallationStatus, codexProcessRunning, chooseCodexRestartAction, launchCodex, requiresCodexRestartForLaunch, watchInjection } from "./cdp.js";
 import { removeManagedAgentProfiles } from "./agent-profiles.js";
 import { coreVersion } from "./compatibility.js";
 import {
@@ -950,13 +950,14 @@ async function main() {
       if (latestIntent?.token !== intent.token) return { launched: false, superseded: true, requestedProfile: intent.profile };
       markLaunchIntentProcessed(intent.sequence);
       const explicitRestartRequested = latestIntent.restart === true;
-      const windowsCodexRunning = process.platform === "win32" && codexProcessRunning();
-      if (windowsCodexRunning && !explicitRestartRequested && !confirmCodexRestart()) {
+      const detectedCodexRunning = ["darwin", "win32"].includes(process.platform) && codexProcessRunning();
+      const restartChoice = detectedCodexRunning && !explicitRestartRequested ? chooseCodexRestartAction() : null;
+      if (restartChoice === "cancelled") {
         return { launched: false, restarted: false, cancelled: true };
       }
       const current = process.platform === "win32" ? { available: false, targets: [] } : await cdpStatus(cdpPort);
-      const codexRunning = process.platform === "win32" ? windowsCodexRunning : codexProcessRunning() || current.available || current.targets.length > 0;
-      const restartRequested = explicitRestartRequested || requiresCodexRestartForLaunch(codexRunning);
+      const codexRunning = detectedCodexRunning || current.available || current.targets.length > 0;
+      const restartRequested = explicitRestartRequested || restartChoice === "restart-codex" || (restartChoice === null && requiresCodexRestartForLaunch(codexRunning));
       const switchedFrom = await deactivatePeerInstance();
       if (!codexRunning) {
         setInjectionEnabled(true);
@@ -964,6 +965,18 @@ async function main() {
         const injection = await cdpInject(cdpPort, activeRuntimePort(), accessToken(), true);
         startInjector(cdpPort);
         return { launched: true, restarted: false, codexStarted: true, switchedFrom, injection };
+      }
+      if (restartChoice === "reset-runtime") {
+        await restartRuntime();
+        setInjectionEnabled(true);
+        launchCodex(cdpPort, true);
+        startInjector(cdpPort);
+        try {
+          const injection = await cdpInject(cdpPort, activeRuntimePort(), accessToken(), false);
+          return { launched: true, restarted: false, runtimeReset: true, openedCurrentCodex: true, switchedFrom, injection };
+        } catch (error) {
+          return { launched: true, restarted: false, runtimeReset: true, openedCurrentCodex: true, switchedFrom, injection: { restored: false, pending: true, error: error instanceof Error ? error.message : "injection_unavailable" } };
+        }
       }
       if (switchedFrom && !restartRequested) {
         setInjectionEnabled(true);
@@ -994,7 +1007,7 @@ async function main() {
       await restartRuntime();
       setInjectionEnabled(true);
       try {
-        const injection = await cdpRestartAndInject(cdpPort, activeRuntimePort(), accessToken(), { confirmQuit: false });
+        const injection = await cdpRestartAndInject(cdpPort, activeRuntimePort(), accessToken());
         await waitForInjector();
         return { launched: true, restarted: true, injection };
       } catch (error) {

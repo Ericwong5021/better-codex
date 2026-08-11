@@ -88,7 +88,7 @@ test("Windows shortcut offers to restart every running Codex instance", () => {
 
 test("Windows launch detects Codex without starting PowerShell or probing CDP", () => {
   const start = source.indexOf("export function codexProcessRunning()");
-  const end = source.indexOf("export function confirmCodexRestart()", start);
+  const end = source.indexOf("export type CodexRestartChoice", start);
   const branch = source.slice(start, end);
   assert.match(branch, /tasklist\.exe/);
   assert.match(branch, /IMAGENAME eq ChatGPT\.exe/);
@@ -110,18 +110,31 @@ test("macOS restart quits only the installed Desktop app by Bundle ID", () => {
   assert.doesNotMatch(source, /\/usr\/bin\/killall/);
 });
 
-test("launch restart asks before terminating Codex", () => {
+test("launcher choice exposes distinct service reset and Codex restart actions", () => {
   assert.match(source, /function codexProcessRunning\(\)/);
-  assert.match(source, /function confirmCodexRestart\(\)/);
+  assert.match(source, /function chooseCodexRestartAction\(\)/);
   assert.match(source, /showNativeChoiceDialog\(/);
+  assert.match(source, /reset-runtime/);
+  assert.match(source, /restart-codex/);
+  assert.match(source, /重置服务/);
+  assert.match(source, /重启Codex/);
   assert.match(nativeDialogSource, /Add-Type -AssemblyName System\.Windows\.Forms/);
   assert.match(nativeDialogSource, /DialogResult\]::No/);
   assert.match(nativeDialogSource, /DialogResult\]::Yes/);
-  assert.match(source, /options\.confirmQuit && codexProcessRunning\(\) && !confirmCodexRestart\(\)/);
-  assert.match(source, /codex_quit_cancelled/);
+  assert.doesNotMatch(source, /confirmQuit/);
 });
 
-test("Windows restart confirmation uses standard Windows dialog chrome and controls", () => {
+test("native restart choice uses Better Codex branding on Windows and macOS", () => {
+  assert.match(nativeDialogSource, /appIconIco/);
+  assert.match(nativeDialogSource, /AppIcon\.ico/);
+  assert.match(nativeDialogSource, /\$form\.Icon = \$dialogIcon/);
+  assert.match(nativeDialogSource, /\$form\.ShowIcon = \$true/);
+  assert.match(nativeDialogSource, /appIconIcns/);
+  assert.match(nativeDialogSource, /AppIcon\.icns/);
+  assert.match(nativeDialogSource, /with icon \(POSIX file/);
+});
+
+test("Windows restart choice uses standard Windows dialog chrome and two explicit actions", () => {
   assert.match(nativeDialogSource, /AutoScaleMode.*Dpi/);
   assert.match(nativeDialogSource, /SystemFonts\]::MessageBoxFont/);
   assert.match(nativeDialogSource, /SystemColors\]::Control/);
@@ -130,7 +143,11 @@ test("Windows restart confirmation uses standard Windows dialog chrome and contr
   assert.match(nativeDialogSource, /AccessibleName/);
   assert.match(nativeDialogSource, /FormBorderStyle.*FixedDialog/);
   assert.match(nativeDialogSource, /\$form\.ControlBox = \$true/);
-  assert.match(nativeDialogSource, /\$form\.CancelButton = \$secondary/);
+  assert.match(nativeDialogSource, /Write-Output 'primary'/);
+  assert.match(nativeDialogSource, /Write-Output 'secondary'/);
+  assert.match(nativeDialogSource, /\$secondary\.Focus\(\)/);
+  assert.match(nativeDialogSource, /default button \$\{secondary\}/);
+  assert.doesNotMatch(nativeDialogSource, /\$form\.CancelButton = \$secondary/);
   assert.doesNotMatch(nativeDialogSource, /GraphicsPath/);
   assert.doesNotMatch(nativeDialogSource, /Set-RoundedRegion/);
   assert.doesNotMatch(nativeDialogSource, /Add_Paint/);

@@ -90,9 +90,9 @@ test("shortcut launch opens the current Codex and supports an explicit restart",
   assert.match(cliSource, /openedCurrentCodex: true/);
   assert.match(cliSource, /async function restartRuntime\(\)/);
   assert.match(cliSource, /restarted: true/);
-  assert.match(cliSource, /const codexRunning = process\.platform === "win32" \? windowsCodexRunning : codexProcessRunning\(\) \|\| current\.available \|\| current\.targets\.length > 0/);
+  assert.match(cliSource, /const codexRunning = detectedCodexRunning \|\| current\.available \|\| current\.targets\.length > 0/);
   assert.match(cliSource, /codexStarted: true/);
-  assert.match(cliSource, /await cdpRestartAndInject\(cdpPort, activeRuntimePort\(\), accessToken\(\), \{ confirmQuit: false \}\)/);
+  assert.match(cliSource, /await cdpRestartAndInject\(cdpPort, activeRuntimePort\(\), accessToken\(\)\)/);
   assert.match(cliSource, /includes\("--restart"\)/);
   assert.match(cliSource, /latestIntent\.restart === true/);
 });
@@ -107,15 +107,31 @@ test("Windows shortcut routes every running Codex through restart confirmation",
 
 test("Windows shortcut checks only the Codex process before asking to restart", () => {
   assert.match(cliSource, /const explicitRestartRequested = latestIntent\.restart === true/);
-  assert.match(cliSource, /const restartRequested = explicitRestartRequested \|\| requiresCodexRestartForLaunch\(codexRunning\)/);
+  assert.match(cliSource, /const restartRequested = explicitRestartRequested \|\| restartChoice === "restart-codex"/);
   const launch = cliSource.indexOf("if (command === \"launch\")");
-  const processDiscovery = cliSource.indexOf('const windowsCodexRunning = process.platform === "win32" && codexProcessRunning()', launch);
-  const confirmation = cliSource.indexOf("windowsCodexRunning && !explicitRestartRequested && !confirmCodexRestart()", processDiscovery);
+  const processDiscovery = cliSource.indexOf('const detectedCodexRunning = ["darwin", "win32"].includes(process.platform) && codexProcessRunning()', launch);
+  const confirmation = cliSource.indexOf("chooseCodexRestartAction()", processDiscovery);
   const platformDiscovery = cliSource.indexOf('const current = process.platform === "win32" ? { available: false, targets: [] } : await cdpStatus(cdpPort)', confirmation);
   const peerDeactivation = cliSource.indexOf("await deactivatePeerInstance()", confirmation);
   const runtimeRestart = cliSource.indexOf("await restartRuntime()", confirmation);
   assert.ok(processDiscovery >= 0 && confirmation > processDiscovery && platformDiscovery > confirmation && peerDeactivation > platformDiscovery && runtimeRestart > peerDeactivation);
   assert.match(cliSource, /cancelled: true/);
+});
+
+test("launcher reset-service choice restarts only the Runtime and restores injection", () => {
+  const resetChoice = cliSource.indexOf('if (restartChoice === "reset-runtime")');
+  const fullRestart = cliSource.indexOf("const injection = await cdpRestartAndInject", resetChoice);
+  const branch = cliSource.slice(resetChoice, fullRestart);
+  assert.ok(resetChoice >= 0 && fullRestart > resetChoice);
+  assert.match(branch, /await restartRuntime\(\)/);
+  assert.match(branch, /cdpInject\(cdpPort, activeRuntimePort\(\), accessToken\(\), false\)/);
+  assert.match(branch, /runtimeReset: true/);
+  assert.doesNotMatch(branch, /cdpRestartAndInject/);
+});
+
+test("macOS and Windows running Codex instances share the native restart choice", () => {
+  assert.match(cliSource, /\["darwin", "win32"\]\.includes\(process\.platform\)/);
+  assert.match(cliSource, /detectedCodexRunning && !explicitRestartRequested \? chooseCodexRestartAction\(\) : null/);
 });
 
 test("shortcut launch restores the bridge when keeping the current Codex", () => {
