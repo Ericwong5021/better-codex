@@ -8,6 +8,30 @@ For a small bug fix or documentation change, open an issue first when the expect
 
 Please do not include API keys, personal task content, private conversation data, or unredacted logs in issues or pull requests.
 
+## Beta testing
+
+Testing Beta releases is a way to contribute without changing the source code. Beta testers help catch installer, update, compatibility, and runtime problems before a release reaches the stable channel.
+
+Install the current Beta on macOS:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scripts/install-beta.sh | bash
+```
+
+Install the current Beta on Windows PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scripts/install-beta.ps1 | iex
+```
+
+The Beta installer selects the Preview update channel. Stable and Preview builds use the same local configuration and task database. To return to stable updates, run:
+
+```bash
+better-codex update channel stable
+```
+
+Switching back to the stable channel does not silently downgrade a newer Beta. When reporting Beta feedback, include your operating system and architecture, Codex version and distribution, Better Codex version, reproduction steps, and a redacted `better-codex doctor` result when relevant.
+
 ## Development setup
 
 Better Codex requires Node.js 22.5 or later.

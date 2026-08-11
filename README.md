@@ -93,12 +93,6 @@ macOS:
 curl -fsSL https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scripts/install.sh | bash
 ```
 
-macOS Beta:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scripts/install-beta.sh | bash
-```
-
 Windows (PowerShell):
 
 ```powershell
@@ -131,9 +125,6 @@ The app entry and route are registered through the local MCP server. The page in
 **How do updates work?**<br>
 Better Codex checks a signed update manifest in the background and shows a notice inside Codex when a new version is available. You can also rerun the install command at any time. It upgrades in place when possible.
 
-**How do I join or leave the Beta channel?**<br>
-Run `better-codex update --channel preview` once to install the current Beta, then `better-codex update channel preview` to keep receiving Preview updates. Run `better-codex update channel stable` to return to stable updates. Both channels use the same local configuration and data; switching back never silently downgrades a newer Beta.
-
 **Which platforms are supported?**<br>
 Codex Desktop on macOS (Apple Silicon and Intel) and the Microsoft Store version of Codex on Windows x64. Release packages and CI cover all three.
 
@@ -146,8 +137,6 @@ better-codex mcp status        # inspect the MCP registration
 better-codex mcp install       # register or repair the MCP server
 better-codex launcher install  # install the system launcher
 better-codex launcher status   # inspect the system launcher
-better-codex update channel preview  # keep receiving Beta updates
-better-codex update channel stable   # return to stable updates
 better-codex eject             # remove the sidebar integration, keep task data
 better-codex uninstall         # uninstall completely and delete local data
 ```
@@ -171,6 +160,7 @@ The development instance does not auto-update its core. Pull source changes and 
 
 - Found a bug or want a feature? Open a [GitHub Issue](https://github.com/Ericwong5021/better-codex/issues).
 - Questions and workflow ideas belong in [GitHub Discussions](https://github.com/Ericwong5021/better-codex/discussions).
+- Want to help test Beta releases? Read the [Beta testing guide](CONTRIBUTING.md#beta-testing).
 - Please use English in public GitHub conversations so everyone can follow them.
 
 If Better Codex makes your Codex better, a star helps other heavy users find it.

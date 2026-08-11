@@ -125,9 +125,6 @@ Codex 通过本地 MCP 应用识别 Better Codex 的应用入口和路由，让�
 **更新怎么做？**<br>
 Better Codex 会在后台检查带签名的更新清单，发现新版本时在 Codex 内提示。你也可以随时重新运行安装命令，它会优先原地升级。
 
-**如何加入或退出 Beta 通道？**<br>
-先运行一次 `better-codex update --channel preview` 安装当前 Beta，再运行 `better-codex update channel preview` 持续接收 Preview 更新。运行 `better-codex update channel stable` 即可回到正式通道。两个通道共用本地配置和数据；切回正式通道时不会静默降级到更旧版本。
-
 **支持哪些平台？**<br>
 macOS 版 Codex Desktop（Apple Silicon 和 Intel），以及 Windows x64 上 Microsoft Store 版本的 Codex。Release 安装包和 CI 覆盖全部三个平台。
 
@@ -140,8 +137,6 @@ better-codex mcp status        # 检查 MCP 注册状态
 better-codex mcp install       # 注册或修复 MCP
 better-codex launcher install  # 安装系统启动入口
 better-codex launcher status   # 检查系统启动入口
-better-codex update channel preview  # 持续接收 Beta 更新
-better-codex update channel stable   # 回到正式更新通道
 better-codex eject             # 移除侧边栏集成，保留任务数据
 better-codex uninstall         # 完全卸载并删除本地数据
 ```
@@ -165,5 +160,6 @@ npm run dev:install
 
 - 发现 Bug 或想要新功能？提交 [GitHub Issue](https://github.com/Ericwong5021/better-codex/issues)。
 - 使用问题和工作流想法欢迎到 [GitHub Discussions](https://github.com/Ericwong5021/better-codex/discussions) 交流。
+- 想作为测试者参与 Beta 验证？请阅读[贡献指南中的 Beta 测试说明](CONTRIBUTING.md#beta-testing)。
 
 如果 Better Codex 让你的 Codex 变得更好用，点个 Star 能帮更多重度用户找到它。
