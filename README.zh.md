@@ -145,7 +145,7 @@ better-codex uninstall         # 完全卸载并删除本地数据
 
 需要 Node.js 22.5 或更新版本。
 
-如果电脑上已经安装正式版，推荐把源码作为独立开发实例安装。正式版继续使用 `~/.better-codex` 和启动器 `Better Codex`；开发版使用 `~/.better-codex-dev` 和启动器 `Better Codex Dev`。两个实例默认共用正式版数据库 `~/.better-codex/better-codex.db`，运行时文件、日志、附件和更新状态仍彼此隔离。点击任一启动器时会先停用另一个实例的页面注入。
+如果电脑上已经安装正式版，推荐把源码作为独立开发实例安装。正式版继续使用 `~/.better-codex` 和启动器 `Better Codex`；开发版使用 `~/.better-codex-dev` 和启动器 `Better Codex Dev`。开发版首次启动时，如果正式版数据库存在，会把它一致性快照到 `~/.better-codex-dev/better-codex.db`。此后两份数据库独立演进：开发版的迁移和测试数据不会修改正式版数据库。运行时文件、日志、附件和更新状态也彼此隔离。点击任一启动器时会先停用另一个实例的页面注入。
 
 ```bash
 git clone https://github.com/Ericwong5021/better-codex.git

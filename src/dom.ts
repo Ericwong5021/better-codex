@@ -6,6 +6,7 @@ import { renderMarkdown } from "./markdown.js";
 import { betterCodexMcpRoute } from "./mcp-app.js";
 import {
   ArrowLeftRight,
+  ArrowUp,
   Archive,
   BookOpen,
   Bot,
@@ -70,6 +71,7 @@ function lucideDefinition(svg: string) {
 
 const lucideIcons = Object.fromEntries(Object.entries({
   plus: Plus,
+  send: ArrowUp,
   more: Ellipsis,
   filter: ListFilter,
   display: SlidersHorizontal,
@@ -307,7 +309,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const THREAD_OPEN_POLL_MS = 100;
     const statusLabels = { backlog: "待规划", todo: "待办", in_progress: "进行中", in_review: "待审核", done: "已完成", blocked: "已阻塞", cancelled: "已取消" };
     const priorityLabels = { none: "无", low: "低", medium: "中", high: "高", urgent: "紧急" };
-    const mockupRunStatusLabels = { "not-started": "未开始", claimed: "排队中", running: "工作中", completed: "已完成", failed: "执行失败", interrupted: "已中断" };
+    const mockupRunStatusLabels = { "not-started": "未开始", claimed: "排队中", running: "工作中", completed: "已完成", failed: "执行失败", interrupted: "已停止" };
     const rememberedSurface = sessionStorage.getItem(RESUME_SURFACE_KEY);
     const rememberedProjectId = localStorage.getItem(PROJECT_KEY) || "";
     const rememberedLanguage = localStorage.getItem(LANGUAGE_KEY);
@@ -472,7 +474,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "对话链接无效。": "The conversation link is invalid.", "对话仍在加载，请稍后重试。": "The conversation is still loading. Try again shortly.", "任务正在执行，请先等待完成。": "The task is still running. Wait for it to finish first.", "任务仍在整理中，请稍后再编辑。": "The task is still being organized. Try editing it again shortly.", "当前为手动运行，请先点击“立即开始任务”。": "Manual run is enabled. Click “Start task now” first.", "待规划中的 Issue 不会自动触发任务，请先移出待规划区。": "Issues in Backlog do not trigger tasks automatically. Move it out of Backlog first.", "当前没有运行中的任务": "No agents are currently working", "查看运行中的任务": "View running tasks", "暂无任务": "No tasks", "未分配": "Unassigned", "已分配": "Assigned", "新建任务": "New task", "新建智能体": "New agent", "运行模式说明": "Run mode", "手动运行时，只有点击“立即开始任务”才会触发智能体任务。": "In manual mode, agent tasks start only after you click “Start task now”.", "自动运行时，只要 Issue 不在「待规划」区，你发送的新消息都会触发任务；「待规划」里的 Issue 不会自动触发。": "In auto-run mode, new messages trigger tasks unless the Issue is in Backlog; Issues in Backlog do not trigger tasks automatically.", "未关联对话。": "No linked conversation.",
       "确定删除任务 “": "Delete task “", "确定删除所有已归档任务吗？": "Delete all archived tasks?", "吗？": "”?", "创建后先由 ": "After creation, ", " 整理卡片，再自动开始工作。": " will organize the card and start working automatically.", "刚刚": "Just now", "分钟": "minutes", "小时": "hours", "天": "days", "更新于": "Updated", "个筛选": "filters", "个智能体工作中": "agents working", "条": "items",
       "代码实现": "Code implementation", "最近 24 小时": "Last 24 hours", "最近 7 天": "Last 7 days", "最近 30 天": "Last 30 days", "暂无可选项": "No options available", "清除筛选": "Clear filters", "复制本地 workdir 路径": "Copy local workdir path",
-      "工作中": "Working", "排队中": "Queued", "理解中": "Thinking", "执行失败": "Execution failed", "已中断": "Interrupted", "未开始": "Not started", "无法连接 Better Codex Runtime": "Unable to connect to Better Codex Runtime",
+      "工作中": "Working", "排队中": "Queued", "理解中": "Thinking", "执行失败": "Execution failed", "已停止": "Stopped", "未开始": "Not started", "无法连接 Better Codex Runtime": "Unable to connect to Better Codex Runtime",
       "在会话中打开": "Open in conversation", "前往会话": "Open conversation", "请前往会话继续对话": "Continue in the conversation", "任务正在进行中": "Task is running", "立即开始任务": "Start task now", "切换到手动": "Switch to manual", "继续创建": "Keep creating", "指派给": "Assign to", "可选": "Optional", "建议": "Suggestions", "创建第一个任务": "Create your first task", "写下要完成的事，交给智能体处理。": "Describe what needs to be done and let an agent handle it.", "开始对话": "Start the conversation", "补充下一步要求，智能体会继续处理。": "Add your next request and the agent will continue.", "在下方输入消息并发送": "Type a message below and send it", "正在处理任务": "Working on the task", "智能体回复产生后会显示在这里。": "The agent's response will appear here when available.", "请稍候": "Please wait", "输入下一步要求…": "Enter your next request…", "调整侧边栏宽度": "Resize sidebar",
       "头像": "Avatar", "上传图片": "Upload image", "使用此头像": "Use this avatar", "点击选择预设图标，或上传图片": "Choose a preset icon or upload an image", "从预设图标中选择，也可以上传图片": "Choose a preset icon or upload an image", "创建智能体": "Create agent", "Codex 默认智能体": "Default Codex agent", "说明这个智能体适合承担什么工作": "Describe what this agent is good at", "定义职责、工作方式和输出要求": "Define responsibilities, workflow, and output requirements", "权限": "Permissions", "只读": "Read-only", "工作区可写": "Workspace write access", "完全访问": "Full access", "仅可读取工作区文件，不能修改": "Can read workspace files but cannot modify them", "可修改当前工作区内的文件": "Can modify files in the current workspace", "可不受限制地访问互联网和电脑上的任何文件": "Unrestricted access to the internet and files on this computer",
       "已经执行过对话的 Issue 只能修改状态、优先级和指派人。": "Issues with an executed conversation can only change status, priority, and assignee.", "终止任务后才能打开对话，是否终止任务？": "The task must be stopped before opening the conversation. Stop it now?", "终止并打开": "Stop and open", "正在终止…": "Stopping…", "忽略当前版本": "Ignore this version", "立即更新": "Update now", "暂无项目": "No projects", "告诉智能体要做什么，例如：“修复项目里任务运行状态不可见的问题”": "Tell the agent what to do, for example: “Fix the invisible task run status in the project”"
@@ -519,6 +521,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     let relayAppSessionId = "";
     let relayCurrentThreadId = "";
     let relayEventQueue = Promise.resolve();
+    let relayCommandInFlight = false;
+    let relayBufferedEvents = [];
     let updateNotice = null;
     let updateNoticeResizeObserver = null;
     let issueSessionSnapshot = new Map();
@@ -1234,6 +1238,28 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       return "desktop_bridge_request_failed";
     }
 
+    function relayEventTurnId(method, params) {
+      if (method === "item/completed") return normalizeSessionId(params?.turnId);
+      if (method === "turn/started" || method === "turn/completed") return normalizeSessionId(params?.turn?.id);
+      return "";
+    }
+
+    function queueRelayEvent(method, params) {
+      relayEventQueue = relayEventQueue.catch(() => {}).then(() => api("/api/session-relay/events", {
+        method: "POST",
+        body: JSON.stringify({ relay_id: relayId, method, params })
+      })).catch(() => {});
+    }
+
+    function flushRelayEvents(turnId = "", includeUnmatched = false) {
+      const buffered = relayBufferedEvents;
+      relayBufferedEvents = [];
+      buffered.forEach(event => {
+        const eventTurnId = relayEventTurnId(event.method, event.params);
+        if (includeUnmatched || !eventTurnId || eventTurnId === turnId) queueRelayEvent(event.method, event.params);
+      });
+    }
+
     function appServerEnvelope(value, event = null) {
       let message = value;
       if (typeof message === "string") {
@@ -1255,6 +1281,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (message.type !== "mcp-notification") return false;
       const method = String(message.method || "");
       const params = message.params && typeof message.params === "object" ? message.params : {};
+      if (method === "thread/started") return false;
       const threadId = normalizeSessionId(params.threadId);
       if (!threadId || (!relayThreads.has(threadId) && threadId !== relayCurrentThreadId)) return false;
       if (!["thread/status/changed", "turn/started", "turn/completed", "item/completed"].includes(method)) return false;
@@ -1278,10 +1305,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const items = Array.isArray(turn.items) ? turn.items.flatMap(item => item && typeof item === "object" && item.type === "agentMessage" && typeof item.text === "string" ? [{ type: "agentMessage", text: item.text }] : []) : [];
         relayParams = { threadId, turn: { id: String(turn.id || ""), status: String(turn.status || ""), items, error: error ? { message: String(error.message || "") } : null } };
       }
-      relayEventQueue = relayEventQueue.catch(() => {}).then(() => api("/api/session-relay/events", {
-        method: "POST",
-        body: JSON.stringify({ relay_id: relayId, method, params: relayParams })
-      })).catch(() => {});
+      if (relayCommandInFlight && method !== "thread/status/changed") relayBufferedEvents.push({ method, params: relayParams });
+      else queueRelayEvent(method, relayParams);
       return true;
     }
 
@@ -1312,6 +1337,21 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           reject(error instanceof Error ? error : new Error("desktop_bridge_unavailable"));
         });
       });
+    }
+
+    async function resumePersistedThread(threadId) {
+      const expected = normalizeSessionId(threadId);
+      if (!expected) throw new Error("thread_id_invalid");
+      const resumed = await sendAppServerRequest("thread/resume", { threadId: expected });
+      const resumedId = normalizeSessionId(resumed?.thread?.id);
+      if (resumedId !== expected) throw new Error("desktop_thread_resume_invalid");
+      relayThreads.add(expected);
+      return resumed.thread;
+    }
+
+    function isThreadNotFoundError(error) {
+      const value = String(error instanceof Error ? error.message : error || "").toLowerCase();
+      return value.includes("thread not found") || value.includes("thread_not_found");
     }
 
     function turnStartParams(threadId, payload) {
@@ -1345,6 +1385,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       let threadId = normalizeSessionId(command?.thread_id);
       let turnId = normalizeSessionId(command?.turn_id);
       const heartbeat = setInterval(() => void heartbeatSessionRelay(), 2000);
+      relayCommandInFlight = true;
+      relayBufferedEvents = [];
       try {
         if (command.kind === "start") {
           const params = {
@@ -1368,7 +1410,15 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         } else if (command.kind === "turn") {
           if (!threadId) throw new Error("session_thread_invalid");
           relayCurrentThreadId = threadId;
-          const turn = await sendAppServerRequest("turn/start", turnStartParams(threadId, payload));
+          await resumePersistedThread(threadId);
+          let turn;
+          try {
+            turn = await sendAppServerRequest("turn/start", turnStartParams(threadId, payload));
+          } catch (error) {
+            if (!isThreadNotFoundError(error)) throw error;
+            await resumePersistedThread(threadId);
+            turn = await sendAppServerRequest("turn/start", turnStartParams(threadId, payload));
+          }
           turnId = normalizeSessionId(turn?.turn?.id);
           if (!turnId) throw new Error("desktop_turn_start_invalid");
         } else if (command.kind === "steer") {
@@ -1391,15 +1441,29 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           method: "POST",
           body: JSON.stringify({ relay_id: relayId, result: { thread_id: threadId, turn_id: turnId } })
         });
+        relayCommandInFlight = false;
+        flushRelayEvents(turnId, command.kind === "steer" || command.kind === "interrupt");
         if (threadId) relayThreads.add(threadId);
       } catch (error) {
+        const commandError = error instanceof Error ? error.message : "desktop_bridge_request_failed";
         const failed = await api("/api/session-relay/commands/" + encodeURIComponent(command.id) + "/fail", {
           method: "POST",
-          body: JSON.stringify({ relay_id: relayId, error: error instanceof Error ? error.message : "desktop_bridge_request_failed", thread_id: threadId, turn_id: turnId })
+          body: JSON.stringify({ relay_id: relayId, error: commandError, thread_id: threadId, turn_id: turnId })
         }).catch(() => {});
+        relayCommandInFlight = false;
+        flushRelayEvents("", true);
+        if (commandError === "desktop_bridge_unavailable" || commandError === "desktop_bridge_timeout") {
+          relayCapability = "failed";
+          relayCapabilityError = commandError;
+          relayCapabilityCheckedAt = Date.now();
+        }
         if (failed && threadId) relayThreads.add(threadId);
       } finally {
         clearInterval(heartbeat);
+        if (relayCommandInFlight) {
+          relayCommandInFlight = false;
+          flushRelayEvents("", true);
+        }
         relayCurrentThreadId = "";
       }
     }
@@ -1420,6 +1484,17 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       relayBusy = true;
       try {
         if (relayCapability === "failed" && Date.now() - relayCapabilityCheckedAt > 10000) relayCapability = "unknown";
+        if (relayCapability === "unknown") {
+          relayCapabilityCheckedAt = Date.now();
+          try {
+            await sendAppServerRequest("thread/list", { limit: 1 });
+            relayCapability = "ready";
+            relayCapabilityError = "";
+          } catch (error) {
+            relayCapability = "failed";
+            relayCapabilityError = error instanceof Error ? error.message : "desktop_bridge_unavailable";
+          }
+        }
         const result = await api("/api/session-relay/poll", {
           method: "POST",
           body: JSON.stringify({
@@ -1435,18 +1510,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           if (threadId) relayThreads.add(threadId);
         });
         if (!result?.leader) return;
-        if (relayCapability === "unknown") {
-          relayCapabilityCheckedAt = Date.now();
-          try {
-            await sendAppServerRequest("thread/list", { limit: 1 });
-            relayCapability = "ready";
-            relayCapabilityError = "";
-          } catch (error) {
-            relayCapability = "failed";
-            relayCapabilityError = error instanceof Error ? error.message : "desktop_bridge_unavailable";
-          }
-          return;
-        }
         if (relayCapability !== "ready" || !result.command) return;
         await executeSessionCommand(result.command);
       } catch {} finally {
@@ -3472,10 +3535,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           const agentName = mockupText(agentDisplayName(assignee));
           const activityAgent = assignee || defaultAgent || { name: "Codex", is_default: true };
           const latestRunStatus = issue.latest_run_status || "";
-          const executionState = issue.status === "blocked" ? "blocked" : issue.latest_scheduler_error && issue.status === "in_review" ? "scheduler-failed" : latestRunStatus === "completed" ? "completed" : latestRunStatus === "failed" ? "failed" : latestRunStatus === "interrupted" ? "interrupted" : latestRunStatus === "scheduling" ? "scheduling" : latestRunStatus === "running" ? "running" : latestRunStatus === "claimed" ? "claimed" : issue.agent_enabled ? "not-started" : "";
+          const replyFailureState = ["failed", "interrupted"].includes(issue.reply_status) ? issue.reply_status : "";
+          const executionState = issue.status === "blocked" ? "blocked" : replyFailureState || (issue.latest_scheduler_error && issue.status === "in_review" ? "scheduler-failed" : latestRunStatus === "completed" ? "completed" : latestRunStatus === "failed" ? "failed" : latestRunStatus === "interrupted" ? "interrupted" : latestRunStatus === "scheduling" ? "scheduling" : latestRunStatus === "running" ? "running" : latestRunStatus === "claimed" ? "claimed" : issue.agent_enabled ? "not-started" : "");
           const activeExecutionState = issue.active_run_status || (issue.reply_status === "running" ? "running" : "");
-          const activityState = enrichmentLocked ? "thinking" : activeExecutionState || executionState;
-          const activityLabel = t(enrichmentLocked ? "理解中" : activityState === "running" ? "工作中" : activityState === "scheduling" ? "调度中" : activityState === "scheduler-failed" ? "调度失败" : activityState === "claimed" ? "排队中" : activityState === "in_review" ? "待审核" : activityState === "completed" ? "已完成" : activityState === "blocked" ? "已阻塞" : activityState === "failed" ? "执行失败" : activityState === "interrupted" ? "已中断" : activityState === "not-started" ? "未开始" : "");
+          const activityState = enrichmentLocked ? "thinking" : issue.session_status === "stopping" ? "stopping" : activeExecutionState || executionState;
+          const activityLabel = t(enrichmentLocked ? "理解中" : activityState === "stopping" ? "正在停止…" : activityState === "running" ? "工作中" : activityState === "scheduling" ? "调度中" : activityState === "scheduler-failed" ? "调度失败" : activityState === "claimed" ? "排队中" : activityState === "in_review" ? "待审核" : activityState === "completed" ? "已完成" : activityState === "blocked" ? "已阻塞" : activityState === "failed" ? "执行失败" : activityState === "interrupted" ? "已停止" : activityState === "not-started" ? "未开始" : "");
           const activityIcon = activityState === "scheduling" ? '<span class="better-codex-activity-dot better-codex-scheduler-dot" aria-hidden="true"></span>' : activityState === "scheduler-failed" ? '<span class="better-codex-activity-dot better-codex-scheduler-failed-dot" aria-hidden="true"></span>' : ["completed", "interrupted", "not-started"].includes(activityState) ? '<span class="better-codex-activity-dot" aria-hidden="true"></span>' : ["failed", "blocked"].includes(activityState) ? icon("close") : agentAvatarMarkup(activityAgent, "better-codex-card-avatar");
           const activity = activityState
             ? '<span class="better-codex-activity" data-run="' + escapeHtml(activityState) + '">' + activityIcon + '<span class="' + (enrichmentLocked || executionRunning ? "better-codex-shimmer" : "") + '">' + activityLabel + '</span></span>'
@@ -3892,12 +3956,23 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (startNow) startNow.disabled = editingLocked || disabled || startBlocked;
       }
 
-      function updateReplySendState() {
+      function updateReplySendState(replyStatus = issue?.reply_status || "idle") {
         const send = dialog.querySelector("[data-conversation-send]");
         const reply = dialog.querySelector('[name="reply"]');
         if (!send) return;
+        const stopping = issue?.session_status === "stopping";
+        const working = stopping || executionRunning || replyStatus === "running";
+        const mode = stopping ? "stopping" : working ? "stop" : "send";
+        const composer = send.closest(".better-codex-composer");
         if (reply) reply.disabled = sessionHandoff;
-        send.disabled = sessionHandoff || (!String(reply?.value || "").trim() && !draft.replyAttachments.length);
+        if (composer) composer.dataset.state = mode;
+        send.dataset.composerMode = mode;
+        send.setAttribute("aria-label", t(stopping ? "正在停止…" : working ? "停止任务" : "发送"));
+        send.title = t(stopping ? "正在停止…" : working ? "停止任务" : "发送");
+        send.innerHTML = icon(working ? "stop" : "send", "", working ? "2.5" : "2");
+        send.disabled = stopping || sessionHandoff || (!working && !String(reply?.value || "").trim() && !draft.replyAttachments.length);
+        const attach = dialog.querySelector("[data-conversation-attach]");
+        if (attach) attach.disabled = sessionHandoff;
       }
 
       function applyDialogPermissions() {
@@ -3914,16 +3989,16 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             control.disabled = true;
             return;
           }
-          if (sessionHandoff && control.matches('[name="reply"], [data-conversation-send], [data-dialog-attachment-scope="reply"]')) {
+          if (sessionHandoff && control.matches('[name="reply"], [data-conversation-send], [data-conversation-attach], [data-dialog-attachment-scope="reply"]')) {
             control.disabled = true;
             return;
           }
           if (executionRunning) {
-            control.disabled = !control.matches('[name="reply"], [data-conversation-send], [data-dialog-attachment-scope="reply"]');
+            control.disabled = !control.matches('[name="reply"], [data-conversation-send], [data-conversation-attach], [data-dialog-attachment-scope="reply"]');
             return;
           }
           if (executionLocked) {
-            control.disabled = !(control.matches('[name="reply"], [data-conversation-send], [data-dialog-attachment-scope="reply"]') || control.closest('[data-dialog-select="status"], [data-dialog-select="priority"], [data-dialog-select="assignee"]'));
+            control.disabled = !(control.matches('[name="reply"], [data-conversation-send], [data-conversation-attach], [data-dialog-attachment-scope="reply"]') || control.closest('[data-dialog-select="status"], [data-dialog-select="priority"], [data-dialog-select="assignee"]'));
             return;
           }
           control.disabled = false;
@@ -3985,14 +4060,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const startNowButton = issue && !sessionId && !issue.active_run_status && !["done", "cancelled"].includes(issue.status)
           ? '<button class="better-codex-dialog-start-now" type="button"' + (!issue.agent_enabled ? " disabled" : "") + ' data-dialog-start-now>' + te("立即开始任务") + '</button>'
           : "";
-        const stopButton = issue && executionRunning
-          ? '<button class="better-codex-icon-button better-codex-dialog-stop" type="button" data-dialog-stop aria-label="' + te("停止任务") + '" title="' + te("停止任务") + '">' + icon("stop") + '</button>'
-          : "";
         const title = draft.mode === "agent" ? t("通过智能体创建") : issue ? escapeHtml(issue.identifier) : t("手动创建");
         const crumb = issue
           ? '<span data-dialog-breadcrumb-project>' + escapeHtml(projectLabel(breadcrumbProject) || t("未提供")) + '</span><span aria-hidden="true">' + icon("chevron") + '</span><strong>' + title + '</strong>'
           : '<strong>' + title + '</strong>';
-        return '<div class="better-codex-dialog-head"><div class="better-codex-dialog-breadcrumb">' + crumb + '</div><div class="better-codex-dialog-head-actions">' + openThreadButton + startNowButton + stopButton + '<button class="better-codex-icon-button" type="button" data-dialog-expand aria-label="' + te(draft.expanded ? "缩小" : "展开") + '">' + icon(draft.expanded ? "shrink" : "expand") + '</button><button class="better-codex-icon-button" type="button" data-dialog-close aria-label="' + te("关闭") + '">' + icon("close") + '</button></div></div>';
+        return '<div class="better-codex-dialog-head"><div class="better-codex-dialog-breadcrumb">' + crumb + '</div><div class="better-codex-dialog-head-actions">' + openThreadButton + startNowButton + '<button class="better-codex-icon-button" type="button" data-dialog-expand aria-label="' + te(draft.expanded ? "缩小" : "展开") + '">' + icon(draft.expanded ? "shrink" : "expand") + '</button><button class="better-codex-icon-button" type="button" data-dialog-close aria-label="' + te("关闭") + '">' + icon("close") + '</button></div></div>';
       }
 
       function conversationPanel() {
@@ -4010,9 +4082,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const activeExecutionState = issue?.active_run_status || (replyStatus === "running" ? "running" : "");
         const replyFailureState = ["failed", "interrupted"].includes(replyStatus) ? replyStatus : conversationFailureState;
         const relayFailure = issue?.session_relay_error && !issue?.session_relay_connected && issue?.active_run_status === "claimed";
-        const activityState = enrichmentLocked ? "thinking" : relayFailure ? "relay-failed" : replyFailureState || activeExecutionState || executionState;
+        const activityState = enrichmentLocked ? "thinking" : issue?.session_status === "stopping" ? "stopping" : relayFailure ? "relay-failed" : replyFailureState || activeExecutionState || executionState;
         if (!activityState) return "";
-        const activityLabel = t(enrichmentLocked ? "理解中" : activityState === "relay-failed" ? "Codex 会话连接失败" : activityState === "running" ? "工作中" : activityState === "scheduling" ? "调度中" : activityState === "scheduler-failed" ? "调度失败" : activityState === "claimed" ? "排队中" : activityState === "in_review" ? "待审核" : activityState === "completed" ? "已完成" : activityState === "blocked" ? "已阻塞" : activityState === "failed" ? "执行失败" : activityState === "interrupted" ? "已中断" : activityState === "not-started" ? "未开始" : "");
+        const activityLabel = t(enrichmentLocked ? "理解中" : activityState === "stopping" ? "正在停止…" : activityState === "relay-failed" ? "Codex 会话连接失败" : activityState === "running" ? "工作中" : activityState === "scheduling" ? "调度中" : activityState === "scheduler-failed" ? "调度失败" : activityState === "claimed" ? "排队中" : activityState === "in_review" ? "待审核" : activityState === "completed" ? "已完成" : activityState === "blocked" ? "已阻塞" : activityState === "failed" ? "执行失败" : activityState === "interrupted" ? "已停止" : activityState === "not-started" ? "未开始" : "");
         const agent = state.agents.find(item => item.id === issue?.agent_id) || state.agents.find(item => item.is_default) || { name: "Codex", is_default: true };
         const activityIcon = activityState === "scheduling"
           ? '<span class="better-codex-activity-dot better-codex-scheduler-dot" aria-hidden="true"></span>'
@@ -4034,8 +4106,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
       function conversationComposer() {
         if (!issue || !sessionId) return "";
-        const disabled = sessionHandoff ? " disabled" : "";
-        return '<div class="better-codex-composer">' + attachmentList(draft.replyAttachments, "reply") + '<textarea name="reply" rows="2" placeholder="' + te(sessionHandoff ? "请前往会话继续对话" : "输入下一步要求…") + '" aria-label="' + te("回复") + '"' + disabled + '>' + escapeHtml(draft.reply) + '</textarea><button class="better-codex-composer-send" type="button" data-conversation-send' + disabled + '>' + te("发送") + '</button></div>';
+        const stopping = issue.session_status === "stopping";
+        const working = stopping || executionRunning || issue.reply_status === "running";
+        const mode = stopping ? "stopping" : working ? "stop" : "send";
+        const inputDisabled = sessionHandoff ? " disabled" : "";
+        const actionDisabled = stopping || sessionHandoff || (!working && !draft.reply.trim() && !draft.replyAttachments.length) ? " disabled" : "";
+        const actionLabel = t(stopping ? "正在停止…" : working ? "停止任务" : "发送");
+        return '<div class="better-codex-composer" data-state="' + mode + '">' + attachmentList(draft.replyAttachments, "reply") + '<textarea name="reply" rows="2" placeholder="' + te(sessionHandoff ? "请前往会话继续对话" : "输入下一步要求…") + '" aria-label="' + te("回复") + '"' + inputDisabled + '>' + escapeHtml(draft.reply) + '</textarea><div class="better-codex-composer-toolbar"><button class="better-codex-composer-attach" type="button" data-conversation-attach aria-label="' + te("添加附件") + '" title="' + te("添加附件") + '"' + inputDisabled + '>' + icon("plus", "", "1.9") + '</button><button class="better-codex-composer-send" type="button" data-conversation-send data-composer-mode="' + mode + '" aria-label="' + escapeHtml(actionLabel) + '" title="' + escapeHtml(actionLabel) + '"' + actionDisabled + '>' + icon(working ? "stop" : "send", "", working ? "2.5" : "2") + '</button></div></div>';
       }
 
       function replyFailureMessage(error, action) {
@@ -4144,7 +4221,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           clearConversationFailure();
           syncConversationStatus(stateName);
         }
-        if (send) updateReplySendState();
+        if (send) updateReplySendState(stateName);
         stopConversationPoll();
         if (stateName === "running" || executionRunning) conversationTimer = setTimeout(() => void loadConversation({ quiet: true }), 2000);
         else if (stateName === "succeeded" && !options.afterSuccess) conversationTimer = setTimeout(() => void loadConversation({ quiet: true, afterSuccess: true }), 1200);
@@ -4217,6 +4294,34 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           lastReplyRequestId = requestId;
           showConversationFailure(error instanceof Error ? error.message : "发送失败", "reply", message);
           send.disabled = false;
+        }
+      }
+
+      async function stopIssueFromDialog(button) {
+        if (!issue || !button || button.disabled) return;
+        const errorOutput = dialog.querySelector(".better-codex-dialog-error");
+        button.disabled = true;
+        button.dataset.composerMode = "stopping";
+        button.setAttribute("aria-busy", "true");
+        button.setAttribute("aria-label", t("正在停止…"));
+        button.title = t("正在停止…");
+        button.closest(".better-codex-composer")?.setAttribute("data-state", "stopping");
+        try {
+          const updated = await stopIssueSession(issue.id);
+          refreshIssueState(updated);
+        } catch (error) {
+          if (errorOutput) {
+            errorOutput.textContent = errorLabel(error);
+            errorOutput.hidden = false;
+          }
+          if (button.isConnected) {
+            button.disabled = false;
+            button.dataset.composerMode = "stop";
+            button.removeAttribute("aria-busy");
+            button.setAttribute("aria-label", t("停止任务"));
+            button.title = t("停止任务");
+            button.closest(".better-codex-composer")?.setAttribute("data-state", "stop");
+          }
         }
       }
 
@@ -4445,11 +4550,35 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           updateReplySendState();
         });
         replyInput?.addEventListener("blur", flushReplyDraft);
-        sendButton?.addEventListener("click", () => void sendReply());
+        sendButton?.addEventListener("click", event => {
+          const button = event.currentTarget;
+          if (button.dataset.composerMode === "stop") void stopIssueFromDialog(button);
+          else if (button.dataset.composerMode === "send") void sendReply();
+        });
+        dialog.querySelector("[data-conversation-attach]")?.addEventListener("click", () => {
+          void pickAttachments().then(result => {
+            const errorOutput = dialog.querySelector(".better-codex-dialog-error");
+            const showAttachError = message => {
+              if (!errorOutput) return;
+              errorOutput.textContent = t(message);
+              errorOutput.hidden = false;
+            };
+            if (!result.picked) return;
+            if (!result.files.length) return showAttachError("当前环境无法读取本地文件路径");
+            const known = new Set(attachmentPaths(draft.replyAttachments));
+            const next = result.files.filter(file => !known.has(file.path));
+            if (next.length) {
+              draft.replyAttachments.push(...next);
+              renderDialog();
+            }
+            if (result.skipped) showAttachError("部分文件无法读取本地路径，已跳过");
+            dialog.querySelector('[name="reply"]')?.focus();
+          });
+        });
         replyInput?.addEventListener("keydown", event => {
           if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
             event.preventDefault();
-            void sendReply();
+            if (sendButton?.dataset.composerMode === "send") void sendReply();
           }
         });
         if (issue && sessionId) void loadConversation();
@@ -4601,25 +4730,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             }
           })();
         });
-        dialog.querySelector("[data-dialog-stop]")?.addEventListener("click", event => {
-          const button = event.currentTarget;
-          if (!issue || button.disabled) return;
-          const errorOutput = dialog.querySelector(".better-codex-dialog-error");
-          button.disabled = true;
-          button.setAttribute("aria-busy", "true");
-          button.title = t("正在停止…");
-          void stopIssueSession(issue.id).then(updated => refreshIssueState(updated)).catch(error => {
-            if (errorOutput) {
-              errorOutput.textContent = errorLabel(error);
-              errorOutput.hidden = false;
-            }
-          }).finally(() => {
-            if (!button.isConnected) return;
-            button.disabled = false;
-            button.removeAttribute("aria-busy");
-            button.title = t("停止任务");
-          });
-        });
+        dialog.querySelector("[data-dialog-stop]")?.addEventListener("click", event => void stopIssueFromDialog(event.currentTarget));
         const startNow = dialog.querySelector("[data-dialog-start-now]");
         startNow?.addEventListener("click", () => {
           syncDraft();
@@ -5068,6 +5179,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     async function openThread(threadId) {
       const expected = normalizeSessionId(threadId);
       if (!expected) throw new Error("thread_id_invalid");
+      await resumePersistedThread(expected);
       const row = findThreadRow(expected);
       close();
       if (!row) window.postMessage({ type: NAVIGATION.messageType, path: NAVIGATION.threadRoutePrefix + encodeURIComponent(expected) }, window.location.origin);
@@ -5176,7 +5288,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       updateTimer = setInterval(checkUpdateNotice, 15000);
     }
 
-    window.__betterCodexInjection__ = { version: VERSION, profile: PROFILE, endpoint: BASE_URL, refresh, open: openRoute, close, destroy };
+    window.__betterCodexInjection__ = { version: VERSION, profile: PROFILE, endpoint: BASE_URL, refresh, open: openRoute, openThread, close, destroy };
     document.addEventListener("click", onClick, true);
     document.addEventListener("keydown", onGlobalShortcut, true);
     window.addEventListener("codex-message-from-view", onHostMessageFromView, true);

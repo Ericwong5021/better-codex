@@ -8,6 +8,17 @@ All notable changes to Better Codex are recorded here.
 
 - Add a compact two-step jitter banner that settles into a cyan Windows installer logo, and report current, repair, update, and upgrade states without labeling same-version repairs as upgrades.
 
+## [0.4.2-beta.3] - 2026-08-11
+
+### Added
+
+- Add bidirectional Issue association with native Codex threads, including synchronized turns, replies, results, and stop handling.
+- Initialize the development database from a one-time snapshot of the Stable database while keeping subsequent Dev changes isolated.
+
+### Fixed
+
+- Make native session completion, reply idempotency, relay leadership, configuration changes, manual turns, and interrupt recovery safe across retries, renderer loss, and Runtime restarts.
+
 ## [0.4.2-beta.2] - 2026-08-11
 
 ### Added
@@ -323,7 +334,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.2-beta.2...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.2-beta.3...HEAD
+[0.4.2-beta.3]: https://github.com/Ericwong5021/better-codex/compare/v0.4.2-beta.2...v0.4.2-beta.3
 [0.4.2-beta.2]: https://github.com/Ericwong5021/better-codex/compare/v0.4.2-beta.1...v0.4.2-beta.2
 [0.4.2-beta.1]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1...v0.4.2-beta.1
 [0.4.1]: https://github.com/Ericwong5021/better-codex/compare/v0.4.0...v0.4.1

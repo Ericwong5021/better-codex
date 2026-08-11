@@ -48,6 +48,7 @@ test("thread navigation opens a sidebar row or falls back to the native route", 
   assert.match(navigation, /location\.pathname\.match/);
   assert.match(navigation, /thread_open_timeout/);
   assert.match(navigation, /threadRoutePrefix/);
+  assert.match(navigation, /__betterCodexInjection__\?\.openThread/);
 });
 
 test("Windows restart terminates the complete installed Codex package process tree", () => {

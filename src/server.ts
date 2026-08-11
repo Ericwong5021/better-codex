@@ -735,6 +735,7 @@ export function startServer() {
       if (url.pathname === "/api/agents/default" && method === "PATCH") {
         const body = await readBody(request);
         const input = defaultAgentInput(body);
+        if (input.sandbox_mode !== defaultAgentProfile().sandbox_mode && store.hasActiveAgentSessionWork(null)) throw new Error("agent_security_config_in_use");
         const profile = updateDefaultAgentProfile(input);
         if (input.max_concurrency !== undefined) {
           store.setDefaultAgentMaxConcurrency(input.max_concurrency);
@@ -764,7 +765,9 @@ export function startServer() {
           const body = await readBody(request);
           const version = Number(body.version);
           if (!Number.isInteger(version) || version < 1) throw new Error("invalid_version");
-          const updated = store.updateAgentProfile(profile.id, version, agentProfileInput(body));
+          const input = agentProfileInput(body);
+          if ((input.sandbox_mode !== profile.sandbox_mode || input.instructions !== profile.instructions) && store.hasActiveAgentSessionWork(profile.id)) throw new Error("agent_security_config_in_use");
+          const updated = store.updateAgentProfile(profile.id, version, input);
           const avatar = asAgentAvatar(body.avatar);
           if (avatar !== undefined) store.setAgentAvatar(profile.id, avatar);
           syncAgentProfiles(store.listAgentProfiles());
@@ -773,6 +776,7 @@ export function startServer() {
         }
         if (method === "DELETE" && path.length === 3) {
           const body = await readBody(request);
+          if (store.hasActiveAgentSessionWork(profile.id)) throw new Error("agent_security_config_in_use");
           store.deleteAgentProfile(profile.id, Number(body.version));
           syncAgentProfiles(store.listAgentProfiles());
           return sendJson(response, 200, { ok: true });
@@ -930,10 +934,10 @@ export function startServer() {
           return sendJson(response, 202, store.getIssue(updated.id));
         }
         if (method === "POST" && path[3] === "stop" && path.length === 4) {
-          const stopped = await worker.stopIssue(issue.id);
+          const accepted = await worker.stopIssue(issue.id);
           const current = store.getIssue(issue.id);
-          if (!stopped && (current?.active_run_status || current?.session_active_turn_id || store.getIssueReplyState(issue.id).status === "running")) throw new Error("issue_stop_timeout");
-          return sendJson(response, 200, store.getIssue(issue.id));
+          if (!accepted && (current?.active_run_status || current?.session_active_turn_id || store.getIssueReplyState(issue.id).status === "running")) throw new Error("issue_stop_timeout");
+          return sendJson(response, current?.session_status === "stopping" ? 202 : 200, store.getIssue(issue.id));
         }
         if (method === "POST" && path[3] === "session-handoff" && path.length === 4) {
           const body = await readBody(request);
@@ -991,6 +995,14 @@ export function startServer() {
           const requestId = cleanString(body.request_id, 200) || randomUUID();
           const message = cleanString(body.message, 100000).trim();
           if (!message) throw new Error("message_required");
+          const existingCommand = store.getSessionCommandByRequest(issue.id, requestId);
+          if (existingCommand && existingCommand.status !== "failed" && existingCommand.status !== "cancelled") {
+            if (String(existingCommand.payload.request_message || "") !== message) throw new Error("request_id_conflict");
+            const reply = store.getIssueReplyState(issue.id);
+            return sendJson(response, 202, existingCommand.kind === "steer"
+              ? { issue_id: issue.id, request_id: requestId, status: "running", message, steered: true }
+              : reply);
+          }
           if (!issue.session_thread_id && issue.active_run_status) throw new Error("issue_session_starting");
           if (!issue.session_thread_id && !store.canAutoStartFromUserMessage(issue)) {
             throw new Error(store.getAutoDispatch() ? "backlog_reply_blocked" : "manual_start_required");

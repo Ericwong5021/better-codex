@@ -4535,16 +4535,16 @@ export function betterCodexDesignSystemCss() {
     }
 
     #better-codex-dialog .better-codex-composer {
-      display: flex;
+      display: grid;
       flex: 0 0 auto;
-      flex-wrap: wrap;
-      align-items: flex-end;
-      gap: 8px;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 6px;
       margin: 8px 20px 0;
-      border: 1px solid var(--bc-border);
-      border-radius: var(--bc-radius-md);
-      background: var(--bc-surface);
+      border: 0;
+      border-radius: 23px;
+      background: var(--bc-color-input);
       padding: 8px;
+      box-shadow: var(--bc-inset-hairline);
     }
 
     #better-codex-dialog .better-codex-composer .better-codex-dialog-attachments {
@@ -4587,12 +4587,12 @@ export function betterCodexDesignSystemCss() {
 
     #better-codex-dialog .better-codex-composer textarea {
       box-sizing: border-box;
-      height: calc(3.625em + 12px);
-      flex: 1;
+      width: 100%;
+      height: calc(2.9em + 8px);
       border: 0;
       color: var(--bc-foreground);
       background: transparent;
-      padding: 6px 8px;
+      padding: 5px 8px 2px;
       font: inherit;
       font-size: var(--bc-text-md);
       line-height: 1.45;
@@ -4602,33 +4602,87 @@ export function betterCodexDesignSystemCss() {
     }
 
     #better-codex-dialog[data-detail="true"][data-expanded="true"] .better-codex-composer textarea {
-      height: calc(6.525em + 12px);
+      height: calc(5.8em + 8px);
     }
 
     #better-codex-dialog .better-codex-composer textarea::placeholder {
       color: var(--bc-muted);
     }
 
+    #better-codex-dialog .better-codex-composer-toolbar {
+      display: flex;
+      height: 30px;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    #better-codex-dialog .better-codex-composer-attach,
     #better-codex-dialog .better-codex-composer-send {
       display: inline-flex;
-      min-width: 72px;
-      height: var(--bc-control-height);
+      width: 30px;
+      height: 30px;
+      flex: 0 0 30px;
       align-items: center;
       justify-content: center;
       border: 0;
-      border-radius: var(--bc-radius-sm);
-      color: var(--bc-primary-foreground);
-      background: var(--bc-primary);
-      padding: 0 12px;
+      border-radius: var(--bc-radius-pill);
+      padding: 0;
       font: inherit;
-      font-size: var(--bc-text-md);
-      font-weight: 550;
       cursor: pointer;
+      transition: transform var(--bc-motion-fast) var(--bc-ease-out), background-color var(--bc-motion-fast) var(--bc-ease-out), color var(--bc-motion-fast) var(--bc-ease-out), opacity var(--bc-motion-fast) var(--bc-ease-out);
     }
 
-    #better-codex-dialog .better-codex-composer-send:disabled {
-      cursor: not-allowed;
-      opacity: .55;
+    #better-codex-dialog .better-codex-composer-attach {
+      color: var(--bc-color-text-muted);
+      background: transparent;
+    }
+
+    #better-codex-dialog .better-codex-composer-send {
+      color: var(--bc-primary-foreground);
+      background: var(--bc-primary);
+    }
+
+    #better-codex-dialog .better-codex-composer-send svg {
+      width: 16px;
+      height: 16px;
+    }
+
+    #better-codex-dialog .better-codex-composer-send[data-composer-mode="stop"] svg,
+    #better-codex-dialog .better-codex-composer-send[data-composer-mode="stopping"] svg {
+      width: 11px;
+      height: 11px;
+      fill: currentColor;
+    }
+
+    #better-codex-dialog .better-codex-composer :is(.better-codex-composer-attach, .better-codex-composer-send):active:not(:disabled) {
+      transform: scale(.92);
+    }
+
+    #better-codex-dialog .better-codex-composer :is(.better-codex-composer-attach, .better-codex-composer-send):focus-visible {
+      outline: 2px solid var(--bc-color-focus);
+      outline-offset: 2px;
+    }
+
+    @media (hover: hover) {
+      #better-codex-dialog .better-codex-composer-attach:hover:not(:disabled) {
+        color: var(--bc-color-text);
+        background: var(--bc-color-hover);
+      }
+
+      #better-codex-dialog .better-codex-composer-send:hover:not(:disabled) {
+        background: color-mix(in oklch, var(--bc-primary) 88%, var(--bc-color-input));
+      }
+    }
+
+    #better-codex-dialog .better-codex-composer :is(.better-codex-composer-attach, .better-codex-composer-send):disabled {
+      cursor: default;
+      opacity: .42;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      #better-codex-dialog .better-codex-composer :is(.better-codex-composer-attach, .better-codex-composer-send) {
+        transition: none;
+      }
     }
 
     #better-codex-dialog .better-codex-dialog-breadcrumb,

@@ -191,8 +191,9 @@ test("gateway completes the issue workflow and survives restart", async () => {
       body: JSON.stringify({ relay_id: "relay-test", method: "turn/completed", params: { threadId: nativeThreadId, turn: { id: nativeTurnId, status: "interrupted", items: [] } } }),
     });
     assert.equal(relayEvent.status, 200);
-    const interruptedIssue = await (await request(`/api/issues/${nativeIssue.id}`)).json() as { status: string; session_status: string; session_active_turn_id: string | null };
-    assert.equal(interruptedIssue.status, "blocked");
+    const interruptedIssue = await (await request(`/api/issues/${nativeIssue.id}`)).json() as { status: string; latest_run_status: string; session_status: string; session_active_turn_id: string | null };
+    assert.equal(interruptedIssue.status, "in_progress");
+    assert.equal(interruptedIssue.latest_run_status, "interrupted");
     assert.equal(interruptedIssue.session_status, "interrupted");
     assert.equal(interruptedIssue.session_active_turn_id, null);
 

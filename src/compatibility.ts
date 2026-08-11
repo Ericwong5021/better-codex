@@ -2,7 +2,7 @@ import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { compatibilityCurrentPath, compatibilityStatusPath, compatibilityVersionsPath, ensureDirectories, runtimeCurrentPath } from "./config.js";
 
-export const coreVersion = "0.4.2-beta.2";
+export const coreVersion = "0.4.2-beta.3";
 
 export type CompatibilityManifest = {
   version: string;
@@ -257,6 +257,9 @@ export function navigationExpression(threadId: string) {
     const attributes = ${attributes};
     const navigation = ${navigation};
     const expected = ${JSON.stringify(threadId)}.replace(/^(local|cloud):/i, "");
+    if (typeof window.__betterCodexInjection__?.openThread === "function") {
+      return await window.__betterCodexInjection__.openThread(expected);
+    }
     const normalize = value => String(value || "").replace(/^(local|cloud):/i, "");
     const findRow = () => Array.from(document.querySelectorAll(selectors.threadRow)).find(item => normalize(item.getAttribute(attributes.threadId)) === expected);
     const currentRoute = () => {

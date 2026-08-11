@@ -145,7 +145,7 @@ better-codex uninstall         # uninstall completely and delete local data
 
 Requires Node.js 22.5 or later.
 
-If the stable build is already installed, install the source checkout as a separate development instance. Stable keeps `~/.better-codex` and the `Better Codex` launcher; development uses `~/.better-codex-dev` and `Better Codex Dev`. Both profiles use the stable database at `~/.better-codex/better-codex.db` by default, while their runtime files, logs, attachments, and update state stay isolated. Opening either launcher deactivates the other instance's page injection first.
+If the stable build is already installed, install the source checkout as a separate development instance. Stable keeps `~/.better-codex` and the `Better Codex` launcher; development uses `~/.better-codex-dev` and `Better Codex Dev`. On first launch, development creates `~/.better-codex-dev/better-codex.db` as a consistent snapshot of the stable database when one exists. The snapshot then evolves independently: development migrations and test data never modify the stable database. Runtime files, logs, attachments, and update state are also isolated. Opening either launcher deactivates the other instance's page injection first.
 
 ```bash
 git clone https://github.com/Ericwong5021/better-codex.git

@@ -566,6 +566,8 @@ test("issue cards show project icon and assignee instead of session entry", () =
 test("open-in-conversation requires a valid session uuid", () => {
   const source = injectionScript(4317, "test-token", "install");
   const openHandler = source.slice(source.indexOf('dialog.querySelector("[data-dialog-open-thread]")'), source.indexOf('const startNow = dialog.querySelector("[data-dialog-start-now]")'));
+  const turnCommand = source.slice(source.indexOf('} else if (command.kind === "turn")'), source.indexOf('} else if (command.kind === "steer")'));
+  const openThread = source.slice(source.indexOf("async function openThread(threadId)"), source.indexOf("function isSidebarNavigationTarget"));
 
   assert.ok(source.includes("function normalizeSessionId(value)"));
   assert.ok(source.includes("/^[a-f0-9-]{36}$/i.test(id)"));
@@ -576,12 +578,17 @@ test("open-in-conversation requires a valid session uuid", () => {
   assert.doesNotMatch(openHandler, /\/stop|session-handoff|终止并打开/);
   assert.ok(source.includes('type: "mcp-request"'));
   assert.ok(source.includes('sendAppServerRequest("thread/start"'));
+  assert.ok(source.includes('sendAppServerRequest("thread/resume", { threadId: expected })'));
+  assert.ok(source.includes('if (method === "thread/started") return false'));
   assert.ok(source.includes('sendAppServerRequest("turn/start"'));
   assert.ok(source.includes('sendAppServerRequest("turn/steer"'));
   assert.ok(source.includes('sendAppServerRequest("turn/interrupt"'));
   assert.ok(source.includes('data-context-action="stop"'));
   assert.ok(source.includes('data-dialog-stop'));
   assert.ok(source.includes('encodeURIComponent(issueId) + "/stop"'));
+  assert.ok(turnCommand.indexOf("resumePersistedThread(threadId)") < turnCommand.indexOf('sendAppServerRequest("turn/start"'));
+  assert.ok(openThread.indexOf("resumePersistedThread(expected)") < openThread.indexOf("close()"));
+  assert.ok(source.includes("openThread, close, destroy"));
 });
 
 test("issue details render the latest conversation result and reply composer", () => {
@@ -599,12 +606,31 @@ test("issue details render the latest conversation result and reply composer", (
   assert.ok(source.includes("/reply"));
   assert.ok(source.includes("在此回复智能体"));
   assert.ok(source.includes("data-conversation-send"));
+  assert.ok(source.includes("data-conversation-attach"));
+  assert.ok(source.includes('data-composer-mode="\' + mode + \'"'));
+  assert.ok(source.includes('button.dataset.composerMode === "stop"'));
+  assert.ok(source.includes("stopIssueFromDialog(button)"));
   assert.match(css, /\.better-codex-timeline\s*\{/s);
   assert.match(css, /\.better-codex-bubble\s*\{/s);
-  assert.match(css, /\.better-codex-composer\s*\{/s);
-  assert.match(css, /\.better-codex-composer textarea\s*\{[^}]*height:\s*calc\(3\.625em\s*\+\s*12px\);/s);
-  assert.match(css, /#better-codex-dialog\[data-detail="true"\]\[data-expanded="true"\] \.better-codex-composer textarea\s*\{[^}]*height:\s*calc\(6\.525em\s*\+\s*12px\);/s);
+  assert.match(css, /\.better-codex-composer\s*\{[^}]*border-radius:\s*23px;[^}]*padding:\s*8px;/s);
+  assert.match(css, /\.better-codex-composer textarea\s*\{[^}]*height:\s*calc\(2\.9em\s*\+\s*8px\);/s);
+  assert.match(css, /#better-codex-dialog\[data-detail="true"\]\[data-expanded="true"\] \.better-codex-composer textarea\s*\{[^}]*height:\s*calc\(5\.8em\s*\+\s*8px\);/s);
   assert.match(css, /\.better-codex-composer textarea\s*\{[^}]*resize:\s*none;/s);
+  assert.match(css, /\.better-codex-composer-toolbar\s*\{[^}]*height:\s*30px;/s);
+  assert.match(css, /\.better-codex-composer-attach,[\s\S]*?\.better-codex-composer-send\s*\{[^}]*width:\s*30px;[^}]*height:\s*30px;/s);
+  assert.match(css, /\.better-codex-composer-send\[data-composer-mode="stop"\] svg/s);
+});
+
+test("user-stopped sessions render a red-dot stopped state", () => {
+  const source = injectionScript(4317, "test-token", "install");
+  const css = betterCodexDesignSystemCss();
+
+  assert.ok(source.includes('interrupted: "已停止"'));
+  assert.ok(source.includes('activityState === "interrupted" ? "已停止"'));
+  assert.ok(source.includes('["failed", "interrupted"].includes(issue.reply_status)'));
+  assert.ok(source.includes('["completed", "interrupted", "not-started"].includes(activityState)'));
+  assert.match(source, /\.better-codex-activity\[data-run="interrupted"\]\s*\{\s*color:\s*var\(--bc-danger\);/s);
+  assert.match(css, /\.better-codex-conversation-status \.better-codex-activity\[data-run="interrupted"\]\s*\{[^}]*color:\s*var\(--bc-danger\);/s);
 });
 
 test("issue keep-open toggle keeps a visible track in light mode", () => {

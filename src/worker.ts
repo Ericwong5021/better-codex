@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { createHash } from "node:crypto";
 import { createWriteStream, existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
@@ -56,7 +57,7 @@ export class IssueWorker {
     for (const issueId of this.store.listManualStartQueue()) this.manualQueue.add(issueId);
     for (const pending of this.store.listPendingSchedulerRuns()) {
       const executionResultPath = join(runLogPath, `${pending.claim.runId}-result.txt`);
-      const executionResult = existsSync(executionResultPath) ? readFileSync(executionResultPath, "utf8").trim() : "";
+      const executionResult = pending.executionResult || (existsSync(executionResultPath) ? readFileSync(executionResultPath, "utf8").trim() : "");
       if (pending.claim.workspacePath) this.scheduler(pending.claim, pending.executionSuccess, pending.executionError, executionResult);
       else this.store.finalizeScheduler(pending.claim.runId, pending.claim.issue.id, pending.executionSuccess, null, "workspace_required");
     }
@@ -382,17 +383,20 @@ export class IssueWorker {
       return;
     }
     if (workspacePath !== claim.workspacePath) this.store.setRunWorkspace(claim.issue.id, workspacePath);
-    const session = this.store.getIssueSession(claim.issue.id);
+    let session = this.store.getIssueSession(claim.issue.id);
     const payload = this.sessionPayload(claim.issue, workspacePath, issuePrompt(claim));
+    const replaceSession = Boolean(session && !session.active_turn_id && session.config_fingerprint !== payload.config_fingerprint);
+    const commandSession = replaceSession ? undefined : session;
     try {
       this.store.enqueueSessionCommand({
         issueId: claim.issue.id,
         runId: claim.runId,
         requestId: `run:${claim.runId}`,
-        kind: session ? "turn" : "start",
-        threadId: session?.thread_id || null,
+        kind: commandSession ? "turn" : "start",
+        threadId: commandSession?.thread_id || null,
         payload,
-        hostId: session?.host_id || "local",
+        hostId: commandSession?.host_id || "local",
+        replaceSession,
       });
     } catch (error) {
       this.store.finishRun(claim.runId, claim.issue.id, false, error instanceof Error ? error.message : "session_command_failed");
@@ -403,14 +407,22 @@ export class IssueWorker {
     const profile = issue.agent_id ? this.store.getAgentProfile(issue.agent_id) : defaultAgentProfile();
     const model = profile?.model && profile.model !== "默认模型" ? profile.model : "";
     const effort = profile?.reasoning_effort && profile.reasoning_effort !== "默认推理等级" ? profile.reasoning_effort : "";
+    const sandboxMode = this.sandboxMode(issue.agent_id);
+    const developerInstructions = issue.agent_id ? profile?.instructions || "" : "";
+    const configFingerprint = createHash("sha256").update(JSON.stringify({
+      agent_id: issue.agent_id || "default",
+      developer_instructions: developerInstructions,
+      sandbox_mode: sandboxMode,
+    })).digest("hex");
     return {
       workspace_path: workspacePath,
       title: `${issue.identifier} ${issue.title}`.trim().slice(0, 200),
       message,
       model,
       effort,
-      sandbox_mode: this.sandboxMode(issue.agent_id),
-      developer_instructions: issue.agent_id ? profile?.instructions || "" : "",
+      sandbox_mode: sandboxMode,
+      developer_instructions: developerInstructions,
+      config_fingerprint: configFingerprint,
       approval_policy: "on-request",
       approvals_reviewer: "auto_review",
     };
@@ -419,43 +431,92 @@ export class IssueWorker {
   sendIssueMessage(issueId: string, requestId: string, message: string) {
     const issue = this.store.getIssue(issueId);
     if (!issue) throw new Error("issue_not_found");
-    const session = this.store.getIssueSession(issueId);
+    const existingCommand = this.store.getSessionCommandByRequest(issueId, requestId);
+    if (existingCommand) {
+      if (String(existingCommand.payload.request_message || "") !== message) throw new Error("request_id_conflict");
+      if (existingCommand.status !== "failed" && existingCommand.status !== "cancelled") {
+        return { command: existingCommand, steered: existingCommand.kind === "steer", replayed: true };
+      }
+      const currentConfig = this.sessionPayload(issue, issue.workspace_path || "", message).config_fingerprint;
+      if (existingCommand.payload.config_fingerprint && existingCommand.payload.config_fingerprint !== currentConfig) throw new Error("request_id_conflict");
+      if (existingCommand.kind === "steer") {
+        const command = this.store.enqueueSessionCommand({
+          issueId,
+          requestId,
+          kind: "steer",
+          threadId: existingCommand.thread_id,
+          turnId: existingCommand.turn_id,
+          payload: existingCommand.payload,
+          hostId: existingCommand.host_id,
+        });
+        return { command, steered: true, replayed: false };
+      }
+      if (existingCommand.kind === "start" || existingCommand.kind === "turn") {
+        const retrySession = this.store.getIssueSession(issueId);
+        const replaceSession = existingCommand.kind === "start" && Boolean(retrySession && !retrySession.active_turn_id);
+        const queued = this.store.enqueueSessionReply({
+          issueId,
+          requestId,
+          kind: existingCommand.kind,
+          threadId: existingCommand.kind === "turn" ? existingCommand.thread_id : null,
+          payload: existingCommand.payload,
+          message,
+          hostId: existingCommand.host_id,
+          replaceSession,
+        });
+        return { command: queued.command, steered: false, replayed: false };
+      }
+    }
+    let session = this.store.getIssueSession(issueId);
     if (!session) throw new Error("session_required");
-    const activeTurnId = session.active_turn_id;
+    let payload: Record<string, unknown> = this.sessionPayload(issue, issue.workspace_path || "", message);
+    const replaceSession = Boolean(!session.active_turn_id && session.config_fingerprint !== payload.config_fingerprint);
+    if (replaceSession) {
+      payload = this.sessionPayload(issue, issue.workspace_path || "", [issue.description.trim(), message].filter(Boolean).join("\n\n"));
+    }
+    payload = { ...payload, request_message: message };
+    const commandSession = replaceSession ? undefined : session;
+    const activeTurnId = commandSession?.active_turn_id || null;
     if (!activeTurnId) {
-      this.store.beginReplyRun(issueId);
-      this.store.setIssueReplyState({
-        issue_id: issueId,
-        request_id: requestId,
-        status: "running",
+      const queued = this.store.enqueueSessionReply({
+        issueId,
+        requestId,
+        kind: commandSession ? "turn" : "start",
+        threadId: commandSession?.thread_id || null,
+        payload,
         message,
-        started_at: new Date().toISOString(),
+        hostId: commandSession?.host_id || "local",
+        replaceSession,
       });
+      return { command: queued.command, steered: false, replayed: queued.replayed };
     }
     try {
       const command = this.store.enqueueSessionCommand({
         issueId,
         requestId,
         kind: activeTurnId ? "steer" : "turn",
-        threadId: session.thread_id,
+        threadId: session!.thread_id,
         turnId: activeTurnId,
-        payload: this.sessionPayload(issue, issue.workspace_path || "", message),
-        hostId: session.host_id,
+        payload,
+        hostId: session!.host_id,
       });
       return { command, steered: Boolean(activeTurnId) };
     } catch (error) {
-      if (!activeTurnId) this.store.finishSessionReply(issueId, "failed", error instanceof Error ? error.message : "session_command_failed");
       throw error;
     }
   }
 
   pollSessionRelay(relayId: string, appSessionId: string, capability: "unknown" | "ready" | "failed", capabilityError?: string, busy = false) {
-    const lease = this.store.heartbeatSessionRelay(relayId, appSessionId, capability === "ready" ? null : capability === "failed" ? capabilityError || "desktop_bridge_unavailable" : undefined);
+    if (capability !== "ready") {
+      this.store.releaseSessionRelay(relayId, capability === "failed" ? capabilityError || "desktop_bridge_unavailable" : "desktop_bridge_unverified");
+      return { leader: false, acquired: false, expires_at: new Date().toISOString(), previous_relay_id: null, command: null, thread_ids: [] as string[] };
+    }
+    const lease = this.store.heartbeatSessionRelay(relayId, appSessionId, null);
     if (lease.acquired) {
       for (const command of this.store.failClaimedSessionCommands(relayId)) this.handleSessionCommandFailure(command, command.error || "relay_replaced");
     }
     const command = lease.leader && capability === "ready" && !busy ? this.store.claimSessionCommand(relayId) : undefined;
-    return { ...lease, command: command || null, thread_ids: this.store.listSessionThreadIds() };
+    return { ...lease, command: command || null, thread_ids: lease.leader ? this.store.listSessionThreadIds() : [] };
   }
 
   completeSessionCommand(commandId: string, relayId: string, result: Record<string, unknown>) {
@@ -471,7 +532,7 @@ export class IssueWorker {
   }
 
   private handleSessionCommandFailure(command: SessionCommand, error: string) {
-    if (command.kind === "steer" || command.kind === "interrupt" || command.turn_id) return;
+    if (command.status === "pending" || command.kind === "steer" || command.kind === "interrupt" || command.turn_id) return;
     if (command.run_id) {
       const claim = this.store.getRunClaim(command.run_id);
       if (claim?.issue.active_run_status && claim.issue.active_run_status !== "scheduling") {
@@ -480,7 +541,7 @@ export class IssueWorker {
       }
       return;
     }
-    if (command.kind === "turn") {
+    if (command.kind === "start" || command.kind === "turn") {
       if (this.store.getIssueReplyState(command.issue_id).status === "running") this.store.finishSessionReply(command.issue_id, error === "user_stopped" ? "interrupted" : "failed", error);
     }
   }
@@ -527,22 +588,19 @@ export class IssueWorker {
     status: "completed" | "interrupted" | "failed";
     error: string | null;
     message: string;
+    should_schedule: boolean;
   }) {
-    if (!completion.run_id) {
-      this.store.finishSessionReply(completion.issue_id, completion.status, completion.error || undefined);
-      return;
-    }
+    if (!completion.run_id || !completion.should_schedule) return;
     const claim = this.store.getRunClaim(completion.run_id);
     if (!claim) return;
-    if (completion.status === "interrupted") {
-      this.store.interruptRun(completion.run_id, completion.issue_id);
-      this.wake();
-      return;
-    }
     const executionSuccess = completion.status === "completed";
     const executionError = executionSuccess ? undefined : completion.error || "session_turn_failed";
-    writeFileSync(join(runLogPath, `${completion.run_id}-result.txt`), completion.message.trim());
-    this.store.beginScheduling(completion.run_id, completion.issue_id, executionSuccess, executionError);
+    try {
+      writeFileSync(join(runLogPath, `${completion.run_id}-result.txt`), completion.message.trim());
+    } catch (error) {
+      const output = error instanceof Error ? error.stack || error.message : String(error);
+      createWriteStream(workerLogPath, { flags: "a" }).end(`${new Date().toISOString()} session_result_log_failed ${output}\n`);
+    }
     if (!this.stopped) this.scheduler(claim, executionSuccess, executionError, completion.message.trim());
   }
 

@@ -58,7 +58,7 @@ npm run dev:install
 npm run dev:status
 ```
 
-This uses `~/.better-codex-dev` and creates `Better Codex Dev` separately from the stable `Better Codex` launcher. Development uses the stable database at `~/.better-codex/better-codex.db` by default, while runtime files, logs, attachments, and update state remain isolated. Only one profile owns the Codex page injection at a time. Run `npm run dev:uninstall` to remove the development launcher without deleting shared task data.
+This uses `~/.better-codex-dev` and creates `Better Codex Dev` separately from the stable `Better Codex` launcher. On first launch, development snapshots the stable database into `~/.better-codex-dev/better-codex.db` when the stable database exists. The copy then evolves independently, so development migrations and test data cannot change stable tasks. Runtime files, logs, attachments, and update state remain isolated as well. Only one profile owns the Codex page injection at a time. Run `npm run dev:uninstall` to remove the development launcher while preserving the development database copy.
 
 On Windows, set `BETTER_CODEX_STABLE_EXECUTABLE` before `npm run dev:install` when the stable binary was installed outside its default location.
 

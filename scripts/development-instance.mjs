@@ -79,7 +79,8 @@ if (action === "install") {
   mkdirSync(home, { recursive: true });
   copyFileSync(join(root, "assets", "update-public-key.pem"), join(home, "update-public-key.pem"));
   run(["launcher", "install"]);
-  console.log(JSON.stringify({ installed: true, profile: "development", home, stable }, null, 2));
+  const started = JSON.parse(run(["start", "--runtime-only"], true) || "{}");
+  console.log(JSON.stringify({ installed: true, profile: "development", home, stable, runtime: started.runtime }, null, 2));
 } else if (action === "uninstall") {
   run(["stop"]);
   run(["launcher", "uninstall"]);

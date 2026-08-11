@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
+import { Store } from "../src/db.js";
 
 const configSource = readFileSync(new URL("../src/config.ts", import.meta.url), "utf8");
 const cliSource = readFileSync(new URL("../src/cli.ts", import.meta.url), "utf8");
@@ -15,16 +19,77 @@ const refreshInjectorSource = readFileSync(new URL("../scripts/refresh-injector.
 const developmentInstaller = readFileSync(new URL("../scripts/development-instance.mjs", import.meta.url), "utf8");
 const runtimeStateSource = readFileSync(new URL("../src/runtime-state.ts", import.meta.url), "utf8");
 
-test("stable and development profiles share the stable database but isolate runtime homes", () => {
+test("stable and development profiles isolate databases and runtime homes", () => {
   assert.match(configSource, /BetterCodexProfile = "stable" \| "development"/);
   assert.match(configSource, /"\.better-codex-dev" : "\.better-codex"/);
   assert.match(configSource, /peerBetterCodexHome/);
-  assert.match(configSource, /defaultDatabaseHome = betterCodexProfile === "development" \? peerBetterCodexHome : betterCodexHome/);
-  assert.match(configSource, /BETTER_CODEX_DB \|\| join\(defaultDatabaseHome, "better-codex\.db"\)/);
+  assert.match(configSource, /databasePath = resolve\(configuredDatabasePath \|\| join\(betterCodexHome, "better-codex\.db"\)\)/);
+  assert.match(configSource, /developmentDatabaseSnapshotSourcePath = betterCodexProfile === "development"/);
+  assert.match(configSource, /resolve\(join\(peerBetterCodexHome, "better-codex\.db"\)\)/);
   assert.match(cliSource, /const sharedDataPaths = betterCodexProfile === "development"\s*\? \[\]/);
+  assert.match(cliSource, /const preservedDevelopmentData = new Set/);
+  assert.match(cliSource, /filter\(path => !preservedDevelopmentData\.has\(path\)\)/);
   assert.match(cliSource, /dataPreserved: betterCodexProfile === "development" \? \[databasePath\] : \[\]/);
   assert.match(configSource, /"\.better-codex-launch\.lock"/);
   assert.match(configSource, /"\.better-codex-launch-intents"/);
+});
+
+test("development database starts from one stable snapshot and then diverges", () => {
+  const directory = mkdtempSync(join(tmpdir(), "better-codex-profile-db-"));
+  const stableHome = join(directory, "stable");
+  const developmentHome = join(directory, "development");
+  const stableDatabase = join(stableHome, "better-codex.db");
+  try {
+    let stable = new Store(stableDatabase);
+    const project = stable.createProject({ name: "Snapshot source", workspacePath: directory });
+    stable.createIssue({ projectId: project.id, title: "Copied from stable" });
+    stable.close();
+
+    const environment = {
+      ...process.env,
+      BETTER_CODEX_PROFILE: "development",
+      BETTER_CODEX_HOME: developmentHome,
+      BETTER_CODEX_PEER_HOME: stableHome,
+    };
+    delete environment.BETTER_CODEX_DB;
+    const runDevelopment = (addDevelopmentIssue: boolean) => {
+      const script = `
+        const { Store } = await import(${JSON.stringify(new URL("../src/db.ts", import.meta.url).href)});
+        const { databasePath } = await import(${JSON.stringify(new URL("../src/config.ts", import.meta.url).href)});
+        const store = new Store();
+        const before = store.listIssues().map(issue => issue.title).sort();
+        if (${JSON.stringify(addDevelopmentIssue)}) {
+          const project = store.listProjects().find(item => item.name === "Snapshot source");
+          store.createIssue({ projectId: project.id, title: "Development only" });
+        }
+        const after = store.listIssues().map(issue => issue.title).sort();
+        store.close();
+        console.log(JSON.stringify({ databasePath, before, after }));
+      `;
+      const result = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "--eval", script], {
+        cwd: process.cwd(),
+        encoding: "utf8",
+        env: environment,
+      });
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+      return JSON.parse(result.stdout.trim()) as { databasePath: string; before: string[]; after: string[] };
+    };
+
+    const first = runDevelopment(true);
+    assert.equal(first.databasePath, join(developmentHome, "better-codex.db"));
+    assert.deepEqual(first.before, ["Copied from stable"]);
+    assert.deepEqual(first.after, ["Copied from stable", "Development only"]);
+
+    stable = new Store(stableDatabase);
+    assert.deepEqual(stable.listIssues().map(issue => issue.title), ["Copied from stable"]);
+    stable.createIssue({ projectId: project.id, title: "Added to stable later" });
+    stable.close();
+
+    const second = runDevelopment(false);
+    assert.deepEqual(second.before, ["Copied from stable", "Development only"]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("profile switching disables and stops the peer before injecting", () => {

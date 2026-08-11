@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { Store } from "../src/db.js";
+import { IssueWorker } from "../src/worker.js";
 import { defaultAgentProfile, updateDefaultAgentProfile } from "../src/agent-profiles.js";
 import { readCodexAppearance } from "../src/appearance.js";
 
@@ -504,7 +505,7 @@ test("finishRun keeps board updates already made by the agent skill", () => {
   }
 });
 
-test("interrupted runs hand blocked issues back to the user", () => {
+test("user-stopped runs stay in their issue column and hand control back to the user", () => {
   const target = temporaryDatabase();
   try {
     const store = new Store(target.file);
@@ -523,10 +524,43 @@ test("interrupted runs hand blocked issues back to the user", () => {
     assert.equal(claimed?.issue.id, issue.id);
     store.interruptRun(claimed!.runId, claimed!.issue.id);
     const stopped = store.getIssue(issue.id)!;
-    assert.equal(stopped.status, "blocked");
+    assert.equal(stopped.status, "in_progress");
+    assert.equal(stopped.latest_run_status, "interrupted");
     assert.equal(stopped.needs_attention, true);
     assert.equal(stopped.pending_actor, "user");
     assert.equal(store.claimNextIssue(), null);
+    store.close();
+  } finally {
+    rmSync(target.directory, { recursive: true, force: true });
+  }
+});
+
+test("an interrupted native session observed by polling stays in its issue column", () => {
+  const target = temporaryDatabase();
+  try {
+    const store = new Store(target.file);
+    const project = store.createProject({ name: "Observed stop", workspacePath: target.directory });
+    const issue = store.createIssue({ projectId: project.id, title: "Stopped in Codex", status: "in_progress", agentEnabled: true, workspacePath: target.directory });
+    const threadId = "019fec06-788f-7af3-a031-76b546904ef0";
+    const startedAt = new Date(Date.now() + 1000).toISOString();
+    const completedAt = new Date(Date.now() + 2000).toISOString();
+    store.db.prepare(`
+      INSERT INTO issue_runs (id, issue_id, status, thread_id, started_at, finished_at, execution_mode)
+      VALUES (?, ?, 'completed', ?, ?, ?, 'desktop')
+    `).run("019fec06-788f-7af3-a031-76b546904ef1", issue.id, threadId, startedAt, completedAt);
+
+    assert.equal(store.syncSessionReply(issue.id, threadId, {
+      status: "interrupted",
+      turn_id: "019fec06-788f-7af3-a031-76b546904ef2",
+      started_at: startedAt,
+      completed_at: completedAt,
+      updated_at: completedAt,
+    }), true);
+    const stopped = store.getIssue(issue.id)!;
+    assert.equal(stopped.status, "in_progress");
+    assert.equal(store.getIssueReplyState(issue.id).status, "interrupted");
+    assert.equal(stopped.needs_attention, true);
+    assert.equal(stopped.pending_actor, "user");
     store.close();
   } finally {
     rmSync(target.directory, { recursive: true, force: true });
@@ -594,7 +628,7 @@ test("agent avatars persist independently and are removed with their profile", (
 test("desktop session relay binds one native thread and tracks its turn", () => {
   const target = temporaryDatabase();
   try {
-    const store = new Store(target.file);
+    let store = new Store(target.file);
     const project = store.createProject({ name: "Native session", workspacePath: target.directory });
     const issue = store.createIssue({
       projectId: project.id,
@@ -618,9 +652,10 @@ test("desktop session relay binds one native thread and tracks its turn", () => 
     assert.equal(store.claimSessionCommand("relay-a")?.id, command.id);
     const threadId = "019fec06-788f-7af3-a031-76b546904fe6";
     const turnId = "019fec06-788f-7af3-a031-76b546904fe7";
-    assert.equal(store.sessionTurnStarted(threadId, turnId)?.issue_id, issue.id);
-    assert.equal(store.getSessionCommand(command.id)?.turn_id, turnId);
+    assert.equal(store.sessionTurnStarted(threadId, turnId), undefined);
+    assert.equal(store.getSessionCommand(command.id)?.turn_id, null);
     store.completeSessionCommand(command.id, "relay-a", { thread_id: threadId, turn_id: turnId });
+    assert.equal(store.sessionTurnStarted(threadId, turnId)?.issue_id, issue.id);
     const linked = store.getIssue(issue.id)!;
     assert.equal(linked.session_owned, true);
     assert.equal(linked.session_thread_id, threadId);
@@ -635,7 +670,246 @@ test("desktop session relay binds one native thread and tracks its turn", () => 
     const completion = store.completeSessionTurn(threadId, turnId, "completed")!;
     assert.equal(completion.run_id, claim.runId);
     assert.equal(completion.message, "Finished");
+    assert.equal(completion.should_schedule, true);
     assert.equal(store.getIssue(issue.id)?.session_status, "idle");
+    assert.equal(store.getIssue(issue.id)?.active_run_status, "scheduling");
+    assert.equal(store.listPendingSchedulerRuns()[0]?.executionResult, "Finished");
+    store.close();
+    store = new Store(target.file);
+    assert.equal(store.getIssueSession(issue.id)?.active_turn_id, null);
+    assert.equal(store.getIssue(issue.id)?.active_run_status, "scheduling");
+    assert.equal(store.listPendingSchedulerRuns()[0]?.executionResult, "Finished");
+    store.close();
+  } finally {
+    rmSync(target.directory, { recursive: true, force: true });
+  }
+});
+
+test("session reply idempotency is issue-scoped, fingerprinted, and atomic", () => {
+  const target = temporaryDatabase();
+  try {
+    const store = new Store(target.file);
+    const project = store.createProject({ name: "Reply idempotency", workspacePath: target.directory });
+    const firstIssue = store.createIssue({ projectId: project.id, title: "First", status: "todo", agentEnabled: true, workspacePath: target.directory });
+    const secondIssue = store.createIssue({ projectId: project.id, title: "Second", status: "todo", agentEnabled: true, workspacePath: target.directory });
+    const timestamp = new Date().toISOString();
+    const firstThread = "019fec06-788f-7af3-a031-76b546904f10";
+    const secondThread = "019fec06-788f-7af3-a031-76b546904f11";
+    for (const [issueId, threadId] of [[firstIssue.id, firstThread], [secondIssue.id, secondThread]]) {
+      store.db.prepare(`
+        INSERT INTO issue_sessions (issue_id, host_id, thread_id, status, config_fingerprint, last_agent_message, created_at, updated_at)
+        VALUES (?, 'local', ?, 'idle', 'config', '', ?, ?)
+      `).run(issueId, threadId, timestamp, timestamp);
+    }
+    const requestId = "same-client-request";
+    const firstInput = { issueId: firstIssue.id, requestId, kind: "turn" as const, threadId: firstThread, payload: { message: "hello" }, message: "hello" };
+    const first = store.enqueueSessionReply(firstInput);
+    assert.equal(first.replayed, false);
+    assert.equal(store.getIssueReplyState(firstIssue.id).status, "running");
+    store.db.prepare("UPDATE session_commands SET status = 'completed', finished_at = ? WHERE id = ?").run(timestamp, first.command.id);
+    store.db.prepare("UPDATE issue_replies SET status = 'succeeded', finished_at = ? WHERE issue_id = ?").run(timestamp, firstIssue.id);
+
+    const replay = store.enqueueSessionReply(firstInput);
+    assert.equal(replay.replayed, true);
+    assert.equal(store.getIssueReplyState(firstIssue.id).status, "succeeded");
+    assert.throws(() => store.enqueueSessionReply({ ...firstInput, payload: { message: "different" }, message: "different" }), /request_id_conflict/);
+    assert.equal(store.getIssueReplyState(firstIssue.id).message, "hello");
+
+    const second = store.enqueueSessionReply({ issueId: secondIssue.id, requestId, kind: "turn", threadId: secondThread, payload: { message: "second" }, message: "second" });
+    assert.notEqual(second.command.id, first.command.id);
+    assert.equal(second.command.issue_id, secondIssue.id);
+    store.close();
+  } finally {
+    rmSync(target.directory, { recursive: true, force: true });
+  }
+});
+
+test("manual native turns never bind a claimed Better Codex command", () => {
+  const target = temporaryDatabase();
+  try {
+    const store = new Store(target.file);
+    const worker = new IssueWorker(store);
+    const project = store.createProject({ name: "Manual collision", workspacePath: target.directory });
+    const issue = store.createIssue({ projectId: project.id, title: "Claimed work", status: "todo", agentEnabled: true, workspacePath: target.directory });
+    const timestamp = new Date().toISOString();
+    const threadId = "019fec06-788f-7af3-a031-76b546904f20";
+    store.db.prepare(`
+      INSERT INTO issue_sessions (issue_id, host_id, thread_id, status, config_fingerprint, last_agent_message, created_at, updated_at)
+      VALUES (?, 'local', ?, 'idle', 'config', '', ?, ?)
+    `).run(issue.id, threadId, timestamp, timestamp);
+    const claim = store.claimNextIssue(issue.id)!;
+    const command = store.enqueueSessionCommand({ issueId: issue.id, runId: claim.runId, requestId: `run:${claim.runId}`, kind: "turn", threadId, payload: { message: "Better Codex work" } });
+    store.heartbeatSessionRelay("relay-manual", "app-manual", null);
+    store.claimSessionCommand("relay-manual");
+    const manualTurnId = "019fec06-788f-7af3-a031-76b546904f21";
+    assert.equal(store.sessionTurnStarted(threadId, manualTurnId)?.turn_id, manualTurnId);
+    assert.equal(store.getSessionCommand(command.id)?.turn_id, null);
+    worker.failSessionCommand(command.id, "relay-manual", "turn_already_active");
+    store.recordSessionAgentMessage(threadId, manualTurnId, "Manual response");
+    const completion = store.completeSessionTurn(threadId, manualTurnId, "completed")!;
+    assert.equal(completion.run_id, null);
+    assert.equal(completion.should_schedule, false);
+    assert.equal(store.getIssue(issue.id)?.latest_run_status, "failed");
+    assert.equal(store.listPendingSchedulerRuns().length, 0);
+    store.close();
+  } finally {
+    rmSync(target.directory, { recursive: true, force: true });
+  }
+});
+
+test("manual native turns reopen completed issues and return them for review", () => {
+  const target = temporaryDatabase();
+  let store: Store | undefined;
+  try {
+    store = new Store(target.file);
+    const project = store.createProject({ name: "Manual continuation", workspacePath: target.directory });
+    const issue = store.createIssue({ projectId: project.id, title: "Continue completed work", status: "done", agentEnabled: true, workspacePath: target.directory });
+    const timestamp = new Date().toISOString();
+    const threadId = "019fec06-788f-7af3-a031-76b546904f22";
+    const turnId = "019fec06-788f-7af3-a031-76b546904f23";
+    store.db.prepare(`
+      INSERT INTO issue_sessions (issue_id, host_id, thread_id, status, config_fingerprint, last_agent_message, created_at, updated_at)
+      VALUES (?, 'local', ?, 'idle', 'config', '', ?, ?)
+    `).run(issue.id, threadId, timestamp, timestamp);
+
+    assert.equal(store.sessionTurnStarted(threadId, turnId)?.turn_id, turnId);
+    const active = store.getIssue(issue.id)!;
+    assert.equal(active.status, "in_progress");
+    assert.equal(active.needs_attention, false);
+    assert.equal(active.pending_actor, "agent");
+    assert.equal(active.session_active_turn_id, turnId);
+
+    store.recordSessionAgentMessage(threadId, turnId, "Follow-up complete");
+    const completion = store.completeSessionTurn(threadId, turnId, "completed")!;
+    assert.equal(completion.run_id, null);
+    const reviewed = store.getIssue(issue.id)!;
+    assert.equal(reviewed.status, "in_review");
+    assert.equal(reviewed.needs_attention, true);
+    assert.equal(reviewed.pending_actor, "user");
+    assert.equal(reviewed.session_active_turn_id, null);
+
+    const statusIssue = store.createIssue({ projectId: project.id, title: "Continue from thread status", status: "done", agentEnabled: true, workspacePath: target.directory });
+    const statusThreadId = "019fec06-788f-7af3-a031-76b546904f24";
+    store.db.prepare(`
+      INSERT INTO issue_sessions (issue_id, host_id, thread_id, status, config_fingerprint, last_agent_message, created_at, updated_at)
+      VALUES (?, 'local', ?, 'idle', 'config', '', ?, ?)
+    `).run(statusIssue.id, statusThreadId, timestamp, timestamp);
+    assert.equal(store.syncSessionThreadStatus(statusThreadId, "active"), true);
+    assert.equal(store.getIssue(statusIssue.id)?.status, "in_progress");
+
+    const disconnectedIssue = store.createIssue({ projectId: project.id, title: "Ignore idle thread failure", status: "done", agentEnabled: true, workspacePath: target.directory });
+    const disconnectedThreadId = "019fec06-788f-7af3-a031-76b546904f25";
+    store.db.prepare(`
+      INSERT INTO issue_sessions (issue_id, host_id, thread_id, status, config_fingerprint, last_agent_message, created_at, updated_at)
+      VALUES (?, 'local', ?, 'idle', 'config', '', ?, ?)
+    `).run(disconnectedIssue.id, disconnectedThreadId, timestamp, timestamp);
+    assert.equal(store.syncSessionThreadStatus(disconnectedThreadId, "systemError"), true);
+    assert.equal(store.getIssue(disconnectedIssue.id)?.status, "done");
+  } finally {
+    store?.close();
+    rmSync(target.directory, { recursive: true, force: true });
+  }
+});
+
+test("changed security configuration replaces an idle native session", () => {
+  const target = temporaryDatabase();
+  try {
+    const store = new Store(target.file);
+    const worker = new IssueWorker(store);
+    const project = store.createProject({ name: "Config replacement", workspacePath: target.directory });
+    const profile = store.createAgentProfile({ name: "Restricted", description: "", instructions: "new instructions", model: "gpt-test", reasoning_effort: "medium", sandbox_mode: "read-only" });
+    const issue = store.createIssue({ projectId: project.id, title: "Replace thread", status: "todo", agentEnabled: true, agentId: profile.id, workspacePath: target.directory });
+    const timestamp = new Date().toISOString();
+    const oldThreadId = "019fec06-788f-7af3-a031-76b546904f30";
+    store.db.prepare(`
+      INSERT INTO issue_sessions (issue_id, host_id, thread_id, status, config_fingerprint, last_agent_message, created_at, updated_at)
+      VALUES (?, 'local', ?, 'idle', 'old-config', '', ?, ?)
+    `).run(issue.id, oldThreadId, timestamp, timestamp);
+    const claim = store.claimNextIssue(issue.id)!;
+    (worker as unknown as { dispatch(value: typeof claim): void }).dispatch(claim);
+    const command = store.getActiveSessionCommand(issue.id)!;
+    assert.equal(command.kind, "start");
+    assert.equal(command.thread_id, null);
+    assert.equal(command.payload.sandbox_mode, "read-only");
+    assert.equal(command.payload.developer_instructions, "new instructions");
+    assert.notEqual(command.payload.config_fingerprint, "old-config");
+    assert.equal(store.getIssueSession(issue.id), undefined);
+    assert.equal(store.hasActiveAgentSessionWork(profile.id), true);
+    store.db.prepare("DELETE FROM session_commands WHERE issue_id = ?").run(issue.id);
+    store.finishRun(claim.runId, issue.id, false, "test_cleanup");
+    assert.equal(store.hasActiveAgentSessionWork(profile.id), false);
+
+    const replyIssue = store.createIssue({ projectId: project.id, title: "Replace reply thread", status: "in_review", agentEnabled: true, agentId: profile.id, workspacePath: target.directory });
+    const replyThreadId = "019fec06-788f-7af3-a031-76b546904f31";
+    store.db.prepare(`
+      INSERT INTO issue_sessions (issue_id, host_id, thread_id, status, config_fingerprint, last_agent_message, created_at, updated_at)
+      VALUES (?, 'local', ?, 'idle', 'old-config', '', ?, ?)
+    `).run(replyIssue.id, replyThreadId, timestamp, timestamp);
+    const sent = worker.sendIssueMessage(replyIssue.id, "config-retry", "continue");
+    assert.equal(sent.command.kind, "start");
+    assert.equal(store.getIssueSession(replyIssue.id), undefined);
+    const replay = worker.sendIssueMessage(replyIssue.id, "config-retry", "continue");
+    assert.equal(replay.replayed, true);
+    assert.equal(replay.command.id, sent.command.id);
+    assert.throws(() => worker.sendIssueMessage(replyIssue.id, "config-retry", "different"), /request_id_conflict/);
+    store.heartbeatSessionRelay("relay-config", "app-config", null);
+    store.claimSessionCommand("relay-config");
+    worker.failSessionCommand(sent.command.id, "relay-config", "turn_start_failed", "019fec06-788f-7af3-a031-76b546904f32");
+    assert.equal(store.getIssueReplyState(replyIssue.id).status, "failed");
+    assert.equal(store.getIssueSession(replyIssue.id)?.status, "failed");
+    const retried = worker.sendIssueMessage(replyIssue.id, "config-retry", "continue");
+    assert.equal(retried.command.status, "pending");
+    assert.equal(store.getIssueReplyState(replyIssue.id).status, "running");
+    assert.equal(store.getIssueSession(replyIssue.id), undefined);
+    store.close();
+  } finally {
+    rmSync(target.directory, { recursive: true, force: true });
+  }
+});
+
+test("only a ready renderer can lead the native session relay", () => {
+  const target = temporaryDatabase();
+  try {
+    const store = new Store(target.file);
+    const worker = new IssueWorker(store);
+    assert.equal(worker.pollSessionRelay("bad-relay", "bad-app", "failed", "desktop_bridge_unavailable").leader, false);
+    assert.equal(worker.pollSessionRelay("good-relay", "good-app", "ready").leader, true);
+    assert.equal(worker.pollSessionRelay("bad-relay", "bad-app", "failed", "desktop_bridge_unavailable").leader, false);
+    assert.equal(worker.pollSessionRelay("other-good", "other-app", "ready").leader, false);
+    store.close();
+  } finally {
+    rmSync(target.directory, { recursive: true, force: true });
+  }
+});
+
+test("interrupt commands are retried and never report a failed stop as success", () => {
+  const target = temporaryDatabase();
+  try {
+    const store = new Store(target.file);
+    const worker = new IssueWorker(store);
+    const project = store.createProject({ name: "Interrupt recovery", workspacePath: target.directory });
+    const issue = store.createIssue({ projectId: project.id, title: "Stop me", status: "in_progress", agentEnabled: true, workspacePath: target.directory });
+    const timestamp = new Date().toISOString();
+    const threadId = "019fec06-788f-7af3-a031-76b546904f40";
+    const turnId = "019fec06-788f-7af3-a031-76b546904f41";
+    store.db.prepare(`
+      INSERT INTO issue_sessions (issue_id, host_id, thread_id, status, active_turn_id, config_fingerprint, last_agent_message, created_at, updated_at)
+      VALUES (?, 'local', ?, 'active', ?, 'config', '', ?, ?)
+    `).run(issue.id, threadId, turnId, timestamp, timestamp);
+    const interrupt = store.enqueueSessionInterrupt(issue.id)!;
+    assert.equal(store.getIssueSession(issue.id)?.status, "stopping");
+    store.heartbeatSessionRelay("relay-stop", "app-stop", null);
+    assert.equal(store.claimSessionCommand("relay-stop")?.id, interrupt.id);
+    assert.equal(store.failClaimedSessionCommands("replacement-relay").length, 0);
+    assert.equal(store.getSessionCommand(interrupt.id)?.status, "pending");
+    for (let attempt = 2; attempt <= 3; attempt += 1) {
+      assert.equal(store.claimSessionCommand("relay-stop")?.id, interrupt.id);
+      const failed = worker.failSessionCommand(interrupt.id, "relay-stop", "desktop_bridge_timeout");
+      assert.equal(failed.status, attempt < 3 ? "pending" : "failed");
+    }
+    assert.equal(store.getIssueSession(issue.id)?.status, "failed");
+    assert.equal(store.getIssue(issue.id)?.status, "blocked");
+    assert.equal(store.getIssue(issue.id)?.needs_attention, true);
     store.close();
   } finally {
     rmSync(target.directory, { recursive: true, force: true });

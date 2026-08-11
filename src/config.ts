@@ -18,8 +18,11 @@ const defaultHome = join(homedir(), betterCodexProfile === "development" ? ".bet
 const defaultPeerHome = join(homedir(), betterCodexProfile === "development" ? ".better-codex" : ".better-codex-dev");
 export const betterCodexHome = resolve(process.env.BETTER_CODEX_HOME || defaultHome);
 export const peerBetterCodexHome = resolve(process.env.BETTER_CODEX_PEER_HOME || defaultPeerHome);
-const defaultDatabaseHome = betterCodexProfile === "development" ? peerBetterCodexHome : betterCodexHome;
-export const databasePath = resolve(process.env.BETTER_CODEX_DB || join(defaultDatabaseHome, "better-codex.db"));
+const configuredDatabasePath = process.env.BETTER_CODEX_DB;
+export const databasePath = resolve(configuredDatabasePath || join(betterCodexHome, "better-codex.db"));
+export const developmentDatabaseSnapshotSourcePath = betterCodexProfile === "development" && !configuredDatabasePath
+  ? resolve(join(peerBetterCodexHome, "better-codex.db"))
+  : null;
 export const runPath = join(betterCodexHome, "run");
 export const logPath = join(betterCodexHome, "logs");
 export const attachmentPath = join(betterCodexHome, "attachments");

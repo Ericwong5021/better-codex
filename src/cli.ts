@@ -776,8 +776,17 @@ async function uninstall() {
   const sharedDataPaths = betterCodexProfile === "development"
     ? []
     : [databasePath, `${databasePath}-wal`, `${databasePath}-shm`, join(dirname(databasePath), "backups")];
+  const preservedDevelopmentData = new Set([
+    databasePath,
+    `${databasePath}-wal`,
+    `${databasePath}-shm`,
+    join(dirname(databasePath), "backups"),
+  ].map(path => resolve(path)));
+  const profileHomePaths = betterCodexProfile === "development" && existsSync(dataHome)
+    ? readdirSync(dataHome).map(name => resolve(join(dataHome, name))).filter(path => !preservedDevelopmentData.has(path))
+    : [dataHome];
   const programPaths = [...new Set([
-    dataHome,
+    ...profileHomePaths,
     ...sharedDataPaths,
     join(codexHome, "skills", "better-codex"),
     join(codexHome, "skills", "better-codex-issue"),
@@ -1101,8 +1110,9 @@ async function main() {
     return usage();
   }
   if (command === "start") {
-    setInjectionEnabled(true);
     const runtime = await ensureRuntime();
+    if ([action, ...args].includes("--runtime-only")) return print({ runtime });
+    setInjectionEnabled(true);
     const selectedPort = Number(option([action, ...args].filter(Boolean) as string[], "--port") ?? cdpPort);
     let injection: unknown = await cdpStatus(selectedPort);
     if ((injection as { available?: boolean }).available || [action, ...args].includes("--launch")) {

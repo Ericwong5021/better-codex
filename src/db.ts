@@ -1,8 +1,8 @@
-import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { createHash, randomUUID } from "node:crypto";
+import { existsSync, linkSync, mkdirSync, unlinkSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { databasePath } from "./config.js";
+import { databasePath, developmentDatabaseSnapshotSourcePath } from "./config.js";
 
 export const issueStatuses = ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"] as const;
 export const issuePriorities = ["none", "low", "medium", "high", "urgent"] as const;
@@ -57,7 +57,7 @@ export type IssueReplyState = {
   finished_at?: string;
 };
 
-export type IssueSessionStatus = "starting" | "active" | "waiting_on_approval" | "waiting_on_user" | "idle" | "interrupted" | "failed" | "disconnected";
+export type IssueSessionStatus = "starting" | "active" | "stopping" | "waiting_on_approval" | "waiting_on_user" | "idle" | "interrupted" | "failed" | "disconnected";
 export type SessionCommandKind = "start" | "turn" | "steer" | "interrupt";
 export type SessionCommandStatus = "pending" | "claimed" | "completed" | "failed" | "cancelled";
 
@@ -67,7 +67,9 @@ export type IssueSession = {
   thread_id: string;
   status: IssueSessionStatus;
   active_turn_id: string | null;
+  active_command_id: string | null;
   last_turn_id: string | null;
+  config_fingerprint: string;
   last_agent_message: string;
   last_error: string | null;
   created_at: string;
@@ -79,6 +81,7 @@ export type SessionCommand = {
   issue_id: string;
   run_id: string | null;
   request_id: string;
+  request_fingerprint: string;
   kind: SessionCommandKind;
   status: SessionCommandStatus;
   host_id: string;
@@ -150,6 +153,7 @@ export type PendingSchedulerRun = {
   claim: ClaimedIssue;
   executionSuccess: boolean;
   executionError?: string;
+  executionResult: string;
 };
 
 type ProjectInput = {
@@ -193,6 +197,57 @@ const latestSchemaVersion = 4;
 
 function now() {
   return new Date().toISOString();
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+function sessionCommandFingerprint(input: {
+  runId?: string | null;
+  kind: SessionCommandKind;
+  payload?: Record<string, unknown>;
+}) {
+  return createHash("sha256").update(canonicalJson({
+    kind: input.kind,
+    payload: input.payload || {},
+    run_id: input.runId || null,
+  })).digest("hex");
+}
+
+function createDevelopmentDatabaseSnapshot(file: string) {
+  const sourcePath = developmentDatabaseSnapshotSourcePath;
+  if (!sourcePath || resolve(file) !== databasePath || existsSync(file) || !existsSync(sourcePath)) return;
+  mkdirSync(dirname(file), { recursive: true });
+  const temporary = join(dirname(file), `.better-codex-snapshot-${randomUUID()}.db`);
+  const source = new DatabaseSync(sourcePath, { readOnly: true });
+  try {
+    source.exec("PRAGMA busy_timeout = 5000;");
+    source.prepare("VACUUM INTO ?").run(temporary);
+  } catch (error) {
+    try { unlinkSync(temporary); } catch {}
+    throw error;
+  } finally {
+    source.close();
+  }
+  try {
+    linkSync(temporary, file);
+    unlinkSync(temporary);
+  } catch (error) {
+    if (existsSync(file)) {
+      try { unlinkSync(temporary); } catch {}
+      return;
+    }
+    try { unlinkSync(temporary); } catch {}
+    throw error;
+  }
 }
 
 function asPendingActor(value: unknown): PendingActor {
@@ -263,6 +318,7 @@ function sessionCommandFromRow(row: Record<string, unknown>): SessionCommand {
     issue_id: String(row.issue_id),
     run_id: row.run_id ? String(row.run_id) : null,
     request_id: String(row.request_id),
+    request_fingerprint: String(row.request_fingerprint || ""),
     kind: String(row.kind) as SessionCommandKind,
     status: String(row.status) as SessionCommandStatus,
     host_id: String(row.host_id || "local"),
@@ -286,6 +342,7 @@ export class Store {
 
   constructor(file = databasePath) {
     this.file = file;
+    createDevelopmentDatabaseSnapshot(file);
     mkdirSync(dirname(file), { recursive: true });
     const existing = existsSync(file);
     this.db = new DatabaseSync(file);
@@ -414,7 +471,9 @@ export class Store {
             thread_id TEXT NOT NULL UNIQUE,
             status TEXT NOT NULL DEFAULT 'starting',
             active_turn_id TEXT,
+            active_command_id TEXT,
             last_turn_id TEXT,
+            config_fingerprint TEXT NOT NULL DEFAULT '',
             last_agent_message TEXT NOT NULL DEFAULT '',
             last_error TEXT,
             created_at TEXT NOT NULL,
@@ -424,7 +483,8 @@ export class Store {
             id TEXT PRIMARY KEY,
             issue_id TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
             run_id TEXT,
-            request_id TEXT NOT NULL UNIQUE,
+            request_id TEXT NOT NULL,
+            request_fingerprint TEXT NOT NULL,
             kind TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'pending',
             host_id TEXT NOT NULL DEFAULT 'local',
@@ -450,6 +510,7 @@ export class Store {
           );
           CREATE INDEX IF NOT EXISTS session_commands_queue ON session_commands(status, created_at);
           CREATE INDEX IF NOT EXISTS session_commands_issue ON session_commands(issue_id, created_at);
+          CREATE UNIQUE INDEX IF NOT EXISTS session_commands_request ON session_commands(issue_id, request_id);
           CREATE INDEX IF NOT EXISTS issue_sessions_thread ON issue_sessions(thread_id);
         `);
         this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (4, ?)").run(now());
@@ -608,7 +669,9 @@ export class Store {
         thread_id TEXT NOT NULL UNIQUE,
         status TEXT NOT NULL DEFAULT 'starting',
         active_turn_id TEXT,
+        active_command_id TEXT,
         last_turn_id TEXT,
+        config_fingerprint TEXT NOT NULL DEFAULT '',
         last_agent_message TEXT NOT NULL DEFAULT '',
         last_error TEXT,
         created_at TEXT NOT NULL,
@@ -618,7 +681,8 @@ export class Store {
         id TEXT PRIMARY KEY,
         issue_id TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
         run_id TEXT,
-        request_id TEXT NOT NULL UNIQUE,
+        request_id TEXT NOT NULL,
+        request_fingerprint TEXT NOT NULL,
         kind TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT 'pending',
         host_id TEXT NOT NULL DEFAULT 'local',
@@ -644,6 +708,7 @@ export class Store {
       );
       CREATE INDEX IF NOT EXISTS session_commands_queue ON session_commands(status, created_at);
       CREATE INDEX IF NOT EXISTS session_commands_issue ON session_commands(issue_id, created_at);
+      CREATE UNIQUE INDEX IF NOT EXISTS session_commands_request ON session_commands(issue_id, request_id);
       CREATE INDEX IF NOT EXISTS issue_sessions_thread ON issue_sessions(thread_id);
     `);
   }
@@ -1444,13 +1509,14 @@ export class Store {
         issue_runs.issue_id,
         issue_runs.execution_success,
         issue_runs.execution_error,
+        issue_runs.execution_result,
         COALESCE(NULLIF(issues.workspace_path, ''), NULLIF(projects.workspace_path, ''), '') AS workspace_path
       FROM issue_runs
       JOIN issues ON issues.id = issue_runs.issue_id
       JOIN projects ON projects.id = issues.project_id
       WHERE issue_runs.status = 'scheduling'
       ORDER BY issue_runs.started_at, issue_runs.rowid
-    `).all() as Array<{ run_id: string; issue_id: string; execution_success: number; execution_error: string | null; workspace_path: string }>;
+    `).all() as Array<{ run_id: string; issue_id: string; execution_success: number; execution_error: string | null; execution_result: string | null; workspace_path: string }>;
     return rows.flatMap(row => {
       const issue = this.getIssue(row.issue_id);
       if (!issue) return [];
@@ -1458,6 +1524,7 @@ export class Store {
         claim: { runId: row.run_id, issue, workspacePath: row.workspace_path },
         executionSuccess: Boolean(row.execution_success),
         ...(row.execution_error ? { executionError: row.execution_error } : {}),
+        executionResult: row.execution_result || "",
       }];
     });
   }
@@ -1658,8 +1725,7 @@ export class Store {
       if (result.changes === 1) {
         this.db.prepare(`
           UPDATE issues
-          SET status = CASE WHEN status = 'in_progress' THEN 'blocked' ELSE status END,
-              needs_attention = CASE WHEN status IN ('done', 'cancelled') THEN needs_attention ELSE 1 END,
+          SET needs_attention = CASE WHEN status IN ('done', 'cancelled') THEN needs_attention ELSE 1 END,
               pending_actor = CASE WHEN status IN ('done', 'cancelled') THEN pending_actor ELSE 'user' END,
               version = version + 1,
               updated_at = ?
@@ -1803,7 +1869,7 @@ export class Store {
         this.db.exec("COMMIT");
         return false;
       }
-      if (activity.status === "interrupted" && reply?.status === "interrupted" && issue.status === "blocked") {
+      if (activity.status === "interrupted" && reply?.status === "interrupted" && ["in_progress", "blocked"].includes(issue.status)) {
         this.db.exec("COMMIT");
         return false;
       }
@@ -1858,7 +1924,7 @@ export class Store {
             updated_at = ?
         WHERE id = ? AND status = ? AND updated_at = ? AND archived_at IS NULL
       `).run(
-        activity.status === "running" ? "in_progress" : activity.status === "completed" ? "in_review" : "blocked",
+        activity.status === "running" ? "in_progress" : activity.status === "completed" ? "in_review" : issue.status,
         Number(activity.status !== "running"),
         activity.status === "running" ? "agent" : "user",
         timestamp,
@@ -1892,7 +1958,9 @@ export class Store {
       thread_id: String(row.thread_id),
       status: String(row.status) as IssueSessionStatus,
       active_turn_id: row.active_turn_id ? String(row.active_turn_id) : null,
+      active_command_id: row.active_command_id ? String(row.active_command_id) : null,
       last_turn_id: row.last_turn_id ? String(row.last_turn_id) : null,
+      config_fingerprint: String(row.config_fingerprint || ""),
       last_agent_message: String(row.last_agent_message || ""),
       last_error: row.last_error ? String(row.last_error) : null,
       created_at: String(row.created_at),
@@ -1925,50 +1993,170 @@ export class Store {
     turnId?: string | null;
     payload?: Record<string, unknown>;
     hostId?: string;
+    replaceSession?: boolean;
   }) {
-    const existing = this.db.prepare("SELECT * FROM session_commands WHERE request_id = ?").get(input.requestId) as Record<string, unknown> | undefined;
-    if (existing) {
-      const command = sessionCommandFromRow(existing);
-      if (command.status !== "failed" && command.status !== "cancelled") return command;
-      this.db.prepare(`
-        UPDATE session_commands
-        SET run_id = ?, kind = ?, status = 'pending', host_id = ?, thread_id = ?, turn_id = ?,
-            payload_json = ?, result_json = NULL, relay_id = NULL, cancel_requested = 0,
-            error = NULL, claimed_at = NULL, finished_at = NULL, created_at = ?
-        WHERE id = ? AND status IN ('failed', 'cancelled')
-      `).run(
-        input.runId || null,
-        input.kind,
-        input.hostId || "local",
-        input.threadId || null,
-        input.turnId || null,
-        JSON.stringify(input.payload || {}),
-        now(),
-        command.id,
-      );
-      return this.getSessionCommand(command.id)!;
-    }
-    if (!this.getIssue(input.issueId)) throw new Error("issue_not_found");
-    const id = randomUUID();
+    const fingerprint = sessionCommandFingerprint(input);
     const timestamp = now();
-    this.db.prepare(`
-      INSERT INTO session_commands (
-        id, issue_id, run_id, request_id, kind, status, host_id, thread_id, turn_id,
-        payload_json, attempts, cancel_requested, created_at
-      ) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, 0, 0, ?)
-    `).run(
-      id,
-      input.issueId,
-      input.runId || null,
-      input.requestId,
-      input.kind,
-      input.hostId || "local",
-      input.threadId || null,
-      input.turnId || null,
-      JSON.stringify(input.payload || {}),
-      timestamp,
-    );
-    return this.getSessionCommand(id)!;
+    let commandId = "";
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const existing = this.db.prepare("SELECT * FROM session_commands WHERE issue_id = ? AND request_id = ?").get(input.issueId, input.requestId) as Record<string, unknown> | undefined;
+      if (existing) {
+        const command = sessionCommandFromRow(existing);
+        if (command.request_fingerprint !== fingerprint) throw new Error("request_id_conflict");
+        commandId = command.id;
+        if (command.status === "failed" || command.status === "cancelled") {
+          if (input.replaceSession) {
+            const detached = this.db.prepare("DELETE FROM issue_sessions WHERE issue_id = ? AND active_turn_id IS NULL").run(input.issueId);
+            if (detached.changes !== 1) throw new Error("issue_session_replace_conflict");
+          }
+          this.db.prepare(`
+            UPDATE session_commands
+            SET run_id = ?, kind = ?, host_id = ?, thread_id = ?, turn_id = ?, payload_json = ?,
+                status = 'pending', result_json = NULL, relay_id = NULL, cancel_requested = 0,
+                attempts = 0, error = NULL, claimed_at = NULL, finished_at = NULL, created_at = ?
+            WHERE id = ? AND status IN ('failed', 'cancelled')
+          `).run(input.runId || null, input.kind, input.hostId || "local", input.threadId || null, input.turnId || null, JSON.stringify(input.payload || {}), timestamp, command.id);
+        }
+      } else {
+        if (!this.getIssue(input.issueId)) throw new Error("issue_not_found");
+        if (input.replaceSession) {
+          const detached = this.db.prepare("DELETE FROM issue_sessions WHERE issue_id = ? AND active_turn_id IS NULL").run(input.issueId);
+          if (detached.changes !== 1) throw new Error("issue_session_replace_conflict");
+        }
+        commandId = randomUUID();
+        this.db.prepare(`
+          INSERT INTO session_commands (
+            id, issue_id, run_id, request_id, request_fingerprint, kind, status, host_id, thread_id, turn_id,
+            payload_json, attempts, cancel_requested, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, 0, 0, ?)
+        `).run(
+          commandId,
+          input.issueId,
+          input.runId || null,
+          input.requestId,
+          fingerprint,
+          input.kind,
+          input.hostId || "local",
+          input.threadId || null,
+          input.turnId || null,
+          JSON.stringify(input.payload || {}),
+          timestamp,
+        );
+      }
+      this.db.exec("COMMIT");
+      return this.getSessionCommand(commandId)!;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  hasActiveAgentSessionWork(agentId: string | null) {
+    return Boolean(this.db.prepare(`
+      SELECT 1 AS value
+      FROM issues
+      WHERE COALESCE(agent_id, '') = COALESCE(?, '')
+        AND (
+          EXISTS (SELECT 1 FROM issue_runs WHERE issue_runs.issue_id = issues.id AND issue_runs.status IN ('claimed', 'running', 'scheduling'))
+          OR EXISTS (SELECT 1 FROM session_commands WHERE session_commands.issue_id = issues.id AND session_commands.status IN ('pending', 'claimed'))
+          OR EXISTS (SELECT 1 FROM issue_replies WHERE issue_replies.issue_id = issues.id AND issue_replies.status = 'running')
+          OR EXISTS (SELECT 1 FROM issue_sessions WHERE issue_sessions.issue_id = issues.id AND issue_sessions.active_turn_id IS NOT NULL)
+        )
+      LIMIT 1
+    `).get(agentId));
+  }
+
+  enqueueSessionReply(input: {
+    issueId: string;
+    requestId: string;
+    kind: "start" | "turn";
+    threadId?: string | null;
+    payload: Record<string, unknown>;
+    message: string;
+    hostId?: string;
+    replaceSession?: boolean;
+  }) {
+    const fingerprint = sessionCommandFingerprint(input);
+    const timestamp = now();
+    let commandId = "";
+    let replayed = false;
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const issue = this.getIssue(input.issueId);
+      if (!issue) throw new Error("issue_not_found");
+      const existingRow = this.db.prepare("SELECT * FROM session_commands WHERE issue_id = ? AND request_id = ?").get(input.issueId, input.requestId) as Record<string, unknown> | undefined;
+      if (existingRow) {
+        const existing = sessionCommandFromRow(existingRow);
+        if (existing.request_fingerprint !== fingerprint) throw new Error("request_id_conflict");
+        commandId = existing.id;
+        if (existing.status !== "failed" && existing.status !== "cancelled") {
+          replayed = true;
+          this.db.exec("COMMIT");
+          return { command: this.getSessionCommand(commandId)!, replayed };
+        }
+      }
+      if (issue.session_handoff_at && !issue.session_owned) throw new Error("issue_session_handed_off");
+      if (issue.active_run_status) throw new Error("issue_execution_running");
+      const reply = this.getIssueReplyState(input.issueId);
+      if (reply.status === "running" && reply.request_id !== input.requestId) throw new Error("reply_busy");
+      if (input.replaceSession) {
+        const detached = this.db.prepare("DELETE FROM issue_sessions WHERE issue_id = ? AND active_turn_id IS NULL").run(input.issueId);
+        if (detached.changes !== 1) throw new Error("issue_session_replace_conflict");
+      }
+      this.db.prepare(`
+        UPDATE issues
+        SET status = CASE WHEN status = 'cancelled' THEN status ELSE 'in_progress' END,
+            needs_attention = CASE WHEN status = 'cancelled' THEN needs_attention ELSE 0 END,
+            pending_actor = CASE WHEN status = 'cancelled' THEN pending_actor ELSE 'agent' END,
+            version = version + 1,
+            updated_at = ?
+        WHERE id = ?
+      `).run(timestamp, input.issueId);
+      this.db.prepare(`
+        INSERT INTO issue_replies (issue_id, request_id, status, message, error, started_at, finished_at)
+        VALUES (?, ?, 'running', ?, NULL, ?, NULL)
+        ON CONFLICT(issue_id) DO UPDATE SET
+          request_id = excluded.request_id,
+          status = 'running',
+          message = excluded.message,
+          error = NULL,
+          started_at = excluded.started_at,
+          finished_at = NULL
+      `).run(input.issueId, input.requestId, input.message, timestamp);
+      if (commandId) {
+        this.db.prepare(`
+          UPDATE session_commands
+          SET kind = ?, host_id = ?, thread_id = ?, turn_id = NULL, payload_json = ?,
+              status = 'pending', result_json = NULL, relay_id = NULL, cancel_requested = 0,
+              attempts = 0, error = NULL, claimed_at = NULL, finished_at = NULL, created_at = ?
+          WHERE id = ? AND status IN ('failed', 'cancelled')
+        `).run(input.kind, input.hostId || "local", input.threadId || null, JSON.stringify(input.payload), timestamp, commandId);
+      } else {
+        commandId = randomUUID();
+        this.db.prepare(`
+          INSERT INTO session_commands (
+            id, issue_id, run_id, request_id, request_fingerprint, kind, status, host_id, thread_id, turn_id,
+            payload_json, attempts, cancel_requested, created_at
+          ) VALUES (?, ?, NULL, ?, ?, ?, 'pending', ?, ?, NULL, ?, 0, 0, ?)
+        `).run(
+          commandId,
+          input.issueId,
+          input.requestId,
+          fingerprint,
+          input.kind,
+          input.hostId || "local",
+          input.threadId || null,
+          JSON.stringify(input.payload),
+          timestamp,
+        );
+      }
+      this.db.exec("COMMIT");
+      return { command: this.getSessionCommand(commandId)!, replayed };
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   getSessionCommand(id: string) {
@@ -2023,6 +2211,20 @@ export class Store {
     }
   }
 
+  getSessionCommandByRequest(issueId: string, requestId: string) {
+    const row = this.db.prepare("SELECT * FROM session_commands WHERE issue_id = ? AND request_id = ?").get(issueId, requestId) as Record<string, unknown> | undefined;
+    return row ? sessionCommandFromRow(row) : undefined;
+  }
+
+  releaseSessionRelay(relayId: string, error: string) {
+    const timestamp = now();
+    this.db.prepare(`
+      UPDATE session_relay
+      SET expires_at = ?, error = ?, updated_at = ?
+      WHERE singleton = 1 AND relay_id = ?
+    `).run(timestamp, error, timestamp, relayId);
+  }
+
   sessionRelayIsLeader(relayId: string) {
     const row = this.db.prepare("SELECT relay_id, expires_at FROM session_relay WHERE singleton = 1").get() as { relay_id: string; expires_at: string } | undefined;
     return Boolean(row && row.relay_id === relayId && Date.parse(row.expires_at) > Date.now());
@@ -2034,14 +2236,37 @@ export class Store {
       SELECT * FROM session_commands
       WHERE status = 'claimed' ${relayId ? "AND relay_id != ?" : ""}
     `).all(...(relayId ? [relayId] : [])) as Record<string, unknown>[];
+    const failed: SessionCommand[] = [];
     for (const row of rows) {
+      const command = sessionCommandFromRow(row);
+      const active = command.kind === "interrupt" && command.turn_id
+        ? this.db.prepare("SELECT 1 AS value FROM issue_sessions WHERE issue_id = ? AND active_turn_id = ?").get(command.issue_id, command.turn_id)
+        : undefined;
+      if (active && command.attempts < 3) {
+        this.db.prepare(`
+          UPDATE session_commands
+          SET status = 'pending', relay_id = NULL, claimed_at = NULL, error = NULL, finished_at = NULL
+          WHERE id = ? AND status = 'claimed'
+        `).run(command.id);
+        continue;
+      }
+      const commandError = relayId ? "relay_replaced" : "runtime_restarted";
       this.db.prepare(`
         UPDATE session_commands
         SET status = 'failed', error = ?, finished_at = ?
         WHERE id = ? AND status = 'claimed'
-      `).run(relayId ? "relay_replaced" : "runtime_restarted", timestamp, String(row.id));
+      `).run(commandError, timestamp, command.id);
+      if (command.kind === "interrupt") {
+        this.db.prepare("UPDATE issue_sessions SET status = 'failed', last_error = ?, updated_at = ? WHERE issue_id = ? AND active_turn_id = ?")
+          .run(commandError, timestamp, command.issue_id, command.turn_id);
+        this.db.prepare(`
+          UPDATE issues SET status = 'blocked', needs_attention = 1, pending_actor = 'user', version = version + 1, updated_at = ?
+          WHERE id = ? AND status NOT IN ('done', 'cancelled')
+        `).run(timestamp, command.issue_id);
+      }
+      failed.push({ ...command, status: "failed", error: commandError, finished_at: timestamp });
     }
-    return rows.map(row => ({ ...sessionCommandFromRow(row), status: "failed" as const, error: relayId ? "relay_replaced" : "runtime_restarted", finished_at: timestamp }));
+    return failed;
   }
 
   claimSessionCommand(relayId: string) {
@@ -2091,27 +2316,31 @@ export class Store {
         if (existingOwner && existingOwner.issue_id !== command.issue_id) throw new Error("issue_session_already_bound");
         this.db.prepare(`
           INSERT INTO issue_sessions (
-            issue_id, host_id, thread_id, status, active_turn_id, last_turn_id,
-            last_agent_message, last_error, created_at, updated_at
-          ) VALUES (?, ?, ?, 'active', ?, NULL, '', NULL, ?, ?)
+            issue_id, host_id, thread_id, status, active_turn_id, active_command_id, last_turn_id,
+            config_fingerprint, last_agent_message, last_error, created_at, updated_at
+          ) VALUES (?, ?, ?, 'active', ?, ?, NULL, ?, '', NULL, ?, ?)
           ON CONFLICT(issue_id) DO UPDATE SET
             host_id = excluded.host_id,
+            thread_id = excluded.thread_id,
             status = 'active',
             active_turn_id = excluded.active_turn_id,
+            active_command_id = excluded.active_command_id,
+            config_fingerprint = excluded.config_fingerprint,
             last_agent_message = CASE WHEN issue_sessions.active_turn_id = excluded.active_turn_id THEN issue_sessions.last_agent_message ELSE '' END,
             last_error = NULL,
             updated_at = excluded.updated_at
-        `).run(command.issue_id, command.host_id, threadId, turnId, timestamp, timestamp);
+        `).run(command.issue_id, command.host_id, threadId, turnId, command.id, String(command.payload.config_fingerprint || ""), timestamp, timestamp);
       } else if (command.kind === "turn" || command.kind === "steer") {
         const binding = this.db.prepare("SELECT thread_id FROM issue_sessions WHERE issue_id = ?").get(command.issue_id) as { thread_id: string } | undefined;
         if (!binding || binding.thread_id !== threadId) throw new Error("issue_session_mismatch");
         this.db.prepare(`
           UPDATE issue_sessions
           SET status = 'active', active_turn_id = ?,
+              active_command_id = CASE WHEN ? = 'turn' THEN ? ELSE active_command_id END,
               last_agent_message = CASE WHEN ? = 'turn' AND active_turn_id IS NOT ? THEN '' ELSE last_agent_message END,
               last_error = NULL, updated_at = ?
           WHERE issue_id = ? AND thread_id = ?
-        `).run(turnId, command.kind, turnId, timestamp, command.issue_id, threadId);
+        `).run(turnId, command.kind, command.id, command.kind, turnId, timestamp, command.issue_id, threadId);
       }
       if (command.run_id && threadId && turnId && command.kind !== "interrupt") {
         const run = this.db.prepare(`
@@ -2143,6 +2372,18 @@ export class Store {
       const command = sessionCommandFromRow(row);
       const threadId = partialThreadId && /^[a-f0-9-]{36}$/i.test(partialThreadId) ? partialThreadId : command.thread_id;
       const turnId = partialTurnId && /^[a-f0-9-]{36}$/i.test(partialTurnId) ? partialTurnId : command.turn_id;
+      if (command.kind === "interrupt" && command.attempts < 3 && command.turn_id) {
+        const active = this.db.prepare("SELECT 1 AS value FROM issue_sessions WHERE issue_id = ? AND active_turn_id = ?").get(command.issue_id, command.turn_id);
+        if (active) {
+          this.db.prepare(`
+            UPDATE session_commands
+            SET status = 'pending', relay_id = NULL, claimed_at = NULL, error = ?, finished_at = NULL
+            WHERE id = ? AND status = 'claimed' AND relay_id = ?
+          `).run(error, commandId, relayId);
+          this.db.exec("COMMIT");
+          return { ...command, status: "pending" as const, error, relay_id: null, claimed_at: null, finished_at: null };
+        }
+      }
       let commandError = error;
       let boundThreadId = threadId;
       let boundTurnId = turnId;
@@ -2157,16 +2398,19 @@ export class Store {
         } else {
           this.db.prepare(`
             INSERT INTO issue_sessions (
-              issue_id, host_id, thread_id, status, active_turn_id, last_turn_id,
-              last_agent_message, last_error, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, NULL, '', ?, ?, ?)
+              issue_id, host_id, thread_id, status, active_turn_id, active_command_id, last_turn_id,
+              config_fingerprint, last_agent_message, last_error, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, '', ?, ?, ?)
             ON CONFLICT(issue_id) DO UPDATE SET
+              thread_id = excluded.thread_id,
               status = excluded.status,
               active_turn_id = excluded.active_turn_id,
+              active_command_id = excluded.active_command_id,
+              config_fingerprint = excluded.config_fingerprint,
               last_agent_message = CASE WHEN excluded.active_turn_id IS NULL OR issue_sessions.active_turn_id = excluded.active_turn_id THEN issue_sessions.last_agent_message ELSE '' END,
               last_error = excluded.last_error,
               updated_at = excluded.updated_at
-          `).run(command.issue_id, command.host_id, threadId, turnId ? "active" : "failed", turnId || null, error, timestamp, timestamp);
+          `).run(command.issue_id, command.host_id, threadId, turnId ? "active" : "failed", turnId || null, turnId ? command.id : null, String(command.payload.config_fingerprint || ""), error, timestamp, timestamp);
           if (command.run_id) {
             this.db.prepare(`
               UPDATE issue_runs
@@ -2181,10 +2425,11 @@ export class Store {
           this.db.prepare(`
             UPDATE issue_sessions
             SET status = 'active', active_turn_id = ?,
+                active_command_id = ?,
                 last_agent_message = CASE WHEN active_turn_id = ? THEN last_agent_message ELSE '' END,
                 last_error = ?, updated_at = ?
             WHERE issue_id = ? AND thread_id = ?
-          `).run(turnId, turnId, error, timestamp, command.issue_id, threadId);
+          `).run(turnId, command.id, turnId, error, timestamp, command.issue_id, threadId);
           if (command.run_id) {
             this.db.prepare(`
               UPDATE issue_runs SET status = 'running', thread_id = ?, turn_id = ?, pid = NULL
@@ -2202,6 +2447,14 @@ export class Store {
         SET status = 'failed', thread_id = ?, turn_id = ?, error = ?, finished_at = ?
         WHERE id = ? AND status = 'claimed' AND relay_id = ?
       `).run(boundThreadId || null, boundTurnId || null, commandError, timestamp, commandId, relayId);
+      if (command.kind === "interrupt") {
+        this.db.prepare("UPDATE issue_sessions SET status = 'failed', last_error = ?, updated_at = ? WHERE issue_id = ? AND active_turn_id = ?")
+          .run(commandError, timestamp, command.issue_id, command.turn_id);
+        this.db.prepare(`
+          UPDATE issues SET status = 'blocked', needs_attention = 1, pending_actor = 'user', version = version + 1, updated_at = ?
+          WHERE id = ? AND status NOT IN ('done', 'cancelled')
+        `).run(timestamp, command.issue_id);
+      }
       this.db.exec("COMMIT");
       return { ...command, status: "failed" as const, thread_id: boundThreadId || null, turn_id: boundTurnId || null, error: commandError, finished_at: timestamp };
     } catch (caught) {
@@ -2237,80 +2490,47 @@ export class Store {
       ORDER BY created_at DESC LIMIT 1
     `).get(issueId, session.active_turn_id) as Record<string, unknown> | undefined;
     if (existing) return sessionCommandFromRow(existing);
-    return this.enqueueSessionCommand({
+    const command = this.enqueueSessionCommand({
       issueId,
       runId: run?.id || null,
-      requestId: `interrupt:${issueId}:${session.active_turn_id}:${randomUUID()}`,
+      requestId: `interrupt:${issueId}:${session.active_turn_id}`,
       kind: "interrupt",
       threadId: session.thread_id,
       turnId: session.active_turn_id,
       payload: {},
       hostId: session.host_id,
     });
+    this.db.prepare("UPDATE issue_sessions SET status = 'stopping', last_error = NULL, updated_at = ? WHERE issue_id = ? AND active_turn_id = ?")
+      .run(now(), issueId, session.active_turn_id);
+    return command;
   }
 
   sessionTurnStarted(threadId: string, turnId: string) {
     const timestamp = now();
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      let session = this.db.prepare("SELECT issue_id, active_turn_id FROM issue_sessions WHERE thread_id = ?").get(threadId) as { issue_id: string; active_turn_id: string | null } | undefined;
+      const session = this.db.prepare("SELECT issue_id, active_turn_id FROM issue_sessions WHERE thread_id = ?").get(threadId) as { issue_id: string; active_turn_id: string | null } | undefined;
       if (!session) {
-        const startCommand = this.db.prepare(`
-          SELECT id, issue_id, run_id, host_id
-          FROM session_commands
-          WHERE status = 'claimed' AND kind = 'start' AND (thread_id IS NULL OR thread_id = ?)
-          ORDER BY claimed_at DESC, rowid DESC LIMIT 1
-        `).get(threadId) as { id: string; issue_id: string; run_id: string | null; host_id: string } | undefined;
-        if (!startCommand) {
-          this.db.exec("COMMIT");
-          return undefined;
-        }
-        const existingBinding = this.db.prepare("SELECT thread_id FROM issue_sessions WHERE issue_id = ?").get(startCommand.issue_id) as { thread_id: string } | undefined;
-        const existingOwner = this.db.prepare("SELECT issue_id FROM issue_sessions WHERE thread_id = ?").get(threadId) as { issue_id: string } | undefined;
-        if ((existingBinding && existingBinding.thread_id !== threadId) || (existingOwner && existingOwner.issue_id !== startCommand.issue_id)) {
-          this.db.exec("COMMIT");
-          return undefined;
-        }
-        this.db.prepare(`
-          INSERT INTO issue_sessions (
-            issue_id, host_id, thread_id, status, active_turn_id, last_turn_id,
-            last_agent_message, last_error, created_at, updated_at
-          ) VALUES (?, ?, ?, 'active', ?, NULL, '', NULL, ?, ?)
-          ON CONFLICT(issue_id) DO UPDATE SET
-            status = 'active', active_turn_id = excluded.active_turn_id,
-            last_agent_message = '', last_error = NULL, updated_at = excluded.updated_at
-        `).run(startCommand.issue_id, startCommand.host_id, threadId, turnId, timestamp, timestamp);
-        session = { issue_id: startCommand.issue_id, active_turn_id: null };
+        this.db.exec("COMMIT");
+        return undefined;
       }
-      const command = this.db.prepare(`
-        SELECT id, run_id
-        FROM session_commands
-        WHERE issue_id = ? AND status = 'claimed' AND kind IN ('start', 'turn')
-          AND (thread_id IS NULL OR thread_id = ?)
-        ORDER BY claimed_at DESC, rowid DESC LIMIT 1
-      `).get(session.issue_id, threadId) as { id: string; run_id: string | null } | undefined;
-      if (command) {
-        this.db.prepare("UPDATE session_commands SET thread_id = ?, turn_id = ? WHERE id = ? AND status = 'claimed'").run(threadId, turnId, command.id);
-        if (command.run_id) {
-          this.db.prepare(`
-            UPDATE issue_runs SET status = 'running', thread_id = ?, turn_id = ?, pid = NULL, error = NULL
-            WHERE id = ? AND issue_id = ? AND status IN ('claimed', 'running') AND execution_mode = 'desktop'
-          `).run(threadId, turnId, command.run_id, session.issue_id);
-        }
+      if (session.active_turn_id && session.active_turn_id !== turnId) {
+        this.db.exec("COMMIT");
+        return undefined;
       }
       this.db.prepare(`
         UPDATE issue_sessions
-        SET status = 'active', active_turn_id = ?,
+        SET status = 'active', active_turn_id = ?, active_command_id = CASE WHEN active_turn_id = ? THEN active_command_id ELSE NULL END,
             last_agent_message = CASE WHEN active_turn_id = ? THEN last_agent_message ELSE '' END,
             last_error = NULL, updated_at = ?
         WHERE issue_id = ?
-      `).run(turnId, turnId, timestamp, session.issue_id);
+      `).run(turnId, turnId, turnId, timestamp, session.issue_id);
       if (session.active_turn_id !== turnId) {
         this.db.prepare(`
           UPDATE issues
-          SET status = CASE WHEN status IN ('done', 'cancelled') THEN status ELSE 'in_progress' END,
-              needs_attention = CASE WHEN status IN ('done', 'cancelled') THEN needs_attention ELSE 0 END,
-              pending_actor = CASE WHEN status IN ('done', 'cancelled') THEN pending_actor ELSE 'agent' END,
+          SET status = CASE WHEN status = 'cancelled' THEN status ELSE 'in_progress' END,
+              needs_attention = CASE WHEN status = 'cancelled' THEN needs_attention ELSE 0 END,
+              pending_actor = CASE WHEN status = 'cancelled' THEN pending_actor ELSE 'agent' END,
               version = version + 1,
               updated_at = ?
           WHERE id = ?
@@ -2336,6 +2556,7 @@ export class Store {
   syncSessionThreadStatus(threadId: string, status: string, activeFlags: string[] = []) {
     const session = this.getIssueSessionByThread(threadId);
     if (!session) return false;
+    if (session.status === "stopping" && session.active_turn_id && status !== "systemError") return false;
     const nextStatus: IssueSessionStatus = status === "active"
       ? activeFlags.includes("waitingOnApproval")
         ? "waiting_on_approval"
@@ -2359,9 +2580,10 @@ export class Store {
         this.db.prepare(`
           UPDATE issues
           SET status = ?, needs_attention = ?, pending_actor = ?, version = version + 1, updated_at = ?
-          WHERE id = ? AND status NOT IN ('done', 'cancelled')
+          WHERE id = ? AND status != 'cancelled'
+            AND (? != 'blocked' OR status != 'done')
             AND (status != ? OR needs_attention != ? OR pending_actor != ?)
-        `).run(issueStatus, needsAttention, pendingActor, timestamp, session.issue_id, issueStatus, needsAttention, pendingActor);
+        `).run(issueStatus, needsAttention, pendingActor, timestamp, session.issue_id, issueStatus, issueStatus, needsAttention, pendingActor);
       }
       this.db.exec("COMMIT");
       return true;
@@ -2380,17 +2602,92 @@ export class Store {
         this.db.exec("COMMIT");
         return undefined;
       }
-      const run = this.db.prepare(`
-        SELECT id FROM issue_runs
-        WHERE issue_id = ? AND turn_id = ? AND status IN ('claimed', 'running') AND execution_mode = 'desktop'
-        ORDER BY started_at DESC, rowid DESC LIMIT 1
-      `).get(String(session.issue_id), turnId) as { id: string } | undefined;
+      const commandId = session.active_command_id ? String(session.active_command_id) : "";
+      const command = commandId
+        ? this.db.prepare("SELECT run_id, kind FROM session_commands WHERE id = ? AND issue_id = ? AND turn_id = ?").get(commandId, String(session.issue_id), turnId) as { run_id: string | null; kind: SessionCommandKind } | undefined
+        : undefined;
+      if (commandId && !command) throw new Error("session_command_turn_mismatch");
+      const run = command?.run_id
+        ? this.db.prepare(`
+            SELECT id FROM issue_runs
+            WHERE id = ? AND issue_id = ? AND turn_id = ? AND status IN ('claimed', 'running') AND execution_mode = 'desktop'
+          `).get(command.run_id, String(session.issue_id), turnId) as { id: string } | undefined
+        : undefined;
+      if (command?.run_id && !run) throw new Error("session_run_turn_mismatch");
       const nextStatus: IssueSessionStatus = status === "completed" ? "idle" : status === "interrupted" ? "interrupted" : "failed";
       this.db.prepare(`
         UPDATE issue_sessions
-        SET status = ?, active_turn_id = NULL, last_turn_id = ?, last_error = ?, updated_at = ?
+        SET status = ?, active_turn_id = NULL, active_command_id = NULL, last_turn_id = ?, last_error = ?, updated_at = ?
         WHERE issue_id = ? AND active_turn_id = ?
       `).run(nextStatus, turnId, error || null, timestamp, String(session.issue_id), turnId);
+      const message = String(session.last_agent_message || "").trim();
+      if (run) {
+        if (status === "interrupted") {
+          this.db.prepare(`
+            UPDATE issue_runs
+            SET status = 'interrupted', finished_at = ?, error = ?, execution_result = ?, pid = NULL
+            WHERE id = ? AND issue_id = ? AND status IN ('claimed', 'running')
+          `).run(timestamp, error || "user_stopped", message, run.id, String(session.issue_id));
+          this.db.prepare(`
+            UPDATE issues
+            SET needs_attention = CASE WHEN status IN ('done', 'cancelled') THEN needs_attention ELSE 1 END,
+                pending_actor = CASE WHEN status IN ('done', 'cancelled') THEN pending_actor ELSE 'user' END,
+                version = version + 1, updated_at = ?
+            WHERE id = ?
+          `).run(timestamp, String(session.issue_id));
+        } else {
+          const executionSuccess = status === "completed";
+          this.db.prepare(`
+            UPDATE issue_runs
+            SET status = 'scheduling', pid = NULL, execution_success = ?, execution_error = ?, execution_result = ?,
+                scheduler_pid = NULL, scheduler_status = 'pending', scheduler_error = NULL
+            WHERE id = ? AND issue_id = ? AND status IN ('claimed', 'running')
+          `).run(Number(executionSuccess), executionSuccess ? null : error || "session_turn_failed", message, run.id, String(session.issue_id));
+        }
+      } else if (command && (command.kind === "start" || command.kind === "turn")) {
+        const replyStatus: IssueReplyStatus = status === "completed" ? "succeeded" : status === "interrupted" ? "interrupted" : "failed";
+        this.db.prepare(`
+          UPDATE issue_replies SET status = ?, error = ?, finished_at = ?
+          WHERE issue_id = ? AND status = 'running'
+        `).run(replyStatus, error || (status === "interrupted" ? "session_interrupted" : null), timestamp, String(session.issue_id));
+        if (status === "interrupted") {
+          this.db.prepare(`
+            UPDATE issues
+            SET needs_attention = CASE WHEN status IN ('done', 'cancelled') THEN needs_attention ELSE 1 END,
+                pending_actor = CASE WHEN status IN ('done', 'cancelled') THEN pending_actor ELSE 'user' END,
+                version = version + 1, updated_at = ?
+            WHERE id = ?
+          `).run(timestamp, String(session.issue_id));
+        } else {
+          this.db.prepare(`
+            UPDATE issues
+            SET status = CASE WHEN status = 'cancelled' THEN status ELSE ? END,
+                needs_attention = CASE WHEN status = 'cancelled' THEN needs_attention ELSE 1 END,
+                pending_actor = CASE WHEN status = 'cancelled' THEN pending_actor ELSE 'user' END,
+                version = version + 1, updated_at = ?
+            WHERE id = ?
+          `).run(status === "completed" ? "in_review" : "blocked", timestamp, String(session.issue_id));
+        }
+      } else {
+        if (status === "interrupted") {
+          this.db.prepare(`
+            UPDATE issues
+            SET needs_attention = CASE WHEN status IN ('done', 'cancelled') THEN needs_attention ELSE 1 END,
+                pending_actor = CASE WHEN status IN ('done', 'cancelled') THEN pending_actor ELSE 'user' END,
+                version = version + 1, updated_at = ?
+            WHERE id = ?
+          `).run(timestamp, String(session.issue_id));
+        } else {
+          this.db.prepare(`
+            UPDATE issues
+            SET status = CASE WHEN status = 'cancelled' THEN status ELSE ? END,
+                needs_attention = CASE WHEN status = 'cancelled' THEN needs_attention ELSE 1 END,
+                pending_actor = CASE WHEN status = 'cancelled' THEN pending_actor ELSE 'user' END,
+                version = version + 1, updated_at = ?
+            WHERE id = ?
+          `).run(status === "completed" ? "in_review" : "blocked", timestamp, String(session.issue_id));
+        }
+      }
       this.db.exec("COMMIT");
       return {
         issue_id: String(session.issue_id),
@@ -2399,7 +2696,8 @@ export class Store {
         turn_id: turnId,
         status,
         error: error || null,
-        message: String(session.last_agent_message || ""),
+        message,
+        should_schedule: Boolean(run && status !== "interrupted"),
       };
     } catch (caught) {
       this.db.exec("ROLLBACK");
@@ -2417,15 +2715,26 @@ export class Store {
         SET status = ?, error = ?, finished_at = ?
         WHERE issue_id = ? AND status = 'running'
       `).run(replyStatus, error || (status === "interrupted" ? "session_interrupted" : null), timestamp, issueId);
-      this.db.prepare(`
-        UPDATE issues
-        SET status = CASE WHEN status IN ('done', 'cancelled') THEN status ELSE ? END,
-            needs_attention = CASE WHEN status IN ('done', 'cancelled') THEN needs_attention ELSE 1 END,
-            pending_actor = CASE WHEN status IN ('done', 'cancelled') THEN pending_actor ELSE 'user' END,
-            version = version + 1,
-            updated_at = ?
-        WHERE id = ? AND status = 'in_progress'
-      `).run(status === "completed" ? "in_review" : "blocked", timestamp, issueId);
+      if (status === "interrupted") {
+        this.db.prepare(`
+          UPDATE issues
+          SET needs_attention = 1,
+              pending_actor = 'user',
+              version = version + 1,
+              updated_at = ?
+          WHERE id = ? AND status = 'in_progress'
+        `).run(timestamp, issueId);
+      } else {
+        this.db.prepare(`
+          UPDATE issues
+          SET status = CASE WHEN status IN ('done', 'cancelled') THEN status ELSE ? END,
+              needs_attention = CASE WHEN status IN ('done', 'cancelled') THEN needs_attention ELSE 1 END,
+              pending_actor = CASE WHEN status IN ('done', 'cancelled') THEN pending_actor ELSE 'user' END,
+              version = version + 1,
+              updated_at = ?
+          WHERE id = ? AND status = 'in_progress'
+        `).run(status === "completed" ? "in_review" : "blocked", timestamp, issueId);
+      }
       this.db.exec("COMMIT");
     } catch (caught) {
       this.db.exec("ROLLBACK");
