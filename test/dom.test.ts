@@ -594,6 +594,7 @@ test("open-in-conversation requires a valid session uuid", () => {
 test("issue details render the latest conversation result and reply composer", () => {
   const source = injectionScript(4317, "test-token", "install");
   const css = betterCodexDesignSystemCss();
+  const permissions = source.slice(source.indexOf("function applyDialogPermissions()"), source.indexOf("function refreshIssueState"));
 
   assert.ok(source.includes('mode: issue ? "manual" : cachedCreateDraft?.mode || state.createMode'));
   assert.ok(source.includes('te("对话")'));
@@ -610,6 +611,9 @@ test("issue details render the latest conversation result and reply composer", (
   assert.ok(source.includes('data-composer-mode="\' + mode + \'"'));
   assert.ok(source.includes('button.dataset.composerMode === "stop"'));
   assert.ok(source.includes("stopIssueFromDialog(button)"));
+  assert.equal(permissions.match(/\[data-conversation-retry\]/g)?.length, 2);
+  assert.ok(source.includes('const retryRequestId = lastReplyStatus === "interrupted" ? "" : lastReplyRequestId'));
+  assert.ok(source.includes("sendReply(lastReplyMessage, retryRequestId)"));
   assert.match(css, /\.better-codex-timeline\s*\{/s);
   assert.match(css, /\.better-codex-bubble\s*\{/s);
   assert.match(css, /\.better-codex-composer\s*\{[^}]*border-radius:\s*23px;[^}]*padding:\s*8px;/s);
@@ -627,7 +631,9 @@ test("user-stopped sessions render a red-dot stopped state", () => {
 
   assert.ok(source.includes('interrupted: "已停止"'));
   assert.ok(source.includes('activityState === "interrupted" ? "已停止"'));
-  assert.ok(source.includes('["failed", "interrupted"].includes(issue.reply_status)'));
+  assert.ok(source.includes('issue.reply_status === "succeeded" ? "completed"'));
+  assert.ok(source.includes('replyStatus === "succeeded" ? "completed"'));
+  assert.ok(source.includes('activeExecutionState || replyResultState || executionState'));
   assert.ok(source.includes('["completed", "interrupted", "not-started"].includes(activityState)'));
   assert.match(source, /\.better-codex-activity\[data-run="interrupted"\]\s*\{\s*color:\s*var\(--bc-danger\);/s);
   assert.match(css, /\.better-codex-conversation-status \.better-codex-activity\[data-run="interrupted"\]\s*\{[^}]*color:\s*var\(--bc-danger\);/s);

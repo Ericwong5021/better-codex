@@ -3535,8 +3535,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           const agentName = mockupText(agentDisplayName(assignee));
           const activityAgent = assignee || defaultAgent || { name: "Codex", is_default: true };
           const latestRunStatus = issue.latest_run_status || "";
-          const replyFailureState = ["failed", "interrupted"].includes(issue.reply_status) ? issue.reply_status : "";
-          const executionState = issue.status === "blocked" ? "blocked" : replyFailureState || (issue.latest_scheduler_error && issue.status === "in_review" ? "scheduler-failed" : latestRunStatus === "completed" ? "completed" : latestRunStatus === "failed" ? "failed" : latestRunStatus === "interrupted" ? "interrupted" : latestRunStatus === "scheduling" ? "scheduling" : latestRunStatus === "running" ? "running" : latestRunStatus === "claimed" ? "claimed" : issue.agent_enabled ? "not-started" : "");
+          const replyResultState = issue.reply_status === "succeeded" ? "completed" : ["failed", "interrupted"].includes(issue.reply_status) ? issue.reply_status : "";
+          const executionState = issue.status === "blocked" ? "blocked" : replyResultState || (issue.latest_scheduler_error && issue.status === "in_review" ? "scheduler-failed" : latestRunStatus === "completed" ? "completed" : latestRunStatus === "failed" ? "failed" : latestRunStatus === "interrupted" ? "interrupted" : latestRunStatus === "scheduling" ? "scheduling" : latestRunStatus === "running" ? "running" : latestRunStatus === "claimed" ? "claimed" : issue.agent_enabled ? "not-started" : "");
           const activeExecutionState = issue.active_run_status || (issue.reply_status === "running" ? "running" : "");
           const activityState = enrichmentLocked ? "thinking" : issue.session_status === "stopping" ? "stopping" : activeExecutionState || executionState;
           const activityLabel = t(enrichmentLocked ? "理解中" : activityState === "stopping" ? "正在停止…" : activityState === "running" ? "工作中" : activityState === "scheduling" ? "调度中" : activityState === "scheduler-failed" ? "调度失败" : activityState === "claimed" ? "排队中" : activityState === "in_review" ? "待审核" : activityState === "completed" ? "已完成" : activityState === "blocked" ? "已阻塞" : activityState === "failed" ? "执行失败" : activityState === "interrupted" ? "已停止" : activityState === "not-started" ? "未开始" : "");
@@ -3826,6 +3826,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       let conversationFailureState = "";
       let lastReplyMessage = "";
       let lastReplyRequestId = "";
+      let lastReplyStatus = issue?.reply_status || "idle";
       let replyDraftTimer = null;
       let latestReplyDraft = draft.reply;
       let sessionId = issueSessionId(issue);
@@ -3994,11 +3995,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             return;
           }
           if (executionRunning) {
-            control.disabled = !control.matches('[name="reply"], [data-conversation-send], [data-conversation-attach], [data-dialog-attachment-scope="reply"]');
+            control.disabled = !control.matches('[name="reply"], [data-conversation-send], [data-conversation-attach], [data-conversation-retry], [data-dialog-attachment-scope="reply"]');
             return;
           }
           if (executionLocked) {
-            control.disabled = !(control.matches('[name="reply"], [data-conversation-send], [data-conversation-attach], [data-dialog-attachment-scope="reply"]') || control.closest('[data-dialog-select="status"], [data-dialog-select="priority"], [data-dialog-select="assignee"]'));
+            control.disabled = !(control.matches('[name="reply"], [data-conversation-send], [data-conversation-attach], [data-conversation-retry], [data-dialog-attachment-scope="reply"]') || control.closest('[data-dialog-select="status"], [data-dialog-select="priority"], [data-dialog-select="assignee"]'));
             return;
           }
           control.disabled = false;
@@ -4080,9 +4081,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const latestRunStatus = issue?.latest_run_status || "";
         const executionState = issue?.status === "blocked" ? "blocked" : issue?.latest_scheduler_error && issue?.status === "in_review" ? "scheduler-failed" : latestRunStatus === "completed" ? "completed" : latestRunStatus === "failed" ? "failed" : latestRunStatus === "interrupted" ? "interrupted" : latestRunStatus === "scheduling" ? "scheduling" : latestRunStatus === "running" ? "running" : latestRunStatus === "claimed" ? "claimed" : issue?.agent_enabled ? "not-started" : "";
         const activeExecutionState = issue?.active_run_status || (replyStatus === "running" ? "running" : "");
-        const replyFailureState = ["failed", "interrupted"].includes(replyStatus) ? replyStatus : conversationFailureState;
+        const replyResultState = replyStatus === "succeeded" ? "completed" : ["failed", "interrupted"].includes(replyStatus) ? replyStatus : conversationFailureState;
         const relayFailure = issue?.session_relay_error && !issue?.session_relay_connected && issue?.active_run_status === "claimed";
-        const activityState = enrichmentLocked ? "thinking" : issue?.session_status === "stopping" ? "stopping" : relayFailure ? "relay-failed" : replyFailureState || activeExecutionState || executionState;
+        const activityState = enrichmentLocked ? "thinking" : issue?.session_status === "stopping" ? "stopping" : relayFailure ? "relay-failed" : activeExecutionState || replyResultState || executionState;
         if (!activityState) return "";
         const activityLabel = t(enrichmentLocked ? "理解中" : activityState === "stopping" ? "正在停止…" : activityState === "relay-failed" ? "Codex 会话连接失败" : activityState === "running" ? "工作中" : activityState === "scheduling" ? "调度中" : activityState === "scheduler-failed" ? "调度失败" : activityState === "claimed" ? "排队中" : activityState === "in_review" ? "待审核" : activityState === "completed" ? "已完成" : activityState === "blocked" ? "已阻塞" : activityState === "failed" ? "执行失败" : activityState === "interrupted" ? "已停止" : activityState === "not-started" ? "未开始" : "");
         const agent = state.agents.find(item => item.id === issue?.agent_id) || state.agents.find(item => item.is_default) || { name: "Codex", is_default: true };
@@ -4140,7 +4141,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         syncConversationStatus("failed");
         feedback.querySelector("[data-conversation-retry]")?.addEventListener("click", event => {
           if (event.currentTarget.dataset.conversationRetry === "load") void loadConversation();
-          else void sendReply(lastReplyMessage, lastReplyRequestId);
+          else {
+            const retryRequestId = lastReplyStatus === "interrupted" ? "" : lastReplyRequestId;
+            void sendReply(lastReplyMessage, retryRequestId);
+          }
         });
       }
 
@@ -4216,6 +4220,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (reply.message) lastReplyMessage = reply.message;
         if (reply.request_id) lastReplyRequestId = reply.request_id;
         const stateName = reply.status || "idle";
+        lastReplyStatus = stateName;
         if (!sessionHandoff && (stateName === "failed" || stateName === "interrupted")) showConversationFailure(reply.error, "reply", reply.message);
         else {
           clearConversationFailure();
@@ -4268,6 +4273,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           }
         }
         try {
+          lastReplyStatus = "running";
           const reply = await api("/api/issues/" + encodeURIComponent(issue.id) + "/reply", { method: "POST", body: JSON.stringify({ message, request_id: requestId }) });
           if (reply.initial_run) {
             await loadIssues();
