@@ -40,10 +40,11 @@ After the workflow succeeds, confirm the prerelease assets and install the publi
 
 1. Confirm the user-visible changes and compatibility notes.
 2. Move the completed entries from `Unreleased` into a new version section in `CHANGELOG.md`.
-3. Update the version in `package.json` and `package-lock.json`:
+3. Update the version in `package.json`, `package-lock.json`, and `src/compatibility.ts`:
 
    ```bash
    npm version patch --no-git-tag-version
+   # Then set coreVersion in src/compatibility.ts to the same version.
    ```
 
    Use `minor` or `major` when the release requires it.
@@ -61,7 +62,7 @@ After the workflow succeeds, confirm the prerelease assets and install the publi
 6. Review the diff, confirm the new version matches the intended tag, and commit the release preparation:
 
    ```bash
-   git add package.json package-lock.json CHANGELOG.md
+   git add package.json package-lock.json src/compatibility.ts CHANGELOG.md
    git commit -m "chore(release): vX.Y.Z"
    ```
 

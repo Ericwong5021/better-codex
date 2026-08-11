@@ -2,7 +2,7 @@ import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { compatibilityCurrentPath, compatibilityStatusPath, compatibilityVersionsPath, ensureDirectories, runtimeCurrentPath } from "./config.js";
 
-export const coreVersion = "0.4.2-beta.3";
+export const coreVersion = "0.4.2";
 
 export type CompatibilityManifest = {
   version: string;
