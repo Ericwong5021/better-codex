@@ -4,6 +4,29 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-08-12
+
+### Added
+
+- Add a local browser workspace and a self-hosted Hub with privacy-filtered board synchronization, remote Issue controls, device access management, backup and restore, and Caddy-based HTTPS deployment.
+- Show the active Codex profile and remaining usage windows in the local Web workspace.
+
+### Changed
+
+- Replace the cancelled task status with archive actions across local and self-hosted boards, and migrate existing cancelled tasks into the archive.
+- Keep the self-hosted Hub and local Runtime on the same v0.4.3 synchronization protocol when deploying or upgrading remote access.
+
+### Fixed
+
+- Keep remote Agent assignment, execution state, conversations, replies, attachments, avatars, and completion activity synchronized with the local Runtime.
+- Preserve the Web workspace, creation preferences, and unread completion notices across sidebar changes, reloads, and Runtime reinjection.
+- Let a newly paired Runtime take over an existing Hub projection without clearing synchronized data or leaving remote commands assigned to the old device.
+- Rate-limit self-hosted Web logins by the original client address behind the bundled Caddy proxy instead of sharing one lockout across all remote users.
+
+### Security
+
+- Protect self-hosted access with separate bootstrap, device, and Web credentials, password hashing, secure sessions, request validation, rate limiting, security headers, and audit records.
+
 ## [0.4.3-beta.8] - 2026-08-12
 
 ### Added
@@ -415,7 +438,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.3-beta.8...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.3...HEAD
+[0.4.3]: https://github.com/Ericwong5021/better-codex/compare/v0.4.2...v0.4.3
 [0.4.3-beta.8]: https://github.com/Ericwong5021/better-codex/compare/v0.4.3-beta.7...v0.4.3-beta.8
 [0.4.3-beta.7]: https://github.com/Ericwong5021/better-codex/compare/v0.4.3-beta.6...v0.4.3-beta.7
 [0.4.3-beta.6]: https://github.com/Ericwong5021/better-codex/compare/v0.4.3-beta.5...v0.4.3-beta.6

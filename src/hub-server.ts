@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { isIP } from "node:net";
 import { resolve } from "node:path";
 import { injectionScript } from "./dom.js";
 import { clearWebSessionCookie, cookies, passwordHash, passwordMatches, readHubSecret, validateWebPassword, validateWebUsername, webSessionCookie } from "./hub-auth.js";
@@ -19,6 +20,7 @@ export type HubServerOptions = {
   webUsername?: string;
   secureCookies?: boolean;
   allowedHosts?: string[];
+  trustedProxy?: boolean;
 };
 
 export function hubServerOptions(): HubServerOptions {
@@ -38,7 +40,15 @@ export function hubServerOptions(): HubServerOptions {
     webUsername,
     secureCookies: process.env.BETTER_CODEX_HUB_INSECURE_COOKIES !== "1",
     allowedHosts: String(process.env.BETTER_CODEX_HUB_ALLOWED_HOSTS || "").split(",").map(value => value.trim().toLowerCase()).filter(Boolean),
+    trustedProxy: process.env.BETTER_CODEX_HUB_TRUST_PROXY === "1",
   };
+}
+
+function loginClientAddress(request: IncomingMessage, trustedProxy: boolean) {
+  if (!trustedProxy) return String(request.socket.remoteAddress || "unknown");
+  const forwarded = request.headers["x-better-codex-client-ip"];
+  if (typeof forwarded !== "string" || !isIP(forwarded.trim())) return null;
+  return forwarded.trim();
 }
 
 function bearer(request: IncomingMessage) {
@@ -188,7 +198,8 @@ export function createHubServer(options: HubServerOptions) {
       if (url.pathname === "/web/host.js" && method === "GET") return sendText(response, 200, betterCodexWebHostJavaScript(true), "text/javascript; charset=utf-8");
       if (url.pathname === "/web/session" && method === "POST") {
         if (!trustedOrigin(request, true)) return sendJson(response, 403, { error: "forbidden" });
-        const client = String(request.socket.remoteAddress || "unknown");
+        const client = loginClientAddress(request, options.trustedProxy === true);
+        if (!client) return sendJson(response, 400, { error: "invalid_proxy_client" });
         const attempt = loginAttempts.get(client);
         if (attempt && attempt.resetAt > Date.now() && attempt.count >= 5) {
           store.audit(client, "web_login_rate_limited");
@@ -228,7 +239,7 @@ export function createHubServer(options: HubServerOptions) {
       }
       if (url.pathname === "/api/v1/devices/pair" && method === "POST") {
         const body = await readBody(request);
-        return sendJson(response, 201, store.pairDevice(body.name, body.pairing_code));
+        return sendJson(response, 201, store.pairDevice(body.name, body.pairing_code, body.replace_existing === true));
       }
       if (url.pathname === "/api/v1/admin/pairing-codes" && method === "POST") {
         if (!admin) return sendJson(response, 401, { error: "unauthorized" });

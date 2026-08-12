@@ -113,6 +113,24 @@ test("Hub Web login separates bootstrap credentials and enforces cookie, Origin,
     await close(limited.server);
     rmSync(limitedDirectory, { recursive: true, force: true });
   }
+
+  const proxiedDirectory = mkdtempSync(join(tmpdir(), "better-codex-hub-proxy-rate-"));
+  const proxied = createHubServer({ host: "127.0.0.1", port: 0, database: join(proxiedDirectory, "hub.db"), adminToken, webUsername, webPassword, trustedProxy: true });
+  const proxiedPort = await listen(proxied.server);
+  const proxiedOrigin = `http://127.0.0.1:${proxiedPort}`;
+  const proxiedLogin = (client: string, password: string) => fetch(`${proxiedOrigin}/web/session`, {
+    method: "POST",
+    headers: { origin: proxiedOrigin, "content-type": "application/json", "x-better-codex-client-ip": client },
+    body: JSON.stringify({ username: webUsername, password }),
+  });
+  try {
+    for (let index = 0; index < 5; index += 1) assert.equal((await proxiedLogin("203.0.113.10", "wrong-password-value")).status, 401);
+    assert.equal((await proxiedLogin("198.51.100.20", webPassword)).status, 200);
+    assert.equal((await proxiedLogin("203.0.113.10", webPassword)).status, 429);
+  } finally {
+    await close(proxied.server);
+    rmSync(proxiedDirectory, { recursive: true, force: true });
+  }
 });
 
 test("Hub backup and restore preserve paired devices, password state, and pending commands", () => {

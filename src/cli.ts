@@ -858,7 +858,7 @@ async function syncCommand(action: string | undefined, args: string[]) {
     const response = await fetch(`${base}/api/v1/devices/pair`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ pairing_code: pairingCode, name: deviceName }),
+      body: JSON.stringify({ pairing_code: pairingCode, name: deviceName, replace_existing: true }),
       signal: AbortSignal.timeout(15_000),
     });
     const body = await response.json().catch(() => ({})) as Record<string, unknown>;

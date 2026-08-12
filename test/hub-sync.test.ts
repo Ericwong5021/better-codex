@@ -10,7 +10,7 @@ import { createHubServer } from "../src/hub-server.js";
 import { HubStore } from "../src/hub-store.js";
 import { SyncClient } from "../src/sync-client.js";
 import { normalizeHubUrl } from "../src/sync-config.js";
-import { syncProtocolVersion, type SyncPushRequest } from "../src/sync-contract.js";
+import { syncProtocolVersion, type ProjectProjection, type SyncPushRequest } from "../src/sync-contract.js";
 
 function listen(server: ReturnType<typeof createHubServer>["server"]) {
   return new Promise<number>((resolve, reject) => {
@@ -170,6 +170,36 @@ test("pairing codes are single-use and a second active writer is rejected", () =
     store.push(first.device_id, request(first.device_id));
     assert.throws(() => store.push(second.device_id, request(second.device_id)), /writer_lease_conflict/);
     assert.throws(() => store.push(first.device_id, { ...request(first.device_id), protocol_version: "sync/v2" as never }), /incompatible_protocol/);
+  } finally {
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("replacement pairing transfers the single writer without clearing the projection", () => {
+  const directory = mkdtempSync(join(tmpdir(), "better-codex-hub-repair-"));
+  const store = new HubStore(join(directory, "hub.db"));
+  try {
+    const first = store.pairDevice("first", store.createPairingCode().pairing_code);
+    const timestamp = new Date().toISOString();
+    const project: ProjectProjection = { id: "project-repair", name: "Repair", identifier_prefix: "RPR", created_at: timestamp, updated_at: timestamp, local_revision: 1 };
+    const request = (deviceId: string, changes: SyncPushRequest["changes"]): SyncPushRequest => ({
+      protocol_version: syncProtocolVersion,
+      core_version: "0.4.3",
+      device_id: deviceId,
+      runtime: { device_id: deviceId, device_name: deviceId, protocol_version: syncProtocolVersion, core_version: "0.4.3", last_seen_at: timestamp, last_sync_at: null, queue_depth: changes.length, health_state: "online" },
+      changes,
+    });
+    store.push(first.device_id, request(first.device_id, [{ event_id: "repair-first", entity_type: "project", entity_id: project.id, operation: "upsert", projection: project, changed_at: timestamp }]));
+
+    const replacement = store.pairDevice("replacement", store.createPairingCode().pairing_code, true);
+    const stale = { ...project, id: "project-stale-writer", name: "Stale writer" };
+    assert.throws(() => store.push(first.device_id, request(first.device_id, [{ event_id: "repair-stale", entity_type: "project", entity_id: stale.id, operation: "upsert", projection: stale, changed_at: timestamp }])), /device_revoked/);
+    const updated = { ...project, name: "Repaired", local_revision: 2, updated_at: new Date().toISOString() };
+    store.push(replacement.device_id, request(replacement.device_id, [{ event_id: "repair-second", entity_type: "project", entity_id: project.id, operation: "upsert", projection: updated, changed_at: updated.updated_at }]));
+
+    assert.equal(store.board().projects.find(item => item.id === project.id)?.name, "Repaired");
+    assert.equal(store.devices().find((device: any) => device.id === first.device_id)?.revoked_at !== null, true);
   } finally {
     store.close();
     rmSync(directory, { recursive: true, force: true });

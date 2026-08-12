@@ -431,7 +431,7 @@ export class HubStore {
     return { pairing_code: code, expires_at };
   }
 
-  pairDevice(nameValue: unknown, code: unknown) {
+  pairDevice(nameValue: unknown, code: unknown, replaceExisting = false) {
     const name = cleanString(nameValue, 120, false).trim();
     if (typeof code !== "string" || !code) throw new Error("invalid_pairing_code");
     const row = this.db.prepare("SELECT expires_at, used_at FROM pairing_codes WHERE code_hash = ?").get(tokenHash(code)) as { expires_at: string; used_at: string | null } | undefined;
@@ -441,14 +441,23 @@ export class HubStore {
     const timestamp = now();
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      this.db.prepare("UPDATE pairing_codes SET used_at = ? WHERE code_hash = ? AND used_at IS NULL").run(timestamp, tokenHash(code));
+      const pairing = this.db.prepare("UPDATE pairing_codes SET used_at = ? WHERE code_hash = ? AND used_at IS NULL").run(timestamp, tokenHash(code));
+      if (pairing.changes !== 1) throw new Error("invalid_pairing_code");
       this.db.prepare("INSERT INTO devices (id, name, token_hash, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?)").run(id, name, tokenHash(token), timestamp, timestamp);
+      if (replaceExisting) {
+        this.db.prepare("UPDATE devices SET revoked_at = ?, lease_expires_at = NULL WHERE id != ? AND revoked_at IS NULL").run(timestamp, id);
+        this.db.prepare("UPDATE entities SET owner_device_id = ? WHERE owner_device_id != ?").run(id, id);
+        this.db.prepare("UPDATE conversations SET owner_device_id = ? WHERE owner_device_id != ?").run(id, id);
+        this.db.prepare("UPDATE remote_commands SET device_id = ? WHERE device_id != ? AND status = 'pending'").run(id, id);
+        this.db.prepare("DELETE FROM runtime_projection WHERE device_id != ?").run(id);
+      }
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
     }
     this.audit(id, "device_paired", name);
+    if (replaceExisting) this.audit(id, "device_ownership_transferred");
     return { protocol_version: syncProtocolVersion, device_id: id, device_token: token, device_name: name };
   }
 
@@ -578,7 +587,8 @@ export class HubStore {
     const owner = this.db.prepare("SELECT id FROM devices WHERE id != ? AND revoked_at IS NULL AND lease_expires_at IS NOT NULL AND last_seen_at > ? LIMIT 1").get(deviceId, takeoverAt);
     if (owner) throw new Error("writer_lease_conflict");
     const expires = after(30_000);
-    this.db.prepare("UPDATE devices SET last_seen_at = ?, lease_expires_at = ? WHERE id = ? AND revoked_at IS NULL").run(timestamp, expires, deviceId);
+    const renewed = this.db.prepare("UPDATE devices SET last_seen_at = ?, lease_expires_at = ? WHERE id = ? AND revoked_at IS NULL").run(timestamp, expires, deviceId);
+    if (renewed.changes !== 1) throw new Error("device_revoked");
     return expires;
   }
 
