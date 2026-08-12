@@ -99,9 +99,38 @@ test("supports English, dark theme, mobile viewport, and keyboard dismissal", as
 test("recovers after a Runtime restart with a new Web session", async ({ page }) => {
   await page.goto(`${runtime.baseUrl}/web#token=${encodeURIComponent(runtime.token)}`);
   await expect(page.locator("#better-codex-panel")).toBeVisible();
+  const project = await page.evaluate(async () => await (window as any).betterCodexHost.request({
+    path: "/api/projects",
+    method: "POST",
+    body: JSON.stringify({ name: "Notification restart project" }),
+  }));
+  const issue = await page.evaluate(async projectId => await (window as any).betterCodexHost.request({
+    path: "/api/issues",
+    method: "POST",
+    body: JSON.stringify({ project_id: projectId, title: "Runtime restart notification", status: "todo" }),
+  }), project.id);
+  await page.evaluate(cachedIssue => {
+    const key = `${cachedIssue.id}:${cachedIssue.updated_at}:${cachedIssue.status}`;
+    const profile = (window as any).__betterCodexInjection__?.profile || "stable";
+    localStorage.setItem(`better-codex-completion-notices:${profile}`, JSON.stringify([{ key, issue: cachedIssue, createdAt: Date.now(), duration: 0 }]));
+  }, issue);
+  await page.reload();
+  const notice = page.locator(".better-codex-completion-notice", { hasText: "Runtime restart notification" });
+  await expect(notice).toBeVisible();
+  await expect(notice.locator(".better-codex-completion-close")).toHaveCount(0);
+  await notice.locator("[data-completion-menu-toggle]").click();
+  await notice.locator("[data-completion-suppress]").click();
+  await expect(notice).toBeVisible();
   await runtime.restart();
   await expect(page.locator("#web-connect")).toBeVisible({ timeout: 15_000 });
   await page.locator("#web-token").fill(runtime.token);
   await page.locator('#web-connect button[type="submit"]').click();
   await expect(page.locator("#better-codex-panel")).toBeVisible();
+  await expect(notice).toBeVisible();
+  await notice.locator(".better-codex-completion-layout").click();
+  await expect(page.locator("#better-codex-dialog")).toBeVisible();
+  await expect.poll(() => page.evaluate(() => {
+    const profile = (window as any).__betterCodexInjection__?.profile || "stable";
+    return localStorage.getItem(`better-codex-completion-notices:${profile}`);
+  })).toBe("[]");
 });
