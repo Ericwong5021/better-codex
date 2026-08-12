@@ -4,6 +4,13 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-08-13
+
+### Fixed
+
+- Prevent repeated create events and retried requests from creating duplicate tasks.
+- Let tasks stuck before their Codex conversation starts stop cleanly so they can be archived and permanently deleted.
+
 ## [0.4.3] - 2026-08-12
 
 ### Added
@@ -438,7 +445,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.3...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.4...HEAD
+[0.4.4]: https://github.com/Ericwong5021/better-codex/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/Ericwong5021/better-codex/compare/v0.4.2...v0.4.3
 [0.4.3-beta.8]: https://github.com/Ericwong5021/better-codex/compare/v0.4.3-beta.7...v0.4.3-beta.8
 [0.4.3-beta.7]: https://github.com/Ericwong5021/better-codex/compare/v0.4.3-beta.6...v0.4.3-beta.7
