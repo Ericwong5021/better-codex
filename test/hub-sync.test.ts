@@ -76,13 +76,15 @@ test("read-only Hub mirrors only the safe projection with durable idempotent syn
 
   try {
     const project = local.createProject({ name: "Remote", workspacePath: join(directory, "private-workspace") });
+    const agent = local.createAgentProfile({ name: "Remote Agent", name_en: "Remote Agent", description: "Visible directory", instructions: "private instructions", model: "private-model", reasoning_effort: "high", sandbox_mode: "danger-full-access" });
     const issue = local.createIssue({ projectId: project.id, title: "Safe projection", description: "Visible", threadId: "private-thread", workspacePath: join(directory, "private-workspace") });
     const first = await client.syncNow();
     assert.equal(first.last_error, null);
     const board = hub.store.board();
     assert.equal(board.issues.find(item => item.id === issue.id)?.title, "Safe projection");
+    assert.equal(board.agents.find(item => item.id === agent.id)?.name, "Remote Agent");
     assert.equal(board.runtime?.health_state, "online");
-    assert.doesNotMatch(JSON.stringify(board), /private-workspace|private-thread|workspace_path|thread_id|reply_draft|instructions|sandbox_mode/);
+    assert.doesNotMatch(JSON.stringify(board), /private-workspace|private-thread|private instructions|private-model|workspace_path|thread_id|reply_draft|instructions|sandbox_mode/);
 
     const revision = board.revision;
     local.updateIssue(issue.id, issue.version, { title: "Incremental update" });
@@ -137,7 +139,7 @@ test("pairing codes are single-use and a second active writer is rejected", () =
     });
     store.push(first.device_id, request(first.device_id));
     assert.throws(() => store.push(second.device_id, request(second.device_id)), /writer_lease_conflict/);
-    assert.throws(() => store.push(first.device_id, { ...request(first.device_id), protocol_version: "sync/v2" as never }), /incompatible_protocol/);
+    assert.throws(() => store.push(first.device_id, { ...request(first.device_id), protocol_version: "sync/v3" as never }), /incompatible_protocol/);
   } finally {
     store.close();
     rmSync(directory, { recursive: true, force: true });
@@ -396,13 +398,22 @@ test("remote create, move, archive, and restore apply through the local Store", 
   const client = new SyncClient(local, 60_000, () => ({ enabled: true, hub_url: `http://127.0.0.1:${port}`, device_id: device.device_id, device_name: device.device_name, device_token: device.device_token, created_at: new Date().toISOString() }));
   try {
     const project = local.createProject({ name: "Remote CRUD", workspacePath: directory });
+    const agent = local.createAgentProfile({ name: "Remote executor", name_en: "Remote executor", description: "", instructions: "local only", model: "gpt-test", reasoning_effort: "medium" });
     await client.syncNow();
-    const created = hub.store.createRemoteCommand({ command_id: "remote-create", operation: "issue.create", base_revision: null, payload: { project_id: project.id, title: "Created remotely", status: "todo", priority: "low", labels: ["remote"] } });
-    const retried = hub.store.createRemoteCommand({ command_id: "remote-create", operation: "issue.create", base_revision: null, payload: { project_id: project.id, title: "Created remotely", status: "todo", priority: "low", labels: ["remote"] } });
+    const created = hub.store.createRemoteCommand({ command_id: "remote-create", operation: "issue.create", base_revision: null, payload: { project_id: project.id, title: "Created remotely", status: "todo", priority: "low", labels: ["remote"], agent_enabled: true, agent_id: agent.id } });
+    const retried = hub.store.createRemoteCommand({ command_id: "remote-create", operation: "issue.create", base_revision: null, payload: { project_id: project.id, title: "Created remotely", status: "todo", priority: "low", labels: ["remote"], agent_enabled: true, agent_id: agent.id } });
     assert.equal(retried.entity_id, created.entity_id);
     await client.syncNow();
     let issue = local.getIssue(created.entity_id)!;
     assert.equal(issue.title, "Created remotely");
+    assert.equal(issue.agent_id, agent.id);
+    assert.equal(issue.agent_enabled, true);
+    hub.store.createRemoteCommand({ command_id: "remote-start", operation: "issue.start", entity_id: issue.id, base_revision: issue.version, payload: { title: issue.title, status: issue.status, priority: issue.priority, labels: issue.labels, agent_id: agent.id } });
+    await client.syncNow();
+    issue = local.getIssue(issue.id)!;
+    assert.equal(local.listManualStartQueue().includes(issue.id), true);
+    assert.equal(hub.store.remoteCommand("remote-start")?.status, "applied");
+    local.dequeueManualStart(issue.id);
     hub.store.createRemoteCommand({ operation: "issue.move", entity_id: issue.id, base_revision: issue.version, payload: { status: "in_progress" } });
     await client.syncNow();
     issue = local.getIssue(issue.id)!;

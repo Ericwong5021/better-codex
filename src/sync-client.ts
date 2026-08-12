@@ -1,7 +1,8 @@
+import { createHash } from "node:crypto";
 import { coreVersion } from "./compatibility.js";
 import type { Store } from "./db.js";
 import { readSyncConfiguration, type SyncConfiguration } from "./sync-config.js";
-import { syncProtocolVersion, type RemoteCommand, type RemoteCommandAck, type RuntimeProjection, type SyncChange, type SyncPushResponse } from "./sync-contract.js";
+import { syncProtocolVersion, type AgentDirectoryProjection, type RemoteCommand, type RemoteCommandAck, type RuntimeProjection, type SyncChange, type SyncPushResponse } from "./sync-contract.js";
 
 type SyncState = {
   connected: boolean;
@@ -42,6 +43,7 @@ export class SyncClient {
     private readonly store: Store,
     private readonly intervalMs = 5_000,
     private readonly configuration: () => SyncConfiguration | null = readSyncConfiguration,
+    private readonly commandApplied: (command: RemoteCommand, ack: RemoteCommandAck) => void = () => {},
   ) {}
 
   start() {
@@ -118,8 +120,10 @@ export class SyncClient {
   }
 
   private async push(configuration: SyncConfiguration) {
+    let directoryPending = true;
     for (let page = 0; page < 100; page += 1) {
-      const entries = this.store.listSyncQueue(100);
+      const limit = directoryPending ? 99 : 100;
+      const entries = this.store.listSyncQueue(limit);
       const changes: SyncChange[] = entries.map(entry => {
         const projection = entry.operation === "upsert" ? this.store.syncProjection(entry.entity_type, entry.entity_id) : null;
         return {
@@ -128,6 +132,7 @@ export class SyncClient {
           projection,
         };
       });
+      if (directoryPending) changes.unshift(this.agentDirectoryChange());
       const result = await hubRequest<SyncPushResponse>(configuration, "/api/v1/sync/push", {
         method: "POST",
         body: JSON.stringify({
@@ -142,7 +147,8 @@ export class SyncClient {
       for (const entry of entries) if (accepted.has(entry.event_id)) this.store.clearSyncQueueEntry(entry);
       this.store.setSyncCursor(result.cursor);
       this.state.lease_expires_at = result.lease_expires_at;
-      if (entries.length < 100) return;
+      directoryPending = false;
+      if (entries.length < limit) return;
     }
     throw new Error("sync_queue_drain_limit");
   }
@@ -154,9 +160,37 @@ export class SyncClient {
       for (const command of result.commands) {
         const ack = this.store.applyRemoteCommand(command);
         await hubRequest<RemoteCommandAck>(configuration, `/api/v1/sync/commands/${encodeURIComponent(command.command_id)}/ack`, { method: "POST", body: JSON.stringify(ack) });
+        if (ack.status === "applied") this.commandApplied(command, ack);
       }
       if (result.commands.length < 100) return;
     }
     throw new Error("command_drain_limit");
+  }
+
+  private agentDirectoryChange(): SyncChange {
+    const agents = this.store.listAgentProfiles().map(profile => ({
+      id: profile.id,
+      role: profile.role,
+      name: profile.name,
+      name_en: profile.name_en,
+      description: profile.description,
+      version: profile.version,
+      created_at: profile.created_at,
+      updated_at: profile.updated_at,
+    }));
+    const hash = createHash("sha256").update(JSON.stringify(agents)).digest("hex");
+    const projection: AgentDirectoryProjection = {
+      id: "agents",
+      agents,
+      local_revision: Math.max(1, Number.parseInt(hash.slice(0, 13), 16)),
+    };
+    return {
+      event_id: `agent-directory-${hash}`,
+      entity_type: "agent_directory",
+      entity_id: projection.id,
+      operation: "upsert",
+      changed_at: agents.reduce((latest, agent) => agent.updated_at > latest ? agent.updated_at : latest, "1970-01-01T00:00:00.000Z"),
+      projection,
+    };
   }
 }

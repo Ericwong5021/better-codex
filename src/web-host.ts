@@ -419,7 +419,7 @@ export function betterCodexWebHostJavaScript(remote = false) {
   if (!remote) return webHostJavaScript;
   return webHostJavaScript
     .replace('kind: "web",', 'kind: "remote",')
-    .replace('issues: "read-write", agents: "read-write", liveUpdates: true, nativeThreads: false', 'issues: "read-write", agents: "unavailable", liveUpdates: true, nativeThreads: false')
+    .replace('issues: "read-write", agents: "read-write", liveUpdates: true, nativeThreads: false', 'issues: "read-write", agents: "read-only", liveUpdates: true, nativeThreads: false')
     .replaceAll("Runtime", "Hub")
     .replaceAll("better-codex web", "Hub 管理命令");
 }

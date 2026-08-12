@@ -265,7 +265,7 @@ test("agent model picker uses the runtime catalog and a Codex-style popover", ()
 test("opening an agent inspector hides the toolbar create action", () => {
   const source = injectionScript(4317, "test-token", "install");
 
-  assert.ok(source.includes('addAgent.hidden = state.agentPane !== "preview"'));
+  assert.ok(source.includes('addAgent.hidden = AGENTS_READ_ONLY || state.agentPane !== "preview"'));
   assert.match(betterCodexDesignSystemCss(), /\.better-codex-agent-actions\[hidden\]\s*\{[^}]*display:\s*none\s*!important/s);
 });
 
@@ -419,7 +419,7 @@ test("panel binds project workspace from the active session cwd", () => {
 test("agent issue creation does not require or bind the current session", () => {
   const source = injectionScript(4317, "test-token", "install");
 
-  assert.ok(source.includes('if (draft.mode === "agent" && !issue && !workspacePath && !state.mockup)'));
+  assert.ok(source.includes('if (draft.mode === "agent" && !issue && !workspacePath && !state.mockup && !REMOTE)'));
   assert.doesNotMatch(source, /draft\.mode === "agent" && !issue && !threadId/);
   assert.ok(source.includes('ai_enrich: draft.mode === "agent" && !issue'));
   const submitIssue = source.slice(source.indexOf("async function submitIssue()"), source.indexOf("async function startIssueNow()"));

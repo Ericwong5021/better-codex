@@ -3,7 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, renameSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { issuePriorities, issueStatuses } from "./db.js";
-import { forbiddenProjectionKeys, remoteCommandOperations, syncEntityTypes, syncProtocolVersion, type HubBoard, type IssueProjection, type ProjectProjection, type RemoteCommand, type RemoteCommandAck, type RemoteCommandOperation, type RemoteCommandStatus, type RuntimeProjection, type SyncChange, type SyncEntityType, type SyncProjection, type SyncPushRequest } from "./sync-contract.js";
+import { forbiddenProjectionKeys, remoteCommandOperations, syncEntityTypes, syncProtocolVersion, type AgentDirectoryProjection, type HubBoard, type IssueProjection, type ProjectProjection, type RemoteCommand, type RemoteCommandAck, type RemoteCommandOperation, type RemoteCommandStatus, type RuntimeProjection, type SyncChange, type SyncEntityType, type SyncProjection, type SyncPushRequest } from "./sync-contract.js";
 
 function now() {
   return new Date().toISOString();
@@ -60,10 +60,33 @@ function cleanProjection(type: SyncEntityType, id: string, value: unknown): Sync
     updated_at: cleanString(source.updated_at, 64, false),
     local_revision: Number(source.local_revision),
   } satisfies ProjectProjection;
+  if (type === "agent_directory") {
+    if (id !== "agents" || !Array.isArray(source.agents) || source.agents.length > 100) throw new Error("invalid_projection");
+    const agents = source.agents.map(value => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid_projection");
+      const agent = value as Record<string, unknown>;
+      const agentId = cleanString(agent.id, 200, false);
+      if (!/^[a-f0-9-]{36}$/i.test(agentId) || !Number.isInteger(agent.version) || Number(agent.version) < 1) throw new Error("invalid_projection");
+      return {
+        id: agentId,
+        role: cleanString(agent.role, 200, false),
+        name: cleanString(agent.name, 80, false),
+        name_en: cleanString(agent.name_en, 80),
+        description: cleanString(agent.description, 500),
+        version: Number(agent.version),
+        created_at: cleanString(agent.created_at, 64, false),
+        updated_at: cleanString(agent.updated_at, 64, false),
+      };
+    });
+    if (new Set(agents.map(agent => agent.id)).size !== agents.length || new Set(agents.map(agent => agent.role)).size !== agents.length) throw new Error("invalid_projection");
+    return { id, agents, local_revision: Number(source.local_revision) } satisfies AgentDirectoryProjection;
+  }
   if (!issueStatuses.includes(source.status as never) || !issuePriorities.includes(source.priority as never)) throw new Error("invalid_projection");
   if (!Array.isArray(source.labels) || source.labels.length > 20 || source.labels.some(label => typeof label !== "string" || label.length > 100)) throw new Error("invalid_projection");
   if (typeof source.sort_order !== "number" || !Number.isFinite(source.sort_order)) throw new Error("invalid_projection");
-  for (const field of ["pinned", "assigned", "active_run", "needs_attention"] as const) if (typeof source[field] !== "boolean") throw new Error("invalid_projection");
+  for (const field of ["pinned", "assigned", "agent_enabled", "user_assigned", "active_run", "needs_attention"] as const) if (typeof source[field] !== "boolean") throw new Error("invalid_projection");
+  if (source.agent_id !== null && (typeof source.agent_id !== "string" || !/^[a-f0-9-]{36}$/i.test(source.agent_id))) throw new Error("invalid_projection");
+  if (source.pending_actor !== "user" && source.pending_actor !== "agent") throw new Error("invalid_projection");
   if (source.archived_at !== null && (typeof source.archived_at !== "string" || source.archived_at.length > 64)) throw new Error("invalid_projection");
   return {
     id,
@@ -78,6 +101,10 @@ function cleanProjection(type: SyncEntityType, id: string, value: unknown): Sync
     pinned: source.pinned as boolean,
     archived_at: source.archived_at as string | null,
     assigned: source.assigned as boolean,
+    agent_enabled: source.agent_enabled as boolean,
+    agent_id: source.agent_id as string | null,
+    user_assigned: source.user_assigned as boolean,
+    pending_actor: source.pending_actor,
     active_run: source.active_run as boolean,
     needs_attention: source.needs_attention as boolean,
     created_at: cleanString(source.created_at, 64, false),
@@ -113,9 +140,11 @@ function cleanCommandPayload(operation: RemoteCommandOperation, value: unknown) 
   if (!value || typeof value !== "object" || Array.isArray(value) || containsForbiddenKey(value)) throw new Error("invalid_command_payload");
   const source = value as Record<string, unknown>;
   const allowed = operation === "issue.create"
-    ? ["project_id", "title", "description", "status", "priority", "labels", "user_assigned"]
+    ? ["project_id", "title", "description", "status", "priority", "labels", "agent_enabled", "agent_id", "user_assigned"]
     : operation === "issue.update"
-      ? ["project_id", "title", "description", "status", "priority", "labels", "sort_order", "pinned", "user_assigned"]
+      ? ["project_id", "title", "description", "status", "priority", "labels", "sort_order", "pinned", "agent_enabled", "agent_id", "user_assigned"]
+      : operation === "issue.start"
+        ? ["project_id", "title", "description", "status", "priority", "labels", "agent_id"]
       : operation === "issue.move" ? ["status", "before_id"] : [];
   if (Object.keys(source).some(key => !allowed.includes(key))) throw new Error("forbidden_command_field");
   const payload: Record<string, unknown> = {};
@@ -139,10 +168,17 @@ function cleanCommandPayload(operation: RemoteCommandOperation, value: unknown) 
     payload.sort_order = source.sort_order;
   }
   if (source.pinned !== undefined) payload.pinned = source.pinned === true;
+  if (source.agent_enabled !== undefined) payload.agent_enabled = source.agent_enabled === true;
+  if (source.agent_id !== undefined) {
+    const agentId = cleanString(source.agent_id, 200);
+    if (agentId && !/^[a-f0-9-]{36}$/i.test(agentId)) throw new Error("invalid_agent_id");
+    payload.agent_id = agentId;
+  }
   if (source.user_assigned !== undefined) payload.user_assigned = source.user_assigned === true;
   if (source.before_id !== undefined) payload.before_id = cleanString(source.before_id, 200);
   if (operation === "issue.create" && (!payload.project_id || !payload.title)) throw new Error("invalid_command_payload");
   if (operation === "issue.move" && !payload.status) throw new Error("invalid_command_payload");
+  if (operation === "issue.start" && !payload.title) throw new Error("invalid_command_payload");
   return payload;
 }
 
@@ -413,6 +449,7 @@ export class HubStore {
     if (operation === "issue.create" && current && !current.deleted_at) throw new Error("issue_exists");
     if (operation !== "issue.create" && (!current || current.deleted_at)) throw new Error("issue_not_found");
     if (current && (JSON.parse(current.payload_json) as IssueProjection).active_run) throw new Error("issue_execution_running");
+    if (payload.agent_id && !this.board().agents.some(agent => agent.id === payload.agent_id)) throw new Error("agent_not_found");
     const deviceId = this.writerDeviceId(entityId);
     const requestedAt = now();
     const expiresAt = after(24 * 60 * 60_000);
@@ -510,6 +547,8 @@ export class HubStore {
     let runtime = runtimeRow ? JSON.parse(runtimeRow.payload_json) as RuntimeProjection : null;
     if (runtime && Date.now() - Date.parse(runtimeRow!.updated_at) > 60_000) runtime = { ...runtime, health_state: "offline" };
     const issues = rows.filter(row => row.entity_type === "issue").map(row => JSON.parse(row.payload_json) as IssueProjection);
+    const directory = rows.find(row => row.entity_type === "agent_directory");
+    const agents = directory ? (JSON.parse(directory.payload_json) as AgentDirectoryProjection).agents : [];
     const commands = this.db.prepare("SELECT * FROM remote_commands WHERE status IN ('pending', 'conflict', 'rejected') ORDER BY requested_at, command_id").all() as CommandRow[];
     for (const row of commands) {
       const command = commandFromRow(row);
@@ -527,7 +566,11 @@ export class HubStore {
           sort_order: Number.MAX_SAFE_INTEGER,
           pinned: false,
           archived_at: null,
-          assigned: command.payload.user_assigned === true,
+          assigned: command.payload.agent_enabled === true || command.payload.user_assigned === true,
+          agent_enabled: command.payload.agent_enabled === true,
+          agent_id: typeof command.payload.agent_id === "string" && command.payload.agent_id ? command.payload.agent_id : null,
+          user_assigned: command.payload.user_assigned === true,
+          pending_actor: command.payload.agent_enabled === true ? "agent" : "user",
           active_run: false,
           needs_attention: false,
           created_at: command.requested_at,
@@ -537,13 +580,17 @@ export class HubStore {
         issues.push(issue);
       }
       if (!issue) continue;
-      if (command.status === "pending" && ["issue.update", "issue.move"].includes(command.operation)) Object.assign(issue, command.payload, { updated_at: command.requested_at });
+      if (command.status === "pending" && ["issue.update", "issue.move", "issue.start"].includes(command.operation)) {
+        Object.assign(issue, command.payload, { updated_at: command.requested_at });
+        if (command.operation === "issue.start") Object.assign(issue, { agent_enabled: true, user_assigned: false, pending_actor: "agent", assigned: true });
+      }
       Object.assign(issue, { remote_state: { command_id: command.command_id, status: command.status, operation: command.operation, error: command.error } });
     }
     return {
       revision: this.cursor(),
       projects: rows.filter(row => row.entity_type === "project").map(row => JSON.parse(row.payload_json) as ProjectProjection),
       issues: issues.sort((left, right) => left.sort_order - right.sort_order || left.created_at.localeCompare(right.created_at)),
+      agents,
       runtime,
     };
   }

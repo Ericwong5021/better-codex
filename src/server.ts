@@ -428,7 +428,9 @@ export function startServer() {
   const eventHistory: number[] = [];
   let eventRevision = 0;
   const worker = new IssueWorker(store);
-  const syncClient = new SyncClient(store);
+  const syncClient = new SyncClient(store, 5_000, undefined, command => {
+    if (command.operation === "issue.start") worker.startIssue(command.entity_id);
+  });
   const sendEvent = (response: ServerResponse, event: string, revision: number) => {
     response.write(`id: ${revision}\nevent: ${event}\ndata: ${JSON.stringify({ revision })}\n\n`);
   };

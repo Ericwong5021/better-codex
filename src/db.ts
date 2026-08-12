@@ -3,6 +3,7 @@ import { existsSync, linkSync, mkdirSync, unlinkSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { databasePath, developmentDatabaseSnapshotSourcePath } from "./config.js";
+import { syncProtocolVersion } from "./sync-contract.js";
 import type { IssueProjection, ProjectProjection, RemoteCommand, RemoteCommandAck, SyncEntityType, SyncProjection } from "./sync-contract.js";
 
 export const issueStatuses = ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"] as const;
@@ -875,13 +876,14 @@ export class Store {
   }
 
   initializeSyncQueue() {
-    if (this.db.prepare("SELECT value FROM sync_cursor WHERE key = 'initialized'").get()) return;
+    const initialized = this.db.prepare("SELECT value FROM sync_cursor WHERE key = 'initialized_protocol'").get() as { value: string } | undefined;
+    if (initialized?.value === syncProtocolVersion) return;
     const timestamp = now();
     this.db.exec("BEGIN IMMEDIATE");
     try {
       this.db.prepare("INSERT OR REPLACE INTO sync_outbox (entity_type, entity_id, event_id, changed_at) SELECT 'project', id, lower(hex(randomblob(16))), ? FROM projects").run(timestamp);
       this.db.prepare("INSERT OR REPLACE INTO sync_outbox (entity_type, entity_id, event_id, changed_at) SELECT 'issue', id, lower(hex(randomblob(16))), ? FROM issues").run(timestamp);
-      this.db.prepare("INSERT OR REPLACE INTO sync_cursor (key, value) VALUES ('initialized', ?)").run(timestamp);
+      this.db.prepare("INSERT OR REPLACE INTO sync_cursor (key, value) VALUES ('initialized_protocol', ?)").run(syncProtocolVersion);
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");
@@ -961,6 +963,10 @@ export class Store {
       pinned: issue.pinned,
       archived_at: issue.archived_at,
       assigned: Boolean(issue.agent_enabled || issue.user_assigned),
+      agent_enabled: issue.agent_enabled,
+      agent_id: issue.agent_id,
+      user_assigned: issue.user_assigned,
+      pending_actor: issue.pending_actor,
       active_run: Boolean(issue.active_run_status || issue.session_owned),
       needs_attention: issue.needs_attention,
       created_at: issue.created_at,
@@ -987,6 +993,8 @@ export class Store {
             status: payload.status as IssueStatus | undefined,
             priority: payload.priority as IssuePriority | undefined,
             labels: Array.isArray(payload.labels) ? payload.labels as string[] : [],
+            agentEnabled: payload.agent_enabled === true,
+            agentId: typeof payload.agent_id === "string" ? payload.agent_id : undefined,
             userAssigned: payload.user_assigned === true,
           });
         } else {
@@ -1013,9 +1021,19 @@ export class Store {
               if (payload.labels !== undefined) patch.labels = payload.labels as string[];
               if (payload.sort_order !== undefined) patch.sort_order = Number(payload.sort_order);
               if (payload.pinned !== undefined) patch.pinned = Boolean(payload.pinned);
+              if (payload.agent_enabled !== undefined) patch.agent_enabled = Boolean(payload.agent_enabled);
+              if (payload.agent_id !== undefined) patch.agent_id = String(payload.agent_id) || null;
               if (payload.user_assigned !== undefined) patch.user_assigned = Boolean(payload.user_assigned);
+              if (command.operation === "issue.start") {
+                patch.agent_enabled = true;
+                patch.user_assigned = false;
+                patch.agent_id = typeof payload.agent_id === "string" ? payload.agent_id || null : current.agent_id;
+                patch.pending_actor = "agent";
+                patch.needs_attention = true;
+              }
             }
             issue = this.updateIssue(current.id, current.version, patch);
+            if (command.operation === "issue.start") this.enqueueManualStart(issue.id);
           }
         }
         return { command_id: command.command_id, status: "applied", error: null, projection: this.syncProjection("issue", issue.id) as IssueProjection } satisfies RemoteCommandAck;

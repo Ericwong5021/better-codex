@@ -139,15 +139,22 @@ function issueForWeb(issue: ReturnType<HubStore["board"]>["issues"][number]) {
     remote_conflict: issue.remote_state?.status === "conflict",
     thread_id: null,
     workspace_path: null,
-    agent_enabled: false,
-    agent_id: null,
-    user_assigned: issue.assigned,
-    pending_actor: "user",
+    agent_enabled: issue.agent_enabled,
+    agent_id: issue.agent_id,
+    user_assigned: issue.user_assigned,
+    pending_actor: issue.pending_actor,
     enrichment_status: null,
     reply_draft: "",
     reply_status: "idle",
     active_run_status: issue.active_run ? "running" : null,
   };
+}
+
+function agentsForWeb(board: ReturnType<HubStore["board"]>) {
+  return [
+    { id: "", role: "codex", name: "Codex", name_en: "Codex", description: "", instructions: "", model: "", reasoning_effort: "", sandbox_mode: "workspace-write", max_concurrency: 5, version: 1, created_at: "", updated_at: "", avatar: "", is_default: true, remote_read_only: true },
+    ...board.agents.map(agent => ({ ...agent, instructions: "", model: "", reasoning_effort: "", sandbox_mode: "workspace-write", max_concurrency: 5, avatar: "", is_default: false, remote_read_only: true })),
+  ];
 }
 
 export function createHubServer(options: HubServerOptions) {
@@ -244,7 +251,7 @@ export function createHubServer(options: HubServerOptions) {
         const board = store.board();
         return sendJson(response, 200, {
           projects: board.projects,
-          agents: [],
+          agents: agentsForWeb(board),
           statuses: issueStatuses,
           priorities: issuePriorities,
           appearance: { theme: "system", accent: "green" },
@@ -258,7 +265,7 @@ export function createHubServer(options: HubServerOptions) {
           schedulerReasoningEffort: "",
           mockup: false,
           runtime: board.runtime,
-          capabilities: { issues: "read-write", agents: "unavailable", nativeThreads: false },
+          capabilities: { issues: "read-write", agents: "read-only", nativeThreads: false },
         });
       }
       if (url.pathname === "/api/update" && method === "GET") {
@@ -267,7 +274,7 @@ export function createHubServer(options: HubServerOptions) {
       }
       if (url.pathname === "/api/agents" && method === "GET") {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" });
-        return sendJson(response, 200, []);
+        return sendJson(response, 200, agentsForWeb(store.board()));
       }
       if (url.pathname === "/api/projects" && method === "GET") {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" });
@@ -297,7 +304,7 @@ export function createHubServer(options: HubServerOptions) {
           operation: "issue.create",
           entity_id: body.id,
           base_revision: null,
-          payload: { project_id: body.project_id, title: body.title, description: body.description, status: body.status, priority: body.priority, labels: body.labels, user_assigned: body.user_assigned },
+          payload: { project_id: body.project_id, title: body.title, description: body.description, status: body.status, priority: body.priority, labels: body.labels, agent_enabled: body.agent_enabled, agent_id: body.agent_id, user_assigned: body.user_assigned },
         });
         const issue = store.board().issues.find(item => item.id === command.entity_id)!;
         return sendJson(response, 202, issueForWeb(issue));
@@ -312,19 +319,24 @@ export function createHubServer(options: HubServerOptions) {
           operation: "issue.update",
           entity_id: issueId,
           base_revision: body.version,
-          payload: { project_id: body.project_id, title: body.title, description: body.description, status: body.status, priority: body.priority, labels: body.labels, sort_order: body.sort_order, pinned: body.pinned, user_assigned: body.user_assigned },
+          payload: { project_id: body.project_id, title: body.title, description: body.description, status: body.status, priority: body.priority, labels: body.labels, sort_order: body.sort_order, pinned: body.pinned, agent_enabled: body.agent_enabled, agent_id: body.agent_id, user_assigned: body.user_assigned },
         });
         const issue = store.board().issues.find(item => item.id === command.entity_id)!;
         return sendJson(response, 202, issueForWeb(issue));
       }
-      const issueAction = url.pathname.match(/^\/api\/issues\/([^/]+)\/(move|archive|unarchive)$/);
+      const issueAction = url.pathname.match(/^\/api\/issues\/([^/]+)\/(move|start|archive|unarchive)$/);
       if (issueAction && method === "POST") {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" });
         if (!trustedOrigin(request, true) || !csrfValid) return sendJson(response, 403, { error: "csrf_invalid" });
         const body = await readBody(request);
         const action = issueAction[2];
-        const operation = action === "archive" ? "issue.archive" : action === "unarchive" ? "issue.restore" : "issue.move";
-        const command = store.createRemoteCommand({ command_id: body.command_id ?? request.headers["x-better-codex-command-id"], operation, entity_id: decodeURIComponent(issueAction[1]), base_revision: body.version, payload: action === "move" ? { status: body.status, before_id: body.before_id } : {} });
+        const operation = action === "archive" ? "issue.archive" : action === "unarchive" ? "issue.restore" : action === "start" ? "issue.start" : "issue.move";
+        const payload = action === "move"
+          ? { status: body.status, before_id: body.before_id }
+          : action === "start"
+            ? { project_id: body.project_id, title: body.title, description: body.description, status: body.status, priority: body.priority, labels: body.labels, agent_id: body.agent_id }
+            : {};
+        const command = store.createRemoteCommand({ command_id: body.command_id ?? request.headers["x-better-codex-command-id"], operation, entity_id: decodeURIComponent(issueAction[1]), base_revision: body.version, payload });
         const issue = store.board().issues.find(item => item.id === command.entity_id)!;
         return sendJson(response, 202, issueForWeb(issue));
       }

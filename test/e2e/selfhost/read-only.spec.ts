@@ -25,6 +25,7 @@ test("remote shared Web UI shows pending, acknowledgement, conflict, and resubmi
 
   try {
     const project = local.createProject({ name: "Public board", workspacePath: join(directory, "secret") });
+    const agent = local.createAgentProfile({ name: "Remote Agent", name_en: "Remote Agent", description: "Visible agent directory", instructions: "local only", model: "gpt-test", reasoning_effort: "medium" });
     const issue = local.createIssue({ projectId: project.id, title: "Visible remotely", description: "Writable projection", status: "todo" });
     const xssTitle = '<img src="x" onerror="window.__betterCodexXss=true">';
     local.createIssue({ projectId: project.id, title: xssTitle, status: "todo" });
@@ -33,7 +34,10 @@ test("remote shared Web UI shows pending, acknowledgement, conflict, and resubmi
     await page.locator("#web-username").fill("admin");
     await page.locator("#web-token").fill(adminToken);
     await page.locator("#web-connect-form button[type=submit]").click();
-    await expect(page.getByText("Visible remotely")).toBeVisible();
+    await expect(page.locator("#better-codex-board").getByText("Visible remotely")).toBeVisible();
+    await page.locator("#better-codex-agents-entry").click();
+    await expect(page.locator("#better-codex-agents").getByText("Remote Agent").first()).toBeVisible();
+    await page.locator("#better-codex-entry").click();
     await expect(page.getByText(xssTitle)).toBeVisible();
     expect(await page.locator('img[src="x"]').count()).toBe(0);
     expect(await page.evaluate(() => Boolean((window as typeof window & { __betterCodexXss?: boolean }).__betterCodexXss))).toBe(false);
@@ -63,15 +67,15 @@ test("remote shared Web UI shows pending, acknowledgement, conflict, and resubmi
     await expect(page.getByText("Conflict resolved remotely")).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('[data-run="remote-conflict"]')).toHaveCount(0);
 
-    const forbidden = await page.evaluate(async ({ issueId }) => {
-      try {
-        await window.betterCodexHost.request({ path: `/api/issues/${issueId}/start`, method: "POST", body: "{}" });
-        return "allowed";
-      } catch (error) {
-        return error instanceof Error ? error.message : String(error);
-      }
-    }, { issueId: issue.id });
-    expect(forbidden).toBe("remote_operation_forbidden");
+    const assignable = local.getIssue(issue.id)!;
+    await page.evaluate(async ({ issueId, version, agentId }) => window.betterCodexHost.request({ path: `/api/issues/${issueId}`, method: "PATCH", body: JSON.stringify({ version, agent_enabled: true, agent_id: agentId, user_assigned: false }) }), { issueId: issue.id, version: assignable.version, agentId: agent.id });
+    await client.syncNow();
+    const assigned = local.getIssue(issue.id)!;
+    expect(assigned.agent_id).toBe(agent.id);
+    const started = await page.evaluate(async ({ issueId, current }) => window.betterCodexHost.request({ path: `/api/issues/${issueId}/start`, method: "POST", body: JSON.stringify({ version: current.version, project_id: current.project_id, title: current.title, description: current.description, status: current.status, priority: current.priority, labels: current.labels, agent_id: current.agent_id }) }), { issueId: issue.id, current: assigned });
+    expect(started.remote_pending).toBe(true);
+    await client.syncNow();
+    expect(local.listManualStartQueue()).toContain(issue.id);
   } finally {
     client.stop();
     local.close();

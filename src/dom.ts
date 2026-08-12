@@ -272,6 +272,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const HOST_KIND = ${JSON.stringify(host)};
     const HOST_CAPABILITIES = window.betterCodexHost?.capabilities || {};
     const READ_ONLY = HOST_CAPABILITIES.issues === "read-only";
+    const AGENTS_READ_ONLY = HOST_CAPABILITIES.agents === "read-only";
+    const REMOTE = window.betterCodexHost?.kind === "remote";
     if (READ_ONLY) document.documentElement.setAttribute("data-better-codex-read-only", "true");
     const HELP_MODE_MARKDOWN = ${helpModeMarkdown};
     const previous = window.__betterCodexInjection__;
@@ -3206,7 +3208,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const previousPane = panel.dataset.agentPane || "preview";
       panel.dataset.agentPane = state.agentPane;
       const addAgent = panel.querySelector(".better-codex-agent-actions");
-      if (addAgent) addAgent.hidden = state.agentPane !== "preview";
+      if (addAgent) addAgent.hidden = AGENTS_READ_ONLY || state.agentPane !== "preview";
       panel.querySelectorAll("[data-agent-view]").forEach(button => button.classList.toggle("is-active", button.dataset.agentView === state.agentView));
       const query = state.agentSearch.trim().toLowerCase();
       const agents = state.agents.filter(agent => {
@@ -3741,6 +3743,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function startAgentCreate(draft = null) {
+      if (AGENTS_READ_ONLY) return;
       agentInspectorClosing = false;
       state.agentPane = "create";
       state.selectedAgentId = "";
@@ -3755,6 +3758,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const form = event.target.closest("[data-agent-form]");
       if (!form) return;
       event.preventDefault();
+      if (AGENTS_READ_ONLY) return;
       const mode = form.dataset.agentForm;
       const selected = state.agents.find(agent => agentKey(agent) === form.dataset.agentKey);
       const submit = form.querySelector('[type="submit"]');
@@ -3791,6 +3795,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     function onAgentsClick(event) {
       if (suppressAgentOutside) return;
+      if (AGENTS_READ_ONLY) return;
       const formAvatarButton = event.target.closest("[data-agent-avatar-form]");
       if (formAvatarButton) {
         const form = formAvatarButton.closest("form");
@@ -4942,7 +4947,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             const ensured = await ensureContextProject(latestContext);
             workspacePath = ensured?.workspace_path || "";
           }
-          if (draft.mode === "agent" && !issue && !workspacePath && !state.mockup) {
+          if (draft.mode === "agent" && !issue && !workspacePath && !state.mockup && !REMOTE) {
             throw new Error("创建智能体 Issue 需要本地工作区：请先打开该项目下的一个 Codex 会话");
           }
           await uploadPastedImages();

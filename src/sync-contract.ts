@@ -1,8 +1,25 @@
 import type { IssuePriority, IssueStatus } from "./db.js";
 
-export const syncProtocolVersion = "sync/v1";
-export const syncEntityTypes = ["project", "issue"] as const;
+export const syncProtocolVersion = "sync/v2";
+export const syncEntityTypes = ["project", "issue", "agent_directory"] as const;
 export type SyncEntityType = typeof syncEntityTypes[number];
+
+export type AgentProjection = {
+  id: string;
+  role: string;
+  name: string;
+  name_en: string;
+  description: string;
+  version: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AgentDirectoryProjection = {
+  id: string;
+  agents: AgentProjection[];
+  local_revision: number;
+};
 
 export type ProjectProjection = {
   id: string;
@@ -26,6 +43,10 @@ export type IssueProjection = {
   pinned: boolean;
   archived_at: string | null;
   assigned: boolean;
+  agent_enabled: boolean;
+  agent_id: string | null;
+  user_assigned: boolean;
+  pending_actor: "user" | "agent";
   active_run: boolean;
   needs_attention: boolean;
   created_at: string;
@@ -44,7 +65,7 @@ export type RuntimeProjection = {
   health_state: "online" | "offline";
 };
 
-export type SyncProjection = ProjectProjection | IssueProjection;
+export type SyncProjection = ProjectProjection | IssueProjection | AgentDirectoryProjection;
 
 export type SyncChange = {
   event_id: string;
@@ -69,7 +90,7 @@ export type SyncPushResponse = {
   lease_expires_at: string;
 };
 
-export const remoteCommandOperations = ["issue.create", "issue.update", "issue.move", "issue.archive", "issue.restore"] as const;
+export const remoteCommandOperations = ["issue.create", "issue.update", "issue.move", "issue.start", "issue.archive", "issue.restore"] as const;
 export type RemoteCommandOperation = typeof remoteCommandOperations[number];
 export type RemoteCommandStatus = "pending" | "applied" | "rejected" | "conflict" | "expired";
 
@@ -109,6 +130,7 @@ export type HubBoard = {
   revision: number;
   projects: ProjectProjection[];
   issues: RemoteIssueProjection[];
+  agents: AgentProjection[];
   runtime: RuntimeProjection | null;
 };
 
