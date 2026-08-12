@@ -4,6 +4,10 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+### Removed
+
+- Remove the creator workflow and workflow sidebar from the main release line.
+
 ## [0.4.3-beta.6] - 2026-08-12
 
 ### Changed

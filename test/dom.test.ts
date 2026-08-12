@@ -83,7 +83,7 @@ test("returning from a native settings route resumes the remembered Better Codex
   const refresh = source.slice(source.indexOf("function refresh()"), source.indexOf("function scheduleRefresh()"));
 
   assert.ok(refresh.includes("const resumeSurface = sessionStorage.getItem(RESUME_SURFACE_KEY)"));
-  assert.ok(refresh.includes('if (!active && betterCodexRoute && !routeSuppressed && ["issues", "agents", "workflows"].includes(resumeSurface)) return open(resumeSurface)'));
+  assert.ok(refresh.includes('if (!active && betterCodexRoute && !routeSuppressed && ["issues", "agents"].includes(resumeSurface)) return open(resumeSurface)'));
 });
 
 test("sidebar utility controls keep the Better Codex surface mounted", () => {
@@ -351,8 +351,7 @@ test("issue editor uses branded listboxes instead of native selects", () => {
   const source = injectionScript(4317, "test-token", "install");
   const css = betterCodexDesignSystemCss();
 
-  const issueEditor = source.slice(source.indexOf("function openEditor(issue)"), source.indexOf("function closeFilterMenu()"));
-  assert.doesNotMatch(issueEditor, /<select\b/);
+  assert.doesNotMatch(source, /<select\b/);
   assert.ok(source.includes('data-dialog-select-toggle="'));
   assert.ok(source.includes('data-dialog-select-option="'));
   assert.ok(source.includes('data-dialog-select-toggle="assignee"') || source.includes('dialogSelect("assignee"'));
