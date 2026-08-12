@@ -4,6 +4,8 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.3-beta.7] - 2026-08-12
+
 ### Removed
 
 - Remove the creator workflow and workflow sidebar from the main release line.
@@ -397,7 +399,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.3-beta.6...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.3-beta.7...HEAD
+[0.4.3-beta.7]: https://github.com/Ericwong5021/better-codex/compare/v0.4.3-beta.6...v0.4.3-beta.7
 [0.4.3-beta.6]: https://github.com/Ericwong5021/better-codex/compare/v0.4.3-beta.5...v0.4.3-beta.6
 [0.4.3-beta.5]: https://github.com/Ericwong5021/better-codex/compare/v0.4.3-beta.4...v0.4.3-beta.5
 [0.4.3-beta.4]: https://github.com/Ericwong5021/better-codex/compare/v0.4.3-beta.3...v0.4.3-beta.4
