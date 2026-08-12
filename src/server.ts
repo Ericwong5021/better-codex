@@ -24,6 +24,7 @@ import { betterCodexWebHostCss, betterCodexWebHostHtml, betterCodexWebHostJavaSc
 import { SyncClient } from "./sync-client.js";
 import { removeSyncConfiguration } from "./sync-config.js";
 import { builtInWorkflowTemplates } from "./workflows.js";
+import { listPublisherConfigurations, publisherRequest, refreshPublisher, submitPublisher, type PublisherProvider } from "./publishers.js";
 
 const accessToken = token();
 const mockupEnabled = !isSea() && !packagedBuild && process.argv.includes("--mockup");
@@ -1185,6 +1186,47 @@ export function startServer() {
         const run = store.getWorkflowRun(decodeURIComponent(path[2]));
         return run ? sendJson(response, 200, run) : sendJson(response, 404, { error: "workflow_run_not_found" });
       }
+      if (!mockupEnabled && path[0] === "api" && path[1] === "workflow-runs" && path[2] && path[3] === "publish-package" && path.length === 4 && method === "GET") {
+        const publishPackage = store.workflowPublishPackage(decodeURIComponent(path[2]));
+        return publishPackage ? sendJson(response, 200, publishPackage) : sendJson(response, 404, { error: "workflow_publish_package_not_found" });
+      }
+      if (!mockupEnabled && url.pathname === "/api/publishers" && method === "GET") {
+        return sendJson(response, 200, listPublisherConfigurations());
+      }
+      if (!mockupEnabled && path[0] === "api" && path[1] === "workflow-runs" && path[2] && path[3] === "publish" && path.length === 4 && method === "POST") {
+        const runId = decodeURIComponent(path[2]);
+        const run = store.getWorkflowRun(runId);
+        if (!run) return sendJson(response, 404, { error: "workflow_run_not_found" });
+        const template = builtInWorkflowTemplates.find(item => item.id === run.template_id);
+        const gate = template?.nodes.find(item => item.id === "publish_gate");
+        const packageNode = template?.nodes.find(item => item.id === "package");
+        const publishedNode = template?.nodes.find(item => item.receipt);
+        const gateRun = gate ? run.nodes.find(item => item.node_id === gate.id) : undefined;
+        const packageRun = packageNode ? run.nodes.find(item => item.node_id === packageNode.id) : undefined;
+        const publishedRun = publishedNode ? run.nodes.find(item => item.node_id === publishedNode.id) : undefined;
+        if (!gateRun || gateRun.issue.status !== "done") throw new Error("publisher_approval_required");
+        if (!packageRun || packageRun.issue.status !== "done") throw new Error("publisher_package_required");
+        if (!publishedRun || publishedRun.issue.status === "done") throw new Error("publisher_receipt_node_unavailable");
+        const publishRequest = publisherRequest(await readBody(request, 2 * 1024 * 1024));
+        const submittedTargets = run.publisher_submissions.flatMap(submission => submission.tasks).filter(task => !task.error);
+        if (publishRequest.targets.some(target => submittedTargets.some(task => task.platform === target.platform && task.account_id === target.account_id))) throw new Error("publisher_target_already_submitted");
+        const submission = await submitPublisher(publishRequest);
+        store.saveWorkflowPublisherSubmission(runId, submission);
+        const started = store.completePublishedWorkflowNode(runId);
+        worker.startIssues(started.filter(issue => issue.agent_enabled).map(issue => issue.id));
+        return sendJson(response, 201, store.getWorkflowRun(runId));
+      }
+      if (!mockupEnabled && path[0] === "api" && path[1] === "workflow-runs" && path[2] && path[3] === "publish" && path[4] && path[5] && path[6] === "refresh" && path.length === 7 && method === "POST") {
+        const runId = decodeURIComponent(path[2]);
+        const provider = decodeURIComponent(path[4]);
+        if (provider !== "postiz" && provider !== "aitoearn") throw new Error("publisher_provider_invalid");
+        const submissionId = decodeURIComponent(path[5]);
+        const submission = await refreshPublisher(provider as PublisherProvider, submissionId);
+        store.saveWorkflowPublisherSubmission(runId, submission);
+        const started = store.completePublishedWorkflowNode(runId);
+        worker.startIssues(started.filter(issue => issue.agent_enabled).map(issue => issue.id));
+        return sendJson(response, 200, store.getWorkflowRun(runId));
+      }
       if (path[0] === "api" && path[1] === "session-relay" && path[2] === "commands" && path[3] && path[4] === "checkpoint" && path.length === 5 && method === "POST") {
         const body = await readBody(request);
         const relayId = cleanString(body.relay_id, 200);
@@ -1274,7 +1316,7 @@ export function startServer() {
           const patch = parseIssuePatch(body);
           if ((issue.active_run_status || issue.session_active_turn_id || store.getIssueReplyState(issue.id).status === "running") && Object.keys(patch).some(key => key !== "reply_draft")) throw new Error("issue_execution_running");
           const updated = store.updateIssue(issue.id, version, patch);
-          if (updated.status === "done") worker.startIssues(store.advanceWorkflowForIssue(updated.id).filter(next => next.agent_enabled).map(next => next.id));
+          if (updated.status === "done" && store.workflowAdvancementAllowed(updated.id)) worker.startIssues(store.advanceWorkflowForIssue(updated.id).filter(next => next.agent_enabled).map(next => next.id));
           if (store.isDispatchable(updated)) worker.wake();
           else if (updated.status === "done") worker.wake();
           return sendJson(response, 200, updated);

@@ -33,7 +33,11 @@ test("injector does not open a second debugger against already attached targets"
   assert.match(source, /if \(boundedOptions\.trustIds\?\.has\(target\.id\)\)/);
 });
 
-test("bridge allows settings and mockup updates", () => {
+test("bridge allows every API family used by the injected panel", () => {
+  assert.match(source, /sessions\(\?:\[\/\?\]\|\$\)/);
+  assert.match(source, /workflows\(\?:\[\/\?\]\|\$\)/);
+  assert.match(source, /workflow-runs\(\?:\[\/\?\]\|\$\)/);
+  assert.match(source, /publishers\(\?:\[\?\]\|\$\)/);
   assert.match(source, /settings\\\/auto-dispatch/);
   assert.match(source, /mockup\\\/\(\?:state\|reset\)/);
   assert.match(source, /\["GET", "POST", "PUT", "PATCH", "DELETE"\]/);

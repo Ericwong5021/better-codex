@@ -152,6 +152,35 @@ export type SchedulerDecision = {
   evidence: string[];
 };
 
+export type WorkflowScore = {
+  total: number;
+  scores: Record<string, number>;
+  hard_failures: string[];
+};
+
+export type WorkflowReceipt = {
+  platform: string;
+  url: string;
+  published_at: string;
+};
+
+export type WorkflowPublisherSubmission = {
+  provider: "postiz" | "aitoearn";
+  submission_id: string;
+  status: "pending" | "published" | "failed";
+  tasks: Array<{
+    id: string;
+    platform: string;
+    account_id: string;
+    status: string;
+    public_url: string | null;
+    published_at: string | null;
+    error: string | null;
+  }>;
+  created_at: string;
+  updated_at: string;
+};
+
 export type WorkflowRun = {
   id: string;
   template_id: string;
@@ -166,8 +195,13 @@ export type WorkflowRun = {
   nodes: Array<{
     node_id: string;
     issue_id: string;
+    attempt: number;
+    result: "passed" | "retrying" | "failed" | "overridden" | null;
+    score: WorkflowScore | null;
+    receipts: WorkflowReceipt[];
     issue: Issue;
   }>;
+  publisher_submissions: WorkflowPublisherSubmission[];
 };
 
 export type WorkflowActivation = {
@@ -234,7 +268,7 @@ export function cleanMaxConcurrency(value: number | undefined) {
   return value;
 }
 
-const latestSchemaVersion = 8;
+const latestSchemaVersion = 9;
 
 function now() {
   return new Date().toISOString();
@@ -331,6 +365,99 @@ function cleanAgentProfile(input: AgentProfileInput) {
 
 function cleanLabels(values: string[]) {
   return [...new Set(values.map(value => value.trim()).filter(Boolean))].slice(0, 20);
+}
+
+function jsonObject(value: string | null | undefined) {
+  try {
+    const parsed = JSON.parse(value || "null") as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
+function jsonArray(value: string | null | undefined) {
+  try {
+    const parsed = JSON.parse(value || "[]") as unknown;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function workflowJsonBlock(value: string, name: string) {
+  const fenced = new RegExp("```(?:json)?\\s*([\\s\\S]*?)```", "gi");
+  for (const match of value.matchAll(fenced)) {
+    const parsed = jsonObject(match[1].trim());
+    if (parsed && parsed.type === name) return parsed;
+  }
+  for (const line of value.split("\n").map(item => item.trim()).filter(Boolean)) {
+    if (!line.startsWith("{") || !line.endsWith("}")) continue;
+    const parsed = jsonObject(line);
+    if (parsed && parsed.type === name) return parsed;
+  }
+  return null;
+}
+
+function workflowScore(value: string, criteria: Array<{ id: string; maximum: number; hard_minimum?: number }>) {
+  const parsed = workflowJsonBlock(value, "workflow_score");
+  if (!parsed || !parsed.scores || typeof parsed.scores !== "object" || Array.isArray(parsed.scores)) return null;
+  const input = parsed.scores as Record<string, unknown>;
+  const scores: Record<string, number> = {};
+  const hardFailures: string[] = [];
+  let total = 0;
+  for (const criterion of criteria) {
+    const value = input[criterion.id];
+    if (typeof value !== "number") return null;
+    const score = value;
+    if (!Number.isFinite(score) || score < 0 || score > criterion.maximum) return null;
+    scores[criterion.id] = score;
+    total += score;
+    if (criterion.hard_minimum !== undefined && score < criterion.hard_minimum) hardFailures.push(criterion.id);
+  }
+  return { total, scores, hard_failures: hardFailures } satisfies WorkflowScore;
+}
+
+function workflowReceipts(value: string) {
+  const parsed = workflowJsonBlock(value, "workflow_receipts");
+  if (!parsed || !Array.isArray(parsed.receipts)) return [];
+  return parsed.receipts.flatMap(item => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const receipt = item as Record<string, unknown>;
+    const platform = typeof receipt.platform === "string" ? receipt.platform.trim() : "";
+    const url = typeof receipt.url === "string" ? receipt.url.trim() : "";
+    const publishedAt = typeof receipt.published_at === "string" ? receipt.published_at.trim() : "";
+    if (!platform || !/^https:\/\//i.test(url) || !publishedAt || Number.isNaN(Date.parse(publishedAt))) return [];
+    return [{ platform, url, published_at: new Date(publishedAt).toISOString() }];
+  });
+}
+
+function workflowMemory(value: string) {
+  const parsed = workflowJsonBlock(value, "workflow_memory");
+  return parsed && typeof parsed.content === "string" ? parsed.content.trim().slice(0, 40000) : "";
+}
+
+function workflowPublishPackage(value: string) {
+  const parsed = workflowJsonBlock(value, "workflow_publish_package");
+  if (!parsed || typeof parsed.content !== "string" || !parsed.content.trim() || !Array.isArray(parsed.targets)) return null;
+  const title = typeof parsed.title === "string" ? parsed.title.trim().slice(0, 500) : "";
+  const publishAt = typeof parsed.publish_at === "string" && !Number.isNaN(Date.parse(parsed.publish_at)) ? new Date(parsed.publish_at).toISOString() : "";
+  const targets = parsed.targets.flatMap(item => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const target = item as Record<string, unknown>;
+    const accountId = typeof target.account_id === "string" ? target.account_id.trim().slice(0, 300) : "";
+    const platform = typeof target.platform === "string" ? target.platform.trim().slice(0, 100) : "";
+    if (!platform) return [];
+    const media = Array.isArray(target.media) ? target.media.flatMap(item => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+      const value = item as Record<string, unknown>;
+      const url = typeof value.url === "string" && /^https?:\/\//i.test(value.url) ? value.url : "";
+      return url ? [{ url, id: typeof value.id === "string" ? value.id : undefined }] : [];
+    }) : [];
+    return [{ account_id: accountId, platform, content: typeof target.content === "string" ? target.content : undefined, title: typeof target.title === "string" ? target.title : undefined, media, settings: target.settings && typeof target.settings === "object" && !Array.isArray(target.settings) ? target.settings as Record<string, unknown> : undefined }];
+  });
+  const targetKeys = targets.map(target => `${target.platform}:${target.account_id}`);
+  return targets.length && new Set(targetKeys).size === targetKeys.length ? { title, content: parsed.content.trim().slice(0, 100000), publish_at: publishAt, targets } : null;
 }
 
 function issueFromRow(row: Record<string, unknown>): Issue {
@@ -659,6 +786,41 @@ export class Store {
           );
         `);
         this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (8, ?)").run(now());
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    }
+    if (fromVersion < 9) {
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        this.db.exec(`
+          ALTER TABLE workflow_node_runs ADD COLUMN attempt INTEGER NOT NULL DEFAULT 0;
+          ALTER TABLE workflow_node_runs ADD COLUMN result TEXT;
+          ALTER TABLE workflow_node_runs ADD COLUMN score_json TEXT;
+          ALTER TABLE workflow_node_runs ADD COLUMN receipts_json TEXT NOT NULL DEFAULT '[]';
+          CREATE TABLE IF NOT EXISTS workflow_memories (
+            project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            template_id TEXT NOT NULL,
+            memory_key TEXT NOT NULL,
+            content TEXT NOT NULL,
+            source_run_id TEXT NOT NULL REFERENCES workflow_runs(id) ON DELETE CASCADE,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (project_id, template_id, memory_key)
+          );
+          CREATE TABLE IF NOT EXISTS workflow_publisher_submissions (
+            workflow_run_id TEXT NOT NULL REFERENCES workflow_runs(id) ON DELETE CASCADE,
+            provider TEXT NOT NULL,
+            submission_id TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            tasks_json TEXT NOT NULL DEFAULT '[]',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (workflow_run_id, provider, submission_id)
+          );
+        `);
+        this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (9, ?)").run(now());
         this.db.exec("COMMIT");
       } catch (error) {
         this.db.exec("ROLLBACK");
@@ -1728,6 +1890,8 @@ export class Store {
     const timestamp = now();
     const issues = new Map<string, Issue>();
     const createdIssueIds: string[] = [];
+    const workflowMemory = this.db.prepare("SELECT content FROM workflow_memories WHERE project_id = ? AND template_id = ? ORDER BY memory_key").all(project.id, template.id) as Array<{ content: string }>;
+    const memoryContext = workflowMemory.map(item => item.content.trim()).filter(Boolean).join("\n\n").slice(0, 40000);
     try {
       for (const node of template.nodes) {
         const dependencyLines = node.dependencies.map(dependencyId => {
@@ -1739,11 +1903,16 @@ export class Store {
           `职责：${node.role}`,
           "",
           `本轮输入：${brief}`,
+          memoryContext ? `\n过往 Campaign 风格记忆：\n${memoryContext}` : "",
           dependencyLines.length ? `\n上游会话：\n${dependencyLines.join("\n")}` : "",
           "",
           node.prompt,
+          node.scorecard ? `\n工作流评分输出：\n评分标准：${node.scorecard.criteria.map(criterion => `${criterion.id} ${criterion.maximum} 分${criterion.hard_minimum === undefined ? "" : `，硬门槛 ${criterion.hard_minimum} 分`}`).join("；")}。在回复末尾单独输出一行 JSON：{"type":"workflow_score","scores":{${node.scorecard.criteria.map(criterion => `"${criterion.id}":0`).join(",")}}}。每项必须是 0 到该项满分之间的数字；总分至少 ${node.scorecard.minimum_score} 分且不得触发硬失败才会放行，最多执行 ${node.scorecard.maximum_attempts} 次评分。` : "",
+          node.receipt ? `\n发布回执输出：\n只有公开页面实际可访问后，才能将此任务标记为已完成。回复末尾单独输出一行 JSON：{"type":"workflow_receipts","receipts":[{"platform":"平台名称","url":"https://公开链接","published_at":"ISO 8601 时间"}]}，至少提供 ${node.receipt.minimum} 条有效回执。` : "",
+          node.memory ? `\n风格记忆输出：\n回复末尾单独输出一行 JSON：{"type":"workflow_memory","content":"可供下一轮 Campaign 直接复用的具体写作偏好、人工修改规律、禁用表达和有效结构"}。` : "",
+          node.publish_package ? `\n发布包输出：\n回复末尾单独输出一行 JSON：{"type":"workflow_publish_package","title":"标题","content":"最终正文","publish_at":"ISO 8601 时间，可留空","targets":[{"account_id":"发布适配器中的账号 ID，不知道时留空","platform":"平台标识","content":"该平台覆盖正文，可省略","title":"该平台覆盖标题，可省略","media":[{"url":"https://素材链接","id":"Postiz 已上传媒体 ID，可省略"}],"settings":{}}]}。至少提供 ${node.publish_package.minimum_targets} 个目标；不知道账号 ID 时留空交给人工补齐，不得编造。同一平台有多个账号时必须填写各自账号 ID。` : "",
         ].filter(Boolean).join("\n");
-        const unlocked = node.dependencies.length === 0;
+        const unlocked = node.dependencies.length === 0 && !node.internal;
         const issue = this.createIssue({
           projectId: project.id,
           title: node.title,
@@ -1778,7 +1947,8 @@ export class Store {
   getWorkflowRun(id: string): WorkflowRun | undefined {
     const row = this.db.prepare("SELECT * FROM workflow_runs WHERE id = ?").get(id) as Record<string, unknown> | undefined;
     if (!row) return undefined;
-    const nodes = this.db.prepare("SELECT node_id, issue_id FROM workflow_node_runs WHERE workflow_run_id = ? ORDER BY created_at, rowid").all(id) as Array<{ node_id: string; issue_id: string }>;
+    const nodes = this.db.prepare("SELECT node_id, issue_id, attempt, result, score_json, receipts_json FROM workflow_node_runs WHERE workflow_run_id = ? ORDER BY created_at, rowid").all(id) as Array<{ node_id: string; issue_id: string; attempt: number; result: string | null; score_json: string | null; receipts_json: string }>;
+    const publisherSubmissions = this.db.prepare("SELECT provider, submission_id, status, tasks_json, created_at, updated_at FROM workflow_publisher_submissions WHERE workflow_run_id = ? ORDER BY created_at").all(id) as Array<{ provider: string; submission_id: string; status: string; tasks_json: string; created_at: string; updated_at: string }>;
     return {
       id: String(row.id),
       template_id: String(row.template_id),
@@ -1792,9 +1962,72 @@ export class Store {
       updated_at: String(row.updated_at),
       nodes: nodes.flatMap(node => {
         const issue = this.getIssue(node.issue_id);
-        return issue ? [{ node_id: node.node_id, issue_id: node.issue_id, issue }] : [];
+        const score = jsonObject(node.score_json);
+        const receipts = jsonArray(node.receipts_json).flatMap(item => {
+          if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+          const receipt = item as Record<string, unknown>;
+          return typeof receipt.platform === "string" && typeof receipt.url === "string" && typeof receipt.published_at === "string"
+            ? [{ platform: receipt.platform, url: receipt.url, published_at: receipt.published_at }]
+            : [];
+        });
+        const workflowScore = score && typeof score.total === "number" && score.scores && typeof score.scores === "object" && !Array.isArray(score.scores) && Array.isArray(score.hard_failures)
+          ? { total: score.total, scores: score.scores as Record<string, number>, hard_failures: score.hard_failures.filter(item => typeof item === "string") as string[] }
+          : null;
+        return issue ? [{ node_id: node.node_id, issue_id: node.issue_id, attempt: Number(node.attempt), result: node.result === "passed" || node.result === "retrying" || node.result === "failed" || node.result === "overridden" ? node.result : null, score: workflowScore, receipts, issue }] : [];
+      }),
+      publisher_submissions: publisherSubmissions.flatMap(submission => {
+        if (submission.provider !== "postiz" && submission.provider !== "aitoearn") return [];
+        const tasks = jsonArray(submission.tasks_json).flatMap(item => {
+          if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+          const task = item as Record<string, unknown>;
+          return typeof task.id === "string" && typeof task.platform === "string" && typeof task.account_id === "string" && typeof task.status === "string"
+            ? [{ id: task.id, platform: task.platform, account_id: task.account_id, status: task.status, public_url: typeof task.public_url === "string" ? task.public_url : null, published_at: typeof task.published_at === "string" ? task.published_at : null, error: typeof task.error === "string" ? task.error : null }]
+            : [];
+        });
+        const status = submission.status === "published" || submission.status === "failed" ? submission.status : "pending";
+        return [{ provider: submission.provider, submission_id: submission.submission_id, status, tasks, created_at: submission.created_at, updated_at: submission.updated_at }];
       }),
     };
+  }
+
+  saveWorkflowPublisherSubmission(runId: string, submission: { provider: "postiz" | "aitoearn"; submission_id: string; tasks: WorkflowPublisherSubmission["tasks"] }) {
+    const run = this.getWorkflowRun(runId);
+    if (!run || run.status !== "active") throw new Error("workflow_run_not_active");
+    const timestamp = now();
+    const status = submission.tasks.length > 0 && submission.tasks.every(task => task.public_url && task.published_at) ? "published" : submission.tasks.some(task => task.error) ? "failed" : "pending";
+    this.db.prepare(`
+      INSERT INTO workflow_publisher_submissions (workflow_run_id, provider, submission_id, status, tasks_json, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(workflow_run_id, provider, submission_id) DO UPDATE SET status = excluded.status, tasks_json = excluded.tasks_json, updated_at = excluded.updated_at
+    `).run(runId, submission.provider, submission.submission_id, status, JSON.stringify(submission.tasks), timestamp, timestamp);
+    this.db.prepare("UPDATE workflow_runs SET updated_at = ? WHERE id = ?").run(timestamp, runId);
+    return this.getWorkflowRun(runId)!;
+  }
+
+  completePublishedWorkflowNode(runId: string) {
+    const run = this.getWorkflowRun(runId);
+    if (!run || run.status !== "active") throw new Error("workflow_run_not_active");
+    const template = workflowTemplate(run.template_id);
+    const node = template?.nodes.find(item => item.receipt);
+    const nodeRun = node ? run.nodes.find(item => item.node_id === node.id) : undefined;
+    if (!node || !node.receipt || !nodeRun) throw new Error("workflow_receipt_node_not_found");
+    const publishPackage = this.workflowPublishPackage(runId);
+    const publishedTasks = run.publisher_submissions.flatMap(submission => submission.tasks).filter(task => task.public_url && task.published_at);
+    const receipts = publishedTasks.map(task => ({ platform: task.platform, url: task.public_url!, published_at: task.published_at! }));
+    const allTargetsPublished = (publishPackage?.targets || []).every(target => publishedTasks.some(task => task.platform === target.platform && (!target.account_id || task.account_id === target.account_id)));
+    if (receipts.length < node.receipt.minimum || !allTargetsPublished) return [] as Issue[];
+    const issue = nodeRun.issue;
+    if (issue.status === "done") return [] as Issue[];
+    const protocol = JSON.stringify({ type: "workflow_receipts", receipts });
+    const updated = this.setWorkflowIssueState(issue, {
+      description: `${issue.description}\n\n发布适配器回执：\n${protocol}`.slice(0, 100000),
+      status: "done",
+      user_assigned: true,
+      agent_enabled: false,
+      pending_actor: "user",
+      needs_attention: false,
+    });
+    return this.advanceWorkflowForIssue(updated.id);
   }
 
   listWorkflowRuns(projectId?: string) {
@@ -1838,12 +2071,13 @@ export class Store {
     const template = workflowTemplate(templateId);
     if (!template) throw new Error("workflow_template_not_found");
     const current = this.getWorkflowActivation(template.id);
-    if (current) return current;
+    if (current && current.template_version >= template.version && template.agents.every(agent => current.agents.some(item => item.template_agent_id === agent.id))) return current;
     const timestamp = now();
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      const createdAgents: AgentProfile[] = [];
-      for (const agent of template.agents) {
+      const currentAgentIds = new Map((current?.agents || []).map(item => [item.template_agent_id, item.agent_id]));
+      const createdAgents = new Map<string, AgentProfile>();
+      for (const agent of template.agents.filter(item => !currentAgentIds.has(item.id))) {
         const profile = this.createAgentProfile({
           name: agent.name,
           name_en: agent.name_en,
@@ -1855,11 +2089,14 @@ export class Store {
           max_concurrency: 1,
         });
         this.setAgentAvatar(profile.id, agent.avatar);
-        createdAgents.push(profile);
+        createdAgents.set(agent.id, profile);
       }
-      this.db.prepare("INSERT INTO workflow_activations (template_id, template_version, activated_at) VALUES (?, ?, ?)").run(template.id, template.version, timestamp);
-      const insertAgent = this.db.prepare("INSERT INTO workflow_activation_agents (template_id, template_agent_id, agent_id) VALUES (?, ?, ?)");
-      template.agents.forEach((agent, index) => insertAgent.run(template.id, agent.id, createdAgents[index].id));
+      this.db.prepare(`
+        INSERT INTO workflow_activations (template_id, template_version, activated_at) VALUES (?, ?, ?)
+        ON CONFLICT(template_id) DO UPDATE SET template_version = excluded.template_version, activated_at = excluded.activated_at
+      `).run(template.id, template.version, timestamp);
+      const insertAgent = this.db.prepare("INSERT OR IGNORE INTO workflow_activation_agents (template_id, template_agent_id, agent_id) VALUES (?, ?, ?)");
+      for (const agent of template.agents) insertAgent.run(template.id, agent.id, currentAgentIds.get(agent.id) || createdAgents.get(agent.id)!.id);
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");
@@ -1881,6 +2118,115 @@ export class Store {
     return issue.description.trim();
   }
 
+  private setWorkflowIssueState(issue: Issue, patch: IssuePatch) {
+    const timestamp = now();
+    const nextStatus = patch.status ?? issue.status;
+    const description = patch.description ?? issue.description;
+    const agentEnabled = patch.agent_enabled ?? issue.agent_enabled;
+    const agentId = patch.agent_id !== undefined ? patch.agent_id : issue.agent_id;
+    const userAssigned = patch.user_assigned ?? issue.user_assigned;
+    const pendingActor = patch.pending_actor ?? issue.pending_actor;
+    const needsAttention = patch.needs_attention ?? issue.needs_attention;
+    const result = this.db.prepare(`
+      UPDATE issues
+      SET description = ?, status = ?, agent_enabled = ?, agent_id = ?, user_assigned = ?, pending_actor = ?, needs_attention = ?, version = version + 1, updated_at = ?
+      WHERE id = ? AND version = ?
+    `).run(description, nextStatus, Number(agentEnabled), agentId, Number(userAssigned), pendingActor, Number(needsAttention), timestamp, issue.id, issue.version);
+    if (result.changes !== 1) throw new Error("version_conflict");
+    return this.getIssue(issue.id)!;
+  }
+
+  private evaluateCompletedWorkflowNode(run: WorkflowRun, nodeId: string, issueByNode: Map<string, Issue>) {
+    const template = workflowTemplate(run.template_id);
+    const node = template?.nodes.find(item => item.id === nodeId);
+    const issue = issueByNode.get(nodeId);
+    if (!template || !node || !issue || issue.status !== "done") return { issue, start: [] as Issue[], stop: false };
+    const output = this.workflowIssueOutput(issue);
+    const timestamp = now();
+    if (node.receipt) {
+      const receipts = workflowReceipts(output);
+      if (receipts.length < node.receipt.minimum) {
+        const updated = this.setWorkflowIssueState(issue, { status: "in_review", user_assigned: true, agent_enabled: false, pending_actor: "user", needs_attention: true });
+        issueByNode.set(nodeId, updated);
+        return { issue: updated, start: [] as Issue[], stop: true };
+      }
+      this.db.prepare("UPDATE workflow_node_runs SET receipts_json = ?, result = 'passed' WHERE workflow_run_id = ? AND node_id = ?").run(JSON.stringify(receipts), run.id, nodeId);
+    }
+    if (node.memory) {
+      const content = workflowMemory(output);
+      if (!content) {
+        if (issue.user_assigned) return { issue, start: [] as Issue[], stop: false };
+        const updated = this.setWorkflowIssueState(issue, { status: "in_review", user_assigned: true, agent_enabled: false, pending_actor: "user", needs_attention: true });
+        issueByNode.set(nodeId, updated);
+        return { issue: updated, start: [] as Issue[], stop: true };
+      }
+      this.db.prepare(`
+        INSERT INTO workflow_memories (project_id, template_id, memory_key, content, source_run_id, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(project_id, template_id, memory_key) DO UPDATE SET content = excluded.content, source_run_id = excluded.source_run_id, updated_at = excluded.updated_at
+      `).run(run.project_id, run.template_id, node.memory.key, content, run.id, timestamp);
+    }
+    if (node.publish_package) {
+      const publishPackage = workflowPublishPackage(output);
+      if (!publishPackage || publishPackage.targets.length < node.publish_package.minimum_targets) {
+        if (issue.user_assigned) return { issue, start: [] as Issue[], stop: false };
+        const updated = this.setWorkflowIssueState(issue, { status: "in_review", user_assigned: true, agent_enabled: false, pending_actor: "user", needs_attention: true });
+        issueByNode.set(nodeId, updated);
+        return { issue: updated, start: [] as Issue[], stop: true };
+      }
+    }
+    if (!node.scorecard) return { issue, start: [] as Issue[], stop: false };
+    const row = this.db.prepare("SELECT attempt, result FROM workflow_node_runs WHERE workflow_run_id = ? AND node_id = ?").get(run.id, nodeId) as { attempt: number; result: string | null };
+    if (row.result === "failed" && issue.user_assigned) {
+      this.db.prepare("UPDATE workflow_node_runs SET result = 'overridden' WHERE workflow_run_id = ? AND node_id = ?").run(run.id, nodeId);
+      const retryIssue = issueByNode.get(node.scorecard.retry_node);
+      if (retryIssue?.status === "backlog") {
+        const skipped = this.setWorkflowIssueState(retryIssue, { status: "done", user_assigned: true, agent_enabled: false, pending_actor: "user", needs_attention: false });
+        issueByNode.set(node.scorecard.retry_node, skipped);
+      }
+      return { issue, start: [] as Issue[], stop: false };
+    }
+    const attempt = Number(row.attempt || 0) + 1;
+    const score = workflowScore(output, node.scorecard.criteria);
+    const passed = Boolean(score && score.total >= node.scorecard.minimum_score && score.hard_failures.length === 0);
+    if (passed) {
+      this.db.prepare("UPDATE workflow_node_runs SET attempt = ?, result = 'passed', score_json = ? WHERE workflow_run_id = ? AND node_id = ?").run(attempt, JSON.stringify(score), run.id, nodeId);
+      const retryIssue = issueByNode.get(node.scorecard.retry_node);
+      if (retryIssue?.status === "backlog") {
+        const skipped = this.setWorkflowIssueState(retryIssue, { status: "done", user_assigned: true, agent_enabled: false, pending_actor: "user", needs_attention: false });
+        issueByNode.set(node.scorecard.retry_node, skipped);
+      }
+      return { issue, start: [] as Issue[], stop: false };
+    }
+    if (attempt >= node.scorecard.maximum_attempts) {
+      this.db.prepare("UPDATE workflow_node_runs SET attempt = ?, result = 'failed', score_json = ? WHERE workflow_run_id = ? AND node_id = ?").run(attempt, score ? JSON.stringify(score) : null, run.id, nodeId);
+      const failed = this.setWorkflowIssueState(issue, { status: "in_review", user_assigned: true, agent_enabled: false, pending_actor: "user", needs_attention: true });
+      issueByNode.set(nodeId, failed);
+      return { issue: failed, start: [] as Issue[], stop: true };
+    }
+    const retryIssue = issueByNode.get(node.scorecard.retry_node);
+    if (!retryIssue) return { issue, start: [] as Issue[], stop: true };
+    const retryTemplate = template.nodes.find(item => item.id === node.scorecard!.retry_node);
+    const retryAgentId = retryTemplate?.agent
+      ? this.getWorkflowActivation(template.id)?.agents.find(item => item.template_agent_id === retryTemplate.agent)?.agent_id || null
+      : null;
+    const feedback = score
+      ? `总分 ${score.total}/${node.scorecard.criteria.reduce((sum, criterion) => sum + criterion.maximum, 0)}；硬失败：${score.hard_failures.join(", ") || "无"}；分项：${JSON.stringify(score.scores)}`
+      : "缺少或无法解析 workflow_score 结构化评分。";
+    this.db.prepare("UPDATE workflow_node_runs SET attempt = ?, result = 'retrying', score_json = ? WHERE workflow_run_id = ? AND node_id = ?").run(attempt, score ? JSON.stringify(score) : null, run.id, nodeId);
+    const retried = this.setWorkflowIssueState(retryIssue, {
+      description: `${retryIssue.description}\n\n第 ${attempt} 轮审校结果：\n${feedback}\n\n完整审校输出：\n${output}`.slice(0, 100000),
+      status: "todo",
+      agent_enabled: true,
+      agent_id: retryAgentId,
+      user_assigned: false,
+      pending_actor: "agent",
+      needs_attention: true,
+    });
+    issueByNode.set(node.scorecard.retry_node, retried);
+    return { issue, start: [retried], stop: true };
+  }
+
   advanceWorkflowForIssue(issueId: string) {
     const run = this.workflowRunForIssue(issueId);
     if (!run || run.status !== "active") return [] as Issue[];
@@ -1892,11 +2238,45 @@ export class Store {
     if (template.agents.some(agent => !agentIds.has(agent.id))) return [] as Issue[];
     const issueByNode = new Map(run.nodes.map(node => [node.node_id, node.issue]));
     const activated: Issue[] = [];
+    const completedNodeId = run.nodes.find(item => item.issue_id === issueId)?.node_id;
+    if (completedNodeId) {
+      const completedTemplate = template.nodes.find(item => item.id === completedNodeId);
+      if (completedTemplate && completedTemplate.kind === "agent" && issueByNode.get(completedNodeId)?.status !== "done") return activated;
+      const evaluation = this.evaluateCompletedWorkflowNode(run, completedNodeId, issueByNode);
+      activated.push(...evaluation.start);
+      if (evaluation.stop) {
+        this.db.prepare("UPDATE workflow_runs SET updated_at = ? WHERE id = ?").run(now(), run.id);
+        return activated;
+      }
+      const revisionNode = template.nodes.find(item => item.id === completedNodeId && item.dependencies.length === 0 && template.nodes.some(candidate => candidate.scorecard?.retry_node === item.id));
+      if (revisionNode && evaluation.issue?.status === "done") {
+        const reviewNode = template.nodes.find(item => item.scorecard?.retry_node === revisionNode.id);
+        const reviewIssue = reviewNode ? issueByNode.get(reviewNode.id) : undefined;
+        if (reviewNode && reviewIssue) {
+          const revisionOutput = this.workflowIssueOutput(evaluation.issue);
+          const reset = this.setWorkflowIssueState(reviewIssue, {
+            description: `${reviewIssue.description}\n\n返工后的完整版本：\n${revisionOutput}`.slice(0, 100000),
+            status: "todo",
+            agent_enabled: true,
+            agent_id: reviewNode.agent ? agentIds.get(reviewNode.agent) : null,
+            user_assigned: false,
+            pending_actor: "agent",
+            needs_attention: true,
+          });
+          issueByNode.set(reviewNode.id, reset);
+          this.db.prepare("UPDATE workflow_node_runs SET result = NULL WHERE workflow_run_id = ? AND node_id = ?").run(run.id, reviewNode.id);
+          activated.push(reset);
+          this.db.prepare("UPDATE workflow_runs SET updated_at = ? WHERE id = ?").run(now(), run.id);
+          return activated;
+        }
+      }
+    }
     for (const node of template.nodes) {
       const issue = issueByNode.get(node.id);
       if (!issue || issue.status !== "backlog") continue;
       const dependencies = node.dependencies.map(dependencyId => issueByNode.get(dependencyId)).filter((value): value is Issue => Boolean(value));
       if (dependencies.length !== node.dependencies.length || dependencies.some(dependency => dependency.status !== "done")) continue;
+      if (template.nodes.some(candidate => candidate.scorecard?.retry_node === node.id)) continue;
       const handoff = dependencies.map(dependency => `## ${dependency.identifier} · ${dependency.title}\n${this.workflowIssueOutput(dependency)}`).join("\n\n").slice(0, 80000);
       const description = `${issue.description}\n\n上游会话结果：\n${handoff}`;
       const updated = this.updateIssue(issue.id, issue.version, {
@@ -1931,6 +2311,43 @@ export class Store {
     return Boolean(row && row.workflow_status === "active" && row.status === "backlog");
   }
 
+  workflowCompletionError(issueId: string, description?: string) {
+    const run = this.workflowRunForIssue(issueId);
+    if (!run || run.status !== "active") return null;
+    const nodeRun = run.nodes.find(item => item.issue_id === issueId);
+    const node = nodeRun ? workflowTemplate(run.template_id)?.nodes.find(item => item.id === nodeRun.node_id) : undefined;
+    if (!node) return null;
+    const output = description ?? (nodeRun ? this.workflowIssueOutput(nodeRun.issue) : "");
+    if (node.receipt && workflowReceipts(output).length < node.receipt.minimum) return "workflow_receipt_required";
+    if (node.scorecard && nodeRun?.result !== "failed" && !workflowScore(output, node.scorecard.criteria)) return "workflow_score_required";
+    if (node.memory && nodeRun?.issue.user_assigned !== true && !workflowMemory(output)) return "workflow_memory_required";
+    if (node.publish_package && nodeRun?.issue.user_assigned !== true && (workflowPublishPackage(output)?.targets.length || 0) < node.publish_package.minimum_targets) return "workflow_publish_package_required";
+    return null;
+  }
+
+  workflowAdvancementAllowed(issueId: string) {
+    const run = this.workflowRunForIssue(issueId);
+    if (!run || run.status !== "active") return true;
+    const nodeRun = run.nodes.find(item => item.issue_id === issueId);
+    if (!nodeRun) return true;
+    const node = workflowTemplate(run.template_id)?.nodes.find(item => item.id === nodeRun.node_id);
+    if (!node) return true;
+    const output = this.workflowIssueOutput(nodeRun.issue);
+    if (node.receipt) return workflowReceipts(output).length >= node.receipt.minimum;
+    if (node.scorecard) return nodeRun.result === "failed" || Boolean(workflowScore(output, node.scorecard.criteria));
+    if (node.memory) return nodeRun.issue.user_assigned === true || Boolean(workflowMemory(output));
+    if (node.publish_package) return nodeRun.issue.user_assigned === true || (workflowPublishPackage(output)?.targets.length || 0) >= node.publish_package.minimum_targets;
+    return true;
+  }
+
+  workflowPublishPackage(runId: string) {
+    const run = this.getWorkflowRun(runId);
+    const template = run ? workflowTemplate(run.template_id) : undefined;
+    const node = template?.nodes.find(item => item.publish_package);
+    const nodeRun = node && run ? run.nodes.find(item => item.node_id === node.id) : undefined;
+    return nodeRun ? workflowPublishPackage(this.workflowIssueOutput(nodeRun.issue)) : null;
+  }
+
   updateIssue(id: string, version: number, patch: IssuePatch, options: { unlockWorkflowNode?: boolean } = {}) {
     const pendingActorProvided = patch.pending_actor !== undefined;
     if (!Number.isInteger(version) || version < 1) throw new Error("invalid_version");
@@ -1948,6 +2365,10 @@ export class Store {
       if (!issue) throw new Error("issue_not_found");
       if (issue.version !== version) throw new Error("version_conflict");
       if (!options.unlockWorkflowNode && this.workflowNodeLocked(issue.id) && patch.status !== undefined && patch.status !== "backlog") throw new Error("workflow_node_locked");
+      if (!options.unlockWorkflowNode && patch.status === "done") {
+        const workflowError = this.workflowCompletionError(issue.id, patch.description);
+        if (workflowError) throw new Error(workflowError);
+      }
       if (issue.enrichment_status === "pending" && patch.enrichment_status === undefined) throw new Error("issue_enrichment_pending");
       if ((issue.run_thread_id || issue.active_run_status) && (patch.title !== undefined || patch.description !== undefined)) throw new Error("issue_execution_locked");
       if (patch.project_id !== undefined && !this.getProject(patch.project_id)) throw new Error("project_not_found");

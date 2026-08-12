@@ -554,6 +554,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "个专属 Agent": "dedicated agents",
       "已激活": "Activated",
       "未激活": "Not activated",
+      "待升级": "Update required",
+      "升级工作流": "Update workflow",
       "激活工作流": "Activate workflow",
       "新建 Campaign": "New campaign",
       "工作流已就绪": "Workflow ready",
@@ -561,6 +563,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "可以创建 Campaign，每个节点会使用已绑定的专属 Agent。": "You can create campaigns. Each node uses its assigned agent.",
       "确认后会创建模板运行所需的 Agent，现有 Agent 不会被修改。": "The required agents will be created after confirmation. Existing agents stay unchanged.",
       "还没有运行。创建 Campaign 后会启动第一个研究会话。": "No runs yet. Creating a campaign starts the first research conversation.",
+      "还没有运行。激活一个工作流后即可创建 Campaign。": "No runs yet. Activate a workflow to create a campaign.",
+      "等待人工裁决": "Awaiting human decision",
+      "人工放行": "Human override",
       "激活工作流后才能创建 Campaign。": "Activate the workflow before creating a campaign.",
       "这个工作流需要创建以下专属 Agent。它们会出现在智能体列表中，并由对应节点自动使用。": "This workflow creates the dedicated agents below. They appear in the agent list and are assigned to their workflow nodes.",
       "确认并创建 Agent": "Confirm and create agents",
@@ -568,6 +573,30 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "工作流所需 Agent 不完整，请重新激活。": "Some workflow agents are missing. Reactivate the workflow.",
       "当前没有可用于创建 Agent 的模型。": "No model is available for creating workflow agents.",
       "该 Agent 正被已激活的工作流使用，无法删除。": "This agent belongs to an active workflow and cannot be deleted.",
+      "请先回填至少一条可验证的公开发布链接和发布时间。": "Add at least one verifiable public URL and publication time first.",
+      "审校结果缺少有效的结构化评分。": "The review is missing a valid structured score.",
+      "复盘结果缺少可供下一轮复用的风格记忆。": "The retrospective is missing reusable style memory for the next campaign.",
+      "发布包缺少有效的结构化平台目标。": "The publication package is missing valid structured platform targets.",
+      "发布适配器": "Publisher adapter",
+      "发布方式": "Publishing mode",
+      "创建发布任务": "Create publishing task",
+      "刷新发布结果": "Refresh publishing result",
+      "发布适配器未配置。": "The publisher adapter is not configured.",
+      "发布前必须先完成人工确认。": "Complete human approval before publishing.",
+      "发布包尚未完成。": "The publication package is not ready.",
+      "发布任务尚未返回公开链接。": "The publishing task has not returned a public URL yet.",
+      "该账号的平台发布任务已经提交。": "A publishing task for this account and platform already exists.",
+      "发布平台尚未返回这条任务，请稍后刷新。": "The publisher has not returned this task yet. Refresh later.",
+      "发布平台返回了无法处理的结果。": "The publisher returned an unsupported result.",
+      "Postiz 图片需要先上传并提供媒体 ID。": "Upload Postiz images first and provide their media IDs.",
+      "发布平台请求失败，请检查账号授权、参数和平台状态。": "The publisher request failed. Check account authorization, parameters and platform status.",
+      "目标账号 ID": "Target account ID",
+      "平台标识": "Platform identifier",
+      "正文": "Content",
+      "标题（可选）": "Title (optional)",
+      "发布时间": "Publish time",
+      "立即发布": "Publish now",
+      "定时发布": "Schedule",
     });
     const bridgeRequests = new Map();
     const appServerRequests = new Map();
@@ -957,6 +986,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #\${PANEL_ID} .better-codex-workflow-heading h1 { margin: 0; color: var(--bc-foreground); font-size: 22px; letter-spacing: -.025em; }
         #\${PANEL_ID} .better-codex-workflow-heading p { margin: 5px 0 0; color: var(--bc-muted); font-size: var(--bc-text-md); }
         #\${PANEL_ID} .better-codex-workflow-layout { display: grid; grid-template-columns: minmax(0,1fr) 292px; gap: 18px; align-items: start; }
+        #\${PANEL_ID} .better-codex-workflow-catalog { display: grid; min-width: 0; gap: 14px; }
         #\${PANEL_ID} .better-codex-workflow-main, #\${PANEL_ID} .better-codex-workflow-aside { border: 0; border-radius: 20px; background: var(--bc-surface); box-shadow: var(--bc-card-shadow); }
         #\${PANEL_ID} .better-codex-workflow-main { overflow: hidden; transition: transform .16s cubic-bezier(.16,1,.3,1),background-color .16s; }
         #\${PANEL_ID} .better-codex-workflow-main:active { transform: scale(.995); }
@@ -988,6 +1018,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #\${PANEL_ID} .better-codex-workflow-node-copy { min-width: 0; }
         #\${PANEL_ID} .better-codex-workflow-node-copy strong { display: block; color: var(--bc-foreground); font-size: var(--bc-text-sm); font-weight: 600; }
         #\${PANEL_ID} .better-codex-workflow-node-copy span { display: block; margin-top: 2px; overflow: hidden; color: var(--bc-muted); font-size: var(--bc-text-caption); text-overflow: ellipsis; white-space: nowrap; }
+        #\${PANEL_ID} .better-codex-workflow-node-copy .better-codex-workflow-node-metrics { color: var(--bc-info); }
         #\${PANEL_ID} .better-codex-workflow-node-state { color: var(--bc-muted); font-size: var(--bc-text-caption); }
         #\${PANEL_ID} button.better-codex-workflow-node-state { border: 0; color: var(--bc-info); background: transparent; padding: 5px; font: inherit; font-size: var(--bc-text-caption); cursor: pointer; }
         #\${PANEL_ID} .better-codex-workflow-node[data-status="done"] .better-codex-workflow-node-mark { color: var(--bc-success); }
@@ -1000,6 +1031,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #\${PANEL_ID} .better-codex-workflow-run strong, #\${PANEL_ID} .better-codex-workflow-run span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         #\${PANEL_ID} .better-codex-workflow-run strong { color: var(--bc-foreground); font-size: var(--bc-text-sm); }
         #\${PANEL_ID} .better-codex-workflow-run span { margin-top: 4px; color: var(--bc-muted); font-size: var(--bc-text-caption); }
+        #\${PANEL_ID} .better-codex-workflow-publisher { margin-top: 8px; border-top: 1px solid var(--bc-border); padding: 8px 9px 0; }
+        #\${PANEL_ID} .better-codex-workflow-publisher > strong { display: block; margin: 3px 0 7px; color: var(--bc-foreground); font-size: var(--bc-text-sm); }
+        #\${PANEL_ID} .better-codex-workflow-publisher button { width: 100%; min-height: 36px; border: 0; border-radius: 9px; color: var(--bc-primary-foreground); background: var(--bc-primary); padding: 0 10px; font: inherit; font-size: var(--bc-text-caption); cursor: pointer; }
+        #\${PANEL_ID} .better-codex-workflow-publisher button + button { margin-top: 6px; color: var(--bc-foreground); background: var(--bc-hover); }
         #\${PANEL_ID} .better-codex-workflow-empty { padding: 18px 15px; color: var(--bc-muted); font-size: var(--bc-text-sm); line-height: 1.5; }
         #better-codex-workflow-dialog { width: min(560px,calc(100vw - 32px)); max-height: calc(100vh - 32px); border: 0; border-radius: 20px; color: var(--bc-foreground); background: var(--bc-surface); padding: 0; box-shadow: var(--bc-floating-shadow); font-family: var(--bc-font-ui); }
         #better-codex-workflow-dialog::backdrop { background: var(--bc-scrim); backdrop-filter: blur(3px); }
@@ -1823,6 +1858,18 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (value === "workflow_agents_missing") return t("工作流所需 Agent 不完整，请重新激活。");
       if (value === "agent_model_unavailable") return t("当前没有可用于创建 Agent 的模型。");
       if (value === "workflow_agent_in_use") return t("该 Agent 正被已激活的工作流使用，无法删除。");
+      if (value === "workflow_receipt_required") return t("请先回填至少一条可验证的公开发布链接和发布时间。");
+      if (value === "workflow_score_required") return t("审校结果缺少有效的结构化评分。");
+      if (value === "workflow_memory_required") return t("复盘结果缺少可供下一轮复用的风格记忆。");
+      if (value === "workflow_publish_package_required") return t("发布包缺少有效的结构化平台目标。");
+      if (value === "publisher_not_configured") return t("发布适配器未配置。");
+      if (value === "publisher_approval_required") return t("发布前必须先完成人工确认。");
+      if (value === "publisher_package_required") return t("发布包尚未完成。");
+      if (value === "publisher_target_already_submitted") return t("该账号的平台发布任务已经提交。");
+      if (value === "publisher_postiz_media_id_required") return t("Postiz 图片需要先上传并提供媒体 ID。");
+      if (value === "publisher_submission_not_found") return t("发布平台尚未返回这条任务，请稍后刷新。");
+      if (value === "publisher_remote_rejected" || value === "publisher_response_invalid") return t("发布平台返回了无法处理的结果。");
+      if (value.startsWith("publisher_http_")) return t("发布平台请求失败，请检查账号授权、参数和平台状态。");
       return t(value);
     }
 
@@ -2936,34 +2983,53 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     function renderWorkflows() {
       const container = panel?.querySelector("#better-codex-workflows");
       if (!container) return;
-      const template = state.workflowTemplates[0];
-      if (!template) {
+      if (!state.workflowTemplates.length) {
         container.innerHTML = '<div class="better-codex-workflow-empty">' + te("暂无工作流模板") + '</div>';
         return;
       }
       const selectedRun = state.workflowRuns.find(run => run.id === state.selectedWorkflowRunId) || state.workflowRuns[0] || null;
       if (selectedRun && state.selectedWorkflowRunId !== selectedRun.id) state.selectedWorkflowRunId = selectedRun.id;
-      const activation = state.workflowActivations.find(item => item.template_id === template.id);
-      const expanded = state.expandedWorkflowTemplateId === template.id;
-      const issueByNode = new Map((selectedRun?.nodes || []).map(node => [node.node_id, node.issue]));
-      const nodes = template.nodes.map((node, index) => {
-        const issue = issueByNode.get(node.id);
-        const status = workflowStatus(issue);
-        const action = issue?.session_thread_id || issue?.run_thread_id
-          ? '<button type="button" class="better-codex-workflow-node-state" data-workflow-thread="' + escapeHtml(issue.session_thread_id || issue.run_thread_id) + '">' + te("打开会话") + '</button>'
-          : issue ? '<button type="button" class="better-codex-workflow-node-state" data-workflow-issue="' + escapeHtml(issue.id) + '">' + te(status.label) + '</button>'
-          : '<span class="better-codex-workflow-node-state">' + te(index === 0 ? "就绪" : "等待中") + '</span>';
-        return '<div class="better-codex-workflow-node" data-status="' + escapeHtml(issue?.status || "template") + '"><span class="better-codex-workflow-node-mark">' + icon(status.icon) + '</span><span class="better-codex-workflow-node-copy"><strong>' + escapeHtml(node.title) + '</strong><span>' + escapeHtml(node.role + " · " + node.summary) + '</span></span>' + action + '</div>';
+      const selectedTemplateId = selectedRun?.template_id || state.expandedWorkflowTemplateId || state.workflowTemplates[0].id;
+      if (!state.expandedWorkflowTemplateId) state.expandedWorkflowTemplateId = selectedTemplateId;
+      const cards = state.workflowTemplates.map(template => {
+        const activation = state.workflowActivations.find(item => item.template_id === template.id);
+        const ready = Boolean(activation && activation.template_version >= template.version && template.agents.every(agent => activation.agents.some(item => item.template_agent_id === agent.id)));
+        const expanded = state.expandedWorkflowTemplateId === template.id;
+        const visibleRun = selectedRun?.template_id === template.id ? selectedRun : null;
+        const nodeRuns = new Map((visibleRun?.nodes || []).map(node => [node.node_id, node]));
+        const nodes = template.nodes.filter(node => !node.internal || Boolean(nodeRuns.get(node.id) && !["backlog", "done"].includes(nodeRuns.get(node.id)?.issue.status))).map((node, index) => {
+          const nodeRun = nodeRuns.get(node.id);
+          const issue = nodeRun?.issue;
+          const status = workflowStatus(issue);
+          const metrics = [
+            nodeRun?.score ? nodeRun.score.total + " 分" : "",
+            nodeRun?.attempt ? "第 " + nodeRun.attempt + " 轮" : "",
+            nodeRun?.receipts?.length ? nodeRun.receipts.length + " 条回执" : "",
+            nodeRun?.result === "failed" ? "等待人工裁决" : nodeRun?.result === "overridden" ? "人工放行" : "",
+          ].filter(Boolean).join(" · ");
+          const action = issue?.user_assigned
+            ? '<button type="button" class="better-codex-workflow-node-state" data-workflow-issue="' + escapeHtml(issue.id) + '">' + te(status.label) + '</button>'
+            : issue?.session_thread_id || issue?.run_thread_id
+            ? '<button type="button" class="better-codex-workflow-node-state" data-workflow-thread="' + escapeHtml(issue.session_thread_id || issue.run_thread_id) + '">' + te("打开会话") + '</button>'
+            : issue ? '<button type="button" class="better-codex-workflow-node-state" data-workflow-issue="' + escapeHtml(issue.id) + '">' + te(status.label) + '</button>'
+            : '<span class="better-codex-workflow-node-state">' + te(index === 0 ? "就绪" : "等待中") + '</span>';
+          return '<div class="better-codex-workflow-node" data-status="' + escapeHtml(issue?.status || "template") + '"><span class="better-codex-workflow-node-mark">' + icon(status.icon) + '</span><span class="better-codex-workflow-node-copy"><strong>' + escapeHtml(node.title) + '</strong><span>' + escapeHtml(node.role + " · " + node.summary) + '</span>' + (metrics ? '<span class="better-codex-workflow-node-metrics">' + escapeHtml(metrics) + '</span>' : '') + '</span>' + action + '</div>';
+        }).join("");
+        const statusChip = ready ? '<span class="is-active">' + te("已激活") + '</span>' : activation ? '<span>' + te("待升级") + '</span>' : '<span>' + te("未激活") + '</span>';
+        const detailAction = ready
+          ? '<button class="better-codex-workflow-start" type="button" data-workflow-start="' + escapeHtml(template.id) + '">' + te("新建 Campaign") + '</button>'
+          : '<button class="better-codex-workflow-start" type="button" data-workflow-activate="' + escapeHtml(template.id) + '"' + (state.mockup ? " disabled" : "") + '>' + te(activation ? "升级工作流" : "激活工作流") + '</button>';
+        return '<section class="better-codex-workflow-main' + (expanded ? " is-expanded" : "") + '"><button class="better-codex-workflow-template-head" type="button" data-workflow-template="' + escapeHtml(template.id) + '" aria-expanded="' + String(expanded) + '"><span class="better-codex-workflow-template-icon">' + icon("layout") + '</span><span class="better-codex-workflow-template-copy"><h2>' + escapeHtml(workflowTemplateName(template)) + '</h2><p>' + escapeHtml(workflowTemplateDescription(template)) + '</p><span class="better-codex-workflow-template-meta">' + statusChip + '<span>' + template.nodes.filter(node => !node.internal).length + ' ' + te("个节点") + '</span><span>' + template.agents.length + ' ' + te("个专属 Agent") + '</span></span></span><span class="better-codex-workflow-chevron">' + icon("chevron") + '</span></button><div class="better-codex-workflow-detail"><div class="better-codex-workflow-detail-head"><span><strong>' + te(ready ? "工作流已就绪" : "激活后创建专属 Agent") + '</strong><span>' + te(ready ? "可以创建 Campaign，每个节点会使用已绑定的专属 Agent。" : "确认后会创建模板运行所需的 Agent，现有 Agent 不会被修改。") + '</span></span>' + detailAction + '</div><div class="better-codex-workflow-nodes">' + nodes + '</div></div></section>';
       }).join("");
       const runs = state.workflowRuns.map(run => {
         const completed = run.nodes.filter(node => node.issue.status === "done").length;
         return '<button type="button" class="better-codex-workflow-run' + (run.id === selectedRun?.id ? " is-selected" : "") + '" data-workflow-run="' + escapeHtml(run.id) + '"><strong>' + escapeHtml(run.title) + '</strong><span>' + completed + ' / ' + run.nodes.length + ' · ' + escapeHtml(t(run.status === "completed" ? "已完成" : "进行中")) + '</span></button>';
       }).join("");
-      const statusChip = activation ? '<span class="is-active">' + te("已激活") + '</span>' : '<span>' + te("未激活") + '</span>';
-      const detailAction = activation
-        ? '<button class="better-codex-workflow-start" type="button" data-workflow-start>' + te("新建 Campaign") + '</button>'
-        : '<button class="better-codex-workflow-start" type="button" data-workflow-activate' + (state.mockup ? " disabled" : "") + '>' + te("激活工作流") + '</button>';
-      container.innerHTML = '<div class="better-codex-workflow-shell"><header class="better-codex-workflow-heading"><div><h1>' + te("工作流") + '</h1><p>' + te("用原生 Codex 会话完成跨 Agent 协作") + '</p></div></header><div class="better-codex-workflow-layout"><section class="better-codex-workflow-main' + (expanded ? " is-expanded" : "") + '"><button class="better-codex-workflow-template-head" type="button" data-workflow-template="' + escapeHtml(template.id) + '" aria-expanded="' + String(expanded) + '"><span class="better-codex-workflow-template-icon">' + icon("layout") + '</span><span class="better-codex-workflow-template-copy"><h2>' + escapeHtml(workflowTemplateName(template)) + '</h2><p>' + escapeHtml(workflowTemplateDescription(template)) + '</p><span class="better-codex-workflow-template-meta">' + statusChip + '<span>' + template.nodes.length + ' ' + te("个节点") + '</span><span>' + template.agents.length + ' ' + te("个专属 Agent") + '</span></span></span><span class="better-codex-workflow-chevron">' + icon("chevron") + '</span></button><div class="better-codex-workflow-detail"><div class="better-codex-workflow-detail-head"><span><strong>' + te(activation ? "工作流已就绪" : "激活后创建专属 Agent") + '</strong><span>' + te(activation ? "可以创建 Campaign，每个节点会使用已绑定的专属 Agent。" : "确认后会创建模板运行所需的 Agent，现有 Agent 不会被修改。") + '</span></span>' + detailAction + '</div><div class="better-codex-workflow-nodes">' + nodes + '</div></div></section><aside class="better-codex-workflow-aside"><h3>' + te("运行记录") + '</h3>' + (runs || '<div class="better-codex-workflow-empty">' + te(activation ? "还没有运行。创建 Campaign 后会启动第一个研究会话。" : "激活工作流后才能创建 Campaign。") + '</div>') + '</aside></div></div>';
+      const publisherSubmissions = selectedRun?.publisher_submissions || [];
+      const publisher = selectedRun && selectedRun.status === "active" && selectedRun.nodes.some(node => node.node_id === "publish_gate" && node.issue.status === "done") && selectedRun.nodes.some(node => node.node_id === "package" && node.issue.status === "done") && selectedRun.nodes.some(node => node.node_id === "published_gate" && node.issue.status !== "done")
+        ? '<div class="better-codex-workflow-publisher"><strong>' + te("发布适配器") + '</strong><button type="button" data-workflow-publish="' + escapeHtml(selectedRun.id) + '">' + te("创建发布任务") + '</button>' + publisherSubmissions.map(submission => '<button type="button" data-workflow-publish-refresh="' + escapeHtml(selectedRun.id) + '" data-publisher-provider="' + escapeHtml(submission.provider) + '" data-publisher-submission="' + escapeHtml(submission.submission_id) + '">' + te("刷新发布结果") + ' · ' + escapeHtml(submission.provider) + '</button>').join("") + '</div>'
+        : "";
+      container.innerHTML = '<div class="better-codex-workflow-shell"><header class="better-codex-workflow-heading"><div><h1>' + te("工作流") + '</h1><p>' + te("用原生 Codex 会话完成跨 Agent 协作") + '</p></div></header><div class="better-codex-workflow-layout"><div class="better-codex-workflow-catalog">' + cards + '</div><aside class="better-codex-workflow-aside"><h3>' + te("运行记录") + '</h3>' + (runs || '<div class="better-codex-workflow-empty">' + te("还没有运行。激活一个工作流后即可创建 Campaign。") + '</div>') + publisher + '</aside></div></div>';
     }
 
     function openWorkflowActivationDialog(template) {
@@ -3035,7 +3101,66 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       dialog.querySelector('textarea[name="brief"]')?.focus();
     }
 
+    async function openWorkflowPublisherDialog(run) {
+      document.getElementById("better-codex-workflow-dialog")?.remove();
+      let publishPackage = { title: "", content: "", publish_at: "", targets: [] };
+      try { publishPackage = await api("/api/workflow-runs/" + encodeURIComponent(run.id) + "/publish-package"); } catch {}
+      const dialog = document.createElement("dialog");
+      dialog.id = "better-codex-workflow-dialog";
+      dialog.setAttribute(OWNED, "true");
+      const submittedTasks = (run.publisher_submissions || []).flatMap(submission => submission.tasks || []).filter(task => !task.error);
+      const packageTarget = publishPackage.targets?.find(target => !submittedTasks.some(task => task.platform === target.platform && (!target.account_id || task.account_id === target.account_id))) || publishPackage.targets?.[0] || {};
+      const defaultDate = (publishPackage.publish_at && !Number.isNaN(Date.parse(publishPackage.publish_at)) ? new Date(publishPackage.publish_at) : new Date(Date.now() + 5 * 60 * 1000)).toISOString().slice(0, 16);
+      dialog.innerHTML = '<form><header><span><strong>' + te("发布适配器") + '</strong><small>' + escapeHtml(run.title) + '</small></span><button type="button" data-workflow-close aria-label="' + te("关闭") + '">' + icon("close") + '</button></header><div class="better-codex-workflow-form"><label><span>' + te("发布适配器") + '</span><select name="provider"><option value="postiz">Postiz</option><option value="aitoearn">AiToEarn</option></select></label><label><span>' + te("发布方式") + '</span><select name="mode"><option value="now">' + te("立即发布") + '</option><option value="schedule">' + te("定时发布") + '</option></select></label><label><span>' + te("发布时间") + '</span><input name="publish_at" type="datetime-local" value="' + escapeHtml(defaultDate) + '" required></label><label><span>' + te("目标账号 ID") + '</span><input name="account_id" maxlength="300" value="' + escapeHtml(packageTarget.account_id || "") + '" required></label><label><span>' + te("平台标识") + '</span><input name="platform" maxlength="100" value="' + escapeHtml(packageTarget.platform || "") + '" placeholder="x / linkedin / douyin / rednote" required></label><label><span>' + te("标题（可选）") + '</span><input name="title" maxlength="500" value="' + escapeHtml(packageTarget.title || publishPackage.title || "") + '"></label><label><span>' + te("正文") + '</span><textarea name="content" maxlength="100000" required>' + escapeHtml(packageTarget.content || publishPackage.content || "") + '</textarea></label><div class="better-codex-workflow-form-error" data-workflow-error hidden></div></div><footer><button type="button" data-workflow-close>' + te("取消") + '</button><button type="submit">' + te("创建发布任务") + '</button></footer></form>';
+      const close = () => dialog.close();
+      dialog.querySelectorAll("[data-workflow-close]").forEach(button => button.addEventListener("click", close));
+      dialog.addEventListener("submit", event => {
+        event.preventDefault();
+        const form = event.target;
+        const submit = form.querySelector('button[type="submit"]');
+        const error = form.querySelector("[data-workflow-error]");
+        submit.disabled = true;
+        error.hidden = true;
+        const data = new FormData(form);
+        const publishAt = new Date(String(data.get("publish_at") || ""));
+        void api("/api/workflow-runs/" + encodeURIComponent(run.id) + "/publish", {
+          method: "POST",
+          body: JSON.stringify({
+            provider: String(data.get("provider") || ""),
+            mode: String(data.get("mode") || ""),
+            publish_at: publishAt.toISOString(),
+            content: String(data.get("content") || ""),
+            title: String(data.get("title") || ""),
+            media: packageTarget.media,
+            targets: [{ account_id: String(data.get("account_id") || ""), platform: String(data.get("platform") || ""), content: String(data.get("content") || ""), title: String(data.get("title") || ""), settings: packageTarget.settings, media: packageTarget.media }],
+          }),
+        }).then(async updated => {
+          state.selectedWorkflowRunId = updated.id;
+          dialog.close();
+          await loadWorkflows();
+        }).catch(reason => {
+          error.textContent = errorLabel(reason);
+          error.hidden = false;
+        }).finally(() => { if (submit.isConnected) submit.disabled = false; });
+      });
+      dialog.addEventListener("close", () => dialog.remove(), { once: true });
+      bindModalDismiss(dialog, close);
+      document.body.appendChild(dialog);
+      dialog.showModal();
+      dialog.querySelector('textarea[name="content"]')?.focus();
+    }
+
     function onWorkflowsClick(event) {
+      const publish = event.target.closest("[data-workflow-publish]");
+      if (publish) {
+        const run = state.workflowRuns.find(item => item.id === publish.dataset.workflowPublish);
+        if (run) return void openWorkflowPublisherDialog(run).catch(reason => showError(errorLabel(reason)));
+      }
+      const refresh = event.target.closest("[data-workflow-publish-refresh]");
+      if (refresh) return void api("/api/workflow-runs/" + encodeURIComponent(refresh.dataset.workflowPublishRefresh) + "/publish/" + encodeURIComponent(refresh.dataset.publisherProvider) + "/" + encodeURIComponent(refresh.dataset.publisherSubmission) + "/refresh", { method: "POST", body: "{}" }).then(async updated => {
+        state.selectedWorkflowRunId = updated.id;
+        await loadWorkflows();
+      }).catch(reason => showError(errorLabel(reason)));
       const templateCard = event.target.closest("[data-workflow-template]");
       if (templateCard) {
         state.expandedWorkflowTemplateId = state.expandedWorkflowTemplateId === templateCard.dataset.workflowTemplate ? "" : templateCard.dataset.workflowTemplate;
@@ -3043,12 +3168,20 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         return;
       }
       const activate = event.target.closest("[data-workflow-activate]");
-      if (activate) return void openWorkflowActivationDialog(state.workflowTemplates[0]);
+      if (activate) {
+        const template = state.workflowTemplates.find(item => item.id === activate.dataset.workflowActivate);
+        if (template) return void openWorkflowActivationDialog(template);
+      }
       const start = event.target.closest("[data-workflow-start]");
-      if (start) return void openWorkflowStartDialog(state.workflowTemplates[0]);
+      if (start) {
+        const template = state.workflowTemplates.find(item => item.id === start.dataset.workflowStart);
+        if (template) return void openWorkflowStartDialog(template);
+      }
       const run = event.target.closest("[data-workflow-run]");
       if (run) {
         state.selectedWorkflowRunId = run.dataset.workflowRun;
+        const selected = state.workflowRuns.find(item => item.id === state.selectedWorkflowRunId);
+        if (selected) state.expandedWorkflowTemplateId = selected.template_id;
         renderWorkflows();
         return;
       }

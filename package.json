@@ -41,10 +41,12 @@
     "dist/service.js",
     "dist/session-transcript.js",
     "dist/markdown.js",
+    "dist/publishers.js",
     "dist/updater.js",
     "dist/user-profile.js",
     "dist/web-host.js",
-    "dist/worker.js"
+    "dist/worker.js",
+    "dist/workflows.js"
   ],
   "scripts": {
     "build": "tsc && node scripts/refresh-local-install.mjs && node scripts/refresh-injector.mjs",
