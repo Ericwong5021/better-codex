@@ -4,6 +4,12 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.5-beta.1] - 2026-08-13
+
+### Fixed
+
+- Align the expanded Issue workspace and keep its header controls usable in narrow windows.
+
 ## [0.4.4] - 2026-08-13
 
 ### Fixed
@@ -445,7 +451,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.4...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.5-beta.1...HEAD
+[0.4.5-beta.1]: https://github.com/Ericwong5021/better-codex/compare/v0.4.4...v0.4.5-beta.1
 [0.4.4]: https://github.com/Ericwong5021/better-codex/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/Ericwong5021/better-codex/compare/v0.4.2...v0.4.3
 [0.4.3-beta.8]: https://github.com/Ericwong5021/better-codex/compare/v0.4.3-beta.7...v0.4.3-beta.8

@@ -2465,6 +2465,24 @@ export function betterCodexDesignSystemCss() {
         overflow: visible;
         text-align: center;
       }
+
+      #better-codex-dialog[data-detail="true"] .better-codex-dialog-head {
+        gap: var(--bc-space-2);
+      }
+
+      #better-codex-dialog[data-detail="true"] .better-codex-dialog-breadcrumb > [data-dialog-breadcrumb-project],
+      #better-codex-dialog[data-detail="true"] .better-codex-dialog-breadcrumb > [aria-hidden="true"] {
+        display: none;
+      }
+
+      #better-codex-dialog[data-detail="true"] .better-codex-dialog-open-thread {
+        padding-inline: var(--bc-space-2);
+        white-space: nowrap;
+      }
+
+      #better-codex-dialog[data-detail="true"] .better-codex-dialog-head-actions {
+        gap: var(--bc-space-1);
+      }
     }
 
     #better-codex-panel .better-codex-column {
@@ -4124,6 +4142,7 @@ export function betterCodexDesignSystemCss() {
     }
 
     #better-codex-dialog[data-detail="true"][data-expanded="true"] {
+      --bc-dialog-content-gutter: calc(var(--bc-text-base) * 1.714286);
       width: min(1200px, calc(100vw - 48px));
       height: fit-content;
       max-height: calc(100vh - 48px);
@@ -4131,6 +4150,34 @@ export function betterCodexDesignSystemCss() {
 
     #better-codex-dialog[data-detail="true"][data-expanded="true"]:has(.better-codex-conversation) {
       height: min(76vh, 780px);
+    }
+
+    #better-codex-dialog[data-detail="true"][data-expanded="true"] .better-codex-dialog-head,
+    #better-codex-dialog[data-detail="true"][data-expanded="true"] .better-codex-agent-picker {
+      padding-inline: var(--bc-dialog-content-gutter);
+    }
+
+    #better-codex-dialog[data-detail="true"][data-expanded="true"] .better-codex-manual-title {
+      width: calc(100% - (var(--bc-dialog-content-gutter) * 2));
+      margin-inline: var(--bc-dialog-content-gutter);
+      padding-inline: var(--bc-space-3);
+    }
+
+    #better-codex-dialog[data-detail="true"][data-expanded="true"] .better-codex-description-field {
+      margin: 0 var(--bc-dialog-content-gutter) var(--bc-space-2);
+      background: var(--bc-color-input);
+      padding: var(--bc-space-1) var(--bc-space-3) var(--bc-space-2);
+      box-shadow: var(--bc-inset-hairline);
+    }
+
+    #better-codex-dialog[data-detail="true"][data-expanded="true"] .better-codex-description-field .better-codex-dialog-editor {
+      height: calc((var(--bc-text-md) * 1.55 * 2) + var(--bc-space-1));
+      max-height: calc((var(--bc-text-md) * 1.55 * 2) + var(--bc-space-1));
+    }
+
+    #better-codex-dialog[data-detail="true"][data-expanded="true"][data-description-expanded="true"] .better-codex-description-field .better-codex-dialog-editor {
+      height: min(36vh, calc((var(--bc-text-md) * 1.55 * 12) + var(--bc-space-1)));
+      max-height: min(36vh, calc((var(--bc-text-md) * 1.55 * 12) + var(--bc-space-1)));
     }
 
     #better-codex-dialog form {
@@ -4224,6 +4271,18 @@ export function betterCodexDesignSystemCss() {
       border: 1px solid var(--bc-border);
       border-radius: var(--bc-radius-md);
       background: color-mix(in oklch, var(--bc-surface) 92%, var(--bc-hover));
+    }
+
+    #better-codex-dialog[data-detail="true"][data-expanded="true"] .better-codex-conversation {
+      margin-inline: var(--bc-dialog-content-gutter);
+      border: 0;
+      background: var(--bc-color-input);
+      box-shadow: var(--bc-inset-hairline);
+    }
+
+    #better-codex-dialog[data-detail="true"][data-expanded="true"] .better-codex-conversation-head,
+    #better-codex-dialog[data-detail="true"][data-expanded="true"] .better-codex-timeline {
+      padding-inline: var(--bc-space-3);
     }
 
     #better-codex-dialog .better-codex-conversation-head {
@@ -4563,6 +4622,10 @@ export function betterCodexDesignSystemCss() {
       box-shadow: var(--bc-inset-hairline);
     }
 
+    #better-codex-dialog[data-detail="true"][data-expanded="true"] .better-codex-composer {
+      margin: var(--bc-space-2) var(--bc-dialog-content-gutter) 0;
+    }
+
     #better-codex-dialog .better-codex-composer .better-codex-dialog-attachments {
       box-sizing: border-box;
       width: 100%;
@@ -4583,6 +4646,10 @@ export function betterCodexDesignSystemCss() {
       padding: 8px 10px;
       font-size: var(--bc-text-md);
       line-height: 1.45;
+    }
+
+    #better-codex-dialog[data-detail="true"][data-expanded="true"] .better-codex-conversation-feedback {
+      margin-inline: var(--bc-dialog-content-gutter);
     }
 
     #better-codex-dialog .better-codex-conversation-feedback[hidden] {
@@ -4619,6 +4686,7 @@ export function betterCodexDesignSystemCss() {
 
     #better-codex-dialog[data-detail="true"][data-expanded="true"] .better-codex-composer textarea {
       height: calc(5.8em + 8px);
+      padding-inline: var(--bc-space-1);
     }
 
     #better-codex-dialog .better-codex-composer textarea::placeholder {
@@ -4761,6 +4829,10 @@ export function betterCodexDesignSystemCss() {
     #better-codex-dialog .better-codex-dialog-properties {
       gap: var(--bc-space-2);
       padding: var(--bc-space-2) calc(var(--bc-text-base) * 1.15) calc(var(--bc-text-base) * 0.75);
+    }
+
+    #better-codex-dialog[data-detail="true"][data-expanded="true"] .better-codex-dialog-properties {
+      padding-inline: var(--bc-dialog-content-gutter);
     }
 
     #better-codex-dialog[data-mode="agent"] .better-codex-project-menu {
@@ -5493,7 +5565,10 @@ export function betterCodexDesignSystemCss() {
       #better-codex-panel .better-codex-agent-grid { grid-template-columns: 1fr; }
       #better-codex-dialog, #better-codex-agent-dialog, #better-codex-confirm, #better-codex-auto-dispatch-help-dialog, #better-codex-avatar-picker, #better-codex-avatar-cropper { width: calc(100vw - 24px); }
       #better-codex-dialog[data-detail="true"][data-expanded="false"],
-      #better-codex-dialog[data-detail="true"][data-expanded="true"] { width: calc(100vw - 24px); }
+      #better-codex-dialog[data-detail="true"][data-expanded="true"] {
+        width: calc(100vw - 24px);
+        --bc-dialog-content-gutter: var(--bc-space-4);
+      }
       #better-codex-dialog .better-codex-dialog-footer { align-items: flex-end; padding-block: var(--bc-space-2); }
       #better-codex-dialog .better-codex-dialog-footer-right { flex-wrap: wrap; }
     }
