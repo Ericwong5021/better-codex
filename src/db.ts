@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { databasePath, developmentDatabaseSnapshotSourcePath } from "./config.js";
 import { syncProtocolVersion } from "./sync-contract.js";
+import { workflowTemplate } from "./workflows.js";
 import type { ConversationProjection, IssueProjection, ProjectProjection, RemoteCommand, RemoteCommandAck, SyncEntityType, SyncProjection } from "./sync-contract.js";
 
 export const issueStatuses = ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"] as const;
@@ -151,6 +152,31 @@ export type SchedulerDecision = {
   evidence: string[];
 };
 
+export type WorkflowRun = {
+  id: string;
+  template_id: string;
+  template_version: number;
+  title: string;
+  brief: string;
+  project_id: string;
+  workspace_path: string;
+  status: "active" | "completed" | "cancelled";
+  created_at: string;
+  updated_at: string;
+  nodes: Array<{
+    node_id: string;
+    issue_id: string;
+    issue: Issue;
+  }>;
+};
+
+export type WorkflowActivation = {
+  template_id: string;
+  template_version: number;
+  activated_at: string;
+  agents: Array<{ template_agent_id: string; agent_id: string; agent: AgentProfile }>;
+};
+
 export type PendingSchedulerRun = {
   claim: ClaimedIssue;
   executionSuccess: boolean;
@@ -208,7 +234,7 @@ export function cleanMaxConcurrency(value: number | undefined) {
   return value;
 }
 
-const latestSchemaVersion = 6;
+const latestSchemaVersion = 8;
 
 function now() {
   return new Date().toISOString();
@@ -577,6 +603,62 @@ export class Store {
           );
         `);
         this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (6, ?)").run(now());
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    }
+    if (fromVersion < 7) {
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS workflow_runs (
+            id TEXT PRIMARY KEY,
+            template_id TEXT NOT NULL,
+            template_version INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            brief TEXT NOT NULL DEFAULT '',
+            project_id TEXT NOT NULL REFERENCES projects(id),
+            workspace_path TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'active',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          );
+          CREATE TABLE IF NOT EXISTS workflow_node_runs (
+            workflow_run_id TEXT NOT NULL REFERENCES workflow_runs(id) ON DELETE CASCADE,
+            node_id TEXT NOT NULL,
+            issue_id TEXT NOT NULL UNIQUE REFERENCES issues(id) ON DELETE CASCADE,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (workflow_run_id, node_id)
+          );
+          CREATE INDEX IF NOT EXISTS workflow_runs_project_updated ON workflow_runs(project_id, updated_at DESC);
+          CREATE INDEX IF NOT EXISTS workflow_node_runs_issue ON workflow_node_runs(issue_id);
+        `);
+        this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (7, ?)").run(now());
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    }
+    if (fromVersion < 8) {
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS workflow_activations (
+            template_id TEXT PRIMARY KEY,
+            template_version INTEGER NOT NULL,
+            activated_at TEXT NOT NULL
+          );
+          CREATE TABLE IF NOT EXISTS workflow_activation_agents (
+            template_id TEXT NOT NULL REFERENCES workflow_activations(template_id) ON DELETE CASCADE,
+            template_agent_id TEXT NOT NULL,
+            agent_id TEXT NOT NULL REFERENCES agent_profiles(id),
+            PRIMARY KEY (template_id, template_agent_id)
+          );
+        `);
+        this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (8, ?)").run(now());
         this.db.exec("COMMIT");
       } catch (error) {
         this.db.exec("ROLLBACK");
@@ -1627,7 +1709,229 @@ export class Store {
     return this.getIssue(id)!;
   }
 
-  updateIssue(id: string, version: number, patch: IssuePatch) {
+  createWorkflowRun(input: { templateId: string; title: string; brief: string; projectId: string; workspacePath?: string }) {
+    const template = workflowTemplate(input.templateId);
+    if (!template) throw new Error("workflow_template_not_found");
+    const activation = this.getWorkflowActivation(template.id);
+    if (!activation) throw new Error("workflow_not_activated");
+    const agentIds = new Map(activation.agents.map(item => [item.template_agent_id, item.agent_id]));
+    if (template.agents.some(agent => !agentIds.has(agent.id))) throw new Error("workflow_agents_missing");
+    const project = this.getProject(input.projectId);
+    if (!project) throw new Error("project_not_found");
+    const title = cleanTitle(input.title);
+    const brief = input.brief.trim();
+    if (!brief) throw new Error("workflow_brief_required");
+    if (brief.length > 100000) throw new Error("workflow_brief_too_long");
+    const workspacePath = input.workspacePath?.trim() || project.workspace_path;
+    if (!workspacePath) throw new Error("workspace_required");
+    const runId = randomUUID();
+    const timestamp = now();
+    const issues = new Map<string, Issue>();
+    const createdIssueIds: string[] = [];
+    try {
+      for (const node of template.nodes) {
+        const dependencyLines = node.dependencies.map(dependencyId => {
+          const dependency = issues.get(dependencyId);
+          return dependency ? `- ${dependency.identifier} · ${dependency.title}` : "";
+        }).filter(Boolean);
+        const description = [
+          `工作流：${title}`,
+          `职责：${node.role}`,
+          "",
+          `本轮输入：${brief}`,
+          dependencyLines.length ? `\n上游会话：\n${dependencyLines.join("\n")}` : "",
+          "",
+          node.prompt,
+        ].filter(Boolean).join("\n");
+        const unlocked = node.dependencies.length === 0;
+        const issue = this.createIssue({
+          projectId: project.id,
+          title: node.title,
+          description,
+          status: unlocked ? "todo" : "backlog",
+          priority: node.kind === "gate" ? "high" : "medium",
+          labels: ["workflow", template.category, runId.slice(0, 8)],
+          workspacePath,
+          agentEnabled: unlocked && node.kind === "agent",
+          agentId: node.agent ? agentIds.get(node.agent) : undefined,
+          userAssigned: unlocked && node.kind === "gate",
+        });
+        issues.set(node.id, issue);
+        createdIssueIds.push(issue.id);
+      }
+      this.db.exec("BEGIN IMMEDIATE");
+      this.db.prepare(`
+        INSERT INTO workflow_runs (id, template_id, template_version, title, brief, project_id, workspace_path, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
+      `).run(runId, template.id, template.version, title, brief, project.id, workspacePath, timestamp, timestamp);
+      const insertNode = this.db.prepare("INSERT INTO workflow_node_runs (workflow_run_id, node_id, issue_id, created_at) VALUES (?, ?, ?, ?)");
+      for (const node of template.nodes) insertNode.run(runId, node.id, issues.get(node.id)!.id, timestamp);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      try { this.db.exec("ROLLBACK"); } catch {}
+      for (const issueId of createdIssueIds) this.db.prepare("DELETE FROM issues WHERE id = ?").run(issueId);
+      throw error;
+    }
+    return this.getWorkflowRun(runId)!;
+  }
+
+  getWorkflowRun(id: string): WorkflowRun | undefined {
+    const row = this.db.prepare("SELECT * FROM workflow_runs WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+    if (!row) return undefined;
+    const nodes = this.db.prepare("SELECT node_id, issue_id FROM workflow_node_runs WHERE workflow_run_id = ? ORDER BY created_at, rowid").all(id) as Array<{ node_id: string; issue_id: string }>;
+    return {
+      id: String(row.id),
+      template_id: String(row.template_id),
+      template_version: Number(row.template_version),
+      title: String(row.title),
+      brief: String(row.brief),
+      project_id: String(row.project_id),
+      workspace_path: String(row.workspace_path),
+      status: String(row.status) as WorkflowRun["status"],
+      created_at: String(row.created_at),
+      updated_at: String(row.updated_at),
+      nodes: nodes.flatMap(node => {
+        const issue = this.getIssue(node.issue_id);
+        return issue ? [{ node_id: node.node_id, issue_id: node.issue_id, issue }] : [];
+      }),
+    };
+  }
+
+  listWorkflowRuns(projectId?: string) {
+    const rows = projectId
+      ? this.db.prepare("SELECT id FROM workflow_runs WHERE project_id = ? ORDER BY updated_at DESC").all(projectId)
+      : this.db.prepare("SELECT id FROM workflow_runs ORDER BY updated_at DESC").all();
+    return (rows as Array<{ id: string }>).flatMap(row => {
+      const run = this.getWorkflowRun(row.id);
+      return run ? [run] : [];
+    });
+  }
+
+  getWorkflowActivation(templateId: string): WorkflowActivation | undefined {
+    const row = this.db.prepare("SELECT * FROM workflow_activations WHERE template_id = ?").get(templateId) as { template_id: string; template_version: number; activated_at: string } | undefined;
+    if (!row) return undefined;
+    const agents = this.db.prepare("SELECT template_agent_id, agent_id FROM workflow_activation_agents WHERE template_id = ? ORDER BY rowid").all(templateId) as Array<{ template_agent_id: string; agent_id: string }>;
+    return {
+      template_id: row.template_id,
+      template_version: Number(row.template_version),
+      activated_at: row.activated_at,
+      agents: agents.flatMap(item => {
+        const agent = this.getAgentProfile(item.agent_id);
+        return agent ? [{ ...item, agent }] : [];
+      }),
+    };
+  }
+
+  listWorkflowActivations() {
+    const rows = this.db.prepare("SELECT template_id FROM workflow_activations ORDER BY activated_at").all() as Array<{ template_id: string }>;
+    return rows.flatMap(row => {
+      const activation = this.getWorkflowActivation(row.template_id);
+      return activation ? [activation] : [];
+    });
+  }
+
+  workflowActivationForAgent(agentId: string) {
+    return this.db.prepare("SELECT template_id, template_agent_id FROM workflow_activation_agents WHERE agent_id = ?").get(agentId) as { template_id: string; template_agent_id: string } | undefined;
+  }
+
+  activateWorkflow(templateId: string, agentDefaults: { model: string; reasoning_effort: string; sandbox_mode: AgentSandboxMode }) {
+    const template = workflowTemplate(templateId);
+    if (!template) throw new Error("workflow_template_not_found");
+    const current = this.getWorkflowActivation(template.id);
+    if (current) return current;
+    const timestamp = now();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const createdAgents: AgentProfile[] = [];
+      for (const agent of template.agents) {
+        const profile = this.createAgentProfile({
+          name: agent.name,
+          name_en: agent.name_en,
+          description: agent.description,
+          instructions: agent.instructions,
+          model: agentDefaults.model,
+          reasoning_effort: agentDefaults.reasoning_effort,
+          sandbox_mode: agentDefaults.sandbox_mode,
+          max_concurrency: 1,
+        });
+        this.setAgentAvatar(profile.id, agent.avatar);
+        createdAgents.push(profile);
+      }
+      this.db.prepare("INSERT INTO workflow_activations (template_id, template_version, activated_at) VALUES (?, ?, ?)").run(template.id, template.version, timestamp);
+      const insertAgent = this.db.prepare("INSERT INTO workflow_activation_agents (template_id, template_agent_id, agent_id) VALUES (?, ?, ?)");
+      template.agents.forEach((agent, index) => insertAgent.run(template.id, agent.id, createdAgents[index].id));
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    return this.getWorkflowActivation(template.id)!;
+  }
+
+  workflowRunForIssue(issueId: string) {
+    const row = this.db.prepare("SELECT workflow_run_id FROM workflow_node_runs WHERE issue_id = ?").get(issueId) as { workflow_run_id: string } | undefined;
+    return row ? this.getWorkflowRun(row.workflow_run_id) : undefined;
+  }
+
+  private workflowIssueOutput(issue: Issue) {
+    const session = this.db.prepare("SELECT last_agent_message FROM issue_sessions WHERE issue_id = ?").get(issue.id) as { last_agent_message: string } | undefined;
+    if (session?.last_agent_message.trim()) return session.last_agent_message.trim();
+    const run = this.db.prepare("SELECT execution_result FROM issue_runs WHERE issue_id = ? AND execution_result IS NOT NULL ORDER BY started_at DESC LIMIT 1").get(issue.id) as { execution_result: string } | undefined;
+    if (run?.execution_result.trim()) return run.execution_result.trim();
+    return issue.description.trim();
+  }
+
+  advanceWorkflowForIssue(issueId: string) {
+    const run = this.workflowRunForIssue(issueId);
+    if (!run || run.status !== "active") return [] as Issue[];
+    const template = workflowTemplate(run.template_id);
+    if (!template) return [] as Issue[];
+    const activation = this.getWorkflowActivation(template.id);
+    if (!activation) return [] as Issue[];
+    const agentIds = new Map(activation.agents.map(item => [item.template_agent_id, item.agent_id]));
+    if (template.agents.some(agent => !agentIds.has(agent.id))) return [] as Issue[];
+    const issueByNode = new Map(run.nodes.map(node => [node.node_id, node.issue]));
+    const activated: Issue[] = [];
+    for (const node of template.nodes) {
+      const issue = issueByNode.get(node.id);
+      if (!issue || issue.status !== "backlog") continue;
+      const dependencies = node.dependencies.map(dependencyId => issueByNode.get(dependencyId)).filter((value): value is Issue => Boolean(value));
+      if (dependencies.length !== node.dependencies.length || dependencies.some(dependency => dependency.status !== "done")) continue;
+      const handoff = dependencies.map(dependency => `## ${dependency.identifier} · ${dependency.title}\n${this.workflowIssueOutput(dependency)}`).join("\n\n").slice(0, 80000);
+      const description = `${issue.description}\n\n上游会话结果：\n${handoff}`;
+      const updated = this.updateIssue(issue.id, issue.version, {
+        description,
+        status: "todo",
+        agent_enabled: node.kind === "agent",
+        agent_id: node.agent ? agentIds.get(node.agent) : null,
+        user_assigned: node.kind === "gate",
+        pending_actor: node.kind === "agent" ? "agent" : "user",
+        needs_attention: true,
+      }, { unlockWorkflowNode: true });
+      issueByNode.set(node.id, updated);
+      activated.push(updated);
+    }
+    const currentIssues = template.nodes.map(node => issueByNode.get(node.id)).filter((value): value is Issue => Boolean(value));
+    if (currentIssues.length === template.nodes.length && currentIssues.every(issue => issue.status === "done")) {
+      this.db.prepare("UPDATE workflow_runs SET status = 'completed', updated_at = ? WHERE id = ?").run(now(), run.id);
+    } else if (activated.length) {
+      this.db.prepare("UPDATE workflow_runs SET updated_at = ? WHERE id = ?").run(now(), run.id);
+    }
+    return activated;
+  }
+
+  workflowNodeLocked(issueId: string) {
+    const row = this.db.prepare(`
+      SELECT issues.status, workflow_runs.status AS workflow_status
+      FROM workflow_node_runs
+      JOIN workflow_runs ON workflow_runs.id = workflow_node_runs.workflow_run_id
+      JOIN issues ON issues.id = workflow_node_runs.issue_id
+      WHERE workflow_node_runs.issue_id = ?
+    `).get(issueId) as { status: IssueStatus; workflow_status: WorkflowRun["status"] } | undefined;
+    return Boolean(row && row.workflow_status === "active" && row.status === "backlog");
+  }
+
+  updateIssue(id: string, version: number, patch: IssuePatch, options: { unlockWorkflowNode?: boolean } = {}) {
     const pendingActorProvided = patch.pending_actor !== undefined;
     if (!Number.isInteger(version) || version < 1) throw new Error("invalid_version");
     if (patch.title !== undefined) patch.title = cleanTitle(patch.title);
@@ -1643,6 +1947,7 @@ export class Store {
       const issue = this.getIssue(id);
       if (!issue) throw new Error("issue_not_found");
       if (issue.version !== version) throw new Error("version_conflict");
+      if (!options.unlockWorkflowNode && this.workflowNodeLocked(issue.id) && patch.status !== undefined && patch.status !== "backlog") throw new Error("workflow_node_locked");
       if (issue.enrichment_status === "pending" && patch.enrichment_status === undefined) throw new Error("issue_enrichment_pending");
       if ((issue.run_thread_id || issue.active_run_status) && (patch.title !== undefined || patch.description !== undefined)) throw new Error("issue_execution_locked");
       if (patch.project_id !== undefined && !this.getProject(patch.project_id)) throw new Error("project_not_found");

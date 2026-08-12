@@ -23,6 +23,7 @@ import { injectionScript } from "./dom.js";
 import { betterCodexWebHostCss, betterCodexWebHostHtml, betterCodexWebHostJavaScript } from "./web-host.js";
 import { SyncClient } from "./sync-client.js";
 import { removeSyncConfiguration } from "./sync-config.js";
+import { builtInWorkflowTemplates } from "./workflows.js";
 
 const accessToken = token();
 const mockupEnabled = !isSea() && !packagedBuild && process.argv.includes("--mockup");
@@ -1067,6 +1068,7 @@ export function startServer() {
         if (method === "DELETE" && path.length === 3) {
           const body = await readBody(request);
           if (store.hasActiveAgentSessionWork(profile.id)) throw new Error("agent_security_config_in_use");
+          if (store.workflowActivationForAgent(profile.id)) throw new Error("workflow_agent_in_use");
           store.deleteAgentProfile(profile.id, Number(body.version));
           syncAgentProfiles(store.listAgentProfiles());
           return sendJson(response, 200, { ok: true });
@@ -1145,6 +1147,43 @@ export function startServer() {
           ...issue,
           reply_status: store.getIssueReplyState(issue.id).status,
         })));
+      }
+      if (url.pathname === "/api/workflows" && method === "GET") {
+        return sendJson(response, 200, {
+          templates: builtInWorkflowTemplates,
+          activations: mockupEnabled ? [] : store.listWorkflowActivations(),
+          runs: mockupEnabled ? [] : store.listWorkflowRuns(url.searchParams.get("project_id") || undefined),
+        });
+      }
+      if (!mockupEnabled && path[0] === "api" && path[1] === "workflows" && path[2] && path[3] === "activate" && path.length === 4 && method === "POST") {
+        const profile = defaultAgentProfile();
+        const catalog = await readModelCatalog();
+        const model = catalog.find(item => item.id === profile.model) || catalog.find(item => item.isDefault) || catalog[0];
+        if (!model) throw new Error("agent_model_unavailable");
+        const reasoningEffort = model.supportedReasoningEfforts.some(item => item.value === profile.reasoning_effort) ? profile.reasoning_effort : model.defaultReasoningEffort;
+        const activation = store.activateWorkflow(decodeURIComponent(path[2]), {
+          model: model.id,
+          reasoning_effort: reasoningEffort,
+          sandbox_mode: profile.sandbox_mode,
+        });
+        syncAgentProfiles(store.listAgentProfiles());
+        return sendJson(response, 201, activation);
+      }
+      if (!mockupEnabled && url.pathname === "/api/workflow-runs" && method === "POST") {
+        const body = await readBody(request);
+        const run = store.createWorkflowRun({
+          templateId: cleanString(body.template_id, 200),
+          title: cleanString(body.title, 500),
+          brief: cleanString(body.brief, 100000),
+          projectId: cleanString(body.project_id, 200),
+          workspacePath: cleanString(body.workspace_path, 4096),
+        });
+        worker.startIssues(run.nodes.filter(node => node.issue.agent_enabled && node.issue.status === "todo").map(node => node.issue.id));
+        return sendJson(response, 201, run);
+      }
+      if (!mockupEnabled && path[0] === "api" && path[1] === "workflow-runs" && path[2] && path.length === 3 && method === "GET") {
+        const run = store.getWorkflowRun(decodeURIComponent(path[2]));
+        return run ? sendJson(response, 200, run) : sendJson(response, 404, { error: "workflow_run_not_found" });
       }
       if (path[0] === "api" && path[1] === "session-relay" && path[2] === "commands" && path[3] && path[4] === "checkpoint" && path.length === 5 && method === "POST") {
         const body = await readBody(request);
@@ -1235,7 +1274,9 @@ export function startServer() {
           const patch = parseIssuePatch(body);
           if ((issue.active_run_status || issue.session_active_turn_id || store.getIssueReplyState(issue.id).status === "running") && Object.keys(patch).some(key => key !== "reply_draft")) throw new Error("issue_execution_running");
           const updated = store.updateIssue(issue.id, version, patch);
+          if (updated.status === "done") worker.startIssues(store.advanceWorkflowForIssue(updated.id).filter(next => next.agent_enabled).map(next => next.id));
           if (store.isDispatchable(updated)) worker.wake();
+          else if (updated.status === "done") worker.wake();
           return sendJson(response, 200, updated);
         }
         if (method === "POST" && path[3] === "start" && path.length === 4) {
