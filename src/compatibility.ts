@@ -225,6 +225,7 @@ export function targetAllowed(target: { url?: string; title?: string }) {
   const compatibility = activeCompatibility();
   const url = target.url ?? "";
   if (compatibility.targetRules.excludedRoutes.some(route => url.includes(route))) return false;
+  if (/^https?:\/\//i.test(url)) return false;
   return compatibility.targetRules.urlPrefixes.some(prefix => url.startsWith(prefix))
     || compatibility.targetRules.titleTerms.some(term => target.title?.includes(term));
 }

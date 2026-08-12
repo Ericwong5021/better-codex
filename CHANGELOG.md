@@ -4,6 +4,10 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep the desktop injector from replacing the self-hosted Web UI injection when both surfaces are open in Codex.
+
 ## [0.4.3-beta.2] - 2026-08-12
 
 ### Changed
