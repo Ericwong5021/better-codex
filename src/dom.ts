@@ -285,6 +285,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     const ENTRY_ID = "better-codex-entry";
     const AGENTS_ENTRY_ID = "better-codex-agents-entry";
+    const WORKFLOWS_ENTRY_ID = "better-codex-workflows-entry";
     const PANEL_ID = "better-codex-panel";
     const STYLE_ID = "better-codex-style";
     const OWNED = "data-better-codex-owned";
@@ -349,7 +350,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
     const systemLocale = resolveSystemLocale(INITIAL_LOCALE);
     const MOCKUP_PROJECT_ID = "mockup-better-codex";
-    const state = { projects: [], issues: [], agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: ["issues", "agents"].includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", mockup: false, keepCreate: false, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], creator: [], project: [], label: [] } };
+    const state = { projects: [], issues: [], agents: [], workflowTemplates: [], workflowActivations: [], workflowRuns: [], expandedWorkflowTemplateId: "", selectedWorkflowRunId: "", agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: ["issues", "agents", "workflows"].includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", mockup: false, keepCreate: false, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], creator: [], project: [], label: [] } };
     function shortcutKeyFromCode(code, key) {
       const source = String(code || "");
       if (/^Key[A-Z]$/.test(source)) return source.slice(3);
@@ -527,6 +528,47 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     localeResources.en["原生会话正在创建，请稍后重试。"] = "The native conversation is being created. Try again shortly.";
     localeResources.en["停止任务"] = "Stop task";
     localeResources.en["正在停止…"] = "Stopping…";
+    Object.assign(localeResources.en, {
+      "工作流": "Workflows",
+      "打开工作流": "Open workflows",
+      "用原生 Codex 会话完成跨 Agent 协作": "Coordinate agents through native Codex conversations",
+      "个节点": "nodes",
+      "个 Agent 会话": "agent conversations",
+      "含人工审批": "Human approvals",
+      "使用模板": "Use template",
+      "运行记录": "Runs",
+      "暂无工作流模板": "No workflow templates",
+      "还没有运行。填写本轮主题后即可启动第一个研究会话。": "No runs yet. Add a campaign brief to start the first research conversation.",
+      "等待中": "Waiting",
+      "等待上游": "Waiting for upstream",
+      "等待确认": "Awaiting approval",
+      "待开始": "Ready",
+      "就绪": "Ready",
+      "打开会话": "Open conversation",
+      "进行中": "Active",
+      "Campaign 名称": "Campaign name",
+      "新一轮内容 Campaign": "New creator campaign",
+      "本轮输入": "Campaign brief",
+      "写下产品事实、目标受众、想解决的问题、已有素材和目标平台。": "Add product facts, audience, problem, available assets and target channels.",
+      "启动研究会话": "Start research conversation",
+      "个专属 Agent": "dedicated agents",
+      "已激活": "Activated",
+      "未激活": "Not activated",
+      "激活工作流": "Activate workflow",
+      "新建 Campaign": "New campaign",
+      "工作流已就绪": "Workflow ready",
+      "激活后创建专属 Agent": "Dedicated agents are created on activation",
+      "可以创建 Campaign，每个节点会使用已绑定的专属 Agent。": "You can create campaigns. Each node uses its assigned agent.",
+      "确认后会创建模板运行所需的 Agent，现有 Agent 不会被修改。": "The required agents will be created after confirmation. Existing agents stay unchanged.",
+      "还没有运行。创建 Campaign 后会启动第一个研究会话。": "No runs yet. Creating a campaign starts the first research conversation.",
+      "激活工作流后才能创建 Campaign。": "Activate the workflow before creating a campaign.",
+      "这个工作流需要创建以下专属 Agent。它们会出现在智能体列表中，并由对应节点自动使用。": "This workflow creates the dedicated agents below. They appear in the agent list and are assigned to their workflow nodes.",
+      "确认并创建 Agent": "Confirm and create agents",
+      "工作流尚未激活。": "Activate the workflow before creating a campaign.",
+      "工作流所需 Agent 不完整，请重新激活。": "Some workflow agents are missing. Reactivate the workflow.",
+      "当前没有可用于创建 Agent 的模型。": "No model is available for creating workflow agents.",
+      "该 Agent 正被已激活的工作流使用，无法删除。": "This agent belongs to an active workflow and cannot be deleted.",
+    });
     const bridgeRequests = new Map();
     const appServerRequests = new Map();
     const sessionHandoffPending = new Set();
@@ -537,6 +579,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     let diagnosticSequence = 0;
     let entry = null;
     let agentsEntry = null;
+    let workflowsEntry = null;
     let panel = null;
     let observer = null;
     let refreshPending = false;
@@ -732,9 +775,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       style.id = STYLE_ID;
       style.setAttribute(OWNED, "true");
       style.textContent = \`
-        #\${ENTRY_ID}[aria-current="page"], #\${AGENTS_ENTRY_ID}[aria-current="page"] { background: var(--color-background-primary-soft-active, var(--color-token-list-hover-background, color-mix(in srgb, currentColor 8%, transparent))); }
-        html[data-better-codex-open="true"] \${SELECTORS.sidebarNavigation} [aria-current="page"]:not(#\${ENTRY_ID}):not(#\${AGENTS_ENTRY_ID}) { background: transparent !important; }
-        html[data-better-codex-open="true"] \${SELECTORS.sidebarNavigation} [aria-current="page"]:not(#\${ENTRY_ID}):not(#\${AGENTS_ENTRY_ID}) .text-token-list-active-selection-foreground { color: var(--color-token-foreground) !important; }
+        #\${ENTRY_ID}[aria-current="page"], #\${AGENTS_ENTRY_ID}[aria-current="page"], #\${WORKFLOWS_ENTRY_ID}[aria-current="page"] { background: var(--color-background-primary-soft-active, var(--color-token-list-hover-background, color-mix(in srgb, currentColor 8%, transparent))); }
+        html[data-better-codex-open="true"] \${SELECTORS.sidebarNavigation} [aria-current="page"]:not(#\${ENTRY_ID}):not(#\${AGENTS_ENTRY_ID}):not(#\${WORKFLOWS_ENTRY_ID}) { background: transparent !important; }
+        html[data-better-codex-open="true"] \${SELECTORS.sidebarNavigation} [aria-current="page"]:not(#\${ENTRY_ID}):not(#\${AGENTS_ENTRY_ID}):not(#\${WORKFLOWS_ENTRY_ID}) .text-token-list-active-selection-foreground { color: var(--color-token-foreground) !important; }
         [\${HOST}="true"] { position: relative !important; z-index: 31 !important; pointer-events: none !important; }
         [\${HIDDEN}="true"] { visibility: hidden !important; pointer-events: none !important; }
         html { --bc-page: oklch(.988087 0 0); --bc-surface: oklch(1 0 0); --bc-raised: oklch(1 0 0); --bc-hover: oklch(.967 .001 286.375); --bc-selected: oklch(.95 .002 286.375); --bc-foreground: oklch(.141 .005 285.823); --bc-muted: oklch(.505 .016 285.938); --bc-faint: oklch(.606 .016 285.938); --bc-border: oklch(.92 .004 286.32); --bc-divider: oklch(.945 .003 286.32); --bc-input: oklch(.92 .004 286.32); --bc-ring: oklch(.705 .015 286.067); --bc-primary: oklch(.21 .006 285.885); --bc-primary-foreground: oklch(.985 0 0); --bc-warning: oklch(.75 .16 85); --bc-success: oklch(.55 .16 145); --bc-info: oklch(.55 .18 250); --bc-danger: oklch(.577 .245 27.325); --bc-priority-none: oklch(.62 .01 286); --bc-priority-low: oklch(.55 .1 250); --bc-priority-medium: oklch(.76 .15 95); --bc-priority-high: oklch(.68 .18 52); --bc-priority-urgent: var(--bc-danger); --bc-surface-shadow: 0 1px 2px rgb(15 23 42 / .04),0 1px 1px rgb(15 23 42 / .03); --bc-card-shadow: 0 1px 3px rgb(15 23 42 / .10); --bc-floating-shadow: 0 16px 40px rgb(15 23 42 / .14),0 3px 10px rgb(15 23 42 / .08); --bc-menu-shadow: 0 8px 24px rgb(15 23 42 / .08),0 2px 6px rgb(15 23 42 / .05); --bc-scrim: rgb(24 24 27 / .22); color-scheme: light; }
@@ -905,6 +948,87 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #\${PANEL_ID}[data-surface="agents"] .better-codex-agent-heading, #\${PANEL_ID}[data-surface="agents"] .better-codex-agent-actions { display: flex; }
         #\${PANEL_ID} .better-codex-agents { display: none; min-height: 0; flex: 1; overflow-y: auto; padding: 12px 22px 28px; }
         #\${PANEL_ID}[data-surface="agents"] .better-codex-agents { display: block; }
+        #\${PANEL_ID}[data-surface="workflows"] .better-codex-issue-only, #\${PANEL_ID}[data-surface="workflows"] .better-codex-agent-heading, #\${PANEL_ID}[data-surface="workflows"] .better-codex-agent-actions { display: none; }
+        #\${PANEL_ID}[data-surface="workflows"] .better-codex-toolbar { display: none; }
+        #\${PANEL_ID} .better-codex-workflows { display: none; min-height: 0; flex: 1; overflow-y: auto; background: var(--bc-page); padding: 24px; }
+        #\${PANEL_ID}[data-surface="workflows"] .better-codex-workflows { display: block; }
+        #\${PANEL_ID} .better-codex-workflow-shell { width: min(1120px,100%); margin: 0 auto; }
+        #\${PANEL_ID} .better-codex-workflow-heading { display: flex; align-items: end; justify-content: space-between; gap: 20px; margin-bottom: 20px; }
+        #\${PANEL_ID} .better-codex-workflow-heading h1 { margin: 0; color: var(--bc-foreground); font-size: 22px; letter-spacing: -.025em; }
+        #\${PANEL_ID} .better-codex-workflow-heading p { margin: 5px 0 0; color: var(--bc-muted); font-size: var(--bc-text-md); }
+        #\${PANEL_ID} .better-codex-workflow-layout { display: grid; grid-template-columns: minmax(0,1fr) 292px; gap: 18px; align-items: start; }
+        #\${PANEL_ID} .better-codex-workflow-main, #\${PANEL_ID} .better-codex-workflow-aside { border: 0; border-radius: 20px; background: var(--bc-surface); box-shadow: var(--bc-card-shadow); }
+        #\${PANEL_ID} .better-codex-workflow-main { overflow: hidden; transition: transform .16s cubic-bezier(.16,1,.3,1),background-color .16s; }
+        #\${PANEL_ID} .better-codex-workflow-main:active { transform: scale(.995); }
+        #\${PANEL_ID} .better-codex-workflow-template-head { display: flex; width: 100%; box-sizing: border-box; align-items: flex-start; gap: 14px; border: 0; color: inherit; background: transparent; padding: 20px; text-align: left; cursor: pointer; }
+        #\${PANEL_ID} .better-codex-workflow-template-head:focus-visible { outline: 2px solid var(--bc-ring); outline-offset: -3px; }
+        #\${PANEL_ID} .better-codex-workflow-template-icon { display: inline-flex; width: 40px; height: 40px; flex: 0 0 auto; align-items: center; justify-content: center; border-radius: 13px; color: var(--bc-foreground); background: var(--bc-hover); }
+        #\${PANEL_ID} .better-codex-workflow-template-icon svg { width: 18px; height: 18px; }
+        #\${PANEL_ID} .better-codex-workflow-template-copy { min-width: 0; flex: 1; }
+        #\${PANEL_ID} .better-codex-workflow-template-copy h2 { margin: 0; color: var(--bc-foreground); font-size: var(--bc-text-lg); }
+        #\${PANEL_ID} .better-codex-workflow-template-copy p { margin: 5px 0 0; color: var(--bc-muted); font-size: var(--bc-text-sm); line-height: 1.55; }
+        #\${PANEL_ID} .better-codex-workflow-template-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+        #\${PANEL_ID} .better-codex-workflow-template-meta span { border-radius: 999px; color: var(--bc-muted); background: var(--bc-hover); padding: 3px 7px; font-size: var(--bc-text-caption); }
+        #\${PANEL_ID} .better-codex-workflow-template-meta .is-active { color: var(--bc-success); background: color-mix(in srgb,var(--bc-success) 10%,var(--bc-hover)); }
+        #\${PANEL_ID} .better-codex-workflow-chevron { display: inline-flex; width: 32px; height: 32px; flex: 0 0 auto; align-items: center; justify-content: center; border-radius: 999px; color: var(--bc-muted); background: var(--bc-hover); transition: transform .18s cubic-bezier(.16,1,.3,1); }
+        #\${PANEL_ID} .better-codex-workflow-main.is-expanded .better-codex-workflow-chevron { transform: rotate(90deg); }
+        #\${PANEL_ID} .better-codex-workflow-detail { display: none; padding: 2px 20px 20px; }
+        #\${PANEL_ID} .better-codex-workflow-main.is-expanded .better-codex-workflow-detail { display: block; animation: better-codex-workflow-reveal .18s cubic-bezier(.16,1,.3,1); }
+        @keyframes better-codex-workflow-reveal { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+        #\${PANEL_ID} .better-codex-workflow-detail-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-radius: 16px; background: var(--bc-page); padding: 14px 16px; }
+        #\${PANEL_ID} .better-codex-workflow-detail-head strong { display: block; color: var(--bc-foreground); font-size: var(--bc-text-sm); }
+        #\${PANEL_ID} .better-codex-workflow-detail-head span { display: block; margin-top: 3px; color: var(--bc-muted); font-size: var(--bc-text-caption); }
+        #\${PANEL_ID} .better-codex-workflow-start { min-height: 40px; flex: 0 0 auto; border: 0; border-radius: 10px; color: var(--bc-primary-foreground); background: var(--bc-primary); padding: 0 14px; font: inherit; font-size: var(--bc-text-sm); font-weight: 600; cursor: pointer; transition: transform .14s; }
+        #\${PANEL_ID} .better-codex-workflow-start:active { transform: scale(.96); }
+        #\${PANEL_ID} .better-codex-workflow-start:disabled { opacity: .48; cursor: default; transform: none; }
+        #\${PANEL_ID} .better-codex-workflow-nodes { display: grid; gap: 6px; padding-top: 12px; }
+        #\${PANEL_ID} .better-codex-workflow-node { position: relative; display: grid; grid-template-columns: 28px minmax(0,1fr) auto; gap: 10px; align-items: center; min-height: 52px; border: 0; border-radius: 14px; background: var(--bc-page); padding: 0 12px; }
+        #\${PANEL_ID} .better-codex-workflow-node-mark { display: inline-flex; width: 22px; height: 22px; align-items: center; justify-content: center; border: 0; border-radius: 999px; color: var(--bc-muted); background: var(--bc-surface); }
+        #\${PANEL_ID} .better-codex-workflow-node-mark svg { width: 12px; height: 12px; }
+        #\${PANEL_ID} .better-codex-workflow-node-copy { min-width: 0; }
+        #\${PANEL_ID} .better-codex-workflow-node-copy strong { display: block; color: var(--bc-foreground); font-size: var(--bc-text-sm); font-weight: 600; }
+        #\${PANEL_ID} .better-codex-workflow-node-copy span { display: block; margin-top: 2px; overflow: hidden; color: var(--bc-muted); font-size: var(--bc-text-caption); text-overflow: ellipsis; white-space: nowrap; }
+        #\${PANEL_ID} .better-codex-workflow-node-state { color: var(--bc-muted); font-size: var(--bc-text-caption); }
+        #\${PANEL_ID} button.better-codex-workflow-node-state { border: 0; color: var(--bc-info); background: transparent; padding: 5px; font: inherit; font-size: var(--bc-text-caption); cursor: pointer; }
+        #\${PANEL_ID} .better-codex-workflow-node[data-status="done"] .better-codex-workflow-node-mark { color: var(--bc-success); }
+        #\${PANEL_ID} .better-codex-workflow-node[data-status="in_progress"] .better-codex-workflow-node-mark { color: var(--bc-warning); }
+        #\${PANEL_ID} .better-codex-workflow-node[data-status="blocked"] .better-codex-workflow-node-mark { color: var(--bc-danger); }
+        #\${PANEL_ID} .better-codex-workflow-aside { overflow: hidden; padding: 8px; }
+        #\${PANEL_ID} .better-codex-workflow-aside h3 { margin: 0; border: 0; padding: 8px 9px 10px; color: var(--bc-foreground); font-size: var(--bc-text-md); }
+        #\${PANEL_ID} .better-codex-workflow-run { display: block; width: 100%; border: 0; border-radius: 12px; color: inherit; background: transparent; padding: 11px 10px; text-align: left; cursor: pointer; }
+        #\${PANEL_ID} .better-codex-workflow-run:hover, #\${PANEL_ID} .better-codex-workflow-run.is-selected { background: var(--bc-hover); }
+        #\${PANEL_ID} .better-codex-workflow-run strong, #\${PANEL_ID} .better-codex-workflow-run span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        #\${PANEL_ID} .better-codex-workflow-run strong { color: var(--bc-foreground); font-size: var(--bc-text-sm); }
+        #\${PANEL_ID} .better-codex-workflow-run span { margin-top: 4px; color: var(--bc-muted); font-size: var(--bc-text-caption); }
+        #\${PANEL_ID} .better-codex-workflow-empty { padding: 18px 15px; color: var(--bc-muted); font-size: var(--bc-text-sm); line-height: 1.5; }
+        #better-codex-workflow-dialog { width: min(560px,calc(100vw - 32px)); max-height: calc(100vh - 32px); border: 0; border-radius: 20px; color: var(--bc-foreground); background: var(--bc-surface); padding: 0; box-shadow: var(--bc-floating-shadow); font-family: var(--bc-font-ui); }
+        #better-codex-workflow-dialog::backdrop { background: var(--bc-scrim); backdrop-filter: blur(3px); }
+        #better-codex-workflow-dialog form { display: flex; max-height: calc(100vh - 32px); flex-direction: column; }
+        #better-codex-workflow-dialog header, #better-codex-workflow-dialog footer { display: flex; align-items: center; padding: 14px 16px; }
+        #better-codex-workflow-dialog header { justify-content: space-between; border-bottom: 0; }
+        #better-codex-workflow-dialog header strong { font-size: var(--bc-text-md); }
+        #better-codex-workflow-dialog header small { display: block; margin-top: 3px; color: var(--bc-muted); font-size: var(--bc-text-caption); }
+        #better-codex-workflow-dialog header button { display: inline-flex; width: 40px; height: 40px; align-items: center; justify-content: center; border: 0; border-radius: 10px; color: var(--bc-muted); background: transparent; cursor: pointer; }
+        #better-codex-workflow-dialog header button:hover { background: var(--bc-hover); }
+        #better-codex-workflow-dialog .better-codex-workflow-form { display: grid; min-height: 0; gap: 14px; overflow-y: auto; padding: 18px; }
+        #better-codex-workflow-dialog .better-codex-workflow-form-error { color: var(--bc-danger); font-size: var(--bc-text-sm); }
+        #better-codex-workflow-dialog .better-codex-workflow-confirm-copy { margin: 0; color: var(--bc-muted); font-size: var(--bc-text-sm); line-height: 1.65; }
+        #better-codex-workflow-dialog .better-codex-workflow-activation-agents { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        #better-codex-workflow-dialog .better-codex-workflow-activation-agent { display: flex; min-width: 0; align-items: center; gap: 10px; border-radius: 12px; background: var(--bc-page); padding: 10px; }
+        #better-codex-workflow-dialog .better-codex-workflow-activation-agent > span:last-child { min-width: 0; }
+        #better-codex-workflow-dialog .better-codex-workflow-activation-agent strong, #better-codex-workflow-dialog .better-codex-workflow-activation-agent small { display: block; }
+        #better-codex-workflow-dialog .better-codex-workflow-activation-agent strong { color: var(--bc-foreground); font-size: var(--bc-text-sm); }
+        #better-codex-workflow-dialog .better-codex-workflow-activation-agent small { margin-top: 2px; overflow: hidden; color: var(--bc-muted); font-size: var(--bc-text-caption); text-overflow: ellipsis; white-space: nowrap; }
+        #better-codex-workflow-dialog label { display: grid; gap: 6px; color: var(--bc-muted); font-size: var(--bc-text-sm); }
+        #better-codex-workflow-dialog input, #better-codex-workflow-dialog textarea, #better-codex-workflow-dialog select { box-sizing: border-box; width: 100%; border: 1px solid var(--bc-input); border-radius: 7px; color: var(--bc-foreground); background: var(--bc-surface); padding: 9px 10px; font: inherit; outline: none; }
+        #better-codex-workflow-dialog textarea { min-height: 132px; resize: vertical; }
+        #better-codex-workflow-dialog input:focus, #better-codex-workflow-dialog textarea:focus, #better-codex-workflow-dialog select:focus { border-color: var(--bc-ring); box-shadow: 0 0 0 2px color-mix(in srgb,var(--bc-ring) 20%,transparent); }
+        #better-codex-workflow-dialog footer { justify-content: flex-end; gap: 8px; border-top: 0; }
+        #better-codex-workflow-dialog footer button { min-height: 40px; border: 0; border-radius: 10px; color: var(--bc-foreground); background: var(--bc-hover); padding: 0 14px; font: inherit; cursor: pointer; transition: transform .14s; }
+        #better-codex-workflow-dialog footer button:active { transform: scale(.96); }
+        #better-codex-workflow-dialog footer button[type="submit"] { color: var(--bc-primary-foreground); background: var(--bc-primary); }
+        @media (max-width: 820px) { #\${PANEL_ID} .better-codex-workflow-layout { grid-template-columns: 1fr; } #\${PANEL_ID} .better-codex-workflow-aside { order: -1; } #\${PANEL_ID} .better-codex-workflow-detail-head { align-items: stretch; flex-direction: column; } #\${PANEL_ID} .better-codex-workflow-start { width: 100%; } #better-codex-workflow-dialog .better-codex-workflow-activation-agents { grid-template-columns: 1fr; } }
+        @media (prefers-reduced-motion: reduce) { #\${PANEL_ID} .better-codex-workflow-main, #\${PANEL_ID} .better-codex-workflow-chevron, #\${PANEL_ID} .better-codex-workflow-main.is-expanded .better-codex-workflow-detail, #\${PANEL_ID} .better-codex-workflow-start { animation: none; transition: none; } }
         #\${PANEL_ID} .better-codex-agent-grid { display: grid; max-width: 1080px; margin: 0 auto; grid-template-columns: repeat(auto-fill,minmax(280px,1fr)); gap: 12px; }
         #\${PANEL_ID} .better-codex-agent-card { display: flex; min-height: 214px; flex-direction: column; border: 1px solid var(--bc-border); border-radius: 12px; color: #27272a; background: #fff; padding: 16px; box-shadow: 0 1px 3px rgba(15,23,42,.08); transition: border-color .15s,transform .15s; }
         #\${PANEL_ID} .better-codex-agent-card:hover { border-color: #cfcfd4; }
@@ -1178,7 +1302,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     function syncEntryIcon(button, surface) {
       const svg = button.querySelector("svg");
       if (svg) {
-        const definition = LUCIDE_ICONS[surface === "agents" ? "bot" : "issues"];
+        const definition = LUCIDE_ICONS[surface === "agents" ? "bot" : surface === "workflows" ? "layout" : "issues"];
         if (svg.getAttribute("viewBox") !== "0 0 24 24") svg.setAttribute("viewBox", "0 0 24 24");
         if (svg.getAttribute("fill") !== "none") svg.setAttribute("fill", "none");
         if (svg.getAttribute("stroke") !== "currentColor") svg.setAttribute("stroke", "currentColor");
@@ -1218,12 +1342,16 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       syncEntryLabel(agentsEntry, "智能体", "管理智能体");
       syncEntryIcon(agentsEntry, "agents");
       if (agentsEntry.parentElement !== parent || agentsEntry.previousElementSibling !== entry) entry.after(agentsEntry);
-      const currentEntry = active && state.surface === "issues" ? entry : active && state.surface === "agents" ? agentsEntry : null;
-      for (const item of [entry, agentsEntry]) {
+      if (!workflowsEntry) workflowsEntry = createEntry("工作流", WORKFLOWS_ENTRY_ID, "打开工作流", "workflows");
+      syncEntryLabel(workflowsEntry, "工作流", "打开工作流");
+      syncEntryIcon(workflowsEntry, "workflows");
+      if (workflowsEntry.parentElement !== parent || workflowsEntry.previousElementSibling !== agentsEntry) agentsEntry.after(workflowsEntry);
+      const currentEntry = active && state.surface === "issues" ? entry : active && state.surface === "agents" ? agentsEntry : active && state.surface === "workflows" ? workflowsEntry : null;
+      for (const item of [entry, agentsEntry, workflowsEntry]) {
         if (item === currentEntry && item.getAttribute("aria-current") !== "page") item.setAttribute("aria-current", "page");
         if (item !== currentEntry && item.hasAttribute("aria-current")) item.removeAttribute("aria-current");
       }
-      return entry.isConnected && agentsEntry.isConnected;
+      return entry.isConnected && agentsEntry.isConnected && workflowsEntry.isConnected;
     }
 
     function findMount() {
@@ -1691,6 +1819,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (value === "issue_session_starting") return t("原生会话正在创建，请稍后重试。");
       if (value === "manual_start_required") return t("当前为手动运行，请先点击“立即开始任务”。");
       if (value === "backlog_reply_blocked") return t("待规划中的 Issue 不会自动触发任务，请先移出待规划区。");
+      if (value === "workflow_not_activated") return t("工作流尚未激活。");
+      if (value === "workflow_agents_missing") return t("工作流所需 Agent 不完整，请重新激活。");
+      if (value === "agent_model_unavailable") return t("当前没有可用于创建 Agent 的模型。");
+      if (value === "workflow_agent_in_use") return t("该 Agent 正被已激活的工作流使用，无法删除。");
       return t(value);
     }
 
@@ -2775,8 +2907,158 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (search) { search.focus(); search.setSelectionRange(search.value.length, search.value.length); }
       });
       agents.addEventListener("submit", onAgentSubmit);
-      section.append(toolbar, board, agents, recovery);
+      const workflows = document.createElement("main");
+      workflows.id = "better-codex-workflows";
+      workflows.className = "better-codex-workflows";
+      workflows.addEventListener("click", onWorkflowsClick);
+      section.append(toolbar, board, agents, workflows, recovery);
       return section;
+    }
+
+    function workflowStatus(issue) {
+      if (!issue) return { label: "等待中", icon: "circle" };
+      if (issue.status === "done") return { label: "已完成", icon: "check" };
+      if (issue.status === "backlog") return { label: "等待上游", icon: "dash" };
+      if (issue.status === "blocked") return { label: "已阻塞", icon: "close" };
+      if (issue.active_run_status || issue.session_active_turn_id) return { label: "工作中", icon: "refresh" };
+      if (issue.user_assigned) return { label: "等待确认", icon: "user" };
+      return { label: "待开始", icon: "circle" };
+    }
+
+    function workflowTemplateName(template) {
+      return state.locale === "en" ? template.name_en || template.name : template.name;
+    }
+
+    function workflowTemplateDescription(template) {
+      return state.locale === "en" ? template.description_en || template.description : template.description;
+    }
+
+    function renderWorkflows() {
+      const container = panel?.querySelector("#better-codex-workflows");
+      if (!container) return;
+      const template = state.workflowTemplates[0];
+      if (!template) {
+        container.innerHTML = '<div class="better-codex-workflow-empty">' + te("暂无工作流模板") + '</div>';
+        return;
+      }
+      const selectedRun = state.workflowRuns.find(run => run.id === state.selectedWorkflowRunId) || state.workflowRuns[0] || null;
+      if (selectedRun && state.selectedWorkflowRunId !== selectedRun.id) state.selectedWorkflowRunId = selectedRun.id;
+      const activation = state.workflowActivations.find(item => item.template_id === template.id);
+      const expanded = state.expandedWorkflowTemplateId === template.id;
+      const issueByNode = new Map((selectedRun?.nodes || []).map(node => [node.node_id, node.issue]));
+      const nodes = template.nodes.map((node, index) => {
+        const issue = issueByNode.get(node.id);
+        const status = workflowStatus(issue);
+        const action = issue?.session_thread_id || issue?.run_thread_id
+          ? '<button type="button" class="better-codex-workflow-node-state" data-workflow-thread="' + escapeHtml(issue.session_thread_id || issue.run_thread_id) + '">' + te("打开会话") + '</button>'
+          : issue ? '<button type="button" class="better-codex-workflow-node-state" data-workflow-issue="' + escapeHtml(issue.id) + '">' + te(status.label) + '</button>'
+          : '<span class="better-codex-workflow-node-state">' + te(index === 0 ? "就绪" : "等待中") + '</span>';
+        return '<div class="better-codex-workflow-node" data-status="' + escapeHtml(issue?.status || "template") + '"><span class="better-codex-workflow-node-mark">' + icon(status.icon) + '</span><span class="better-codex-workflow-node-copy"><strong>' + escapeHtml(node.title) + '</strong><span>' + escapeHtml(node.role + " · " + node.summary) + '</span></span>' + action + '</div>';
+      }).join("");
+      const runs = state.workflowRuns.map(run => {
+        const completed = run.nodes.filter(node => node.issue.status === "done").length;
+        return '<button type="button" class="better-codex-workflow-run' + (run.id === selectedRun?.id ? " is-selected" : "") + '" data-workflow-run="' + escapeHtml(run.id) + '"><strong>' + escapeHtml(run.title) + '</strong><span>' + completed + ' / ' + run.nodes.length + ' · ' + escapeHtml(t(run.status === "completed" ? "已完成" : "进行中")) + '</span></button>';
+      }).join("");
+      const statusChip = activation ? '<span class="is-active">' + te("已激活") + '</span>' : '<span>' + te("未激活") + '</span>';
+      const detailAction = activation
+        ? '<button class="better-codex-workflow-start" type="button" data-workflow-start>' + te("新建 Campaign") + '</button>'
+        : '<button class="better-codex-workflow-start" type="button" data-workflow-activate' + (state.mockup ? " disabled" : "") + '>' + te("激活工作流") + '</button>';
+      container.innerHTML = '<div class="better-codex-workflow-shell"><header class="better-codex-workflow-heading"><div><h1>' + te("工作流") + '</h1><p>' + te("用原生 Codex 会话完成跨 Agent 协作") + '</p></div></header><div class="better-codex-workflow-layout"><section class="better-codex-workflow-main' + (expanded ? " is-expanded" : "") + '"><button class="better-codex-workflow-template-head" type="button" data-workflow-template="' + escapeHtml(template.id) + '" aria-expanded="' + String(expanded) + '"><span class="better-codex-workflow-template-icon">' + icon("layout") + '</span><span class="better-codex-workflow-template-copy"><h2>' + escapeHtml(workflowTemplateName(template)) + '</h2><p>' + escapeHtml(workflowTemplateDescription(template)) + '</p><span class="better-codex-workflow-template-meta">' + statusChip + '<span>' + template.nodes.length + ' ' + te("个节点") + '</span><span>' + template.agents.length + ' ' + te("个专属 Agent") + '</span></span></span><span class="better-codex-workflow-chevron">' + icon("chevron") + '</span></button><div class="better-codex-workflow-detail"><div class="better-codex-workflow-detail-head"><span><strong>' + te(activation ? "工作流已就绪" : "激活后创建专属 Agent") + '</strong><span>' + te(activation ? "可以创建 Campaign，每个节点会使用已绑定的专属 Agent。" : "确认后会创建模板运行所需的 Agent，现有 Agent 不会被修改。") + '</span></span>' + detailAction + '</div><div class="better-codex-workflow-nodes">' + nodes + '</div></div></section><aside class="better-codex-workflow-aside"><h3>' + te("运行记录") + '</h3>' + (runs || '<div class="better-codex-workflow-empty">' + te(activation ? "还没有运行。创建 Campaign 后会启动第一个研究会话。" : "激活工作流后才能创建 Campaign。") + '</div>') + '</aside></div></div>';
+    }
+
+    function openWorkflowActivationDialog(template) {
+      document.getElementById("better-codex-workflow-dialog")?.remove();
+      const dialog = document.createElement("dialog");
+      dialog.id = "better-codex-workflow-dialog";
+      dialog.setAttribute(OWNED, "true");
+      const agents = template.agents.map(agent => '<div class="better-codex-workflow-activation-agent">' + agentAvatarMarkup(agent, "better-codex-agent-list-avatar") + '<span><strong>' + escapeHtml(state.locale === "en" ? agent.name_en || agent.name : agent.name) + '</strong><small>' + escapeHtml(agent.description) + '</small></span></div>').join("");
+      dialog.innerHTML = '<form><header><span><strong>' + te("激活工作流") + '</strong><small>' + escapeHtml(workflowTemplateName(template)) + '</small></span><button type="button" data-workflow-close aria-label="' + te("关闭") + '">' + icon("close") + '</button></header><div class="better-codex-workflow-form"><p class="better-codex-workflow-confirm-copy">' + te("这个工作流需要创建以下专属 Agent。它们会出现在智能体列表中，并由对应节点自动使用。") + '</p><div class="better-codex-workflow-activation-agents">' + agents + '</div><div class="better-codex-workflow-form-error" data-workflow-error hidden></div></div><footer><button type="button" data-workflow-close>' + te("取消") + '</button><button type="submit">' + te("确认并创建 Agent") + '</button></footer></form>';
+      const close = () => dialog.close();
+      dialog.querySelectorAll("[data-workflow-close]").forEach(button => button.addEventListener("click", close));
+      dialog.addEventListener("submit", event => {
+        event.preventDefault();
+        const submit = event.currentTarget.querySelector('button[type="submit"]');
+        const error = event.currentTarget.querySelector("[data-workflow-error]");
+        submit.disabled = true;
+        error.hidden = true;
+        void api("/api/workflows/" + encodeURIComponent(template.id) + "/activate", { method: "POST", body: "{}" }).then(async () => {
+          dialog.close();
+          await Promise.all([loadWorkflows(), loadAgents({ background: true })]);
+        }).catch(reason => {
+          error.textContent = errorLabel(reason);
+          error.hidden = false;
+        }).finally(() => { if (submit.isConnected) submit.disabled = false; });
+      });
+      dialog.addEventListener("close", () => dialog.remove(), { once: true });
+      bindModalDismiss(dialog, close);
+      document.body.appendChild(dialog);
+      dialog.showModal();
+    }
+
+    function openWorkflowStartDialog(template) {
+      document.getElementById("better-codex-workflow-dialog")?.remove();
+      const dialog = document.createElement("dialog");
+      dialog.id = "better-codex-workflow-dialog";
+      dialog.setAttribute(OWNED, "true");
+      const projectOptions = state.projects.map(project => '<option value="' + escapeHtml(project.id) + '"' + (project.id === state.projectId ? " selected" : "") + '>' + escapeHtml(projectLabel(project) || project.name) + '</option>').join("");
+      dialog.innerHTML = '<form><header><strong>' + escapeHtml(workflowTemplateName(template)) + '</strong><button type="button" data-workflow-close aria-label="' + te("关闭") + '">' + icon("close") + '</button></header><div class="better-codex-workflow-form"><label><span>' + te("Campaign 名称") + '</span><input name="title" maxlength="500" value="' + escapeHtml(t("新一轮内容 Campaign")) + '" required></label><label><span>' + te("项目") + '</span><select name="project_id" required>' + projectOptions + '</select></label><label><span>' + te("本轮输入") + '</span><textarea name="brief" maxlength="100000" placeholder="' + te("写下产品事实、目标受众、想解决的问题、已有素材和目标平台。") + '" required></textarea></label><div class="better-codex-workflow-form-error" data-workflow-error hidden></div></div><footer><button type="button" data-workflow-close>' + te("取消") + '</button><button type="submit">' + te("启动研究会话") + '</button></footer></form>';
+      const close = () => dialog.close();
+      dialog.querySelectorAll("[data-workflow-close]").forEach(button => button.addEventListener("click", close));
+      dialog.addEventListener("submit", event => {
+        event.preventDefault();
+        const form = event.target;
+        const submit = form.querySelector('button[type="submit"]');
+        submit.disabled = true;
+        const error = form.querySelector("[data-workflow-error]");
+        error.hidden = true;
+        void (async () => {
+          try {
+            const data = new FormData(form);
+            const projectId = String(data.get("project_id") || "");
+            const project = state.projects.find(item => item.id === projectId);
+            const run = await api("/api/workflow-runs", { method: "POST", body: JSON.stringify({ template_id: template.id, title: String(data.get("title") || ""), brief: String(data.get("brief") || ""), project_id: projectId, workspace_path: project?.workspace_path || "" }) });
+            state.selectedWorkflowRunId = run.id;
+            dialog.close();
+            await loadWorkflows();
+          } catch (reason) {
+            error.textContent = errorLabel(reason);
+            error.hidden = false;
+          } finally {
+            if (submit.isConnected) submit.disabled = false;
+          }
+        })();
+      });
+      dialog.addEventListener("close", () => dialog.remove(), { once: true });
+      bindModalDismiss(dialog, close);
+      document.body.appendChild(dialog);
+      dialog.showModal();
+      dialog.querySelector('textarea[name="brief"]')?.focus();
+    }
+
+    function onWorkflowsClick(event) {
+      const templateCard = event.target.closest("[data-workflow-template]");
+      if (templateCard) {
+        state.expandedWorkflowTemplateId = state.expandedWorkflowTemplateId === templateCard.dataset.workflowTemplate ? "" : templateCard.dataset.workflowTemplate;
+        renderWorkflows();
+        return;
+      }
+      const activate = event.target.closest("[data-workflow-activate]");
+      if (activate) return void openWorkflowActivationDialog(state.workflowTemplates[0]);
+      const start = event.target.closest("[data-workflow-start]");
+      if (start) return void openWorkflowStartDialog(state.workflowTemplates[0]);
+      const run = event.target.closest("[data-workflow-run]");
+      if (run) {
+        state.selectedWorkflowRunId = run.dataset.workflowRun;
+        renderWorkflows();
+        return;
+      }
+      const thread = event.target.closest("[data-workflow-thread]");
+      if (thread) return void perform(() => openThread(thread.dataset.workflowThread));
+      const issueButton = event.target.closest("[data-workflow-issue]");
+      if (!issueButton) return;
+      const selectedRun = state.workflowRuns.find(item => item.id === state.selectedWorkflowRunId) || state.workflowRuns[0];
+      const issue = selectedRun?.nodes.find(node => node.issue.id === issueButton.dataset.workflowIssue)?.issue;
+      if (issue) void perform(() => openEditor(issue));
     }
 
     function agentKey(agent) {
@@ -3623,6 +3905,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (!panel) return;
       panel.dataset.surface = state.surface;
       renderAgents();
+      renderWorkflows();
       syncAutoDispatch();
       syncMockupUi();
       const runningCount = state.issues.filter(issue => issueExecutionRunning(issue) || issue.reply_status === "running").length;
@@ -3731,8 +4014,19 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       render();
     }
 
+    async function loadWorkflows() {
+      const query = state.projectId ? "?project_id=" + encodeURIComponent(state.projectId) : "";
+      const result = await api("/api/workflows" + query);
+      state.workflowTemplates = result.templates || [];
+      state.workflowActivations = result.activations || [];
+      state.workflowRuns = result.runs || [];
+      if (!state.workflowRuns.some(run => run.id === state.selectedWorkflowRunId)) state.selectedWorkflowRunId = state.workflowRuns[0]?.id || "";
+      render();
+    }
+
     async function loadSurface(options = {}) {
       if (state.surface === "agents") await loadAgents(options);
+      else if (state.surface === "workflows") await loadWorkflows();
       else await loadIssues(options);
     }
 
@@ -5379,7 +5673,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     function onClick(event) {
       if (!active || suppressAgentOutside) return;
       const target = event.target?.closest?.("button,a,[role='button']," + SELECTORS.threadRow);
-      if (!target || target === entry || target === agentsEntry || target.closest("#" + PANEL_ID) || target.closest("#better-codex-dialog") || target.closest("#better-codex-agent-dialog") || target.closest("#better-codex-avatar-picker")) return;
+      if (!target || target === entry || target === agentsEntry || target === workflowsEntry || target.closest("#" + PANEL_ID) || target.closest("#better-codex-dialog") || target.closest("#better-codex-agent-dialog") || target.closest("#better-codex-avatar-picker") || target.closest("#better-codex-workflow-dialog")) return;
       if (isSidebarNavigationTarget(target)) close({ resume: true });
       else if (target.closest(SELECTORS.sidebarNavigation)) scheduleRefresh();
     }
@@ -5397,7 +5691,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (!betterCodexRoute) routeSuppressed = false;
       syncSessionHandoffFromHost();
       if (active && routeSeen && !betterCodexRoute) return close({ resume: true, suppressRoute: false });
-      if (!active && betterCodexRoute && !routeSuppressed && ["issues", "agents"].includes(resumeSurface)) return open(resumeSurface);
+      if (!active && betterCodexRoute && !routeSuppressed && ["issues", "agents", "workflows"].includes(resumeSurface)) return open(resumeSurface);
       if (active) mountPanel();
     }
 

@@ -103,6 +103,10 @@ export class IssueWorker {
     return true;
   }
 
+  startIssues(issueIds: string[]) {
+    for (const issueId of issueIds) this.startIssue(issueId);
+  }
+
   stopIssue(issueId: string) {
     this.store.dequeueManualStart(issueId);
     this.manualQueue.delete(issueId);
@@ -712,6 +716,7 @@ export class IssueWorker {
           const decision = code === 0 && existsSync(resultPath) ? parseSchedulerDecision(readFileSync(resultPath, "utf8")) : null;
           const schedulerError = timedOut ? "scheduler_timeout" : processError || (code === 0 ? decision ? undefined : "scheduler_invalid_output" : `scheduler_exit_${code ?? "unknown"}`);
           this.store.finalizeScheduler(claim.runId, claim.issue.id, executionSuccess, decision, schedulerError);
+          this.startIssues(this.store.advanceWorkflowForIssue(claim.issue.id).filter(issue => issue.agent_enabled).map(issue => issue.id));
         }
       }
       this.wake();
