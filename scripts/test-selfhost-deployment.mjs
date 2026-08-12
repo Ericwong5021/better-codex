@@ -77,6 +77,7 @@ const environment = {
 try {
   compose(["build", "hub"], environment);
   compose(["up", "-d", "--wait"], environment);
+  assert.match(composeOutput(["exec", "-T", "hub", "sh", "-c", "sed -n 's/^Uid:[[:space:]]*\\([0-9]*\\).*/\\1/p' /proc/1/status"], environment), /^1000$/);
   const portLine = composeOutput(["port", "caddy", "443"], environment).split("\n").find(line => /:\d+$/.test(line));
   const httpsPort = Number(portLine?.match(/:(\d+)$/)?.[1]);
   if (!Number.isInteger(httpsPort) || httpsPort < 1) throw new Error("published_https_port_unavailable");

@@ -16,6 +16,8 @@ COPY --from=build /app/dist ./dist
 COPY --from=build /app/node_modules ./node_modules
 COPY assets ./assets
 COPY package.json ./package.json
-USER node
+COPY deploy/hub/entrypoint.sh /usr/local/bin/better-codex-hub-entrypoint
+RUN chmod 0755 /usr/local/bin/better-codex-hub-entrypoint
 EXPOSE 4318
+ENTRYPOINT ["/usr/local/bin/better-codex-hub-entrypoint"]
 CMD ["node", "dist/hub-cli.js", "serve"]
