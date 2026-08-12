@@ -125,7 +125,7 @@ try {
   assert.match(String(page.headers["strict-transport-security"]), /max-age=31536000/);
   process.stdout.write(JSON.stringify({ ok: true, transport: "https", reverse_proxy: "caddy", login: "password-cookie", sync: "round-trip", remote_command: "acknowledged" }) + "\n");
 } catch (error) {
-  try { compose(["logs", "--no-color"], environment, true); } catch (logsError) { process.stderr.write(String(logsError) + "\n"); }
+  try { process.stderr.write(composeOutput(["logs", "--no-color"], environment) + "\n"); } catch (logsError) { process.stderr.write(String(logsError) + "\n"); }
   throw error;
 } finally {
   try { compose(["down", "-v", "--remove-orphans"], environment, true); } catch {}
