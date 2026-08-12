@@ -967,7 +967,7 @@ export class Store {
       agent_id: issue.agent_id,
       user_assigned: issue.user_assigned,
       pending_actor: issue.pending_actor,
-      active_run: Boolean(issue.active_run_status || issue.session_owned),
+      active_run: Boolean(issue.active_run_status || issue.session_active_turn_id || this.getIssueReplyState(issue.id).status === "running"),
       needs_attention: issue.needs_attention,
       created_at: issue.created_at,
       updated_at: issue.updated_at,

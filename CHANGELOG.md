@@ -9,6 +9,7 @@ All notable changes to Better Codex are recorded here.
 ### Fixed
 
 - Keep the desktop injector from replacing the self-hosted Web UI injection when both surfaces are open in Codex.
+- Stop completed resumable Agent sessions from appearing as active runs in the self-hosted Web UI.
 
 ## [0.4.3-beta.2] - 2026-08-12
 
