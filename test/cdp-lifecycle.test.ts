@@ -65,7 +65,7 @@ test("a CDP WebSocket child process closes cleanly on supported Node versions", 
   }
 });
 
-test("a half-open CDP HTTP endpoint is bounded", async () => {
+test("a half-open CDP HTTP endpoint is bounded", { skip: process.platform === "linux" ? "Codex Desktop target discovery is unavailable on Linux" : false }, async () => {
   const sockets = new Set<import("node:net").Socket>();
   const server = createTcpServer(socket => {
     sockets.add(socket);
@@ -92,7 +92,7 @@ test("a half-open CDP HTTP endpoint is bounded", async () => {
   }
 });
 
-test("the overall target deadline includes a CDP command that never replies", async () => {
+test("the overall target deadline includes a CDP command that never replies", { skip: process.platform === "linux" ? "Codex Desktop target discovery is unavailable on Linux" : false }, async () => {
   const sockets = new Set<import("node:net").Socket>();
   const server = createServer((_request, response) => {
     const address = server.address();
