@@ -54,13 +54,19 @@ export function normalizeCodexUsage(value: unknown): CodexUsage | null {
 
 function queryCodexUsage(executable: string) {
   return new Promise<CodexUsage>((resolve, reject) => {
+    const maxOutputBytes = 1_048_576;
+    const maxLineBytes = 262_144;
     const child = spawn(executable, ["app-server"], { stdio: ["pipe", "pipe", "ignore"], windowsHide: true });
     let output = "";
+    let outputBytes = 0;
     let settled = false;
     const finish = (error?: Error, usage?: CodexUsage) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      child.stdout.removeAllListeners("data");
+      child.stdout.destroy();
+      child.stdin.destroy();
       child.kill();
       if (error) reject(error);
       else if (usage) resolve(usage);
@@ -69,7 +75,11 @@ function queryCodexUsage(executable: string) {
     const timer = setTimeout(() => finish(new Error("codex_usage_timeout")), 5000);
     child.on("error", error => finish(error));
     child.stdout.on("data", chunk => {
+      if (settled) return;
+      outputBytes += Buffer.byteLength(chunk);
+      if (outputBytes > maxOutputBytes) return finish(new Error("codex_usage_output_too_large"));
       output += String(chunk);
+      if (Buffer.byteLength(output) > maxLineBytes) return finish(new Error("codex_usage_line_too_large"));
       const lines = output.split(/\r?\n/);
       output = lines.pop() || "";
       for (const line of lines) {

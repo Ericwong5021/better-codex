@@ -3,7 +3,8 @@ import { existsSync, linkSync, mkdirSync, unlinkSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { databasePath, developmentDatabaseSnapshotSourcePath } from "./config.js";
-import type { IssueProjection, ProjectProjection, RemoteCommand, RemoteCommandAck, SyncEntityType, SyncProjection } from "./sync-contract.js";
+import { syncProtocolVersion } from "./sync-contract.js";
+import type { ConversationProjection, IssueProjection, ProjectProjection, RemoteCommand, RemoteCommandAck, SyncEntityType, SyncProjection } from "./sync-contract.js";
 
 export const issueStatuses = ["backlog", "todo", "in_progress", "in_review", "done", "blocked"] as const;
 export const issuePriorities = ["none", "low", "medium", "high", "urgent"] as const;
@@ -128,11 +129,13 @@ export type Issue = {
   latest_run_status?: "claimed" | "running" | "scheduling" | "completed" | "failed" | "interrupted" | null;
   latest_scheduler_status?: "pending" | "running" | "completed" | "failed" | "interrupted" | null;
   latest_scheduler_error?: string | null;
+  latest_run_finished_at?: string | null;
   run_thread_id?: string | null;
   session_thread_id?: string | null;
   session_status?: IssueSessionStatus | null;
   session_active_turn_id?: string | null;
   session_last_error?: string | null;
+  session_updated_at?: string | null;
   session_owned?: boolean;
   session_relay_connected?: boolean;
   session_relay_error?: string | null;
@@ -207,7 +210,7 @@ export function cleanMaxConcurrency(value: number | undefined) {
   return value;
 }
 
-const latestSchemaVersion = 7;
+const latestSchemaVersion = 9;
 
 function now() {
   return new Date().toISOString();
@@ -582,9 +585,14 @@ export class Store {
         throw error;
       }
     }
-    if (fromVersion < 7) {
+    if (fromVersion < 7) this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (7, ?)").run(now());
+    if (fromVersion < 9) {
       this.db.exec("BEGIN IMMEDIATE");
       try {
+        const issueColumns = new Set((this.db.prepare("PRAGMA table_info(issues)").all() as Array<{ name: string }>).map(column => column.name));
+        const dispatchReset = issueColumns.has("needs_attention") && issueColumns.has("pending_actor")
+          ? ", needs_attention = 0, pending_actor = 'user'"
+          : "";
         // Cancellation used to be a terminal issue status. Archive is now the
         // terminal action, so keep legacy issues recoverable without allowing
         // them to restart automatically when they are restored.
@@ -593,9 +601,10 @@ export class Store {
           SET status = 'backlog',
               archived_at = COALESCE(archived_at, updated_at),
               version = version + 1
+              ${dispatchReset}
           WHERE status = 'cancelled'
         `);
-        this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (7, ?)").run(now());
+        this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (9, ?)").run(now());
         this.db.exec("COMMIT");
       } catch (error) {
         this.db.exec("ROLLBACK");
@@ -618,15 +627,36 @@ export class Store {
       ON CONFLICT(entity_type, entity_id) DO UPDATE SET event_id = excluded.event_id, changed_at = excluded.changed_at;
     `;
     this.db.exec(`
-      CREATE TRIGGER IF NOT EXISTS sync_project_insert AFTER INSERT ON projects BEGIN ${dirty("project", "NEW.id")} END;
-      CREATE TRIGGER IF NOT EXISTS sync_project_update AFTER UPDATE OF name, identifier_prefix ON projects BEGIN ${dirty("project", "NEW.id")} END;
-      CREATE TRIGGER IF NOT EXISTS sync_project_delete AFTER DELETE ON projects BEGIN ${removed("project", "OLD.id")} END;
-      CREATE TRIGGER IF NOT EXISTS sync_issue_insert AFTER INSERT ON issues BEGIN ${dirty("issue", "NEW.id")} END;
-      CREATE TRIGGER IF NOT EXISTS sync_issue_update AFTER UPDATE OF project_id, title, description, status, priority, labels_json, sort_order, pinned, archived_at, agent_id, agent_enabled, user_assigned, needs_attention, pending_actor ON issues BEGIN ${dirty("issue", "NEW.id")} END;
-      CREATE TRIGGER IF NOT EXISTS sync_issue_delete AFTER DELETE ON issues BEGIN ${removed("issue", "OLD.id")} END;
-      CREATE TRIGGER IF NOT EXISTS sync_run_insert AFTER INSERT ON issue_runs BEGIN ${dirty("issue", "NEW.issue_id")} END;
-      CREATE TRIGGER IF NOT EXISTS sync_run_update AFTER UPDATE OF status, scheduler_status ON issue_runs BEGIN ${dirty("issue", "NEW.issue_id")} END;
-      CREATE TRIGGER IF NOT EXISTS sync_run_delete AFTER DELETE ON issue_runs BEGIN ${dirty("issue", "OLD.issue_id")} END;
+      DROP TRIGGER IF EXISTS sync_project_insert;
+      DROP TRIGGER IF EXISTS sync_project_update;
+      DROP TRIGGER IF EXISTS sync_project_delete;
+      DROP TRIGGER IF EXISTS sync_issue_insert;
+      DROP TRIGGER IF EXISTS sync_issue_update;
+      DROP TRIGGER IF EXISTS sync_issue_delete;
+      DROP TRIGGER IF EXISTS sync_run_insert;
+      DROP TRIGGER IF EXISTS sync_run_update;
+      DROP TRIGGER IF EXISTS sync_run_delete;
+      DROP TRIGGER IF EXISTS sync_session_insert;
+      DROP TRIGGER IF EXISTS sync_session_update;
+      DROP TRIGGER IF EXISTS sync_session_delete;
+      DROP TRIGGER IF EXISTS sync_reply_insert;
+      DROP TRIGGER IF EXISTS sync_reply_update;
+      DROP TRIGGER IF EXISTS sync_reply_delete;
+      CREATE TRIGGER sync_project_insert AFTER INSERT ON projects BEGIN ${dirty("project", "NEW.id")} END;
+      CREATE TRIGGER sync_project_update AFTER UPDATE OF name, identifier_prefix ON projects BEGIN ${dirty("project", "NEW.id")} END;
+      CREATE TRIGGER sync_project_delete AFTER DELETE ON projects BEGIN ${removed("project", "OLD.id")} END;
+      CREATE TRIGGER sync_issue_insert AFTER INSERT ON issues BEGIN ${dirty("issue", "NEW.id")} END;
+      CREATE TRIGGER sync_issue_update AFTER UPDATE OF project_id, title, description, status, priority, labels_json, sort_order, pinned, archived_at, agent_id, agent_enabled, user_assigned, needs_attention, pending_actor ON issues BEGIN ${dirty("issue", "NEW.id")} END;
+      CREATE TRIGGER sync_issue_delete AFTER DELETE ON issues BEGIN ${removed("issue", "OLD.id")} END;
+      CREATE TRIGGER sync_run_insert AFTER INSERT ON issue_runs BEGIN ${dirty("issue", "NEW.issue_id")} END;
+      CREATE TRIGGER sync_run_update AFTER UPDATE OF status, scheduler_status, thread_id ON issue_runs BEGIN ${dirty("issue", "NEW.issue_id")} END;
+      CREATE TRIGGER sync_run_delete AFTER DELETE ON issue_runs BEGIN ${dirty("issue", "OLD.issue_id")} END;
+      CREATE TRIGGER sync_session_insert AFTER INSERT ON issue_sessions BEGIN ${dirty("issue", "NEW.issue_id")} END;
+      CREATE TRIGGER sync_session_update AFTER UPDATE OF status, active_turn_id, last_turn_id, last_agent_message, last_error ON issue_sessions BEGIN ${dirty("issue", "NEW.issue_id")} END;
+      CREATE TRIGGER sync_session_delete AFTER DELETE ON issue_sessions BEGIN ${dirty("issue", "OLD.issue_id")} END;
+      CREATE TRIGGER sync_reply_insert AFTER INSERT ON issue_replies BEGIN ${dirty("issue", "NEW.issue_id")} END;
+      CREATE TRIGGER sync_reply_update AFTER UPDATE OF status, message, error, started_at, finished_at ON issue_replies BEGIN ${dirty("issue", "NEW.issue_id")} END;
+      CREATE TRIGGER sync_reply_delete AFTER DELETE ON issue_replies BEGIN ${dirty("issue", "OLD.issue_id")} END;
     `);
   }
 
@@ -895,13 +925,14 @@ export class Store {
   }
 
   initializeSyncQueue() {
-    if (this.db.prepare("SELECT value FROM sync_cursor WHERE key = 'initialized'").get()) return;
+    const initialized = this.db.prepare("SELECT value FROM sync_cursor WHERE key = 'initialized_protocol'").get() as { value: string } | undefined;
+    if (initialized?.value === syncProtocolVersion) return;
     const timestamp = now();
     this.db.exec("BEGIN IMMEDIATE");
     try {
       this.db.prepare("INSERT OR REPLACE INTO sync_outbox (entity_type, entity_id, event_id, changed_at) SELECT 'project', id, lower(hex(randomblob(16))), ? FROM projects").run(timestamp);
       this.db.prepare("INSERT OR REPLACE INTO sync_outbox (entity_type, entity_id, event_id, changed_at) SELECT 'issue', id, lower(hex(randomblob(16))), ? FROM issues").run(timestamp);
-      this.db.prepare("INSERT OR REPLACE INTO sync_cursor (key, value) VALUES ('initialized', ?)").run(timestamp);
+      this.db.prepare("INSERT OR REPLACE INTO sync_cursor (key, value) VALUES ('initialized_protocol', ?)").run(syncProtocolVersion);
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");
@@ -968,6 +999,12 @@ export class Store {
     }
     const issue = this.getIssue(id);
     if (!issue) return null;
+    const reply = this.getIssueReplyState(issue.id);
+    const lastActivityFinishedAt = [
+      ["completed", "failed", "interrupted"].includes(issue.latest_run_status || "") ? issue.latest_run_finished_at : null,
+      ["succeeded", "failed", "interrupted"].includes(reply.status) ? reply.finished_at : null,
+      ["idle", "interrupted", "failed", "disconnected"].includes(issue.session_status || "") ? issue.session_updated_at : null,
+    ].filter((value): value is string => Boolean(value)).sort().at(-1) || null;
     return {
       id: issue.id,
       identifier: issue.identifier,
@@ -981,7 +1018,17 @@ export class Store {
       pinned: issue.pinned,
       archived_at: issue.archived_at,
       assigned: Boolean(issue.agent_enabled || issue.user_assigned),
-      active_run: Boolean(issue.active_run_status || issue.session_owned),
+      agent_enabled: issue.agent_enabled,
+      agent_id: issue.agent_id,
+      user_assigned: issue.user_assigned,
+      pending_actor: issue.pending_actor,
+      active_run_status: issue.active_run_status ?? null,
+      latest_run_status: issue.latest_run_status ?? null,
+      latest_scheduler_status: issue.latest_scheduler_status ?? null,
+      session_status: issue.session_status ?? null,
+      reply_status: reply.status,
+      has_conversation: Boolean(issue.run_thread_id),
+      last_activity_finished_at: lastActivityFinishedAt,
       needs_attention: issue.needs_attention,
       created_at: issue.created_at,
       updated_at: issue.updated_at,
@@ -989,10 +1036,10 @@ export class Store {
     } satisfies IssueProjection;
   }
 
-  applyRemoteCommand(command: RemoteCommand): RemoteCommandAck {
+  async applyRemoteCommand(command: RemoteCommand, handlers: { reply?: (issueId: string, requestId: string, message: string, files: Array<{ name: string; type: string; data: string }>) => void | Promise<void>; stop?: (issueId: string) => void | Promise<void> } = {}): Promise<RemoteCommandAck> {
     const receipt = this.db.prepare("SELECT result_json FROM sync_command_receipts WHERE command_id = ?").get(command.command_id) as { result_json: string } | undefined;
     if (receipt) return JSON.parse(receipt.result_json) as RemoteCommandAck;
-    const result = (() => {
+    const result = await (async () => {
       try {
         const payload = command.payload;
         if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("invalid_command_payload");
@@ -1007,16 +1054,30 @@ export class Store {
             status: payload.status as IssueStatus | undefined,
             priority: payload.priority as IssuePriority | undefined,
             labels: Array.isArray(payload.labels) ? payload.labels as string[] : [],
+            agentEnabled: payload.agent_enabled === true,
+            agentId: typeof payload.agent_id === "string" ? payload.agent_id : undefined,
             userAssigned: payload.user_assigned === true,
           });
         } else {
           const current = this.getIssue(command.entity_id);
           if (!current) throw new Error("issue_not_found");
-          if (current.version !== command.base_revision) throw new Error("version_conflict");
-          if (current.active_run_status || current.session_active_turn_id || this.getIssueReplyState(current.id).status === "running") throw new Error("issue_execution_running");
+          if (!["issue.reply", "issue.stop"].includes(command.operation) && current.version !== command.base_revision) throw new Error("version_conflict");
+          if (!["issue.reply", "issue.stop"].includes(command.operation) && (current.active_run_status || current.session_active_turn_id || this.getIssueReplyState(current.id).status === "running")) throw new Error("issue_execution_running");
           if (command.operation === "issue.archive") issue = this.archiveIssue(current.id, current.version);
           else if (command.operation === "issue.restore") issue = this.unarchiveIssue(current.id, current.version);
-          else {
+          else if (command.operation === "issue.reply") {
+            if (current.archived_at) throw new Error("issue_archived");
+            if (!handlers.reply) throw new Error("remote_reply_unavailable");
+            const message = String(payload.message || "").trim();
+            const files = Array.isArray(payload.files) ? payload.files as Array<{ name: string; type: string; data: string }> : [];
+            if (!message && !files.length) throw new Error("message_required");
+            await handlers.reply(current.id, command.command_id, message, files);
+            issue = this.getIssue(current.id)!;
+          } else if (command.operation === "issue.stop") {
+            if (!handlers.stop) throw new Error("remote_stop_unavailable");
+            await handlers.stop(current.id);
+            issue = this.getIssue(current.id)!;
+          } else {
             const patch: IssuePatch = {};
             if (command.operation === "issue.move") {
               if (payload.status !== undefined) patch.status = payload.status as IssueStatus;
@@ -1033,9 +1094,19 @@ export class Store {
               if (payload.labels !== undefined) patch.labels = payload.labels as string[];
               if (payload.sort_order !== undefined) patch.sort_order = Number(payload.sort_order);
               if (payload.pinned !== undefined) patch.pinned = Boolean(payload.pinned);
+              if (payload.agent_enabled !== undefined) patch.agent_enabled = Boolean(payload.agent_enabled);
+              if (payload.agent_id !== undefined) patch.agent_id = String(payload.agent_id) || null;
               if (payload.user_assigned !== undefined) patch.user_assigned = Boolean(payload.user_assigned);
+              if (command.operation === "issue.start") {
+                patch.agent_enabled = true;
+                patch.user_assigned = false;
+                patch.agent_id = typeof payload.agent_id === "string" ? payload.agent_id || null : current.agent_id;
+                patch.pending_actor = "agent";
+                patch.needs_attention = true;
+              }
             }
             issue = this.updateIssue(current.id, current.version, patch);
+            if (command.operation === "issue.start") this.enqueueManualStart(issue.id);
           }
         }
         return { command_id: command.command_id, status: "applied", error: null, projection: this.syncProjection("issue", issue.id) as IssueProjection } satisfies RemoteCommandAck;
@@ -1305,12 +1376,12 @@ export class Store {
     const rows = this.db.prepare(`
       SELECT issues.*, active_run.status AS active_run_status, active_run.started_at AS active_run_started_at,
         latest_run.status AS latest_run_status, latest_run.scheduler_status AS latest_scheduler_status,
-        latest_run.scheduler_error AS latest_scheduler_error,
+        latest_run.scheduler_error AS latest_scheduler_error, latest_run.finished_at AS latest_run_finished_at,
         COALESCE(issue_sessions.thread_id, latest_thread.thread_id) AS run_thread_id,
         issue_sessions.thread_id AS session_thread_id,
         issue_sessions.status AS session_status,
         issue_sessions.active_turn_id AS session_active_turn_id,
-        issue_sessions.last_error AS session_last_error,
+        issue_sessions.last_error AS session_last_error, issue_sessions.updated_at AS session_updated_at,
         CASE WHEN issue_sessions.issue_id IS NULL THEN 0 ELSE 1 END AS session_owned,
         COALESCE((SELECT CASE WHEN session_relay.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now') THEN 1 ELSE 0 END FROM session_relay WHERE singleton = 1), 0) AS session_relay_connected,
         (SELECT error FROM session_relay WHERE singleton = 1) AS session_relay_error
@@ -1480,6 +1551,13 @@ export class Store {
           ORDER BY issue_runs.started_at DESC, issue_runs.rowid DESC
           LIMIT 1
         ) AS latest_scheduler_error,
+        (
+          SELECT issue_runs.finished_at
+          FROM issue_runs
+          WHERE issue_runs.issue_id = issues.id
+          ORDER BY issue_runs.started_at DESC, issue_runs.rowid DESC
+          LIMIT 1
+        ) AS latest_run_finished_at,
         COALESCE((
           SELECT issue_sessions.thread_id
           FROM issue_sessions
@@ -1514,6 +1592,11 @@ export class Store {
           FROM issue_sessions
           WHERE issue_sessions.issue_id = issues.id
         ) AS session_last_error,
+        (
+          SELECT issue_sessions.updated_at
+          FROM issue_sessions
+          WHERE issue_sessions.issue_id = issues.id
+        ) AS session_updated_at,
         EXISTS(SELECT 1 FROM issue_sessions WHERE issue_sessions.issue_id = issues.id) AS session_owned,
         COALESCE((SELECT CASE WHEN session_relay.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now') THEN 1 ELSE 0 END FROM session_relay WHERE singleton = 1), 0) AS session_relay_connected,
         (SELECT error FROM session_relay WHERE singleton = 1) AS session_relay_error
@@ -3229,5 +3312,22 @@ export class Store {
         finished_at = excluded.finished_at
     `).run(state.issue_id, state.request_id || "", state.status, state.message, state.error || null, state.started_at || now(), state.finished_at || null);
     return this.getIssueReplyState(state.issue_id);
+  }
+
+  conversationProjection(issueId: string, messages: ConversationProjection["messages"]): ConversationProjection {
+    const issue = this.getIssue(issueId);
+    if (!issue) throw new Error("issue_not_found");
+    const reply = this.getIssueReplyState(issueId);
+    const projected = messages.slice(-80).map(message => ({ ...message, html: "" }));
+    if (reply.status === "running" && reply.message && !projected.some(message => message.role === "user" && message.markdown === reply.message)) {
+      projected.push({ id: `reply-${reply.request_id || issueId}`, role: "user", markdown: reply.message, html: "", phase: null, timestamp: reply.started_at || null });
+    }
+    return {
+      issue_id: issueId,
+      found: projected.length > 0,
+      messages: projected.slice(-80),
+      reply,
+      updated_at: [issue.updated_at, reply.finished_at || reply.started_at || "", ...projected.map(message => message.timestamp || "")].sort().at(-1) || issue.updated_at,
+    };
   }
 }

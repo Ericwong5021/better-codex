@@ -220,6 +220,7 @@ const eventCursorKey = "better-codex-web-event-cursor";
 let profileLocale = "zh-CN";
 let usageLoadedAt = 0;
 let usageLoading = false;
+let cachedUsage;
 
 function profileText(zh, en) {
   return profileLocale === "zh-CN" ? zh : en;
@@ -237,6 +238,7 @@ function updateWebProfile(detail) {
   profileKind.textContent = profileText("Codex 账户", "Codex account");
   usageTitle.textContent = profileText("剩余用量", "Usage remaining");
   profileButton.setAttribute("aria-label", profileText("查看 Codex 额度", "View Codex usage"));
+  if (usageLoadedAt) renderUsage(cachedUsage);
 }
 
 function usageWindowLabel(minutes) {
@@ -311,8 +313,10 @@ async function loadUsage() {
   try {
     const result = await requestRuntime({ path: "/api/account/usage", method: "GET" });
     usageLoadedAt = Date.now();
-    renderUsage(result?.usage);
+    cachedUsage = result?.usage ?? null;
+    renderUsage(cachedUsage);
   } catch {
+    cachedUsage = null;
     renderUsage(null);
   } finally {
     usageLoading = false;
@@ -567,7 +571,7 @@ export function betterCodexWebHostJavaScript(remote = false) {
   if (!remote) return webHostJavaScript;
   return webHostJavaScript
     .replace('kind: "web",', 'kind: "remote",')
-    .replace('issues: "read-write", agents: "read-write", liveUpdates: true, nativeThreads: false', 'issues: "read-write", agents: "unavailable", liveUpdates: true, nativeThreads: false')
+    .replace('issues: "read-write", agents: "read-write", liveUpdates: true, nativeThreads: false', 'issues: "read-write", agents: "read-only", liveUpdates: true, nativeThreads: false')
     .replaceAll("Runtime", "Hub")
     .replaceAll("better-codex web", "Hub 管理命令");
 }

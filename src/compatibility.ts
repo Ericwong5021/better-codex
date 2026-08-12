@@ -2,7 +2,7 @@ import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { compatibilityCurrentPath, compatibilityStatusPath, compatibilityVersionsPath, ensureDirectories, runtimeCurrentPath } from "./config.js";
 
-export const coreVersion = "0.4.3-beta.1";
+export const coreVersion = "0.4.3-beta.7";
 
 export type CompatibilityManifest = {
   version: string;
@@ -225,6 +225,7 @@ export function targetAllowed(target: { url?: string; title?: string }) {
   const compatibility = activeCompatibility();
   const url = target.url ?? "";
   if (compatibility.targetRules.excludedRoutes.some(route => url.includes(route))) return false;
+  if (/^https?:\/\//i.test(url)) return false;
   return compatibility.targetRules.urlPrefixes.some(prefix => url.startsWith(prefix))
     || compatibility.targetRules.titleTerms.some(term => target.title?.includes(term));
 }

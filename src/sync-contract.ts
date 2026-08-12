@@ -1,8 +1,28 @@
-import type { IssuePriority, IssueStatus } from "./db.js";
+import type { IssuePriority, IssueReplyStatus, IssueSessionStatus, IssueStatus } from "./db.js";
+import type { ConversationMessage } from "./session-transcript.js";
 
-export const syncProtocolVersion = "sync/v1";
-export const syncEntityTypes = ["project", "issue"] as const;
+export const syncProtocolVersion = "sync/v5";
+export const syncEntityTypes = ["project", "issue", "agent_directory"] as const;
 export type SyncEntityType = typeof syncEntityTypes[number];
+
+export type AgentProjection = {
+  id: string;
+  role: string;
+  name: string;
+  name_en: string;
+  description: string;
+  avatar: string;
+  version: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AgentDirectoryProjection = {
+  id: string;
+  agents: AgentProjection[];
+  default_avatar: string;
+  local_revision: number;
+};
 
 export type ProjectProjection = {
   id: string;
@@ -26,7 +46,17 @@ export type IssueProjection = {
   pinned: boolean;
   archived_at: string | null;
   assigned: boolean;
-  active_run: boolean;
+  agent_enabled: boolean;
+  agent_id: string | null;
+  user_assigned: boolean;
+  pending_actor: "user" | "agent";
+  active_run_status: "claimed" | "running" | "scheduling" | null;
+  latest_run_status: "claimed" | "running" | "scheduling" | "completed" | "failed" | "interrupted" | null;
+  latest_scheduler_status: "pending" | "running" | "completed" | "failed" | "interrupted" | null;
+  session_status: IssueSessionStatus | null;
+  reply_status: IssueReplyStatus;
+  has_conversation: boolean;
+  last_activity_finished_at: string | null;
   needs_attention: boolean;
   created_at: string;
   updated_at: string;
@@ -44,7 +74,7 @@ export type RuntimeProjection = {
   health_state: "online" | "offline";
 };
 
-export type SyncProjection = ProjectProjection | IssueProjection;
+export type SyncProjection = ProjectProjection | IssueProjection | AgentDirectoryProjection;
 
 export type SyncChange = {
   event_id: string;
@@ -69,7 +99,7 @@ export type SyncPushResponse = {
   lease_expires_at: string;
 };
 
-export const remoteCommandOperations = ["issue.create", "issue.update", "issue.move", "issue.archive", "issue.restore"] as const;
+export const remoteCommandOperations = ["issue.create", "issue.update", "issue.move", "issue.start", "issue.stop", "issue.reply", "issue.archive", "issue.restore"] as const;
 export type RemoteCommandOperation = typeof remoteCommandOperations[number];
 export type RemoteCommandStatus = "pending" | "applied" | "rejected" | "conflict" | "expired";
 
@@ -87,11 +117,32 @@ export type RemoteCommand = {
   error: string | null;
 };
 
+export type RemoteFilePayload = {
+  name: string;
+  type: string;
+  data: string;
+};
+
 export type RemoteCommandAck = {
   command_id: string;
   status: Exclude<RemoteCommandStatus, "pending" | "expired">;
   error: string | null;
   projection: IssueProjection | null;
+};
+
+export type ConversationProjection = {
+  issue_id: string;
+  found: boolean;
+  messages: ConversationMessage[];
+  reply: {
+    request_id?: string;
+    status: IssueReplyStatus;
+    message: string;
+    error?: string;
+    started_at?: string;
+    finished_at?: string;
+  };
+  updated_at: string;
 };
 
 export type RemoteIssueState = {
@@ -109,6 +160,8 @@ export type HubBoard = {
   revision: number;
   projects: ProjectProjection[];
   issues: RemoteIssueProjection[];
+  agents: AgentProjection[];
+  default_avatar: string;
   runtime: RuntimeProjection | null;
 };
 
@@ -126,4 +179,5 @@ export const forbiddenProjectionKeys = [
   "credential",
   "attachment",
   "log",
+  "rollout_path",
 ] as const;

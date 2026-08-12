@@ -107,6 +107,7 @@ test("web host boots the shared DOM injection behind a local session", async () 
     assert.match(hostScript, /subscribe: subscribeRuntime/);
     assert.match(hostScript, /better-codex-web-event-cursor/);
     assert.match(hostScript, /better-codex:bootstrap/);
+    assert.match(hostScript, /if \(usageLoadedAt\) renderUsage\(cachedUsage\)/);
     assert.match(hostScript, /\/api\/account\/usage/);
     assert.match(hostScript, /profileButton\.setAttribute\("aria-expanded"/);
 

@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { randomUUID, timingSafeEqual } from "node:crypto";
-import { closeSync, openSync, readFileSync, writeFileSync } from "node:fs";
+import { closeSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
 import { isSea } from "node:sea";
@@ -16,7 +16,7 @@ import { attachmentPath, runPath, runtimePort, token, updateLogPath } from "./co
 import { acquireRuntimeLock, clearRuntimeState, createRuntimeIdentity, publishRuntimeState } from "./runtime-state.js";
 import { activeCoreCommand, checkGatewayUpdate, getGatewayUpdateState, installGatewayUpdate, recordGatewayUpdateActivation, startGatewayUpdateChecks } from "./updater.js";
 import { packagedBuild } from "./build.js";
-import { join } from "node:path";
+import { basename, extname, join } from "node:path";
 import { normalizeSessionId, readConversationActivity, readConversationResult, sessionWorkspace } from "./session-transcript.js";
 import { IssueWorker } from "./worker.js";
 import { maxMockupBytes, normalizeMockupLocale, readMockupState, replaceMockupState, resetMockupState, updateMockupState } from "./mockup.js";
@@ -51,6 +51,20 @@ function savePastedImage(value: unknown) {
   const path = join(attachmentPath, name);
   writeFileSync(path, bytes, { flag: "wx", mode: 0o600 });
   return { name, path };
+}
+
+function saveRemoteFile(value: { name: string; type: string; data: string }) {
+  const match = value.data.match(/^data:([a-z0-9][a-z0-9.+-]*\/[a-z0-9][a-z0-9.+-]*);base64,([A-Za-z0-9+/]+={0,2})$/i);
+  if (!match || match[1].toLowerCase() !== value.type.toLowerCase()) throw new Error("invalid_file_attachment");
+  const bytes = Buffer.from(match[2], "base64");
+  if (!bytes.length || bytes.length > maxPastedImageBytes) throw new Error("invalid_file_attachment");
+  const inputName = basename(value.name).replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^[-.]+/, "").slice(0, 120) || "file";
+  const extension = extname(inputName).slice(0, 16);
+  const stem = basename(inputName, extension).slice(0, Math.max(1, 100 - extension.length));
+  const name = `web-${Date.now()}-${randomUUID().slice(0, 8)}-${stem}${extension}`;
+  const path = join(attachmentPath, name);
+  writeFileSync(path, bytes, { flag: "wx", mode: 0o600 });
+  return path;
 }
 
 async function reconcileInterruptedIssues(store: Store, issues: Issue[]) {
@@ -429,7 +443,38 @@ export function startServer() {
   const eventHistory: number[] = [];
   let eventRevision = 0;
   const worker = new IssueWorker(store);
-  const syncClient = new SyncClient(store);
+  const syncClient = new SyncClient(
+    store,
+    5_000,
+    undefined,
+    command => {
+      if (command.operation === "issue.start") worker.startIssue(command.entity_id);
+    },
+    async issueId => {
+      const issue = store.getIssue(issueId);
+      if (!issue?.run_thread_id) return null;
+      const conversation = await readConversationResult(issue.run_thread_id);
+      return store.conversationProjection(issueId, conversation.messages);
+    },
+    (issueId, requestId, message, files) => {
+      const paths: string[] = [];
+      try {
+        for (const file of files) paths.push(saveRemoteFile(file));
+        const fileBlock = paths.length ? `附带文件：\n${paths.map(path => `- ${path}`).join("\n")}` : "";
+        worker.sendIssueMessage(issueId, requestId, [message, fileBlock].filter(Boolean).join("\n\n"));
+      } catch (error) {
+        for (const path of paths) {
+          try { unlinkSync(path); } catch {}
+        }
+        throw error;
+      }
+    },
+    async issueId => {
+      const accepted = await worker.stopIssue(issueId);
+      const current = store.getIssue(issueId);
+      if (!accepted && (current?.active_run_status || current?.session_active_turn_id || store.getIssueReplyState(issueId).status === "running")) throw new Error("issue_stop_timeout");
+    },
+  );
   const sendEvent = (response: ServerResponse, event: string, revision: number) => {
     response.write(`id: ${revision}\nevent: ${event}\ndata: ${JSON.stringify({ revision })}\n\n`);
   };
@@ -955,8 +1000,9 @@ export function startServer() {
         if (updateInstallInProgress) throw new Error("update_in_progress");
         if (!worker.pauseForUpdate()) throw new Error("issue_execution_running");
         updateInstallInProgress = true;
-        try {
-          const result = await installGatewayUpdate();
+        const installation = installGatewayUpdate();
+        sendJson(response, 202, { accepted: true, state: getGatewayUpdateState() });
+        void installation.then(result => {
           const updated = result.core.updated || result.compatibility.updated;
           const updates = { core: result.core.updated ? result.core.version : null, compatibility: result.compatibility.updated ? result.compatibility.version : null };
           const shouldRelaunch = updated && !updateRelaunchScheduled;
@@ -964,7 +1010,6 @@ export function startServer() {
             updateRelaunchScheduled = true;
             recordGatewayUpdateActivation("activating", null, updates);
           }
-          sendJson(response, updated ? 202 : 200, { accepted: updated, updated, state: getGatewayUpdateState(), result });
           if (!shouldRelaunch) {
             updateInstallInProgress = false;
             worker.resumeAfterUpdate();
@@ -988,12 +1033,13 @@ export function startServer() {
               recordGatewayUpdateActivation("error", error instanceof Error ? error.message : "update_activation_failed");
             }
           }, 250);
-          return;
-        } catch (error) {
+        }).catch(error => {
           updateInstallInProgress = false;
+          updateRelaunchScheduled = false;
           worker.resumeAfterUpdate();
-          throw error;
-        }
+          if (getGatewayUpdateState().status !== "error") recordGatewayUpdateActivation("error", error instanceof Error ? error.message : "update_activation_failed");
+        });
+        return;
       }
       if (url.pathname === "/api/agents" && method === "GET") return sendJson(response, 200, visibleAgentProfiles());
       if (url.pathname === "/api/agents" && method === "POST") {

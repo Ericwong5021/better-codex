@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { normalizeCodexUsage } from "../src/codex-usage.js";
 
@@ -29,4 +30,13 @@ test("normalizeCodexUsage rejects missing windows and clamps percentages", () =>
     windowDurationMins: 300,
     resetsAt: 1,
   });
+});
+
+test("Codex usage transport bounds untrusted app-server output", () => {
+  const source = readFileSync(new URL("../src/codex-usage.ts", import.meta.url), "utf8");
+  assert.match(source, /const maxOutputBytes = 1_048_576/);
+  assert.match(source, /const maxLineBytes = 262_144/);
+  assert.match(source, /outputBytes > maxOutputBytes/);
+  assert.match(source, /Buffer\.byteLength\(output\) > maxLineBytes/);
+  assert.match(source, /child\.stdout\.removeAllListeners\("data"\)/);
 });

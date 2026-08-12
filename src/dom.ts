@@ -270,6 +270,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const HOST_KIND = ${JSON.stringify(host)};
     const HOST_CAPABILITIES = window.betterCodexHost?.capabilities || {};
     const READ_ONLY = HOST_CAPABILITIES.issues === "read-only";
+    const AGENTS_READ_ONLY = HOST_CAPABILITIES.agents === "read-only";
+    const REMOTE = window.betterCodexHost?.kind === "remote";
     if (READ_ONLY) document.documentElement.setAttribute("data-better-codex-read-only", "true");
     const HELP_MODE_MARKDOWN = ${helpModeMarkdown};
     const previous = window.__betterCodexInjection__;
@@ -659,12 +661,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function issueSessionId(issue) {
+      if (REMOTE && issue?.has_conversation) return String(issue.id || "");
       return normalizeSessionId(issue?.run_thread_id) || "";
     }
 
     function issueExecutionRunning(issue) {
       return ["claimed", "running", "scheduling"].includes(issue?.active_run_status)
         || issue?.reply_status === "running"
+        || ["starting", "active", "stopping", "waiting_on_approval", "waiting_on_user"].includes(issue?.session_status)
         || Boolean(issue?.session_active_turn_id);
     }
 
@@ -1256,7 +1260,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function api(path, options = {}) {
-      if (READ_ONLY && String(options.method || "GET").toUpperCase() !== "GET") return Promise.reject(new Error("remote_read_only"));
+      const method = String(options.method || "GET").toUpperCase();
+      if (READ_ONLY && method !== "GET") return Promise.reject(new Error("remote_read_only"));
       const requestPath = path + (path.includes("?") ? "&" : "?") + "locale=" + encodeURIComponent(state.locale);
       const attempt = (retriesLeft) => {
         if (typeof window.betterCodexHost?.request === "function") {
@@ -1287,7 +1292,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           throw error;
         });
       };
-      return attempt(1);
+      return attempt(method === "GET" ? 1 : 0);
     }
 
     function startLiveUpdates() {
@@ -1778,13 +1783,58 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       syncCompletionNoticePosition();
     }
 
+    async function waitForUpdateCompletion(notice) {
+      const deadline = Date.now() + 10 * 60 * 1000;
+      const title = notice.querySelector(".better-codex-update-title");
+      const description = notice.querySelector(".better-codex-update-description");
+      while (!destroyed && updateNotice === notice && Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+        let update;
+        try {
+          update = await api("/api/update");
+        } catch (reason) {
+          if (destroyed || updateNotice !== notice) return;
+          const message = String(reason instanceof Error ? reason.message : reason || "");
+          if (["runtime_bridge_timeout", "runtime_bridge_unavailable", "runtime_unavailable", "injection_destroyed"].includes(message)) continue;
+          throw reason;
+        }
+        if (updateNotice !== notice) return;
+        if (update?.status === "error") throw new Error(String(update.error || "update_failed"));
+        if (update?.status === "current") {
+          notice.dataset.status = "current";
+          title.textContent = t("Better Codex 已是最新版本");
+          description.textContent = t("更新已完成。");
+          setTimeout(() => {
+            if (updateNotice !== notice) return;
+            notice.remove();
+            updateNotice = null;
+            updateNoticeResizeObserver?.disconnect();
+            updateNoticeResizeObserver = null;
+            syncCompletionNoticePosition();
+          }, 1800);
+          return;
+        }
+        if (update?.status === "restarting") {
+          notice.dataset.status = "restarting";
+          title.textContent = t("正在重启 Better Codex");
+          description.textContent = t("正在重启 Codex，稍后会自动恢复。");
+        } else {
+          notice.dataset.status = "installing";
+          title.textContent = t("正在更新 Better Codex");
+          description.textContent = t("正在下载并校验新版本，请不要关闭 Codex。");
+        }
+      }
+      if (!destroyed && updateNotice === notice) throw new Error("runtime_bridge_timeout");
+    }
+
     function renderUpdateNotice(update) {
       const version = String(update?.latestVersion || "");
       const activationError = update?.status === "error" && String(update?.error || "").startsWith("update_activation_failed:");
       const installError = update?.status === "error" && updateNotice?.dataset.status === "install-error";
+      const activeInstall = ["installing", "restarting", "current"].includes(updateNotice?.dataset.status || "");
       const noticeVersion = activationError ? String(update?.currentVersion || "activation-error") + ":" + String(update?.checkedAt || Date.now()) : version;
       if (!activationError && (update?.status !== "available" || !version)) {
-        if (installError) return;
+        if (installError || activeInstall) return;
         if (!["checking", "installing", "restarting"].includes(update?.status)) {
           updateNoticeResizeObserver?.disconnect();
           updateNoticeResizeObserver = null;
@@ -1857,23 +1907,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         try {
           const result = await api("/api/update/install", { method: "POST" });
           if (updateNotice !== notice) return;
-          if (result?.updated === false) {
-            notice.dataset.status = "current";
-            title.textContent = t("Better Codex 已是最新版本");
-            description.textContent = t("刚刚完成检查，无需更新。");
-            setTimeout(() => {
-              if (updateNotice !== notice) return;
-              notice.remove();
-              updateNotice = null;
-              updateNoticeResizeObserver?.disconnect();
-              updateNoticeResizeObserver = null;
-              syncCompletionNoticePosition();
-            }, 1800);
-            return;
-          }
-          notice.dataset.status = "restarting";
-          title.textContent = t("正在重启 Better Codex");
-          description.textContent = t("正在重启 Codex，稍后会自动恢复。");
+          if (result?.accepted !== true) throw new Error("update_not_accepted");
+          await waitForUpdateCompletion(notice);
         } catch (reason) {
           if (updateNotice !== notice) return;
           notice.dataset.status = "install-error";
@@ -1916,7 +1951,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           && record.issue
           && typeof record.issue.id === "string"
           && Number.isFinite(record.createdAt)
-          && [0, 1000, 5000, 10000].includes(record.duration));
+          && [0, 1000, 5000, 10000].includes(record.duration))
+          .map(record => ({ ...record, issue: completionNoticeSnapshot(record.issue) }));
       } catch {
         return [];
       }
@@ -1933,9 +1969,21 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       writeCompletionNoticeCache(readCompletionNoticeCache().filter(record => record.key !== key));
     }
 
+    function completionNoticeSnapshot(issue) {
+      return {
+        id: String(issue?.id || ""),
+        identifier: String(issue?.identifier || ""),
+        title: String(issue?.title || ""),
+        status: String(issue?.status || ""),
+        agent_id: typeof issue?.agent_id === "string" ? issue.agent_id : null,
+        updated_at: String(issue?.updated_at || ""),
+      };
+    }
+
     function cacheCompletionNotice(issue, duration) {
-      const key = String(issue?.id || "") + ":" + String(issue?.updated_at || Date.now()) + ":" + String(issue?.status || "");
-      const record = { key, issue, createdAt: Date.now(), duration };
+      const snapshot = completionNoticeSnapshot(issue);
+      const key = snapshot.id + ":" + (snapshot.updated_at || Date.now()) + ":" + snapshot.status;
+      const record = { key, issue: snapshot, createdAt: Date.now(), duration };
       const records = readCompletionNoticeCache().filter(item => item.key !== key);
       records.push(record);
       writeCompletionNoticeCache(records);
@@ -1944,11 +1992,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     function restoreCompletionNotices() {
       const now = Date.now();
-      const records = readCompletionNoticeCache().filter(record => record.duration === 0 || now - record.createdAt < record.duration);
+      const records = readCompletionNoticeCache().filter(record => (record.duration === 0 || now - record.createdAt < record.duration)
+        && state.issues.some(issue => issue.id === record.issue.id));
       writeCompletionNoticeCache(records);
       records.forEach(record => {
         if (completionNoticeSuppressed() && record.duration !== 0) return;
-        const issue = state.issues.find(item => item.id === record.issue.id) || record.issue;
+        const issue = state.issues.find(item => item.id === record.issue.id);
+        if (!issue) return;
         renderSessionEndNotice(issue, record);
       });
     }
@@ -1970,6 +2020,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         completionNoticeStack.id = "better-codex-completion-notices";
         completionNoticeStack.setAttribute(OWNED, "true");
         document.body.appendChild(completionNoticeStack);
+      }
+      if (completionNoticeStack.children.length >= COMPLETION_NOTICE_CACHE_LIMIT) {
+        const oldest = completionNoticeStack.firstElementChild;
+        completionNoticeDismissals.get(oldest)?.(false);
       }
       syncCompletionNoticePosition();
       const previousPositions = new Map(Array.from(completionNoticeStack.children, item => [item, item.getBoundingClientRect().top]));
@@ -2505,7 +2559,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     async function stopIssueSession(issueId) {
-      const updated = await api("/api/issues/" + encodeURIComponent(issueId) + "/stop", { method: "POST" });
+      const issue = state.issues.find(item => item.id === issueId);
+      const updated = await api("/api/issues/" + encodeURIComponent(issueId) + "/stop", { method: "POST", body: JSON.stringify({ version: issue?.version }) });
       await loadIssues();
       return state.issues.find(issue => issue.id === issueId) || updated;
     }
@@ -3266,7 +3321,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const previousPane = panel.dataset.agentPane || "preview";
       panel.dataset.agentPane = state.agentPane;
       const addAgent = panel.querySelector(".better-codex-agent-actions");
-      if (addAgent) addAgent.hidden = state.agentPane !== "preview";
+      if (addAgent) addAgent.hidden = AGENTS_READ_ONLY || state.agentPane !== "preview";
       panel.querySelectorAll("[data-agent-view]").forEach(button => button.classList.toggle("is-active", button.dataset.agentView === state.agentView));
       const query = state.agentSearch.trim().toLowerCase();
       const agents = state.agents.filter(agent => {
@@ -3400,6 +3455,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         state.languageSetting = setting;
         state.systemLocale = resolveSystemLocale(state.systemLocale);
         state.locale = setting === "system" ? state.systemLocale : setting;
+        if (HOST_KIND === "web") window.dispatchEvent(new CustomEvent("better-codex:bootstrap", { detail: { user: state.user, locale: state.locale } }));
         finish();
         panel?.remove();
         panel = null;
@@ -3692,8 +3748,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           const activityAgent = assignee || defaultAgent || { name: "Codex", is_default: true };
           const latestRunStatus = issue.latest_run_status || "";
           const replyResultState = issue.reply_status === "succeeded" ? "completed" : ["failed", "interrupted"].includes(issue.reply_status) ? issue.reply_status : "";
-          const executionState = issue.status === "blocked" ? "blocked" : replyResultState || (issue.latest_scheduler_error && issue.status === "in_review" ? "scheduler-failed" : latestRunStatus === "completed" ? "completed" : latestRunStatus === "failed" ? "failed" : latestRunStatus === "interrupted" ? "interrupted" : latestRunStatus === "scheduling" ? "scheduling" : latestRunStatus === "running" ? "running" : latestRunStatus === "claimed" ? "claimed" : issue.agent_enabled ? "not-started" : "");
-          const activeExecutionState = issue.active_run_status || (issue.reply_status === "running" ? "running" : "");
+          const executionState = issue.status === "done" ? "completed" : issue.status === "cancelled" ? "interrupted" : issue.status === "blocked" ? "blocked" : issue.status === "in_review" ? ((issue.latest_scheduler_error || issue.latest_scheduler_status === "failed") ? "scheduler-failed" : "in_review") : replyResultState || (latestRunStatus === "failed" ? "failed" : latestRunStatus === "interrupted" ? "interrupted" : latestRunStatus === "scheduling" ? "scheduling" : latestRunStatus === "running" ? "running" : latestRunStatus === "claimed" ? "claimed" : issue.agent_enabled ? "not-started" : "");
+          const sessionExecutionState = issue.session_status === "stopping" ? "stopping" : issue.session_status === "starting" ? "claimed" : ["active", "waiting_on_approval", "waiting_on_user"].includes(issue.session_status) ? "running" : "";
+          const activeExecutionState = issue.active_run_status || (issue.reply_status === "running" ? "running" : sessionExecutionState);
           const activityState = permissions.remotePending ? "remote-pending" : permissions.remoteConflict ? "remote-conflict" : enrichmentLocked ? "thinking" : issue.session_status === "stopping" ? "stopping" : activeExecutionState || executionState;
           const activityLabel = t(activityState === "remote-pending" ? "同步中" : activityState === "remote-conflict" ? "同步冲突" : enrichmentLocked ? "理解中" : activityState === "stopping" ? "正在停止…" : activityState === "running" ? "工作中" : activityState === "scheduling" ? "调度中" : activityState === "scheduler-failed" ? "调度失败" : activityState === "claimed" ? "排队中" : activityState === "in_review" ? "待审核" : activityState === "completed" ? "已完成" : activityState === "blocked" ? "已阻塞" : activityState === "failed" ? "执行失败" : activityState === "interrupted" ? "已停止" : activityState === "not-started" ? "未开始" : "");
           const activityIcon = activityState === "scheduling" ? '<span class="better-codex-activity-dot better-codex-scheduler-dot" aria-hidden="true"></span>' : activityState === "scheduler-failed" ? '<span class="better-codex-activity-dot better-codex-scheduler-failed-dot" aria-hidden="true"></span>' : ["completed", "interrupted", "not-started"].includes(activityState) ? '<span class="better-codex-activity-dot" aria-hidden="true"></span>' : ["failed", "blocked", "remote-conflict"].includes(activityState) ? icon("close") : agentAvatarMarkup(activityAgent, "better-codex-card-avatar");
@@ -3730,11 +3787,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (issueSessionSnapshot.size) {
         const ended = issues.filter(issue => {
           const previous = issueSessionSnapshot.get(issue.id);
-          return previous && ((["claimed", "running", "scheduling"].includes(previous.activeRunStatus) && !issue.active_run_status) || (previous.replyStatus === "running" && issue.reply_status !== "running"));
+          return previous && ((["claimed", "running", "scheduling"].includes(previous.activeRunStatus) && !issue.active_run_status) || (previous.replyStatus === "running" && issue.reply_status !== "running") || (issue.last_activity_finished_at && issue.last_activity_finished_at !== previous.lastActivityFinishedAt));
         });
         ended.sort((left, right) => new Date(left.updated_at).getTime() - new Date(right.updated_at).getTime()).forEach(renderSessionEndNotice);
       }
-      issueSessionSnapshot = new Map(issues.map(issue => [issue.id, { activeRunStatus: issue.active_run_status || "", replyStatus: issue.reply_status || "idle" }]));
+      issueSessionSnapshot = new Map(issues.map(issue => [issue.id, { activeRunStatus: issue.active_run_status || "", replyStatus: issue.reply_status || "idle", lastActivityFinishedAt: issue.last_activity_finished_at || "" }]));
       state.issues = issues;
       syncSessionHandoffFromHost();
       const dialog = document.getElementById("better-codex-dialog");
@@ -3806,6 +3863,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function startAgentCreate(draft = null) {
+      if (AGENTS_READ_ONLY) return;
       agentInspectorClosing = false;
       state.agentPane = "create";
       state.selectedAgentId = "";
@@ -3820,6 +3878,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const form = event.target.closest("[data-agent-form]");
       if (!form) return;
       event.preventDefault();
+      if (AGENTS_READ_ONLY) return;
       const mode = form.dataset.agentForm;
       const selected = state.agents.find(agent => agentKey(agent) === form.dataset.agentKey);
       const submit = form.querySelector('[type="submit"]');
@@ -3856,6 +3915,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     function onAgentsClick(event) {
       if (suppressAgentOutside) return;
+      if (AGENTS_READ_ONLY) return;
       const formAvatarButton = event.target.closest("[data-agent-avatar-form]");
       if (formAvatarButton) {
         const form = formAvatarButton.closest("form");
@@ -4083,7 +4143,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       }
 
       function persistReplyDraft(value) {
-        if (!issue) return;
+        if (!issue || REMOTE) return;
         replyDraftUpdate = replyDraftUpdate.catch(() => {}).then(async () => {
           let current = issue;
           for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -4228,7 +4288,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
       function header() {
         const breadcrumbProject = state.projects.find(item => item.id === draft.projectId);
-        const openThreadButton = issue && sessionId && !enrichmentLocked
+        const openThreadButton = issue && sessionId && !enrichmentLocked && HOST_CAPABILITIES.nativeThreads !== false
           ? '<button class="better-codex-dialog-open-thread" type="button" data-dialog-open-thread="' + escapeHtml(sessionId) + '">' + te(sessionHandoff ? "前往会话" : "在会话中打开") + '</button>'
           : "";
         const startNowButton = issue && !issue.archived_at && !sessionId && !issue.active_run_status && issue.status !== "done"
@@ -4252,8 +4312,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       function conversationStatusMarkup(replyStatus) {
         const enrichmentLocked = issuePermissions(issue).enrichmentPending;
         const latestRunStatus = issue?.latest_run_status || "";
-        const executionState = issue?.status === "blocked" ? "blocked" : issue?.latest_scheduler_error && issue?.status === "in_review" ? "scheduler-failed" : latestRunStatus === "completed" ? "completed" : latestRunStatus === "failed" ? "failed" : latestRunStatus === "interrupted" ? "interrupted" : latestRunStatus === "scheduling" ? "scheduling" : latestRunStatus === "running" ? "running" : latestRunStatus === "claimed" ? "claimed" : issue?.agent_enabled ? "not-started" : "";
-        const activeExecutionState = issue?.active_run_status || (replyStatus === "running" ? "running" : "");
+        const executionState = issue?.status === "done" ? "completed" : issue?.status === "cancelled" ? "interrupted" : issue?.status === "blocked" ? "blocked" : (issue?.latest_scheduler_error || issue?.latest_scheduler_status === "failed") && issue?.status === "in_review" ? "scheduler-failed" : latestRunStatus === "completed" ? "completed" : latestRunStatus === "failed" ? "failed" : latestRunStatus === "interrupted" ? "interrupted" : latestRunStatus === "scheduling" ? "scheduling" : latestRunStatus === "running" ? "running" : latestRunStatus === "claimed" ? "claimed" : issue?.agent_enabled ? "not-started" : "";
+        const sessionExecutionState = issue?.session_status === "stopping" ? "stopping" : issue?.session_status === "starting" ? "claimed" : ["active", "waiting_on_approval", "waiting_on_user"].includes(issue?.session_status) ? "running" : "";
+        const activeExecutionState = issue?.active_run_status || (replyStatus === "running" ? "running" : sessionExecutionState);
         const replyResultState = replyStatus === "succeeded" ? "completed" : ["failed", "interrupted"].includes(replyStatus) ? replyStatus : conversationFailureState;
         const relayFailure = issue?.session_relay_error && !issue?.session_relay_connected && issue?.active_run_status === "claimed";
         const activityState = enrichmentLocked ? "thinking" : issue?.session_status === "stopping" ? "stopping" : relayFailure ? "relay-failed" : activeExecutionState || replyResultState || executionState;
@@ -4286,7 +4347,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const inputDisabled = sessionHandoff ? " disabled" : "";
         const actionDisabled = stopping || sessionHandoff || (!working && !draft.reply.trim() && !draft.replyAttachments.length) ? " disabled" : "";
         const actionLabel = t(stopping ? "正在停止…" : working ? "停止任务" : "发送");
-        return '<div class="better-codex-composer" data-state="' + mode + '">' + attachmentList(draft.replyAttachments, "reply") + '<textarea name="reply" rows="2" placeholder="' + te(sessionHandoff ? "请前往会话继续对话" : "输入下一步要求…") + '" aria-label="' + te("回复") + '"' + inputDisabled + '>' + escapeHtml(draft.reply) + '</textarea><div class="better-codex-composer-toolbar"><button class="better-codex-composer-attach" type="button" data-conversation-attach aria-label="' + te("添加附件") + '" title="' + te("添加附件") + '"' + inputDisabled + '>' + icon("plus", "", "1.9") + '</button><button class="better-codex-composer-send" type="button" data-conversation-send data-composer-mode="' + mode + '" aria-label="' + escapeHtml(actionLabel) + '" title="' + escapeHtml(actionLabel) + '"' + actionDisabled + '>' + icon(working ? "stop" : "send", "", working ? "2.5" : "2") + '</button></div></div>';
+        const attachments = attachmentList(draft.replyAttachments, "reply");
+        const attachButton = '<button class="better-codex-composer-attach" type="button" data-conversation-attach aria-label="' + te("添加附件") + '" title="' + te("添加附件") + '"' + inputDisabled + '>' + icon("plus", "", "1.9") + '</button>';
+        return '<div class="better-codex-composer" data-state="' + mode + '">' + attachments + '<textarea name="reply" rows="2" placeholder="' + te(sessionHandoff ? "请前往会话继续对话" : "输入下一步要求…") + '" aria-label="' + te("回复") + '"' + inputDisabled + '>' + escapeHtml(draft.reply) + '</textarea><div class="better-codex-composer-toolbar">' + attachButton + '<button class="better-codex-composer-send" type="button" data-conversation-send data-composer-mode="' + mode + '" aria-label="' + escapeHtml(actionLabel) + '" title="' + escapeHtml(actionLabel) + '"' + actionDisabled + '>' + icon(working ? "stop" : "send", "", working ? "2.5" : "2") + '</button></div></div>';
       }
 
       function replyFailureMessage(error, action) {
@@ -4380,7 +4443,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         } else if (data?.html) {
           body.innerHTML = conversationBubbles([{ role: "agent", html: data.html, markdown: data.markdown || "", timestamp: null }], data.user);
           body.scrollTop = body.scrollHeight;
-        } else {
+        } else if (!options.preserveBody) {
           body.innerHTML = sessionId
             ? sessionHandoff
               ? '<div class="better-codex-conversation-empty"><h3>' + te("开始对话") + '</h3><p>' + te("请前往会话继续对话") + '</p></div>'
@@ -4434,10 +4497,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         errorOutput.hidden = true;
         clearConversationFailure();
         let message = text;
-        if (!retrying) {
+        let files = [];
+        if (REMOTE || !retrying) {
           try {
-            await uploadPastedImages(draft.replyAttachments);
-            message = withAttachments(text, draft.replyAttachments);
+            if (REMOTE) files = await remoteFiles(draft.replyAttachments);
+            else {
+              await uploadPastedImages(draft.replyAttachments);
+              message = withAttachments(text, draft.replyAttachments);
+            }
           } catch (error) {
             errorOutput.textContent = t(error instanceof Error ? error.message : "图片保存失败");
             errorOutput.hidden = false;
@@ -4447,7 +4514,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         }
         try {
           lastReplyStatus = "running";
-          const reply = await api("/api/issues/" + encodeURIComponent(issue.id) + "/reply", { method: "POST", body: JSON.stringify({ message, request_id: requestId }) });
+          const reply = await api("/api/issues/" + encodeURIComponent(issue.id) + "/reply", { method: "POST", body: JSON.stringify({ message, request_id: requestId, files }) });
           if (reply.initial_run) {
             await loadIssues();
             dialog.close();
@@ -4467,7 +4534,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           flushReplyDraft();
           persistReplyDraft("");
           await loadIssues().catch(() => {});
-          applyConversation({ html: dialog.querySelector("[data-conversation-body]")?.innerHTML || "", found: true, reply });
+          applyConversation({ found: true, reply }, { preserveBody: true });
           conversationTimer = setTimeout(() => void loadConversation({ quiet: true }), 1500);
         } catch (error) {
           lastReplyRequestId = requestId;
@@ -4572,6 +4639,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         });
       }
 
+      async function remoteFiles(items) {
+        return Promise.all(items.map(async item => ({ name: item.name, type: item.file.type || "application/octet-stream", data: await fileDataUrl(item.file) })));
+      }
+
       async function uploadPastedImages(items = draft.attachments) {
         for (const item of items) {
           if (!item.file || item.path) continue;
@@ -4648,11 +4719,15 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             let skipped = 0;
             for (const file of files) {
               const path = String(file.path || "").trim();
-              if (!path) {
+              if (!path && !REMOTE) {
                 skipped += 1;
                 continue;
               }
-              selected.push({ name: file.name || path.split(/[\\\\/]/).pop() || path, path });
+              if (file.size > 10 * 1024 * 1024) {
+                skipped += 1;
+                continue;
+              }
+              selected.push({ name: file.name || path.split(/[\\\\/]/).pop() || path || t("附件"), path, file: REMOTE ? file : null, previewUrl: REMOTE && file.type.startsWith("image/") ? URL.createObjectURL(file) : "" });
             }
             resolve({ files: selected, skipped, picked: files.length });
           }, { once: true });
@@ -4746,14 +4821,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
               errorOutput.hidden = false;
             };
             if (!result.picked) return;
-            if (!result.files.length) return showAttachError("当前环境无法读取本地文件路径");
-            const known = new Set(attachmentPaths(draft.replyAttachments));
-            const next = result.files.filter(file => !known.has(file.path));
+            if (!result.files.length) return showAttachError(REMOTE ? "文件不能超过 10 MB" : "当前环境无法读取本地文件路径");
+            const known = new Set(draft.replyAttachments.map(file => file.path || file.name + ":" + (file.file?.size || 0)));
+            const next = result.files.filter(file => !known.has(file.path || file.name + ":" + (file.file?.size || 0)));
             if (next.length) {
               draft.replyAttachments.push(...next);
               renderDialog();
             }
-            if (result.skipped) showAttachError("部分文件无法读取本地路径，已跳过");
+            if (result.skipped) showAttachError(REMOTE ? "部分文件超过 10 MB，已跳过" : "部分文件无法读取本地路径，已跳过");
             dialog.querySelector('[name="reply"]')?.focus();
           });
         });
@@ -5010,7 +5085,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             const ensured = await ensureContextProject(latestContext);
             workspacePath = ensured?.workspace_path || "";
           }
-          if (draft.mode === "agent" && !issue && !workspacePath && !state.mockup) {
+          if (draft.mode === "agent" && !issue && !workspacePath && !state.mockup && !REMOTE) {
             throw new Error("创建智能体 Issue 需要本地工作区：请先打开该项目下的一个 Codex 会话");
           }
           await uploadPastedImages();

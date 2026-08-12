@@ -3,7 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, renameSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { issuePriorities, issueStatuses } from "./db.js";
-import { forbiddenProjectionKeys, remoteCommandOperations, syncEntityTypes, syncProtocolVersion, type HubBoard, type IssueProjection, type ProjectProjection, type RemoteCommand, type RemoteCommandAck, type RemoteCommandOperation, type RemoteCommandStatus, type RuntimeProjection, type SyncChange, type SyncEntityType, type SyncProjection, type SyncPushRequest } from "./sync-contract.js";
+import { forbiddenProjectionKeys, remoteCommandOperations, syncEntityTypes, syncProtocolVersion, type AgentDirectoryProjection, type ConversationProjection, type HubBoard, type IssueProjection, type ProjectProjection, type RemoteCommand, type RemoteCommandAck, type RemoteCommandOperation, type RemoteCommandStatus, type RuntimeProjection, type SyncChange, type SyncEntityType, type SyncProjection, type SyncPushRequest } from "./sync-contract.js";
 
 function now() {
   return new Date().toISOString();
@@ -17,7 +17,7 @@ function tokenHash(value: string) {
   return createHash("sha256").update(value).digest("hex");
 }
 
-const hubSchemaVersion = 4;
+const hubSchemaVersion = 5;
 
 function backupBeforeMigration(file: string) {
   if (!existsSync(file)) return;
@@ -27,6 +27,7 @@ function backupBeforeMigration(file: string) {
     if (integrity?.quick_check !== "ok") throw new Error("hub_database_integrity_failed");
     let version = 0;
     try { version = Number((source.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM hub_migrations").get() as { version: number }).version); } catch {}
+    if (version > hubSchemaVersion) throw new Error("hub_database_schema_too_new");
     if (version >= hubSchemaVersion) return;
     const directory = join(dirname(file), "backups");
     mkdirSync(directory, { recursive: true });
@@ -40,6 +41,12 @@ function backupBeforeMigration(file: string) {
 function cleanString(value: unknown, limit: number, allowEmpty = true) {
   if (typeof value !== "string" || value.length > limit || value.includes("\0") || (!allowEmpty && !value.trim())) throw new Error("invalid_projection");
   return value;
+}
+
+function cleanAvatar(value: unknown) {
+  const avatar = cleanString(value, 400_000);
+  if (!avatar || /^icon:[a-z0-9_-]{1,32}$/i.test(avatar) || /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(avatar)) return avatar;
+  throw new Error("invalid_projection");
 }
 
 function containsForbiddenKey(value: unknown): boolean {
@@ -60,11 +67,40 @@ function cleanProjection(type: SyncEntityType, id: string, value: unknown): Sync
     updated_at: cleanString(source.updated_at, 64, false),
     local_revision: Number(source.local_revision),
   } satisfies ProjectProjection;
+  if (type === "agent_directory") {
+    if (id !== "agents" || !Array.isArray(source.agents) || source.agents.length > 100) throw new Error("invalid_projection");
+    const agents = source.agents.map(value => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid_projection");
+      const agent = value as Record<string, unknown>;
+      const agentId = cleanString(agent.id, 200, false);
+      if (!/^[a-f0-9-]{36}$/i.test(agentId) || !Number.isInteger(agent.version) || Number(agent.version) < 1) throw new Error("invalid_projection");
+      return {
+        id: agentId,
+        role: cleanString(agent.role, 200, false),
+        name: cleanString(agent.name, 80, false),
+        name_en: cleanString(agent.name_en, 80),
+        description: cleanString(agent.description, 500),
+        avatar: cleanAvatar(agent.avatar),
+        version: Number(agent.version),
+        created_at: cleanString(agent.created_at, 64, false),
+        updated_at: cleanString(agent.updated_at, 64, false),
+      };
+    });
+    if (new Set(agents.map(agent => agent.id)).size !== agents.length || new Set(agents.map(agent => agent.role)).size !== agents.length) throw new Error("invalid_projection");
+    return { id, agents, default_avatar: cleanAvatar(source.default_avatar), local_revision: Number(source.local_revision) } satisfies AgentDirectoryProjection;
+  }
   if (!issueStatuses.includes(source.status as never) || !issuePriorities.includes(source.priority as never)) throw new Error("invalid_projection");
   if (!Array.isArray(source.labels) || source.labels.length > 20 || source.labels.some(label => typeof label !== "string" || label.length > 100)) throw new Error("invalid_projection");
   if (typeof source.sort_order !== "number" || !Number.isFinite(source.sort_order)) throw new Error("invalid_projection");
-  for (const field of ["pinned", "assigned", "active_run", "needs_attention"] as const) if (typeof source[field] !== "boolean") throw new Error("invalid_projection");
+  for (const field of ["pinned", "assigned", "agent_enabled", "user_assigned", "has_conversation", "needs_attention"] as const) if (typeof source[field] !== "boolean") throw new Error("invalid_projection");
+  if (source.agent_id !== null && (typeof source.agent_id !== "string" || !/^[a-f0-9-]{36}$/i.test(source.agent_id))) throw new Error("invalid_projection");
+  if (source.pending_actor !== "user" && source.pending_actor !== "agent") throw new Error("invalid_projection");
   if (source.archived_at !== null && (typeof source.archived_at !== "string" || source.archived_at.length > 64)) throw new Error("invalid_projection");
+  if (source.active_run_status !== null && !["claimed", "running", "scheduling"].includes(String(source.active_run_status))) throw new Error("invalid_projection");
+  if (source.latest_run_status !== null && !["claimed", "running", "scheduling", "completed", "failed", "interrupted"].includes(String(source.latest_run_status))) throw new Error("invalid_projection");
+  if (source.latest_scheduler_status !== null && !["pending", "running", "completed", "failed", "interrupted"].includes(String(source.latest_scheduler_status))) throw new Error("invalid_projection");
+  if (source.session_status !== null && !["starting", "active", "stopping", "waiting_on_approval", "waiting_on_user", "idle", "interrupted", "failed", "disconnected"].includes(String(source.session_status))) throw new Error("invalid_projection");
+  if (!["idle", "running", "succeeded", "failed", "interrupted"].includes(String(source.reply_status))) throw new Error("invalid_projection");
   return {
     id,
     identifier: cleanString(source.identifier, 200, false),
@@ -78,7 +114,17 @@ function cleanProjection(type: SyncEntityType, id: string, value: unknown): Sync
     pinned: source.pinned as boolean,
     archived_at: source.archived_at as string | null,
     assigned: source.assigned as boolean,
-    active_run: source.active_run as boolean,
+    agent_enabled: source.agent_enabled as boolean,
+    agent_id: source.agent_id as string | null,
+    user_assigned: source.user_assigned as boolean,
+    pending_actor: source.pending_actor,
+    active_run_status: source.active_run_status as IssueProjection["active_run_status"],
+    latest_run_status: source.latest_run_status as IssueProjection["latest_run_status"],
+    latest_scheduler_status: source.latest_scheduler_status as IssueProjection["latest_scheduler_status"],
+    session_status: source.session_status as IssueProjection["session_status"],
+    reply_status: source.reply_status as IssueProjection["reply_status"],
+    has_conversation: source.has_conversation as boolean,
+    last_activity_finished_at: source.last_activity_finished_at === null ? null : cleanString(source.last_activity_finished_at, 64, false),
     needs_attention: source.needs_attention as boolean,
     created_at: cleanString(source.created_at, 64, false),
     updated_at: cleanString(source.updated_at, 64, false),
@@ -113,9 +159,12 @@ function cleanCommandPayload(operation: RemoteCommandOperation, value: unknown) 
   if (!value || typeof value !== "object" || Array.isArray(value) || containsForbiddenKey(value)) throw new Error("invalid_command_payload");
   const source = value as Record<string, unknown>;
   const allowed = operation === "issue.create"
-    ? ["project_id", "title", "description", "status", "priority", "labels", "user_assigned"]
+    ? ["project_id", "title", "description", "status", "priority", "labels", "agent_enabled", "agent_id", "user_assigned"]
     : operation === "issue.update"
-      ? ["project_id", "title", "description", "status", "priority", "labels", "sort_order", "pinned", "user_assigned"]
+      ? ["project_id", "title", "description", "status", "priority", "labels", "sort_order", "pinned", "agent_enabled", "agent_id", "user_assigned"]
+      : operation === "issue.start"
+        ? ["project_id", "title", "description", "status", "priority", "labels", "agent_id"]
+      : operation === "issue.reply" ? ["message", "files"]
       : operation === "issue.move" ? ["status", "before_id"] : [];
   if (Object.keys(source).some(key => !allowed.includes(key))) throw new Error("forbidden_command_field");
   const payload: Record<string, unknown> = {};
@@ -139,10 +188,34 @@ function cleanCommandPayload(operation: RemoteCommandOperation, value: unknown) 
     payload.sort_order = source.sort_order;
   }
   if (source.pinned !== undefined) payload.pinned = source.pinned === true;
+  if (source.agent_enabled !== undefined) payload.agent_enabled = source.agent_enabled === true;
+  if (source.agent_id !== undefined) {
+    const agentId = cleanString(source.agent_id, 200);
+    if (agentId && !/^[a-f0-9-]{36}$/i.test(agentId)) throw new Error("invalid_agent_id");
+    payload.agent_id = agentId;
+  }
   if (source.user_assigned !== undefined) payload.user_assigned = source.user_assigned === true;
   if (source.before_id !== undefined) payload.before_id = cleanString(source.before_id, 200);
+  if (source.message !== undefined) payload.message = cleanString(source.message, 100_000, false).trim();
+  if (source.files !== undefined) {
+    if (!Array.isArray(source.files) || source.files.length > 4) throw new Error("invalid_files");
+    const files = source.files.map(value => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid_files");
+      const file = value as Record<string, unknown>;
+      if (Object.keys(file).some(key => !["name", "type", "data"].includes(key))) throw new Error("invalid_files");
+      const name = cleanString(file.name, 160, false);
+      const type = cleanString(file.type, 120, false).toLowerCase();
+      const data = cleanString(file.data, 14_000_000, false);
+      if (!/^[a-z0-9][a-z0-9.+-]*\/[a-z0-9][a-z0-9.+-]*$/i.test(type) || !data.startsWith(`data:${type};base64,`)) throw new Error("invalid_files");
+      return { name, type, data };
+    });
+    if (files.reduce((size, file) => size + file.data.length, 0) > 28_000_000) throw new Error("body_too_large");
+    payload.files = files;
+  }
   if (operation === "issue.create" && (!payload.project_id || !payload.title)) throw new Error("invalid_command_payload");
   if (operation === "issue.move" && !payload.status) throw new Error("invalid_command_payload");
+  if (operation === "issue.start" && !payload.title) throw new Error("invalid_command_payload");
+  if (operation === "issue.reply" && !payload.message && !(payload.files as unknown[] | undefined)?.length) throw new Error("message_required");
   return payload;
 }
 
@@ -179,6 +252,7 @@ export class HubStore {
       CREATE TABLE IF NOT EXISTS sync_events (event_id TEXT PRIMARY KEY, device_id TEXT NOT NULL, received_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS changes (seq INTEGER PRIMARY KEY AUTOINCREMENT, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, operation TEXT NOT NULL, created_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS runtime_projection (device_id TEXT PRIMARY KEY REFERENCES devices(id), payload_json TEXT NOT NULL, updated_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS conversations (issue_id TEXT PRIMARY KEY, owner_device_id TEXT NOT NULL REFERENCES devices(id), payload_json TEXT NOT NULL, updated_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS remote_commands (
         command_id TEXT PRIMARY KEY,
         device_id TEXT NOT NULL REFERENCES devices(id),
@@ -221,19 +295,21 @@ export class HubStore {
       INSERT OR IGNORE INTO hub_migrations (version, applied_at) VALUES (3, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
     `);
     const currentVersion = Number((this.db.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM hub_migrations").get() as { version: number }).version);
-    if (currentVersion < 4) {
+    if (currentVersion < 5) {
       this.db.exec("BEGIN IMMEDIATE");
       try {
         const timestamp = now();
-        const rows = this.db.prepare("SELECT entity_id, payload_json FROM entities WHERE entity_type = 'issue' AND deleted_at IS NULL").all() as Array<{ entity_id: string; payload_json: string }>;
+        const rows = this.db.prepare("SELECT entity_id, local_revision, payload_json FROM entities WHERE entity_type = 'issue' AND deleted_at IS NULL").all() as Array<{ entity_id: string; local_revision: number; payload_json: string }>;
         for (const row of rows) {
           const projection = JSON.parse(row.payload_json) as Record<string, unknown>;
           if (projection.status !== "cancelled") continue;
           projection.status = "backlog";
           projection.archived_at ||= projection.updated_at || timestamp;
           projection.needs_attention = false;
-          this.db.prepare("UPDATE entities SET payload_json = ?, updated_at = ? WHERE entity_type = 'issue' AND entity_id = ?")
-            .run(JSON.stringify(projection), timestamp, row.entity_id);
+          const nextRevision = Number(row.local_revision) + 1;
+          projection.local_revision = nextRevision;
+          this.db.prepare("UPDATE entities SET local_revision = ?, payload_json = ?, updated_at = ? WHERE entity_type = 'issue' AND entity_id = ?")
+            .run(nextRevision, JSON.stringify(projection), timestamp, row.entity_id);
           this.db.prepare("INSERT INTO changes (entity_type, entity_id, operation, created_at) VALUES ('issue', ?, 'upsert', ?)").run(row.entity_id, timestamp);
         }
         const obsoleteCommands = this.db.prepare("SELECT command_id, payload_json FROM remote_commands WHERE status = 'pending'").all() as Array<{ command_id: string; payload_json: string }>;
@@ -245,7 +321,7 @@ export class HubStore {
           this.db.prepare("INSERT INTO remote_command_audit (command_id, status, detail, created_at) VALUES (?, 'rejected', 'obsolete_cancelled_status', ?)")
             .run(command.command_id, timestamp);
         }
-        this.db.prepare("INSERT INTO hub_migrations (version, applied_at) VALUES (4, ?)").run(timestamp);
+        this.db.prepare("INSERT INTO hub_migrations (version, applied_at) VALUES (5, ?)").run(timestamp);
         this.db.exec("COMMIT");
       } catch (error) {
         this.db.exec("ROLLBACK");
@@ -444,7 +520,15 @@ export class HubStore {
     const current = this.db.prepare("SELECT payload_json, deleted_at FROM entities WHERE entity_type = 'issue' AND entity_id = ?").get(entityId) as { payload_json: string; deleted_at: string | null } | undefined;
     if (operation === "issue.create" && current && !current.deleted_at) throw new Error("issue_exists");
     if (operation !== "issue.create" && (!current || current.deleted_at)) throw new Error("issue_not_found");
-    if (current && (JSON.parse(current.payload_json) as IssueProjection).active_run) throw new Error("issue_execution_running");
+    const currentProjection = current ? JSON.parse(current.payload_json) as IssueProjection : null;
+    const pendingReply = operation === "issue.create" ? undefined : this.db.prepare("SELECT 1 AS value FROM remote_commands WHERE entity_id = ? AND operation = 'issue.reply' AND status = 'pending' LIMIT 1").get(entityId);
+    const running = Boolean(currentProjection?.active_run_status || currentProjection?.reply_status === "running" || ["starting", "active", "stopping", "waiting_on_approval", "waiting_on_user"].includes(currentProjection?.session_status || "") || pendingReply);
+    if (current && running && !["issue.reply", "issue.stop"].includes(operation)) throw new Error("issue_execution_running");
+    if (operation === "issue.reply" && pendingReply) throw new Error("reply_busy");
+    if (operation === "issue.reply" && currentProjection?.archived_at) throw new Error("issue_archived");
+    if (operation === "issue.reply" && !currentProjection?.has_conversation) throw new Error("session_required");
+    if (operation === "issue.stop" && !running) throw new Error("issue_not_running");
+    if (payload.agent_id && !this.board().agents.some(agent => agent.id === payload.agent_id)) throw new Error("agent_not_found");
     const deviceId = this.writerDeviceId(entityId);
     const requestedAt = now();
     const expiresAt = after(24 * 60 * 60_000);
@@ -462,7 +546,7 @@ export class HubStore {
 
   pendingCommands(deviceId: string, limit = 100) {
     this.expireCommands();
-    return (this.db.prepare("SELECT * FROM remote_commands WHERE device_id = ? AND status = 'pending' ORDER BY requested_at, command_id LIMIT ?").all(deviceId, Math.min(Math.max(Math.trunc(limit), 1), 100)) as CommandRow[]).map(commandFromRow);
+    return (this.db.prepare("SELECT * FROM remote_commands WHERE device_id = ? AND status = 'pending' ORDER BY requested_at, rowid LIMIT ?").all(deviceId, Math.min(Math.max(Math.trunc(limit), 1), 100)) as CommandRow[]).map(commandFromRow);
   }
 
   ackRemoteCommand(deviceId: string, ack: RemoteCommandAck) {
@@ -521,6 +605,7 @@ export class HubStore {
         const changed = !current || current.payload_json !== payload || current.deleted_at !== deletedAt;
         if (!current) this.db.prepare("INSERT INTO entities (entity_type, entity_id, owner_device_id, local_revision, payload_json, deleted_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(change.entity_type, change.entity_id, deviceId, localRevision, payload, deletedAt, now());
         else if (changed) this.db.prepare("UPDATE entities SET local_revision = ?, payload_json = ?, deleted_at = ?, updated_at = ? WHERE entity_type = ? AND entity_id = ?").run(localRevision, payload, deletedAt, now(), change.entity_type, change.entity_id);
+        if (change.entity_type === "issue" && !projection) this.db.prepare("DELETE FROM conversations WHERE issue_id = ?").run(change.entity_id);
         this.db.prepare("INSERT INTO sync_events (event_id, device_id, received_at) VALUES (?, ?, ?)").run(change.event_id, deviceId, now());
         if (changed) this.db.prepare("INSERT INTO changes (entity_type, entity_id, operation, created_at) VALUES (?, ?, ?, ?)").run(change.entity_type, change.entity_id, projection ? "upsert" : "delete", now());
         accepted.push(change.event_id);
@@ -542,7 +627,10 @@ export class HubStore {
     let runtime = runtimeRow ? JSON.parse(runtimeRow.payload_json) as RuntimeProjection : null;
     if (runtime && Date.now() - Date.parse(runtimeRow!.updated_at) > 60_000) runtime = { ...runtime, health_state: "offline" };
     const issues = rows.filter(row => row.entity_type === "issue").map(row => JSON.parse(row.payload_json) as IssueProjection);
-    const commands = this.db.prepare("SELECT * FROM remote_commands WHERE status IN ('pending', 'conflict', 'rejected') ORDER BY requested_at, command_id").all() as CommandRow[];
+    const directory = rows.find(row => row.entity_type === "agent_directory");
+    const agentDirectory = directory ? JSON.parse(directory.payload_json) as AgentDirectoryProjection : null;
+    const agents = agentDirectory?.agents ?? [];
+    const commands = this.db.prepare("SELECT * FROM remote_commands WHERE status IN ('pending', 'conflict', 'rejected') ORDER BY requested_at, rowid").all() as CommandRow[];
     for (const row of commands) {
       const command = commandFromRow(row);
       let issue = issues.find(item => item.id === command.entity_id);
@@ -559,8 +647,18 @@ export class HubStore {
           sort_order: Number.MAX_SAFE_INTEGER,
           pinned: false,
           archived_at: null,
-          assigned: command.payload.user_assigned === true,
-          active_run: false,
+          assigned: command.payload.agent_enabled === true || command.payload.user_assigned === true,
+          agent_enabled: command.payload.agent_enabled === true,
+          agent_id: typeof command.payload.agent_id === "string" && command.payload.agent_id ? command.payload.agent_id : null,
+          user_assigned: command.payload.user_assigned === true,
+          pending_actor: command.payload.agent_enabled === true ? "agent" : "user",
+          active_run_status: null,
+          latest_run_status: null,
+          latest_scheduler_status: null,
+          session_status: null,
+          reply_status: "idle",
+          has_conversation: false,
+          last_activity_finished_at: null,
           needs_attention: false,
           created_at: command.requested_at,
           updated_at: command.requested_at,
@@ -569,13 +667,18 @@ export class HubStore {
         issues.push(issue);
       }
       if (!issue) continue;
-      if (command.status === "pending" && ["issue.update", "issue.move"].includes(command.operation)) Object.assign(issue, command.payload, { updated_at: command.requested_at });
+      if (command.status === "pending" && ["issue.update", "issue.move", "issue.start"].includes(command.operation)) {
+        Object.assign(issue, command.payload, { updated_at: command.requested_at });
+        if (command.operation === "issue.start") Object.assign(issue, { agent_enabled: true, user_assigned: false, pending_actor: "agent", assigned: true });
+      }
       Object.assign(issue, { remote_state: { command_id: command.command_id, status: command.status, operation: command.operation, error: command.error } });
     }
     return {
       revision: this.cursor(),
       projects: rows.filter(row => row.entity_type === "project").map(row => JSON.parse(row.payload_json) as ProjectProjection),
       issues: issues.sort((left, right) => left.sort_order - right.sort_order || left.created_at.localeCompare(right.created_at)),
+      agents,
+      default_avatar: agentDirectory?.default_avatar ?? "",
       runtime,
     };
   }
@@ -583,6 +686,58 @@ export class HubStore {
   changesAfter(cursor: number, limit = 1000) {
     if (!Number.isSafeInteger(cursor) || cursor < 0) throw new Error("invalid_cursor");
     return this.db.prepare("SELECT seq, entity_type, entity_id, operation, created_at FROM changes WHERE seq > ? ORDER BY seq LIMIT ?").all(cursor, Math.min(Math.max(limit, 1), 1000)) as Array<{ seq: number; entity_type: string; entity_id: string; operation: string; created_at: string }>;
+  }
+
+  putConversation(deviceId: string, issueId: string, value: unknown) {
+    const entity = this.db.prepare("SELECT owner_device_id FROM entities WHERE entity_type = 'issue' AND entity_id = ? AND deleted_at IS NULL").get(issueId) as { owner_device_id: string } | undefined;
+    if (!entity || entity.owner_device_id !== deviceId) throw new Error("issue_not_found");
+    if (!value || typeof value !== "object" || Array.isArray(value) || containsForbiddenKey(value)) throw new Error("invalid_conversation_projection");
+    const source = value as Record<string, unknown>;
+    if (source.issue_id !== issueId || typeof source.found !== "boolean" || !Array.isArray(source.messages) || source.messages.length > 80) throw new Error("invalid_conversation_projection");
+    const messages = source.messages.map((value, index) => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid_conversation_projection");
+      const message = value as Record<string, unknown>;
+      if (message.role !== "user" && message.role !== "agent") throw new Error("invalid_conversation_projection");
+      return {
+        id: cleanString(message.id ?? `${message.role}-${index}`, 200, false),
+        role: message.role as "user" | "agent",
+        markdown: cleanString(message.markdown, 100_000),
+        html: "",
+        phase: message.phase === null || message.phase === undefined ? null : cleanString(message.phase, 40),
+        timestamp: message.timestamp === null || message.timestamp === undefined ? null : cleanString(message.timestamp, 64),
+      };
+    });
+    const replySource = source.reply;
+    if (!replySource || typeof replySource !== "object" || Array.isArray(replySource)) throw new Error("invalid_conversation_projection");
+    const reply = replySource as Record<string, unknown>;
+    if (!["idle", "running", "succeeded", "failed", "interrupted"].includes(String(reply.status))) throw new Error("invalid_conversation_projection");
+    const projection: ConversationProjection = {
+      issue_id: issueId,
+      found: source.found,
+      messages,
+      reply: {
+        ...(typeof reply.request_id === "string" ? { request_id: cleanString(reply.request_id, 200) } : {}),
+        status: reply.status as ConversationProjection["reply"]["status"],
+        message: cleanString(reply.message, 100_000),
+        ...(typeof reply.error === "string" ? { error: cleanString(reply.error, 2000) } : {}),
+        ...(typeof reply.started_at === "string" ? { started_at: cleanString(reply.started_at, 64) } : {}),
+        ...(typeof reply.finished_at === "string" ? { finished_at: cleanString(reply.finished_at, 64) } : {}),
+      },
+      updated_at: cleanString(source.updated_at, 64, false),
+    };
+    const payload = JSON.stringify(projection);
+    const current = this.db.prepare("SELECT payload_json FROM conversations WHERE issue_id = ?").get(issueId) as { payload_json: string } | undefined;
+    if (current?.payload_json === payload) return projection;
+    const timestamp = now();
+    this.db.prepare("INSERT INTO conversations (issue_id, owner_device_id, payload_json, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(issue_id) DO UPDATE SET owner_device_id = excluded.owner_device_id, payload_json = excluded.payload_json, updated_at = excluded.updated_at").run(issueId, deviceId, payload, timestamp);
+    this.db.prepare("INSERT INTO changes (entity_type, entity_id, operation, created_at) VALUES ('issue', ?, 'conversation', ?)").run(issueId, timestamp);
+    this.pruneChanges();
+    return projection;
+  }
+
+  conversation(issueId: string) {
+    const row = this.db.prepare("SELECT payload_json FROM conversations WHERE issue_id = ?").get(issueId) as { payload_json: string } | undefined;
+    return row ? JSON.parse(row.payload_json) as ConversationProjection : null;
   }
 
   changeWindow(cursor: number, limit = 1000) {
@@ -598,7 +753,7 @@ export class HubStore {
     if (Number(pending.value) > 0) throw new Error("pending_commands_exist");
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      this.db.exec("DELETE FROM runtime_projection; DELETE FROM sync_events; DELETE FROM entities; DELETE FROM changes;");
+      this.db.exec("DELETE FROM runtime_projection; DELETE FROM conversations; DELETE FROM sync_events; DELETE FROM entities; DELETE FROM changes;");
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");
@@ -617,7 +772,9 @@ export function restoreHubBackup(databaseFile: string, backupFile: string) {
   try {
     const integrity = source.prepare("PRAGMA quick_check").get() as { quick_check?: string } | undefined;
     const migration = source.prepare("SELECT MAX(version) AS version FROM hub_migrations").get() as { version?: number } | undefined;
-    if (integrity?.quick_check !== "ok" || !Number(migration?.version)) throw new Error("backup_invalid");
+    const version = Number(migration?.version);
+    if (integrity?.quick_check !== "ok" || !Number.isInteger(version) || version < 1) throw new Error("backup_invalid");
+    if (version > hubSchemaVersion) throw new Error("hub_backup_schema_too_new");
   } finally {
     source.close();
   }

@@ -183,6 +183,13 @@ function debuggerUrlAllowed(value: string, port: number) {
   }
 }
 
+export function darwinCdpListenerTrusted(listeners: Array<{ socket: string; uid: number; executable: string }>, currentUid: number | undefined, application: string) {
+  return listeners.length > 0
+    && new Set(listeners.map(listener => listener.socket)).size === 1
+    && listeners.every(listener => listener.uid === currentUid)
+    && listeners.some(listener => listener.executable.startsWith(`${application}/Contents/`));
+}
+
 function assertTrustedCdpListener(port: number) {
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("cdp_port_invalid");
   if (process.platform === "win32") {
@@ -207,14 +214,24 @@ Write-Output $trusted[0]`;
   }
   if (process.platform === "darwin") {
     try {
-      const pids = execFileSync("/usr/sbin/lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"], { encoding: "utf8", timeout: 5000 })
-        .trim().split(/\s+/).filter(Boolean);
-      if (pids.length !== 1 || !/^\d+$/.test(pids[0])) throw new Error("cdp_listener_untrusted");
-      const uid = execFileSync("/bin/ps", ["-p", pids[0], "-o", "uid="], { encoding: "utf8", timeout: 5000 }).trim();
-      const executable = execFileSync("/usr/sbin/lsof", ["-a", "-p", pids[0], "-d", "txt", "-Fn"], { encoding: "utf8", timeout: 5000 })
-        .split(/\r?\n/).find(line => line.startsWith("n"))?.slice(1) || "";
+      const fields = execFileSync("/usr/sbin/lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-F0pd"], { encoding: "utf8", timeout: 5000 })
+        .split(/[\0\r\n]+/).filter(Boolean);
+      let pid = "";
+      const sockets = fields.flatMap(field => {
+        if (/^p\d+$/.test(field)) {
+          pid = field.slice(1);
+          return [];
+        }
+        return pid && /^d.+/.test(field) ? [{ pid, socket: field.slice(1) }] : [];
+      });
       const application = desktopApplication();
-      if (Number(uid) !== process.getuid?.() || !executable.startsWith(`${application}/Contents/`)) throw new Error("cdp_listener_untrusted");
+      const listeners = sockets.map(listener => {
+        const uid = execFileSync("/bin/ps", ["-p", listener.pid, "-o", "uid="], { encoding: "utf8", timeout: 5000 }).trim();
+        const executable = execFileSync("/usr/sbin/lsof", ["-a", "-p", listener.pid, "-d", "txt", "-Fn"], { encoding: "utf8", timeout: 5000 })
+          .split(/\r?\n/).find(line => line.startsWith("n"))?.slice(1) || "";
+        return { socket: listener.socket, uid: Number(uid), executable };
+      });
+      if (!darwinCdpListenerTrusted(listeners, process.getuid?.(), application)) throw new Error("cdp_listener_untrusted");
       return;
     } catch {
       throw new Error("cdp_listener_untrusted");

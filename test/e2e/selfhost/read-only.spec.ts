@@ -1,10 +1,12 @@
 import { expect, test } from "@playwright/test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Store } from "../../../src/db.js";
 import { createHubServer } from "../../../src/hub-server.js";
 import { SyncClient } from "../../../src/sync-client.js";
+import type { ConversationMessage } from "../../../src/session-transcript.js";
+import { IssueWorker } from "../../../src/worker.js";
 
 test("remote shared Web UI shows pending, acknowledgement, conflict, and resubmission @critical", async ({ page }) => {
   test.setTimeout(90_000);
@@ -21,11 +23,36 @@ test("remote shared Web UI shows pending, acknowledgement, conflict, and resubmi
   const baseUrl = `http://127.0.0.1:${address.port}`;
   const pairing = hub.store.createPairingCode();
   const device = hub.store.pairDevice("Playwright Runtime", pairing.pairing_code);
-  const client = new SyncClient(local, 60_000, () => ({ enabled: true, hub_url: baseUrl, device_id: device.device_id, device_name: device.device_name, device_token: device.device_token, created_at: new Date().toISOString() }));
+  const conversations = new Map<string, ConversationMessage[]>();
+  const worker = new IssueWorker(local);
+  const client = new SyncClient(
+    local,
+    60_000,
+    () => ({ enabled: true, hub_url: baseUrl, device_id: device.device_id, device_name: device.device_name, device_token: device.device_token, created_at: new Date().toISOString() }),
+    () => {},
+    async issueId => local.conversationProjection(issueId, conversations.get(issueId) || []),
+    (issueId, requestId, message, files) => {
+      const paths = files.map(file => {
+        const path = join(directory, file.name);
+        writeFileSync(path, Buffer.from(file.data.split(",")[1], "base64"));
+        return path;
+      });
+      const request = [message, paths.length ? `附带文件：\n${paths.map(path => `- ${path}`).join("\n")}` : ""].filter(Boolean).join("\n\n");
+      worker.sendIssueMessage(issueId, requestId, request);
+      conversations.get(issueId)?.push({ id: `user-${requestId}`, role: "user", markdown: request, html: "", phase: null, timestamp: new Date().toISOString() });
+    },
+    issueId => worker.stopIssue(issueId),
+  );
 
   try {
     const project = local.createProject({ name: "Public board", workspacePath: join(directory, "secret") });
+    const agent = local.createAgentProfile({ name: "Remote Agent", name_en: "Remote Agent", description: "Visible agent directory", instructions: "local only", model: "gpt-test", reasoning_effort: "medium" });
     const issue = local.createIssue({ projectId: project.id, title: "Visible remotely", description: "Writable projection", status: "todo" });
+    const conversationIssue = local.createIssue({ projectId: project.id, title: "Conversation remotely", description: "Same card detail flow", session: { threadId: "019fec06-788f-7af3-a031-76b546904fe5", configFingerprint: worker.sessionConfigFingerprint(null), active: false } });
+    conversations.set(conversationIssue.id, [
+      { id: "user-1", role: "user", markdown: "Keep this Web context", html: "", phase: null, timestamp: "2026-08-12T08:00:00.000Z" },
+      { id: "agent-1", role: "agent", markdown: "Context is visible in the card", html: "", phase: "final_answer", timestamp: "2026-08-12T08:00:01.000Z" },
+    ]);
     const xssTitle = '<img src="x" onerror="window.__betterCodexXss=true">';
     local.createIssue({ projectId: project.id, title: xssTitle, status: "todo" });
     await client.syncNow();
@@ -33,11 +60,52 @@ test("remote shared Web UI shows pending, acknowledgement, conflict, and resubmi
     await page.locator("#web-username").fill("admin");
     await page.locator("#web-token").fill(adminToken);
     await page.locator("#web-connect-form button[type=submit]").click();
-    await expect(page.getByText("Visible remotely")).toBeVisible();
+    await expect(page.locator("#better-codex-board").getByText("Visible remotely")).toBeVisible();
+    await page.locator("#better-codex-agents-entry").click();
+    await expect(page.locator("#better-codex-agents").getByText("Remote Agent").first()).toBeVisible();
+    await page.locator("#better-codex-entry").click();
     await expect(page.getByText(xssTitle)).toBeVisible();
     expect(await page.locator('img[src="x"]').count()).toBe(0);
     expect(await page.evaluate(() => Boolean((window as typeof window & { __betterCodexXss?: boolean }).__betterCodexXss))).toBe(false);
     await expect(page.locator("html")).not.toHaveAttribute("data-better-codex-read-only", "true");
+
+    await page.locator(`[data-issue-id="${conversationIssue.id}"]`).click();
+    const dialog = page.locator("#better-codex-dialog");
+    await expect(dialog.locator(".better-codex-bubble.is-user")).toContainText("Keep this Web context");
+    await expect(dialog.locator(".better-codex-bubble.is-agent")).toContainText("Context is visible in the card");
+    await expect(dialog.locator('[name="reply"]')).toBeVisible();
+    await expect(dialog.locator("[data-conversation-attach]")).toBeVisible();
+    const chooser = page.waitForEvent("filechooser");
+    await dialog.locator("[data-conversation-attach]").click();
+    await (await chooser).setFiles({ name: "web-proof.txt", mimeType: "text/plain", buffer: Buffer.from("verified from WebUI") });
+    await expect(dialog.locator("[data-reply-attachments]")).toContainText("web-proof.txt");
+    await dialog.locator('[name="reply"]').fill("Continue from WebUI");
+    await dialog.locator("[data-conversation-send]").click();
+    await expect.poll(() => hub.store.board().issues.find(item => item.id === conversationIssue.id)?.remote_state?.operation).toBe("issue.reply");
+    const replyCommandId = hub.store.board().issues.find(item => item.id === conversationIssue.id)!.remote_state!.command_id;
+    await expect(dialog.locator(".better-codex-bubble.is-user").last()).toContainText("Continue from WebUI");
+    await expect(dialog.locator('[data-conversation-status] [data-run="running"]')).toBeVisible();
+    await dialog.locator("[data-conversation-send]").click();
+    await expect.poll(() => hub.store.board().issues.find(item => item.id === conversationIssue.id)?.remote_state?.operation).toBe("issue.stop");
+    await client.syncNow();
+    const requestMessage = String(local.getSessionCommandByRequest(conversationIssue.id, replyCommandId)?.payload.request_message || "");
+    const uploadedPath = requestMessage.match(/^- (.+web-proof\.txt)$/m)?.[1] || "";
+    expect(requestMessage).toContain("Continue from WebUI");
+    expect(uploadedPath).not.toBe("");
+    expect(existsSync(uploadedPath)).toBe(true);
+    expect(readFileSync(uploadedPath, "utf8")).toBe("verified from WebUI");
+    expect(local.getIssueReplyState(conversationIssue.id).status).toBe("interrupted");
+    await expect(dialog.locator('[data-conversation-status] [data-run="interrupted"]')).toBeVisible();
+    await dialog.locator('[name="reply"]').fill("Continue after stop");
+    await dialog.locator("[data-conversation-send]").click();
+    await expect.poll(() => hub.store.board().issues.find(item => item.id === conversationIssue.id)?.remote_state?.operation).toBe("issue.reply");
+    await client.syncNow();
+    conversations.get(conversationIssue.id)!.push({ id: "agent-2", role: "agent", markdown: "Reply returned to WebUI", html: "", phase: "final_answer", timestamp: new Date().toISOString() });
+    local.finishSessionReply(conversationIssue.id, "completed");
+    await client.syncNow();
+    await expect(dialog.locator(".better-codex-bubble.is-agent").last()).toContainText("Reply returned to WebUI");
+    await expect(dialog.locator('[data-conversation-status] [data-run="completed"]')).toBeVisible();
+    await dialog.locator("[data-dialog-close]").click();
 
     const pending = await page.evaluate(async ({ issueId, version }) => window.betterCodexHost.request({ path: `/api/issues/${issueId}`, method: "PATCH", body: JSON.stringify({ version, title: "Pending remote update" }) }), { issueId: issue.id, version: issue.version });
     expect(pending.remote_pending).toBe(true);
@@ -63,15 +131,31 @@ test("remote shared Web UI shows pending, acknowledgement, conflict, and resubmi
     await expect(page.getByText("Conflict resolved remotely")).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('[data-run="remote-conflict"]')).toHaveCount(0);
 
-    const forbidden = await page.evaluate(async ({ issueId }) => {
-      try {
-        await window.betterCodexHost.request({ path: `/api/issues/${issueId}/start`, method: "POST", body: "{}" });
-        return "allowed";
-      } catch (error) {
-        return error instanceof Error ? error.message : String(error);
-      }
-    }, { issueId: issue.id });
-    expect(forbidden).toBe("remote_operation_forbidden");
+    const assignable = local.getIssue(issue.id)!;
+    await page.evaluate(async ({ issueId, version, agentId }) => window.betterCodexHost.request({ path: `/api/issues/${issueId}`, method: "PATCH", body: JSON.stringify({ version, agent_enabled: true, agent_id: agentId, user_assigned: false }) }), { issueId: issue.id, version: assignable.version, agentId: agent.id });
+    await client.syncNow();
+    const assigned = local.getIssue(issue.id)!;
+    expect(assigned.agent_id).toBe(agent.id);
+    const started = await page.evaluate(async ({ issueId, current }) => window.betterCodexHost.request({ path: `/api/issues/${issueId}/start`, method: "POST", body: JSON.stringify({ version: current.version, project_id: current.project_id, title: current.title, description: current.description, status: current.status, priority: current.priority, labels: current.labels, agent_id: current.agent_id }) }), { issueId: issue.id, current: assigned });
+    expect(started.remote_pending).toBe(true);
+    await client.syncNow();
+    expect(local.listManualStartQueue()).toContain(issue.id);
+    const claim = local.claimNextIssue(issue.id)!;
+    await client.syncNow();
+    await expect(page.locator(`[data-issue-id="${issue.id}"] [data-run="claimed"]`)).toBeVisible();
+    local.startRun(claim.runId, 12345);
+    await client.syncNow();
+    await expect(page.locator(`[data-issue-id="${issue.id}"] [data-run="running"]`)).toBeVisible();
+    local.beginScheduling(claim.runId, issue.id, true);
+    await client.syncNow();
+    await expect(page.locator(`[data-issue-id="${issue.id}"] [data-run="scheduling"]`)).toBeVisible();
+    local.interruptRun(claim.runId, issue.id);
+    await client.syncNow();
+    await expect(page.locator(`[data-issue-id="${issue.id}"] [data-run="interrupted"]`)).toBeVisible();
+    const completed = local.getIssue(issue.id)!;
+    local.updateIssue(issue.id, completed.version, { status: "done" });
+    await client.syncNow();
+    await expect(page.locator("article").filter({ hasText: "Conflict resolved remotely" }).locator('[data-run="completed"]')).toBeVisible({ timeout: 10_000 });
   } finally {
     client.stop();
     local.close();

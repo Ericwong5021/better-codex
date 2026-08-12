@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { copyFileSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -127,7 +127,7 @@ test("Hub backup and restore preserve paired devices, password state, and pendin
     const device = store.pairDevice("backup runtime", code.pairing_code);
     const timestamp = new Date().toISOString();
     const project: ProjectProjection = { id: "project-1", name: "Backup", identifier_prefix: "BKP", created_at: timestamp, updated_at: timestamp, local_revision: 1 };
-    const issue: IssueProjection = { id: "issue-1", identifier: "BKP-1", project_id: project.id, title: "Before backup", description: "", status: "todo", priority: "medium", labels: [], sort_order: 0, pinned: false, archived_at: null, assigned: false, active_run: false, needs_attention: false, created_at: timestamp, updated_at: timestamp, local_revision: 1 };
+    const issue: IssueProjection = { id: "issue-1", identifier: "BKP-1", project_id: project.id, title: "Before backup", description: "", status: "todo", priority: "medium", labels: [], sort_order: 0, pinned: false, archived_at: null, assigned: false, agent_enabled: false, agent_id: null, user_assigned: false, pending_actor: "user", active_run_status: null, latest_run_status: null, latest_scheduler_status: null, session_status: null, reply_status: "idle", has_conversation: false, last_activity_finished_at: null, needs_attention: false, created_at: timestamp, updated_at: timestamp, local_revision: 1 };
     const push: SyncPushRequest = {
       protocol_version: syncProtocolVersion,
       core_version: "0.4.2",
@@ -172,7 +172,7 @@ test("Hub migration creates an integrity-checked backup before changing an older
   } finally {
     migrated.close();
   }
-  const backups = readdirSync(join(directory, "backups")).filter(name => name.startsWith("before-hub-v4-") && name.endsWith(".db"));
+  const backups = readdirSync(join(directory, "backups")).filter(name => name.startsWith("before-hub-v5-") && name.endsWith(".db"));
   assert.equal(backups.length, 1);
   const snapshot = new DatabaseSync(join(directory, "backups", backups[0]), { readOnly: true });
   try {
@@ -215,7 +215,7 @@ test("Hub migration archives legacy cancelled projections and rejects obsolete c
       .run(projection.id, device.device_id, JSON.stringify(projection), timestamp);
     store.db.prepare("INSERT INTO remote_commands (command_id, device_id, operation, entity_id, base_revision, payload_json, status, requested_at, expires_at) VALUES ('legacy-command', ?, 'issue.move', ?, 1, '{\"status\":\"cancelled\"}', 'pending', ?, ?)")
       .run(device.device_id, projection.id, timestamp, new Date(Date.now() + 60_000).toISOString());
-    store.db.prepare("DELETE FROM hub_migrations WHERE version = 4").run();
+    store.db.prepare("DELETE FROM hub_migrations WHERE version = 5").run();
     store.close();
     store = undefined;
 
@@ -224,10 +224,31 @@ test("Hub migration archives legacy cancelled projections and rejects obsolete c
     assert.equal(migrated.status, "backlog");
     assert.equal(migrated.archived_at, timestamp);
     assert.equal(migrated.needs_attention, false);
+    assert.equal(migrated.local_revision, 2);
     assert.equal(store.remoteCommand("legacy-command")?.status, "rejected");
     assert.equal(store.remoteCommand("legacy-command")?.error, "obsolete_cancelled_status");
   } finally {
     store?.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("Hub rejects newer schemas before opening or restoring them", () => {
+  const directory = mkdtempSync(join(tmpdir(), "better-codex-hub-newer-schema-"));
+  const database = join(directory, "hub.db");
+  const backup = join(directory, "newer.db");
+  const current = new HubStore(database);
+  current.close();
+  copyFileSync(database, backup);
+  const newer = new DatabaseSync(backup);
+  newer.prepare("INSERT INTO hub_migrations (version, applied_at) VALUES (6, ?)").run(new Date().toISOString());
+  newer.close();
+  try {
+    assert.throws(() => new HubStore(backup), /hub_database_schema_too_new/);
+    assert.throws(() => restoreHubBackup(database, backup), /hub_backup_schema_too_new/);
+    const unchanged = new HubStore(database);
+    unchanged.close();
+  } finally {
     rmSync(directory, { recursive: true, force: true });
   }
 });

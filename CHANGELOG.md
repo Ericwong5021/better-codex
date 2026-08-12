@@ -4,6 +4,72 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+### Added
+
+- Show the active Codex profile and remaining usage windows in the local Web workspace.
+
+### Changed
+
+- Upgrade self-hosted synchronization to v5; the Hub and local Runtime must run the same Beta.
+- Replace the cancelled task status with archive actions across local and self-hosted boards, and migrate existing cancelled tasks into the archive.
+
+### Fixed
+
+- Keep Better Codex mounted when the native sidebar collapses.
+- Preserve the continue-creating preference and unread completion notifications across reloads and Runtime reinjection.
+
+## [0.4.3-beta.7] - 2026-08-12
+
+### Removed
+
+- Remove the creator workflow and workflow sidebar from the main release line.
+
+## [0.4.3-beta.6] - 2026-08-12
+
+### Changed
+
+- Upgrade self-hosted synchronization to v4 for synchronized Agent avatars, completion activity, and Web file replies.
+
+### Fixed
+
+- Keep Web Issue conversations current, show card workflow status consistently, and restore completion notifications across the local and remote surfaces.
+- Preserve custom Agent avatars in WebUI, keep expanded card details compact, and restore the attachment and send controls in the reply composer.
+
+## [0.4.3-beta.5] - 2026-08-12
+
+### Added
+
+- Add an activatable creator workflow with dedicated Agents, native Codex conversation handoffs, approval gates, and a rounded workflow sidebar.
+
+## [0.4.3-beta.4] - 2026-08-12
+
+### Changed
+
+- Upgrade self-hosted synchronization to v3; the Hub and local Runtime must run the same Beta.
+
+### Fixed
+
+- Show privacy-filtered conversation history in self-hosted Issue cards, and let users reply or stop the linked Codex session without leaving the card.
+- Keep claimed, running, scheduling, completed, failed, and interrupted execution states in sync with the self-hosted Web UI.
+
+## [0.4.3-beta.3] - 2026-08-12
+
+### Fixed
+
+- Keep the desktop injector from replacing the self-hosted Web UI injection when both surfaces are open in Codex.
+- Show completed resumable Agent sessions as completed instead of active or not started in the self-hosted Web UI.
+
+## [0.4.3-beta.2] - 2026-08-12
+
+### Changed
+
+- Upgrade self-hosted synchronization to v2; the Hub and local Runtime must run the same Beta.
+
+### Fixed
+
+- Keep the safe Agent directory and assignment state available after remote deployment, and let the Web UI assign and start Agent tasks through the local Runtime.
+- Keep the macOS Codex session relay connected when trusted ChatGPT helper processes inherit the same local debugging socket.
+
 ## [0.4.3-beta.1] - 2026-08-12
 
 ### Added
@@ -347,7 +413,13 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.3-beta.1...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.3-beta.7...HEAD
+[0.4.3-beta.7]: https://github.com/Ericwong5021/better-codex/compare/v0.4.3-beta.6...v0.4.3-beta.7
+[0.4.3-beta.6]: https://github.com/Ericwong5021/better-codex/compare/v0.4.3-beta.5...v0.4.3-beta.6
+[0.4.3-beta.5]: https://github.com/Ericwong5021/better-codex/compare/v0.4.3-beta.4...v0.4.3-beta.5
+[0.4.3-beta.4]: https://github.com/Ericwong5021/better-codex/compare/v0.4.3-beta.3...v0.4.3-beta.4
+[0.4.3-beta.3]: https://github.com/Ericwong5021/better-codex/compare/v0.4.3-beta.2...v0.4.3-beta.3
+[0.4.3-beta.2]: https://github.com/Ericwong5021/better-codex/compare/v0.4.3-beta.1...v0.4.3-beta.2
 [0.4.3-beta.1]: https://github.com/Ericwong5021/better-codex/compare/v0.4.2...v0.4.3-beta.1
 [0.4.2]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1...v0.4.2
 [0.4.2-beta.2]: https://github.com/Ericwong5021/better-codex/compare/v0.4.2-beta.1...v0.4.2-beta.2

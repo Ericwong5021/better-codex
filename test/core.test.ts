@@ -37,7 +37,7 @@ test("syncing an existing Codex project backfills its source creation time", () 
     assert.equal(synced.created_at, sourceCreatedAt);
   } finally {
     store?.close();
-    rmSync(target.directory, { recursive: true, force: true });
+    rmSync(target.directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
 
@@ -180,7 +180,7 @@ test("core workflow persists, orders status moves, and rejects stale writes", ()
     const restored = store.getIssue(first.id);
     assert.equal(restored?.status, "in_progress");
     assert.equal(restored?.thread_id, "local:thread-1");
-    assert.equal(store.health().schemaVersion, 7);
+    assert.equal(store.health().schemaVersion, 9);
     store.close();
   } finally {
     rmSync(target.directory, { recursive: true, force: true });
@@ -857,7 +857,7 @@ test("manual native turns reopen completed issues and return them for review", (
     assert.equal(store.getIssue(disconnectedIssue.id)?.status, "done");
   } finally {
     store?.close();
-    rmSync(target.directory, { recursive: true, force: true });
+    rmSync(target.directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
 
@@ -919,6 +919,7 @@ test("legacy imported issues attach resumable completed sessions without changin
     assert.equal(upgraded.session_owned, true);
     assert.equal(upgraded.session_thread_id, threadId);
     assert.equal(store.getIssueReplyState(upgraded.id).status, "succeeded");
+    assert.equal((store.syncProjection("issue", upgraded.id) as { active_run_status: string | null }).active_run_status, null);
 
     const activeTurnId = "019fec06-788f-7af3-a031-76b546904f30";
     const refreshed = store.attachImportedSession(legacy.id, {
@@ -928,6 +929,7 @@ test("legacy imported issues attach resumable completed sessions without changin
       turnId: activeTurnId,
     });
     assert.equal(refreshed.status, "in_progress");
+    assert.equal((store.syncProjection("issue", refreshed.id) as { session_status: string | null }).session_status, "active");
     assert.equal(refreshed.session_active_turn_id, activeTurnId);
     assert.equal(store.getIssueReplyState(refreshed.id).status, "running");
     assert.equal(store.completeSessionTurn(threadId, activeTurnId, "completed")?.turn_id, activeTurnId);
@@ -1075,21 +1077,54 @@ test("legacy cancelled issues migrate to archived backlog issues", () => {
 
     const legacy = new DatabaseSync(target.file);
     legacy.prepare("UPDATE issues SET status = 'cancelled', updated_at = ?, needs_attention = 1, pending_actor = 'agent' WHERE id = ?").run(archivedAt, issue.id);
-    legacy.prepare("DELETE FROM schema_migrations WHERE version = 7").run();
+    legacy.prepare("DELETE FROM schema_migrations WHERE version = 9").run();
     legacy.close();
 
     store = new Store(target.file);
     const migrated = store.getIssue(issue.id)!;
     assert.equal(migrated.status, "backlog");
     assert.equal(migrated.archived_at, archivedAt);
+    assert.equal(migrated.needs_attention, false);
+    assert.equal(migrated.pending_actor, "user");
     assert.equal(store.listIssues().some(item => item.id === issue.id), false);
     assert.equal(store.listIssues({ archived: true }).some(item => item.id === issue.id), true);
     assert.equal(store.isDispatchable(migrated), false);
     assert.throws(() => store.beginReplyRun(issue.id), /issue_archived/);
-    assert.equal(store.health().schemaVersion, 7);
+    const restored = store.unarchiveIssue(issue.id, migrated.version);
+    const moved = store.updateIssue(issue.id, restored.version, { status: "todo" });
+    assert.equal(store.isDispatchable(moved), false);
+    assert.equal(store.health().schemaVersion, 9);
   } finally {
     store?.close();
-    rmSync(target.directory, { recursive: true, force: true });
+    rmSync(target.directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  }
+});
+
+test("remote replies reject archived issues before invoking attachment handlers", async () => {
+  const store = new Store(":memory:");
+  try {
+    const project = store.createProject({ name: "Archived reply", workspacePath: process.cwd() });
+    const issue = store.createIssue({ projectId: project.id, title: "Do not reply" });
+    const archived = store.archiveIssue(issue.id, issue.version);
+    let replied = false;
+    const reply = await store.applyRemoteCommand({
+      command_id: "archived-reply",
+      device_id: "test-device",
+      operation: "issue.reply",
+      entity_id: issue.id,
+      base_revision: archived.version,
+      payload: { message: "Do not send" },
+      status: "pending",
+      requested_at: archived.updated_at,
+      expires_at: "2026-08-13T10:00:00.000Z",
+      finished_at: null,
+      error: null,
+    }, { reply: () => { replied = true; } });
+    assert.equal(reply.status, "rejected");
+    assert.equal(reply.error, "issue_archived");
+    assert.equal(replied, false);
+  } finally {
+    store.close();
   }
 });
 
@@ -1097,7 +1132,7 @@ test("newer database schema is rejected without migration", () => {
   const target = temporaryDatabase();
   try {
     const future = new DatabaseSync(target.file);
-    future.exec("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL); INSERT INTO schema_migrations VALUES (8, '2026-01-01T00:00:00.000Z')");
+    future.exec("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL); INSERT INTO schema_migrations VALUES (10, '2026-01-01T00:00:00.000Z')");
     future.close();
     assert.throws(() => new Store(target.file), /database_schema_too_new/);
   } finally {
@@ -1141,7 +1176,7 @@ test("legacy database is backed up before migration", () => {
     legacy.close();
 
     const store = new Store(target.file);
-    assert.equal(store.health().schemaVersion, 7);
+    assert.equal(store.health().schemaVersion, 9);
     assert.ok(store.lastBackupPath);
     assert.ok(existsSync(store.lastBackupPath!));
     assert.equal(store.getProject("legacy")?.name, "Legacy");

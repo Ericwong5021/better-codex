@@ -37,11 +37,14 @@ test("in-review status uses the waiting-for-review label", () => {
   assert.doesNotMatch(source, /审核中/);
 });
 
-test("board bridge requests retry once after runtime_bridge_timeout", () => {
+test("board bridge retries timed out GET requests without repeating writes", () => {
   const source = injectionScript(4317, "test-token", "install");
   assert.match(source, /runtime_bridge_timeout/);
-  assert.match(source, /return attempt\(1\)/);
+  assert.match(source, /const method = String\(options\.method \|\| "GET"\)\.toUpperCase\(\)/);
+  assert.match(source, /return attempt\(method === "GET" \? 1 : 0\)/);
   assert.match(source, /retriesLeft > 0 && error instanceof Error && error\.message === "runtime_bridge_timeout"/);
+  assert.match(source, /result\?\.accepted !== true/);
+  assert.match(source, /await waitForUpdateCompletion\(notice\)/);
 });
 
 test("injected panel opts out of the native Electron drag region", () => {
@@ -240,11 +243,19 @@ test("continue creating preference persists across page reloads", () => {
 
 test("unread completion notifications survive Runtime reinjection", () => {
   const source = injectionScript(4317, "test-token", "install");
+  const cacheSource = source.slice(source.indexOf("function readCompletionNoticeCache"), source.indexOf("function restoreCompletionNotices"));
 
   assert.ok(source.includes('const COMPLETION_NOTICE_CACHE_KEY = "better-codex-completion-notices:" + PROFILE'));
   assert.ok(source.includes("function readCompletionNoticeCache()"));
   assert.ok(source.includes("localStorage.setItem(COMPLETION_NOTICE_CACHE_KEY"));
+  assert.ok(cacheSource.includes("issue: completionNoticeSnapshot(record.issue)"), "legacy cache records must be reduced to the safe snapshot");
+  assert.ok(cacheSource.includes("const record = { key, issue: snapshot, createdAt: Date.now(), duration }"));
+  assert.doesNotMatch(cacheSource, /const record = \{ key, issue,/, "the persistent cache must not store the complete Issue object");
+  assert.ok(source.includes("completionNoticeStack.children.length >= COMPLETION_NOTICE_CACHE_LIMIT"), "the live notification stack must share the persistent cache bound");
+  assert.ok(source.includes("completionNoticeDismissals.get(oldest)?.(false)"));
   assert.ok(source.includes("function restoreCompletionNotices()"));
+  assert.ok(source.includes("state.issues.some(issue => issue.id === record.issue.id)"), "cached notices from another account or database must be dropped");
+  assert.doesNotMatch(source, /state\.issues\.find\(item => item\.id === record\.issue\.id\) \|\| record\.issue/);
   assert.ok(source.includes("restoreCompletionNotices();"));
   assert.ok(source.includes("dismissNotice(false)"), "reinjection should detach notices without marking them read");
 });
@@ -304,7 +315,7 @@ test("agent model picker uses the runtime catalog and a Codex-style popover", ()
 test("opening an agent inspector hides the toolbar create action", () => {
   const source = injectionScript(4317, "test-token", "install");
 
-  assert.ok(source.includes('addAgent.hidden = state.agentPane !== "preview"'));
+  assert.ok(source.includes('addAgent.hidden = AGENTS_READ_ONLY || state.agentPane !== "preview"'));
   assert.match(betterCodexDesignSystemCss(), /\.better-codex-agent-actions\[hidden\]\s*\{[^}]*display:\s*none\s*!important/s);
 });
 
@@ -458,7 +469,7 @@ test("panel binds project workspace from the active session cwd", () => {
 test("agent issue creation does not require or bind the current session", () => {
   const source = injectionScript(4317, "test-token", "install");
 
-  assert.ok(source.includes('if (draft.mode === "agent" && !issue && !workspacePath && !state.mockup)'));
+  assert.ok(source.includes('if (draft.mode === "agent" && !issue && !workspacePath && !state.mockup && !REMOTE)'));
   assert.doesNotMatch(source, /draft\.mode === "agent" && !issue && !threadId/);
   assert.ok(source.includes('ai_enrich: draft.mode === "agent" && !issue'));
   const submitIssue = source.slice(source.indexOf("async function submitIssue()"), source.indexOf("async function startIssueNow()"));
@@ -527,7 +538,7 @@ test("issue detail dialog separates compact and expanded sizes", () => {
   assert.match(css, /#better-codex-dialog\[data-detail="true"\]\[data-expanded="false"\]\s*\{[^}]*width:\s*min\(720px,[^}]*height:\s*fit-content;/s);
   assert.match(css, /#better-codex-dialog\[data-detail="true"\]\[data-expanded="false"\]:has\(\.better-codex-conversation\)\s*\{[^}]*height:\s*min\(62vh,\s*640px\)/s);
   assert.match(css, /#better-codex-dialog\[data-detail="true"\]\[data-expanded="true"\]\s*\{[^}]*width:\s*min\(1200px,[^}]*height:\s*fit-content;/s);
-  assert.match(css, /#better-codex-dialog\[data-detail="true"\]\[data-expanded="true"\]:has\(\.better-codex-conversation\)\s*\{[^}]*height:\s*min\(90vh,\s*960px\)/s);
+  assert.match(css, /#better-codex-dialog\[data-detail="true"\]\[data-expanded="true"\]:has\(\.better-codex-conversation\)\s*\{[^}]*height:\s*min\(76vh,\s*780px\)/s);
   assert.match(css, /#better-codex-dialog\[data-detail="true"\]\[data-expanded="false"\],[\s\S]*?#better-codex-dialog\[data-detail="true"\]\[data-expanded="true"\]\s*\{\s*width:\s*calc\(100vw - 24px\);/s);
 });
 
@@ -818,5 +829,6 @@ test("web injection shares the Codex user profile with the host shell", () => {
   const source = injectionScript(4317, "test-token", "install", "zh-CN", "web");
 
   assert.match(source, /new CustomEvent\("better-codex:bootstrap"/);
+  assert.equal(source.match(/new CustomEvent\("better-codex:bootstrap"/g)?.length, 2, "language changes should refresh the Web host profile");
   assert.match(source, /detail: \{ user: state\.user, locale: state\.locale \}/);
 });
