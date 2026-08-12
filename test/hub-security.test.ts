@@ -120,7 +120,7 @@ test("Hub Web login separates bootstrap credentials and enforces cookie, Origin,
   const proxiedOrigin = `http://127.0.0.1:${proxiedPort}`;
   const proxiedLogin = (client: string, password: string) => fetch(`${proxiedOrigin}/web/session`, {
     method: "POST",
-    headers: { origin: proxiedOrigin, "content-type": "application/json", "x-better-codex-client-ip": client },
+    headers: { origin: proxiedOrigin, "content-type": "application/json", "x-forwarded-for": client },
     body: JSON.stringify({ username: webUsername, password }),
   });
   try {

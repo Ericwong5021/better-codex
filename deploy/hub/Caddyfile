@@ -1,6 +1,4 @@
 {$BETTER_CODEX_HUB_DOMAIN} {
 	encode zstd gzip
-	reverse_proxy hub:4318 {
-		header_up X-Better-Codex-Client-IP {remote_host}
-	}
+	reverse_proxy hub:4318
 }

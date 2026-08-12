@@ -46,7 +46,7 @@ export function hubServerOptions(): HubServerOptions {
 
 function loginClientAddress(request: IncomingMessage, trustedProxy: boolean) {
   if (!trustedProxy) return String(request.socket.remoteAddress || "unknown");
-  const forwarded = request.headers["x-better-codex-client-ip"];
+  const forwarded = request.headers["x-forwarded-for"];
   if (typeof forwarded !== "string" || !isIP(forwarded.trim())) return null;
   return forwarded.trim();
 }
