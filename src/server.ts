@@ -953,8 +953,9 @@ export function startServer() {
         if (updateInstallInProgress) throw new Error("update_in_progress");
         if (!worker.pauseForUpdate()) throw new Error("issue_execution_running");
         updateInstallInProgress = true;
-        try {
-          const result = await installGatewayUpdate();
+        const installation = installGatewayUpdate();
+        sendJson(response, 202, { accepted: true, state: getGatewayUpdateState() });
+        void installation.then(result => {
           const updated = result.core.updated || result.compatibility.updated;
           const updates = { core: result.core.updated ? result.core.version : null, compatibility: result.compatibility.updated ? result.compatibility.version : null };
           const shouldRelaunch = updated && !updateRelaunchScheduled;
@@ -962,7 +963,6 @@ export function startServer() {
             updateRelaunchScheduled = true;
             recordGatewayUpdateActivation("activating", null, updates);
           }
-          sendJson(response, updated ? 202 : 200, { accepted: updated, updated, state: getGatewayUpdateState(), result });
           if (!shouldRelaunch) {
             updateInstallInProgress = false;
             worker.resumeAfterUpdate();
@@ -986,12 +986,13 @@ export function startServer() {
               recordGatewayUpdateActivation("error", error instanceof Error ? error.message : "update_activation_failed");
             }
           }, 250);
-          return;
-        } catch (error) {
+        }).catch(error => {
           updateInstallInProgress = false;
+          updateRelaunchScheduled = false;
           worker.resumeAfterUpdate();
-          throw error;
-        }
+          if (getGatewayUpdateState().status !== "error") recordGatewayUpdateActivation("error", error instanceof Error ? error.message : "update_activation_failed");
+        });
+        return;
       }
       if (url.pathname === "/api/agents" && method === "GET") return sendJson(response, 200, visibleAgentProfiles());
       if (url.pathname === "/api/agents" && method === "POST") {

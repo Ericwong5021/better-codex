@@ -1255,7 +1255,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function api(path, options = {}) {
-      if (READ_ONLY && String(options.method || "GET").toUpperCase() !== "GET") return Promise.reject(new Error("remote_read_only"));
+      const method = String(options.method || "GET").toUpperCase();
+      if (READ_ONLY && method !== "GET") return Promise.reject(new Error("remote_read_only"));
       const requestPath = path + (path.includes("?") ? "&" : "?") + "locale=" + encodeURIComponent(state.locale);
       const attempt = (retriesLeft) => {
         if (typeof window.betterCodexHost?.request === "function") {
@@ -1286,7 +1287,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           throw error;
         });
       };
-      return attempt(1);
+      return attempt(method === "GET" ? 1 : 0);
     }
 
     function startLiveUpdates() {
@@ -1777,13 +1778,58 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       syncCompletionNoticePosition();
     }
 
+    async function waitForUpdateCompletion(notice) {
+      const deadline = Date.now() + 10 * 60 * 1000;
+      const title = notice.querySelector(".better-codex-update-title");
+      const description = notice.querySelector(".better-codex-update-description");
+      while (!destroyed && updateNotice === notice && Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+        let update;
+        try {
+          update = await api("/api/update");
+        } catch (reason) {
+          if (destroyed || updateNotice !== notice) return;
+          const message = String(reason instanceof Error ? reason.message : reason || "");
+          if (["runtime_bridge_timeout", "runtime_bridge_unavailable", "runtime_unavailable", "injection_destroyed"].includes(message)) continue;
+          throw reason;
+        }
+        if (updateNotice !== notice) return;
+        if (update?.status === "error") throw new Error(String(update.error || "update_failed"));
+        if (update?.status === "current") {
+          notice.dataset.status = "current";
+          title.textContent = t("Better Codex 已是最新版本");
+          description.textContent = t("更新已完成。");
+          setTimeout(() => {
+            if (updateNotice !== notice) return;
+            notice.remove();
+            updateNotice = null;
+            updateNoticeResizeObserver?.disconnect();
+            updateNoticeResizeObserver = null;
+            syncCompletionNoticePosition();
+          }, 1800);
+          return;
+        }
+        if (update?.status === "restarting") {
+          notice.dataset.status = "restarting";
+          title.textContent = t("正在重启 Better Codex");
+          description.textContent = t("正在重启 Codex，稍后会自动恢复。");
+        } else {
+          notice.dataset.status = "installing";
+          title.textContent = t("正在更新 Better Codex");
+          description.textContent = t("正在下载并校验新版本，请不要关闭 Codex。");
+        }
+      }
+      if (!destroyed && updateNotice === notice) throw new Error("runtime_bridge_timeout");
+    }
+
     function renderUpdateNotice(update) {
       const version = String(update?.latestVersion || "");
       const activationError = update?.status === "error" && String(update?.error || "").startsWith("update_activation_failed:");
       const installError = update?.status === "error" && updateNotice?.dataset.status === "install-error";
+      const activeInstall = ["installing", "restarting", "current"].includes(updateNotice?.dataset.status || "");
       const noticeVersion = activationError ? String(update?.currentVersion || "activation-error") + ":" + String(update?.checkedAt || Date.now()) : version;
       if (!activationError && (update?.status !== "available" || !version)) {
-        if (installError) return;
+        if (installError || activeInstall) return;
         if (!["checking", "installing", "restarting"].includes(update?.status)) {
           updateNoticeResizeObserver?.disconnect();
           updateNoticeResizeObserver = null;
@@ -1856,23 +1902,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         try {
           const result = await api("/api/update/install", { method: "POST" });
           if (updateNotice !== notice) return;
-          if (result?.updated === false) {
-            notice.dataset.status = "current";
-            title.textContent = t("Better Codex 已是最新版本");
-            description.textContent = t("刚刚完成检查，无需更新。");
-            setTimeout(() => {
-              if (updateNotice !== notice) return;
-              notice.remove();
-              updateNotice = null;
-              updateNoticeResizeObserver?.disconnect();
-              updateNoticeResizeObserver = null;
-              syncCompletionNoticePosition();
-            }, 1800);
-            return;
-          }
-          notice.dataset.status = "restarting";
-          title.textContent = t("正在重启 Better Codex");
-          description.textContent = t("正在重启 Codex，稍后会自动恢复。");
+          if (result?.accepted !== true) throw new Error("update_not_accepted");
+          await waitForUpdateCompletion(notice);
         } catch (reason) {
           if (updateNotice !== notice) return;
           notice.dataset.status = "install-error";

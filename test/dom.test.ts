@@ -37,11 +37,14 @@ test("in-review status uses the waiting-for-review label", () => {
   assert.doesNotMatch(source, /审核中/);
 });
 
-test("board bridge requests retry once after runtime_bridge_timeout", () => {
+test("board bridge retries timed out GET requests without repeating writes", () => {
   const source = injectionScript(4317, "test-token", "install");
   assert.match(source, /runtime_bridge_timeout/);
-  assert.match(source, /return attempt\(1\)/);
+  assert.match(source, /const method = String\(options\.method \|\| "GET"\)\.toUpperCase\(\)/);
+  assert.match(source, /return attempt\(method === "GET" \? 1 : 0\)/);
   assert.match(source, /retriesLeft > 0 && error instanceof Error && error\.message === "runtime_bridge_timeout"/);
+  assert.match(source, /result\?\.accepted !== true/);
+  assert.match(source, /await waitForUpdateCompletion\(notice\)/);
 });
 
 test("injected panel opts out of the native Electron drag region", () => {
