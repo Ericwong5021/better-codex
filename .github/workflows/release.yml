@@ -68,8 +68,25 @@ jobs:
             exit 1
           fi
 
-  package:
+  acceptance:
     needs: validate-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.0
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:acceptance
+      - uses: actions/upload-artifact@v4
+        with:
+          name: selfhost-acceptance
+          path: release/acceptance.json
+
+  package:
+    needs: acceptance
     strategy:
       matrix:
         runner:
@@ -97,7 +114,9 @@ jobs:
             release/better-codex-core-*
 
   release:
-    needs: package
+    needs:
+      - package
+      - acceptance
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

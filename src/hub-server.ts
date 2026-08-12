@@ -1,8 +1,8 @@
-import { randomBytes, timingSafeEqual } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { resolve } from "node:path";
 import { injectionScript } from "./dom.js";
+import { clearWebSessionCookie, cookies, passwordHash, passwordMatches, readHubSecret, validateWebPassword, validateWebUsername, webSessionCookie } from "./hub-auth.js";
 import { issuePriorities, issueStatuses } from "./db.js";
 import { HubStore } from "./hub-store.js";
 import type { RemoteCommandAck, SyncPushRequest } from "./sync-contract.js";
@@ -13,23 +13,29 @@ export type HubServerOptions = {
   port: number;
   database: string;
   adminToken: string;
+  webPassword?: string;
+  webUsername?: string;
+  secureCookies?: boolean;
+  allowedHosts?: string[];
 };
-
-function readAdminToken() {
-  const file = process.env.BETTER_CODEX_HUB_ADMIN_TOKEN_FILE;
-  const value = file ? readFileSync(resolve(file), "utf8").trim() : process.env.BETTER_CODEX_HUB_ADMIN_TOKEN?.trim() ?? "";
-  if (value.length < 32) throw new Error("hub_admin_token_too_short");
-  return value;
-}
 
 export function hubServerOptions(): HubServerOptions {
   const port = Number(process.env.BETTER_CODEX_HUB_PORT ?? 4318);
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error("invalid_hub_port");
+  const adminToken = readHubSecret("BETTER_CODEX_HUB_BOOTSTRAP_SECRET_FILE", "BETTER_CODEX_HUB_BOOTSTRAP_SECRET") || readHubSecret("BETTER_CODEX_HUB_ADMIN_TOKEN_FILE", "BETTER_CODEX_HUB_ADMIN_TOKEN");
+  const webPassword = validateWebPassword(readHubSecret("BETTER_CODEX_HUB_WEB_PASSWORD_FILE", "BETTER_CODEX_HUB_WEB_PASSWORD"));
+  const webUsername = validateWebUsername(process.env.BETTER_CODEX_HUB_WEB_USERNAME || "admin");
+  if (adminToken.length < 32) throw new Error("hub_bootstrap_secret_too_short");
+  if (adminToken === webPassword) throw new Error("hub_secrets_must_be_distinct");
   return {
     host: process.env.BETTER_CODEX_HUB_HOST || "127.0.0.1",
     port,
     database: resolve(process.env.BETTER_CODEX_HUB_DB || "./data/better-codex-hub.db"),
-    adminToken: readAdminToken(),
+    adminToken,
+    webPassword,
+    webUsername,
+    secureCookies: process.env.BETTER_CODEX_HUB_INSECURE_COOKIES !== "1",
+    allowedHosts: String(process.env.BETTER_CODEX_HUB_ALLOWED_HOSTS || "").split(",").map(value => value.trim().toLowerCase()).filter(Boolean),
   };
 }
 
@@ -47,15 +53,19 @@ function secretEqual(left: string, right: string) {
 function securityHeaders() {
   return {
     "cache-control": "no-store",
+    "cross-origin-opener-policy": "same-origin",
+    "cross-origin-resource-policy": "same-origin",
+    "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
     "referrer-policy": "no-referrer",
+    "strict-transport-security": "max-age=31536000; includeSubDomains",
     "x-content-type-options": "nosniff",
     "x-frame-options": "DENY",
   };
 }
 
-function sendJson(response: ServerResponse, status: number, value: unknown) {
+function sendJson(response: ServerResponse, status: number, value: unknown, headers: Record<string, string> = {}) {
   const body = JSON.stringify(value);
-  response.writeHead(status, { ...securityHeaders(), "content-type": "application/json; charset=utf-8", "content-length": Buffer.byteLength(body), "content-security-policy": "default-src 'none'; frame-ancestors 'none'" });
+  response.writeHead(status, { ...securityHeaders(), "content-type": "application/json; charset=utf-8", "content-length": Buffer.byteLength(body), "content-security-policy": "default-src 'none'; frame-ancestors 'none'", ...headers });
   response.end(body);
 }
 
@@ -91,9 +101,9 @@ function readBody(request: IncomingMessage, limit = 1_048_576) {
   });
 }
 
-function trustedOrigin(request: IncomingMessage) {
+function trustedOrigin(request: IncomingMessage, required = false) {
   const origin = request.headers.origin;
-  if (!origin) return true;
+  if (!origin) return !required;
   try {
     return new URL(origin).host === request.headers.host;
   } catch {
@@ -101,13 +111,23 @@ function trustedOrigin(request: IncomingMessage) {
   }
 }
 
+function trustedHost(request: IncomingMessage, allowedHosts: string[]) {
+  const raw = String(request.headers.host || "").toLowerCase();
+  if (!raw || raw.includes("/") || raw.includes("\\")) return false;
+  let hostname = "";
+  try { hostname = new URL(`http://${raw}`).hostname.toLowerCase(); } catch { return false; }
+  if (["127.0.0.1", "localhost", "::1", "[::1]"].includes(hostname)) return true;
+  return allowedHosts.includes(raw) || allowedHosts.includes(hostname);
+}
+
 function errorStatus(code: string) {
   if (code === "unauthorized") return 401;
-  if (["forbidden", "writer_lease_conflict"].includes(code)) return 403;
+  if (["forbidden", "csrf_invalid", "writer_lease_conflict"].includes(code)) return 403;
   if (["device_not_found", "issue_not_found", "command_not_found"].includes(code)) return 404;
   if (["entity_owned_by_another_device", "incompatible_protocol", "version_conflict", "command_id_conflict", "issue_execution_running"].includes(code)) return 409;
   if (code === "runtime_not_paired") return 503;
   if (code === "body_too_large") return 413;
+  if (code === "login_rate_limited") return 429;
   return 400;
 }
 
@@ -133,20 +153,17 @@ function issueForWeb(issue: ReturnType<HubStore["board"]>["issues"][number]) {
 export function createHubServer(options: HubServerOptions) {
   if (options.adminToken.length < 32) throw new Error("hub_admin_token_too_short");
   const store = new HubStore(options.database);
-  const webSessions = new Map<string, number>();
-  const sessionValid = (token: string) => {
-    const expires = webSessions.get(token) ?? 0;
-    if (expires <= Date.now()) {
-      if (token) webSessions.delete(token);
-      return false;
-    }
-    return true;
-  };
+  const initialPassword = options.webPassword ?? options.adminToken;
+  store.ensureWebCredentials(validateWebUsername(options.webUsername || "admin"), passwordHash(initialPassword));
+  const secureCookies = options.secureCookies !== false;
+  const allowedHosts = options.allowedHosts ?? [];
+  const loginAttempts = new Map<string, { count: number; resetAt: number }>();
   const server = createServer((request, response) => {
     void (async () => {
       if (!request.url) return sendJson(response, 400, { error: "invalid_request" });
       const url = new URL(request.url, "http://hub.local");
       const method = request.method ?? "GET";
+      if (!trustedHost(request, allowedHosts)) return sendJson(response, 403, { error: "untrusted_host" });
       if (method === "OPTIONS") {
         response.writeHead(204, securityHeaders());
         return response.end();
@@ -157,21 +174,44 @@ export function createHubServer(options: HubServerOptions) {
       if (url.pathname === "/web/host.css" && method === "GET") return sendText(response, 200, betterCodexWebHostCss(), "text/css; charset=utf-8");
       if (url.pathname === "/web/host.js" && method === "GET") return sendText(response, 200, betterCodexWebHostJavaScript(true), "text/javascript; charset=utf-8");
       if (url.pathname === "/web/session" && method === "POST") {
+        if (!trustedOrigin(request, true)) return sendJson(response, 403, { error: "forbidden" });
+        const client = String(request.socket.remoteAddress || "unknown");
+        const attempt = loginAttempts.get(client);
+        if (attempt && attempt.resetAt > Date.now() && attempt.count >= 5) {
+          store.audit(client, "web_login_rate_limited");
+          return sendJson(response, 429, { error: "login_rate_limited" }, { "retry-after": String(Math.max(1, Math.ceil((attempt.resetAt - Date.now()) / 1000))) });
+        }
         const body = await readBody(request, 4096);
-        if (!secretEqual(String(body.token ?? ""), options.adminToken)) return sendJson(response, 401, { error: "unauthorized" });
-        const token = randomBytes(32).toString("base64url");
-        webSessions.set(token, Date.now() + 12 * 60 * 60_000);
-        return sendJson(response, 200, { token });
+        if (String(body.username ?? "") !== store.webUsername() || !passwordMatches(String(body.password ?? ""), store.webPasswordHash() || "")) {
+          const current = attempt && attempt.resetAt > Date.now() ? attempt : { count: 0, resetAt: Date.now() + 15 * 60_000 };
+          loginAttempts.set(client, { ...current, count: current.count + 1 });
+          store.audit(client, "web_login_failed");
+          return sendJson(response, 401, { error: "unauthorized" });
+        }
+        loginAttempts.delete(client);
+        const session = store.createWebSession();
+        return sendJson(response, 200, { csrf_token: session.csrf_token, expires_at: session.expires_at }, { "set-cookie": webSessionCookie(session.token, secureCookies) });
       }
 
       const token = bearer(request);
       const admin = token.length > 0 && secretEqual(token, options.adminToken);
-      const browser = sessionValid(token);
+      const browserToken = cookies(request.headers.cookie).get("better_codex_session") || "";
+      const browser = store.webSession(browserToken);
+      const csrfValid = Boolean(browser && typeof request.headers["x-csrf-token"] === "string" && secretEqual(request.headers["x-csrf-token"], browser.csrf_token));
+      if (url.pathname === "/web/session" && method === "GET") {
+        if (!browser) return sendJson(response, 401, { error: "unauthorized" });
+        return sendJson(response, 200, { csrf_token: browser.csrf_token, expires_at: browser.expires_at });
+      }
+      if (url.pathname === "/web/session" && method === "DELETE") {
+        if (!browser) return sendJson(response, 401, { error: "unauthorized" }, { "set-cookie": clearWebSessionCookie(secureCookies) });
+        if (!trustedOrigin(request, true) || !csrfValid) return sendJson(response, 403, { error: "csrf_invalid" });
+        store.revokeWebSession(browserToken);
+        return sendJson(response, 200, { ok: true }, { "set-cookie": clearWebSessionCookie(secureCookies) });
+      }
       if (url.pathname === "/web/injection.js" && method === "GET") {
-        const session = url.searchParams.get("session") || "";
-        if (!sessionValid(session)) return sendJson(response, 401, { error: "unauthorized" });
+        if (!browser) return sendJson(response, 401, { error: "unauthorized" });
         const locale = String(url.searchParams.get("locale") || "").toLowerCase().startsWith("zh") ? "zh-CN" : "en";
-        return sendText(response, 200, injectionScript(0, session, "install", locale, "web"), "text/javascript; charset=utf-8");
+        return sendText(response, 200, injectionScript(0, "", "install", locale, "web"), "text/javascript; charset=utf-8");
       }
       if (url.pathname === "/api/v1/devices/pair" && method === "POST") {
         const body = await readBody(request);
@@ -250,6 +290,7 @@ export function createHubServer(options: HubServerOptions) {
       }
       if (url.pathname === "/api/issues" && method === "POST") {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" });
+        if (!trustedOrigin(request, true) || !csrfValid) return sendJson(response, 403, { error: "csrf_invalid" });
         const body = await readBody(request);
         const command = store.createRemoteCommand({
           command_id: body.command_id ?? request.headers["x-better-codex-command-id"],
@@ -263,6 +304,7 @@ export function createHubServer(options: HubServerOptions) {
       }
       if (issueMatch && method === "PATCH") {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" });
+        if (!trustedOrigin(request, true) || !csrfValid) return sendJson(response, 403, { error: "csrf_invalid" });
         const body = await readBody(request);
         const issueId = decodeURIComponent(issueMatch[1]);
         const command = store.createRemoteCommand({
@@ -278,6 +320,7 @@ export function createHubServer(options: HubServerOptions) {
       const issueAction = url.pathname.match(/^\/api\/issues\/([^/]+)\/(move|archive|unarchive)$/);
       if (issueAction && method === "POST") {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" });
+        if (!trustedOrigin(request, true) || !csrfValid) return sendJson(response, 403, { error: "csrf_invalid" });
         const body = await readBody(request);
         const action = issueAction[2];
         const operation = action === "archive" ? "issue.archive" : action === "unarchive" ? "issue.restore" : "issue.move";
@@ -297,9 +340,19 @@ export function createHubServer(options: HubServerOptions) {
         response.flushHeaders();
         let cursor = Number(request.headers["last-event-id"] ?? store.board().revision);
         if (!Number.isSafeInteger(cursor) || cursor < 0) cursor = 0;
-        response.write(`id: ${store.board().revision}\nevent: ready\ndata: {}\n\n`);
+        const initial = store.changeWindow(cursor);
+        if (initial.resync_required) {
+          cursor = initial.revision;
+          response.write(`id: ${cursor}\nevent: resync_required\ndata: {}\n\n`);
+        } else response.write(`id: ${initial.revision}\nevent: ready\ndata: {}\n\n`);
         const poll = setInterval(() => {
-          const changes = store.changesAfter(cursor);
+          const window = store.changeWindow(cursor);
+          if (window.resync_required) {
+            cursor = window.revision;
+            response.write(`id: ${cursor}\nevent: resync_required\ndata: {}\n\n`);
+            return;
+          }
+          const changes = window.changes;
           for (const change of changes) {
             cursor = change.seq;
             response.write(`id: ${change.seq}\nevent: change\ndata: ${JSON.stringify(change)}\n\n`);
@@ -309,7 +362,10 @@ export function createHubServer(options: HubServerOptions) {
         request.once("close", () => clearInterval(poll));
         return;
       }
-      if (url.pathname.startsWith("/api/") && browser && method !== "GET") return sendJson(response, 405, { error: "remote_operation_forbidden" });
+      if (url.pathname.startsWith("/api/") && browser && method !== "GET") {
+        if (!trustedOrigin(request, true) || !csrfValid) return sendJson(response, 403, { error: "csrf_invalid" });
+        return sendJson(response, 405, { error: "remote_operation_forbidden" });
+      }
 
       const device = store.deviceForToken(token);
       if (!device) return sendJson(response, 401, { error: "unauthorized" });

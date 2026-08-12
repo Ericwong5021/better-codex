@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { copyFileSync, existsSync, mkdirSync, renameSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { issuePriorities, issueStatuses } from "./db.js";
 import { forbiddenProjectionKeys, remoteCommandOperations, syncEntityTypes, syncProtocolVersion, type HubBoard, type IssueProjection, type ProjectProjection, type RemoteCommand, type RemoteCommandAck, type RemoteCommandOperation, type RemoteCommandStatus, type RuntimeProjection, type SyncChange, type SyncEntityType, type SyncProjection, type SyncPushRequest } from "./sync-contract.js";
@@ -15,6 +15,26 @@ function after(milliseconds: number) {
 
 function tokenHash(value: string) {
   return createHash("sha256").update(value).digest("hex");
+}
+
+const hubSchemaVersion = 3;
+
+function backupBeforeMigration(file: string) {
+  if (!existsSync(file)) return;
+  const source = new DatabaseSync(file);
+  try {
+    const integrity = source.prepare("PRAGMA quick_check").get() as { quick_check?: string } | undefined;
+    if (integrity?.quick_check !== "ok") throw new Error("hub_database_integrity_failed");
+    let version = 0;
+    try { version = Number((source.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM hub_migrations").get() as { version: number }).version); } catch {}
+    if (version >= hubSchemaVersion) return;
+    const directory = join(dirname(file), "backups");
+    mkdirSync(directory, { recursive: true });
+    const destination = join(directory, `before-hub-v${hubSchemaVersion}-${new Date().toISOString().replace(/[:.]/g, "-")}.db`);
+    source.prepare("VACUUM INTO ?").run(destination);
+  } finally {
+    source.close();
+  }
 }
 
 function cleanString(value: unknown, limit: number, allowEmpty = true) {
@@ -131,6 +151,7 @@ export class HubStore {
 
   constructor(readonly file: string) {
     mkdirSync(dirname(file), { recursive: true });
+    backupBeforeMigration(file);
     this.db = new DatabaseSync(file);
     this.db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
     this.db.exec(`
@@ -178,10 +199,26 @@ export class HubStore {
         detail TEXT,
         created_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS hub_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS web_sessions (
+        token_hash TEXT PRIMARY KEY,
+        csrf_token TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        last_seen_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS hub_audit (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT,
+        actor TEXT NOT NULL,
+        event TEXT NOT NULL,
+        detail TEXT,
+        created_at TEXT NOT NULL
+      );
       CREATE INDEX IF NOT EXISTS changes_created_at ON changes(created_at);
       CREATE INDEX IF NOT EXISTS remote_commands_queue ON remote_commands(device_id, status, requested_at);
       INSERT OR IGNORE INTO hub_migrations (version, applied_at) VALUES (1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
       INSERT OR IGNORE INTO hub_migrations (version, applied_at) VALUES (2, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+      INSERT OR IGNORE INTO hub_migrations (version, applied_at) VALUES (3, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
     `);
   }
 
@@ -195,10 +232,94 @@ export class HubStore {
     return { ok: check?.quick_check === "ok", protocol_version: syncProtocolVersion, devices: Number(devices.value), revision: this.cursor() };
   }
 
+  audit(actor: string, event: string, detail: string | null = null) {
+    this.db.prepare("INSERT INTO hub_audit (actor, event, detail, created_at) VALUES (?, ?, ?, ?)").run(actor.slice(0, 120), event.slice(0, 120), detail?.slice(0, 1000) ?? null, now());
+  }
+
+  auditEvents(limit = 100) {
+    return this.db.prepare("SELECT seq, actor, event, detail, created_at FROM hub_audit ORDER BY seq DESC LIMIT ?").all(Math.min(Math.max(Math.trunc(limit), 1), 1000));
+  }
+
+  webPasswordHash() {
+    const row = this.db.prepare("SELECT value FROM hub_settings WHERE key = 'web_password_hash'").get() as { value: string } | undefined;
+    return row?.value ?? null;
+  }
+
+  webUsername() {
+    const row = this.db.prepare("SELECT value FROM hub_settings WHERE key = 'web_username'").get() as { value: string } | undefined;
+    return row?.value ?? null;
+  }
+
+  setWebCredentials(username: string, encoded: string) {
+    if (!encoded.startsWith("scrypt$") || !username) throw new Error("hub_web_credentials_invalid");
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const timestamp = now();
+      this.db.prepare("INSERT INTO hub_settings (key, value, updated_at) VALUES ('web_username', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at").run(username, timestamp);
+      this.db.prepare("INSERT INTO hub_settings (key, value, updated_at) VALUES ('web_password_hash', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at").run(encoded, timestamp);
+      this.db.exec("DELETE FROM web_sessions");
+      this.audit("admin", "web_credentials_rotated");
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  setWebPasswordHash(encoded: string) {
+    this.setWebCredentials(this.webUsername() || "admin", encoded);
+  }
+
+  ensureWebCredentials(username: string, encoded: string) {
+    if (!this.webPasswordHash() || !this.webUsername()) this.setWebCredentials(username, encoded);
+  }
+
+  createWebSession() {
+    const token = randomBytes(32).toString("base64url");
+    const csrf_token = randomBytes(32).toString("base64url");
+    const created_at = now();
+    const expires_at = after(12 * 60 * 60_000);
+    this.db.prepare("INSERT INTO web_sessions (token_hash, csrf_token, created_at, expires_at, last_seen_at) VALUES (?, ?, ?, ?, ?)").run(tokenHash(token), csrf_token, created_at, expires_at, created_at);
+    this.audit("browser", "web_session_created");
+    return { token, csrf_token, expires_at };
+  }
+
+  webSession(token: string) {
+    if (!token) return null;
+    this.db.prepare("DELETE FROM web_sessions WHERE expires_at <= ?").run(now());
+    const row = this.db.prepare("SELECT csrf_token, expires_at FROM web_sessions WHERE token_hash = ? AND expires_at > ?").get(tokenHash(token), now()) as { csrf_token: string; expires_at: string } | undefined;
+    if (!row) return null;
+    this.db.prepare("UPDATE web_sessions SET last_seen_at = ? WHERE token_hash = ?").run(now(), tokenHash(token));
+    return row;
+  }
+
+  revokeWebSession(token: string) {
+    if (token) this.db.prepare("DELETE FROM web_sessions WHERE token_hash = ?").run(tokenHash(token));
+    this.audit("browser", "web_session_revoked");
+  }
+
+  backup(target?: string) {
+    const directory = join(dirname(this.file), "backups");
+    mkdirSync(directory, { recursive: true });
+    const destination = resolve(target || join(directory, `better-codex-hub-${new Date().toISOString().replace(/[:.]/g, "-")}.db`));
+    if (existsSync(destination)) throw new Error("backup_already_exists");
+    this.db.prepare("VACUUM INTO ?").run(destination);
+    const check = new DatabaseSync(destination, { readOnly: true });
+    try {
+      const integrity = check.prepare("PRAGMA quick_check").get() as { quick_check?: string } | undefined;
+      if (integrity?.quick_check !== "ok") throw new Error("backup_integrity_failed");
+    } finally {
+      check.close();
+    }
+    this.audit("admin", "backup_created", destination);
+    return { backup: destination };
+  }
+
   createPairingCode() {
     const code = randomBytes(6).toString("base64url");
     const expires_at = after(10 * 60_000);
     this.db.prepare("INSERT INTO pairing_codes (code_hash, expires_at) VALUES (?, ?)").run(tokenHash(code), expires_at);
+    this.audit("admin", "pairing_code_created");
     return { pairing_code: code, expires_at };
   }
 
@@ -219,6 +340,7 @@ export class HubStore {
       this.db.exec("ROLLBACK");
       throw error;
     }
+    this.audit(id, "device_paired", name);
     return { protocol_version: syncProtocolVersion, device_id: id, device_token: token, device_name: name };
   }
 
@@ -234,6 +356,7 @@ export class HubStore {
   revokeDevice(id: string) {
     const result = this.db.prepare("UPDATE devices SET revoked_at = ?, lease_expires_at = NULL WHERE id = ? AND revoked_at IS NULL").run(now(), id);
     if (result.changes !== 1) throw new Error("device_not_found");
+    this.audit("admin", "device_revoked", id);
     return { revoked: true, device_id: id };
   }
 
@@ -255,6 +378,12 @@ export class HubStore {
     const timestamp = now();
     this.db.prepare("INSERT INTO remote_command_audit (command_id, status, detail, created_at) VALUES (?, ?, ?, ?)").run(commandId, status, detail, timestamp);
     this.db.prepare("INSERT INTO changes (entity_type, entity_id, operation, created_at) VALUES ('issue', ?, 'command', ?)").run(commandId, timestamp);
+    this.pruneChanges();
+  }
+
+  private pruneChanges() {
+    const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60_000).toISOString();
+    this.db.prepare("DELETE FROM changes WHERE created_at < ? OR seq <= (SELECT MAX(seq) - 10000 FROM changes)").run(cutoff);
   }
 
   private expireCommands() {
@@ -365,6 +494,7 @@ export class HubStore {
         accepted.push(change.event_id);
       }
       this.db.prepare("INSERT INTO runtime_projection (device_id, payload_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(device_id) DO UPDATE SET payload_json = excluded.payload_json, updated_at = excluded.updated_at").run(deviceId, JSON.stringify({ ...runtime, last_seen_at: now() }), now());
+      this.pruneChanges();
       this.db.exec("COMMIT");
       return { accepted, cursor: this.cursor(), lease_expires_at };
     } catch (error) {
@@ -423,6 +553,14 @@ export class HubStore {
     return this.db.prepare("SELECT seq, entity_type, entity_id, operation, created_at FROM changes WHERE seq > ? ORDER BY seq LIMIT ?").all(cursor, Math.min(Math.max(limit, 1), 1000)) as Array<{ seq: number; entity_type: string; entity_id: string; operation: string; created_at: string }>;
   }
 
+  changeWindow(cursor: number, limit = 1000) {
+    if (!Number.isSafeInteger(cursor) || cursor < 0) throw new Error("invalid_cursor");
+    const current = this.cursor();
+    const oldest = Number((this.db.prepare("SELECT COALESCE(MIN(seq), ?) AS value FROM changes").get(current + 1) as { value: number }).value);
+    if (cursor > current || cursor < oldest - 1) return { resync_required: true, revision: current, changes: [] as ReturnType<HubStore["changesAfter"]> };
+    return { resync_required: false, revision: current, changes: this.changesAfter(cursor, limit) };
+  }
+
   clearProjection() {
     const pending = this.db.prepare("SELECT COUNT(*) AS value FROM remote_commands WHERE status = 'pending'").get() as { value: number };
     if (Number(pending.value) > 0) throw new Error("pending_commands_exist");
@@ -434,6 +572,27 @@ export class HubStore {
       this.db.exec("ROLLBACK");
       throw error;
     }
+    this.audit("admin", "projection_cleared");
     return { cleared: true };
   }
+}
+
+export function restoreHubBackup(databaseFile: string, backupFile: string) {
+  const database = resolve(databaseFile);
+  const backup = resolve(backupFile);
+  if (!existsSync(backup)) throw new Error("backup_not_found");
+  const source = new DatabaseSync(backup, { readOnly: true });
+  try {
+    const integrity = source.prepare("PRAGMA quick_check").get() as { quick_check?: string } | undefined;
+    const migration = source.prepare("SELECT MAX(version) AS version FROM hub_migrations").get() as { version?: number } | undefined;
+    if (integrity?.quick_check !== "ok" || !Number(migration?.version)) throw new Error("backup_invalid");
+  } finally {
+    source.close();
+  }
+  mkdirSync(dirname(database), { recursive: true });
+  const temporary = `${database}.restore-${randomUUID()}`;
+  copyFileSync(backup, temporary);
+  if (existsSync(database)) renameSync(database, `${database}.before-restore-${new Date().toISOString().replace(/[:.]/g, "-")}`);
+  renameSync(temporary, database);
+  return { restored: database, source: backup };
 }

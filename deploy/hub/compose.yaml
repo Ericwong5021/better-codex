@@ -8,22 +8,47 @@ services:
       BETTER_CODEX_HUB_HOST: 0.0.0.0
       BETTER_CODEX_HUB_PORT: 4318
       BETTER_CODEX_HUB_DB: /data/better-codex-hub.db
-      BETTER_CODEX_HUB_ADMIN_TOKEN_FILE: /run/secrets/hub_admin_token
-    ports:
-      - 127.0.0.1:4318:4318
+      BETTER_CODEX_HUB_BOOTSTRAP_SECRET_FILE: /run/secrets/hub_bootstrap_secret
+      BETTER_CODEX_HUB_WEB_PASSWORD_FILE: /run/secrets/hub_web_password
+      BETTER_CODEX_HUB_WEB_USERNAME: ${BETTER_CODEX_HUB_WEB_USERNAME:-admin}
+      BETTER_CODEX_HUB_ALLOWED_HOSTS: ${BETTER_CODEX_HUB_DOMAIN:-aionui.talktodo.cn}
+    expose:
+      - 4318
     volumes:
       - hub-data:/data
     secrets:
-      - hub_admin_token
+      - hub_bootstrap_secret
+      - hub_web_password
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4318/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 10s
       timeout: 3s
       retries: 5
 
+  caddy:
+    image: caddy:2.11.4-alpine
+    restart: unless-stopped
+    depends_on:
+      hub:
+        condition: service_healthy
+    environment:
+      BETTER_CODEX_HUB_DOMAIN: ${BETTER_CODEX_HUB_DOMAIN:-aionui.talktodo.cn}
+    ports:
+      - ${BETTER_CODEX_HUB_HTTP_PORT:-80}:80
+      - ${BETTER_CODEX_HUB_HTTPS_PORT:-443}:443
+      - ${BETTER_CODEX_HUB_HTTPS_PORT:-443}:443/udp
+    volumes:
+      - ${BETTER_CODEX_HUB_CADDYFILE:-./Caddyfile}:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
 secrets:
-  hub_admin_token:
-    file: ./secrets/admin-token.txt
+  hub_bootstrap_secret:
+    file: ${BETTER_CODEX_HUB_BOOTSTRAP_SECRET_FILE:-./secrets/bootstrap-secret.txt}
+  hub_web_password:
+    file: ${BETTER_CODEX_HUB_WEB_PASSWORD_FILE:-./secrets/web-password.txt}
 
 volumes:
   hub-data:
+  caddy-data:
+  caddy-config:

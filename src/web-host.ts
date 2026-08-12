@@ -171,36 +171,56 @@ const webHostJavaScript = String.raw`
 const connectDialog = document.getElementById("web-connect");
 const connectForm = document.getElementById("web-connect-form");
 const tokenInput = document.getElementById("web-token");
+const usernameInput = document.getElementById("web-username");
 const connectError = document.getElementById("web-connect-error");
 let installing = false;
-let sessionToken = sessionStorage.getItem("better-codex-web-session") || "";
+const REMOTE = document.documentElement.dataset.betterCodexRemote === "true";
+let sessionToken = REMOTE ? "" : sessionStorage.getItem("better-codex-web-session") || "";
+let csrfToken = REMOTE ? sessionStorage.getItem("better-codex-web-csrf") || "" : "";
 const eventCursorKey = "better-codex-web-event-cursor";
 
 function consumeFragmentToken() {
   const params = new URLSearchParams(location.hash.replace(/^#/, ""));
   const token = params.get("token") || "";
   if (token) history.replaceState(history.state, "", location.pathname + location.search);
-  return token;
+  return REMOTE ? "" : token;
 }
 
 async function establishSession(token) {
   const response = await fetch("/web/session", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ token }),
+    body: JSON.stringify(REMOTE ? { username: usernameInput?.value.trim() || "", password: token } : { token }),
   });
-  if (!response.ok) throw new Error("令牌无效，请重新运行 better-codex web");
+  if (!response.ok) throw new Error(REMOTE ? "密码无效或登录请求过于频繁" : "令牌无效，请重新运行 better-codex web");
   const session = await response.json();
-  if (typeof session.token !== "string" || !session.token) throw new Error("Runtime 未返回有效的 Web 会话");
-  sessionToken = session.token;
-  sessionStorage.setItem("better-codex-web-session", sessionToken);
+  if (REMOTE) {
+    if (typeof session.csrf_token !== "string" || !session.csrf_token) throw new Error("Hub 未返回有效的 Web 会话");
+    csrfToken = session.csrf_token;
+    sessionStorage.setItem("better-codex-web-csrf", csrfToken);
+  } else {
+    if (typeof session.token !== "string" || !session.token) throw new Error("Runtime 未返回有效的 Web 会话");
+    sessionToken = session.token;
+    sessionStorage.setItem("better-codex-web-session", sessionToken);
+  }
+}
+
+async function restoreRemoteSession() {
+  const response = await fetch("/web/session");
+  if (!response.ok) throw new Error("Web 会话已失效，请重新登录");
+  const session = await response.json();
+  if (typeof session.csrf_token !== "string" || !session.csrf_token) throw new Error("Hub 未返回有效的 Web 会话");
+  csrfToken = session.csrf_token;
+  sessionStorage.setItem("better-codex-web-csrf", csrfToken);
 }
 
 function expireSession() {
   sessionToken = "";
+  csrfToken = "";
   sessionStorage.removeItem("better-codex-web-session");
+  sessionStorage.removeItem("better-codex-web-csrf");
   window.__betterCodexInjection__?.destroy?.();
-  connectError.textContent = "Web 会话已失效，请重新运行 better-codex web";
+  connectError.textContent = REMOTE ? "Web 会话已失效，请重新登录" : "Web 会话已失效，请重新运行 better-codex web";
   connectError.hidden = false;
   if (!connectDialog.open) connectDialog.showModal();
 }
@@ -211,7 +231,8 @@ async function requestRuntime(request) {
   }
   const method = String(request.method || "GET").toUpperCase();
   if (method !== "GET" && !request.commandId) request.commandId = crypto.randomUUID();
-  const headers = { authorization: "Bearer " + sessionToken };
+  const headers = REMOTE ? {} : { authorization: "Bearer " + sessionToken };
+  if (REMOTE && method !== "GET") headers["x-csrf-token"] = csrfToken;
   if (request.commandId) headers["x-better-codex-command-id"] = request.commandId;
   if (request.body !== undefined) headers["content-type"] = "application/json";
   const controller = new AbortController();
@@ -256,7 +277,7 @@ function subscribeRuntime(listener) {
     while (!stopped) {
       controller = new AbortController();
       try {
-        const headers = { authorization: "Bearer " + sessionToken };
+        const headers = REMOTE ? {} : { authorization: "Bearer " + sessionToken };
         const cursor = sessionStorage.getItem(eventCursorKey);
         if (cursor) headers["last-event-id"] = cursor;
         const response = await fetch("/api/events", { headers, signal: controller.signal });
@@ -317,7 +338,7 @@ function loadInjection() {
   if (installing || window.__betterCodexInjection__) return;
   installing = true;
   const script = document.createElement("script");
-  script.src = "/web/injection.js?locale=" + encodeURIComponent(navigator.language || document.documentElement.lang || "en") + "&session=" + encodeURIComponent(sessionToken);
+  script.src = "/web/injection.js?locale=" + encodeURIComponent(navigator.language || document.documentElement.lang || "en") + (REMOTE ? "" : "&session=" + encodeURIComponent(sessionToken));
   script.onload = () => {
     installing = false;
     connectDialog.close();
@@ -333,7 +354,8 @@ function loadInjection() {
 async function boot(token = "") {
   try {
     if (token) await establishSession(token);
-    if (!sessionToken) throw new Error("请运行 better-codex web 获取本地访问令牌");
+    if (REMOTE && !csrfToken) await restoreRemoteSession();
+    if (!REMOTE && !sessionToken) throw new Error("请运行 better-codex web 获取本地访问令牌");
     loadInjection();
   } catch (error) {
     connectError.textContent = error instanceof Error ? error.message : "连接失败";
@@ -378,7 +400,14 @@ void boot(consumeFragmentToken());
 
 export function betterCodexWebHostHtml(remote = false) {
   return remote
-    ? webHostHtml.replace("本地工作台", "远端工作台").replace("Local connection", "Self-hosted Hub").replace("请运行 <code>better-codex web</code> 自动打开，或粘贴本地访问令牌。令牌只用于连接本机 Runtime。", "输入 Hub 访问令牌以管理经过隐私裁剪的远端看板投影。").replace("访问令牌", "Hub 访问令牌")
+    ? webHostHtml
+      .replace('<html lang="zh-CN">', '<html lang="zh-CN" data-better-codex-remote="true">')
+      .replace("本地工作台", "远端工作台")
+      .replace("Local connection", "Self-hosted Hub")
+      .replace("请运行 <code>better-codex web</code> 自动打开，或粘贴本地访问令牌。令牌只用于连接本机 Runtime。", "输入 Web 访问密码以管理经过隐私裁剪的远端看板投影。")
+      .replace('<label><span>访问令牌</span>', '<label><span>账户</span><input id="web-username" type="text" autocomplete="username" spellcheck="false" required></label><label><span>访问令牌</span>')
+      .replace("访问令牌", "访问密码")
+      .replace('autocomplete="off"', 'autocomplete="current-password"')
     : webHostHtml;
 }
 

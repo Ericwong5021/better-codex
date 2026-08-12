@@ -24,6 +24,7 @@
     "dist/db.js",
     "dist/dom.js",
     "dist/injection-state.js",
+    "dist/hub-auth.js",
     "dist/hub-cli.js",
     "dist/hub-server.js",
     "dist/hub-store.js",
@@ -67,7 +68,8 @@
     "test:web:debug": "playwright test --headed --debug",
     "test:web:stack": "node scripts/test-web-stack.mjs",
     "test:web:selfhost": "playwright test test/e2e/selfhost",
-    "test:acceptance": "npm run test:web:stack"
+    "test:deploy:selfhost": "node scripts/test-selfhost-deployment.mjs",
+    "test:acceptance": "node scripts/run-acceptance.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",

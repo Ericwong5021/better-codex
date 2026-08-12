@@ -11,7 +11,7 @@ test("remote shared Web UI shows pending, acknowledgement, conflict, and resubmi
   const directory = mkdtempSync(join(tmpdir(), "better-codex-selfhost-e2e-"));
   const adminToken = "selfhost-e2e-admin-token-" + "x".repeat(40);
   const local = new Store(join(directory, "local.db"));
-  const hub = createHubServer({ host: "127.0.0.1", port: 0, database: join(directory, "hub.db"), adminToken });
+  const hub = createHubServer({ host: "127.0.0.1", port: 0, database: join(directory, "hub.db"), adminToken, webPassword: adminToken, secureCookies: false });
   await new Promise<void>((resolve, reject) => {
     hub.server.once("error", reject);
     hub.server.listen(0, "127.0.0.1", resolve);
@@ -26,11 +26,17 @@ test("remote shared Web UI shows pending, acknowledgement, conflict, and resubmi
   try {
     const project = local.createProject({ name: "Public board", workspacePath: join(directory, "secret") });
     const issue = local.createIssue({ projectId: project.id, title: "Visible remotely", description: "Writable projection", status: "todo" });
+    const xssTitle = '<img src="x" onerror="window.__betterCodexXss=true">';
+    local.createIssue({ projectId: project.id, title: xssTitle, status: "todo" });
     await client.syncNow();
     await page.goto(`${baseUrl}/web`);
+    await page.locator("#web-username").fill("admin");
     await page.locator("#web-token").fill(adminToken);
     await page.locator("#web-connect-form button[type=submit]").click();
     await expect(page.getByText("Visible remotely")).toBeVisible();
+    await expect(page.getByText(xssTitle)).toBeVisible();
+    expect(await page.locator('img[src="x"]').count()).toBe(0);
+    expect(await page.evaluate(() => Boolean((window as typeof window & { __betterCodexXss?: boolean }).__betterCodexXss))).toBe(false);
     await expect(page.locator("html")).not.toHaveAttribute("data-better-codex-read-only", "true");
 
     const pending = await page.evaluate(async ({ issueId, version }) => window.betterCodexHost.request({ path: `/api/issues/${issueId}`, method: "PATCH", body: JSON.stringify({ version, title: "Pending remote update" }) }), { issueId: issue.id, version: issue.version });
@@ -80,7 +86,7 @@ test("two browser contexts cannot both commit the same base revision", async ({ 
   const directory = mkdtempSync(join(tmpdir(), "better-codex-selfhost-two-contexts-"));
   const adminToken = "selfhost-two-context-admin-" + "y".repeat(40);
   const local = new Store(join(directory, "local.db"));
-  const hub = createHubServer({ host: "127.0.0.1", port: 0, database: join(directory, "hub.db"), adminToken });
+  const hub = createHubServer({ host: "127.0.0.1", port: 0, database: join(directory, "hub.db"), adminToken, webPassword: adminToken, secureCookies: false });
   await new Promise<void>((resolve, reject) => {
     hub.server.once("error", reject);
     hub.server.listen(0, "127.0.0.1", resolve);
@@ -101,6 +107,7 @@ test("two browser contexts cannot both commit the same base revision", async ({ 
     await client.syncNow();
     for (const page of [first, second]) {
       await page.goto(`${baseUrl}/web`);
+      await page.locator("#web-username").fill("admin");
       await page.locator("#web-token").fill(adminToken);
       await page.locator("#web-connect-form button[type=submit]").click();
       await expect(page.getByText("Concurrent original")).toBeVisible();
