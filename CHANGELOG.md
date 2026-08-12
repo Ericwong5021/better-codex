@@ -4,6 +4,17 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.3-beta.1] - 2026-08-12
+
+### Added
+
+- Add a local browser host and a self-hosted Hub that synchronizes a privacy-filtered Better Codex board projection, supports acknowledged remote Issue commands, and keeps the local Runtime as the sole authoritative writer.
+- Add password-protected remote Web access, device pairing and revocation, conflict-aware pending commands, backup and restore, Caddy HTTPS deployment, and candidate-bound browser and container acceptance automation.
+
+### Security
+
+- Separate bootstrap, device, and Web credentials; hash Web passwords with scrypt; use Secure HttpOnly same-site sessions with CSRF, Origin and Host validation, rate limiting, security headers, and audit records.
+
 ## [0.4.2] - 2026-08-11
 
 ### Added
@@ -336,7 +347,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.3-beta.1...HEAD
+[0.4.3-beta.1]: https://github.com/Ericwong5021/better-codex/compare/v0.4.2...v0.4.3-beta.1
 [0.4.2]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1...v0.4.2
 [0.4.2-beta.2]: https://github.com/Ericwong5021/better-codex/compare/v0.4.2-beta.1...v0.4.2-beta.2
 [0.4.2-beta.1]: https://github.com/Ericwong5021/better-codex/compare/v0.4.1...v0.4.2-beta.1
