@@ -405,7 +405,7 @@ function errorCode(error: unknown) {
 
 function errorStatus(code: string) {
   if (code === "body_too_large") return 413;
-  if (code === "version_conflict" || code === "reply_busy" || code === "update_in_progress" || code === "issue_execution_locked" || code === "issue_execution_running" || code === "issue_session_handed_off" || code === "issue_session_starting" || code === "issue_session_already_bound" || code === "session_relay_not_leader" || code === "session_command_not_claimed" || code === "session_command_outcome_unknown") return 409;
+  if (code === "version_conflict" || code === "request_id_conflict" || code === "reply_busy" || code === "update_in_progress" || code === "issue_execution_locked" || code === "issue_execution_running" || code === "issue_session_handed_off" || code === "issue_session_starting" || code === "issue_session_already_bound" || code === "session_relay_not_leader" || code === "session_command_not_claimed" || code === "session_command_outcome_unknown") return 409;
   if (code.endsWith("_not_found")) return 404;
   if (code === "database_unavailable" || code === "database_integrity_check_failed") return 503;
   return 400;
@@ -1218,6 +1218,7 @@ export function startServer() {
       if (url.pathname === "/api/issues" && method === "POST") {
         const body = await readBody(request);
         const projectId = cleanString(body.project_id, 200);
+        const requestId = cleanString(body.request_id, 200);
         if ("ai_enrich" in body && typeof body.ai_enrich !== "boolean") throw new Error("invalid_ai_enrich");
         const aiEnrich = body.ai_enrich === true;
         const agentEnabled = body.agent_enabled === true || aiEnrich;
@@ -1231,7 +1232,7 @@ export function startServer() {
         }
         const agentId = cleanString(body.agent_id, 200);
         if (aiEnrich && agentId && !store.getAgentProfile(agentId)) throw new Error("agent_not_found");
-        const issue = store.createIssue({
+        const created = store.createIssueRequest({
           projectId,
           title: cleanString(body.title, 500),
           description: cleanString(body.description, 100000),
@@ -1244,7 +1245,9 @@ export function startServer() {
           agentId,
           userAssigned: body.user_assigned === true,
           enrichmentStatus: aiEnrich ? "pending" : null,
-        });
+        }, requestId);
+        const { issue } = created;
+        if (created.replayed) return sendJson(response, 200, issue);
         if (aiEnrich) worker.enrichIssue(issue, issue.description, agentId);
         else if (issue.agent_enabled && store.isDispatchable(issue)) worker.wake();
         return sendJson(response, 201, issue);

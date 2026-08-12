@@ -397,15 +397,16 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           mode: draft.mode === "agent" ? "agent" : "manual",
           title: String(draft.title || ""),
           description: String(draft.description || ""),
-          prompt: String(draft.prompt || "")
+          prompt: String(draft.prompt || ""),
+          requestId: typeof draft.requestId === "string" && draft.requestId.length <= 200 ? draft.requestId : ""
         };
       } catch {
         sessionStorage.removeItem(CREATE_DRAFT_KEY);
         return null;
       }
     }
-    function writeCreateDraft(draft) {
-      const cached = { mode: draft.mode, title: draft.title, description: draft.description, prompt: draft.prompt };
+    function writeCreateDraft(draft, requestId) {
+      const cached = { mode: draft.mode, title: draft.title, description: draft.description, prompt: draft.prompt, requestId };
       if (![cached.title, cached.description, cached.prompt].some(value => value.trim())) {
         sessionStorage.removeItem(CREATE_DRAFT_KEY);
         return;
@@ -1541,6 +1542,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (threadId) relayThreads.add(threadId);
       } catch (error) {
         const commandError = error instanceof Error ? error.message : "desktop_bridge_request_failed";
+        if (threadId && turnId && commandError === "session_command_not_claimed") {
+          await sendAppServerRequest("turn/interrupt", { threadId, turnId }).catch(() => {});
+        }
         const failed = await api("/api/session-relay/commands/" + encodeURIComponent(command.id) + "/fail", {
           method: "POST",
           body: JSON.stringify({ relay_id: relayId, error: commandError, thread_id: threadId, turn_id: turnId })
@@ -4072,6 +4076,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       let completedIssueUpdate = Promise.resolve();
       let replyDraftUpdate = Promise.resolve();
       let retainCreateDraft = !issue;
+      let createRequestId = issue ? "" : cachedCreateDraft?.requestId || globalThis.crypto?.randomUUID?.() || VERSION + "-create-" + Date.now() + "-" + Math.random().toString(36).slice(2);
+      let submitInFlight = false;
       const dirtyDraftFields = new Set();
       const dialogKind = () => issue ? "issue" : draft.mode === "agent" ? "create_agent" : "create_manual";
       const traceDialog = (event, fields = {}) => traceRendererDiagnostic(event, {
@@ -5060,13 +5066,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       }
 
       async function submitIssue() {
-        if (editingLocked) return;
+        if (editingLocked || submitInFlight) return;
         const submit = dialog.querySelector(".better-codex-submit");
         const errorOutput = dialog.querySelector(".better-codex-dialog-error");
         if (!submit || !errorOutput) return;
         const prompt = draft.prompt.trim();
         const title = draft.mode === "agent" ? prompt.split(/\\n/).find(line => line.trim())?.replace(/^[#*\\s-]+/, "").trim().slice(0, 120) || "" : draft.title.trim();
         if (!title) return;
+        submitInFlight = true;
         submit.disabled = true;
         errorOutput.hidden = true;
         traceDialog("dialog_submit_start", { action: issue ? "update_issue" : "create_issue" });
@@ -5099,10 +5106,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             workspace_path: workspacePath,
             ai_enrich: draft.mode === "agent" && !issue,
             ...(state.mockup ? { mockup_run_status: draft.runStatus } : {}),
-            ...assignee
+            ...assignee,
+            ...(!issue ? { request_id: createRequestId } : {})
           };
           if (issue) await api("/api/issues/" + encodeURIComponent(issue.id), { method: "PATCH", body: JSON.stringify({ ...body, version: issue.version }) });
           else {
+            writeCreateDraft(draft, createRequestId);
             await api("/api/issues", { method: "POST", body: JSON.stringify({ ...body, project_id: draft.projectId }) });
             state.projectId = draft.projectId;
           }
@@ -5110,6 +5119,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           if (!issue) sessionStorage.removeItem(CREATE_DRAFT_KEY);
           await loadIssues();
           if (!issue && state.keepCreate) {
+            createRequestId = globalThis.crypto?.randomUUID?.() || VERSION + "-create-" + Date.now() + "-" + Math.random().toString(36).slice(2);
+            submitInFlight = false;
             draft.title = "";
             draft.description = "";
             draft.prompt = "";
@@ -5125,6 +5136,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           traceDialog("dialog_submit_error", { action: issue ? "update_issue" : "create_issue", error: String(error instanceof Error ? error.message : "create_failed").slice(0, 200) });
           errorOutput.textContent = t(error instanceof Error ? error.message : "创建失败");
           errorOutput.hidden = false;
+          submitInFlight = false;
           submit.disabled = false;
         }
       }
@@ -5227,7 +5239,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         traceDialog("dialog_close", { dialog_open: dialog.open });
         if (retainCreateDraft) {
           syncDraft();
-          writeCreateDraft(draft);
+          writeCreateDraft(draft, createRequestId);
         }
         draft.attachments.forEach(releaseAttachment);
         draft.replyAttachments.forEach(releaseAttachment);

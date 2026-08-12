@@ -89,7 +89,7 @@ test("gateway completes the issue workflow and survives restart", async () => {
   try {
     await waitForGateway(port, gateway);
     const health = await (await fetch(`http://127.0.0.1:${port}/health`)).json() as { database: { schemaVersion: number } };
-    assert.equal(health.database.schemaVersion, 9);
+    assert.equal(health.database.schemaVersion, 10);
 
     const bootstrap = await (await request("/api/bootstrap")).json() as { projects: Array<{ external_id: string | null; created_at: string }>; agents: Array<{ id: string; name: string; is_default?: boolean }>; appearance: unknown };
     assert.equal(
@@ -310,10 +310,24 @@ test("gateway completes the issue workflow and survives restart", async () => {
     assert.equal(completedRunningIssue.reply_status, "succeeded");
     assert.equal(completedRunningIssue.session_status, "idle");
 
-    const issueResponse = await request("/api/issues", { method: "POST", body: JSON.stringify({ project_id: project.id, title: "Round trip" }) });
+    const createRequest = { project_id: project.id, title: "Round trip", request_id: "gateway-create-round-trip" };
+    const issueResponse = await request("/api/issues", { method: "POST", body: JSON.stringify(createRequest) });
     assert.equal(issueResponse.status, 201);
     const issue = await issueResponse.json() as { id: string; version: number };
+    const replayedIssueResponse = await request("/api/issues", { method: "POST", body: JSON.stringify(createRequest) });
+    assert.equal(replayedIssueResponse.status, 200);
+    assert.equal((await replayedIssueResponse.json() as { id: string }).id, issue.id);
+    const conflictedIssueResponse = await request("/api/issues", { method: "POST", body: JSON.stringify({ ...createRequest, title: "Different" }) });
+    assert.equal(conflictedIssueResponse.status, 409);
+    const deletedCreateRequest = { project_id: project.id, title: "Deleted idempotent create", request_id: "gateway-create-deleted" };
+    const deletedIssueResponse = await request("/api/issues", { method: "POST", body: JSON.stringify(deletedCreateRequest) });
+    const deletedIssue = await deletedIssueResponse.json() as { id: string; version: number };
+    const deletedIssueArchive = await request(`/api/issues/${deletedIssue.id}/archive`, { method: "POST", body: JSON.stringify({ version: deletedIssue.version }) });
+    const deletedIssueArchived = await deletedIssueArchive.json() as { version: number };
+    assert.equal((await request(`/api/issues/${deletedIssue.id}`, { method: "DELETE", body: JSON.stringify({ version: deletedIssueArchived.version }) })).status, 200);
+    assert.equal((await request("/api/issues", { method: "POST", body: JSON.stringify(deletedCreateRequest) })).status, 404);
     const listedIssues = await (await request("/api/issues")).json() as Array<{ id: string; reply_status: string }>;
+    assert.equal(listedIssues.filter(item => item.id === issue.id).length, 1);
     assert.equal(listedIssues.find(item => item.id === issue.id)?.reply_status, "idle");
     const directIssue = await (await request(`/api/issues/${issue.id}`)).json() as { reply_status: string };
     assert.equal(directIssue.reply_status, "idle");
@@ -358,6 +372,28 @@ test("gateway completes the issue workflow and survives restart", async () => {
     assert.equal(interruptedIssue.session_status, "interrupted");
     assert.equal(interruptedIssue.session_active_turn_id, null);
 
+    const stuckIssueResponse = await request("/api/issues", {
+      method: "POST",
+      body: JSON.stringify({ project_id: nativeProject.id, title: "Stuck before thread", status: "todo", agent_enabled: true, workspace_path: home }),
+    });
+    const stuckIssue = await stuckIssueResponse.json() as { id: string; version: number };
+    const stuckStart = await request(`/api/issues/${stuckIssue.id}/start`, { method: "POST", body: JSON.stringify({ version: stuckIssue.version }) });
+    assert.equal(stuckStart.status, 202);
+    const stuckRelay = await request("/api/session-relay/poll", {
+      method: "POST",
+      body: JSON.stringify({ relay_id: "relay-test", app_session_id: "app-test", capability: "ready" }),
+    });
+    assert.equal(((await stuckRelay.json()) as { command: { kind: string } }).command.kind, "start");
+    const stuckCurrent = await (await request(`/api/issues/${stuckIssue.id}`)).json() as { version: number; active_run_status: string };
+    assert.equal(stuckCurrent.active_run_status, "claimed");
+    const stuckArchiveResponse = await request(`/api/issues/${stuckIssue.id}/archive`, { method: "POST", body: JSON.stringify({ version: stuckCurrent.version }) });
+    assert.equal(stuckArchiveResponse.status, 200);
+    const stuckArchived = await stuckArchiveResponse.json() as { version: number; archived_at: string; active_run_status: string | null };
+    assert.ok(stuckArchived.archived_at);
+    assert.equal(stuckArchived.active_run_status, null);
+    const stuckDeleteResponse = await request(`/api/issues/${stuckIssue.id}`, { method: "DELETE", body: JSON.stringify({ version: stuckArchived.version }) });
+    assert.equal(stuckDeleteResponse.status, 200);
+
     const invalidResponse = await request(`/api/issues/${issue.id}`, { method: "PATCH", body: JSON.stringify({ version: issue.version, pinned: "false" }) });
     assert.equal(invalidResponse.status, 400);
     assert.deepEqual(await invalidResponse.json(), { error: "invalid_pinned" });
@@ -379,6 +415,9 @@ test("gateway completes the issue workflow and survives restart", async () => {
     assert.equal(restored.status, "in_progress");
     assert.equal(restored.project_id, targetProject.id);
     assert.equal(restored.thread_id, null);
+    const replayedAfterRestart = await request("/api/issues", { method: "POST", body: JSON.stringify(createRequest) });
+    assert.equal(replayedAfterRestart.status, 200);
+    assert.equal((await replayedAfterRestart.json() as { id: string }).id, issue.id);
     const restoredAgents = await (await request("/api/agents")).json() as Array<{ id: string; avatar: string }>;
     assert.equal(restoredAgents.find(agent => agent.id === optionalAgent.id)?.avatar, "icon:reviewer");
   } finally {

@@ -474,6 +474,13 @@ test("agent issue creation does not require or bind the current session", () => 
   assert.ok(source.includes('ai_enrich: draft.mode === "agent" && !issue'));
   const submitIssue = source.slice(source.indexOf("async function submitIssue()"), source.indexOf("async function startIssueNow()"));
   assert.doesNotMatch(submitIssue, /thread_id:\s*threadId/);
+  assert.match(submitIssue, /if \(editingLocked \|\| submitInFlight\) return/);
+  assert.match(submitIssue, /request_id: createRequestId/);
+  assert.ok(source.includes("cachedCreateDraft?.requestId"));
+  assert.ok(source.includes("writeCreateDraft(draft, createRequestId)"));
+  assert.ok(submitIssue.indexOf("writeCreateDraft(draft, createRequestId)") < submitIssue.indexOf('await api("/api/issues"'));
+  assert.ok(source.includes('commandError === "session_command_not_claimed"'));
+  assert.ok(source.includes('sendAppServerRequest("turn/interrupt", { threadId, turnId })'));
 });
 
 test("agent detail avatars use preset icons and open an avatar picker", () => {
@@ -627,7 +634,7 @@ test("issue cards show project icon and assignee instead of session entry", () =
   assert.ok(source.includes('if (issue && !issuePermissions(issue).enrichmentPending) return void perform(() => openEditor(issue))'));
   assert.ok(source.includes('draggable="\' + String(!issueLocked) + \'"'));
   assert.ok(source.includes('if (!issue || editingLocked || !issue.agent_enabled ||'));
-  assert.ok(source.includes('if (editingLocked) return;'));
+  assert.ok(source.includes('if (editingLocked || submitInFlight) return;'));
   assert.ok(!source.includes("issue?.run_thread_id || issue?.thread_id || \"\""));
   assert.ok(!source.includes("(sessionId ? ' data-thread=\""));
   assert.doesNotMatch(source, /任务尚未关联 Session/);

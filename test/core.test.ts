@@ -180,7 +180,7 @@ test("core workflow persists, orders status moves, and rejects stale writes", ()
     const restored = store.getIssue(first.id);
     assert.equal(restored?.status, "in_progress");
     assert.equal(restored?.thread_id, "local:thread-1");
-    assert.equal(store.health().schemaVersion, 9);
+    assert.equal(store.health().schemaVersion, 10);
     store.close();
   } finally {
     rmSync(target.directory, { recursive: true, force: true });
@@ -718,6 +718,42 @@ test("desktop session relay binds one native thread and tracks its turn", () => 
   }
 });
 
+test("stopping a claimed desktop start before turn binding releases the run", async () => {
+  const target = temporaryDatabase();
+  try {
+    const store = new Store(target.file);
+    const worker = new IssueWorker(store);
+    const project = store.createProject({ name: "Claimed stop", workspacePath: target.directory });
+    const issue = store.createIssue({ projectId: project.id, title: "Stop before thread", status: "todo", agentEnabled: true, workspacePath: target.directory });
+    const claim = store.claimNextIssue(issue.id)!;
+    const command = store.enqueueSessionCommand({
+      issueId: issue.id,
+      runId: claim.runId,
+      requestId: `run:${claim.runId}`,
+      kind: "start",
+      payload: { message: issue.title, workspace_path: target.directory },
+    });
+    store.heartbeatSessionRelay("relay-stop-before-thread", "app-stop-before-thread", null);
+    assert.equal(store.claimSessionCommand("relay-stop-before-thread")?.id, command.id);
+    const threadId = "019fec06-788f-7af3-a031-76b546904fa1";
+    store.checkpointSessionCommand(command.id, "relay-stop-before-thread", { thread_id: threadId });
+    assert.equal(store.getIssueSession(issue.id)?.status, "starting");
+    assert.equal(await worker.stopIssue(issue.id), true);
+    assert.equal(store.getSessionCommand(command.id)?.status, "cancelled");
+    assert.equal(store.getIssueSession(issue.id)?.status, "interrupted");
+    assert.equal(store.sessionTurnStarted(threadId, "019fec06-788f-7af3-a031-76b546904fa2"), undefined);
+    assert.equal(store.getIssueSession(issue.id)?.active_command_id, null);
+    assert.equal(store.getIssueSession(issue.id)?.active_turn_id, null);
+    const stopped = store.getIssue(issue.id)!;
+    assert.equal(stopped.active_run_status, null);
+    const archived = store.archiveIssue(stopped.id, stopped.version);
+    assert.ok(archived.archived_at);
+    store.close();
+  } finally {
+    rmSync(target.directory, { recursive: true, force: true });
+  }
+});
+
 test("session reply idempotency is issue-scoped, fingerprinted, and atomic", () => {
   const target = temporaryDatabase();
   try {
@@ -1077,7 +1113,7 @@ test("legacy cancelled issues migrate to archived backlog issues", () => {
 
     const legacy = new DatabaseSync(target.file);
     legacy.prepare("UPDATE issues SET status = 'cancelled', updated_at = ?, needs_attention = 1, pending_actor = 'agent' WHERE id = ?").run(archivedAt, issue.id);
-    legacy.prepare("DELETE FROM schema_migrations WHERE version = 9").run();
+    legacy.prepare("DELETE FROM schema_migrations WHERE version >= 9").run();
     legacy.close();
 
     store = new Store(target.file);
@@ -1093,7 +1129,7 @@ test("legacy cancelled issues migrate to archived backlog issues", () => {
     const restored = store.unarchiveIssue(issue.id, migrated.version);
     const moved = store.updateIssue(issue.id, restored.version, { status: "todo" });
     assert.equal(store.isDispatchable(moved), false);
-    assert.equal(store.health().schemaVersion, 9);
+    assert.equal(store.health().schemaVersion, 10);
   } finally {
     store?.close();
     rmSync(target.directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
@@ -1132,7 +1168,7 @@ test("newer database schema is rejected without migration", () => {
   const target = temporaryDatabase();
   try {
     const future = new DatabaseSync(target.file);
-    future.exec("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL); INSERT INTO schema_migrations VALUES (10, '2026-01-01T00:00:00.000Z')");
+    future.exec("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL); INSERT INTO schema_migrations VALUES (11, '2026-01-01T00:00:00.000Z')");
     future.close();
     assert.throws(() => new Store(target.file), /database_schema_too_new/);
   } finally {
@@ -1176,7 +1212,7 @@ test("legacy database is backed up before migration", () => {
     legacy.close();
 
     const store = new Store(target.file);
-    assert.equal(store.health().schemaVersion, 9);
+    assert.equal(store.health().schemaVersion, 10);
     assert.ok(store.lastBackupPath);
     assert.ok(existsSync(store.lastBackupPath!));
     assert.equal(store.getProject("legacy")?.name, "Legacy");

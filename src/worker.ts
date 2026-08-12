@@ -135,8 +135,12 @@ export class IssueWorker {
           commandChanged = true;
           this.handleSessionCommandFailure(cancelled, "user_stopped");
         }
-      } else if (this.store.requestSessionCommandCancellation(command.id)) {
-        commandChanged = true;
+      } else {
+        const cancellation = this.store.requestSessionCommandCancellation(command.id);
+        if (cancellation) {
+          commandChanged = true;
+          if (cancellation.status === "cancelled") this.handleSessionCommandFailure(cancellation, "user_stopped");
+        }
       }
     }
     const interrupt = this.store.enqueueSessionInterrupt(issueId);

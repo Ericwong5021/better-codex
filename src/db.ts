@@ -210,7 +210,7 @@ export function cleanMaxConcurrency(value: number | undefined) {
   return value;
 }
 
-const latestSchemaVersion = 9;
+const latestSchemaVersion = 10;
 
 function now() {
   return new Date().toISOString();
@@ -237,6 +237,10 @@ function sessionCommandFingerprint(input: {
     payload: input.payload || {},
     run_id: input.runId || null,
   })).digest("hex");
+}
+
+function issueCreateFingerprint(input: IssueInput) {
+  return createHash("sha256").update(canonicalJson(input)).digest("hex");
 }
 
 function createDevelopmentDatabaseSnapshot(file: string) {
@@ -605,6 +609,25 @@ export class Store {
           WHERE status = 'cancelled'
         `);
         this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (9, ?)").run(now());
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    }
+    if (fromVersion < 10) {
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS issue_create_requests (
+            request_id TEXT PRIMARY KEY,
+            request_fingerprint TEXT NOT NULL,
+            issue_id TEXT NOT NULL,
+            created_at TEXT NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS issue_create_requests_issue ON issue_create_requests(issue_id);
+        `);
+        this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (10, ?)").run(now());
         this.db.exec("COMMIT");
       } catch (error) {
         this.db.exec("ROLLBACK");
@@ -1607,8 +1630,14 @@ export class Store {
   }
 
   createIssue(input: IssueInput) {
+    return this.createIssueRequest(input).issue;
+  }
+
+  createIssueRequest(input: IssueInput, requestId = "") {
     const project = this.getProject(input.projectId);
     if (!project) throw new Error("project_not_found");
+    if (requestId.length > 200 || requestId.includes("\0")) throw new Error("invalid_request_id");
+    const requestFingerprint = requestId ? issueCreateFingerprint(input) : "";
     const enrichmentStatus = input.enrichmentStatus ?? null;
     const title = enrichmentStatus === "pending" ? "正在理解任务" : cleanTitle(input.title);
     if (input.status && !issueStatuses.includes(input.status)) throw new Error("invalid_status");
@@ -1628,6 +1657,16 @@ export class Store {
     const timestamp = now();
     this.db.exec("BEGIN IMMEDIATE");
     try {
+      if (requestId) {
+        const existing = this.db.prepare("SELECT request_fingerprint, issue_id FROM issue_create_requests WHERE request_id = ?").get(requestId) as { request_fingerprint: string; issue_id: string } | undefined;
+        if (existing) {
+          if (existing.request_fingerprint !== requestFingerprint) throw new Error("request_id_conflict");
+          const issue = this.getIssue(existing.issue_id);
+          if (!issue) throw new Error("issue_not_found");
+          this.db.exec("COMMIT");
+          return { issue, replayed: true };
+        }
+      }
       const current = this.getProject(project.id)!;
       let issueNumber = current.next_issue_number;
       let identifier = `${current.identifier_prefix}-${issueNumber}`;
@@ -1667,12 +1706,16 @@ export class Store {
       this.db.prepare("UPDATE projects SET next_issue_number = ?, updated_at = ? WHERE id = ?")
         .run(issueNumber + 1, timestamp, project.id);
       if (importedSession) this.writeImportedSession(id, importedSession, timestamp);
+      if (requestId) {
+        this.db.prepare("INSERT INTO issue_create_requests (request_id, request_fingerprint, issue_id, created_at) VALUES (?, ?, ?, ?)")
+          .run(requestId, requestFingerprint, id, timestamp);
+      }
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
     }
-    return this.getIssue(id)!;
+    return { issue: this.getIssue(id)!, replayed: false };
   }
 
   updateIssue(id: string, version: number, patch: IssuePatch) {
@@ -2969,8 +3012,38 @@ export class Store {
   }
 
   requestSessionCommandCancellation(commandId: string) {
-    const result = this.db.prepare("UPDATE session_commands SET cancel_requested = 1 WHERE id = ? AND status = 'claimed'").run(commandId);
-    return result.changes === 1;
+    const timestamp = now();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const row = this.db.prepare("SELECT * FROM session_commands WHERE id = ? AND status = 'claimed'").get(commandId) as Record<string, unknown> | undefined;
+      if (!row) {
+        this.db.exec("COMMIT");
+        return undefined;
+      }
+      const command = sessionCommandFromRow(row);
+      if (!command.turn_id) {
+        const result = this.db.prepare(`
+          UPDATE session_commands
+          SET status = 'cancelled', cancel_requested = 1, error = 'user_stopped', finished_at = ?
+          WHERE id = ? AND status = 'claimed'
+        `).run(timestamp, commandId);
+        if (result.changes !== 1) throw new Error("session_command_transition_conflict");
+        this.db.prepare(`
+          UPDATE issue_sessions
+          SET status = 'interrupted', last_error = 'user_stopped', updated_at = ?
+          WHERE issue_id = ? AND active_command_id = ? AND active_turn_id IS NULL
+        `).run(timestamp, command.issue_id, command.id);
+        this.db.exec("COMMIT");
+        return { ...command, status: "cancelled" as const, cancel_requested: true, error: "user_stopped", finished_at: timestamp };
+      }
+      const result = this.db.prepare("UPDATE session_commands SET cancel_requested = 1 WHERE id = ? AND status = 'claimed'").run(commandId);
+      if (result.changes !== 1) throw new Error("session_command_transition_conflict");
+      this.db.exec("COMMIT");
+      return { ...command, cancel_requested: true };
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   cancelPendingSessionCommand(commandId: string) {
@@ -3028,7 +3101,13 @@ export class Store {
       }
       const commandId = session.active_turn_id ? null : session.active_command_id;
       if (commandId) {
-        const command = this.db.prepare("SELECT run_id FROM session_commands WHERE id = ? AND issue_id = ? AND kind IN ('start', 'turn')").get(commandId, session.issue_id) as { run_id: string | null } | undefined;
+        const command = this.db.prepare("SELECT run_id, status, cancel_requested FROM session_commands WHERE id = ? AND issue_id = ? AND kind IN ('start', 'turn')").get(commandId, session.issue_id) as { run_id: string | null; status: SessionCommandStatus; cancel_requested: number } | undefined;
+        if (!command || command.status !== "claimed" || command.cancel_requested) {
+          this.db.prepare("UPDATE issue_sessions SET active_command_id = NULL, updated_at = ? WHERE issue_id = ? AND active_command_id = ? AND active_turn_id IS NULL")
+            .run(timestamp, session.issue_id, commandId);
+          this.db.exec("COMMIT");
+          return undefined;
+        }
         if (command) {
           this.db.prepare("UPDATE session_commands SET thread_id = ?, turn_id = ? WHERE id = ?").run(threadId, turnId, commandId);
           if (command.run_id) {
