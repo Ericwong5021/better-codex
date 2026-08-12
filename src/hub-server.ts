@@ -147,6 +147,7 @@ function issueForWeb(issue: ReturnType<HubStore["board"]>["issues"][number]) {
     reply_draft: "",
     reply_status: "idle",
     active_run_status: issue.active_run ? "running" : null,
+    latest_run_status: issue.status === "done" ? "completed" : null,
   };
 }
 

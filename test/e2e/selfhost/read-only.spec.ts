@@ -76,6 +76,10 @@ test("remote shared Web UI shows pending, acknowledgement, conflict, and resubmi
     expect(started.remote_pending).toBe(true);
     await client.syncNow();
     expect(local.listManualStartQueue()).toContain(issue.id);
+    const completed = local.getIssue(issue.id)!;
+    local.updateIssue(issue.id, completed.version, { status: "done" });
+    await client.syncNow();
+    await expect(page.locator("article").filter({ hasText: "Conflict resolved remotely" }).locator('[data-run="completed"]')).toBeVisible({ timeout: 10_000 });
   } finally {
     client.stop();
     local.close();
