@@ -15,7 +15,7 @@ import { attachmentPath, runPath, runtimePort, token, updateLogPath } from "./co
 import { acquireRuntimeLock, clearRuntimeState, createRuntimeIdentity, publishRuntimeState } from "./runtime-state.js";
 import { activeCoreCommand, checkGatewayUpdate, getGatewayUpdateState, installGatewayUpdate, recordGatewayUpdateActivation, startGatewayUpdateChecks } from "./updater.js";
 import { packagedBuild } from "./build.js";
-import { join } from "node:path";
+import { basename, extname, join } from "node:path";
 import { normalizeSessionId, readConversationActivity, readConversationResult, sessionWorkspace } from "./session-transcript.js";
 import { IssueWorker } from "./worker.js";
 import { maxMockupBytes, normalizeMockupLocale, readMockupState, replaceMockupState, resetMockupState, updateMockupState } from "./mockup.js";
@@ -50,6 +50,20 @@ function savePastedImage(value: unknown) {
   const path = join(attachmentPath, name);
   writeFileSync(path, bytes, { flag: "wx", mode: 0o600 });
   return { name, path };
+}
+
+function saveRemoteFile(value: { name: string; type: string; data: string }) {
+  const match = value.data.match(/^data:([a-z0-9][a-z0-9.+-]*\/[a-z0-9][a-z0-9.+-]*);base64,([A-Za-z0-9+/]+={0,2})$/i);
+  if (!match || match[1].toLowerCase() !== value.type.toLowerCase()) throw new Error("invalid_file_attachment");
+  const bytes = Buffer.from(match[2], "base64");
+  if (!bytes.length || bytes.length > maxPastedImageBytes) throw new Error("invalid_file_attachment");
+  const inputName = basename(value.name).replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^[-.]+/, "").slice(0, 120) || "file";
+  const extension = extname(inputName).slice(0, 16);
+  const stem = basename(inputName, extension).slice(0, Math.max(1, 100 - extension.length));
+  const name = `web-${Date.now()}-${randomUUID().slice(0, 8)}-${stem}${extension}`;
+  const path = join(attachmentPath, name);
+  writeFileSync(path, bytes, { flag: "wx", mode: 0o600 });
+  return path;
 }
 
 async function reconcileInterruptedIssues(store: Store, issues: Issue[]) {
@@ -441,8 +455,10 @@ export function startServer() {
       const conversation = await readConversationResult(issue.run_thread_id);
       return store.conversationProjection(issueId, conversation.messages);
     },
-    (issueId, requestId, message) => {
-      worker.sendIssueMessage(issueId, requestId, message);
+    (issueId, requestId, message, files) => {
+      const paths = files.map(saveRemoteFile);
+      const fileBlock = paths.length ? `附带文件：\n${paths.map(path => `- ${path}`).join("\n")}` : "";
+      worker.sendIssueMessage(issueId, requestId, [message, fileBlock].filter(Boolean).join("\n\n"));
     },
     async issueId => {
       const accepted = await worker.stopIssue(issueId);

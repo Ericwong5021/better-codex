@@ -1,7 +1,7 @@
 import type { IssuePriority, IssueReplyStatus, IssueSessionStatus, IssueStatus } from "./db.js";
 import type { ConversationMessage } from "./session-transcript.js";
 
-export const syncProtocolVersion = "sync/v3";
+export const syncProtocolVersion = "sync/v4";
 export const syncEntityTypes = ["project", "issue", "agent_directory"] as const;
 export type SyncEntityType = typeof syncEntityTypes[number];
 
@@ -11,6 +11,7 @@ export type AgentProjection = {
   name: string;
   name_en: string;
   description: string;
+  avatar: string;
   version: number;
   created_at: string;
   updated_at: string;
@@ -19,6 +20,7 @@ export type AgentProjection = {
 export type AgentDirectoryProjection = {
   id: string;
   agents: AgentProjection[];
+  default_avatar: string;
   local_revision: number;
 };
 
@@ -54,6 +56,7 @@ export type IssueProjection = {
   session_status: IssueSessionStatus | null;
   reply_status: IssueReplyStatus;
   has_conversation: boolean;
+  last_activity_finished_at: string | null;
   needs_attention: boolean;
   created_at: string;
   updated_at: string;
@@ -114,6 +117,12 @@ export type RemoteCommand = {
   error: string | null;
 };
 
+export type RemoteFilePayload = {
+  name: string;
+  type: string;
+  data: string;
+};
+
 export type RemoteCommandAck = {
   command_id: string;
   status: Exclude<RemoteCommandStatus, "pending" | "expired">;
@@ -152,6 +161,7 @@ export type HubBoard = {
   projects: ProjectProjection[];
   issues: RemoteIssueProjection[];
   agents: AgentProjection[];
+  default_avatar: string;
   runtime: RuntimeProjection | null;
 };
 

@@ -42,6 +42,12 @@ function cleanString(value: unknown, limit: number, allowEmpty = true) {
   return value;
 }
 
+function cleanAvatar(value: unknown) {
+  const avatar = cleanString(value, 400_000);
+  if (!avatar || /^icon:[a-z0-9_-]{1,32}$/i.test(avatar) || /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(avatar)) return avatar;
+  throw new Error("invalid_projection");
+}
+
 function containsForbiddenKey(value: unknown): boolean {
   if (Array.isArray(value)) return value.some(containsForbiddenKey);
   if (!value || typeof value !== "object") return false;
@@ -73,13 +79,14 @@ function cleanProjection(type: SyncEntityType, id: string, value: unknown): Sync
         name: cleanString(agent.name, 80, false),
         name_en: cleanString(agent.name_en, 80),
         description: cleanString(agent.description, 500),
+        avatar: cleanAvatar(agent.avatar),
         version: Number(agent.version),
         created_at: cleanString(agent.created_at, 64, false),
         updated_at: cleanString(agent.updated_at, 64, false),
       };
     });
     if (new Set(agents.map(agent => agent.id)).size !== agents.length || new Set(agents.map(agent => agent.role)).size !== agents.length) throw new Error("invalid_projection");
-    return { id, agents, local_revision: Number(source.local_revision) } satisfies AgentDirectoryProjection;
+    return { id, agents, default_avatar: cleanAvatar(source.default_avatar), local_revision: Number(source.local_revision) } satisfies AgentDirectoryProjection;
   }
   if (!issueStatuses.includes(source.status as never) || !issuePriorities.includes(source.priority as never)) throw new Error("invalid_projection");
   if (!Array.isArray(source.labels) || source.labels.length > 20 || source.labels.some(label => typeof label !== "string" || label.length > 100)) throw new Error("invalid_projection");
@@ -116,6 +123,7 @@ function cleanProjection(type: SyncEntityType, id: string, value: unknown): Sync
     session_status: source.session_status as IssueProjection["session_status"],
     reply_status: source.reply_status as IssueProjection["reply_status"],
     has_conversation: source.has_conversation as boolean,
+    last_activity_finished_at: source.last_activity_finished_at === null ? null : cleanString(source.last_activity_finished_at, 64, false),
     needs_attention: source.needs_attention as boolean,
     created_at: cleanString(source.created_at, 64, false),
     updated_at: cleanString(source.updated_at, 64, false),
@@ -155,7 +163,7 @@ function cleanCommandPayload(operation: RemoteCommandOperation, value: unknown) 
       ? ["project_id", "title", "description", "status", "priority", "labels", "sort_order", "pinned", "agent_enabled", "agent_id", "user_assigned"]
       : operation === "issue.start"
         ? ["project_id", "title", "description", "status", "priority", "labels", "agent_id"]
-      : operation === "issue.reply" ? ["message"]
+      : operation === "issue.reply" ? ["message", "files"]
       : operation === "issue.move" ? ["status", "before_id"] : [];
   if (Object.keys(source).some(key => !allowed.includes(key))) throw new Error("forbidden_command_field");
   const payload: Record<string, unknown> = {};
@@ -188,10 +196,25 @@ function cleanCommandPayload(operation: RemoteCommandOperation, value: unknown) 
   if (source.user_assigned !== undefined) payload.user_assigned = source.user_assigned === true;
   if (source.before_id !== undefined) payload.before_id = cleanString(source.before_id, 200);
   if (source.message !== undefined) payload.message = cleanString(source.message, 100_000, false).trim();
+  if (source.files !== undefined) {
+    if (!Array.isArray(source.files) || source.files.length > 4) throw new Error("invalid_files");
+    const files = source.files.map(value => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid_files");
+      const file = value as Record<string, unknown>;
+      if (Object.keys(file).some(key => !["name", "type", "data"].includes(key))) throw new Error("invalid_files");
+      const name = cleanString(file.name, 160, false);
+      const type = cleanString(file.type, 120, false).toLowerCase();
+      const data = cleanString(file.data, 14_000_000, false);
+      if (!/^[a-z0-9][a-z0-9.+-]*\/[a-z0-9][a-z0-9.+-]*$/i.test(type) || !data.startsWith(`data:${type};base64,`)) throw new Error("invalid_files");
+      return { name, type, data };
+    });
+    if (files.reduce((size, file) => size + file.data.length, 0) > 28_000_000) throw new Error("body_too_large");
+    payload.files = files;
+  }
   if (operation === "issue.create" && (!payload.project_id || !payload.title)) throw new Error("invalid_command_payload");
   if (operation === "issue.move" && !payload.status) throw new Error("invalid_command_payload");
   if (operation === "issue.start" && !payload.title) throw new Error("invalid_command_payload");
-  if (operation === "issue.reply" && !payload.message) throw new Error("message_required");
+  if (operation === "issue.reply" && !payload.message && !(payload.files as unknown[] | undefined)?.length) throw new Error("message_required");
   return payload;
 }
 
@@ -570,7 +593,8 @@ export class HubStore {
     if (runtime && Date.now() - Date.parse(runtimeRow!.updated_at) > 60_000) runtime = { ...runtime, health_state: "offline" };
     const issues = rows.filter(row => row.entity_type === "issue").map(row => JSON.parse(row.payload_json) as IssueProjection);
     const directory = rows.find(row => row.entity_type === "agent_directory");
-    const agents = directory ? (JSON.parse(directory.payload_json) as AgentDirectoryProjection).agents : [];
+    const agentDirectory = directory ? JSON.parse(directory.payload_json) as AgentDirectoryProjection : null;
+    const agents = agentDirectory?.agents ?? [];
     const commands = this.db.prepare("SELECT * FROM remote_commands WHERE status IN ('pending', 'conflict', 'rejected') ORDER BY requested_at, rowid").all() as CommandRow[];
     for (const row of commands) {
       const command = commandFromRow(row);
@@ -599,6 +623,7 @@ export class HubStore {
           session_status: null,
           reply_status: "idle",
           has_conversation: false,
+          last_activity_finished_at: null,
           needs_attention: false,
           created_at: command.requested_at,
           updated_at: command.requested_at,
@@ -618,6 +643,7 @@ export class HubStore {
       projects: rows.filter(row => row.entity_type === "project").map(row => JSON.parse(row.payload_json) as ProjectProjection),
       issues: issues.sort((left, right) => left.sort_order - right.sort_order || left.created_at.localeCompare(right.created_at)),
       agents,
+      default_avatar: agentDirectory?.default_avatar ?? "",
       runtime,
     };
   }

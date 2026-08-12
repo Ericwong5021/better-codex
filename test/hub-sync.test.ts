@@ -85,12 +85,16 @@ test("Hub mirrors the privacy-filtered projection with durable idempotent sync",
   try {
     const project = local.createProject({ name: "Remote", workspacePath: join(directory, "private-workspace") });
     const agent = local.createAgentProfile({ name: "Remote Agent", name_en: "Remote Agent", description: "Visible directory", instructions: "private instructions", model: "private-model", reasoning_effort: "high", sandbox_mode: "danger-full-access" });
+    local.setAgentAvatar(agent.id, "icon:reviewer");
+    local.setAgentAvatar("default", "icon:sparkles");
     const issue = local.createIssue({ projectId: project.id, title: "Safe projection", description: "Visible", workspacePath: join(directory, "private-workspace"), session: { threadId: "019fec06-788f-7af3-a031-76b546904fe5", configFingerprint: "test", active: false } });
     const first = await client.syncNow();
     assert.equal(first.last_error, null);
     const board = hub.store.board();
     assert.equal(board.issues.find(item => item.id === issue.id)?.title, "Safe projection");
     assert.equal(board.agents.find(item => item.id === agent.id)?.name, "Remote Agent");
+    assert.equal(board.agents.find(item => item.id === agent.id)?.avatar, "icon:reviewer");
+    assert.equal(board.default_avatar, "icon:sparkles");
     assert.equal(board.runtime?.health_state, "online");
     assert.doesNotMatch(JSON.stringify(board), /private-workspace|private-thread|private instructions|private-model|workspace_path|thread_id|reply_draft|instructions|sandbox_mode/);
     assert.equal(board.issues.find(item => item.id === issue.id)?.has_conversation, true);

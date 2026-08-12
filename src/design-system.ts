@@ -4130,7 +4130,7 @@ export function betterCodexDesignSystemCss() {
     }
 
     #better-codex-dialog[data-detail="true"][data-expanded="true"]:has(.better-codex-conversation) {
-      height: min(90vh, 960px);
+      height: min(76vh, 780px);
     }
 
     #better-codex-dialog form {

@@ -129,11 +129,13 @@ export type Issue = {
   latest_run_status?: "claimed" | "running" | "scheduling" | "completed" | "failed" | "interrupted" | null;
   latest_scheduler_status?: "pending" | "running" | "completed" | "failed" | "interrupted" | null;
   latest_scheduler_error?: string | null;
+  latest_run_finished_at?: string | null;
   run_thread_id?: string | null;
   session_thread_id?: string | null;
   session_status?: IssueSessionStatus | null;
   session_active_turn_id?: string | null;
   session_last_error?: string | null;
+  session_updated_at?: string | null;
   session_owned?: boolean;
   session_relay_connected?: boolean;
   session_relay_error?: string | null;
@@ -971,6 +973,12 @@ export class Store {
     }
     const issue = this.getIssue(id);
     if (!issue) return null;
+    const reply = this.getIssueReplyState(issue.id);
+    const lastActivityFinishedAt = [
+      ["completed", "failed", "interrupted"].includes(issue.latest_run_status || "") ? issue.latest_run_finished_at : null,
+      ["succeeded", "failed", "interrupted"].includes(reply.status) ? reply.finished_at : null,
+      ["idle", "interrupted", "failed", "disconnected"].includes(issue.session_status || "") ? issue.session_updated_at : null,
+    ].filter((value): value is string => Boolean(value)).sort().at(-1) || null;
     return {
       id: issue.id,
       identifier: issue.identifier,
@@ -992,8 +1000,9 @@ export class Store {
       latest_run_status: issue.latest_run_status ?? null,
       latest_scheduler_status: issue.latest_scheduler_status ?? null,
       session_status: issue.session_status ?? null,
-      reply_status: this.getIssueReplyState(issue.id).status,
+      reply_status: reply.status,
       has_conversation: Boolean(issue.run_thread_id),
+      last_activity_finished_at: lastActivityFinishedAt,
       needs_attention: issue.needs_attention,
       created_at: issue.created_at,
       updated_at: issue.updated_at,
@@ -1001,7 +1010,7 @@ export class Store {
     } satisfies IssueProjection;
   }
 
-  async applyRemoteCommand(command: RemoteCommand, handlers: { reply?: (issueId: string, requestId: string, message: string) => void | Promise<void>; stop?: (issueId: string) => void | Promise<void> } = {}): Promise<RemoteCommandAck> {
+  async applyRemoteCommand(command: RemoteCommand, handlers: { reply?: (issueId: string, requestId: string, message: string, files: Array<{ name: string; type: string; data: string }>) => void | Promise<void>; stop?: (issueId: string) => void | Promise<void> } = {}): Promise<RemoteCommandAck> {
     const receipt = this.db.prepare("SELECT result_json FROM sync_command_receipts WHERE command_id = ?").get(command.command_id) as { result_json: string } | undefined;
     if (receipt) return JSON.parse(receipt.result_json) as RemoteCommandAck;
     const result = await (async () => {
@@ -1033,8 +1042,9 @@ export class Store {
           else if (command.operation === "issue.reply") {
             if (!handlers.reply) throw new Error("remote_reply_unavailable");
             const message = String(payload.message || "").trim();
-            if (!message) throw new Error("message_required");
-            await handlers.reply(current.id, command.command_id, message);
+            const files = Array.isArray(payload.files) ? payload.files as Array<{ name: string; type: string; data: string }> : [];
+            if (!message && !files.length) throw new Error("message_required");
+            await handlers.reply(current.id, command.command_id, message, files);
             issue = this.getIssue(current.id)!;
           } else if (command.operation === "issue.stop") {
             if (!handlers.stop) throw new Error("remote_stop_unavailable");
@@ -1340,12 +1350,12 @@ export class Store {
     const rows = this.db.prepare(`
       SELECT issues.*, active_run.status AS active_run_status, active_run.started_at AS active_run_started_at,
         latest_run.status AS latest_run_status, latest_run.scheduler_status AS latest_scheduler_status,
-        latest_run.scheduler_error AS latest_scheduler_error,
+        latest_run.scheduler_error AS latest_scheduler_error, latest_run.finished_at AS latest_run_finished_at,
         COALESCE(issue_sessions.thread_id, latest_thread.thread_id) AS run_thread_id,
         issue_sessions.thread_id AS session_thread_id,
         issue_sessions.status AS session_status,
         issue_sessions.active_turn_id AS session_active_turn_id,
-        issue_sessions.last_error AS session_last_error,
+        issue_sessions.last_error AS session_last_error, issue_sessions.updated_at AS session_updated_at,
         CASE WHEN issue_sessions.issue_id IS NULL THEN 0 ELSE 1 END AS session_owned,
         COALESCE((SELECT CASE WHEN session_relay.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now') THEN 1 ELSE 0 END FROM session_relay WHERE singleton = 1), 0) AS session_relay_connected,
         (SELECT error FROM session_relay WHERE singleton = 1) AS session_relay_error
@@ -1515,6 +1525,13 @@ export class Store {
           ORDER BY issue_runs.started_at DESC, issue_runs.rowid DESC
           LIMIT 1
         ) AS latest_scheduler_error,
+        (
+          SELECT issue_runs.finished_at
+          FROM issue_runs
+          WHERE issue_runs.issue_id = issues.id
+          ORDER BY issue_runs.started_at DESC, issue_runs.rowid DESC
+          LIMIT 1
+        ) AS latest_run_finished_at,
         COALESCE((
           SELECT issue_sessions.thread_id
           FROM issue_sessions
@@ -1549,6 +1566,11 @@ export class Store {
           FROM issue_sessions
           WHERE issue_sessions.issue_id = issues.id
         ) AS session_last_error,
+        (
+          SELECT issue_sessions.updated_at
+          FROM issue_sessions
+          WHERE issue_sessions.issue_id = issues.id
+        ) AS session_updated_at,
         EXISTS(SELECT 1 FROM issue_sessions WHERE issue_sessions.issue_id = issues.id) AS session_owned,
         COALESCE((SELECT CASE WHEN session_relay.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now') THEN 1 ELSE 0 END FROM session_relay WHERE singleton = 1), 0) AS session_relay_connected,
         (SELECT error FROM session_relay WHERE singleton = 1) AS session_relay_error

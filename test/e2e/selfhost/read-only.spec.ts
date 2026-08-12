@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Store } from "../../../src/db.js";
@@ -31,9 +31,15 @@ test("remote shared Web UI shows pending, acknowledgement, conflict, and resubmi
     () => ({ enabled: true, hub_url: baseUrl, device_id: device.device_id, device_name: device.device_name, device_token: device.device_token, created_at: new Date().toISOString() }),
     () => {},
     async issueId => local.conversationProjection(issueId, conversations.get(issueId) || []),
-    (issueId, requestId, message) => {
-      worker.sendIssueMessage(issueId, requestId, message);
-      conversations.get(issueId)?.push({ id: `user-${requestId}`, role: "user", markdown: message, html: "", phase: null, timestamp: new Date().toISOString() });
+    (issueId, requestId, message, files) => {
+      const paths = files.map(file => {
+        const path = join(directory, file.name);
+        writeFileSync(path, Buffer.from(file.data.split(",")[1], "base64"));
+        return path;
+      });
+      const request = [message, paths.length ? `附带文件：\n${paths.map(path => `- ${path}`).join("\n")}` : ""].filter(Boolean).join("\n\n");
+      worker.sendIssueMessage(issueId, requestId, request);
+      conversations.get(issueId)?.push({ id: `user-${requestId}`, role: "user", markdown: request, html: "", phase: null, timestamp: new Date().toISOString() });
     },
     issueId => worker.stopIssue(issueId),
   );
@@ -68,7 +74,11 @@ test("remote shared Web UI shows pending, acknowledgement, conflict, and resubmi
     await expect(dialog.locator(".better-codex-bubble.is-user")).toContainText("Keep this Web context");
     await expect(dialog.locator(".better-codex-bubble.is-agent")).toContainText("Context is visible in the card");
     await expect(dialog.locator('[name="reply"]')).toBeVisible();
-    await expect(dialog.locator("[data-conversation-attach]")).toHaveCount(0);
+    await expect(dialog.locator("[data-conversation-attach]")).toBeVisible();
+    const chooser = page.waitForEvent("filechooser");
+    await dialog.locator("[data-conversation-attach]").click();
+    await (await chooser).setFiles({ name: "web-proof.txt", mimeType: "text/plain", buffer: Buffer.from("verified from WebUI") });
+    await expect(dialog.locator("[data-reply-attachments]")).toContainText("web-proof.txt");
     await dialog.locator('[name="reply"]').fill("Continue from WebUI");
     await dialog.locator("[data-conversation-send]").click();
     await expect.poll(() => hub.store.board().issues.find(item => item.id === conversationIssue.id)?.remote_state?.operation).toBe("issue.reply");
@@ -78,7 +88,12 @@ test("remote shared Web UI shows pending, acknowledgement, conflict, and resubmi
     await dialog.locator("[data-conversation-send]").click();
     await expect.poll(() => hub.store.board().issues.find(item => item.id === conversationIssue.id)?.remote_state?.operation).toBe("issue.stop");
     await client.syncNow();
-    expect(local.getSessionCommandByRequest(conversationIssue.id, replyCommandId)?.payload.request_message).toBe("Continue from WebUI");
+    const requestMessage = String(local.getSessionCommandByRequest(conversationIssue.id, replyCommandId)?.payload.request_message || "");
+    const uploadedPath = requestMessage.match(/^- (.+web-proof\.txt)$/m)?.[1] || "";
+    expect(requestMessage).toContain("Continue from WebUI");
+    expect(uploadedPath).not.toBe("");
+    expect(existsSync(uploadedPath)).toBe(true);
+    expect(readFileSync(uploadedPath, "utf8")).toBe("verified from WebUI");
     expect(local.getIssueReplyState(conversationIssue.id).status).toBe("interrupted");
     await expect(dialog.locator('[data-conversation-status] [data-run="interrupted"]')).toBeVisible();
     await dialog.locator('[name="reply"]').fill("Continue after stop");

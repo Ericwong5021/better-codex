@@ -4,6 +4,17 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.3-beta.5] - 2026-08-12
+
+### Changed
+
+- Upgrade self-hosted synchronization to v4 for synchronized Agent avatars, completion activity, and Web file replies.
+
+### Fixed
+
+- Keep Web Issue conversations current, show card workflow status consistently, and restore completion notifications across the local and remote surfaces.
+- Preserve custom Agent avatars in WebUI, keep expanded card details compact, and restore the attachment and send controls in the reply composer.
+
 ## [0.4.3-beta.4] - 2026-08-12
 
 ### Changed
@@ -376,7 +387,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.3-beta.4...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.3-beta.5...HEAD
+[0.4.3-beta.5]: https://github.com/Ericwong5021/better-codex/compare/v0.4.3-beta.4...v0.4.3-beta.5
 [0.4.3-beta.4]: https://github.com/Ericwong5021/better-codex/compare/v0.4.3-beta.3...v0.4.3-beta.4
 [0.4.3-beta.3]: https://github.com/Ericwong5021/better-codex/compare/v0.4.3-beta.2...v0.4.3-beta.3
 [0.4.3-beta.2]: https://github.com/Ericwong5021/better-codex/compare/v0.4.3-beta.1...v0.4.3-beta.2

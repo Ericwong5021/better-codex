@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { coreVersion } from "./compatibility.js";
 import type { Store } from "./db.js";
 import { readSyncConfiguration, type SyncConfiguration } from "./sync-config.js";
-import { syncProtocolVersion, type AgentDirectoryProjection, type ConversationProjection, type RemoteCommand, type RemoteCommandAck, type RuntimeProjection, type SyncChange, type SyncPushResponse } from "./sync-contract.js";
+import { syncProtocolVersion, type AgentDirectoryProjection, type ConversationProjection, type RemoteCommand, type RemoteCommandAck, type RemoteFilePayload, type RuntimeProjection, type SyncChange, type SyncPushResponse } from "./sync-contract.js";
 
 type SyncState = {
   connected: boolean;
@@ -37,6 +37,7 @@ export class SyncClient {
   private timer: NodeJS.Timeout | null = null;
   private active: Promise<SyncState> | null = null;
   private failures = 0;
+  private conversationHashes = new Map<string, string>();
   private state: SyncState = { connected: false, syncing: false, last_sync_at: null, last_error: null, hub_url: null, device_name: null, lease_expires_at: null };
 
   constructor(
@@ -45,7 +46,7 @@ export class SyncClient {
     private readonly configuration: () => SyncConfiguration | null = readSyncConfiguration,
     private readonly commandApplied: (command: RemoteCommand, ack: RemoteCommandAck) => void = () => {},
     private readonly conversation: (issueId: string) => Promise<ConversationProjection | null> = async () => null,
-    private readonly reply: (issueId: string, requestId: string, message: string) => void | Promise<void> = () => { throw new Error("remote_reply_unavailable"); },
+    private readonly reply: (issueId: string, requestId: string, message: string, files: RemoteFilePayload[]) => void | Promise<void> = () => { throw new Error("remote_reply_unavailable"); },
     private readonly stopIssue: (issueId: string) => void | Promise<void> = () => { throw new Error("remote_stop_unavailable"); },
   ) {}
 
@@ -150,17 +151,46 @@ export class SyncClient {
       for (const entry of entries) {
         if (!accepted.has(entry.event_id)) continue;
         if (entry.entity_type === "issue" && entry.operation === "upsert" && this.store.getIssue(entry.entity_id)?.run_thread_id) {
-          const projection = await this.conversation(entry.entity_id);
-          if (projection) await hubRequest(configuration, `/api/v1/sync/issues/${encodeURIComponent(entry.entity_id)}/conversation`, { method: "PUT", body: JSON.stringify(projection) });
+          await this.pushConversation(configuration, entry.entity_id);
         }
         this.store.clearSyncQueueEntry(entry);
       }
       this.store.setSyncCursor(result.cursor);
       this.state.lease_expires_at = result.lease_expires_at;
       directoryPending = false;
-      if (entries.length < limit) return;
+      if (entries.length < limit) {
+        await this.refreshConversations(configuration);
+        return;
+      }
     }
     throw new Error("sync_queue_drain_limit");
+  }
+
+  private async pushConversation(configuration: SyncConfiguration, issueId: string) {
+    const projection = await this.conversation(issueId);
+    if (!projection) return;
+    const payload = JSON.stringify(projection);
+    const hash = createHash("sha256").update(payload).digest("hex");
+    if (this.conversationHashes.get(issueId) === hash) return;
+    await hubRequest(configuration, `/api/v1/sync/issues/${encodeURIComponent(issueId)}/conversation`, { method: "PUT", body: payload });
+    this.conversationHashes.set(issueId, hash);
+  }
+
+  private async refreshConversations(configuration: SyncConfiguration) {
+    const issues = [...this.store.listIssues(), ...this.store.listIssues({ archived: true })];
+    const recentThreshold = Date.now() - 120_000;
+    const candidates = this.conversationHashes.size
+      ? issues.filter(issue => {
+          const reply = this.store.getIssueReplyState(issue.id);
+          const recentlyFinished = [issue.latest_run_finished_at, issue.session_updated_at, reply.finished_at]
+            .some(value => value && Date.parse(value) >= recentThreshold);
+          return Boolean(issue.active_run_status)
+            || ["starting", "active", "stopping", "waiting_on_approval", "waiting_on_user"].includes(issue.session_status || "")
+            || reply.status === "running"
+            || recentlyFinished;
+        })
+      : issues;
+    for (const issue of candidates) if (issue.run_thread_id) await this.pushConversation(configuration, issue.id);
   }
 
   private async pullCommands(configuration: SyncConfiguration) {
@@ -184,14 +214,17 @@ export class SyncClient {
       name: profile.name,
       name_en: profile.name_en,
       description: profile.description,
+      avatar: this.store.getAgentAvatar(profile.id),
       version: profile.version,
       created_at: profile.created_at,
       updated_at: profile.updated_at,
     }));
-    const hash = createHash("sha256").update(JSON.stringify(agents)).digest("hex");
+    const defaultAvatar = this.store.getAgentAvatar("default");
+    const hash = createHash("sha256").update(JSON.stringify({ agents, defaultAvatar })).digest("hex");
     const projection: AgentDirectoryProjection = {
       id: "agents",
       agents,
+      default_avatar: defaultAvatar,
       local_revision: Math.max(1, Number.parseInt(hash.slice(0, 13), 16)),
     };
     return {

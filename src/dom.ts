@@ -3668,7 +3668,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           const activityAgent = assignee || defaultAgent || { name: "Codex", is_default: true };
           const latestRunStatus = issue.latest_run_status || "";
           const replyResultState = issue.reply_status === "succeeded" ? "completed" : ["failed", "interrupted"].includes(issue.reply_status) ? issue.reply_status : "";
-          const executionState = issue.status === "done" ? "completed" : issue.status === "cancelled" ? "interrupted" : issue.status === "blocked" ? "blocked" : replyResultState || ((issue.latest_scheduler_error || issue.latest_scheduler_status === "failed") && issue.status === "in_review" ? "scheduler-failed" : latestRunStatus === "completed" ? "completed" : latestRunStatus === "failed" ? "failed" : latestRunStatus === "interrupted" ? "interrupted" : latestRunStatus === "scheduling" ? "scheduling" : latestRunStatus === "running" ? "running" : latestRunStatus === "claimed" ? "claimed" : issue.agent_enabled ? "not-started" : "");
+          const executionState = issue.status === "done" ? "completed" : issue.status === "cancelled" ? "interrupted" : issue.status === "blocked" ? "blocked" : issue.status === "in_review" ? ((issue.latest_scheduler_error || issue.latest_scheduler_status === "failed") ? "scheduler-failed" : "in_review") : replyResultState || (latestRunStatus === "failed" ? "failed" : latestRunStatus === "interrupted" ? "interrupted" : latestRunStatus === "scheduling" ? "scheduling" : latestRunStatus === "running" ? "running" : latestRunStatus === "claimed" ? "claimed" : issue.agent_enabled ? "not-started" : "");
           const sessionExecutionState = issue.session_status === "stopping" ? "stopping" : issue.session_status === "starting" ? "claimed" : ["active", "waiting_on_approval", "waiting_on_user"].includes(issue.session_status) ? "running" : "";
           const activeExecutionState = issue.active_run_status || (issue.reply_status === "running" ? "running" : sessionExecutionState);
           const activityState = permissions.remotePending ? "remote-pending" : permissions.remoteConflict ? "remote-conflict" : enrichmentLocked ? "thinking" : issue.session_status === "stopping" ? "stopping" : activeExecutionState || executionState;
@@ -3707,11 +3707,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (issueSessionSnapshot.size) {
         const ended = issues.filter(issue => {
           const previous = issueSessionSnapshot.get(issue.id);
-          return previous && ((["claimed", "running", "scheduling"].includes(previous.activeRunStatus) && !issue.active_run_status) || (previous.replyStatus === "running" && issue.reply_status !== "running"));
+          return previous && ((["claimed", "running", "scheduling"].includes(previous.activeRunStatus) && !issue.active_run_status) || (previous.replyStatus === "running" && issue.reply_status !== "running") || (issue.last_activity_finished_at && issue.last_activity_finished_at !== previous.lastActivityFinishedAt));
         });
         ended.sort((left, right) => new Date(left.updated_at).getTime() - new Date(right.updated_at).getTime()).forEach(renderSessionEndNotice);
       }
-      issueSessionSnapshot = new Map(issues.map(issue => [issue.id, { activeRunStatus: issue.active_run_status || "", replyStatus: issue.reply_status || "idle" }]));
+      issueSessionSnapshot = new Map(issues.map(issue => [issue.id, { activeRunStatus: issue.active_run_status || "", replyStatus: issue.reply_status || "idle", lastActivityFinishedAt: issue.last_activity_finished_at || "" }]));
       state.issues = issues;
       syncSessionHandoffFromHost();
       const dialog = document.getElementById("better-codex-dialog");
@@ -4262,8 +4262,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const inputDisabled = sessionHandoff ? " disabled" : "";
         const actionDisabled = stopping || sessionHandoff || (!working && !draft.reply.trim() && !draft.replyAttachments.length) ? " disabled" : "";
         const actionLabel = t(stopping ? "正在停止…" : working ? "停止任务" : "发送");
-        const attachments = REMOTE ? "" : attachmentList(draft.replyAttachments, "reply");
-        const attachButton = REMOTE ? "" : '<button class="better-codex-composer-attach" type="button" data-conversation-attach aria-label="' + te("添加附件") + '" title="' + te("添加附件") + '"' + inputDisabled + '>' + icon("plus", "", "1.9") + '</button>';
+        const attachments = attachmentList(draft.replyAttachments, "reply");
+        const attachButton = '<button class="better-codex-composer-attach" type="button" data-conversation-attach aria-label="' + te("添加附件") + '" title="' + te("添加附件") + '"' + inputDisabled + '>' + icon("plus", "", "1.9") + '</button>';
         return '<div class="better-codex-composer" data-state="' + mode + '">' + attachments + '<textarea name="reply" rows="2" placeholder="' + te(sessionHandoff ? "请前往会话继续对话" : "输入下一步要求…") + '" aria-label="' + te("回复") + '"' + inputDisabled + '>' + escapeHtml(draft.reply) + '</textarea><div class="better-codex-composer-toolbar">' + attachButton + '<button class="better-codex-composer-send" type="button" data-conversation-send data-composer-mode="' + mode + '" aria-label="' + escapeHtml(actionLabel) + '" title="' + escapeHtml(actionLabel) + '"' + actionDisabled + '>' + icon(working ? "stop" : "send", "", working ? "2.5" : "2") + '</button></div></div>';
       }
 
@@ -4412,10 +4412,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         errorOutput.hidden = true;
         clearConversationFailure();
         let message = text;
-        if (!retrying) {
+        let files = [];
+        if (REMOTE || !retrying) {
           try {
-            await uploadPastedImages(draft.replyAttachments);
-            message = withAttachments(text, draft.replyAttachments);
+            if (REMOTE) files = await remoteFiles(draft.replyAttachments);
+            else {
+              await uploadPastedImages(draft.replyAttachments);
+              message = withAttachments(text, draft.replyAttachments);
+            }
           } catch (error) {
             errorOutput.textContent = t(error instanceof Error ? error.message : "图片保存失败");
             errorOutput.hidden = false;
@@ -4425,7 +4429,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         }
         try {
           lastReplyStatus = "running";
-          const reply = await api("/api/issues/" + encodeURIComponent(issue.id) + "/reply", { method: "POST", body: JSON.stringify({ message, request_id: requestId }) });
+          const reply = await api("/api/issues/" + encodeURIComponent(issue.id) + "/reply", { method: "POST", body: JSON.stringify({ message, request_id: requestId, files }) });
           if (reply.initial_run) {
             await loadIssues();
             dialog.close();
@@ -4550,6 +4554,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         });
       }
 
+      async function remoteFiles(items) {
+        return Promise.all(items.map(async item => ({ name: item.name, type: item.file.type || "application/octet-stream", data: await fileDataUrl(item.file) })));
+      }
+
       async function uploadPastedImages(items = draft.attachments) {
         for (const item of items) {
           if (!item.file || item.path) continue;
@@ -4582,7 +4590,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
       function pasteImages(event) {
         const replyPaste = event.target?.matches?.('[name="reply"]');
-        if (REMOTE && replyPaste) return;
         if (editingLocked && !replyPaste) return;
         const files = Array.from(event.clipboardData?.items || []).flatMap(item => item.kind === "file" && item.type.startsWith("image/") ? [item.getAsFile()].filter(Boolean) : []);
         if (!files.length) return;
@@ -4627,11 +4634,15 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             let skipped = 0;
             for (const file of files) {
               const path = String(file.path || "").trim();
-              if (!path) {
+              if (!path && !REMOTE) {
                 skipped += 1;
                 continue;
               }
-              selected.push({ name: file.name || path.split(/[\\\\/]/).pop() || path, path });
+              if (file.size > 10 * 1024 * 1024) {
+                skipped += 1;
+                continue;
+              }
+              selected.push({ name: file.name || path.split(/[\\\\/]/).pop() || path || t("附件"), path, file: REMOTE ? file : null, previewUrl: REMOTE && file.type.startsWith("image/") ? URL.createObjectURL(file) : "" });
             }
             resolve({ files: selected, skipped, picked: files.length });
           }, { once: true });
@@ -4722,14 +4733,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
               errorOutput.hidden = false;
             };
             if (!result.picked) return;
-            if (!result.files.length) return showAttachError("当前环境无法读取本地文件路径");
-            const known = new Set(attachmentPaths(draft.replyAttachments));
-            const next = result.files.filter(file => !known.has(file.path));
+            if (!result.files.length) return showAttachError(REMOTE ? "文件不能超过 10 MB" : "当前环境无法读取本地文件路径");
+            const known = new Set(draft.replyAttachments.map(file => file.path || file.name + ":" + (file.file?.size || 0)));
+            const next = result.files.filter(file => !known.has(file.path || file.name + ":" + (file.file?.size || 0)));
             if (next.length) {
               draft.replyAttachments.push(...next);
               renderDialog();
             }
-            if (result.skipped) showAttachError("部分文件无法读取本地路径，已跳过");
+            if (result.skipped) showAttachError(REMOTE ? "部分文件超过 10 MB，已跳过" : "部分文件无法读取本地路径，已跳过");
             dialog.querySelector('[name="reply"]')?.focus();
           });
         });

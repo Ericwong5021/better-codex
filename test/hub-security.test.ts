@@ -117,7 +117,7 @@ test("Hub backup and restore preserve paired devices, password state, and pendin
     const device = store.pairDevice("backup runtime", code.pairing_code);
     const timestamp = new Date().toISOString();
     const project: ProjectProjection = { id: "project-1", name: "Backup", identifier_prefix: "BKP", created_at: timestamp, updated_at: timestamp, local_revision: 1 };
-    const issue: IssueProjection = { id: "issue-1", identifier: "BKP-1", project_id: project.id, title: "Before backup", description: "", status: "todo", priority: "medium", labels: [], sort_order: 0, pinned: false, archived_at: null, assigned: false, agent_enabled: false, agent_id: null, user_assigned: false, pending_actor: "user", active_run_status: null, latest_run_status: null, latest_scheduler_status: null, session_status: null, reply_status: "idle", has_conversation: false, needs_attention: false, created_at: timestamp, updated_at: timestamp, local_revision: 1 };
+    const issue: IssueProjection = { id: "issue-1", identifier: "BKP-1", project_id: project.id, title: "Before backup", description: "", status: "todo", priority: "medium", labels: [], sort_order: 0, pinned: false, archived_at: null, assigned: false, agent_enabled: false, agent_id: null, user_assigned: false, pending_actor: "user", active_run_status: null, latest_run_status: null, latest_scheduler_status: null, session_status: null, reply_status: "idle", has_conversation: false, last_activity_finished_at: null, needs_attention: false, created_at: timestamp, updated_at: timestamp, local_revision: 1 };
     const push: SyncPushRequest = {
       protocol_version: syncProtocolVersion,
       core_version: "0.4.2",
