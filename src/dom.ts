@@ -3767,6 +3767,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         state.systemLocale = resolveSystemLocale(HOST_KIND === "web" ? INITIAL_LOCALE : bootstrap.locale);
         state.locale = state.languageSetting === "system" ? state.systemLocale : state.languageSetting;
         if (bootstrap.user && typeof bootstrap.user === "object") state.user = bootstrap.user;
+        if (HOST_KIND === "web") window.dispatchEvent(new CustomEvent("better-codex:bootstrap", { detail: { user: state.user, locale: state.locale } }));
         state.mockup = Boolean(bootstrap.mockup);
         state.agents = bootstrap.agents || [];
         state.projects = bootstrap.projects || [];

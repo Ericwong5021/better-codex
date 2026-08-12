@@ -10,6 +10,7 @@ const webHostHtml = String.raw`<!doctype html>
   <meta name="color-scheme" content="light dark">
   <meta name="referrer" content="no-referrer">
   <title>Better Codex</title>
+  <link rel="icon" type="image/png" href="${betterCodexLogoUrl}">
   <link rel="stylesheet" href="/web/host.css">
 </head>
 <body>
@@ -28,10 +29,19 @@ const webHostHtml = String.raw`<!doctype html>
           <div class="web-sidebar-section" data-app-action-sidebar-section></div>
         </div>
       </nav>
-      <footer class="web-profile">
-        <span class="web-avatar">BC</span>
-        <span><strong>Better Codex</strong><small>本地工作台</small></span>
-        <i class="web-online" aria-label="Runtime 已连接"></i>
+      <footer class="web-account">
+        <button id="web-profile" class="web-profile" type="button" aria-expanded="false" aria-controls="web-usage">
+          <span id="web-avatar" class="web-avatar"><span id="web-avatar-initials">你</span><i class="web-online" aria-hidden="true"></i></span>
+          <span><strong id="web-profile-name">你</strong><small id="web-profile-kind">Codex 账户</small></span>
+          <svg class="web-profile-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg>
+        </button>
+        <section id="web-usage" class="web-usage" aria-live="polite" hidden>
+          <div class="web-usage-heading">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>
+            <strong id="web-usage-title">剩余用量</strong>
+          </div>
+          <div id="web-usage-body" class="web-usage-body"><span class="web-usage-status">点击查看 Codex 额度</span></div>
+        </section>
       </footer>
     </aside>
     <main id="web-main" class="web-main">
@@ -119,13 +129,34 @@ body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; 
 .web-nav-button { display: grid; grid-template-columns: 20px minmax(0, 1fr); width: 100%; min-height: 38px; align-items: center; gap: 8px; border: 0; border-radius: 10px; padding: 0 10px; background: transparent; text-align: left; cursor: pointer; transition: background-color 120ms cubic-bezier(.16,1,.3,1), transform 120ms cubic-bezier(.16,1,.3,1); }
 .web-nav-button svg { width: 16px; height: 16px; }
 .text-fade-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.web-profile { display: grid; grid-template-columns: 30px minmax(0, 1fr) 8px; min-height: 48px; align-items: center; gap: 9px; padding: 6px; }
-.web-avatar { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 50%; color: #fff; background: #2fa15f; font-size: 9px; font-weight: 700; }
+.web-account { border-radius: 12px; background: transparent; }
+.web-account:has(.web-profile[aria-expanded="true"]) { background: var(--web-hover); }
+.web-profile { display: grid; grid-template-columns: 30px minmax(0, 1fr) 14px; width: 100%; min-height: 48px; align-items: center; gap: 9px; border: 0; border-radius: 10px; padding: 6px; background: transparent; text-align: left; cursor: pointer; }
+.web-avatar { position: relative; display: grid; width: 28px; height: 28px; place-items: center; border-radius: 50%; color: #fff; background: #2fa15f; font-size: 9px; font-weight: 700; }
 .web-profile > span:nth-child(2) { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
-.web-profile strong, .web-profile small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.web-profile strong, .web-profile small { overflow: hidden; white-space: nowrap; }
 .web-profile strong { font-size: 11px; font-weight: 620; }
 .web-profile small { color: var(--web-muted); font-size: 9px; }
-.web-online { width: 7px; height: 7px; border-radius: 50%; background: #2fa15f; box-shadow: 0 0 0 3px color-mix(in srgb, #2fa15f 15%, transparent); }
+.web-online { position: absolute; right: -1px; bottom: -1px; width: 7px; height: 7px; border: 2px solid var(--web-sidebar); border-radius: 50%; background: #2fa15f; }
+.web-profile-chevron { width: 14px; height: 14px; color: var(--web-muted); }
+.web-profile[aria-expanded="true"] .web-profile-chevron { transform: rotate(90deg); }
+.web-usage { margin: 0 6px; border-top: 1px solid var(--web-line); padding: 9px 4px 10px; }
+.web-usage[hidden] { display: none; }
+.web-usage-heading { display: flex; align-items: center; gap: 6px; color: var(--web-muted); font-size: 10px; }
+.web-usage-heading svg { width: 13px; height: 13px; }
+.web-usage-heading strong { font-weight: 590; }
+.web-usage-body { display: grid; gap: 10px; margin-top: 9px; }
+.web-usage-status { color: var(--web-muted); font-size: 10px; line-height: 1.5; }
+.web-usage-window { display: grid; gap: 6px; }
+.web-usage-row { display: flex; min-width: 0; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 10px; }
+.web-usage-row > span:first-child { font-weight: 620; }
+.web-usage-value { display: flex; min-width: 0; align-items: baseline; gap: 6px; color: var(--web-muted); }
+.web-usage-value strong { color: var(--web-ink); font-size: 11px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.web-usage-value small { overflow: hidden; white-space: nowrap; font-size: 9px; }
+.web-usage-progress { width: 100%; height: 3px; border: 0; border-radius: 999px; overflow: hidden; background: var(--web-line); appearance: none; }
+.web-usage-progress::-webkit-progress-bar { border-radius: 999px; background: var(--web-line); }
+.web-usage-progress::-webkit-progress-value { border-radius: 999px; background: #2fa15f; }
+.web-usage-progress::-moz-progress-bar { border-radius: 999px; background: #2fa15f; }
 .web-main, .web-surface { min-width: 0; min-height: 0; height: 100%; }
 .web-surface { position: relative; }
 .web-native-layout, .app-shell-main-content-frame { width: 100%; height: 100%; }
@@ -146,12 +177,12 @@ body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; 
 .web-connect input { width: 100%; height: 39px; border: 0; border-radius: 10px; padding: 0 11px; color: var(--web-ink); background: var(--web-hover); }
 .web-connect output { display: block; margin-top: 9px; color: #d34e4e; font-size: 11px; }
 .web-connect button { width: 100%; min-height: 38px; margin-top: 16px; border: 0; border-radius: 10px; color: var(--web-canvas); background: var(--web-ink); cursor: pointer; }
-@media (hover:hover) { .web-nav-button:hover, .web-icon-button:hover { background: var(--web-hover); } }
+@media (hover:hover) { .web-nav-button:hover, .web-icon-button:hover, .web-profile:hover { background: var(--web-hover); } }
 @media (max-width: 720px) {
   .web-shell { display: block; }
   .web-main { width: 100%; height: calc(100% - 58px); }
   .web-sidebar { position: fixed; z-index: 50; right: 0; bottom: 0; left: 0; width: 100%; height: 58px; flex-direction: row; align-items: center; justify-content: center; padding: 6px max(10px, env(safe-area-inset-right)) max(6px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left)); box-shadow: inset 0 1px var(--web-line); }
-  .web-brand, .web-profile { display: none; }
+  .web-brand, .web-account { display: none; }
   .web-sidebar nav, .web-sidebar-scroll { width: 100%; height: auto; }
   .web-sidebar-section { display: flex; justify-content: center; gap: 8px; margin: 0; }
   .web-nav-button:not(#better-codex-entry):not(#better-codex-agents-entry) { display: none; }
@@ -173,11 +204,128 @@ const connectForm = document.getElementById("web-connect-form");
 const tokenInput = document.getElementById("web-token");
 const usernameInput = document.getElementById("web-username");
 const connectError = document.getElementById("web-connect-error");
+const profileButton = document.getElementById("web-profile");
+const profileName = document.getElementById("web-profile-name");
+const profileKind = document.getElementById("web-profile-kind");
+const profileAvatar = document.getElementById("web-avatar");
+const profileAvatarInitials = document.getElementById("web-avatar-initials");
+const usagePanel = document.getElementById("web-usage");
+const usageTitle = document.getElementById("web-usage-title");
+const usageBody = document.getElementById("web-usage-body");
 let installing = false;
 const REMOTE = document.documentElement.dataset.betterCodexRemote === "true";
 let sessionToken = REMOTE ? "" : sessionStorage.getItem("better-codex-web-session") || "";
 let csrfToken = REMOTE ? sessionStorage.getItem("better-codex-web-csrf") || "" : "";
 const eventCursorKey = "better-codex-web-event-cursor";
+let profileLocale = "zh-CN";
+let usageLoadedAt = 0;
+let usageLoading = false;
+
+function profileText(zh, en) {
+  return profileLocale === "zh-CN" ? zh : en;
+}
+
+function updateWebProfile(detail) {
+  const user = detail?.user && typeof detail.user === "object" ? detail.user : {};
+  profileLocale = detail?.locale === "en" ? "en" : "zh-CN";
+  const name = typeof user.name === "string" && user.name.trim() ? user.name.trim() : profileText("你", "You");
+  const initials = typeof user.initials === "string" && user.initials.trim() ? user.initials.trim().slice(0, 2) : name.slice(0, 2);
+  profileName.textContent = name;
+  profileName.title = name;
+  profileAvatarInitials.textContent = initials;
+  if (typeof user.color === "string" && /^#[0-9a-f]{6}$/i.test(user.color)) profileAvatar.style.backgroundColor = user.color;
+  profileKind.textContent = profileText("Codex 账户", "Codex account");
+  usageTitle.textContent = profileText("剩余用量", "Usage remaining");
+  profileButton.setAttribute("aria-label", profileText("查看 Codex 额度", "View Codex usage"));
+}
+
+function usageWindowLabel(minutes) {
+  if (minutes % 10080 === 0) {
+    const weeks = Math.round(minutes / 10080);
+    return profileLocale === "zh-CN" ? weeks + "周" : weeks + (weeks === 1 ? " week" : " weeks");
+  }
+  if (minutes % 1440 === 0) {
+    const days = Math.round(minutes / 1440);
+    return profileLocale === "zh-CN" ? days + "天" : days + (days === 1 ? " day" : " days");
+  }
+  const hours = Math.max(1, Math.round(minutes / 60));
+  return profileLocale === "zh-CN" ? hours + "小时" : hours + (hours === 1 ? " hour" : " hours");
+}
+
+function usageResetLabel(timestamp) {
+  const date = new Date(Number(timestamp) * 1000);
+  if (!Number.isFinite(date.getTime())) return "";
+  const value = date.toLocaleDateString(profileLocale === "zh-CN" ? "zh-CN" : "en-US", { month: "short", day: "numeric" });
+  return profileLocale === "zh-CN" ? value + "重置" : "Resets " + value;
+}
+
+function renderUsageWindow(value) {
+  const item = document.createElement("div");
+  item.className = "web-usage-window";
+  const row = document.createElement("div");
+  row.className = "web-usage-row";
+  const duration = document.createElement("span");
+  duration.textContent = usageWindowLabel(Number(value.windowDurationMins));
+  const summary = document.createElement("span");
+  summary.className = "web-usage-value";
+  const remaining = document.createElement("strong");
+  remaining.textContent = String(Number(value.remainingPercent)) + "%";
+  const reset = document.createElement("small");
+  reset.textContent = usageResetLabel(value.resetsAt);
+  summary.append(remaining, reset);
+  row.append(duration, summary);
+  const progress = document.createElement("progress");
+  progress.className = "web-usage-progress";
+  progress.max = 100;
+  progress.value = Number(value.remainingPercent);
+  progress.setAttribute("aria-label", duration.textContent + " " + profileText("剩余额度", "usage remaining"));
+  item.append(row, progress);
+  return item;
+}
+
+function renderUsage(usage) {
+  usageBody.replaceChildren();
+  const windows = [usage?.primary, usage?.secondary].filter(Boolean);
+  if (!windows.length) {
+    const status = document.createElement("span");
+    status.className = "web-usage-status";
+    status.textContent = profileText("暂时无法读取 Codex 额度", "Codex usage is temporarily unavailable");
+    usageBody.append(status);
+    return;
+  }
+  windows.forEach(value => usageBody.append(renderUsageWindow(value)));
+  if (typeof usage.planType === "string" && usage.planType) {
+    const plan = usage.planType.charAt(0).toUpperCase() + usage.planType.slice(1);
+    profileKind.textContent = "Codex " + plan;
+  }
+}
+
+async function loadUsage() {
+  if (usageLoading || (usageLoadedAt && Date.now() - usageLoadedAt < 60_000)) return;
+  usageLoading = true;
+  usageBody.replaceChildren();
+  const status = document.createElement("span");
+  status.className = "web-usage-status";
+  status.textContent = profileText("正在读取…", "Loading…");
+  usageBody.append(status);
+  try {
+    const result = await requestRuntime({ path: "/api/account/usage", method: "GET" });
+    usageLoadedAt = Date.now();
+    renderUsage(result?.usage);
+  } catch {
+    renderUsage(null);
+  } finally {
+    usageLoading = false;
+  }
+}
+
+window.addEventListener("better-codex:bootstrap", event => updateWebProfile(event.detail));
+profileButton.addEventListener("click", () => {
+  const expanded = profileButton.getAttribute("aria-expanded") !== "true";
+  profileButton.setAttribute("aria-expanded", String(expanded));
+  usagePanel.hidden = !expanded;
+  if (expanded) void loadUsage();
+});
 
 function consumeFragmentToken() {
   const params = new URLSearchParams(location.hash.replace(/^#/, ""));

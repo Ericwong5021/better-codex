@@ -7,6 +7,7 @@ import { issuePriorities, issueStatuses } from "./db.js";
 import { HubStore } from "./hub-store.js";
 import type { RemoteCommandAck, SyncPushRequest } from "./sync-contract.js";
 import { betterCodexWebHostCss, betterCodexWebHostHtml, betterCodexWebHostJavaScript } from "./web-host.js";
+import { avatarInitials } from "./user-profile.js";
 
 export type HubServerOptions = {
   host: string;
@@ -242,6 +243,7 @@ export function createHubServer(options: HubServerOptions) {
       if (url.pathname === "/api/bootstrap" && method === "GET") {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" });
         const board = store.board();
+        const userName = store.webUsername() || "admin";
         return sendJson(response, 200, {
           projects: board.projects,
           agents: [],
@@ -249,7 +251,7 @@ export function createHubServer(options: HubServerOptions) {
           priorities: issuePriorities,
           appearance: { theme: "system", accent: "green" },
           locale: "zh-CN",
-          user: { id: "remote", name: "Better Codex", email: "", handle: "remote", initials: "BC", color: "#16a34a" },
+          user: { id: `remote:${userName}`, name: userName, email: "", handle: userName, initials: avatarInitials(userName), color: "#16a34a" },
           agentModelCatalog: [],
           agentModels: [],
           agentReasoningEfforts: [],
@@ -260,6 +262,10 @@ export function createHubServer(options: HubServerOptions) {
           runtime: board.runtime,
           capabilities: { issues: "read-write", agents: "unavailable", nativeThreads: false },
         });
+      }
+      if (url.pathname === "/api/account/usage" && method === "GET") {
+        if (!browser) return sendJson(response, 401, { error: "unauthorized" });
+        return sendJson(response, 200, { usage: null });
       }
       if (url.pathname === "/api/update" && method === "GET") {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" });

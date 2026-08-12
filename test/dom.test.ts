@@ -813,3 +813,10 @@ test("semantic surface hierarchy is derived from the Codex appearance configurat
   assert.match(css, /\.better-codex-agent-inspector-group\s*\{[^}]*background:\s*var\(--bc-color-input\);/s);
   assert.match(css, /\.better-codex-agent-inspector-field textarea\s*\{[^}]*background:\s*var\(--bc-color-input\);/s);
 });
+
+test("web injection shares the Codex user profile with the host shell", () => {
+  const source = injectionScript(4317, "test-token", "install", "zh-CN", "web");
+
+  assert.match(source, /new CustomEvent\("better-codex:bootstrap"/);
+  assert.match(source, /detail: \{ user: state\.user, locale: state\.locale \}/);
+});

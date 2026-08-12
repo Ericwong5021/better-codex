@@ -48,7 +48,9 @@ test("Hub Web login separates bootstrap credentials and enforces cookie, Origin,
   try {
     const page = await fetch(`${base}/web`);
     assert.equal(page.status, 200);
-    assert.match(await page.text(), /data-better-codex-remote="true"/);
+    const pageHtml = await page.text();
+    assert.match(pageHtml, /data-better-codex-remote="true"/);
+    assert.match(pageHtml, /<link rel="icon" type="image\/png" href="data:image\/png;base64,/);
     assert.equal(page.headers.get("strict-transport-security"), "max-age=31536000; includeSubDomains");
 
     const noOrigin = await fetch(`${base}/web/session`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: webUsername, password: webPassword }) });
@@ -75,6 +77,14 @@ test("Hub Web login separates bootstrap credentials and enforces cookie, Origin,
 
     const session = await fetch(`${base}/web/session`, { headers: { cookie } });
     assert.equal(session.status, 200);
+
+    const bootstrap = await fetch(`${base}/api/bootstrap`, { headers: { cookie } });
+    assert.equal(bootstrap.status, 200);
+    assert.equal(((await bootstrap.json()) as { user?: { name?: string } }).user?.name, webUsername);
+
+    const usage = await fetch(`${base}/api/account/usage`, { headers: { cookie } });
+    assert.equal(usage.status, 200);
+    assert.deepEqual(await usage.json(), { usage: null });
 
     const noCsrf = await fetch(`${base}/api/issues`, { method: "POST", headers: { cookie, origin, "content-type": "application/json" }, body: "{}" });
     assert.equal(noCsrf.status, 403);
