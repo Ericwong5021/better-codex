@@ -88,7 +88,10 @@ test("web host boots the shared DOM injection behind a local session", async () 
     assert.match(html, /data-better-codex-web-surface/);
     assert.match(html, /\/web\/host\.js/);
     assert.match(html, /class="web-brand-logo"/);
+    assert.match(html, /<link rel="icon" type="image\/png" href="data:image\/png;base64,/);
     assert.match(html, /<strong>Better Codex<\/strong>/);
+    assert.match(html, /id="web-profile-name">你<\/strong>/);
+    assert.match(html, /id="web-usage"[^>]*hidden/);
     assert.doesNotMatch(html, />新对话<|>已安排<|>插件</);
     assert.match(page.headers.get("content-security-policy") || "", /script-src 'self'/);
     assert.equal(page.headers.get("cross-origin-resource-policy"), "same-origin");
@@ -103,6 +106,9 @@ test("web host boots the shared DOM injection behind a local session", async () 
     assert.match(hostScript, /window\.betterCodexHost = Object\.freeze/);
     assert.match(hostScript, /subscribe: subscribeRuntime/);
     assert.match(hostScript, /better-codex-web-event-cursor/);
+    assert.match(hostScript, /better-codex:bootstrap/);
+    assert.match(hostScript, /\/api\/account\/usage/);
+    assert.match(hostScript, /profileButton\.setAttribute\("aria-expanded"/);
 
     const hostCss = await (await fetch(`${base}/web/host.css`)).text();
     assert.doesNotMatch(hostCss, /^\s*\*\s*\{/m);
@@ -170,6 +176,10 @@ test("web host boots the shared DOM injection behind a local session", async () 
 
     const webBootstrap = await fetch(`${base}/api/bootstrap`, { headers: { authorization: `Bearer ${sessionToken}` } });
     assert.equal(webBootstrap.status, 200);
+
+    const accountUsage = await fetch(`${base}/api/account/usage`, { headers: { authorization: `Bearer ${sessionToken}` } });
+    assert.equal(accountUsage.status, 200);
+    assert.ok(Object.hasOwn(await accountUsage.json(), "usage"));
 
     const eventController = new AbortController();
     const eventResponse = await fetch(`${base}/api/events`, {

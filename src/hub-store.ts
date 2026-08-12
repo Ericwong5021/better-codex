@@ -17,7 +17,7 @@ function tokenHash(value: string) {
   return createHash("sha256").update(value).digest("hex");
 }
 
-const hubSchemaVersion = 3;
+const hubSchemaVersion = 4;
 
 function backupBeforeMigration(file: string) {
   if (!existsSync(file)) return;
@@ -220,6 +220,38 @@ export class HubStore {
       INSERT OR IGNORE INTO hub_migrations (version, applied_at) VALUES (2, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
       INSERT OR IGNORE INTO hub_migrations (version, applied_at) VALUES (3, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
     `);
+    const currentVersion = Number((this.db.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM hub_migrations").get() as { version: number }).version);
+    if (currentVersion < 4) {
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        const timestamp = now();
+        const rows = this.db.prepare("SELECT entity_id, payload_json FROM entities WHERE entity_type = 'issue' AND deleted_at IS NULL").all() as Array<{ entity_id: string; payload_json: string }>;
+        for (const row of rows) {
+          const projection = JSON.parse(row.payload_json) as Record<string, unknown>;
+          if (projection.status !== "cancelled") continue;
+          projection.status = "backlog";
+          projection.archived_at ||= projection.updated_at || timestamp;
+          projection.needs_attention = false;
+          this.db.prepare("UPDATE entities SET payload_json = ?, updated_at = ? WHERE entity_type = 'issue' AND entity_id = ?")
+            .run(JSON.stringify(projection), timestamp, row.entity_id);
+          this.db.prepare("INSERT INTO changes (entity_type, entity_id, operation, created_at) VALUES ('issue', ?, 'upsert', ?)").run(row.entity_id, timestamp);
+        }
+        const obsoleteCommands = this.db.prepare("SELECT command_id, payload_json FROM remote_commands WHERE status = 'pending'").all() as Array<{ command_id: string; payload_json: string }>;
+        for (const command of obsoleteCommands) {
+          const payload = JSON.parse(command.payload_json) as Record<string, unknown>;
+          if (payload.status !== "cancelled") continue;
+          this.db.prepare("UPDATE remote_commands SET status = 'rejected', finished_at = ?, error = 'obsolete_cancelled_status' WHERE command_id = ? AND status = 'pending'")
+            .run(timestamp, command.command_id);
+          this.db.prepare("INSERT INTO remote_command_audit (command_id, status, detail, created_at) VALUES (?, 'rejected', 'obsolete_cancelled_status', ?)")
+            .run(command.command_id, timestamp);
+        }
+        this.db.prepare("INSERT INTO hub_migrations (version, applied_at) VALUES (4, ?)").run(timestamp);
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    }
   }
 
   close() {

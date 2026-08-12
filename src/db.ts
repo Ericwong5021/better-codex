@@ -5,7 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import { databasePath, developmentDatabaseSnapshotSourcePath } from "./config.js";
 import type { IssueProjection, ProjectProjection, RemoteCommand, RemoteCommandAck, SyncEntityType, SyncProjection } from "./sync-contract.js";
 
-export const issueStatuses = ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"] as const;
+export const issueStatuses = ["backlog", "todo", "in_progress", "in_review", "done", "blocked"] as const;
 export const issuePriorities = ["none", "low", "medium", "high", "urgent"] as const;
 const defaultSchedulerModel = "gpt-5.6-sol";
 const defaultSchedulerReasoningEffort = "high";
@@ -207,7 +207,7 @@ export function cleanMaxConcurrency(value: number | undefined) {
   return value;
 }
 
-const latestSchemaVersion = 6;
+const latestSchemaVersion = 7;
 
 function now() {
   return new Date().toISOString();
@@ -582,6 +582,26 @@ export class Store {
         throw error;
       }
     }
+    if (fromVersion < 7) {
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        // Cancellation used to be a terminal issue status. Archive is now the
+        // terminal action, so keep legacy issues recoverable without allowing
+        // them to restart automatically when they are restored.
+        this.db.exec(`
+          UPDATE issues
+          SET status = 'backlog',
+              archived_at = COALESCE(archived_at, updated_at),
+              version = version + 1
+          WHERE status = 'cancelled'
+        `);
+        this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (7, ?)").run(now());
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    }
   }
 
   private ensureSyncTriggers() {
@@ -633,7 +653,7 @@ export class Store {
         SET needs_attention = 1, pending_actor = 'agent'
         WHERE agent_enabled = 1
           AND archived_at IS NULL
-          AND status NOT IN ('backlog', 'done', 'cancelled')
+          AND status NOT IN ('backlog', 'done')
           AND needs_attention = 0
           AND pending_actor = 'user'
           AND NOT EXISTS (
@@ -1126,8 +1146,7 @@ export class Store {
       && issue.agent_enabled
       && !issue.archived_at
       && issue.status !== "backlog"
-      && issue.status !== "done"
-      && issue.status !== "cancelled",
+      && issue.status !== "done",
     );
   }
 
@@ -1140,7 +1159,7 @@ export class Store {
   }
 
   canAutoStartFromUserMessage(issue: Issue) {
-    return Boolean(this.getAutoDispatch() && !issue.archived_at && !["backlog", "done", "cancelled"].includes(issue.status));
+    return Boolean(this.getAutoDispatch() && !issue.archived_at && !["backlog", "done"].includes(issue.status));
   }
 
   listProjects() {
@@ -1519,8 +1538,8 @@ export class Store {
     if (enrichmentStatus !== null && enrichmentStatus !== "pending" && enrichmentStatus !== "failed") throw new Error("invalid_enrichment_status");
     const status = importedSession ? importedSession.active ? "in_progress" : "in_review" : enrichmentStatus === "pending" ? "backlog" : input.status ?? "todo";
     const userHandoff = status === "blocked" || status === "in_review";
-    const needsAttention = importedSession ? Number(!importedSession.active) : userHandoff ? 1 : agentEnabled && status !== "backlog" && status !== "done" && status !== "cancelled" ? 1 : 0;
-    const pendingActor = importedSession ? importedSession.active ? "agent" : "user" : agentEnabled && !userHandoff && status !== "done" && status !== "cancelled" ? "agent" : "user";
+    const needsAttention = importedSession ? Number(!importedSession.active) : userHandoff ? 1 : agentEnabled && status !== "backlog" && status !== "done" ? 1 : 0;
+    const pendingActor = importedSession ? importedSession.active ? "agent" : "user" : agentEnabled && !userHandoff && status !== "done" ? "agent" : "user";
     const id = input.id ?? randomUUID();
     if (!/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,199}$/.test(id)) throw new Error("invalid_issue_id");
     const timestamp = now();
@@ -1606,7 +1625,7 @@ export class Store {
         patch.user_assigned = false;
         if (patch.pending_actor === undefined) patch.pending_actor = "agent";
       }
-      if (patch.status === "done" || patch.status === "cancelled") {
+      if (patch.status === "done") {
         patch.pending_actor = "user";
         patch.needs_attention = false;
       } else if ((patch.status === "blocked" || patch.status === "in_review") && !pendingActorProvided) {
@@ -1617,7 +1636,7 @@ export class Store {
         const nextStatus = patch.status ?? issue.status;
         const agentOwned = patch.pending_actor === "agent"
           || (patch.status !== undefined && issue.agent_enabled && issue.pending_actor === "agent");
-        if (agentOwned && nextStatus !== "backlog" && nextStatus !== "done" && nextStatus !== "cancelled") patch.needs_attention = true;
+        if (agentOwned && nextStatus !== "backlog" && nextStatus !== "done") patch.needs_attention = true;
       }
       if (patch.status === "backlog" && patch.needs_attention === undefined) patch.needs_attention = false;
       const projectChanged = patch.project_id !== undefined && patch.project_id !== issue.project_id;
@@ -1683,7 +1702,7 @@ export class Store {
     if (!issue) throw new Error("issue_not_found");
     if (issue.version !== version) throw new Error("version_conflict");
     if (issue.enrichment_status === "pending") throw new Error("issue_enrichment_pending");
-    const result = this.db.prepare("UPDATE issues SET archived_at = ?, version = version + 1, updated_at = ? WHERE id = ? AND version = ?")
+    const result = this.db.prepare("UPDATE issues SET archived_at = ?, needs_attention = 0, pending_actor = 'user', version = version + 1, updated_at = ? WHERE id = ? AND version = ?")
       .run(now(), now(), issue.id, version);
     if (result.changes !== 1) throw new Error("version_conflict");
     return this.getIssue(issue.id)!;
@@ -1767,7 +1786,7 @@ export class Store {
           AND issues.agent_enabled = 1
           ${issueId ? "AND issues.id = ?" : ""}
           AND issues.archived_at IS NULL
-          AND issues.status NOT IN ('backlog', 'done', 'cancelled')
+          AND issues.status NOT IN ('backlog', 'done')
           AND (issues.workspace_path IS NOT NULL OR projects.workspace_path != '')
           AND NOT EXISTS (
             SELECT 1 FROM issue_runs
@@ -1807,7 +1826,7 @@ export class Store {
           AND needs_attention = 1
           AND pending_actor = 'agent'
           AND agent_enabled = 1
-          AND status NOT IN ('backlog', 'done', 'cancelled')
+          AND status NOT IN ('backlog', 'done')
           AND (enrichment_status IS NULL OR enrichment_status != 'pending')
       `).run(timestamp, issue.id, issue.version);
       if (result.changes !== 1) throw new Error("claim_conflict");
@@ -1978,20 +1997,19 @@ export class Store {
     try {
       const issue = this.getIssue(issueId);
       if (!issue) throw new Error("issue_not_found");
+      if (issue.archived_at) throw new Error("issue_archived");
       if (issue.session_handoff_at && !issue.session_owned) throw new Error("issue_session_handed_off");
       if (issue.active_run_status) throw new Error("issue_execution_running");
       if (this.getIssueReplyState(issueId).status === "running") throw new Error("reply_busy");
-      if (issue.status !== "cancelled") {
-        this.db.prepare(`
-          UPDATE issues
-          SET status = 'in_progress',
-              needs_attention = 0,
-              pending_actor = 'agent',
-              version = version + 1,
-              updated_at = ?
-          WHERE id = ?
-        `).run(timestamp, issueId);
-      }
+      this.db.prepare(`
+        UPDATE issues
+        SET status = 'in_progress',
+            needs_attention = 0,
+            pending_actor = 'agent',
+            version = version + 1,
+            updated_at = ?
+        WHERE id = ? AND archived_at IS NULL
+      `).run(timestamp, issueId);
       this.db.exec("COMMIT");
       return this.getIssue(issueId)!;
     } catch (error) {
@@ -2006,13 +2024,14 @@ export class Store {
     try {
       this.db.prepare(`
         UPDATE issues
-        SET status = CASE WHEN status IN ('done', 'cancelled') THEN status ELSE ? END,
-            needs_attention = CASE WHEN status IN ('done', 'cancelled') THEN needs_attention ELSE 1 END,
-            pending_actor = CASE WHEN status IN ('done', 'cancelled') THEN pending_actor ELSE 'user' END,
+        SET status = ?,
+            needs_attention = 1,
+            pending_actor = 'user',
             version = version + 1,
             updated_at = ?
         WHERE id = ?
           AND status = 'in_progress'
+          AND archived_at IS NULL
       `).run(success ? "in_review" : "blocked", timestamp, issueId);
       this.db.exec("COMMIT");
     } catch (caught) {
@@ -2062,11 +2081,11 @@ export class Store {
       if (result.changes === 1) {
         this.db.prepare(`
           UPDATE issues
-          SET needs_attention = CASE WHEN status IN ('done', 'cancelled') THEN needs_attention ELSE 1 END,
-              pending_actor = CASE WHEN status IN ('done', 'cancelled') THEN pending_actor ELSE 'user' END,
+          SET needs_attention = CASE WHEN status = 'done' THEN needs_attention ELSE 1 END,
+              pending_actor = CASE WHEN status = 'done' THEN pending_actor ELSE 'user' END,
               version = version + 1,
               updated_at = ?
-          WHERE id = ?
+          WHERE id = ? AND archived_at IS NULL
         `).run(timestamp, issueId);
       }
       this.db.exec("COMMIT");
@@ -2168,7 +2187,7 @@ export class Store {
         SELECT issues.status, issues.updated_at
         FROM issues
         WHERE issues.id = ?
-          AND issues.status NOT IN ('done', 'cancelled')
+          AND issues.status != 'done'
           AND issues.archived_at IS NULL
           AND ? = (
             SELECT latest.thread_id
@@ -2337,6 +2356,9 @@ export class Store {
     let commandId = "";
     this.db.exec("BEGIN IMMEDIATE");
     try {
+      const issue = this.getIssue(input.issueId);
+      if (!issue) throw new Error("issue_not_found");
+      if (issue.archived_at) throw new Error("issue_archived");
       const existing = this.db.prepare("SELECT * FROM session_commands WHERE issue_id = ? AND request_id = ?").get(input.issueId, input.requestId) as Record<string, unknown> | undefined;
       if (existing) {
         const command = sessionCommandFromRow(existing);
@@ -2356,7 +2378,6 @@ export class Store {
           `).run(input.runId || null, input.kind, input.hostId || "local", input.threadId || null, input.turnId || null, JSON.stringify(input.payload || {}), timestamp, command.id);
         }
       } else {
-        if (!this.getIssue(input.issueId)) throw new Error("issue_not_found");
         if (input.replaceSession) {
           const detached = this.db.prepare("DELETE FROM issue_sessions WHERE issue_id = ? AND active_turn_id IS NULL").run(input.issueId);
           if (detached.changes !== 1) throw new Error("issue_session_replace_conflict");
@@ -2422,6 +2443,7 @@ export class Store {
     try {
       const issue = this.getIssue(input.issueId);
       if (!issue) throw new Error("issue_not_found");
+      if (issue.archived_at) throw new Error("issue_archived");
       const existingRow = this.db.prepare("SELECT * FROM session_commands WHERE issue_id = ? AND request_id = ?").get(input.issueId, input.requestId) as Record<string, unknown> | undefined;
       if (existingRow) {
         const existing = sessionCommandFromRow(existingRow);
@@ -2443,12 +2465,12 @@ export class Store {
       }
       this.db.prepare(`
         UPDATE issues
-        SET status = CASE WHEN status = 'cancelled' THEN status ELSE 'in_progress' END,
-            needs_attention = CASE WHEN status = 'cancelled' THEN needs_attention ELSE 0 END,
-            pending_actor = CASE WHEN status = 'cancelled' THEN pending_actor ELSE 'agent' END,
+        SET status = 'in_progress',
+            needs_attention = 0,
+            pending_actor = 'agent',
             version = version + 1,
             updated_at = ?
-        WHERE id = ?
+        WHERE id = ? AND archived_at IS NULL
       `).run(timestamp, input.issueId);
       this.db.prepare(`
         INSERT INTO issue_replies (issue_id, request_id, status, message, error, started_at, finished_at)
@@ -2600,7 +2622,7 @@ export class Store {
           .run(commandError, timestamp, command.issue_id, command.turn_id);
         this.db.prepare(`
           UPDATE issues SET status = 'blocked', needs_attention = 1, pending_actor = 'user', version = version + 1, updated_at = ?
-          WHERE id = ? AND status NOT IN ('done', 'cancelled')
+          WHERE id = ? AND status != 'done' AND archived_at IS NULL
         `).run(timestamp, command.issue_id);
       }
       failed.push({ ...command, status: "failed", error: commandError, finished_at: timestamp });
@@ -2852,7 +2874,7 @@ export class Store {
           .run(commandError, timestamp, command.issue_id, command.turn_id);
         this.db.prepare(`
           UPDATE issues SET status = 'blocked', needs_attention = 1, pending_actor = 'user', version = version + 1, updated_at = ?
-          WHERE id = ? AND status NOT IN ('done', 'cancelled')
+          WHERE id = ? AND status != 'done' AND archived_at IS NULL
         `).run(timestamp, command.issue_id);
       }
       this.db.exec("COMMIT");
@@ -2954,12 +2976,12 @@ export class Store {
         `).run(session.issue_id, `native:${threadId}:${turnId}`, timestamp);
         this.db.prepare(`
           UPDATE issues
-          SET status = CASE WHEN status = 'cancelled' THEN status ELSE 'in_progress' END,
-              needs_attention = CASE WHEN status = 'cancelled' THEN needs_attention ELSE 0 END,
-              pending_actor = CASE WHEN status = 'cancelled' THEN pending_actor ELSE 'agent' END,
+          SET status = 'in_progress',
+              needs_attention = 0,
+              pending_actor = 'agent',
               version = version + 1,
               updated_at = ?
-          WHERE id = ?
+          WHERE id = ? AND archived_at IS NULL
         `).run(timestamp, session.issue_id);
       }
       this.db.exec("COMMIT");
@@ -3006,7 +3028,7 @@ export class Store {
         this.db.prepare(`
           UPDATE issues
           SET status = ?, needs_attention = ?, pending_actor = ?, version = version + 1, updated_at = ?
-          WHERE id = ? AND status != 'cancelled'
+          WHERE id = ? AND archived_at IS NULL
             AND (? != 'blocked' OR status != 'done')
             AND (status != ? OR needs_attention != ? OR pending_actor != ?)
         `).run(issueStatus, needsAttention, pendingActor, timestamp, session.issue_id, issueStatus, issueStatus, needsAttention, pendingActor);
@@ -3056,10 +3078,10 @@ export class Store {
           `).run(timestamp, error || "user_stopped", message, run.id, String(session.issue_id));
           this.db.prepare(`
             UPDATE issues
-            SET needs_attention = CASE WHEN status IN ('done', 'cancelled') THEN needs_attention ELSE 1 END,
-                pending_actor = CASE WHEN status IN ('done', 'cancelled') THEN pending_actor ELSE 'user' END,
+            SET needs_attention = CASE WHEN status = 'done' THEN needs_attention ELSE 1 END,
+                pending_actor = CASE WHEN status = 'done' THEN pending_actor ELSE 'user' END,
                 version = version + 1, updated_at = ?
-            WHERE id = ?
+            WHERE id = ? AND archived_at IS NULL
           `).run(timestamp, String(session.issue_id));
         } else {
           const executionSuccess = status === "completed";
@@ -3079,19 +3101,19 @@ export class Store {
         if (status === "interrupted") {
           this.db.prepare(`
             UPDATE issues
-            SET needs_attention = CASE WHEN status IN ('done', 'cancelled') THEN needs_attention ELSE 1 END,
-                pending_actor = CASE WHEN status IN ('done', 'cancelled') THEN pending_actor ELSE 'user' END,
+            SET needs_attention = CASE WHEN status = 'done' THEN needs_attention ELSE 1 END,
+                pending_actor = CASE WHEN status = 'done' THEN pending_actor ELSE 'user' END,
                 version = version + 1, updated_at = ?
-            WHERE id = ?
+            WHERE id = ? AND archived_at IS NULL
           `).run(timestamp, String(session.issue_id));
         } else {
           this.db.prepare(`
             UPDATE issues
-            SET status = CASE WHEN status = 'cancelled' THEN status ELSE ? END,
-                needs_attention = CASE WHEN status = 'cancelled' THEN needs_attention ELSE 1 END,
-                pending_actor = CASE WHEN status = 'cancelled' THEN pending_actor ELSE 'user' END,
+            SET status = CASE WHEN status = 'done' THEN status ELSE ? END,
+                needs_attention = CASE WHEN status = 'done' THEN needs_attention ELSE 1 END,
+                pending_actor = CASE WHEN status = 'done' THEN pending_actor ELSE 'user' END,
                 version = version + 1, updated_at = ?
-            WHERE id = ?
+            WHERE id = ? AND archived_at IS NULL
           `).run(status === "completed" ? "in_review" : "blocked", timestamp, String(session.issue_id));
         }
       }
@@ -3134,12 +3156,12 @@ export class Store {
       } else {
         this.db.prepare(`
           UPDATE issues
-          SET status = CASE WHEN status IN ('done', 'cancelled') THEN status ELSE ? END,
-              needs_attention = CASE WHEN status IN ('done', 'cancelled') THEN needs_attention ELSE 1 END,
-              pending_actor = CASE WHEN status IN ('done', 'cancelled') THEN pending_actor ELSE 'user' END,
+          SET status = CASE WHEN status = 'done' THEN status ELSE ? END,
+              needs_attention = CASE WHEN status = 'done' THEN needs_attention ELSE 1 END,
+              pending_actor = CASE WHEN status = 'done' THEN pending_actor ELSE 'user' END,
               version = version + 1,
               updated_at = ?
-          WHERE id = ? AND status = 'in_progress'
+          WHERE id = ? AND status = 'in_progress' AND archived_at IS NULL
         `).run(status === "completed" ? "in_review" : "blocked", timestamp, issueId);
       }
       this.db.exec("COMMIT");

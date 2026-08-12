@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { dirname } from "node:path";
 import { mockupStatePath } from "./config.js";
 
-const statuses = ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"];
+const statuses = ["backlog", "todo", "in_progress", "in_review", "done", "blocked"];
 const priorities = ["none", "low", "medium", "high", "urgent"];
 const runStatuses = ["not-started", "claimed", "running", "scheduling", "completed", "failed", "interrupted"];
 const projectId = "mockup-better-codex";
@@ -85,7 +85,7 @@ function defaultIssues(agents: MockupRecord[], locale: MockupLocale) {
     ["PM-120", "Verify the Mockup import/export loop", "Confirm that a complete exported state can be imported again and immediately refresh projects, Agents, and the board.", "done", "low", "Product Planning", ["Mockup", "Acceptance"], "completed"],
     ["PM-121", "Wait for Codex compatibility verification", "A new DOM structure requires regression coverage for the injection entry point and main panel.", "blocked", "urgent", "Codex", ["Compatibility", "Blocked"], "failed"],
     ["PM-107", "Fix sidebar count synchronization", "Locate the issue that prevents task counts from updating after filtering and background refreshes.", "blocked", "high", "Quality Assurance", ["Sidebar", "Bug"], "failed"],
-    ["PM-125", "Cancel the multi-Agent orchestration experiment", "Keep the current phase focused on a stable single-user Issue, Thread, and Review loop.", "cancelled", "medium", "Product Planning", ["Agent", "Scope control"], "interrupted"],
+    ["PM-125", "Cancel the multi-Agent orchestration experiment", "Keep the current phase focused on a stable single-user Issue, Thread, and Review loop.", "backlog", "medium", "Product Planning", ["Agent", "Scope control"], "interrupted", true],
   ] as const : [
     ["PM-101", "规划 Issue 模板精简", "减少创建任务时的额外编排，只保留任务详情、Skill 指令和 taskid。", "backlog", "urgent", "Codex", ["Issue", "产品"], "not-started"],
     ["PM-108", "统一 Issue 创建入口", "让顶部按钮和看板列快捷入口共享项目、状态与 Agent 默认值。", "todo", "medium", "Codex", ["Issue", "创建"], "claimed"],
@@ -114,7 +114,7 @@ function defaultIssues(agents: MockupRecord[], locale: MockupLocale) {
     ["PM-120", "验证 Mockup 导入导出闭环", "确认导出的完整状态可以再次导入并立即刷新项目、Agent 和看板。", "done", "low", "产品策划", ["Mockup", "验收"], "completed"],
     ["PM-121", "等待 Codex 新版本兼容性验证", "新版本 DOM 结构发生变化，需要完成注入入口和主面板回归。", "blocked", "urgent", "Codex", ["兼容性", "阻塞"], "failed"],
     ["PM-107", "修复侧边栏计数不同步", "定位筛选和后台刷新后任务数量未及时更新的问题。", "blocked", "high", "质量保障", ["侧边栏", "缺陷"], "failed"],
-    ["PM-125", "取消多 Agent 自动编排实验", "当前阶段继续聚焦单用户 Issue、Thread 与 Review 的稳定闭环。", "cancelled", "medium", "产品策划", ["Agent", "范围控制"], "interrupted"],
+    ["PM-125", "取消多 Agent 自动编排实验", "当前阶段继续聚焦单用户 Issue、Thread 与 Review 的稳定闭环。", "backlog", "medium", "产品策划", ["Agent", "范围控制"], "interrupted", true],
   ] as const;
   const now = Date.now();
   return specs.map((spec, index) => ({
@@ -127,7 +127,7 @@ function defaultIssues(agents: MockupRecord[], locale: MockupLocale) {
     priority: spec[4],
     sort_order: (index + 1) * 1000,
     pinned: false,
-    archived_at: null,
+    archived_at: spec[8] ? new Date(now - (index + 3) * 60000).toISOString() : null,
     thread_id: null,
     run_thread_id: null,
     workspace_path: "",
@@ -211,6 +211,7 @@ function normalizeIssue(value: unknown, index: number): MockupRecord {
   if (!title || title.length > 500 || description.length > 100000 || replyDraft.length > 100000) throw new Error("invalid_mockup_issue");
   if (labels.length > 50 || labels.some(label => label.length > 100)) throw new Error("invalid_mockup_issue");
   const now = new Date().toISOString();
+  const legacyCancelled = source.status === "cancelled";
   const mockupRunStatus = runStatuses.includes(String(source.mockup_run_status)) ? String(source.mockup_run_status) : "not-started";
   return {
     ...source,
@@ -219,11 +220,11 @@ function normalizeIssue(value: unknown, index: number): MockupRecord {
     project_id: String(source.project_id || projectId),
     title,
     description,
-    status: statuses.includes(String(source.status)) ? source.status : "backlog",
+    status: legacyCancelled ? "backlog" : statuses.includes(String(source.status)) ? source.status : "backlog",
     priority: priorities.includes(String(source.priority)) ? source.priority : "none",
     sort_order: Number.isFinite(Number(source.sort_order)) ? Number(source.sort_order) : (index + 1) * 1000,
     pinned: Boolean(source.pinned),
-    archived_at: source.archived_at || null,
+    archived_at: source.archived_at || (legacyCancelled ? source.updated_at || now : null),
     thread_id: source.thread_id || null,
     run_thread_id: null,
     workspace_path: String(source.workspace_path || ""),
@@ -234,8 +235,8 @@ function normalizeIssue(value: unknown, index: number): MockupRecord {
     agent_id: source.agent_id ? String(source.agent_id) : null,
     mockup_agent_name: String(source.mockup_agent_name || ""),
     user_assigned: Boolean(source.user_assigned),
-    needs_attention: Boolean(source.needs_attention),
-    pending_actor: source.pending_actor === "agent" ? "agent" : "user",
+    needs_attention: legacyCancelled ? false : Boolean(source.needs_attention),
+    pending_actor: legacyCancelled ? "user" : source.pending_actor === "agent" ? "agent" : "user",
     enrichment_status: source.enrichment_status === "pending" ? "pending" : null,
     reply_draft: replyDraft,
     session_handoff_at: source.session_handoff_at ? String(source.session_handoff_at) : null,

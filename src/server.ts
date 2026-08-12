@@ -10,6 +10,7 @@ import { defaultAgentProfile, syncAgentProfiles, updateDefaultAgentProfile } fro
 import { readCodexAppearance } from "./appearance.js";
 import { normalizeCodexLocale, readCodexLocale } from "./locale.js";
 import { readCodexUserProfile } from "./user-profile.js";
+import { readCodexUsage } from "./codex-usage.js";
 import { readModelCatalog } from "./model-catalog.js";
 import { attachmentPath, runPath, runtimePort, token, updateLogPath } from "./config.js";
 import { acquireRuntimeLock, clearRuntimeState, createRuntimeIdentity, publishRuntimeState } from "./runtime-state.js";
@@ -54,7 +55,7 @@ function savePastedImage(value: unknown) {
 
 async function reconcileInterruptedIssues(store: Store, issues: Issue[]) {
   await Promise.all(issues.map(async issue => {
-    if (!issue.run_thread_id || issue.session_owned || ["done", "cancelled"].includes(issue.status) || issue.active_run_status || store.getIssueReplyState(issue.id).status === "running") return;
+    if (!issue.run_thread_id || issue.archived_at || issue.session_owned || issue.status === "done" || issue.active_run_status || store.getIssueReplyState(issue.id).status === "running") return;
     const conversation = await readConversationActivity(issue.run_thread_id);
     const completedAt = conversation.activity.status === "completed"
       ? conversation.activity.completed_at
@@ -572,6 +573,9 @@ export function startServer() {
         if (!mockup) syncCodexProjects(store);
         return sendJson(response, 200, { projects: mockup ? mockup.projects : store.listProjects(), agents: mockup ? mockup.agents : visibleAgentProfiles(), statuses: issueStatuses, priorities: issuePriorities, appearance: readCodexAppearance(), locale: readCodexLocale(), user: readCodexUserProfile(), agentModelCatalog, agentModels, agentReasoningEfforts, autoDispatch: mockup ? mockup.auto_dispatch : store.getAutoDispatch(), schedulerModel: mockup ? mockup.scheduler_model : store.getSchedulerModel(defaultAgentProfile().model), schedulerReasoningEffort: mockup ? mockup.scheduler_reasoning_effort : store.getSchedulerReasoningEffort(), mockup: mockupEnabled });
       }
+      if (url.pathname === "/api/account/usage" && method === "GET") {
+        return sendJson(response, 200, { usage: await readCodexUsage() });
+      }
       if (mockupEnabled && url.pathname === "/api/mockup/state" && method === "GET") {
         return sendJson(response, 200, readMockupState(mockupLocale));
       }
@@ -763,7 +767,7 @@ export function startServer() {
             const current = state.issues[index];
             requireVersion(body, current);
             const status = String(body.status || current.status);
-            if (["backlog", "done", "cancelled"].includes(status)) throw new Error("issue_not_startable");
+            if (current.archived_at || ["backlog", "done"].includes(status)) throw new Error("issue_not_startable");
             state.issues[index] = {
               ...current,
               ...body,
@@ -1224,9 +1228,9 @@ export function startServer() {
           const patch = parseIssuePatch(body);
           if (issue.archived_at) throw new Error("issue_not_startable");
           if (!issue.agent_enabled) throw new Error("issue_agent_required");
-          if (["done", "cancelled"].includes(issue.status)) throw new Error("issue_not_startable");
+          if (issue.status === "done") throw new Error("issue_not_startable");
           const nextStatus = patch.status || issue.status;
-          if (["backlog", "done", "cancelled"].includes(String(nextStatus))) throw new Error("issue_not_startable");
+          if (["backlog", "done"].includes(String(nextStatus))) throw new Error("issue_not_startable");
           if (issue.active_run_status || issue.session_active_turn_id || store.getIssueReplyState(issue.id).status === "running") throw new Error("issue_execution_running");
           const nextProject = store.getProject(String(patch.project_id || issue.project_id));
           const nextWorkspace = String(patch.workspace_path || issue.workspace_path || nextProject?.workspace_path || "");
@@ -1299,6 +1303,7 @@ export function startServer() {
         }
         if (method === "POST" && path[3] === "reply" && path.length === 4) {
           if (updateInstallInProgress) throw new Error("update_in_progress");
+          if (issue.archived_at) throw new Error("issue_archived");
           if (issue.session_handoff_at && !issue.session_owned) throw new Error("issue_session_handed_off");
           const body = await readBody(request);
           const requestId = cleanString(body.request_id, 200) || randomUUID();

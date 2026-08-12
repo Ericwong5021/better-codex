@@ -48,7 +48,9 @@ test("Hub Web login separates bootstrap credentials and enforces cookie, Origin,
   try {
     const page = await fetch(`${base}/web`);
     assert.equal(page.status, 200);
-    assert.match(await page.text(), /data-better-codex-remote="true"/);
+    const pageHtml = await page.text();
+    assert.match(pageHtml, /data-better-codex-remote="true"/);
+    assert.match(pageHtml, /<link rel="icon" type="image\/png" href="data:image\/png;base64,/);
     assert.equal(page.headers.get("strict-transport-security"), "max-age=31536000; includeSubDomains");
 
     const noOrigin = await fetch(`${base}/web/session`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: webUsername, password: webPassword }) });
@@ -75,6 +77,14 @@ test("Hub Web login separates bootstrap credentials and enforces cookie, Origin,
 
     const session = await fetch(`${base}/web/session`, { headers: { cookie } });
     assert.equal(session.status, 200);
+
+    const bootstrap = await fetch(`${base}/api/bootstrap`, { headers: { cookie } });
+    assert.equal(bootstrap.status, 200);
+    assert.equal(((await bootstrap.json()) as { user?: { name?: string } }).user?.name, webUsername);
+
+    const usage = await fetch(`${base}/api/account/usage`, { headers: { cookie } });
+    assert.equal(usage.status, 200);
+    assert.deepEqual(await usage.json(), { usage: null });
 
     const noCsrf = await fetch(`${base}/api/issues`, { method: "POST", headers: { cookie, origin, "content-type": "application/json" }, body: "{}" });
     assert.equal(noCsrf.status, 403);
@@ -162,7 +172,7 @@ test("Hub migration creates an integrity-checked backup before changing an older
   } finally {
     migrated.close();
   }
-  const backups = readdirSync(join(directory, "backups")).filter(name => name.startsWith("before-hub-v3-") && name.endsWith(".db"));
+  const backups = readdirSync(join(directory, "backups")).filter(name => name.startsWith("before-hub-v4-") && name.endsWith(".db"));
   assert.equal(backups.length, 1);
   const snapshot = new DatabaseSync(join(directory, "backups", backups[0]), { readOnly: true });
   try {
@@ -170,6 +180,54 @@ test("Hub migration creates an integrity-checked backup before changing an older
     assert.equal((snapshot.prepare("PRAGMA quick_check").get() as { quick_check: string }).quick_check, "ok");
   } finally {
     snapshot.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("Hub migration archives legacy cancelled projections and rejects obsolete commands", () => {
+  const directory = mkdtempSync(join(tmpdir(), "better-codex-hub-cancelled-migration-"));
+  const database = join(directory, "hub.db");
+  let store: HubStore | undefined = new HubStore(database);
+  try {
+    const pairing = store.createPairingCode();
+    const device = store.pairDevice("legacy-runtime", pairing.pairing_code);
+    const timestamp = "2026-08-01T10:00:00.000Z";
+    const projection = {
+      id: "legacy-cancelled",
+      identifier: "LEG-1",
+      project_id: "legacy-project",
+      title: "Cancelled before archive existed",
+      description: "",
+      status: "cancelled",
+      priority: "medium",
+      labels: [],
+      sort_order: 1000,
+      pinned: false,
+      archived_at: null,
+      assigned: true,
+      active_run: false,
+      needs_attention: true,
+      created_at: timestamp,
+      updated_at: timestamp,
+      local_revision: 1,
+    };
+    store.db.prepare("INSERT INTO entities (entity_type, entity_id, owner_device_id, local_revision, payload_json, deleted_at, updated_at) VALUES ('issue', ?, ?, 1, ?, NULL, ?)")
+      .run(projection.id, device.device_id, JSON.stringify(projection), timestamp);
+    store.db.prepare("INSERT INTO remote_commands (command_id, device_id, operation, entity_id, base_revision, payload_json, status, requested_at, expires_at) VALUES ('legacy-command', ?, 'issue.move', ?, 1, '{\"status\":\"cancelled\"}', 'pending', ?, ?)")
+      .run(device.device_id, projection.id, timestamp, new Date(Date.now() + 60_000).toISOString());
+    store.db.prepare("DELETE FROM hub_migrations WHERE version = 4").run();
+    store.close();
+    store = undefined;
+
+    store = new HubStore(database);
+    const migrated = store.board().issues.find(issue => issue.id === projection.id)!;
+    assert.equal(migrated.status, "backlog");
+    assert.equal(migrated.archived_at, timestamp);
+    assert.equal(migrated.needs_attention, false);
+    assert.equal(store.remoteCommand("legacy-command")?.status, "rejected");
+    assert.equal(store.remoteCommand("legacy-command")?.error, "obsolete_cancelled_status");
+  } finally {
+    store?.close();
     rmSync(directory, { recursive: true, force: true });
   }
 });

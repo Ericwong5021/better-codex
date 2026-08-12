@@ -64,7 +64,7 @@ test("leaving the app surface suspends the panel and restores its previous surfa
   assert.ok(source.includes('"bot":{"name":"bot"'));
   assert.ok(source.includes("return entry.isConnected && agentsEntry.isConnected"));
   assert.ok(source.includes("const entriesAvailable = ensureEntry()"));
-  assert.ok(source.includes("if (active) close({ resume: true, suppressRoute: betterCodexRoute })"));
+  assert.ok(source.includes("if (active && !betterCodexRoute) close({ resume: true, suppressRoute: false })"));
   assert.ok(source.includes("routeSeen = false"));
   assert.ok(source.includes("window.postMessage({ type: NAVIGATION.messageType, path: BETTER_CODEX_ROUTE }, window.location.origin)"));
   assert.ok(source.includes("function scheduleRefresh()"));
@@ -81,6 +81,14 @@ test("returning from a native settings route resumes the remembered Better Codex
 
   assert.ok(refresh.includes("const resumeSurface = sessionStorage.getItem(RESUME_SURFACE_KEY)"));
   assert.ok(refresh.includes('if (!active && betterCodexRoute && !routeSuppressed && ["issues", "agents"].includes(resumeSurface)) return open(resumeSurface)'));
+});
+
+test("collapsing the native sidebar keeps Better Codex mounted on its MCP route", () => {
+  const source = injectionScript(4317, "test-token", "install");
+  const refresh = source.slice(source.indexOf("function refresh()"), source.indexOf("function scheduleRefresh()"));
+
+  assert.ok(refresh.includes("if (active && !betterCodexRoute) close({ resume: true, suppressRoute: false })"));
+  assert.doesNotMatch(refresh, /if \(active\) close\(\{ resume: true, suppressRoute: betterCodexRoute \}\)/);
 });
 
 test("sidebar utility controls keep the Better Codex surface mounted", () => {
@@ -105,7 +113,7 @@ test("all interface icons use Lucide definitions", () => {
     "file-code-corner", "flask-conical", "book-open", "shield-check", "database", "sparkles", "pencil", "chevron-right",
     "chevron-down", "check", "circle", "minus", "trash-2", "refresh-cw", "square-kanban",
     "circle-dashed", "loader-circle", "circle-dot", "circle-check-big", "circle-slash-2",
-    "circle-x", "signal-low", "signal-medium", "signal-high", "priority-urgent",
+    "signal-low", "signal-medium", "signal-high", "priority-urgent",
   ]) assert.ok(source.includes('"name":"' + name + '"'), `missing Lucide icon: ${name}`);
 
   assert.ok(source.includes('const classes = "lucide lucide-" + definition.name'));
@@ -219,6 +227,37 @@ test("issue creation uses a primary split button with an agent creation menu", (
   assert.match(css, /#better-codex-panel \.better-codex-create-split\s*\{[^}]*background:\s*var\(--bc-color-primary\);/s);
   assert.match(css, /#better-codex-panel \.better-codex-create-primary,[\s\S]*?#better-codex-panel \.better-codex-create-toggle\s*\{[^}]*background:\s*transparent;/s);
   assert.match(css, /\.better-codex-create-menu\s*\{[^}]*box-shadow:\s*var\(--bc-elevation-menu\);/s);
+});
+
+test("continue creating preference persists across page reloads", () => {
+  const source = injectionScript(4317, "test-token", "install");
+
+  assert.ok(source.includes('const KEEP_CREATE_KEY = "better-codex-keep-create"'));
+  assert.ok(source.includes('const rememberedKeepCreate = localStorage.getItem(KEEP_CREATE_KEY) === "true"'));
+  assert.ok(source.includes("keepCreate: rememberedKeepCreate"));
+  assert.ok(source.includes("localStorage.setItem(KEEP_CREATE_KEY, String(state.keepCreate))"));
+});
+
+test("unread completion notifications survive Runtime reinjection", () => {
+  const source = injectionScript(4317, "test-token", "install");
+
+  assert.ok(source.includes('const COMPLETION_NOTICE_CACHE_KEY = "better-codex-completion-notices:" + PROFILE'));
+  assert.ok(source.includes("function readCompletionNoticeCache()"));
+  assert.ok(source.includes("localStorage.setItem(COMPLETION_NOTICE_CACHE_KEY"));
+  assert.ok(source.includes("function restoreCompletionNotices()"));
+  assert.ok(source.includes("restoreCompletionNotices();"));
+  assert.ok(source.includes("dismissNotice(false)"), "reinjection should detach notices without marking them read");
+});
+
+test("permanent completion notifications can only be cleared by opening them", () => {
+  const source = injectionScript(4317, "test-token", "install");
+  const notificationSource = source.slice(source.indexOf("function renderSessionEndNotice"), source.indexOf("async function perform"));
+
+  assert.ok(notificationSource.includes("const permanent = duration === 0"));
+  assert.ok(notificationSource.includes('permanent ? "" : \'<button class="better-codex-completion-close"'));
+  assert.ok(notificationSource.includes('if (currentNotice.dataset.permanent !== "true") dismissNotice(true)'));
+  assert.ok(notificationSource.includes("dismiss(true);\n        void perform(() => openEditor(issue))"));
+  assert.doesNotMatch(notificationSource, /querySelector\("\.better-codex-completion-close"\)\.addEventListener/);
 });
 
 test("issue creation project picker orders newest projects first", () => {
@@ -568,7 +607,7 @@ test("issue cards show project icon and assignee instead of session entry", () =
   assert.ok(source.includes('data-dialog-start-now'));
   assert.ok(source.includes('/start'));
   assert.ok(source.includes('立即开始任务'));
-  assert.ok(source.includes('!sessionId && !issue.active_run_status && !["done", "cancelled"].includes(issue.status)'));
+  assert.ok(source.includes('!issue.archived_at && !sessionId && !issue.active_run_status && issue.status !== "done"'));
   const headerStart = source.indexOf("function header()");
   const footerStart = source.indexOf("function footer()");
   const headerSource = source.slice(headerStart, footerStart);
@@ -702,6 +741,16 @@ test("destructive actions use the branded confirmation dialog", () => {
   assert.doesNotMatch(source, /\b(?:window\.)?confirm\s*\(/);
 });
 
+test("archive is an action and cancelled is not an issue status", () => {
+  const source = injectionScript(4317, "test-token", "install");
+
+  assert.doesNotMatch(source, /statusCancelled|cancelled:\s*"已取消"|data-context-value="cancelled"/);
+  assert.ok(source.includes('data-context-action="archive">\' + icon("archive") + \'<span>\' + escapeHtml(t("归档"))'));
+  const archiveAction = source.slice(source.indexOf('if (item.dataset.contextAction === "archive")'), source.indexOf('if (item.dataset.contextAction === "assign")'));
+  assert.ok(archiveAction.includes('/archive'));
+  assert.doesNotMatch(archiveAction, /confirmAction|删除任务/);
+});
+
 test("every modal dialog closes only when its backdrop is clicked", () => {
   const source = injectionScript(4317, "test-token", "install");
   const bindings = source.match(/bindModalDismiss\(dialog, \(\) =>/g) || [];
@@ -763,4 +812,11 @@ test("semantic surface hierarchy is derived from the Codex appearance configurat
   assert.match(css, /\.better-codex-agent-profile-name\s*\{[^}]*background:\s*var\(--bc-color-control\);/s);
   assert.match(css, /\.better-codex-agent-inspector-group\s*\{[^}]*background:\s*var\(--bc-color-input\);/s);
   assert.match(css, /\.better-codex-agent-inspector-field textarea\s*\{[^}]*background:\s*var\(--bc-color-input\);/s);
+});
+
+test("web injection shares the Codex user profile with the host shell", () => {
+  const source = injectionScript(4317, "test-token", "install", "zh-CN", "web");
+
+  assert.match(source, /new CustomEvent\("better-codex:bootstrap"/);
+  assert.match(source, /detail: \{ user: state\.user, locale: state\.locale \}/);
 });

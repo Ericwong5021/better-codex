@@ -21,7 +21,6 @@ import {
   CircleDot,
   CircleHelp,
   CircleSlash2,
-  CircleX,
   Columns3,
   Database,
   Ellipsis,
@@ -122,7 +121,6 @@ const lucideIcons = Object.fromEntries(Object.entries({
   statusInReview: CircleDot,
   statusDone: CircleCheckBig,
   statusBlocked: CircleSlash2,
-  statusCancelled: CircleX,
   priorityNone: Minus,
   priorityLow: SignalLow,
   priorityMedium: SignalMedium,
@@ -325,7 +323,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const PROJECT_KEY = "better-codex-project-id";
     const LANGUAGE_KEY = "better-codex-language";
     const COMPLETION_DURATION_KEY = "better-codex-completion-notice-duration";
+    const COMPLETION_NOTICE_CACHE_KEY = "better-codex-completion-notices:" + PROFILE;
+    const COMPLETION_NOTICE_CACHE_LIMIT = 50;
     const CREATE_DRAFT_KEY = "better-codex-create-draft";
+    const KEEP_CREATE_KEY = "better-codex-keep-create";
     const CREATE_ISSUE_SHORTCUT_KEY = "better-codex-create-issue-shortcut";
     const AGENT_INSPECTOR_WIDTH_KEY = "better-codex-agent-inspector-width";
     const DIALOG_EXPANDED_KEY = "better-codex-dialog-expanded";
@@ -333,12 +334,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const AGENT_DIRECTORY_MIN_WIDTH = 320;
     const THREAD_OPEN_TIMEOUT_MS = 10000;
     const THREAD_OPEN_POLL_MS = 100;
-    const statusLabels = { backlog: "待规划", todo: "待办", in_progress: "进行中", in_review: "待审核", done: "已完成", blocked: "已阻塞", cancelled: "已取消" };
+    const statusLabels = { backlog: "待规划", todo: "待办", in_progress: "进行中", in_review: "待审核", done: "已完成", blocked: "已阻塞" };
     const priorityLabels = { none: "无", low: "低", medium: "中", high: "高", urgent: "紧急" };
     const mockupRunStatusLabels = { "not-started": "未开始", claimed: "排队中", running: "工作中", completed: "已完成", failed: "执行失败", interrupted: "已停止" };
     const rememberedSurface = sessionStorage.getItem(RESUME_SURFACE_KEY);
     const rememberedProjectId = localStorage.getItem(PROJECT_KEY) || "";
     const rememberedLanguage = localStorage.getItem(LANGUAGE_KEY);
+    const rememberedKeepCreate = localStorage.getItem(KEEP_CREATE_KEY) === "true";
     const rememberedAgentInspectorWidth = Number(localStorage.getItem(AGENT_INSPECTOR_WIDTH_KEY));
     const languageSetting = ["system", "zh-CN", "en"].includes(rememberedLanguage) ? rememberedLanguage : "system";
     function resolveSystemLocale(fallback) {
@@ -347,7 +349,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
     const systemLocale = resolveSystemLocale(INITIAL_LOCALE);
     const MOCKUP_PROJECT_ID = "mockup-better-codex";
-    const state = { projects: [], issues: [], agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: ["issues", "agents"].includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", mockup: false, keepCreate: false, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], creator: [], project: [], label: [] } };
+    const state = { projects: [], issues: [], agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: ["issues", "agents"].includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", mockup: false, keepCreate: rememberedKeepCreate, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], creator: [], project: [], label: [] } };
     function shortcutKeyFromCode(code, key) {
       const source = String(code || "");
       if (/^Key[A-Z]$/.test(source)) return source.slice(3);
@@ -482,7 +484,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "重试回复": "Retry reply", "重新加载": "Reload", "回复等待超时。请检查模型服务连接后重试。": "The reply timed out. Check the model service connection and retry.", "网络连接异常，回复未完成。请检查网络和 Better Codex Runtime 后重试。": "The reply did not finish because of a network problem. Check your network and Better Codex Runtime, then retry.", "当前权限不足，无法完成回复。请调整智能体权限或允许所需操作后重试。": "The reply needs additional permission. Adjust the agent permission or allow the required action, then retry.", "Better Codex Runtime 已停止。请重新启动后重试。": "Better Codex Runtime stopped. Restart it and retry.", "上一条回复仍在进行中。请稍后重新加载。": "The previous reply is still running. Reload shortly.", "回复未完成。请打开完整会话查看详情，然后重试。": "The reply did not finish. Open the full conversation for details, then retry.", "会话加载超时。请确认 Better Codex Runtime 正在运行，然后重新加载。": "The conversation timed out while loading. Make sure Better Codex Runtime is running, then reload.", "无法加载会话。请检查网络和 Better Codex Runtime，然后重新加载。": "Unable to load the conversation. Check your network and Better Codex Runtime, then reload.", "没有权限加载会话。请调整权限后重新加载。": "You do not have permission to load the conversation. Adjust the permission, then reload.",
       "任务看板": "Task board", "打开任务看板": "Open task board", "智能体": "Agents", "管理智能体": "Manage agents", "创建和管理你的智能体": "Create and manage your agents",
       "Better Codex 服务需要重启": "Better Codex needs to restart", "当前页面与后台服务的连接已失效。请在终端运行下面的命令，完成后重新连接。": "The connection between this page and the background service has expired. Run the command below in your terminal, then reconnect.", "复制重启命令": "Copy restart command", "已复制": "Copied", "重新连接": "Reconnect", "正在连接…": "Connecting…", "错误详情": "Error details",
-      "全部": "All", "已分配": "Assigned", "未分配": "Unassigned", "待规划": "Backlog", "待办": "Todo", "进行中": "In progress", "待审核": "In review", "调度中": "Scheduling", "已完成": "Done", "已阻塞": "Blocked", "已取消": "Canceled", "归档": "Archive", "拖到这里即可归档": "Drop here to archive", "查看已归档卡片": "View archived cards", "已归档任务": "Archived tasks", "搜索已归档任务": "Search archived tasks", "所有项目": "All projects", "全部删除": "Delete all", "删除已归档聊天": "Delete archived chat", "删除项目中的全部内容": "Delete all project content", "确定删除项目中的全部已归档任务吗？": "Delete all archived tasks in this project?", "取消归档": "Unarchive", "已归档卡片": "Archived cards", "暂无已归档卡片": "No archived cards", "归档列表加载失败": "Unable to load archived cards",
+      "全部": "All", "已分配": "Assigned", "未分配": "Unassigned", "待规划": "Backlog", "待办": "Todo", "进行中": "In progress", "待审核": "In review", "调度中": "Scheduling", "已完成": "Done", "已阻塞": "Blocked", "归档": "Archive", "拖到这里即可归档": "Drop here to archive", "查看已归档卡片": "View archived cards", "已归档任务": "Archived tasks", "搜索已归档任务": "Search archived tasks", "所有项目": "All projects", "全部删除": "Delete all", "删除已归档聊天": "Delete archived chat", "删除项目中的全部内容": "Delete all project content", "确定删除项目中的全部已归档任务吗？": "Delete all archived tasks in this project?", "取消归档": "Unarchive", "已归档卡片": "Archived cards", "暂无已归档卡片": "No archived cards", "归档列表加载失败": "Unable to load archived cards",
       "无": "None", "低": "Low", "中": "Medium", "高": "High", "紧急": "Urgent", "超高": "Extra high", "无优先级": "No priority", "优先级": "Priority", "状态": "Status", "日期": "Date", "筛选": "Filter", "标签": "Labels",
       "新建": "New", "新建 issue": "New issue", "新建任务": "New task", "新建智能体": "New agent", "创建": "Create", "创建任务": "Create task", "删除": "Delete", "删除任务": "Delete task", "删除智能体": "Delete agent", "保存": "Save", "确认": "Confirm", "取消": "Cancel", "关闭": "Close", "重试": "Retry", "稍后": "Later", "展开": "Expand", "缩小": "Minimize", "缩放头像": "Zoom avatar",
       "项目": "Project", "无项目": "No project", "选择项目": "Select project", "选择责任人": "Select owner", "选择执行智能体": "Select agent", "选择 issue 创建方式": "Choose how to create the issue", "任务标题": "Task title", "添加描述...": "Add description...", "添加标签": "Add label", "添加附件": "Add attachment", "移除附件": "Remove attachment", "搜索任务": "Search tasks", "搜索项目": "Search projects", "搜索项目...": "Search projects...", "搜索智能体": "Search agents",
@@ -555,6 +557,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     let updateNotice = null;
     let updateNoticeResizeObserver = null;
     let issueSessionSnapshot = new Map();
+    let completionNoticesRestored = false;
     let completionNoticeStack = null;
     const completionNoticeDismissals = new Map();
     const completionNoticeTimers = new Map();
@@ -1904,8 +1907,64 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       return [0, 1000, 5000, 10000].includes(duration) ? duration : 5000;
     }
 
-    function renderSessionEndNotice(issue) {
-      if (completionNoticeSuppressed()) return;
+    function readCompletionNoticeCache() {
+      try {
+        const records = JSON.parse(localStorage.getItem(COMPLETION_NOTICE_CACHE_KEY) || "[]");
+        if (!Array.isArray(records)) return [];
+        return records.filter(record => record
+          && typeof record.key === "string"
+          && record.issue
+          && typeof record.issue.id === "string"
+          && Number.isFinite(record.createdAt)
+          && [0, 1000, 5000, 10000].includes(record.duration));
+      } catch {
+        return [];
+      }
+    }
+
+    function writeCompletionNoticeCache(records) {
+      try {
+        localStorage.setItem(COMPLETION_NOTICE_CACHE_KEY, JSON.stringify(records.slice(-COMPLETION_NOTICE_CACHE_LIMIT)));
+      } catch {
+      }
+    }
+
+    function forgetCompletionNotice(key) {
+      writeCompletionNoticeCache(readCompletionNoticeCache().filter(record => record.key !== key));
+    }
+
+    function cacheCompletionNotice(issue, duration) {
+      const key = String(issue?.id || "") + ":" + String(issue?.updated_at || Date.now()) + ":" + String(issue?.status || "");
+      const record = { key, issue, createdAt: Date.now(), duration };
+      const records = readCompletionNoticeCache().filter(item => item.key !== key);
+      records.push(record);
+      writeCompletionNoticeCache(records);
+      return record;
+    }
+
+    function restoreCompletionNotices() {
+      const now = Date.now();
+      const records = readCompletionNoticeCache().filter(record => record.duration === 0 || now - record.createdAt < record.duration);
+      writeCompletionNoticeCache(records);
+      records.forEach(record => {
+        if (completionNoticeSuppressed() && record.duration !== 0) return;
+        const issue = state.issues.find(item => item.id === record.issue.id) || record.issue;
+        renderSessionEndNotice(issue, record);
+      });
+    }
+
+    function renderSessionEndNotice(issue, cachedNotice = null) {
+      if (!cachedNotice && completionNoticeSuppressed()) return;
+      const duration = cachedNotice?.duration ?? completionNoticeDuration();
+      const permanent = duration === 0;
+      if (cachedNotice && completionNoticeSuppressed() && !permanent) return;
+      const cached = cachedNotice || cacheCompletionNotice(issue, duration);
+      const remaining = permanent ? 0 : duration - (Date.now() - cached.createdAt);
+      if (!permanent && remaining <= 0) {
+        forgetCompletionNotice(cached.key);
+        return;
+      }
+      if (completionNoticeStack?.querySelector('[data-notice-key="' + CSS.escape(cached.key) + '"]')) return;
       if (!completionNoticeStack?.isConnected) {
         completionNoticeStack = document.createElement("div");
         completionNoticeStack.id = "better-codex-completion-notices";
@@ -1917,6 +1976,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const notice = document.createElement("section");
       notice.className = "better-codex-completion-notice";
       notice.dataset.status = String(issue?.status || "");
+      notice.dataset.noticeKey = cached.key;
+      notice.dataset.permanent = String(permanent);
       notice.setAttribute(OWNED, "true");
       notice.setAttribute("role", "status");
       notice.setAttribute("aria-live", "polite");
@@ -1925,7 +1986,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const subject = [identifier, title].filter(Boolean).join(" ");
       const status = t(statusLabels[issue?.status] || String(issue?.status || ""));
       const completionAgent = state.agents.find(agent => agent.id === issue?.agent_id) || state.agents.find(agent => agent.is_default) || { name: "Codex", is_default: true };
-      notice.innerHTML = '<div class="better-codex-completion-layout">' + agentAvatarMarkup(completionAgent, "better-codex-completion-avatar") + '<p class="better-codex-completion-message">' + escapeHtml(subject || t("会话已结束")) + '</p><span class="better-codex-completion-status">' + escapeHtml(status) + '</span></div><button class="better-codex-completion-menu-toggle" type="button" aria-label="' + escapeHtml(t("更多操作")) + '" aria-expanded="false" aria-haspopup="menu" data-completion-menu-toggle>' + icon("more") + '</button><div class="better-codex-completion-menu" data-completion-menu hidden><button type="button" role="menuitem" data-completion-suppress>' + escapeHtml(t("本次启动关闭")) + '</button></div><button class="better-codex-completion-close" type="button" aria-label="' + escapeHtml(t("关闭")) + '">' + icon("close") + '</button>';
+      notice.innerHTML = '<div class="better-codex-completion-layout">' + agentAvatarMarkup(completionAgent, "better-codex-completion-avatar") + '<p class="better-codex-completion-message">' + escapeHtml(subject || t("会话已结束")) + '</p><span class="better-codex-completion-status">' + escapeHtml(status) + '</span></div><button class="better-codex-completion-menu-toggle" type="button" aria-label="' + escapeHtml(t("更多操作")) + '" aria-expanded="false" aria-haspopup="menu" data-completion-menu-toggle>' + icon("more") + '</button><div class="better-codex-completion-menu" data-completion-menu hidden><button type="button" role="menuitem" data-completion-suppress>' + escapeHtml(t("本次启动关闭")) + '</button></div>' + (permanent ? "" : '<button class="better-codex-completion-close" type="button" aria-label="' + escapeHtml(t("关闭")) + '">' + icon("close") + '</button>');
       completionNoticeStack.appendChild(notice);
       requestAnimationFrame(() => previousPositions.forEach((top, item) => {
         if (!item.isConnected) return;
@@ -1955,15 +2016,18 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       menu.querySelectorAll("[data-completion-suppress]").forEach(button => button.addEventListener("click", () => {
         sessionStorage.setItem("better-codex-completion-notice-disabled", "true");
         closeMenu();
-        Array.from(completionNoticeDismissals.values()).forEach(dismissNotice => dismissNotice());
+        completionNoticeDismissals.forEach((dismissNotice, currentNotice) => {
+          if (currentNotice.dataset.permanent !== "true") dismissNotice(true);
+        });
       }));
-      const dismiss = () => {
+      const dismiss = (forget = true) => {
         if (!notice.isConnected) return;
         closeMenu();
         const timer = completionNoticeTimers.get(notice);
         if (timer !== undefined) clearTimeout(timer);
         completionNoticeTimers.delete(notice);
         completionNoticeDismissals.delete(notice);
+        if (forget) forgetCompletionNotice(cached.key);
         notice.remove();
         if (!completionNoticeDismissals.size) {
           completionNoticeStack?.remove();
@@ -1973,12 +2037,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       completionNoticeDismissals.set(notice, dismiss);
       notice.addEventListener("click", event => {
         if (event.target.closest("button")) return;
-        dismiss();
+        dismiss(true);
         void perform(() => openEditor(issue));
       });
-      notice.querySelector(".better-codex-completion-close").addEventListener("click", dismiss);
-      const duration = completionNoticeDuration();
-      if (duration > 0) completionNoticeTimers.set(notice, setTimeout(dismiss, duration));
+      notice.querySelector(".better-codex-completion-close")?.addEventListener("click", () => dismiss(true));
+      if (!permanent) completionNoticeTimers.set(notice, setTimeout(() => dismiss(true), remaining));
     }
 
     async function perform(action) {
@@ -2213,7 +2276,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function statusIcon(status) {
-      const names = { backlog: "statusBacklog", todo: "statusTodo", in_progress: "statusInProgress", in_review: "statusInReview", done: "statusDone", blocked: "statusBlocked", cancelled: "statusCancelled", archive: "archive" };
+      const names = { backlog: "statusBacklog", todo: "statusTodo", in_progress: "statusInProgress", in_review: "statusInReview", done: "statusDone", blocked: "statusBlocked", archive: "archive" };
       const markup = icon(names[status] || "statusTodo", "better-codex-status-icon", "2.35");
       return markup.replace("<svg ", '<svg data-status="' + escapeHtml(status) + '" ');
     }
@@ -2484,7 +2547,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       menu.setAttribute(OWNED, "true");
       menu.dataset.issueId = issue.id;
       menu.dataset.align = event.clientX + 430 > window.innerWidth ? "left" : "right";
-      menu.innerHTML = '<div class="better-codex-context-item-wrap' + contextLockClass + '"><button class="better-codex-context-item" type="button"' + contextLockAttrs + '>' + statusIcon(issue.status) + '<span>' + escapeHtml(t("状态")) + '</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu">' + statusItems + '</div></div><div class="better-codex-context-item-wrap' + contextLockClass + '"><button class="better-codex-context-item" type="button"' + contextLockAttrs + '>' + priorityIcon(issue.priority) + '<span>' + escapeHtml(t("优先级")) + '</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu">' + priorityItems + '</div></div><div class="better-codex-context-item-wrap' + contextLockClass + '"><button class="better-codex-context-item" type="button"' + contextLockAttrs + '>' + icon("user") + '<span>' + escapeHtml(t("指定负责人")) + '</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu is-assignee">' + assigneeItems + '</div></div>' + stopItem + (workspacePath ? '<div class="better-codex-context-divider"></div><button class="better-codex-context-item" type="button" data-context-action="copy-workspace">' + icon("folder") + '<span>' + escapeHtml(t("复制本地 workdir 路径")) + '</span></button>' : "") + '<div class="better-codex-context-divider"></div><button class="better-codex-context-item is-danger" type="button"' + archiveLockAttrs + ' data-context-action="archive">' + icon("trash") + '<span>' + escapeHtml(t("删除任务")) + '</span></button>';
+      menu.innerHTML = '<div class="better-codex-context-item-wrap' + contextLockClass + '"><button class="better-codex-context-item" type="button"' + contextLockAttrs + '>' + statusIcon(issue.status) + '<span>' + escapeHtml(t("状态")) + '</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu">' + statusItems + '</div></div><div class="better-codex-context-item-wrap' + contextLockClass + '"><button class="better-codex-context-item" type="button"' + contextLockAttrs + '>' + priorityIcon(issue.priority) + '<span>' + escapeHtml(t("优先级")) + '</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu">' + priorityItems + '</div></div><div class="better-codex-context-item-wrap' + contextLockClass + '"><button class="better-codex-context-item" type="button"' + contextLockAttrs + '>' + icon("user") + '<span>' + escapeHtml(t("指定负责人")) + '</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu is-assignee">' + assigneeItems + '</div></div>' + stopItem + (workspacePath ? '<div class="better-codex-context-divider"></div><button class="better-codex-context-item" type="button" data-context-action="copy-workspace">' + icon("folder") + '<span>' + escapeHtml(t("复制本地 workdir 路径")) + '</span></button>' : "") + '<div class="better-codex-context-divider"></div><button class="better-codex-context-item" type="button"' + archiveLockAttrs + ' data-context-action="archive">' + icon("archive") + '<span>' + escapeHtml(t("归档")) + '</span></button>';
       document.body.appendChild(menu);
       const rect = menu.getBoundingClientRect();
       menu.style.left = Math.max(8, Math.min(event.clientX, window.innerWidth - rect.width - 8)) + "px";
@@ -2536,12 +2599,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         }
         if (item.dataset.contextAction === "archive") {
           closeIssueMenu();
-          return void confirmAction("删除任务", "确定删除任务 “" + current.identifier + "” 吗？", "删除").then(confirmed => {
-            if (!confirmed) return;
-            return perform(async () => {
-              await api("/api/issues/" + encodeURIComponent(current.id) + "/archive", { method: "POST", body: JSON.stringify({ version: current.version }) });
-              await loadIssues();
-            });
+          return void perform(async () => {
+            await api("/api/issues/" + encodeURIComponent(current.id) + "/archive", { method: "POST", body: JSON.stringify({ version: current.version }) });
+            await loadIssues();
           });
         }
         if (item.dataset.contextAction === "assign") {
@@ -3614,7 +3674,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         board.innerHTML = '<section class="better-codex-board-empty"><h2>' + te("创建第一个任务") + '</h2><p>' + te("写下要完成的事，交给智能体处理。") + '</p><div><button type="button" data-add-status="todo">' + icon("plus") + '<span>' + te("新建任务") + '</span></button><button type="button" data-archive-open>' + icon("archive") + '<span>' + te("查看已归档卡片") + '</span></button></div></section>';
         return;
       }
-      const visibleStatuses = [...Object.entries(statusLabels).filter(([status]) => status !== "cancelled"), ["archive", "归档"]];
+      const visibleStatuses = [...Object.entries(statusLabels), ["archive", "归档"]];
       board.innerHTML = visibleStatuses.map(([status, statusLabel]) => {
         const archiveColumn = status === "archive";
         const issues = archiveColumn ? [] : visible.filter(issue => issue.status === status);
@@ -3707,6 +3767,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         state.systemLocale = resolveSystemLocale(HOST_KIND === "web" ? INITIAL_LOCALE : bootstrap.locale);
         state.locale = state.languageSetting === "system" ? state.systemLocale : state.languageSetting;
         if (bootstrap.user && typeof bootstrap.user === "object") state.user = bootstrap.user;
+        if (HOST_KIND === "web") window.dispatchEvent(new CustomEvent("better-codex:bootstrap", { detail: { user: state.user, locale: state.locale } }));
         state.mockup = Boolean(bootstrap.mockup);
         state.agents = bootstrap.agents || [];
         state.projects = bootstrap.projects || [];
@@ -3730,6 +3791,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           if (state.projectId) localStorage.setItem(PROJECT_KEY, state.projectId);
         }
         await loadSurface({ preserveInspector: true });
+        if (!completionNoticesRestored) {
+          completionNoticesRestored = true;
+          restoreCompletionNotices();
+        }
         hideServiceRecovery();
       } catch (error) {
         if (needsServiceRecovery(error)) return showServiceRecovery(error);
@@ -4060,7 +4125,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const content = dialog.querySelector(draft.mode === "agent" ? '[name="prompt"]' : '[name="title"]');
         const disabled = !String(content?.value || "").trim();
         const draftAgentDisabled = dirtyDraftFields.has("assignee") && ["none", "user"].includes(draft.assignee);
-        const startBlocked = !issue || !issue.agent_enabled || draftAgentDisabled || Boolean(issue.active_run_status) || Boolean(sessionId) || issue.enrichment_status === "pending" || ["done", "cancelled"].includes(issue.status);
+        const startBlocked = !issue || Boolean(issue.archived_at) || !issue.agent_enabled || draftAgentDisabled || Boolean(issue.active_run_status) || Boolean(sessionId) || issue.enrichment_status === "pending" || issue.status === "done";
         if (submit) submit.disabled = editingLocked || disabled;
         if (startNow) startNow.disabled = editingLocked || disabled || startBlocked;
       }
@@ -4166,7 +4231,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const openThreadButton = issue && sessionId && !enrichmentLocked
           ? '<button class="better-codex-dialog-open-thread" type="button" data-dialog-open-thread="' + escapeHtml(sessionId) + '">' + te(sessionHandoff ? "前往会话" : "在会话中打开") + '</button>'
           : "";
-        const startNowButton = issue && !sessionId && !issue.active_run_status && !["done", "cancelled"].includes(issue.status)
+        const startNowButton = issue && !issue.archived_at && !sessionId && !issue.active_run_status && issue.status !== "done"
           ? '<button class="better-codex-dialog-start-now" type="button"' + (!issue.agent_enabled ? " disabled" : "") + ' data-dialog-start-now>' + te("立即开始任务") + '</button>'
           : "";
         const title = draft.mode === "agent" ? t("通过智能体创建") : issue ? escapeHtml(issue.identifier) : t("手动创建");
@@ -4655,7 +4720,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           dialog.dataset.descriptionExpanded = String(draft.descriptionExpanded);
           updateDescriptionDisclosure();
         });
-        dialog.querySelector('[name="keep"]')?.addEventListener("change", event => { state.keepCreate = event.currentTarget.checked; });
+        dialog.querySelector('[name="keep"]')?.addEventListener("change", event => {
+          state.keepCreate = event.currentTarget.checked;
+          localStorage.setItem(KEEP_CREATE_KEY, String(state.keepCreate));
+        });
         const replyInput = dialog.querySelector('[name="reply"]');
         const sendButton = dialog.querySelector("[data-conversation-send]");
         replyInput?.addEventListener("input", () => {
@@ -4995,7 +5063,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         errorOutput.hidden = true;
         try {
           const current = await api("/api/issues/" + encodeURIComponent(issue.id));
-          if (!current.agent_enabled || (dirtyDraftFields.has("assignee") && ["none", "user"].includes(draft.assignee)) || current.active_run_status || issueSessionId(current) || current.enrichment_status === "pending" || ["done", "cancelled"].includes(current.status)) {
+          if (current.archived_at || !current.agent_enabled || (dirtyDraftFields.has("assignee") && ["none", "user"].includes(draft.assignee)) || current.active_run_status || issueSessionId(current) || current.enrichment_status === "pending" || current.status === "done") {
             refreshIssueState(current);
             throw new Error("issue_not_startable");
           }
@@ -5333,7 +5401,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const betterCodexRoute = isBetterCodexRoute();
       const entriesAvailable = ensureEntry();
       if (!entriesAvailable) {
-        if (active) close({ resume: true, suppressRoute: betterCodexRoute });
+        if (active && !betterCodexRoute) close({ resume: true, suppressRoute: false });
         if (!betterCodexRoute) routeSuppressed = false;
         return;
       }
@@ -5369,7 +5437,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       relayTimer = null;
       updateNoticeResizeObserver?.disconnect();
       updateNoticeResizeObserver = null;
-      Array.from(completionNoticeDismissals.values()).forEach(dismissNotice => dismissNotice());
+      Array.from(completionNoticeDismissals.values()).forEach(dismissNotice => dismissNotice(false));
       completionNoticeTimers.forEach(timer => clearTimeout(timer));
       completionNoticeTimers.clear();
       completionNoticeDismissals.clear();
