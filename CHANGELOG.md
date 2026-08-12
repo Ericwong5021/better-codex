@@ -13,6 +13,7 @@ All notable changes to Better Codex are recorded here.
 ### Fixed
 
 - Keep the safe Agent directory and assignment state available after remote deployment, and let the Web UI assign and start Agent tasks through the local Runtime.
+- Keep the macOS Codex session relay connected when trusted ChatGPT helper processes inherit the same local debugging socket.
 
 ## [0.4.3-beta.1] - 2026-08-12
 

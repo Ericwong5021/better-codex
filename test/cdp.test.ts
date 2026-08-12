@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { requiresCodexRestartForLaunch, windowsCodexPackageProcessPowerShell } from "../src/cdp.js";
+import { darwinCdpListenerTrusted, requiresCodexRestartForLaunch, windowsCodexPackageProcessPowerShell } from "../src/cdp.js";
 
 const source = readFileSync(new URL("../src/cdp.ts", import.meta.url), "utf8");
 const nativeDialogSource = readFileSync(new URL("../src/native-dialog.ts", import.meta.url), "utf8");
@@ -104,11 +104,23 @@ test("every main target scan has a total deadline and candidate cap", () => {
 });
 
 test("CDP injection trusts only the installed Codex listener and same-port loopback sockets", () => {
+  const application = "/Applications/Codex.app";
+  const codex = { socket: "0xabc", uid: 501, executable: `${application}/Contents/MacOS/ChatGPT` };
+  const helper = { socket: "0xabc", uid: 501, executable: "/usr/local/bin/SkyComputerUseService" };
+  assert.equal(darwinCdpListenerTrusted([codex, helper], 501, application), true);
+  assert.equal(darwinCdpListenerTrusted([codex, { ...helper, socket: "0xdef" }], 501, application), false);
+  assert.equal(darwinCdpListenerTrusted([codex, { ...helper, uid: 502 }], 501, application), false);
+  assert.equal(darwinCdpListenerTrusted([helper], 501, application), false);
   assert.match(source, /function assertTrustedCdpListener\(port: number\)/);
   assert.match(source, /Get-NetTCPConnection -State Listen/);
   assert.match(source, /GetOwnerSid/);
   assert.match(source, /OpenAI\.Codex_/);
   assert.match(source, /\/usr\/sbin\/lsof/);
+  assert.match(source, /-F0pd/);
+  assert.doesNotMatch(source, /pids\.length !== 1/);
+  assert.match(source, /new Set\(listeners\.map\(listener => listener\.socket\)\)\.size === 1/);
+  assert.match(source, /listeners\.every\(listener => listener\.uid === currentUid\)/);
+  assert.match(source, /listeners\.some\(listener => listener\.executable\.startsWith/);
   assert.match(source, /function debuggerUrlAllowed/);
   assert.match(source, /\["127\.0\.0\.1", "::1", "localhost"\]/);
   assert.match(source, /Number\(url\.port\) === port/);
