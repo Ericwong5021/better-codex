@@ -1,6 +1,7 @@
-import type { IssuePriority, IssueStatus } from "./db.js";
+import type { IssuePriority, IssueReplyStatus, IssueSessionStatus, IssueStatus } from "./db.js";
+import type { ConversationMessage } from "./session-transcript.js";
 
-export const syncProtocolVersion = "sync/v2";
+export const syncProtocolVersion = "sync/v3";
 export const syncEntityTypes = ["project", "issue", "agent_directory"] as const;
 export type SyncEntityType = typeof syncEntityTypes[number];
 
@@ -47,7 +48,12 @@ export type IssueProjection = {
   agent_id: string | null;
   user_assigned: boolean;
   pending_actor: "user" | "agent";
-  active_run: boolean;
+  active_run_status: "claimed" | "running" | "scheduling" | null;
+  latest_run_status: "claimed" | "running" | "scheduling" | "completed" | "failed" | "interrupted" | null;
+  latest_scheduler_status: "pending" | "running" | "completed" | "failed" | "interrupted" | null;
+  session_status: IssueSessionStatus | null;
+  reply_status: IssueReplyStatus;
+  has_conversation: boolean;
   needs_attention: boolean;
   created_at: string;
   updated_at: string;
@@ -90,7 +96,7 @@ export type SyncPushResponse = {
   lease_expires_at: string;
 };
 
-export const remoteCommandOperations = ["issue.create", "issue.update", "issue.move", "issue.start", "issue.archive", "issue.restore"] as const;
+export const remoteCommandOperations = ["issue.create", "issue.update", "issue.move", "issue.start", "issue.stop", "issue.reply", "issue.archive", "issue.restore"] as const;
 export type RemoteCommandOperation = typeof remoteCommandOperations[number];
 export type RemoteCommandStatus = "pending" | "applied" | "rejected" | "conflict" | "expired";
 
@@ -113,6 +119,21 @@ export type RemoteCommandAck = {
   status: Exclude<RemoteCommandStatus, "pending" | "expired">;
   error: string | null;
   projection: IssueProjection | null;
+};
+
+export type ConversationProjection = {
+  issue_id: string;
+  found: boolean;
+  messages: ConversationMessage[];
+  reply: {
+    request_id?: string;
+    status: IssueReplyStatus;
+    message: string;
+    error?: string;
+    started_at?: string;
+    finished_at?: string;
+  };
+  updated_at: string;
 };
 
 export type RemoteIssueState = {
@@ -148,4 +169,5 @@ export const forbiddenProjectionKeys = [
   "credential",
   "attachment",
   "log",
+  "rollout_path",
 ] as const;

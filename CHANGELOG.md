@@ -4,6 +4,15 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+### Changed
+
+- Upgrade self-hosted synchronization to v3; the Hub and local Runtime must run the same Beta.
+
+### Fixed
+
+- Show privacy-filtered conversation history in self-hosted Issue cards, and let users reply or stop the linked Codex session without leaving the card.
+- Keep claimed, running, scheduling, completed, failed, and interrupted execution states in sync with the self-hosted Web UI.
+
 ## [0.4.3-beta.3] - 2026-08-12
 
 ### Fixed

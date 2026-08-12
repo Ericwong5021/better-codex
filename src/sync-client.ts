@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { coreVersion } from "./compatibility.js";
 import type { Store } from "./db.js";
 import { readSyncConfiguration, type SyncConfiguration } from "./sync-config.js";
-import { syncProtocolVersion, type AgentDirectoryProjection, type RemoteCommand, type RemoteCommandAck, type RuntimeProjection, type SyncChange, type SyncPushResponse } from "./sync-contract.js";
+import { syncProtocolVersion, type AgentDirectoryProjection, type ConversationProjection, type RemoteCommand, type RemoteCommandAck, type RuntimeProjection, type SyncChange, type SyncPushResponse } from "./sync-contract.js";
 
 type SyncState = {
   connected: boolean;
@@ -44,6 +44,9 @@ export class SyncClient {
     private readonly intervalMs = 5_000,
     private readonly configuration: () => SyncConfiguration | null = readSyncConfiguration,
     private readonly commandApplied: (command: RemoteCommand, ack: RemoteCommandAck) => void = () => {},
+    private readonly conversation: (issueId: string) => Promise<ConversationProjection | null> = async () => null,
+    private readonly reply: (issueId: string, requestId: string, message: string) => void | Promise<void> = () => { throw new Error("remote_reply_unavailable"); },
+    private readonly stopIssue: (issueId: string) => void | Promise<void> = () => { throw new Error("remote_stop_unavailable"); },
   ) {}
 
   start() {
@@ -144,7 +147,14 @@ export class SyncClient {
         }),
       });
       const accepted = new Set(result.accepted);
-      for (const entry of entries) if (accepted.has(entry.event_id)) this.store.clearSyncQueueEntry(entry);
+      for (const entry of entries) {
+        if (!accepted.has(entry.event_id)) continue;
+        if (entry.entity_type === "issue" && entry.operation === "upsert" && this.store.getIssue(entry.entity_id)?.run_thread_id) {
+          const projection = await this.conversation(entry.entity_id);
+          if (projection) await hubRequest(configuration, `/api/v1/sync/issues/${encodeURIComponent(entry.entity_id)}/conversation`, { method: "PUT", body: JSON.stringify(projection) });
+        }
+        this.store.clearSyncQueueEntry(entry);
+      }
       this.store.setSyncCursor(result.cursor);
       this.state.lease_expires_at = result.lease_expires_at;
       directoryPending = false;
@@ -158,7 +168,7 @@ export class SyncClient {
       const result = await hubRequest<{ commands: RemoteCommand[] }>(configuration, "/api/v1/sync/commands?limit=100");
       if (!Array.isArray(result.commands)) throw new Error("invalid_command_response");
       for (const command of result.commands) {
-        const ack = this.store.applyRemoteCommand(command);
+        const ack = await this.store.applyRemoteCommand(command, { reply: this.reply, stop: this.stopIssue });
         await hubRequest<RemoteCommandAck>(configuration, `/api/v1/sync/commands/${encodeURIComponent(command.command_id)}/ack`, { method: "POST", body: JSON.stringify(ack) });
         if (ack.status === "applied") this.commandApplied(command, ack);
       }

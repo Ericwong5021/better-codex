@@ -56,7 +56,7 @@ test("Hub URLs require HTTPS except loopback development", () => {
   assert.throws(() => normalizeHubUrl("https://token@board.example.com"), /invalid_hub_url/);
 });
 
-test("read-only Hub mirrors only the safe projection with durable idempotent sync", async () => {
+test("Hub mirrors the privacy-filtered projection with durable idempotent sync", async () => {
   const directory = mkdtempSync(join(tmpdir(), "better-codex-hub-sync-"));
   const local = new Store(join(directory, "local.db"));
   const adminToken = "a".repeat(64);
@@ -72,12 +72,20 @@ test("read-only Hub mirrors only the safe projection with durable idempotent syn
     device_token: paired.device_token,
     created_at: new Date().toISOString(),
   };
-  const client = new SyncClient(local, 60_000, () => configuration);
+  const messages = [
+    { id: "user-1", role: "user" as const, markdown: "Keep this context", html: "<p>not transferred</p>", phase: null, timestamp: "2026-08-12T08:00:00.000Z" },
+    { id: "agent-1", role: "agent" as const, markdown: "Context retained", html: "<p>not transferred</p>", phase: "final_answer", timestamp: "2026-08-12T08:00:01.000Z" },
+  ];
+  const replies: string[] = [];
+  const client = new SyncClient(local, 60_000, () => configuration, () => {}, async issueId => local.conversationProjection(issueId, messages), (issueId, requestId, message) => {
+    replies.push(message);
+    local.setIssueReplyState({ issue_id: issueId, request_id: requestId, status: "running", message, started_at: new Date().toISOString() });
+  });
 
   try {
     const project = local.createProject({ name: "Remote", workspacePath: join(directory, "private-workspace") });
     const agent = local.createAgentProfile({ name: "Remote Agent", name_en: "Remote Agent", description: "Visible directory", instructions: "private instructions", model: "private-model", reasoning_effort: "high", sandbox_mode: "danger-full-access" });
-    const issue = local.createIssue({ projectId: project.id, title: "Safe projection", description: "Visible", threadId: "private-thread", workspacePath: join(directory, "private-workspace") });
+    const issue = local.createIssue({ projectId: project.id, title: "Safe projection", description: "Visible", workspacePath: join(directory, "private-workspace"), session: { threadId: "019fec06-788f-7af3-a031-76b546904fe5", configFingerprint: "test", active: false } });
     const first = await client.syncNow();
     assert.equal(first.last_error, null);
     const board = hub.store.board();
@@ -85,12 +93,30 @@ test("read-only Hub mirrors only the safe projection with durable idempotent syn
     assert.equal(board.agents.find(item => item.id === agent.id)?.name, "Remote Agent");
     assert.equal(board.runtime?.health_state, "online");
     assert.doesNotMatch(JSON.stringify(board), /private-workspace|private-thread|private instructions|private-model|workspace_path|thread_id|reply_draft|instructions|sandbox_mode/);
+    assert.equal(board.issues.find(item => item.id === issue.id)?.has_conversation, true);
+    assert.deepEqual(hub.store.conversation(issue.id)?.messages.map(message => message.markdown), ["Keep this context", "Context retained"]);
+    assert.equal(hub.store.conversation(issue.id)?.messages.every(message => message.html === ""), true);
+
+    const replied = hub.store.createRemoteCommand({ command_id: "reply-from-web", operation: "issue.reply", entity_id: issue.id, base_revision: issue.version, payload: { message: "Continue here" } });
+    assert.equal(replied.status, "pending");
+    local.updateIssue(issue.id, issue.version, { priority: "high" });
+    await client.syncNow();
+    assert.deepEqual(replies, ["Continue here"]);
+    assert.equal(hub.store.remoteCommand(replied.command_id)?.status, "applied");
+    assert.equal(hub.store.board().issues.find(item => item.id === issue.id)?.reply_status, "running");
+    assert.equal(hub.store.conversation(issue.id)?.messages.at(-1)?.markdown, "Continue here");
+
+    local.setIssueReplyState({ issue_id: issue.id, request_id: replied.command_id, status: "succeeded", message: "Continue here", started_at: "2026-08-12T08:00:02.000Z", finished_at: "2026-08-12T08:00:03.000Z" });
+    messages.push({ id: "agent-2", role: "agent", markdown: "Continued remotely", html: "<p>not transferred</p>", phase: "final_answer", timestamp: "2026-08-12T08:00:03.000Z" });
+    await client.syncNow();
+    assert.equal(hub.store.board().issues.find(item => item.id === issue.id)?.reply_status, "succeeded");
+    assert.equal(hub.store.conversation(issue.id)?.messages.at(-1)?.markdown, "Continued remotely");
 
     const revision = board.revision;
-    local.updateIssue(issue.id, issue.version, { title: "Incremental update" });
+    local.updateIssue(issue.id, local.getIssue(issue.id)!.version, { priority: "urgent" });
     const entry = local.listSyncQueue(100).find(item => item.entity_id === issue.id)!;
     await client.syncNow();
-    assert.equal(hub.store.board().issues.find(item => item.id === issue.id)?.title, "Incremental update");
+    assert.equal(hub.store.board().issues.find(item => item.id === issue.id)?.priority, "urgent");
     assert.ok(hub.store.board().revision > revision);
 
     const duplicate: SyncPushRequest = {
@@ -139,7 +165,7 @@ test("pairing codes are single-use and a second active writer is rejected", () =
     });
     store.push(first.device_id, request(first.device_id));
     assert.throws(() => store.push(second.device_id, request(second.device_id)), /writer_lease_conflict/);
-    assert.throws(() => store.push(first.device_id, { ...request(first.device_id), protocol_version: "sync/v3" as never }), /incompatible_protocol/);
+    assert.throws(() => store.push(first.device_id, { ...request(first.device_id), protocol_version: "sync/v2" as never }), /incompatible_protocol/);
   } finally {
     store.close();
     rmSync(directory, { recursive: true, force: true });
@@ -343,12 +369,24 @@ test("active runs reject remote mutations without changing ownership", async () 
   try {
     const project = local.createProject({ name: "Active", workspacePath: directory });
     const issue = local.createIssue({ projectId: project.id, title: "Running", agentEnabled: true, workspacePath: directory });
-    assert.ok(local.claimNextIssue(issue.id));
+    const claim = local.claimNextIssue(issue.id)!;
     await client.syncNow();
     const running = local.getIssue(issue.id)!;
     assert.equal(running.active_run_status, "claimed");
+    assert.equal(hub.store.board().issues.find(item => item.id === issue.id)?.active_run_status, "claimed");
+    assert.equal(hub.store.board().issues.find(item => item.id === issue.id)?.latest_run_status, "claimed");
     assert.throws(() => hub.store.createRemoteCommand({ operation: "issue.archive", entity_id: issue.id, base_revision: running.version, payload: {} }), /issue_execution_running/);
     assert.equal(local.getIssue(issue.id)?.active_run_status, "claimed");
+    local.startRun(claim.runId, 12345);
+    await client.syncNow();
+    assert.equal(hub.store.board().issues.find(item => item.id === issue.id)?.active_run_status, "running");
+    local.beginScheduling(claim.runId, issue.id, true);
+    await client.syncNow();
+    assert.equal(hub.store.board().issues.find(item => item.id === issue.id)?.active_run_status, "scheduling");
+    local.interruptRun(claim.runId, issue.id);
+    await client.syncNow();
+    assert.equal(hub.store.board().issues.find(item => item.id === issue.id)?.active_run_status, null);
+    assert.equal(hub.store.board().issues.find(item => item.id === issue.id)?.latest_run_status, "interrupted");
   } finally {
     client.stop();
     local.close();

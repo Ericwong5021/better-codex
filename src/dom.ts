@@ -658,12 +658,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function issueSessionId(issue) {
+      if (REMOTE && issue?.has_conversation) return String(issue.id || "");
       return normalizeSessionId(issue?.run_thread_id) || "";
     }
 
     function issueExecutionRunning(issue) {
       return ["claimed", "running", "scheduling"].includes(issue?.active_run_status)
         || issue?.reply_status === "running"
+        || ["starting", "active", "stopping", "waiting_on_approval", "waiting_on_user"].includes(issue?.session_status)
         || Boolean(issue?.session_active_turn_id);
     }
 
@@ -2475,7 +2477,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     async function stopIssueSession(issueId) {
-      const updated = await api("/api/issues/" + encodeURIComponent(issueId) + "/stop", { method: "POST" });
+      const issue = state.issues.find(item => item.id === issueId);
+      const updated = await api("/api/issues/" + encodeURIComponent(issueId) + "/stop", { method: "POST", body: JSON.stringify({ version: issue?.version }) });
       await loadIssues();
       return state.issues.find(issue => issue.id === issueId) || updated;
     }
@@ -3665,8 +3668,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           const activityAgent = assignee || defaultAgent || { name: "Codex", is_default: true };
           const latestRunStatus = issue.latest_run_status || "";
           const replyResultState = issue.reply_status === "succeeded" ? "completed" : ["failed", "interrupted"].includes(issue.reply_status) ? issue.reply_status : "";
-          const executionState = issue.status === "blocked" ? "blocked" : replyResultState || (issue.latest_scheduler_error && issue.status === "in_review" ? "scheduler-failed" : latestRunStatus === "completed" ? "completed" : latestRunStatus === "failed" ? "failed" : latestRunStatus === "interrupted" ? "interrupted" : latestRunStatus === "scheduling" ? "scheduling" : latestRunStatus === "running" ? "running" : latestRunStatus === "claimed" ? "claimed" : issue.agent_enabled ? "not-started" : "");
-          const activeExecutionState = issue.active_run_status || (issue.reply_status === "running" ? "running" : "");
+          const executionState = issue.status === "done" ? "completed" : issue.status === "cancelled" ? "interrupted" : issue.status === "blocked" ? "blocked" : replyResultState || ((issue.latest_scheduler_error || issue.latest_scheduler_status === "failed") && issue.status === "in_review" ? "scheduler-failed" : latestRunStatus === "completed" ? "completed" : latestRunStatus === "failed" ? "failed" : latestRunStatus === "interrupted" ? "interrupted" : latestRunStatus === "scheduling" ? "scheduling" : latestRunStatus === "running" ? "running" : latestRunStatus === "claimed" ? "claimed" : issue.agent_enabled ? "not-started" : "");
+          const sessionExecutionState = issue.session_status === "stopping" ? "stopping" : issue.session_status === "starting" ? "claimed" : ["active", "waiting_on_approval", "waiting_on_user"].includes(issue.session_status) ? "running" : "";
+          const activeExecutionState = issue.active_run_status || (issue.reply_status === "running" ? "running" : sessionExecutionState);
           const activityState = permissions.remotePending ? "remote-pending" : permissions.remoteConflict ? "remote-conflict" : enrichmentLocked ? "thinking" : issue.session_status === "stopping" ? "stopping" : activeExecutionState || executionState;
           const activityLabel = t(activityState === "remote-pending" ? "同步中" : activityState === "remote-conflict" ? "同步冲突" : enrichmentLocked ? "理解中" : activityState === "stopping" ? "正在停止…" : activityState === "running" ? "工作中" : activityState === "scheduling" ? "调度中" : activityState === "scheduler-failed" ? "调度失败" : activityState === "claimed" ? "排队中" : activityState === "in_review" ? "待审核" : activityState === "completed" ? "已完成" : activityState === "blocked" ? "已阻塞" : activityState === "failed" ? "执行失败" : activityState === "interrupted" ? "已停止" : activityState === "not-started" ? "未开始" : "");
           const activityIcon = activityState === "scheduling" ? '<span class="better-codex-activity-dot better-codex-scheduler-dot" aria-hidden="true"></span>' : activityState === "scheduler-failed" ? '<span class="better-codex-activity-dot better-codex-scheduler-failed-dot" aria-hidden="true"></span>' : ["completed", "interrupted", "not-started"].includes(activityState) ? '<span class="better-codex-activity-dot" aria-hidden="true"></span>' : ["failed", "blocked", "remote-conflict"].includes(activityState) ? icon("close") : agentAvatarMarkup(activityAgent, "better-codex-card-avatar");
@@ -4054,7 +4058,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       }
 
       function persistReplyDraft(value) {
-        if (!issue) return;
+        if (!issue || REMOTE) return;
         replyDraftUpdate = replyDraftUpdate.catch(() => {}).then(async () => {
           let current = issue;
           for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -4199,7 +4203,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
       function header() {
         const breadcrumbProject = state.projects.find(item => item.id === draft.projectId);
-        const openThreadButton = issue && sessionId && !enrichmentLocked
+        const openThreadButton = issue && sessionId && !enrichmentLocked && HOST_CAPABILITIES.nativeThreads !== false
           ? '<button class="better-codex-dialog-open-thread" type="button" data-dialog-open-thread="' + escapeHtml(sessionId) + '">' + te(sessionHandoff ? "前往会话" : "在会话中打开") + '</button>'
           : "";
         const startNowButton = issue && !sessionId && !issue.active_run_status && !["done", "cancelled"].includes(issue.status)
@@ -4223,8 +4227,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       function conversationStatusMarkup(replyStatus) {
         const enrichmentLocked = issuePermissions(issue).enrichmentPending;
         const latestRunStatus = issue?.latest_run_status || "";
-        const executionState = issue?.status === "blocked" ? "blocked" : issue?.latest_scheduler_error && issue?.status === "in_review" ? "scheduler-failed" : latestRunStatus === "completed" ? "completed" : latestRunStatus === "failed" ? "failed" : latestRunStatus === "interrupted" ? "interrupted" : latestRunStatus === "scheduling" ? "scheduling" : latestRunStatus === "running" ? "running" : latestRunStatus === "claimed" ? "claimed" : issue?.agent_enabled ? "not-started" : "";
-        const activeExecutionState = issue?.active_run_status || (replyStatus === "running" ? "running" : "");
+        const executionState = issue?.status === "done" ? "completed" : issue?.status === "cancelled" ? "interrupted" : issue?.status === "blocked" ? "blocked" : (issue?.latest_scheduler_error || issue?.latest_scheduler_status === "failed") && issue?.status === "in_review" ? "scheduler-failed" : latestRunStatus === "completed" ? "completed" : latestRunStatus === "failed" ? "failed" : latestRunStatus === "interrupted" ? "interrupted" : latestRunStatus === "scheduling" ? "scheduling" : latestRunStatus === "running" ? "running" : latestRunStatus === "claimed" ? "claimed" : issue?.agent_enabled ? "not-started" : "";
+        const sessionExecutionState = issue?.session_status === "stopping" ? "stopping" : issue?.session_status === "starting" ? "claimed" : ["active", "waiting_on_approval", "waiting_on_user"].includes(issue?.session_status) ? "running" : "";
+        const activeExecutionState = issue?.active_run_status || (replyStatus === "running" ? "running" : sessionExecutionState);
         const replyResultState = replyStatus === "succeeded" ? "completed" : ["failed", "interrupted"].includes(replyStatus) ? replyStatus : conversationFailureState;
         const relayFailure = issue?.session_relay_error && !issue?.session_relay_connected && issue?.active_run_status === "claimed";
         const activityState = enrichmentLocked ? "thinking" : issue?.session_status === "stopping" ? "stopping" : relayFailure ? "relay-failed" : activeExecutionState || replyResultState || executionState;
@@ -4257,7 +4262,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const inputDisabled = sessionHandoff ? " disabled" : "";
         const actionDisabled = stopping || sessionHandoff || (!working && !draft.reply.trim() && !draft.replyAttachments.length) ? " disabled" : "";
         const actionLabel = t(stopping ? "正在停止…" : working ? "停止任务" : "发送");
-        return '<div class="better-codex-composer" data-state="' + mode + '">' + attachmentList(draft.replyAttachments, "reply") + '<textarea name="reply" rows="2" placeholder="' + te(sessionHandoff ? "请前往会话继续对话" : "输入下一步要求…") + '" aria-label="' + te("回复") + '"' + inputDisabled + '>' + escapeHtml(draft.reply) + '</textarea><div class="better-codex-composer-toolbar"><button class="better-codex-composer-attach" type="button" data-conversation-attach aria-label="' + te("添加附件") + '" title="' + te("添加附件") + '"' + inputDisabled + '>' + icon("plus", "", "1.9") + '</button><button class="better-codex-composer-send" type="button" data-conversation-send data-composer-mode="' + mode + '" aria-label="' + escapeHtml(actionLabel) + '" title="' + escapeHtml(actionLabel) + '"' + actionDisabled + '>' + icon(working ? "stop" : "send", "", working ? "2.5" : "2") + '</button></div></div>';
+        const attachments = REMOTE ? "" : attachmentList(draft.replyAttachments, "reply");
+        const attachButton = REMOTE ? "" : '<button class="better-codex-composer-attach" type="button" data-conversation-attach aria-label="' + te("添加附件") + '" title="' + te("添加附件") + '"' + inputDisabled + '>' + icon("plus", "", "1.9") + '</button>';
+        return '<div class="better-codex-composer" data-state="' + mode + '">' + attachments + '<textarea name="reply" rows="2" placeholder="' + te(sessionHandoff ? "请前往会话继续对话" : "输入下一步要求…") + '" aria-label="' + te("回复") + '"' + inputDisabled + '>' + escapeHtml(draft.reply) + '</textarea><div class="better-codex-composer-toolbar">' + attachButton + '<button class="better-codex-composer-send" type="button" data-conversation-send data-composer-mode="' + mode + '" aria-label="' + escapeHtml(actionLabel) + '" title="' + escapeHtml(actionLabel) + '"' + actionDisabled + '>' + icon(working ? "stop" : "send", "", working ? "2.5" : "2") + '</button></div></div>';
       }
 
       function replyFailureMessage(error, action) {
@@ -4351,7 +4358,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         } else if (data?.html) {
           body.innerHTML = conversationBubbles([{ role: "agent", html: data.html, markdown: data.markdown || "", timestamp: null }], data.user);
           body.scrollTop = body.scrollHeight;
-        } else {
+        } else if (!options.preserveBody) {
           body.innerHTML = sessionId
             ? sessionHandoff
               ? '<div class="better-codex-conversation-empty"><h3>' + te("开始对话") + '</h3><p>' + te("请前往会话继续对话") + '</p></div>'
@@ -4438,7 +4445,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           flushReplyDraft();
           persistReplyDraft("");
           await loadIssues().catch(() => {});
-          applyConversation({ html: dialog.querySelector("[data-conversation-body]")?.innerHTML || "", found: true, reply });
+          applyConversation({ found: true, reply }, { preserveBody: true });
           conversationTimer = setTimeout(() => void loadConversation({ quiet: true }), 1500);
         } catch (error) {
           lastReplyRequestId = requestId;
@@ -4575,6 +4582,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
       function pasteImages(event) {
         const replyPaste = event.target?.matches?.('[name="reply"]');
+        if (REMOTE && replyPaste) return;
         if (editingLocked && !replyPaste) return;
         const files = Array.from(event.clipboardData?.items || []).flatMap(item => item.kind === "file" && item.type.startsWith("image/") ? [item.getAsFile()].filter(Boolean) : []);
         if (!files.length) return;

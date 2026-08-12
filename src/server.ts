@@ -428,9 +428,28 @@ export function startServer() {
   const eventHistory: number[] = [];
   let eventRevision = 0;
   const worker = new IssueWorker(store);
-  const syncClient = new SyncClient(store, 5_000, undefined, command => {
-    if (command.operation === "issue.start") worker.startIssue(command.entity_id);
-  });
+  const syncClient = new SyncClient(
+    store,
+    5_000,
+    undefined,
+    command => {
+      if (command.operation === "issue.start") worker.startIssue(command.entity_id);
+    },
+    async issueId => {
+      const issue = store.getIssue(issueId);
+      if (!issue?.run_thread_id) return null;
+      const conversation = await readConversationResult(issue.run_thread_id);
+      return store.conversationProjection(issueId, conversation.messages);
+    },
+    (issueId, requestId, message) => {
+      worker.sendIssueMessage(issueId, requestId, message);
+    },
+    async issueId => {
+      const accepted = await worker.stopIssue(issueId);
+      const current = store.getIssue(issueId);
+      if (!accepted && (current?.active_run_status || current?.session_active_turn_id || store.getIssueReplyState(issueId).status === "running")) throw new Error("issue_stop_timeout");
+    },
+  );
   const sendEvent = (response: ServerResponse, event: string, revision: number) => {
     response.write(`id: ${revision}\nevent: ${event}\ndata: ${JSON.stringify({ revision })}\n\n`);
   };

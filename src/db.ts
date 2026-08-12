@@ -4,7 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { databasePath, developmentDatabaseSnapshotSourcePath } from "./config.js";
 import { syncProtocolVersion } from "./sync-contract.js";
-import type { IssueProjection, ProjectProjection, RemoteCommand, RemoteCommandAck, SyncEntityType, SyncProjection } from "./sync-contract.js";
+import type { ConversationProjection, IssueProjection, ProjectProjection, RemoteCommand, RemoteCommandAck, SyncEntityType, SyncProjection } from "./sync-contract.js";
 
 export const issueStatuses = ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"] as const;
 export const issuePriorities = ["none", "low", "medium", "high", "urgent"] as const;
@@ -599,15 +599,36 @@ export class Store {
       ON CONFLICT(entity_type, entity_id) DO UPDATE SET event_id = excluded.event_id, changed_at = excluded.changed_at;
     `;
     this.db.exec(`
-      CREATE TRIGGER IF NOT EXISTS sync_project_insert AFTER INSERT ON projects BEGIN ${dirty("project", "NEW.id")} END;
-      CREATE TRIGGER IF NOT EXISTS sync_project_update AFTER UPDATE OF name, identifier_prefix ON projects BEGIN ${dirty("project", "NEW.id")} END;
-      CREATE TRIGGER IF NOT EXISTS sync_project_delete AFTER DELETE ON projects BEGIN ${removed("project", "OLD.id")} END;
-      CREATE TRIGGER IF NOT EXISTS sync_issue_insert AFTER INSERT ON issues BEGIN ${dirty("issue", "NEW.id")} END;
-      CREATE TRIGGER IF NOT EXISTS sync_issue_update AFTER UPDATE OF project_id, title, description, status, priority, labels_json, sort_order, pinned, archived_at, agent_id, agent_enabled, user_assigned, needs_attention, pending_actor ON issues BEGIN ${dirty("issue", "NEW.id")} END;
-      CREATE TRIGGER IF NOT EXISTS sync_issue_delete AFTER DELETE ON issues BEGIN ${removed("issue", "OLD.id")} END;
-      CREATE TRIGGER IF NOT EXISTS sync_run_insert AFTER INSERT ON issue_runs BEGIN ${dirty("issue", "NEW.issue_id")} END;
-      CREATE TRIGGER IF NOT EXISTS sync_run_update AFTER UPDATE OF status, scheduler_status ON issue_runs BEGIN ${dirty("issue", "NEW.issue_id")} END;
-      CREATE TRIGGER IF NOT EXISTS sync_run_delete AFTER DELETE ON issue_runs BEGIN ${dirty("issue", "OLD.issue_id")} END;
+      DROP TRIGGER IF EXISTS sync_project_insert;
+      DROP TRIGGER IF EXISTS sync_project_update;
+      DROP TRIGGER IF EXISTS sync_project_delete;
+      DROP TRIGGER IF EXISTS sync_issue_insert;
+      DROP TRIGGER IF EXISTS sync_issue_update;
+      DROP TRIGGER IF EXISTS sync_issue_delete;
+      DROP TRIGGER IF EXISTS sync_run_insert;
+      DROP TRIGGER IF EXISTS sync_run_update;
+      DROP TRIGGER IF EXISTS sync_run_delete;
+      DROP TRIGGER IF EXISTS sync_session_insert;
+      DROP TRIGGER IF EXISTS sync_session_update;
+      DROP TRIGGER IF EXISTS sync_session_delete;
+      DROP TRIGGER IF EXISTS sync_reply_insert;
+      DROP TRIGGER IF EXISTS sync_reply_update;
+      DROP TRIGGER IF EXISTS sync_reply_delete;
+      CREATE TRIGGER sync_project_insert AFTER INSERT ON projects BEGIN ${dirty("project", "NEW.id")} END;
+      CREATE TRIGGER sync_project_update AFTER UPDATE OF name, identifier_prefix ON projects BEGIN ${dirty("project", "NEW.id")} END;
+      CREATE TRIGGER sync_project_delete AFTER DELETE ON projects BEGIN ${removed("project", "OLD.id")} END;
+      CREATE TRIGGER sync_issue_insert AFTER INSERT ON issues BEGIN ${dirty("issue", "NEW.id")} END;
+      CREATE TRIGGER sync_issue_update AFTER UPDATE OF project_id, title, description, status, priority, labels_json, sort_order, pinned, archived_at, agent_id, agent_enabled, user_assigned, needs_attention, pending_actor ON issues BEGIN ${dirty("issue", "NEW.id")} END;
+      CREATE TRIGGER sync_issue_delete AFTER DELETE ON issues BEGIN ${removed("issue", "OLD.id")} END;
+      CREATE TRIGGER sync_run_insert AFTER INSERT ON issue_runs BEGIN ${dirty("issue", "NEW.issue_id")} END;
+      CREATE TRIGGER sync_run_update AFTER UPDATE OF status, scheduler_status, thread_id ON issue_runs BEGIN ${dirty("issue", "NEW.issue_id")} END;
+      CREATE TRIGGER sync_run_delete AFTER DELETE ON issue_runs BEGIN ${dirty("issue", "OLD.issue_id")} END;
+      CREATE TRIGGER sync_session_insert AFTER INSERT ON issue_sessions BEGIN ${dirty("issue", "NEW.issue_id")} END;
+      CREATE TRIGGER sync_session_update AFTER UPDATE OF status, active_turn_id, last_turn_id, last_agent_message, last_error ON issue_sessions BEGIN ${dirty("issue", "NEW.issue_id")} END;
+      CREATE TRIGGER sync_session_delete AFTER DELETE ON issue_sessions BEGIN ${dirty("issue", "OLD.issue_id")} END;
+      CREATE TRIGGER sync_reply_insert AFTER INSERT ON issue_replies BEGIN ${dirty("issue", "NEW.issue_id")} END;
+      CREATE TRIGGER sync_reply_update AFTER UPDATE OF status, message, error, started_at, finished_at ON issue_replies BEGIN ${dirty("issue", "NEW.issue_id")} END;
+      CREATE TRIGGER sync_reply_delete AFTER DELETE ON issue_replies BEGIN ${dirty("issue", "OLD.issue_id")} END;
     `);
   }
 
@@ -967,7 +988,12 @@ export class Store {
       agent_id: issue.agent_id,
       user_assigned: issue.user_assigned,
       pending_actor: issue.pending_actor,
-      active_run: Boolean(issue.active_run_status || issue.session_active_turn_id || this.getIssueReplyState(issue.id).status === "running"),
+      active_run_status: issue.active_run_status ?? null,
+      latest_run_status: issue.latest_run_status ?? null,
+      latest_scheduler_status: issue.latest_scheduler_status ?? null,
+      session_status: issue.session_status ?? null,
+      reply_status: this.getIssueReplyState(issue.id).status,
+      has_conversation: Boolean(issue.run_thread_id),
       needs_attention: issue.needs_attention,
       created_at: issue.created_at,
       updated_at: issue.updated_at,
@@ -975,10 +1001,10 @@ export class Store {
     } satisfies IssueProjection;
   }
 
-  applyRemoteCommand(command: RemoteCommand): RemoteCommandAck {
+  async applyRemoteCommand(command: RemoteCommand, handlers: { reply?: (issueId: string, requestId: string, message: string) => void | Promise<void>; stop?: (issueId: string) => void | Promise<void> } = {}): Promise<RemoteCommandAck> {
     const receipt = this.db.prepare("SELECT result_json FROM sync_command_receipts WHERE command_id = ?").get(command.command_id) as { result_json: string } | undefined;
     if (receipt) return JSON.parse(receipt.result_json) as RemoteCommandAck;
-    const result = (() => {
+    const result = await (async () => {
       try {
         const payload = command.payload;
         if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("invalid_command_payload");
@@ -1000,11 +1026,21 @@ export class Store {
         } else {
           const current = this.getIssue(command.entity_id);
           if (!current) throw new Error("issue_not_found");
-          if (current.version !== command.base_revision) throw new Error("version_conflict");
-          if (current.active_run_status || current.session_active_turn_id || this.getIssueReplyState(current.id).status === "running") throw new Error("issue_execution_running");
+          if (!["issue.reply", "issue.stop"].includes(command.operation) && current.version !== command.base_revision) throw new Error("version_conflict");
+          if (!["issue.reply", "issue.stop"].includes(command.operation) && (current.active_run_status || current.session_active_turn_id || this.getIssueReplyState(current.id).status === "running")) throw new Error("issue_execution_running");
           if (command.operation === "issue.archive") issue = this.archiveIssue(current.id, current.version);
           else if (command.operation === "issue.restore") issue = this.unarchiveIssue(current.id, current.version);
-          else {
+          else if (command.operation === "issue.reply") {
+            if (!handlers.reply) throw new Error("remote_reply_unavailable");
+            const message = String(payload.message || "").trim();
+            if (!message) throw new Error("message_required");
+            await handlers.reply(current.id, command.command_id, message);
+            issue = this.getIssue(current.id)!;
+          } else if (command.operation === "issue.stop") {
+            if (!handlers.stop) throw new Error("remote_stop_unavailable");
+            await handlers.stop(current.id);
+            issue = this.getIssue(current.id)!;
+          } else {
             const patch: IssuePatch = {};
             if (command.operation === "issue.move") {
               if (payload.status !== undefined) patch.status = payload.status as IssueStatus;
@@ -3225,5 +3261,22 @@ export class Store {
         finished_at = excluded.finished_at
     `).run(state.issue_id, state.request_id || "", state.status, state.message, state.error || null, state.started_at || now(), state.finished_at || null);
     return this.getIssueReplyState(state.issue_id);
+  }
+
+  conversationProjection(issueId: string, messages: ConversationProjection["messages"]): ConversationProjection {
+    const issue = this.getIssue(issueId);
+    if (!issue) throw new Error("issue_not_found");
+    const reply = this.getIssueReplyState(issueId);
+    const projected = messages.slice(-80).map(message => ({ ...message, html: "" }));
+    if (reply.status === "running" && reply.message && !projected.some(message => message.role === "user" && message.markdown === reply.message)) {
+      projected.push({ id: `reply-${reply.request_id || issueId}`, role: "user", markdown: reply.message, html: "", phase: null, timestamp: reply.started_at || null });
+    }
+    return {
+      issue_id: issueId,
+      found: projected.length > 0,
+      messages: projected.slice(-80),
+      reply,
+      updated_at: [issue.updated_at, reply.finished_at || reply.started_at || "", ...projected.map(message => message.timestamp || "")].sort().at(-1) || issue.updated_at,
+    };
   }
 }

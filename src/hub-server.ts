@@ -7,6 +7,7 @@ import { issuePriorities, issueStatuses } from "./db.js";
 import { HubStore } from "./hub-store.js";
 import type { RemoteCommandAck, SyncPushRequest } from "./sync-contract.js";
 import { betterCodexWebHostCss, betterCodexWebHostHtml, betterCodexWebHostJavaScript } from "./web-host.js";
+import { renderMarkdown } from "./markdown.js";
 
 export type HubServerOptions = {
   host: string;
@@ -138,6 +139,7 @@ function issueForWeb(issue: ReturnType<HubStore["board"]>["issues"][number]) {
     remote_pending: issue.remote_state?.status === "pending",
     remote_conflict: issue.remote_state?.status === "conflict",
     thread_id: null,
+    run_thread_id: issue.has_conversation ? issue.id : null,
     workspace_path: null,
     agent_enabled: issue.agent_enabled,
     agent_id: issue.agent_id,
@@ -145,9 +147,11 @@ function issueForWeb(issue: ReturnType<HubStore["board"]>["issues"][number]) {
     pending_actor: issue.pending_actor,
     enrichment_status: null,
     reply_draft: "",
-    reply_status: "idle",
-    active_run_status: issue.active_run ? "running" : null,
-    latest_run_status: issue.status === "done" ? "completed" : null,
+    reply_status: issue.reply_status,
+    active_run_status: issue.active_run_status,
+    latest_run_status: issue.latest_run_status,
+    latest_scheduler_status: issue.latest_scheduler_status,
+    session_status: issue.session_status,
   };
 }
 
@@ -325,13 +329,45 @@ export function createHubServer(options: HubServerOptions) {
         const issue = store.board().issues.find(item => item.id === command.entity_id)!;
         return sendJson(response, 202, issueForWeb(issue));
       }
-      const issueAction = url.pathname.match(/^\/api\/issues\/([^/]+)\/(move|start|archive|unarchive)$/);
+      const conversationMatch = url.pathname.match(/^\/api\/issues\/([^/]+)\/conversation$/);
+      if (conversationMatch && method === "GET") {
+        if (!browser) return sendJson(response, 401, { error: "unauthorized" });
+        const issueId = decodeURIComponent(conversationMatch[1]);
+        const issue = store.board().issues.find(item => item.id === issueId || item.identifier === issueId);
+        if (!issue) return sendJson(response, 404, { error: "issue_not_found" });
+        const projection = store.conversation(issue.id);
+        let messages = projection?.messages ?? [];
+        let reply = projection?.reply ?? { status: issue.reply_status, message: "" };
+        if (issue.remote_state?.operation === "issue.reply") {
+          const command = store.remoteCommand(issue.remote_state.command_id);
+          if (command?.status === "pending") {
+            const message = String(command.payload.message || "");
+            reply = { request_id: command.command_id, status: "running", message, started_at: command.requested_at };
+            if (!messages.some(item => item.role === "user" && item.markdown === message)) messages = [...messages, { id: `reply-${command.command_id}`, role: "user", markdown: message, html: "", phase: null, timestamp: command.requested_at }];
+          } else if (command?.status === "conflict" || command?.status === "rejected") {
+            reply = { request_id: command.command_id, status: "failed", message: String(command.payload.message || ""), error: command.error || "command_rejected", started_at: command.requested_at, finished_at: command.finished_at || undefined };
+          }
+        }
+        return sendJson(response, 200, { issue_id: issue.id, found: messages.length > 0, messages: messages.map(message => ({ ...message, html: renderMarkdown(message.markdown) })), reply, updated_at: projection?.updated_at || issue.updated_at, issue: issueForWeb(issue) });
+      }
+      const replyMatch = url.pathname.match(/^\/api\/issues\/([^/]+)\/reply$/);
+      if (replyMatch && method === "POST") {
+        if (!browser) return sendJson(response, 401, { error: "unauthorized" });
+        if (!trustedOrigin(request, true) || !csrfValid) return sendJson(response, 403, { error: "csrf_invalid" });
+        const body = await readBody(request);
+        const issueId = decodeURIComponent(replyMatch[1]);
+        const issue = store.board().issues.find(item => item.id === issueId || item.identifier === issueId);
+        if (!issue) return sendJson(response, 404, { error: "issue_not_found" });
+        const command = store.createRemoteCommand({ command_id: body.request_id ?? request.headers["x-better-codex-command-id"], operation: "issue.reply", entity_id: issue.id, base_revision: issue.local_revision, payload: { message: body.message } });
+        return sendJson(response, 202, { issue_id: issue.id, request_id: command.command_id, status: "running", message: command.payload.message });
+      }
+      const issueAction = url.pathname.match(/^\/api\/issues\/([^/]+)\/(move|start|stop|archive|unarchive)$/);
       if (issueAction && method === "POST") {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" });
         if (!trustedOrigin(request, true) || !csrfValid) return sendJson(response, 403, { error: "csrf_invalid" });
         const body = await readBody(request);
         const action = issueAction[2];
-        const operation = action === "archive" ? "issue.archive" : action === "unarchive" ? "issue.restore" : action === "start" ? "issue.start" : "issue.move";
+        const operation = action === "archive" ? "issue.archive" : action === "unarchive" ? "issue.restore" : action === "start" ? "issue.start" : action === "stop" ? "issue.stop" : "issue.move";
         const payload = action === "move"
           ? { status: body.status, before_id: body.before_id }
           : action === "start"
@@ -383,6 +419,8 @@ export function createHubServer(options: HubServerOptions) {
       const device = store.deviceForToken(token);
       if (!device) return sendJson(response, 401, { error: "unauthorized" });
       if (url.pathname === "/api/v1/sync/push" && method === "POST") return sendJson(response, 200, store.push(device.id, await readBody(request) as SyncPushRequest));
+      const conversationPush = url.pathname.match(/^\/api\/v1\/sync\/issues\/([^/]+)\/conversation$/);
+      if (conversationPush && method === "PUT") return sendJson(response, 200, store.putConversation(device.id, decodeURIComponent(conversationPush[1]), await readBody(request, 10 * 1024 * 1024)));
       if (url.pathname === "/api/v1/sync/commands" && method === "GET") return sendJson(response, 200, { commands: store.pendingCommands(device.id, Number(url.searchParams.get("limit") || 100)) });
       const commandAck = url.pathname.match(/^\/api\/v1\/sync\/commands\/([^/]+)\/ack$/);
       if (commandAck && method === "POST") {

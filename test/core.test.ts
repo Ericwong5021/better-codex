@@ -919,7 +919,7 @@ test("legacy imported issues attach resumable completed sessions without changin
     assert.equal(upgraded.session_owned, true);
     assert.equal(upgraded.session_thread_id, threadId);
     assert.equal(store.getIssueReplyState(upgraded.id).status, "succeeded");
-    assert.equal((store.syncProjection("issue", upgraded.id) as { active_run: boolean }).active_run, false);
+    assert.equal((store.syncProjection("issue", upgraded.id) as { active_run_status: string | null }).active_run_status, null);
 
     const activeTurnId = "019fec06-788f-7af3-a031-76b546904f30";
     const refreshed = store.attachImportedSession(legacy.id, {
@@ -929,7 +929,7 @@ test("legacy imported issues attach resumable completed sessions without changin
       turnId: activeTurnId,
     });
     assert.equal(refreshed.status, "in_progress");
-    assert.equal((store.syncProjection("issue", refreshed.id) as { active_run: boolean }).active_run, true);
+    assert.equal((store.syncProjection("issue", refreshed.id) as { session_status: string | null }).session_status, "active");
     assert.equal(refreshed.session_active_turn_id, activeTurnId);
     assert.equal(store.getIssueReplyState(refreshed.id).status, "running");
     assert.equal(store.completeSessionTurn(threadId, activeTurnId, "completed")?.turn_id, activeTurnId);
