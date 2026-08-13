@@ -12,10 +12,6 @@ bindings = [
 tag = "v1"
 new_sqlite_classes = ["BetterCodexHubObject"]
 
-[assets]
-directory = "./assets"
-binding = "ASSETS"
-
 [[r2_buckets]]
 binding = "BACKUPS"
 bucket_name = "better-codex-hub-backups"

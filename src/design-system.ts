@@ -47,6 +47,8 @@ export function betterCodexDesignSystemCss() {
       --bc-color-on-primary: var(--bc-color-canvas);
       --bc-color-danger: oklch(.59 .2 27);
       --bc-color-danger-soft: color-mix(in oklch, var(--bc-color-danger) 12%, var(--bc-color-surface));
+      --bc-success: oklch(.55 .16 145);
+      --bc-warning: oklch(.75 .16 85);
       --bc-color-scrim: rgb(18 18 20 / .28);
       --bc-priority-none: oklch(.62 .01 286);
       --bc-priority-low: oklch(.55 .1 250);
@@ -112,6 +114,8 @@ export function betterCodexDesignSystemCss() {
       --bc-color-primary: var(--bc-color-text);
       --bc-color-on-primary: var(--bc-color-canvas);
       --bc-color-danger: oklch(.68 .18 24);
+      --bc-success: oklch(.65 .15 145);
+      --bc-warning: oklch(.70 .16 85);
       --bc-color-scrim: rgb(0 0 0 / .56);
       --bc-priority-none: oklch(.68 .01 286);
       --bc-priority-low: oklch(.68 .1 250);
@@ -1097,6 +1101,383 @@ export function betterCodexDesignSystemCss() {
       padding-block: 24px;
     }
 
+    #better-codex-auto-dispatch-help-dialog .better-codex-auto-dispatch-help-shell[data-help-view="remote"] {
+      height: min(680px, calc(100vh - 32px));
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-auto-dispatch-help-shell[data-help-view="remote"] .better-codex-help-content {
+      padding: 24px 30px 30px;
+    }
+
+    #better-codex-auto-dispatch-help-dialog [data-help-page="remote"].is-active {
+      max-width: 640px;
+      margin-inline: auto;
+      justify-content: flex-start;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-heading,
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-status-head,
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-actions,
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-url,
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-command {
+      display: flex;
+      align-items: center;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-heading {
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-heading h2 {
+      margin: 0;
+      font-size: calc(var(--bc-text-xl) + 3px);
+      font-weight: 720;
+      letter-spacing: -.025em;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-heading p,
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-step p {
+      margin: 5px 0 0;
+      color: var(--bc-color-text-muted);
+      font-size: var(--bc-text-sm);
+      line-height: 1.5;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-refresh,
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-command button,
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-url button,
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-actions a,
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-actions button {
+      display: inline-flex;
+      min-height: 34px;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      border: 0;
+      border-radius: var(--bc-radius-sm);
+      color: var(--bc-color-text);
+      background: var(--bc-color-control);
+      padding: 0 11px;
+      font: inherit;
+      font-size: var(--bc-text-sm);
+      font-weight: 600;
+      text-decoration: none;
+      cursor: pointer;
+      transition: background var(--bc-motion-fast) var(--bc-ease-out), transform var(--bc-motion-fast) var(--bc-ease-out);
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-refresh svg,
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-command button svg,
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-url button svg,
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-actions svg {
+      width: 15px;
+      height: 15px;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-refresh[data-loading="true"] svg {
+      animation: better-codex-spin .85s linear infinite;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-provider {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin-bottom: 12px;
+      padding: 5px;
+      border-radius: var(--bc-radius-lg);
+      background: var(--bc-color-control);
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-provider > button {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      gap: 11px;
+      border: 0;
+      border-radius: var(--bc-radius-md);
+      color: var(--bc-color-text-muted);
+      background: transparent;
+      padding: 12px;
+      text-align: left;
+      font: inherit;
+      cursor: pointer;
+      transition: background var(--bc-motion-fast) var(--bc-ease-out), color var(--bc-motion-fast) var(--bc-ease-out);
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-provider > button.is-active {
+      color: var(--bc-color-text);
+      background: var(--bc-color-canvas);
+      box-shadow: var(--bc-elevation-card);
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-provider-icon,
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-status-icon {
+      display: inline-flex;
+      width: 34px;
+      height: 34px;
+      flex: 0 0 34px;
+      align-items: center;
+      justify-content: center;
+      border-radius: var(--bc-radius-sm);
+      color: var(--bc-color-text);
+      background: var(--bc-color-pressed);
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-provider-icon svg,
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-status-icon svg {
+      width: 17px;
+      height: 17px;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-provider strong,
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-provider small {
+      display: block;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-provider strong {
+      font-size: var(--bc-text-body);
+      line-height: 1.3;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-provider small {
+      overflow: hidden;
+      margin-top: 3px;
+      color: var(--bc-color-text-muted);
+      font-size: var(--bc-text-caption);
+      font-weight: 450;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-setup {
+      display: grid;
+      gap: 8px;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-step {
+      display: grid;
+      grid-template-columns: 28px minmax(0, 1fr);
+      gap: 10px;
+      border-radius: var(--bc-radius-lg);
+      background: var(--bc-color-surface);
+      padding: 13px;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-step-number {
+      display: inline-flex;
+      width: 26px;
+      height: 26px;
+      align-items: center;
+      justify-content: center;
+      border-radius: var(--bc-radius-pill);
+      color: var(--bc-color-on-primary);
+      background: var(--bc-color-primary);
+      font-size: var(--bc-text-caption);
+      font-weight: 700;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-step h3 {
+      margin: 2px 0 0;
+      font-size: var(--bc-text-body);
+      font-weight: 650;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-command,
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-url {
+      min-width: 0;
+      gap: 7px;
+      margin-top: 9px;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-command {
+      border-radius: var(--bc-radius-md);
+      background: var(--bc-color-control);
+      padding: 5px;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-command code {
+      overflow: hidden;
+      min-width: 0;
+      flex: 1;
+      padding-inline: 7px;
+      color: var(--bc-color-text-muted);
+      font: 500 var(--bc-text-caption)/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-command button,
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-url button {
+      flex: 0 0 auto;
+      color: var(--bc-color-on-primary);
+      background: var(--bc-color-primary);
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-url input {
+      min-width: 0;
+      min-height: 36px;
+      flex: 1;
+      border: 0;
+      border-radius: var(--bc-radius-sm);
+      outline: 0;
+      color: var(--bc-color-text);
+      background: var(--bc-color-control);
+      padding: 0 11px;
+      font: inherit;
+      font-size: var(--bc-text-sm);
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-url input:focus {
+      box-shadow: var(--bc-focus-ring);
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-status {
+      margin-top: 12px;
+      border-radius: var(--bc-radius-lg);
+      background: var(--bc-color-control);
+      padding: 14px;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-status-head {
+      gap: 10px;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-status-head > div {
+      min-width: 0;
+      flex: 1;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-status-head strong,
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-status-head small {
+      display: block;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-status-head strong {
+      font-size: var(--bc-text-body);
+      font-weight: 650;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-status-head small {
+      overflow: hidden;
+      margin-top: 3px;
+      color: var(--bc-color-text-muted);
+      font-size: var(--bc-text-caption);
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-status-badge {
+      flex: 0 0 auto;
+      border-radius: var(--bc-radius-pill);
+      color: var(--bc-color-text-muted);
+      background: var(--bc-color-pressed);
+      padding: 5px 9px;
+      font-size: var(--bc-text-caption);
+      font-weight: 650;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-status[data-remote-status="online"] .better-codex-remote-status-icon,
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-status[data-remote-status="online"] .better-codex-remote-status-badge {
+      color: var(--bc-success);
+      background: color-mix(in oklch, var(--bc-success) 13%, var(--bc-color-control));
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-status[data-remote-status="offline"] .better-codex-remote-status-icon,
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-status[data-remote-status="offline"] .better-codex-remote-status-badge {
+      color: var(--bc-color-danger);
+      background: var(--bc-color-danger-soft);
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-status-empty {
+      margin: 13px 0 1px;
+      color: var(--bc-color-text-muted);
+      font-size: var(--bc-text-sm);
+      line-height: 1.5;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-status dl {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 6px;
+      margin: 12px 0 0;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-status dl[hidden],
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-actions[hidden],
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-status-empty[hidden] {
+      display: none;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-status dl > div {
+      min-width: 0;
+      border-radius: var(--bc-radius-sm);
+      background: var(--bc-color-surface-raised);
+      padding: 9px 10px;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-status dt {
+      color: var(--bc-color-text-muted);
+      font-size: var(--bc-text-caption);
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-status dd {
+      overflow: hidden;
+      margin: 4px 0 0;
+      color: var(--bc-color-text);
+      font-size: var(--bc-text-sm);
+      font-weight: 600;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-actions {
+      gap: 7px;
+      margin-top: 9px;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-actions a {
+      color: var(--bc-color-on-primary);
+      background: var(--bc-color-primary);
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-refresh:disabled,
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-url button:disabled,
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-actions button:disabled {
+      color: var(--bc-color-text-faint);
+      background: var(--bc-color-pressed);
+      cursor: default;
+    }
+
+    @media (hover: hover) {
+      #better-codex-auto-dispatch-help-dialog .better-codex-remote-refresh:hover:not(:disabled),
+      #better-codex-auto-dispatch-help-dialog .better-codex-remote-command button:hover:not(:disabled),
+      #better-codex-auto-dispatch-help-dialog .better-codex-remote-url button:hover:not(:disabled),
+      #better-codex-auto-dispatch-help-dialog .better-codex-remote-actions a:hover,
+      #better-codex-auto-dispatch-help-dialog .better-codex-remote-actions button:hover:not(:disabled),
+      #better-codex-auto-dispatch-help-dialog .better-codex-remote-provider > button:hover:not(.is-active) {
+        background: var(--bc-color-hover);
+      }
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-refresh:focus-visible,
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-command button:focus-visible,
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-url button:focus-visible,
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-actions a:focus-visible,
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-actions button:focus-visible,
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-provider > button:focus-visible {
+      outline: 0;
+      box-shadow: var(--bc-focus-ring);
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-command button:active:not(:disabled),
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-url button:active:not(:disabled),
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-actions a:active,
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-actions button:active:not(:disabled) {
+      transform: scale(.97);
+    }
+
     #better-codex-auto-dispatch-help-dialog [data-help-page="settings"] .better-codex-help-setting-group {
       margin-top: 10px;
     }
@@ -1902,6 +2283,44 @@ export function betterCodexDesignSystemCss() {
 
       #better-codex-auto-dispatch-help-dialog .better-codex-help-content {
         padding: 24px 22px;
+      }
+
+      #better-codex-auto-dispatch-help-dialog .better-codex-auto-dispatch-help-shell[data-help-view="remote"] .better-codex-help-content {
+        padding: 20px 16px 24px;
+      }
+
+      #better-codex-auto-dispatch-help-dialog .better-codex-remote-heading {
+        align-items: flex-start;
+      }
+
+      #better-codex-auto-dispatch-help-dialog .better-codex-remote-refresh span {
+        display: none;
+      }
+
+      #better-codex-auto-dispatch-help-dialog .better-codex-remote-provider {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      #better-codex-auto-dispatch-help-dialog .better-codex-remote-provider small {
+        white-space: normal;
+      }
+
+      #better-codex-auto-dispatch-help-dialog .better-codex-remote-url {
+        align-items: stretch;
+        flex-direction: column;
+      }
+
+      #better-codex-auto-dispatch-help-dialog .better-codex-remote-url button {
+        width: 100%;
+      }
+
+      #better-codex-auto-dispatch-help-dialog .better-codex-remote-status dl {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      #better-codex-auto-dispatch-help-dialog .better-codex-remote-actions {
+        align-items: stretch;
+        flex-direction: column;
       }
 
       #better-codex-auto-dispatch-help-dialog .better-codex-help-page.is-active {

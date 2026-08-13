@@ -21,9 +21,12 @@ import {
   CircleDot,
   CircleHelp,
   CircleSlash2,
+  Cloud,
   Columns3,
+  Copy,
   Database,
   Ellipsis,
+  ExternalLink,
   FileCode2,
   FlaskConical,
   FolderOpen,
@@ -42,6 +45,7 @@ import {
   RefreshCw,
   Search,
   SearchCode,
+  Server,
   ShieldCheck,
   SignalHigh,
   SignalLow,
@@ -101,6 +105,10 @@ const lucideIcons = Object.fromEntries(Object.entries({
   permissionWorkspace: FolderOpen,
   permissionDanger: TriangleAlert,
   database: Database,
+  server: Server,
+  cloud: Cloud,
+  copy: Copy,
+  external: ExternalLink,
   sparkles: Sparkles,
   star: Star,
   edit: Pencil,
@@ -514,6 +522,43 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     localeResources.en["源码开发版"] = "Source development build";
     localeResources.en["发现兼容更新"] = "Compatibility update available";
     localeResources.en["源码开发版仅检查兼容层更新，核心版本请更新源码并重新构建。"] = "Source builds only check for compatibility updates. Update the source and rebuild to change the core version.";
+    Object.assign(localeResources.en, {
+      "远程访问": "Remote access",
+      "从浏览器安全访问你的任务看板": "Access your task board securely from a browser",
+      "选择部署方式": "Choose a deployment method",
+      "自有服务器": "Your server",
+      "使用 Docker、SQLite 和自动 HTTPS": "Docker, SQLite, and automatic HTTPS",
+      "无需服务器，部署到你的 Cloudflare 账户": "No server required. Deploy to your Cloudflare account",
+      "安装远程服务": "Install remote service",
+      "在目标服务器的终端执行": "Run in the target server terminal",
+      "在本机终端执行": "Run in your local terminal",
+      "复制安装指令": "Copy install command",
+      "绑定 Better Codex": "Connect Better Codex",
+      "输入部署完成后的访问地址": "Enter the URL shown after deployment",
+      "访问地址": "Access URL",
+      "复制绑定指令": "Copy connect command",
+      "远程服务状态": "Remote service status",
+      "未绑定远程服务": "No remote service connected",
+      "未绑定": "Not connected",
+      "完成部署和绑定后，这里会显示服务状态、版本和访问入口。": "After deployment and connection, service status, version, and the access link appear here.",
+      "已连接": "Connected",
+      "服务在线": "Online",
+      "无法访问": "Unavailable",
+      "服务版本": "Service version",
+      "同步协议": "Sync protocol",
+      "最后同步": "Last sync",
+      "尚未同步": "Not synced yet",
+      "打开远程访问": "Open remote access",
+      "刷新状态": "Refresh status",
+      "升级远程服务": "Upgrade remote service",
+      "复制升级指令": "Copy upgrade command",
+      "远程服务已是当前版本": "Remote service is up to date",
+      "指令已复制": "Command copied",
+      "状态检查失败": "Status check failed",
+      "部署在 VPS": "Deployed on VPS",
+      "部署在 Cloudflare": "Deployed on Cloudflare",
+      "检测中": "Checking",
+    });
     localeResources.en["有任务正在运行，请等待任务结束后再更新。"] = "A task is running. Wait for it to finish before updating.";
     localeResources.en["更新正在进行中，请稍候。"] = "An update is already in progress. Please wait.";
     localeResources.en["下载的更新版本与发布版本不一致，请稍后重试。"] = "The downloaded version does not match the release. Try again later.";
@@ -3381,15 +3426,37 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         '</section>',
       ].join("");
       const shortcutPage = '<section class="better-codex-help-page" data-help-page="shortcuts" hidden><div class="better-codex-help-page-heading"><h2>' + te("快捷键设置") + '</h2><p>' + te("为常用操作设置键盘快捷键。") + '</p></div><div class="better-codex-help-setting-group"><h3>' + te("快捷键") + '</h3><div class="better-codex-help-setting-row is-shortcut"><span><strong>' + te("创建 Issue") + '</strong><small>' + te("打开创建 Issue 窗口") + '</small></span><span class="better-codex-help-shortcut-controls"><button type="button" class="better-codex-help-shortcut-key" data-setting-create-issue-shortcut aria-pressed="false">' + escapeHtml(createIssueShortcut ? shortcutLabel(createIssueShortcut) : te("点击录入")) + '</button><button type="button" class="better-codex-help-shortcut-clear" data-setting-create-issue-shortcut-clear' + (createIssueShortcut ? "" : " disabled") + '>' + te("清除快捷键") + '</button></span></div></div></section>';
+      const remoteInstallerUrl = "https://raw.githubusercontent.com/Ericwong5021/better-codex/v" + CORE_VERSION + "/scripts/selfhost.sh";
+      const remoteInstallCommands = {
+        vps: "curl -fsSL " + remoteInstallerUrl + " | sudo bash -s -- install vps v" + CORE_VERSION,
+        cloudflare: "curl -fsSL " + remoteInstallerUrl + " | bash -s -- install cloudflare v" + CORE_VERSION,
+      };
+      const remoteUpgradeCommands = {
+        vps: "curl -fsSL " + remoteInstallerUrl + " | sudo bash -s -- upgrade vps v" + CORE_VERSION,
+        cloudflare: "curl -fsSL " + remoteInstallerUrl + " | bash -s -- upgrade cloudflare v" + CORE_VERSION,
+      };
+      const remotePage = [
+        '<section class="better-codex-help-page" data-help-page="remote" data-remote-provider="vps" hidden>',
+        '<div class="better-codex-remote-heading"><div><h2>' + te("远程访问") + '</h2><p>' + te("从浏览器安全访问你的任务看板") + '</p></div><button type="button" class="better-codex-remote-refresh" data-remote-refresh>' + icon("refresh") + '<span>' + te("刷新状态") + '</span></button></div>',
+        '<div class="better-codex-remote-provider" role="radiogroup" aria-label="' + te("选择部署方式") + '"><button type="button" role="radio" aria-checked="true" class="is-active" data-remote-provider="vps"><span class="better-codex-remote-provider-icon">' + icon("server") + '</span><span><strong>VPS</strong><small>' + te("使用 Docker、SQLite 和自动 HTTPS") + '</small></span></button><button type="button" role="radio" aria-checked="false" data-remote-provider="cloudflare"><span class="better-codex-remote-provider-icon">' + icon("cloud") + '</span><span><strong>Cloudflare</strong><small>' + te("无需服务器，部署到你的 Cloudflare 账户") + '</small></span></button></div>',
+        '<div class="better-codex-remote-setup">',
+        '<section class="better-codex-remote-step"><span class="better-codex-remote-step-number">1</span><div><h3>' + te("安装远程服务") + '</h3><p data-remote-install-hint>' + te("在目标服务器的终端执行") + '</p><div class="better-codex-remote-command"><code data-remote-install-command>' + escapeHtml(remoteInstallCommands.vps) + '</code><button type="button" data-remote-copy-install aria-label="' + te("复制安装指令") + '">' + icon("copy") + '<span>' + te("复制") + '</span></button></div></div></section>',
+        '<section class="better-codex-remote-step"><span class="better-codex-remote-step-number">2</span><div><h3>' + te("绑定 Better Codex") + '</h3><p>' + te("输入部署完成后的访问地址") + '</p><div class="better-codex-remote-url"><input type="url" data-remote-url inputmode="url" autocomplete="url" placeholder="https://codex.example.com" aria-label="' + te("访问地址") + '"><button type="button" data-remote-copy-connect disabled>' + icon("copy") + '<span>' + te("复制绑定指令") + '</span></button></div></div></section>',
+        '</div>',
+        '<section class="better-codex-remote-status" data-remote-status="loading"><div class="better-codex-remote-status-head"><span class="better-codex-remote-status-icon">' + icon("server") + '</span><div><strong data-remote-status-title>' + te("检测中") + '</strong><small data-remote-status-subtitle>' + te("正在检查") + '</small></div><span class="better-codex-remote-status-badge" data-remote-status-badge>' + te("检测中") + '</span></div><div class="better-codex-remote-status-empty" data-remote-status-empty>' + te("完成部署和绑定后，这里会显示服务状态、版本和访问入口。") + '</div><dl data-remote-status-details hidden><div><dt>' + te("服务版本") + '</dt><dd data-remote-version>--</dd></div><div><dt>' + te("同步协议") + '</dt><dd data-remote-protocol>--</dd></div><div><dt>' + te("最后同步") + '</dt><dd data-remote-sync>--</dd></div></dl><div class="better-codex-remote-actions" data-remote-actions hidden><a data-remote-open target="_blank" rel="noreferrer">' + icon("external") + '<span>' + te("打开远程访问") + '</span></a><button type="button" data-remote-upgrade>' + icon("refresh") + '<span>' + te("复制升级指令") + '</span></button></div></section>',
+        '<p class="better-codex-help-error" data-remote-error hidden></p>',
+        '</section>',
+      ].join("");
       dialog.innerHTML = [
         '<div class="better-codex-auto-dispatch-help-shell" data-help-view="mode">',
-        '<header><div class="better-codex-help-tabs" role="tablist" aria-label="' + te("帮助与设置") + '"><button type="button" class="is-active" data-help-view="mode" aria-selected="true">' + te("运行模式说明") + '</button><button type="button" data-help-view="settings" aria-selected="false">' + te("设置") + '</button><button type="button" data-help-view="shortcuts" aria-selected="false">' + te("快捷键") + '</button><button type="button" data-help-view="about" aria-selected="false">' + te("关于") + '</button></div>' + mockupTools + '<button type="button" data-help-close aria-label="' + te("关闭") + '">' + icon("close") + "</button></header>",
+        '<header><div class="better-codex-help-tabs" role="tablist" aria-label="' + te("帮助与设置") + '"><button type="button" class="is-active" data-help-view="mode" aria-selected="true">' + te("运行模式说明") + '</button><button type="button" data-help-view="settings" aria-selected="false">' + te("设置") + '</button><button type="button" data-help-view="shortcuts" aria-selected="false">' + te("快捷键") + '</button>' + (HOST_KIND === "web" ? "" : '<button type="button" data-help-view="remote" aria-selected="false">' + te("远程访问") + '</button>') + '<button type="button" data-help-view="about" aria-selected="false">' + te("关于") + '</button></div>' + mockupTools + '<button type="button" data-help-close aria-label="' + te("关闭") + '">' + icon("close") + "</button></header>",
         '<main class="better-codex-help-content">',
         '<section class="better-codex-help-page is-active" data-help-page="mode"><div class="better-codex-auto-dispatch-help-panels"><article class="better-codex-auto-dispatch-help-panel is-manual"><div class="better-codex-auto-dispatch-help-heading">' + icon("user") + "<h3>" + te("手动运行") + "</h3></div>" + modeDescription(helpMode.manual) + "</article>",
         '<div class="better-codex-auto-dispatch-help-divider" aria-hidden="true"></div>',
         '<article class="better-codex-auto-dispatch-help-panel is-auto"><div class="better-codex-auto-dispatch-help-heading">' + icon("refresh") + "<h3>" + te("自动运行") + "</h3></div>" + modeDescription(helpMode.auto) + "</article></div></section>",
         settingsPage,
         shortcutPage,
+        HOST_KIND === "web" ? "" : remotePage,
         '<section class="better-codex-help-page" data-help-page="about" hidden><div class="better-codex-help-about"><span class="better-codex-help-about-logo">' + betterCodexLogo() + '</span><div><h2>Better Codex</h2><p class="better-codex-help-about-slogan">' + te("从开始到完成，让 Codex 里的工作清晰可见。") + '</p></div><span class="better-codex-help-runtime-status"><span class="better-codex-help-status-dot"></span>' + te("运行正常") + '</span></div><dl class="better-codex-help-about-details"><div><dt>' + te("版本信息") + '</dt><dd><button class="better-codex-help-check-update" type="button" data-check-update>' + te("检查新版本") + '</button><span data-product-core></span></dd></div></dl><div class="better-codex-help-github-row"><a class="better-codex-help-github" href="https://github.com/Ericwong5021/better-codex" target="_blank" rel="noreferrer">' + githubLogo() + '<span class="better-codex-help-github-name">Better Codex</span><span class="better-codex-help-github-stars">' + icon("star", "better-codex-help-star") + '</span></a><p>' + te("如果你喜欢 Better Codex，欢迎给我们一个 Star。") + '</p></div></section>',
         "</main>",
         "</div>",
@@ -3437,6 +3504,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         void perform(confirmMockupReset);
       });
       dialog.querySelectorAll("[data-help-close]").forEach(button => button.addEventListener("click", finish));
+      let loadRemoteStatus = () => Promise.resolve();
       const setHelpView = view => {
         dialog.querySelector(".better-codex-auto-dispatch-help-shell").dataset.helpView = view;
         dialog.querySelectorAll("[data-help-view]").forEach(item => {
@@ -3449,8 +3517,147 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           page.hidden = !selected;
           page.classList.toggle("is-active", selected);
         });
+        if (view === "remote") void loadRemoteStatus();
       };
       dialog.querySelectorAll("[data-help-view]").forEach(button => button.addEventListener("click", () => setHelpView(button.dataset.helpView)));
+      const remotePageNode = dialog.querySelector('[data-help-page="remote"]');
+      const remoteInstallCommand = dialog.querySelector("[data-remote-install-command]");
+      const remoteInstallHint = dialog.querySelector("[data-remote-install-hint]");
+      const remoteUrlInput = dialog.querySelector("[data-remote-url]");
+      const remoteConnectButton = dialog.querySelector("[data-remote-copy-connect]");
+      const remoteStatus = dialog.querySelector("[data-remote-status]");
+      const remoteStatusTitle = dialog.querySelector("[data-remote-status-title]");
+      const remoteStatusSubtitle = dialog.querySelector("[data-remote-status-subtitle]");
+      const remoteStatusBadge = dialog.querySelector("[data-remote-status-badge]");
+      const remoteStatusEmpty = dialog.querySelector("[data-remote-status-empty]");
+      const remoteStatusDetails = dialog.querySelector("[data-remote-status-details]");
+      const remoteActions = dialog.querySelector("[data-remote-actions]");
+      const remoteOpen = dialog.querySelector("[data-remote-open]");
+      const remoteUpgrade = dialog.querySelector("[data-remote-upgrade]");
+      const remoteError = dialog.querySelector("[data-remote-error]");
+      const remoteRefresh = dialog.querySelector("[data-remote-refresh]");
+      let selectedRemoteProvider = "vps";
+      let remoteStatusLoaded = false;
+      const normalizedRemoteUrl = () => {
+        try {
+          const url = new URL(remoteUrlInput.value.trim());
+          if (url.protocol !== "https:" && !(url.protocol === "http:" && ["127.0.0.1", "localhost", "::1"].includes(url.hostname))) return "";
+          if (url.username || url.password) return "";
+          if (url.pathname !== "/") return "";
+          url.pathname = "";
+          url.search = "";
+          url.hash = "";
+          return url.origin;
+        } catch {
+          return "";
+        }
+      };
+      const copiedFeedback = async button => {
+        const label = button.querySelector("span");
+        const previous = label?.textContent || "";
+        if (label) label.textContent = te("指令已复制");
+        button.dataset.copied = "true";
+        window.setTimeout(() => {
+          if (!button.isConnected) return;
+          if (label) label.textContent = previous;
+          delete button.dataset.copied;
+        }, 1600);
+      };
+      const setRemoteProvider = provider => {
+        if (!remotePageNode || !["vps", "cloudflare"].includes(provider)) return;
+        selectedRemoteProvider = provider;
+        remotePageNode.dataset.remoteProvider = provider;
+        dialog.querySelectorAll("[data-remote-provider]").forEach(button => {
+          if (button === remotePageNode) return;
+          const selected = button.dataset.remoteProvider === provider;
+          button.classList.toggle("is-active", selected);
+          button.setAttribute("aria-checked", String(selected));
+        });
+        remoteInstallCommand.textContent = remoteInstallCommands[provider];
+        remoteInstallHint.textContent = te(provider === "vps" ? "在目标服务器的终端执行" : "在本机终端执行");
+        remoteUrlInput.placeholder = provider === "vps" ? "https://codex.example.com" : "https://better-codex-hub.example.workers.dev";
+      };
+      const renderRemoteStatus = value => {
+        if (!remoteStatus) return;
+        const remote = value?.remote;
+        const reachable = remote?.reachable === true;
+        const provider = remote?.deployment === "cloudflare" || (!remote?.deployment && String(remote?.url || "").includes(".workers.dev")) ? "cloudflare" : "vps";
+        remoteRefresh.disabled = false;
+        remoteRefresh.dataset.loading = "false";
+        remoteError.hidden = true;
+        if (!remote) {
+          remoteStatus.dataset.remoteStatus = "empty";
+          remoteStatusTitle.textContent = te("未绑定远程服务");
+          remoteStatusSubtitle.textContent = te("完成部署和绑定后，这里会显示服务状态、版本和访问入口。");
+          remoteStatusBadge.textContent = te("未绑定");
+          remoteStatusEmpty.hidden = false;
+          remoteStatusDetails.hidden = true;
+          remoteActions.hidden = true;
+          return;
+        }
+        setRemoteProvider(provider);
+        remoteUrlInput.value = String(remote.url || "");
+        remoteConnectButton.disabled = !normalizedRemoteUrl();
+        remoteStatus.dataset.remoteStatus = reachable ? "online" : "offline";
+        remoteStatusTitle.textContent = String(remote.name || "Better Codex Hub");
+        remoteStatusSubtitle.textContent = te(provider === "cloudflare" ? "部署在 Cloudflare" : "部署在 VPS") + " · " + String(remote.url || "");
+        remoteStatusBadge.textContent = te(reachable ? "服务在线" : "无法访问");
+        remoteStatusEmpty.hidden = true;
+        remoteStatusDetails.hidden = false;
+        remoteActions.hidden = false;
+        dialog.querySelector("[data-remote-version]").textContent = remote.version ? "v" + String(remote.version).replace(/^v/, "") : "--";
+        dialog.querySelector("[data-remote-protocol]").textContent = String(remote.protocol_version || "--");
+        dialog.querySelector("[data-remote-sync]").textContent = value.last_sync_at ? new Date(value.last_sync_at).toLocaleString(state.locale === "zh-CN" ? "zh-CN" : "en") : te("尚未同步");
+        remoteOpen.href = String(remote.url || "");
+        const current = remote.update_available === false && remote.upgrade_supported === true;
+        remoteUpgrade.disabled = current;
+        remoteUpgrade.querySelector("span").textContent = te(current ? "远程服务已是当前版本" : "复制升级指令");
+        if (!reachable && remote.error) {
+          remoteError.textContent = te("状态检查失败") + ": " + String(remote.error);
+          remoteError.hidden = false;
+        }
+      };
+      loadRemoteStatus = async (force = false) => {
+        if (!remoteStatus || (remoteStatusLoaded && !force)) return;
+        remoteStatusLoaded = true;
+        remoteRefresh.disabled = true;
+        remoteRefresh.dataset.loading = "true";
+        remoteStatus.dataset.remoteStatus = "loading";
+        remoteStatusBadge.textContent = te("检测中");
+        try {
+          renderRemoteStatus(await api("/api/remote-access/status"));
+        } catch (error) {
+          remoteRefresh.disabled = false;
+          remoteRefresh.dataset.loading = "false";
+          remoteStatus.dataset.remoteStatus = "offline";
+          remoteStatusTitle.textContent = te("状态检查失败");
+          remoteStatusSubtitle.textContent = error instanceof Error ? error.message : String(error);
+          remoteStatusBadge.textContent = te("无法访问");
+          remoteError.textContent = te("状态检查失败");
+          remoteError.hidden = false;
+        }
+      };
+      dialog.querySelectorAll(".better-codex-remote-provider [data-remote-provider]").forEach(button => button.addEventListener("click", () => setRemoteProvider(button.dataset.remoteProvider)));
+      dialog.querySelector("[data-remote-copy-install]")?.addEventListener("click", async event => {
+        const button = event.currentTarget;
+        await copyText(remoteInstallCommands[selectedRemoteProvider]);
+        await copiedFeedback(button);
+      });
+      remoteUrlInput?.addEventListener("input", () => { remoteConnectButton.disabled = !normalizedRemoteUrl(); });
+      remoteConnectButton?.addEventListener("click", async event => {
+        const button = event.currentTarget;
+        const url = normalizedRemoteUrl();
+        if (!url) return;
+        await copyText('better-codex sync connect --url "' + url + '"');
+        await copiedFeedback(button);
+      });
+      remoteUpgrade?.addEventListener("click", async event => {
+        const button = event.currentTarget;
+        if (button.disabled) return;
+        await copyText(remoteUpgradeCommands[selectedRemoteProvider]);
+        await copiedFeedback(button);
+      });
+      remoteRefresh?.addEventListener("click", () => void loadRemoteStatus(true));
       const languageSwitch = dialog.querySelector("[data-language-value]");
       languageSwitch.querySelectorAll("[data-language]").forEach(button => button.addEventListener("click", () => {
         const setting = button.dataset.language;

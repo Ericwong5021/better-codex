@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { issuePriorities, issueStatuses } from "./db.js";
 import { forbiddenProjectionKeys, remoteCommandOperations, supportedSyncProtocolVersions, syncEntityTypes, syncProtocolVersion, type AgentDirectoryProjection, type ConversationProjection, type HubBoard, type IssueProjection, type ProjectProjection, type RemoteCommand, type RemoteCommandAck, type RemoteCommandOperation, type RemoteCommandStatus, type RuntimeProjection, type SyncChange, type SyncEntityType, type SyncProjection, type SyncPushRequest } from "./sync-contract.js";
+import { coreVersion } from "./version.js";
 
 function now() {
   return new Date().toISOString();
@@ -402,7 +403,7 @@ export class HubStore {
   health() {
     const check = this.db.prepare("PRAGMA quick_check").get() as { quick_check?: string } | undefined;
     const devices = this.db.prepare("SELECT COUNT(*) AS value FROM devices WHERE revoked_at IS NULL").get() as { value: number };
-    return { ok: check?.quick_check === "ok", protocol_version: syncProtocolVersion, devices: Number(devices.value), revision: this.cursor() };
+    return { ok: check?.quick_check === "ok", name: "Better Codex Hub", deployment: "vps", version: coreVersion, protocol_version: syncProtocolVersion, devices: Number(devices.value), revision: this.cursor() };
   }
 
   audit(actor: string, event: string, detail: string | null = null) {

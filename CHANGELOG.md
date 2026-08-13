@@ -4,6 +4,19 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+### Added
+
+- Add an event-driven Cloudflare Hub using Workers, Durable Objects, R2 backups, browser authentication, and remote task controls.
+- Add a Remote access tab with one-command VPS and Cloudflare setup, guided Runtime connection, live service status, version details, browser access, and upgrade commands.
+
+### Changed
+
+- Replace idle sync polling with a WebSocket control channel that wakes the Runtime only when local changes or remote commands need attention.
+
+### Fixed
+
+- Keep remote commands idempotent across retries and reconnects, and improve the remote Web workspace on narrow screens.
+
 ## [0.4.5-beta.1] - 2026-08-13
 
 ### Fixed

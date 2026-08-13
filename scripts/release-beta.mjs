@@ -24,7 +24,7 @@ function readReleaseSources(root) {
   return {
     packageJson: readFileSync(join(root, "package.json"), "utf8"),
     packageLock: readFileSync(join(root, "package-lock.json"), "utf8"),
-    compatibility: readFileSync(join(root, "src", "compatibility.ts"), "utf8"),
+    version: readFileSync(join(root, "src", "version.ts"), "utf8"),
     changelog: readFileSync(join(root, "CHANGELOG.md"), "utf8"),
   };
 }
@@ -32,7 +32,7 @@ function readReleaseSources(root) {
 function writeReleaseSources(root, sources) {
   writeFileSync(join(root, "package.json"), sources.packageJson);
   writeFileSync(join(root, "package-lock.json"), sources.packageLock);
-  writeFileSync(join(root, "src", "compatibility.ts"), sources.compatibility);
+  writeFileSync(join(root, "src", "version.ts"), sources.version);
   writeFileSync(join(root, "CHANGELOG.md"), sources.changelog);
 }
 
@@ -41,7 +41,7 @@ function restoreReleaseSources(root, original, prepared) {
   const paths = {
     packageJson: "package.json",
     packageLock: "package-lock.json",
-    compatibility: "src/compatibility.ts",
+    version: "src/version.ts",
     changelog: "CHANGELOG.md",
   };
   const conflicts = Object.keys(paths).filter(key => current[key] !== prepared[key] && current[key] !== original[key]);
@@ -88,7 +88,7 @@ function changelogSection(changelog, version) {
 function validateCurrentReleaseSources(sources) {
   const version = packageVersion(sources.packageJson, "package.json");
   const lock = lockVersion(sources.packageLock);
-  const core = coreVersion(sources.compatibility);
+  const core = coreVersion(sources.version);
   if (!stableVersionPattern.test(version) && !betaVersionPattern.test(version)) {
     throw new Error(`Current package version ${version} is not a stable or Beta release version.`);
   }
@@ -109,7 +109,7 @@ function validateCurrentReleaseSources(sources) {
 export function validateBetaSources(sources, expectedVersion, expectedTag = "") {
   const version = packageVersion(sources.packageJson, "package.json");
   const lock = lockVersion(sources.packageLock);
-  const core = coreVersion(sources.compatibility);
+  const core = coreVersion(sources.version);
   if (!betaVersionPattern.test(version)) throw new Error(`Package version ${version} is not a Beta version.`);
   if (expectedVersion && version !== expectedVersion) throw new Error(`Package version ${version} does not match expected version ${expectedVersion}.`);
   if (lock.top !== version || lock.root !== version || core !== version) {
@@ -149,7 +149,7 @@ function replaceLockVersions(source, version) {
 
 function replaceCoreVersion(source, version) {
   const replaced = source.replace(/(export const coreVersion = ")[^"]+(";)/, `$1${version}$2`);
-  if (replaced === source) throw new Error("src/compatibility.ts coreVersion could not be updated.");
+  if (replaced === source) throw new Error("src/version.ts coreVersion could not be updated.");
   return replaced;
 }
 
@@ -187,7 +187,7 @@ export function prepareBetaRelease(root, requestedVersion = "", date = localDate
   const prepared = {
     packageJson: replacePackageVersion(sources.packageJson, nextVersion, "package.json"),
     packageLock: replaceLockVersions(sources.packageLock, nextVersion),
-    compatibility: replaceCoreVersion(sources.compatibility, nextVersion),
+    version: replaceCoreVersion(sources.version, nextVersion),
     changelog: releaseChangelog(sources.changelog, currentVersion, nextVersion, date),
   };
   validateBetaSources(prepared, nextVersion);

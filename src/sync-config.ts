@@ -27,7 +27,8 @@ export function normalizeHubUrl(value: string) {
   if (!['https:', 'http:'].includes(url.protocol)) throw new Error("invalid_hub_url");
   if (url.protocol === "http:" && !["127.0.0.1", "localhost", "::1"].includes(url.hostname)) throw new Error("hub_https_required");
   if (url.username || url.password) throw new Error("invalid_hub_url");
-  url.pathname = url.pathname.replace(/\/$/, "");
+  if (url.pathname !== "/") throw new Error("invalid_hub_url");
+  url.pathname = "";
   url.search = "";
   url.hash = "";
   return url.toString().replace(/\/$/, "");

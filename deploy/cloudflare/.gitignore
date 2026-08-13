@@ -1,2 +1,4 @@
 .wrangler
 .dev.vars
+.admin-token
+.worker-url

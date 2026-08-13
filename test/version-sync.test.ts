@@ -4,7 +4,7 @@ import test from "node:test";
 
 const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
 const packageLock = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8")) as { packages: Record<string, { version?: string }> };
-const compatibilitySource = readFileSync(new URL("../src/compatibility.ts", import.meta.url), "utf8");
+const versionSource = readFileSync(new URL("../src/version.ts", import.meta.url), "utf8");
 const changelog = readFileSync(new URL("../CHANGELOG.md", import.meta.url), "utf8");
 const releaseWorkflow = readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
 const previewWorkflow = readFileSync(new URL("../.github/workflows/preview.yml", import.meta.url), "utf8");
@@ -12,7 +12,7 @@ const previewPromotion = readFileSync(new URL("../scripts/promote-preview-feed.s
 
 test("release and preview version sources stay synchronized", () => {
   const version = packageJson.version;
-  const coreVersion = compatibilitySource.match(/export const coreVersion = "([^"]+)"/)?.[1];
+  const coreVersion = versionSource.match(/export const coreVersion = "([^"]+)"/)?.[1];
   const escapedVersion = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   assert.match(version, /^\d+\.\d+\.\d+(?:-beta\.[1-9]\d*)?$/);
   assert.equal(packageLock.packages[""].version, version);
@@ -43,7 +43,7 @@ test("release and preview version sources stay synchronized", () => {
   assert.match(previewWorkflow, /path: \|\s+release\/better-codex-cli-/);
   assert.match(previewWorkflow, /checksums\.txt/);
   assert.match(previewWorkflow, /checksums\.sig/);
-  assert.match(previewWorkflow, /cp scripts\/install\.sh scripts\/install\.ps1 release\//);
+  assert.match(previewWorkflow, /cp scripts\/install\.sh scripts\/install\.ps1 scripts\/selfhost\.sh release\//);
   assert.doesNotMatch(previewWorkflow, /release\/\* --prerelease/);
   assert.doesNotMatch(previewWorkflow, /Homebrew|Formula\/better-codex/);
   assert.match(previewPromotion, /select\(\.name == "update-manifest\.json"\)/);

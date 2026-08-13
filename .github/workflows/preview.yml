@@ -94,8 +94,9 @@ jobs:
         with:
           path: release
           merge-multiple: true
-      - run: cp scripts/install.sh scripts/install.ps1 release/
-      - run: find release -type f \( -name '*.tar.gz' -o -name '*.zip' \) -exec sha256sum {} \; | sed 's#release/##' > release/checksums.txt
+      - run: cp scripts/install.sh scripts/install.ps1 scripts/selfhost.sh release/
+      - run: git rev-parse HEAD > release/source-commit.txt
+      - run: find release -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name 'selfhost.sh' -o -name 'source-commit.txt' \) -exec sha256sum {} \; | sed 's#release/##' > release/checksums.txt
       - name: Create signed Preview manifest
         env:
           BETTER_CODEX_UPDATE_CHANNEL: preview
@@ -111,7 +112,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          assets=(release/better-codex-cli-* release/better-codex-core-* release/better-codex-compatibility-*.json release/acceptance.json release/checksums.txt release/checksums.sig release/install.ps1 release/install.sh release/update-manifest.json release/update-public-key.pem)
+          assets=(release/better-codex-cli-* release/better-codex-core-* release/better-codex-compatibility-*.json release/acceptance.json release/checksums.txt release/checksums.sig release/install.ps1 release/install.sh release/selfhost.sh release/source-commit.txt release/update-manifest.json release/update-public-key.pem)
           if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
             test "$(gh release view "${GITHUB_REF_NAME}" --json tagName,isDraft,isPrerelease --jq '[.tagName, .isDraft, .isPrerelease] | @tsv')" = "${GITHUB_REF_NAME}"$'\tfalse\ttrue'
             gh release upload "${GITHUB_REF_NAME}" "${assets[@]}" --clobber

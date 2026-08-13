@@ -1,6 +1,8 @@
 import { controlCapabilities, controlProtocolVersion, decodeControlMessage, encodeControlMessage } from "./control-protocol.js";
 import { syncProtocolVersion, supportedSyncProtocolVersions, type RemoteCommandAck, type SyncChange, type SyncPushRequest } from "./sync-contract.js";
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { coreVersion } from "./version.js";
+import { cloudflareIssuePriorities, cloudflareIssueStatuses, cloudflareRenderMarkdown, cloudflareWebCss, cloudflareWebHtml, cloudflareWebJavaScript } from "./cloudflare-web.js";
 
 type SqlRow = Record<string, unknown>;
 type SqlCursor = { toArray(): SqlRow[] };
@@ -19,6 +21,7 @@ type WebSocketPairConstructor = new () => [WebSocket, WebSocket];
 declare const WebSocketPair: WebSocketPairConstructor;
 
 const schema = `
+CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS devices (id TEXT PRIMARY KEY, name TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL, last_seen_at TEXT NOT NULL, lease_expires_at TEXT, revoked_at TEXT);
 CREATE TABLE IF NOT EXISTS entities (entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, owner_device_id TEXT NOT NULL, local_revision INTEGER NOT NULL, payload_json TEXT NOT NULL, deleted_at TEXT, updated_at TEXT NOT NULL, PRIMARY KEY(entity_type, entity_id));
 CREATE TABLE IF NOT EXISTS sync_events (event_id TEXT PRIMARY KEY, device_id TEXT NOT NULL, received_at TEXT NOT NULL);
@@ -32,6 +35,7 @@ CREATE TABLE IF NOT EXISTS device_authorizations (authorization_id TEXT PRIMARY 
 CREATE TABLE IF NOT EXISTS remote_commands (command_id TEXT PRIMARY KEY, device_id TEXT NOT NULL, operation TEXT NOT NULL, entity_id TEXT NOT NULL, base_revision INTEGER, payload_json TEXT NOT NULL, status TEXT NOT NULL, requested_at TEXT NOT NULL, expires_at TEXT NOT NULL, finished_at TEXT, error TEXT, delivery_id TEXT, dispatched_at TEXT, dispatch_expires_at TEXT, attempt_count INTEGER NOT NULL DEFAULT 0, last_delivery_error TEXT);
 CREATE INDEX IF NOT EXISTS remote_commands_queue ON remote_commands(device_id, status, requested_at);
 `;
+const schemaVersion = 1;
 
 function timestamp(offset = 0) {
   return new Date(Date.now() + offset).toISOString();
@@ -115,8 +119,23 @@ function cleanCommandPayload(operation: string, value: unknown) {
   if (Object.keys(source).some(key => !allowed.includes(key))) throw new Error("forbidden_command_field");
   const payload: Record<string, unknown> = {};
   for (const key of allowed) if (source[key] !== undefined) payload[key] = source[key];
+  if (payload.status !== undefined && !cloudflareIssueStatuses.includes(String(payload.status))) throw new Error("invalid_status");
+  if (payload.priority !== undefined && !cloudflareIssuePriorities.includes(String(payload.priority))) throw new Error("invalid_priority");
+  if (payload.labels !== undefined && (!Array.isArray(payload.labels) || payload.labels.length > 20 || payload.labels.some(label => typeof label !== "string" || label.length > 100))) throw new Error("invalid_labels");
+  if (payload.sort_order !== undefined && (typeof payload.sort_order !== "number" || !Number.isFinite(payload.sort_order))) throw new Error("invalid_sort_order");
+  if (payload.files !== undefined && (!Array.isArray(payload.files) || payload.files.length > 4 || payload.files.some(value => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return true;
+    const file = value as Record<string, unknown>;
+    if (Object.keys(file).some(key => !["name", "type", "data"].includes(key))) return true;
+    const type = typeof file.type === "string" ? file.type.toLowerCase() : "";
+    return typeof file.name !== "string" || file.name.length > 160 || !/^[a-z0-9][a-z0-9.+-]*\/[a-z0-9][a-z0-9.+-]*$/i.test(type) || typeof file.data !== "string" || !file.data.startsWith(`data:${type};base64,`);
+  }) || payload.files.reduce((size, value) => size + String((value as Record<string, unknown>).data || "").length, 0) > 28_000_000)) throw new Error("invalid_files");
   if ((operation === "issue.create" && (!payload.project_id || !payload.title)) || (operation === "issue.move" && !payload.status) || (operation === "issue.start" && !payload.title) || (operation === "issue.reply" && !payload.message && !(Array.isArray(payload.files) && payload.files.length))) throw new Error("invalid_command_payload");
   return payload;
+}
+
+function commandOperation(value: string) {
+  return ["issue.create", "issue.update", "issue.start", "issue.reply", "issue.move", "issue.stop", "issue.archive", "issue.restore"].includes(value);
 }
 
 function webSessionCookie(token: string) {
@@ -133,14 +152,30 @@ function escapeHtml(value: string) {
   return value.replace(/[&<>\"']/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[character] || character));
 }
 
+function issueForWeb(issue: Record<string, unknown>) {
+  const remoteState = issue.remote_state as Record<string, unknown> | undefined;
+  return { ...issue, version: issue.local_revision, remote_pending: remoteState?.status === "pending" || remoteState?.status === "dispatched", remote_conflict: remoteState?.status === "conflict", thread_id: null, run_thread_id: issue.has_conversation ? issue.id : null, workspace_path: null, enrichment_status: null, reply_draft: "" };
+}
+
+function agentsForWeb(board: { agents: Array<Record<string, unknown>>; default_avatar: unknown }) {
+  return [
+    { id: "", role: "codex", name: "Codex", name_en: "Codex", description: "", instructions: "", model: "", reasoning_effort: "", sandbox_mode: "workspace-write", max_concurrency: 5, version: 1, created_at: "", updated_at: "", avatar: board.default_avatar, is_default: true, remote_read_only: true },
+    ...board.agents.map(agent => ({ ...agent, instructions: "", model: "", reasoning_effort: "", sandbox_mode: "workspace-write", max_concurrency: 5, is_default: false, remote_read_only: true })),
+  ];
+}
+
 export class BetterCodexHubObject {
   private ready: Promise<void>;
   private readonly sql: SqlStorage;
+  private readonly webEventStreams = new Set<ReadableStreamDefaultController<Uint8Array>>();
 
   constructor(private readonly state: DurableObjectState, private readonly env: CloudflareEnv) {
     this.sql = state.storage.sql;
     this.ready = state.blockConcurrencyWhile(() => {
       this.sql.exec(schema);
+      const migration = Number(this.sql.exec("SELECT COALESCE(MAX(version), 0) AS value FROM schema_migrations").toArray()[0]?.value || 0);
+      if (migration > schemaVersion) throw new Error("hub_schema_too_new");
+      if (migration < 1) this.sql.exec("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)", schemaVersion, timestamp());
       if (this.env.ADMIN_TOKEN && this.env.ADMIN_TOKEN.length < 32) throw new Error("admin_token_too_short");
       if (this.env.ADMIN_TOKEN && this.env.WEB_PASSWORD && this.env.ADMIN_TOKEN === this.env.WEB_PASSWORD) throw new Error("hub_secrets_must_be_distinct");
       if (this.env.WEB_PASSWORD && this.env.WEB_PASSWORD.length < 12) throw new Error("web_password_too_short");
@@ -155,10 +190,11 @@ export class BetterCodexHubObject {
   async fetch(request: Request) {
     await this.ready;
     const url = new URL(request.url);
-    if (url.pathname === "/healthz" && request.method === "GET") return json({ ok: true, protocol_version: syncProtocolVersion, revision: this.revision() });
+    if (url.pathname === "/healthz" && request.method === "GET") return json({ ok: true, name: "Better Codex Hub", deployment: "cloudflare", version: coreVersion, protocol_version: syncProtocolVersion, revision: this.revision() });
     if (url.pathname === "/api/v1/control" && request.headers.get("upgrade")?.toLowerCase() === "websocket") return this.openControl(request);
     if (url.pathname === "/web/session" && request.method === "POST") return this.login(request);
     if (url.pathname === "/web/session" && request.method === "GET") return this.session(request);
+    if (url.pathname === "/web/session" && request.method === "DELETE") return this.logout(request);
     const approvalPage = url.pathname.match(/^\/web\/device-authorizations\/([^/]+)$/);
     if (approvalPage && request.method === "GET") return this.authorizationPage(decodeURIComponent(approvalPage[1]), url.searchParams.get("code") || "");
     if (url.pathname === "/api/v1/device-authorizations" && request.method === "POST") return this.createAuthorization(request);
@@ -176,8 +212,9 @@ export class BetterCodexHubObject {
     if (url.pathname === "/api/v1/admin/read-only" && request.method === "POST") return this.setReadOnly(request);
     if (url.pathname === "/api/v1/admin/command-queue" && request.method === "GET") return this.commandQueue(request);
     if (url.pathname === "/" && request.method === "GET") return this.webDashboard();
-    if (url.pathname === "/web" && request.method === "GET") return this.webDashboard();
-    if (url.pathname === "/web/" && request.method === "GET") return this.webDashboard();
+    if ((url.pathname === "/web" || url.pathname === "/web/") && request.method === "GET") return this.webDashboard();
+    if (url.pathname === "/web/host.css" && request.method === "GET") return new Response(cloudflareWebCss(), { headers: { "content-type": "text/css; charset=utf-8" } });
+    if (url.pathname === "/web/host.js" && request.method === "GET") return new Response(cloudflareWebJavaScript(), { headers: { "content-type": "text/javascript; charset=utf-8" } });
     if (url.pathname === "/api/v1/board" && request.method === "GET") {
       if (!(await this.isWebAuthorized(request))) return json({ error: "unauthorized" }, 401);
       return json(this.board());
@@ -189,11 +226,20 @@ export class BetterCodexHubObject {
       const runtime = this.sql.exec("SELECT payload_json, updated_at FROM runtime_projection ORDER BY updated_at DESC LIMIT 1").toArray()[0] as { payload_json?: string; updated_at?: string } | undefined;
       return json({ protocol_version: syncProtocolVersion, revision: this.revision(), runtime: runtime?.payload_json ? JSON.parse(runtime.payload_json) : null, backup: { configured: Boolean(this.env.BACKUPS), last_backup: backup ? { key: backup.value, created_at: backup.updated_at } : null }, read_only: readOnly?.value === "1" });
     }
-    if ((url.pathname === "/api/issues" || url.pathname.startsWith("/api/issues/")) && request.method !== "GET") {
-      if (!(await this.isWebAuthorized(request))) return json({ error: "unauthorized" }, 401);
-      if (!trustedOrigin(request) || !(await this.webCsrf(request))) return json({ error: "csrf_invalid" }, 403);
-      try { return json(await this.createWebCommand(url, request), 202); } catch (error) { return json({ error: error instanceof Error ? error.message : "command_failed" }, 400); }
-    }
+    if (url.pathname === "/api/bootstrap" && request.method === "GET") return this.webBootstrap(request);
+    if (url.pathname === "/api/account/usage" && request.method === "GET") return this.webAuthorized(request, { usage: null });
+    if (url.pathname === "/api/update" && request.method === "GET") return this.webAuthorized(request, { available: false, checking: false, installing: false });
+    if (url.pathname === "/api/agents" && request.method === "GET") return this.webAgents(request);
+    if (url.pathname === "/api/projects" && request.method === "GET") return this.webProjects(request);
+    if (url.pathname === "/api/issues" && request.method === "GET") return this.webIssues(request, url);
+    const webIssue = url.pathname.match(/^\/api\/issues\/([^/]+)$/);
+    if (webIssue && request.method === "GET") return this.webIssue(request, decodeURIComponent(webIssue[1]));
+    const conversation = url.pathname.match(/^\/api\/issues\/([^/]+)\/conversation$/);
+    if (conversation && request.method === "GET") return this.webConversation(request, decodeURIComponent(conversation[1]));
+    const commandStatus = url.pathname.match(/^\/api\/v1\/commands\/([^/]+)$/);
+    if (commandStatus && request.method === "GET") return this.webCommand(request, decodeURIComponent(commandStatus[1]));
+    if (url.pathname === "/api/events" && request.method === "GET") return this.webEvents(request, url);
+    if ((url.pathname === "/api/issues" || url.pathname.startsWith("/api/issues/")) && request.method !== "GET") return this.webMutation(request, url);
     if (url.pathname === "/api/v1/devices" && request.method === "POST") return this.createDevice(request);
     const device = await this.deviceForToken(tokenFromRequest(request));
     if (!device) return json({ error: "unauthorized" }, 401);
@@ -250,6 +296,7 @@ export class BetterCodexHubObject {
     const readOnly = this.sql.exec("SELECT value FROM hub_settings WHERE key = 'read_only'").toArray()[0] as { value?: string } | undefined;
     if (readOnly?.value === "1") throw new Error("hub_read_only");
     const commandId = typeof input.commandId === "string" && input.commandId ? input.commandId : crypto.randomUUID();
+    if (!commandOperation(input.operation)) throw new Error("invalid_command_operation");
     if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(commandId)) throw new Error("invalid_command_id");
     const existing = this.sql.exec("SELECT * FROM remote_commands WHERE command_id = ?", commandId).toArray()[0] as SqlRow | undefined;
     const payloadJson = JSON.stringify(cleanCommandPayload(input.operation, input.payload));
@@ -262,17 +309,20 @@ export class BetterCodexHubObject {
     const current = this.sql.exec("SELECT payload_json, deleted_at FROM entities WHERE entity_type = 'issue' AND entity_id = ?", entityId).toArray()[0] as { payload_json: string; deleted_at: string | null } | undefined;
     if (input.operation === "issue.create" && current && !current.deleted_at) throw new Error("issue_exists");
     if (input.operation !== "issue.create" && (!current || current.deleted_at)) throw new Error("issue_not_found");
+    const baseRevision = input.operation === "issue.create" ? null : Number(input.baseRevision);
+    if (input.operation !== "issue.create" && (!Number.isInteger(baseRevision) || Number(baseRevision) < 1)) throw new Error("invalid_version");
     const requested = timestamp();
     let command: SqlRow;
     try {
       command = this.transaction(() => {
-        this.sql.exec("INSERT INTO remote_commands (command_id, device_id, operation, entity_id, base_revision, payload_json, status, requested_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)", commandId, device.id, input.operation, entityId, input.baseRevision === null ? null : Number(input.baseRevision), payloadJson, requested, timestamp(24 * 60 * 60_000));
+        this.sql.exec("INSERT INTO remote_commands (command_id, device_id, operation, entity_id, base_revision, payload_json, status, requested_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)", commandId, device.id, input.operation, entityId, baseRevision, payloadJson, requested, timestamp(24 * 60 * 60_000));
         return this.sql.exec("SELECT * FROM remote_commands WHERE command_id = ?", commandId).toArray()[0] as SqlRow;
       });
     } catch (error) {
       throw error;
     }
     this.notifyDevice(device.id);
+    this.notifyWeb({ entity_type: "issue", entity_id: String(command.entity_id), operation: "command" });
     return this.command(command);
   }
 
@@ -299,15 +349,28 @@ export class BetterCodexHubObject {
   private board() {
     const rows = this.sql.exec("SELECT entity_type, entity_id, payload_json FROM entities WHERE deleted_at IS NULL ORDER BY entity_type, entity_id").toArray() as Array<{ entity_type: string; entity_id: string; payload_json: string }>;
     const projects = rows.filter(row => row.entity_type === "project").map(row => JSON.parse(row.payload_json));
-    const issues = rows.filter(row => row.entity_type === "issue").map(row => JSON.parse(row.payload_json));
+    const issues = rows.filter(row => row.entity_type === "issue").map(row => JSON.parse(row.payload_json) as Record<string, unknown>);
     const directory = rows.find(row => row.entity_type === "agent_directory");
     const agents = directory ? JSON.parse(directory.payload_json) : { agents: [], default_avatar: "" };
     const runtimeRow = this.sql.exec("SELECT payload_json FROM runtime_projection ORDER BY updated_at DESC LIMIT 1").toArray()[0] as { payload_json?: string } | undefined;
+    const commands = this.sql.exec("SELECT * FROM remote_commands WHERE status IN ('pending', 'dispatched', 'conflict', 'rejected') ORDER BY requested_at").toArray();
+    for (const row of commands) {
+      const command = this.command(row);
+      let issue = issues.find(item => item.id === command.entity_id);
+      if (!issue && command.operation === "issue.create" && ["pending", "dispatched"].includes(String(command.status))) {
+        const payload = command.payload as Record<string, unknown>;
+        issue = { id: command.entity_id, identifier: `PENDING-${String(command.entity_id).slice(0, 8).toUpperCase()}`, project_id: payload.project_id, title: payload.title, description: payload.description || "", status: payload.status || "todo", priority: payload.priority || "medium", labels: payload.labels || [], sort_order: Number.MAX_SAFE_INTEGER, pinned: false, archived_at: null, assigned: payload.agent_enabled === true || payload.user_assigned === true, agent_enabled: payload.agent_enabled === true, agent_id: payload.agent_id || null, user_assigned: payload.user_assigned === true, pending_actor: payload.agent_enabled === true ? "agent" : "user", active_run_status: null, latest_run_status: null, latest_scheduler_status: null, session_status: null, reply_status: "idle", has_conversation: false, last_activity_finished_at: null, needs_attention: false, created_at: command.requested_at, updated_at: command.requested_at, local_revision: 0 };
+        issues.push(issue);
+      }
+      if (!issue) continue;
+      if (["pending", "dispatched"].includes(String(command.status)) && ["issue.update", "issue.move", "issue.start"].includes(String(command.operation))) Object.assign(issue, command.payload, { updated_at: command.requested_at });
+      Object.assign(issue, { remote_state: { command_id: command.command_id, status: command.status, operation: command.operation, error: command.error } });
+    }
     return { revision: this.revision(), projects, issues, agents: agents.agents || [], default_avatar: agents.default_avatar || "", runtime: runtimeRow?.payload_json ? JSON.parse(runtimeRow.payload_json) : null };
   }
 
   private webDashboard() {
-    return new Response(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Better Codex Hub</title><style>body{font:16px system-ui,sans-serif;max-width:760px;margin:40px auto;padding:0 20px;color:#17211b}form{display:grid;gap:10px;max-width:360px}input,button{font:inherit;padding:10px}pre{white-space:pre-wrap;background:#f3f5f3;padding:14px;border-radius:8px}</style><main><h1>Better Codex Hub</h1><p>Sign in to inspect the projection and runtime status.</p><form id="login"><input name="username" value="admin" autocomplete="username" required><input name="password" type="password" autocomplete="current-password" required><button>Sign in</button><output id="message"></output></form><section id="content" hidden><h2>Current projection</h2><pre id="board"></pre></section><script>const login=document.querySelector('#login'),message=document.querySelector('#message'),content=document.querySelector('#content'),board=document.querySelector('#board');login.onsubmit=async event=>{event.preventDefault();const data=new FormData(login);const response=await fetch('/web/session',{method:'POST',headers:{'content-type':'application/json'},credentials:'same-origin',body:JSON.stringify({username:data.get('username'),password:data.get('password')})});const value=await response.json();if(!response.ok){message.textContent=value.error||'Sign in failed';return}const boardResponse=await fetch('/api/v1/board',{credentials:'same-origin'});const boardValue=await boardResponse.json();if(!boardResponse.ok){message.textContent=boardValue.error||'Board unavailable';return}login.hidden=true;content.hidden=false;board.textContent=JSON.stringify(boardValue,null,2)};</script></main>`, { status: 200, headers: { "content-type": "text/html; charset=utf-8", "content-security-policy": "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-ancestors 'none'" } });
+    return new Response(cloudflareWebHtml(), { status: 200, headers: { "content-type": "text/html; charset=utf-8", "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'" } });
   }
 
   private snapshot() {
@@ -459,6 +522,115 @@ export class BetterCodexHubObject {
     return row ? json({ csrf_token: row.csrf_token, expires_at: row.expires_at }) : json({ error: "unauthorized" }, 401);
   }
 
+  private async logout(request: Request) {
+    if (!trustedOrigin(request) || !(await this.webCsrf(request))) return json({ error: "csrf_invalid" }, 403);
+    const token = cookieValue(request, "better_codex_session");
+    this.sql.exec("DELETE FROM web_sessions WHERE token_hash = ?", await tokenHash(token));
+    return json({ ok: true }, 200, { "set-cookie": "better_codex_session=; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=0" });
+  }
+
+  private async webAuthorized(request: Request, value: unknown) {
+    return await this.isWebAuthorized(request) ? json(value) : json({ error: "unauthorized" }, 401);
+  }
+
+  private async webBootstrap(request: Request) {
+    if (!(await this.isWebAuthorized(request))) return json({ error: "unauthorized" }, 401);
+    const board = this.board();
+    return json({ projects: board.projects, agents: agentsForWeb(board), statuses: cloudflareIssueStatuses, priorities: cloudflareIssuePriorities, appearance: { theme: "system", accent: "green" }, locale: "zh-CN", user: { id: "remote:admin", name: "admin", email: "", handle: "admin", initials: "AD", color: "#16a34a" }, agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], autoDispatch: false, schedulerModel: "", schedulerReasoningEffort: "", mockup: false, runtime: board.runtime, capabilities: { issues: "read-write", agents: "read-only", nativeThreads: false } });
+  }
+
+  private async webAgents(request: Request) {
+    if (!(await this.isWebAuthorized(request))) return json({ error: "unauthorized" }, 401);
+    return json(agentsForWeb(this.board()));
+  }
+
+  private async webProjects(request: Request) {
+    if (!(await this.isWebAuthorized(request))) return json({ error: "unauthorized" }, 401);
+    return json(this.board().projects);
+  }
+
+  private async webIssues(request: Request, url: URL) {
+    if (!(await this.isWebAuthorized(request))) return json({ error: "unauthorized" }, 401);
+    const projectId = url.searchParams.get("project_id");
+    const search = (url.searchParams.get("search") || "").toLowerCase();
+    const archived = url.searchParams.get("archived") === "1";
+    const issues = this.board().issues.filter(issue => Boolean(issue.archived_at) === archived && (!projectId || issue.project_id === projectId) && (!search || `${String(issue.identifier || "")} ${String(issue.title || "")} ${String(issue.description || "")}`.toLowerCase().includes(search)));
+    return json(issues.map(issueForWeb));
+  }
+
+  private async webIssue(request: Request, id: string) {
+    if (!(await this.isWebAuthorized(request))) return json({ error: "unauthorized" }, 401);
+    const issue = this.board().issues.find(item => item.id === id || item.identifier === id);
+    return issue ? json(issueForWeb(issue)) : json({ error: "issue_not_found" }, 404);
+  }
+
+  private async webConversation(request: Request, id: string) {
+    if (!(await this.isWebAuthorized(request))) return json({ error: "unauthorized" }, 401);
+    const issue = this.board().issues.find(item => item.id === id || item.identifier === id);
+    if (!issue) return json({ error: "issue_not_found" }, 404);
+    const row = this.sql.exec("SELECT payload_json, updated_at FROM conversations WHERE issue_id = ?", issue.id).toArray()[0] as { payload_json?: string; updated_at?: string } | undefined;
+    const projection = row?.payload_json ? JSON.parse(row.payload_json) as Record<string, unknown> : null;
+    const messages = Array.isArray(projection?.messages) ? projection.messages.map(value => {
+      const message = value as Record<string, unknown>;
+      return { ...message, html: cloudflareRenderMarkdown(String(message.markdown || "")) };
+    }) : [];
+    return json({ issue_id: issue.id, found: messages.length > 0, messages, reply: projection?.reply || { status: issue.reply_status || "idle", message: "" }, updated_at: projection?.updated_at || row?.updated_at || issue.updated_at, issue: issueForWeb(issue) });
+  }
+
+  private async webCommand(request: Request, id: string) {
+    if (!(await this.isWebAuthorized(request))) return json({ error: "unauthorized" }, 401);
+    const row = this.sql.exec("SELECT * FROM remote_commands WHERE command_id = ?", id).toArray()[0];
+    return row ? json(this.command(row)) : json({ error: "command_not_found" }, 404);
+  }
+
+  private async webEvents(request: Request, url: URL) {
+    if (!(await this.isWebAuthorized(request))) return json({ error: "unauthorized" }, 401);
+    const cursor = Math.max(0, Number(request.headers.get("last-event-id") || url.searchParams.get("cursor") || 0));
+    const changes = this.sql.exec("SELECT seq, entity_type, entity_id, operation, created_at FROM changes WHERE seq > ? ORDER BY seq LIMIT 100", Number.isSafeInteger(cursor) ? cursor : 0).toArray();
+    const revision = this.revision();
+    const initial = changes.length ? changes.map(change => `id: ${change.seq}\nevent: change\ndata: ${JSON.stringify(change)}\n\n`).join("") : `id: ${revision}\nevent: ready\ndata: {}\n\n`;
+    const encoder = new TextEncoder();
+    let timer: ReturnType<typeof setTimeout>;
+    let controllerRef: ReadableStreamDefaultController<Uint8Array> | null = null;
+    const stream = new ReadableStream<Uint8Array>({
+      start: controller => {
+        controllerRef = controller;
+        controller.enqueue(encoder.encode(initial));
+        this.webEventStreams.add(controller);
+        timer = setTimeout(() => {
+          if (!this.webEventStreams.delete(controller)) return;
+          controller.enqueue(encoder.encode(": heartbeat\n\n"));
+          controller.close();
+        }, 25_000);
+      },
+      cancel: () => {
+        clearTimeout(timer);
+        if (controllerRef) this.webEventStreams.delete(controllerRef);
+      },
+    });
+    return new Response(stream, { headers: { "cache-control": "no-store", "content-type": "text/event-stream; charset=utf-8" } });
+  }
+
+  private notifyWeb(event: Record<string, unknown>) {
+    const body = new TextEncoder().encode(`id: ${this.revision()}\nevent: change\ndata: ${JSON.stringify(event)}\n\n`);
+    for (const controller of this.webEventStreams) {
+      try { controller.enqueue(body); } catch { this.webEventStreams.delete(controller); }
+    }
+  }
+
+  private async webMutation(request: Request, url: URL) {
+    if (!(await this.isWebAuthorized(request))) return json({ error: "unauthorized" }, 401);
+    if (!trustedOrigin(request) || !(await this.webCsrf(request))) return json({ error: "csrf_invalid" }, 403);
+    try {
+      const command = await this.createWebCommand(url, request);
+      const row = command as Record<string, unknown>;
+      const issue = this.board().issues.find(item => item.id === row.entity_id);
+      return json(issue ? issueForWeb(issue) : command, 202);
+    } catch (error) {
+      return json({ error: error instanceof Error ? error.message : "command_failed" }, 400);
+    }
+  }
+
   private authorizationPage(authorizationId: string, code: string) {
     const row = this.authorization(authorizationId);
     if (!row || row.status !== "pending") return new Response("authorization_expired", { status: 410, headers: { "content-type": "text/plain; charset=utf-8" } });
@@ -580,6 +752,7 @@ export class BetterCodexHubObject {
       this.sql.exec("INSERT INTO runtime_projection (device_id, payload_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(device_id) DO UPDATE SET payload_json = excluded.payload_json, updated_at = excluded.updated_at", deviceId, JSON.stringify({ ...request.runtime, protocol_version: request.protocol_version, last_seen_at: timestamp() }), timestamp());
       return { accepted, cursor: this.revision(), lease_expires_at: leaseExpiresAt };
     });
+    if (result.accepted.length) this.notifyWeb({ entity_type: "sync", entity_id: deviceId, operation: "push" });
     return result;
   }
 
@@ -618,6 +791,7 @@ export class BetterCodexHubObject {
       const result = this.command(this.sql.exec("SELECT * FROM remote_commands WHERE command_id = ?", ack.command_id).toArray()[0]);
       return result;
     });
+    this.notifyWeb({ entity_type: "issue", entity_id: String(row.entity_id), operation: "command" });
     return result;
   }
 
@@ -690,12 +864,6 @@ export class BetterCodexHubObject {
 
 export default {
   async fetch(request: Request, env: CloudflareEnv) {
-    const pathname = new URL(request.url).pathname;
-    if (env.ASSETS && request.method === "GET" && ["/", "/web", "/web/"].includes(pathname)) {
-      const assetRequest = new Request(new URL("/", request.url), request);
-      return env.ASSETS.fetch(assetRequest);
-    }
-    if (env.ASSETS && request.method === "GET" && pathname !== "/" && pathname !== "/web" && pathname !== "/web/" && !pathname.startsWith("/api/") && !pathname.startsWith("/web/") && pathname !== "/healthz") return env.ASSETS.fetch(request);
     const id = env.HUB.idFromName("primary");
     return env.HUB.get(id).fetch(request);
   },

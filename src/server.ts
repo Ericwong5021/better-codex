@@ -4,7 +4,7 @@ import { closeSync, openSync, readFileSync, unlinkSync, writeFileSync } from "no
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
 import { isSea } from "node:sea";
-import { coreVersion, readCompatibilityStatus } from "./compatibility.js";
+import { compareVersions, coreVersion, readCompatibilityStatus } from "./compatibility.js";
 import { agentSandboxModes, cleanMaxConcurrency, issuePriorities, issueStatuses, Store, type AgentModel, type AgentReasoningEffort, type AgentSandboxMode, type Issue, type IssuePriority, type IssueStatus } from "./db.js";
 import { defaultAgentProfile, syncAgentProfiles, updateDefaultAgentProfile } from "./agent-profiles.js";
 import { readCodexAppearance } from "./appearance.js";
@@ -23,7 +23,7 @@ import { maxMockupBytes, normalizeMockupLocale, readMockupState, replaceMockupSt
 import { injectionScript } from "./dom.js";
 import { betterCodexWebHostCss, betterCodexWebHostHtml, betterCodexWebHostJavaScript } from "./web-host.js";
 import { SyncClient } from "./sync-client.js";
-import { removeSyncConfiguration } from "./sync-config.js";
+import { readSyncConfiguration, removeSyncConfiguration } from "./sync-config.js";
 
 const accessToken = token();
 const mockupEnabled = !isSea() && !packagedBuild && process.argv.includes("--mockup");
@@ -568,6 +568,28 @@ export function startServer() {
       }
       if (!authorized(request, url, webSessions)) return sendJson(response, 401, { error: "unauthorized" });
       if (url.pathname === "/api/sync/status" && method === "GET") return sendJson(response, 200, syncClient.status());
+      if (url.pathname === "/api/remote-access/status" && method === "GET") {
+        const configuration = readSyncConfiguration();
+        const status = syncClient.status();
+        if (!configuration) return sendJson(response, 200, { ...status, remote: null });
+        try {
+          const remote = await fetch(`${configuration.hub_url}/healthz`, { headers: { accept: "application/json" }, redirect: "error", signal: AbortSignal.timeout(8_000) }).then(async remoteResponse => {
+            const contentLength = Number(remoteResponse.headers.get("content-length") || 0);
+            if (contentLength > 16_384) throw new Error("hub_response_too_large");
+            const text = await remoteResponse.text();
+            if (Buffer.byteLength(text) > 16_384) throw new Error("hub_response_too_large");
+            const value = (() => { try { return JSON.parse(text) as Record<string, unknown>; } catch { return {}; } })();
+            if (!remoteResponse.ok) throw new Error(typeof value.error === "string" ? value.error : `hub_http_${remoteResponse.status}`);
+            if (value.ok !== true || value.name !== "Better Codex Hub" || !["vps", "cloudflare"].includes(String(value.deployment)) || typeof value.version !== "string" || typeof value.protocol_version !== "string") throw new Error("invalid_hub_health");
+            return value;
+          });
+          const remoteVersion = typeof remote.version === "string" ? remote.version.replace(/^v/, "") : null;
+          const updateAvailable = Boolean(remoteVersion && compareVersions(remoteVersion, coreVersion) < 0);
+          return sendJson(response, 200, { ...status, remote: { ...remote, url: configuration.hub_url, reachable: remote.ok === true, update_available: updateAvailable, upgrade_supported: Boolean(remoteVersion) } });
+        } catch (error) {
+          return sendJson(response, 200, { ...status, remote: { url: configuration.hub_url, reachable: false, error: error instanceof Error ? error.message : "remote_unavailable" } });
+        }
+      }
       if (url.pathname === "/api/sync/now" && method === "POST") return sendJson(response, 200, await syncClient.syncNow());
       if (url.pathname === "/api/sync/connect" && method === "POST") {
         store.rebuildSyncQueue();
