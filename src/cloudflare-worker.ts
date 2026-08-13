@@ -62,7 +62,10 @@ function recoverExpiredCommands(sql: SqlStorage) {
 function decodePayload(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid_projection");
   const source = value as Record<string, unknown>;
-  if (Object.keys(source).some(key => ["workspace_path", "thread_id", "credential", "prompt", "sandbox_mode", "model", "reasoning_effort"].some(blocked => key.toLowerCase().includes(blocked)))) throw new Error("forbidden_projection_field");
+  const forbidden = (item: unknown): boolean => Array.isArray(item)
+    ? item.some(forbidden)
+    : Boolean(item && typeof item === "object" && Object.entries(item as Record<string, unknown>).some(([key, child]) => ["workspace_path", "thread_id", "credential", "prompt", "sandbox_mode", "model", "reasoning_effort", "rollout_path"].some(blocked => key.toLowerCase().includes(blocked)) || forbidden(child)));
+  if (forbidden(source)) throw new Error("forbidden_projection_field");
   return source;
 }
 
@@ -136,6 +139,7 @@ export class BetterCodexHubObject {
   private push(deviceId: string, request: SyncPushRequest) {
     if (!supportedSyncProtocolVersions.includes(request.protocol_version)) throw new Error("incompatible_protocol");
     if (request.device_id !== deviceId || !Array.isArray(request.changes) || request.changes.length > 100) throw new Error("invalid_changes");
+    if (request.runtime?.device_id !== deviceId || !supportedSyncProtocolVersions.includes(request.runtime?.protocol_version) || request.runtime.health_state !== "online") throw new Error("invalid_runtime_projection");
     const leaseExpiresAt = this.lease(deviceId);
     const accepted: string[] = [];
     for (const change of request.changes) {
@@ -144,6 +148,7 @@ export class BetterCodexHubObject {
       const current = this.sql.exec("SELECT * FROM entities WHERE entity_type = ? AND entity_id = ?", change.entity_type, change.entity_id).toArray()[0] as { owner_device_id: string; payload_json: string; local_revision: number; deleted_at: string | null } | undefined;
       if (current && current.owner_device_id !== deviceId) throw new Error("entity_owned_by_another_device");
       const projection = change.operation === "upsert" ? decodePayload(change.projection) : null;
+      if (projection && (projection.id !== change.entity_id || !Number.isSafeInteger(projection.local_revision) || Number(projection.local_revision) < 1)) throw new Error("invalid_projection");
       const payload = JSON.stringify(projection || (current ? JSON.parse(current.payload_json) : {}));
       const localRevision = Number((projection as Record<string, unknown> | null)?.local_revision || current?.local_revision || 0);
       const deletedAt = projection ? null : change.changed_at;
@@ -178,6 +183,13 @@ export class BetterCodexHubObject {
     if (!row) throw new Error("command_not_found");
     if (!["pending", "dispatched"].includes(String(row.status))) return this.command(row);
     if (row.status === "dispatched" && row.delivery_id && row.delivery_id !== ack.delivery_id) throw new Error("stale_command_delivery");
+    if (!["applied", "rejected", "conflict"].includes(ack.status)) throw new Error("invalid_command_status");
+    if (ack.status === "applied") {
+      const projection = decodePayload(ack.projection);
+      if (projection.id !== row.entity_id || !Number.isSafeInteger(projection.local_revision) || Number(projection.local_revision) < 1) throw new Error("invalid_projection");
+      this.sql.exec("INSERT INTO entities (entity_type, entity_id, owner_device_id, local_revision, payload_json, deleted_at, updated_at) VALUES ('issue', ?, ?, ?, ?, NULL, ?) ON CONFLICT(entity_type, entity_id) DO UPDATE SET owner_device_id = excluded.owner_device_id, local_revision = excluded.local_revision, payload_json = excluded.payload_json, deleted_at = NULL, updated_at = excluded.updated_at", row.entity_id, deviceId, projection.local_revision, JSON.stringify(projection), timestamp());
+      this.sql.exec("INSERT INTO changes (entity_type, entity_id, operation, created_at) VALUES ('issue', ?, 'upsert', ?)", row.entity_id, timestamp());
+    }
     this.sql.exec("UPDATE remote_commands SET status = ?, finished_at = ?, error = ?, delivery_id = NULL, dispatched_at = NULL, dispatch_expires_at = NULL WHERE command_id = ?", ack.status, timestamp(), ack.error, ack.command_id);
     return this.command(this.sql.exec("SELECT * FROM remote_commands WHERE command_id = ?", ack.command_id).toArray()[0]);
   }
