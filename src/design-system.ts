@@ -5542,11 +5542,33 @@ export function betterCodexDesignSystemCss() {
       #better-codex-panel .better-codex-actions,
       #better-codex-panel .better-codex-agent-actions {
         width: 100%;
-        overflow-x: auto;
-        padding-bottom: 2px;
+        overflow: visible;
+        padding-bottom: 0;
       }
 
-      #better-codex-panel .better-codex-search { min-width: 140px; flex: 1; }
+      #better-codex-panel .better-codex-actions {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-areas:
+          "error error"
+          "working search"
+          "filter auto"
+          "create create";
+        align-items: center;
+        gap: var(--bc-space-2);
+      }
+
+      #better-codex-panel .better-codex-actions > .better-codex-error { grid-area: error; max-width: 100%; margin: 0; overflow-wrap: anywhere; }
+      #better-codex-panel .better-codex-actions > * { min-width: 0; }
+      #better-codex-panel .better-codex-actions > #better-codex-working { grid-area: working; min-width: 0; justify-content: flex-start; }
+      #better-codex-panel .better-codex-actions > .better-codex-search-wrap { grid-area: search; width: auto; min-width: 0; flex: 1 1 auto; }
+      #better-codex-panel .better-codex-actions > .better-codex-filter-wrap { grid-area: filter; min-width: 0; }
+      #better-codex-panel .better-codex-actions > .better-codex-auto-dispatch-wrap { grid-area: auto; min-width: 0; justify-content: flex-end; }
+      #better-codex-panel .better-codex-actions > .better-codex-create-split { grid-area: create; justify-self: start; max-width: 100%; }
+      #better-codex-panel .better-codex-create-primary { min-width: 0; max-width: calc(100% - 26px); overflow-wrap: anywhere; white-space: normal; }
+      #better-codex-panel .better-codex-search { width: 100%; min-width: 0; flex: 1; }
+      #better-codex-panel .better-codex-agent-actions { flex-wrap: wrap; }
+      #better-codex-panel .better-codex-agent-actions .better-codex-button { flex: 1 1 180px; }
       #better-codex-panel .better-codex-board { padding-inline: var(--bc-space-3); }
       #better-codex-panel .better-codex-agents { padding-inline: var(--bc-space-3); }
       #better-codex-panel .better-codex-agent-directory { padding: 18px 12px 36px; }
@@ -5569,8 +5591,100 @@ export function betterCodexDesignSystemCss() {
         width: calc(100vw - 24px);
         --bc-dialog-content-gutter: var(--bc-space-4);
       }
-      #better-codex-dialog .better-codex-dialog-footer { align-items: flex-end; padding-block: var(--bc-space-2); }
-      #better-codex-dialog .better-codex-dialog-footer-right { flex-wrap: wrap; }
+      #better-codex-dialog .better-codex-dialog-head {
+        align-items: flex-start;
+        flex-wrap: wrap;
+        gap: var(--bc-space-2);
+      }
+      #better-codex-dialog .better-codex-dialog-breadcrumb { flex: 1 1 100%; }
+      #better-codex-dialog .better-codex-dialog-head-actions {
+        width: 100%;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
+      #better-codex-dialog .better-codex-dialog-head-actions :is(.better-codex-dialog-open-thread, .better-codex-dialog-start-now) {
+        min-width: 0;
+        flex: 1 1 140px;
+        height: auto;
+        min-height: var(--bc-control-height);
+        padding-block: var(--bc-space-2);
+        text-align: center;
+        white-space: normal;
+      }
+      #better-codex-dialog .better-codex-dialog-footer {
+        display: grid;
+        grid-template-columns: var(--bc-control-height) minmax(0, 1fr);
+        align-items: start;
+        padding-block: var(--bc-space-2);
+      }
+      #better-codex-dialog .better-codex-dialog-footer-right {
+        display: grid;
+        min-width: 0;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: var(--bc-space-2);
+      }
+      #better-codex-dialog .better-codex-switch-mode {
+        width: 100%;
+        min-width: 0;
+        grid-column: 1 / -1;
+        height: auto;
+        min-height: var(--bc-control-height);
+        justify-content: flex-start;
+        padding-block: var(--bc-space-2);
+        text-align: left;
+        white-space: normal;
+      }
+      #better-codex-dialog .better-codex-keep-open { grid-column: 1; min-width: 0; white-space: normal; }
+      #better-codex-dialog .better-codex-submit {
+        grid-column: 2;
+        min-width: 0;
+        max-width: 100%;
+        height: auto;
+        min-height: var(--bc-control-height);
+        padding-block: var(--bc-space-2);
+        white-space: normal;
+      }
+      #better-codex-update-notice {
+        right: 12px;
+        bottom: 12px;
+        left: 12px;
+        width: auto;
+      }
+      #better-codex-update-notice .better-codex-update-layout { flex-wrap: wrap; }
+      #better-codex-update-notice .better-codex-update-actions {
+        width: 100%;
+        justify-content: flex-end;
+        margin: var(--bc-space-1) 0 0;
+      }
+      #better-codex-update-notice .better-codex-update-button { flex: 1 1 120px; }
+      #better-codex-completion-notices { right: 12px; left: 12px; max-width: none; align-items: stretch; }
+      .better-codex-completion-notice { width: 100%; max-width: none; }
+    }
+
+    @media (max-width: 350px) {
+      #better-codex-panel .better-codex-actions {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-areas:
+          "error"
+          "working"
+          "search"
+          "filter"
+          "auto"
+          "create";
+      }
+      #better-codex-panel .better-codex-actions > .better-codex-search-wrap,
+      #better-codex-panel .better-codex-actions > .better-codex-filter-wrap,
+      #better-codex-panel .better-codex-actions > .better-codex-auto-dispatch-wrap,
+      #better-codex-panel .better-codex-actions > .better-codex-create-split {
+        width: 100%;
+      }
+      #better-codex-panel .better-codex-actions > .better-codex-filter-wrap,
+      #better-codex-panel .better-codex-actions > .better-codex-auto-dispatch-wrap {
+        justify-content: flex-start;
+      }
+      #better-codex-panel .better-codex-actions > .better-codex-create-split { justify-self: stretch; }
+      #better-codex-panel .better-codex-create-primary { flex: 1 1 auto; }
     }
 
     @media (prefers-reduced-motion: reduce) {
