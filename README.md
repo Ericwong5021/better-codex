@@ -105,7 +105,14 @@ The installer adds the CLI, Skill, local runtime, and system launcher, then regi
 
 Restart Codex from the Better Codex launcher, and `Task board` and `Agents` appear as two entries in your sidebar. Run `better-codex uninstall` to remove Better Codex completely.
 
-To access your board remotely from a browser, deploy your own Hub and Web UI with the [Self-hosting runbook](SELF_HOSTING.md).
+### Remote access
+
+Remote access is optional and keeps the local Runtime authoritative. Open `More` → `Remote access`, choose a provider, and copy the installation prompt into Codex:
+
+- **VPS** runs the Hub in Docker on your Linux server and uses either the bundled Caddy HTTPS service or your existing reverse proxy.
+- **Cloudflare** runs the Hub on Workers, a SQLite Durable Object, and R2. It does not require a VPS.
+
+Codex verifies the signed, version-pinned [self-hosting runbook](SELF_HOSTING.md), inspects the environment, preserves existing services and partial installations, and verifies the public service before reporting success. After deployment, enter the public URL in Better Codex to get the Runtime connection command. The same page then shows service status, version, browser access, and a verified upgrade prompt.
 
 ## FAQ
 

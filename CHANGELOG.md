@@ -4,6 +4,25 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.5] - 2026-08-13
+
+### Added
+
+- Add an event-driven Cloudflare Hub using Workers, Durable Objects, R2 backups, browser authentication, and remote task controls.
+- Add a Remote access tab with guided VPS and Cloudflare deployment, Runtime connection, live service status, version details, browser access, and verified upgrade prompts.
+
+### Changed
+
+- Replace idle sync polling with a WebSocket control channel that wakes the Runtime only when local changes or remote commands need attention.
+- Guide remote installation through version-pinned Codex prompts backed by an executable self-hosting runbook.
+
+### Fixed
+
+- Keep remote commands idempotent across retries and reconnects, and improve the remote Web workspace on narrow screens.
+- Preserve existing reverse proxies, credentials, Cloudflare resources, and valid partial installations during guided deployment and recovery.
+- Authenticate the self-hosting runbook and installer before Codex reads or executes release instructions.
+- Align the expanded Issue workspace and keep its header controls usable in narrow windows.
+
 ## [0.4.5-beta.2] - 2026-08-13
 
 ### Added
@@ -466,7 +485,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.5-beta.2...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.5...HEAD
+[0.4.5]: https://github.com/Ericwong5021/better-codex/compare/v0.4.4...v0.4.5
 [0.4.5-beta.2]: https://github.com/Ericwong5021/better-codex/compare/v0.4.5-beta.1...v0.4.5-beta.2
 [0.4.5-beta.1]: https://github.com/Ericwong5021/better-codex/compare/v0.4.4...v0.4.5-beta.1
 [0.4.4]: https://github.com/Ericwong5021/better-codex/compare/v0.4.3...v0.4.4

@@ -130,9 +130,9 @@ jobs:
         with:
           path: release
           merge-multiple: true
-      - run: cp scripts/install.sh scripts/install.ps1 scripts/selfhost.sh release/
+      - run: cp scripts/install.sh scripts/install.ps1 scripts/selfhost.sh SELF_HOSTING.md release/
       - run: git rev-parse HEAD > release/source-commit.txt
-      - run: find release -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name 'selfhost.sh' -o -name 'source-commit.txt' \) -exec sha256sum {} \; | sed 's#release/##' > release/checksums.txt
+      - run: find release -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name 'selfhost.sh' -o -name 'SELF_HOSTING.md' -o -name 'source-commit.txt' \) -exec sha256sum {} \; | sed 's#release/##' > release/checksums.txt
       - env:
           BETTER_CODEX_UPDATE_PRIVATE_KEY: ${{ secrets.BETTER_CODEX_UPDATE_PRIVATE_KEY }}
         run: npm run package:update-manifest

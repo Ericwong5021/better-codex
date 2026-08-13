@@ -195,25 +195,43 @@ upgrade_vps() {
   need git
   need docker
   docker compose version >/dev/null 2>&1 || fail "Docker Compose is required"
-  local target directory compose environment
+  local target directory compose proxy_compose environment backup_output backup previous previous_version
+  local -a compose_args up_services
   target="$(version_tag)"
   directory="${BETTER_CODEX_SELFHOST_DIR:-/opt/better-codex}"
   compose="$directory/deploy/hub/compose.yaml"
+  proxy_compose="$directory/deploy/hub/compose.proxy.yaml"
   environment="$directory/deploy/hub/.env"
   [ -f "$compose" ] && [ -f "$environment" ] || fail "Better Codex Hub is not installed in $directory"
-  local previous
+  compose_args=(-f "$compose" --env-file "$environment")
+  up_services=()
+  if [ -f "$proxy_compose" ]; then
+    compose_args+=(-f "$proxy_compose")
+    up_services=(hub)
+  fi
+  docker compose "${compose_args[@]}" config --quiet
   previous="$(git -C "$directory" rev-parse HEAD)"
+  previous_version="$(git -C "$directory" show "${previous}:package.json" | sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
+  [ -n "$previous_version" ] || fail "unable to resolve the installed VPS version"
   verify_tag_commit "$directory" "$target"
-  docker compose -f "$compose" --env-file "$environment" exec -T --user node hub node dist/hub-cli.js backup >/dev/null
-  checkout_source "$directory" "$target"
-  if ! docker compose -f "$compose" --env-file "$environment" up -d --build --wait; then
+  backup_output="$(docker compose "${compose_args[@]}" exec -T --user node hub node dist/hub-cli.js backup)"
+  backup="$(printf '%s\n' "$backup_output" | sed -n 's/^[[:space:]]*"backup":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
+  [[ "$backup" == /data/backups/*.db ]] || fail "VPS backup path is invalid"
+  rollback_vps() {
     git -C "$directory" checkout --detach "$previous"
-    docker compose -f "$compose" --env-file "$environment" up -d --build --wait
+    docker compose "${compose_args[@]}" stop hub
+    docker compose "${compose_args[@]}" build hub
+    docker compose "${compose_args[@]}" run --rm --no-deps hub node dist/hub-cli.js restore "$backup"
+    docker compose "${compose_args[@]}" up -d --wait "${up_services[@]}"
+    docker compose "${compose_args[@]}" exec -T -e TARGET_VERSION="$previous_version" hub node -e 'fetch("http://127.0.0.1:4318/healthz").then(response=>response.json()).then(value=>{if(value.ok!==true||value.version!==process.env.TARGET_VERSION)process.exit(1)})'
+  }
+  checkout_source "$directory" "$target"
+  if ! docker compose "${compose_args[@]}" up -d --build --wait "${up_services[@]}"; then
+    rollback_vps
     fail "VPS upgrade failed and the previous version was restored"
   fi
-  if ! docker compose -f "$compose" --env-file "$environment" exec -T -e TARGET_VERSION="${target#v}" hub node -e 'fetch("http://127.0.0.1:4318/healthz").then(response=>response.json()).then(value=>{if(value.ok!==true||value.version!==process.env.TARGET_VERSION)process.exit(1)})'; then
-    git -C "$directory" checkout --detach "$previous"
-    docker compose -f "$compose" --env-file "$environment" up -d --build --wait
+  if ! docker compose "${compose_args[@]}" exec -T -e TARGET_VERSION="${target#v}" hub node -e 'fetch("http://127.0.0.1:4318/healthz").then(response=>response.json()).then(value=>{if(value.ok!==true||value.version!==process.env.TARGET_VERSION)process.exit(1)})'; then
+    rollback_vps
     fail "VPS upgrade health check failed and the previous version was restored"
   fi
   printf 'Better Codex Hub upgraded to %s\n' "$target"

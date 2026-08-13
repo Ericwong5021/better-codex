@@ -43,7 +43,7 @@ test("release and preview version sources stay synchronized", () => {
   assert.match(previewWorkflow, /path: \|\s+release\/better-codex-cli-/);
   assert.match(previewWorkflow, /checksums\.txt/);
   assert.match(previewWorkflow, /checksums\.sig/);
-  assert.match(previewWorkflow, /cp scripts\/install\.sh scripts\/install\.ps1 scripts\/selfhost\.sh release\//);
+  assert.match(previewWorkflow, /cp scripts\/install\.sh scripts\/install\.ps1 scripts\/selfhost\.sh SELF_HOSTING\.md release\//);
   assert.doesNotMatch(previewWorkflow, /release\/\* --prerelease/);
   assert.doesNotMatch(previewWorkflow, /Homebrew|Formula\/better-codex/);
   assert.match(previewPromotion, /select\(\.name == "update-manifest\.json"\)/);

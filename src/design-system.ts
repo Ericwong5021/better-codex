@@ -1297,13 +1297,15 @@ export function betterCodexDesignSystemCss() {
       padding: 5px;
     }
 
-    #better-codex-auto-dispatch-help-dialog .better-codex-remote-command code {
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-command > span {
       overflow: hidden;
       min-width: 0;
       flex: 1;
       padding-inline: 7px;
       color: var(--bc-color-text-muted);
-      font: 500 var(--bc-text-caption)/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: var(--bc-text-sm);
+      font-weight: 560;
+      line-height: 1.45;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
