@@ -1,0 +1,20 @@
+name = "better-codex-hub"
+main = "../../src/cloudflare-worker.ts"
+compatibility_date = "2026-08-13"
+compatibility_flags = ["nodejs_compat"]
+
+[durable_objects]
+bindings = [
+  { name = "HUB", class_name = "BetterCodexHubObject" }
+]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["BetterCodexHubObject"]
+
+[assets]
+directory = "../../dist"
+binding = "ASSETS"
+
+[vars]
+BETTER_CODEX_HUB_PUBLIC = "1"

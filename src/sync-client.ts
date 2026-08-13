@@ -1,8 +1,9 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { coreVersion } from "./compatibility.js";
 import type { Store } from "./db.js";
 import { readSyncConfiguration, type SyncConfiguration } from "./sync-config.js";
 import { syncProtocolVersion, type AgentDirectoryProjection, type ConversationProjection, type RemoteCommand, type RemoteCommandAck, type RemoteFilePayload, type RuntimeProjection, type SyncChange, type SyncPushResponse } from "./sync-contract.js";
+import { controlCapabilities, controlProtocolVersion, decodeControlMessage, encodeControlMessage } from "./control-protocol.js";
 
 type SyncState = {
   connected: boolean;
@@ -38,6 +39,14 @@ export class SyncClient {
   private active: Promise<SyncState> | null = null;
   private failures = 0;
   private conversationHashes = new Map<string, string>();
+  private controlSocket: WebSocket | null = null;
+  private controlOpening = false;
+  private controlReady = false;
+  private controlHeartbeat: NodeJS.Timeout | null = null;
+  private controlKey: string | null = null;
+  private remoteWake = false;
+  private running = false;
+  private controlRequests = new Map<string, { resolve: (value: Record<string, unknown>) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }>();
   private state: SyncState = { connected: false, syncing: false, last_sync_at: null, last_error: null, hub_url: null, device_name: null, lease_expires_at: null };
 
   constructor(
@@ -52,12 +61,27 @@ export class SyncClient {
 
   start() {
     if (this.timer || !this.configuration()) return;
+    this.running = true;
+    void this.ensureControlConnection();
     void this.schedule(0);
   }
 
   stop() {
+    this.running = false;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+    if (this.controlHeartbeat) clearInterval(this.controlHeartbeat);
+    this.controlHeartbeat = null;
+    this.controlKey = null;
+    this.controlSocket?.close();
+    this.controlSocket = null;
+    this.controlOpening = false;
+    this.controlReady = false;
+    for (const request of this.controlRequests.values()) {
+      clearTimeout(request.timer);
+      request.reject(new Error("control_stopped"));
+    }
+    this.controlRequests.clear();
   }
 
   status() {
@@ -71,7 +95,8 @@ export class SyncClient {
     };
   }
 
-  syncNow() {
+  syncNow(forceRemote = true) {
+    if (forceRemote) this.remoteWake = true;
     if (this.active) return this.active;
     this.active = this.run().finally(() => { this.active = null; });
     return this.active;
@@ -80,12 +105,109 @@ export class SyncClient {
   private async schedule(delay: number) {
     this.timer = setTimeout(async () => {
       this.timer = null;
-      await this.syncNow();
+      await this.syncNow(false);
       if (!this.configuration()) return;
       const retry = [5_000, 10_000, 20_000, 40_000, 60_000][Math.min(this.failures - 1, 4)] ?? this.intervalMs;
       void this.schedule(this.failures ? retry : this.intervalMs);
     }, delay);
     this.timer.unref();
+  }
+
+  private controlUrl(configuration: SyncConfiguration) {
+    const base = new URL(configuration.hub_url);
+    base.protocol = base.protocol === "https:" ? "wss:" : "ws:";
+    base.pathname = "/api/v1/control";
+    base.search = "";
+    return base.toString();
+  }
+
+  private async ensureControlConnection() {
+    const configuration = this.configuration();
+    if (!this.running || !configuration || configuration.transport === "http" || this.controlOpening || (this.controlSocket && (this.controlSocket.readyState === WebSocket.OPEN || this.controlSocket.readyState === WebSocket.CONNECTING))) return;
+    const key = `${configuration.hub_url}|${configuration.device_id}|${configuration.device_token}`;
+    if (this.controlKey === key && this.controlSocket) return;
+    this.controlOpening = true;
+    this.controlKey = key;
+    try {
+      const socket = new WebSocket(this.controlUrl(configuration), ["better-codex-control-v1", configuration.device_token]);
+      this.controlSocket = socket;
+      socket.addEventListener("open", () => {
+        this.controlOpening = false;
+        this.controlReady = false;
+        socket.send(encodeControlMessage({ type: "hello", protocol_version: controlProtocolVersion, device_id: configuration.device_id, device_name: configuration.device_name, sync_protocol_versions: ["sync/v6", "sync/v5"], capabilities: [...controlCapabilities] }));
+        this.controlHeartbeat = setInterval(() => {
+          if (socket.readyState !== WebSocket.OPEN) return;
+          const queue = this.store.syncQueueStatus();
+          socket.send(encodeControlMessage({ type: "heartbeat", protocol_version: controlProtocolVersion, device_id: configuration.device_id, queue_depth: queue.pending }));
+        }, 30_000);
+        this.controlHeartbeat.unref();
+      }, { once: true });
+      socket.addEventListener("message", event => {
+        try {
+          const message = decodeControlMessage(String(event.data));
+          if (message.type === "rpc_response") {
+            const pending = this.controlRequests.get(message.request_id);
+            if (!pending) return;
+            clearTimeout(pending.timer);
+            this.controlRequests.delete(message.request_id);
+            if (message.ok) pending.resolve(message.result || {});
+            else pending.reject(new Error(message.error || "control_rpc_failed"));
+            return;
+          }
+          if (message.type === "hello_ack") {
+            this.controlReady = true;
+            this.state.lease_expires_at = message.lease_expires_at;
+          }
+          if (message.type === "heartbeat_ack") {
+            this.state.lease_expires_at = message.lease_expires_at;
+            if (message.commands_available > 0) void this.syncNow(true);
+          }
+          if (message.type === "commands_available") void this.syncNow(true);
+        } catch {
+          socket.close();
+        }
+      });
+      socket.addEventListener("close", () => {
+        if (this.controlSocket === socket) this.controlSocket = null;
+        this.controlOpening = false;
+        this.controlReady = false;
+        if (this.controlHeartbeat) clearInterval(this.controlHeartbeat);
+        this.controlHeartbeat = null;
+        for (const request of this.controlRequests.values()) {
+          clearTimeout(request.timer);
+          request.reject(new Error("control_closed"));
+        }
+        this.controlRequests.clear();
+        if (this.running && this.configuration()) void this.ensureControlConnection();
+      });
+      socket.addEventListener("error", () => {
+        this.controlOpening = false;
+      });
+    } catch {
+      this.controlOpening = false;
+      this.controlSocket = null;
+    }
+  }
+
+  private controlRpc(method: "commands.claim" | "commands.ack", params: Record<string, unknown>) {
+    const socket = this.controlSocket;
+    if (!socket || socket.readyState !== WebSocket.OPEN) return Promise.reject(new Error("control_unavailable"));
+    const requestId = randomUUID();
+    return new Promise<Record<string, unknown>>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.controlRequests.delete(requestId);
+        reject(new Error("control_rpc_timeout"));
+      }, 15_000);
+      timer.unref();
+      this.controlRequests.set(requestId, { resolve, reject, timer });
+      try {
+        socket.send(encodeControlMessage({ type: "rpc_request", protocol_version: controlProtocolVersion, request_id: requestId, method, params }));
+      } catch (error) {
+        clearTimeout(timer);
+        this.controlRequests.delete(requestId);
+        reject(error instanceof Error ? error : new Error("control_rpc_send_failed"));
+      }
+    });
   }
 
   private runtime(configuration: SyncConfiguration): RuntimeProjection {
@@ -111,9 +233,28 @@ export class SyncClient {
     this.state = { ...this.state, connected: true, syncing: true, hub_url: configuration.hub_url, device_name: configuration.device_name };
     try {
       this.store.initializeSyncQueue();
-      await this.push(configuration);
-      await this.pullCommands(configuration);
-      await this.push(configuration);
+      const remoteWake = this.remoteWake;
+      this.remoteWake = false;
+      const controlReady = this.controlReady && this.controlSocket?.readyState === WebSocket.OPEN;
+      if (configuration.transport === "websocket" && !controlReady) {
+        void this.ensureControlConnection();
+        this.failures += 1;
+        this.state = { ...this.state, syncing: false, last_error: "control_unavailable" };
+        return this.status();
+      }
+      if (controlReady && !remoteWake && this.store.syncQueueStatus().pending === 0) {
+        this.failures = 0;
+        this.state = { ...this.state, syncing: false, last_error: null };
+        return this.status();
+      }
+      if (controlReady && remoteWake && this.store.syncQueueStatus().pending === 0) {
+        await this.pullCommands(configuration);
+        if (this.store.syncQueueStatus().pending > 0) await this.push(configuration);
+      } else {
+        await this.push(configuration);
+        await this.pullCommands(configuration);
+        await this.push(configuration);
+      }
       this.failures = 0;
       this.state = { ...this.state, syncing: false, last_sync_at: new Date().toISOString(), last_error: null };
     } catch (error) {
@@ -195,11 +336,15 @@ export class SyncClient {
 
   private async pullCommands(configuration: SyncConfiguration) {
     for (let page = 0; page < 100; page += 1) {
-      const result = await hubRequest<{ commands: RemoteCommand[] }>(configuration, "/api/v1/sync/commands?limit=100");
+      const claimed = this.controlReady && this.controlSocket?.readyState === WebSocket.OPEN;
+      const result = claimed
+        ? await this.controlRpc("commands.claim", { limit: 100 }) as { commands: RemoteCommand[] }
+        : await hubRequest<{ commands: RemoteCommand[] }>(configuration, "/api/v1/sync/commands?limit=100");
       if (!Array.isArray(result.commands)) throw new Error("invalid_command_response");
       for (const command of result.commands) {
-        const ack = await this.store.applyRemoteCommand(command, { reply: this.reply, stop: this.stopIssue });
-        await hubRequest<RemoteCommandAck>(configuration, `/api/v1/sync/commands/${encodeURIComponent(command.command_id)}/ack`, { method: "POST", body: JSON.stringify(ack) });
+        const ack = { ...(await this.store.applyRemoteCommand(command, { reply: this.reply, stop: this.stopIssue })), delivery_id: command.delivery_id ?? null };
+        if (claimed) await this.controlRpc("commands.ack", ack as unknown as Record<string, unknown>);
+        else await hubRequest<RemoteCommandAck>(configuration, `/api/v1/sync/commands/${encodeURIComponent(command.command_id)}/ack`, { method: "POST", body: JSON.stringify(ack) });
         if (ack.status === "applied") this.commandApplied(command, ack);
       }
       if (result.commands.length < 100) return;

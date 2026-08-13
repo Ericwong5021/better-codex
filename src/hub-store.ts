@@ -3,7 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, renameSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { issuePriorities, issueStatuses } from "./db.js";
-import { forbiddenProjectionKeys, remoteCommandOperations, syncEntityTypes, syncProtocolVersion, type AgentDirectoryProjection, type ConversationProjection, type HubBoard, type IssueProjection, type ProjectProjection, type RemoteCommand, type RemoteCommandAck, type RemoteCommandOperation, type RemoteCommandStatus, type RuntimeProjection, type SyncChange, type SyncEntityType, type SyncProjection, type SyncPushRequest } from "./sync-contract.js";
+import { forbiddenProjectionKeys, remoteCommandOperations, supportedSyncProtocolVersions, syncEntityTypes, syncProtocolVersion, type AgentDirectoryProjection, type ConversationProjection, type HubBoard, type IssueProjection, type ProjectProjection, type RemoteCommand, type RemoteCommandAck, type RemoteCommandOperation, type RemoteCommandStatus, type RuntimeProjection, type SyncChange, type SyncEntityType, type SyncProjection, type SyncPushRequest } from "./sync-contract.js";
 
 function now() {
   return new Date().toISOString();
@@ -17,7 +17,7 @@ function tokenHash(value: string) {
   return createHash("sha256").update(value).digest("hex");
 }
 
-const hubSchemaVersion = 5;
+const hubSchemaVersion = 6;
 
 function backupBeforeMigration(file: string) {
   if (!existsSync(file)) return;
@@ -135,11 +135,11 @@ function cleanProjection(type: SyncEntityType, id: string, value: unknown): Sync
 function cleanRuntime(value: unknown, deviceId: string): RuntimeProjection {
   if (!value || typeof value !== "object" || Array.isArray(value) || containsForbiddenKey(value)) throw new Error("invalid_runtime_projection");
   const source = value as Record<string, unknown>;
-  if (source.device_id !== deviceId || source.protocol_version !== syncProtocolVersion || source.health_state !== "online") throw new Error("invalid_runtime_projection");
+  if (source.device_id !== deviceId || !supportedSyncProtocolVersions.includes(source.protocol_version as never) || source.health_state !== "online") throw new Error("invalid_runtime_projection");
   return {
     device_id: deviceId,
     device_name: cleanString(source.device_name, 120, false),
-    protocol_version: syncProtocolVersion,
+    protocol_version: source.protocol_version as RuntimeProjection["protocol_version"],
     core_version: cleanString(source.core_version, 40, false),
     last_seen_at: now(),
     last_sync_at: typeof source.last_sync_at === "string" ? cleanString(source.last_sync_at, 64) : null,
@@ -149,10 +149,27 @@ function cleanRuntime(value: unknown, deviceId: string): RuntimeProjection {
 }
 
 type EntityRow = { entity_type: SyncEntityType; entity_id: string; payload_json: string; deleted_at: string | null };
-type CommandRow = { command_id: string; device_id: string; operation: RemoteCommandOperation; entity_id: string; base_revision: number | null; payload_json: string; status: RemoteCommandStatus; requested_at: string; expires_at: string; finished_at: string | null; error: string | null };
+type CommandRow = { command_id: string; device_id: string; operation: RemoteCommandOperation; entity_id: string; base_revision: number | null; payload_json: string; status: RemoteCommandStatus; requested_at: string; expires_at: string; finished_at: string | null; error: string | null; delivery_id: string | null; dispatched_at: string | null; dispatch_expires_at: string | null; attempt_count: number | null; last_delivery_error: string | null };
 
 function commandFromRow(row: CommandRow): RemoteCommand {
-  return { ...row, payload: JSON.parse(row.payload_json) as Record<string, unknown> };
+  return {
+    command_id: row.command_id,
+    device_id: row.device_id,
+    operation: row.operation,
+    entity_id: row.entity_id,
+    base_revision: row.base_revision,
+    payload: JSON.parse(row.payload_json) as Record<string, unknown>,
+    status: row.status,
+    requested_at: row.requested_at,
+    expires_at: row.expires_at,
+    finished_at: row.finished_at,
+    error: row.error,
+    delivery_id: row.delivery_id,
+    dispatched_at: row.dispatched_at,
+    dispatch_expires_at: row.dispatch_expires_at,
+    attempt_count: row.attempt_count ?? 0,
+    last_delivery_error: row.last_delivery_error,
+  };
 }
 
 function cleanCommandPayload(operation: RemoteCommandOperation, value: unknown) {
@@ -264,7 +281,12 @@ export class HubStore {
         requested_at TEXT NOT NULL,
         expires_at TEXT NOT NULL,
         finished_at TEXT,
-        error TEXT
+        error TEXT,
+        delivery_id TEXT,
+        dispatched_at TEXT,
+        dispatch_expires_at TEXT,
+        attempt_count INTEGER NOT NULL DEFAULT 0,
+        last_delivery_error TEXT
       );
       CREATE TABLE IF NOT EXISTS remote_command_audit (
         seq INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -322,6 +344,24 @@ export class HubStore {
             .run(command.command_id, timestamp);
         }
         this.db.prepare("INSERT INTO hub_migrations (version, applied_at) VALUES (5, ?)").run(timestamp);
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    }
+    const migratedVersion = Number((this.db.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM hub_migrations").get() as { version: number }).version);
+    if (migratedVersion < 6) {
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        const columns = this.db.prepare("PRAGMA table_info(remote_commands)").all() as Array<{ name: string }>;
+        const names = new Set(columns.map(column => column.name));
+        if (!names.has("delivery_id")) this.db.exec("ALTER TABLE remote_commands ADD COLUMN delivery_id TEXT");
+        if (!names.has("dispatched_at")) this.db.exec("ALTER TABLE remote_commands ADD COLUMN dispatched_at TEXT");
+        if (!names.has("dispatch_expires_at")) this.db.exec("ALTER TABLE remote_commands ADD COLUMN dispatch_expires_at TEXT");
+        if (!names.has("attempt_count")) this.db.exec("ALTER TABLE remote_commands ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0");
+        if (!names.has("last_delivery_error")) this.db.exec("ALTER TABLE remote_commands ADD COLUMN last_delivery_error TEXT");
+        this.db.prepare("INSERT INTO hub_migrations (version, applied_at) VALUES (6, ?)").run(now());
         this.db.exec("COMMIT");
       } catch (error) {
         this.db.exec("ROLLBACK");
@@ -504,7 +544,13 @@ export class HubStore {
   }
 
   private expireCommands() {
-    const rows = this.db.prepare("SELECT command_id FROM remote_commands WHERE status = 'pending' AND expires_at <= ?").all(now()) as Array<{ command_id: string }>;
+    const timestamp = now();
+    const recovered = this.db.prepare("SELECT command_id FROM remote_commands WHERE status = 'dispatched' AND dispatch_expires_at IS NOT NULL AND dispatch_expires_at <= ?").all(timestamp) as Array<{ command_id: string }>;
+    for (const row of recovered) {
+      this.db.prepare("UPDATE remote_commands SET status = 'pending', delivery_id = NULL, dispatched_at = NULL, dispatch_expires_at = NULL, last_delivery_error = 'delivery_lease_expired' WHERE command_id = ? AND status = 'dispatched'").run(row.command_id);
+      this.recordCommandChange(row.command_id, "pending", "delivery_lease_expired");
+    }
+    const rows = this.db.prepare("SELECT command_id FROM remote_commands WHERE status = 'pending' AND expires_at <= ?").all(timestamp) as Array<{ command_id: string }>;
     for (const row of rows) {
       this.db.prepare("UPDATE remote_commands SET status = 'expired', finished_at = ?, error = 'command_expired' WHERE command_id = ? AND status = 'pending'").run(now(), row.command_id);
       this.recordCommandChange(row.command_id, "expired", "command_expired");
@@ -530,7 +576,7 @@ export class HubStore {
     if (operation === "issue.create" && current && !current.deleted_at) throw new Error("issue_exists");
     if (operation !== "issue.create" && (!current || current.deleted_at)) throw new Error("issue_not_found");
     const currentProjection = current ? JSON.parse(current.payload_json) as IssueProjection : null;
-    const pendingReply = operation === "issue.create" ? undefined : this.db.prepare("SELECT 1 AS value FROM remote_commands WHERE entity_id = ? AND operation = 'issue.reply' AND status = 'pending' LIMIT 1").get(entityId);
+    const pendingReply = operation === "issue.create" ? undefined : this.db.prepare("SELECT 1 AS value FROM remote_commands WHERE entity_id = ? AND operation = 'issue.reply' AND status IN ('pending', 'dispatched') LIMIT 1").get(entityId);
     const running = Boolean(currentProjection?.active_run_status || currentProjection?.reply_status === "running" || ["starting", "active", "stopping", "waiting_on_approval", "waiting_on_user"].includes(currentProjection?.session_status || "") || pendingReply);
     if (current && running && !["issue.reply", "issue.stop"].includes(operation)) throw new Error("issue_execution_running");
     if (operation === "issue.reply" && pendingReply) throw new Error("reply_busy");
@@ -558,10 +604,59 @@ export class HubStore {
     return (this.db.prepare("SELECT * FROM remote_commands WHERE device_id = ? AND status = 'pending' ORDER BY requested_at, rowid LIMIT ?").all(deviceId, Math.min(Math.max(Math.trunc(limit), 1), 100)) as CommandRow[]).map(commandFromRow);
   }
 
+  claimCommands(deviceId: string, limit = 100) {
+    this.expireCommands();
+    const boundedLimit = Math.min(Math.max(Math.trunc(limit), 1), 100);
+    const rows = this.db.prepare("SELECT command_id FROM remote_commands WHERE device_id = ? AND status = 'pending' ORDER BY requested_at, rowid LIMIT ?").all(deviceId, boundedLimit) as Array<{ command_id: string }>;
+    const claimed: RemoteCommand[] = [];
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const row of rows) {
+        const deliveryId = randomUUID();
+        const dispatchedAt = now();
+        const dispatchExpiresAt = after(90_000);
+        const result = this.db.prepare("UPDATE remote_commands SET status = 'dispatched', delivery_id = ?, dispatched_at = ?, dispatch_expires_at = ?, attempt_count = COALESCE(attempt_count, 0) + 1 WHERE command_id = ? AND device_id = ? AND status = 'pending'").run(deliveryId, dispatchedAt, dispatchExpiresAt, row.command_id, deviceId);
+        if (result.changes !== 1) continue;
+        this.recordCommandChange(row.command_id, "dispatched", deliveryId);
+        const command = this.db.prepare("SELECT * FROM remote_commands WHERE command_id = ?").get(row.command_id) as CommandRow;
+        claimed.push(commandFromRow(command));
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    return claimed;
+  }
+
+  pendingCommandCount(deviceId: string) {
+    this.expireCommands();
+    const row = this.db.prepare("SELECT COUNT(*) AS value FROM remote_commands WHERE device_id = ? AND status IN ('pending', 'dispatched')").get(deviceId) as { value: number };
+    return Number(row.value);
+  }
+
+  revision() {
+    return this.cursor();
+  }
+
+  heartbeat(deviceId: string) {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const lease_expires_at = this.acquireLease(deviceId);
+      const commands_available = this.pendingCommandCount(deviceId);
+      this.db.exec("COMMIT");
+      return { lease_expires_at, commands_available };
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   ackRemoteCommand(deviceId: string, ack: RemoteCommandAck) {
     const row = this.db.prepare("SELECT * FROM remote_commands WHERE command_id = ? AND device_id = ?").get(ack.command_id, deviceId) as CommandRow | undefined;
     if (!row) throw new Error("command_not_found");
-    if (row.status !== "pending") return commandFromRow(row);
+    if (row.status !== "pending" && row.status !== "dispatched") return commandFromRow(row);
+    if (row.status === "dispatched" && row.delivery_id && ack.delivery_id !== row.delivery_id) throw new Error("stale_command_delivery");
     if (!(["applied", "rejected", "conflict"] as const).includes(ack.status)) throw new Error("invalid_command_status");
     this.db.exec("BEGIN IMMEDIATE");
     try {
@@ -571,7 +666,7 @@ export class HubStore {
         if (!current) this.db.prepare("INSERT INTO entities (entity_type, entity_id, owner_device_id, local_revision, payload_json, deleted_at, updated_at) VALUES ('issue', ?, ?, ?, ?, NULL, ?)").run(row.entity_id, deviceId, projection.local_revision, JSON.stringify(projection), now());
         else this.db.prepare("UPDATE entities SET local_revision = ?, payload_json = ?, deleted_at = NULL, updated_at = ? WHERE entity_type = 'issue' AND entity_id = ? AND owner_device_id = ?").run(projection.local_revision, JSON.stringify(projection), now(), row.entity_id, deviceId);
       }
-      this.db.prepare("UPDATE remote_commands SET status = ?, finished_at = ?, error = ? WHERE command_id = ? AND status = 'pending'").run(ack.status, now(), ack.error, ack.command_id);
+      this.db.prepare("UPDATE remote_commands SET status = ?, finished_at = ?, error = ?, delivery_id = NULL, dispatched_at = NULL, dispatch_expires_at = NULL WHERE command_id = ? AND status IN ('pending', 'dispatched')").run(ack.status, now(), ack.error, ack.command_id);
       this.recordCommandChange(ack.command_id, ack.status, ack.error);
       this.db.exec("COMMIT");
     } catch (error) {
@@ -583,17 +678,17 @@ export class HubStore {
 
   private acquireLease(deviceId: string) {
     const timestamp = now();
-    const takeoverAt = new Date(Date.now() - 60_000).toISOString();
+    const takeoverAt = new Date(Date.now() - 180_000).toISOString();
     const owner = this.db.prepare("SELECT id FROM devices WHERE id != ? AND revoked_at IS NULL AND lease_expires_at IS NOT NULL AND last_seen_at > ? LIMIT 1").get(deviceId, takeoverAt);
     if (owner) throw new Error("writer_lease_conflict");
-    const expires = after(30_000);
+    const expires = after(90_000);
     const renewed = this.db.prepare("UPDATE devices SET last_seen_at = ?, lease_expires_at = ? WHERE id = ? AND revoked_at IS NULL").run(timestamp, expires, deviceId);
     if (renewed.changes !== 1) throw new Error("device_revoked");
     return expires;
   }
 
   push(deviceId: string, request: SyncPushRequest) {
-    if (request.protocol_version !== syncProtocolVersion) throw new Error("incompatible_protocol");
+    if (!supportedSyncProtocolVersions.includes(request.protocol_version)) throw new Error("incompatible_protocol");
     if (request.device_id !== deviceId || !Array.isArray(request.changes) || request.changes.length > 100) throw new Error("invalid_changes");
     const runtime = cleanRuntime(request.runtime, deviceId);
     const accepted: string[] = [];
@@ -640,11 +735,11 @@ export class HubStore {
     const directory = rows.find(row => row.entity_type === "agent_directory");
     const agentDirectory = directory ? JSON.parse(directory.payload_json) as AgentDirectoryProjection : null;
     const agents = agentDirectory?.agents ?? [];
-    const commands = this.db.prepare("SELECT * FROM remote_commands WHERE status IN ('pending', 'conflict', 'rejected') ORDER BY requested_at, rowid").all() as CommandRow[];
+    const commands = this.db.prepare("SELECT * FROM remote_commands WHERE status IN ('pending', 'dispatched', 'conflict', 'rejected') ORDER BY requested_at, rowid").all() as CommandRow[];
     for (const row of commands) {
       const command = commandFromRow(row);
       let issue = issues.find(item => item.id === command.entity_id);
-      if (!issue && command.operation === "issue.create" && command.status === "pending") {
+      if (!issue && command.operation === "issue.create" && ["pending", "dispatched"].includes(command.status)) {
         issue = {
           id: command.entity_id,
           identifier: `PENDING-${command.entity_id.slice(0, 8).toUpperCase()}`,
@@ -677,7 +772,7 @@ export class HubStore {
         issues.push(issue);
       }
       if (!issue) continue;
-      if (command.status === "pending" && ["issue.update", "issue.move", "issue.start"].includes(command.operation)) {
+      if (["pending", "dispatched"].includes(command.status) && ["issue.update", "issue.move", "issue.start"].includes(command.operation)) {
         Object.assign(issue, command.payload, { updated_at: command.requested_at });
         if (command.operation === "issue.start") Object.assign(issue, { agent_enabled: true, user_assigned: false, pending_actor: "agent", assigned: true });
       }

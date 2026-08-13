@@ -11,7 +11,10 @@ export type SyncConfiguration = {
   device_name: string;
   device_token: string;
   created_at: string;
+  transport?: SyncTransport;
 };
+
+export type SyncTransport = "auto" | "websocket" | "http";
 
 export function normalizeHubUrl(value: string) {
   const url = new URL(value);
@@ -29,7 +32,8 @@ export function readSyncConfiguration(): SyncConfiguration | null {
   try {
     const value = JSON.parse(readFileSync(syncConfigPath, "utf8")) as Partial<SyncConfiguration>;
     if (value.enabled !== true || !value.hub_url || !value.device_id || !value.device_token || !value.device_name) return null;
-    return { ...value, hub_url: normalizeHubUrl(value.hub_url) } as SyncConfiguration;
+    const transport = value.transport === "http" || value.transport === "websocket" ? value.transport : "auto";
+    return { ...value, transport, hub_url: normalizeHubUrl(value.hub_url) } as SyncConfiguration;
   } catch {
     return null;
   }
@@ -43,6 +47,7 @@ export function writeSyncConfiguration(input: Omit<SyncConfiguration, "enabled" 
     device_name: input.device_name.trim() || "Better Codex",
     device_token: input.device_token,
     created_at: new Date().toISOString(),
+    transport: input.transport === "http" || input.transport === "websocket" ? input.transport : "auto",
   };
   mkdirSync(dirname(syncConfigPath), { recursive: true });
   const temporary = `${syncConfigPath}.${randomUUID()}.tmp`;

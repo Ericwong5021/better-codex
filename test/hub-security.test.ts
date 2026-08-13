@@ -190,7 +190,7 @@ test("Hub migration creates an integrity-checked backup before changing an older
   } finally {
     migrated.close();
   }
-  const backups = readdirSync(join(directory, "backups")).filter(name => name.startsWith("before-hub-v5-") && name.endsWith(".db"));
+  const backups = readdirSync(join(directory, "backups")).filter(name => name.startsWith("before-hub-v6-") && name.endsWith(".db"));
   assert.equal(backups.length, 1);
   const snapshot = new DatabaseSync(join(directory, "backups", backups[0]), { readOnly: true });
   try {
@@ -233,7 +233,7 @@ test("Hub migration archives legacy cancelled projections and rejects obsolete c
       .run(projection.id, device.device_id, JSON.stringify(projection), timestamp);
     store.db.prepare("INSERT INTO remote_commands (command_id, device_id, operation, entity_id, base_revision, payload_json, status, requested_at, expires_at) VALUES ('legacy-command', ?, 'issue.move', ?, 1, '{\"status\":\"cancelled\"}', 'pending', ?, ?)")
       .run(device.device_id, projection.id, timestamp, new Date(Date.now() + 60_000).toISOString());
-    store.db.prepare("DELETE FROM hub_migrations WHERE version = 5").run();
+    store.db.prepare("DELETE FROM hub_migrations WHERE version IN (5, 6)").run();
     store.close();
     store = undefined;
 
@@ -259,7 +259,7 @@ test("Hub rejects newer schemas before opening or restoring them", () => {
   current.close();
   copyFileSync(database, backup);
   const newer = new DatabaseSync(backup);
-  newer.prepare("INSERT INTO hub_migrations (version, applied_at) VALUES (6, ?)").run(new Date().toISOString());
+  newer.prepare("INSERT INTO hub_migrations (version, applied_at) VALUES (7, ?)").run(new Date().toISOString());
   newer.close();
   try {
     assert.throws(() => new HubStore(backup), /hub_database_schema_too_new/);

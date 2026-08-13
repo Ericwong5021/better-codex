@@ -10,6 +10,8 @@ import type { RemoteCommandAck, SyncPushRequest } from "./sync-contract.js";
 import { betterCodexWebHostCss, betterCodexWebHostHtml, betterCodexWebHostJavaScript } from "./web-host.js";
 import { avatarInitials } from "./user-profile.js";
 import { renderMarkdown } from "./markdown.js";
+import { controlCapabilities, controlProtocolVersion, decodeControlMessage, encodeControlMessage } from "./control-protocol.js";
+import { upgradeWebSocket, type WebSocketConnection } from "./websocket-server.js";
 
 export type HubServerOptions = {
   host: string;
@@ -136,7 +138,7 @@ function errorStatus(code: string) {
   if (code === "unauthorized") return 401;
   if (["forbidden", "csrf_invalid", "writer_lease_conflict"].includes(code)) return 403;
   if (["device_not_found", "issue_not_found", "command_not_found"].includes(code)) return 404;
-  if (["entity_owned_by_another_device", "incompatible_protocol", "version_conflict", "command_id_conflict", "issue_execution_running"].includes(code)) return 409;
+  if (["entity_owned_by_another_device", "incompatible_protocol", "version_conflict", "command_id_conflict", "issue_execution_running", "stale_command_delivery"].includes(code)) return 409;
   if (code === "runtime_not_paired") return 503;
   if (code === "body_too_large") return 413;
   if (code === "login_rate_limited") return 429;
@@ -147,7 +149,7 @@ function issueForWeb(issue: ReturnType<HubStore["board"]>["issues"][number]) {
   return {
     ...issue,
     version: issue.local_revision,
-    remote_pending: issue.remote_state?.status === "pending",
+    remote_pending: issue.remote_state?.status === "pending" || issue.remote_state?.status === "dispatched",
     remote_conflict: issue.remote_state?.status === "conflict",
     thread_id: null,
     run_thread_id: issue.has_conversation ? issue.id : null,
@@ -181,6 +183,13 @@ export function createHubServer(options: HubServerOptions) {
   const secureCookies = options.secureCookies !== false;
   const allowedHosts = options.allowedHosts ?? [];
   const loginAttempts = new Map<string, { count: number; resetAt: number }>();
+  const controlConnections = new Map<string, Set<WebSocketConnection>>();
+  const notifyControl = (deviceId: string) => {
+    const count = store.pendingCommandCount(deviceId);
+    if (count < 1) return;
+    const message = encodeControlMessage({ type: "commands_available", protocol_version: controlProtocolVersion, count });
+    for (const connection of controlConnections.get(deviceId) || []) connection.send(message);
+  };
   const server = createServer((request, response) => {
     void (async () => {
       if (!request.url) return sendJson(response, 400, { error: "invalid_request" });
@@ -328,6 +337,7 @@ export function createHubServer(options: HubServerOptions) {
           base_revision: null,
           payload: { project_id: body.project_id, title: body.title, description: body.description, status: body.status, priority: body.priority, labels: body.labels, agent_enabled: body.agent_enabled, agent_id: body.agent_id, user_assigned: body.user_assigned },
         });
+        notifyControl(command.device_id);
         const issue = store.board().issues.find(item => item.id === command.entity_id)!;
         return sendJson(response, 202, issueForWeb(issue));
       }
@@ -343,6 +353,7 @@ export function createHubServer(options: HubServerOptions) {
           base_revision: body.version,
           payload: { project_id: body.project_id, title: body.title, description: body.description, status: body.status, priority: body.priority, labels: body.labels, sort_order: body.sort_order, pinned: body.pinned, agent_enabled: body.agent_enabled, agent_id: body.agent_id, user_assigned: body.user_assigned },
         });
+        notifyControl(command.device_id);
         const issue = store.board().issues.find(item => item.id === command.entity_id)!;
         return sendJson(response, 202, issueForWeb(issue));
       }
@@ -357,7 +368,7 @@ export function createHubServer(options: HubServerOptions) {
         let reply = projection?.reply ?? { status: issue.reply_status, message: "" };
         if (issue.remote_state?.operation === "issue.reply") {
           const command = store.remoteCommand(issue.remote_state.command_id);
-          if (command?.status === "pending") {
+          if (command?.status === "pending" || command?.status === "dispatched") {
             const names = Array.isArray(command.payload.files) ? command.payload.files.flatMap(file => file && typeof file === "object" && typeof (file as Record<string, unknown>).name === "string" ? [String((file as Record<string, unknown>).name)] : []) : [];
             const message = String(command.payload.message || "") || (names.length ? `附带文件：\n${names.map(name => `- ${name}`).join("\n")}` : "");
             reply = { request_id: command.command_id, status: "running", message, started_at: command.requested_at };
@@ -377,6 +388,7 @@ export function createHubServer(options: HubServerOptions) {
         const issue = store.board().issues.find(item => item.id === issueId || item.identifier === issueId);
         if (!issue) return sendJson(response, 404, { error: "issue_not_found" });
         const command = store.createRemoteCommand({ command_id: body.request_id ?? request.headers["x-better-codex-command-id"], operation: "issue.reply", entity_id: issue.id, base_revision: issue.local_revision, payload: { message: body.message, files: body.files } });
+        notifyControl(command.device_id);
         const names = Array.isArray(command.payload.files) ? command.payload.files.flatMap(file => file && typeof file === "object" && typeof (file as Record<string, unknown>).name === "string" ? [String((file as Record<string, unknown>).name)] : []) : [];
         const message = String(command.payload.message || "") || (names.length ? `附带文件：\n${names.map(name => `- ${name}`).join("\n")}` : "");
         return sendJson(response, 202, { issue_id: issue.id, request_id: command.command_id, status: "running", message });
@@ -394,6 +406,7 @@ export function createHubServer(options: HubServerOptions) {
             ? { project_id: body.project_id, title: body.title, description: body.description, status: body.status, priority: body.priority, labels: body.labels, agent_id: body.agent_id }
             : {};
         const command = store.createRemoteCommand({ command_id: body.command_id ?? request.headers["x-better-codex-command-id"], operation, entity_id: decodeURIComponent(issueAction[1]), base_revision: body.version, payload });
+        notifyControl(command.device_id);
         const issue = store.board().issues.find(item => item.id === command.entity_id)!;
         return sendJson(response, 202, issueForWeb(issue));
       }
@@ -438,10 +451,12 @@ export function createHubServer(options: HubServerOptions) {
 
       const device = store.deviceForToken(token);
       if (!device) return sendJson(response, 401, { error: "unauthorized" });
+      if (url.pathname === "/api/v1/capabilities" && method === "GET") return sendJson(response, 200, { protocol_versions: ["sync/v6", "sync/v5"], control_protocol: "control/v1", transports: ["websocket", "http"], command_delivery: "lease" });
       if (url.pathname === "/api/v1/sync/push" && method === "POST") return sendJson(response, 200, store.push(device.id, await readBody(request, 45 * 1024 * 1024) as SyncPushRequest));
       const conversationPush = url.pathname.match(/^\/api\/v1\/sync\/issues\/([^/]+)\/conversation$/);
       if (conversationPush && method === "PUT") return sendJson(response, 200, store.putConversation(device.id, decodeURIComponent(conversationPush[1]), await readBody(request, 10 * 1024 * 1024)));
       if (url.pathname === "/api/v1/sync/commands" && method === "GET") return sendJson(response, 200, { commands: store.pendingCommands(device.id, Number(url.searchParams.get("limit") || 100)) });
+      if (url.pathname === "/api/v1/sync/commands/claim" && method === "POST") return sendJson(response, 200, { commands: store.claimCommands(device.id, Number(url.searchParams.get("limit") || 100)) });
       const commandAck = url.pathname.match(/^\/api\/v1\/sync\/commands\/([^/]+)\/ack$/);
       if (commandAck && method === "POST") {
         const body = await readBody(request);
@@ -453,6 +468,78 @@ export function createHubServer(options: HubServerOptions) {
       if (!response.headersSent) sendJson(response, errorStatus(code), { error: code });
       else response.end();
     });
+  });
+  server.on("upgrade", (request, socket, head) => {
+    try {
+      if (!trustedHost(request, allowedHosts) || !trustedOrigin(request)) {
+        socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+        return;
+      }
+      const url = new URL(request.url || "/", "http://hub.local");
+      if (url.pathname !== "/api/v1/control") {
+        socket.destroy();
+        return;
+      }
+      const requested = String(request.headers["sec-websocket-protocol"] ?? "").split(",").map(value => value.trim()).filter(Boolean);
+      const token = requested.find(value => value !== "better-codex-control-v1") || "";
+      const device = store.deviceForToken(token);
+      if (!device) {
+        socket.end("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
+        return;
+      }
+      let connection: WebSocketConnection | null = null;
+      let helloReceived = false;
+      connection = upgradeWebSocket(request, socket, ["better-codex-control-v1"], {
+        message: value => {
+          try {
+            const message = decodeControlMessage(value);
+            if (message.type === "hello") {
+              if (message.device_id !== device.id) throw new Error("device_mismatch");
+              helloReceived = true;
+              const lease = store.heartbeat(device.id);
+              connection?.send(encodeControlMessage({ type: "hello_ack", protocol_version: controlProtocolVersion, sync_protocol_version: "sync/v6", capabilities: [...controlCapabilities], revision: store.revision(), lease_expires_at: lease.lease_expires_at }));
+              if (lease.commands_available > 0) connection?.send(encodeControlMessage({ type: "commands_available", protocol_version: controlProtocolVersion, count: lease.commands_available }));
+              return;
+            }
+            if (!helloReceived) throw new Error("control_hello_required");
+            if (message.type === "heartbeat") {
+              if (message.device_id !== device.id) throw new Error("device_mismatch");
+              const lease = store.heartbeat(device.id);
+              connection?.send(encodeControlMessage({ type: "heartbeat_ack", protocol_version: controlProtocolVersion, lease_expires_at: lease.lease_expires_at, commands_available: lease.commands_available }));
+              if (lease.commands_available > 0) connection?.send(encodeControlMessage({ type: "commands_available", protocol_version: controlProtocolVersion, count: lease.commands_available }));
+              return;
+            }
+            if (message.type === "rpc_request" && message.method === "commands.claim") {
+              const commands = store.claimCommands(device.id, Number(message.params.limit || 100));
+              connection?.send(encodeControlMessage({ type: "rpc_response", protocol_version: controlProtocolVersion, request_id: message.request_id, ok: true, result: { commands } }));
+              return;
+            }
+            if (message.type === "rpc_request" && message.method === "commands.ack") {
+              const result = store.ackRemoteCommand(device.id, message.params as RemoteCommandAck);
+              connection?.send(encodeControlMessage({ type: "rpc_response", protocol_version: controlProtocolVersion, request_id: message.request_id, ok: true, result: { command: result } }));
+              return;
+            }
+            throw new Error("unsupported_control_message");
+          } catch (error) {
+            connection?.close(1008);
+            store.audit(device.id, "control_protocol_error", error instanceof Error ? error.message : "control_error");
+          }
+        },
+        close: () => {
+          const connections = controlConnections.get(device.id);
+          connections?.delete(connection!);
+          if (connections?.size === 0) controlConnections.delete(device.id);
+        },
+        error: error => store.audit(device.id, "control_socket_error", error.message),
+      });
+      if (!connection) return;
+      const connections = controlConnections.get(device.id) || new Set<WebSocketConnection>();
+      connections.add(connection);
+      controlConnections.set(device.id, connections);
+      connection.acceptHead(head);
+    } catch {
+      socket.destroy();
+    }
   });
   server.once("close", () => store.close());
   return { server, store };

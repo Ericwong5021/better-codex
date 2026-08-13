@@ -1,7 +1,10 @@
 import type { IssuePriority, IssueReplyStatus, IssueSessionStatus, IssueStatus } from "./db.js";
 import type { ConversationMessage } from "./session-transcript.js";
 
-export const syncProtocolVersion = "sync/v5";
+export const legacySyncProtocolVersion = "sync/v5" as const;
+export const syncProtocolVersion = "sync/v6" as const;
+export const supportedSyncProtocolVersions = [legacySyncProtocolVersion, syncProtocolVersion] as const;
+export type SyncProtocolVersion = typeof supportedSyncProtocolVersions[number];
 export const syncEntityTypes = ["project", "issue", "agent_directory"] as const;
 export type SyncEntityType = typeof syncEntityTypes[number];
 
@@ -66,7 +69,7 @@ export type IssueProjection = {
 export type RuntimeProjection = {
   device_id: string;
   device_name: string;
-  protocol_version: typeof syncProtocolVersion;
+  protocol_version: SyncProtocolVersion;
   core_version: string;
   last_seen_at: string;
   last_sync_at: string | null;
@@ -86,7 +89,7 @@ export type SyncChange = {
 };
 
 export type SyncPushRequest = {
-  protocol_version: typeof syncProtocolVersion;
+  protocol_version: SyncProtocolVersion;
   core_version: string;
   device_id: string;
   runtime: RuntimeProjection;
@@ -101,7 +104,7 @@ export type SyncPushResponse = {
 
 export const remoteCommandOperations = ["issue.create", "issue.update", "issue.move", "issue.start", "issue.stop", "issue.reply", "issue.archive", "issue.restore"] as const;
 export type RemoteCommandOperation = typeof remoteCommandOperations[number];
-export type RemoteCommandStatus = "pending" | "applied" | "rejected" | "conflict" | "expired";
+export type RemoteCommandStatus = "pending" | "dispatched" | "applied" | "rejected" | "conflict" | "expired";
 
 export type RemoteCommand = {
   command_id: string;
@@ -115,6 +118,11 @@ export type RemoteCommand = {
   expires_at: string;
   finished_at: string | null;
   error: string | null;
+  delivery_id?: string | null;
+  dispatched_at?: string | null;
+  dispatch_expires_at?: string | null;
+  attempt_count?: number;
+  last_delivery_error?: string | null;
 };
 
 export type RemoteFilePayload = {
@@ -125,9 +133,10 @@ export type RemoteFilePayload = {
 
 export type RemoteCommandAck = {
   command_id: string;
-  status: Exclude<RemoteCommandStatus, "pending" | "expired">;
+  status: Exclude<RemoteCommandStatus, "pending" | "dispatched" | "expired">;
   error: string | null;
   projection: IssueProjection | null;
+  delivery_id?: string | null;
 };
 
 export type ConversationProjection = {

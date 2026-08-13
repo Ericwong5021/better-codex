@@ -643,7 +643,7 @@ function print(value: unknown) {
 }
 
 function usage() {
-  console.log("better-codex version | web | sync connect|status|now|disconnect | update [check|compatibility|rollback|channel stable|preview] [--channel stable|preview] | setup [--yes] | launch [--restart] | launcher install|uninstall|status | mcp install|uninstall|status | doctor | enable | disable | start [--launch] | stop | status | uninstall | data delete [--yes] | inject [--launch] [--port N] | eject [--port N] | service install|uninstall|start|stop|restart|status|logs | project list|create | agent list | issue list|get|create|update|status|open");
+  console.log("better-codex version | web | sync connect <url> [--pairing-code CODE|--admin-token TOKEN] [--transport auto|websocket|http] | sync status|now|disconnect | update [check|compatibility|rollback|channel stable|preview] [--channel stable|preview] | setup [--yes] | launch [--restart] | launcher install|uninstall|status | mcp install|uninstall|status | doctor | enable | disable | start [--launch] | stop | status | uninstall | data delete [--yes] | inject [--launch] [--port N] | eject [--port N] | service install|uninstall|start|stop|restart|status|logs | project list|create | agent list | issue list|get|create|update|status|open");
 }
 
 function selfCommand() {
@@ -851,14 +851,15 @@ async function syncCommand(action: string | undefined, args: string[]) {
   if (action === "connect") {
     const hubUrl = option(args, "--url") ?? positionals(args)[0];
     const pairingCode = option(args, "--pairing-code");
+    const adminToken = option(args, "--admin-token") ?? process.env.BETTER_CODEX_CLOUDFLARE_ADMIN_TOKEN;
     if (!hubUrl) throw new Error("hub_url_required");
-    if (!pairingCode) throw new Error("pairing_code_required");
+    if (!pairingCode && !adminToken) throw new Error("pairing_code_or_admin_token_required");
     const base = normalizeHubUrl(hubUrl);
     const deviceName = option(args, "--name") ?? hostname();
-    const response = await fetch(`${base}/api/v1/devices/pair`, {
+    const response = await fetch(`${base}${pairingCode ? "/api/v1/devices/pair" : "/api/v1/devices"}`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ pairing_code: pairingCode, name: deviceName, replace_existing: true }),
+      headers: { "content-type": "application/json", ...(adminToken ? { authorization: `Bearer ${adminToken}` } : {}) },
+      body: JSON.stringify(pairingCode ? { pairing_code: pairingCode, name: deviceName, replace_existing: true } : { name: deviceName }),
       signal: AbortSignal.timeout(15_000),
     });
     const body = await response.json().catch(() => ({})) as Record<string, unknown>;
@@ -866,7 +867,9 @@ async function syncCommand(action: string | undefined, args: string[]) {
     const deviceId = String(body.device_id ?? "");
     const deviceToken = String(body.device_token ?? "");
     if (!deviceId || !deviceToken) throw new Error("invalid_pair_response");
-    const configuration = writeSyncConfiguration({ hub_url: base, device_id: deviceId, device_name: deviceName, device_token: deviceToken });
+    const transport = option(args, "--transport");
+    if (transport && !["auto", "websocket", "http"].includes(transport)) throw new Error("invalid_sync_transport");
+    const configuration = writeSyncConfiguration({ hub_url: base, device_id: deviceId, device_name: deviceName, device_token: deviceToken, transport: transport as "auto" | "websocket" | "http" | undefined });
     try {
       await ensureRuntime();
       return print({ connected: true, hub_url: configuration.hub_url, device_id: configuration.device_id, status: await request("/api/sync/connect", { method: "POST" }) });
