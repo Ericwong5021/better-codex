@@ -4,9 +4,12 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "secret:admin": "wrangler secret put ADMIN_TOKEN",
+    "secret:web": "wrangler secret put WEB_PASSWORD",
+    "bucket:create": "wrangler r2 bucket create better-codex-hub-backups"
   },
   "devDependencies": {
-    "wrangler": "^4.30.0"
+    "wrangler": "4.122.0"
   }
 }

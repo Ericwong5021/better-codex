@@ -10,6 +10,7 @@ import type { RemoteCommandAck, SyncPushRequest } from "./sync-contract.js";
 import { betterCodexWebHostCss, betterCodexWebHostHtml, betterCodexWebHostJavaScript } from "./web-host.js";
 import { avatarInitials } from "./user-profile.js";
 import { renderMarkdown } from "./markdown.js";
+import { deviceAuthorizationPage } from "./device-authorization-page.js";
 import { controlCapabilities, controlProtocolVersion, decodeControlMessage, encodeControlMessage } from "./control-protocol.js";
 import { upgradeWebSocket, type WebSocketConnection } from "./websocket-server.js";
 
@@ -246,6 +247,33 @@ export function createHubServer(options: HubServerOptions) {
         const locale = String(url.searchParams.get("locale") || "").toLowerCase().startsWith("zh") ? "zh-CN" : "en";
         return sendText(response, 200, injectionScript(0, "", "install", locale, "web"), "text/javascript; charset=utf-8");
       }
+      const deviceAuthorization = url.pathname.match(/^\/web\/device-authorizations\/([^/]+)$/);
+      if (deviceAuthorization && method === "GET") {
+        const authorization = store.deviceAuthorization(decodeURIComponent(deviceAuthorization[1]));
+        if (!authorization || authorization.status !== "pending") return sendText(response, 410, "authorization_expired", "text/plain; charset=utf-8");
+        const userCode = url.searchParams.get("code") || "";
+        return sendText(response, 200, deviceAuthorizationPage(authorization.authorization_id, userCode), "text/html; charset=utf-8", { "content-security-policy": "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'" });
+      }
+      if (url.pathname === "/api/v1/device-authorizations" && method === "POST") {
+        if (admin || browser) return sendJson(response, 403, { error: "device_authorization_requires_cli" });
+        const body = await readBody(request);
+        const authorization = store.createDeviceAuthorization(body.name || "Better Codex Runtime");
+        const origin = `${options.secureCookies === false ? "http" : "https"}://${request.headers.host}`;
+        return sendJson(response, 201, { ...authorization, approval_url: `${origin}/web/device-authorizations/${encodeURIComponent(authorization.authorization_id)}?code=${encodeURIComponent(authorization.user_code)}` });
+      }
+      const authorizationStatus = url.pathname.match(/^\/api\/v1\/device-authorizations\/([^/]+)$/);
+      if (authorizationStatus && method === "GET") return sendJson(response, 200, store.deviceAuthorization(decodeURIComponent(authorizationStatus[1])) || { error: "device_authorization_not_found" });
+      const authorizationToken = url.pathname.match(/^\/api\/v1\/device-authorizations\/([^/]+)\/token$/);
+      if (authorizationToken && method === "POST") {
+        const body = await readBody(request);
+        return sendJson(response, 200, store.deviceAuthorizationToken(decodeURIComponent(authorizationToken[1]), body.user_code));
+      }
+      const authorizationApproval = url.pathname.match(/^\/api\/v1\/device-authorizations\/([^/]+)\/approve$/);
+      if (authorizationApproval && method === "POST") {
+        if (!browser || !csrfValid || !trustedOrigin(request, true)) return sendJson(response, 403, { error: "csrf_invalid" });
+        const body = await readBody(request);
+        return sendJson(response, 200, store.approveDeviceAuthorization(decodeURIComponent(authorizationApproval[1]), body.user_code));
+      }
       if (url.pathname === "/api/v1/devices/pair" && method === "POST") {
         const body = await readBody(request);
         return sendJson(response, 201, store.pairDevice(body.name, body.pairing_code, body.replace_existing === true));
@@ -266,6 +294,19 @@ export function createHubServer(options: HubServerOptions) {
       if (url.pathname === "/api/v1/admin/projection" && method === "DELETE") {
         if (!admin) return sendJson(response, 401, { error: "unauthorized" });
         return sendJson(response, 200, store.clearProjection());
+      }
+      if (url.pathname === "/api/v1/admin/read-only" && method === "POST") {
+        if (!admin) return sendJson(response, 401, { error: "unauthorized" });
+        const body = await readBody(request);
+        return sendJson(response, 200, store.setReadOnly(body.read_only === true));
+      }
+      if (url.pathname === "/api/v1/admin/read-only" && method === "GET") {
+        if (!admin) return sendJson(response, 401, { error: "unauthorized" });
+        return sendJson(response, 200, { read_only: store.isReadOnly() });
+      }
+      if (url.pathname === "/api/v1/admin/command-queue" && method === "GET") {
+        if (!admin) return sendJson(response, 401, { error: "unauthorized" });
+        return sendJson(response, 200, store.pendingCommandSummary());
       }
 
       if (url.pathname === "/api/v1/board" && method === "GET") {

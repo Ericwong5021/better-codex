@@ -139,6 +139,16 @@ export type RemoteCommandAck = {
   delivery_id?: string | null;
 };
 
+export type DeviceAuthorization = {
+  authorization_id: string;
+  user_code: string;
+  device_name: string;
+  status: "pending" | "approved" | "expired" | "denied";
+  expires_at: string;
+  device_id?: string;
+  device_token?: string;
+};
+
 export type ConversationProjection = {
   issue_id: string;
   found: boolean;

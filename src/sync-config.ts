@@ -16,6 +16,12 @@ export type SyncConfiguration = {
 
 export type SyncTransport = "auto" | "websocket" | "http";
 
+function configuredTransport(value: unknown): SyncTransport {
+  if (value === "http" || value === "websocket" || value === "auto") return value;
+  const environment = process.env.BETTER_CODEX_SYNC_TRANSPORT;
+  return environment === "http" || environment === "websocket" || environment === "auto" ? environment : "auto";
+}
+
 export function normalizeHubUrl(value: string) {
   const url = new URL(value);
   if (!['https:', 'http:'].includes(url.protocol)) throw new Error("invalid_hub_url");
@@ -32,7 +38,7 @@ export function readSyncConfiguration(): SyncConfiguration | null {
   try {
     const value = JSON.parse(readFileSync(syncConfigPath, "utf8")) as Partial<SyncConfiguration>;
     if (value.enabled !== true || !value.hub_url || !value.device_id || !value.device_token || !value.device_name) return null;
-    const transport = value.transport === "http" || value.transport === "websocket" ? value.transport : "auto";
+    const transport = configuredTransport(value.transport);
     return { ...value, transport, hub_url: normalizeHubUrl(value.hub_url) } as SyncConfiguration;
   } catch {
     return null;

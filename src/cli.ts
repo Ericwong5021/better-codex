@@ -643,7 +643,7 @@ function print(value: unknown) {
 }
 
 function usage() {
-  console.log("better-codex version | web | sync connect <url> [--pairing-code CODE|--admin-token TOKEN] [--transport auto|websocket|http] | sync status|now|disconnect | update [check|compatibility|rollback|channel stable|preview] [--channel stable|preview] | setup [--yes] | launch [--restart] | launcher install|uninstall|status | mcp install|uninstall|status | doctor | enable | disable | start [--launch] | stop | status | uninstall | data delete [--yes] | inject [--launch] [--port N] | eject [--port N] | service install|uninstall|start|stop|restart|status|logs | project list|create | agent list | issue list|get|create|update|status|open");
+  console.log("better-codex version | web | sync connect <url> [--pairing-code CODE|--admin-token TOKEN] [--transport auto|websocket|http] | sync migrate --to <url> --from-admin-token TOKEN | sync status|now|disconnect | update [check|compatibility|rollback|channel stable|preview] [--channel stable|preview] | setup [--yes] | launch [--restart] | launcher install|uninstall|status | mcp install|uninstall|status | doctor | enable | disable | start [--launch] | stop | status | uninstall | data delete [--yes] | inject [--launch] [--port N] | eject [--port N] | service install|uninstall|start|stop|restart|status|logs | project list|create | agent list | issue list|get|create|update|status|open");
 }
 
 function selfCommand() {
@@ -847,13 +847,53 @@ function progress(stage: string, json: boolean) {
   if (!json) console.error(stage);
 }
 
+async function openExternalUrl(url: string) {
+  const invocation = process.platform === "win32"
+    ? { command: "rundll32.exe", args: ["url.dll,FileProtocolHandler", url] }
+    : { command: "open", args: [url] };
+  try {
+    const child = spawn(invocation.command, invocation.args, { detached: true, stdio: "ignore", windowsHide: true });
+    child.unref();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function requestDeviceCredentials(base: string, deviceName: string) {
+  const authorization = await fetch(`${base}/api/v1/device-authorizations`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: deviceName }), signal: AbortSignal.timeout(15_000) }).then(async response => {
+    const value = await response.json().catch(() => ({})) as Record<string, unknown>;
+    if (!response.ok) throw new Error(String(value.error || `hub_http_${response.status}`));
+    return value;
+  });
+  const authorizationId = String(authorization.authorization_id || "");
+  const userCode = String(authorization.user_code || "");
+  const approvalUrl = String(authorization.approval_url || "");
+  if (!authorizationId || !userCode || !approvalUrl) throw new Error("invalid_device_authorization_response");
+  const opened = await openExternalUrl(approvalUrl);
+  if (!opened) console.error(`Approve this device at ${approvalUrl}`);
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    const tokenResponse = await fetch(`${base}/api/v1/device-authorizations/${encodeURIComponent(authorizationId)}/token`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ user_code: userCode }), signal: AbortSignal.timeout(15_000) });
+    const tokenBody = await tokenResponse.json().catch(() => ({})) as Record<string, unknown>;
+    if (tokenResponse.ok && tokenBody.status === "approved" && tokenBody.device_id && tokenBody.device_token) return { device_id: String(tokenBody.device_id), device_token: String(tokenBody.device_token) };
+    if (tokenBody.status === "expired" || tokenBody.status === "denied") throw new Error(`device_authorization_${tokenBody.status}`);
+    await new Promise(resolve => setTimeout(resolve, 2_000));
+  }
+  throw new Error("device_authorization_timeout");
+}
+
 async function syncCommand(action: string | undefined, args: string[]) {
   if (action === "connect") {
     const hubUrl = option(args, "--url") ?? positionals(args)[0];
     const pairingCode = option(args, "--pairing-code");
     const adminToken = option(args, "--admin-token") ?? process.env.BETTER_CODEX_CLOUDFLARE_ADMIN_TOKEN;
     if (!hubUrl) throw new Error("hub_url_required");
-    if (!pairingCode && !adminToken) throw new Error("pairing_code_or_admin_token_required");
+    if (!pairingCode && !adminToken) {
+      const base = normalizeHubUrl(hubUrl);
+      const deviceName = option(args, "--name") ?? hostname();
+      const credentials = await requestDeviceCredentials(base, deviceName);
+      return finishSyncConnect(base, deviceName, credentials.device_id, credentials.device_token, args);
+    }
     const base = normalizeHubUrl(hubUrl);
     const deviceName = option(args, "--name") ?? hostname();
     const response = await fetch(`${base}${pairingCode ? "/api/v1/devices/pair" : "/api/v1/devices"}`, {
@@ -869,15 +909,37 @@ async function syncCommand(action: string | undefined, args: string[]) {
     if (!deviceId || !deviceToken) throw new Error("invalid_pair_response");
     const transport = option(args, "--transport");
     if (transport && !["auto", "websocket", "http"].includes(transport)) throw new Error("invalid_sync_transport");
-    const configuration = writeSyncConfiguration({ hub_url: base, device_id: deviceId, device_name: deviceName, device_token: deviceToken, transport: transport as "auto" | "websocket" | "http" | undefined });
+    return finishSyncConnect(base, deviceName, deviceId, deviceToken, args);
+  }
+
+  if (action === "migrate") {
+    const current = readSyncConfiguration();
+    if (!current) throw new Error("sync_not_connected");
+    const target = option(args, "--to") ?? positionals(args)[0];
+    if (!target) throw new Error("migration_target_required");
+    const fromAdminToken = option(args, "--from-admin-token") ?? process.env.BETTER_CODEX_SYNC_MIGRATION_ADMIN_TOKEN ?? process.env.BETTER_CODEX_HUB_ADMIN_TOKEN ?? process.env.BETTER_CODEX_HUB_BOOTSTRAP_SECRET;
+    if (!fromAdminToken) throw new Error("migration_admin_token_required");
+    const oldResponse = await fetch(`${current.hub_url}/api/v1/admin/read-only`, { method: "POST", headers: { authorization: `Bearer ${fromAdminToken}`, "content-type": "application/json" }, body: JSON.stringify({ read_only: true }), signal: AbortSignal.timeout(15_000) });
+    if (!oldResponse.ok) throw new Error(`source_hub_read_only_failed_${oldResponse.status}`);
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      const queueResponse = await fetch(`${current.hub_url}/api/v1/admin/command-queue`, { headers: { authorization: `Bearer ${fromAdminToken}` }, signal: AbortSignal.timeout(15_000) });
+      if (!queueResponse.ok) throw new Error(`source_hub_queue_check_failed_${queueResponse.status}`);
+      const queue = await queueResponse.json() as { pending?: number; dispatched?: number };
+      if (!queue.pending && !queue.dispatched) break;
+      if (attempt === 29) throw new Error("source_hub_commands_not_drained");
+      await new Promise(resolve => setTimeout(resolve, 2_000));
+    }
+    const base = normalizeHubUrl(target);
+    const deviceName = option(args, "--name") ?? current.device_name;
+    const credentials = await requestDeviceCredentials(base, deviceName);
     try {
-      await ensureRuntime();
-      return print({ connected: true, hub_url: configuration.hub_url, device_id: configuration.device_id, status: await request("/api/sync/connect", { method: "POST" }) });
+      return await finishSyncConnect(base, deviceName, credentials.device_id, credentials.device_token, args, current);
     } catch (error) {
-      removeSyncConfiguration();
+      await fetch(`${current.hub_url}/api/v1/admin/read-only`, { method: "POST", headers: { authorization: `Bearer ${fromAdminToken}`, "content-type": "application/json" }, body: JSON.stringify({ read_only: false }), signal: AbortSignal.timeout(15_000) }).catch(() => {});
       throw error;
     }
   }
+
   if (action === "status") {
     const configuration = readSyncConfiguration();
     if (!configuration) return print({ connected: false });
@@ -903,6 +965,20 @@ async function syncCommand(action: string | undefined, args: string[]) {
   }
   usage();
 }
+
+async function finishSyncConnect(base: string, deviceName: string, deviceId: string, deviceToken: string, args: string[], rollbackConfiguration?: ReturnType<typeof readSyncConfiguration>) {
+    const transport = option(args, "--transport");
+    if (transport && !["auto", "websocket", "http"].includes(transport)) throw new Error("invalid_sync_transport");
+    const configuration = writeSyncConfiguration({ hub_url: base, device_id: deviceId, device_name: deviceName, device_token: deviceToken, transport: transport as "auto" | "websocket" | "http" | undefined });
+    try {
+      await ensureRuntime();
+      return print({ connected: true, hub_url: configuration.hub_url, device_id: configuration.device_id, status: await request("/api/sync/connect", { method: "POST" }) });
+    } catch (error) {
+      if (rollbackConfiguration) writeSyncConfiguration(rollbackConfiguration);
+      else removeSyncConfiguration();
+      throw error;
+    }
+  }
 
 async function issueCommand(action: string | undefined, args: string[]) {
   if (action === "list") {

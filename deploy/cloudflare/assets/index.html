@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Better Codex Hub</title>
+  <style>body{font:16px system-ui,sans-serif;max-width:760px;margin:40px auto;padding:0 20px;color:#17211b}form{display:grid;gap:10px;max-width:360px}input,button{font:inherit;padding:10px}pre{white-space:pre-wrap;background:#f3f5f3;padding:14px;border-radius:8px}</style>
+</head>
+<body>
+  <main>
+    <h1>Better Codex Hub</h1>
+    <p>Sign in to inspect the projection and runtime status.</p>
+    <form id="login">
+      <input name="username" value="admin" autocomplete="username" required>
+      <input name="password" type="password" autocomplete="current-password" required>
+      <button>Sign in</button>
+      <output id="message"></output>
+    </form>
+    <section id="content" hidden>
+      <h2>Status</h2>
+      <pre id="status"></pre>
+      <h2>Current projection</h2>
+      <pre id="board"></pre>
+    </section>
+  </main>
+  <script>
+    const login = document.querySelector("#login");
+    const message = document.querySelector("#message");
+    const content = document.querySelector("#content");
+    const board = document.querySelector("#board");
+    const status = document.querySelector("#status");
+    login.onsubmit = async event => {
+      event.preventDefault();
+      const data = new FormData(login);
+      const response = await fetch("/web/session", { method: "POST", headers: { "content-type": "application/json" }, credentials: "same-origin", body: JSON.stringify({ username: data.get("username"), password: data.get("password") }) });
+      const value = await response.json();
+      if (!response.ok) { message.textContent = value.error || "Sign in failed"; return; }
+      const statusResponse = await fetch("/api/v1/status", { credentials: "same-origin" });
+      const statusValue = await statusResponse.json();
+      if (!statusResponse.ok) { message.textContent = statusValue.error || "Status unavailable"; return; }
+      const boardResponse = await fetch("/api/v1/board", { credentials: "same-origin" });
+      const boardValue = await boardResponse.json();
+      if (!boardResponse.ok) { message.textContent = boardValue.error || "Board unavailable"; return; }
+      login.hidden = true;
+      content.hidden = false;
+      status.textContent = JSON.stringify(statusValue, null, 2);
+      board.textContent = JSON.stringify(boardValue, null, 2);
+    };
+  </script>
+</body>
+</html>

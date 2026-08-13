@@ -178,6 +178,41 @@ test("Hub backup and restore preserve paired devices, password state, and pendin
   }
 });
 
+test("Hub device authorization is browser-approved, one-time, and blocked by read-only mode", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "better-codex-hub-device-auth-"));
+  const adminToken = "bootstrap-" + "e".repeat(64);
+  const webPassword = "web-password-" + "f".repeat(32);
+  const hub = createHubServer({ host: "127.0.0.1", port: 0, database: join(directory, "hub.db"), adminToken, webPassword, secureCookies: false });
+  const port = await listen(hub.server);
+  const base = `http://127.0.0.1:${port}`;
+  try {
+    const created = await fetch(`${base}/api/v1/device-authorizations`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "browser runtime" }) });
+    assert.equal(created.status, 201);
+    const authorization = await created.json() as { authorization_id: string; user_code: string; approval_url: string };
+    assert.match(authorization.approval_url, /\/web\/device-authorizations\//);
+    const login = await fetch(`${base}/web/session`, { method: "POST", headers: { origin: base, "content-type": "application/json" }, body: JSON.stringify({ username: "admin", password: webPassword }) });
+    assert.equal(login.status, 200);
+    const session = await login.json() as { csrf_token: string };
+    const cookie = (login.headers.get("set-cookie") || "").split(";", 1)[0];
+    const approval = await fetch(`${base}/api/v1/device-authorizations/${authorization.authorization_id}/approve`, { method: "POST", headers: { origin: base, cookie, "x-csrf-token": session.csrf_token, "content-type": "application/json" }, body: JSON.stringify({ user_code: authorization.user_code }) });
+    assert.equal(approval.status, 200);
+    const token = await fetch(`${base}/api/v1/device-authorizations/${authorization.authorization_id}/token`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ user_code: authorization.user_code }) });
+    assert.equal(token.status, 200);
+    const tokenBody = await token.json() as { device_token?: string };
+    assert.ok(tokenBody.device_token);
+    const replay = await fetch(`${base}/api/v1/device-authorizations/${authorization.authorization_id}/token`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ user_code: authorization.user_code }) });
+    assert.equal((await replay.json() as { device_token?: string }).device_token, undefined);
+    const readOnly = await fetch(`${base}/api/v1/admin/read-only`, { method: "POST", headers: { authorization: `Bearer ${adminToken}`, "content-type": "application/json" }, body: JSON.stringify({ read_only: true }) });
+    assert.equal(readOnly.status, 200);
+    const blocked = await fetch(`${base}/api/issues`, { method: "POST", headers: { origin: base, cookie, "x-csrf-token": session.csrf_token, "content-type": "application/json" }, body: "{}" });
+    assert.equal(blocked.status, 400);
+    assert.deepEqual(await blocked.json(), { error: "hub_read_only" });
+  } finally {
+    await close(hub.server);
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("Hub migration creates an integrity-checked backup before changing an older schema", () => {
   const directory = mkdtempSync(join(tmpdir(), "better-codex-hub-migration-"));
   const database = join(directory, "hub.db");
@@ -190,7 +225,7 @@ test("Hub migration creates an integrity-checked backup before changing an older
   } finally {
     migrated.close();
   }
-  const backups = readdirSync(join(directory, "backups")).filter(name => name.startsWith("before-hub-v6-") && name.endsWith(".db"));
+  const backups = readdirSync(join(directory, "backups")).filter(name => name.startsWith("before-hub-v7-") && name.endsWith(".db"));
   assert.equal(backups.length, 1);
   const snapshot = new DatabaseSync(join(directory, "backups", backups[0]), { readOnly: true });
   try {
@@ -233,7 +268,7 @@ test("Hub migration archives legacy cancelled projections and rejects obsolete c
       .run(projection.id, device.device_id, JSON.stringify(projection), timestamp);
     store.db.prepare("INSERT INTO remote_commands (command_id, device_id, operation, entity_id, base_revision, payload_json, status, requested_at, expires_at) VALUES ('legacy-command', ?, 'issue.move', ?, 1, '{\"status\":\"cancelled\"}', 'pending', ?, ?)")
       .run(device.device_id, projection.id, timestamp, new Date(Date.now() + 60_000).toISOString());
-    store.db.prepare("DELETE FROM hub_migrations WHERE version IN (5, 6)").run();
+    store.db.prepare("DELETE FROM hub_migrations WHERE version IN (5, 6, 7)").run();
     store.close();
     store = undefined;
 
@@ -259,7 +294,7 @@ test("Hub rejects newer schemas before opening or restoring them", () => {
   current.close();
   copyFileSync(database, backup);
   const newer = new DatabaseSync(backup);
-  newer.prepare("INSERT INTO hub_migrations (version, applied_at) VALUES (7, ?)").run(new Date().toISOString());
+  newer.prepare("INSERT INTO hub_migrations (version, applied_at) VALUES (8, ?)").run(new Date().toISOString());
   newer.close();
   try {
     assert.throws(() => new HubStore(backup), /hub_database_schema_too_new/);

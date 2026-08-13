@@ -17,7 +17,7 @@ function tokenHash(value: string) {
   return createHash("sha256").update(value).digest("hex");
 }
 
-const hubSchemaVersion = 6;
+const hubSchemaVersion = 7;
 
 function backupBeforeMigration(file: string) {
   if (!existsSync(file)) return;
@@ -303,6 +303,18 @@ export class HubStore {
         expires_at TEXT NOT NULL,
         last_seen_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS device_authorizations (
+        authorization_id TEXT PRIMARY KEY,
+        user_code_hash TEXT NOT NULL UNIQUE,
+        device_name TEXT NOT NULL,
+        status TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        device_id TEXT,
+        device_token_hash TEXT,
+        device_token TEXT,
+        created_at TEXT NOT NULL,
+        approved_at TEXT
+      );
       CREATE TABLE IF NOT EXISTS hub_audit (
         seq INTEGER PRIMARY KEY AUTOINCREMENT,
         actor TEXT NOT NULL,
@@ -362,6 +374,19 @@ export class HubStore {
         if (!names.has("attempt_count")) this.db.exec("ALTER TABLE remote_commands ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0");
         if (!names.has("last_delivery_error")) this.db.exec("ALTER TABLE remote_commands ADD COLUMN last_delivery_error TEXT");
         this.db.prepare("INSERT INTO hub_migrations (version, applied_at) VALUES (6, ?)").run(now());
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    }
+    const latestVersion = Number((this.db.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM hub_migrations").get() as { version: number }).version);
+    if (latestVersion < 7) {
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        const columns = this.db.prepare("PRAGMA table_info(device_authorizations)").all() as Array<{ name: string }>;
+        if (!columns.some(column => column.name === "device_token")) this.db.exec("ALTER TABLE device_authorizations ADD COLUMN device_token TEXT");
+        this.db.prepare("INSERT INTO hub_migrations (version, applied_at) VALUES (7, ?)").run(now());
         this.db.exec("COMMIT");
       } catch (error) {
         this.db.exec("ROLLBACK");
@@ -441,9 +466,67 @@ export class HubStore {
     return row;
   }
 
+  setReadOnly(readOnly: boolean) {
+    this.db.prepare("INSERT INTO hub_settings (key, value, updated_at) VALUES ('read_only', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at").run(readOnly ? "1" : "0", now());
+    this.audit("admin", readOnly ? "hub_read_only_enabled" : "hub_read_only_disabled");
+    return { read_only: readOnly };
+  }
+
+  isReadOnly() {
+    const row = this.db.prepare("SELECT value FROM hub_settings WHERE key = 'read_only'").get() as { value: string } | undefined;
+    return row?.value === "1";
+  }
+
   revokeWebSession(token: string) {
     if (token) this.db.prepare("DELETE FROM web_sessions WHERE token_hash = ?").run(tokenHash(token));
     this.audit("browser", "web_session_revoked");
+  }
+
+  createDeviceAuthorization(nameValue: unknown) {
+    const device_name = cleanString(nameValue, 120, false).trim();
+    const authorization_id = randomUUID();
+    const user_code = randomBytes(5).toString("base64url").toUpperCase();
+    const expires_at = after(10 * 60_000);
+    this.db.prepare("INSERT INTO device_authorizations (authorization_id, user_code_hash, device_name, status, expires_at, created_at) VALUES (?, ?, ?, 'pending', ?, ?)").run(authorization_id, tokenHash(user_code), device_name, expires_at, now());
+    this.audit("cli", "device_authorization_created", authorization_id);
+    return { authorization_id, user_code, device_name, status: "pending" as const, expires_at };
+  }
+
+  deviceAuthorization(authorizationId: string) {
+    this.db.prepare("UPDATE device_authorizations SET status = 'expired' WHERE status = 'pending' AND expires_at <= ?").run(now());
+    const row = this.db.prepare("SELECT authorization_id, device_name, status, expires_at, device_id FROM device_authorizations WHERE authorization_id = ?").get(authorizationId) as { authorization_id: string; device_name: string; status: "pending" | "approved" | "expired" | "denied"; expires_at: string; device_id: string | null } | undefined;
+    return row ? { ...row, device_id: row.device_id || undefined } : null;
+  }
+
+  approveDeviceAuthorization(authorizationId: string, userCode: unknown) {
+    if (typeof userCode !== "string" || !userCode) throw new Error("invalid_device_authorization");
+    this.db.prepare("UPDATE device_authorizations SET status = 'expired' WHERE status = 'pending' AND expires_at <= ?").run(now());
+    const row = this.db.prepare("SELECT device_name, status, expires_at FROM device_authorizations WHERE authorization_id = ? AND user_code_hash = ?").get(authorizationId, tokenHash(userCode.trim().toUpperCase())) as { device_name: string; status: string; expires_at: string } | undefined;
+    if (!row || row.status !== "pending" || row.expires_at <= now()) throw new Error("invalid_device_authorization");
+    const id = randomUUID();
+    const token = randomBytes(32).toString("hex");
+    const timestamp = now();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const claimed = this.db.prepare("UPDATE device_authorizations SET status = 'approved', device_id = ?, device_token_hash = ?, device_token = ?, approved_at = ? WHERE authorization_id = ? AND status = 'pending'").run(id, tokenHash(token), token, timestamp, authorizationId);
+      if (claimed.changes !== 1) throw new Error("invalid_device_authorization");
+      this.db.prepare("INSERT INTO devices (id, name, token_hash, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?)").run(id, row.device_name, tokenHash(token), timestamp, timestamp);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    this.audit(id, "device_authorization_approved", authorizationId);
+    return { authorization_id: authorizationId, device_id: id, device_name: row.device_name, status: "approved" as const };
+  }
+
+  deviceAuthorizationToken(authorizationId: string, userCode: unknown) {
+    if (typeof userCode !== "string" || !userCode) throw new Error("invalid_device_authorization");
+    const row = this.db.prepare("SELECT device_name, status, expires_at, device_id, device_token FROM device_authorizations WHERE authorization_id = ? AND user_code_hash = ?").get(authorizationId, tokenHash(userCode.trim().toUpperCase())) as { device_name: string; status: string; expires_at: string; device_id: string | null; device_token: string | null } | undefined;
+    if (!row || row.expires_at <= now()) throw new Error("invalid_device_authorization");
+    if (row.status !== "approved" || !row.device_id || !row.device_token) return { authorization_id: authorizationId, status: row.status };
+    this.db.prepare("UPDATE device_authorizations SET device_token = NULL WHERE authorization_id = ? AND device_token IS NOT NULL").run(authorizationId);
+    return { authorization_id: authorizationId, status: "approved" as const, device_id: row.device_id, device_name: row.device_name, device_token: row.device_token };
   }
 
   backup(target?: string) {
@@ -558,6 +641,7 @@ export class HubStore {
   }
 
   createRemoteCommand(input: { command_id?: unknown; operation: unknown; entity_id?: unknown; base_revision?: unknown; payload?: unknown }) {
+    if (this.isReadOnly()) throw new Error("hub_read_only");
     if (!remoteCommandOperations.includes(input.operation as never)) throw new Error("invalid_command_operation");
     const operation = input.operation as RemoteCommandOperation;
     const commandId = input.command_id === undefined ? randomUUID() : cleanString(input.command_id, 200, false);
@@ -591,6 +675,11 @@ export class HubStore {
     this.db.prepare("INSERT INTO remote_commands (command_id, device_id, operation, entity_id, base_revision, payload_json, status, requested_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)").run(commandId, deviceId, operation, entityId, baseRevision, JSON.stringify(payload), requestedAt, expiresAt);
     this.recordCommandChange(commandId, "pending");
     return commandFromRow(this.db.prepare("SELECT * FROM remote_commands WHERE command_id = ?").get(commandId) as CommandRow);
+  }
+
+  commandQueueEmpty() {
+    const summary = this.pendingCommandSummary();
+    return summary.pending === 0 && summary.dispatched === 0;
   }
 
   remoteCommand(commandId: string) {
@@ -633,6 +722,12 @@ export class HubStore {
     this.expireCommands();
     const row = this.db.prepare("SELECT COUNT(*) AS value FROM remote_commands WHERE device_id = ? AND status IN ('pending', 'dispatched')").get(deviceId) as { value: number };
     return Number(row.value);
+  }
+
+  pendingCommandSummary() {
+    this.expireCommands();
+    const rows = this.db.prepare("SELECT status, COUNT(*) AS value FROM remote_commands WHERE status IN ('pending', 'dispatched') GROUP BY status").all() as Array<{ status: "pending" | "dispatched"; value: number }>;
+    return { pending: Number(rows.find(row => row.status === "pending")?.value || 0), dispatched: Number(rows.find(row => row.status === "dispatched")?.value || 0) };
   }
 
   revision() {

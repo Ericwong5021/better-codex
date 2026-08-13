@@ -1,18 +1,20 @@
 import { controlCapabilities, controlProtocolVersion, decodeControlMessage, encodeControlMessage } from "./control-protocol.js";
 import { syncProtocolVersion, supportedSyncProtocolVersions, type RemoteCommandAck, type SyncChange, type SyncPushRequest } from "./sync-contract.js";
+import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 
 type SqlRow = Record<string, unknown>;
 type SqlCursor = { toArray(): SqlRow[] };
 type SqlStorage = { exec(query: string, ...bindings: unknown[]): SqlCursor };
 type DurableObjectWebSocket = WebSocket & { serializeAttachment?(value: unknown): void; deserializeAttachment?(): unknown };
 type DurableObjectState = {
-  storage: { sql: SqlStorage };
+  storage: { sql: SqlStorage; transactionSync?<T>(callback: () => T): T };
   blockConcurrencyWhile<T>(callback: () => Promise<T> | T): Promise<T>;
   acceptWebSocket?(socket: DurableObjectWebSocket, tags?: string[]): void;
   getWebSockets?(tag?: string): DurableObjectWebSocket[];
 };
 type DurableObjectNamespace = { idFromName(name: string): unknown; get(id: unknown): { fetch(request: Request): Promise<Response> } };
-type CloudflareEnv = { HUB: DurableObjectNamespace; ADMIN_TOKEN?: string; ASSETS?: { fetch(request: Request): Promise<Response> } };
+type R2Bucket = { put(key: string, value: string, options?: Record<string, unknown>): Promise<unknown>; get(key: string): Promise<{ text(): Promise<string> } | null> };
+type CloudflareEnv = { HUB: DurableObjectNamespace; ADMIN_TOKEN?: string; WEB_PASSWORD?: string; ASSETS?: { fetch(request: Request): Promise<Response> }; BACKUPS?: R2Bucket };
 type WebSocketPairConstructor = new () => [WebSocket, WebSocket];
 declare const WebSocketPair: WebSocketPairConstructor;
 
@@ -23,6 +25,10 @@ CREATE TABLE IF NOT EXISTS sync_events (event_id TEXT PRIMARY KEY, device_id TEX
 CREATE TABLE IF NOT EXISTS changes (seq INTEGER PRIMARY KEY AUTOINCREMENT, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, operation TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS runtime_projection (device_id TEXT PRIMARY KEY, payload_json TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS conversations (issue_id TEXT PRIMARY KEY, owner_device_id TEXT NOT NULL, payload_json TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS hub_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS web_sessions (token_hash TEXT PRIMARY KEY, csrf_token TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, last_seen_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS login_attempts (client_key TEXT PRIMARY KEY, count INTEGER NOT NULL, reset_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS device_authorizations (authorization_id TEXT PRIMARY KEY, user_code_hash TEXT NOT NULL UNIQUE, device_name TEXT NOT NULL, status TEXT NOT NULL, expires_at TEXT NOT NULL, device_id TEXT, device_token_hash TEXT, device_token TEXT, created_at TEXT NOT NULL, approved_at TEXT);
 CREATE TABLE IF NOT EXISTS remote_commands (command_id TEXT PRIMARY KEY, device_id TEXT NOT NULL, operation TEXT NOT NULL, entity_id TEXT NOT NULL, base_revision INTEGER, payload_json TEXT NOT NULL, status TEXT NOT NULL, requested_at TEXT NOT NULL, expires_at TEXT NOT NULL, finished_at TEXT, error TEXT, delivery_id TEXT, dispatched_at TEXT, dispatch_expires_at TEXT, attempt_count INTEGER NOT NULL DEFAULT 0, last_delivery_error TEXT);
 CREATE INDEX IF NOT EXISTS remote_commands_queue ON remote_commands(device_id, status, requested_at);
 `;
@@ -44,9 +50,35 @@ function controlToken(request: Request) {
   return (request.headers.get("sec-websocket-protocol") || "").split(",").map(value => value.trim()).find(value => value !== "better-codex-control-v1") || "";
 }
 
+function cookieValue(request: Request, name: string) {
+  const value = request.headers.get("cookie") || "";
+  return value.split(";").map(item => item.trim()).find(item => item.startsWith(`${name}=`))?.slice(name.length + 1) || "";
+}
+
 async function tokenHash(value: string) {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return [...new Uint8Array(digest)].map(value => value.toString(16).padStart(2, "0")).join("");
+}
+
+function base64Url(value: Uint8Array) {
+  return Buffer.from(value).toString("base64url");
+}
+
+function passwordHash(value: string, salt = randomBytes(16)) {
+  const digest = scryptSync(value, salt, 32, { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 });
+  return `scrypt$16384$8$1$${base64Url(salt)}$${base64Url(digest)}`;
+}
+
+function passwordMatches(value: string, encoded: string) {
+  try {
+    const [algorithm, cost, blockSize, parallelism, saltValue, digestValue] = encoded.split("$");
+    if (algorithm !== "scrypt" || !saltValue || !digestValue) return false;
+    const expected = Buffer.from(digestValue, "base64url");
+    const actual = scryptSync(value, Buffer.from(saltValue, "base64url"), expected.length, { N: Number(cost), r: Number(blockSize), p: Number(parallelism), maxmem: 64 * 1024 * 1024 });
+    return expected.length === actual.length && timingSafeEqual(expected, actual);
+  } catch {
+    return false;
+  }
 }
 
 function boundedLimit(value: string | null) {
@@ -69,20 +101,99 @@ function decodePayload(value: unknown) {
   return source;
 }
 
+function cleanCommandPayload(operation: string, value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid_command_payload");
+  const source = value as Record<string, unknown>;
+  const allowed = operation === "issue.create"
+    ? ["project_id", "title", "description", "status", "priority", "labels", "agent_enabled", "agent_id", "user_assigned"]
+    : operation === "issue.update"
+      ? ["project_id", "title", "description", "status", "priority", "labels", "sort_order", "pinned", "agent_enabled", "agent_id", "user_assigned"]
+      : operation === "issue.start"
+        ? ["project_id", "title", "description", "status", "priority", "labels", "agent_id"]
+        : operation === "issue.reply" ? ["message", "files"]
+          : operation === "issue.move" ? ["status", "before_id"] : [];
+  if (Object.keys(source).some(key => !allowed.includes(key))) throw new Error("forbidden_command_field");
+  const payload: Record<string, unknown> = {};
+  for (const key of allowed) if (source[key] !== undefined) payload[key] = source[key];
+  if ((operation === "issue.create" && (!payload.project_id || !payload.title)) || (operation === "issue.move" && !payload.status) || (operation === "issue.start" && !payload.title) || (operation === "issue.reply" && !payload.message && !(Array.isArray(payload.files) && payload.files.length))) throw new Error("invalid_command_payload");
+  return payload;
+}
+
+function webSessionCookie(token: string) {
+  return `better_codex_session=${token}; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=43200`;
+}
+
+function trustedOrigin(request: Request) {
+  const origin = request.headers.get("origin");
+  if (!origin) return false;
+  try { return new URL(origin).host === new URL(request.url).host; } catch { return false; }
+}
+
+function escapeHtml(value: string) {
+  return value.replace(/[&<>\"']/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[character] || character));
+}
+
 export class BetterCodexHubObject {
   private ready: Promise<void>;
   private readonly sql: SqlStorage;
 
   constructor(private readonly state: DurableObjectState, private readonly env: CloudflareEnv) {
     this.sql = state.storage.sql;
-    this.ready = state.blockConcurrencyWhile(() => { this.sql.exec(schema); });
+    this.ready = state.blockConcurrencyWhile(() => {
+      this.sql.exec(schema);
+      if (this.env.ADMIN_TOKEN && this.env.ADMIN_TOKEN.length < 32) throw new Error("admin_token_too_short");
+      if (this.env.ADMIN_TOKEN && this.env.WEB_PASSWORD && this.env.ADMIN_TOKEN === this.env.WEB_PASSWORD) throw new Error("hub_secrets_must_be_distinct");
+      if (this.env.WEB_PASSWORD && this.env.WEB_PASSWORD.length < 12) throw new Error("web_password_too_short");
+      if (!this.sql.exec("SELECT value FROM hub_settings WHERE key = 'web_password_hash'").toArray().length && this.env.WEB_PASSWORD) this.sql.exec("INSERT INTO hub_settings (key, value, updated_at) VALUES ('web_password_hash', ?, ?)", passwordHash(this.env.WEB_PASSWORD), timestamp());
+    });
+  }
+
+  private transaction<T>(callback: () => T) {
+    return this.state.storage.transactionSync ? this.state.storage.transactionSync(callback) : callback();
   }
 
   async fetch(request: Request) {
     await this.ready;
     const url = new URL(request.url);
     if (url.pathname === "/healthz" && request.method === "GET") return json({ ok: true, protocol_version: syncProtocolVersion, revision: this.revision() });
-      if (url.pathname === "/api/v1/control" && request.headers.get("upgrade")?.toLowerCase() === "websocket") return this.openControl(request);
+    if (url.pathname === "/api/v1/control" && request.headers.get("upgrade")?.toLowerCase() === "websocket") return this.openControl(request);
+    if (url.pathname === "/web/session" && request.method === "POST") return this.login(request);
+    if (url.pathname === "/web/session" && request.method === "GET") return this.session(request);
+    const approvalPage = url.pathname.match(/^\/web\/device-authorizations\/([^/]+)$/);
+    if (approvalPage && request.method === "GET") return this.authorizationPage(decodeURIComponent(approvalPage[1]), url.searchParams.get("code") || "");
+    if (url.pathname === "/api/v1/device-authorizations" && request.method === "POST") return this.createAuthorization(request);
+    const authorizationStatus = url.pathname.match(/^\/api\/v1\/device-authorizations\/([^/]+)$/);
+    if (authorizationStatus && request.method === "GET") return json(this.authorization(decodeURIComponent(authorizationStatus[1])) || { error: "device_authorization_not_found" }, 200);
+    const authorizationToken = url.pathname.match(/^\/api\/v1\/device-authorizations\/([^/]+)\/token$/);
+    if (authorizationToken && request.method === "POST") return this.authorizationToken(decodeURIComponent(authorizationToken[1]), request);
+    const authorizationApproval = url.pathname.match(/^\/api\/v1\/device-authorizations\/([^/]+)\/approve$/);
+    if (authorizationApproval && request.method === "POST") return this.approveAuthorization(decodeURIComponent(authorizationApproval[1]), request);
+    if (url.pathname === "/api/v1/admin/backup" && request.method === "POST") return this.createBackup(request);
+    if (url.pathname === "/api/v1/admin/backup/status" && request.method === "GET") return this.backupStatus(request);
+    if (url.pathname === "/api/v1/admin/backup/restore" && request.method === "POST") return this.restoreBackup(request);
+    if (url.pathname === "/api/v1/admin/password" && request.method === "POST") return this.rotatePassword(request);
+    if (url.pathname === "/api/v1/admin/read-only" && request.method === "GET") return this.readOnly(request);
+    if (url.pathname === "/api/v1/admin/read-only" && request.method === "POST") return this.setReadOnly(request);
+    if (url.pathname === "/api/v1/admin/command-queue" && request.method === "GET") return this.commandQueue(request);
+    if (url.pathname === "/" && request.method === "GET") return this.webDashboard();
+    if (url.pathname === "/web" && request.method === "GET") return this.webDashboard();
+    if (url.pathname === "/web/" && request.method === "GET") return this.webDashboard();
+    if (url.pathname === "/api/v1/board" && request.method === "GET") {
+      if (!(await this.isWebAuthorized(request))) return json({ error: "unauthorized" }, 401);
+      return json(this.board());
+    }
+    if (url.pathname === "/api/v1/status" && request.method === "GET") {
+      if (!(await this.isWebAuthorized(request))) return json({ error: "unauthorized" }, 401);
+      const backup = this.sql.exec("SELECT value, updated_at FROM hub_settings WHERE key = 'last_backup_key'").toArray()[0] as { value?: string; updated_at?: string } | undefined;
+      const readOnly = this.sql.exec("SELECT value FROM hub_settings WHERE key = 'read_only'").toArray()[0] as { value?: string } | undefined;
+      const runtime = this.sql.exec("SELECT payload_json, updated_at FROM runtime_projection ORDER BY updated_at DESC LIMIT 1").toArray()[0] as { payload_json?: string; updated_at?: string } | undefined;
+      return json({ protocol_version: syncProtocolVersion, revision: this.revision(), runtime: runtime?.payload_json ? JSON.parse(runtime.payload_json) : null, backup: { configured: Boolean(this.env.BACKUPS), last_backup: backup ? { key: backup.value, created_at: backup.updated_at } : null }, read_only: readOnly?.value === "1" });
+    }
+    if ((url.pathname === "/api/issues" || url.pathname.startsWith("/api/issues/")) && request.method !== "GET") {
+      if (!(await this.isWebAuthorized(request))) return json({ error: "unauthorized" }, 401);
+      if (!trustedOrigin(request) || !(await this.webCsrf(request))) return json({ error: "csrf_invalid" }, 403);
+      try { return json(await this.createWebCommand(url, request), 202); } catch (error) { return json({ error: error instanceof Error ? error.message : "command_failed" }, 400); }
+    }
     if (url.pathname === "/api/v1/devices" && request.method === "POST") return this.createDevice(request);
     const device = await this.deviceForToken(tokenFromRequest(request));
     if (!device) return json({ error: "unauthorized" }, 401);
@@ -114,6 +225,313 @@ export class BetterCodexHubObject {
     return json({ protocol_version: syncProtocolVersion, device_id: id, device_name: name, device_token: token }, 201);
   }
 
+  private async isWebAuthorized(request: Request) {
+    if (this.env.ADMIN_TOKEN && request.headers.get("authorization") === `Bearer ${this.env.ADMIN_TOKEN}`) return true;
+    const session = cookieValue(request, "better_codex_session");
+    if (!session) return false;
+    return this.sql.exec("SELECT 1 AS value FROM web_sessions WHERE token_hash = ? AND expires_at > ?", await tokenHash(session), timestamp()).toArray().length > 0;
+  }
+
+  private async webCsrf(request: Request) {
+    const session = cookieValue(request, "better_codex_session");
+    const csrf = request.headers.get("x-csrf-token") || "";
+    if (!session || !csrf) return false;
+    const row = this.sql.exec("SELECT csrf_token FROM web_sessions WHERE token_hash = ? AND expires_at > ?", await tokenHash(session), timestamp()).toArray()[0] as { csrf_token?: string } | undefined;
+    return Boolean(row?.csrf_token && row.csrf_token === csrf);
+  }
+
+  private writerDevice() {
+    const row = this.sql.exec("SELECT id, name FROM devices WHERE revoked_at IS NULL ORDER BY CASE WHEN lease_expires_at > ? THEN 0 ELSE 1 END, last_seen_at DESC LIMIT 1", timestamp()).toArray()[0] as { id: string; name: string } | undefined;
+    if (!row) throw new Error("runtime_not_paired");
+    return row;
+  }
+
+  private createWebCommandRow(input: { commandId?: unknown; operation: string; entityId?: unknown; baseRevision?: unknown; payload: Record<string, unknown> }) {
+    const readOnly = this.sql.exec("SELECT value FROM hub_settings WHERE key = 'read_only'").toArray()[0] as { value?: string } | undefined;
+    if (readOnly?.value === "1") throw new Error("hub_read_only");
+    const commandId = typeof input.commandId === "string" && input.commandId ? input.commandId : crypto.randomUUID();
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(commandId)) throw new Error("invalid_command_id");
+    const existing = this.sql.exec("SELECT * FROM remote_commands WHERE command_id = ?", commandId).toArray()[0] as SqlRow | undefined;
+    const payloadJson = JSON.stringify(cleanCommandPayload(input.operation, input.payload));
+    if (existing) {
+      if (existing.operation !== input.operation || existing.payload_json !== payloadJson) throw new Error("command_id_conflict");
+      return this.command(existing);
+    }
+    const device = this.writerDevice();
+    const entityId = typeof input.entityId === "string" && input.entityId ? input.entityId : crypto.randomUUID();
+    const current = this.sql.exec("SELECT payload_json, deleted_at FROM entities WHERE entity_type = 'issue' AND entity_id = ?", entityId).toArray()[0] as { payload_json: string; deleted_at: string | null } | undefined;
+    if (input.operation === "issue.create" && current && !current.deleted_at) throw new Error("issue_exists");
+    if (input.operation !== "issue.create" && (!current || current.deleted_at)) throw new Error("issue_not_found");
+    const requested = timestamp();
+    let command: SqlRow;
+    try {
+      command = this.transaction(() => {
+        this.sql.exec("INSERT INTO remote_commands (command_id, device_id, operation, entity_id, base_revision, payload_json, status, requested_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)", commandId, device.id, input.operation, entityId, input.baseRevision === null ? null : Number(input.baseRevision), payloadJson, requested, timestamp(24 * 60 * 60_000));
+        return this.sql.exec("SELECT * FROM remote_commands WHERE command_id = ?", commandId).toArray()[0] as SqlRow;
+      });
+    } catch (error) {
+      throw error;
+    }
+    this.notifyDevice(device.id);
+    return this.command(command);
+  }
+
+  private notifyDevice(deviceId: string) {
+    const sockets = this.state.getWebSockets?.(`device:${deviceId}`) || [];
+    if (!sockets.length) return;
+    const count = this.countCommands(deviceId);
+    const message = encodeControlMessage({ type: "commands_available", protocol_version: controlProtocolVersion, count });
+    for (const socket of sockets) socket.send(message);
+  }
+
+  private async createWebCommand(url: URL, request: Request) {
+    const body = await request.json() as Record<string, unknown>;
+    const issueMatch = url.pathname.match(/^\/api\/issues\/([^/]+)$/);
+    const actionMatch = url.pathname.match(/^\/api\/issues\/([^/]+)\/(move|start|stop|archive|unarchive|reply)$/);
+    if (url.pathname === "/api/issues" && request.method === "POST") return this.createWebCommandRow({ commandId: body.command_id, operation: "issue.create", entityId: body.id, baseRevision: null, payload: { project_id: body.project_id, title: body.title, description: body.description, status: body.status, priority: body.priority, labels: body.labels, agent_enabled: body.agent_enabled, agent_id: body.agent_id, user_assigned: body.user_assigned } });
+    if (issueMatch && request.method === "PATCH") return this.createWebCommandRow({ commandId: body.command_id, operation: "issue.update", entityId: decodeURIComponent(issueMatch[1]), baseRevision: body.version, payload: { project_id: body.project_id, title: body.title, description: body.description, status: body.status, priority: body.priority, sort_order: body.sort_order, pinned: body.pinned, agent_enabled: body.agent_enabled, agent_id: body.agent_id, user_assigned: body.user_assigned } });
+    if (!actionMatch || request.method !== "POST") throw new Error("not_found");
+    const action = actionMatch[2];
+    const operation = action === "archive" ? "issue.archive" : action === "unarchive" ? "issue.restore" : action === "start" ? "issue.start" : action === "stop" ? "issue.stop" : action === "reply" ? "issue.reply" : "issue.move";
+    return this.createWebCommandRow({ commandId: body.command_id || body.request_id, operation, entityId: decodeURIComponent(actionMatch[1]), baseRevision: body.version, payload: action === "move" ? { status: body.status, before_id: body.before_id } : action === "start" ? { project_id: body.project_id, title: body.title, description: body.description, status: body.status, priority: body.priority, labels: body.labels, agent_id: body.agent_id } : action === "reply" ? { message: body.message, files: body.files } : {} });
+  }
+
+  private board() {
+    const rows = this.sql.exec("SELECT entity_type, entity_id, payload_json FROM entities WHERE deleted_at IS NULL ORDER BY entity_type, entity_id").toArray() as Array<{ entity_type: string; entity_id: string; payload_json: string }>;
+    const projects = rows.filter(row => row.entity_type === "project").map(row => JSON.parse(row.payload_json));
+    const issues = rows.filter(row => row.entity_type === "issue").map(row => JSON.parse(row.payload_json));
+    const directory = rows.find(row => row.entity_type === "agent_directory");
+    const agents = directory ? JSON.parse(directory.payload_json) : { agents: [], default_avatar: "" };
+    const runtimeRow = this.sql.exec("SELECT payload_json FROM runtime_projection ORDER BY updated_at DESC LIMIT 1").toArray()[0] as { payload_json?: string } | undefined;
+    return { revision: this.revision(), projects, issues, agents: agents.agents || [], default_avatar: agents.default_avatar || "", runtime: runtimeRow?.payload_json ? JSON.parse(runtimeRow.payload_json) : null };
+  }
+
+  private webDashboard() {
+    return new Response(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Better Codex Hub</title><style>body{font:16px system-ui,sans-serif;max-width:760px;margin:40px auto;padding:0 20px;color:#17211b}form{display:grid;gap:10px;max-width:360px}input,button{font:inherit;padding:10px}pre{white-space:pre-wrap;background:#f3f5f3;padding:14px;border-radius:8px}</style><main><h1>Better Codex Hub</h1><p>Sign in to inspect the projection and runtime status.</p><form id="login"><input name="username" value="admin" autocomplete="username" required><input name="password" type="password" autocomplete="current-password" required><button>Sign in</button><output id="message"></output></form><section id="content" hidden><h2>Current projection</h2><pre id="board"></pre></section><script>const login=document.querySelector('#login'),message=document.querySelector('#message'),content=document.querySelector('#content'),board=document.querySelector('#board');login.onsubmit=async event=>{event.preventDefault();const data=new FormData(login);const response=await fetch('/web/session',{method:'POST',headers:{'content-type':'application/json'},credentials:'same-origin',body:JSON.stringify({username:data.get('username'),password:data.get('password')})});const value=await response.json();if(!response.ok){message.textContent=value.error||'Sign in failed';return}const boardResponse=await fetch('/api/v1/board',{credentials:'same-origin'});const boardValue=await boardResponse.json();if(!boardResponse.ok){message.textContent=boardValue.error||'Board unavailable';return}login.hidden=true;content.hidden=false;board.textContent=JSON.stringify(boardValue,null,2)};</script></main>`, { status: 200, headers: { "content-type": "text/html; charset=utf-8", "content-security-policy": "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-ancestors 'none'" } });
+  }
+
+  private snapshot() {
+    const tables = ["devices", "entities", "sync_events", "changes", "runtime_projection", "conversations", "remote_commands", "hub_settings"];
+    return { version: 1, created_at: timestamp(), tables: Object.fromEntries(tables.map(table => [table, this.snapshotRows(table)])) };
+  }
+
+  private async createBackup(request: Request) {
+    if (!this.env.BACKUPS || !this.env.ADMIN_TOKEN || request.headers.get("authorization") !== `Bearer ${this.env.ADMIN_TOKEN}`) return json({ error: "unauthorized" }, 401);
+    const key = `hub-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+    await this.env.BACKUPS.put(key, JSON.stringify(this.snapshot()), { httpMetadata: { contentType: "application/json" } });
+    this.sql.exec("INSERT INTO hub_settings (key, value, updated_at) VALUES ('last_backup_key', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at", key, timestamp());
+    return json({ ok: true, key, created_at: timestamp() });
+  }
+
+  private snapshotRows(table: string) {
+    return this.sql.exec(`SELECT * FROM ${table}`).toArray().map(row => {
+      const copy = { ...row } as Record<string, unknown>;
+      if (table === "hub_settings" && copy.key === "web_password_hash") return null;
+      if (table === "web_sessions" || table === "login_attempts" || table === "device_authorizations") return null;
+      if (table === "devices") delete copy.device_token;
+      return copy;
+    }).filter((row): row is Record<string, unknown> => row !== null);
+  }
+
+  private async backupStatus(request: Request) {
+    if (!this.env.ADMIN_TOKEN || request.headers.get("authorization") !== `Bearer ${this.env.ADMIN_TOKEN}`) return json({ error: "unauthorized" }, 401);
+    const row = this.sql.exec("SELECT value, updated_at FROM hub_settings WHERE key = 'last_backup_key'").toArray()[0] as { value: string; updated_at: string } | undefined;
+    return json({ configured: Boolean(this.env.BACKUPS), last_backup: row ? { key: row.value, created_at: row.updated_at } : null });
+  }
+
+  private async restoreBackup(request: Request) {
+    if (!this.env.BACKUPS || !this.env.ADMIN_TOKEN || request.headers.get("authorization") !== `Bearer ${this.env.ADMIN_TOKEN}`) return json({ error: "unauthorized" }, 401);
+    const body = await request.json() as Record<string, unknown>;
+    const key = typeof body.key === "string" ? body.key : "";
+    if (!/^hub-[A-Za-z0-9_.-]+\.json$/.test(key)) return json({ error: "invalid_backup_key" }, 400);
+    const object = await this.env.BACKUPS.get(key);
+    if (!object) return json({ error: "backup_not_found" }, 404);
+    let snapshot: unknown;
+    try { snapshot = JSON.parse(await object.text()); } catch { return json({ error: "backup_invalid" }, 400); }
+    if (!snapshot || typeof snapshot !== "object" || (snapshot as Record<string, unknown>).version !== 1) return json({ error: "backup_invalid" }, 400);
+    const tables = (snapshot as Record<string, unknown>).tables;
+    if (!tables || typeof tables !== "object" || Array.isArray(tables)) return json({ error: "backup_invalid" }, 400);
+    const allowed = ["devices", "entities", "sync_events", "changes", "runtime_projection", "conversations", "remote_commands", "hub_settings"];
+    const columns: Record<string, string[]> = {
+      devices: ["id", "name", "token_hash", "created_at", "last_seen_at", "lease_expires_at", "revoked_at"],
+      entities: ["entity_type", "entity_id", "owner_device_id", "local_revision", "payload_json", "deleted_at", "updated_at"],
+      sync_events: ["event_id", "device_id", "received_at"],
+      changes: ["seq", "entity_type", "entity_id", "operation", "created_at"],
+      runtime_projection: ["device_id", "payload_json", "updated_at"],
+      conversations: ["issue_id", "owner_device_id", "payload_json", "updated_at"],
+      remote_commands: ["command_id", "device_id", "operation", "entity_id", "base_revision", "payload_json", "status", "requested_at", "expires_at", "finished_at", "error", "delivery_id", "dispatched_at", "dispatch_expires_at", "attempt_count", "last_delivery_error"],
+      hub_settings: ["key", "value", "updated_at"],
+    };
+    for (const table of allowed) {
+      const rows = (tables as Record<string, unknown>)[table];
+      if (rows !== undefined && !Array.isArray(rows)) return json({ error: "backup_invalid" }, 400);
+      if (Array.isArray(rows)) for (const value of rows) {
+        if (!value || typeof value !== "object" || Array.isArray(value)) return json({ error: "backup_invalid" }, 400);
+        const row = value as Record<string, unknown>;
+        const names = columns[table].filter(name => row[name] !== undefined);
+        if (!names.length || (table === "devices" && !row.token_hash) || (table === "hub_settings" && (!row.key || row.value === undefined || !row.updated_at))) return json({ error: "backup_invalid" }, 400);
+      }
+    }
+    const currentPassword = this.sql.exec("SELECT value FROM hub_settings WHERE key = 'web_password_hash'").toArray()[0] as { value?: string } | undefined;
+    try {
+      this.transaction(() => {
+        this.sql.exec("DELETE FROM devices; DELETE FROM entities; DELETE FROM sync_events; DELETE FROM changes; DELETE FROM runtime_projection; DELETE FROM conversations; DELETE FROM remote_commands; DELETE FROM hub_settings;");
+        if (currentPassword?.value) this.sql.exec("INSERT INTO hub_settings (key, value, updated_at) VALUES ('web_password_hash', ?, ?)", currentPassword.value, timestamp());
+        for (const table of allowed) {
+          const rows = (tables as Record<string, unknown>)[table];
+          if (!Array.isArray(rows)) continue;
+          for (const value of rows) {
+            const row = value as Record<string, unknown>;
+            const names = columns[table].filter(name => row[name] !== undefined);
+            if (!names.length) continue;
+            const placeholders = names.map(() => "?").join(", ");
+            this.sql.exec(`INSERT INTO ${table} (${names.join(", ")}) VALUES (${placeholders})`, ...names.map(name => row[name]));
+          }
+        }
+      });
+    } catch (error) {
+      return json({ error: error instanceof Error ? error.message : "backup_restore_failed" }, 400);
+    }
+    return json({ ok: true, key, restored_at: timestamp() });
+  }
+
+  private async readOnly(request: Request) {
+    if (!this.env.ADMIN_TOKEN || request.headers.get("authorization") !== `Bearer ${this.env.ADMIN_TOKEN}`) return json({ error: "unauthorized" }, 401);
+    const row = this.sql.exec("SELECT value FROM hub_settings WHERE key = 'read_only'").toArray()[0] as { value?: string } | undefined;
+    return json({ read_only: row?.value === "1" });
+  }
+
+  private async setReadOnly(request: Request) {
+    if (!this.env.ADMIN_TOKEN || request.headers.get("authorization") !== `Bearer ${this.env.ADMIN_TOKEN}`) return json({ error: "unauthorized" }, 401);
+    const body = await request.json() as Record<string, unknown>;
+    const readOnly = body.read_only === true;
+    this.sql.exec("INSERT INTO hub_settings (key, value, updated_at) VALUES ('read_only', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at", readOnly ? "1" : "0", timestamp());
+    return json({ read_only: readOnly });
+  }
+
+  private async rotatePassword(request: Request) {
+    if (!this.env.ADMIN_TOKEN || request.headers.get("authorization") !== `Bearer ${this.env.ADMIN_TOKEN}`) return json({ error: "unauthorized" }, 401);
+    const body = await request.json() as Record<string, unknown>;
+    const password = typeof body.password === "string" ? body.password : "";
+    if (password.length < 12 || password === this.env.ADMIN_TOKEN) return json({ error: "invalid_web_password" }, 400);
+    this.sql.exec("INSERT INTO hub_settings (key, value, updated_at) VALUES ('web_password_hash', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at", passwordHash(password), timestamp());
+    this.sql.exec("DELETE FROM web_sessions; UPDATE device_authorizations SET status = 'denied' WHERE status = 'pending';");
+    return json({ updated: true, sessions_revoked: true, device_authorizations_revoked: true });
+  }
+
+  private async commandQueue(request: Request) {
+    if (!this.env.ADMIN_TOKEN || request.headers.get("authorization") !== `Bearer ${this.env.ADMIN_TOKEN}`) return json({ error: "unauthorized" }, 401);
+    recoverExpiredCommands(this.sql);
+    const rows = this.sql.exec("SELECT status, COUNT(*) AS value FROM remote_commands WHERE status IN ('pending', 'dispatched') GROUP BY status").toArray() as Array<{ status: string; value: number }>;
+    return json({ pending: Number(rows.find(row => row.status === "pending")?.value || 0), dispatched: Number(rows.find(row => row.status === "dispatched")?.value || 0) });
+  }
+
+  private async login(request: Request) {
+    if (!trustedOrigin(request)) return json({ error: "forbidden" }, 403);
+    const body = await request.json() as Record<string, unknown>;
+    const username = String(body.username || "");
+    const password = String(body.password || "");
+    const clientKey = request.headers.get("cf-connecting-ip") || request.headers.get("x-forwarded-for") || "unknown";
+    const attempt = this.sql.exec("SELECT count, reset_at FROM login_attempts WHERE client_key = ?", clientKey).toArray()[0] as { count: number; reset_at: string } | undefined;
+    if (attempt && attempt.reset_at > timestamp() && attempt.count >= 5) return json({ error: "login_rate_limited" }, 429, { "retry-after": String(Math.max(1, Math.ceil((Date.parse(attempt.reset_at) - Date.now()) / 1000))) });
+    const stored = this.sql.exec("SELECT value FROM hub_settings WHERE key = 'web_password_hash'").toArray()[0]?.value;
+    const expected = stored ? String(stored) : "";
+    if (username !== "admin" || !passwordMatches(password, expected)) {
+      const current = attempt && attempt.reset_at > timestamp() ? attempt : { count: 0, reset_at: timestamp(15 * 60_000) };
+      this.sql.exec("INSERT INTO login_attempts (client_key, count, reset_at) VALUES (?, ?, ?) ON CONFLICT(client_key) DO UPDATE SET count = excluded.count, reset_at = excluded.reset_at", clientKey, current.count + 1, current.reset_at);
+      return json({ error: "unauthorized" }, 401);
+    }
+    this.sql.exec("DELETE FROM login_attempts WHERE client_key = ?", clientKey);
+    const tokenBytes = new Uint8Array(32);
+    crypto.getRandomValues(tokenBytes);
+    const token = [...tokenBytes].map(value => value.toString(16).padStart(2, "0")).join("");
+    const csrfBytes = new Uint8Array(24);
+    crypto.getRandomValues(csrfBytes);
+    const csrf = [...csrfBytes].map(value => value.toString(16).padStart(2, "0")).join("");
+    const created = timestamp();
+    this.sql.exec("INSERT INTO web_sessions (token_hash, csrf_token, created_at, expires_at, last_seen_at) VALUES (?, ?, ?, ?, ?)", await tokenHash(token), csrf, created, timestamp(12 * 60 * 60_000), created);
+    return json({ csrf_token: csrf, expires_at: timestamp(12 * 60 * 60_000) }, 200, { "set-cookie": webSessionCookie(token) });
+  }
+
+  private async session(request: Request) {
+    const token = cookieValue(request, "better_codex_session");
+    const row = this.sql.exec("SELECT csrf_token, expires_at FROM web_sessions WHERE token_hash = ? AND expires_at > ?", await tokenHash(token), timestamp()).toArray()[0] as { csrf_token: string; expires_at: string } | undefined;
+    return row ? json({ csrf_token: row.csrf_token, expires_at: row.expires_at }) : json({ error: "unauthorized" }, 401);
+  }
+
+  private authorizationPage(authorizationId: string, code: string) {
+    const row = this.authorization(authorizationId);
+    if (!row || row.status !== "pending") return new Response("authorization_expired", { status: 410, headers: { "content-type": "text/plain; charset=utf-8" } });
+    const safeId = JSON.stringify(authorizationId);
+    const safeCode = JSON.stringify(code);
+    return new Response(`<!doctype html><meta charset="utf-8"><title>Approve Better Codex Runtime</title><main><h1>Approve Better Codex Runtime</h1><p>Device code: <strong>${escapeHtml(code)}</strong></p><form id="f"><input name="username" autocomplete="username" placeholder="Username" required><input name="password" type="password" autocomplete="current-password" placeholder="Password" required><button>Approve</button><output id="o"></output></form><script>const id=${safeId},code=${safeCode},f=document.querySelector('#f'),o=document.querySelector('#o');f.onsubmit=async e=>{e.preventDefault();const d=new FormData(f);let r=await fetch('/web/session',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({username:d.get('username'),password:d.get('password')})});const s=await r.json();if(!r.ok)throw new Error('login_failed');r=await fetch('/api/v1/device-authorizations/'+encodeURIComponent(id)+'/approve',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json','x-csrf-token':s.csrf_token},body:JSON.stringify({user_code:code})});const v=await r.json();o.textContent=r.ok?'Approved. Return to the CLI.':v.error||'Approval failed'};</script></main>`, { status: 200, headers: { "content-type": "text/html; charset=utf-8", "content-security-policy": "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-ancestors 'none'" } });
+  }
+
+  private async createAuthorization(request: Request) {
+    if (this.isReadOnlyValue()) return json({ error: "hub_read_only" }, 409);
+    if (request.headers.get("authorization")) return json({ error: "device_authorization_requires_cli" }, 403);
+    const body = await request.json() as Record<string, unknown>;
+    const deviceName = typeof body.name === "string" && body.name.trim() ? body.name.trim().slice(0, 120) : "Runtime";
+    const id = crypto.randomUUID();
+    const codeBytes = new Uint8Array(5);
+    crypto.getRandomValues(codeBytes);
+    const code = [...codeBytes].map(value => value.toString(16).padStart(2, "0")).join("").slice(0, 10).toUpperCase();
+    this.sql.exec("INSERT INTO device_authorizations (authorization_id, user_code_hash, device_name, status, expires_at, created_at) VALUES (?, ?, ?, 'pending', ?, ?)", id, await tokenHash(code), deviceName, timestamp(10 * 60_000), timestamp());
+    const base = new URL(request.url).origin;
+    return json({ authorization_id: id, user_code: code, device_name: deviceName, status: "pending", expires_at: timestamp(10 * 60_000), approval_url: `${base}/web/device-authorizations/${encodeURIComponent(id)}?code=${encodeURIComponent(code)}` }, 201);
+  }
+
+  private isReadOnlyValue() {
+    return (this.sql.exec("SELECT value FROM hub_settings WHERE key = 'read_only'").toArray()[0] as { value?: string } | undefined)?.value === "1";
+  }
+
+  private authorization(id: string) {
+    this.sql.exec("UPDATE device_authorizations SET status = 'expired' WHERE status = 'pending' AND expires_at <= ?", timestamp());
+    return this.sql.exec("SELECT authorization_id, device_name, status, expires_at, device_id FROM device_authorizations WHERE authorization_id = ?", id).toArray()[0] as Record<string, unknown> | undefined;
+  }
+
+  private async authorizationToken(id: string, request: Request) {
+    const body = await request.json() as Record<string, unknown>;
+    const codeHash = await tokenHash(String(body.user_code || "").trim().toUpperCase());
+    const row = this.sql.exec("SELECT authorization_id, device_name, status, expires_at, device_id, device_token FROM device_authorizations WHERE authorization_id = ? AND user_code_hash = ?", id, codeHash).toArray()[0] as Record<string, unknown> | undefined;
+    if (!row || String(row.expires_at) <= timestamp()) return json({ error: "invalid_device_authorization" }, 400);
+    if (row.status !== "approved" || !row.device_id || !row.device_token) return json({ authorization_id: id, status: row.status });
+    const token = String(row.device_token);
+    const result = this.transaction(() => {
+      const current = this.sql.exec("SELECT device_token FROM device_authorizations WHERE authorization_id = ? AND status = 'approved'", id).toArray()[0] as { device_token?: string } | undefined;
+      if (!current?.device_token) return null;
+      this.sql.exec("UPDATE device_authorizations SET device_token = NULL WHERE authorization_id = ? AND device_token IS NOT NULL", id);
+      return current.device_token;
+    });
+    return result ? json({ authorization_id: id, status: "approved", device_id: row.device_id, device_name: row.device_name, device_token: token }) : json({ authorization_id: id, status: "approved" });
+  }
+
+  private async approveAuthorization(id: string, request: Request) {
+    if (!trustedOrigin(request)) return json({ error: "csrf_invalid" }, 403);
+    const session = cookieValue(request, "better_codex_session");
+    const csrf = request.headers.get("x-csrf-token") || "";
+    const sessionRow = this.sql.exec("SELECT csrf_token FROM web_sessions WHERE token_hash = ? AND expires_at > ?", await tokenHash(session), timestamp()).toArray()[0] as { csrf_token: string } | undefined;
+    if (!sessionRow || sessionRow.csrf_token !== csrf) return json({ error: "csrf_invalid" }, 403);
+    const body = await request.json() as Record<string, unknown>;
+    const codeHash = await tokenHash(String(body.user_code || "").trim().toUpperCase());
+    const row = this.sql.exec("SELECT device_name, status, expires_at FROM device_authorizations WHERE authorization_id = ? AND user_code_hash = ?", id, codeHash).toArray()[0] as { device_name: string; status: string; expires_at: string } | undefined;
+    if (!row || row.status !== "pending" || row.expires_at <= timestamp()) return json({ error: "invalid_device_authorization" }, 400);
+    const deviceId = crypto.randomUUID();
+    const tokenBytes = new Uint8Array(32);
+    crypto.getRandomValues(tokenBytes);
+    const token = [...tokenBytes].map(value => value.toString(16).padStart(2, "0")).join("");
+    const now = timestamp();
+    const tokenHashValue = await tokenHash(token);
+    this.transaction(() => {
+      const current = this.sql.exec("SELECT status FROM device_authorizations WHERE authorization_id = ? AND status = 'pending'", id).toArray();
+      if (!current.length) throw new Error("invalid_device_authorization");
+      this.sql.exec("UPDATE device_authorizations SET status = 'approved', device_id = ?, device_token_hash = ?, device_token = ?, approved_at = ? WHERE authorization_id = ? AND status = 'pending'", deviceId, tokenHashValue, token, now, id);
+      if (!this.sql.exec("SELECT 1 FROM device_authorizations WHERE authorization_id = ? AND status = 'approved' AND device_id = ?", id, deviceId).toArray().length) throw new Error("invalid_device_authorization");
+      this.sql.exec("INSERT INTO devices (id, name, token_hash, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?)", deviceId, row.device_name, tokenHashValue, now, now);
+    });
+    return json({ authorization_id: id, status: "approved", device_id: deviceId, device_name: row.device_name });
+  }
+
   private async deviceForToken(token: string) {
     if (!token) return null;
     const row = this.sql.exec("SELECT id, name, lease_expires_at FROM devices WHERE token_hash = ? AND revoked_at IS NULL", await tokenHash(token)).toArray()[0] as { id: string; name: string; lease_expires_at: string | null } | undefined;
@@ -140,9 +558,10 @@ export class BetterCodexHubObject {
     if (!supportedSyncProtocolVersions.includes(request.protocol_version)) throw new Error("incompatible_protocol");
     if (request.device_id !== deviceId || !Array.isArray(request.changes) || request.changes.length > 100) throw new Error("invalid_changes");
     if (request.runtime?.device_id !== deviceId || !supportedSyncProtocolVersions.includes(request.runtime?.protocol_version) || request.runtime.health_state !== "online") throw new Error("invalid_runtime_projection");
-    const leaseExpiresAt = this.lease(deviceId);
-    const accepted: string[] = [];
-    for (const change of request.changes) {
+    const result = this.transaction(() => {
+      const leaseExpiresAt = this.lease(deviceId);
+      const accepted: string[] = [];
+      for (const change of request.changes) {
       if (!change || typeof change.event_id !== "string" || !change.entity_id || !["project", "issue", "agent_directory"].includes(change.entity_type)) throw new Error("invalid_change");
       if (this.sql.exec("SELECT event_id FROM sync_events WHERE event_id = ?", change.event_id).toArray().length) { accepted.push(change.event_id); continue; }
       const current = this.sql.exec("SELECT * FROM entities WHERE entity_type = ? AND entity_id = ?", change.entity_type, change.entity_id).toArray()[0] as { owner_device_id: string; payload_json: string; local_revision: number; deleted_at: string | null } | undefined;
@@ -156,10 +575,12 @@ export class BetterCodexHubObject {
       else this.sql.exec("UPDATE entities SET local_revision = ?, payload_json = ?, deleted_at = ?, updated_at = ? WHERE entity_type = ? AND entity_id = ?", localRevision, payload, deletedAt, timestamp(), change.entity_type, change.entity_id);
       this.sql.exec("INSERT INTO sync_events (event_id, device_id, received_at) VALUES (?, ?, ?)", change.event_id, deviceId, timestamp());
       this.sql.exec("INSERT INTO changes (entity_type, entity_id, operation, created_at) VALUES (?, ?, ?, ?)", change.entity_type, change.entity_id, projection ? "upsert" : "delete", timestamp());
-      accepted.push(change.event_id);
-    }
-    this.sql.exec("INSERT INTO runtime_projection (device_id, payload_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(device_id) DO UPDATE SET payload_json = excluded.payload_json, updated_at = excluded.updated_at", deviceId, JSON.stringify({ ...request.runtime, protocol_version: request.protocol_version, last_seen_at: timestamp() }), timestamp());
-    return { accepted, cursor: this.revision(), lease_expires_at: leaseExpiresAt };
+        accepted.push(change.event_id);
+      }
+      this.sql.exec("INSERT INTO runtime_projection (device_id, payload_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(device_id) DO UPDATE SET payload_json = excluded.payload_json, updated_at = excluded.updated_at", deviceId, JSON.stringify({ ...request.runtime, protocol_version: request.protocol_version, last_seen_at: timestamp() }), timestamp());
+      return { accepted, cursor: this.revision(), lease_expires_at: leaseExpiresAt };
+    });
+    return result;
   }
 
   private pendingCommands(deviceId: string, limit: number) {
@@ -170,11 +591,13 @@ export class BetterCodexHubObject {
   private claimCommands(deviceId: string, limit: number) {
     recoverExpiredCommands(this.sql);
     const rows = this.pendingCommands(deviceId, limit);
-    return rows.map(command => {
-      const deliveryId = crypto.randomUUID();
-      this.sql.exec("UPDATE remote_commands SET status = 'dispatched', delivery_id = ?, dispatched_at = ?, dispatch_expires_at = ?, attempt_count = COALESCE(attempt_count, 0) + 1 WHERE command_id = ? AND status = 'pending'", deliveryId, timestamp(), timestamp(90_000), command.command_id);
-      return this.command(this.sql.exec("SELECT * FROM remote_commands WHERE command_id = ?", command.command_id).toArray()[0]);
-    });
+    const claimed = this.transaction(() => rows.flatMap(command => {
+        const deliveryId = crypto.randomUUID();
+        this.sql.exec("UPDATE remote_commands SET status = 'dispatched', delivery_id = ?, dispatched_at = ?, dispatch_expires_at = ?, attempt_count = COALESCE(attempt_count, 0) + 1 WHERE command_id = ? AND status = 'pending'", deliveryId, timestamp(), timestamp(90_000), command.command_id);
+        if (!this.sql.exec("SELECT 1 FROM remote_commands WHERE command_id = ? AND status = 'dispatched' AND delivery_id = ?", command.command_id, deliveryId).toArray().length) return [];
+        return [this.command(this.sql.exec("SELECT * FROM remote_commands WHERE command_id = ?", command.command_id).toArray()[0])];
+      }));
+    return claimed;
   }
 
   private ack(deviceId: string, ack: RemoteCommandAck) {
@@ -184,14 +607,18 @@ export class BetterCodexHubObject {
     if (!["pending", "dispatched"].includes(String(row.status))) return this.command(row);
     if (row.status === "dispatched" && row.delivery_id && row.delivery_id !== ack.delivery_id) throw new Error("stale_command_delivery");
     if (!["applied", "rejected", "conflict"].includes(ack.status)) throw new Error("invalid_command_status");
-    if (ack.status === "applied") {
-      const projection = decodePayload(ack.projection);
-      if (projection.id !== row.entity_id || !Number.isSafeInteger(projection.local_revision) || Number(projection.local_revision) < 1) throw new Error("invalid_projection");
-      this.sql.exec("INSERT INTO entities (entity_type, entity_id, owner_device_id, local_revision, payload_json, deleted_at, updated_at) VALUES ('issue', ?, ?, ?, ?, NULL, ?) ON CONFLICT(entity_type, entity_id) DO UPDATE SET owner_device_id = excluded.owner_device_id, local_revision = excluded.local_revision, payload_json = excluded.payload_json, deleted_at = NULL, updated_at = excluded.updated_at", row.entity_id, deviceId, projection.local_revision, JSON.stringify(projection), timestamp());
-      this.sql.exec("INSERT INTO changes (entity_type, entity_id, operation, created_at) VALUES ('issue', ?, 'upsert', ?)", row.entity_id, timestamp());
-    }
-    this.sql.exec("UPDATE remote_commands SET status = ?, finished_at = ?, error = ?, delivery_id = NULL, dispatched_at = NULL, dispatch_expires_at = NULL WHERE command_id = ?", ack.status, timestamp(), ack.error, ack.command_id);
-    return this.command(this.sql.exec("SELECT * FROM remote_commands WHERE command_id = ?", ack.command_id).toArray()[0]);
+    const result = this.transaction(() => {
+      if (ack.status === "applied") {
+        const projection = decodePayload(ack.projection);
+        if (projection.id !== row.entity_id || !Number.isSafeInteger(projection.local_revision) || Number(projection.local_revision) < 1) throw new Error("invalid_projection");
+        this.sql.exec("INSERT INTO entities (entity_type, entity_id, owner_device_id, local_revision, payload_json, deleted_at, updated_at) VALUES ('issue', ?, ?, ?, ?, NULL, ?) ON CONFLICT(entity_type, entity_id) DO UPDATE SET owner_device_id = excluded.owner_device_id, local_revision = excluded.local_revision, payload_json = excluded.payload_json, deleted_at = NULL, updated_at = excluded.updated_at", row.entity_id, deviceId, projection.local_revision, JSON.stringify(projection), timestamp());
+        this.sql.exec("INSERT INTO changes (entity_type, entity_id, operation, created_at) VALUES ('issue', ?, 'upsert', ?)", row.entity_id, timestamp());
+      }
+      this.sql.exec("UPDATE remote_commands SET status = ?, finished_at = ?, error = ?, delivery_id = NULL, dispatched_at = NULL, dispatch_expires_at = NULL WHERE command_id = ?", ack.status, timestamp(), ack.error, ack.command_id);
+      const result = this.command(this.sql.exec("SELECT * FROM remote_commands WHERE command_id = ?", ack.command_id).toArray()[0]);
+      return result;
+    });
+    return result;
   }
 
   private putConversation(deviceId: string, issueId: string, value: unknown) {
@@ -263,7 +690,12 @@ export class BetterCodexHubObject {
 
 export default {
   async fetch(request: Request, env: CloudflareEnv) {
-    if (env.ASSETS && request.method === "GET" && !new URL(request.url).pathname.startsWith("/api/") && new URL(request.url).pathname !== "/healthz") return env.ASSETS.fetch(request);
+    const pathname = new URL(request.url).pathname;
+    if (env.ASSETS && request.method === "GET" && ["/", "/web", "/web/"].includes(pathname)) {
+      const assetRequest = new Request(new URL("/", request.url), request);
+      return env.ASSETS.fetch(assetRequest);
+    }
+    if (env.ASSETS && request.method === "GET" && pathname !== "/" && pathname !== "/web" && pathname !== "/web/" && !pathname.startsWith("/api/") && !pathname.startsWith("/web/") && pathname !== "/healthz") return env.ASSETS.fetch(request);
     const id = env.HUB.idFromName("primary");
     return env.HUB.get(id).fetch(request);
   },

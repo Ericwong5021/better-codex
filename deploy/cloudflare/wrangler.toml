@@ -13,8 +13,12 @@ tag = "v1"
 new_sqlite_classes = ["BetterCodexHubObject"]
 
 [assets]
-directory = "../../dist"
+directory = "./assets"
 binding = "ASSETS"
+
+[[r2_buckets]]
+binding = "BACKUPS"
+bucket_name = "better-codex-hub-backups"
 
 [vars]
 BETTER_CODEX_HUB_PUBLIC = "1"
