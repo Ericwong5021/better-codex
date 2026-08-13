@@ -117,7 +117,7 @@ test("recovers after a Runtime restart with a new Web session", async ({ page })
   await page.reload();
   const notice = page.locator(".better-codex-completion-notice", { hasText: "Runtime restart notification" });
   await expect(notice).toBeVisible();
-  await expect(notice.locator(".better-codex-completion-close")).toHaveCount(0);
+  await expect(notice.locator(".better-codex-completion-close")).toBeVisible();
   await notice.locator("[data-completion-menu-toggle]").click();
   await notice.locator("[data-completion-suppress]").click();
   await expect(notice).toBeVisible();

@@ -260,15 +260,16 @@ test("unread completion notifications survive Runtime reinjection", () => {
   assert.ok(source.includes("dismissNotice(false)"), "reinjection should detach notices without marking them read");
 });
 
-test("permanent completion notifications can only be cleared by opening them", () => {
+test("permanent completion notifications remain manually dismissible", () => {
   const source = injectionScript(4317, "test-token", "install");
   const notificationSource = source.slice(source.indexOf("function renderSessionEndNotice"), source.indexOf("async function perform"));
 
   assert.ok(notificationSource.includes("const permanent = duration === 0"));
-  assert.ok(notificationSource.includes('permanent ? "" : \'<button class="better-codex-completion-close"'));
+  assert.ok(notificationSource.includes('<button class="better-codex-completion-close"'));
   assert.ok(notificationSource.includes('if (currentNotice.dataset.permanent !== "true") dismissNotice(true)'));
   assert.ok(notificationSource.includes("dismiss(true);\n        void perform(() => openEditor(issue))"));
-  assert.doesNotMatch(notificationSource, /querySelector\("\.better-codex-completion-close"\)\.addEventListener/);
+  assert.ok(notificationSource.includes('querySelector(".better-codex-completion-close").addEventListener("click", () => dismiss(true))'));
+  assert.ok(notificationSource.includes("if (!permanent) completionNoticeTimers.set"));
 });
 
 test("issue creation project picker orders newest projects first", () => {

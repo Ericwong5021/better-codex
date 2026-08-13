@@ -2044,7 +2044,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const subject = [identifier, title].filter(Boolean).join(" ");
       const status = t(statusLabels[issue?.status] || String(issue?.status || ""));
       const completionAgent = state.agents.find(agent => agent.id === issue?.agent_id) || state.agents.find(agent => agent.is_default) || { name: "Codex", is_default: true };
-      notice.innerHTML = '<div class="better-codex-completion-layout">' + agentAvatarMarkup(completionAgent, "better-codex-completion-avatar") + '<p class="better-codex-completion-message">' + escapeHtml(subject || t("会话已结束")) + '</p><span class="better-codex-completion-status">' + escapeHtml(status) + '</span></div><button class="better-codex-completion-menu-toggle" type="button" aria-label="' + escapeHtml(t("更多操作")) + '" aria-expanded="false" aria-haspopup="menu" data-completion-menu-toggle>' + icon("more") + '</button><div class="better-codex-completion-menu" data-completion-menu hidden><button type="button" role="menuitem" data-completion-suppress>' + escapeHtml(t("本次启动关闭")) + '</button></div>' + (permanent ? "" : '<button class="better-codex-completion-close" type="button" aria-label="' + escapeHtml(t("关闭")) + '">' + icon("close") + '</button>');
+      notice.innerHTML = '<div class="better-codex-completion-layout">' + agentAvatarMarkup(completionAgent, "better-codex-completion-avatar") + '<p class="better-codex-completion-message">' + escapeHtml(subject || t("会话已结束")) + '</p><span class="better-codex-completion-status">' + escapeHtml(status) + '</span></div><button class="better-codex-completion-menu-toggle" type="button" aria-label="' + escapeHtml(t("更多操作")) + '" aria-expanded="false" aria-haspopup="menu" data-completion-menu-toggle>' + icon("more") + '</button><div class="better-codex-completion-menu" data-completion-menu hidden><button type="button" role="menuitem" data-completion-suppress>' + escapeHtml(t("本次启动关闭")) + '</button></div><button class="better-codex-completion-close" type="button" aria-label="' + escapeHtml(t("关闭")) + '">' + icon("close") + '</button>';
       completionNoticeStack.appendChild(notice);
       requestAnimationFrame(() => previousPositions.forEach((top, item) => {
         if (!item.isConnected) return;
@@ -2098,7 +2098,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         dismiss(true);
         void perform(() => openEditor(issue));
       });
-      notice.querySelector(".better-codex-completion-close")?.addEventListener("click", () => dismiss(true));
+      notice.querySelector(".better-codex-completion-close").addEventListener("click", () => dismiss(true));
       if (!permanent) completionNoticeTimers.set(notice, setTimeout(() => dismiss(true), remaining));
     }
 
