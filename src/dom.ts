@@ -698,12 +698,23 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       return project?.external_id === "inbox" ? t("未分配") : project?.name || "";
     }
 
-    function projectsByNewestCreation(projects) {
-      const createdAt = project => {
-        const timestamp = Date.parse(project?.created_at || "");
-        return Number.isFinite(timestamp) ? timestamp : 0;
+    function projectsByRecentActivity(projects, issues = state.issues) {
+      const issueActivity = new Map();
+      issues.forEach(issue => {
+        const timestamp = Date.parse(issue?.updated_at || "");
+        if (!Number.isFinite(timestamp)) return;
+        issueActivity.set(issue.project_id, Math.max(issueActivity.get(issue.project_id) || 0, timestamp));
+      });
+      const activityAt = project => {
+        const timestamp = Date.parse(project?.updated_at || project?.created_at || "");
+        const projectActivity = Number.isFinite(timestamp) ? timestamp : 0;
+        return Math.max(projectActivity, issueActivity.get(project?.id) || 0);
       };
-      return [...projects].sort((left, right) => createdAt(right) - createdAt(left));
+      return [...projects].sort((left, right) => {
+        const difference = activityAt(right) - activityAt(left);
+        if (difference) return difference;
+        return projectLabel(left).localeCompare(projectLabel(right), state.locale || undefined);
+      });
     }
 
     function normalizeSessionId(value) {
@@ -2269,7 +2280,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const load = async () => {
         try {
           archivedIssues = await api("/api/issues?archived=1");
-          const projects = state.projects.filter(project => archivedIssues.some(issue => issue.project_id === project.id));
+          const projects = projectsByRecentActivity(state.projects.filter(project => archivedIssues.some(issue => issue.project_id === project.id)), archivedIssues);
           projectOptions = projects;
           render();
         } catch {
@@ -2487,7 +2498,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (key === "date") return [{ value: "1", text: t("最近 24 小时") }, { value: "7", text: t("最近 7 天") }, { value: "30", text: t("最近 30 天") }];
       if (key === "assignee") return [{ value: "user", text: state.user.name || t("我") }, { value: "codex", text: "Codex" }, ...state.agents.filter(agent => !agent.is_default).map(agent => ({ value: agent.id, text: agentDisplayName(agent) })), { value: "none", text: t("未分配") }];
       if (key === "creator") return [{ value: "me", text: t("由我创建") }];
-      if (key === "project") return state.projects.map(project => ({ value: project.id, text: projectLabel(project) }));
+      if (key === "project") return projectsByRecentActivity(state.projects).map(project => ({ value: project.id, text: projectLabel(project) }));
       if (key === "label") return [...new Set(state.issues.flatMap(issue => issue.labels || []))].map(value => ({ value, text: value }));
       return [];
     }
@@ -2534,7 +2545,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const options = filterOptions(key);
         submenu.innerHTML = "";
         submenu.style.top = row.offsetTop + "px";
-        submenu.style.right = "calc(100% + 4px)";
+        const openLeft = menu.getBoundingClientRect().left >= 194;
+        submenu.style.right = openLeft ? "calc(100% + 4px)" : "auto";
+        submenu.style.left = openLeft ? "auto" : "calc(100% + 4px)";
         if (!options.length) {
           submenu.innerHTML = '<div class="better-codex-filter-row"><span class="better-codex-filter-label">' + escapeHtml(t("暂无可选项")) + '</span></div>';
         } else {
@@ -4793,7 +4806,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
       function projectPicker() {
         const selectedProject = state.projects.find(item => item.id === draft.projectId);
-        const options = projectsByNewestCreation(state.projects).map(item => '<button class="better-codex-project-option" type="button" data-dialog-project-option="' + escapeHtml(item.id) + '">' + icon("folder") + '<span>' + escapeHtml(projectLabel(item)) + '</span><span class="better-codex-project-check">' + (item.id === draft.projectId ? icon("check") : "") + '</span></button>').join("");
+        const options = projectsByRecentActivity(state.projects).map(item => '<button class="better-codex-project-option" type="button" data-dialog-project-option="' + escapeHtml(item.id) + '">' + icon("folder") + '<span>' + escapeHtml(projectLabel(item)) + '</span><span class="better-codex-project-check">' + (item.id === draft.projectId ? icon("check") : "") + '</span></button>').join("");
         return '<span class="better-codex-project-picker"><button class="better-codex-property" type="button" data-dialog-project>' + icon("folder") + '<span data-project-label>' + escapeHtml(projectLabel(selectedProject) || t("选择项目")) + '</span>' + icon("chevron") + '</button><span class="better-codex-project-menu" hidden><input class="better-codex-project-search" type="search" placeholder="' + te("搜索项目...") + '" aria-label="' + te("搜索项目") + '"><span data-project-options>' + (options || '<span class="better-codex-project-empty">' + te("暂无项目") + '</span>') + '</span></span></span>';
       }
 

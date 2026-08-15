@@ -276,11 +276,11 @@ function cleanString(value: unknown, limit = 10000) {
   return value.trim();
 }
 
-function codexProjectCreatedAt(value: unknown) {
+function codexProjectTimestamp(value: unknown) {
   const timestamp = typeof value === "number" ? value : Number.NaN;
   if (!Number.isFinite(timestamp) || timestamp <= 0) return undefined;
-  const createdAt = new Date(timestamp);
-  return Number.isFinite(createdAt.getTime()) ? createdAt.toISOString() : undefined;
+  const date = new Date(timestamp);
+  return Number.isFinite(date.getTime()) ? date.toISOString() : undefined;
 }
 
 function syncCodexProjects(store: Store) {
@@ -296,12 +296,13 @@ function syncCodexProjects(store: Store) {
         const name = cleanString(project.name, 120);
         const rootPaths = Array.isArray(project.rootPaths) ? project.rootPaths : [];
         const workspacePath = cleanString(rootPaths[0], 4096);
-        const createdAt = codexProjectCreatedAt(project.createdAt);
+        const createdAt = codexProjectTimestamp(project.createdAt);
+        const updatedAt = codexProjectTimestamp(project.updatedAt);
         if (!externalId || !name) continue;
         const id = cleanString(externalId, 200);
         const current = existing.get(id);
-        if (current?.name === name && current.workspace_path === workspacePath && (!createdAt || current.created_at === createdAt)) continue;
-        existing.set(id, store.ensureProject({ externalId: id, name, workspacePath, createdAt }));
+        if (current?.name === name && current.workspace_path === workspacePath && (!createdAt || current.created_at === createdAt) && (!updatedAt || current.updated_at >= updatedAt)) continue;
+        existing.set(id, store.ensureProject({ externalId: id, name, workspacePath, createdAt, updatedAt }));
       } catch {}
     }
   } catch {}

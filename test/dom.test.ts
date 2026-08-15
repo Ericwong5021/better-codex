@@ -272,14 +272,15 @@ test("permanent completion notifications remain manually dismissible", () => {
   assert.ok(notificationSource.includes("if (!permanent) completionNoticeTimers.set"));
 });
 
-test("issue creation project picker orders newest projects first", () => {
+test("project lists order recent activity first", () => {
   const source = injectionScript(4317, "test-token", "install");
 
-  assert.ok(source.includes("function projectsByNewestCreation(projects)"));
-  assert.ok(source.includes('const timestamp = Date.parse(project?.created_at || "")'));
-  assert.ok(source.includes("return [...projects].sort((left, right) => createdAt(right) - createdAt(left))"));
-  assert.ok(source.includes("projectsByNewestCreation(state.projects).map"));
-  assert.equal(source.match(/projectsByNewestCreation\(state\.projects\)/g)?.length, 1);
+  assert.ok(source.includes("function projectsByRecentActivity(projects, issues = state.issues)"));
+  assert.ok(source.includes('const timestamp = Date.parse(project?.updated_at || project?.created_at || "")'));
+  assert.ok(source.includes("Math.max(projectActivity, issueActivity.get(project?.id) || 0)"));
+  assert.ok(source.includes('if (key === "project") return projectsByRecentActivity(state.projects).map'));
+  assert.ok(source.includes("const options = projectsByRecentActivity(state.projects).map"));
+  assert.equal(source.match(/projectsByRecentActivity\(state\.projects\)/g)?.length, 2);
 });
 
 test("column cards fill the padded column evenly", () => {
