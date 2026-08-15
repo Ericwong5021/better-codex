@@ -1342,6 +1342,10 @@ export function betterCodexDesignSystemCss() {
       padding: 14px;
     }
 
+    #better-codex-auto-dispatch-help-dialog [data-help-page="remote"][data-remote-connected="true"] .better-codex-remote-status {
+      margin-top: 0;
+    }
+
     #better-codex-auto-dispatch-help-dialog .better-codex-remote-status-head {
       gap: 10px;
     }
