@@ -4336,6 +4336,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       let lastReplyMessage = "";
       let lastReplyRequestId = "";
       let lastReplyStatus = issue?.reply_status || "idle";
+      let replyRecoveryRequestId = "";
+      let replyRecoveryTimer = null;
       let replyDraftTimer = null;
       let latestReplyDraft = draft.reply;
       let sessionId = issueSessionId(issue);
@@ -4364,6 +4366,43 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           clearTimeout(conversationTimer);
           conversationTimer = null;
         }
+      }
+
+      function stopReplyRecovery() {
+        if (replyRecoveryTimer !== null) {
+          clearTimeout(replyRecoveryTimer);
+          replyRecoveryTimer = null;
+        }
+        replyRecoveryRequestId = "";
+      }
+
+      function recoverReply(requestId, message, attempts = 0) {
+        if (!issue || !sessionId || !dialog.isConnected || requestId !== replyRecoveryRequestId) return;
+        if (attempts >= 5) {
+          stopReplyRecovery();
+          showConversationFailure("reply_request_unconfirmed", "reply", message);
+          return;
+        }
+        replyRecoveryTimer = setTimeout(async () => {
+          replyRecoveryTimer = null;
+          if (requestId !== replyRecoveryRequestId) return;
+          try {
+            const data = await api("/api/issues/" + encodeURIComponent(issue.id) + "/conversation");
+            const reply = data?.reply || {};
+            if (reply.request_id === requestId) {
+              stopReplyRecovery();
+              applyConversation(data, { preserveBody: true });
+              return;
+            }
+          } catch {}
+          recoverReply(requestId, message, attempts + 1);
+        }, attempts === 0 ? 1500 : 2000);
+      }
+
+      function scheduleReplyRecovery(requestId, message) {
+        stopReplyRecovery();
+        replyRecoveryRequestId = requestId;
+        recoverReply(requestId, message);
       }
 
       function syncDraft() {
@@ -4771,6 +4810,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const text = String(retryMessage || textarea?.value || "").trim();
         const requestId = retryRequestId || (globalThis.crypto?.randomUUID?.() || VERSION + "-reply-" + Date.now() + "-" + Math.random().toString(36).slice(2));
         if (sessionHandoff || !issue || !sessionId || (!text && !draft.replyAttachments.length) || !send || !errorOutput) return;
+        stopReplyRecovery();
         send.disabled = true;
         errorOutput.hidden = true;
         clearConversationFailure();
@@ -4799,6 +4839,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             return;
           }
           lastReplyRequestId = reply.request_id || requestId;
+          stopReplyRecovery();
           draft.reply = "";
           latestReplyDraft = "";
           draft.replyAttachments.forEach(releaseAttachment);
@@ -4817,6 +4858,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         } catch (error) {
           lastReplyRequestId = requestId;
           showConversationFailure(error instanceof Error ? error.message : "发送失败", "reply", message);
+          scheduleReplyRecovery(requestId, message);
           send.disabled = false;
         }
       }
@@ -5529,6 +5571,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         draft.attachments.forEach(releaseAttachment);
         draft.replyAttachments.forEach(releaseAttachment);
         stopConversationPoll();
+        stopReplyRecovery();
         flushReplyDraft();
         if (projectDismiss) document.removeEventListener("pointerdown", projectDismiss, true);
         if (selectDismiss) document.removeEventListener("pointerdown", selectDismiss, true);
