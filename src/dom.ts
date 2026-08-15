@@ -359,7 +359,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
     const systemLocale = resolveSystemLocale(INITIAL_LOCALE);
     const MOCKUP_PROJECT_ID = "mockup-better-codex";
-    const state = { projects: [], issues: [], agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: ["issues", "agents"].includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", mockup: false, keepCreate: rememberedKeepCreate, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], creator: [], project: [], label: [] } };
+    const state = { projects: [], issues: [], agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: ["issues", "agents"].includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", mockup: false, keepCreate: rememberedKeepCreate, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], project: [], label: [] } };
     function shortcutKeyFromCode(code, key) {
       const source = String(code || "");
       if (/^Key[A-Z]$/.test(source)) return source.slice(3);
@@ -609,6 +609,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     let relayBufferedEvents = [];
     let updateNotice = null;
     let updateNoticeResizeObserver = null;
+    let boardScrollResizeObserver = null;
     let issueSessionSnapshot = new Map();
     let completionNoticesRestored = false;
     let completionNoticeStack = null;
@@ -1069,11 +1070,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #better-codex-dialog .better-codex-property select, #better-codex-dialog .better-codex-property input { width: auto; max-width: 128px; border: 0; color: inherit; background: transparent; padding: 0; font: inherit; font-size: inherit; outline: none; }
         #better-codex-dialog .better-codex-property input { width: 72px; }
         #better-codex-dialog .better-codex-project-picker { position: relative; display: inline-flex; }
-        #better-codex-dialog .better-codex-project-menu { position: absolute; top: calc(100% + 6px); right: 0; bottom: auto; z-index: 30; box-sizing: border-box; width: 220px; max-height: min(320px, calc(100dvh - 32px)); overflow: hidden; border: 1px solid #e4e4e7; border-radius: 9px; color: #3f3f46; background: #fff; padding: 5px; box-shadow: 0 12px 30px rgba(15,23,42,.14),0 2px 7px rgba(15,23,42,.08); }
-        #better-codex-dialog .better-codex-project-menu.is-above { top: auto; bottom: calc(100% + 6px); }
+        #better-codex-dialog .better-codex-project-menu { position: absolute; top: calc(100% + 6px); right: 0; bottom: auto; z-index: 30; display: flex; box-sizing: border-box; width: 220px; max-height: min(320px, calc(100dvh - 32px)); overflow: hidden; flex-direction: column; border: 1px solid #e4e4e7; border-radius: 9px; color: #3f3f46; background: #fff; padding: 5px; box-shadow: 0 12px 30px rgba(15,23,42,.14),0 2px 7px rgba(15,23,42,.08); }
+        #better-codex-dialog .better-codex-project-menu.is-above { top: auto; bottom: calc(100% + 6px); flex-direction: column-reverse; }
         #better-codex-dialog .better-codex-project-menu[hidden] { display: none; }
         #better-codex-dialog .better-codex-project-search { box-sizing: border-box; width: 100%; height: var(--bc-control-height, 32px); border: 0; border-bottom: 1px solid #ededee; color: inherit; background: transparent; padding: 0 7px 4px; font: inherit; font-size: var(--bc-text-md); outline: none; }
-        #better-codex-dialog .better-codex-project-menu > [data-project-options] { display: block; max-height: min(260px, calc(100dvh - 96px)); overflow-y: auto; overscroll-behavior: contain; }
+        #better-codex-dialog .better-codex-project-menu > [data-project-options] { display: flex; min-height: 0; max-height: min(260px, calc(100dvh - 96px)); overflow-y: auto; flex-direction: column; overscroll-behavior: contain; }
+        #better-codex-dialog .better-codex-project-menu.is-above > [data-project-options] { flex-direction: column-reverse; }
         #better-codex-dialog .better-codex-project-option { display: flex; width: 100%; min-height: var(--bc-row-height, 34px); align-items: center; gap: 7px; border: 0; border-radius: 6px; color: inherit; background: transparent; padding: 0 7px; font: inherit; font-size: var(--bc-text-md); text-align: left; cursor: pointer; }
         #better-codex-dialog .better-codex-project-option:hover, #better-codex-dialog .better-codex-project-option:focus-visible { background: #f4f4f5; outline: none; }
         #better-codex-dialog .better-codex-project-option > span:first-of-type { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -2432,7 +2434,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           : issue.user_assigned ? "user" : "none";
         if (!filters.assignee.includes(assignee)) return false;
       }
-      if (filters.creator.length && !filters.creator.includes("me")) return false;
       if (filters.date.length) {
         const age = Date.now() - new Date(issue.updated_at).getTime();
         if (!filters.date.some(days => age <= Number(days) * 86400000)) return false;
@@ -2497,7 +2498,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (key === "priority") return Object.entries(priorityLabels).map(([value, text]) => ({ value, text: t(value === "none" ? "无优先级" : text + "优先级") }));
       if (key === "date") return [{ value: "1", text: t("最近 24 小时") }, { value: "7", text: t("最近 7 天") }, { value: "30", text: t("最近 30 天") }];
       if (key === "assignee") return [{ value: "user", text: state.user.name || t("我") }, { value: "codex", text: "Codex" }, ...state.agents.filter(agent => !agent.is_default).map(agent => ({ value: agent.id, text: agentDisplayName(agent) })), { value: "none", text: t("未分配") }];
-      if (key === "creator") return [{ value: "me", text: t("由我创建") }];
       if (key === "project") return projectsByRecentActivity(state.projects).map(project => ({ value: project.id, text: projectLabel(project) }));
       if (key === "label") return [...new Set(state.issues.flatMap(issue => issue.labels || []))].map(value => ({ value, text: value }));
       return [];
@@ -2516,7 +2516,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           : state.agents.find(item => item.id === value);
         return agentAvatarMarkup(agent, "better-codex-filter-avatar");
       }
-      const names = { date: "calendar", assignee: "user", creator: "userEdit", project: "folder", label: "tag" };
+      const names = { date: "calendar", assignee: "user", project: "folder", label: "tag" };
       return icon(names[key] || "circle");
     }
 
@@ -2528,7 +2528,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         { key: "priority", text: "优先级", icon: "display" },
         { key: "date", text: "日期", icon: "calendar" },
         { key: "assignee", text: "负责人", icon: "user" },
-        { key: "creator", text: "创建者", icon: "userEdit" },
         { key: "project", text: "项目", icon: "folder" },
         { key: "label", text: "标签", icon: "tag" }
       ];
@@ -2758,6 +2757,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const section = document.createElement("section");
       section.id = PANEL_ID;
       section.className = nativeFrame?.className || "";
+      section.dataset.host = HOST_KIND;
       section.hidden = true;
       section.setAttribute(OWNED, "true");
       const error = document.createElement("div");
@@ -2787,7 +2787,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const working = actionButton("0 个智能体工作中");
       working.id = "better-codex-working";
       working.classList.add("better-codex-working-chip", "is-bordered");
-      working.addEventListener("click", () => { state.view = state.view === "agent" ? "all" : "agent"; render(); });
+      working.addEventListener("click", () => { state.view = state.view === "working" ? "all" : "working"; render(); });
       const searchWrap = document.createElement("div");
       searchWrap.className = "better-codex-search-wrap";
       searchWrap.innerHTML = icon("search");
@@ -2879,6 +2879,21 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       board.addEventListener("dragend", onCardDragEnd);
       board.addEventListener("dragover", event => event.preventDefault());
       board.addEventListener("drop", onDrop);
+      let boardScrollControl = null;
+      if (HOST_KIND === "web") {
+        boardScrollControl = document.createElement("div");
+        boardScrollControl.className = "better-codex-board-scroll better-codex-issue-only";
+        boardScrollControl.hidden = true;
+        boardScrollControl.innerHTML = '<span class="is-start" aria-hidden="true">' + icon("chevron") + '</span><input type="range" min="0" max="0" value="0" step="1" aria-label="' + te("横向滚动任务看板") + '"><span aria-hidden="true">' + icon("chevron") + '</span>';
+        const range = boardScrollControl.querySelector("input");
+        range.addEventListener("input", () => {
+          board.scrollLeft = Number(range.value);
+        });
+        board.addEventListener("scroll", syncBoardScrollControl, { passive: true });
+        boardScrollResizeObserver?.disconnect();
+        boardScrollResizeObserver = new ResizeObserver(syncBoardScrollControl);
+        boardScrollResizeObserver.observe(board);
+      }
       const recovery = document.createElement("main");
       recovery.id = "better-codex-recovery";
       recovery.className = "better-codex-recovery";
@@ -2922,8 +2937,20 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (search) { search.focus(); search.setSelectionRange(search.value.length, search.value.length); }
       });
       agents.addEventListener("submit", onAgentSubmit);
-      section.append(toolbar, board, agents, recovery);
+      section.append(toolbar, board, ...(boardScrollControl ? [boardScrollControl] : []), agents, recovery);
       return section;
+    }
+
+    function syncBoardScrollControl() {
+      if (HOST_KIND !== "web" || !panel) return;
+      const board = panel.querySelector("#better-codex-board");
+      const control = panel.querySelector(".better-codex-board-scroll");
+      const range = control?.querySelector("input");
+      if (!board || !control || !range) return;
+      const max = Math.max(0, Math.ceil(board.scrollWidth - board.clientWidth));
+      control.hidden = state.surface !== "issues" || max < 2;
+      range.max = String(max);
+      range.value = String(Math.min(max, Math.max(0, Math.round(board.scrollLeft))));
     }
 
     function agentKey(agent) {
@@ -3936,13 +3963,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       renderAgents();
       syncAutoDispatch();
       syncMockupUi();
-      const runningCount = state.issues.filter(issue => issueExecutionRunning(issue) || issue.reply_status === "running").length;
+      const runningCount = state.issues.filter(issue => issueExecutionRunning(issue)).length;
       panel.querySelectorAll("[data-view]").forEach(button => button.classList.toggle("is-active", button.dataset.view === state.view));
       const working = panel.querySelector("#better-codex-working");
       working.innerHTML = '<span class="better-codex-working-dot"></span>' + te(runningCount + " 个智能体工作中");
       working.title = t(runningCount ? "查看运行中的任务" : "当前没有运行中的任务");
       working.classList.toggle("has-work", runningCount > 0);
-      working.classList.toggle("is-active", state.view === "agent");
+      working.classList.toggle("is-active", state.view === "working");
       working.hidden = false;
       const filterButton = panel.querySelector("#better-codex-filter");
       const filterCount = Object.values(state.filters).reduce((total, values) => total + values.length, 0);
@@ -3953,12 +3980,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const matchesView = state.view === "all"
           || (state.view === "assigned" && assigned)
           || (state.view === "unassigned" && !assigned)
-          || (state.view === "agent" && Boolean(issue.agent_enabled));
+          || (state.view === "working" && issueExecutionRunning(issue));
         return matchesView && issueMatchesFilters(issue);
       });
       const board = panel.querySelector("#better-codex-board");
       if (!visible.length && !state.search && filterCount === 0 && state.view === "all") {
         board.innerHTML = '<section class="better-codex-board-empty"><h2>' + te("创建第一个任务") + '</h2><p>' + te("写下要完成的事，交给智能体处理。") + '</p><div><button type="button" data-add-status="todo">' + icon("plus") + '<span>' + te("新建任务") + '</span></button><button type="button" data-archive-open>' + icon("archive") + '<span>' + te("查看已归档卡片") + '</span></button></div></section>';
+        requestAnimationFrame(syncBoardScrollControl);
         return;
       }
       const visibleStatuses = [...Object.entries(statusLabels), ["archive", "归档"]];
@@ -4007,6 +4035,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           : '<button class="better-codex-column-icon" type="button" data-add-status="' + status + '" aria-label="' + te("新建任务") + '">' + icon("plus") + '</button>';
         return '<section class="better-codex-column" data-status="' + status + '"><div class="better-codex-column-head"><span class="better-codex-column-title">' + statusIcon(status) + '<span>' + te(statusLabel) + '</span>' + (archiveColumn ? "" : '<span>' + issues.length + '</span>') + '</span><span class="better-codex-column-actions">' + columnButton + '</span></div><div class="better-codex-cards">' + (cards || '<div class="better-codex-empty">' + te(archiveColumn ? "拖到这里即可归档" : "暂无任务") + '</div>') + '</div></section>';
       }).join("");
+      requestAnimationFrame(syncBoardScrollControl);
     }
 
     async function loadIssues(options = {}) {
@@ -5764,6 +5793,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       relayTimer = null;
       updateNoticeResizeObserver?.disconnect();
       updateNoticeResizeObserver = null;
+      boardScrollResizeObserver?.disconnect();
+      boardScrollResizeObserver = null;
       Array.from(completionNoticeDismissals.values()).forEach(dismissNotice => dismissNotice(false));
       completionNoticeTimers.forEach(timer => clearTimeout(timer));
       completionNoticeTimers.clear();
