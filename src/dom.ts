@@ -1059,6 +1059,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #better-codex-dialog .better-codex-property input { width: 72px; }
         #better-codex-dialog .better-codex-project-picker { position: relative; display: inline-flex; }
         #better-codex-dialog .better-codex-project-menu { position: absolute; top: calc(100% + 6px); right: 0; bottom: auto; z-index: 30; box-sizing: border-box; width: 220px; max-height: min(320px, calc(100dvh - 32px)); overflow: hidden; border: 1px solid #e4e4e7; border-radius: 9px; color: #3f3f46; background: #fff; padding: 5px; box-shadow: 0 12px 30px rgba(15,23,42,.14),0 2px 7px rgba(15,23,42,.08); }
+        #better-codex-dialog .better-codex-project-menu.is-above { top: auto; bottom: calc(100% + 6px); }
         #better-codex-dialog .better-codex-project-menu[hidden] { display: none; }
         #better-codex-dialog .better-codex-project-search { box-sizing: border-box; width: 100%; height: var(--bc-control-height, 32px); border: 0; border-bottom: 1px solid #ededee; color: inherit; background: transparent; padding: 0 7px 4px; font: inherit; font-size: var(--bc-text-md); outline: none; }
         #better-codex-dialog .better-codex-project-menu > [data-project-options] { display: block; max-height: min(260px, calc(100dvh - 96px)); overflow-y: auto; overscroll-behavior: contain; }
@@ -5139,6 +5140,18 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const projectButton = dialog.querySelector("[data-dialog-project]");
         const projectMenu = dialog.querySelector(".better-codex-project-menu");
         const projectSearch = dialog.querySelector(".better-codex-project-search");
+        const positionProjectMenu = () => {
+          const viewportTop = window.visualViewport?.offsetTop || 0;
+          const viewportBottom = viewportTop + (window.visualViewport?.height || window.innerHeight);
+          const buttonRect = projectButton.getBoundingClientRect();
+          const spaceAbove = Math.max(0, buttonRect.top - viewportTop - 12);
+          const spaceBelow = Math.max(0, viewportBottom - buttonRect.bottom - 12);
+          const openAbove = spaceAbove > spaceBelow;
+          const availableHeight = Math.min(320, openAbove ? spaceAbove : spaceBelow);
+          projectMenu.classList.toggle("is-above", openAbove);
+          projectMenu.style.maxHeight = Math.floor(availableHeight) + "px";
+          projectMenu.querySelector("[data-project-options]").style.maxHeight = Math.max(0, Math.floor(availableHeight) - 44) + "px";
+        };
         projectButton?.addEventListener("click", event => {
           event.stopPropagation();
           projectMenu.hidden = !projectMenu.hidden;
@@ -5149,6 +5162,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           }
           projectSearch.value = "";
           projectMenu.querySelectorAll("[data-dialog-project-option]").forEach(option => { option.hidden = false; });
+          positionProjectMenu();
           projectSearch.focus();
           projectDismiss = dismissEvent => {
             if (projectMenu.contains(dismissEvent.target) || projectButton.contains(dismissEvent.target)) return;
