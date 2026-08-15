@@ -339,7 +339,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const KEEP_CREATE_KEY = "better-codex-keep-create";
     const CREATE_ISSUE_SHORTCUT_KEY = "better-codex-create-issue-shortcut";
     const AGENT_INSPECTOR_WIDTH_KEY = "better-codex-agent-inspector-width";
-    const DIALOG_EXPANDED_KEY = "better-codex-dialog-expanded";
+    const CREATE_DIALOG_EXPANDED_KEY = "better-codex-create-dialog-expanded";
+    const ISSUE_DIALOG_EXPANDED_KEY = "better-codex-issue-dialog-expanded";
     const AGENT_INSPECTOR_MIN_WIDTH = 320;
     const AGENT_DIRECTORY_MIN_WIDTH = 320;
     const THREAD_OPEN_TIMEOUT_MS = 10000;
@@ -4319,7 +4320,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         runStatus: issue?.mockup_run_status || "not-started",
         labels: (issue?.labels || []).join(", "),
         projectId: issue?.project_id || state.projectId,
-        expanded: localStorage.getItem(DIALOG_EXPANDED_KEY) === "true",
+        expanded: localStorage.getItem(issue ? ISSUE_DIALOG_EXPANDED_KEY : CREATE_DIALOG_EXPANDED_KEY) === "true",
         descriptionExpanded: false,
         reply: issue?.reply_draft || "",
         attachments: [],
@@ -5328,7 +5329,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         });
         dialog.querySelector("[data-dialog-expand]")?.addEventListener("click", event => {
           draft.expanded = !draft.expanded;
-          localStorage.setItem(DIALOG_EXPANDED_KEY, String(draft.expanded));
+          localStorage.setItem(issue ? ISSUE_DIALOG_EXPANDED_KEY : CREATE_DIALOG_EXPANDED_KEY, String(draft.expanded));
           dialog.dataset.expanded = String(draft.expanded);
           const button = event.currentTarget;
           button.setAttribute("aria-label", t(draft.expanded ? "缩小" : "展开"));
