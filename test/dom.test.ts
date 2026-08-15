@@ -562,7 +562,7 @@ test("issue submit buttons omit visual keyboard shortcut badges", () => {
 
   assert.doesNotMatch(source, /better-codex-keycap/);
   assert.doesNotMatch(source, />⌘<|>↵</);
-  assert.ok(source.includes('event.key === "Enter"'));
+  assert.ok(source.includes("isSendKeyboardEvent(event)"));
 });
 
 test("issue context menu can assign the current user or an agent", () => {
