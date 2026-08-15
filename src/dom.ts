@@ -580,6 +580,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     localeResources.en["原生会话正在创建，请稍后重试。"] = "The native conversation is being created. Try again shortly.";
     localeResources.en["停止任务"] = "Stop task";
     localeResources.en["正在停止…"] = "Stopping…";
+    localeResources.en["未命名任务"] = "Untitled issue";
+    localeResources.en["无法确定会话所属项目。请先把会话放入一个项目。"] = "We couldn't determine this conversation's project. Move it into a project first.";
+    localeResources.en["该会话对应的 Issue 已归档，请先取消归档。"] = "The issue linked to this conversation is archived. Restore it first.";
+    localeResources.en["发送方式"] = "Send with";
+    localeResources.en["发送消息"] = "Send messages";
+    localeResources.en["选择消息输入框的发送按键"] = "Choose the key used to send from message fields";
+    localeResources.en["横向滚动任务看板"] = "Scroll the task board horizontally";
     const bridgeRequests = new Map();
     const appServerRequests = new Map();
     const sessionHandoffPending = new Set();
@@ -625,6 +632,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     let suppressAgentOutside = false;
     let agentInspectorResize = null;
     let draggingIssueId = "";
+    let sessionDragPointer = null;
+    let sessionDropInFlight = false;
+    let suppressSessionClickUntil = 0;
     let codexLogoSequence = 0;
     let active = false;
     let bootstrapReady = false;
@@ -726,6 +736,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     function issueSessionId(issue) {
       if (REMOTE && issue?.has_conversation) return String(issue.id || "");
       return normalizeSessionId(issue?.run_thread_id) || "";
+    }
+
+    function linkedIssueThreadId(issue) {
+      return issueSessionId(issue) || normalizeSessionId(issue?.thread_id) || "";
     }
 
     function issueExecutionRunning(issue) {
@@ -1762,6 +1776,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (value === "issue_session_starting") return t("原生会话正在创建，请稍后重试。");
       if (value === "manual_start_required") return t("当前为手动运行，请先点击“立即开始任务”。");
       if (value === "backlog_reply_blocked") return t("待规划中的 Issue 不会自动触发任务，请先移出待规划区。");
+      if (value === "project_required") return t("无法确定会话所属项目。请先把会话放入一个项目。");
+      if (value === "issue_archived") return t("该会话对应的 Issue 已归档，请先取消归档。");
       return t(value);
     }
 
@@ -4039,7 +4055,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     async function loadIssues(options = {}) {
-      if (options.background && draggingIssueId) return;
+      if (options.background && (draggingIssueId || sessionDragPointer?.dragging)) return;
       const query = new URLSearchParams();
       if (state.search) query.set("search", state.search);
       const issues = await api("/api/issues" + (query.toString() ? "?" + query : ""));
@@ -5549,6 +5565,129 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (issue && !issuePermissions(issue).enrichmentPending) return void perform(() => openEditor(issue));
     }
 
+    function sessionThreadTitle(row) {
+      const attribute = ATTRIBUTES.threadTitle ? row.getAttribute(ATTRIBUTES.threadTitle) : "";
+      return String(attribute || row.getAttribute("aria-label") || row.querySelector(SELECTORS.truncatedText)?.textContent || row.textContent || "").replace(/\\s+/g, " ").trim();
+    }
+
+    function sessionDropTarget(clientX, clientY) {
+      const board = panel?.querySelector("#better-codex-board");
+      if (!board || panel?.hidden) return null;
+      const bounds = board.getBoundingClientRect();
+      if (clientX < bounds.left || clientX > bounds.right || clientY < bounds.top || clientY > bounds.bottom) return null;
+      const column = Array.from(board.querySelectorAll(".better-codex-column")).find(node => {
+        const rect = node.getBoundingClientRect();
+        return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
+      }) || null;
+      if (column?.dataset.status === "archive") return null;
+      return { board, column };
+    }
+
+    function setSessionDropTarget(target) {
+      panel?.querySelectorAll(".is-session-drop-target").forEach(node => node.classList.remove("is-session-drop-target"));
+      if (!target) return;
+      target.board.classList.add("is-session-drop-target");
+    }
+
+    function resetSessionDrag() {
+      sessionDragPointer = null;
+      setSessionDropTarget(null);
+    }
+
+    function revealImportedIssue(issueId) {
+      requestAnimationFrame(() => {
+        const card = Array.from(panel?.querySelectorAll("[data-issue-id]") || []).find(node => node.dataset.issueId === issueId);
+        if (!card) return;
+        const reducedMotion = globalThis.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+        card.scrollIntoView({ block: "nearest", inline: "nearest", behavior: reducedMotion ? "auto" : "smooth" });
+        card.classList.add("is-session-imported");
+        setTimeout(() => card.classList.remove("is-session-imported"), 1400);
+      });
+    }
+
+    async function importSessionIssue(context) {
+      if (sessionDropInFlight) return null;
+      sessionDropInFlight = true;
+      try {
+        let issue = null;
+        try {
+          const existing = await api("/api/issues/from-thread?thread_id=" + encodeURIComponent(context.threadId));
+          if (existing && linkedIssueThreadId(existing) === context.threadId) {
+            issue = await api("/api/issues/from-thread", {
+              method: "POST",
+              body: JSON.stringify({ thread_id: context.threadId })
+            });
+          }
+        } catch (error) {
+          if (String(error instanceof Error ? error.message : error) !== "issue_not_found") throw error;
+        }
+        if (!issue) {
+          state.projects = await api("/api/projects");
+          let project = context.projectId ? await ensureContextProject(context) : null;
+          let workspacePath = String(project?.workspace_path || "").trim();
+          if (!workspacePath) workspacePath = await resolveWorkspacePath(context);
+          if (!project && workspacePath) project = state.projects.find(item => item.workspace_path === workspacePath) || null;
+          if (!project) throw new Error("project_required");
+          issue = await api("/api/issues/from-thread", {
+            method: "POST",
+            body: JSON.stringify({
+              project_id: project.id,
+              title: context.threadTitle || t("未命名任务"),
+              thread_id: context.threadId,
+              workspace_path: workspacePath || project.workspace_path || ""
+            })
+          });
+        }
+        if (issue.archived_at) throw new Error("issue_archived");
+        await loadIssues();
+        revealImportedIssue(issue.id);
+        return issue;
+      } finally {
+        sessionDropInFlight = false;
+      }
+    }
+
+    function onSessionPointerDown(event) {
+      if (!active || state.surface !== "issues" || state.mockup || READ_ONLY || REMOTE || HOST_CAPABILITIES.nativeThreads === false || event.button !== 0 || event.isPrimary === false) return;
+      const row = event.target?.closest?.(SELECTORS.threadRow);
+      if (!row || row.closest("#" + PANEL_ID)) return;
+      const nestedControl = event.target?.closest?.("button,a,input,textarea,select,[contenteditable='true']");
+      if (nestedControl && nestedControl !== row) return;
+      const threadId = nativeThreadId(row);
+      if (!threadId) return;
+      const context = readContext(row);
+      context.threadId = threadId;
+      context.threadTitle = sessionThreadTitle(row);
+      sessionDragPointer = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, dragging: false, context };
+    }
+
+    function onSessionPointerMove(event) {
+      const drag = sessionDragPointer;
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      if (!drag.dragging) {
+        const deltaX = event.clientX - drag.startX;
+        const deltaY = event.clientY - drag.startY;
+        if (deltaX * deltaX + deltaY * deltaY < 36) return;
+        drag.dragging = true;
+      }
+      setSessionDropTarget(sessionDropTarget(event.clientX, event.clientY));
+    }
+
+    function onSessionPointerUp(event) {
+      const drag = sessionDragPointer;
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      const target = drag.dragging ? sessionDropTarget(event.clientX, event.clientY) : null;
+      resetSessionDrag();
+      if (!target) return;
+      suppressSessionClickUntil = Date.now() + 500;
+      void perform(() => importSessionIssue(drag.context));
+    }
+
+    function onSessionPointerCancel(event) {
+      if (!sessionDragPointer || event.pointerId !== sessionDragPointer.pointerId) return;
+      resetSessionDrag();
+    }
+
     function onCardDragStart(event) {
       const card = event.target.closest("[data-issue-id]");
       if (!card || !event.dataTransfer) return;
@@ -5647,6 +5786,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       else sessionStorage.removeItem(RESUME_SURFACE_KEY);
       routeSuppressed = options.suppressRoute !== false;
       active = false;
+      resetSessionDrag();
       closeFilterMenu();
       closeCreateMenu();
       closeIssueMenu();
@@ -5749,6 +5889,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (!active || suppressAgentOutside) return;
       const target = event.target?.closest?.("button,a,[role='button']," + SELECTORS.threadRow);
       if (!target || target === entry || target === agentsEntry || target.closest("#" + PANEL_ID) || target.closest("#better-codex-dialog") || target.closest("#better-codex-agent-dialog") || target.closest("#better-codex-avatar-picker")) return;
+      if (Date.now() < suppressSessionClickUntil && target.closest(SELECTORS.threadRow)) {
+        suppressSessionClickUntil = 0;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return;
+      }
       if (isSidebarNavigationTarget(target)) close({ resume: true });
       else if (target.closest(SELECTORS.sidebarNavigation)) scheduleRefresh();
     }
@@ -5820,6 +5966,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       liveUnsubscribe = null;
       document.removeEventListener("DOMContentLoaded", mount);
       document.removeEventListener("click", onClick, true);
+      document.removeEventListener("pointerdown", onSessionPointerDown, true);
+      document.removeEventListener("pointermove", onSessionPointerMove, true);
+      document.removeEventListener("pointerup", onSessionPointerUp, true);
+      document.removeEventListener("pointercancel", onSessionPointerCancel, true);
       document.removeEventListener("keydown", onGlobalShortcut, true);
       window.removeEventListener("codex-message-from-view", onHostMessageFromView, true);
       window.removeEventListener("message", onAppServerMessage, true);
@@ -5844,6 +5994,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     window.__betterCodexInjection__ = { version: VERSION, profile: PROFILE, host: HOST_KIND, endpoint: BASE_URL, refresh, open: openRoute, openThread, close, destroy };
     document.addEventListener("click", onClick, true);
+    document.addEventListener("pointerdown", onSessionPointerDown, true);
+    document.addEventListener("pointermove", onSessionPointerMove, true);
+    document.addEventListener("pointerup", onSessionPointerUp, true);
+    document.addEventListener("pointercancel", onSessionPointerCancel, true);
     document.addEventListener("keydown", onGlobalShortcut, true);
     window.addEventListener("codex-message-from-view", onHostMessageFromView, true);
     window.addEventListener("message", onAppServerMessage, true);

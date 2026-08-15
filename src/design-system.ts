@@ -3164,6 +3164,11 @@ export function betterCodexDesignSystemCss() {
       transform: none;
     }
 
+    #better-codex-panel .better-codex-card.is-session-imported {
+      border-color: color-mix(in oklch, var(--bc-color-focus) 68%, var(--bc-color-hairline));
+      box-shadow: var(--bc-card-shadow), 0 0 0 2px color-mix(in oklch, var(--bc-color-focus) 30%, transparent);
+    }
+
     .better-codex-card.is-drag-ghost {
       display: block;
       margin: 0 !important;
