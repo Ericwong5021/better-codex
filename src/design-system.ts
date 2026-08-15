@@ -1492,10 +1492,6 @@ export function betterCodexDesignSystemCss() {
       margin-top: 0;
     }
 
-    #better-codex-auto-dispatch-help-dialog [data-help-page="shortcuts"] .better-codex-help-page-heading {
-      margin-bottom: 22px;
-    }
-
     #better-codex-auto-dispatch-help-dialog .better-codex-help-shortcut-controls {
       display: flex;
       width: 240px;
@@ -2019,24 +2015,31 @@ export function betterCodexDesignSystemCss() {
       height: 15px;
     }
 
-    #better-codex-auto-dispatch-help-dialog .better-codex-language-switch {
+    #better-codex-auto-dispatch-help-dialog .better-codex-language-switch,
+    #better-codex-auto-dispatch-help-dialog .better-codex-send-mode-switch {
+      --bc-switch-count: 3;
       position: relative;
       display: grid;
       width: 240px;
       flex: 0 0 240px;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(var(--bc-switch-count), minmax(0, 1fr));
       border-radius: 10px;
       background: var(--bc-color-control);
       padding: 3px;
       isolation: isolate;
     }
 
-    #better-codex-auto-dispatch-help-dialog .better-codex-language-switch::before {
+    #better-codex-auto-dispatch-help-dialog .better-codex-send-mode-switch {
+      --bc-switch-count: 2;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-language-switch::before,
+    #better-codex-auto-dispatch-help-dialog .better-codex-send-mode-switch::before {
       position: absolute;
       z-index: -1;
       top: 3px;
       left: 3px;
-      width: calc((100% - 6px) / 3);
+      width: calc((100% - 6px) / var(--bc-switch-count));
       height: calc(100% - 6px);
       border-radius: 8px;
       background: var(--bc-color-canvas);
@@ -2053,7 +2056,12 @@ export function betterCodexDesignSystemCss() {
       transform: translateX(200%);
     }
 
-    #better-codex-auto-dispatch-help-dialog .better-codex-language-switch button {
+    #better-codex-auto-dispatch-help-dialog .better-codex-send-mode-switch[data-send-mode-value="enter"]::before {
+      transform: translateX(100%);
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-language-switch button,
+    #better-codex-auto-dispatch-help-dialog .better-codex-send-mode-switch button {
       min-width: 0;
       min-height: 30px;
       border: 0;
@@ -2066,12 +2074,14 @@ export function betterCodexDesignSystemCss() {
       cursor: pointer;
     }
 
-    #better-codex-auto-dispatch-help-dialog .better-codex-language-switch button[aria-checked="true"] {
+    #better-codex-auto-dispatch-help-dialog .better-codex-language-switch button[aria-checked="true"],
+    #better-codex-auto-dispatch-help-dialog .better-codex-send-mode-switch button[aria-checked="true"] {
       color: var(--bc-color-text);
       font-weight: 600;
     }
 
-    #better-codex-auto-dispatch-help-dialog .better-codex-language-switch button:focus-visible {
+    #better-codex-auto-dispatch-help-dialog .better-codex-language-switch button:focus-visible,
+    #better-codex-auto-dispatch-help-dialog .better-codex-send-mode-switch button:focus-visible {
       outline: 0;
       box-shadow: var(--bc-focus-ring);
     }
@@ -2338,6 +2348,7 @@ export function betterCodexDesignSystemCss() {
       }
 
       #better-codex-auto-dispatch-help-dialog .better-codex-help-setting-row.is-language,
+      #better-codex-auto-dispatch-help-dialog .better-codex-help-setting-row.is-send-mode,
       #better-codex-auto-dispatch-help-dialog .better-codex-help-setting-row.is-notification,
       #better-codex-auto-dispatch-help-dialog .better-codex-help-setting-row.is-model,
       #better-codex-auto-dispatch-help-dialog .better-codex-help-setting-row.is-shortcut {
@@ -2346,7 +2357,8 @@ export function betterCodexDesignSystemCss() {
         padding-block: 10px;
       }
 
-      #better-codex-auto-dispatch-help-dialog .better-codex-language-switch {
+      #better-codex-auto-dispatch-help-dialog .better-codex-language-switch,
+      #better-codex-auto-dispatch-help-dialog .better-codex-send-mode-switch {
         width: 100%;
         flex-basis: auto;
       }

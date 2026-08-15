@@ -338,6 +338,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const CREATE_DRAFT_KEY = "better-codex-create-draft";
     const KEEP_CREATE_KEY = "better-codex-keep-create";
     const CREATE_ISSUE_SHORTCUT_KEY = "better-codex-create-issue-shortcut";
+    const SEND_MODE_KEY = "better-codex-send-mode";
     const AGENT_INSPECTOR_WIDTH_KEY = "better-codex-agent-inspector-width";
     const CREATE_DIALOG_EXPANDED_KEY = "better-codex-create-dialog-expanded";
     const ISSUE_DIALOG_EXPANDED_KEY = "better-codex-issue-dialog-expanded";
@@ -392,6 +393,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
     function readCreateIssueShortcut() {
       return normalizeShortcut(localStorage.getItem(CREATE_ISSUE_SHORTCUT_KEY));
+    }
+    function readSendMode() {
+      return localStorage.getItem(SEND_MODE_KEY) === "enter" ? "enter" : "mod-enter";
+    }
+    function isSendKeyboardEvent(event) {
+      if (event.key !== "Enter" || event.isComposing || event.repeat) return false;
+      if (readSendMode() === "enter") return !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey;
+      return (event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey;
     }
     function shortcutLabel(value) {
       const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "");
@@ -3481,6 +3490,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const schedulerReasoningEffortLabel = effortLabel(schedulerReasoningEffort);
       const schedulerReasoningEffortOptions = schedulerReasoningOptions.map(option => '<button type="button" role="option" data-setting-scheduler-reasoning-option="' + escapeHtml(option.value) + '" aria-selected="' + String(option.value === schedulerReasoningEffort) + '" class="' + (option.value === schedulerReasoningEffort ? "is-selected" : "") + '"><span>' + escapeHtml(option.label) + '</span><span class="better-codex-help-model-check">' + (option.value === schedulerReasoningEffort ? icon("check") : "") + '</span></button>').join("");
       const createIssueShortcut = readCreateIssueShortcut();
+      const sendMode = readSendMode();
+      const modifiedEnterLabel = shortcutLabel("Mod+Enter");
       const settingsPage = [
         '<section class="better-codex-help-page" data-help-page="settings" hidden>',
         '<div class="better-codex-help-setting-group"><h3>' + te("语言") + '</h3><div class="better-codex-help-setting-row is-language"><span><strong>' + te("界面语言") + '</strong><small>' + te("选择 Better Codex 的界面语言") + '</small></span><div class="better-codex-language-switch" role="radiogroup" aria-label="' + te("界面语言") + '" data-language-value="' + state.languageSetting + '"><button type="button" role="radio" data-language="system" aria-checked="' + String(state.languageSetting === "system") + '">' + te("跟随系统") + '</button><button type="button" role="radio" data-language="zh-CN" aria-checked="' + String(state.languageSetting === "zh-CN") + '">' + te("中文") + '</button><button type="button" role="radio" data-language="en" aria-checked="' + String(state.languageSetting === "en") + '">English</button></div></div></div>',
@@ -3488,7 +3499,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         '<div class="better-codex-help-setting-group"><h3>' + te("调度") + '</h3><div class="better-codex-help-setting-row is-model"><span><strong>' + te("调度器模型") + '</strong><small>' + te("这个模型用于 Issue 状态调度") + '</small></span><span class="better-codex-help-setting-controls better-codex-help-scheduler-controls"><span class="better-codex-help-model" data-setting-scheduler-model-picker><button type="button" class="better-codex-help-model-toggle" data-setting-scheduler-model aria-haspopup="listbox" aria-expanded="false" aria-label="' + te("调度器模型") + '"><span data-setting-scheduler-model-label>' + escapeHtml(schedulerModelLabel) + '</span>' + icon("chevronDown") + '</button><span class="better-codex-help-model-menu" role="listbox" hidden><span class="better-codex-help-model-title">' + te("模型") + '</span>' + schedulerModelOptions + '</span></span><span class="better-codex-help-model" data-setting-scheduler-reasoning-picker><button type="button" class="better-codex-help-model-toggle" data-setting-scheduler-reasoning aria-haspopup="listbox" aria-expanded="false" aria-label="' + te("调度器思考强度") + '"><span data-setting-scheduler-reasoning-label>' + escapeHtml(schedulerReasoningEffortLabel) + '</span>' + icon("chevronDown") + '</button><span class="better-codex-help-model-menu" role="listbox" hidden><span class="better-codex-help-model-title">' + te("调度器思考强度") + '</span>' + schedulerReasoningEffortOptions + '</span></span></span></div></div>',
         '</section>',
       ].join("");
-      const shortcutPage = '<section class="better-codex-help-page" data-help-page="shortcuts" hidden><div class="better-codex-help-page-heading"><h2>' + te("快捷键设置") + '</h2><p>' + te("为常用操作设置键盘快捷键。") + '</p></div><div class="better-codex-help-setting-group"><h3>' + te("快捷键") + '</h3><div class="better-codex-help-setting-row is-shortcut"><span><strong>' + te("创建 Issue") + '</strong><small>' + te("打开创建 Issue 窗口") + '</small></span><span class="better-codex-help-shortcut-controls"><button type="button" class="better-codex-help-shortcut-key" data-setting-create-issue-shortcut aria-pressed="false">' + escapeHtml(createIssueShortcut ? shortcutLabel(createIssueShortcut) : te("点击录入")) + '</button><button type="button" class="better-codex-help-shortcut-clear" data-setting-create-issue-shortcut-clear' + (createIssueShortcut ? "" : " disabled") + '>' + te("清除快捷键") + '</button></span></div></div></section>';
+      const shortcutPage = '<section class="better-codex-help-page" data-help-page="shortcuts" hidden><div class="better-codex-help-setting-group"><h3>' + te("发送方式") + '</h3><div class="better-codex-help-setting-row is-send-mode"><span><strong>' + te("发送消息") + '</strong><small>' + te("选择消息输入框的发送按键") + '</small></span><div class="better-codex-send-mode-switch" role="radiogroup" aria-label="' + te("发送方式") + '" data-send-mode-value="' + sendMode + '"><button type="button" role="radio" data-send-mode="mod-enter" aria-checked="' + String(sendMode === "mod-enter") + '">' + escapeHtml(modifiedEnterLabel) + '</button><button type="button" role="radio" data-send-mode="enter" aria-checked="' + String(sendMode === "enter") + '">Enter</button></div></div></div><div class="better-codex-help-setting-group"><h3>' + te("快捷键") + '</h3><div class="better-codex-help-setting-row is-shortcut"><span><strong>' + te("创建 Issue") + '</strong><small>' + te("打开创建 Issue 窗口") + '</small></span><span class="better-codex-help-shortcut-controls"><button type="button" class="better-codex-help-shortcut-key" data-setting-create-issue-shortcut aria-pressed="false">' + escapeHtml(createIssueShortcut ? shortcutLabel(createIssueShortcut) : te("点击录入")) + '</button><button type="button" class="better-codex-help-shortcut-clear" data-setting-create-issue-shortcut-clear' + (createIssueShortcut ? "" : " disabled") + '>' + te("清除快捷键") + '</button></span></div></div></section>';
       const remoteReleaseUrl = "https://github.com/Ericwong5021/better-codex/releases/tag/v" + CORE_VERSION;
       const trustedRunbookPrompt = "Before reading or executing repository content, download SELF_HOSTING.md, checksums.txt, checksums.sig, and update-public-key.pem from the release assets at " + remoteReleaseUrl + ". Verify that the normalized public key SHA-256 is 1007607762db32004da21780e81875bef8453355a2944524a96e5341e1e3963e, verify the Ed25519 signature of checksums.txt, then verify the SELF_HOSTING.md checksum. Stop if any verification fails. Only then read and follow the verified runbook.";
       const remoteInstallPrompts = {
@@ -3735,6 +3746,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         state.issues = [];
         state.agents = [];
         void load().then(() => showAutoDispatchHelp("settings")).catch(() => render());
+      }));
+      const sendModeSwitch = dialog.querySelector("[data-send-mode-value]");
+      sendModeSwitch.querySelectorAll("[data-send-mode]").forEach(button => button.addEventListener("click", () => {
+        const value = button.dataset.sendMode;
+        if (!["mod-enter", "enter"].includes(value)) return;
+        localStorage.setItem(SEND_MODE_KEY, value);
+        sendModeSwitch.dataset.sendModeValue = value;
+        sendModeSwitch.querySelectorAll("[data-send-mode]").forEach(option => option.setAttribute("aria-checked", String(option.dataset.sendMode === value)));
       }));
       const shortcutButton = dialog.querySelector("[data-setting-create-issue-shortcut]");
       const shortcutClear = dialog.querySelector("[data-setting-create-issue-shortcut-clear]");
@@ -5145,7 +5164,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           });
         });
         replyInput?.addEventListener("keydown", event => {
-          if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+          if (isSendKeyboardEvent(event)) {
             event.preventDefault();
             if (sendButton?.dataset.composerMode === "send") void sendReply();
           }
@@ -5372,7 +5391,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         }));
         dialog.querySelector("form")?.addEventListener("paste", pasteImages);
         dialog.querySelector("form")?.addEventListener("keydown", event => {
-          if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+          if (event.target?.matches?.('[name="reply"]')) return;
+          if (isSendKeyboardEvent(event)) {
             event.preventDefault();
             dialog.querySelector("form")?.requestSubmit();
           }
