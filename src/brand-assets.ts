@@ -23,3 +23,7 @@ export function appIconIco() {
 export function betterCodexLogoPng() {
   return readAsset("better-codex.png");
 }
+
+export function betterCodexWebIconPng(size: 192 | 512) {
+  return readAsset(`web/better-codex-icon-${size}.png`);
+}

@@ -13,6 +13,8 @@
   },
   "files": [
     "assets/better-codex.png",
+    "assets/web/better-codex-icon-192.png",
+    "assets/web/better-codex-icon-512.png",
     "dist/cdp.js",
     "dist/cli.js",
     "dist/codex-cli.js",
@@ -47,6 +49,7 @@
     "dist/user-profile.js",
     "dist/version.js",
     "dist/web-host.js",
+    "dist/web-app.js",
     "dist/worker.js"
   ],
   "scripts": {

@@ -1,4 +1,5 @@
 import { betterCodexLogoPng } from "./brand-assets.js";
+import { betterCodexWebAppRegistrationJavaScript } from "./web-app.js";
 
 const betterCodexLogoUrl = `data:image/png;base64,${betterCodexLogoPng().toString("base64")}`;
 
@@ -8,9 +9,15 @@ const webHostHtml = String.raw`<!doctype html>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f7f7f6" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#191918" media="(prefers-color-scheme: dark)">
   <meta name="referrer" content="no-referrer">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Better Codex">
   <title>Better Codex</title>
   <link rel="icon" type="image/png" href="${betterCodexLogoUrl}">
+  <link rel="apple-touch-icon" href="/better-codex-icon-192.png">
+  <link rel="manifest" href="/web/manifest.webmanifest">
   <link rel="stylesheet" href="/web/host.css">
 </head>
 <body>
@@ -20,6 +27,9 @@ const webHostHtml = String.raw`<!doctype html>
       <header class="web-brand">
         <img class="web-brand-logo" src="${betterCodexLogoUrl}" alt="">
         <strong>Better Codex</strong>
+        <button id="web-install" class="web-icon-button" type="button" aria-label="安装 Better Codex" hidden>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg>
+        </button>
         <button id="web-theme" class="web-icon-button" type="button" aria-label="切换深色模式">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.66 6.34l1.41-1.41"></path></svg>
         </button>
@@ -118,10 +128,11 @@ body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; 
 .web-shell { display: grid; grid-template-columns: 244px minmax(0, 1fr); width: 100%; height: 100%; }
 .web-sidebar { display: flex; min-width: 0; flex-direction: column; padding: 10px; background: var(--web-sidebar); box-shadow: inset -1px 0 var(--web-line); }
 .web-brand { display: flex; min-height: 48px; align-items: center; gap: 10px; padding: 4px 6px 8px; }
-.web-brand strong { font-size: 15px; font-weight: 650; }
+.web-brand strong { margin-right: auto; font-size: 15px; font-weight: 650; }
 .web-brand-logo { display: block; width: 30px; height: 30px; flex: 0 0 auto; border-radius: 9px; object-fit: contain; }
 .web-brand-logo.is-large { width: 46px; height: 46px; margin-bottom: 24px; border-radius: 14px; }
-.web-icon-button { display: grid; width: 34px; height: 34px; margin-left: auto; border: 0; border-radius: 9px; padding: 8px; place-items: center; background: transparent; cursor: pointer; }
+.web-icon-button { display: grid; width: 34px; height: 34px; border: 0; border-radius: 9px; padding: 8px; place-items: center; background: transparent; cursor: pointer; }
+.web-icon-button[hidden] { display: none; }
 .web-icon-button svg { width: 17px; height: 17px; }
 .web-sidebar nav { min-height: 0; flex: 1; }
 .web-sidebar-scroll { height: 100%; overflow: auto; }
@@ -204,6 +215,7 @@ const connectForm = document.getElementById("web-connect-form");
 const tokenInput = document.getElementById("web-token");
 const usernameInput = document.getElementById("web-username");
 const connectError = document.getElementById("web-connect-error");
+const installButton = document.getElementById("web-install");
 const profileButton = document.getElementById("web-profile");
 const profileName = document.getElementById("web-profile-name");
 const profileKind = document.getElementById("web-profile-kind");
@@ -221,6 +233,7 @@ let profileLocale = "zh-CN";
 let usageLoadedAt = 0;
 let usageLoading = false;
 let cachedUsage;
+let installPrompt;
 
 function profileText(zh, en) {
   return profileLocale === "zh-CN" ? zh : en;
@@ -236,6 +249,7 @@ function updateWebProfile(detail) {
   profileAvatarInitials.textContent = initials;
   if (typeof user.color === "string" && /^#[0-9a-f]{6}$/i.test(user.color)) profileAvatar.style.backgroundColor = user.color;
   profileKind.textContent = profileText("Codex 账户", "Codex account");
+  installButton.setAttribute("aria-label", profileText("安装 Better Codex", "Install Better Codex"));
   usageTitle.textContent = profileText("剩余用量", "Usage remaining");
   profileButton.setAttribute("aria-label", profileText("查看 Codex 额度", "View Codex usage"));
   if (usageLoadedAt) renderUsage(cachedUsage);
@@ -546,6 +560,27 @@ document.getElementById("web-theme").addEventListener("click", () => {
   document.documentElement.dataset.theme = next;
   localStorage.setItem("better-codex-web-theme", next);
 });
+
+window.addEventListener("beforeinstallprompt", event => {
+  event.preventDefault();
+  installPrompt = event;
+  installButton.hidden = false;
+});
+
+installButton.addEventListener("click", async () => {
+  if (!installPrompt) return;
+  installButton.hidden = true;
+  await installPrompt.prompt();
+  await installPrompt.userChoice;
+  installPrompt = undefined;
+});
+
+window.addEventListener("appinstalled", () => {
+  installPrompt = undefined;
+  installButton.hidden = true;
+});
+
+${betterCodexWebAppRegistrationJavaScript()}
 
 void boot(consumeFragmentToken());
 `;

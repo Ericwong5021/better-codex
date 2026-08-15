@@ -22,6 +22,8 @@ import { IssueWorker } from "./worker.js";
 import { maxMockupBytes, normalizeMockupLocale, readMockupState, replaceMockupState, resetMockupState, updateMockupState } from "./mockup.js";
 import { injectionScript } from "./dom.js";
 import { betterCodexWebHostCss, betterCodexWebHostHtml, betterCodexWebHostJavaScript } from "./web-host.js";
+import { betterCodexWebIconPng } from "./brand-assets.js";
+import { betterCodexWebManifest, betterCodexWebServiceWorker } from "./web-app.js";
 import { SyncClient } from "./sync-client.js";
 import { readSyncConfiguration, removeSyncConfiguration } from "./sync-config.js";
 
@@ -118,7 +120,7 @@ function sendJson(response: ServerResponse, status: number, value: unknown) {
   response.end(body);
 }
 
-function sendWeb(response: ServerResponse, status: number, body: string, contentType: string, headers: Record<string, string> = {}) {
+function sendWeb(response: ServerResponse, status: number, body: string | Buffer, contentType: string, headers: Record<string, string> = {}) {
   response.writeHead(status, {
     "cache-control": "no-store",
     "content-length": Buffer.byteLength(body),
@@ -552,6 +554,10 @@ export function startServer() {
       }
       if (url.pathname === "/web/host.css" && method === "GET") return sendWeb(response, 200, betterCodexWebHostCss(), "text/css; charset=utf-8");
       if (url.pathname === "/web/host.js" && method === "GET") return sendWeb(response, 200, betterCodexWebHostJavaScript(), "text/javascript; charset=utf-8");
+      if (url.pathname === "/web/manifest.webmanifest" && method === "GET") return sendWeb(response, 200, betterCodexWebManifest(), "application/manifest+json; charset=utf-8");
+      if (url.pathname === "/web/service-worker.js" && method === "GET") return sendWeb(response, 200, betterCodexWebServiceWorker(), "text/javascript; charset=utf-8", { "service-worker-allowed": "/" });
+      if (url.pathname === "/better-codex-icon-192.png" && method === "GET") return sendWeb(response, 200, betterCodexWebIconPng(192), "image/png", { "cache-control": "public, max-age=86400" });
+      if (url.pathname === "/better-codex-icon-512.png" && method === "GET") return sendWeb(response, 200, betterCodexWebIconPng(512), "image/png", { "cache-control": "public, max-age=86400" });
       if (url.pathname === "/web/session" && method === "POST") {
         const body = await readBody(request, 4096);
         if (!validAccessToken(body.token)) return sendJson(response, 401, { error: "unauthorized" });

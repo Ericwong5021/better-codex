@@ -3,6 +3,7 @@ import { syncProtocolVersion, supportedSyncProtocolVersions, type RemoteCommandA
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { coreVersion } from "./version.js";
 import { cloudflareIssuePriorities, cloudflareIssueStatuses, cloudflareRenderMarkdown, cloudflareWebCss, cloudflareWebHtml, cloudflareWebJavaScript } from "./cloudflare-web.js";
+import { betterCodexWebManifest, betterCodexWebServiceWorker } from "./web-app.js";
 
 type SqlRow = Record<string, unknown>;
 type SqlCursor = { toArray(): SqlRow[] };
@@ -215,6 +216,8 @@ export class BetterCodexHubObject {
     if ((url.pathname === "/web" || url.pathname === "/web/") && request.method === "GET") return this.webDashboard();
     if (url.pathname === "/web/host.css" && request.method === "GET") return new Response(cloudflareWebCss(), { headers: { "content-type": "text/css; charset=utf-8" } });
     if (url.pathname === "/web/host.js" && request.method === "GET") return new Response(cloudflareWebJavaScript(), { headers: { "content-type": "text/javascript; charset=utf-8" } });
+    if (url.pathname === "/web/manifest.webmanifest" && request.method === "GET") return new Response(betterCodexWebManifest(), { headers: { "cache-control": "no-cache", "content-type": "application/manifest+json; charset=utf-8" } });
+    if (url.pathname === "/web/service-worker.js" && request.method === "GET") return new Response(betterCodexWebServiceWorker(), { headers: { "cache-control": "no-cache", "content-type": "text/javascript; charset=utf-8", "service-worker-allowed": "/" } });
     if (url.pathname === "/api/v1/board" && request.method === "GET") {
       if (!(await this.isWebAuthorized(request))) return json({ error: "unauthorized" }, 401);
       return json(this.board());
@@ -864,6 +867,8 @@ export class BetterCodexHubObject {
 
 export default {
   async fetch(request: Request, env: CloudflareEnv) {
+    const path = new URL(request.url).pathname;
+    if (request.method === "GET" && (path === "/better-codex-icon-192.png" || path === "/better-codex-icon-512.png") && env.ASSETS) return env.ASSETS.fetch(request);
     const id = env.HUB.idFromName("primary");
     return env.HUB.get(id).fetch(request);
   },

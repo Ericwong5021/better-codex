@@ -8,6 +8,8 @@ import { issuePriorities, issueStatuses } from "./db.js";
 import { HubStore } from "./hub-store.js";
 import type { RemoteCommandAck, SyncPushRequest } from "./sync-contract.js";
 import { betterCodexWebHostCss, betterCodexWebHostHtml, betterCodexWebHostJavaScript } from "./web-host.js";
+import { betterCodexWebIconPng } from "./brand-assets.js";
+import { betterCodexWebManifest, betterCodexWebServiceWorker } from "./web-app.js";
 import { avatarInitials } from "./user-profile.js";
 import { renderMarkdown } from "./markdown.js";
 import { deviceAuthorizationPage } from "./device-authorization-page.js";
@@ -84,7 +86,7 @@ function sendJson(response: ServerResponse, status: number, value: unknown, head
   response.end(body);
 }
 
-function sendText(response: ServerResponse, status: number, body: string, contentType: string, headers: Record<string, string> = {}) {
+function sendText(response: ServerResponse, status: number, body: string | Buffer, contentType: string, headers: Record<string, string> = {}) {
   response.writeHead(status, { ...securityHeaders(), "content-type": contentType, "content-length": Buffer.byteLength(body), ...headers });
   response.end(body);
 }
@@ -206,6 +208,10 @@ export function createHubServer(options: HubServerOptions) {
       if (["/", "/web"].includes(url.pathname) && method === "GET") return sendText(response, 200, betterCodexWebHostHtml(true), "text/html; charset=utf-8", { "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'" });
       if (url.pathname === "/web/host.css" && method === "GET") return sendText(response, 200, betterCodexWebHostCss(), "text/css; charset=utf-8");
       if (url.pathname === "/web/host.js" && method === "GET") return sendText(response, 200, betterCodexWebHostJavaScript(true), "text/javascript; charset=utf-8");
+      if (url.pathname === "/web/manifest.webmanifest" && method === "GET") return sendText(response, 200, betterCodexWebManifest(), "application/manifest+json; charset=utf-8");
+      if (url.pathname === "/web/service-worker.js" && method === "GET") return sendText(response, 200, betterCodexWebServiceWorker(), "text/javascript; charset=utf-8", { "service-worker-allowed": "/" });
+      if (url.pathname === "/better-codex-icon-192.png" && method === "GET") return sendText(response, 200, betterCodexWebIconPng(192), "image/png", { "cache-control": "public, max-age=86400" });
+      if (url.pathname === "/better-codex-icon-512.png" && method === "GET") return sendText(response, 200, betterCodexWebIconPng(512), "image/png", { "cache-control": "public, max-age=86400" });
       if (url.pathname === "/web/session" && method === "POST") {
         if (!trustedOrigin(request, true)) return sendJson(response, 403, { error: "forbidden" });
         const client = loginClientAddress(request, options.trustedProxy === true);
