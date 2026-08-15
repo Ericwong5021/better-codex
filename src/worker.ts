@@ -8,7 +8,7 @@ import { debugLoggingEnabled, schedulerRuntimePath, schedulerSchemaPath, runLogP
 import { agentSandboxModes, Store, type AgentSandboxMode, type ClaimedIssue, type Issue, type SchedulerDecision, type SessionCommand } from "./db.js";
 import { mockupSessionActive } from "./injection-state.js";
 import { codexExecutablePath } from "./codex-cli.js";
-import { readConversationActivity, readConversationResult } from "./session-transcript.js";
+import { readConversationActivity } from "./session-transcript.js";
 
 const interval = 60000;
 const schedulerTimeout = 180000;
@@ -624,10 +624,10 @@ export class IssueWorker {
     this.reconcilingSessions = true;
     try {
       for (const session of this.store.listActiveIssueSessions()) {
-      const threadId = session.thread_id;
-      const expectedTurnId = session.active_turn_id || "";
+        const threadId = session.thread_id;
+        const expectedTurnId = session.active_turn_id || "";
         if (!threadId) continue;
-        const result = await readConversationActivity(threadId);
+        const result = await readConversationActivity(threadId, expectedTurnId);
         const activity = result.activity;
         if (!activity.turn_id || (expectedTurnId && activity.turn_id !== expectedTurnId)) continue;
         if (!expectedTurnId && !this.store.sessionTurnStarted(threadId, activity.turn_id)) continue;
@@ -636,8 +636,7 @@ export class IssueWorker {
           continue;
         }
         if (activity.status !== "completed" && activity.status !== "interrupted") continue;
-        const conversation = await readConversationResult(threadId);
-        if (conversation.markdown) this.store.recordSessionAgentMessage(threadId, activity.turn_id, conversation.markdown);
+        if (result.last_agent_message) this.store.recordSessionAgentMessage(threadId, activity.turn_id, result.last_agent_message);
         const completion = this.store.completeSessionTurn(threadId, activity.turn_id, activity.status);
         if (completion) this.finishSessionTurn(completion);
       }

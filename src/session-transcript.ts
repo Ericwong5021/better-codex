@@ -99,7 +99,7 @@ export type ConversationResult = {
 };
 
 const conversationResults = new Map<string, { mtimeMs: number; size: number; result: ConversationResult }>();
-export type ConversationActivityResult = { activity: ConversationActivity; last_final_at: string | null };
+export type ConversationActivityResult = { activity: ConversationActivity; last_final_at: string | null; last_agent_message: string };
 const conversationActivities = new Map<string, { mtimeMs: number; size: number; result: ConversationActivityResult }>();
 
 function shouldIncludeUserMessage(message: string) {
@@ -300,8 +300,8 @@ async function readConversationMessages(rolloutPath: string) {
   return { messages: messages.length > MAX_MESSAGES ? messages.slice(-MAX_MESSAGES) : messages, activity };
 }
 
-export async function readConversationActivity(threadId: string | null | undefined): Promise<ConversationActivityResult> {
-  const empty = (): ConversationActivityResult => ({ activity: { status: "idle", turn_id: null, started_at: null, completed_at: null, updated_at: null }, last_final_at: null });
+export async function readConversationActivity(threadId: string | null | undefined, expectedTurnId = ""): Promise<ConversationActivityResult> {
+  const empty = (): ConversationActivityResult => ({ activity: { status: "idle", turn_id: null, started_at: null, completed_at: null, updated_at: null }, last_final_at: null, last_agent_message: "" });
   const id = normalizeSessionId(threadId);
   if (!id) return empty();
   const rolloutPath = findRolloutPath(id);
@@ -309,36 +309,43 @@ export async function readConversationActivity(threadId: string | null | undefin
   let initialStats: { mtimeMs: number; size: number };
   try {
     initialStats = statSync(rolloutPath);
-    const cached = conversationActivities.get(rolloutPath);
+    const cacheKey = expectedTurnId ? `${rolloutPath}:${expectedTurnId}` : rolloutPath;
+    const cached = conversationActivities.get(cacheKey);
     if (cached && cached.mtimeMs === initialStats.mtimeMs && cached.size === initialStats.size) return cached.result;
   } catch {
     return empty();
   }
   let activity: ConversationActivity = { status: "idle", turn_id: null, started_at: null, completed_at: null, updated_at: null };
   let lastFinalAt: string | null = null;
+  let lastAgentMessage = "";
   const lines = createInterface({ input: createReadStream(rolloutPath, { encoding: "utf8" }), crlfDelay: Infinity });
   for await (const line of lines) {
     if (!line.includes("task_started") && !line.includes("task_complete") && !line.includes("turn_aborted") && !line.includes("agent_message") && !line.includes("response_item")) continue;
-    let event: { type?: string; timestamp?: unknown; payload?: { type?: string; role?: string; phase?: unknown; turn_id?: unknown } };
+    let event: { type?: string; timestamp?: unknown; payload?: { type?: string; role?: string; phase?: unknown; turn_id?: unknown; last_agent_message?: unknown } };
     try { event = JSON.parse(line) as typeof event; } catch { continue; }
     const timestamp = typeof event.timestamp === "string" ? event.timestamp : null;
     if (activity.status === "running" && timestamp) activity.updated_at = timestamp;
     if (event.type === "event_msg" && event.payload?.type === "task_started") {
-      activity = { status: "running", turn_id: typeof event.payload.turn_id === "string" ? event.payload.turn_id : null, started_at: timestamp, completed_at: null, updated_at: timestamp };
+      const turnId = typeof event.payload.turn_id === "string" ? event.payload.turn_id : null;
+      if (!expectedTurnId || turnId === expectedTurnId) activity = { status: "running", turn_id: turnId, started_at: timestamp, completed_at: null, updated_at: timestamp };
     } else if (event.type === "event_msg" && event.payload?.type === "task_complete") {
       const turnId = typeof event.payload.turn_id === "string" ? event.payload.turn_id : null;
-      if (!activity.turn_id || !turnId || activity.turn_id === turnId) activity = { status: "completed", turn_id: turnId || activity.turn_id, started_at: activity.started_at, completed_at: timestamp, updated_at: timestamp };
+      if ((!expectedTurnId || turnId === expectedTurnId) && (!activity.turn_id || !turnId || activity.turn_id === turnId)) {
+        activity = { status: "completed", turn_id: turnId || activity.turn_id, started_at: activity.started_at, completed_at: timestamp, updated_at: timestamp };
+        lastAgentMessage = typeof event.payload.last_agent_message === "string" ? event.payload.last_agent_message.trim() : "";
+      }
     } else if (event.type === "event_msg" && event.payload?.type === "turn_aborted") {
       const turnId = typeof event.payload.turn_id === "string" ? event.payload.turn_id : null;
-      if (!activity.turn_id || !turnId || activity.turn_id === turnId) activity = { status: "interrupted", turn_id: turnId || activity.turn_id, started_at: activity.started_at, completed_at: timestamp, updated_at: timestamp };
+      if ((!expectedTurnId || turnId === expectedTurnId) && (!activity.turn_id || !turnId || activity.turn_id === turnId)) activity = { status: "interrupted", turn_id: turnId || activity.turn_id, started_at: activity.started_at, completed_at: timestamp, updated_at: timestamp };
     }
     if (((event.type === "event_msg" && event.payload?.type === "agent_message") || (event.type === "response_item" && event.payload?.type === "message" && event.payload.role === "assistant")) && event.payload?.phase === "final_answer") lastFinalAt = timestamp;
   }
-  const result = { activity, last_final_at: lastFinalAt };
+  const result = { activity, last_final_at: lastFinalAt, last_agent_message: lastAgentMessage };
   try {
     const stats = statSync(rolloutPath);
     if (stats.mtimeMs === initialStats.mtimeMs && stats.size === initialStats.size) {
-      conversationActivities.set(rolloutPath, { mtimeMs: stats.mtimeMs, size: stats.size, result });
+      const cacheKey = expectedTurnId ? `${rolloutPath}:${expectedTurnId}` : rolloutPath;
+      conversationActivities.set(cacheKey, { mtimeMs: stats.mtimeMs, size: stats.size, result });
       if (conversationActivities.size > MAX_CONVERSATION_ACTIVITIES) conversationActivities.delete(conversationActivities.keys().next().value!);
     }
   } catch {}
@@ -394,7 +401,7 @@ export async function readConversationResult(threadId: string | null | undefined
       conversationResults.set(rolloutPath, { mtimeMs: stats.mtimeMs, size: stats.size, result });
       if (conversationResults.size > MAX_CONVERSATION_RESULTS) conversationResults.delete(conversationResults.keys().next().value!);
       const lastFinalAt = [...messages].reverse().find(item => item.role === "agent" && item.phase === "final_answer")?.timestamp || null;
-      conversationActivities.set(rolloutPath, { mtimeMs: stats.mtimeMs, size: stats.size, result: { activity, last_final_at: lastFinalAt } });
+      conversationActivities.set(rolloutPath, { mtimeMs: stats.mtimeMs, size: stats.size, result: { activity, last_final_at: lastFinalAt, last_agent_message: "" } });
       if (conversationActivities.size > MAX_CONVERSATION_ACTIVITIES) conversationActivities.delete(conversationActivities.keys().next().value!);
     }
   } catch {}
