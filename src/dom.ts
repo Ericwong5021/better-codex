@@ -576,6 +576,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     });
     localeResources.en["有任务正在运行，请等待任务结束后再更新。"] = "A task is running. Wait for it to finish before updating.";
     localeResources.en["更新正在进行中，请稍候。"] = "An update is already in progress. Please wait.";
+    localeResources.en["管理员密码不正确。"] = "The administrator password is incorrect.";
+    localeResources.en["当前部署尚未启用在线升级。"] = "Online updates are not enabled for this deployment.";
+    localeResources.en["输入管理员密码"] = "Enter administrator password";
+    localeResources.en["确认升级"] = "Confirm update";
+    localeResources.en["远程服务升级完成。"] = "The remote service update is complete.";
+    localeResources.en["远程服务正在重启，页面稍后会自动恢复。"] = "The remote service is restarting. This page will reconnect automatically.";
+    localeResources.en["正在备份并升级远程服务，请不要关闭页面。"] = "Backing up and updating the remote service. Keep this page open.";
     localeResources.en["下载的更新版本与发布版本不一致，请稍后重试。"] = "The downloaded version does not match the release. Try again later.";
     localeResources.en["更新包验证失败，已保留当前版本。"] = "The update package could not be verified. The current version was kept.";
     localeResources.en["同步中"] = "Syncing";
@@ -701,6 +708,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (match) return leading + t(match[1]) + " · Click to retry" + trailing;
       match = core.match(/^v(.+) 已可用，更新完成后将自动重启 Codex。$/);
       if (match) return leading + "v" + match[1] + " is available. Codex will restart automatically after the update." + trailing;
+      match = core.match(/^v(.+) 已可用，升级时远程服务会暂时重启。$/);
+      if (match) return leading + "v" + match[1] + " is available. The remote service will restart briefly during the update." + trailing;
       match = core.match(/^更换 (.+) 的头像$/);
       if (match) return leading + "Change " + match[1] + "'s avatar" + trailing;
       return source;
@@ -847,6 +856,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #better-codex-update-notice .better-codex-update-description { margin: 0; color: var(--color-token-text-secondary, var(--bc-muted)); font-size: var(--font-size-small, var(--bc-text-sm)); line-height: 1.4; text-wrap: pretty; }
         #better-codex-update-notice .better-codex-update-error { margin: 4px 0 0; color: var(--bc-danger); font-size: var(--font-size-small, var(--bc-text-sm)); line-height: 1.4; }
         #better-codex-update-notice .better-codex-update-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; margin: 0 2px 0 6px; }
+        #better-codex-update-notice .better-codex-update-password { width: 168px; min-height: 32px; box-sizing: border-box; border: 1px solid var(--color-token-border, var(--bc-border)); border-radius: 999px; color: inherit; background: var(--color-token-background-primary, var(--bc-surface)); padding: 0 11px; font: inherit; font-size: var(--font-size-small, var(--bc-text-sm)); }
         #better-codex-update-notice .better-codex-update-button { display: inline-flex; min-height: 32px; align-items: center; justify-content: center; border: 0; border-radius: 999px; padding: 0 10px; color: var(--color-token-foreground, var(--bc-foreground)); background: var(--color-token-button-secondary-background, var(--bc-hover)); font: inherit; font-size: var(--font-size-small, var(--bc-text-sm)); font-weight: 600; cursor: pointer; transition: transform .15s,color .15s,background-color .15s; }
         #better-codex-update-notice .better-codex-update-button.is-primary { color: var(--color-token-background-primary, var(--bc-primary-foreground)); background: var(--color-token-foreground, var(--bc-primary)); }
         #better-codex-update-notice .better-codex-update-button:active { transform: scale(.96); }
@@ -1796,6 +1806,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (value.startsWith("update_activation_failed:")) value = value.slice("update_activation_failed:".length);
       if (value === "reply_busy" || value === "issue_execution_running") return t("有任务正在运行，请等待任务结束后再更新。");
       if (value === "update_in_progress") return t("更新正在进行中，请稍候。");
+      if (value === "update_password_invalid") return t("管理员密码不正确。");
+      if (value === "hub_update_not_configured") return t("当前部署尚未启用在线升级。");
       if (value === "core_version_mismatch" || value === "compatibility_manifest_mismatch") return t("下载的更新版本与发布版本不一致，请稍后重试。");
       if (value === "core_validation_failed" || value === "core_health_validation_failed" || value === "update_asset_invalid" || value === "update_manifest_invalid" || value === "update_compatibility_invalid" || value === "update_core_invalid") return t("更新包验证失败，已保留当前版本。");
       if (value === "core_activation_version_mismatch" || value === "compatibility_activation_version_mismatch") return t("更新后的版本验证失败，已恢复到上一版本。");
@@ -1897,7 +1909,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (update?.status === "current") {
           notice.dataset.status = "current";
           title.textContent = t("Better Codex 已是最新版本");
-          description.textContent = t("更新已完成。");
+          description.textContent = REMOTE ? t("远程服务升级完成。") : t("更新已完成。");
           setTimeout(() => {
             if (updateNotice !== notice) return;
             notice.remove();
@@ -1911,11 +1923,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (update?.status === "restarting") {
           notice.dataset.status = "restarting";
           title.textContent = t("正在重启 Better Codex");
-          description.textContent = t("正在重启 Codex，稍后会自动恢复。");
+          description.textContent = REMOTE ? t("远程服务正在重启，页面稍后会自动恢复。") : t("正在重启 Codex，稍后会自动恢复。");
         } else {
           notice.dataset.status = "installing";
           title.textContent = t("正在更新 Better Codex");
-          description.textContent = t("正在下载并校验新版本，请不要关闭 Codex。");
+          description.textContent = REMOTE ? t("正在备份并升级远程服务，请不要关闭页面。") : t("正在下载并校验新版本，请不要关闭 Codex。");
         }
       }
       if (!destroyed && updateNotice === notice) throw new Error("runtime_bridge_timeout");
@@ -1950,7 +1962,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       updateNotice.setAttribute(OWNED, "true");
       updateNotice.setAttribute("role", "status");
       updateNotice.setAttribute("aria-live", "polite");
-      updateNotice.innerHTML = '<button class="better-codex-update-menu-toggle" type="button" aria-label="' + escapeHtml(t("更多操作")) + '" aria-expanded="false" aria-haspopup="menu" data-update-menu-toggle>' + icon("more") + '</button><div class="better-codex-update-menu" data-update-menu hidden><button type="button" role="menuitem" data-update-ignore>' + escapeHtml(t("忽略当前版本")) + '</button></div><button class="better-codex-update-close" type="button" aria-label="' + escapeHtml(t("稍后提醒")) + '">' + icon("close") + '</button><div class="better-codex-update-layout"><span class="better-codex-update-icon">' + icon("refresh") + '</span><div class="better-codex-update-copy"><p class="better-codex-update-title">' + escapeHtml(t("Better Codex 有新版本")) + '</p><p class="better-codex-update-description">' + escapeHtml(t("v" + version + " 已可用，更新完成后将自动重启 Codex。")) + '</p><p class="better-codex-update-error" hidden></p></div><div class="better-codex-update-actions"><button class="better-codex-update-button" type="button" data-update-later>' + escapeHtml(t("稍后")) + '</button><button class="better-codex-update-button is-primary" type="button" data-update-install>' + escapeHtml(t("立即更新")) + '</button></div></div>';
+      const updateDescription = REMOTE ? "v" + version + " 已可用，升级时远程服务会暂时重启。" : "v" + version + " 已可用，更新完成后将自动重启 Codex。";
+      updateNotice.innerHTML = '<button class="better-codex-update-menu-toggle" type="button" aria-label="' + escapeHtml(t("更多操作")) + '" aria-expanded="false" aria-haspopup="menu" data-update-menu-toggle>' + icon("more") + '</button><div class="better-codex-update-menu" data-update-menu hidden><button type="button" role="menuitem" data-update-ignore>' + escapeHtml(t("忽略当前版本")) + '</button></div><button class="better-codex-update-close" type="button" aria-label="' + escapeHtml(t("稍后提醒")) + '">' + icon("close") + '</button><div class="better-codex-update-layout"><span class="better-codex-update-icon">' + icon("refresh") + '</span><div class="better-codex-update-copy"><p class="better-codex-update-title">' + escapeHtml(t("Better Codex 有新版本")) + '</p><p class="better-codex-update-description">' + escapeHtml(t(updateDescription)) + '</p><p class="better-codex-update-error" hidden></p></div><div class="better-codex-update-actions"><button class="better-codex-update-button" type="button" data-update-later>' + escapeHtml(t("稍后")) + '</button><button class="better-codex-update-button is-primary" type="button" data-update-install>' + escapeHtml(t("立即更新")) + '</button></div></div>';
       document.body.appendChild(updateNotice);
       updateNoticeResizeObserver = new ResizeObserver(syncCompletionNoticePosition);
       updateNoticeResizeObserver.observe(updateNotice);
@@ -1988,18 +2001,37 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const title = notice.querySelector(".better-codex-update-title");
         const description = notice.querySelector(".better-codex-update-description");
         const error = notice.querySelector(".better-codex-update-error");
+        let password = notice.querySelector("[data-update-password]");
+        if (REMOTE && !password) {
+          password = document.createElement("input");
+          password.className = "better-codex-update-password";
+          password.type = "password";
+          password.autocomplete = "current-password";
+          password.placeholder = t("输入管理员密码");
+          password.setAttribute("aria-label", t("输入管理员密码"));
+          password.setAttribute("data-update-password", "true");
+          install.before(password);
+          install.textContent = t("确认升级");
+          password.focus();
+          return;
+        }
+        if (REMOTE && !password.value) {
+          password.focus();
+          return;
+        }
         notice.dataset.status = "installing";
         install.disabled = true;
         menuToggle.disabled = true;
         close.disabled = true;
         ignore.disabled = true;
         later.disabled = true;
+        if (password) password.disabled = true;
         install.textContent = t("正在更新");
         title.textContent = t("正在更新 Better Codex");
-        description.textContent = t("正在下载并校验新版本，请不要关闭 Codex。");
+        description.textContent = REMOTE ? t("正在备份并升级远程服务，请不要关闭页面。") : t("正在下载并校验新版本，请不要关闭 Codex。");
         error.hidden = true;
         try {
-          const result = await api("/api/update/install", { method: "POST" });
+          const result = await api("/api/update/install", { method: "POST", body: REMOTE ? JSON.stringify({ password: password.value }) : undefined });
           if (updateNotice !== notice) return;
           if (result?.accepted !== true) throw new Error("update_not_accepted");
           await waitForUpdateCompletion(notice);
@@ -2011,6 +2043,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           close.disabled = false;
           ignore.disabled = false;
           later.disabled = false;
+          if (password) password.disabled = false;
           install.textContent = t("重试");
           title.textContent = t("更新未完成");
           description.textContent = t("Better Codex 保持当前版本运行。");

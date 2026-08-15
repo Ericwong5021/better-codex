@@ -13,10 +13,12 @@ services:
       BETTER_CODEX_HUB_WEB_USERNAME: ${BETTER_CODEX_HUB_WEB_USERNAME:-admin}
       BETTER_CODEX_HUB_ALLOWED_HOSTS: ${BETTER_CODEX_HUB_DOMAIN:-aionui.talktodo.cn}
       BETTER_CODEX_HUB_TRUST_PROXY: "1"
+      BETTER_CODEX_HUB_UPDATER_DIR: /run/better-codex-updater
     expose:
       - 4318
     volumes:
       - hub-data:/data
+      - /var/lib/better-codex-updater:/run/better-codex-updater
     secrets:
       - hub_bootstrap_secret
       - hub_web_password

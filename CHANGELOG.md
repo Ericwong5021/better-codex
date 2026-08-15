@@ -4,6 +4,24 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.6] - 2026-08-16
+
+### Added
+
+- Check signed Hub releases from the remote Web workspace and offer password-confirmed online upgrades for VPS deployments.
+- Install Better Codex Web as a standalone app and import native sessions by dragging them onto the board.
+- Choose whether message fields send with Enter or the platform shortcut.
+
+### Changed
+
+- Back up, rebuild, verify public health, and roll back VPS deployments through a restricted host-side update trigger without exposing Docker control to the Web container.
+- Show signed update availability in Cloudflare Web deployments while keeping deployment changes on the Cloudflare host.
+
+### Fixed
+
+- Keep project pickers and board filtering inside their scroll boundaries, sort project lists by recent activity, and preserve dialog expansion by context.
+- Recover uncertain replies, reconcile completed Issue conversations with their latest turn, and simplify connected remote access.
+
 ## [0.4.5] - 2026-08-13
 
 ### Added
@@ -485,7 +503,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.5...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.6...HEAD
+[0.4.6]: https://github.com/Ericwong5021/better-codex/compare/v0.4.5...v0.4.6
 [0.4.5]: https://github.com/Ericwong5021/better-codex/compare/v0.4.4...v0.4.5
 [0.4.5-beta.2]: https://github.com/Ericwong5021/better-codex/compare/v0.4.5-beta.1...v0.4.5-beta.2
 [0.4.5-beta.1]: https://github.com/Ericwong5021/better-codex/compare/v0.4.4...v0.4.5-beta.1

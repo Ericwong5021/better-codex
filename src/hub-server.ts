@@ -15,6 +15,7 @@ import { renderMarkdown } from "./markdown.js";
 import { deviceAuthorizationPage } from "./device-authorization-page.js";
 import { controlCapabilities, controlProtocolVersion, decodeControlMessage, encodeControlMessage } from "./control-protocol.js";
 import { upgradeWebSocket, type WebSocketConnection } from "./websocket-server.js";
+import { HubUpdater } from "./hub-updater.js";
 
 export type HubServerOptions = {
   host: string;
@@ -186,7 +187,9 @@ export function createHubServer(options: HubServerOptions) {
   const secureCookies = options.secureCookies !== false;
   const allowedHosts = options.allowedHosts ?? [];
   const loginAttempts = new Map<string, { count: number; resetAt: number }>();
+  const updateAttempts = new Map<string, { count: number; resetAt: number }>();
   const controlConnections = new Map<string, Set<WebSocketConnection>>();
+  const updater = new HubUpdater();
   const notifyControl = (deviceId: string) => {
     const count = store.pendingCommandCount(deviceId);
     if (count < 1) return;
@@ -348,7 +351,31 @@ export function createHubServer(options: HubServerOptions) {
       }
       if (url.pathname === "/api/update" && method === "GET") {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" });
-        return sendJson(response, 200, { available: false, checking: false, installing: false });
+        return sendJson(response, 200, await updater.current());
+      }
+      if (url.pathname === "/api/update/check" && method === "POST") {
+        if (!browser) return sendJson(response, 401, { error: "unauthorized" });
+        if (!trustedOrigin(request, true) || !csrfValid) return sendJson(response, 403, { error: "csrf_invalid" });
+        return sendJson(response, 200, await updater.check());
+      }
+      if (url.pathname === "/api/update/install" && method === "POST") {
+        if (!browser) return sendJson(response, 401, { error: "unauthorized" });
+        if (!trustedOrigin(request, true) || !csrfValid) return sendJson(response, 403, { error: "csrf_invalid" });
+        const client = loginClientAddress(request, options.trustedProxy === true);
+        if (!client) return sendJson(response, 400, { error: "invalid_proxy_client" });
+        const attempt = updateAttempts.get(client);
+        if (attempt && attempt.resetAt > Date.now() && attempt.count >= 5) return sendJson(response, 429, { error: "login_rate_limited" }, { "retry-after": String(Math.max(1, Math.ceil((attempt.resetAt - Date.now()) / 1000))) });
+        const body = await readBody(request, 4096);
+        if (!passwordMatches(String(body.password ?? ""), store.webPasswordHash() || "")) {
+          const current = attempt && attempt.resetAt > Date.now() ? attempt : { count: 0, resetAt: Date.now() + 15 * 60_000 };
+          updateAttempts.set(client, { ...current, count: current.count + 1 });
+          store.audit(client, "hub_update_password_failed");
+          return sendJson(response, 403, { error: "update_password_invalid" });
+        }
+        updateAttempts.delete(client);
+        const result = await updater.install();
+        store.audit(client, "hub_update_requested", result.state.latestVersion || "unknown");
+        return sendJson(response, 202, result);
       }
       if (url.pathname === "/api/agents" && method === "GET") {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" });

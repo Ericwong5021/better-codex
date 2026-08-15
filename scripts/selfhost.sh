@@ -156,6 +156,28 @@ verify_running_installer() {
   verify_release_asset "$target" selfhost.sh "$source"
 }
 
+configure_vps_updater() {
+  local directory="$1"
+  install -d -m 755 /etc/better-codex /usr/local/libexec
+  install -d -o root -g "${BETTER_CODEX_HUB_CONTAINER_GID:-1000}" -m 0770 /var/lib/better-codex-updater
+  install -m 0755 "$directory/scripts/selfhost-updater.sh" /usr/local/libexec/better-codex-selfhost-updater
+  install -m 0755 "$directory/scripts/selfhost.sh" /usr/local/libexec/better-codex-selfhost
+  printf '%s\n' "$directory" > /etc/better-codex/updater-directory
+  chmod 600 /etc/better-codex/updater-directory
+  if ! command -v systemctl >/dev/null 2>&1; then
+    rm -f /var/lib/better-codex-updater/ready
+    return
+  fi
+  printf '%s\n' '[Unit]' 'Description=Better Codex Hub online updater' 'After=docker.service network-online.target' '' '[Service]' 'Type=oneshot' 'ExecStart=/usr/local/libexec/better-codex-selfhost-updater' > /etc/systemd/system/better-codex-updater.service
+  printf '%s\n' '[Unit]' 'Description=Watch for Better Codex Hub online update requests' '' '[Path]' 'PathExists=/var/lib/better-codex-updater/request' 'Unit=better-codex-updater.service' '' '[Install]' 'WantedBy=multi-user.target' > /etc/systemd/system/better-codex-updater.path
+  chmod 644 /etc/systemd/system/better-codex-updater.service /etc/systemd/system/better-codex-updater.path
+  systemctl daemon-reload
+  systemctl enable --now better-codex-updater.path
+  touch /var/lib/better-codex-updater/ready
+  chown root:"${BETTER_CODEX_HUB_CONTAINER_GID:-1000}" /var/lib/better-codex-updater/ready
+  chmod 640 /var/lib/better-codex-updater/ready
+}
+
 install_vps() {
   [ "$(id -u)" -eq 0 ] || fail "VPS installation must run with sudo"
   need curl
@@ -178,6 +200,7 @@ install_vps() {
   target="$(version_tag)"
   directory="${BETTER_CODEX_SELFHOST_DIR:-/opt/better-codex}"
   prepare_install_source "$directory" "$target"
+  configure_vps_updater "$directory"
   install -d -m 700 "$directory/deploy/hub/secrets"
   umask 077
   [ -f "$directory/deploy/hub/secrets/bootstrap-secret.txt" ] || write_secret "$directory/deploy/hub/secrets/bootstrap-secret.txt" "$(openssl rand -hex 32)"
@@ -195,7 +218,7 @@ upgrade_vps() {
   need git
   need docker
   docker compose version >/dev/null 2>&1 || fail "Docker Compose is required"
-  local target directory compose proxy_compose environment backup_output backup previous previous_version
+  local target directory compose proxy_compose environment backup_output backup previous previous_version domain public_health
   local -a compose_args up_services
   target="$(version_tag)"
   directory="${BETTER_CODEX_SELFHOST_DIR:-/opt/better-codex}"
@@ -226,6 +249,10 @@ upgrade_vps() {
     docker compose "${compose_args[@]}" exec -T -e TARGET_VERSION="$previous_version" hub node -e 'fetch("http://127.0.0.1:4318/healthz").then(response=>response.json()).then(value=>{if(value.ok!==true||value.version!==process.env.TARGET_VERSION)process.exit(1)})'
   }
   checkout_source "$directory" "$target"
+  if ! configure_vps_updater "$directory"; then
+    git -C "$directory" checkout --detach "$previous"
+    fail "VPS online updater configuration failed"
+  fi
   if ! docker compose "${compose_args[@]}" up -d --build --wait "${up_services[@]}"; then
     rollback_vps
     fail "VPS upgrade failed and the previous version was restored"
@@ -233,6 +260,17 @@ upgrade_vps() {
   if ! docker compose "${compose_args[@]}" exec -T -e TARGET_VERSION="${target#v}" hub node -e 'fetch("http://127.0.0.1:4318/healthz").then(response=>response.json()).then(value=>{if(value.ok!==true||value.version!==process.env.TARGET_VERSION)process.exit(1)})'; then
     rollback_vps
     fail "VPS upgrade health check failed and the previous version was restored"
+  fi
+  domain="$(sed -n 's/^BETTER_CODEX_HUB_DOMAIN=//p' "$environment" | tail -n 1)"
+  if [ -n "$domain" ]; then
+    [[ "$domain" =~ ^[A-Za-z0-9.-]+$ ]] || {
+      rollback_vps
+      fail "VPS public domain is invalid and the previous version was restored"
+    }
+    if ! public_health="$(retry curl -fsSL --connect-timeout 15 --max-time 30 "https://$domain/healthz")" || ! grep -Fq '"ok":true' <<< "$public_health" || ! grep -Fq '"version":"'"${target#v}"'"' <<< "$public_health"; then
+      rollback_vps
+      fail "VPS public health check failed and the previous version was restored"
+    fi
   fi
   printf 'Better Codex Hub upgraded to %s\n' "$target"
 }

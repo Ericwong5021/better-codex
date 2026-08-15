@@ -4,6 +4,7 @@ import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { coreVersion } from "./version.js";
 import { cloudflareIssuePriorities, cloudflareIssueStatuses, cloudflareRenderMarkdown, cloudflareWebCss, cloudflareWebHtml, cloudflareWebJavaScript } from "./cloudflare-web.js";
 import { betterCodexWebManifest, betterCodexWebServiceWorker } from "./web-app.js";
+import { checkStableRelease, type ReleaseUpdateState } from "./release-update.js";
 
 type SqlRow = Record<string, unknown>;
 type SqlCursor = { toArray(): SqlRow[] };
@@ -169,6 +170,8 @@ export class BetterCodexHubObject {
   private ready: Promise<void>;
   private readonly sql: SqlStorage;
   private readonly webEventStreams = new Set<ReadableStreamDefaultController<Uint8Array>>();
+  private updateState: ReleaseUpdateState = { status: "current", currentVersion: coreVersion, latestVersion: coreVersion, checkedAt: "", error: null };
+  private updateCheckPromise: Promise<ReleaseUpdateState> | null = null;
 
   constructor(private readonly state: DurableObjectState, private readonly env: CloudflareEnv) {
     this.sql = state.storage.sql;
@@ -231,7 +234,8 @@ export class BetterCodexHubObject {
     }
     if (url.pathname === "/api/bootstrap" && request.method === "GET") return this.webBootstrap(request);
     if (url.pathname === "/api/account/usage" && request.method === "GET") return this.webAuthorized(request, { usage: null });
-    if (url.pathname === "/api/update" && request.method === "GET") return this.webAuthorized(request, { available: false, checking: false, installing: false });
+    if (url.pathname === "/api/update" && request.method === "GET") return this.webUpdate(request, false);
+    if (url.pathname === "/api/update/check" && request.method === "POST") return this.webUpdate(request, true);
     if (url.pathname === "/api/agents" && request.method === "GET") return this.webAgents(request);
     if (url.pathname === "/api/projects" && request.method === "GET") return this.webProjects(request);
     if (url.pathname === "/api/issues" && request.method === "GET") return this.webIssues(request, url);
@@ -534,6 +538,26 @@ export class BetterCodexHubObject {
 
   private async webAuthorized(request: Request, value: unknown) {
     return await this.isWebAuthorized(request) ? json(value) : json({ error: "unauthorized" }, 401);
+  }
+
+  private checkUpdate() {
+    if (this.updateCheckPromise) return this.updateCheckPromise;
+    const promise = checkStableRelease().then(result => {
+      this.updateState = result;
+      return result;
+    }).finally(() => {
+      if (this.updateCheckPromise === promise) this.updateCheckPromise = null;
+    });
+    this.updateCheckPromise = promise;
+    return promise;
+  }
+
+  private async webUpdate(request: Request, force: boolean) {
+    if (!(await this.isWebAuthorized(request))) return json({ error: "unauthorized" }, 401);
+    if (request.method !== "GET" && (!trustedOrigin(request) || !(await this.webCsrf(request)))) return json({ error: "csrf_invalid" }, 403);
+    const checkedAt = Date.parse(this.updateState.checkedAt);
+    const state = force || !Number.isFinite(checkedAt) || Date.now() - checkedAt >= 60 * 60 * 1000 ? await this.checkUpdate() : this.updateState;
+    return json({ ...state, deployment: "cloudflare", installSupported: false });
   }
 
   private async webBootstrap(request: Request) {
