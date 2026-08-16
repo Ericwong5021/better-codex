@@ -623,6 +623,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     let updateTimer = null;
     let relayTimer = null;
     let relayBusy = false;
+    let relayTurnProbeAt = 0;
     let relayCapability = "unknown";
     let relayCapabilityError = "";
     let relayCapabilityCheckedAt = 0;
@@ -1676,6 +1677,37 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       return relayAppSessionId;
     }
 
+    async function reconcileRelayTurns(values) {
+      await Promise.all(values.map(async value => {
+        const threadId = normalizeSessionId(value?.thread_id);
+        const turnId = normalizeSessionId(value?.turn_id);
+        if (!threadId || !turnId) return;
+        try {
+          const summary = await sendAppServerRequest("thread/read", { threadId, includeTurns: false });
+          const status = summary?.thread?.status && typeof summary.thread.status === "object" ? summary.thread.status : {};
+          const statusType = String(status.type || "");
+          if (statusType === "active") {
+            queueRelayEvent("thread/status/changed", {
+              threadId,
+              status: {
+                type: statusType,
+                activeFlags: Array.isArray(status.activeFlags) ? status.activeFlags.filter(item => typeof item === "string") : []
+              }
+            });
+            return;
+          }
+          if (statusType !== "idle") return;
+          const detail = await sendAppServerRequest("thread/read", { threadId, includeTurns: true });
+          const turns = Array.isArray(detail?.thread?.turns) ? detail.thread.turns : [];
+          const turn = turns.find(item => normalizeSessionId(item?.id) === turnId);
+          if (!turn || !["completed", "interrupted", "failed"].includes(String(turn.status || ""))) return;
+          const items = Array.isArray(turn.items) ? turn.items.flatMap(item => item && typeof item === "object" && item.type === "agentMessage" && typeof item.text === "string" ? [{ type: "agentMessage", text: item.text }] : []) : [];
+          const error = turn.error && typeof turn.error === "object" ? { message: String(turn.error.message || "") } : null;
+          queueRelayEvent("turn/completed", { threadId, turn: { id: turnId, status: String(turn.status), items, error } });
+        } catch {}
+      }));
+    }
+
     async function pollSessionRelay() {
       if (relayBusy || destroyed) return;
       relayBusy = true;
@@ -1707,8 +1739,16 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           if (threadId) relayThreads.add(threadId);
         });
         if (!result?.leader) return;
-        if (relayCapability !== "ready" || !result.command) return;
-        await executeSessionCommand(result.command);
+        if (relayCapability !== "ready") return;
+        if (result.command) {
+          await executeSessionCommand(result.command);
+          return;
+        }
+        const activeTurns = Array.isArray(result?.active_turns) ? result.active_turns : [];
+        if (activeTurns.length && Date.now() - relayTurnProbeAt >= 5000) {
+          relayTurnProbeAt = Date.now();
+          await reconcileRelayTurns(activeTurns);
+        }
       } catch {} finally {
         relayBusy = false;
       }

@@ -662,6 +662,7 @@ test("desktop session relay binds one native thread and tracks its turn", () => 
   const target = temporaryDatabase();
   try {
     let store = new Store(target.file);
+    const worker = new IssueWorker(store);
     const project = store.createProject({ name: "Native session", workspacePath: target.directory });
     const issue = store.createIssue({
       projectId: project.id,
@@ -695,6 +696,7 @@ test("desktop session relay binds one native thread and tracks its turn", () => 
     assert.equal(linked.run_thread_id, threadId);
     assert.equal(linked.session_active_turn_id, turnId);
     assert.equal(linked.active_run_status, "running");
+    assert.deepEqual(worker.pollSessionRelay("relay-a", "app-a", "ready").active_turns, [{ thread_id: threadId, turn_id: turnId }]);
     assert.equal(store.syncSessionThreadStatus(threadId, "active", ["waitingOnApproval"]), true);
     assert.equal(store.getIssue(issue.id)?.pending_actor, "user");
     assert.equal(store.syncSessionThreadStatus(threadId, "active"), true);

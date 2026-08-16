@@ -586,6 +586,10 @@ test("issue working activity uses the agent avatar instead of initials", () => {
 
   assert.ok(source.includes("issue.active_run_status"));
   assert.ok(source.includes('issue.reply_status === "running"'));
+  assert.ok(source.includes('sendAppServerRequest("thread/read", { threadId, includeTurns: false })'));
+  assert.ok(source.includes('sendAppServerRequest("thread/read", { threadId, includeTurns: true })'));
+  assert.ok(source.includes('queueRelayEvent("turn/completed"'));
+  assert.ok(source.includes("result?.active_turns"));
   assert.ok(source.includes('agentAvatarMarkup(activityAgent, "better-codex-card-avatar")'));
   assert.ok(source.includes('"工作中"'));
   assert.ok(source.includes('"排队中"'));

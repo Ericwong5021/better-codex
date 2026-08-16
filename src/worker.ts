@@ -520,14 +520,21 @@ export class IssueWorker {
   pollSessionRelay(relayId: string, appSessionId: string, capability: "unknown" | "ready" | "failed", capabilityError?: string, busy = false) {
     if (capability !== "ready") {
       this.store.releaseSessionRelay(relayId, capability === "failed" ? capabilityError || "desktop_bridge_unavailable" : "desktop_bridge_unverified");
-      return { leader: false, acquired: false, expires_at: new Date().toISOString(), previous_relay_id: null, command: null, thread_ids: [] as string[] };
+      return { leader: false, acquired: false, expires_at: new Date().toISOString(), previous_relay_id: null, command: null, thread_ids: [] as string[], active_turns: [] as Array<{ thread_id: string; turn_id: string }> };
     }
     const lease = this.store.heartbeatSessionRelay(relayId, appSessionId, null);
     if (lease.acquired) {
       for (const command of this.store.failClaimedSessionCommands(relayId)) this.handleSessionCommandFailure(command, command.error || "relay_replaced");
     }
     const command = lease.leader && capability === "ready" && !busy ? this.store.claimSessionCommand(relayId) : undefined;
-    return { ...lease, command: command || null, thread_ids: lease.leader ? this.store.listSessionThreadIds() : [] };
+    return {
+      ...lease,
+      command: command || null,
+      thread_ids: lease.leader ? this.store.listSessionThreadIds() : [],
+      active_turns: lease.leader
+        ? this.store.listActiveIssueSessions().flatMap(session => session.active_turn_id ? [{ thread_id: session.thread_id, turn_id: session.active_turn_id }] : [])
+        : [],
+    };
   }
 
   completeSessionCommand(commandId: string, relayId: string, result: Record<string, unknown>) {
