@@ -1973,7 +1973,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (!destroyed && updateNotice === notice) throw new Error("runtime_bridge_timeout");
     }
 
-    function renderUpdateNotice(update) {
+    function renderUpdateNotice(update, force = false) {
       const version = String(update?.latestVersion || "");
       const activationError = update?.status === "error" && String(update?.error || "").startsWith("update_activation_failed:");
       const installError = update?.status === "error" && updateNotice?.dataset.status === "install-error";
@@ -1990,7 +1990,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         }
         return;
       }
-      if (dismissedUpdateVersion === noticeVersion || ignoredUpdateVersion === noticeVersion) return;
+      if (!force && (dismissedUpdateVersion === noticeVersion || ignoredUpdateVersion === noticeVersion)) return;
       if (updateNotice?.dataset.version === noticeVersion && updateNotice.dataset.status === (activationError ? "error" : "available")) return;
       updateNoticeResizeObserver?.disconnect();
       updateNoticeResizeObserver = null;
@@ -4018,7 +4018,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         checkUpdate.disabled = true;
         checkUpdate.textContent = t("检查中…");
         try {
-          renderUpdateState(await api("/api/update/check", { method: "POST" }), true);
+          const update = await api("/api/update/check", { method: "POST" });
+          renderUpdateState(update, true);
+          if (update?.status === "available") {
+            finish();
+            renderUpdateNotice(update, true);
+          }
         } catch {
           checkUpdate.textContent = t("无法检查更新");
         } finally {
