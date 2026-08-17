@@ -535,8 +535,8 @@ export function startServer() {
     (projectId, name, workspacePath) => {
       createCodexProject(store, name, workspacePath, projectId);
     },
-    projectId => {
-      if (!worker.generateProjectOverview(projectId)) throw new Error("project_overview_unavailable");
+    (projectId, agentId, feedback) => {
+      if (!worker.generateProjectOverview(projectId, agentId, feedback)) throw new Error("project_overview_unavailable");
     },
   );
   const sendEvent = (response: ServerResponse, event: string, revision: number) => {
@@ -1233,7 +1233,10 @@ export function startServer() {
         const projectId = decodeURIComponent(path[2]);
         const project = store.getProject(projectId);
         if (!project) return sendJson(response, 404, { error: "project_not_found" });
-        if (project.overview_status !== "generating" && !worker.generateProjectOverview(project.id)) throw new Error("project_overview_unavailable");
+        const body = await readBody(request);
+        const agentId = cleanString(body.agent_id, 200);
+        const feedback = cleanString(body.feedback, 4000);
+        if (project.overview_status !== "generating" && !worker.generateProjectOverview(project.id, agentId, feedback)) throw new Error("project_overview_unavailable");
         return sendJson(response, 202, store.getProject(project.id));
       }
       if (path[0] === "api" && path[1] === "sessions" && path[2] && path[3] === "workspace" && path.length === 4 && method === "GET") {

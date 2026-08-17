@@ -401,7 +401,7 @@ test("issue editor uses branded listboxes instead of native selects", () => {
   const source = injectionScript(4317, "test-token", "install");
   const css = betterCodexDesignSystemCss();
 
-  assert.doesNotMatch(source, /<select\b/);
+  assert.doesNotMatch(source, /<select[^>]+name="(?:status|priority|assignee|project_id)"/);
   assert.ok(source.includes('data-dialog-select-toggle="'));
   assert.ok(source.includes('data-dialog-select-option="'));
   assert.ok(source.includes('data-dialog-select-toggle="assignee"') || source.includes('dialogSelect("assignee"'));

@@ -30,6 +30,23 @@ export type AgentDirectoryProjection = {
   local_revision: number;
 };
 
+export const projectDocumentKeys = ["charter", "product", "architecture", "roadmap", "work", "delivery", "evidence"] as const;
+export type ProjectDocumentKey = typeof projectDocumentKeys[number];
+export type ProjectDocumentViewStatus = "idle" | "queued" | "generating" | "ready" | "failed";
+export type ProjectDocumentDiagram = {
+  nodes: Array<{ id: string; label: string; group: string; detail: string }>;
+  edges: Array<{ from: string; to: string; label: string }>;
+};
+export type ProjectDocumentView = {
+  key: ProjectDocumentKey;
+  status: ProjectDocumentViewStatus;
+  markdown: string;
+  html: string;
+  diagram: ProjectDocumentDiagram | null;
+  error: string | null;
+  updated_at: string | null;
+};
+
 export type ProjectProjection = {
   id: string;
   name: string;
@@ -40,6 +57,9 @@ export type ProjectProjection = {
   overview_status: "idle" | "generating" | "ready" | "failed";
   overview_error: string | null;
   overview_updated_at: string | null;
+  document_views?: ProjectDocumentView[];
+  document_agent_id?: string | null;
+  document_feedback?: string;
   created_at: string;
   updated_at: string;
   local_revision: number;

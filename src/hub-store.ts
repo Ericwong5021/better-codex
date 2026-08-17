@@ -3,7 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, renameSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { issuePriorities, issueStatuses } from "./db.js";
-import { forbiddenProjectionKeys, normalizeAgentDirectoryProjection, normalizeAgentModelCatalogProjection, normalizeCodexUsageProjection, remoteCommandOperations, runtimeProjectionSignature, supportedSyncProtocolVersions, syncEntityTypes, syncProtocolVersion, type AgentDirectoryProjection, type ConversationProjection, type HubBoard, type IssueProjection, type ProjectProjection, type RemoteCommand, type RemoteCommandAck, type RemoteCommandOperation, type RemoteCommandStatus, type RuntimeProjection, type SyncChange, type SyncEntityType, type SyncProjection, type SyncPushRequest } from "./sync-contract.js";
+import { forbiddenProjectionKeys, normalizeAgentDirectoryProjection, normalizeAgentModelCatalogProjection, normalizeCodexUsageProjection, projectDocumentKeys, remoteCommandOperations, runtimeProjectionSignature, supportedSyncProtocolVersions, syncEntityTypes, syncProtocolVersion, type AgentDirectoryProjection, type ConversationProjection, type HubBoard, type IssueProjection, type ProjectDocumentView, type ProjectProjection, type RemoteCommand, type RemoteCommandAck, type RemoteCommandOperation, type RemoteCommandStatus, type RuntimeProjection, type SyncChange, type SyncEntityType, type SyncProjection, type SyncPushRequest } from "./sync-contract.js";
 import { coreVersion } from "./version.js";
 
 function now() {
@@ -50,6 +50,42 @@ function cleanAvatar(value: unknown) {
   throw new Error("invalid_projection");
 }
 
+function cleanProjectDocumentViews(value: unknown): ProjectDocumentView[] {
+  if (!Array.isArray(value) || value.length > projectDocumentKeys.length) throw new Error("invalid_projection");
+  const found = new Map(value.map(item => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("invalid_projection");
+    const source = item as Record<string, unknown>;
+    if (!projectDocumentKeys.includes(source.key as never) || !["idle", "queued", "generating", "ready", "failed"].includes(String(source.status))) throw new Error("invalid_projection");
+    const diagramSource = source.diagram === null ? null : source.diagram as Record<string, unknown>;
+    let diagram: ProjectDocumentView["diagram"] = null;
+    if (diagramSource) {
+      if (typeof diagramSource !== "object" || Array.isArray(diagramSource) || !Array.isArray(diagramSource.nodes) || diagramSource.nodes.length > 80 || !Array.isArray(diagramSource.edges) || diagramSource.edges.length > 160) throw new Error("invalid_projection");
+      const nodes = diagramSource.nodes.map(node => {
+        if (!node || typeof node !== "object" || Array.isArray(node)) throw new Error("invalid_projection");
+        const item = node as Record<string, unknown>;
+        return { id: cleanString(item.id, 80, false), label: cleanString(item.label, 160, false), group: cleanString(item.group, 80), detail: cleanString(item.detail, 500) };
+      });
+      const edges = diagramSource.edges.map(edge => {
+        if (!edge || typeof edge !== "object" || Array.isArray(edge)) throw new Error("invalid_projection");
+        const item = edge as Record<string, unknown>;
+        return { from: cleanString(item.from, 80, false), to: cleanString(item.to, 80, false), label: cleanString(item.label, 120) };
+      });
+      diagram = { nodes, edges };
+    }
+    const view: ProjectDocumentView = {
+      key: source.key as ProjectDocumentView["key"],
+      status: source.status as ProjectDocumentView["status"],
+      markdown: cleanString(source.markdown, 120_000),
+      html: cleanString(source.html, 500_000),
+      diagram,
+      error: source.error === null ? null : cleanString(source.error, 2_000),
+      updated_at: source.updated_at === null ? null : cleanString(source.updated_at, 64, false),
+    };
+    return [view.key, view] as const;
+  }));
+  return projectDocumentKeys.map(key => found.get(key) || { key, status: "idle", markdown: "", html: "", diagram: null, error: null, updated_at: null });
+}
+
 function containsForbiddenKey(value: unknown): boolean {
   if (Array.isArray(value)) return value.some(containsForbiddenKey);
   if (!value || typeof value !== "object") return false;
@@ -70,6 +106,9 @@ function cleanProjection(type: SyncEntityType, id: string, value: unknown): Sync
     overview_status: ["idle", "generating", "ready", "failed"].includes(String(source.overview_status)) ? source.overview_status as ProjectProjection["overview_status"] : (() => { throw new Error("invalid_projection"); })(),
     overview_error: source.overview_error === null ? null : cleanString(source.overview_error, 2_000),
     overview_updated_at: source.overview_updated_at === null ? null : cleanString(source.overview_updated_at, 64, false),
+    document_views: source.document_views === undefined ? undefined : cleanProjectDocumentViews(source.document_views),
+    document_agent_id: source.document_agent_id === undefined ? undefined : source.document_agent_id === null ? null : cleanString(source.document_agent_id, 200),
+    document_feedback: source.document_feedback === undefined ? undefined : cleanString(source.document_feedback, 4_000),
     created_at: cleanString(source.created_at, 64, false),
     updated_at: cleanString(source.updated_at, 64, false),
     local_revision: Number(source.local_revision),

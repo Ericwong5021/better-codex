@@ -56,6 +56,35 @@ function agentId(agents: MockupRecord[], name: string) {
   return String(agents.find(agent => agent.name === name)?.id || "") || null;
 }
 
+function defaultProjectDocuments(locale: MockupLocale) {
+  const en = locale === "en";
+  const definitions = en ? [
+    ["charter", "<h1>Project charter</h1><h2>Why</h2><p>Make agent work visible from intent through delivery, while keeping local repositories and conversations connected.</p><h2>Users</h2><p>Independent developers and small teams coordinating multiple Codex sessions.</p><h2>Scope</h2><ul><li>Project and Issue management</li><li>Agent assignment and progress</li><li>Local and remote access</li></ul><h2>Non-goals</h2><p>Replacing source control or CI systems.</p>"],
+    ["product", "<h1>Product map</h1><h2>Work orchestration</h2><p>Projects organize Issues, Agents execute work, and conversations preserve decisions.</p><h2>Operating scenarios</h2><ul><li>Plan work across repositories</li><li>Resume a session from desktop or web</li><li>Review delivery evidence</li></ul>"],
+    ["architecture", "<h1>Architecture map</h1><h2>Context</h2><p>Better Codex connects the user, Codex CLI, local repositories, and an optional remote hub.</p><h2>Containers</h2><p>The injected interface talks to Runtime APIs backed by SQLite and worker processes.</p>"],
+    ["roadmap", "<h1>Roadmap</h1><h2>Outcome</h2><p>Reliable project coordination across local and remote surfaces.</p><h2>Milestones</h2><ol><li>Stable task and session loop</li><li>Project intelligence</li><li>Evidence-aware delivery</li></ol>"],
+    ["work", "<h1>Work graph</h1><h2>Active features</h2><p>Runtime resilience, project intelligence, and board consistency are decomposed into traceable work items.</p>"],
+    ["delivery", "<h1>Delivery graph</h1><h2>Current flow</h2><p>Issues lead to implementation branches, pull requests, CI verification, and tagged releases. Missing links remain explicit.</p>"],
+    ["evidence", ""],
+  ] : [
+    ["charter", "<h1>项目章程</h1><h2>为什么做</h2><p>让智能体从任务意图到真实交付的过程清晰可见，同时连接本地仓库与会话。</p><h2>用户</h2><p>同时推进多个 Codex 会话的独立开发者与小团队。</p><h2>范围</h2><ul><li>项目与 Issue 管理</li><li>智能体分配与进度</li><li>本地与远程访问</li></ul><h2>非目标</h2><p>不替代 Git 或 CI 系统。</p>"],
+    ["product", "<h1>产品地图</h1><h2>工作编排</h2><p>项目组织 Issue，智能体执行工作，会话沉淀决策。</p><h2>用户场景</h2><ul><li>跨仓库规划工作</li><li>从桌面或 Web 恢复会话</li><li>核对交付证据</li></ul>"],
+    ["architecture", "<h1>架构地图</h1><h2>Context</h2><p>Better Codex 连接用户、Codex CLI、本地代码仓库和可选的远程 Hub。</p><h2>Container</h2><p>注入式界面通过 Runtime API 访问 SQLite 与工作进程。</p>"],
+    ["roadmap", "<h1>路线图</h1><h2>Outcome</h2><p>在本地和远程界面中可靠地协调项目。</p><h2>Milestone</h2><ol><li>稳定任务与会话闭环</li><li>项目智能</li><li>证据化交付</li></ol>"],
+    ["work", "<h1>工作图</h1><h2>活跃 Feature</h2><p>Runtime 韧性、项目智能和看板一致性被拆为可追踪的 Work Item。</p>"],
+    ["delivery", "<h1>交付图</h1><h2>当前链路</h2><p>Issue 进入开发分支、PR、CI 验证与版本发布，缺失的关联保持显式可见。</p>"],
+    ["evidence", ""],
+  ];
+  const diagrams: Record<string, MockupRecord> = {
+    product: { nodes: [{ id: "project", label: en ? "Projects" : "项目", group: en ? "Capability" : "能力域", detail: en ? "Organize outcomes" : "组织目标" }, { id: "issues", label: "Issues", group: en ? "Module" : "功能模块", detail: en ? "Track work" : "追踪工作" }, { id: "agents", label: en ? "Agents" : "智能体", group: en ? "Module" : "功能模块", detail: en ? "Execute tasks" : "执行任务" }], edges: [{ from: "project", to: "issues", label: en ? "contains" : "包含" }, { from: "issues", to: "agents", label: en ? "assigned to" : "分配给" }] },
+    architecture: { nodes: [{ id: "user", label: en ? "User" : "用户", group: "Context", detail: "" }, { id: "ui", label: "Better Codex UI", group: "Container", detail: "" }, { id: "runtime", label: "Runtime", group: "Container", detail: "" }, { id: "codex", label: "Codex CLI", group: "Component", detail: "" }], edges: [{ from: "user", to: "ui", label: en ? "operates" : "操作" }, { from: "ui", to: "runtime", label: "API" }, { from: "runtime", to: "codex", label: en ? "launches" : "启动" }] },
+    roadmap: { nodes: [{ id: "outcome", label: en ? "Reliable coordination" : "可靠协同", group: "Outcome", detail: "" }, { id: "milestone", label: en ? "Project intelligence" : "项目智能", group: "Milestone", detail: "" }, { id: "release", label: en ? "Next release" : "下一版本", group: "Release", detail: "" }], edges: [{ from: "outcome", to: "milestone", label: en ? "enabled by" : "由此支撑" }, { from: "milestone", to: "release", label: en ? "shipped in" : "随版本交付" }] },
+    work: { nodes: [{ id: "feature", label: en ? "Project intelligence" : "项目智能", group: "Feature", detail: "" }, { id: "work-1", label: en ? "Seven document views" : "七类文档视图", group: "Work Item", detail: "" }, { id: "work-2", label: en ? "Progressive generation" : "渐进式生成", group: "Work Item", detail: "" }], edges: [{ from: "feature", to: "work-1", label: en ? "decomposes" : "拆解" }, { from: "work-1", to: "work-2", label: en ? "depends on" : "依赖" }] },
+    delivery: { nodes: [{ id: "issue", label: "Issue", group: "Issue", detail: "" }, { id: "branch", label: "feature/project-docs", group: "Branch", detail: "" }, { id: "pr", label: "PR", group: "PR", detail: "" }, { id: "ci", label: "CI", group: "CI", detail: "" }, { id: "release", label: "Release", group: "Release", detail: "" }], edges: [{ from: "issue", to: "branch", label: "" }, { from: "branch", to: "pr", label: "" }, { from: "pr", to: "ci", label: "" }, { from: "ci", to: "release", label: "" }] },
+  };
+  return definitions.map(([key, html]) => ({ key, status: key === "evidence" ? "generating" : "ready", markdown: "", html, diagram: diagrams[key] || null, error: null, updated_at: new Date().toISOString() }));
+}
+
 function defaultIssues(agents: MockupRecord[], locale: MockupLocale) {
   const specs = locale === "en" ? [
     ["PM-101", "Simplify Issue templates", "Reduce extra formatting when creating tasks and keep only the task details, Skill instructions, and taskid.", "backlog", "urgent", "Codex", ["Issue", "Product"], "not-started"],
@@ -150,9 +179,10 @@ function defaultIssues(agents: MockupRecord[], locale: MockupLocale) {
 
 export function defaultMockupState(locale: MockupLocale = "zh-CN"): MockupState {
   const agents = defaultAgents(locale);
+  const documents = defaultProjectDocuments(locale);
   const project = locale === "en"
-    ? { id: projectId, external_id: "mockup", name: "Better Codex Desktop", workspace_path: "" }
-    : { id: projectId, external_id: "mockup", name: "better-codex", workspace_path: "" };
+    ? { id: projectId, external_id: "mockup", name: "Better Codex Desktop", workspace_path: "", root_paths: [], description: "A project and agent workspace that makes Codex work visible from intent to delivery.", overview_html: String(documents[0].html), overview_status: "generating", overview_error: null, overview_updated_at: null, document_views: documents, document_agent_id: "agent-product", document_feedback: "" }
+    : { id: projectId, external_id: "mockup", name: "better-codex", workspace_path: "", root_paths: [], description: "把 Codex 的任务、会话、智能体与真实交付连接起来的项目工作台。", overview_html: String(documents[0].html), overview_status: "generating", overview_error: null, overview_updated_at: null, document_views: documents, document_agent_id: "agent-product", document_feedback: "" };
   return {
     version: 1,
     revision: 1,

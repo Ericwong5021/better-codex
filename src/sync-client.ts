@@ -63,7 +63,7 @@ export class SyncClient {
     private readonly stopIssue: (issueId: string) => void | Promise<void> = () => { throw new Error("remote_stop_unavailable"); },
     private readonly accountUsage: () => Promise<CodexUsageProjection | null> = async () => null,
     private readonly projectCreate: (projectId: string, name: string, workspacePath: string) => void | Promise<void> = () => { throw new Error("remote_project_create_unavailable"); },
-    private readonly projectOverview: (projectId: string) => void | Promise<void> = () => { throw new Error("remote_project_overview_unavailable"); },
+    private readonly projectOverview: (projectId: string, agentId: string, feedback: string) => void | Promise<void> = () => { throw new Error("remote_project_overview_unavailable"); },
   ) {}
 
   start() {

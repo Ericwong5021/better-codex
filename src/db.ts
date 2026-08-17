@@ -4,7 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { databasePath, developmentDatabaseSnapshotSourcePath } from "./config.js";
 import { syncProtocolVersion } from "./sync-contract.js";
-import type { ConversationProjection, IssueProjection, ProjectProjection, RemoteCommand, RemoteCommandAck, SyncEntityType, SyncProjection } from "./sync-contract.js";
+import { projectDocumentKeys, type ConversationProjection, type IssueProjection, type ProjectDocumentKey, type ProjectDocumentView, type ProjectProjection, type RemoteCommand, type RemoteCommandAck, type SyncEntityType, type SyncProjection } from "./sync-contract.js";
 
 export const issueStatuses = ["backlog", "todo", "in_progress", "in_review", "done", "blocked"] as const;
 export const issuePriorities = ["none", "low", "medium", "high", "urgent"] as const;
@@ -46,6 +46,9 @@ export type Project = {
   overview_status: "idle" | "generating" | "ready" | "failed";
   overview_error: string | null;
   overview_updated_at: string | null;
+  document_views: ProjectDocumentView[];
+  document_agent_id: string | null;
+  document_feedback: string;
   next_issue_number: number;
   created_at: string;
   updated_at: string;
@@ -219,7 +222,7 @@ export function cleanMaxConcurrency(value: number | undefined) {
   return value;
 }
 
-const latestSchemaVersion = 12;
+const latestSchemaVersion = 13;
 
 function now() {
   return new Date().toISOString();
@@ -337,6 +340,49 @@ function issueFromRow(row: Record<string, unknown>): Issue {
   } as Issue;
 }
 
+function emptyProjectDocumentViews(): ProjectDocumentView[] {
+  return projectDocumentKeys.map(key => ({ key, status: "idle", markdown: "", html: "", diagram: null, error: null, updated_at: null }));
+}
+
+function projectDocumentViewsFromRow(row: Record<string, unknown>) {
+  const views = emptyProjectDocumentViews();
+  try {
+    const parsed = JSON.parse(String(row.project_documents_json || "[]"));
+    if (Array.isArray(parsed)) {
+      for (const view of parsed) {
+        if (!view || typeof view !== "object" || !projectDocumentKeys.includes(view.key as ProjectDocumentKey)) continue;
+        const target = views.find(item => item.key === view.key)!;
+        const source = view as Record<string, unknown>;
+        const diagramSource = source.diagram && typeof source.diagram === "object" && !Array.isArray(source.diagram) ? source.diagram as Record<string, unknown> : null;
+        const diagram = diagramSource && Array.isArray(diagramSource.nodes) && Array.isArray(diagramSource.edges)
+          ? {
+              nodes: diagramSource.nodes.slice(0, 80).flatMap(node => {
+                if (!node || typeof node !== "object" || Array.isArray(node)) return [];
+                const item = node as Record<string, unknown>;
+                return [{ id: String(item.id || "").slice(0, 80), label: String(item.label || "").slice(0, 160), group: String(item.group || "").slice(0, 80), detail: String(item.detail || "").slice(0, 500) }];
+              }).filter(node => node.id && node.label),
+              edges: diagramSource.edges.slice(0, 160).flatMap(edge => {
+                if (!edge || typeof edge !== "object" || Array.isArray(edge)) return [];
+                const item = edge as Record<string, unknown>;
+                return [{ from: String(item.from || "").slice(0, 80), to: String(item.to || "").slice(0, 80), label: String(item.label || "").slice(0, 120) }];
+              }).filter(edge => edge.from && edge.to),
+            }
+          : null;
+        Object.assign(target, {
+          status: ["queued", "generating", "ready", "failed"].includes(String(source.status)) ? source.status : "idle",
+          markdown: String(source.markdown || "").slice(0, 120000),
+          html: String(source.html || "").slice(0, 500000),
+          diagram,
+          error: source.error ? String(source.error).slice(0, 2000) : null,
+          updated_at: source.updated_at ? String(source.updated_at).slice(0, 64) : null,
+        });
+      }
+    }
+  } catch {}
+  if (!views[0].html && row.overview_html) Object.assign(views[0], { status: "ready", html: String(row.overview_html), updated_at: row.overview_updated_at ? String(row.overview_updated_at) : null });
+  return views;
+}
+
 function projectFromRow(row: Record<string, unknown>): Project {
   let rootPaths: string[] = [];
   try {
@@ -357,6 +403,9 @@ function projectFromRow(row: Record<string, unknown>): Project {
     overview_status: ["generating", "ready", "failed"].includes(String(row.overview_status)) ? String(row.overview_status) as Project["overview_status"] : "idle",
     overview_error: row.overview_error ? String(row.overview_error) : null,
     overview_updated_at: row.overview_updated_at ? String(row.overview_updated_at) : null,
+    document_views: projectDocumentViewsFromRow(row),
+    document_agent_id: row.document_agent_id ? String(row.document_agent_id) : null,
+    document_feedback: String(row.document_feedback || ""),
     next_issue_number: Number(row.next_issue_number || 1),
     created_at: String(row.created_at),
     updated_at: String(row.updated_at),
@@ -676,6 +725,7 @@ export class Store {
       this.db.prepare("INSERT OR REPLACE INTO sync_outbox (entity_type, entity_id, event_id, changed_at) SELECT 'project', id, lower(hex(randomblob(16))), ? FROM projects").run(timestamp);
       this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (12, ?)").run(timestamp);
     }
+    if (fromVersion < 13) this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (13, ?)").run(now());
   }
 
   private ensureProjectColumns() {
@@ -686,9 +736,16 @@ export class Store {
     if (!columns.has("overview_status")) this.db.exec("ALTER TABLE projects ADD COLUMN overview_status TEXT NOT NULL DEFAULT 'idle'");
     if (!columns.has("overview_error")) this.db.exec("ALTER TABLE projects ADD COLUMN overview_error TEXT");
     if (!columns.has("overview_updated_at")) this.db.exec("ALTER TABLE projects ADD COLUMN overview_updated_at TEXT");
-    const rows = this.db.prepare("SELECT id, workspace_path, root_paths_json FROM projects").all() as Array<{ id: string; workspace_path: string; root_paths_json: string }>;
+    if (!columns.has("project_documents_json")) this.db.exec("ALTER TABLE projects ADD COLUMN project_documents_json TEXT NOT NULL DEFAULT '[]'");
+    if (!columns.has("document_agent_id")) this.db.exec("ALTER TABLE projects ADD COLUMN document_agent_id TEXT");
+    if (!columns.has("document_feedback")) this.db.exec("ALTER TABLE projects ADD COLUMN document_feedback TEXT NOT NULL DEFAULT ''");
+    const rows = this.db.prepare("SELECT id, workspace_path, root_paths_json, project_documents_json, overview_status FROM projects").all() as Array<{ id: string; workspace_path: string; root_paths_json: string; project_documents_json: string; overview_status: string }>;
     for (const row of rows) {
       if (row.workspace_path && (!row.root_paths_json || row.root_paths_json === "[]")) this.db.prepare("UPDATE projects SET root_paths_json = ? WHERE id = ?").run(JSON.stringify([row.workspace_path]), row.id);
+      if (row.overview_status === "generating") {
+        const views = projectDocumentViewsFromRow(row as unknown as Record<string, unknown>).map(view => ["queued", "generating"].includes(view.status) ? { ...view, status: "failed" as const, error: "runtime_restarted" } : view);
+        this.db.prepare("UPDATE projects SET project_documents_json = ? WHERE id = ?").run(JSON.stringify(views), row.id);
+      }
     }
     this.db.prepare("UPDATE projects SET overview_status = 'failed', overview_error = 'runtime_restarted' WHERE overview_status = 'generating'").run();
   }
@@ -723,7 +780,7 @@ export class Store {
       DROP TRIGGER IF EXISTS sync_reply_update;
       DROP TRIGGER IF EXISTS sync_reply_delete;
       CREATE TRIGGER sync_project_insert AFTER INSERT ON projects BEGIN ${dirty("project", "NEW.id")} END;
-      CREATE TRIGGER sync_project_update AFTER UPDATE OF name, identifier_prefix, workspace_path, root_paths_json, description, overview_html, overview_status, overview_error, overview_updated_at ON projects BEGIN ${dirty("project", "NEW.id")} END;
+      CREATE TRIGGER sync_project_update AFTER UPDATE OF name, identifier_prefix, workspace_path, root_paths_json, description, overview_html, overview_status, overview_error, overview_updated_at, project_documents_json, document_agent_id, document_feedback ON projects BEGIN ${dirty("project", "NEW.id")} END;
       CREATE TRIGGER sync_project_delete AFTER DELETE ON projects BEGIN ${removed("project", "OLD.id")} END;
       CREATE TRIGGER sync_issue_insert AFTER INSERT ON issues BEGIN ${dirty("issue", "NEW.id")} END;
       CREATE TRIGGER sync_issue_update AFTER UPDATE OF project_id, title, description, status, priority, labels_json, sort_order, pinned, archived_at, agent_id, agent_enabled, user_assigned, needs_attention, pending_actor ON issues BEGIN ${dirty("issue", "NEW.id")} END;
@@ -1078,6 +1135,9 @@ export class Store {
         overview_status: project.overview_status,
         overview_error: project.overview_error,
         overview_updated_at: project.overview_updated_at,
+        document_views: project.document_views,
+        document_agent_id: project.document_agent_id,
+        document_feedback: project.document_feedback,
         created_at: project.created_at,
         updated_at: project.updated_at,
         local_revision: Math.max(1, Date.parse(project.updated_at) || 1),
@@ -1122,7 +1182,7 @@ export class Store {
     } satisfies IssueProjection;
   }
 
-  async applyRemoteCommand(command: RemoteCommand, handlers: { reply?: (issueId: string, requestId: string, message: string, files: Array<{ name: string; type: string; data: string }>) => void | Promise<void>; stop?: (issueId: string) => void | Promise<void>; projectCreate?: (projectId: string, name: string, workspacePath: string) => void | Promise<void>; projectOverview?: (projectId: string) => void | Promise<void> } = {}): Promise<RemoteCommandAck> {
+  async applyRemoteCommand(command: RemoteCommand, handlers: { reply?: (issueId: string, requestId: string, message: string, files: Array<{ name: string; type: string; data: string }>) => void | Promise<void>; stop?: (issueId: string) => void | Promise<void>; projectCreate?: (projectId: string, name: string, workspacePath: string) => void | Promise<void>; projectOverview?: (projectId: string, agentId: string, feedback: string) => void | Promise<void> } = {}): Promise<RemoteCommandAck> {
     const receipt = this.db.prepare("SELECT result_json FROM sync_command_receipts WHERE command_id = ?").get(command.command_id) as { result_json: string } | undefined;
     if (receipt) return JSON.parse(receipt.result_json) as RemoteCommandAck;
     const result = await (async () => {
@@ -1147,7 +1207,9 @@ export class Store {
           if (!project) throw new Error("project_not_found");
           if ((this.syncProjection("project", project.id) as ProjectProjection).local_revision !== command.base_revision) throw new Error("version_conflict");
           if (!handlers.projectOverview) throw new Error("remote_project_overview_unavailable");
-          await handlers.projectOverview(project.id);
+          const agentId = typeof payload.agent_id === "string" ? payload.agent_id.trim().slice(0, 200) : "";
+          const feedback = typeof payload.feedback === "string" ? payload.feedback.trim().slice(0, 4000) : "";
+          await handlers.projectOverview(project.id, agentId, feedback);
           return { command_id: command.command_id, status: "applied", error: null, projection: this.syncProjection("project", project.id) as ProjectProjection } satisfies RemoteCommandAck;
         }
         let issue: Issue;
@@ -1381,22 +1443,59 @@ export class Store {
     return this.getProject(id)!;
   }
 
-  startProjectOverview(id: string) {
-    const result = this.db.prepare("UPDATE projects SET overview_status = 'generating', overview_error = NULL WHERE id = ? AND overview_status != 'generating'").run(id);
-    if (result.changes !== 1) return null;
+  startProjectOverview(id: string, agentId = "", feedback = "") {
+    const project = this.getProject(id);
+    if (!project || project.overview_status === "generating") return null;
+    const views = project.document_views.map(view => ({ ...view, status: "queued" as const, error: null }));
+    const timestamp = now();
+    this.db.prepare("UPDATE projects SET project_documents_json = ?, document_agent_id = ?, document_feedback = ?, overview_status = 'generating', overview_error = NULL, updated_at = ? WHERE id = ?")
+      .run(JSON.stringify(views), agentId || null, feedback.trim().slice(0, 4000), timestamp, id);
     return this.getProject(id)!;
   }
 
-  finishProjectOverview(id: string, description: string, overviewHtml: string) {
+  startProjectDocumentView(id: string, key: ProjectDocumentKey) {
+    const project = this.getProject(id);
+    if (!project) return null;
+    const views = project.document_views.map(view => view.key === key ? { ...view, status: "generating" as const, error: null } : view);
+    this.db.prepare("UPDATE projects SET project_documents_json = ?, updated_at = ? WHERE id = ?").run(JSON.stringify(views), now(), id);
+    return this.getProject(id);
+  }
+
+  finishProjectDocumentView(id: string, key: ProjectDocumentKey, markdown: string, html: string, diagram: ProjectDocumentView["diagram"], description = "") {
+    const project = this.getProject(id);
+    if (!project) return null;
     const timestamp = now();
-    this.db.prepare("UPDATE projects SET description = ?, overview_html = ?, overview_status = 'ready', overview_error = NULL, overview_updated_at = ?, updated_at = ? WHERE id = ?")
-      .run(description.trim().slice(0, 2000), overviewHtml.slice(0, 500000), timestamp, timestamp, id);
+    const views = project.document_views.map(view => view.key === key ? { ...view, status: "ready" as const, markdown: markdown.slice(0, 120000), html: html.slice(0, 500000), diagram, error: null, updated_at: timestamp } : view);
+    this.db.prepare("UPDATE projects SET project_documents_json = ?, description = CASE WHEN ? != '' THEN ? ELSE description END, overview_html = CASE WHEN ? = 'charter' THEN ? ELSE overview_html END, overview_updated_at = ?, updated_at = ? WHERE id = ?")
+      .run(JSON.stringify(views), description.trim(), description.trim().slice(0, 2000), key, html.slice(0, 500000), timestamp, timestamp, id);
+    return this.getProject(id);
+  }
+
+  failProjectDocumentView(id: string, key: ProjectDocumentKey, error: string) {
+    const project = this.getProject(id);
+    if (!project) return null;
+    const views = project.document_views.map(view => view.key === key ? { ...view, status: "failed" as const, error: error.slice(0, 2000) } : view);
+    this.db.prepare("UPDATE projects SET project_documents_json = ?, updated_at = ? WHERE id = ?").run(JSON.stringify(views), now(), id);
+    return this.getProject(id);
+  }
+
+  finishProjectOverview(id: string) {
+    const project = this.getProject(id);
+    if (!project) return null;
+    const failed = project.document_views.filter(view => view.status === "failed");
+    const timestamp = now();
+    this.db.prepare("UPDATE projects SET overview_status = ?, overview_error = ?, overview_updated_at = ?, updated_at = ? WHERE id = ?")
+      .run(failed.length ? "failed" : "ready", failed.length ? `project_document_views_failed:${failed.map(view => view.key).join(",")}` : null, timestamp, timestamp, id);
     return this.getProject(id);
   }
 
   failProjectOverview(id: string, error: string) {
-    this.db.prepare("UPDATE projects SET overview_status = 'failed', overview_error = ? WHERE id = ?")
-      .run(error.slice(0, 2000), id);
+    const project = this.getProject(id);
+    if (!project) return null;
+    const message = error.slice(0, 2000);
+    const views = project.document_views.map(view => ["queued", "generating"].includes(view.status) ? { ...view, status: "failed" as const, error: message } : view);
+    this.db.prepare("UPDATE projects SET project_documents_json = ?, overview_status = 'failed', overview_error = ?, updated_at = ? WHERE id = ?")
+      .run(JSON.stringify(views), message, now(), id);
     return this.getProject(id);
   }
 

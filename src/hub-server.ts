@@ -436,7 +436,7 @@ export function createHubServer(options: HubServerOptions) {
         const project = store.board().projects.find(item => item.id === projectId);
         if (!project) return sendJson(response, 404, { error: "project_not_found" });
         const body = await readBody(request);
-        const command = store.createRemoteCommand({ command_id: body.command_id ?? request.headers["x-better-codex-command-id"], operation: "project.overview", entity_id: project.id, base_revision: project.local_revision, payload: {} });
+        const command = store.createRemoteCommand({ command_id: body.command_id ?? request.headers["x-better-codex-command-id"], operation: "project.overview", entity_id: project.id, base_revision: project.local_revision, payload: { agent_id: typeof body.agent_id === "string" ? body.agent_id.trim().slice(0, 200) : "", feedback: typeof body.feedback === "string" ? body.feedback.trim().slice(0, 4000) : "" } });
         notifyControl(command.device_id);
         return sendJson(response, 202, { command_id: command.command_id });
       }
