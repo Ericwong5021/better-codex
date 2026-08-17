@@ -538,6 +538,21 @@ export function startServer() {
     (projectId, agentId, feedback) => {
       if (!worker.generateProjectOverview(projectId, agentId, feedback)) throw new Error("project_overview_unavailable");
     },
+    files => {
+      const paths: string[] = [];
+      const cleanup = () => {
+        for (const path of paths) {
+          try { unlinkSync(path); } catch {}
+        }
+      };
+      try {
+        for (const file of files) paths.push(saveRemoteFile(file));
+        return { paths, cleanup };
+      } catch (error) {
+        cleanup();
+        throw error;
+      }
+    },
   );
   const sendEvent = (response: ServerResponse, event: string, revision: number) => {
     response.write(`id: ${revision}\nevent: ${event}\ndata: ${JSON.stringify({ revision })}\n\n`);

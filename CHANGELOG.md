@@ -4,6 +4,19 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.8] - 2026-08-17
+
+### Added
+
+- Add a project workspace with issue activity, generated documentation views, and project relationship maps.
+- Generate concise Issue titles with the configured scheduler model while preserving the original request as the description.
+- Transfer attachments when creating or editing Issues from the remote Web UI.
+- Add message separators and hover-to-copy controls to Issue conversations.
+
+### Changed
+
+- Use full-screen create and detail dialogs on compact Web layouts and keep the mobile task toolbar usable at narrow widths.
+
 ## [0.4.7] - 2026-08-17
 
 ### Fixed
@@ -512,7 +525,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.7...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.8...HEAD
+[0.4.8]: https://github.com/Ericwong5021/better-codex/compare/v0.4.7...v0.4.8
 [0.4.7]: https://github.com/Ericwong5021/better-codex/compare/v0.4.6...v0.4.7
 [0.4.6]: https://github.com/Ericwong5021/better-codex/compare/v0.4.5...v0.4.6
 [0.4.5]: https://github.com/Ericwong5021/better-codex/compare/v0.4.4...v0.4.5

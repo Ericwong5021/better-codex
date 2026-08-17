@@ -1182,13 +1182,21 @@ export class Store {
     } satisfies IssueProjection;
   }
 
-  async applyRemoteCommand(command: RemoteCommand, handlers: { reply?: (issueId: string, requestId: string, message: string, files: Array<{ name: string; type: string; data: string }>) => void | Promise<void>; stop?: (issueId: string) => void | Promise<void>; projectCreate?: (projectId: string, name: string, workspacePath: string) => void | Promise<void>; projectOverview?: (projectId: string, agentId: string, feedback: string) => void | Promise<void> } = {}): Promise<RemoteCommandAck> {
+  async applyRemoteCommand(command: RemoteCommand, handlers: { files?: (files: Array<{ name: string; type: string; data: string }>) => { paths: string[]; cleanup: () => void } | Promise<{ paths: string[]; cleanup: () => void }>; reply?: (issueId: string, requestId: string, message: string, files: Array<{ name: string; type: string; data: string }>) => void | Promise<void>; stop?: (issueId: string) => void | Promise<void>; projectCreate?: (projectId: string, name: string, workspacePath: string) => void | Promise<void>; projectOverview?: (projectId: string, agentId: string, feedback: string) => void | Promise<void> } = {}): Promise<RemoteCommandAck> {
     const receipt = this.db.prepare("SELECT result_json FROM sync_command_receipts WHERE command_id = ?").get(command.command_id) as { result_json: string } | undefined;
     if (receipt) return JSON.parse(receipt.result_json) as RemoteCommandAck;
     const result = await (async () => {
+      let transferred: { paths: string[]; cleanup: () => void } | null = null;
       try {
         const payload = command.payload;
         if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("invalid_command_payload");
+        const files = Array.isArray(payload.files) ? payload.files as Array<{ name: string; type: string; data: string }> : [];
+        if (["issue.create", "issue.update"].includes(command.operation) && files.length) {
+          if (!handlers.files) throw new Error("remote_files_unavailable");
+          transferred = await handlers.files(files);
+        }
+        const fileBlock = transferred?.paths.length ? `附带文件：\n${transferred.paths.map(path => `- ${path}`).join("\n")}` : "";
+        const descriptionWithFiles = (description: unknown) => [typeof description === "string" ? description : "", fileBlock].filter(Boolean).join("\n\n");
         if (command.operation === "settings.auto-dispatch") {
           if (command.entity_id !== "auto-dispatch" || command.base_revision !== null || typeof payload.enabled !== "boolean") throw new Error("invalid_auto_dispatch");
           this.setAutoDispatch(payload.enabled);
@@ -1219,7 +1227,7 @@ export class Store {
             id: command.entity_id,
             projectId: String(payload.project_id || ""),
             title: String(payload.title || ""),
-            description: typeof payload.description === "string" ? payload.description : "",
+            description: descriptionWithFiles(payload.description),
             status: payload.status as IssueStatus | undefined,
             priority: payload.priority as IssuePriority | undefined,
             labels: Array.isArray(payload.labels) ? payload.labels as string[] : [],
@@ -1257,7 +1265,7 @@ export class Store {
             } else {
               if (payload.project_id !== undefined) patch.project_id = String(payload.project_id);
               if (payload.title !== undefined) patch.title = String(payload.title);
-              if (payload.description !== undefined) patch.description = String(payload.description);
+              if (payload.description !== undefined || fileBlock) patch.description = descriptionWithFiles(payload.description);
               if (payload.status !== undefined) patch.status = payload.status as IssueStatus;
               if (payload.priority !== undefined) patch.priority = payload.priority as IssuePriority;
               if (payload.labels !== undefined) patch.labels = payload.labels as string[];
@@ -1280,6 +1288,7 @@ export class Store {
         }
         return { command_id: command.command_id, status: "applied", error: null, projection: this.syncProjection("issue", issue.id) as IssueProjection } satisfies RemoteCommandAck;
       } catch (error) {
+        transferred?.cleanup();
         const code = error instanceof Error ? error.message : "command_rejected";
         const status = code === "version_conflict" ? "conflict" : "rejected";
         return { command_id: command.command_id, status, error: code, projection: null } satisfies RemoteCommandAck;

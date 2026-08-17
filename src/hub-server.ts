@@ -458,13 +458,13 @@ export function createHubServer(options: HubServerOptions) {
       if (url.pathname === "/api/issues" && method === "POST") {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" });
         if (!trustedOrigin(request, true) || !csrfValid) return sendJson(response, 403, { error: "csrf_invalid" });
-        const body = await readBody(request);
+        const body = await readBody(request, 30 * 1024 * 1024);
         const command = store.createRemoteCommand({
           command_id: body.command_id ?? request.headers["x-better-codex-command-id"],
           operation: "issue.create",
           entity_id: body.id,
           base_revision: null,
-          payload: { project_id: body.project_id, title: body.title, description: body.description, status: body.status, priority: body.priority, labels: body.labels, agent_enabled: body.agent_enabled, agent_id: body.agent_id, user_assigned: body.user_assigned },
+          payload: { project_id: body.project_id, title: body.title, description: body.description, status: body.status, priority: body.priority, labels: body.labels, agent_enabled: body.agent_enabled, agent_id: body.agent_id, user_assigned: body.user_assigned, files: body.files },
         });
         notifyControl(command.device_id);
         const issue = store.board().issues.find(item => item.id === command.entity_id)!;
@@ -473,14 +473,14 @@ export function createHubServer(options: HubServerOptions) {
       if (issueMatch && method === "PATCH") {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" });
         if (!trustedOrigin(request, true) || !csrfValid) return sendJson(response, 403, { error: "csrf_invalid" });
-        const body = await readBody(request);
+        const body = await readBody(request, 30 * 1024 * 1024);
         const issueId = decodeURIComponent(issueMatch[1]);
         const command = store.createRemoteCommand({
           command_id: body.command_id ?? request.headers["x-better-codex-command-id"],
           operation: "issue.update",
           entity_id: issueId,
           base_revision: body.version,
-          payload: { project_id: body.project_id, title: body.title, description: body.description, status: body.status, priority: body.priority, labels: body.labels, sort_order: body.sort_order, pinned: body.pinned, agent_enabled: body.agent_enabled, agent_id: body.agent_id, user_assigned: body.user_assigned },
+          payload: { project_id: body.project_id, title: body.title, description: body.description, status: body.status, priority: body.priority, labels: body.labels, sort_order: body.sort_order, pinned: body.pinned, agent_enabled: body.agent_enabled, agent_id: body.agent_id, user_assigned: body.user_assigned, files: body.files },
         });
         notifyControl(command.device_id);
         const issue = store.board().issues.find(item => item.id === command.entity_id)!;
@@ -673,17 +673,25 @@ export function createHubServer(options: HubServerOptions) {
     }
   });
   server.once("close", () => store.close());
-  return { server, store };
+  const close = () => new Promise<void>((resolveClose, reject) => {
+    server.close(error => error ? reject(error) : resolveClose());
+    for (const connections of controlConnections.values()) {
+      for (const connection of [...connections]) connection.close();
+    }
+    server.closeAllConnections();
+  });
+  return { server, store, close };
 }
 
 export function startHubServer(options = hubServerOptions()) {
-  const { server } = createHubServer(options);
+  const hub = createHubServer(options);
+  const { server } = hub;
   server.listen(options.port, options.host, () => {
     const address = server.address();
     const port = typeof address === "object" && address ? address.port : options.port;
     console.log(`Better Codex Hub listening on http://${options.host}:${port}`);
   });
-  const stop = () => server.close(() => process.exit(0));
+  const stop = () => void hub.close().then(() => process.exit(0), () => process.exit(1));
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
   return server;

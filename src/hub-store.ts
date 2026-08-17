@@ -208,9 +208,9 @@ function cleanCommandPayload(operation: RemoteCommandOperation, value: unknown) 
   if (!value || typeof value !== "object" || Array.isArray(value) || (operation !== "project.create" && containsForbiddenKey(value))) throw new Error("invalid_command_payload");
   const source = value as Record<string, unknown>;
   const allowed = operation === "issue.create"
-    ? ["project_id", "title", "description", "status", "priority", "labels", "agent_enabled", "agent_id", "user_assigned"]
+    ? ["project_id", "title", "description", "status", "priority", "labels", "agent_enabled", "agent_id", "user_assigned", "files"]
     : operation === "issue.update"
-      ? ["project_id", "title", "description", "status", "priority", "labels", "sort_order", "pinned", "agent_enabled", "agent_id", "user_assigned"]
+      ? ["project_id", "title", "description", "status", "priority", "labels", "sort_order", "pinned", "agent_enabled", "agent_id", "user_assigned", "files"]
       : operation === "issue.start"
         ? ["project_id", "title", "description", "status", "priority", "labels", "agent_id"]
       : operation === "issue.reply" ? ["message", "files"]

@@ -542,7 +542,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "调度失败": "Scheduling failed",
       "重试回复": "Retry reply", "重新加载": "Reload", "回复等待超时。请检查模型服务连接后重试。": "The reply timed out. Check the model service connection and retry.", "网络连接异常，回复未完成。请检查网络和 Better Codex Runtime 后重试。": "The reply did not finish because of a network problem. Check your network and Better Codex Runtime, then retry.", "当前权限不足，无法完成回复。请调整智能体权限或允许所需操作后重试。": "The reply needs additional permission. Adjust the agent permission or allow the required action, then retry.", "Better Codex Runtime 已停止。请重新启动后重试。": "Better Codex Runtime stopped. Restart it and retry.", "上一条回复仍在进行中。请稍后重新加载。": "The previous reply is still running. Reload shortly.", "回复未完成。请打开完整会话查看详情，然后重试。": "The reply did not finish. Open the full conversation for details, then retry.", "会话加载超时。请确认 Better Codex Runtime 正在运行，然后重新加载。": "The conversation timed out while loading. Make sure Better Codex Runtime is running, then reload.", "无法加载会话。请检查网络和 Better Codex Runtime，然后重新加载。": "Unable to load the conversation. Check your network and Better Codex Runtime, then reload.", "没有权限加载会话。请调整权限后重新加载。": "You do not have permission to load the conversation. Adjust the permission, then reload.",
       "任务看板": "Task board", "打开任务看板": "Open task board", "智能体": "Agents", "管理智能体": "Manage agents", "创建和管理你的智能体": "Create and manage your agents",
-      "Better Codex 服务需要重启": "Better Codex needs to restart", "当前页面与后台服务的连接已失效。请在终端运行下面的命令，完成后重新连接。": "The connection between this page and the background service has expired. Run the command below in your terminal, then reconnect.", "复制重启命令": "Copy restart command", "已复制": "Copied", "重新连接": "Reconnect", "正在连接…": "Connecting…", "错误详情": "Error details",
+      "Better Codex 服务需要重启": "Better Codex needs to restart", "当前页面与后台服务的连接已失效。请在终端运行下面的命令，完成后重新连接。": "The connection between this page and the background service has expired. Run the command below in your terminal, then reconnect.", "复制重启命令": "Copy restart command", "复制消息": "Copy message", "已复制": "Copied", "重新连接": "Reconnect", "正在连接…": "Connecting…", "错误详情": "Error details",
       "全部": "All", "已分配": "Assigned", "未分配": "Unassigned", "待规划": "Backlog", "待办": "Todo", "进行中": "In progress", "待审核": "In review", "调度中": "Scheduling", "已完成": "Done", "已阻塞": "Blocked", "归档": "Archive", "拖到这里即可归档": "Drop here to archive", "查看已归档卡片": "View archived cards", "已归档任务": "Archived tasks", "搜索已归档任务": "Search archived tasks", "所有项目": "All projects", "全部删除": "Delete all", "删除已归档聊天": "Delete archived chat", "删除项目中的全部内容": "Delete all project content", "确定删除项目中的全部已归档任务吗？": "Delete all archived tasks in this project?", "取消归档": "Unarchive", "已归档卡片": "Archived cards", "暂无已归档卡片": "No archived cards", "归档列表加载失败": "Unable to load archived cards",
       "无": "None", "低": "Low", "中": "Medium", "高": "High", "紧急": "Urgent", "超高": "Extra high", "无优先级": "No priority", "优先级": "Priority", "状态": "Status", "日期": "Date", "筛选": "Filter", "标签": "Labels",
       "新建": "New", "新建 issue": "New issue", "新建任务": "New task", "新建智能体": "New agent", "创建": "Create", "创建任务": "Create task", "删除": "Delete", "删除任务": "Delete task", "删除智能体": "Delete agent", "保存": "Save", "确认": "Confirm", "取消": "Cancel", "关闭": "Close", "重试": "Retry", "稍后": "Later", "展开": "Expand", "缩小": "Minimize", "缩放头像": "Zoom avatar",
@@ -567,6 +567,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "已经执行过对话的 Issue 只能修改状态、优先级和指派人。": "Issues with an executed conversation can only change status, priority, and assignee.", "终止任务后才能打开对话，是否终止任务？": "The task must be stopped before opening the conversation. Stop it now?", "终止并打开": "Stop and open", "正在终止…": "Stopping…", "忽略当前版本": "Ignore this version", "立即更新": "Update now", "暂无项目": "No projects", "告诉智能体要做什么，例如：“修复项目里任务运行状态不可见的问题”": "Tell the agent what to do, for example: “Fix the invisible task run status in the project”"
     } };
     localeResources.en["手动创建 issue"] = "Create issue manually";
+    localeResources.en["文件不能超过 10 MB"] = "Files must be 10 MB or smaller";
+    localeResources.en["部分文件超过 10 MB，已跳过"] = "Some files larger than 10 MB were skipped";
+    localeResources.en["最多传输 4 个文件且总大小不能超过 20 MB"] = "Transfer up to 4 files with a total size of 20 MB or less";
+    localeResources.en["部分文件超出传输限制，已跳过"] = "Some files exceeded the transfer limits and were skipped";
+    localeResources.en["无法读取文件"] = "Unable to read the file";
     localeResources.en["源码开发版"] = "Source development build";
     localeResources.en["发现兼容更新"] = "Compatibility update available";
     localeResources.en["源码开发版仅检查兼容层更新，核心版本请更新源码并重新构建。"] = "Source builds only check for compatibility updates. Update the source and rebuild to change the core version.";
@@ -3150,6 +3155,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       actions.className = "better-codex-actions better-codex-issue-only";
       const working = actionButton("0 个智能体工作中");
       working.id = "better-codex-working";
+      working.dataset.runningCount = "0";
       working.classList.add("better-codex-working-chip", "is-bordered");
       working.setAttribute("aria-label", t("0 个智能体工作中"));
       working.addEventListener("click", () => { state.view = state.view === "working" ? "all" : "working"; render(); });
@@ -4637,6 +4643,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       panel.querySelectorAll("[data-view]").forEach(button => button.classList.toggle("is-active", button.dataset.view === state.view));
       const working = panel.querySelector("#better-codex-working");
       working.innerHTML = icon("bot") + '<span>' + te(runningCount + " 个智能体工作中") + "</span>";
+      working.dataset.runningCount = String(runningCount);
       working.setAttribute("aria-label", t(runningCount + " 个智能体工作中"));
       working.title = t(runningCount ? "查看运行中的任务" : "当前没有运行中的任务");
       working.classList.toggle("has-work", runningCount > 0);
@@ -5008,6 +5015,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       let conversationTimer = null;
       let conversationLoadFailures = 0;
       let conversationFailureState = "";
+      let conversationMessages = [];
       let lastReplyMessage = "";
       let lastReplyRequestId = "";
       let lastReplyStatus = issue?.reply_status || "idle";
@@ -5428,14 +5436,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const agentName = agent ? agentDisplayName(agent) : (issue?.agent_enabled ? "Codex" : t("智能体"));
         const user = profile && profile.name ? profile : state.user || { name: t("你"), initials: t("你"), color: "#16a34a" };
         if (profile && profile.name) state.user = { ...state.user, ...profile };
-        return (messages || []).map(message => {
+        return (messages || []).map((message, index) => {
           const isUser = message.role === "user";
           const avatar = isUser
             ? '<span class="better-codex-bubble-avatar is-user is-initials" style="background:' + escapeHtml(user.color || "#16a34a") + '" title="' + escapeHtml(user.handle ? "@" + user.handle : user.name || "") + '" aria-hidden="true">' + escapeHtml(user.initials || t("你")) + '</span>'
             : agentAvatarMarkup(agent, "better-codex-bubble-avatar");
           const name = isUser ? (user.name || t("你")) : agentName;
           const time = relativeTime(message.timestamp);
-          return '<article class="better-codex-bubble ' + (isUser ? "is-user" : "is-agent") + '">' + avatar + '<div class="better-codex-bubble-main"><div class="better-codex-bubble-meta"><strong>' + escapeHtml(name) + '</strong>' + (time ? '<time datetime="' + escapeHtml(message.timestamp || "") + '">' + escapeHtml(time) + '</time>' : "") + '</div><div class="better-codex-bubble-content">' + (message.html || renderPlainBubble(message.markdown || "")) + '</div></div></article>';
+          return '<article class="better-codex-bubble ' + (isUser ? "is-user" : "is-agent") + '">' + avatar + '<div class="better-codex-bubble-main"><button class="better-codex-bubble-copy" type="button" data-conversation-copy="' + index + '" aria-label="' + te("复制消息") + '" title="' + te("复制消息") + '">' + icon("copy") + '</button><div class="better-codex-bubble-meta"><strong>' + escapeHtml(name) + '</strong>' + (time ? '<time datetime="' + escapeHtml(message.timestamp || "") + '">' + escapeHtml(time) + '</time>' : "") + '</div><div class="better-codex-bubble-content">' + (message.html || renderPlainBubble(message.markdown || "")) + '</div></div></article>';
         }).join("");
       }
 
@@ -5453,12 +5461,15 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const previousScrollTop = body.scrollTop;
         const stickToBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 48;
         if (messages.length) {
+          conversationMessages = messages;
           body.innerHTML = conversationBubbles(messages, data.user);
           body.scrollTop = stickToBottom ? body.scrollHeight : previousScrollTop;
         } else if (data?.html) {
-          body.innerHTML = conversationBubbles([{ role: "agent", html: data.html, markdown: data.markdown || "", timestamp: null }], data.user);
+          conversationMessages = [{ role: "agent", html: data.html, markdown: data.markdown || "", timestamp: null }];
+          body.innerHTML = conversationBubbles(conversationMessages, data.user);
           body.scrollTop = stickToBottom ? body.scrollHeight : previousScrollTop;
         } else if (!options.preserveBody) {
+          conversationMessages = [];
           body.innerHTML = sessionId
             ? sessionHandoff
               ? '<div class="better-codex-conversation-empty"><h3>' + te("开始对话") + '</h3><p>' + te("请前往会话继续对话") + '</p></div>'
@@ -5689,8 +5700,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       function fileDataUrl(file) {
         return new Promise((resolve, reject) => {
           const reader = new FileReader();
-          reader.onload = () => typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("无法读取这张图片"));
-          reader.onerror = () => reject(new Error("无法读取这张图片"));
+          reader.onload = () => typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("无法读取文件"));
+          reader.onerror = () => reject(new Error("无法读取文件"));
           reader.readAsDataURL(file);
         });
       }
@@ -5738,20 +5749,26 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const selectionStart = event.target?.selectionStart;
         const selectionEnd = event.target?.selectionEnd;
         event.preventDefault();
+        const attachments = replyPaste ? draft.replyAttachments : draft.attachments;
+        let totalSize = attachments.reduce((size, item) => size + (item.file?.size || 0), 0);
+        let acceptedCount = 0;
         const accepted = files.filter(file => {
           if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) return false;
-          return file.size <= 10 * 1024 * 1024;
+          if (file.size > 10 * 1024 * 1024) return false;
+          if (REMOTE && (attachments.length + acceptedCount >= 4 || totalSize + file.size > 20 * 1024 * 1024)) return false;
+          totalSize += file.size;
+          acceptedCount += 1;
+          return true;
         });
         if (!accepted.length) {
           const errorOutput = dialog.querySelector(".better-codex-dialog-error");
           if (errorOutput) {
-            errorOutput.textContent = t(files.some(file => file.size > 10 * 1024 * 1024) ? "图片不能超过 10 MB" : "请选择 PNG、JPEG 或 WebP 图片");
+            errorOutput.textContent = t(REMOTE && attachments.length >= 4 ? "最多传输 4 个文件且总大小不能超过 20 MB" : files.some(file => file.size > 10 * 1024 * 1024) ? "图片不能超过 10 MB" : "请选择 PNG、JPEG 或 WebP 图片");
             errorOutput.hidden = false;
           }
           return;
         }
         syncDraft();
-        const attachments = replyPaste ? draft.replyAttachments : draft.attachments;
         attachments.push(...accepted.map((file, index) => ({
           name: file.name || t("粘贴的图片") + (accepted.length > 1 ? " " + (index + 1) : ""),
           path: "",
@@ -5764,7 +5781,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (active?.setSelectionRange && Number.isInteger(selectionStart) && Number.isInteger(selectionEnd)) active.setSelectionRange(selectionStart, selectionEnd);
       }
 
-      function pickAttachments() {
+      function pickAttachments(existing = []) {
         return new Promise(resolve => {
           const input = document.createElement("input");
           input.type = "file";
@@ -5773,6 +5790,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             const files = Array.from(input.files || []);
             const selected = [];
             let skipped = 0;
+            let totalSize = existing.reduce((size, item) => size + (item.file?.size || 0), 0);
             for (const file of files) {
               const path = String(file.path || "").trim();
               if (!path && !REMOTE) {
@@ -5783,7 +5801,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
                 skipped += 1;
                 continue;
               }
+              if (REMOTE && (existing.length + selected.length >= 4 || totalSize + file.size > 20 * 1024 * 1024)) {
+                skipped += 1;
+                continue;
+              }
               selected.push({ name: file.name || path.split(/[\\\\/]/).pop() || path || t("附件"), path, file: REMOTE ? file : null, previewUrl: REMOTE && file.type.startsWith("image/") ? URL.createObjectURL(file) : "" });
+              totalSize += file.size;
             }
             resolve({ files: selected, skipped, picked: files.length });
           }, { once: true });
@@ -5868,8 +5891,28 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           if (button.dataset.composerMode === "stop") void stopIssueFromDialog(button);
           else if (button.dataset.composerMode === "send") void sendReply();
         });
+        dialog.querySelector("[data-conversation-body]")?.addEventListener("click", async event => {
+          const button = event.target.closest("[data-conversation-copy]");
+          if (!button) return;
+          const message = conversationMessages[Number(button.dataset.conversationCopy)];
+          const visibleContent = button.closest(".better-codex-bubble")?.querySelector(".better-codex-bubble-content")?.innerText || "";
+          const content = typeof message?.markdown === "string" && message.markdown ? message.markdown : visibleContent;
+          if (!content) return;
+          await copyText(content);
+          button.classList.add("is-copied");
+          button.innerHTML = icon("check");
+          button.setAttribute("aria-label", t("已复制"));
+          button.setAttribute("title", t("已复制"));
+          setTimeout(() => {
+            if (!button.isConnected) return;
+            button.classList.remove("is-copied");
+            button.innerHTML = icon("copy");
+            button.setAttribute("aria-label", t("复制消息"));
+            button.setAttribute("title", t("复制消息"));
+          }, 1600);
+        });
         dialog.querySelector("[data-conversation-attach]")?.addEventListener("click", () => {
-          void pickAttachments().then(result => {
+          void pickAttachments(draft.replyAttachments).then(result => {
             const errorOutput = dialog.querySelector(".better-codex-dialog-error");
             const showAttachError = message => {
               if (!errorOutput) return;
@@ -5877,14 +5920,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
               errorOutput.hidden = false;
             };
             if (!result.picked) return;
-            if (!result.files.length) return showAttachError(REMOTE ? "文件不能超过 10 MB" : "当前环境无法读取本地文件路径");
+            if (!result.files.length) return showAttachError(REMOTE ? "最多传输 4 个文件且总大小不能超过 20 MB" : "当前环境无法读取本地文件路径");
             const known = new Set(draft.replyAttachments.map(file => file.path || file.name + ":" + (file.file?.size || 0)));
             const next = result.files.filter(file => !known.has(file.path || file.name + ":" + (file.file?.size || 0)));
             if (next.length) {
               draft.replyAttachments.push(...next);
               renderDialog();
             }
-            if (result.skipped) showAttachError(REMOTE ? "部分文件超过 10 MB，已跳过" : "部分文件无法读取本地路径，已跳过");
+            if (result.skipped) showAttachError(REMOTE ? "部分文件超出传输限制，已跳过" : "部分文件无法读取本地路径，已跳过");
             dialog.querySelector('[name="reply"]')?.focus();
           });
         });
@@ -6085,7 +6128,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           dialog.querySelector(draft.mode === "agent" ? '[name="prompt"]' : '[name="title"]')?.focus();
         });
         dialog.querySelector("[data-dialog-attach]")?.addEventListener("click", () => {
-          void pickAttachments().then(result => {
+          void pickAttachments(draft.attachments).then(result => {
             const showAttachError = message => {
               const errorOutput = dialog.querySelector(".better-codex-dialog-error");
               if (!errorOutput) return;
@@ -6093,14 +6136,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
               errorOutput.hidden = false;
             };
             if (!result.picked) return;
-            if (!result.files.length) return showAttachError("当前环境无法读取本地文件路径");
-            const known = new Set(attachmentPaths());
-            const next = result.files.filter(file => !known.has(file.path));
+            if (!result.files.length) return showAttachError(REMOTE ? "最多传输 4 个文件且总大小不能超过 20 MB" : "当前环境无法读取本地文件路径");
+            const known = new Set(draft.attachments.map(file => file.path || file.name + ":" + (file.file?.size || 0)));
+            const next = result.files.filter(file => !known.has(file.path || file.name + ":" + (file.file?.size || 0)));
             if (next.length) {
               draft.attachments.push(...next);
               renderDialog();
             }
-            if (result.skipped) showAttachError("部分文件无法读取本地路径，已跳过");
+            if (result.skipped) showAttachError(REMOTE ? "部分文件超出传输限制，已跳过" : "部分文件无法读取本地路径，已跳过");
             dialog.querySelector(draft.mode === "agent" ? '[name="prompt"]' : '[name="title"]')?.focus();
           });
         });
@@ -6160,16 +6203,19 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           if (draft.mode === "agent" && !issue && !workspacePath && !state.mockup && !REMOTE) {
             throw new Error("创建智能体 Issue 需要本地工作区：请先打开该项目下的一个 Codex 会话");
           }
-          await uploadPastedImages();
+          let files = [];
+          if (REMOTE) files = await remoteFiles(draft.attachments);
+          else await uploadPastedImages();
           const body = {
             project_id: draft.projectId,
             title,
-            description: withAttachments(draft.mode === "agent" ? prompt : draft.description),
+            description: REMOTE ? (draft.mode === "agent" ? prompt : draft.description) : withAttachments(draft.mode === "agent" ? prompt : draft.description),
             status: draft.mode === "agent" && !issue ? "todo" : draft.status,
             priority: draft.priority,
             labels: draft.labels.split(/[,，]/).map(value => value.trim()).filter(Boolean),
             workspace_path: workspacePath,
             ai_enrich: draft.mode === "agent" && !issue,
+            files,
             ...(state.mockup ? { mockup_run_status: draft.runStatus } : {}),
             ...assignee,
             ...(!issue ? { request_id: createRequestId } : {})
@@ -6327,7 +6373,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       window.visualViewport?.addEventListener("scroll", mobileDialogViewport, { passive: true });
       window.addEventListener("resize", mobileDialogViewport, { passive: true });
       traceDialog("dialog_open", { dialog_open: dialog.open });
-      dialog.querySelector(issue && HOST_KIND === "web" && window.matchMedia("(max-width: 720px)").matches ? "[data-dialog-close]" : draft.mode === "agent" ? '[name="prompt"]' : '[name="title"]')?.focus();
+      dialog.querySelector(HOST_KIND === "web" && window.matchMedia("(max-width: 720px)").matches ? "[data-dialog-close]" : draft.mode === "agent" ? '[name="prompt"]' : '[name="title"]')?.focus();
     }
 
     function onBoardClick(event) {

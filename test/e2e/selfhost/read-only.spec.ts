@@ -160,7 +160,7 @@ test("remote shared Web UI shows pending, acknowledgement, conflict, and resubmi
     client.stop();
     local.close();
     await page.close();
-    await new Promise<void>(resolve => hub.server.close(() => resolve()));
+    await hub.close();
     rmSync(directory, { recursive: true, force: true });
   }
 });
@@ -211,7 +211,7 @@ test("two browser contexts cannot both commit the same base revision", async ({ 
     local.close();
     await firstContext.close();
     await secondContext.close();
-    await new Promise<void>(resolve => hub.server.close(() => resolve()));
+    await hub.close();
     rmSync(directory, { recursive: true, force: true });
   }
 });

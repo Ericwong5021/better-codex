@@ -112,9 +112,9 @@ function cleanCommandPayload(operation: string, value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid_command_payload");
   const source = value as Record<string, unknown>;
   const allowed = operation === "issue.create"
-    ? ["project_id", "title", "description", "status", "priority", "labels", "agent_enabled", "agent_id", "user_assigned"]
+    ? ["project_id", "title", "description", "status", "priority", "labels", "agent_enabled", "agent_id", "user_assigned", "files"]
     : operation === "issue.update"
-      ? ["project_id", "title", "description", "status", "priority", "labels", "sort_order", "pinned", "agent_enabled", "agent_id", "user_assigned"]
+      ? ["project_id", "title", "description", "status", "priority", "labels", "sort_order", "pinned", "agent_enabled", "agent_id", "user_assigned", "files"]
       : operation === "issue.start"
         ? ["project_id", "title", "description", "status", "priority", "labels", "agent_id"]
         : operation === "issue.reply" ? ["message", "files"]
@@ -359,8 +359,8 @@ export class BetterCodexHubObject {
     const body = await request.json() as Record<string, unknown>;
     const issueMatch = url.pathname.match(/^\/api\/issues\/([^/]+)$/);
     const actionMatch = url.pathname.match(/^\/api\/issues\/([^/]+)\/(move|start|stop|archive|unarchive|reply)$/);
-    if (url.pathname === "/api/issues" && request.method === "POST") return this.createWebCommandRow({ commandId: body.command_id, operation: "issue.create", entityId: body.id, baseRevision: null, payload: { project_id: body.project_id, title: body.title, description: body.description, status: body.status, priority: body.priority, labels: body.labels, agent_enabled: body.agent_enabled, agent_id: body.agent_id, user_assigned: body.user_assigned } });
-    if (issueMatch && request.method === "PATCH") return this.createWebCommandRow({ commandId: body.command_id, operation: "issue.update", entityId: decodeURIComponent(issueMatch[1]), baseRevision: body.version, payload: { project_id: body.project_id, title: body.title, description: body.description, status: body.status, priority: body.priority, sort_order: body.sort_order, pinned: body.pinned, agent_enabled: body.agent_enabled, agent_id: body.agent_id, user_assigned: body.user_assigned } });
+    if (url.pathname === "/api/issues" && request.method === "POST") return this.createWebCommandRow({ commandId: body.command_id, operation: "issue.create", entityId: body.id, baseRevision: null, payload: { project_id: body.project_id, title: body.title, description: body.description, status: body.status, priority: body.priority, labels: body.labels, agent_enabled: body.agent_enabled, agent_id: body.agent_id, user_assigned: body.user_assigned, files: body.files } });
+    if (issueMatch && request.method === "PATCH") return this.createWebCommandRow({ commandId: body.command_id, operation: "issue.update", entityId: decodeURIComponent(issueMatch[1]), baseRevision: body.version, payload: { project_id: body.project_id, title: body.title, description: body.description, status: body.status, priority: body.priority, sort_order: body.sort_order, pinned: body.pinned, agent_enabled: body.agent_enabled, agent_id: body.agent_id, user_assigned: body.user_assigned, files: body.files } });
     if (!actionMatch || request.method !== "POST") throw new Error("not_found");
     const action = actionMatch[2];
     const operation = action === "archive" ? "issue.archive" : action === "unarchive" ? "issue.restore" : action === "start" ? "issue.start" : action === "stop" ? "issue.stop" : action === "reply" ? "issue.reply" : "issue.move";
