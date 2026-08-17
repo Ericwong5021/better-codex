@@ -2,8 +2,9 @@ import type { IssuePriority, IssueReplyStatus, IssueSessionStatus, IssueStatus }
 import type { ConversationMessage } from "./session-transcript.js";
 
 export const legacySyncProtocolVersion = "sync/v5" as const;
-export const syncProtocolVersion = "sync/v6" as const;
-export const supportedSyncProtocolVersions = [legacySyncProtocolVersion, syncProtocolVersion] as const;
+export const previousSyncProtocolVersion = "sync/v6" as const;
+export const syncProtocolVersion = "sync/v7" as const;
+export const supportedSyncProtocolVersions = [syncProtocolVersion, previousSyncProtocolVersion, legacySyncProtocolVersion] as const;
 export type SyncProtocolVersion = typeof supportedSyncProtocolVersions[number];
 export const syncEntityTypes = ["project", "issue", "agent_directory"] as const;
 export type SyncEntityType = typeof syncEntityTypes[number];
@@ -14,6 +15,8 @@ export type AgentProjection = {
   name: string;
   name_en: string;
   description: string;
+  model?: string;
+  reasoning_effort?: string;
   avatar: string;
   version: number;
   created_at: string;
@@ -76,6 +79,26 @@ export type RuntimeProjection = {
   queue_depth: number;
   health_state: "online" | "offline";
   usage?: CodexUsageProjection | null;
+  agent_models?: AgentModelCatalogProjection[];
+  auto_dispatch?: boolean;
+  scheduler_model?: string;
+  scheduler_reasoning_effort?: string;
+  default_agent_model?: string;
+  default_agent_reasoning_effort?: string;
+};
+
+export type AgentReasoningEffortProjection = {
+  value: string;
+  description: string;
+};
+
+export type AgentModelCatalogProjection = {
+  id: string;
+  displayName: string;
+  description: string;
+  isDefault: boolean;
+  defaultReasoningEffort: string;
+  supportedReasoningEfforts: AgentReasoningEffortProjection[];
 };
 
 export type CodexUsageWindowProjection = {
@@ -125,6 +148,87 @@ export function normalizeCodexUsageProjection(value: unknown): CodexUsageProject
   };
 }
 
+function projectionString(value: unknown, limit: number) {
+  return typeof value === "string" && !value.includes("\0") ? value.trim().slice(0, limit) : "";
+}
+
+function requiredProjectionString(value: unknown, limit: number) {
+  if (typeof value !== "string" || !value.trim() || value.length > limit || value.includes("\0")) throw new Error("invalid_projection");
+  return value;
+}
+
+function optionalProjectionString(value: unknown, limit: number) {
+  if (value === undefined) return "";
+  if (typeof value !== "string" || value.length > limit || value.includes("\0")) throw new Error("invalid_projection");
+  return value;
+}
+
+function normalizeAgentAvatar(value: unknown) {
+  const avatar = optionalProjectionString(value, 400_000);
+  if (!avatar || /^icon:[a-z0-9_-]{1,32}$/i.test(avatar) || /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(avatar)) return avatar;
+  throw new Error("invalid_projection");
+}
+
+export function normalizeAgentDirectoryProjection(value: unknown, id: string): AgentDirectoryProjection {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid_projection");
+  const source = value as Record<string, unknown>;
+  if (id !== "agents" || source.id !== id || !Number.isSafeInteger(source.local_revision) || Number(source.local_revision) < 1 || !Array.isArray(source.agents) || source.agents.length > 100) throw new Error("invalid_projection");
+  const agents = source.agents.map(value => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid_projection");
+    const agent = value as Record<string, unknown>;
+    const agentId = requiredProjectionString(agent.id, 200);
+    if (!/^[a-f0-9-]{36}$/i.test(agentId) || !Number.isInteger(agent.version) || Number(agent.version) < 1) throw new Error("invalid_projection");
+    return {
+      id: agentId,
+      role: requiredProjectionString(agent.role, 200),
+      name: requiredProjectionString(agent.name, 80),
+      name_en: optionalProjectionString(agent.name_en, 80),
+      description: optionalProjectionString(agent.description, 500),
+      model: optionalProjectionString(agent.model, 200),
+      reasoning_effort: optionalProjectionString(agent.reasoning_effort, 40),
+      avatar: normalizeAgentAvatar(agent.avatar),
+      version: Number(agent.version),
+      created_at: requiredProjectionString(agent.created_at, 64),
+      updated_at: requiredProjectionString(agent.updated_at, 64),
+    };
+  });
+  if (new Set(agents.map(agent => agent.id)).size !== agents.length || new Set(agents.map(agent => agent.role)).size !== agents.length) throw new Error("invalid_projection");
+  return { id, agents, default_avatar: normalizeAgentAvatar(source.default_avatar), local_revision: Number(source.local_revision) };
+}
+
+export function normalizeAgentModelCatalogProjection(value: unknown): AgentModelCatalogProjection[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 100).flatMap((item): AgentModelCatalogProjection[] => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const source = item as Record<string, unknown>;
+    const id = projectionString(source.id, 200);
+    if (!id) return [];
+    const efforts = Array.isArray(source.supportedReasoningEfforts)
+      ? source.supportedReasoningEfforts.slice(0, 20).flatMap((item): AgentReasoningEffortProjection[] => {
+        if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+        const effort = item as Record<string, unknown>;
+        const effortValue = projectionString(effort.value, 40);
+        return effortValue ? [{ value: effortValue, description: projectionString(effort.description, 500) }] : [];
+      })
+      : [];
+    const defaultReasoningEffort = projectionString(source.defaultReasoningEffort, 40) || efforts[0]?.value || "medium";
+    return [{
+      id,
+      displayName: projectionString(source.displayName, 200) || id,
+      description: projectionString(source.description, 2000),
+      isDefault: source.isDefault === true,
+      defaultReasoningEffort,
+      supportedReasoningEfforts: efforts.length ? efforts : [{ value: defaultReasoningEffort, description: "" }],
+    }];
+  });
+}
+
+export function runtimeProjectionSignature(value: RuntimeProjection | null | undefined) {
+  if (!value) return "";
+  const { last_seen_at: _lastSeenAt, last_sync_at: _lastSyncAt, ...projection } = value;
+  return JSON.stringify(projection);
+}
+
 export type SyncProjection = ProjectProjection | IssueProjection | AgentDirectoryProjection;
 
 export type SyncChange = {
@@ -150,7 +254,7 @@ export type SyncPushResponse = {
   lease_expires_at: string;
 };
 
-export const remoteCommandOperations = ["issue.create", "issue.update", "issue.move", "issue.start", "issue.stop", "issue.reply", "issue.archive", "issue.restore"] as const;
+export const remoteCommandOperations = ["issue.create", "issue.update", "issue.move", "issue.start", "issue.stop", "issue.reply", "issue.archive", "issue.restore", "settings.auto-dispatch"] as const;
 export type RemoteCommandOperation = typeof remoteCommandOperations[number];
 export type RemoteCommandStatus = "pending" | "dispatched" | "applied" | "rejected" | "conflict" | "expired";
 
@@ -240,8 +344,6 @@ export const forbiddenProjectionKeys = [
   "reply_draft",
   "instructions",
   "sandbox_mode",
-  "model",
-  "reasoning_effort",
   "prompt",
   "credential",
   "attachment",

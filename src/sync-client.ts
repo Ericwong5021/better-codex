@@ -1,8 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
+import { defaultAgentProfile } from "./agent-profiles.js";
 import { coreVersion } from "./compatibility.js";
 import type { Store } from "./db.js";
+import { readModelCatalog } from "./model-catalog.js";
 import { readSyncConfiguration, type SyncConfiguration } from "./sync-config.js";
-import { syncProtocolVersion, type AgentDirectoryProjection, type CodexUsageProjection, type ConversationProjection, type RemoteCommand, type RemoteCommandAck, type RemoteFilePayload, type RuntimeProjection, type SyncChange, type SyncPushResponse } from "./sync-contract.js";
+import { supportedSyncProtocolVersions, syncProtocolVersion, type AgentDirectoryProjection, type AgentModelCatalogProjection, type CodexUsageProjection, type ConversationProjection, type RemoteCommand, type RemoteCommandAck, type RemoteFilePayload, type RuntimeProjection, type SyncChange, type SyncProtocolVersion, type SyncPushResponse } from "./sync-contract.js";
 import { controlCapabilities, controlProtocolVersion, decodeControlMessage, encodeControlMessage } from "./control-protocol.js";
 
 type SyncState = {
@@ -47,6 +49,7 @@ export class SyncClient {
   private remoteWake = false;
   private running = false;
   private lastUsageSyncAt = 0;
+  private syncProtocolCache: { key: string; value: SyncProtocolVersion; expiresAt: number } | null = null;
   private controlRequests = new Map<string, { resolve: (value: Record<string, unknown>) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }>();
   private state: SyncState = { connected: false, syncing: false, last_sync_at: null, last_error: null, hub_url: null, device_name: null, lease_expires_at: null };
 
@@ -79,6 +82,7 @@ export class SyncClient {
     this.controlSocket = null;
     this.controlOpening = false;
     this.controlReady = false;
+    this.syncProtocolCache = null;
     for (const request of this.controlRequests.values()) {
       clearTimeout(request.timer);
       request.reject(new Error("control_stopped"));
@@ -136,7 +140,7 @@ export class SyncClient {
       socket.addEventListener("open", () => {
         this.controlOpening = false;
         this.controlReady = false;
-        socket.send(encodeControlMessage({ type: "hello", protocol_version: controlProtocolVersion, device_id: configuration.device_id, device_name: configuration.device_name, sync_protocol_versions: ["sync/v6", "sync/v5"], capabilities: [...controlCapabilities] }));
+        socket.send(encodeControlMessage({ type: "hello", protocol_version: controlProtocolVersion, device_id: configuration.device_id, device_name: configuration.device_name, sync_protocol_versions: [...supportedSyncProtocolVersions], capabilities: [...controlCapabilities] }));
         this.controlHeartbeat = setInterval(() => {
           if (socket.readyState !== WebSocket.OPEN) return;
           const queue = this.store.syncQueueStatus();
@@ -157,6 +161,8 @@ export class SyncClient {
             return;
           }
           if (message.type === "hello_ack") {
+            if (!supportedSyncProtocolVersions.includes(message.sync_protocol_version as SyncProtocolVersion)) throw new Error("incompatible_protocol");
+            this.syncProtocolCache = { key, value: message.sync_protocol_version as SyncProtocolVersion, expiresAt: Date.now() + 60_000 };
             this.controlReady = true;
             this.state.lease_expires_at = message.lease_expires_at;
           }
@@ -212,18 +218,38 @@ export class SyncClient {
     });
   }
 
-  private runtime(configuration: SyncConfiguration, usage: CodexUsageProjection | null): RuntimeProjection {
+  private async negotiatedSyncProtocol(configuration: SyncConfiguration) {
+    const key = `${configuration.hub_url}|${configuration.device_id}|${configuration.device_token}`;
+    if (this.syncProtocolCache?.key === key && this.syncProtocolCache.expiresAt > Date.now()) return this.syncProtocolCache.value;
+    const capabilities = await hubRequest<{ protocol_versions?: unknown }>(configuration, "/api/v1/capabilities");
+    const advertised = Array.isArray(capabilities.protocol_versions) ? capabilities.protocol_versions : [];
+    const selected = supportedSyncProtocolVersions.find(version => advertised.includes(version));
+    if (!selected) throw new Error("incompatible_protocol");
+    this.syncProtocolCache = { key, value: selected, expiresAt: Date.now() + 60_000 };
+    return selected;
+  }
+
+  private runtime(configuration: SyncConfiguration, protocolVersion: SyncProtocolVersion, usage: CodexUsageProjection | null, agentModelCatalog: AgentModelCatalogProjection[]): RuntimeProjection {
     const queue = this.store.syncQueueStatus();
+    const defaultAgent = defaultAgentProfile();
     return {
       device_id: configuration.device_id,
       device_name: configuration.device_name,
-      protocol_version: syncProtocolVersion,
+      protocol_version: protocolVersion,
       core_version: coreVersion,
       last_seen_at: new Date().toISOString(),
       last_sync_at: this.state.last_sync_at,
       queue_depth: queue.pending,
       health_state: "online",
       usage,
+      ...(protocolVersion === syncProtocolVersion ? {
+        agent_models: agentModelCatalog,
+        auto_dispatch: this.store.getAutoDispatch(),
+        scheduler_model: this.store.getSchedulerModel(defaultAgent.model),
+        scheduler_reasoning_effort: this.store.getSchedulerReasoningEffort(),
+        default_agent_model: defaultAgent.model,
+        default_agent_reasoning_effort: defaultAgent.reasoning_effort,
+      } : {}),
     };
   }
 
@@ -252,7 +278,7 @@ export class SyncClient {
       }
       if (controlReady && remoteWake && this.store.syncQueueStatus().pending === 0) {
         await this.pullCommands(configuration);
-        if (this.store.syncQueueStatus().pending > 0) await this.push(configuration);
+        await this.push(configuration);
       } else {
         await this.push(configuration);
         await this.pullCommands(configuration);
@@ -268,7 +294,8 @@ export class SyncClient {
   }
 
   private async push(configuration: SyncConfiguration) {
-    const usage = await this.accountUsage();
+    const protocolVersion = await this.negotiatedSyncProtocol(configuration);
+    const [usage, agentModelCatalog] = await Promise.all([this.accountUsage(), protocolVersion === syncProtocolVersion ? readModelCatalog() : Promise.resolve([])]);
     let directoryPending = true;
     for (let page = 0; page < 100; page += 1) {
       const limit = directoryPending ? 99 : 100;
@@ -281,14 +308,14 @@ export class SyncClient {
           projection,
         };
       });
-      if (directoryPending) changes.unshift(this.agentDirectoryChange());
+      if (directoryPending) changes.unshift(this.agentDirectoryChange(protocolVersion));
       const result = await hubRequest<SyncPushResponse>(configuration, "/api/v1/sync/push", {
         method: "POST",
         body: JSON.stringify({
-          protocol_version: syncProtocolVersion,
+          protocol_version: protocolVersion,
           core_version: coreVersion,
           device_id: configuration.device_id,
-          runtime: this.runtime(configuration, usage),
+          runtime: this.runtime(configuration, protocolVersion, usage, agentModelCatalog),
           changes,
         }),
       });
@@ -357,13 +384,14 @@ export class SyncClient {
     throw new Error("command_drain_limit");
   }
 
-  private agentDirectoryChange(): SyncChange {
+  private agentDirectoryChange(protocolVersion: SyncProtocolVersion): SyncChange {
     const agents = this.store.listAgentProfiles().map(profile => ({
       id: profile.id,
       role: profile.role,
       name: profile.name,
       name_en: profile.name_en,
       description: profile.description,
+      ...(protocolVersion === syncProtocolVersion ? { model: profile.model, reasoning_effort: profile.reasoning_effort } : {}),
       avatar: this.store.getAgentAvatar(profile.id),
       version: profile.version,
       created_at: profile.created_at,

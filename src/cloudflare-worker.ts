@@ -1,5 +1,5 @@
 import { controlCapabilities, controlProtocolVersion, decodeControlMessage, encodeControlMessage } from "./control-protocol.js";
-import { normalizeCodexUsageProjection, syncProtocolVersion, supportedSyncProtocolVersions, type RemoteCommandAck, type RuntimeProjection, type SyncChange, type SyncPushRequest } from "./sync-contract.js";
+import { normalizeAgentDirectoryProjection, normalizeAgentModelCatalogProjection, normalizeCodexUsageProjection, runtimeProjectionSignature, syncProtocolVersion, supportedSyncProtocolVersions, type RemoteCommandAck, type RuntimeProjection, type SyncChange, type SyncPushRequest } from "./sync-contract.js";
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { coreVersion } from "./version.js";
 import { cloudflareIssuePriorities, cloudflareIssueStatuses, cloudflareRenderMarkdown, cloudflareWebCss, cloudflareWebHtml, cloudflareWebJavaScript } from "./cloudflare-web.js";
@@ -97,12 +97,13 @@ function recoverExpiredCommands(sql: SqlStorage) {
   sql.exec("UPDATE remote_commands SET status = 'expired', finished_at = ?, error = 'command_expired' WHERE status = 'pending' AND expires_at <= ?", timestamp(), timestamp());
 }
 
-function decodePayload(value: unknown) {
+function decodePayload(value: unknown, allowAgentConfig = false) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid_projection");
   const source = value as Record<string, unknown>;
+  const blockedKeys = ["workspace_path", "thread_id", "credential", "prompt", "sandbox_mode", "rollout_path", ...(allowAgentConfig ? [] : ["model", "reasoning_effort"])];
   const forbidden = (item: unknown): boolean => Array.isArray(item)
     ? item.some(forbidden)
-    : Boolean(item && typeof item === "object" && Object.entries(item as Record<string, unknown>).some(([key, child]) => ["workspace_path", "thread_id", "credential", "prompt", "sandbox_mode", "model", "reasoning_effort", "rollout_path"].some(blocked => key.toLowerCase().includes(blocked)) || forbidden(child)));
+    : Boolean(item && typeof item === "object" && Object.entries(item as Record<string, unknown>).some(([key, child]) => blockedKeys.some(blocked => key.toLowerCase().includes(blocked)) || forbidden(child)));
   if (forbidden(source)) throw new Error("forbidden_projection_field");
   return source;
 }
@@ -117,7 +118,8 @@ function cleanCommandPayload(operation: string, value: unknown) {
       : operation === "issue.start"
         ? ["project_id", "title", "description", "status", "priority", "labels", "agent_id"]
         : operation === "issue.reply" ? ["message", "files"]
-          : operation === "issue.move" ? ["status", "before_id"] : [];
+          : operation === "issue.move" ? ["status", "before_id"]
+            : operation === "settings.auto-dispatch" ? ["enabled"] : [];
   if (Object.keys(source).some(key => !allowed.includes(key))) throw new Error("forbidden_command_field");
   const payload: Record<string, unknown> = {};
   for (const key of allowed) if (source[key] !== undefined) payload[key] = source[key];
@@ -132,12 +134,13 @@ function cleanCommandPayload(operation: string, value: unknown) {
     const type = typeof file.type === "string" ? file.type.toLowerCase() : "";
     return typeof file.name !== "string" || file.name.length > 160 || !/^[a-z0-9][a-z0-9.+-]*\/[a-z0-9][a-z0-9.+-]*$/i.test(type) || typeof file.data !== "string" || !file.data.startsWith(`data:${type};base64,`);
   }) || payload.files.reduce((size, value) => size + String((value as Record<string, unknown>).data || "").length, 0) > 28_000_000)) throw new Error("invalid_files");
+  if (operation === "settings.auto-dispatch" && typeof payload.enabled !== "boolean") throw new Error("invalid_auto_dispatch");
   if ((operation === "issue.create" && (!payload.project_id || !payload.title)) || (operation === "issue.move" && !payload.status) || (operation === "issue.start" && !payload.title) || (operation === "issue.reply" && !payload.message && !(Array.isArray(payload.files) && payload.files.length))) throw new Error("invalid_command_payload");
   return payload;
 }
 
 function commandOperation(value: string) {
-  return ["issue.create", "issue.update", "issue.start", "issue.reply", "issue.move", "issue.stop", "issue.archive", "issue.restore"].includes(value);
+  return ["issue.create", "issue.update", "issue.start", "issue.reply", "issue.move", "issue.stop", "issue.archive", "issue.restore", "settings.auto-dispatch"].includes(value);
 }
 
 function webSessionCookie(token: string) {
@@ -159,10 +162,11 @@ function issueForWeb(issue: Record<string, unknown>) {
   return { ...issue, version: issue.local_revision, remote_pending: remoteState?.status === "pending" || remoteState?.status === "dispatched", remote_conflict: remoteState?.status === "conflict", thread_id: null, run_thread_id: issue.has_conversation ? issue.id : null, workspace_path: null, enrichment_status: null, reply_draft: "" };
 }
 
-function agentsForWeb(board: { agents: Array<Record<string, unknown>>; default_avatar: unknown }) {
+function agentsForWeb(board: { agents: Array<Record<string, unknown>>; default_avatar: unknown; runtime?: Record<string, unknown> | null }) {
+  const runtime = board.runtime || {};
   return [
-    { id: "", role: "codex", name: "Codex", name_en: "Codex", description: "", instructions: "", model: "", reasoning_effort: "", sandbox_mode: "workspace-write", max_concurrency: 5, version: 1, created_at: "", updated_at: "", avatar: board.default_avatar, is_default: true, remote_read_only: true },
-    ...board.agents.map(agent => ({ ...agent, instructions: "", model: "", reasoning_effort: "", sandbox_mode: "workspace-write", max_concurrency: 5, is_default: false, remote_read_only: true })),
+    { id: "", role: "codex", name: "Codex", name_en: "Codex", description: "", instructions: "", model: runtime.default_agent_model || "", reasoning_effort: runtime.default_agent_reasoning_effort || "", sandbox_mode: "workspace-write", max_concurrency: 5, version: 1, created_at: "", updated_at: "", avatar: board.default_avatar, is_default: true, remote_read_only: true },
+    ...board.agents.map(agent => ({ ...agent, instructions: "", sandbox_mode: "workspace-write", max_concurrency: 5, is_default: false, remote_read_only: true })),
   ];
 }
 
@@ -234,6 +238,8 @@ export class BetterCodexHubObject {
     }
     if (url.pathname === "/api/bootstrap" && request.method === "GET") return this.webBootstrap(request);
     if (url.pathname === "/api/account/usage" && request.method === "GET") return this.webUsage(request);
+    if (url.pathname === "/api/settings/auto-dispatch" && ["GET", "PATCH"].includes(request.method)) return this.webAutoDispatch(request);
+    if (url.pathname === "/api/remote-access/status" && request.method === "GET") return this.webRemoteStatus(request);
     if (url.pathname === "/api/update" && request.method === "GET") return this.webUpdate(request, false);
     if (url.pathname === "/api/update/check" && request.method === "POST") return this.webUpdate(request, true);
     if (url.pathname === "/api/agents" && request.method === "GET") return this.webAgents(request);
@@ -251,7 +257,7 @@ export class BetterCodexHubObject {
     const device = await this.deviceForToken(tokenFromRequest(request));
     if (!device) return json({ error: "unauthorized" }, 401);
     try {
-      if (url.pathname === "/api/v1/capabilities" && request.method === "GET") return json({ protocol_versions: ["sync/v6", "sync/v5"], control_protocol: "control/v1", transports: ["websocket", "http"], command_delivery: "lease" });
+      if (url.pathname === "/api/v1/capabilities" && request.method === "GET") return json({ protocol_versions: [...supportedSyncProtocolVersions], control_protocol: "control/v1", transports: ["websocket", "http"], command_delivery: "lease" });
       if (url.pathname === "/api/v1/sync/push" && request.method === "POST") return json(this.push(device.id, await request.json() as SyncPushRequest));
       if (url.pathname === "/api/v1/sync/commands" && request.method === "GET") return json({ commands: this.pendingCommands(device.id, boundedLimit(url.searchParams.get("limit"))) });
       if (url.pathname === "/api/v1/sync/commands/claim" && request.method === "POST") return json({ commands: this.claimCommands(device.id, boundedLimit(url.searchParams.get("limit"))) });
@@ -303,6 +309,7 @@ export class BetterCodexHubObject {
     const readOnly = this.sql.exec("SELECT value FROM hub_settings WHERE key = 'read_only'").toArray()[0] as { value?: string } | undefined;
     if (readOnly?.value === "1") throw new Error("hub_read_only");
     const commandId = typeof input.commandId === "string" && input.commandId ? input.commandId : crypto.randomUUID();
+    const settingOperation = input.operation === "settings.auto-dispatch";
     if (!commandOperation(input.operation)) throw new Error("invalid_command_operation");
     if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(commandId)) throw new Error("invalid_command_id");
     const existing = this.sql.exec("SELECT * FROM remote_commands WHERE command_id = ?", commandId).toArray()[0] as SqlRow | undefined;
@@ -311,13 +318,20 @@ export class BetterCodexHubObject {
       if (existing.operation !== input.operation || existing.payload_json !== payloadJson) throw new Error("command_id_conflict");
       return this.command(existing);
     }
+    if (settingOperation) {
+      const active = this.sql.exec("SELECT * FROM remote_commands WHERE operation = ? AND entity_id = 'auto-dispatch' AND status IN ('pending', 'dispatched') ORDER BY requested_at LIMIT 1", input.operation).toArray()[0] as SqlRow | undefined;
+      if (active) {
+        if (active.payload_json === payloadJson) return this.command(active);
+        throw new Error("setting_busy");
+      }
+    }
     const device = this.writerDevice();
-    const entityId = typeof input.entityId === "string" && input.entityId ? input.entityId : crypto.randomUUID();
+    const entityId = settingOperation ? "auto-dispatch" : typeof input.entityId === "string" && input.entityId ? input.entityId : crypto.randomUUID();
     const current = this.sql.exec("SELECT payload_json, deleted_at FROM entities WHERE entity_type = 'issue' AND entity_id = ?", entityId).toArray()[0] as { payload_json: string; deleted_at: string | null } | undefined;
     if (input.operation === "issue.create" && current && !current.deleted_at) throw new Error("issue_exists");
-    if (input.operation !== "issue.create" && (!current || current.deleted_at)) throw new Error("issue_not_found");
-    const baseRevision = input.operation === "issue.create" ? null : Number(input.baseRevision);
-    if (input.operation !== "issue.create" && (!Number.isInteger(baseRevision) || Number(baseRevision) < 1)) throw new Error("invalid_version");
+    if (input.operation !== "issue.create" && !settingOperation && (!current || current.deleted_at)) throw new Error("issue_not_found");
+    const baseRevision = input.operation === "issue.create" || settingOperation ? null : Number(input.baseRevision);
+    if (input.operation !== "issue.create" && !settingOperation && (!Number.isInteger(baseRevision) || Number(baseRevision) < 1)) throw new Error("invalid_version");
     const requested = timestamp();
     let command: SqlRow;
     try {
@@ -329,7 +343,7 @@ export class BetterCodexHubObject {
       throw error;
     }
     this.notifyDevice(device.id);
-    this.notifyWeb({ entity_type: "issue", entity_id: String(command.entity_id), operation: "command" });
+    this.notifyWeb({ entity_type: settingOperation ? "settings" : "issue", entity_id: String(command.entity_id), operation: "command" });
     return this.command(command);
   }
 
@@ -359,7 +373,9 @@ export class BetterCodexHubObject {
     const issues = rows.filter(row => row.entity_type === "issue").map(row => JSON.parse(row.payload_json) as Record<string, unknown>);
     const directory = rows.find(row => row.entity_type === "agent_directory");
     const agents = directory ? JSON.parse(directory.payload_json) : { agents: [], default_avatar: "" };
-    const runtimeRow = this.sql.exec("SELECT payload_json FROM runtime_projection ORDER BY updated_at DESC LIMIT 1").toArray()[0] as { payload_json?: string } | undefined;
+    const runtimeRow = this.sql.exec("SELECT payload_json, updated_at FROM runtime_projection ORDER BY updated_at DESC LIMIT 1").toArray()[0] as { payload_json?: string; updated_at?: string } | undefined;
+    let runtime = runtimeRow?.payload_json ? JSON.parse(runtimeRow.payload_json) as Record<string, unknown> : null;
+    if (runtime && runtimeRow?.updated_at && Date.now() - Date.parse(runtimeRow.updated_at) > 60_000) runtime = { ...runtime, health_state: "offline" };
     const commands = this.sql.exec("SELECT * FROM remote_commands WHERE status IN ('pending', 'dispatched', 'conflict', 'rejected') ORDER BY requested_at").toArray();
     for (const row of commands) {
       const command = this.command(row);
@@ -373,7 +389,7 @@ export class BetterCodexHubObject {
       if (["pending", "dispatched"].includes(String(command.status)) && ["issue.update", "issue.move", "issue.start"].includes(String(command.operation))) Object.assign(issue, command.payload, { updated_at: command.requested_at });
       Object.assign(issue, { remote_state: { command_id: command.command_id, status: command.status, operation: command.operation, error: command.error } });
     }
-    return { revision: this.revision(), projects, issues, agents: agents.agents || [], default_avatar: agents.default_avatar || "", runtime: runtimeRow?.payload_json ? JSON.parse(runtimeRow.payload_json) : null };
+    return { revision: this.revision(), projects, issues, agents: agents.agents || [], default_avatar: agents.default_avatar || "", runtime };
   }
 
   private webDashboard() {
@@ -547,6 +563,39 @@ export class BetterCodexHubObject {
     return json({ usage: normalizeCodexUsageProjection(projection?.usage) });
   }
 
+  private async webAutoDispatch(request: Request) {
+    if (!(await this.isWebAuthorized(request))) return json({ error: "unauthorized" }, 401);
+    const runtime = this.board().runtime as RuntimeProjection | null;
+    if (request.method === "GET") return json({ enabled: runtime?.auto_dispatch === true });
+    if (!trustedOrigin(request) || !(await this.webCsrf(request))) return json({ error: "csrf_invalid" }, 403);
+    if (!runtime || runtime.health_state !== "online") return json({ error: "runtime_offline" }, 503);
+    if (runtime.protocol_version !== syncProtocolVersion) return json({ error: "incompatible_protocol" }, 409);
+    const body = await request.json() as Record<string, unknown>;
+    if (typeof body.enabled !== "boolean") return json({ error: "invalid_auto_dispatch" }, 400);
+    const activeRow = this.sql.exec("SELECT * FROM remote_commands WHERE operation = 'settings.auto-dispatch' AND entity_id = 'auto-dispatch' AND status IN ('pending', 'dispatched') ORDER BY requested_at LIMIT 1").toArray()[0] as SqlRow | undefined;
+    if (activeRow) {
+      const activeCommand = this.command(activeRow);
+      const activePayload = activeCommand.payload as Record<string, unknown>;
+      if (activePayload.enabled === body.enabled) return json({ enabled: body.enabled, command_id: activeCommand.command_id }, 202);
+      return json({ error: "setting_busy" }, 409);
+    }
+    if (runtime.auto_dispatch === body.enabled) return json({ enabled: body.enabled, command_id: null });
+    try {
+      const command = this.createWebCommandRow({ commandId: request.headers.get("x-better-codex-command-id"), operation: "settings.auto-dispatch", payload: { enabled: body.enabled } });
+      return json({ enabled: body.enabled, command_id: command.command_id }, 202);
+    } catch (error) {
+      const code = error instanceof Error ? error.message : "command_failed";
+      return json({ error: code }, ["command_id_conflict", "setting_busy"].includes(code) ? 409 : 400);
+    }
+  }
+
+  private async webRemoteStatus(request: Request) {
+    if (!(await this.isWebAuthorized(request))) return json({ error: "unauthorized" }, 401);
+    const runtime = this.board().runtime as RuntimeProjection | null;
+    const connected = runtime?.health_state === "online";
+    return json({ ...runtime, remote: { ok: true, name: "Better Codex Hub", deployment: "cloudflare", version: coreVersion, protocol_version: syncProtocolVersion, url: new URL(request.url).origin, reachable: connected, error: connected ? null : "runtime_offline" } });
+  }
+
   private checkUpdate() {
     if (this.updateCheckPromise) return this.updateCheckPromise;
     const promise = checkStableRelease().then(result => {
@@ -570,7 +619,9 @@ export class BetterCodexHubObject {
   private async webBootstrap(request: Request) {
     if (!(await this.isWebAuthorized(request))) return json({ error: "unauthorized" }, 401);
     const board = this.board();
-    return json({ projects: board.projects, agents: agentsForWeb(board), statuses: cloudflareIssueStatuses, priorities: cloudflareIssuePriorities, appearance: { theme: "system", accent: "green" }, locale: "zh-CN", user: { id: "remote:admin", name: "admin", email: "", handle: "admin", initials: "AD", color: "#16a34a" }, agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], autoDispatch: false, schedulerModel: "", schedulerReasoningEffort: "", mockup: false, runtime: board.runtime, capabilities: { issues: "read-write", agents: "read-only", nativeThreads: false } });
+    const runtime = board.runtime as RuntimeProjection | null;
+    const agentModelCatalog = runtime?.agent_models || [];
+    return json({ projects: board.projects, agents: agentsForWeb(board), statuses: cloudflareIssueStatuses, priorities: cloudflareIssuePriorities, appearance: { theme: "system", accent: "green" }, locale: "zh-CN", user: { id: "remote:admin", name: "admin", email: "", handle: "admin", initials: "AD", color: "#16a34a" }, agentModelCatalog, agentModels: agentModelCatalog.map(model => model.id), agentReasoningEfforts: [...new Set(agentModelCatalog.flatMap(model => model.supportedReasoningEfforts.map(effort => effort.value)))], autoDispatch: runtime?.auto_dispatch === true, schedulerModel: runtime?.scheduler_model || "", schedulerReasoningEffort: runtime?.scheduler_reasoning_effort || "", mockup: false, runtime: board.runtime, capabilities: { issues: "read-write", agents: "read-only", nativeThreads: false } });
   }
 
   private async webAgents(request: Request) {
@@ -772,7 +823,8 @@ export class BetterCodexHubObject {
       if (this.sql.exec("SELECT event_id FROM sync_events WHERE event_id = ?", change.event_id).toArray().length) { accepted.push(change.event_id); continue; }
       const current = this.sql.exec("SELECT * FROM entities WHERE entity_type = ? AND entity_id = ?", change.entity_type, change.entity_id).toArray()[0] as { owner_device_id: string; payload_json: string; local_revision: number; deleted_at: string | null } | undefined;
       if (current && current.owner_device_id !== deviceId) throw new Error("entity_owned_by_another_device");
-      const projection = change.operation === "upsert" ? decodePayload(change.projection) : null;
+      const decoded = change.operation === "upsert" ? decodePayload(change.projection, change.entity_type === "agent_directory") : null;
+      const projection = decoded && change.entity_type === "agent_directory" ? normalizeAgentDirectoryProjection(decoded, change.entity_id) : decoded;
       if (projection && (projection.id !== change.entity_id || !Number.isSafeInteger(projection.local_revision) || Number(projection.local_revision) < 1)) throw new Error("invalid_projection");
       const payload = JSON.stringify(projection || (current ? JSON.parse(current.payload_json) : {}));
       const localRevision = Number((projection as Record<string, unknown> | null)?.local_revision || current?.local_revision || 0);
@@ -783,7 +835,10 @@ export class BetterCodexHubObject {
       this.sql.exec("INSERT INTO changes (entity_type, entity_id, operation, created_at) VALUES (?, ?, ?, ?)", change.entity_type, change.entity_id, projection ? "upsert" : "delete", timestamp());
         accepted.push(change.event_id);
       }
-      this.sql.exec("INSERT INTO runtime_projection (device_id, payload_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(device_id) DO UPDATE SET payload_json = excluded.payload_json, updated_at = excluded.updated_at", deviceId, JSON.stringify({ ...request.runtime, protocol_version: request.protocol_version, last_seen_at: timestamp(), usage: normalizeCodexUsageProjection(request.runtime.usage) }), timestamp());
+      const runtimeRow = this.sql.exec("SELECT payload_json FROM runtime_projection WHERE device_id = ?", deviceId).toArray()[0] as { payload_json?: string } | undefined;
+      const runtime = { ...request.runtime, protocol_version: request.protocol_version, last_seen_at: timestamp(), usage: normalizeCodexUsageProjection(request.runtime.usage), agent_models: normalizeAgentModelCatalogProjection(request.runtime.agent_models), auto_dispatch: request.runtime.auto_dispatch === true, scheduler_model: String(request.runtime.scheduler_model || "").slice(0, 200), scheduler_reasoning_effort: String(request.runtime.scheduler_reasoning_effort || "").slice(0, 40), default_agent_model: String(request.runtime.default_agent_model || "").slice(0, 200), default_agent_reasoning_effort: String(request.runtime.default_agent_reasoning_effort || "").slice(0, 40) };
+      this.sql.exec("INSERT INTO runtime_projection (device_id, payload_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(device_id) DO UPDATE SET payload_json = excluded.payload_json, updated_at = excluded.updated_at", deviceId, JSON.stringify(runtime), timestamp());
+      if (runtimeProjectionSignature(runtimeRow?.payload_json ? JSON.parse(runtimeRow.payload_json) as RuntimeProjection : null) !== runtimeProjectionSignature(runtime)) this.sql.exec("INSERT INTO changes (entity_type, entity_id, operation, created_at) VALUES ('runtime', ?, 'upsert', ?)", deviceId, timestamp());
       return { accepted, cursor: this.revision(), lease_expires_at: leaseExpiresAt };
     });
     if (result.accepted.length) this.notifyWeb({ entity_type: "sync", entity_id: deviceId, operation: "push" });
@@ -815,17 +870,21 @@ export class BetterCodexHubObject {
     if (row.status === "dispatched" && row.delivery_id && row.delivery_id !== ack.delivery_id) throw new Error("stale_command_delivery");
     if (!["applied", "rejected", "conflict"].includes(ack.status)) throw new Error("invalid_command_status");
     const result = this.transaction(() => {
-      if (ack.status === "applied") {
+      if (ack.status === "applied" && row.operation !== "settings.auto-dispatch") {
         const projection = decodePayload(ack.projection);
         if (projection.id !== row.entity_id || !Number.isSafeInteger(projection.local_revision) || Number(projection.local_revision) < 1) throw new Error("invalid_projection");
         this.sql.exec("INSERT INTO entities (entity_type, entity_id, owner_device_id, local_revision, payload_json, deleted_at, updated_at) VALUES ('issue', ?, ?, ?, ?, NULL, ?) ON CONFLICT(entity_type, entity_id) DO UPDATE SET owner_device_id = excluded.owner_device_id, local_revision = excluded.local_revision, payload_json = excluded.payload_json, deleted_at = NULL, updated_at = excluded.updated_at", row.entity_id, deviceId, projection.local_revision, JSON.stringify(projection), timestamp());
         this.sql.exec("INSERT INTO changes (entity_type, entity_id, operation, created_at) VALUES ('issue', ?, 'upsert', ?)", row.entity_id, timestamp());
       }
+      if (ack.status === "applied" && row.operation === "settings.auto-dispatch") {
+        const runtime = this.sql.exec("SELECT payload_json FROM runtime_projection WHERE device_id = ?", deviceId).toArray()[0] as { payload_json?: string } | undefined;
+        if (runtime?.payload_json) this.sql.exec("UPDATE runtime_projection SET payload_json = ?, updated_at = ? WHERE device_id = ?", JSON.stringify({ ...JSON.parse(runtime.payload_json), auto_dispatch: JSON.parse(String(row.payload_json)).enabled === true }), timestamp(), deviceId);
+      }
       this.sql.exec("UPDATE remote_commands SET status = ?, finished_at = ?, error = ?, delivery_id = NULL, dispatched_at = NULL, dispatch_expires_at = NULL WHERE command_id = ?", ack.status, timestamp(), ack.error, ack.command_id);
       const result = this.command(this.sql.exec("SELECT * FROM remote_commands WHERE command_id = ?", ack.command_id).toArray()[0]);
       return result;
     });
-    this.notifyWeb({ entity_type: "issue", entity_id: String(row.entity_id), operation: "command" });
+    this.notifyWeb({ entity_type: row.operation === "settings.auto-dispatch" ? "settings" : "issue", entity_id: String(row.entity_id), operation: "command" });
     return result;
   }
 
@@ -859,8 +918,10 @@ export class BetterCodexHubObject {
       if (message.type === "hello" || message.type === "heartbeat") {
         if (message.device_id !== attachment.device_id) throw new Error("device_mismatch");
         const leaseExpiresAt = this.lease(attachment.device_id);
+        const selectedSyncProtocol = message.type === "hello" ? supportedSyncProtocolVersions.find(version => message.sync_protocol_versions.includes(version)) : undefined;
+        if (message.type === "hello" && !selectedSyncProtocol) throw new Error("incompatible_protocol");
         socket.send(encodeControlMessage(message.type === "hello"
-          ? { type: "hello_ack", protocol_version: controlProtocolVersion, sync_protocol_version: syncProtocolVersion, capabilities: [...controlCapabilities], revision: this.revision(), lease_expires_at: leaseExpiresAt }
+          ? { type: "hello_ack", protocol_version: controlProtocolVersion, sync_protocol_version: selectedSyncProtocol!, capabilities: [...controlCapabilities], revision: this.revision(), lease_expires_at: leaseExpiresAt }
           : { type: "heartbeat_ack", protocol_version: controlProtocolVersion, lease_expires_at: leaseExpiresAt, commands_available: this.countCommands(attachment.device_id) }));
         if (this.countCommands(attachment.device_id) > 0) socket.send(encodeControlMessage({ type: "commands_available", protocol_version: controlProtocolVersion, count: this.countCommands(attachment.device_id) }));
         return;

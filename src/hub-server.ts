@@ -6,7 +6,7 @@ import { injectionScript } from "./dom.js";
 import { clearWebSessionCookie, cookies, passwordHash, passwordMatches, readHubSecret, validateWebPassword, validateWebUsername, webSessionCookie } from "./hub-auth.js";
 import { issuePriorities, issueStatuses } from "./db.js";
 import { HubStore } from "./hub-store.js";
-import type { RemoteCommandAck, SyncPushRequest } from "./sync-contract.js";
+import { supportedSyncProtocolVersions, syncProtocolVersion, type RemoteCommandAck, type SyncPushRequest } from "./sync-contract.js";
 import { betterCodexWebHostCss, betterCodexWebHostHtml, betterCodexWebHostJavaScript } from "./web-host.js";
 import { betterCodexWebIconPng } from "./brand-assets.js";
 import { betterCodexWebManifest, betterCodexWebServiceWorker } from "./web-app.js";
@@ -142,7 +142,7 @@ function errorStatus(code: string) {
   if (code === "unauthorized") return 401;
   if (["forbidden", "csrf_invalid", "writer_lease_conflict"].includes(code)) return 403;
   if (["device_not_found", "issue_not_found", "command_not_found"].includes(code)) return 404;
-  if (["entity_owned_by_another_device", "incompatible_protocol", "version_conflict", "command_id_conflict", "issue_execution_running", "stale_command_delivery"].includes(code)) return 409;
+  if (["entity_owned_by_another_device", "incompatible_protocol", "version_conflict", "command_id_conflict", "issue_execution_running", "setting_busy", "stale_command_delivery"].includes(code)) return 409;
   if (code === "runtime_not_paired") return 503;
   if (code === "body_too_large") return 413;
   if (code === "login_rate_limited") return 429;
@@ -173,9 +173,10 @@ function issueForWeb(issue: ReturnType<HubStore["board"]>["issues"][number]) {
 }
 
 function agentsForWeb(board: ReturnType<HubStore["board"]>) {
+  const runtime = board.runtime;
   return [
-    { id: "", role: "codex", name: "Codex", name_en: "Codex", description: "", instructions: "", model: "", reasoning_effort: "", sandbox_mode: "workspace-write", max_concurrency: 5, version: 1, created_at: "", updated_at: "", avatar: board.default_avatar, is_default: true, remote_read_only: true },
-    ...board.agents.map(agent => ({ ...agent, instructions: "", model: "", reasoning_effort: "", sandbox_mode: "workspace-write", max_concurrency: 5, is_default: false, remote_read_only: true })),
+    { id: "", role: "codex", name: "Codex", name_en: "Codex", description: "", instructions: "", model: runtime?.default_agent_model || "", reasoning_effort: runtime?.default_agent_reasoning_effort || "", sandbox_mode: "workspace-write", max_concurrency: 5, version: 1, created_at: "", updated_at: "", avatar: board.default_avatar, is_default: true, remote_read_only: true },
+    ...board.agents.map(agent => ({ ...agent, instructions: "", sandbox_mode: "workspace-write", max_concurrency: 5, is_default: false, remote_read_only: true })),
   ];
 }
 
@@ -325,6 +326,8 @@ export function createHubServer(options: HubServerOptions) {
       if (url.pathname === "/api/bootstrap" && method === "GET") {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" });
         const board = store.board();
+        const runtime = board.runtime;
+        const agentModelCatalog = runtime?.agent_models || [];
         const userName = store.webUsername() || "admin";
         return sendJson(response, 200, {
           projects: board.projects,
@@ -334,12 +337,12 @@ export function createHubServer(options: HubServerOptions) {
           appearance: { theme: "system", accent: "green" },
           locale: "zh-CN",
           user: { id: `remote:${userName}`, name: userName, email: "", handle: userName, initials: avatarInitials(userName), color: "#16a34a" },
-          agentModelCatalog: [],
-          agentModels: [],
-          agentReasoningEfforts: [],
-          autoDispatch: false,
-          schedulerModel: "",
-          schedulerReasoningEffort: "",
+          agentModelCatalog,
+          agentModels: agentModelCatalog.map(model => model.id),
+          agentReasoningEfforts: [...new Set(agentModelCatalog.flatMap(model => model.supportedReasoningEfforts.map(effort => effort.value)))],
+          autoDispatch: runtime?.auto_dispatch === true,
+          schedulerModel: runtime?.scheduler_model || "",
+          schedulerReasoningEffort: runtime?.scheduler_reasoning_effort || "",
           mockup: false,
           runtime: board.runtime,
           capabilities: { issues: "read-write", agents: "read-only", nativeThreads: false },
@@ -348,6 +351,38 @@ export function createHubServer(options: HubServerOptions) {
       if (url.pathname === "/api/account/usage" && method === "GET") {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" });
         return sendJson(response, 200, { usage: store.runtime()?.usage ?? null });
+      }
+      if (url.pathname === "/api/settings/auto-dispatch" && method === "GET") {
+        if (!browser) return sendJson(response, 401, { error: "unauthorized" });
+        return sendJson(response, 200, { enabled: store.runtime()?.auto_dispatch === true });
+      }
+      if (url.pathname === "/api/settings/auto-dispatch" && method === "PATCH") {
+        if (!browser) return sendJson(response, 401, { error: "unauthorized" });
+        if (!trustedOrigin(request, true) || !csrfValid) return sendJson(response, 403, { error: "csrf_invalid" });
+        const runtime = store.runtime();
+        if (!runtime || runtime.health_state !== "online") return sendJson(response, 503, { error: "runtime_offline" });
+        if (runtime.protocol_version !== syncProtocolVersion) return sendJson(response, 409, { error: "incompatible_protocol" });
+        const body = await readBody(request, 4096);
+        if (typeof body.enabled !== "boolean") throw new Error("invalid_auto_dispatch");
+        const activeCommand = store.activeAutoDispatchCommand();
+        if (activeCommand) {
+          if (activeCommand.payload.enabled === body.enabled) return sendJson(response, 202, { enabled: body.enabled, command_id: activeCommand.command_id });
+          return sendJson(response, 409, { error: "setting_busy" });
+        }
+        if (runtime.auto_dispatch === body.enabled) return sendJson(response, 200, { enabled: body.enabled, command_id: null });
+        const command = store.createRemoteCommand({ command_id: request.headers["x-better-codex-command-id"], operation: "settings.auto-dispatch", payload: { enabled: body.enabled } });
+        notifyControl(command.device_id);
+        return sendJson(response, 202, { enabled: body.enabled, command_id: command.command_id });
+      }
+      if (url.pathname === "/api/remote-access/status" && method === "GET") {
+        if (!browser) return sendJson(response, 401, { error: "unauthorized" });
+        const runtime = store.runtime();
+        const health = store.health();
+        const forwardedProtocol = options.trustedProxy === true ? String(request.headers["x-forwarded-proto"] || "").split(",")[0].trim() : "";
+        const protocol = forwardedProtocol === "https" ? "https" : "http";
+        const origin = `${protocol}://${request.headers.host || "localhost"}`;
+        const connected = runtime?.health_state === "online";
+        return sendJson(response, 200, { ...runtime, remote: { ...health, url: origin, reachable: connected, error: connected ? null : "runtime_offline" } });
       }
       if (url.pathname === "/api/update" && method === "GET") {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" });
@@ -525,7 +560,7 @@ export function createHubServer(options: HubServerOptions) {
 
       const device = store.deviceForToken(token);
       if (!device) return sendJson(response, 401, { error: "unauthorized" });
-      if (url.pathname === "/api/v1/capabilities" && method === "GET") return sendJson(response, 200, { protocol_versions: ["sync/v6", "sync/v5"], control_protocol: "control/v1", transports: ["websocket", "http"], command_delivery: "lease" });
+      if (url.pathname === "/api/v1/capabilities" && method === "GET") return sendJson(response, 200, { protocol_versions: [...supportedSyncProtocolVersions], control_protocol: "control/v1", transports: ["websocket", "http"], command_delivery: "lease" });
       if (url.pathname === "/api/v1/sync/push" && method === "POST") return sendJson(response, 200, store.push(device.id, await readBody(request, 45 * 1024 * 1024) as SyncPushRequest));
       const conversationPush = url.pathname.match(/^\/api\/v1\/sync\/issues\/([^/]+)\/conversation$/);
       if (conversationPush && method === "PUT") return sendJson(response, 200, store.putConversation(device.id, decodeURIComponent(conversationPush[1]), await readBody(request, 10 * 1024 * 1024)));
@@ -569,9 +604,11 @@ export function createHubServer(options: HubServerOptions) {
             const message = decodeControlMessage(value);
             if (message.type === "hello") {
               if (message.device_id !== device.id) throw new Error("device_mismatch");
+              const selectedSyncProtocol = supportedSyncProtocolVersions.find(version => message.sync_protocol_versions.includes(version));
+              if (!selectedSyncProtocol) throw new Error("incompatible_protocol");
               helloReceived = true;
               const lease = store.heartbeat(device.id);
-              connection?.send(encodeControlMessage({ type: "hello_ack", protocol_version: controlProtocolVersion, sync_protocol_version: "sync/v6", capabilities: [...controlCapabilities], revision: store.revision(), lease_expires_at: lease.lease_expires_at }));
+              connection?.send(encodeControlMessage({ type: "hello_ack", protocol_version: controlProtocolVersion, sync_protocol_version: selectedSyncProtocol, capabilities: [...controlCapabilities], revision: store.revision(), lease_expires_at: lease.lease_expires_at }));
               if (lease.commands_available > 0) connection?.send(encodeControlMessage({ type: "commands_available", protocol_version: controlProtocolVersion, count: lease.commands_available }));
               return;
             }

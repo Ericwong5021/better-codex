@@ -485,8 +485,8 @@ function subscribeRuntime(listener) {
 
 window.betterCodexHost = Object.freeze({
   version: 1,
-  kind: "web",
-  capabilities: Object.freeze({ issues: "read-write", agents: "read-write", liveUpdates: true, nativeThreads: false }),
+  kind: REMOTE ? "remote" : "web",
+  capabilities: Object.freeze({ issues: "read-write", agents: REMOTE ? "read-only" : "read-write", liveUpdates: true, nativeThreads: false }),
   request: requestRuntime,
   subscribe: subscribeRuntime,
 });

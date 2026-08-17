@@ -361,7 +361,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
     const systemLocale = resolveSystemLocale(INITIAL_LOCALE);
     const MOCKUP_PROJECT_ID = "mockup-better-codex";
-    const state = { projects: [], issues: [], agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: ["issues", "agents"].includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", mockup: false, keepCreate: rememberedKeepCreate, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], project: [], label: [] } };
+    const state = { projects: [], issues: [], agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: ["issues", "agents"].includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, autoDispatchPending: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", mockup: false, keepCreate: rememberedKeepCreate, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], project: [], label: [] } };
     function shortcutKeyFromCode(code, key) {
       const source = String(code || "");
       if (/^Key[A-Z]$/.test(source)) return source.slice(3);
@@ -620,6 +620,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     let refreshTimer = null;
     let pollTimer = null;
     let liveUnsubscribe = null;
+    let liveDirty = false;
     let updateTimer = null;
     let relayTimer = null;
     let relayBusy = false;
@@ -1399,9 +1400,19 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (liveUnsubscribe || typeof window.betterCodexHost?.subscribe !== "function") return false;
       liveUnsubscribe = window.betterCodexHost.subscribe(event => {
         if (event?.event === "ready" && !bootstrapReady) return;
-        if (!document.hidden && active && !panel?.dataset.recovery) void perform(() => loadSurface({ background: true }));
+        if (document.hidden) {
+          liveDirty = true;
+          return;
+        }
+        if (active && !panel?.dataset.recovery) void perform(() => REMOTE ? Promise.all([loadSurface({ background: true }), loadAutoDispatch()]) : loadSurface({ background: true }));
       });
       return typeof liveUnsubscribe === "function";
+    }
+
+    function onVisibilityChange() {
+      if (document.hidden || !liveDirty || !active || panel?.dataset.recovery) return;
+      liveDirty = false;
+      void perform(() => REMOTE ? Promise.all([loadSurface({ background: true }), loadAutoDispatch()]) : loadSurface({ background: true }));
     }
 
     function appServerError(value) {
@@ -1525,7 +1536,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     async function resumePersistedThread(threadId) {
       const expected = normalizeSessionId(threadId);
       if (!expected) throw new Error("thread_id_invalid");
-      const resumed = await sendAppServerRequest("thread/resume", { threadId: expected });
+      const resumed = await sendAppServerRequest("thread/resume", { threadId: expected, excludeTurns: true });
       const resumedId = normalizeSessionId(resumed?.thread?.id);
       if (resumedId !== expected) throw new Error("desktop_thread_resume_invalid");
       relayThreads.add(expected);
@@ -2914,17 +2925,21 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       autoDispatch.setAttribute("aria-label", t("切换为自动运行"));
       autoDispatch.innerHTML = icon("user") + "<span>" + escapeHtml(t("手动运行")) + "</span>";
       autoDispatch.addEventListener("click", () => {
+        if (state.autoDispatchPending) return;
         const next = !state.autoDispatch;
-        state.autoDispatch = next;
+        state.autoDispatchPending = true;
         syncAutoDispatch();
         void perform(async () => {
           try {
             const result = await api("/api/settings/auto-dispatch", { method: "PATCH", body: JSON.stringify({ enabled: next }) });
-            state.autoDispatch = Boolean(result.enabled);
-          } catch (error) {
-            state.autoDispatch = !next;
-            throw error;
+            if (result.command_id) {
+              const command = await waitForRemoteCommand(result.command_id);
+              if (command.status !== "applied") throw new Error(command.error || "command_rejected");
+              await loadAutoDispatch();
+            } else state.autoDispatch = Boolean(result.enabled);
           } finally {
+            state.autoDispatchPending = false;
+            if (REMOTE) await loadAutoDispatch().catch(() => {});
             syncAutoDispatch();
           }
         });
@@ -3478,16 +3493,18 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const creating = state.agentPane === "create";
       const draft = creating ? (state.agentDraft || {}) : agent;
       if (!draft) return "";
+      const readOnly = AGENTS_READ_ONLY || draft.remote_read_only === true;
       const isDefault = Boolean(draft.is_default);
       const nameField = state.locale === "en" ? "name_en" : "name";
       const name = draft[nameField] || "";
       const description = creating ? draft.description || "" : draft.description || "";
       const instructions = creating ? draft.instructions || "" : draft.instructions || "";
       const defaultModel = state.agentModelCatalog.find(item => item.isDefault) || state.agentModelCatalog[0];
-      const model = state.agentModels.includes(draft.model) ? draft.model : defaultModel?.id || draft.model || "";
-      const effortOptions = effortsForModel(model);
+      const model = draft.model || defaultModel?.id || "";
+      let effortOptions = effortsForModel(model);
       const preferredEffort = draft.reasoning_effort || state.agentModelCatalog.find(item => item.id === model)?.defaultReasoningEffort;
-      const effort = effortOptions.some(item => item.value === preferredEffort) ? preferredEffort : effortOptions[0]?.value || "medium";
+      if (preferredEffort && !effortOptions.some(item => item.value === preferredEffort)) effortOptions = [{ value: preferredEffort, label: effortLabel(preferredEffort), description: t("当前模型目录未提供此配置"), tone: "warning" }, ...effortOptions];
+      const effort = preferredEffort || effortOptions[0]?.value || "medium";
       const sandboxMode = ["read-only", "workspace-write", "danger-full-access"].includes(draft.sandbox_mode) ? draft.sandbox_mode : "workspace-write";
       const heading = t(creating ? "新建" : "智能体");
       const avatarInput = '<input type="hidden" name="avatar" value="' + escapeHtml(draft.avatar || "") + '">';
@@ -3497,16 +3514,19 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const identity = isDefault
         ? '<div class="better-codex-agent-summary"><div><strong>' + te("Codex 默认智能体") + '</strong></div></div>'
         : '<label class="better-codex-agent-inspector-field"><span>' + te("名称") + '</span><input data-agent-name name="' + nameField + '" maxlength="80" value="' + escapeHtml(name) + '" placeholder="' + te("智能体名称") + '" required></label><label class="better-codex-agent-inspector-field"><span>' + te("介绍") + ' <small>' + te("可选") + '</small></span><textarea name="description" maxlength="500" rows="3" placeholder="' + te("说明这个智能体适合承担什么工作") + '">' + escapeHtml(description) + '</textarea></label>';
-      const instructionField = isDefault ? "" : '<label class="better-codex-agent-inspector-field"><span>' + te("指令") + ' <small>' + te("可选") + '</small></span><textarea name="instructions" rows="7" placeholder="' + te("定义职责、工作方式和输出要求") + '">' + escapeHtml(instructions) + '</textarea></label>';
+      const instructionField = isDefault || readOnly ? "" : '<label class="better-codex-agent-inspector-field"><span>' + te("指令") + ' <small>' + te("可选") + '</small></span><textarea name="instructions" rows="7" placeholder="' + te("定义职责、工作方式和输出要求") + '">' + escapeHtml(instructions) + '</textarea></label>';
       const deleteButton = !creating && !isDefault ? '<button class="better-codex-agent-danger" type="button" data-agent-delete data-agent-key="' + escapeHtml(agentKey(draft)) + '">' + te("删除智能体") + '</button>' : "";
-      const modelOptions = state.agentModelCatalog.map(item => ({ value: item.id, label: item.displayName, description: item.description || "" }));
+      const modelOptions = [
+        ...(model && !state.agentModels.includes(model) ? [{ value: model, label: model, description: t("当前模型目录未提供此配置"), tone: "warning" }] : []),
+        ...state.agentModelCatalog.map(item => ({ value: item.id, label: item.displayName, description: item.description || "" })),
+      ];
       const sandboxOptions = [
         { value: "read-only", label: t("只读"), description: t("仅可读取工作区文件，不能修改"), icon: "permissionReadOnly" },
         { value: "workspace-write", label: t("工作区可写"), description: t("可修改当前工作区内的文件"), icon: "permissionWorkspace" },
         { value: "danger-full-access", label: t("完全访问"), description: t("可不受限制地访问互联网和电脑上的任何文件"), icon: "permissionDanger", tone: "warning" },
       ];
       const animateAttr = options.animateEnter ? ' data-animate="enter"' : "";
-       return '<aside class="better-codex-agent-inspector"' + animateAttr + '><div class="better-codex-agent-inspector-resize" data-agent-inspector-resize role="separator" aria-orientation="vertical" aria-label="' + te("调整侧边栏宽度") + '" tabindex="0"></div><form data-agent-form="' + (creating ? "create" : isDefault ? "default" : "update") + '" data-agent-key="' + escapeHtml(creating ? "" : agentKey(draft)) + '"><header class="better-codex-agent-inspector-head"><span>' + heading + '</span><button class="better-codex-agent-card-action" type="button" data-agent-close-pane aria-label="' + te("关闭详情") + '">' + icon("close") + '</button></header><div class="better-codex-agent-inspector-scroll">' + profileHead + identity + '<h3>' + te("详情") + '</h3><div class="better-codex-agent-inspector-group">' + agentPicker("model", t("模型"), model, modelOptions) + agentPicker("reasoning_effort", t("推理"), effort, effortOptions) + agentPicker("sandbox_mode", t("权限"), sandboxMode, sandboxOptions) + agentNumberInput("max_concurrency", t("最大并发"), draft.max_concurrency, 1, 20) + '</div>' + instructionField + '<div class="better-codex-agent-inspector-error" hidden></div></div><footer class="better-codex-agent-inspector-footer">' + deleteButton + '<button class="better-codex-submit" type="submit">' + te(creating ? "创建" : "保存") + '</button></footer></form></aside>';
+       return '<aside class="better-codex-agent-inspector"' + animateAttr + '><div class="better-codex-agent-inspector-resize" data-agent-inspector-resize role="separator" aria-orientation="vertical" aria-label="' + te("调整侧边栏宽度") + '" tabindex="0"></div><form data-agent-form="' + (creating ? "create" : isDefault ? "default" : "update") + '" data-agent-key="' + escapeHtml(creating ? "" : agentKey(draft)) + '"><header class="better-codex-agent-inspector-head"><span>' + heading + '</span><button class="better-codex-agent-card-action" type="button" data-agent-close-pane aria-label="' + te("关闭详情") + '">' + icon("close") + '</button></header><div class="better-codex-agent-inspector-scroll">' + profileHead + identity + '<h3>' + te("详情") + '</h3><div class="better-codex-agent-inspector-group">' + agentPicker("model", t("模型"), model, modelOptions) + agentPicker("reasoning_effort", t("推理"), effort, effortOptions) + agentPicker("sandbox_mode", t("权限"), sandboxMode, sandboxOptions) + agentNumberInput("max_concurrency", t("最大并发"), draft.max_concurrency, 1, 20) + '</div>' + instructionField + '<div class="better-codex-agent-inspector-error" hidden></div></div>' + (readOnly ? "" : '<footer class="better-codex-agent-inspector-footer">' + deleteButton + '<button class="better-codex-submit" type="submit">' + te(creating ? "创建" : "保存") + '</button></footer>') + '</form></aside>';
     }
 
     function renderAgents() {
@@ -3593,19 +3613,21 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       ].join("");
       dialog.innerHTML = [
         '<div class="better-codex-auto-dispatch-help-shell" data-help-view="mode">',
-        '<header><div class="better-codex-help-tabs" role="tablist" aria-label="' + te("帮助与设置") + '"><button type="button" class="is-active" data-help-view="mode" aria-selected="true">' + te("运行模式说明") + '</button><button type="button" data-help-view="settings" aria-selected="false">' + te("设置") + '</button><button type="button" data-help-view="shortcuts" aria-selected="false">' + te("快捷键") + '</button>' + (HOST_KIND === "web" ? "" : '<button type="button" data-help-view="remote" aria-selected="false">' + te("远程访问") + '</button>') + '<button type="button" data-help-view="about" aria-selected="false">' + te("关于") + '</button></div>' + mockupTools + '<button type="button" data-help-close aria-label="' + te("关闭") + '">' + icon("close") + "</button></header>",
+        '<header><div class="better-codex-help-tabs" role="tablist" aria-label="' + te("帮助与设置") + '"><button type="button" class="is-active" data-help-view="mode" aria-selected="true">' + te("运行模式说明") + '</button><button type="button" data-help-view="settings" aria-selected="false">' + te("设置") + '</button><button type="button" data-help-view="shortcuts" aria-selected="false">' + te("快捷键") + '</button><button type="button" data-help-view="remote" aria-selected="false">' + te("远程访问") + '</button><button type="button" data-help-view="about" aria-selected="false">' + te("关于") + '</button></div>' + mockupTools + '<button type="button" data-help-close aria-label="' + te("关闭") + '">' + icon("close") + "</button></header>",
         '<main class="better-codex-help-content">',
         '<section class="better-codex-help-page is-active" data-help-page="mode"><div class="better-codex-auto-dispatch-help-panels"><article class="better-codex-auto-dispatch-help-panel is-manual"><div class="better-codex-auto-dispatch-help-heading">' + icon("user") + "<h3>" + te("手动运行") + "</h3></div>" + modeDescription(helpMode.manual) + "</article>",
         '<div class="better-codex-auto-dispatch-help-divider" aria-hidden="true"></div>',
         '<article class="better-codex-auto-dispatch-help-panel is-auto"><div class="better-codex-auto-dispatch-help-heading">' + icon("refresh") + "<h3>" + te("自动运行") + "</h3></div>" + modeDescription(helpMode.auto) + "</article></div></section>",
         settingsPage,
         shortcutPage,
-        HOST_KIND === "web" ? "" : remotePage,
+        remotePage,
         '<section class="better-codex-help-page" data-help-page="about" hidden><div class="better-codex-help-about"><span class="better-codex-help-about-logo">' + betterCodexLogo() + '</span><div><h2>Better Codex</h2><p class="better-codex-help-about-slogan">' + te("从开始到完成，让 Codex 里的工作清晰可见。") + '</p></div><span class="better-codex-help-runtime-status"><span class="better-codex-help-status-dot"></span>' + te("运行正常") + '</span></div><dl class="better-codex-help-about-details"><div><dt>' + te("版本信息") + '</dt><dd><button class="better-codex-help-check-update" type="button" data-check-update>' + te("检查新版本") + '</button><span data-product-core></span></dd></div></dl><div class="better-codex-help-github-row"><a class="better-codex-help-github" href="https://github.com/Ericwong5021/better-codex" target="_blank" rel="noreferrer">' + githubLogo() + '<span class="better-codex-help-github-name">Better Codex</span><span class="better-codex-help-github-stars">' + icon("star", "better-codex-help-star") + '</span></a><p>' + te("如果你喜欢 Better Codex，欢迎给我们一个 Star。") + '</p></div></section>',
         "</main>",
         "</div>",
       ].join("");
+      let remoteStatusTimer = null;
       const finish = () => {
+        if (remoteStatusTimer !== null) clearInterval(remoteStatusTimer);
         document.removeEventListener("pointerdown", closeMockupOutside, true);
         dialog.close();
         dialog.remove();
@@ -3782,6 +3804,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           remoteError.hidden = false;
         }
       };
+      remoteStatusTimer = setInterval(() => {
+        if (!document.hidden && dialog.open && dialog.querySelector(".better-codex-auto-dispatch-help-shell")?.dataset.helpView === "remote") void loadRemoteStatus(true);
+      }, 5000);
       dialog.querySelectorAll(".better-codex-remote-provider [data-remote-provider]").forEach(button => button.addEventListener("click", () => setRemoteProvider(button.dataset.remoteProvider)));
       dialog.querySelector("[data-remote-copy-install]")?.addEventListener("click", async event => {
         const button = event.currentTarget;
@@ -4045,12 +4070,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     function syncAutoDispatch() {
       const button = panel?.querySelector("#better-codex-auto-dispatch");
       if (!button) return;
-      const label = state.autoDispatch ? "自动运行" : "手动运行";
+      const label = state.autoDispatchPending ? "切换中…" : state.autoDispatch ? "自动运行" : "手动运行";
       button.classList.toggle("is-on", state.autoDispatch);
       button.setAttribute("aria-pressed", String(state.autoDispatch));
+      button.disabled = state.autoDispatchPending;
+      button.setAttribute("aria-busy", String(state.autoDispatchPending));
       button.removeAttribute("title");
       button.setAttribute("aria-label", t(state.autoDispatch ? "切换为手动运行" : "切换为自动运行"));
-      button.innerHTML = icon(state.autoDispatch ? "refresh" : "user") + "<span>" + te(label) + "</span>";
+      button.innerHTML = icon(state.autoDispatch || state.autoDispatchPending ? "refresh" : "user") + "<span>" + te(label) + "</span>";
     }
 
     function syncMockupUi() {
@@ -4176,6 +4203,23 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       render();
     }
 
+    async function loadAutoDispatch() {
+      const result = await api("/api/settings/auto-dispatch");
+      state.autoDispatch = result.enabled === true;
+      syncAutoDispatch();
+      return state.autoDispatch;
+    }
+
+    async function waitForRemoteCommand(commandId) {
+      const deadline = Date.now() + 30_000;
+      while (Date.now() < deadline) {
+        const command = await api("/api/v1/commands/" + encodeURIComponent(commandId));
+        if (["applied", "rejected", "conflict", "expired"].includes(command.status)) return command;
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+      throw new Error("remote_command_timeout");
+    }
+
     async function loadSurface(options = {}) {
       if (state.surface === "agents") await loadAgents(options);
       else await loadIssues(options);
@@ -4280,6 +4324,18 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     function onAgentsClick(event) {
       if (suppressAgentOutside) return;
+      if (event.target.closest("[data-agent-close-pane]")) return closeAgentInspector();
+      const row = event.target.closest(".better-codex-agent-directory [data-agent-key]");
+      if (row) {
+        const agent = state.agents.find(item => agentKey(item) === row.dataset.agentKey);
+        if (!agent) return;
+        agentInspectorClosing = false;
+        state.selectedAgentId = agentKey(agent);
+        state.agentPane = "detail";
+        state.agentDraft = null;
+        return renderAgents();
+      }
+      if (state.agentPane !== "preview" && event.target.closest(".better-codex-agent-directory")) return closeAgentInspector();
       if (AGENTS_READ_ONLY) return;
       const formAvatarButton = event.target.closest("[data-agent-avatar-form]");
       if (formAvatarButton) {
@@ -4345,7 +4401,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (event.target.closest("[data-agent-create]")) return startAgentCreate();
       const templateButton = event.target.closest("[data-agent-template]");
       if (templateButton) return startAgentCreate(suggestedAgents.find(item => item.key === templateButton.dataset.agentTemplate) || null);
-      if (event.target.closest("[data-agent-close-pane]")) return closeAgentInspector();
       const deleteButton = event.target.closest("[data-agent-delete]");
       if (deleteButton) {
         const agent = state.agents.find(item => agentKey(item) === deleteButton.dataset.agentKey);
@@ -4362,17 +4417,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         });
         return;
       }
-      const row = event.target.closest(".better-codex-agent-directory [data-agent-key]");
-      if (row) {
-        const agent = state.agents.find(item => agentKey(item) === row.dataset.agentKey);
-        if (!agent) return;
-        agentInspectorClosing = false;
-        state.selectedAgentId = agentKey(agent);
-        state.agentPane = "detail";
-        state.agentDraft = null;
-        return renderAgents();
-      }
-      if (state.agentPane !== "preview" && event.target.closest(".better-codex-agent-directory")) return closeAgentInspector();
     }
 
     async function openEditor(issue = null, initialStatus = "todo", createMode = "agent") {
@@ -6104,6 +6148,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       document.removeEventListener("pointerup", onSessionPointerUp, true);
       document.removeEventListener("pointercancel", onSessionPointerCancel, true);
       document.removeEventListener("keydown", onGlobalShortcut, true);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
       window.removeEventListener("codex-message-from-view", onHostMessageFromView, true);
       window.removeEventListener("message", onAppServerMessage, true);
       close();
@@ -6132,6 +6177,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     document.addEventListener("pointerup", onSessionPointerUp, true);
     document.addEventListener("pointercancel", onSessionPointerCancel, true);
     document.addEventListener("keydown", onGlobalShortcut, true);
+    document.addEventListener("visibilitychange", onVisibilityChange);
     window.addEventListener("codex-message-from-view", onHostMessageFromView, true);
     window.addEventListener("message", onAppServerMessage, true);
     if (document.documentElement) mount();

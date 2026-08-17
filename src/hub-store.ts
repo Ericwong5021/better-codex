@@ -3,7 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, renameSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { issuePriorities, issueStatuses } from "./db.js";
-import { forbiddenProjectionKeys, normalizeCodexUsageProjection, remoteCommandOperations, supportedSyncProtocolVersions, syncEntityTypes, syncProtocolVersion, type AgentDirectoryProjection, type ConversationProjection, type HubBoard, type IssueProjection, type ProjectProjection, type RemoteCommand, type RemoteCommandAck, type RemoteCommandOperation, type RemoteCommandStatus, type RuntimeProjection, type SyncChange, type SyncEntityType, type SyncProjection, type SyncPushRequest } from "./sync-contract.js";
+import { forbiddenProjectionKeys, normalizeAgentDirectoryProjection, normalizeAgentModelCatalogProjection, normalizeCodexUsageProjection, remoteCommandOperations, runtimeProjectionSignature, supportedSyncProtocolVersions, syncEntityTypes, syncProtocolVersion, type AgentDirectoryProjection, type ConversationProjection, type HubBoard, type IssueProjection, type ProjectProjection, type RemoteCommand, type RemoteCommandAck, type RemoteCommandOperation, type RemoteCommandStatus, type RuntimeProjection, type SyncChange, type SyncEntityType, type SyncProjection, type SyncPushRequest } from "./sync-contract.js";
 import { coreVersion } from "./version.js";
 
 function now() {
@@ -68,28 +68,7 @@ function cleanProjection(type: SyncEntityType, id: string, value: unknown): Sync
     updated_at: cleanString(source.updated_at, 64, false),
     local_revision: Number(source.local_revision),
   } satisfies ProjectProjection;
-  if (type === "agent_directory") {
-    if (id !== "agents" || !Array.isArray(source.agents) || source.agents.length > 100) throw new Error("invalid_projection");
-    const agents = source.agents.map(value => {
-      if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid_projection");
-      const agent = value as Record<string, unknown>;
-      const agentId = cleanString(agent.id, 200, false);
-      if (!/^[a-f0-9-]{36}$/i.test(agentId) || !Number.isInteger(agent.version) || Number(agent.version) < 1) throw new Error("invalid_projection");
-      return {
-        id: agentId,
-        role: cleanString(agent.role, 200, false),
-        name: cleanString(agent.name, 80, false),
-        name_en: cleanString(agent.name_en, 80),
-        description: cleanString(agent.description, 500),
-        avatar: cleanAvatar(agent.avatar),
-        version: Number(agent.version),
-        created_at: cleanString(agent.created_at, 64, false),
-        updated_at: cleanString(agent.updated_at, 64, false),
-      };
-    });
-    if (new Set(agents.map(agent => agent.id)).size !== agents.length || new Set(agents.map(agent => agent.role)).size !== agents.length) throw new Error("invalid_projection");
-    return { id, agents, default_avatar: cleanAvatar(source.default_avatar), local_revision: Number(source.local_revision) } satisfies AgentDirectoryProjection;
-  }
+  if (type === "agent_directory") return normalizeAgentDirectoryProjection(source, id);
   if (!issueStatuses.includes(source.status as never) || !issuePriorities.includes(source.priority as never)) throw new Error("invalid_projection");
   if (!Array.isArray(source.labels) || source.labels.length > 20 || source.labels.some(label => typeof label !== "string" || label.length > 100)) throw new Error("invalid_projection");
   if (typeof source.sort_order !== "number" || !Number.isFinite(source.sort_order)) throw new Error("invalid_projection");
@@ -147,6 +126,12 @@ function cleanRuntime(value: unknown, deviceId: string): RuntimeProjection {
     queue_depth: Number.isSafeInteger(source.queue_depth) && Number(source.queue_depth) >= 0 ? Number(source.queue_depth) : 0,
     health_state: "online",
     usage: normalizeCodexUsageProjection(source.usage),
+    agent_models: normalizeAgentModelCatalogProjection(source.agent_models),
+    auto_dispatch: source.auto_dispatch === true,
+    scheduler_model: typeof source.scheduler_model === "string" ? cleanString(source.scheduler_model, 200) : "",
+    scheduler_reasoning_effort: typeof source.scheduler_reasoning_effort === "string" ? cleanString(source.scheduler_reasoning_effort, 40) : "",
+    default_agent_model: typeof source.default_agent_model === "string" ? cleanString(source.default_agent_model, 200) : "",
+    default_agent_reasoning_effort: typeof source.default_agent_reasoning_effort === "string" ? cleanString(source.default_agent_reasoning_effort, 40) : "",
   };
 }
 
@@ -184,7 +169,8 @@ function cleanCommandPayload(operation: RemoteCommandOperation, value: unknown) 
       : operation === "issue.start"
         ? ["project_id", "title", "description", "status", "priority", "labels", "agent_id"]
       : operation === "issue.reply" ? ["message", "files"]
-      : operation === "issue.move" ? ["status", "before_id"] : [];
+      : operation === "issue.move" ? ["status", "before_id"]
+      : operation === "settings.auto-dispatch" ? ["enabled"] : [];
   if (Object.keys(source).some(key => !allowed.includes(key))) throw new Error("forbidden_command_field");
   const payload: Record<string, unknown> = {};
   if (source.project_id !== undefined) payload.project_id = cleanString(source.project_id, 200, false);
@@ -214,6 +200,7 @@ function cleanCommandPayload(operation: RemoteCommandOperation, value: unknown) 
     payload.agent_id = agentId;
   }
   if (source.user_assigned !== undefined) payload.user_assigned = source.user_assigned === true;
+  if (source.enabled !== undefined) payload.enabled = source.enabled === true;
   if (source.before_id !== undefined) payload.before_id = cleanString(source.before_id, 200);
   if (source.message !== undefined) payload.message = cleanString(source.message, 100_000, false).trim();
   if (source.files !== undefined) {
@@ -235,6 +222,7 @@ function cleanCommandPayload(operation: RemoteCommandOperation, value: unknown) 
   if (operation === "issue.move" && !payload.status) throw new Error("invalid_command_payload");
   if (operation === "issue.start" && !payload.title) throw new Error("invalid_command_payload");
   if (operation === "issue.reply" && !payload.message && !(payload.files as unknown[] | undefined)?.length) throw new Error("message_required");
+  if (operation === "settings.auto-dispatch" && typeof source.enabled !== "boolean") throw new Error("invalid_auto_dispatch");
   return payload;
 }
 
@@ -646,23 +634,31 @@ export class HubStore {
     if (this.isReadOnly()) throw new Error("hub_read_only");
     if (!remoteCommandOperations.includes(input.operation as never)) throw new Error("invalid_command_operation");
     const operation = input.operation as RemoteCommandOperation;
+    const settingOperation = operation === "settings.auto-dispatch";
     const commandId = input.command_id === undefined ? randomUUID() : cleanString(input.command_id, 200, false);
     if (!/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,199}$/.test(commandId)) throw new Error("invalid_command_id");
-    const baseRevision = operation === "issue.create" ? null : Number(input.base_revision);
-    if (operation !== "issue.create" && (!Number.isInteger(baseRevision) || Number(baseRevision) < 1)) throw new Error("invalid_version");
+    const baseRevision = operation === "issue.create" || settingOperation ? null : Number(input.base_revision);
+    if (operation !== "issue.create" && !settingOperation && (!Number.isInteger(baseRevision) || Number(baseRevision) < 1)) throw new Error("invalid_version");
     const payload = cleanCommandPayload(operation, input.payload ?? {});
     const existing = this.db.prepare("SELECT * FROM remote_commands WHERE command_id = ?").get(commandId) as CommandRow | undefined;
     if (existing) {
       if (existing.operation !== operation || (input.entity_id !== undefined && existing.entity_id !== input.entity_id) || existing.base_revision !== baseRevision || existing.payload_json !== JSON.stringify(payload)) throw new Error("command_id_conflict");
       return commandFromRow(existing);
     }
-    const entityId = operation === "issue.create" && input.entity_id === undefined ? randomUUID() : cleanString(input.entity_id, 200, false);
+    if (settingOperation) {
+      const active = this.db.prepare("SELECT * FROM remote_commands WHERE operation = ? AND entity_id = 'auto-dispatch' AND status IN ('pending', 'dispatched') ORDER BY requested_at LIMIT 1").get(operation) as CommandRow | undefined;
+      if (active) {
+        if (active.payload_json === JSON.stringify(payload)) return commandFromRow(active);
+        throw new Error("setting_busy");
+      }
+    }
+    const entityId = settingOperation ? "auto-dispatch" : operation === "issue.create" && input.entity_id === undefined ? randomUUID() : cleanString(input.entity_id, 200, false);
     if (!/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,199}$/.test(entityId)) throw new Error("invalid_issue_id");
     const current = this.db.prepare("SELECT payload_json, deleted_at FROM entities WHERE entity_type = 'issue' AND entity_id = ?").get(entityId) as { payload_json: string; deleted_at: string | null } | undefined;
     if (operation === "issue.create" && current && !current.deleted_at) throw new Error("issue_exists");
-    if (operation !== "issue.create" && (!current || current.deleted_at)) throw new Error("issue_not_found");
+    if (operation !== "issue.create" && !settingOperation && (!current || current.deleted_at)) throw new Error("issue_not_found");
     const currentProjection = current ? JSON.parse(current.payload_json) as IssueProjection : null;
-    const pendingReply = operation === "issue.create" ? undefined : this.db.prepare("SELECT 1 AS value FROM remote_commands WHERE entity_id = ? AND operation = 'issue.reply' AND status IN ('pending', 'dispatched') LIMIT 1").get(entityId);
+    const pendingReply = operation === "issue.create" || settingOperation ? undefined : this.db.prepare("SELECT 1 AS value FROM remote_commands WHERE entity_id = ? AND operation = 'issue.reply' AND status IN ('pending', 'dispatched') LIMIT 1").get(entityId);
     const running = Boolean(currentProjection?.active_run_status || currentProjection?.reply_status === "running" || ["starting", "active", "stopping", "waiting_on_approval", "waiting_on_user"].includes(currentProjection?.session_status || "") || pendingReply);
     if (current && running && !["issue.reply", "issue.stop"].includes(operation)) throw new Error("issue_execution_running");
     if (operation === "issue.reply" && pendingReply) throw new Error("reply_busy");
@@ -670,7 +666,7 @@ export class HubStore {
     if (operation === "issue.reply" && !currentProjection?.has_conversation) throw new Error("session_required");
     if (operation === "issue.stop" && !running) throw new Error("issue_not_running");
     if (payload.agent_id && !this.board().agents.some(agent => agent.id === payload.agent_id)) throw new Error("agent_not_found");
-    const deviceId = this.writerDeviceId(entityId);
+    const deviceId = this.writerDeviceId(settingOperation ? "" : entityId);
     const requestedAt = now();
     const expiresAt = after(24 * 60 * 60_000);
     this.db.prepare("UPDATE remote_commands SET status = 'expired', finished_at = ?, error = 'superseded' WHERE entity_id = ? AND status IN ('conflict', 'rejected')").run(requestedAt, entityId);
@@ -687,6 +683,12 @@ export class HubStore {
   remoteCommand(commandId: string) {
     this.expireCommands();
     const row = this.db.prepare("SELECT * FROM remote_commands WHERE command_id = ?").get(commandId) as CommandRow | undefined;
+    return row ? commandFromRow(row) : null;
+  }
+
+  activeAutoDispatchCommand() {
+    this.expireCommands();
+    const row = this.db.prepare("SELECT * FROM remote_commands WHERE operation = 'settings.auto-dispatch' AND entity_id = 'auto-dispatch' AND status IN ('pending', 'dispatched') ORDER BY requested_at LIMIT 1").get() as CommandRow | undefined;
     return row ? commandFromRow(row) : null;
   }
 
@@ -757,11 +759,15 @@ export class HubStore {
     if (!(["applied", "rejected", "conflict"] as const).includes(ack.status)) throw new Error("invalid_command_status");
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      if (ack.status === "applied") {
+      if (ack.status === "applied" && row.operation !== "settings.auto-dispatch") {
         const projection = cleanProjection("issue", row.entity_id, ack.projection);
         const current = this.db.prepare("SELECT owner_device_id FROM entities WHERE entity_type = 'issue' AND entity_id = ?").get(row.entity_id) as { owner_device_id: string } | undefined;
         if (!current) this.db.prepare("INSERT INTO entities (entity_type, entity_id, owner_device_id, local_revision, payload_json, deleted_at, updated_at) VALUES ('issue', ?, ?, ?, ?, NULL, ?)").run(row.entity_id, deviceId, projection.local_revision, JSON.stringify(projection), now());
         else this.db.prepare("UPDATE entities SET local_revision = ?, payload_json = ?, deleted_at = NULL, updated_at = ? WHERE entity_type = 'issue' AND entity_id = ? AND owner_device_id = ?").run(projection.local_revision, JSON.stringify(projection), now(), row.entity_id, deviceId);
+      }
+      if (ack.status === "applied" && row.operation === "settings.auto-dispatch") {
+        const runtimeRow = this.db.prepare("SELECT payload_json FROM runtime_projection WHERE device_id = ?").get(deviceId) as { payload_json: string } | undefined;
+        if (runtimeRow) this.db.prepare("UPDATE runtime_projection SET payload_json = ?, updated_at = ? WHERE device_id = ?").run(JSON.stringify({ ...JSON.parse(runtimeRow.payload_json), auto_dispatch: commandFromRow(row).payload.enabled === true }), now(), deviceId);
       }
       this.db.prepare("UPDATE remote_commands SET status = ?, finished_at = ?, error = ?, delivery_id = NULL, dispatched_at = NULL, dispatch_expires_at = NULL WHERE command_id = ? AND status IN ('pending', 'dispatched')").run(ack.status, now(), ack.error, ack.command_id);
       this.recordCommandChange(ack.command_id, ack.status, ack.error);
@@ -812,7 +818,10 @@ export class HubStore {
         if (changed) this.db.prepare("INSERT INTO changes (entity_type, entity_id, operation, created_at) VALUES (?, ?, ?, ?)").run(change.entity_type, change.entity_id, projection ? "upsert" : "delete", now());
         accepted.push(change.event_id);
       }
-      this.db.prepare("INSERT INTO runtime_projection (device_id, payload_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(device_id) DO UPDATE SET payload_json = excluded.payload_json, updated_at = excluded.updated_at").run(deviceId, JSON.stringify({ ...runtime, last_seen_at: now() }), now());
+      const previousRuntime = this.db.prepare("SELECT payload_json FROM runtime_projection WHERE device_id = ?").get(deviceId) as { payload_json: string } | undefined;
+      const nextRuntime = { ...runtime, last_seen_at: now() };
+      this.db.prepare("INSERT INTO runtime_projection (device_id, payload_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(device_id) DO UPDATE SET payload_json = excluded.payload_json, updated_at = excluded.updated_at").run(deviceId, JSON.stringify(nextRuntime), now());
+      if (runtimeProjectionSignature(previousRuntime ? JSON.parse(previousRuntime.payload_json) as RuntimeProjection : null) !== runtimeProjectionSignature(nextRuntime)) this.db.prepare("INSERT INTO changes (entity_type, entity_id, operation, created_at) VALUES ('runtime', ?, 'upsert', ?)").run(deviceId, now());
       this.pruneChanges();
       this.db.exec("COMMIT");
       return { accepted, cursor: this.cursor(), lease_expires_at };

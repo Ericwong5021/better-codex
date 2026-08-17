@@ -1067,6 +1067,11 @@ export class Store {
       try {
         const payload = command.payload;
         if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("invalid_command_payload");
+        if (command.operation === "settings.auto-dispatch") {
+          if (command.entity_id !== "auto-dispatch" || command.base_revision !== null || typeof payload.enabled !== "boolean") throw new Error("invalid_auto_dispatch");
+          this.setAutoDispatch(payload.enabled);
+          return { command_id: command.command_id, status: "applied", error: null, projection: null } satisfies RemoteCommandAck;
+        }
         let issue: Issue;
         if (command.operation === "issue.create") {
           if (command.base_revision !== null || this.getIssue(command.entity_id)) throw new Error("version_conflict");

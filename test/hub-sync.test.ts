@@ -10,7 +10,7 @@ import { createHubServer } from "../src/hub-server.js";
 import { HubStore } from "../src/hub-store.js";
 import { SyncClient } from "../src/sync-client.js";
 import { normalizeHubUrl } from "../src/sync-config.js";
-import { syncProtocolVersion, type ProjectProjection, type SyncPushRequest } from "../src/sync-contract.js";
+import { previousSyncProtocolVersion, syncProtocolVersion, type ProjectProjection, type SyncPushRequest } from "../src/sync-contract.js";
 
 function listen(server: ReturnType<typeof createHubServer>["server"]) {
   return new Promise<number>((resolve, reject) => {
@@ -102,10 +102,21 @@ test("Hub mirrors the privacy-filtered projection with durable idempotent sync",
     assert.equal(board.default_avatar, "icon:sparkles");
     assert.equal(board.runtime?.health_state, "online");
     assert.deepEqual(board.runtime?.usage, expectedUsage);
-    assert.doesNotMatch(JSON.stringify(board), /private-workspace|private-thread|private instructions|private-model|workspace_path|thread_id|reply_draft|instructions|sandbox_mode/);
+    assert.equal(hub.store.changeWindow(0).changes.some(change => change.entity_type === "runtime"), true);
+    assert.doesNotMatch(JSON.stringify(board), /private-workspace|private-thread|private instructions|workspace_path|thread_id|reply_draft|instructions|sandbox_mode/);
+    assert.equal(board.agents.find(item => item.id === agent.id)?.model, "private-model");
+    assert.equal(board.agents.find(item => item.id === agent.id)?.reasoning_effort, "high");
     assert.equal(board.issues.find(item => item.id === issue.id)?.has_conversation, true);
     assert.deepEqual(hub.store.conversation(issue.id)?.messages.map(message => message.markdown), ["Keep this context", "Context retained"]);
     assert.equal(hub.store.conversation(issue.id)?.messages.every(message => message.html === ""), true);
+
+    const autoDispatch = hub.store.createRemoteCommand({ command_id: "auto-dispatch-from-web", operation: "settings.auto-dispatch", payload: { enabled: true } });
+    assert.equal(hub.store.createRemoteCommand({ command_id: "auto-dispatch-duplicate", operation: "settings.auto-dispatch", payload: { enabled: true } }).command_id, autoDispatch.command_id);
+    assert.throws(() => hub.store.createRemoteCommand({ command_id: "auto-dispatch-conflict", operation: "settings.auto-dispatch", payload: { enabled: false } }), /setting_busy/);
+    await client.syncNow();
+    assert.equal(local.getAutoDispatch(), true);
+    assert.equal(hub.store.remoteCommand(autoDispatch.command_id)?.status, "applied");
+    assert.equal(hub.store.runtime()?.auto_dispatch, true);
 
     const replied = hub.store.createRemoteCommand({ command_id: "reply-from-web", operation: "issue.reply", entity_id: issue.id, base_revision: issue.version, payload: { message: "Continue here" } });
     assert.equal(replied.status, "pending");
@@ -173,6 +184,16 @@ test("pairing codes are single-use and a second active writer is rejected", () =
       runtime: { device_id: deviceId, device_name: deviceId, protocol_version: syncProtocolVersion, core_version: "0.4.2", last_seen_at: new Date().toISOString(), last_sync_at: null, queue_depth: 0, health_state: "online" },
       changes: [],
     });
+    const timestamp = new Date().toISOString();
+    const previousRequest: SyncPushRequest = {
+      ...request(first.device_id),
+      protocol_version: previousSyncProtocolVersion,
+      runtime: { ...request(first.device_id).runtime, protocol_version: previousSyncProtocolVersion },
+      changes: [{ event_id: "previous-agent-directory", entity_type: "agent_directory", entity_id: "agents", operation: "upsert", changed_at: timestamp, projection: { id: "agents", agents: [{ id: "019fed43-a001-7000-8000-000000000001", role: "legacy", name: "Legacy", name_en: "Legacy", description: "", avatar: "", version: 1, created_at: timestamp, updated_at: timestamp }], default_avatar: "", local_revision: 1 } as any }],
+    };
+    store.push(first.device_id, previousRequest);
+    assert.equal(store.board().agents[0]?.model, "");
+    assert.equal(store.board().agents[0]?.reasoning_effort, "");
     store.push(first.device_id, request(first.device_id));
     assert.throws(() => store.push(second.device_id, request(second.device_id)), /writer_lease_conflict/);
     assert.throws(() => store.push(first.device_id, { ...request(first.device_id), protocol_version: "sync/v2" as never }), /incompatible_protocol/);

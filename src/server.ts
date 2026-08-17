@@ -452,6 +452,7 @@ export function startServer() {
     undefined,
     command => {
       if (command.operation === "issue.start") worker.startIssue(command.entity_id);
+      if (command.operation === "settings.auto-dispatch" && command.payload.enabled === true) worker.wake();
     },
     async issueId => {
       const issue = store.getIssue(issueId);

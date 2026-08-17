@@ -198,7 +198,8 @@ test("issues toolbar has a toggleable auto-dispatch icon between filter and crea
   assert.ok(source.includes("backlog_reply_blocked"));
   assert.ok(!source.includes("「待处理」标志"));
   assert.ok(!source.includes('better-codex-attention'));
-  assert.ok(source.includes('icon(state.autoDispatch ? "refresh" : "user")'));
+  assert.ok(source.includes('icon(state.autoDispatch || state.autoDispatchPending ? "refresh" : "user")'));
+  assert.ok(source.includes('button.disabled = state.autoDispatchPending'));
   assert.ok(source.includes('icon("user") + "<span>" + escapeHtml(t("手动运行")) + "</span>"'));
   assert.ok(source.includes('icon("user") + "<h3>" + te("手动运行") + "</h3></div>"'));
   assert.ok(source.includes('icon("refresh") + "<h3>" + te("自动运行") + "</h3></div>"'));
@@ -673,7 +674,7 @@ test("open-in-conversation requires a valid session uuid", () => {
   assert.doesNotMatch(openHandler, /\/stop|session-handoff|终止并打开/);
   assert.ok(source.includes('type: "mcp-request"'));
   assert.ok(source.includes('sendAppServerRequest("thread/start"'));
-  assert.ok(source.includes('sendAppServerRequest("thread/resume", { threadId: expected })'));
+  assert.ok(source.includes('sendAppServerRequest("thread/resume", { threadId: expected, excludeTurns: true })'));
   assert.ok(source.includes('if (method === "thread/started") return false'));
   assert.ok(source.includes('sendAppServerRequest("turn/start"'));
   assert.ok(source.includes('sendAppServerRequest("turn/steer"'));

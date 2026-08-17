@@ -1,4 +1,4 @@
-import type { RemoteCommandAck, SyncPushRequest } from "./sync-contract.js";
+import { supportedSyncProtocolVersions, type RemoteCommandAck, type SyncPushRequest } from "./sync-contract.js";
 
 export type HubDevice = {
   id: string;
@@ -66,7 +66,7 @@ export class HubApplication {
       const device = this.dependencies.repository.deviceForToken(bearerToken(request));
       if (!device) return jsonResponse({ error: "unauthorized" }, 401);
       try {
-      if (url.pathname === "/api/v1/capabilities" && request.method === "GET") return jsonResponse({ protocol_versions: ["sync/v6", "sync/v5"], control_protocol: "control/v1", transports: ["websocket", "http"], command_delivery: "lease" });
+      if (url.pathname === "/api/v1/capabilities" && request.method === "GET") return jsonResponse({ protocol_versions: [...supportedSyncProtocolVersions], control_protocol: "control/v1", transports: ["websocket", "http"], command_delivery: "lease" });
       if (url.pathname === "/api/v1/sync/push" && request.method === "POST") return jsonResponse(this.dependencies.repository.push(device.id, await request.json() as SyncPushRequest));
       if (url.pathname === "/api/v1/sync/commands" && request.method === "GET") return jsonResponse({ commands: this.dependencies.repository.pendingCommands(device.id, Number(url.searchParams.get("limit") || 100)) });
       if (url.pathname === "/api/v1/sync/commands/claim" && request.method === "POST") return jsonResponse({ commands: this.dependencies.repository.claimCommands(device.id, Number(url.searchParams.get("limit") || 100)) });
