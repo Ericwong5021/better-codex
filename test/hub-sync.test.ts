@@ -103,7 +103,8 @@ test("Hub mirrors the privacy-filtered projection with durable idempotent sync",
     assert.equal(board.runtime?.health_state, "online");
     assert.deepEqual(board.runtime?.usage, expectedUsage);
     assert.equal(hub.store.changeWindow(0).changes.some(change => change.entity_type === "runtime"), true);
-    assert.doesNotMatch(JSON.stringify(board), /private-workspace|private-thread|private instructions|workspace_path|thread_id|reply_draft|instructions|sandbox_mode/);
+    assert.deepEqual(board.projects.find(item => item.id === project.id)?.root_paths, [join(directory, "private-workspace")]);
+    assert.doesNotMatch(JSON.stringify(board), /private-thread|private instructions|workspace_path|thread_id|reply_draft|instructions|sandbox_mode/);
     assert.equal(board.agents.find(item => item.id === agent.id)?.model, "private-model");
     assert.equal(board.agents.find(item => item.id === agent.id)?.reasoning_effort, "high");
     assert.equal(board.issues.find(item => item.id === issue.id)?.has_conversation, true);
@@ -209,7 +210,7 @@ test("replacement pairing transfers the single writer without clearing the proje
   try {
     const first = store.pairDevice("first", store.createPairingCode().pairing_code);
     const timestamp = new Date().toISOString();
-    const project: ProjectProjection = { id: "project-repair", name: "Repair", identifier_prefix: "RPR", created_at: timestamp, updated_at: timestamp, local_revision: 1 };
+    const project: ProjectProjection = { id: "project-repair", name: "Repair", identifier_prefix: "RPR", root_paths: [], description: "", overview_html: "", overview_status: "idle", overview_error: null, overview_updated_at: null, created_at: timestamp, updated_at: timestamp, local_revision: 1 };
     const request = (deviceId: string, changes: SyncPushRequest["changes"]): SyncPushRequest => ({
       protocol_version: syncProtocolVersion,
       core_version: "0.4.3",
@@ -281,6 +282,7 @@ test("the real Runtime service pushes API writes to the Hub", async () => {
   const codexHome = join(directory, "codex");
   mkdirSync(home, { recursive: true });
   mkdirSync(codexHome, { recursive: true });
+  mkdirSync(join(directory, "private-workspace"));
   const hub = createHubServer({ host: "127.0.0.1", port: 0, database: join(directory, "hub.db"), adminToken: "e".repeat(64) });
   const hubPort = await listen(hub.server);
   const code = hub.store.createPairingCode();
@@ -318,7 +320,8 @@ test("the real Runtime service pushes API writes to the Hub", async () => {
     while (Date.now() < syncDeadline && !hub.store.board().issues.some(issue => issue.title === "Runtime synchronized issue")) await new Promise(resolve => setTimeout(resolve, 100));
     const serialized = JSON.stringify(hub.store.board());
     assert.match(serialized, /Runtime synchronized issue/);
-    assert.doesNotMatch(serialized, /private-workspace|workspace_path/);
+    assert.match(serialized, /private-workspace/);
+    assert.doesNotMatch(serialized, /workspace_path/);
   } finally {
     await stopChild(child);
     await close(hub.server);

@@ -60,7 +60,9 @@ import {
   TriangleAlert,
   Trash2,
   User,
+  UserRoundCheck,
   UserRoundPen,
+  UserRoundX,
   Wrench,
   X,
 } from "lucide-static";
@@ -88,6 +90,8 @@ const lucideIcons = Object.fromEntries(Object.entries({
   tag: Tag,
   calendar: Calendar,
   user: User,
+  userCheck: UserRoundCheck,
+  userX: UserRoundX,
   userEdit: UserRoundPen,
   bot: Bot,
   image: Image,
@@ -291,6 +295,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     const ENTRY_ID = "better-codex-entry";
     const AGENTS_ENTRY_ID = "better-codex-agents-entry";
+    const PROJECTS_ENTRY_ID = "better-codex-projects-entry";
     const PANEL_ID = "better-codex-panel";
     const STYLE_ID = "better-codex-style";
     const OWNED = "data-better-codex-owned";
@@ -361,7 +366,31 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
     const systemLocale = resolveSystemLocale(INITIAL_LOCALE);
     const MOCKUP_PROJECT_ID = "mockup-better-codex";
-    const state = { projects: [], issues: [], agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: ["issues", "agents"].includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, autoDispatchPending: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", mockup: false, keepCreate: rememberedKeepCreate, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], project: [], label: [] } };
+    const initialProjectRoute = webProjectRoute();
+    const state = { projects: [], projectsLoaded: false, issues: [], projectIssues: [], projectDetailId: initialProjectRoute?.projectId || "", agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: initialProjectRoute ? "projects" : ["issues", "agents", "projects"].includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, autoDispatchPending: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", mockup: false, keepCreate: rememberedKeepCreate, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], project: [], label: [] } };
+    function webProjectRoute() {
+      if (HOST_KIND !== "web") return null;
+      const match = location.pathname.match(/^\\/web\\/projects(?:\\/([^/?#]+))?\\/?$/);
+      if (!match) return null;
+      try {
+        return { projectId: match[1] ? decodeURIComponent(match[1]) : "" };
+      } catch {
+        return { projectId: "" };
+      }
+    }
+
+    function projectRoutePath(projectId = "") {
+      return "/web/projects" + (projectId ? "/" + encodeURIComponent(projectId) : "");
+    }
+
+    function syncWebProjectRoute(projectId = "", mode = "push") {
+      if (HOST_KIND !== "web" || mode === "none") return;
+      const path = projectRoutePath(projectId);
+      if (location.pathname === path) return;
+      const routeState = { betterCodex: true, betterCodexSurface: "projects", betterCodexProjectId: projectId || "" };
+      if (projectId && location.pathname === projectRoutePath()) routeState.betterCodexProjectFromHome = true;
+      history[mode === "replace" ? "replaceState" : "pushState"](routeState, "", path);
+    }
     function shortcutKeyFromCode(code, key) {
       const source = String(code || "");
       if (/^Key[A-Z]$/.test(source)) return source.slice(3);
@@ -604,6 +633,34 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     localeResources.en["发送消息"] = "Send messages";
     localeResources.en["选择消息输入框的发送按键"] = "Choose the key used to send from message fields";
     localeResources.en["横向滚动任务看板"] = "Scroll the task board horizontally";
+    Object.assign(localeResources.en, {
+      "项目管理": "Projects",
+      "管理项目": "Manage projects",
+      "创建项目": "Create project",
+      "项目名称": "Project name",
+      "项目文件夹": "Project folder",
+      "选择文件夹": "Choose folder",
+      "返回项目列表": "Back to projects",
+      "最近 Issue 与对话": "Recent issues and conversations",
+      "项目介绍": "Project overview",
+      "重新生成": "Regenerate",
+      "生成项目介绍": "Generate overview",
+      "正在读取项目代码和会话…": "Reading project code and conversations…",
+      "尚未生成项目介绍": "No project overview yet",
+      "项目介绍生成失败，可重新生成。": "The overview could not be generated. Try again.",
+      "创建后会加入 Codex 的项目列表。": "The project will be added to Codex.",
+      "创建项目后，它会出现在 Codex 的项目列表中。": "Create a project to add it to Codex.",
+      "输入文件夹的绝对路径": "Enter an absolute folder path",
+      "暂无关联 Issue": "No linked issues",
+      "已归档": "Archived",
+      "打开 Issue 详情": "Open issue details",
+      "取消归档后继续对话": "Unarchive to continue the conversation",
+      "项目概况": "Project summary",
+      "个项目": "projects",
+      "个文件夹": "folders",
+      "创建 Codex 项目": "Create Codex project",
+      "无法选择文件夹": "Unable to choose a folder",
+    });
     const bridgeRequests = new Map();
     const appServerRequests = new Map();
     const sessionHandoffPending = new Set();
@@ -614,6 +671,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     let diagnosticSequence = 0;
     let entry = null;
     let agentsEntry = null;
+    let projectsEntry = null;
     let panel = null;
     let observer = null;
     let refreshPending = false;
@@ -833,9 +891,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       style.id = STYLE_ID;
       style.setAttribute(OWNED, "true");
       style.textContent = \`
-        #\${ENTRY_ID}[aria-current="page"], #\${AGENTS_ENTRY_ID}[aria-current="page"] { background: var(--color-background-primary-soft-active, var(--color-token-list-hover-background, color-mix(in srgb, currentColor 8%, transparent))); }
-        html[data-better-codex-open="true"] \${SELECTORS.sidebarNavigation} [aria-current="page"]:not(#\${ENTRY_ID}):not(#\${AGENTS_ENTRY_ID}) { background: transparent !important; }
-        html[data-better-codex-open="true"] \${SELECTORS.sidebarNavigation} [aria-current="page"]:not(#\${ENTRY_ID}):not(#\${AGENTS_ENTRY_ID}) .text-token-list-active-selection-foreground { color: var(--color-token-foreground) !important; }
+        #\${ENTRY_ID}[aria-current="page"], #\${AGENTS_ENTRY_ID}[aria-current="page"], #\${PROJECTS_ENTRY_ID}[aria-current="page"] { background: var(--color-background-primary-soft-active, var(--color-token-list-hover-background, color-mix(in srgb, currentColor 8%, transparent))); }
+        html[data-better-codex-open="true"] \${SELECTORS.sidebarNavigation} [aria-current="page"]:not(#\${ENTRY_ID}):not(#\${AGENTS_ENTRY_ID}):not(#\${PROJECTS_ENTRY_ID}) { background: transparent !important; }
+        html[data-better-codex-open="true"] \${SELECTORS.sidebarNavigation} [aria-current="page"]:not(#\${ENTRY_ID}):not(#\${AGENTS_ENTRY_ID}):not(#\${PROJECTS_ENTRY_ID}) .text-token-list-active-selection-foreground { color: var(--color-token-foreground) !important; }
         [\${HOST}="true"] { position: relative !important; z-index: 31 !important; pointer-events: none !important; }
         [\${HIDDEN}="true"] { visibility: hidden !important; pointer-events: none !important; }
         html { --bc-page: oklch(.988087 0 0); --bc-surface: oklch(1 0 0); --bc-raised: oklch(1 0 0); --bc-hover: oklch(.967 .001 286.375); --bc-selected: oklch(.95 .002 286.375); --bc-foreground: oklch(.141 .005 285.823); --bc-muted: oklch(.505 .016 285.938); --bc-faint: oklch(.606 .016 285.938); --bc-border: oklch(.92 .004 286.32); --bc-divider: oklch(.945 .003 286.32); --bc-input: oklch(.92 .004 286.32); --bc-ring: oklch(.705 .015 286.067); --bc-primary: oklch(.21 .006 285.885); --bc-primary-foreground: oklch(.985 0 0); --bc-warning: oklch(.75 .16 85); --bc-success: oklch(.55 .16 145); --bc-info: oklch(.55 .18 250); --bc-danger: oklch(.577 .245 27.325); --bc-priority-none: oklch(.62 .01 286); --bc-priority-low: oklch(.55 .1 250); --bc-priority-medium: oklch(.76 .15 95); --bc-priority-high: oklch(.68 .18 52); --bc-priority-urgent: var(--bc-danger); --bc-surface-shadow: 0 1px 2px rgb(15 23 42 / .04),0 1px 1px rgb(15 23 42 / .03); --bc-card-shadow: 0 1px 3px rgb(15 23 42 / .10); --bc-floating-shadow: 0 16px 40px rgb(15 23 42 / .14),0 3px 10px rgb(15 23 42 / .08); --bc-menu-shadow: 0 8px 24px rgb(15 23 42 / .08),0 2px 6px rgb(15 23 42 / .05); --bc-scrim: rgb(24 24 27 / .22); color-scheme: light; }
@@ -999,6 +1057,72 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         @keyframes better-codex-shimmer { 0% { background-position: 200% 0 } 100% { background-position: -200% 0 } }
         #\${PANEL_ID} .better-codex-shimmer { background-image: linear-gradient(90deg,#71717a 0%,#71717a 35%,#18181b 50%,#71717a 65%,#71717a 100%); background-size: 200% 100%; background-clip: text; -webkit-background-clip: text; color: transparent; -webkit-text-fill-color: transparent; animation: better-codex-shimmer 2.5s linear infinite; }
         #\${PANEL_ID} .better-codex-empty { padding: 18px 4px; text-align: center; color: #a1a1aa; font-size: var(--bc-text-sm); }
+        #\${PANEL_ID} .better-codex-project-heading, #\${PANEL_ID} .better-codex-project-actions { display: none; align-items: center; gap: 8px; }
+        #\${PANEL_ID} .better-codex-project-heading { min-width: 0; }
+        #\${PANEL_ID} .better-codex-project-heading strong { overflow: hidden; font-size: var(--bc-text-md); font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+        #\${PANEL_ID} .better-codex-project-heading span { flex: 0 0 auto; color: var(--bc-muted); font-size: var(--bc-text-sm); }
+        #\${PANEL_ID} .better-codex-project-heading .better-codex-project-back { min-height: 32px; margin-left: -8px; padding: 0 8px; }
+        #\${PANEL_ID} .better-codex-project-breadcrumb { display: flex; min-width: 0; align-items: center; gap: 7px; }
+        #\${PANEL_ID} .better-codex-project-breadcrumb button { flex: 0 0 auto; border: 0; color: var(--bc-muted); background: transparent; padding: 3px 0; font: inherit; font-size: var(--bc-text-md); cursor: pointer; }
+        #\${PANEL_ID} .better-codex-project-breadcrumb button:hover { color: var(--bc-foreground); }
+        #\${PANEL_ID}[data-surface="projects"] .better-codex-issue-only, #\${PANEL_ID}[data-surface="projects"] .better-codex-agent-heading, #\${PANEL_ID}[data-surface="projects"] .better-codex-agent-actions { display: none; }
+        #\${PANEL_ID}[data-surface="projects"] .better-codex-project-heading, #\${PANEL_ID}[data-surface="projects"] .better-codex-project-actions { display: flex; }
+        #\${PANEL_ID} .better-codex-projects { display: none; min-height: 0; flex: 1; overflow-y: auto; padding: 18px 22px 32px; }
+        #\${PANEL_ID}[data-surface="projects"] .better-codex-projects { display: block; }
+        #\${PANEL_ID} .better-codex-project-list { display: grid; width: min(1120px,100%); margin: 0 auto; grid-template-columns: repeat(auto-fill,minmax(300px,1fr)); gap: 12px; }
+        #\${PANEL_ID} .better-codex-project-card { display: flex; min-height: 152px; box-sizing: border-box; flex-direction: column; border: 0; border-radius: var(--bc-radius-lg, 16px); color: var(--bc-foreground); background: var(--bc-surface); padding: 16px; text-align: left; cursor: pointer; transition: transform .15s cubic-bezier(.16,1,.3,1), background-color .15s cubic-bezier(.16,1,.3,1); }
+        #\${PANEL_ID} .better-codex-project-card:active { transform: scale(.98); }
+        #\${PANEL_ID} .better-codex-project-card:focus-visible { outline: 2px solid var(--bc-ring); outline-offset: 2px; }
+        #\${PANEL_ID} .better-codex-project-card-head { display: flex; align-items: flex-start; gap: 11px; }
+        #\${PANEL_ID} .better-codex-project-card-icon { display: inline-flex; width: 36px; height: 36px; flex: 0 0 auto; align-items: center; justify-content: center; border-radius: var(--bc-radius-sm, 10px); color: var(--bc-muted); background: var(--bc-control); }
+        #\${PANEL_ID} .better-codex-project-card-icon svg { width: 18px; height: 18px; }
+        #\${PANEL_ID} .better-codex-project-card-title { min-width: 0; flex: 1; }
+        #\${PANEL_ID} .better-codex-project-card-title strong { display: block; overflow: hidden; font-size: var(--bc-text-md); font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+        #\${PANEL_ID} .better-codex-project-card-title span { display: block; margin-top: 4px; color: var(--bc-muted); font-size: var(--bc-text-caption); }
+        #\${PANEL_ID} .better-codex-project-card-description { display: -webkit-box; margin: 13px 0 0; overflow: hidden; color: var(--bc-muted); font-size: var(--bc-text-sm); line-height: 1.65; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+        #\${PANEL_ID} .better-codex-project-card-path { display: flex; min-width: 0; align-items: center; gap: 6px; margin-top: auto; padding-top: 16px; color: var(--bc-faint); font-size: var(--bc-text-caption); }
+        #\${PANEL_ID} .better-codex-project-card-path svg { width: 13px; height: 13px; flex: 0 0 auto; }
+        #\${PANEL_ID} .better-codex-project-card-path span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        #\${PANEL_ID} .better-codex-project-empty { width: min(520px,100%); margin: 16vh auto 0; text-align: center; }
+        #\${PANEL_ID} .better-codex-project-empty strong { display: block; font-size: var(--bc-text-md); }
+        #\${PANEL_ID} .better-codex-project-empty p { margin: 7px 0 0; color: var(--bc-muted); font-size: var(--bc-text-sm); line-height: 1.7; }
+        #\${PANEL_ID} .better-codex-project-detail { width: min(1240px,100%); margin: 0 auto; }
+        #\${PANEL_ID} .better-codex-project-back { display: inline-flex; min-height: 36px; align-items: center; gap: 7px; border: 0; border-radius: var(--bc-radius-sm, 10px); color: var(--bc-muted); background: transparent; padding: 0 9px; font: inherit; font-size: var(--bc-text-sm); cursor: pointer; }
+        #\${PANEL_ID} .better-codex-project-back svg { width: 15px; height: 15px; transform: rotate(180deg); }
+        #\${PANEL_ID} .better-codex-project-summary { display: grid; grid-template-columns: minmax(0,1fr) minmax(260px,.7fr); gap: 24px; margin-top: 14px; border-radius: var(--bc-radius-xl, 20px); background: var(--bc-surface); padding: 24px; }
+        #\${PANEL_ID} .better-codex-project-summary h1 { margin: 0; font-size: var(--bc-text-xl); font-weight: 680; line-height: 1.3; text-wrap: balance; }
+        #\${PANEL_ID} .better-codex-project-eyebrow { display: block; margin-bottom: 7px; color: var(--bc-faint); font-size: var(--bc-text-caption); font-weight: 650; }
+        #\${PANEL_ID} .better-codex-project-summary p { max-width: 68ch; margin: 9px 0 0; color: var(--bc-muted); font-size: var(--bc-text-md); line-height: 1.75; text-wrap: pretty; }
+        #\${PANEL_ID} .better-codex-project-paths { display: grid; align-content: start; gap: 7px; }
+        #\${PANEL_ID} .better-codex-project-paths > strong { color: var(--bc-muted); font-size: var(--bc-text-caption); font-weight: 600; }
+        #\${PANEL_ID} .better-codex-project-path { display: flex; min-width: 0; align-items: center; gap: 7px; border-radius: var(--bc-radius-sm, 10px); color: var(--bc-muted); background: var(--bc-control); padding: 9px 10px; font-family: var(--bc-font-mono, ui-monospace, monospace); font-size: var(--bc-text-caption); }
+        #\${PANEL_ID} .better-codex-project-path svg { width: 14px; height: 14px; flex: 0 0 auto; }
+        #\${PANEL_ID} .better-codex-project-path span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        #\${PANEL_ID} .better-codex-project-columns { display: grid; height: clamp(380px,calc(100dvh - 350px),720px); grid-template-columns: minmax(320px,.82fr) minmax(420px,1.18fr); gap: 14px; margin-top: 14px; align-items: stretch; }
+        #\${PANEL_ID} .better-codex-project-panel { display: flex; min-width: 0; min-height: 0; overflow: hidden; flex-direction: column; border-radius: var(--bc-radius-lg, 16px); background: var(--bc-surface); }
+        #\${PANEL_ID} .better-codex-project-panel-head { display: flex; min-height: 52px; align-items: center; justify-content: space-between; gap: 12px; padding: 0 16px; }
+        #\${PANEL_ID} .better-codex-project-panel-head strong { font-size: var(--bc-text-md); font-weight: 650; }
+        #\${PANEL_ID} .better-codex-project-panel-head span { color: var(--bc-muted); font-size: var(--bc-text-caption); }
+        #\${PANEL_ID} .better-codex-project-issues { min-height: 0; flex: 1; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 0 7px 8px; }
+        #\${PANEL_ID} .better-codex-project-issue { overflow: hidden; border-radius: var(--bc-radius-sm, 10px); }
+        #\${PANEL_ID} .better-codex-project-issue-toggle { display: grid; width: 100%; min-height: 56px; grid-template-columns: 18px minmax(0,1fr) auto; align-items: center; gap: 9px; border: 0; border-radius: inherit; color: inherit; background: transparent; padding: 8px 9px; font: inherit; text-align: left; cursor: pointer; }
+        #\${PANEL_ID} .better-codex-project-issue-toggle:focus-visible { outline: 2px solid var(--bc-ring); outline-offset: -2px; }
+        #\${PANEL_ID} .better-codex-project-issue-title { min-width: 0; }
+        #\${PANEL_ID} .better-codex-project-issue-title strong { display: block; overflow: hidden; font-size: var(--bc-text-sm); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+        #\${PANEL_ID} .better-codex-project-issue-title > span { display: flex; align-items: center; gap: 6px; margin-top: 4px; color: var(--bc-faint); font-size: var(--bc-text-caption); }
+        #\${PANEL_ID} .better-codex-project-issue-toggle > svg { width: 14px; height: 14px; color: var(--bc-faint); transition: transform .15s cubic-bezier(.16,1,.3,1); }
+        #\${PANEL_ID} .better-codex-project-issue-toggle:hover > svg { transform: translateX(2px); }
+        #\${PANEL_ID} .better-codex-project-overview { min-height: 0; flex: 1; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 2px 20px 24px; color: color-mix(in oklch,var(--bc-foreground) 82%,var(--bc-muted)); font-size: var(--bc-text-md); line-height: 1.75; }
+        #\${PANEL_ID} .better-codex-project-overview h1, #\${PANEL_ID} .better-codex-project-overview h2, #\${PANEL_ID} .better-codex-project-overview h3 { color: var(--bc-foreground); line-height: 1.35; text-wrap: balance; }
+        #\${PANEL_ID} .better-codex-project-overview h1 { font-size: var(--bc-text-xl); }
+        #\${PANEL_ID} .better-codex-project-overview h2 { margin-top: 24px; font-size: var(--bc-text-lg); }
+        #\${PANEL_ID} .better-codex-project-overview code { border-radius: var(--bc-radius-xs, 6px); background: var(--bc-control); padding: 2px 5px; }
+        #\${PANEL_ID} .better-codex-project-overview-empty { display: grid; min-height: 360px; place-content: center; color: var(--bc-muted); text-align: center; }
+        #\${PANEL_ID} .better-codex-project-overview-empty svg { width: 24px; height: 24px; margin: 0 auto 10px; }
+        #\${PANEL_ID} .better-codex-project-overview-empty p { max-width: 34ch; margin: 0; font-size: var(--bc-text-sm); line-height: 1.7; }
+        @media (hover:hover) { #\${PANEL_ID} .better-codex-project-card:hover, #\${PANEL_ID} .better-codex-project-issue-toggle:hover, #\${PANEL_ID} .better-codex-project-back:hover { background: var(--bc-hover); } }
+        @media (max-width: 900px) { #\${PANEL_ID} .better-codex-project-summary, #\${PANEL_ID} .better-codex-project-columns { grid-template-columns: 1fr; } #\${PANEL_ID} .better-codex-project-columns { height: auto; } #\${PANEL_ID} .better-codex-project-panel:first-child { height: min(60dvh,560px); min-height: 340px; } #\${PANEL_ID} .better-codex-project-panel:last-child { height: auto; } #\${PANEL_ID} .better-codex-project-overview { min-height: 260px; overflow: visible; } }
+        @media (max-width: 640px) { #\${PANEL_ID} .better-codex-projects { padding: 12px 12px 24px; } #\${PANEL_ID} .better-codex-project-list { grid-template-columns: 1fr; } #\${PANEL_ID} .better-codex-project-summary { padding: 18px; } #\${PANEL_ID} .better-codex-project-columns { grid-template-columns: minmax(0,1fr); } }
         #\${PANEL_ID} .better-codex-agent-heading { display: none; min-width: 0; align-items: baseline; gap: 4px; }
         #\${PANEL_ID} .better-codex-agent-heading strong { color: #18181b; font-size: var(--bc-text-md); font-weight: 650; }
         #\${PANEL_ID} .better-codex-agent-heading span { color: var(--bc-muted); font-size: var(--bc-text-sm); }
@@ -1061,6 +1185,20 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #better-codex-agent-dialog .better-codex-button:active, #better-codex-agent-dialog .better-codex-submit:active { transform: scale(.96); }
         #better-codex-agent-dialog .better-codex-submit:disabled { opacity: .55; cursor: not-allowed; }
         @media (max-width: 640px) { #better-codex-agent-dialog .better-codex-agent-field { grid-template-columns: 1fr; gap: 5px; } #better-codex-agent-dialog .better-codex-agent-field > label { padding-top: 0; } #better-codex-agent-dialog .better-codex-agent-execution { grid-template-columns: 1fr; } }
+        #better-codex-project-dialog { position: fixed; inset: 0; box-sizing: border-box; width: min(500px,calc(100vw - 32px)); margin: auto; border: 0; border-radius: var(--bc-radius-xl, 20px); color: var(--bc-foreground); background: var(--bc-raised); padding: 0; box-shadow: var(--bc-floating-shadow); font-family: var(--bc-font-ui); }
+        #better-codex-project-dialog::backdrop { background: var(--bc-scrim); }
+        #better-codex-project-dialog form { padding: 24px; }
+        #better-codex-project-dialog h2 { margin: 0; font-size: var(--bc-text-xl); font-weight: 650; }
+        #better-codex-project-dialog > form > p { margin: 7px 0 20px; color: var(--bc-muted); font-size: var(--bc-text-sm); line-height: 1.65; }
+        #better-codex-project-dialog label { display: grid; gap: 7px; margin-top: 14px; color: var(--bc-muted); font-size: var(--bc-text-sm); font-weight: 600; }
+        #better-codex-project-dialog input { box-sizing: border-box; width: 100%; min-height: 40px; border: 0; border-radius: var(--bc-radius-sm, 10px); color: var(--bc-foreground); background: var(--bc-control); padding: 0 11px; font: inherit; font-weight: 400; }
+        #better-codex-project-dialog input:focus-visible, #better-codex-project-dialog button:focus-visible { outline: 2px solid var(--bc-ring); outline-offset: 2px; }
+        #better-codex-project-dialog .better-codex-project-folder-field { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px; }
+        #better-codex-project-dialog .better-codex-project-folder-field button, #better-codex-project-dialog .better-codex-project-dialog-actions button { min-height: 40px; border: 0; border-radius: var(--bc-radius-sm, 10px); color: var(--bc-foreground); background: var(--bc-control); padding: 0 12px; font: inherit; cursor: pointer; }
+        #better-codex-project-dialog .better-codex-project-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px; }
+        #better-codex-project-dialog .better-codex-project-dialog-actions button[type="submit"] { color: var(--bc-primary-foreground); background: var(--bc-primary); }
+        #better-codex-project-dialog output { display: block; margin-top: 10px; color: var(--bc-danger); font-size: var(--bc-text-sm); }
+        #better-codex-project-dialog button:active { transform: scale(.96); }
         #better-codex-confirm { position: fixed; inset: 0; box-sizing: border-box; width: min(420px,calc(100vw - 40px)); margin: auto; overflow: hidden; border: 1px solid var(--bc-border); border-radius: 13px; color: var(--bc-foreground); background: var(--bc-raised); padding: 0; box-shadow: var(--bc-floating-shadow); font-family: var(--bc-font-ui); }
         #better-codex-confirm::backdrop { background: var(--bc-scrim); backdrop-filter: blur(4px); }
         #better-codex-confirm .better-codex-confirm-body { padding: 20px 20px 17px; }
@@ -1273,7 +1411,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       button.addEventListener("click", event => {
         event.preventDefault();
         event.stopPropagation();
-        state.surface = surface;
         openRoute(surface);
       });
       return button;
@@ -1282,7 +1419,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     function syncEntryIcon(button, surface) {
       const svg = button.querySelector("svg");
       if (svg) {
-        const definition = LUCIDE_ICONS[surface === "agents" ? "bot" : "issues"];
+        const definition = LUCIDE_ICONS[surface === "agents" ? "bot" : surface === "projects" ? "folder" : "issues"];
         if (svg.getAttribute("viewBox") !== "0 0 24 24") svg.setAttribute("viewBox", "0 0 24 24");
         if (svg.getAttribute("fill") !== "none") svg.setAttribute("fill", "none");
         if (svg.getAttribute("stroke") !== "currentColor") svg.setAttribute("stroke", "currentColor");
@@ -1322,12 +1459,16 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       syncEntryLabel(agentsEntry, "智能体", "管理智能体");
       syncEntryIcon(agentsEntry, "agents");
       if (agentsEntry.parentElement !== parent || agentsEntry.previousElementSibling !== entry) entry.after(agentsEntry);
-      const currentEntry = active && state.surface === "issues" ? entry : active && state.surface === "agents" ? agentsEntry : null;
-      for (const item of [entry, agentsEntry]) {
+      if (!projectsEntry) projectsEntry = createEntry("项目管理", PROJECTS_ENTRY_ID, "管理项目", "projects");
+      syncEntryLabel(projectsEntry, "项目管理", "管理项目");
+      syncEntryIcon(projectsEntry, "projects");
+      if (projectsEntry.parentElement !== parent || projectsEntry.previousElementSibling !== agentsEntry) agentsEntry.after(projectsEntry);
+      const currentEntry = active && state.surface === "issues" ? entry : active && state.surface === "agents" ? agentsEntry : active && state.surface === "projects" ? projectsEntry : null;
+      for (const item of [entry, agentsEntry, projectsEntry]) {
         if (item === currentEntry && item.getAttribute("aria-current") !== "page") item.setAttribute("aria-current", "page");
         if (item !== currentEntry && item.hasAttribute("aria-current")) item.removeAttribute("aria-current");
       }
-      return entry.isConnected && agentsEntry.isConnected;
+      return entry.isConnected && agentsEntry.isConnected && projectsEntry.isConnected;
     }
 
     function findMount() {
@@ -1366,7 +1507,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const requestPath = path + (path.includes("?") ? "&" : "?") + "locale=" + encodeURIComponent(state.locale);
       const attempt = (retriesLeft) => {
         if (typeof window.betterCodexHost?.request === "function") {
-          return Promise.resolve(window.betterCodexHost.request({ path: requestPath, method: options.method || "GET", body: options.body })).catch(error => {
+          return Promise.resolve(window.betterCodexHost.request({ path: requestPath, method: options.method || "GET", body: options.body, timeoutMs: options.timeoutMs })).catch(error => {
             if (retriesLeft > 0 && error instanceof Error && error.message === "runtime_bridge_timeout") return attempt(retriesLeft - 1);
             throw error;
           });
@@ -1377,10 +1518,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           const timer = setTimeout(() => {
             bridgeRequests.delete(id);
             reject(new Error("runtime_bridge_timeout"));
-          }, 10000);
+          }, Number(options.timeoutMs) || 10000);
           bridgeRequests.set(id, { resolve, reject, timer });
           try {
-            window.betterCodexRequest(JSON.stringify({ id, token: BRIDGE_TOKEN, path: requestPath, method: options.method || "GET", body: options.body }));
+            window.betterCodexRequest(JSON.stringify({ id, token: BRIDGE_TOKEN, path: requestPath, method: options.method || "GET", body: options.body, timeoutMs: options.timeoutMs }));
           } catch (error) {
             bridgeRequests.delete(id);
             clearTimeout(timer);
@@ -2881,6 +3022,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       for (const [view, text] of [["all", "全部"], ["assigned", "已分配"], ["unassigned", "未分配"]]) {
         const button = actionButton(text);
         button.dataset.view = view;
+        button.setAttribute("aria-label", t(text));
+        button.innerHTML = icon(view === "all" ? "board" : view === "assigned" ? "userCheck" : "userX", "better-codex-tab-icon") + "<span>" + te(text) + "</span>";
         button.addEventListener("click", () => { state.view = view; render(); });
         tabs.append(button);
       }
@@ -2897,6 +3040,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const working = actionButton("0 个智能体工作中");
       working.id = "better-codex-working";
       working.classList.add("better-codex-working-chip", "is-bordered");
+      working.setAttribute("aria-label", t("0 个智能体工作中"));
       working.addEventListener("click", () => { state.view = state.view === "working" ? "all" : "working"; render(); });
       const searchWrap = document.createElement("div");
       searchWrap.className = "better-codex-search-wrap";
@@ -2905,13 +3049,15 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       search.id = "better-codex-search";
       search.className = "better-codex-search";
       search.placeholder = t("搜索任务");
+      search.setAttribute("aria-label", t("搜索任务"));
       search.value = "";
       search.addEventListener("input", () => { state.search = search.value; void perform(loadIssues); });
       searchWrap.appendChild(search);
       const filter = actionButton("筛选");
       filter.id = "better-codex-filter";
       filter.classList.add("is-bordered");
-      filter.insertAdjacentHTML("afterbegin", icon("filter"));
+      filter.setAttribute("aria-label", t("筛选"));
+      filter.innerHTML = icon("filter") + "<span>" + te("筛选") + "</span>";
       filter.addEventListener("click", event => { event.stopPropagation(); openFilterMenu(filter); });
       const filterWrap = document.createElement("div");
       filterWrap.className = "better-codex-filter-wrap";
@@ -2955,7 +3101,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       autoDispatchWrap.append(autoDispatch, autoDispatchHelp);
       const addIssue = actionButton("新建 issue");
       addIssue.className = "better-codex-create-primary";
-      addIssue.insertAdjacentHTML("afterbegin", icon("plus"));
+      addIssue.setAttribute("aria-label", t("新建 issue"));
+      addIssue.innerHTML = icon("plus") + "<span>" + te("新建 issue") + "</span>";
       addIssue.addEventListener("click", () => {
         closeCreateMenu();
         void perform(() => openEditor());
@@ -2975,7 +3122,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const createSplit = document.createElement("div");
       createSplit.className = "better-codex-create-split";
       createSplit.append(addIssue, createToggle);
-      actions.append(error, working, searchWrap, filterWrap, autoDispatchWrap, createSplit);
+      actions.append(working, searchWrap, filterWrap, autoDispatchWrap, createSplit);
       const agentActions = document.createElement("div");
       agentActions.className = "better-codex-agent-actions";
       const addAgent = actionButton("新建智能体");
@@ -2983,7 +3130,18 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       addAgent.insertAdjacentHTML("afterbegin", icon("plus"));
       addAgent.addEventListener("click", () => startAgentCreate());
       agentActions.append(addAgent);
-      toolbar.append(tabs, agentHeading, actions, agentActions);
+      const projectHeading = document.createElement("div");
+      projectHeading.className = "better-codex-project-heading";
+      projectHeading.innerHTML = '<strong>' + te("项目管理") + '</strong><span data-project-heading-meta></span>';
+      projectHeading.addEventListener("click", onProjectsClick);
+      const projectActions = document.createElement("div");
+      projectActions.className = "better-codex-project-actions";
+      const addProject = actionButton("创建项目");
+      addProject.classList.add("is-bordered");
+      addProject.insertAdjacentHTML("afterbegin", icon("plus"));
+      addProject.addEventListener("click", () => openCreateProjectDialog());
+      projectActions.append(addProject);
+      toolbar.append(tabs, agentHeading, projectHeading, error, actions, agentActions, projectActions);
       const board = document.createElement("main");
       board.id = "better-codex-board";
       board.className = "better-codex-board better-codex-issue-only";
@@ -3051,7 +3209,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (search) { search.focus(); search.setSelectionRange(search.value.length, search.value.length); }
       });
       agents.addEventListener("submit", onAgentSubmit);
-      section.append(toolbar, board, ...(boardScrollControl ? [boardScrollControl] : []), agents, recovery);
+      const projects = document.createElement("main");
+      projects.id = "better-codex-projects";
+      projects.className = "better-codex-projects";
+      projects.addEventListener("click", onProjectsClick);
+      section.append(toolbar, board, ...(boardScrollControl ? [boardScrollControl] : []), agents, projects, recovery);
       return section;
     }
 
@@ -3558,6 +3720,181 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const animateEnter = previousPane === "preview" && state.agentPane !== "preview";
       container.innerHTML = '<div class="better-codex-agent-shell" data-pane="' + state.agentPane + '"><section class="better-codex-agent-directory"><header class="better-codex-agent-page-heading"><h1>' + te("智能体") + '</h1><p>' + te("创建和管理你的智能体") + '</p></header><div class="better-codex-agent-search-wrap">' + icon("search") + '<input class="better-codex-search" data-agent-search type="search" value="' + escapeHtml(state.agentSearch) + '" placeholder="' + te("搜索智能体") + '" aria-label="' + te("搜索智能体") + '"></div><div class="better-codex-agent-list">' + (rows || empty) + '</div>' + (state.agentView === "all" && !query ? '<div class="better-codex-agent-suggestions"><h3>' + te("建议") + '</h3>' + suggestions + '</div>' : "") + '</section>' + agentInspector(selected, { animateEnter }) + '</div>';
       applyAgentInspectorWidth(container.querySelector(".better-codex-agent-inspector"));
+    }
+
+    function projectRootPaths(project) {
+      const paths = Array.isArray(project?.root_paths) ? project.root_paths.map(String).filter(Boolean) : [];
+      if (!paths.length && project?.workspace_path) paths.push(String(project.workspace_path));
+      return paths;
+    }
+
+    function renderProjects() {
+      const container = panel?.querySelector("#better-codex-projects");
+      if (!container) return;
+      const heading = panel.querySelector(".better-codex-project-heading");
+      const createButton = panel.querySelector(".better-codex-project-actions .better-codex-button");
+      if (createButton) createButton.hidden = false;
+      if (!state.projectDetailId) {
+        if (heading) heading.innerHTML = '<strong>' + te("项目管理") + '</strong><span>' + escapeHtml(state.projects.length + " " + t("个项目")) + '</span>';
+        if (HOST_KIND === "web" && state.surface === "projects") document.title = t("项目管理") + " · Better Codex";
+        if (!state.projects.length) {
+          container.innerHTML = '<section class="better-codex-project-empty"><strong>' + te("暂无项目") + '</strong><p>' + te("创建项目后，它会出现在 Codex 的项目列表中。") + '</p></section>';
+          return;
+        }
+        container.innerHTML = '<section class="better-codex-project-list">' + projectsByRecentActivity(state.projects).map(project => {
+          const paths = projectRootPaths(project);
+          const description = project.description || t("尚未生成项目介绍");
+          return '<button class="better-codex-project-card" type="button" data-project-id="' + escapeHtml(project.id) + '"><span class="better-codex-project-card-head"><span class="better-codex-project-card-icon">' + icon("folder") + '</span><span class="better-codex-project-card-title"><strong>' + escapeHtml(projectLabel(project)) + '</strong><span>' + escapeHtml(paths.length + " " + t("个文件夹")) + '</span></span>' + icon("chevron") + '</span><span class="better-codex-project-card-description">' + escapeHtml(description) + '</span><span class="better-codex-project-card-path">' + icon("folder") + '<span>' + escapeHtml(paths[0] || t("未提供")) + '</span></span></button>';
+        }).join("") + '</section>';
+        return;
+      }
+      const project = state.projects.find(item => item.id === state.projectDetailId);
+      if (!project) {
+        if (!state.projectsLoaded) {
+          if (heading) heading.innerHTML = '<strong>' + te("项目管理") + '</strong>';
+          container.innerHTML = "";
+          return;
+        }
+        state.projectDetailId = "";
+        syncWebProjectRoute("", "replace");
+        return renderProjects();
+      }
+      const paths = projectRootPaths(project);
+      const issues = [...state.projectIssues].sort((left, right) => String(right.updated_at).localeCompare(String(left.updated_at)));
+      const overviewGenerating = project.overview_status === "generating";
+      const overviewAction = state.mockup ? "" : '<button class="better-codex-button is-bordered" type="button" data-project-overview="' + escapeHtml(project.id) + '"' + (overviewGenerating ? " disabled" : "") + '>' + icon(overviewGenerating ? "refresh" : "sparkles") + '<span>' + te(project.overview_html ? "重新生成" : "生成项目介绍") + '</span></button>';
+      const overview = project.overview_html
+        ? '<div class="better-codex-project-overview">' + project.overview_html + '</div>'
+        : '<div class="better-codex-project-overview-empty">' + icon(overviewGenerating ? "refresh" : "sparkles") + '<p>' + te(overviewGenerating ? "正在读取项目代码和会话…" : project.overview_status === "failed" ? "项目介绍生成失败，可重新生成。" : "尚未生成项目介绍") + '</p></div>';
+      const issueRows = issues.length ? issues.map(issue => '<article class="better-codex-project-issue"><button class="better-codex-project-issue-toggle" type="button" data-project-issue="' + escapeHtml(issue.id) + '" aria-label="' + te("打开 Issue 详情") + '">' + statusIcon(issue.status) + '<span class="better-codex-project-issue-title"><strong>' + escapeHtml(issue.title) + '</strong><span><b>' + escapeHtml(issue.identifier) + '</b><span>' + te("更新于 " + timeAgo(issue.updated_at)) + '</span>' + (issue.archived_at ? '<em>' + te("已归档") + '</em>' : "") + '</span></span>' + icon("chevron") + '</button></article>').join("") : '<div class="better-codex-empty">' + te("暂无关联 Issue") + '</div>';
+      const projectName = projectLabel(project);
+      if (heading) heading.innerHTML = '<button class="better-codex-project-back" type="button" data-project-back aria-label="' + te("返回项目列表") + '">' + icon("chevron") + '</button><nav class="better-codex-project-breadcrumb" aria-label="' + te("项目管理") + '"><button type="button" data-project-home>' + te("项目管理") + '</button><span aria-hidden="true">&gt;</span><strong title="' + escapeHtml(projectName) + '">' + escapeHtml(projectName) + '</strong></nav>';
+      if (HOST_KIND === "web" && state.surface === "projects") document.title = t("项目管理") + " > " + projectName + " · Better Codex";
+      container.innerHTML = '<section class="better-codex-project-detail"><section class="better-codex-project-summary"><div><span class="better-codex-project-eyebrow">' + te("项目概况") + '</span><h1>' + escapeHtml(projectName) + '</h1><p>' + escapeHtml(project.description || t("尚未生成项目介绍")) + '</p></div><div class="better-codex-project-paths"><strong>' + te("项目文件夹") + '</strong>' + (paths.length ? paths.map(path => '<div class="better-codex-project-path" title="' + escapeHtml(path) + '">' + icon("folder") + '<span>' + escapeHtml(path) + '</span></div>').join("") : '<div class="better-codex-project-path"><span>' + te("未提供") + '</span></div>') + '</div></section><div class="better-codex-project-columns"><section class="better-codex-project-panel"><header class="better-codex-project-panel-head"><strong>' + te("最近 Issue 与对话") + '</strong><span>' + escapeHtml(String(issues.length)) + '</span></header><div class="better-codex-project-issues">' + issueRows + '</div></section><section class="better-codex-project-panel"><header class="better-codex-project-panel-head"><strong>' + te("项目介绍") + '</strong>' + overviewAction + '</header>' + overview + '</section></div></section>';
+    }
+
+    async function loadProjects(options = {}) {
+      const projects = await api("/api/projects");
+      const projectsChanged = JSON.stringify(projects) !== JSON.stringify(state.projects);
+      state.projects = projects;
+      state.projectsLoaded = true;
+      if (state.projectDetailId) {
+        if (!state.projects.some(project => project.id === state.projectDetailId)) {
+          state.projectDetailId = "";
+          syncWebProjectRoute("", "replace");
+        }
+        else {
+          const [activeIssues, archivedIssues] = await Promise.all([
+            api("/api/issues?project_id=" + encodeURIComponent(state.projectDetailId)),
+            api("/api/issues?archived=1&project_id=" + encodeURIComponent(state.projectDetailId)),
+          ]);
+          state.projectIssues = [...activeIssues, ...archivedIssues];
+        }
+      }
+      if (options.background && !projectsChanged && !state.projectDetailId) return;
+      render();
+    }
+
+    async function openProjectDetail(projectId) {
+      state.projectDetailId = projectId;
+      syncWebProjectRoute(projectId);
+      renderProjects();
+      await loadProjects();
+      const project = state.projects.find(item => item.id === projectId);
+      if (!state.mockup && project && !project.overview_html && project.overview_status === "idle") {
+        const result = await api("/api/projects/" + encodeURIComponent(project.id) + "/overview", { method: "POST" });
+        if (result.command_id) {
+          const command = await waitForRemoteCommand(result.command_id);
+          if (command.status !== "applied") throw new Error(command.error || "command_rejected");
+        }
+        await loadProjects();
+      }
+    }
+
+    function onProjectsClick(event) {
+      const back = event.target.closest("[data-project-back],[data-project-home]");
+      if (back) {
+        if (HOST_KIND === "web" && history.state?.betterCodexProjectFromHome) return history.back();
+        state.projectDetailId = "";
+        syncWebProjectRoute("", "replace");
+        renderProjects();
+        return;
+      }
+      const overview = event.target.closest("[data-project-overview]");
+      if (overview) {
+        overview.disabled = true;
+        return void perform(async () => {
+          const result = await api("/api/projects/" + encodeURIComponent(overview.dataset.projectOverview) + "/overview", { method: "POST" });
+          if (result.command_id) {
+            const command = await waitForRemoteCommand(result.command_id);
+            if (command.status !== "applied") throw new Error(command.error || "command_rejected");
+          }
+          await loadProjects();
+        });
+      }
+      const issue = event.target.closest("[data-project-issue]");
+      if (issue) {
+        const selected = state.projectIssues.find(item => item.id === issue.dataset.projectIssue);
+        if (selected && !issuePermissions(selected).enrichmentPending) return void perform(() => openEditor(selected));
+        return;
+      }
+      const project = event.target.closest("[data-project-id]");
+      if (project) void perform(() => openProjectDetail(project.dataset.projectId));
+    }
+
+    function openCreateProjectDialog() {
+      document.getElementById("better-codex-project-dialog")?.remove();
+      const dialog = document.createElement("dialog");
+      dialog.id = "better-codex-project-dialog";
+      dialog.setAttribute(OWNED, "true");
+      dialog.innerHTML = '<form><h2>' + te("创建 Codex 项目") + '</h2><p>' + te("创建后会加入 Codex 的项目列表。") + '</p><label><span>' + te("项目名称") + '</span><input name="name" maxlength="120" autocomplete="off" required></label><label><span>' + te("项目文件夹") + '</span><span class="better-codex-project-folder-field"><input name="workspace_path" maxlength="4096" placeholder="' + te("输入文件夹的绝对路径") + '" autocomplete="off" spellcheck="false" required>' + (REMOTE ? "" : '<button type="button" data-project-choose-folder>' + te("选择文件夹") + '</button>') + '</span></label><output hidden></output><div class="better-codex-project-dialog-actions"><button type="button" data-project-create-cancel>' + te("取消") + '</button><button type="submit">' + te("创建项目") + '</button></div></form>';
+      const finish = () => { dialog.close(); dialog.remove(); };
+      dialog.querySelector("[data-project-create-cancel]").addEventListener("click", finish);
+      dialog.querySelector("[data-project-choose-folder]")?.addEventListener("click", async event => {
+        const button = event.currentTarget;
+        button.disabled = true;
+        try {
+          const result = await api("/api/system/directory", { method: "POST", timeoutMs: 300000 });
+          if (result.workspace_path) dialog.querySelector('[name="workspace_path"]').value = result.workspace_path;
+        } catch (error) {
+          const output = dialog.querySelector("output");
+          output.textContent = error instanceof Error ? error.message : t("无法选择文件夹");
+          output.hidden = false;
+        } finally {
+          button.disabled = false;
+        }
+      });
+      dialog.querySelector("form").addEventListener("submit", event => {
+        event.preventDefault();
+        const submit = dialog.querySelector('button[type="submit"]');
+        const output = dialog.querySelector("output");
+        const data = new FormData(event.currentTarget);
+        submit.disabled = true;
+        output.hidden = true;
+        const name = String(data.get("name") || "");
+        const workspacePath = String(data.get("workspace_path") || "");
+        void api("/api/projects", { method: "POST", body: JSON.stringify({ name, workspace_path: workspacePath }) }).then(async project => {
+          if (project.command_id) {
+            const command = await waitForRemoteCommand(project.command_id);
+            if (command.status !== "applied") throw new Error(command.error || "command_rejected");
+            await loadProjects();
+            project = state.projects.find(item => projectRootPaths(item).includes(workspacePath) && projectLabel(item) === name);
+            if (!project) throw new Error("project_not_found");
+          }
+          finish();
+          await loadProjects();
+          await openProjectDetail(project.id);
+        }).catch(error => {
+          output.textContent = error instanceof Error ? error.message : t("创建失败");
+          output.hidden = false;
+          submit.disabled = false;
+        });
+      });
+      dialog.addEventListener("cancel", event => { event.preventDefault(); finish(); });
+      bindModalDismiss(dialog, finish);
+      document.body.appendChild(dialog);
+      dialog.showModal();
+      dialog.querySelector('[name="name"]').focus();
     }
 
     function showAutoDispatchHelp(initialView = "mode") {
@@ -4092,20 +4429,24 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     function render() {
       if (!panel) return;
       panel.dataset.surface = state.surface;
+      if (HOST_KIND === "web" && state.surface !== "projects") document.title = t(state.surface === "agents" ? "智能体" : "任务看板") + " · Better Codex";
       renderAgents();
+      renderProjects();
       syncAutoDispatch();
       syncMockupUi();
       const runningCount = state.issues.filter(issue => issueExecutionRunning(issue)).length;
       panel.querySelectorAll("[data-view]").forEach(button => button.classList.toggle("is-active", button.dataset.view === state.view));
       const working = panel.querySelector("#better-codex-working");
-      working.innerHTML = '<span class="better-codex-working-dot"></span>' + te(runningCount + " 个智能体工作中");
+      working.innerHTML = icon("bot") + '<span>' + te(runningCount + " 个智能体工作中") + "</span>";
+      working.setAttribute("aria-label", t(runningCount + " 个智能体工作中"));
       working.title = t(runningCount ? "查看运行中的任务" : "当前没有运行中的任务");
       working.classList.toggle("has-work", runningCount > 0);
       working.classList.toggle("is-active", state.view === "working");
       working.hidden = false;
       const filterButton = panel.querySelector("#better-codex-filter");
       const filterCount = Object.values(state.filters).reduce((total, values) => total + values.length, 0);
-      filterButton.innerHTML = icon("filter") + te(filterCount ? filterCount + " 个筛选" : "筛选");
+      filterButton.innerHTML = icon("filter") + "<span>" + te(filterCount ? filterCount + " 个筛选" : "筛选") + "</span>";
+      filterButton.setAttribute("aria-label", t(filterCount ? filterCount + " 个筛选" : "筛选"));
       filterButton.classList.toggle("is-active", filterCount > 0);
       const visible = state.issues.filter(issue => {
         const assigned = Boolean(issue.agent_enabled || issue.user_assigned);
@@ -4222,6 +4563,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     async function loadSurface(options = {}) {
       if (state.surface === "agents") await loadAgents(options);
+      else if (state.surface === "projects") await loadProjects(options);
       else await loadIssues(options);
     }
 
@@ -4460,6 +4802,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       };
       const dialog = document.createElement("dialog");
       dialog.id = "better-codex-dialog";
+      dialog.dataset.host = HOST_KIND;
       dialog.setAttribute(OWNED, "true");
       let projectDismiss = null;
       let selectDismiss = null;
@@ -4485,6 +4828,17 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       let retainCreateDraft = !issue;
       let createRequestId = issue ? "" : cachedCreateDraft?.requestId || globalThis.crypto?.randomUUID?.() || VERSION + "-create-" + Date.now() + "-" + Math.random().toString(36).slice(2);
       let submitInFlight = false;
+      const mobileDialogViewport = () => {
+        const compact = HOST_KIND === "web" && window.matchMedia("(max-width: 720px)").matches;
+        if (!compact) {
+          dialog.style.removeProperty("--bc-mobile-viewport-top");
+          dialog.style.removeProperty("--bc-mobile-viewport-height");
+          return;
+        }
+        const viewport = window.visualViewport;
+        dialog.style.setProperty("--bc-mobile-viewport-top", (viewport?.offsetTop || 0) + "px");
+        dialog.style.setProperty("--bc-mobile-viewport-height", (viewport?.height || window.innerHeight) + "px");
+      };
       const dirtyDraftFields = new Set();
       const dialogKind = () => issue ? "issue" : draft.mode === "agent" ? "create_agent" : "create_manual";
       const traceDialog = (event, fields = {}) => traceRendererDiagnostic(event, {
@@ -4645,18 +4999,19 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const reply = dialog.querySelector('[name="reply"]');
         if (!send) return;
         const stopping = issue?.session_status === "stopping";
+        const archived = Boolean(issue?.archived_at);
         const working = stopping || executionRunning || replyStatus === "running";
         const mode = stopping ? "stopping" : working ? "stop" : "send";
         const composer = send.closest(".better-codex-composer");
-        if (reply) reply.disabled = sessionHandoff;
+        if (reply) reply.disabled = sessionHandoff || archived;
         if (composer) composer.dataset.state = mode;
         send.dataset.composerMode = mode;
         send.setAttribute("aria-label", t(stopping ? "正在停止…" : working ? "停止任务" : "发送"));
         send.title = t(stopping ? "正在停止…" : working ? "停止任务" : "发送");
         send.innerHTML = icon(working ? "stop" : "send", "", working ? "2.5" : "2");
-        send.disabled = stopping || sessionHandoff || (!working && !String(reply?.value || "").trim() && !draft.replyAttachments.length);
+        send.disabled = stopping || sessionHandoff || archived || (!working && !String(reply?.value || "").trim() && !draft.replyAttachments.length);
         const attach = dialog.querySelector("[data-conversation-attach]");
-        if (attach) attach.disabled = sessionHandoff;
+        if (attach) attach.disabled = sessionHandoff || archived;
       }
 
       function applyDialogPermissions() {
@@ -4665,8 +5020,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         dialog.dataset.executionLocked = String(executionLocked);
         dialog.dataset.locked = String(editingLocked);
         dialog.querySelectorAll("input, textarea, select, button").forEach(control => {
-          if (control.matches("[data-dialog-close], [data-dialog-expand], [data-dialog-open-thread], [data-dialog-stop], [data-description-toggle]")) {
+          if (control.matches("[data-dialog-close], [data-dialog-expand], [data-dialog-open-thread], [data-dialog-stop], [data-dialog-restore], [data-description-toggle]")) {
             control.disabled = false;
+            return;
+          }
+          if (issue?.archived_at) {
+            control.disabled = true;
             return;
           }
           if (enrichmentLocked) {
@@ -4697,6 +5056,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const previousEnrichmentLocked = enrichmentLocked;
         const previousExecutionRunning = executionRunning;
         const previousSessionHandoff = sessionHandoff;
+        const previousArchivedAt = issue.archived_at;
         const previousTitle = issue.title;
         const previousDescription = issue.description;
         const previousStatus = issue.status;
@@ -4725,7 +5085,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           || previousLabels !== JSON.stringify(issue.labels || [])
           || previousAssignee !== [issue.agent_enabled, issue.agent_id || "", issue.user_assigned].join(":")
           || previousProjectId !== issue.project_id;
-        if (previousSessionId !== sessionId || previousEnrichmentLocked !== enrichmentLocked || previousExecutionRunning !== executionRunning || previousSessionHandoff !== sessionHandoff || footerPresent !== !executionLocked || draftSourceChanged) {
+        if (previousSessionId !== sessionId || previousEnrichmentLocked !== enrichmentLocked || previousExecutionRunning !== executionRunning || previousSessionHandoff !== sessionHandoff || previousArchivedAt !== issue.archived_at || footerPresent !== !executionLocked || draftSourceChanged) {
           syncDraft();
           syncDraftFromIssue();
           renderDialog();
@@ -4739,16 +5099,19 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       function header() {
         const breadcrumbProject = state.projects.find(item => item.id === draft.projectId);
         const openThreadButton = issue && sessionId && !enrichmentLocked && HOST_CAPABILITIES.nativeThreads !== false
-          ? '<button class="better-codex-dialog-open-thread" type="button" data-dialog-open-thread="' + escapeHtml(sessionId) + '">' + te(sessionHandoff ? "前往会话" : "在会话中打开") + '</button>'
+          ? '<button class="better-codex-dialog-open-thread" type="button" data-dialog-open-thread="' + escapeHtml(sessionId) + '" aria-label="' + te(sessionHandoff ? "前往会话" : "在会话中打开") + '">' + icon("external") + '<span>' + te(sessionHandoff ? "前往会话" : "在会话中打开") + '</span></button>'
           : "";
         const startNowButton = issue && !issue.archived_at && !sessionId && !issue.active_run_status && issue.status !== "done"
-          ? '<button class="better-codex-dialog-start-now" type="button"' + (!issue.agent_enabled ? " disabled" : "") + ' data-dialog-start-now>' + te("立即开始任务") + '</button>'
+          ? '<button class="better-codex-dialog-start-now" type="button"' + (!issue.agent_enabled ? " disabled" : "") + ' data-dialog-start-now aria-label="' + te("立即开始任务") + '">' + icon("send") + '<span>' + te("立即开始任务") + '</span></button>'
+          : "";
+        const restoreButton = issue?.archived_at
+          ? '<button class="better-codex-dialog-start-now better-codex-dialog-restore" type="button" data-dialog-restore aria-label="' + te("取消归档") + '">' + icon("archive") + '<span>' + te("取消归档") + '</span></button>'
           : "";
         const title = draft.mode === "agent" ? t("通过智能体创建") : issue ? escapeHtml(issue.identifier) : t("手动创建");
         const crumb = issue
           ? '<span data-dialog-breadcrumb-project>' + escapeHtml(projectLabel(breadcrumbProject) || t("未提供")) + '</span><span aria-hidden="true">' + icon("chevron") + '</span><strong>' + title + '</strong>'
           : '<strong>' + title + '</strong>';
-        return '<div class="better-codex-dialog-head"><div class="better-codex-dialog-breadcrumb">' + crumb + '</div><div class="better-codex-dialog-head-actions">' + openThreadButton + startNowButton + '<button class="better-codex-icon-button" type="button" data-dialog-expand aria-label="' + te(draft.expanded ? "缩小" : "展开") + '">' + icon(draft.expanded ? "shrink" : "expand") + '</button><button class="better-codex-icon-button" type="button" data-dialog-close aria-label="' + te("关闭") + '">' + icon("close") + '</button></div></div>';
+        return '<div class="better-codex-dialog-head"><div class="better-codex-dialog-breadcrumb">' + crumb + '</div><div class="better-codex-dialog-head-actions">' + restoreButton + openThreadButton + startNowButton + '<button class="better-codex-icon-button" type="button" data-dialog-expand aria-label="' + te(draft.expanded ? "缩小" : "展开") + '">' + icon(draft.expanded ? "shrink" : "expand") + '</button><button class="better-codex-icon-button" type="button" data-dialog-close aria-label="' + te("关闭") + '">' + icon("close") + '</button></div></div>';
       }
 
       function conversationPanel() {
@@ -4792,14 +5155,15 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       function conversationComposer() {
         if (!issue || !sessionId) return "";
         const stopping = issue.session_status === "stopping";
+        const archived = Boolean(issue.archived_at);
         const working = stopping || executionRunning || issue.reply_status === "running";
         const mode = stopping ? "stopping" : working ? "stop" : "send";
-        const inputDisabled = sessionHandoff ? " disabled" : "";
-        const actionDisabled = stopping || sessionHandoff || (!working && !draft.reply.trim() && !draft.replyAttachments.length) ? " disabled" : "";
+        const inputDisabled = sessionHandoff || archived ? " disabled" : "";
+        const actionDisabled = stopping || sessionHandoff || archived || (!working && !draft.reply.trim() && !draft.replyAttachments.length) ? " disabled" : "";
         const actionLabel = t(stopping ? "正在停止…" : working ? "停止任务" : "发送");
         const attachments = attachmentList(draft.replyAttachments, "reply");
         const attachButton = '<button class="better-codex-composer-attach" type="button" data-conversation-attach aria-label="' + te("添加附件") + '" title="' + te("添加附件") + '"' + inputDisabled + '>' + icon("plus", "", "1.9") + '</button>';
-        return '<div class="better-codex-composer" data-state="' + mode + '">' + attachments + '<textarea name="reply" rows="2" placeholder="' + te(sessionHandoff ? "请前往会话继续对话" : "输入下一步要求…") + '" aria-label="' + te("回复") + '"' + inputDisabled + '>' + escapeHtml(draft.reply) + '</textarea><div class="better-codex-composer-toolbar">' + attachButton + '<button class="better-codex-composer-send" type="button" data-conversation-send data-composer-mode="' + mode + '" aria-label="' + escapeHtml(actionLabel) + '" title="' + escapeHtml(actionLabel) + '"' + actionDisabled + '>' + icon(working ? "stop" : "send", "", working ? "2.5" : "2") + '</button></div></div>';
+        return '<div class="better-codex-composer" data-state="' + mode + '">' + attachments + '<textarea name="reply" rows="2" placeholder="' + te(archived ? "取消归档后继续对话" : sessionHandoff ? "请前往会话继续对话" : "输入下一步要求…") + '" aria-label="' + te("回复") + '"' + inputDisabled + '>' + escapeHtml(draft.reply) + '</textarea><div class="better-codex-composer-toolbar">' + attachButton + '<button class="better-codex-composer-send" type="button" data-conversation-send data-composer-mode="' + mode + '" aria-label="' + escapeHtml(actionLabel) + '" title="' + escapeHtml(actionLabel) + '"' + actionDisabled + '>' + icon(working ? "stop" : "send", "", working ? "2.5" : "2") + '</button></div></div>';
       }
 
       function replyFailureMessage(error, action) {
@@ -4887,12 +5251,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (!body || !status) return;
         if (data?.user && typeof data.user === "object") state.user = { ...state.user, ...data.user };
         const messages = Array.isArray(data?.messages) ? data.messages : [];
+        const previousScrollTop = body.scrollTop;
+        const stickToBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 48;
         if (messages.length) {
           body.innerHTML = conversationBubbles(messages, data.user);
-          body.scrollTop = body.scrollHeight;
+          body.scrollTop = stickToBottom ? body.scrollHeight : previousScrollTop;
         } else if (data?.html) {
           body.innerHTML = conversationBubbles([{ role: "agent", html: data.html, markdown: data.markdown || "", timestamp: null }], data.user);
-          body.scrollTop = body.scrollHeight;
+          body.scrollTop = stickToBottom ? body.scrollHeight : previousScrollTop;
         } else if (!options.preserveBody) {
           body.innerHTML = sessionId
             ? sessionHandoff
@@ -5020,6 +5386,44 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             button.setAttribute("aria-label", t("停止任务"));
             button.title = t("停止任务");
             button.closest(".better-codex-composer")?.setAttribute("data-state", "stop");
+          }
+        }
+      }
+
+      async function restoreIssueFromDialog(button) {
+        if (!issue?.archived_at || !button || button.disabled) return;
+        const errorOutput = dialog.querySelector(".better-codex-dialog-error");
+        button.disabled = true;
+        button.setAttribute("aria-busy", "true");
+        try {
+          let current = issue;
+          for (let attempt = 0; attempt < 2; attempt += 1) {
+            try {
+              let updated = await api("/api/issues/" + encodeURIComponent(issue.id) + "/unarchive", { method: "POST", body: JSON.stringify({ version: Number(current.version) }) });
+              const commandId = updated?.remote_state?.command_id;
+              if (commandId) {
+                const command = await waitForRemoteCommand(commandId);
+                if (command.status !== "applied") throw new Error(command.error || "command_rejected");
+                updated = await api("/api/issues/" + encodeURIComponent(issue.id));
+              }
+              refreshIssueState(updated);
+              await Promise.all([loadIssues({ background: true }), loadProjects({ background: true })]);
+              dialog.querySelector('[name="reply"]')?.focus();
+              return;
+            } catch (error) {
+              if (attempt === 1 || !(error instanceof Error) || error.message !== "version_conflict") throw error;
+              current = await api("/api/issues/" + encodeURIComponent(issue.id));
+              refreshIssueState(current);
+            }
+          }
+        } catch (error) {
+          if (errorOutput) {
+            errorOutput.textContent = errorLabel(error);
+            errorOutput.hidden = false;
+          }
+          if (button.isConnected) {
+            button.disabled = false;
+            button.removeAttribute("aria-busy");
           }
         }
       }
@@ -5190,7 +5594,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       }
 
       function footer() {
-        if (executionLocked) return "";
+        if (issue?.archived_at || executionLocked) return "";
         const switchButton = issue ? "" : '<button class="better-codex-switch-mode" type="button" data-dialog-switch>' + icon("switch") + te(draft.mode === "agent" ? "切换到手动" : "切换到智能体") + '</button>';
         const submitText = issue ? "保存" : draft.mode === "agent" ? "创建" : "创建任务";
         const keepOpen = issue ? "" : '<label class="better-codex-keep-open"><input class="better-codex-toggle" name="keep" type="checkbox"' + (state.keepCreate ? " checked" : "") + '>' + te("继续创建") + '</label>';
@@ -5454,6 +5858,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           })();
         });
         dialog.querySelector("[data-dialog-stop]")?.addEventListener("click", event => void stopIssueFromDialog(event.currentTarget));
+        dialog.querySelector("[data-dialog-restore]")?.addEventListener("click", event => void restoreIssueFromDialog(event.currentTarget));
         const startNow = dialog.querySelector("[data-dialog-start-now]");
         startNow?.addEventListener("click", () => {
           syncDraft();
@@ -5652,6 +6057,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (control.matches("[data-dialog-open-thread]")) return "open_thread";
         if (control.matches("[data-dialog-start-now]")) return "start_now";
         if (control.matches("[data-dialog-stop]")) return "stop";
+        if (control.matches("[data-dialog-restore]")) return "restore";
         if (control.matches("[data-dialog-switch]")) return "switch_mode";
         if (control.matches("[data-dialog-expand]")) return "expand";
         if (control.matches("[data-dialog-attach]")) return "attach";
@@ -5709,13 +6115,20 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         flushReplyDraft();
         if (projectDismiss) document.removeEventListener("pointerdown", projectDismiss, true);
         if (selectDismiss) document.removeEventListener("pointerdown", selectDismiss, true);
+        window.visualViewport?.removeEventListener("resize", mobileDialogViewport);
+        window.visualViewport?.removeEventListener("scroll", mobileDialogViewport);
+        window.removeEventListener("resize", mobileDialogViewport);
         dialog.remove();
       }, { once: true });
       bindModalDismiss(dialog, () => dialog.close());
       renderDialog();
       dialog.showModal();
+      mobileDialogViewport();
+      window.visualViewport?.addEventListener("resize", mobileDialogViewport, { passive: true });
+      window.visualViewport?.addEventListener("scroll", mobileDialogViewport, { passive: true });
+      window.addEventListener("resize", mobileDialogViewport, { passive: true });
       traceDialog("dialog_open", { dialog_open: dialog.open });
-      dialog.querySelector(draft.mode === "agent" ? '[name="prompt"]' : '[name="title"]')?.focus();
+      dialog.querySelector(issue && HOST_KIND === "web" && window.matchMedia("(max-width: 720px)").matches ? "[data-dialog-close]" : draft.mode === "agent" ? '[name="prompt"]' : '[name="title"]')?.focus();
     }
 
     function onBoardClick(event) {
@@ -5931,15 +6344,26 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function isBetterCodexRoute() {
-      if (HOST_KIND === "web") return location.pathname === "/web" || location.pathname === "/";
+      if (HOST_KIND === "web") return location.pathname === "/web" || location.pathname === "/" || Boolean(webProjectRoute());
       if (Array.from(document.querySelectorAll("webview")).some(view => view.title === "Better Codex")) return true;
       return Array.from(document.querySelectorAll("main *")).some(node => ["找不到 MCP 应用视图", "MCP app view not found"].includes(node.textContent?.trim()));
     }
 
-    function openRoute(surface = state.surface) {
+    function openRoute(surface = state.surface, options = {}) {
       routeSuppressed = false;
       routeSeen = false;
-      window.postMessage({ type: NAVIGATION.messageType, path: BETTER_CODEX_ROUTE }, window.location.origin);
+      if (surface === "projects") {
+        state.projectDetailId = typeof options.projectId === "string" ? options.projectId : "";
+        if (HOST_KIND === "web") {
+          const mode = options.history || (webProjectRoute() ? "replace" : "push");
+          syncWebProjectRoute(state.projectDetailId, mode);
+        } else {
+          window.postMessage({ type: NAVIGATION.messageType, path: BETTER_CODEX_ROUTE }, window.location.origin);
+        }
+      } else {
+        state.projectDetailId = "";
+        if (HOST_KIND !== "web" || options.history !== "none") window.postMessage({ type: NAVIGATION.messageType, path: BETTER_CODEX_ROUTE }, window.location.origin);
+      }
       open(surface);
     }
 
@@ -6065,7 +6489,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     function onClick(event) {
       if (!active || suppressAgentOutside) return;
       const target = event.target?.closest?.("button,a,[role='button']," + SELECTORS.threadRow);
-      if (!target || target === entry || target === agentsEntry || target.closest("#" + PANEL_ID) || target.closest("#better-codex-dialog") || target.closest("#better-codex-agent-dialog") || target.closest("#better-codex-avatar-picker")) return;
+      if (!target || target === entry || target === agentsEntry || target === projectsEntry || target.closest("#" + PANEL_ID) || target.closest("#better-codex-dialog") || target.closest("#better-codex-agent-dialog") || target.closest("#better-codex-project-dialog") || target.closest("#better-codex-avatar-picker")) return;
       if (Date.now() < suppressSessionClickUntil && target.closest(SELECTORS.threadRow)) {
         suppressSessionClickUntil = 0;
         event.preventDefault();
@@ -6089,7 +6513,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (!betterCodexRoute) routeSuppressed = false;
       syncSessionHandoffFromHost();
       if (active && routeSeen && !betterCodexRoute) return close({ resume: true, suppressRoute: false });
-      if (!active && betterCodexRoute && !routeSuppressed && ["issues", "agents"].includes(resumeSurface)) return open(resumeSurface);
+      if (!active && betterCodexRoute && !routeSuppressed && ["issues", "agents", "projects"].includes(resumeSurface)) return open(resumeSurface);
       if (active) mountPanel();
     }
 

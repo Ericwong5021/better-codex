@@ -89,7 +89,7 @@ test("gateway completes the issue workflow and survives restart", async () => {
   try {
     await waitForGateway(port, gateway);
     const health = await (await fetch(`http://127.0.0.1:${port}/health`)).json() as { database: { schemaVersion: number } };
-    assert.equal(health.database.schemaVersion, 10);
+    assert.equal(health.database.schemaVersion, 12);
 
     const bootstrap = await (await request("/api/bootstrap")).json() as { projects: Array<{ external_id: string | null; created_at: string }>; agents: Array<{ id: string; name: string; is_default?: boolean }>; appearance: unknown };
     assert.equal(
@@ -164,10 +164,14 @@ test("gateway completes the issue workflow and survives restart", async () => {
     assert.equal(preflight.headers.get("access-control-allow-origin"), "app://-");
     assert.equal(preflight.headers.get("access-control-allow-private-network"), "true");
 
-    const projectResponse = await request("/api/projects", { method: "POST", body: JSON.stringify({ name: "Gateway" }) });
+    const projectWorkspace = join(home, "gateway-project");
+    const targetProjectWorkspace = join(home, "gateway-target-project");
+    mkdirSync(projectWorkspace);
+    mkdirSync(targetProjectWorkspace);
+    const projectResponse = await request("/api/projects", { method: "POST", body: JSON.stringify({ name: "Gateway", workspace_path: projectWorkspace }) });
     assert.equal(projectResponse.status, 201);
     const project = await projectResponse.json() as { id: string };
-    const targetProjectResponse = await request("/api/projects", { method: "POST", body: JSON.stringify({ name: "Gateway target" }) });
+    const targetProjectResponse = await request("/api/projects", { method: "POST", body: JSON.stringify({ name: "Gateway target", workspace_path: targetProjectWorkspace }) });
     assert.equal(targetProjectResponse.status, 201);
     const targetProject = await targetProjectResponse.json() as { id: string };
 

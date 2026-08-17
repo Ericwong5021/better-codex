@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -77,6 +77,7 @@ test("request body limits stop buffering after rejection", () => {
 
 test("web host boots the shared DOM injection behind a local session", async () => {
   const home = mkdtempSync(join(tmpdir(), "better-codex-web-test-"));
+  mkdirSync(join(home, "codex"));
   const port = await availablePort();
   const token = "web-test-token";
   const runtime = startRuntime(home, port, token);
@@ -199,7 +200,7 @@ test("web host boots the shared DOM injection behind a local session", async () 
     const eventMutation = await fetch(`${base}/api/projects`, {
       method: "POST",
       headers: { authorization: `Bearer ${sessionToken}`, "content-type": "application/json" },
-      body: JSON.stringify({ name: "Event project" }),
+      body: JSON.stringify({ name: "Event project", workspace_path: home }),
     });
     assert.equal(eventMutation.status, 201);
     while (!eventSource.includes("event: change")) {

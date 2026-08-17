@@ -40,6 +40,12 @@ export type Project = {
   identifier_prefix: string;
   name: string;
   workspace_path: string;
+  root_paths: string[];
+  description: string;
+  overview_html: string;
+  overview_status: "idle" | "generating" | "ready" | "failed";
+  overview_error: string | null;
+  overview_updated_at: string | null;
   next_issue_number: number;
   created_at: string;
   updated_at: string;
@@ -165,6 +171,8 @@ type ProjectInput = {
   externalId?: string;
   name: string;
   workspacePath?: string;
+  rootPaths?: string[];
+  description?: string;
   createdAt?: string;
   updatedAt?: string;
 };
@@ -211,7 +219,7 @@ export function cleanMaxConcurrency(value: number | undefined) {
   return value;
 }
 
-const latestSchemaVersion = 10;
+const latestSchemaVersion = 12;
 
 function now() {
   return new Date().toISOString();
@@ -329,6 +337,32 @@ function issueFromRow(row: Record<string, unknown>): Issue {
   } as Issue;
 }
 
+function projectFromRow(row: Record<string, unknown>): Project {
+  let rootPaths: string[] = [];
+  try {
+    const parsed = JSON.parse(String(row.root_paths_json || "[]"));
+    if (Array.isArray(parsed)) rootPaths = parsed.map(String).filter(Boolean);
+  } catch {}
+  const workspacePath = String(row.workspace_path || "");
+  if (!rootPaths.length && workspacePath) rootPaths = [workspacePath];
+  return {
+    id: String(row.id),
+    external_id: row.external_id ? String(row.external_id) : null,
+    identifier_prefix: String(row.identifier_prefix || "BCX"),
+    name: String(row.name || ""),
+    workspace_path: workspacePath,
+    root_paths: rootPaths,
+    description: String(row.description || ""),
+    overview_html: String(row.overview_html || ""),
+    overview_status: ["generating", "ready", "failed"].includes(String(row.overview_status)) ? String(row.overview_status) as Project["overview_status"] : "idle",
+    overview_error: row.overview_error ? String(row.overview_error) : null,
+    overview_updated_at: row.overview_updated_at ? String(row.overview_updated_at) : null,
+    next_issue_number: Number(row.next_issue_number || 1),
+    created_at: String(row.created_at),
+    updated_at: String(row.updated_at),
+  };
+}
+
 function sessionCommandFromRow(row: Record<string, unknown>): SessionCommand {
   let payload: Record<string, unknown> = {};
   try {
@@ -387,6 +421,7 @@ export class Store {
     this.ensureEnrichmentColumn();
     this.ensureReplyDraftColumn();
     this.ensureSessionHandoffColumn();
+    this.ensureProjectColumns();
     this.ensureSyncTriggers();
     const integrity = this.db.prepare("PRAGMA quick_check").get() as Record<string, unknown> | undefined;
     if (String(integrity?.quick_check ?? "") !== "ok") {
@@ -635,6 +670,27 @@ export class Store {
         throw error;
       }
     }
+    if (fromVersion < 11) this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (11, ?)").run(now());
+    if (fromVersion < 12) {
+      const timestamp = now();
+      this.db.prepare("INSERT OR REPLACE INTO sync_outbox (entity_type, entity_id, event_id, changed_at) SELECT 'project', id, lower(hex(randomblob(16))), ? FROM projects").run(timestamp);
+      this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (12, ?)").run(timestamp);
+    }
+  }
+
+  private ensureProjectColumns() {
+    const columns = new Set((this.db.prepare("PRAGMA table_info(projects)").all() as Array<{ name: string }>).map(item => item.name));
+    if (!columns.has("root_paths_json")) this.db.exec("ALTER TABLE projects ADD COLUMN root_paths_json TEXT NOT NULL DEFAULT '[]'");
+    if (!columns.has("description")) this.db.exec("ALTER TABLE projects ADD COLUMN description TEXT NOT NULL DEFAULT ''");
+    if (!columns.has("overview_html")) this.db.exec("ALTER TABLE projects ADD COLUMN overview_html TEXT NOT NULL DEFAULT ''");
+    if (!columns.has("overview_status")) this.db.exec("ALTER TABLE projects ADD COLUMN overview_status TEXT NOT NULL DEFAULT 'idle'");
+    if (!columns.has("overview_error")) this.db.exec("ALTER TABLE projects ADD COLUMN overview_error TEXT");
+    if (!columns.has("overview_updated_at")) this.db.exec("ALTER TABLE projects ADD COLUMN overview_updated_at TEXT");
+    const rows = this.db.prepare("SELECT id, workspace_path, root_paths_json FROM projects").all() as Array<{ id: string; workspace_path: string; root_paths_json: string }>;
+    for (const row of rows) {
+      if (row.workspace_path && (!row.root_paths_json || row.root_paths_json === "[]")) this.db.prepare("UPDATE projects SET root_paths_json = ? WHERE id = ?").run(JSON.stringify([row.workspace_path]), row.id);
+    }
+    this.db.prepare("UPDATE projects SET overview_status = 'failed', overview_error = 'runtime_restarted' WHERE overview_status = 'generating'").run();
   }
 
   private ensureSyncTriggers() {
@@ -667,7 +723,7 @@ export class Store {
       DROP TRIGGER IF EXISTS sync_reply_update;
       DROP TRIGGER IF EXISTS sync_reply_delete;
       CREATE TRIGGER sync_project_insert AFTER INSERT ON projects BEGIN ${dirty("project", "NEW.id")} END;
-      CREATE TRIGGER sync_project_update AFTER UPDATE OF name, identifier_prefix ON projects BEGIN ${dirty("project", "NEW.id")} END;
+      CREATE TRIGGER sync_project_update AFTER UPDATE OF name, identifier_prefix, workspace_path, root_paths_json, description, overview_html, overview_status, overview_error, overview_updated_at ON projects BEGIN ${dirty("project", "NEW.id")} END;
       CREATE TRIGGER sync_project_delete AFTER DELETE ON projects BEGIN ${removed("project", "OLD.id")} END;
       CREATE TRIGGER sync_issue_insert AFTER INSERT ON issues BEGIN ${dirty("issue", "NEW.id")} END;
       CREATE TRIGGER sync_issue_update AFTER UPDATE OF project_id, title, description, status, priority, labels_json, sort_order, pinned, archived_at, agent_id, agent_enabled, user_assigned, needs_attention, pending_actor ON issues BEGIN ${dirty("issue", "NEW.id")} END;
@@ -1016,6 +1072,12 @@ export class Store {
         id: project.id,
         name: project.name,
         identifier_prefix: project.identifier_prefix,
+        root_paths: project.root_paths,
+        description: project.description,
+        overview_html: project.overview_html,
+        overview_status: project.overview_status,
+        overview_error: project.overview_error,
+        overview_updated_at: project.overview_updated_at,
         created_at: project.created_at,
         updated_at: project.updated_at,
         local_revision: Math.max(1, Date.parse(project.updated_at) || 1),
@@ -1060,7 +1122,7 @@ export class Store {
     } satisfies IssueProjection;
   }
 
-  async applyRemoteCommand(command: RemoteCommand, handlers: { reply?: (issueId: string, requestId: string, message: string, files: Array<{ name: string; type: string; data: string }>) => void | Promise<void>; stop?: (issueId: string) => void | Promise<void> } = {}): Promise<RemoteCommandAck> {
+  async applyRemoteCommand(command: RemoteCommand, handlers: { reply?: (issueId: string, requestId: string, message: string, files: Array<{ name: string; type: string; data: string }>) => void | Promise<void>; stop?: (issueId: string) => void | Promise<void>; projectCreate?: (projectId: string, name: string, workspacePath: string) => void | Promise<void>; projectOverview?: (projectId: string) => void | Promise<void> } = {}): Promise<RemoteCommandAck> {
     const receipt = this.db.prepare("SELECT result_json FROM sync_command_receipts WHERE command_id = ?").get(command.command_id) as { result_json: string } | undefined;
     if (receipt) return JSON.parse(receipt.result_json) as RemoteCommandAck;
     const result = await (async () => {
@@ -1071,6 +1133,22 @@ export class Store {
           if (command.entity_id !== "auto-dispatch" || command.base_revision !== null || typeof payload.enabled !== "boolean") throw new Error("invalid_auto_dispatch");
           this.setAutoDispatch(payload.enabled);
           return { command_id: command.command_id, status: "applied", error: null, projection: null } satisfies RemoteCommandAck;
+        }
+        if (command.operation === "project.create") {
+          if (command.base_revision !== null || this.getProject(command.entity_id)) throw new Error("version_conflict");
+          if (!handlers.projectCreate) throw new Error("remote_project_create_unavailable");
+          await handlers.projectCreate(command.entity_id, String(payload.name || ""), String(payload.workspace_path || ""));
+          const project = this.getProject(command.entity_id);
+          if (!project) throw new Error("project_create_failed");
+          return { command_id: command.command_id, status: "applied", error: null, projection: this.syncProjection("project", project.id) as ProjectProjection } satisfies RemoteCommandAck;
+        }
+        if (command.operation === "project.overview") {
+          const project = this.getProject(command.entity_id);
+          if (!project) throw new Error("project_not_found");
+          if ((this.syncProjection("project", project.id) as ProjectProjection).local_revision !== command.base_revision) throw new Error("version_conflict");
+          if (!handlers.projectOverview) throw new Error("remote_project_overview_unavailable");
+          await handlers.projectOverview(project.id);
+          return { command_id: command.command_id, status: "applied", error: null, projection: this.syncProjection("project", project.id) as ProjectProjection } satisfies RemoteCommandAck;
         }
         let issue: Issue;
         if (command.operation === "issue.create") {
@@ -1263,17 +1341,14 @@ export class Store {
   }
 
   listProjects() {
-    return this.db.prepare(`
-      SELECT id, external_id, identifier_prefix, name, workspace_path, next_issue_number, created_at, updated_at
-      FROM projects ORDER BY updated_at DESC, name COLLATE NOCASE
-    `).all() as Project[];
+    return (this.db.prepare(`
+      SELECT * FROM projects ORDER BY updated_at DESC, name COLLATE NOCASE
+    `).all() as Array<Record<string, unknown>>).map(projectFromRow);
   }
 
   getProject(id: string) {
-    return this.db.prepare(`
-      SELECT id, external_id, identifier_prefix, name, workspace_path, next_issue_number, created_at, updated_at
-      FROM projects WHERE id = ?
-    `).get(id) as Project | undefined;
+    const row = this.db.prepare("SELECT * FROM projects WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+    return row ? projectFromRow(row) : undefined;
   }
 
   ensureProject(input: ProjectInput) {
@@ -1282,8 +1357,9 @@ export class Store {
       const existing = this.db.prepare("SELECT id FROM projects WHERE external_id = ?").get(input.externalId) as { id: string } | undefined;
       if (existing) {
         const timestamp = input.updatedAt ?? now();
-        this.db.prepare("UPDATE projects SET name = ?, workspace_path = COALESCE(NULLIF(?, ''), workspace_path), created_at = COALESCE(?, created_at), updated_at = MAX(updated_at, ?) WHERE id = ?")
-          .run(name, input.workspacePath ?? "", input.createdAt ?? null, timestamp, existing.id);
+        const rootPaths = input.rootPaths?.map(value => value.trim()).filter(Boolean) || [];
+        this.db.prepare("UPDATE projects SET name = ?, workspace_path = COALESCE(NULLIF(?, ''), workspace_path), root_paths_json = CASE WHEN ? = '[]' THEN root_paths_json ELSE ? END, description = COALESCE(NULLIF(?, ''), description), created_at = COALESCE(?, created_at), updated_at = MAX(updated_at, ?) WHERE id = ?")
+          .run(name, input.workspacePath ?? rootPaths[0] ?? "", JSON.stringify(rootPaths), JSON.stringify(rootPaths), input.description ?? "", input.createdAt ?? null, timestamp, existing.id);
         return this.getProject(existing.id)!;
       }
     }
@@ -1296,12 +1372,32 @@ export class Store {
     const timestamp = now();
     const createdAt = input.createdAt ?? timestamp;
     const updatedAt = input.updatedAt ?? timestamp;
+    const rootPaths = input.rootPaths?.map(value => value.trim()).filter(Boolean) || (input.workspacePath ? [input.workspacePath] : []);
     this.db.prepare(`
       INSERT INTO projects (
-        id, external_id, identifier_prefix, name, workspace_path, next_issue_number, default_branch, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, 1, 'main', ?, ?)
-    `).run(id, input.externalId ?? null, projectPrefix(name), name, input.workspacePath ?? "", createdAt, updatedAt);
+        id, external_id, identifier_prefix, name, workspace_path, root_paths_json, description, next_issue_number, default_branch, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'main', ?, ?)
+    `).run(id, input.externalId ?? null, projectPrefix(name), name, input.workspacePath ?? rootPaths[0] ?? "", JSON.stringify(rootPaths), input.description ?? "", createdAt, updatedAt);
     return this.getProject(id)!;
+  }
+
+  startProjectOverview(id: string) {
+    const result = this.db.prepare("UPDATE projects SET overview_status = 'generating', overview_error = NULL WHERE id = ? AND overview_status != 'generating'").run(id);
+    if (result.changes !== 1) return null;
+    return this.getProject(id)!;
+  }
+
+  finishProjectOverview(id: string, description: string, overviewHtml: string) {
+    const timestamp = now();
+    this.db.prepare("UPDATE projects SET description = ?, overview_html = ?, overview_status = 'ready', overview_error = NULL, overview_updated_at = ?, updated_at = ? WHERE id = ?")
+      .run(description.trim().slice(0, 2000), overviewHtml.slice(0, 500000), timestamp, timestamp, id);
+    return this.getProject(id);
+  }
+
+  failProjectOverview(id: string, error: string) {
+    this.db.prepare("UPDATE projects SET overview_status = 'failed', overview_error = ? WHERE id = ?")
+      .run(error.slice(0, 2000), id);
+    return this.getProject(id);
   }
 
   listAgentProfiles() {

@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { randomUUID, timingSafeEqual } from "node:crypto";
-import { closeSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
 import { isSea } from "node:sea";
@@ -16,7 +16,7 @@ import { attachmentPath, runPath, runtimePort, token, updateLogPath } from "./co
 import { acquireRuntimeLock, clearRuntimeState, createRuntimeIdentity, publishRuntimeState } from "./runtime-state.js";
 import { activeCoreCommand, checkGatewayUpdate, getGatewayUpdateState, installGatewayUpdate, recordGatewayUpdateActivation, startGatewayUpdateChecks } from "./updater.js";
 import { packagedBuild } from "./build.js";
-import { basename, extname, join } from "node:path";
+import { basename, dirname, extname, join, resolve } from "node:path";
 import { normalizeSessionId, readConversationActivity, readConversationResult, sessionWorkspace } from "./session-transcript.js";
 import { IssueWorker } from "./worker.js";
 import { maxMockupBytes, normalizeMockupLocale, readMockupState, replaceMockupState, resetMockupState, updateMockupState } from "./mockup.js";
@@ -26,6 +26,7 @@ import { betterCodexWebIconPng } from "./brand-assets.js";
 import { betterCodexWebManifest, betterCodexWebServiceWorker } from "./web-app.js";
 import { SyncClient } from "./sync-client.js";
 import { readSyncConfiguration, removeSyncConfiguration } from "./sync-config.js";
+import { chooseNativeDirectory } from "./native-dialog.js";
 
 const accessToken = token();
 const mockupEnabled = !isSea() && !packagedBuild && process.argv.includes("--mockup");
@@ -297,17 +298,59 @@ function syncCodexProjects(store: Store) {
         const project = value as Record<string, unknown>;
         const name = cleanString(project.name, 120);
         const rootPaths = Array.isArray(project.rootPaths) ? project.rootPaths : [];
-        const workspacePath = cleanString(rootPaths[0], 4096);
+        const cleanedRootPaths = rootPaths.map(value => cleanString(value, 4096)).filter(Boolean);
+        const workspacePath = cleanedRootPaths[0] || "";
         const createdAt = codexProjectTimestamp(project.createdAt);
         const updatedAt = codexProjectTimestamp(project.updatedAt);
         if (!externalId || !name) continue;
         const id = cleanString(externalId, 200);
         const current = existing.get(id);
-        if (current?.name === name && current.workspace_path === workspacePath && (!createdAt || current.created_at === createdAt) && (!updatedAt || current.updated_at >= updatedAt)) continue;
-        existing.set(id, store.ensureProject({ externalId: id, name, workspacePath, createdAt, updatedAt }));
+        if (current?.name === name && current.workspace_path === workspacePath && JSON.stringify(current.root_paths) === JSON.stringify(cleanedRootPaths) && (!createdAt || current.created_at === createdAt) && (!updatedAt || current.updated_at >= updatedAt)) continue;
+        existing.set(id, store.ensureProject({ externalId: id, name, workspacePath, rootPaths: cleanedRootPaths, createdAt, updatedAt }));
       } catch {}
     }
   } catch {}
+}
+
+function createCodexProject(store: Store, nameValue: unknown, workspaceValue: unknown, projectId?: string) {
+  const name = cleanString(nameValue, 120);
+  const workspaceInput = cleanString(workspaceValue, 4096);
+  if (!name) throw new Error("name_required");
+  if (!workspaceInput) throw new Error("workspace_required");
+  const workspacePath = resolve(workspaceInput);
+  try {
+    if (!statSync(workspacePath).isDirectory()) throw new Error("workspace_invalid");
+  } catch {
+    throw new Error("workspace_invalid");
+  }
+  let state: Record<string, unknown> = {};
+  try {
+    state = JSON.parse(readFileSync(codexStatePath, "utf8")) as Record<string, unknown>;
+  } catch {
+    if (existsSync(codexStatePath)) throw new Error("codex_state_invalid");
+  }
+  const localProjects = state["local-projects"] && typeof state["local-projects"] === "object" && !Array.isArray(state["local-projects"])
+    ? { ...(state["local-projects"] as Record<string, unknown>) }
+    : {};
+  const existing = Object.entries(localProjects).find(([, value]) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    return Array.isArray((value as Record<string, unknown>).rootPaths) && ((value as Record<string, unknown>).rootPaths as unknown[]).some(item => typeof item === "string" && resolve(item) === workspacePath);
+  }) as [string, Record<string, unknown>] | undefined;
+  if (existing) {
+    if (projectId) throw new Error("project_exists");
+    const [externalId, project] = existing;
+    const rootPaths = Array.isArray(project.rootPaths) ? project.rootPaths.filter(value => typeof value === "string").map(value => cleanString(value, 4096)).filter(Boolean) : [workspacePath];
+    return store.ensureProject({ externalId: cleanString(project.id, 200) || externalId, name: cleanString(project.name, 120) || name, workspacePath: rootPaths[0] || workspacePath, rootPaths });
+  }
+  const id = `local-${randomUUID().replaceAll("-", "")}`;
+  const timestamp = Date.now();
+  localProjects[id] = { id, name, rootPaths: [workspacePath], createdAt: timestamp, updatedAt: timestamp };
+  state["local-projects"] = localProjects;
+  const temporary = join(dirname(codexStatePath), `.codex-global-state-${randomUUID()}.tmp`);
+  writeFileSync(temporary, JSON.stringify(state), { mode: 0o600 });
+  renameSync(temporary, codexStatePath);
+  const input = { externalId: id, name, workspacePath, rootPaths: [workspacePath], createdAt: new Date(timestamp).toISOString(), updatedAt: new Date(timestamp).toISOString() };
+  return projectId ? store.createProject({ ...input, id: projectId }) : store.ensureProject(input);
 }
 
 function asLabels(value: unknown) {
@@ -445,7 +488,8 @@ export function startServer() {
   const eventClients = new Map<ServerResponse, ReturnType<typeof setInterval>>();
   const eventHistory: number[] = [];
   let eventRevision = 0;
-  const worker = new IssueWorker(store);
+  let publishChange = () => {};
+  const worker = new IssueWorker(store, () => publishChange());
   const syncClient = new SyncClient(
     store,
     5_000,
@@ -488,11 +532,17 @@ export function startServer() {
       if (!accepted && (current?.active_run_status || current?.session_active_turn_id || store.getIssueReplyState(issueId).status === "running")) throw new Error("issue_stop_timeout");
     },
     readCodexUsage,
+    (projectId, name, workspacePath) => {
+      createCodexProject(store, name, workspacePath, projectId);
+    },
+    projectId => {
+      if (!worker.generateProjectOverview(projectId)) throw new Error("project_overview_unavailable");
+    },
   );
   const sendEvent = (response: ServerResponse, event: string, revision: number) => {
     response.write(`id: ${revision}\nevent: ${event}\ndata: ${JSON.stringify({ revision })}\n\n`);
   };
-  const publishChange = () => {
+  publishChange = () => {
     eventRevision += 1;
     eventHistory.push(eventRevision);
     if (eventHistory.length > 64) eventHistory.shift();
@@ -558,7 +608,7 @@ export function startServer() {
         const activePort = typeof address === "object" && address ? address.port : 0;
         return sendJson(response, database.ok ? 200 : 503, { ok: database.ok, name: "Better Codex Runtime", version: identity.version, pid: process.pid, port: activePort, instanceId: identity.instanceId, database, compatibility: readCompatibilityStatus() });
       }
-      if ((url.pathname === "/web" || url.pathname.startsWith("/local/")) && method === "GET") {
+      if ((url.pathname === "/web" || url.pathname === "/web/projects" || url.pathname.startsWith("/web/projects/") || url.pathname.startsWith("/local/")) && method === "GET") {
         return sendWeb(response, 200, betterCodexWebHostHtml(), "text/html; charset=utf-8", {
           "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
         });
@@ -707,6 +757,18 @@ export function startServer() {
       if (mockupEnabled && url.pathname === "/api/agents" && method === "GET") {
         return sendJson(response, 200, readMockupState(mockupLocale).agents);
       }
+      if (mockupEnabled && url.pathname === "/api/projects" && method === "GET") {
+        return sendJson(response, 200, readMockupState(mockupLocale).projects);
+      }
+      if (mockupEnabled && url.pathname === "/api/projects" && method === "POST") {
+        const body = await readBody(request);
+        const projectId = `mockup-project-${randomUUID()}`;
+        const updated = updateMockupState(mockupLocale, state => {
+          const workspacePath = cleanString(body.workspace_path, 4096);
+          state.projects.push({ id: projectId, external_id: projectId, name: cleanString(body.name, 120), workspace_path: workspacePath, root_paths: workspacePath ? [workspacePath] : [], description: "", overview_html: "", overview_status: "idle", overview_error: null, overview_updated_at: null });
+        }).state;
+        return sendJson(response, 201, updated.projects.find(project => project.id === projectId));
+      }
       if (mockupEnabled && url.pathname === "/api/agents" && method === "POST") {
         const body = await readBody(request);
         const agentId = `mockup-agent-${randomUUID()}`;
@@ -754,7 +816,8 @@ export function startServer() {
       if (mockupEnabled && url.pathname === "/api/issues" && method === "GET") {
         const query = String(url.searchParams.get("search") || "").trim().toLowerCase();
         const archived = url.searchParams.get("archived") === "1";
-        const issues = readMockupState(mockupLocale).issues.filter(issue => Boolean(issue.archived_at) === archived && (!query || [issue.identifier, issue.title, issue.description, ...(Array.isArray(issue.labels) ? issue.labels : [])].join(" ").toLowerCase().includes(query)));
+        const projectId = url.searchParams.get("project_id") || "";
+        const issues = readMockupState(mockupLocale).issues.filter(issue => Boolean(issue.archived_at) === archived && (!projectId || issue.project_id === projectId) && (!query || [issue.identifier, issue.title, issue.description, ...(Array.isArray(issue.labels) ? issue.labels : [])].join(" ").toLowerCase().includes(query)));
         return sendJson(response, 200, issues);
       }
       if (mockupEnabled && url.pathname === "/api/issues" && method === "POST") {
@@ -1146,10 +1209,7 @@ export function startServer() {
       }
       if (url.pathname === "/api/projects" && method === "POST") {
         const body = await readBody(request);
-        const project = store.createProject({
-          name: cleanString(body.name, 120),
-          workspacePath: cleanString(body.workspace_path, 4096),
-        });
+        const project = createCodexProject(store, body.name, body.workspace_path);
         return sendJson(response, 201, project);
       }
       if (url.pathname === "/api/projects/ensure" && method === "POST") {
@@ -1161,6 +1221,20 @@ export function startServer() {
         });
         if (project.workspace_path) worker.wake();
         return sendJson(response, 200, project);
+      }
+      if (url.pathname === "/api/system/directory" && method === "POST") {
+        return sendJson(response, 200, { workspace_path: chooseNativeDirectory() });
+      }
+      if (path[0] === "api" && path[1] === "projects" && path[2] && path.length === 3 && method === "GET") {
+        const project = store.getProject(decodeURIComponent(path[2]));
+        return project ? sendJson(response, 200, project) : sendJson(response, 404, { error: "project_not_found" });
+      }
+      if (path[0] === "api" && path[1] === "projects" && path[2] && path[3] === "overview" && path.length === 4 && method === "POST") {
+        const projectId = decodeURIComponent(path[2]);
+        const project = store.getProject(projectId);
+        if (!project) return sendJson(response, 404, { error: "project_not_found" });
+        if (project.overview_status !== "generating" && !worker.generateProjectOverview(project.id)) throw new Error("project_overview_unavailable");
+        return sendJson(response, 202, store.getProject(project.id));
       }
       if (path[0] === "api" && path[1] === "sessions" && path[2] && path[3] === "workspace" && path.length === 4 && method === "GET") {
         const threadId = normalizeSessionId(decodeURIComponent(path[2]));
@@ -1380,7 +1454,7 @@ export function startServer() {
         if (method === "GET" && path[3] === "conversation" && path.length === 4) {
           if (store.isEnrichmentPending(issue)) throw new Error("issue_enrichment_pending");
           const [current] = await reconcileInterruptedIssues(store, [issue]);
-          const threadId = current.run_thread_id || "";
+          const threadId = current.run_thread_id || current.session_thread_id || current.thread_id || "";
           const conversation = await readConversationResult(threadId);
           return sendJson(response, 200, {
             ...conversation,

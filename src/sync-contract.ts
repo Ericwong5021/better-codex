@@ -34,6 +34,12 @@ export type ProjectProjection = {
   id: string;
   name: string;
   identifier_prefix: string;
+  root_paths: string[];
+  description: string;
+  overview_html: string;
+  overview_status: "idle" | "generating" | "ready" | "failed";
+  overview_error: string | null;
+  overview_updated_at: string | null;
   created_at: string;
   updated_at: string;
   local_revision: number;
@@ -254,7 +260,7 @@ export type SyncPushResponse = {
   lease_expires_at: string;
 };
 
-export const remoteCommandOperations = ["issue.create", "issue.update", "issue.move", "issue.start", "issue.stop", "issue.reply", "issue.archive", "issue.restore", "settings.auto-dispatch"] as const;
+export const remoteCommandOperations = ["project.create", "project.overview", "issue.create", "issue.update", "issue.move", "issue.start", "issue.stop", "issue.reply", "issue.archive", "issue.restore", "settings.auto-dispatch"] as const;
 export type RemoteCommandOperation = typeof remoteCommandOperations[number];
 export type RemoteCommandStatus = "pending" | "dispatched" | "applied" | "rejected" | "conflict" | "expired";
 
@@ -287,7 +293,7 @@ export type RemoteCommandAck = {
   command_id: string;
   status: Exclude<RemoteCommandStatus, "pending" | "dispatched" | "expired">;
   error: string | null;
-  projection: IssueProjection | null;
+  projection: ProjectProjection | IssueProjection | null;
   delivery_id?: string | null;
 };
 

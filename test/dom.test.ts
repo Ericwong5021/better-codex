@@ -83,7 +83,7 @@ test("returning from a native settings route resumes the remembered Better Codex
   const refresh = source.slice(source.indexOf("function refresh()"), source.indexOf("function scheduleRefresh()"));
 
   assert.ok(refresh.includes("const resumeSurface = sessionStorage.getItem(RESUME_SURFACE_KEY)"));
-  assert.ok(refresh.includes('if (!active && betterCodexRoute && !routeSuppressed && ["issues", "agents"].includes(resumeSurface)) return open(resumeSurface)'));
+  assert.ok(refresh.includes('if (!active && betterCodexRoute && !routeSuppressed && ["issues", "agents", "projects"].includes(resumeSurface)) return open(resumeSurface)'));
 });
 
 test("collapsing the native sidebar keeps Better Codex mounted on its MCP route", () => {
@@ -183,7 +183,7 @@ test("issues toolbar has a toggleable auto-dispatch icon between filter and crea
   const css = betterCodexDesignSystemCss();
 
   assert.ok(source.includes('id = "better-codex-auto-dispatch"'));
-  assert.ok(source.includes("actions.append(error, working, searchWrap, filterWrap, autoDispatchWrap, createSplit)"));
+  assert.ok(source.includes("actions.append(working, searchWrap, filterWrap, autoDispatchWrap, createSplit)"));
   assert.ok(source.includes('api("/api/settings/auto-dispatch"'));
   assert.ok(source.includes("state.autoDispatch = Boolean(bootstrap.autoDispatch)"));
   assert.ok(source.includes("syncAutoDispatch()"));
@@ -281,7 +281,7 @@ test("project lists order recent activity first", () => {
   assert.ok(source.includes("Math.max(projectActivity, issueActivity.get(project?.id) || 0)"));
   assert.ok(source.includes('if (key === "project") return projectsByRecentActivity(state.projects).map'));
   assert.ok(source.includes("const options = projectsByRecentActivity(state.projects).map"));
-  assert.equal(source.match(/projectsByRecentActivity\(state\.projects\)/g)?.length, 2);
+  assert.equal(source.match(/projectsByRecentActivity\(state\.projects\)/g)?.length, 3);
 });
 
 test("column cards fill the padded column evenly", () => {
@@ -636,7 +636,7 @@ test("issue cards show project icon and assignee instead of session entry", () =
   const headerStart = source.indexOf("function header()");
   const footerStart = source.indexOf("function footer()");
   const headerSource = source.slice(headerStart, footerStart);
-  assert.ok(headerSource.includes('data-dialog-start-now>\' + te("立即开始任务")'));
+  assert.ok(headerSource.includes('data-dialog-start-now aria-label="\' + te("立即开始任务")'));
   assert.equal(source.slice(footerStart, source.indexOf("function renderDialog()", footerStart)).includes("data-dialog-start-now"), false);
   assert.ok(source.includes('if (issue && !issuePermissions(issue).enrichmentPending) return void perform(() => openEditor(issue))'));
   assert.ok(source.includes('draggable="\' + String(!issueLocked) + \'"'));

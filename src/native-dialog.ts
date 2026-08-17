@@ -108,3 +108,24 @@ export function showNativeChoiceDialog(options: NativeDialogOptions) {
   }
   return "cancelled";
 }
+
+export function chooseNativeDirectory() {
+  try {
+    if (process.platform === "win32") {
+      const script = [
+        "$ErrorActionPreference = 'Stop'",
+        "Add-Type -AssemblyName System.Windows.Forms",
+        "$dialog = New-Object System.Windows.Forms.FolderBrowserDialog",
+        "$dialog.Description = '选择 Codex 项目文件夹'",
+        "$dialog.ShowNewFolderButton = $true",
+        "$result = $dialog.ShowDialog()",
+        "if ($result -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $dialog.SelectedPath }",
+      ].join("; ");
+      return execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-STA", "-Command", script], { encoding: "utf8", windowsHide: true }).trim();
+    }
+    if (process.platform === "darwin") {
+      return execFileSync("/usr/bin/osascript", ["-e", 'POSIX path of (choose folder with prompt "选择 Codex 项目文件夹")'], { encoding: "utf8" }).trim().replace(/\/$/, "");
+    }
+  } catch {}
+  return "";
+}

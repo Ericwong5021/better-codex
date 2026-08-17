@@ -196,8 +196,9 @@ body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; 
   .web-brand, .web-account { display: none; }
   .web-sidebar nav, .web-sidebar-scroll { width: 100%; height: auto; }
   .web-sidebar-section { display: flex; justify-content: center; gap: 8px; margin: 0; }
-  .web-nav-button:not(#better-codex-entry):not(#better-codex-agents-entry) { display: none; }
+  .web-nav-button:not(#better-codex-entry):not(#better-codex-agents-entry):not(#better-codex-projects-entry) { display: none; }
   .web-nav-button { display: grid; grid-template-columns: 20px auto; width: min(150px, calc(50vw - 18px)); min-height: 42px; justify-content: center; gap: 7px; padding: 0 12px; }
+  .web-sidebar-section:has(#better-codex-projects-entry) .web-nav-button { width: min(132px, calc(33.333vw - 12px)); }
   .web-nav-button .text-fade-truncate { display: block; }
 }
 @media (prefers-reduced-motion: reduce) { .web-sidebar *, .web-native-view *, .web-connect * { transition-duration: .01ms !important; } }
@@ -402,7 +403,7 @@ async function requestRuntime(request) {
   if (request.commandId) headers["x-better-codex-command-id"] = request.commandId;
   if (request.body !== undefined) headers["content-type"] = "application/json";
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10_000);
+  const timeout = setTimeout(() => controller.abort(), Math.min(Math.max(Number(request.timeoutMs) || 10_000, 1_000), 300_000));
   try {
     const response = await fetch(request.path, { method, headers, body: request.body, signal: controller.signal });
     let value;
@@ -508,7 +509,7 @@ function loadInjection() {
   script.onload = () => {
     installing = false;
     connectDialog.close();
-    if (!location.pathname.startsWith("/local/")) window.__betterCodexInjection__?.open?.("issues");
+    openCurrentRoute();
   };
   script.onerror = () => {
     installing = false;
@@ -543,9 +544,21 @@ window.addEventListener("message", event => {
   else if (path) history.pushState({ betterCodex: true }, "", "/web");
 });
 
-window.addEventListener("popstate", () => {
-  if (location.pathname === "/web" || location.pathname === "/") window.__betterCodexInjection__?.open?.("issues");
+function openCurrentRoute() {
+  const match = location.pathname.match(/^\/web\/projects(?:\/([^/?#]+))?\/?$/);
+  if (match) {
+    let projectId = "";
+    try { projectId = match[1] ? decodeURIComponent(match[1]) : ""; }
+    catch {}
+    window.__betterCodexInjection__?.open?.("projects", { projectId, history: "none" });
+    return;
+  }
+  if (location.pathname === "/web" || location.pathname === "/") window.__betterCodexInjection__?.open?.("issues", { history: "none" });
   else window.__betterCodexInjection__?.refresh?.();
+}
+
+window.addEventListener("popstate", () => {
+  openCurrentRoute();
 });
 
 document.getElementById("web-back-to-board").addEventListener("click", () => {

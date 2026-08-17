@@ -209,7 +209,7 @@ export function createHubServer(options: HubServerOptions) {
       }
       if (!trustedOrigin(request)) return sendJson(response, 403, { error: "forbidden" });
       if (url.pathname === "/healthz" && method === "GET") return sendJson(response, 200, store.health());
-      if (["/", "/web"].includes(url.pathname) && method === "GET") return sendText(response, 200, betterCodexWebHostHtml(true), "text/html; charset=utf-8", { "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'" });
+      if ((["/", "/web", "/web/projects"].includes(url.pathname) || url.pathname.startsWith("/web/projects/")) && method === "GET") return sendText(response, 200, betterCodexWebHostHtml(true), "text/html; charset=utf-8", { "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'" });
       if (url.pathname === "/web/host.css" && method === "GET") return sendText(response, 200, betterCodexWebHostCss(), "text/css; charset=utf-8");
       if (url.pathname === "/web/host.js" && method === "GET") return sendText(response, 200, betterCodexWebHostJavaScript(true), "text/javascript; charset=utf-8");
       if (url.pathname === "/web/manifest.webmanifest" && method === "GET") return sendText(response, 200, betterCodexWebManifest(), "application/manifest+json; charset=utf-8");
@@ -419,6 +419,26 @@ export function createHubServer(options: HubServerOptions) {
       if (url.pathname === "/api/projects" && method === "GET") {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" });
         return sendJson(response, 200, store.board().projects);
+      }
+      if (url.pathname === "/api/projects" && method === "POST") {
+        if (!browser) return sendJson(response, 401, { error: "unauthorized" });
+        if (!trustedOrigin(request, true) || !csrfValid) return sendJson(response, 403, { error: "csrf_invalid" });
+        const body = await readBody(request);
+        const command = store.createRemoteCommand({ command_id: body.command_id ?? request.headers["x-better-codex-command-id"], operation: "project.create", base_revision: null, payload: { name: body.name, workspace_path: body.workspace_path } });
+        notifyControl(command.device_id);
+        return sendJson(response, 202, { command_id: command.command_id });
+      }
+      const projectOverview = url.pathname.match(/^\/api\/projects\/([^/]+)\/overview$/);
+      if (projectOverview && method === "POST") {
+        if (!browser) return sendJson(response, 401, { error: "unauthorized" });
+        if (!trustedOrigin(request, true) || !csrfValid) return sendJson(response, 403, { error: "csrf_invalid" });
+        const projectId = decodeURIComponent(projectOverview[1]);
+        const project = store.board().projects.find(item => item.id === projectId);
+        if (!project) return sendJson(response, 404, { error: "project_not_found" });
+        const body = await readBody(request);
+        const command = store.createRemoteCommand({ command_id: body.command_id ?? request.headers["x-better-codex-command-id"], operation: "project.overview", entity_id: project.id, base_revision: project.local_revision, payload: {} });
+        notifyControl(command.device_id);
+        return sendJson(response, 202, { command_id: command.command_id });
       }
       if (url.pathname === "/api/issues" && method === "GET") {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" });

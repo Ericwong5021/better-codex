@@ -62,6 +62,8 @@ export class SyncClient {
     private readonly reply: (issueId: string, requestId: string, message: string, files: RemoteFilePayload[]) => void | Promise<void> = () => { throw new Error("remote_reply_unavailable"); },
     private readonly stopIssue: (issueId: string) => void | Promise<void> = () => { throw new Error("remote_stop_unavailable"); },
     private readonly accountUsage: () => Promise<CodexUsageProjection | null> = async () => null,
+    private readonly projectCreate: (projectId: string, name: string, workspacePath: string) => void | Promise<void> = () => { throw new Error("remote_project_create_unavailable"); },
+    private readonly projectOverview: (projectId: string) => void | Promise<void> = () => { throw new Error("remote_project_overview_unavailable"); },
   ) {}
 
   start() {
@@ -374,7 +376,7 @@ export class SyncClient {
         : await hubRequest<{ commands: RemoteCommand[] }>(configuration, "/api/v1/sync/commands?limit=100");
       if (!Array.isArray(result.commands)) throw new Error("invalid_command_response");
       for (const command of result.commands) {
-        const ack = { ...(await this.store.applyRemoteCommand(command, { reply: this.reply, stop: this.stopIssue })), delivery_id: command.delivery_id ?? null };
+        const ack = { ...(await this.store.applyRemoteCommand(command, { reply: this.reply, stop: this.stopIssue, projectCreate: this.projectCreate, projectOverview: this.projectOverview })), delivery_id: command.delivery_id ?? null };
         if (claimed) await this.controlRpc("commands.ack", ack as unknown as Record<string, unknown>);
         else await hubRequest<RemoteCommandAck>(configuration, `/api/v1/sync/commands/${encodeURIComponent(command.command_id)}/ack`, { method: "POST", body: JSON.stringify(ack) });
         if (ack.status === "applied") this.commandApplied(command, ack);
