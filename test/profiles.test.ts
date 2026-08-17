@@ -143,6 +143,8 @@ test("profile switching disables and stops the peer before injecting", () => {
   assert.doesNotMatch(cliSource, /setImmediate\(\(\) => process\.exit/);
   assert.match(cliSource, /processStartTime/);
   assert.match(cliSource, /injector_stop_failed/);
+  assert.match(cliSource, /repairServiceConfiguration\(\)/);
+  assert.match(serviceSource, /readFileSync\(launchAgentPath, "utf8"\) === servicePlist\(\)/);
   assert.match(runtimeStateSource, /startedAt: identity\.startedAt/);
   assert.match(runtimeStateSource, /processStartTime\(current\.pid\)/);
   assert.match(serviceSource, /betterCodexProfile === "development"/);

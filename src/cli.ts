@@ -36,7 +36,7 @@ import { installLaunchIntegration, launchIntegrationStatus, uninstallLaunchInteg
 import { readCodexLocale } from "./locale.js";
 import { betterCodexMcpName, startMcpAppServer } from "./mcp-app.js";
 import { packagedBuild } from "./build.js";
-import { installService, restartService, serviceLogs, serviceStatus, startService, stopService, uninstallService } from "./service.js";
+import { installService, repairServiceConfiguration, restartService, serviceLogs, serviceStatus, startService, stopService, uninstallService } from "./service.js";
 import { activeVersions, checkForUpdates, maybeDelegateToActiveCore, recordGatewayUpdateActivation, rollbackActivatedUpdate, rollbackAllUpdates, selectedUpdateChannel, setUpdateChannel, updateAll, updateCompatibility, type UpdateChannel } from "./updater.js";
 import { requireCodexExecutablePath } from "./codex-cli.js";
 import { normalizeHubUrl, readSyncConfiguration, removeSyncConfiguration, writeSyncConfiguration } from "./sync-config.js";
@@ -135,6 +135,7 @@ function spawnSelf(args: string[], logFile: string, detached = true) {
 
 async function ensureRuntime() {
   await stopLegacyRuntime();
+  repairServiceConfiguration();
   try {
     return await health();
   } catch {

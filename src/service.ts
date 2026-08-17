@@ -72,6 +72,13 @@ export function servicePlist() {
 `;
 }
 
+export function repairServiceConfiguration() {
+  if (betterCodexProfile === "development" || process.platform !== "darwin" || !existsSync(launchAgentPath)) return false;
+  if (readFileSync(launchAgentPath, "utf8") === servicePlist()) return false;
+  installService();
+  return true;
+}
+
 function launchctl(args: string[], ignoreFailure = false) {
   try {
     return execFileSync("/bin/launchctl", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
@@ -134,6 +141,7 @@ export function uninstallService() {
 
 export function startService() {
   if (betterCodexProfile === "development") throw new Error("development_runtime_unmanaged");
+  if (process.platform === "darwin" && repairServiceConfiguration()) return { started: true, label, repaired: true };
   if (process.platform === "win32") {
     if (!serviceStatus().installed) throw new Error("service_not_installed");
     if (!windowsRuntime()) {
