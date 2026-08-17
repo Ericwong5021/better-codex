@@ -8,6 +8,7 @@ import { randomUUID } from "node:crypto";
 export type RuntimeFixture = {
   baseUrl: string;
   token: string;
+  workspacePath: string;
   output: () => string;
   restart: () => Promise<void>;
   stop: () => Promise<void>;
@@ -89,6 +90,7 @@ export async function startRuntimeFixture(): Promise<RuntimeFixture> {
   return {
     baseUrl,
     token,
+    workspacePath: fixtureHome,
     output,
     restart: async () => {
       await stopProcess(child);

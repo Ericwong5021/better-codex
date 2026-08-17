@@ -89,7 +89,7 @@ try {
   const device = await request(httpsPort, "/api/v1/devices/pair", { method: "POST", body: { name: "Deployment acceptance", pairing_code: pairing.value.pairing_code } });
   assert.equal(device.status, 201);
   const timestamp = new Date().toISOString();
-  const projectProjection = { id: "deployment-project", name: "Deployment acceptance", identifier_prefix: "DEP", created_at: timestamp, updated_at: timestamp, local_revision: 1 };
+  const projectProjection = { id: "deployment-project", name: "Deployment acceptance", identifier_prefix: "DEP", root_paths: [], description: "", overview_html: "", overview_status: "idle", overview_error: null, overview_updated_at: null, created_at: timestamp, updated_at: timestamp, local_revision: 1 };
   const issueProjection = { id: "deployment-issue", identifier: "DEP-1", project_id: projectProjection.id, title: "Container synchronized", description: "Acceptance", status: "todo", priority: "medium", labels: [], sort_order: 0, pinned: false, archived_at: null, assigned: false, agent_enabled: false, agent_id: null, user_assigned: false, pending_actor: "user", active_run_status: null, latest_run_status: null, latest_scheduler_status: null, session_status: null, reply_status: "idle", has_conversation: false, last_activity_finished_at: null, needs_attention: false, created_at: timestamp, updated_at: timestamp, local_revision: 1 };
   const runtime = { device_id: device.value.device_id, device_name: device.value.device_name, protocol_version: device.value.protocol_version, core_version: "acceptance", last_seen_at: timestamp, last_sync_at: timestamp, queue_depth: 0, health_state: "online" };
   const deviceHeaders = { authorization: `Bearer ${device.value.device_token}` };

@@ -42,11 +42,11 @@ test("synchronizes two browser contexts and rejects a stale write", async ({ bro
   const first = await openAuthenticatedPage(browser, { locale: "zh-CN" });
   const second = await openAuthenticatedPage(browser, { locale: "zh-CN" });
   const title = `双窗口同步 ${Date.now()}`;
-  const project = await first.page.evaluate(async () => await (window as any).betterCodexHost.request({
+  const project = await first.page.evaluate(async workspacePath => await (window as any).betterCodexHost.request({
     path: "/api/projects",
     method: "POST",
-    body: JSON.stringify({ name: "Web E2E Project" }),
-  }));
+    body: JSON.stringify({ name: "Web E2E Project", workspace_path: workspacePath }),
+  }), runtime.workspacePath);
   const issue = await first.page.evaluate(async input => await (window as any).betterCodexHost.request({
     path: "/api/issues",
     method: "POST",
@@ -99,11 +99,11 @@ test("supports English, dark theme, mobile viewport, and keyboard dismissal", as
 test("recovers after a Runtime restart with a new Web session", async ({ page }) => {
   await page.goto(`${runtime.baseUrl}/web#token=${encodeURIComponent(runtime.token)}`);
   await expect(page.locator("#better-codex-panel")).toBeVisible();
-  const project = await page.evaluate(async () => await (window as any).betterCodexHost.request({
+  const project = await page.evaluate(async workspacePath => await (window as any).betterCodexHost.request({
     path: "/api/projects",
     method: "POST",
-    body: JSON.stringify({ name: "Notification restart project" }),
-  }));
+    body: JSON.stringify({ name: "Notification restart project", workspace_path: workspacePath }),
+  }), runtime.workspacePath);
   const issue = await page.evaluate(async projectId => await (window as any).betterCodexHost.request({
     path: "/api/issues",
     method: "POST",
