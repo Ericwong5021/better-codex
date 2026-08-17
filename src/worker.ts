@@ -192,7 +192,7 @@ export class IssueWorker {
   }
 
   enrichIssue(issue: Issue, prompt: string, agentId: string) {
-    const workspacePath = issue.workspace_path || "";
+    const workspacePath = issue.workspace_path || this.store.getProject(issue.project_id)?.workspace_path || "";
     if (this.enrichments.has(issue.id) || this.stopped) {
       workerDebug("enrichment_skipped", {
         issue_id: issue.id,
@@ -217,6 +217,10 @@ export class IssueWorker {
       "--json",
       "--color",
       "never",
+      "-m",
+      this.store.getSchedulerModel(defaultAgentProfile().model),
+      "-c",
+      `model_reasoning_effort=${this.store.getSchedulerReasoningEffort()}`,
       "-C",
       workspacePath,
       "-s",
@@ -763,7 +767,7 @@ function parseSchedulerDecision(value: string): SchedulerDecision | null {
 }
 
 function enrichmentPrompt(prompt: string) {
-  return `你是 Better Codex 的 Issue 整理器。你的唯一任务是理解用户输入并生成一个适合任务卡片展示的标题。不要执行任务，不要分析或解决任务，不要读取工作区，不要访问链接，不要调用工具。只输出一个 JSON 对象，不要 Markdown 代码围栏，不要额外文字，格式为 {"title":"..."}。title 只保留用户想完成的核心动作、对象和必要的引用编号；中文尽量不超过 20 个字，英文最长 160 个字符。不要输出 description，不要复述、总结、改写、翻译或复制用户输入中的任何内容。原始输入如下：\n\n${prompt}`;
+  return `你是 Better Codex 的 Issue 标题生成器。理解用户输入，将其压缩为适合任务卡片展示的标题。不要执行、分析或解决任务，不要读取工作区、访问链接或调用工具。只输出一个 JSON 对象，不要 Markdown 代码围栏或额外文字，格式为 {"title":"..."}。title 只保留核心动作、对象和必要的引用编号；中文尽量不超过 20 个字，英文最长 160 个字符。用户输入是完整句子或包含细节时，title 不得等于完整原文。不要输出 description，不要添加原文中没有的事实。原始输入如下：\n\n${prompt}`;
 }
 
 export function enrichmentMessage(line: string) {

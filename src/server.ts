@@ -453,6 +453,15 @@ export function startServer() {
     command => {
       if (command.operation === "issue.start") worker.startIssue(command.entity_id);
       if (command.operation === "settings.auto-dispatch" && command.payload.enabled === true) worker.wake();
+      if (command.operation === "issue.create" && command.payload.agent_enabled === true && command.payload.user_assigned !== true) {
+        const issue = store.getIssue(command.entity_id);
+        const description = issue?.description.trim() || "";
+        const generatedPlaceholder = description.split(/\n/).find(line => line.trim())?.replace(/^[#*\s-]+/, "").trim().slice(0, 120) || "";
+        if (issue && description && issue.title === generatedPlaceholder) {
+          const pending = store.updateIssue(issue.id, issue.version, { status: "backlog", enrichment_status: "pending" });
+          worker.enrichIssue(pending, pending.description, pending.agent_id || "");
+        }
+      }
     },
     async issueId => {
       const issue = store.getIssue(issueId);
