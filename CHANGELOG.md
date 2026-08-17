@@ -4,6 +4,15 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.7] - 2026-08-17
+
+### Fixed
+
+- Reconcile desktop turns against Codex thread state so completed, interrupted, and failed runs no longer leave cards stuck as working.
+- Open the installer directly after a manual update check reports a new version.
+- Show Codex usage, Agent model and reasoning settings, automatic-run state, and live Runtime connection details in the remote Web UI.
+- Repair stale macOS Runtime service configuration automatically before launch.
+
 ## [0.4.6] - 2026-08-16
 
 ### Added
@@ -503,7 +512,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.6...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.7...HEAD
+[0.4.7]: https://github.com/Ericwong5021/better-codex/compare/v0.4.6...v0.4.7
 [0.4.6]: https://github.com/Ericwong5021/better-codex/compare/v0.4.5...v0.4.6
 [0.4.5]: https://github.com/Ericwong5021/better-codex/compare/v0.4.4...v0.4.5
 [0.4.5-beta.2]: https://github.com/Ericwong5021/better-codex/compare/v0.4.5-beta.1...v0.4.5-beta.2
