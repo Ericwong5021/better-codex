@@ -67,9 +67,12 @@ async function readStreamChunk(reader: ReadableStreamDefaultReader<Uint8Array>) 
 
 test("request body limits stop buffering after rejection", () => {
   const source = readFileSync(new URL("../src/server.ts", import.meta.url), "utf8");
+  const cloudflareSource = readFileSync(new URL("../src/cloudflare-worker.ts", import.meta.url), "utf8");
 
   assert.match(source, /declaredLength > limit[\s\S]*request\.resume\(\)/);
   assert.match(source, /size > limit[\s\S]*request\.off\("data", onData\)[\s\S]*request\.resume\(\)/);
+  assert.match(cloudflareSource, /api\/account\/usage[\s\S]*webUsage\(request\)/);
+  assert.match(cloudflareSource, /usage: normalizeCodexUsageProjection\(request\.runtime\.usage\)/);
 });
 
 test("web host boots the shared DOM injection behind a local session", async () => {

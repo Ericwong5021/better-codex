@@ -76,11 +76,16 @@ test("Hub mirrors the privacy-filtered projection with durable idempotent sync",
     { id: "user-1", role: "user" as const, markdown: "Keep this context", html: "<p>not transferred</p>", phase: null, timestamp: "2026-08-12T08:00:00.000Z" },
     { id: "agent-1", role: "agent" as const, markdown: "Context retained", html: "<p>not transferred</p>", phase: "final_answer", timestamp: "2026-08-12T08:00:01.000Z" },
   ];
+  const expectedUsage = {
+    planType: "pro",
+    primary: { usedPercent: 35, remainingPercent: 65, windowDurationMins: 10080, resetsAt: 1787196605 },
+    secondary: null,
+  };
   const replies: string[] = [];
   const client = new SyncClient(local, 60_000, () => configuration, () => {}, async issueId => local.conversationProjection(issueId, messages), (issueId, requestId, message) => {
     replies.push(message);
     local.setIssueReplyState({ issue_id: issueId, request_id: requestId, status: "running", message, started_at: new Date().toISOString() });
-  });
+  }, undefined, async () => expectedUsage);
 
   try {
     const project = local.createProject({ name: "Remote", workspacePath: join(directory, "private-workspace") });
@@ -96,6 +101,7 @@ test("Hub mirrors the privacy-filtered projection with durable idempotent sync",
     assert.equal(board.agents.find(item => item.id === agent.id)?.avatar, "icon:reviewer");
     assert.equal(board.default_avatar, "icon:sparkles");
     assert.equal(board.runtime?.health_state, "online");
+    assert.deepEqual(board.runtime?.usage, expectedUsage);
     assert.doesNotMatch(JSON.stringify(board), /private-workspace|private-thread|private instructions|private-model|workspace_path|thread_id|reply_draft|instructions|sandbox_mode/);
     assert.equal(board.issues.find(item => item.id === issue.id)?.has_conversation, true);
     assert.deepEqual(hub.store.conversation(issue.id)?.messages.map(message => message.markdown), ["Keep this context", "Context retained"]);

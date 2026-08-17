@@ -477,6 +477,7 @@ export function startServer() {
       const current = store.getIssue(issueId);
       if (!accepted && (current?.active_run_status || current?.session_active_turn_id || store.getIssueReplyState(issueId).status === "running")) throw new Error("issue_stop_timeout");
     },
+    readCodexUsage,
   );
   const sendEvent = (response: ServerResponse, event: string, revision: number) => {
     response.write(`id: ${revision}\nevent: ${event}\ndata: ${JSON.stringify({ revision })}\n\n`);

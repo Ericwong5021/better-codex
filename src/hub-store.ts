@@ -3,7 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, renameSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { issuePriorities, issueStatuses } from "./db.js";
-import { forbiddenProjectionKeys, remoteCommandOperations, supportedSyncProtocolVersions, syncEntityTypes, syncProtocolVersion, type AgentDirectoryProjection, type ConversationProjection, type HubBoard, type IssueProjection, type ProjectProjection, type RemoteCommand, type RemoteCommandAck, type RemoteCommandOperation, type RemoteCommandStatus, type RuntimeProjection, type SyncChange, type SyncEntityType, type SyncProjection, type SyncPushRequest } from "./sync-contract.js";
+import { forbiddenProjectionKeys, normalizeCodexUsageProjection, remoteCommandOperations, supportedSyncProtocolVersions, syncEntityTypes, syncProtocolVersion, type AgentDirectoryProjection, type ConversationProjection, type HubBoard, type IssueProjection, type ProjectProjection, type RemoteCommand, type RemoteCommandAck, type RemoteCommandOperation, type RemoteCommandStatus, type RuntimeProjection, type SyncChange, type SyncEntityType, type SyncProjection, type SyncPushRequest } from "./sync-contract.js";
 import { coreVersion } from "./version.js";
 
 function now() {
@@ -146,6 +146,7 @@ function cleanRuntime(value: unknown, deviceId: string): RuntimeProjection {
     last_sync_at: typeof source.last_sync_at === "string" ? cleanString(source.last_sync_at, 64) : null,
     queue_depth: Number.isSafeInteger(source.queue_depth) && Number(source.queue_depth) >= 0 ? Number(source.queue_depth) : 0,
     health_state: "online",
+    usage: normalizeCodexUsageProjection(source.usage),
   };
 }
 
@@ -821,12 +822,17 @@ export class HubStore {
     }
   }
 
-  board(): HubBoard {
-    this.expireCommands();
-    const rows = this.db.prepare("SELECT entity_type, entity_id, payload_json, deleted_at FROM entities WHERE deleted_at IS NULL ORDER BY entity_type, updated_at").all() as EntityRow[];
+  runtime() {
     const runtimeRow = this.db.prepare("SELECT payload_json, updated_at FROM runtime_projection ORDER BY updated_at DESC LIMIT 1").get() as { payload_json: string; updated_at: string } | undefined;
     let runtime = runtimeRow ? JSON.parse(runtimeRow.payload_json) as RuntimeProjection : null;
     if (runtime && Date.now() - Date.parse(runtimeRow!.updated_at) > 60_000) runtime = { ...runtime, health_state: "offline" };
+    return runtime;
+  }
+
+  board(): HubBoard {
+    this.expireCommands();
+    const rows = this.db.prepare("SELECT entity_type, entity_id, payload_json, deleted_at FROM entities WHERE deleted_at IS NULL ORDER BY entity_type, updated_at").all() as EntityRow[];
+    const runtime = this.runtime();
     const issues = rows.filter(row => row.entity_type === "issue").map(row => JSON.parse(row.payload_json) as IssueProjection);
     const directory = rows.find(row => row.entity_type === "agent_directory");
     const agentDirectory = directory ? JSON.parse(directory.payload_json) as AgentDirectoryProjection : null;

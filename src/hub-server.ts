@@ -347,7 +347,7 @@ export function createHubServer(options: HubServerOptions) {
       }
       if (url.pathname === "/api/account/usage" && method === "GET") {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" });
-        return sendJson(response, 200, { usage: null });
+        return sendJson(response, 200, { usage: store.runtime()?.usage ?? null });
       }
       if (url.pathname === "/api/update" && method === "GET") {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" });

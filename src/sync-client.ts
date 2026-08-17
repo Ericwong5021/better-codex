@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { coreVersion } from "./compatibility.js";
 import type { Store } from "./db.js";
 import { readSyncConfiguration, type SyncConfiguration } from "./sync-config.js";
-import { syncProtocolVersion, type AgentDirectoryProjection, type ConversationProjection, type RemoteCommand, type RemoteCommandAck, type RemoteFilePayload, type RuntimeProjection, type SyncChange, type SyncPushResponse } from "./sync-contract.js";
+import { syncProtocolVersion, type AgentDirectoryProjection, type CodexUsageProjection, type ConversationProjection, type RemoteCommand, type RemoteCommandAck, type RemoteFilePayload, type RuntimeProjection, type SyncChange, type SyncPushResponse } from "./sync-contract.js";
 import { controlCapabilities, controlProtocolVersion, decodeControlMessage, encodeControlMessage } from "./control-protocol.js";
 
 type SyncState = {
@@ -46,6 +46,7 @@ export class SyncClient {
   private controlKey: string | null = null;
   private remoteWake = false;
   private running = false;
+  private lastUsageSyncAt = 0;
   private controlRequests = new Map<string, { resolve: (value: Record<string, unknown>) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }>();
   private state: SyncState = { connected: false, syncing: false, last_sync_at: null, last_error: null, hub_url: null, device_name: null, lease_expires_at: null };
 
@@ -57,6 +58,7 @@ export class SyncClient {
     private readonly conversation: (issueId: string) => Promise<ConversationProjection | null> = async () => null,
     private readonly reply: (issueId: string, requestId: string, message: string, files: RemoteFilePayload[]) => void | Promise<void> = () => { throw new Error("remote_reply_unavailable"); },
     private readonly stopIssue: (issueId: string) => void | Promise<void> = () => { throw new Error("remote_stop_unavailable"); },
+    private readonly accountUsage: () => Promise<CodexUsageProjection | null> = async () => null,
   ) {}
 
   start() {
@@ -210,7 +212,7 @@ export class SyncClient {
     });
   }
 
-  private runtime(configuration: SyncConfiguration): RuntimeProjection {
+  private runtime(configuration: SyncConfiguration, usage: CodexUsageProjection | null): RuntimeProjection {
     const queue = this.store.syncQueueStatus();
     return {
       device_id: configuration.device_id,
@@ -221,6 +223,7 @@ export class SyncClient {
       last_sync_at: this.state.last_sync_at,
       queue_depth: queue.pending,
       health_state: "online",
+      usage,
     };
   }
 
@@ -242,7 +245,7 @@ export class SyncClient {
         this.state = { ...this.state, syncing: false, last_error: "control_unavailable" };
         return this.status();
       }
-      if (controlReady && !remoteWake && this.store.syncQueueStatus().pending === 0) {
+      if (controlReady && !remoteWake && this.store.syncQueueStatus().pending === 0 && Date.now() - this.lastUsageSyncAt < 60_000) {
         this.failures = 0;
         this.state = { ...this.state, syncing: false, last_error: null };
         return this.status();
@@ -265,6 +268,7 @@ export class SyncClient {
   }
 
   private async push(configuration: SyncConfiguration) {
+    const usage = await this.accountUsage();
     let directoryPending = true;
     for (let page = 0; page < 100; page += 1) {
       const limit = directoryPending ? 99 : 100;
@@ -284,10 +288,11 @@ export class SyncClient {
           protocol_version: syncProtocolVersion,
           core_version: coreVersion,
           device_id: configuration.device_id,
-          runtime: this.runtime(configuration),
+          runtime: this.runtime(configuration, usage),
           changes,
         }),
       });
+      this.lastUsageSyncAt = Date.now();
       const accepted = new Set(result.accepted);
       for (const entry of entries) {
         if (!accepted.has(entry.event_id)) continue;

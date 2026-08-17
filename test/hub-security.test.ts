@@ -82,9 +82,29 @@ test("Hub Web login separates bootstrap credentials and enforces cookie, Origin,
     assert.equal(bootstrap.status, 200);
     assert.equal(((await bootstrap.json()) as { user?: { name?: string } }).user?.name, webUsername);
 
+    const pairing = hub.store.createPairingCode();
+    const device = hub.store.pairDevice("usage runtime", pairing.pairing_code);
+    const timestamp = new Date().toISOString();
+    const expectedUsage = {
+      planType: "pro",
+      primary: { usedPercent: 35, remainingPercent: 65, windowDurationMins: 10080, resetsAt: 1787196605 },
+      secondary: null,
+    };
+    const pushedUsage = {
+      planType: " pro ",
+      primary: { usedPercent: 35, remainingPercent: 1, windowDurationMins: 10080, resetsAt: 1787196605 },
+      secondary: null,
+    };
+    hub.store.push(device.device_id, {
+      protocol_version: syncProtocolVersion,
+      core_version: "0.4.6",
+      device_id: device.device_id,
+      runtime: { device_id: device.device_id, device_name: device.device_name, protocol_version: syncProtocolVersion, core_version: "0.4.6", last_seen_at: timestamp, last_sync_at: null, queue_depth: 0, health_state: "online", usage: pushedUsage },
+      changes: [],
+    });
     const usage = await fetch(`${base}/api/account/usage`, { headers: { cookie } });
     assert.equal(usage.status, 200);
-    assert.deepEqual(await usage.json(), { usage: null });
+    assert.deepEqual(await usage.json(), { usage: expectedUsage });
 
     const noCsrf = await fetch(`${base}/api/issues`, { method: "POST", headers: { cookie, origin, "content-type": "application/json" }, body: "{}" });
     assert.equal(noCsrf.status, 403);

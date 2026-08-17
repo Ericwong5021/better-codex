@@ -75,7 +75,55 @@ export type RuntimeProjection = {
   last_sync_at: string | null;
   queue_depth: number;
   health_state: "online" | "offline";
+  usage?: CodexUsageProjection | null;
 };
+
+export type CodexUsageWindowProjection = {
+  usedPercent: number;
+  remainingPercent: number;
+  windowDurationMins: number;
+  resetsAt: number;
+};
+
+export type CodexUsageProjection = {
+  planType: string;
+  primary: CodexUsageWindowProjection | null;
+  secondary: CodexUsageWindowProjection | null;
+};
+
+function usageNumber(value: unknown) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function normalizeUsageWindow(value: unknown): CodexUsageWindowProjection | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const source = value as Record<string, unknown>;
+  const usedPercent = usageNumber(source.usedPercent);
+  const windowDurationMins = usageNumber(source.windowDurationMins);
+  const resetsAt = usageNumber(source.resetsAt);
+  if (usedPercent === null || windowDurationMins === null || resetsAt === null || windowDurationMins <= 0 || resetsAt <= 0) return null;
+  const used = Math.min(100, Math.max(0, Math.round(usedPercent)));
+  return {
+    usedPercent: used,
+    remainingPercent: 100 - used,
+    windowDurationMins: Math.round(windowDurationMins),
+    resetsAt: Math.round(resetsAt),
+  };
+}
+
+export function normalizeCodexUsageProjection(value: unknown): CodexUsageProjection | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const source = value as Record<string, unknown>;
+  const primary = normalizeUsageWindow(source.primary);
+  const secondary = normalizeUsageWindow(source.secondary);
+  if (!primary && !secondary) return null;
+  return {
+    planType: typeof source.planType === "string" ? source.planType.trim().slice(0, 40) : "",
+    primary,
+    secondary,
+  };
+}
 
 export type SyncProjection = ProjectProjection | IssueProjection | AgentDirectoryProjection;
 

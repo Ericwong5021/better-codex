@@ -1,5 +1,5 @@
 import { controlCapabilities, controlProtocolVersion, decodeControlMessage, encodeControlMessage } from "./control-protocol.js";
-import { syncProtocolVersion, supportedSyncProtocolVersions, type RemoteCommandAck, type SyncChange, type SyncPushRequest } from "./sync-contract.js";
+import { normalizeCodexUsageProjection, syncProtocolVersion, supportedSyncProtocolVersions, type RemoteCommandAck, type RuntimeProjection, type SyncChange, type SyncPushRequest } from "./sync-contract.js";
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { coreVersion } from "./version.js";
 import { cloudflareIssuePriorities, cloudflareIssueStatuses, cloudflareRenderMarkdown, cloudflareWebCss, cloudflareWebHtml, cloudflareWebJavaScript } from "./cloudflare-web.js";
@@ -233,7 +233,7 @@ export class BetterCodexHubObject {
       return json({ protocol_version: syncProtocolVersion, revision: this.revision(), runtime: runtime?.payload_json ? JSON.parse(runtime.payload_json) : null, backup: { configured: Boolean(this.env.BACKUPS), last_backup: backup ? { key: backup.value, created_at: backup.updated_at } : null }, read_only: readOnly?.value === "1" });
     }
     if (url.pathname === "/api/bootstrap" && request.method === "GET") return this.webBootstrap(request);
-    if (url.pathname === "/api/account/usage" && request.method === "GET") return this.webAuthorized(request, { usage: null });
+    if (url.pathname === "/api/account/usage" && request.method === "GET") return this.webUsage(request);
     if (url.pathname === "/api/update" && request.method === "GET") return this.webUpdate(request, false);
     if (url.pathname === "/api/update/check" && request.method === "POST") return this.webUpdate(request, true);
     if (url.pathname === "/api/agents" && request.method === "GET") return this.webAgents(request);
@@ -540,6 +540,13 @@ export class BetterCodexHubObject {
     return await this.isWebAuthorized(request) ? json(value) : json({ error: "unauthorized" }, 401);
   }
 
+  private async webUsage(request: Request) {
+    if (!(await this.isWebAuthorized(request))) return json({ error: "unauthorized" }, 401);
+    const runtime = this.sql.exec("SELECT payload_json FROM runtime_projection ORDER BY updated_at DESC LIMIT 1").toArray()[0] as { payload_json?: string } | undefined;
+    const projection = runtime?.payload_json ? JSON.parse(runtime.payload_json) as RuntimeProjection : null;
+    return json({ usage: normalizeCodexUsageProjection(projection?.usage) });
+  }
+
   private checkUpdate() {
     if (this.updateCheckPromise) return this.updateCheckPromise;
     const promise = checkStableRelease().then(result => {
@@ -776,7 +783,7 @@ export class BetterCodexHubObject {
       this.sql.exec("INSERT INTO changes (entity_type, entity_id, operation, created_at) VALUES (?, ?, ?, ?)", change.entity_type, change.entity_id, projection ? "upsert" : "delete", timestamp());
         accepted.push(change.event_id);
       }
-      this.sql.exec("INSERT INTO runtime_projection (device_id, payload_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(device_id) DO UPDATE SET payload_json = excluded.payload_json, updated_at = excluded.updated_at", deviceId, JSON.stringify({ ...request.runtime, protocol_version: request.protocol_version, last_seen_at: timestamp() }), timestamp());
+      this.sql.exec("INSERT INTO runtime_projection (device_id, payload_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(device_id) DO UPDATE SET payload_json = excluded.payload_json, updated_at = excluded.updated_at", deviceId, JSON.stringify({ ...request.runtime, protocol_version: request.protocol_version, last_seen_at: timestamp(), usage: normalizeCodexUsageProjection(request.runtime.usage) }), timestamp());
       return { accepted, cursor: this.revision(), lease_expires_at: leaseExpiresAt };
     });
     if (result.accepted.length) this.notifyWeb({ entity_type: "sync", entity_id: deviceId, operation: "push" });
