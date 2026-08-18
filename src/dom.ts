@@ -6880,12 +6880,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-theme", "aria-current", ATTRIBUTES.threadActive] });
       startLiveUpdates();
       refresh();
-      startSessionRelay();
       void checkUpdateNotice();
       updateTimer = setInterval(() => { if (!document.hidden) void checkUpdateNotice(); }, 15000);
     }
 
-    window.__betterCodexInjection__ = { version: VERSION, profile: PROFILE, host: HOST_KIND, endpoint: BASE_URL, refresh, pulse: pulseSessionRelay, open: openRoute, openThread, close, destroy };
+    window.__betterCodexInjection__ = { version: VERSION, profile: PROFILE, host: HOST_KIND, endpoint: BASE_URL, refresh, pulse: () => true, open: openRoute, openThread, close, destroy };
     document.addEventListener("click", onClick, true);
     document.addEventListener("pointerdown", onSessionPointerDown, true);
     document.addEventListener("pointermove", onSessionPointerMove, true);

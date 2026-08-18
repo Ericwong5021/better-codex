@@ -28,6 +28,7 @@ function startGateway(home: string, port: number, token: string, mockup = false)
       CODEX_HOME: home,
       BETTER_CODEX_PORT: String(port),
       BETTER_CODEX_TOKEN: token,
+      BETTER_CODEX_DISABLE_RUNTIME_SESSION_RELAY: "1",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });

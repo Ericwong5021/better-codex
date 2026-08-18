@@ -1,6 +1,6 @@
 {
   "name": "better-codex",
-  "version": "0.4.9-beta.2",
+  "version": "0.4.9-beta.3",
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
@@ -44,6 +44,7 @@
     "dist/sync-config.js",
     "dist/sync-contract.js",
     "dist/service.js",
+    "dist/session-relay.js",
     "dist/session-transcript.js",
     "dist/markdown.js",
     "dist/updater.js",

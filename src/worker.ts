@@ -10,6 +10,7 @@ import { mockupSessionActive } from "./injection-state.js";
 import { codexExecutablePath } from "./codex-cli.js";
 import { renderMarkdown } from "./markdown.js";
 import { readConversationActivity, readConversationResult } from "./session-transcript.js";
+import { RuntimeSessionRelay } from "./session-relay.js";
 import { projectDocumentKeys, type ProjectDocumentDiagram, type ProjectDocumentKey } from "./sync-contract.js";
 
 const interval = 60000;
@@ -48,10 +49,34 @@ export class IssueWorker {
   private readonly projectOverviews = new Map<string, ChildProcess | null>();
   private readonly manualQueue = new Set<string>();
   private readonly stoppingRuns = new Set<string>();
+  private readonly sessionRelay: RuntimeSessionRelay;
   private reconcilingSessions = false;
   private stopped = true;
 
-  constructor(private readonly store: Store, private readonly onChange: () => void = () => {}) {}
+  constructor(private readonly store: Store, private readonly onChange: () => void = () => {}) {
+    this.sessionRelay = new RuntimeSessionRelay({
+      poll: (relayId, busy) => this.pollSessionRelay(relayId, `runtime:${process.pid}`, "ready", undefined, busy),
+      release: (relayId, error) => {
+        this.store.releaseSessionRelay(relayId, error);
+        this.onChange();
+      },
+      checkpoint: (commandId, relayId, result) => {
+        this.checkpointSessionCommand(commandId, relayId, result);
+        this.onChange();
+      },
+      complete: (commandId, relayId, result) => {
+        this.completeSessionCommand(commandId, relayId, result);
+        this.onChange();
+      },
+      fail: (commandId, relayId, error, threadId, turnId) => {
+        this.failSessionCommand(commandId, relayId, error, threadId, turnId);
+        this.onChange();
+      },
+      event: (method, params) => {
+        if (this.handleSessionEvent(method, params)) this.onChange();
+      },
+    });
+  }
 
   start() {
     this.stopped = false;
@@ -65,6 +90,7 @@ export class IssueWorker {
       else this.store.finalizeScheduler(pending.claim.runId, pending.claim.issue.id, pending.executionSuccess, null, "workspace_required");
     }
     for (const issue of this.store.listPendingEnrichmentIssues()) this.enrichIssue(issue, issue.description, issue.agent_id || "");
+    this.sessionRelay.start();
     void this.reconcileDesktopRuns();
     this.schedule(0);
   }
@@ -80,6 +106,7 @@ export class IssueWorker {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
     this.manualQueue.clear();
+    this.sessionRelay.stop();
     return true;
   }
 
@@ -169,6 +196,7 @@ export class IssueWorker {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
     this.manualQueue.clear();
+    this.sessionRelay.stop();
     for (const { child, claim } of this.schedulers.values()) {
       this.store.pauseScheduler(claim.runId);
       child.kill("SIGTERM");
