@@ -160,11 +160,12 @@ test("square icon controls center their SVG geometry instead of using the text b
   assert.match(css, /\.better-codex-column-icon > svg,[\s\S]*?\.better-codex-status-icon \{[^}]*display:\s*block;/);
 });
 
-test("task columns only render controls backed by working actions", () => {
+test("task columns render working actions and the project creation shortcut", () => {
   const source = injectionScript(4317, "test-token", "install");
 
   assert.doesNotMatch(source, /aria-label="更多"/);
-  assert.doesNotMatch(source, /新建项目|openNativeProjectEditor|data-app-action-sidebar-project-create/);
+  assert.doesNotMatch(source, /openNativeProjectEditor|data-app-action-sidebar-project-create/);
+  assert.ok(source.includes('t("创建新项目")'));
   assert.match(source, /data-add-status=/);
   assert.ok(source.includes('te("新建任务")'));
 });
@@ -214,16 +215,17 @@ test("issues toolbar has a toggleable auto-dispatch icon between filter and crea
   assert.match(css, /\.better-codex-auto-dispatch-help-divider\s*\{/s);
 });
 
-test("issue creation uses a primary split button with an agent creation menu", () => {
+test("issue creation uses a primary split button with a project creation menu", () => {
   const source = injectionScript(4317, "test-token", "install");
   const css = betterCodexDesignSystemCss();
 
   assert.ok(source.includes('className = "better-codex-create-split"'));
-  assert.ok(source.includes('setAttribute("aria-label", t("选择 issue 创建方式"))'));
+  assert.ok(source.includes('setAttribute("aria-label", t("更多创建选项"))'));
+  assert.ok(source.includes('project.innerHTML = icon("folder") + "<span>" + escapeHtml(t("创建新项目"))'));
+  assert.ok(source.includes('openCreateProjectDialog()'));
   assert.ok(source.includes("通过智能体创建"));
   assert.ok(source.includes('async function openEditor(issue = null, initialStatus = "todo", createMode = "agent")'));
   assert.ok(source.includes('const draftMode = issue ? "manual" : createMode === "manual" ? "manual" : "agent"'));
-  assert.ok(source.includes('openEditor(null, "todo", "manual")'));
   assert.doesNotMatch(source, /state\.createMode/);
   assert.ok(source.includes('te(draft.mode === "agent" ? "切换到手动" : "切换到智能体")'));
   assert.ok(source.includes('const crumb = issue'));
@@ -639,7 +641,9 @@ test("issue cards show project icon and assignee instead of session entry", () =
   assert.ok(headerSource.includes('data-dialog-start-now aria-label="\' + te("立即开始任务")'));
   assert.equal(source.slice(footerStart, source.indexOf("function renderDialog()", footerStart)).includes("data-dialog-start-now"), false);
   assert.ok(source.includes('if (issue && !issuePermissions(issue).enrichmentPending) return void perform(() => openEditor(issue))'));
-  assert.ok(source.includes('draggable="\' + String(!issueLocked) + \'"'));
+  assert.ok(source.includes('draggable="\' + String(!issueLocked && supportsIssueDrag()) + \'"'));
+  assert.ok(source.includes('board.addEventListener("pointerdown", onIssueLongPressStart)'));
+  assert.ok(source.includes("openIssueMenuAt(card, press.startX, press.startY)"));
   assert.ok(source.includes('if (!issue || editingLocked || !issue.agent_enabled ||'));
   assert.ok(source.includes('if (editingLocked || submitInFlight) return;'));
   assert.ok(!source.includes("issue?.run_thread_id || issue?.thread_id || \"\""));

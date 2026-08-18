@@ -546,7 +546,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "全部": "All", "已分配": "Assigned", "未分配": "Unassigned", "待规划": "Backlog", "待办": "Todo", "进行中": "In progress", "待审核": "In review", "调度中": "Scheduling", "已完成": "Done", "已阻塞": "Blocked", "归档": "Archive", "拖到这里即可归档": "Drop here to archive", "查看已归档卡片": "View archived cards", "已归档任务": "Archived tasks", "搜索已归档任务": "Search archived tasks", "所有项目": "All projects", "全部删除": "Delete all", "删除已归档聊天": "Delete archived chat", "删除项目中的全部内容": "Delete all project content", "确定删除项目中的全部已归档任务吗？": "Delete all archived tasks in this project?", "取消归档": "Unarchive", "已归档卡片": "Archived cards", "暂无已归档卡片": "No archived cards", "归档列表加载失败": "Unable to load archived cards",
       "无": "None", "低": "Low", "中": "Medium", "高": "High", "紧急": "Urgent", "超高": "Extra high", "无优先级": "No priority", "优先级": "Priority", "状态": "Status", "日期": "Date", "筛选": "Filter", "标签": "Labels",
       "新建": "New", "新建 issue": "New issue", "新建任务": "New task", "新建智能体": "New agent", "创建": "Create", "创建任务": "Create task", "删除": "Delete", "删除任务": "Delete task", "删除智能体": "Delete agent", "保存": "Save", "确认": "Confirm", "取消": "Cancel", "关闭": "Close", "重试": "Retry", "稍后": "Later", "展开": "Expand", "缩小": "Minimize", "缩放头像": "Zoom avatar",
-      "项目": "Project", "无项目": "No project", "选择项目": "Select project", "选择责任人": "Select owner", "选择执行智能体": "Select agent", "选择 issue 创建方式": "Choose how to create the issue", "任务标题": "Task title", "添加描述...": "Add description...", "添加标签": "Add label", "添加附件": "Add attachment", "移除附件": "Remove attachment", "搜索任务": "Search tasks", "搜索项目": "Search projects", "搜索项目...": "Search projects...", "搜索智能体": "Search agents",
+      "项目": "Project", "无项目": "No project", "选择项目": "Select project", "选择责任人": "Select owner", "选择执行智能体": "Select agent", "更多创建选项": "More creation options", "任务标题": "Task title", "添加描述...": "Add description...", "添加标签": "Add label", "添加附件": "Add attachment", "移除附件": "Remove attachment", "搜索任务": "Search tasks", "搜索项目": "Search projects", "搜索项目...": "Search projects...", "搜索智能体": "Search agents",
       "负责人": "Owner", "创建者": "Creator", "指定负责人": "Assign owner", "由我创建": "Created by me", "由我": "By me", "我": "Me", "你": "You", "未指派": "Not assigned", "未提供": "Not provided", "已同步": "Synced",
       "自动运行": "Auto-run", "手动运行": "Manual run", "切换为自动运行": "Switch to auto-run", "切换为手动运行": "Switch to manual run", "切换到智能体": "Switch to agents", "手动创建": "Manual creation", "通过智能体创建": "Create with agent", "运行模式说明": "Run mode", "帮助与设置": "Help and settings", "设置": "Settings", "快捷键": "Shortcuts", "快捷键设置": "Keyboard shortcuts", "为常用操作设置键盘快捷键。": "Set keyboard shortcuts for common actions.", "创建 Issue": "Create Issue", "打开创建 Issue 窗口": "Open the Create Issue window", "设置快捷键": "Set shortcut", "点击录入": "Click to record", "按下新的快捷键": "Press a new shortcut", "未设置": "Not set", "清除快捷键": "Clear shortcut", "关于": "About", "会话结束提醒": "Session completion alerts", "Issue 会话结束后在当前窗口显示提醒": "Show an alert in the current window when an issue session ends", "弹窗持续时间": "Popup duration", "1 秒": "1 second", "5 秒": "5 seconds", "10 秒": "10 seconds", "永久": "Permanent", "会话已结束": "Session ended", "通知": "Notifications", "语言": "Language", "界面语言": "Interface language", "选择 Better Codex 的界面语言": "Choose the language used by Better Codex", "调度": "Scheduling", "调度器模型": "Scheduler model", "这个模型用于 Issue 状态调度": "This model is used for Issue status routing", "调度器思考强度": "Scheduler reasoning effort", "这个强度用于 Issue 状态调度": "This level is used for Issue status routing", "跟随系统": "System", "中文": "Chinese", "软件更新": "Software updates", "更新状态": "Update status", "检查新版本": "Check for updates", "检查中…": "Checking…", "发现新版本": "Update available", "无法检查更新": "Unable to check", "版本信息": "Version info", "兼容版本": "Compatibility version", "运行状态": "Runtime status", "运行正常": "Running", "正在检查": "Checking", "已是最新版本": "Up to date", "从开始到完成，让 Codex 里的工作清晰可见。": "From start to finish, keep your work in Codex clear and visible.", "如果你喜欢 Better Codex，欢迎给我们一个 Star。": "If you like Better Codex, please give us a Star.", "最大并发": "Max concurrency", "模型": "Model", "推理": "Reasoning", "指令": "Instructions", "默认": "Default", "自定义": "Custom",
       "点击": "Click", "，或者在已完成的会话卡片中": ", or use", "新消息，智能体才会执行任务。": "to post a new message in a completed conversation card. Only then will the agent run the task.", "会主动执行分配给自己的任务，但是不会执行": "automatically runs tasks assigned to it, but does not run", "区域的任务。": "tasks.",
@@ -566,7 +566,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "头像": "Avatar", "上传图片": "Upload image", "使用此头像": "Use this avatar", "点击选择预设图标，或上传图片": "Choose a preset icon or upload an image", "从预设图标中选择，也可以上传图片": "Choose a preset icon or upload an image", "创建智能体": "Create agent", "Codex 默认智能体": "Default Codex agent", "说明这个智能体适合承担什么工作": "Describe what this agent is good at", "定义职责、工作方式和输出要求": "Define responsibilities, workflow, and output requirements", "权限": "Permissions", "只读": "Read-only", "工作区可写": "Workspace write access", "完全访问": "Full access", "仅可读取工作区文件，不能修改": "Can read workspace files but cannot modify them", "可修改当前工作区内的文件": "Can modify files in the current workspace", "可不受限制地访问互联网和电脑上的任何文件": "Unrestricted access to the internet and files on this computer",
       "已经执行过对话的 Issue 只能修改状态、优先级和指派人。": "Issues with an executed conversation can only change status, priority, and assignee.", "终止任务后才能打开对话，是否终止任务？": "The task must be stopped before opening the conversation. Stop it now?", "终止并打开": "Stop and open", "正在终止…": "Stopping…", "忽略当前版本": "Ignore this version", "立即更新": "Update now", "暂无项目": "No projects", "告诉智能体要做什么，例如：“修复项目里任务运行状态不可见的问题”": "Tell the agent what to do, for example: “Fix the invisible task run status in the project”"
     } };
-    localeResources.en["手动创建 issue"] = "Create issue manually";
+    localeResources.en["创建新项目"] = "Create new project";
     localeResources.en["文件不能超过 10 MB"] = "Files must be 10 MB or smaller";
     localeResources.en["部分文件超过 10 MB，已跳过"] = "Some files larger than 10 MB were skipped";
     localeResources.en["最多传输 4 个文件且总大小不能超过 20 MB"] = "Transfer up to 4 files with a total size of 20 MB or less";
@@ -578,15 +578,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     Object.assign(localeResources.en, {
       "远程访问": "Remote access",
       "从浏览器安全访问你的任务看板": "Access your task board securely from a browser",
-      "选择部署方式": "Choose a deployment method",
-      "自有服务器": "Your server",
-      "使用 Docker、SQLite 和自动 HTTPS": "Docker, SQLite, and automatic HTTPS",
-      "无需服务器，部署到你的 Cloudflare 账户": "No server required. Deploy to your Cloudflare account",
       "让 Codex 协助安装": "Ask Codex to install",
       "把提示词发给服务器上的 Codex，或能 SSH 连接服务器的本地 Codex": "Send the prompt to Codex on the server, or to local Codex with SSH access",
-      "把提示词发给本机 Codex": "Send the prompt to Codex on this computer",
       "VPS 安装提示词": "VPS installation prompt",
-      "Cloudflare 安装提示词": "Cloudflare installation prompt",
       "复制提示词": "Copy prompt",
       "提示词已复制": "Prompt copied",
       "绑定 Better Codex": "Connect Better Codex",
@@ -614,7 +608,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "指令已复制": "Command copied",
       "状态检查失败": "Status check failed",
       "部署在 VPS": "Deployed on VPS",
-      "部署在 Cloudflare": "Deployed on Cloudflare",
       "检测中": "Checking",
     });
     localeResources.en["有任务正在运行，请等待任务结束后再更新。"] = "A task is running. Wait for it to finish before updating.";
@@ -682,6 +675,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "项目名称": "Project name",
       "项目文件夹": "Project folder",
       "选择文件夹": "Choose folder",
+      "选择本地项目文件夹": "Choose a local project folder",
+      "正在选择…": "Choosing…",
       "返回项目列表": "Back to projects",
       "最近 Issue 与对话": "Recent issues and conversations",
       "项目介绍": "Project overview",
@@ -692,7 +687,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "项目介绍生成失败，可重新生成。": "The overview could not be generated. Try again.",
       "创建后会加入 Codex 的项目列表。": "The project will be added to Codex.",
       "创建项目后，它会出现在 Codex 的项目列表中。": "Create a project to add it to Codex.",
-      "输入文件夹的绝对路径": "Enter an absolute folder path",
       "暂无关联 Issue": "No linked issues",
       "已归档": "Archived",
       "打开 Issue 详情": "Open issue details",
@@ -747,6 +741,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     let createMenuDismiss = null;
     let issueMenu = null;
     let issueMenuDismiss = null;
+    let issueLongPress = null;
+    let suppressIssueClickUntil = 0;
     let avatarPickerClose = null;
     let suppressAgentOutside = false;
     let agentInspectorResize = null;
@@ -1053,6 +1049,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #\${PANEL_ID} .better-codex-column-icon:hover { background: rgba(113,113,122,.1); }
         #\${PANEL_ID} .better-codex-cards { min-height: 0; flex: 1; overflow-y: auto; padding: 0; border-radius: 8px; }
         #\${PANEL_ID} .better-codex-card { box-sizing: border-box; width: 100%; margin-bottom: 8px; border: 1px solid var(--bc-color-hairline, #e5e5e6); border-radius: 8px; background: var(--bc-color-canvas, var(--bc-page, #fff)); padding: 12px 10px; box-shadow: var(--bc-card-shadow, 0 1px 2px rgba(15,23,42,.04),0 2px 6px rgba(15,23,42,.05)); cursor: pointer; transition: border-color .15s, box-shadow .15s, transform .15s; }
+        @media (hover: none), (pointer: coarse) { #\${PANEL_ID} .better-codex-card { -webkit-touch-callout: none; user-select: none; } }
         #\${PANEL_ID} .better-codex-card:hover { border-color: color-mix(in srgb, var(--bc-color-text, #1a1c1f) 16%, var(--bc-color-hairline, #e5e5e6)); background: var(--bc-color-canvas, var(--bc-page, #fff)); box-shadow: var(--bc-card-shadow, 0 1px 2px rgba(15,23,42,.04),0 2px 6px rgba(15,23,42,.05)), 0 4px 12px rgba(15,23,42,.06); }
         #\${PANEL_ID} .better-codex-card.is-enrichment-pending { cursor: wait; opacity: .76; }
         #\${PANEL_ID} .better-codex-card.is-enrichment-pending:hover { border-color: var(--bc-color-hairline, #e5e5e6); box-shadow: var(--bc-card-shadow, 0 1px 2px rgba(15,23,42,.04),0 2px 6px rgba(15,23,42,.05)); }
@@ -2834,17 +2831,17 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       menu.className = "better-codex-create-menu";
       menu.setAttribute("role", "menu");
       menu.setAttribute(OWNED, "true");
-      const manual = document.createElement("button");
-      manual.type = "button";
-      manual.className = "better-codex-create-menu-item";
-      manual.setAttribute("role", "menuitem");
-      manual.innerHTML = icon("plus") + "<span>" + escapeHtml(t("手动创建 issue")) + "</span>";
-      manual.addEventListener("click", event => {
+      const project = document.createElement("button");
+      project.type = "button";
+      project.className = "better-codex-create-menu-item";
+      project.setAttribute("role", "menuitem");
+      project.innerHTML = icon("folder") + "<span>" + escapeHtml(t("创建新项目")) + "</span>";
+      project.addEventListener("click", event => {
         event.stopPropagation();
         closeCreateMenu();
-        void perform(() => openEditor(null, "todo", "manual"));
+        openCreateProjectDialog();
       });
-      menu.append(manual);
+      menu.append(project);
       trigger.closest(".better-codex-create-split")?.append(menu);
       trigger.setAttribute("aria-expanded", "true");
       createMenuDismiss = event => {
@@ -2999,12 +2996,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       return state.issues.find(issue => issue.id === issueId) || updated;
     }
 
-    function openIssueMenu(event) {
-      const card = event.target.closest("[data-issue-id]");
+    function openIssueMenuAt(card, clientX, clientY) {
       const issue = state.issues.find(item => item.id === card?.dataset.issueId);
       if (!issue) return;
-      event.preventDefault();
-      event.stopPropagation();
       closeFilterMenu();
       closeIssueMenu();
       const project = state.projects.find(item => item.id === issue.project_id);
@@ -3035,12 +3029,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       menu.id = "better-codex-context-menu";
       menu.setAttribute(OWNED, "true");
       menu.dataset.issueId = issue.id;
-      menu.dataset.align = event.clientX + 430 > window.innerWidth ? "left" : "right";
+      menu.dataset.align = clientX + 430 > window.innerWidth ? "left" : "right";
       menu.innerHTML = '<div class="better-codex-context-item-wrap' + contextLockClass + '"><button class="better-codex-context-item" type="button"' + contextLockAttrs + '>' + statusIcon(issue.status) + '<span>' + escapeHtml(t("状态")) + '</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu">' + statusItems + '</div></div><div class="better-codex-context-item-wrap' + contextLockClass + '"><button class="better-codex-context-item" type="button"' + contextLockAttrs + '>' + priorityIcon(issue.priority) + '<span>' + escapeHtml(t("优先级")) + '</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu">' + priorityItems + '</div></div><div class="better-codex-context-item-wrap' + contextLockClass + '"><button class="better-codex-context-item" type="button"' + contextLockAttrs + '>' + icon("user") + '<span>' + escapeHtml(t("指定负责人")) + '</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu is-assignee">' + assigneeItems + '</div></div>' + stopItem + (workspacePath ? '<div class="better-codex-context-divider"></div><button class="better-codex-context-item" type="button" data-context-action="copy-workspace">' + icon("folder") + '<span>' + escapeHtml(t("复制本地 workdir 路径")) + '</span></button>' : "") + '<div class="better-codex-context-divider"></div><button class="better-codex-context-item" type="button"' + archiveLockAttrs + ' data-context-action="archive">' + icon("archive") + '<span>' + escapeHtml(t("归档")) + '</span></button>';
       document.body.appendChild(menu);
       const rect = menu.getBoundingClientRect();
-      menu.style.left = Math.max(8, Math.min(event.clientX, window.innerWidth - rect.width - 8)) + "px";
-      menu.style.top = Math.max(8, Math.min(event.clientY, window.innerHeight - rect.height - 8)) + "px";
+      menu.style.left = Math.max(8, Math.min(clientX, window.innerWidth - rect.width - 8)) + "px";
+      menu.style.top = Math.max(8, Math.min(clientY, window.innerHeight - rect.height - 8)) + "px";
 
       async function assignIssue(kind, agentId = "") {
         const current = state.issues.find(candidate => candidate.id === menu.dataset.issueId);
@@ -3117,6 +3111,46 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         document.addEventListener("pointerdown", issueMenuDismiss, true);
         document.addEventListener("keydown", issueMenuDismiss, true);
       }, 0);
+    }
+
+    function openIssueMenu(event) {
+      const card = event.target.closest("[data-issue-id]");
+      if (!card) return;
+      event.preventDefault();
+      event.stopPropagation();
+      openIssueMenuAt(card, event.clientX, event.clientY);
+    }
+
+    function resetIssueLongPress() {
+      if (issueLongPress?.timer) clearTimeout(issueLongPress.timer);
+      issueLongPress = null;
+    }
+
+    function onIssueLongPressStart(event) {
+      if (event.pointerType !== "touch" || event.isPrimary === false || event.button !== 0) return;
+      const card = event.target.closest("[data-issue-id]");
+      if (!card) return;
+      resetIssueLongPress();
+      const press = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, timer: null };
+      press.timer = setTimeout(() => {
+        if (issueLongPress !== press) return;
+        suppressIssueClickUntil = Date.now() + 700;
+        openIssueMenuAt(card, press.startX, press.startY);
+        resetIssueLongPress();
+      }, 500);
+      issueLongPress = press;
+    }
+
+    function onIssueLongPressMove(event) {
+      if (!issueLongPress || event.pointerId !== issueLongPress.pointerId) return;
+      const deltaX = event.clientX - issueLongPress.startX;
+      const deltaY = event.clientY - issueLongPress.startY;
+      if (deltaX * deltaX + deltaY * deltaY > 64) resetIssueLongPress();
+    }
+
+    function onIssueLongPressEnd(event) {
+      if (!issueLongPress || event.pointerId !== issueLongPress.pointerId) return;
+      resetIssueLongPress();
     }
 
     function createPanel() {
@@ -3228,7 +3262,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       createToggle.id = "better-codex-create-toggle";
       createToggle.className = "better-codex-create-toggle";
       createToggle.dataset.createMenuToggle = "true";
-      createToggle.setAttribute("aria-label", t("选择 issue 创建方式"));
+      createToggle.setAttribute("aria-label", t("更多创建选项"));
       createToggle.setAttribute("aria-haspopup", "menu");
       createToggle.setAttribute("aria-expanded", "false");
       createToggle.innerHTML = icon("chevronDown");
@@ -3264,6 +3298,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       board.className = "better-codex-board better-codex-issue-only";
       board.addEventListener("click", onBoardClick);
       board.addEventListener("contextmenu", openIssueMenu);
+      board.addEventListener("pointerdown", onIssueLongPressStart);
+      board.addEventListener("pointermove", onIssueLongPressMove);
+      board.addEventListener("pointerup", onIssueLongPressEnd);
+      board.addEventListener("pointercancel", onIssueLongPressEnd);
       board.addEventListener("dragstart", onCardDragStart);
       board.addEventListener("dragend", onCardDragEnd);
       board.addEventListener("dragover", event => event.preventDefault());
@@ -4052,23 +4090,39 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const dialog = document.createElement("dialog");
       dialog.id = "better-codex-project-dialog";
       dialog.setAttribute(OWNED, "true");
-      dialog.innerHTML = '<form><h2>' + te("创建 Codex 项目") + '</h2><p>' + te("创建后会加入 Codex 的项目列表。") + '</p><label><span>' + te("项目名称") + '</span><input name="name" maxlength="120" autocomplete="off" required></label><label><span>' + te("项目文件夹") + '</span><span class="better-codex-project-folder-field"><input name="workspace_path" maxlength="4096" placeholder="' + te("输入文件夹的绝对路径") + '" autocomplete="off" spellcheck="false" required>' + (REMOTE ? "" : '<button type="button" data-project-choose-folder>' + te("选择文件夹") + '</button>') + '</span></label><output hidden></output><div class="better-codex-project-dialog-actions"><button type="button" data-project-create-cancel>' + te("取消") + '</button><button type="submit">' + te("创建项目") + '</button></div></form>';
+      dialog.innerHTML = '<form><h2>' + te("创建 Codex 项目") + '</h2><p>' + te("创建后会加入 Codex 的项目列表。") + '</p><label><span>' + te("项目名称") + '</span><input name="name" maxlength="120" autocomplete="off" required></label><label><span>' + te("项目文件夹") + '</span><span class="better-codex-project-folder-field"><input name="workspace_path" maxlength="4096" placeholder="' + te("选择本地项目文件夹") + '" autocomplete="off" spellcheck="false" readonly required><button type="button" data-project-choose-folder>' + te("选择文件夹") + '</button></span></label><output hidden></output><div class="better-codex-project-dialog-actions"><button type="button" data-project-create-cancel>' + te("取消") + '</button><button type="submit" disabled>' + te("创建项目") + '</button></div></form>';
       const finish = () => { dialog.close(); dialog.remove(); };
       dialog.querySelector("[data-project-create-cancel]").addEventListener("click", finish);
-      dialog.querySelector("[data-project-choose-folder]")?.addEventListener("click", async event => {
-        const button = event.currentTarget;
+      const chooseFolder = async () => {
+        const button = dialog.querySelector("[data-project-choose-folder]");
+        const output = dialog.querySelector("output");
+        const workspaceInput = dialog.querySelector('[name="workspace_path"]');
+        const nameInput = dialog.querySelector('[name="name"]');
+        const submit = dialog.querySelector('button[type="submit"]');
         button.disabled = true;
+        button.textContent = t("正在选择…");
+        output.hidden = true;
         try {
           const result = await api("/api/system/directory", { method: "POST", timeoutMs: 300000 });
-          if (result.workspace_path) dialog.querySelector('[name="workspace_path"]').value = result.workspace_path;
+          const command = result.command_id ? await waitForRemoteCommand(result.command_id, 300000) : null;
+          if (command && command.status !== "applied") throw new Error(command.error || "command_rejected");
+          const workspacePath = String(command?.payload?.workspace_path || result.workspace_path || "");
+          if (!workspacePath) return;
+          workspaceInput.value = workspacePath;
+          workspaceInput.title = workspacePath;
+          submit.disabled = false;
+          if (!nameInput.value.trim()) nameInput.value = workspacePath.replace(/[\\\\/]+$/, "").split(/[\\\\/]/).pop() || "";
+          nameInput.focus();
+          nameInput.select();
         } catch (error) {
-          const output = dialog.querySelector("output");
           output.textContent = error instanceof Error ? error.message : t("无法选择文件夹");
           output.hidden = false;
         } finally {
           button.disabled = false;
+          button.textContent = t("选择文件夹");
         }
-      });
+      };
+      dialog.querySelector("[data-project-choose-folder]").addEventListener("click", () => { void chooseFolder(); });
       dialog.querySelector("form").addEventListener("submit", event => {
         event.preventDefault();
         const submit = dialog.querySelector('button[type="submit"]');
@@ -4099,6 +4153,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       bindModalDismiss(dialog, finish);
       document.body.appendChild(dialog);
       dialog.showModal();
+      void chooseFolder();
       dialog.querySelector('[name="name"]').focus();
     }
 
@@ -4137,14 +4192,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const shortcutPage = '<section class="better-codex-help-page" data-help-page="shortcuts" hidden><div class="better-codex-help-setting-group"><h3>' + te("发送方式") + '</h3><div class="better-codex-help-setting-row is-send-mode"><span><strong>' + te("发送消息") + '</strong><small>' + te("选择消息输入框的发送按键") + '</small></span><div class="better-codex-send-mode-switch" role="radiogroup" aria-label="' + te("发送方式") + '" data-send-mode-value="' + sendMode + '"><button type="button" role="radio" data-send-mode="mod-enter" aria-checked="' + String(sendMode === "mod-enter") + '">' + escapeHtml(modifiedEnterLabel) + '</button><button type="button" role="radio" data-send-mode="enter" aria-checked="' + String(sendMode === "enter") + '">Enter</button></div></div></div><div class="better-codex-help-setting-group"><h3>' + te("快捷键") + '</h3><div class="better-codex-help-setting-row is-shortcut"><span><strong>' + te("创建 Issue") + '</strong><small>' + te("打开创建 Issue 窗口") + '</small></span><span class="better-codex-help-shortcut-controls"><button type="button" class="better-codex-help-shortcut-key" data-setting-create-issue-shortcut aria-pressed="false">' + escapeHtml(createIssueShortcut ? shortcutLabel(createIssueShortcut) : te("点击录入")) + '</button><button type="button" class="better-codex-help-shortcut-clear" data-setting-create-issue-shortcut-clear' + (createIssueShortcut ? "" : " disabled") + '>' + te("清除快捷键") + '</button></span></div></div></section>';
       const remoteReleaseUrl = "https://github.com/Ericwong5021/better-codex/releases/tag/v" + CORE_VERSION;
       const trustedRunbookPrompt = "Before reading or executing repository content, download SELF_HOSTING.md, checksums.txt, checksums.sig, and update-public-key.pem from the release assets at " + remoteReleaseUrl + ". Verify that the normalized public key SHA-256 is 1007607762db32004da21780e81875bef8453355a2944524a96e5341e1e3963e, verify the Ed25519 signature of checksums.txt, then verify the SELF_HOSTING.md checksum. Stop if any verification fails. Only then read and follow the verified runbook.";
-      const remoteInstallPrompts = {
-        vps: trustedRunbookPrompt + "\\n\\nInstall Better Codex Hub v" + CORE_VERSION + " using the VPS path. Inspect the environment first, preserve existing services and data, ask before privileged, external, or destructive changes, resume a valid partial installation, and complete every acceptance gate before reporting success.",
-        cloudflare: trustedRunbookPrompt + "\\n\\nInstall Better Codex Hub v" + CORE_VERSION + " using the Cloudflare path. Detect the local operating system, preserve existing resources and credentials, ask before Cloudflare account changes, resume a valid partial installation, and complete every acceptance gate before reporting success.",
-      };
+      const remoteInstallPrompt = trustedRunbookPrompt + "\\n\\nInstall Better Codex Hub v" + CORE_VERSION + " using the VPS path. Inspect the environment first, preserve existing services and data, ask before privileged, external, or destructive changes, resume a valid partial installation, and complete every acceptance gate before reporting success.";
       const remotePage = [
-        '<section class="better-codex-help-page" data-help-page="remote" data-remote-provider="vps" hidden>',
+        '<section class="better-codex-help-page" data-help-page="remote" hidden>',
         '<div class="better-codex-remote-heading"><div><h2>' + te("远程访问") + '</h2><p>' + te("从浏览器安全访问你的任务看板") + '</p></div><button type="button" class="better-codex-remote-refresh" data-remote-refresh>' + icon("refresh") + '<span>' + te("刷新状态") + '</span></button></div>',
-        '<div data-remote-guidance><div class="better-codex-remote-provider" role="radiogroup" aria-label="' + te("选择部署方式") + '"><button type="button" role="radio" aria-checked="true" class="is-active" data-remote-provider="vps"><span class="better-codex-remote-provider-icon">' + icon("server") + '</span><span><strong>VPS</strong><small>' + te("使用 Docker、SQLite 和自动 HTTPS") + '</small></span></button><button type="button" role="radio" aria-checked="false" data-remote-provider="cloudflare"><span class="better-codex-remote-provider-icon">' + icon("cloud") + '</span><span><strong>Cloudflare</strong><small>' + te("无需服务器，部署到你的 Cloudflare 账户") + '</small></span></button></div>',
+        '<div data-remote-guidance>',
         '<div class="better-codex-remote-setup">',
         '<section class="better-codex-remote-step"><span class="better-codex-remote-step-number">1</span><div><h3>' + te("让 Codex 协助安装") + '</h3><p data-remote-install-hint>' + te("把提示词发给服务器上的 Codex，或能 SSH 连接服务器的本地 Codex") + '</p><div class="better-codex-remote-command"><span data-remote-install-prompt-label>' + te("VPS 安装提示词") + '</span><button type="button" data-remote-copy-install aria-label="' + te("复制提示词") + '">' + icon("copy") + '<span>' + te("复制提示词") + '</span></button></div></div></section>',
         '<section class="better-codex-remote-step"><span class="better-codex-remote-step-number">2</span><div><h3>' + te("绑定 Better Codex") + '</h3><p>' + te("输入部署完成后的访问地址") + '</p><div class="better-codex-remote-url"><input type="url" data-remote-url inputmode="url" autocomplete="url" placeholder="https://codex.example.com" aria-label="' + te("访问地址") + '"><button type="button" data-remote-copy-connect disabled>' + icon("copy") + '<span>' + te("复制绑定指令") + '</span></button></div></div></section>',
@@ -4230,8 +4282,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       dialog.querySelectorAll("[data-help-view]").forEach(button => button.addEventListener("click", () => setHelpView(button.dataset.helpView)));
       const remotePageNode = dialog.querySelector('[data-help-page="remote"]');
       const remoteGuidance = dialog.querySelector("[data-remote-guidance]");
-      const remoteInstallPromptLabel = dialog.querySelector("[data-remote-install-prompt-label]");
-      const remoteInstallHint = dialog.querySelector("[data-remote-install-hint]");
       const remoteUrlInput = dialog.querySelector("[data-remote-url]");
       const remoteConnectButton = dialog.querySelector("[data-remote-copy-connect]");
       const remoteStatus = dialog.querySelector("[data-remote-status]");
@@ -4244,7 +4294,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const remoteOpen = dialog.querySelector("[data-remote-open]");
       const remoteError = dialog.querySelector("[data-remote-error]");
       const remoteRefresh = dialog.querySelector("[data-remote-refresh]");
-      let selectedRemoteProvider = "vps";
       let remoteStatusLoaded = false;
       const normalizedRemoteUrl = () => {
         try {
@@ -4271,25 +4320,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           delete button.dataset.copied;
         }, 1600);
       };
-      const setRemoteProvider = provider => {
-        if (!remotePageNode || !["vps", "cloudflare"].includes(provider)) return;
-        selectedRemoteProvider = provider;
-        remotePageNode.dataset.remoteProvider = provider;
-        dialog.querySelectorAll("[data-remote-provider]").forEach(button => {
-          if (button === remotePageNode) return;
-          const selected = button.dataset.remoteProvider === provider;
-          button.classList.toggle("is-active", selected);
-          button.setAttribute("aria-checked", String(selected));
-        });
-        remoteInstallPromptLabel.textContent = te(provider === "vps" ? "VPS 安装提示词" : "Cloudflare 安装提示词");
-        remoteInstallHint.textContent = te(provider === "vps" ? "把提示词发给服务器上的 Codex，或能 SSH 连接服务器的本地 Codex" : "把提示词发给本机 Codex");
-        remoteUrlInput.placeholder = provider === "vps" ? "https://codex.example.com" : "https://better-codex-hub.example.workers.dev";
-      };
       const renderRemoteStatus = value => {
         if (!remoteStatus) return;
         const remote = value?.remote;
         const reachable = remote?.reachable === true;
-        const provider = remote?.deployment === "cloudflare" || (!remote?.deployment && String(remote?.url || "").includes(".workers.dev")) ? "cloudflare" : "vps";
         remoteRefresh.disabled = false;
         remoteRefresh.dataset.loading = "false";
         remoteError.hidden = true;
@@ -4307,12 +4341,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         }
         remotePageNode.dataset.remoteConnected = "true";
         remoteGuidance.hidden = true;
-        setRemoteProvider(provider);
         remoteUrlInput.value = String(remote.url || "");
         remoteConnectButton.disabled = !normalizedRemoteUrl();
         remoteStatus.dataset.remoteStatus = reachable ? "online" : "offline";
         remoteStatusTitle.textContent = String(remote.name || "Better Codex Hub");
-        remoteStatusSubtitle.textContent = te(provider === "cloudflare" ? "部署在 Cloudflare" : "部署在 VPS") + " · " + String(remote.url || "");
+        remoteStatusSubtitle.textContent = te("部署在 VPS") + " · " + String(remote.url || "");
         remoteStatusBadge.textContent = te(reachable ? "服务在线" : "无法访问");
         remoteStatusEmpty.hidden = true;
         remoteStatusDetails.hidden = false;
@@ -4349,10 +4382,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       remoteStatusTimer = setInterval(() => {
         if (!document.hidden && dialog.open && dialog.querySelector(".better-codex-auto-dispatch-help-shell")?.dataset.helpView === "remote") void loadRemoteStatus(true);
       }, 5000);
-      dialog.querySelectorAll(".better-codex-remote-provider [data-remote-provider]").forEach(button => button.addEventListener("click", () => setRemoteProvider(button.dataset.remoteProvider)));
       dialog.querySelector("[data-remote-copy-install]")?.addEventListener("click", async event => {
         const button = event.currentTarget;
-        await copyText(remoteInstallPrompts[selectedRemoteProvider]);
+        await copyText(remoteInstallPrompt);
         await copiedFeedback(button, "提示词已复制");
       });
       remoteUrlInput?.addEventListener("input", () => { remoteConnectButton.disabled = !normalizedRemoteUrl(); });
@@ -4707,7 +4739,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             : issue.user_assigned
               ? '<span class="better-codex-card-assignee"><span class="better-codex-card-avatar is-user is-initials" style="background:' + escapeHtml(state.user.color || "#16a34a") + '">' + escapeHtml(state.user.initials || t("你")) + '</span><span>' + escapeHtml(state.user.name || t("我")) + '</span></span>'
               : '<span class="better-codex-card-assignee is-empty">' + icon("user") + '<span>' + te("未分配") + '</span></span>';
-          return '<article class="better-codex-card' + (issue.id === draggingIssueId ? " is-dragging" : "") + (enrichmentLocked ? " is-enrichment-pending" : "") + (executionRunning ? " is-execution-running" : "") + (permissions.remotePending ? " is-remote-pending" : "") + (permissions.remoteConflict ? " is-remote-conflict" : "") + '" draggable="' + String(!issueLocked) + '" aria-disabled="' + String(issueLocked) + '"' + (issueLocked ? ' aria-busy="' + String(enrichmentLocked || executionRunning || permissions.remotePending) + '"' : "") + ' data-issue-id="' + escapeHtml(issue.id) + '"><div class="better-codex-card-row"><div class="better-codex-card-id">' + priorityIcon(issue.priority) + '<span>' + escapeHtml(issue.identifier) + '</span></div>' + activity + '</div><div class="better-codex-card-title">' + escapeHtml(mockupText(issue.title)) + '</div>' + (description ? '<div class="better-codex-card-description">' + escapeHtml(description) + '</div>' : "") + (chips ? '<div class="better-codex-chip-row">' + chips + '</div>' : "") + '<div class="better-codex-card-meta">' + meta + '<span>' + te("更新于 " + timeAgo(issue.updated_at)) + '</span></div></article>';
+          return '<article class="better-codex-card' + (issue.id === draggingIssueId ? " is-dragging" : "") + (enrichmentLocked ? " is-enrichment-pending" : "") + (executionRunning ? " is-execution-running" : "") + (permissions.remotePending ? " is-remote-pending" : "") + (permissions.remoteConflict ? " is-remote-conflict" : "") + '" draggable="' + String(!issueLocked && supportsIssueDrag()) + '" aria-disabled="' + String(issueLocked) + '"' + (issueLocked ? ' aria-busy="' + String(enrichmentLocked || executionRunning || permissions.remotePending) + '"' : "") + ' data-issue-id="' + escapeHtml(issue.id) + '"><div class="better-codex-card-row"><div class="better-codex-card-id">' + priorityIcon(issue.priority) + '<span>' + escapeHtml(issue.identifier) + '</span></div>' + activity + '</div><div class="better-codex-card-title">' + escapeHtml(mockupText(issue.title)) + '</div>' + (description ? '<div class="better-codex-card-description">' + escapeHtml(description) + '</div>' : "") + (chips ? '<div class="better-codex-chip-row">' + chips + '</div>' : "") + '<div class="better-codex-card-meta">' + meta + '<span>' + te("更新于 " + timeAgo(issue.updated_at)) + '</span></div></article>';
         }).join("");
         const columnButton = archiveColumn
           ? '<button class="better-codex-column-icon" type="button" data-archive-open aria-label="' + te("查看已归档卡片") + '" title="' + te("查看已归档卡片") + '">' + icon("archive") + '</button>'
@@ -4757,8 +4789,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       return state.autoDispatch;
     }
 
-    async function waitForRemoteCommand(commandId) {
-      const deadline = Date.now() + 30_000;
+    async function waitForRemoteCommand(commandId, timeoutMs = 30_000) {
+      const deadline = Date.now() + timeoutMs;
       while (Date.now() < deadline) {
         const command = await api("/api/v1/commands/" + encodeURIComponent(commandId));
         if (["applied", "rejected", "conflict", "expired"].includes(command.status)) return command;
@@ -6377,6 +6409,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function onBoardClick(event) {
+      if (Date.now() < suppressIssueClickUntil) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
       const archiveOpen = event.target.closest("[data-archive-open]");
       if (archiveOpen) return void openArchiveDialog();
       const add = event.target.closest("[data-add-status]");
@@ -6523,9 +6560,17 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       resetSessionDrag();
     }
 
+    function supportsIssueDrag() {
+      return !window.matchMedia?.("(hover: none), (pointer: coarse)")?.matches;
+    }
+
     function onCardDragStart(event) {
       const card = event.target.closest("[data-issue-id]");
       if (!card || !event.dataTransfer) return;
+      if (!supportsIssueDrag()) {
+        event.preventDefault();
+        return;
+      }
       const issueId = card.dataset.issueId || "";
       const issue = state.issues.find(item => item.id === issueId);
       if (!issue || issuePermissions(issue).boardLocked) return;

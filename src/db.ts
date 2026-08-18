@@ -1182,7 +1182,7 @@ export class Store {
     } satisfies IssueProjection;
   }
 
-  async applyRemoteCommand(command: RemoteCommand, handlers: { files?: (files: Array<{ name: string; type: string; data: string }>) => { paths: string[]; cleanup: () => void } | Promise<{ paths: string[]; cleanup: () => void }>; reply?: (issueId: string, requestId: string, message: string, files: Array<{ name: string; type: string; data: string }>) => void | Promise<void>; stop?: (issueId: string) => void | Promise<void>; projectCreate?: (projectId: string, name: string, workspacePath: string) => void | Promise<void>; projectOverview?: (projectId: string, agentId: string, feedback: string) => void | Promise<void> } = {}): Promise<RemoteCommandAck> {
+  async applyRemoteCommand(command: RemoteCommand, handlers: { files?: (files: Array<{ name: string; type: string; data: string }>) => { paths: string[]; cleanup: () => void } | Promise<{ paths: string[]; cleanup: () => void }>; reply?: (issueId: string, requestId: string, message: string, files: Array<{ name: string; type: string; data: string }>) => void | Promise<void>; stop?: (issueId: string) => void | Promise<void>; projectCreate?: (projectId: string, name: string, workspacePath: string) => void | Promise<void>; projectOverview?: (projectId: string, agentId: string, feedback: string) => void | Promise<void>; chooseDirectory?: () => string | Promise<string> } = {}): Promise<RemoteCommandAck> {
     const receipt = this.db.prepare("SELECT result_json FROM sync_command_receipts WHERE command_id = ?").get(command.command_id) as { result_json: string } | undefined;
     if (receipt) return JSON.parse(receipt.result_json) as RemoteCommandAck;
     const result = await (async () => {
@@ -1197,6 +1197,11 @@ export class Store {
         }
         const fileBlock = transferred?.paths.length ? `附带文件：\n${transferred.paths.map(path => `- ${path}`).join("\n")}` : "";
         const descriptionWithFiles = (description: unknown) => [typeof description === "string" ? description : "", fileBlock].filter(Boolean).join("\n\n");
+        if (command.operation === "project.pick_directory") {
+          if (command.base_revision !== null || !handlers.chooseDirectory) throw new Error("directory_picker_unavailable");
+          const workspacePath = String(await handlers.chooseDirectory()).trim();
+          return { command_id: command.command_id, status: "applied", error: null, projection: null, result: { workspace_path: workspacePath } } satisfies RemoteCommandAck;
+        }
         if (command.operation === "settings.auto-dispatch") {
           if (command.entity_id !== "auto-dispatch" || command.base_revision !== null || typeof payload.enabled !== "boolean") throw new Error("invalid_auto_dispatch");
           this.setAutoDispatch(payload.enabled);

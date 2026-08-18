@@ -216,6 +216,7 @@ function cleanCommandPayload(operation: RemoteCommandOperation, value: unknown) 
       : operation === "issue.reply" ? ["message", "files"]
       : operation === "issue.move" ? ["status", "before_id"]
       : operation === "project.create" ? ["name", "workspace_path"]
+      : operation === "project.overview" ? ["agent_id", "feedback"]
       : operation === "settings.auto-dispatch" ? ["enabled"] : [];
   if (Object.keys(source).some(key => !allowed.includes(key))) throw new Error("forbidden_command_field");
   const payload: Record<string, unknown> = {};
@@ -249,6 +250,7 @@ function cleanCommandPayload(operation: RemoteCommandOperation, value: unknown) 
   if (source.enabled !== undefined) payload.enabled = source.enabled === true;
   if (source.before_id !== undefined) payload.before_id = cleanString(source.before_id, 200);
   if (source.message !== undefined) payload.message = cleanString(source.message, 100_000, false).trim();
+  if (source.feedback !== undefined) payload.feedback = cleanString(source.feedback, 4_000).trim();
   if (source.name !== undefined) payload.name = cleanString(source.name, 120, false).trim();
   if (source.workspace_path !== undefined) payload.workspace_path = cleanString(source.workspace_path, 4096, false).trim();
   if (source.files !== undefined) {
@@ -684,8 +686,9 @@ export class HubStore {
     if (!remoteCommandOperations.includes(input.operation as never)) throw new Error("invalid_command_operation");
     const operation = input.operation as RemoteCommandOperation;
     const settingOperation = operation === "settings.auto-dispatch";
+    const directoryOperation = operation === "project.pick_directory";
     const projectOperation = operation.startsWith("project.");
-    const createOperation = operation === "issue.create" || operation === "project.create";
+    const createOperation = operation === "issue.create" || operation === "project.create" || directoryOperation;
     const commandId = input.command_id === undefined ? randomUUID() : cleanString(input.command_id, 200, false);
     if (!/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,199}$/.test(commandId)) throw new Error("invalid_command_id");
     const baseRevision = createOperation || settingOperation ? null : Number(input.base_revision);
@@ -759,7 +762,8 @@ export class HubStore {
       for (const row of rows) {
         const deliveryId = randomUUID();
         const dispatchedAt = now();
-        const dispatchExpiresAt = after(90_000);
+        const operation = this.db.prepare("SELECT operation FROM remote_commands WHERE command_id = ?").get(row.command_id) as { operation: RemoteCommandOperation } | undefined;
+        const dispatchExpiresAt = after(operation?.operation === "project.pick_directory" ? 300_000 : 90_000);
         const result = this.db.prepare("UPDATE remote_commands SET status = 'dispatched', delivery_id = ?, dispatched_at = ?, dispatch_expires_at = ?, attempt_count = COALESCE(attempt_count, 0) + 1 WHERE command_id = ? AND device_id = ? AND status = 'pending'").run(deliveryId, dispatchedAt, dispatchExpiresAt, row.command_id, deviceId);
         if (result.changes !== 1) continue;
         this.recordCommandChange(row.command_id, "dispatched", deliveryId);
@@ -811,7 +815,13 @@ export class HubStore {
     if (!(["applied", "rejected", "conflict"] as const).includes(ack.status)) throw new Error("invalid_command_status");
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      if (ack.status === "applied" && row.operation !== "settings.auto-dispatch") {
+      if (ack.status === "applied" && row.operation === "project.pick_directory") {
+        const result = ack.result;
+        if (!result || typeof result !== "object" || Array.isArray(result) || Object.keys(result).some(key => key !== "workspace_path")) throw new Error("invalid_command_result");
+        const workspacePath = cleanString(result.workspace_path ?? "", 4096).trim();
+        this.db.prepare("UPDATE remote_commands SET payload_json = ? WHERE command_id = ?").run(JSON.stringify({ workspace_path: workspacePath }), ack.command_id);
+      }
+      if (ack.status === "applied" && row.operation !== "settings.auto-dispatch" && row.operation !== "project.pick_directory") {
         const entityType: SyncEntityType = row.operation.startsWith("project.") ? "project" : "issue";
         const projectionId = row.operation === "project.create" && ack.projection && "id" in ack.projection ? ack.projection.id : row.entity_id;
         const projection = cleanProjection(entityType, projectionId, ack.projection);

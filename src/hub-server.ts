@@ -428,6 +428,16 @@ export function createHubServer(options: HubServerOptions) {
         notifyControl(command.device_id);
         return sendJson(response, 202, { command_id: command.command_id });
       }
+      if (url.pathname === "/api/system/directory" && method === "POST") {
+        if (!browser) return sendJson(response, 401, { error: "unauthorized" });
+        if (!trustedOrigin(request, true) || !csrfValid) return sendJson(response, 403, { error: "csrf_invalid" });
+        const runtime = store.runtime();
+        if (!runtime || runtime.health_state !== "online") return sendJson(response, 503, { error: "runtime_offline" });
+        if (runtime.protocol_version !== syncProtocolVersion) return sendJson(response, 409, { error: "incompatible_protocol" });
+        const command = store.createRemoteCommand({ command_id: request.headers["x-better-codex-command-id"], operation: "project.pick_directory", base_revision: null, payload: {} });
+        notifyControl(command.device_id);
+        return sendJson(response, 202, { command_id: command.command_id });
+      }
       const projectOverview = url.pathname.match(/^\/api\/projects\/([^/]+)\/overview$/);
       if (projectOverview && method === "POST") {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" });

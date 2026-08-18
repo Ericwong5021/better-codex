@@ -887,7 +887,7 @@ async function syncCommand(action: string | undefined, args: string[]) {
   if (action === "connect") {
     const hubUrl = option(args, "--url") ?? positionals(args)[0];
     const pairingCode = option(args, "--pairing-code");
-    const adminToken = option(args, "--admin-token") ?? process.env.BETTER_CODEX_CLOUDFLARE_ADMIN_TOKEN;
+    const adminToken = option(args, "--admin-token");
     if (!hubUrl) throw new Error("hub_url_required");
     if (!pairingCode && !adminToken) {
       const base = normalizeHubUrl(hubUrl);

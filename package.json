@@ -19,7 +19,6 @@
     "dist/cli.js",
     "dist/codex-cli.js",
     "dist/codex-usage.js",
-    "dist/cloudflare-web.js",
     "dist/design-system.js",
     "dist/appearance.js",
     "dist/agent-profiles.js",

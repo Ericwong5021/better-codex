@@ -280,7 +280,7 @@ export type SyncPushResponse = {
   lease_expires_at: string;
 };
 
-export const remoteCommandOperations = ["project.create", "project.overview", "issue.create", "issue.update", "issue.move", "issue.start", "issue.stop", "issue.reply", "issue.archive", "issue.restore", "settings.auto-dispatch"] as const;
+export const remoteCommandOperations = ["project.pick_directory", "project.create", "project.overview", "issue.create", "issue.update", "issue.move", "issue.start", "issue.stop", "issue.reply", "issue.archive", "issue.restore", "settings.auto-dispatch"] as const;
 export type RemoteCommandOperation = typeof remoteCommandOperations[number];
 export type RemoteCommandStatus = "pending" | "dispatched" | "applied" | "rejected" | "conflict" | "expired";
 
@@ -314,6 +314,7 @@ export type RemoteCommandAck = {
   status: Exclude<RemoteCommandStatus, "pending" | "dispatched" | "expired">;
   error: string | null;
   projection: ProjectProjection | IssueProjection | null;
+  result?: { workspace_path?: string };
   delivery_id?: string | null;
 };
 

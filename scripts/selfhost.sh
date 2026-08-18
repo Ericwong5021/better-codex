@@ -275,72 +275,6 @@ upgrade_vps() {
   printf 'Better Codex Hub upgraded to %s\n' "$target"
 }
 
-cloudflare_directory() {
-  printf '%s\n' "${BETTER_CODEX_SELFHOST_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/better-codex-cloudflare}"
-}
-
-install_cloudflare() {
-  need curl
-  need git
-  need npm
-  need openssl
-  local password admin_token target directory deploy_output worker_url
-  printf 'Web password: ' >/dev/tty
-  IFS= read -r -s password </dev/tty
-  printf '\n' >/dev/tty
-  [ "${#password}" -ge 12 ] || fail "password must contain at least 12 characters"
-  target="$(version_tag)"
-  directory="$(cloudflare_directory)"
-  prepare_install_source "$directory" "$target"
-  npm --prefix "$directory/deploy/cloudflare" ci --ignore-scripts
-  cd "$directory/deploy/cloudflare"
-  npx --no-install wrangler login
-  npx --no-install wrangler whoami
-  if ! npx --no-install wrangler r2 bucket create better-codex-hub-backups >/dev/null 2>&1; then
-    npx --no-install wrangler r2 bucket list | grep -Fq better-codex-hub-backups || fail "unable to create the Cloudflare backup bucket"
-  fi
-  if [ -f .admin-token ]; then admin_token="$(cat .admin-token)"; else admin_token="$(openssl rand -hex 32)"; fi
-  umask 077
-  write_secret .admin-token "$admin_token"
-  printf '%s' "$admin_token" | npx --no-install wrangler secret put ADMIN_TOKEN >/dev/null
-  printf '%s' "$password" | npx --no-install wrangler secret put WEB_PASSWORD >/dev/null
-  deploy_output="$(npx --no-install wrangler deploy 2>&1 | tee /dev/tty)"
-  worker_url="$(printf '%s\n' "$deploy_output" | sed -n 's#.*\(https://[^[:space:]]*\.workers\.dev\).*#\1#p' | tail -n 1)"
-  [ -n "$worker_url" ] || fail "unable to resolve the deployed Worker URL"
-  write_secret .worker-url "${worker_url%/}"
-  curl -fsSL --retry 3 "${worker_url%/}/healthz" | node -e 'let value="";process.stdin.on("data",chunk=>value+=chunk).on("end",()=>{const result=JSON.parse(value);if(result.ok!==true||result.deployment!=="cloudflare")process.exit(1)})' || fail "Cloudflare deployment health check failed"
-  printf 'Better Codex Hub %s is available at %s\n' "$target" "${worker_url%/}"
-  printf 'Cloudflare administrator token stored at %s\n' "$directory/deploy/cloudflare/.admin-token"
-}
-
-upgrade_cloudflare() {
-  need curl
-  need git
-  need npm
-  local target directory
-  target="$(version_tag)"
-  directory="$(cloudflare_directory)"
-  [ -f "$directory/deploy/cloudflare/wrangler.toml" ] || fail "Better Codex Cloudflare Hub is not installed in $directory"
-  local admin_token previous worker_url
-  admin_token="$(cat "$directory/deploy/cloudflare/.admin-token")"
-  [ -n "$admin_token" ] || fail "Cloudflare administrator token is unavailable"
-  worker_url="$(cat "$directory/deploy/cloudflare/.worker-url")"
-  [ -n "$worker_url" ] || fail "Cloudflare Hub URL is unavailable"
-  previous="$(git -C "$directory" rev-parse HEAD)"
-  verify_tag_commit "$directory" "$target"
-  curl -fsSL -X POST -H "authorization: Bearer $admin_token" "${worker_url%/}/api/v1/admin/backup" >/dev/null || fail "Cloudflare backup failed"
-  checkout_source "$directory" "$target"
-  npm --prefix "$directory/deploy/cloudflare" ci --ignore-scripts
-  cd "$directory/deploy/cloudflare"
-  npx --no-install wrangler whoami
-  if ! npx --no-install wrangler deploy || ! curl -fsSL --retry 3 "${worker_url%/}/healthz" | TARGET_VERSION="${target#v}" node -e 'let value="";process.stdin.on("data",chunk=>value+=chunk).on("end",()=>{const result=JSON.parse(value);if(result.ok!==true||result.deployment!=="cloudflare"||result.version!==process.env.TARGET_VERSION)process.exit(1)})'; then
-    git -C "$directory" checkout --detach "$previous"
-    npm ci --ignore-scripts
-    npx --no-install wrangler deploy
-    fail "Cloudflare upgrade failed and the previous version was restored"
-  fi
-}
-
 target_version="$(version_tag)"
 if [ "${BETTER_CODEX_SELFHOST_VERIFIED:-0}" != 1 ]; then
   if [ -t 0 ]; then
@@ -358,7 +292,5 @@ fi
 case "$action:$provider" in
   install:vps) install_vps ;;
   upgrade:vps) upgrade_vps ;;
-  install:cloudflare) install_cloudflare ;;
-  upgrade:cloudflare) upgrade_cloudflare ;;
-  *) fail "usage: selfhost.sh install|upgrade vps|cloudflare [version]" ;;
+  *) fail "usage: selfhost.sh install|upgrade vps [version]" ;;
 esac

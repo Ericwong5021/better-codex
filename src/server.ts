@@ -553,6 +553,7 @@ export function startServer() {
         throw error;
       }
     },
+    chooseNativeDirectory,
   );
   const sendEvent = (response: ServerResponse, event: string, revision: number) => {
     response.write(`id: ${revision}\nevent: ${event}\ndata: ${JSON.stringify({ revision })}\n\n`);
@@ -663,7 +664,7 @@ export function startServer() {
             if (Buffer.byteLength(text) > 16_384) throw new Error("hub_response_too_large");
             const value = (() => { try { return JSON.parse(text) as Record<string, unknown>; } catch { return {}; } })();
             if (!remoteResponse.ok) throw new Error(typeof value.error === "string" ? value.error : `hub_http_${remoteResponse.status}`);
-            if (value.ok !== true || value.name !== "Better Codex Hub" || !["vps", "cloudflare"].includes(String(value.deployment)) || typeof value.version !== "string" || typeof value.protocol_version !== "string") throw new Error("invalid_hub_health");
+            if (value.ok !== true || value.name !== "Better Codex Hub" || value.deployment !== "vps" || typeof value.version !== "string" || typeof value.protocol_version !== "string") throw new Error("invalid_hub_health");
             return value;
           });
           const remoteVersion = typeof remote.version === "string" ? remote.version.replace(/^v/, "") : null;
