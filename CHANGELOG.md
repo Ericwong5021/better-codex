@@ -8,7 +8,7 @@ All notable changes to Better Codex are recorded here.
 
 ### Fixed
 
-- Close Relay event streams deterministically and serialize test files so Intel packaging cannot stall after successful assertions.
+- Close Relay event streams deterministically and serialize Relay test execution during packaging.
 
 ## [0.4.9-beta.6] - 2026-08-19
 

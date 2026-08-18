@@ -82,7 +82,7 @@
     "relay:start": "node dist/relay-cli.js serve",
     "better-codex": "tsx src/cli.ts",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test --test-concurrency=1 test/*.test.ts",
+    "test": "tsx --test --test-concurrency=2 test/*.test.ts",
     "test:web": "playwright test",
     "test:web:smoke": "playwright test test/e2e/web/local-smoke.spec.ts",
     "test:web:debug": "playwright test --headed --debug",

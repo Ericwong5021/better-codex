@@ -31,15 +31,20 @@ function startRuntime(home: string, port: number, token: string) {
       BETTER_CODEX_DISABLE_RUNTIME_SESSION_RELAY: "1",
       CODEX_HOME: join(home, "codex"),
     },
-    stdio: ["ignore", "pipe", "pipe"],
+    detached: process.platform !== "win32",
+    stdio: "ignore",
   });
 }
 
-async function stopRuntime(process: ChildProcess) {
-  if (process.exitCode !== null) return;
-  process.kill("SIGTERM");
+async function stopRuntime(child: ChildProcess) {
+  if (process.platform !== "win32" && child.pid) {
+    try { process.kill(-child.pid, "SIGTERM"); } catch {}
+  } else if (child.exitCode === null) {
+    child.kill("SIGTERM");
+  }
+  if (child.exitCode !== null) return;
   await Promise.race([
-    once(process, "exit"),
+    once(child, "exit"),
     new Promise((_, reject) => setTimeout(() => reject(new Error("runtime_stop_timeout")), 5000)),
   ]);
 }
