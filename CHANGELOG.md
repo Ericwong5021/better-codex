@@ -4,6 +4,12 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.9-beta.10] - 2026-08-19
+
+### Fixed
+
+- Bound the Node test runner lifecycle after completed assertions so platform-specific handles cannot stall packaging.
+
 ## [0.4.9-beta.9] - 2026-08-19
 
 ### Fixed
@@ -589,7 +595,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.9...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.10...HEAD
+[0.4.9-beta.10]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.9...v0.4.9-beta.10
 [0.4.9-beta.9]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.8...v0.4.9-beta.9
 [0.4.9-beta.8]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.7...v0.4.9-beta.8
 [0.4.9-beta.7]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.6...v0.4.9-beta.7
