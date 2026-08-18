@@ -27,6 +27,7 @@ function startRuntime(home: string, port: number, token: string) {
       BETTER_CODEX_DB: join(home, "better-codex.db"),
       BETTER_CODEX_PORT: String(port),
       BETTER_CODEX_TOKEN: token,
+      BETTER_CODEX_DISABLE_RUNTIME_SESSION_RELAY: "1",
       CODEX_HOME: join(home, "codex"),
     },
     stdio: ["ignore", "pipe", "pipe"],
