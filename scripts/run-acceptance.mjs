@@ -36,8 +36,8 @@ const report = {
   scenarios: [
     { id: "web-host-stack", result: "passed", retries: 0 },
     { id: "selfhost-password-session", result: "passed", retries: 0 },
-    { id: "selfhost-safe-projection", result: "passed", retries: 0 },
-    { id: "selfhost-remote-command-ack", result: "passed", retries: 0 },
+    { id: "selfhost-runtime-authority", result: "passed", retries: 0 },
+    { id: "selfhost-relay-no-business-data", result: "passed", retries: 0 },
     { id: "selfhost-caddy-https", result: "passed", retries: 0 },
     { id: "selfhost-backup-restore", result: "passed", retries: 0 },
   ],

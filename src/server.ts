@@ -28,8 +28,9 @@ import { SyncClient } from "./sync-client.js";
 import { readSyncConfiguration, removeSyncConfiguration } from "./sync-config.js";
 import { chooseNativeDirectory } from "./native-dialog.js";
 import { RuntimeRelayClient } from "./runtime-relay-client.js";
-import { removeRelayConfiguration } from "./relay-config.js";
+import { readRelayConfiguration, removeRelayConfiguration } from "./relay-config.js";
 import { requestFingerprint, RequestReceiptStore, type RequestReceiptResponse } from "./request-receipts.js";
+import { disableProjectionSync, readRemoteMode } from "./remote-mode.js";
 
 const accessToken = token();
 const mockupEnabled = !isSea() && !packagedBuild && process.argv.includes("--mockup");
@@ -536,7 +537,7 @@ function errorCode(error: unknown) {
 
 function errorStatus(code: string) {
   if (code === "body_too_large") return 413;
-  if (code === "version_conflict" || code === "request_id_conflict" || code === "request_outcome_unknown" || code === "reply_busy" || code === "update_in_progress" || code === "issue_execution_locked" || code === "issue_execution_running" || code === "issue_session_handed_off" || code === "issue_session_starting" || code === "issue_session_already_bound" || code === "session_relay_not_leader" || code === "session_command_not_claimed" || code === "session_command_outcome_unknown") return 409;
+  if (code === "version_conflict" || code === "request_id_conflict" || code === "request_outcome_unknown" || code === "remote_mode_disabled" || code === "reply_busy" || code === "update_in_progress" || code === "issue_execution_locked" || code === "issue_execution_running" || code === "issue_session_handed_off" || code === "issue_session_starting" || code === "issue_session_already_bound" || code === "session_relay_not_leader" || code === "session_command_not_claimed" || code === "session_command_outcome_unknown") return 409;
   if (code.endsWith("_not_found")) return 404;
   if (code === "database_unavailable" || code === "database_integrity_check_failed") return 503;
   return 400;
@@ -556,11 +557,13 @@ function spawnUpdateRelaunch(runtimePid: number, updates: { core: string | null;
 
 export function startServer() {
   if (!Number.isInteger(runtimePort) || runtimePort < 0 || runtimePort > 65535) throw new Error("invalid_runtime_port");
+  const remoteMode = readRemoteMode();
   const identity = createRuntimeIdentity();
   acquireRuntimeLock(identity);
   let store: Store;
   try {
     store = new Store();
+    if (remoteMode === "relay") disableProjectionSync(databasePath);
     if (!mockupEnabled) syncAgentProfiles(store.listAgentProfiles());
   } catch (error) {
     clearRuntimeState(identity.instanceId);
@@ -763,22 +766,42 @@ export function startServer() {
         return sendWeb(response, 200, injectionScript(activePort, sessionToken, "install", locale, "web"), "text/javascript; charset=utf-8");
       }
       if (!authorized(request, url, webSessions)) return sendJson(response, 401, { error: "unauthorized" });
-      if (url.pathname === "/api/sync/status" && method === "GET") return sendJson(response, 200, syncClient.status());
-      if (url.pathname === "/api/relay/status" && method === "GET") return sendJson(response, 200, relayClient.status());
+      if (url.pathname === "/api/sync/status" && method === "GET") return sendJson(response, 200, { ...syncClient.status(), remote_mode: remoteMode, enabled: remoteMode === "projection" });
+      if (url.pathname === "/api/relay/status" && method === "GET") return sendJson(response, 200, { ...relayClient.status(), remote_mode: remoteMode, enabled: remoteMode === "relay" && relayClient.status().enabled });
       if (url.pathname === "/api/relay/connect" && method === "POST") {
+        if (remoteMode !== "relay") throw new Error("remote_mode_disabled");
         relayClient.start();
         relayClient.reconnect();
         return sendJson(response, 200, relayClient.status());
       }
       if (url.pathname === "/api/relay/disconnect" && method === "POST") {
+        if (remoteMode !== "relay") throw new Error("remote_mode_disabled");
         relayClient.stop();
         removeRelayConfiguration();
         return sendJson(response, 200, relayClient.status());
       }
       if (url.pathname === "/api/remote-access/status" && method === "GET") {
+        if (remoteMode === "relay") {
+          const configuration = readRelayConfiguration();
+          const status = relayClient.status();
+          if (!configuration) return sendJson(response, 200, { ...status, remote_mode: remoteMode, last_sync_at: status.last_heartbeat_at, remote: null });
+          try {
+            const remote = await fetch(`${configuration.relay_url}/healthz`, { headers: { accept: "application/json" }, redirect: "error", signal: AbortSignal.timeout(8_000) }).then(async remoteResponse => {
+              const text = await remoteResponse.text();
+              if (Buffer.byteLength(text) > 16_384) throw new Error("relay_response_too_large");
+              const value = (() => { try { return JSON.parse(text) as Record<string, unknown>; } catch { return {}; } })();
+              if (!remoteResponse.ok) throw new Error(typeof value.error === "string" ? value.error : `relay_http_${remoteResponse.status}`);
+              if (value.ok !== true || value.name !== "Better Codex Relay" || value.protocol_version !== "relay/v1" || typeof value.version !== "string") throw new Error("invalid_relay_health");
+              return value;
+            });
+            return sendJson(response, 200, { ...status, remote_mode: remoteMode, last_sync_at: status.last_heartbeat_at, remote: { ...remote, url: configuration.relay_url, reachable: true, update_available: false, upgrade_supported: false } });
+          } catch (error) {
+            return sendJson(response, 200, { ...status, remote_mode: remoteMode, last_sync_at: status.last_heartbeat_at, remote: { name: "Better Codex Relay", url: configuration.relay_url, reachable: false, error: error instanceof Error ? error.message : "remote_unavailable" } });
+          }
+        }
         const configuration = readSyncConfiguration();
         const status = syncClient.status();
-        if (!configuration) return sendJson(response, 200, { ...status, remote: null });
+        if (!configuration) return sendJson(response, 200, { ...status, remote_mode: remoteMode, remote: null });
         try {
           const remote = await fetch(`${configuration.hub_url}/healthz`, { headers: { accept: "application/json" }, redirect: "error", signal: AbortSignal.timeout(8_000) }).then(async remoteResponse => {
             const contentLength = Number(remoteResponse.headers.get("content-length") || 0);
@@ -792,18 +815,23 @@ export function startServer() {
           });
           const remoteVersion = typeof remote.version === "string" ? remote.version.replace(/^v/, "") : null;
           const updateAvailable = Boolean(remoteVersion && compareVersions(remoteVersion, coreVersion) < 0);
-          return sendJson(response, 200, { ...status, remote: { ...remote, url: configuration.hub_url, reachable: remote.ok === true, update_available: updateAvailable, upgrade_supported: Boolean(remoteVersion) } });
+          return sendJson(response, 200, { ...status, remote_mode: remoteMode, remote: { ...remote, url: configuration.hub_url, reachable: remote.ok === true, update_available: updateAvailable, upgrade_supported: Boolean(remoteVersion) } });
         } catch (error) {
-          return sendJson(response, 200, { ...status, remote: { url: configuration.hub_url, reachable: false, error: error instanceof Error ? error.message : "remote_unavailable" } });
+          return sendJson(response, 200, { ...status, remote_mode: remoteMode, remote: { url: configuration.hub_url, reachable: false, error: error instanceof Error ? error.message : "remote_unavailable" } });
         }
       }
-      if (url.pathname === "/api/sync/now" && method === "POST") return sendJson(response, 200, await syncClient.syncNow());
+      if (url.pathname === "/api/sync/now" && method === "POST") {
+        if (remoteMode !== "projection") throw new Error("remote_mode_disabled");
+        return sendJson(response, 200, await syncClient.syncNow());
+      }
       if (url.pathname === "/api/sync/connect" && method === "POST") {
+        if (remoteMode !== "projection") throw new Error("remote_mode_disabled");
         store.rebuildSyncQueue();
         syncClient.start();
         return sendJson(response, 200, await syncClient.syncNow());
       }
       if (url.pathname === "/api/sync/disconnect" && method === "POST") {
+        if (remoteMode !== "projection") throw new Error("remote_mode_disabled");
         syncClient.stop();
         removeSyncConfiguration();
         return sendJson(response, 200, syncClient.status());
@@ -1666,8 +1694,8 @@ export function startServer() {
     activeRuntimePort = address.port;
     publishRuntimeState({ ...identity, port: address.port });
     if (!mockupEnabled) worker.start();
-    if (!mockupEnabled) syncClient.start();
-    if (!mockupEnabled) relayClient.start();
+    if (!mockupEnabled && remoteMode === "projection") syncClient.start();
+    if (!mockupEnabled && remoteMode === "relay") relayClient.start();
     console.log(`Better Codex Runtime ${coreVersion} listening on http://127.0.0.1:${address.port}`);
   });
   const stop = () => {

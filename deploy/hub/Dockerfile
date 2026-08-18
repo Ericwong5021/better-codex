@@ -7,9 +7,9 @@ RUN npx tsc
 
 FROM node:22-bookworm-slim
 ENV NODE_ENV=production \
-    BETTER_CODEX_HUB_HOST=0.0.0.0 \
-    BETTER_CODEX_HUB_PORT=4318 \
-    BETTER_CODEX_HUB_DB=/data/better-codex-hub.db
+    BETTER_CODEX_RELAY_HOST=0.0.0.0 \
+    BETTER_CODEX_RELAY_PORT=4318 \
+    BETTER_CODEX_RELAY_DB=/data/better-codex-relay.db
 WORKDIR /app
 RUN mkdir -p /data && chown node:node /data
 COPY --from=build /app/dist ./dist
@@ -20,4 +20,4 @@ COPY deploy/hub/entrypoint.sh /usr/local/bin/better-codex-hub-entrypoint
 RUN chmod 0755 /usr/local/bin/better-codex-hub-entrypoint
 EXPOSE 4318
 ENTRYPOINT ["/usr/local/bin/better-codex-hub-entrypoint"]
-CMD ["node", "dist/hub-cli.js", "serve"]
+CMD ["node", "dist/relay-cli.js", "serve"]

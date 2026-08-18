@@ -2,13 +2,15 @@
 import { resolve } from "node:path";
 import { passwordHash, readHubSecret, validateWebPassword, validateWebUsername } from "./relay-auth.js";
 import { startRelayServer } from "./relay-server.js";
-import { RelayStore } from "./relay-store.js";
+import { RelayStore, restoreRelayBackup } from "./relay-store.js";
 
 const [command = "serve", value] = process.argv.slice(2);
 const database = resolve(process.env.BETTER_CODEX_RELAY_DB || "./data/better-codex-relay.db");
 
 if (command === "serve") {
   startRelayServer();
+} else if (command === "restore" && value) {
+  console.log(JSON.stringify(restoreRelayBackup(database, value), null, 2));
 } else {
   const store = new RelayStore(database);
   try {
@@ -22,7 +24,8 @@ if (command === "serve") {
       store.setWebCredentials(username, passwordHash(password));
       console.log(JSON.stringify({ updated: true, sessions_revoked: true }, null, 2));
     } else if (command === "audit") console.log(JSON.stringify(store.auditEvents(value ? Number(value) : 100), null, 2));
-    else throw new Error("usage: better-codex-relay serve|pairing-code|devices|revoke <device-id>|rotate-token <device-id>|password-set|audit [limit]");
+    else if (command === "backup") console.log(JSON.stringify(store.backup(value), null, 2));
+    else throw new Error("usage: better-codex-relay serve|pairing-code|devices|revoke <device-id>|rotate-token <device-id>|password-set|backup [path]|restore <path>|audit [limit]");
   } finally {
     store.close();
   }

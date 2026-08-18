@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import https from "node:https";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import WebSocket from "ws";
 
 const root = resolve(import.meta.dirname, "..");
 const composeFile = join(root, "deploy/hub/compose.yaml");
@@ -51,16 +52,26 @@ function request(portValue, path, options = {}) {
   });
 }
 
-async function waitForHub(portValue) {
+async function waitForRelay(portValue) {
   const deadline = Date.now() + 90_000;
   while (Date.now() < deadline) {
     try {
       const response = await request(portValue, "/healthz");
-      if (response.status === 200 && response.value?.ok === true) return;
+      if (response.status === 200 && response.value?.ok === true && response.value?.name === "Better Codex Relay") return;
     } catch {}
     await new Promise(resolveWait => setTimeout(resolveWait, 500));
   }
   throw new Error("deployment_health_timeout");
+}
+
+function socketMessage(socket) {
+  return new Promise((resolveMessage, reject) => {
+    const timer = setTimeout(() => reject(new Error("relay_message_timeout")), 5000);
+    socket.once("message", data => {
+      clearTimeout(timer);
+      resolveMessage(JSON.parse(data.toString()));
+    });
+  });
 }
 
 const environment = {
@@ -81,50 +92,41 @@ try {
   const portLine = composeOutput(["port", "caddy", "443"], environment).split("\n").find(line => /:\d+$/.test(line));
   const httpsPort = Number(portLine?.match(/:(\d+)$/)?.[1]);
   if (!Number.isInteger(httpsPort) || httpsPort < 1) throw new Error("published_https_port_unavailable");
-  await waitForHub(httpsPort);
+  await waitForRelay(httpsPort);
   const baseOrigin = `https://localhost:${httpsPort}`;
   const adminHeaders = { authorization: `Bearer ${bootstrapSecret}` };
   const pairing = await request(httpsPort, "/api/v1/admin/pairing-codes", { method: "POST", headers: adminHeaders, body: {} });
   assert.equal(pairing.status, 201);
   const device = await request(httpsPort, "/api/v1/devices/pair", { method: "POST", body: { name: "Deployment acceptance", pairing_code: pairing.value.pairing_code } });
   assert.equal(device.status, 201);
-  const timestamp = new Date().toISOString();
-  const projectProjection = { id: "deployment-project", name: "Deployment acceptance", identifier_prefix: "DEP", root_paths: [], description: "", overview_html: "", overview_status: "idle", overview_error: null, overview_updated_at: null, created_at: timestamp, updated_at: timestamp, local_revision: 1 };
-  const issueProjection = { id: "deployment-issue", identifier: "DEP-1", project_id: projectProjection.id, title: "Container synchronized", description: "Acceptance", status: "todo", priority: "medium", labels: [], sort_order: 0, pinned: false, archived_at: null, assigned: false, agent_enabled: false, agent_id: null, user_assigned: false, pending_actor: "user", active_run_status: null, latest_run_status: null, latest_scheduler_status: null, session_status: null, reply_status: "idle", has_conversation: false, last_activity_finished_at: null, needs_attention: false, created_at: timestamp, updated_at: timestamp, local_revision: 1 };
-  const runtime = { device_id: device.value.device_id, device_name: device.value.device_name, protocol_version: device.value.protocol_version, core_version: "acceptance", last_seen_at: timestamp, last_sync_at: timestamp, queue_depth: 0, health_state: "online" };
-  const deviceHeaders = { authorization: `Bearer ${device.value.device_token}` };
-  const pushed = await request(httpsPort, "/api/v1/sync/push", { method: "POST", headers: deviceHeaders, body: { protocol_version: device.value.protocol_version, core_version: "acceptance", device_id: device.value.device_id, runtime, changes: [
-    { event_id: randomUUID(), entity_type: "project", entity_id: projectProjection.id, operation: "upsert", projection: projectProjection, changed_at: timestamp },
-    { event_id: randomUUID(), entity_type: "issue", entity_id: issueProjection.id, operation: "upsert", projection: issueProjection, changed_at: timestamp },
-  ] } });
-  assert.equal(pushed.status, 200);
+  const socket = new WebSocket(`wss://localhost:${httpsPort}/api/v1/runtime/connect`, "better-codex-relay-v1", { rejectUnauthorized: false, headers: { authorization: `Bearer ${device.value.device_token}` } });
+  await new Promise((resolveOpen, reject) => {
+    socket.once("open", resolveOpen);
+    socket.once("error", reject);
+  });
+  socket.send(JSON.stringify({ type: "hello", protocol_version: "relay/v1", device_id: device.value.device_id, runtime_instance_id: "deployment-runtime", core_version: "acceptance", capabilities: ["http-stream", "sse", "file-upload", "request-cancel"] }));
+  const hello = await socketMessage(socket);
+  assert.equal(hello.type, "hello_ack");
 
-  const login = await request(httpsPort, "/web/session", { method: "POST", headers: { origin: baseOrigin }, body: { username: webUsername, password: webPassword } });
+  const login = await request(httpsPort, "/relay/session", { method: "POST", headers: { origin: baseOrigin }, body: { username: webUsername, password: webPassword } });
   assert.equal(login.status, 200);
   assert.equal(Object.hasOwn(login.value, "token"), false);
   const cookie = String(login.headers["set-cookie"]?.[0] || "").split(";", 1)[0];
-  assert.ok(cookie.startsWith("better_codex_session="));
+  assert.ok(cookie.startsWith("better_codex_relay_session="));
   const browserHeaders = { cookie, origin: baseOrigin, "x-csrf-token": login.value.csrf_token };
-  const board = await request(httpsPort, "/api/v1/board", { headers: { cookie } });
-  assert.equal(board.status, 200);
-  assert.equal(board.value.issues[0].title, "Container synchronized");
-  const pending = await request(httpsPort, `/api/issues/${issueProjection.id}`, { method: "PATCH", headers: browserHeaders, body: { version: 1, title: "Container command pending", command_id: "deployment-command" } });
-  assert.equal(pending.status, 202);
-  assert.equal(pending.value.remote_pending, true);
-  const commands = await request(httpsPort, "/api/v1/sync/commands", { headers: deviceHeaders });
-  assert.equal(commands.status, 200);
-  assert.equal(commands.value.commands[0].command_id, "deployment-command");
-  const acknowledgedProjection = { ...issueProjection, title: "Container command applied", local_revision: 2, updated_at: new Date().toISOString() };
-  const acknowledged = await request(httpsPort, "/api/v1/sync/commands/deployment-command/ack", { method: "POST", headers: deviceHeaders, body: { status: "applied", projection: acknowledgedProjection, error: null } });
-  assert.equal(acknowledged.status, 200);
-  const applied = await request(httpsPort, `/api/issues/${issueProjection.id}`, { headers: { cookie } });
-  assert.equal(applied.status, 200);
-  assert.equal(applied.value.title, "Container command applied");
+  const status = await request(httpsPort, "/relay/status", { headers: { cookie } });
+  assert.equal(status.status, 200);
+  assert.equal(status.value.runtime.online, true);
   const page = await request(httpsPort, "/web");
   assert.equal(page.status, 200);
-  assert.match(page.value, /data-better-codex-remote="true"/);
+  assert.match(page.value, /data-better-codex-host="relay"/);
   assert.match(String(page.headers["strict-transport-security"]), /max-age=31536000/);
-  process.stdout.write(JSON.stringify({ ok: true, transport: "https", reverse_proxy: "caddy", login: "password-cookie", sync: "round-trip", remote_command: "acknowledged" }) + "\n");
+  const tableOutput = composeOutput(["exec", "-T", "hub", "node", "--input-type=module", "-e", "import { DatabaseSync } from 'node:sqlite'; const db=new DatabaseSync('/data/better-codex-relay.db',{readOnly:true}); process.stdout.write(JSON.stringify(db.prepare(\"SELECT name FROM sqlite_master WHERE type='table' ORDER BY name\").all().map(row=>row.name))); db.close();"], environment);
+  assert.deepEqual(JSON.parse(tableOutput), ["relay_audit", "relay_devices", "relay_settings", "relay_web_sessions", "sqlite_sequence"]);
+  const logout = await request(httpsPort, "/relay/logout", { method: "DELETE", headers: browserHeaders });
+  assert.equal(logout.status, 200);
+  socket.close();
+  process.stdout.write(JSON.stringify({ ok: true, transport: "wss", reverse_proxy: "caddy", login: "password-cookie", authority: "runtime", relay_business_tables: 0 }) + "\n");
 } catch (error) {
   try { process.stderr.write(composeOutput(["logs", "--no-color"], environment) + "\n"); } catch (logsError) { process.stderr.write(String(logsError) + "\n"); }
   throw error;

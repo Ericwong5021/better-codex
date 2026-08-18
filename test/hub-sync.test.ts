@@ -293,7 +293,7 @@ test("the real Runtime service pushes API writes to the Hub", async () => {
   const output: string[] = [];
   const child = spawn(process.execPath, ["--import", "tsx", "src/cli.ts", "serve"], {
     cwd: process.cwd(),
-    env: { ...process.env, BETTER_CODEX_HOME: home, BETTER_CODEX_DB: join(home, "better-codex.db"), BETTER_CODEX_PORT: String(runtimePort), BETTER_CODEX_TOKEN: runtimeToken, CODEX_HOME: codexHome },
+    env: { ...process.env, BETTER_CODEX_REMOTE_MODE: "projection", BETTER_CODEX_HOME: home, BETTER_CODEX_DB: join(home, "better-codex.db"), BETTER_CODEX_PORT: String(runtimePort), BETTER_CODEX_TOKEN: runtimeToken, CODEX_HOME: codexHome },
     stdio: ["ignore", "pipe", "pipe"],
   });
   child.stdout?.on("data", chunk => output.push(String(chunk)));

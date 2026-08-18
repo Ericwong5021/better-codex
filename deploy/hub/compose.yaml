@@ -5,15 +5,14 @@ services:
       dockerfile: deploy/hub/Dockerfile
     restart: unless-stopped
     environment:
-      BETTER_CODEX_HUB_HOST: 0.0.0.0
-      BETTER_CODEX_HUB_PORT: 4318
-      BETTER_CODEX_HUB_DB: /data/better-codex-hub.db
-      BETTER_CODEX_HUB_BOOTSTRAP_SECRET_FILE: /run/secrets/hub_bootstrap_secret
-      BETTER_CODEX_HUB_WEB_PASSWORD_FILE: /run/secrets/hub_web_password
-      BETTER_CODEX_HUB_WEB_USERNAME: ${BETTER_CODEX_HUB_WEB_USERNAME:-admin}
-      BETTER_CODEX_HUB_ALLOWED_HOSTS: ${BETTER_CODEX_HUB_DOMAIN:-aionui.talktodo.cn}
-      BETTER_CODEX_HUB_TRUST_PROXY: "1"
-      BETTER_CODEX_HUB_UPDATER_DIR: /run/better-codex-updater
+      BETTER_CODEX_RELAY_HOST: 0.0.0.0
+      BETTER_CODEX_RELAY_PORT: 4318
+      BETTER_CODEX_RELAY_DB: /data/better-codex-relay.db
+      BETTER_CODEX_RELAY_BOOTSTRAP_SECRET_FILE: /run/secrets/hub_bootstrap_secret
+      BETTER_CODEX_RELAY_WEB_PASSWORD_FILE: /run/secrets/hub_web_password
+      BETTER_CODEX_RELAY_WEB_USERNAME: ${BETTER_CODEX_HUB_WEB_USERNAME:-admin}
+      BETTER_CODEX_RELAY_ALLOWED_HOSTS: ${BETTER_CODEX_HUB_DOMAIN:-aionui.talktodo.cn}
+      BETTER_CODEX_RELAY_TRUST_PROXY: "1"
     expose:
       - 4318
     volumes:

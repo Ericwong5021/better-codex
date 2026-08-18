@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
 async function availablePort() {
@@ -32,6 +33,15 @@ function startRuntime(home: string, port: number, token: string) {
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
+}
+
+function syncQueueCount(file: string) {
+  const database = new DatabaseSync(file, { readOnly: true });
+  try {
+    return Number((database.prepare("SELECT COUNT(*) AS value FROM sync_outbox").get() as { value: number }).value);
+  } finally {
+    database.close();
+  }
 }
 
 async function waitForRuntime(port: number, process: ChildProcess) {
@@ -83,6 +93,13 @@ test("web host boots the shared DOM injection behind a local session", async () 
 
   try {
     await waitForRuntime(port, runtime);
+    const initialSyncQueueCount = syncQueueCount(join(home, "better-codex.db"));
+
+    const relayModeStatus = await fetch(`${base}/api/relay/status`, { headers: { authorization: `Bearer ${token}` } }).then(response => response.json()) as { remote_mode: string };
+    assert.equal(relayModeStatus.remote_mode, "relay");
+    const disabledProjection = await fetch(`${base}/api/sync/connect`, { method: "POST", headers: { authorization: `Bearer ${token}` } });
+    assert.equal(disabledProjection.status, 409);
+    assert.deepEqual(await disabledProjection.json(), { error: "remote_mode_disabled" });
 
     const page = await fetch(`${base}/web`);
     assert.equal(page.status, 200);
@@ -284,6 +301,7 @@ test("web host boots the shared DOM injection behind a local session", async () 
     const threadFallback = await fetch(`${base}/local/00000000-0000-4000-8000-000000000000`);
     assert.equal(threadFallback.status, 200);
     assert.match(await threadFallback.text(), /会话已在 Codex 中打开/);
+    assert.equal(syncQueueCount(join(home, "better-codex.db")), initialSyncQueueCount);
   } finally {
     await stopRuntime(runtime);
     rmSync(home, { recursive: true, force: true });

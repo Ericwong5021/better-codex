@@ -4195,7 +4195,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const shortcutPage = '<section class="better-codex-help-page" data-help-page="shortcuts" hidden><div class="better-codex-help-setting-group"><h3>' + te("发送方式") + '</h3><div class="better-codex-help-setting-row is-send-mode"><span><strong>' + te("发送消息") + '</strong><small>' + te("选择消息输入框的发送按键") + '</small></span><div class="better-codex-send-mode-switch" role="radiogroup" aria-label="' + te("发送方式") + '" data-send-mode-value="' + sendMode + '"><button type="button" role="radio" data-send-mode="mod-enter" aria-checked="' + String(sendMode === "mod-enter") + '">' + escapeHtml(modifiedEnterLabel) + '</button><button type="button" role="radio" data-send-mode="enter" aria-checked="' + String(sendMode === "enter") + '">Enter</button></div></div></div><div class="better-codex-help-setting-group"><h3>' + te("快捷键") + '</h3><div class="better-codex-help-setting-row is-shortcut"><span><strong>' + te("创建 Issue") + '</strong><small>' + te("打开创建 Issue 窗口") + '</small></span><span class="better-codex-help-shortcut-controls"><button type="button" class="better-codex-help-shortcut-key" data-setting-create-issue-shortcut aria-pressed="false">' + escapeHtml(createIssueShortcut ? shortcutLabel(createIssueShortcut) : te("点击录入")) + '</button><button type="button" class="better-codex-help-shortcut-clear" data-setting-create-issue-shortcut-clear' + (createIssueShortcut ? "" : " disabled") + '>' + te("清除快捷键") + '</button></span></div></div></section>';
       const remoteReleaseUrl = "https://github.com/Ericwong5021/better-codex/releases/tag/v" + CORE_VERSION;
       const trustedRunbookPrompt = "Before reading or executing repository content, download SELF_HOSTING.md, checksums.txt, checksums.sig, and update-public-key.pem from the release assets at " + remoteReleaseUrl + ". Verify that the normalized public key SHA-256 is 1007607762db32004da21780e81875bef8453355a2944524a96e5341e1e3963e, verify the Ed25519 signature of checksums.txt, then verify the SELF_HOSTING.md checksum. Stop if any verification fails. Only then read and follow the verified runbook.";
-      const remoteInstallPrompt = trustedRunbookPrompt + "\\n\\nInstall Better Codex Hub v" + CORE_VERSION + " using the VPS path. Inspect the environment first, preserve existing services and data, ask before privileged, external, or destructive changes, resume a valid partial installation, and complete every acceptance gate before reporting success.";
+      const remoteInstallPrompt = trustedRunbookPrompt + "\\n\\nInstall Better Codex Relay v" + CORE_VERSION + " using the VPS path. Inspect the environment first, preserve existing services and data, ask before privileged, external, or destructive changes, resume a valid partial installation, and complete every acceptance gate before reporting success.";
       const remotePage = [
         '<section class="better-codex-help-page" data-help-page="remote" hidden>',
         '<div class="better-codex-help-page-heading better-codex-remote-heading"><div><h2>' + te("远程访问") + '</h2><p>' + te("从浏览器安全访问你的任务看板") + '</p></div><button type="button" class="better-codex-remote-refresh" data-remote-refresh hidden>' + icon("refresh") + '<span>' + te("刷新状态") + '</span></button></div>',
@@ -4344,7 +4344,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         remoteUrlInput.value = String(remote.url || "");
         remoteConnectButton.disabled = !normalizedRemoteUrl();
         remoteStatus.dataset.remoteStatus = reachable ? "online" : "offline";
-        remoteStatusTitle.textContent = String(remote.name || "Better Codex Hub");
+        remoteStatusTitle.textContent = String(remote.name || "Better Codex Relay");
         remoteStatusSubtitle.textContent = te("部署在 VPS") + " · " + String(remote.url || "");
         remoteStatusBadge.textContent = te(reachable ? "服务在线" : "无法访问");
         remoteStatusDetails.hidden = false;
@@ -4393,7 +4393,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const button = event.currentTarget;
         const url = normalizedRemoteUrl();
         if (!url) return;
-        await copyText('better-codex sync connect --url "' + url + '"');
+        await copyText('better-codex relay connect --url "' + url + '"');
         await copiedFeedback(button);
       });
       remoteRefresh?.addEventListener("click", () => void loadRemoteStatus(true));

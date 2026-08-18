@@ -168,8 +168,8 @@ configure_vps_updater() {
     rm -f /var/lib/better-codex-updater/ready
     return
   fi
-  printf '%s\n' '[Unit]' 'Description=Better Codex Hub online updater' 'After=docker.service network-online.target' '' '[Service]' 'Type=oneshot' 'ExecStart=/usr/local/libexec/better-codex-selfhost-updater' > /etc/systemd/system/better-codex-updater.service
-  printf '%s\n' '[Unit]' 'Description=Watch for Better Codex Hub online update requests' '' '[Path]' 'PathExists=/var/lib/better-codex-updater/request' 'Unit=better-codex-updater.service' '' '[Install]' 'WantedBy=multi-user.target' > /etc/systemd/system/better-codex-updater.path
+  printf '%s\n' '[Unit]' 'Description=Better Codex Relay online updater' 'After=docker.service network-online.target' '' '[Service]' 'Type=oneshot' 'ExecStart=/usr/local/libexec/better-codex-selfhost-updater' > /etc/systemd/system/better-codex-updater.service
+  printf '%s\n' '[Unit]' 'Description=Watch for Better Codex Relay online update requests' '' '[Path]' 'PathExists=/var/lib/better-codex-updater/request' 'Unit=better-codex-updater.service' '' '[Install]' 'WantedBy=multi-user.target' > /etc/systemd/system/better-codex-updater.path
   chmod 644 /etc/systemd/system/better-codex-updater.service /etc/systemd/system/better-codex-updater.path
   systemctl daemon-reload
   systemctl enable --now better-codex-updater.path
@@ -209,7 +209,7 @@ install_vps() {
 BETTER_CODEX_HUB_WEB_USERNAME=$username
 "
   docker compose -f "$directory/deploy/hub/compose.yaml" --env-file "$directory/deploy/hub/.env" up -d --build --wait
-  printf 'Better Codex Hub %s is starting at https://%s\n' "$target" "$domain"
+  printf 'Better Codex Relay %s is starting at https://%s\n' "$target" "$domain"
 }
 
 upgrade_vps() {
@@ -218,14 +218,14 @@ upgrade_vps() {
   need git
   need docker
   docker compose version >/dev/null 2>&1 || fail "Docker Compose is required"
-  local target directory compose proxy_compose environment backup_output backup previous previous_version domain public_health
+  local target directory compose proxy_compose environment backup_output backup backup_cli previous_service previous previous_version domain public_health
   local -a compose_args up_services
   target="$(version_tag)"
   directory="${BETTER_CODEX_SELFHOST_DIR:-/opt/better-codex}"
   compose="$directory/deploy/hub/compose.yaml"
   proxy_compose="$directory/deploy/hub/compose.proxy.yaml"
   environment="$directory/deploy/hub/.env"
-  [ -f "$compose" ] && [ -f "$environment" ] || fail "Better Codex Hub is not installed in $directory"
+  [ -f "$compose" ] && [ -f "$environment" ] || fail "Better Codex Relay is not installed in $directory"
   compose_args=(-f "$compose" --env-file "$environment")
   up_services=()
   if [ -f "$proxy_compose" ]; then
@@ -237,14 +237,20 @@ upgrade_vps() {
   previous_version="$(git -C "$directory" show "${previous}:package.json" | sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
   [ -n "$previous_version" ] || fail "unable to resolve the installed VPS version"
   verify_tag_commit "$directory" "$target"
-  backup_output="$(docker compose "${compose_args[@]}" exec -T --user node hub node dist/hub-cli.js backup)"
+  previous_service="$(docker compose "${compose_args[@]}" exec -T hub node -e 'fetch("http://127.0.0.1:4318/healthz").then(response=>response.json()).then(value=>process.stdout.write(String(value.name||"")))')"
+  case "$previous_service" in
+    'Better Codex Relay') backup_cli=dist/relay-cli.js ;;
+    'Better Codex Hub') backup_cli=dist/hub-cli.js ;;
+    *) fail "unable to identify the installed remote service" ;;
+  esac
+  backup_output="$(docker compose "${compose_args[@]}" exec -T --user node hub node "$backup_cli" backup)"
   backup="$(printf '%s\n' "$backup_output" | sed -n 's/^[[:space:]]*"backup":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
   [[ "$backup" == /data/backups/*.db ]] || fail "VPS backup path is invalid"
   rollback_vps() {
     git -C "$directory" checkout --detach "$previous"
     docker compose "${compose_args[@]}" stop hub
     docker compose "${compose_args[@]}" build hub
-    docker compose "${compose_args[@]}" run --rm --no-deps hub node dist/hub-cli.js restore "$backup"
+    docker compose "${compose_args[@]}" run --rm --no-deps hub node "$backup_cli" restore "$backup"
     docker compose "${compose_args[@]}" up -d --wait "${up_services[@]}"
     docker compose "${compose_args[@]}" exec -T -e TARGET_VERSION="$previous_version" hub node -e 'fetch("http://127.0.0.1:4318/healthz").then(response=>response.json()).then(value=>{if(value.ok!==true||value.version!==process.env.TARGET_VERSION)process.exit(1)})'
   }
@@ -272,7 +278,7 @@ upgrade_vps() {
       fail "VPS public health check failed and the previous version was restored"
     fi
   fi
-  printf 'Better Codex Hub upgraded to %s\n' "$target"
+  printf 'Better Codex Relay upgraded to %s\n' "$target"
 }
 
 target_version="$(version_tag)"

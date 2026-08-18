@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { copyFileSync, existsSync, mkdirSync, renameSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 function now() {
@@ -228,7 +228,44 @@ export class RelayStore {
     return this.database.prepare("SELECT seq, actor, event, detail, created_at FROM relay_audit ORDER BY seq DESC LIMIT ?").all(safeLimit);
   }
 
+  backup(target?: string) {
+    const directory = join(dirname(this.file), "backups");
+    mkdirSync(directory, { recursive: true });
+    const destination = resolve(target || join(directory, `better-codex-relay-${new Date().toISOString().replace(/[:.]/g, "-")}.db`));
+    if (existsSync(destination)) throw new Error("backup_already_exists");
+    this.database.prepare("VACUUM INTO ?").run(destination);
+    const check = new DatabaseSync(destination, { readOnly: true });
+    try {
+      const integrity = check.prepare("PRAGMA quick_check").get() as { quick_check?: string } | undefined;
+      if (integrity?.quick_check !== "ok") throw new Error("backup_integrity_failed");
+    } finally {
+      check.close();
+    }
+    this.audit("admin", "backup_created", destination);
+    return { backup: destination };
+  }
+
   tableNames() {
     return (this.database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all() as Array<{ name: string }>).map(row => row.name);
   }
+}
+
+export function restoreRelayBackup(databaseFile: string, backupFile: string) {
+  const database = resolve(databaseFile);
+  const backup = resolve(backupFile);
+  if (!existsSync(backup)) throw new Error("backup_not_found");
+  const source = new DatabaseSync(backup, { readOnly: true });
+  try {
+    const integrity = source.prepare("PRAGMA quick_check").get() as { quick_check?: string } | undefined;
+    const tables = new Set((source.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>).map(row => row.name));
+    if (integrity?.quick_check !== "ok" || !["relay_settings", "relay_web_sessions", "relay_devices", "relay_audit"].every(table => tables.has(table))) throw new Error("backup_invalid");
+  } finally {
+    source.close();
+  }
+  mkdirSync(dirname(database), { recursive: true });
+  const temporary = `${database}.restore-${randomUUID()}`;
+  copyFileSync(backup, temporary);
+  if (existsSync(database)) renameSync(database, `${database}.before-restore-${new Date().toISOString().replace(/[:.]/g, "-")}`);
+  renameSync(temporary, database);
+  return { restored: database, source: backup };
 }
