@@ -9,7 +9,8 @@
   },
   "bin": {
     "better-codex": "dist/cli.js",
-    "better-codex-hub": "dist/hub-cli.js"
+    "better-codex-hub": "dist/hub-cli.js",
+    "better-codex-relay": "dist/relay-cli.js"
   },
   "files": [
     "assets/better-codex.png",
@@ -39,6 +40,11 @@
     "dist/mockup.js",
     "dist/runtime-state.js",
     "dist/release-update.js",
+    "dist/relay-auth.js",
+    "dist/relay-cli.js",
+    "dist/relay-protocol.js",
+    "dist/relay-server.js",
+    "dist/relay-store.js",
     "dist/server.js",
     "dist/sync-client.js",
     "dist/sync-config.js",
@@ -68,6 +74,8 @@
     "start": "node dist/cli.js serve",
     "hub": "tsx src/hub-cli.ts",
     "hub:start": "node dist/hub-cli.js serve",
+    "relay": "tsx src/relay-cli.ts",
+    "relay:start": "node dist/relay-cli.js serve",
     "better-codex": "tsx src/cli.ts",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test --test-concurrency=2 test/*.test.ts",
@@ -82,11 +90,13 @@
   "devDependencies": {
     "@playwright/test": "^1.62.1",
     "@types/node": "^22.15.21",
+    "@types/ws": "^8.18.1",
     "esbuild": "^0.28.1",
     "tsx": "^4.19.4",
     "typescript": "^5.8.3"
   },
   "dependencies": {
-    "lucide-static": "^1.28.0"
+    "lucide-static": "^1.28.0",
+    "ws": "^8.21.0"
   }
 }
