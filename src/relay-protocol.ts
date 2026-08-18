@@ -3,6 +3,7 @@ export const relayWebSocketProtocol = "better-codex-relay-v1" as const;
 export const relayCapabilities = ["http-stream", "sse", "file-upload", "request-cancel"] as const;
 export const relayMaxChunkBytes = 256 * 1024;
 export const relayMaxFrameBytes = 512 * 1024;
+export const relayInitialWindowBytes = 1024 * 1024;
 
 export type RelayCapability = typeof relayCapabilities[number];
 

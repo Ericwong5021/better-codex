@@ -102,10 +102,39 @@ test("relay Web session requires same-origin CSRF for protected requests", async
 
 test("runtime relay client forwards concurrent HTTP requests with only the local token", async () => {
   const localToken = "local-runtime-token";
+  let sseClosed = 0;
+  let uploadAborted = false;
+  let resolveUploadStarted: (() => void) | undefined;
+  const uploadStarted = new Promise<void>(resolve => { resolveUploadStarted = resolve; });
   const local = createServer((request, response) => {
     if (request.headers.authorization !== `Bearer ${localToken}`) {
       response.writeHead(401, { "content-type": "application/json" });
       response.end(JSON.stringify({ error: "unauthorized" }));
+      return;
+    }
+    if (request.url === "/api/events") {
+      response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
+      let id = 0;
+      const interval = setInterval(() => {
+        id += 1;
+        response.write(`id: ${id}\nevent: change\ndata: {"sequence":${id}}\n\n`);
+      }, 10);
+      response.once("close", () => {
+        clearInterval(interval);
+        sseClosed += 1;
+      });
+      return;
+    }
+    if (request.url === "/api/large") {
+      const body = Buffer.alloc(3 * 1024 * 1024, 97);
+      response.writeHead(200, { "content-type": "application/octet-stream", "content-length": body.length });
+      response.end(body);
+      return;
+    }
+    if (request.url === "/api/cancel-upload") {
+      request.once("data", () => resolveUploadStarted?.());
+      request.once("aborted", () => { uploadAborted = true; });
+      request.resume();
       return;
     }
     const chunks: Buffer[] = [];
@@ -113,7 +142,7 @@ test("runtime relay client forwards concurrent HTTP requests with only the local
     request.on("end", () => {
       const body = Buffer.concat(chunks).toString("utf8");
       response.writeHead(200, { "content-type": "application/json", "x-runtime": "local" });
-      response.end(JSON.stringify({ path: request.url, method: request.method, body, relay: request.headers["x-better-codex-relay"], request_id: request.headers["x-better-codex-request-id"] }));
+      response.end(JSON.stringify({ path: request.url, method: request.method, body, body_bytes: Buffer.byteLength(body), chunk_count: chunks.length, relay: request.headers["x-better-codex-relay"], request_id: request.headers["x-better-codex-request-id"] }));
     });
   });
   local.listen(0, "127.0.0.1");
@@ -159,6 +188,60 @@ test("runtime relay client forwards concurrent HTTP requests with only the local
     assert.equal(response.request_id, `request-${index}-abcdef`);
   }
 
+  const large = await fetch(`${base}/api/large`, { headers: { cookie } });
+  assert.equal(large.status, 200);
+  assert.equal((await large.arrayBuffer()).byteLength, 3 * 1024 * 1024);
+
+  const uploadBytes = 3 * 1024 * 1024;
+  let uploadOffset = 0;
+  const uploadBody = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (uploadOffset >= uploadBytes) return controller.close();
+      const size = Math.min(32 * 1024, uploadBytes - uploadOffset);
+      uploadOffset += size;
+      controller.enqueue(new Uint8Array(size).fill(120));
+    },
+  });
+  const uploadInit: RequestInit & { duplex: "half" } = { method: "POST", headers: { cookie, origin: base, "content-type": "application/octet-stream", "x-csrf-token": session.csrf_token }, body: uploadBody, duplex: "half" };
+  const upload = await fetch(`${base}/api/upload`, uploadInit);
+  assert.equal(upload.status, 200);
+  const uploadResult = await upload.json() as { body_bytes: number; chunk_count: number };
+  assert.equal(uploadResult.body_bytes, uploadBytes);
+  assert.ok(uploadResult.chunk_count > 1);
+
+  const eventsController = new AbortController();
+  const events = await fetch(`${base}/api/events`, { headers: { cookie, "last-event-id": "7" }, signal: eventsController.signal });
+  assert.match(events.headers.get("content-type") || "", /text\/event-stream/);
+  assert.equal(events.headers.get("x-accel-buffering"), "no");
+  const eventsReader = events.body?.getReader();
+  assert.ok(eventsReader);
+  let eventText = "";
+  while (!eventText.includes("id: 3")) {
+    const chunk = await eventsReader.read();
+    if (chunk.done) break;
+    eventText += new TextDecoder().decode(chunk.value);
+  }
+  assert.match(eventText, /event: change/);
+  eventsController.abort();
+  await waitFor(() => sseClosed === 1 && (relay.runtime()?.activeChannels || 0) === 0);
+
+  let cancelOffset = 0;
+  const cancelBody = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      if (cancelOffset >= 20 * 1024 * 1024) return controller.close();
+      cancelOffset += 32 * 1024;
+      controller.enqueue(new Uint8Array(32 * 1024).fill(121));
+      await new Promise(resolve => setTimeout(resolve, 5));
+    },
+  });
+  const cancelController = new AbortController();
+  const cancelInit: RequestInit & { duplex: "half" } = { method: "POST", headers: { cookie, origin: base, "content-type": "application/octet-stream", "x-csrf-token": session.csrf_token }, body: cancelBody, duplex: "half", signal: cancelController.signal };
+  const cancelledUpload = fetch(`${base}/api/cancel-upload`, cancelInit);
+  await uploadStarted;
+  cancelController.abort();
+  await assert.rejects(cancelledUpload, error => error instanceof Error && error.name === "AbortError");
+  await waitFor(() => uploadAborted && (relay.runtime()?.activeChannels || 0) === 0);
+
   client.stop();
   await waitFor(() => !relay.runtime());
   assert.equal((await fetch(`${base}/api/echo`, { headers: { cookie } })).status, 503);
@@ -169,6 +252,14 @@ test("runtime relay client forwards concurrent HTTP requests with only the local
   await waitFor(() => restarted.status().connected);
   assert.equal(restarted.status().connection_epoch, 2);
   assert.equal((await fetch(`${base}/health`, { headers: { cookie } })).status, 200);
+  const reconnectedEventsController = new AbortController();
+  const reconnectedEvents = await fetch(`${base}/api/events`, { headers: { cookie, "last-event-id": "3" }, signal: reconnectedEventsController.signal });
+  assert.equal(reconnectedEvents.status, 200);
+  const reconnectedReader = reconnectedEvents.body?.getReader();
+  assert.ok(reconnectedReader);
+  assert.match(new TextDecoder().decode((await reconnectedReader.read()).value), /event: change/);
+  reconnectedEventsController.abort();
+  await waitFor(() => sseClosed === 2);
   restarted.stop();
   await relay.close();
   local.close();

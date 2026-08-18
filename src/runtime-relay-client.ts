@@ -1,6 +1,8 @@
 import WebSocket, { type RawData } from "ws";
+import { PassThrough } from "node:stream";
+import { once } from "node:events";
 import { readRelayConfiguration, type RelayConfiguration } from "./relay-config.js";
-import { decodeRelayMessage, encodeRelayMessage, relayCapabilities, relayMaxChunkBytes, relayMaxFrameBytes, relayProtocolVersion, relayWebSocketProtocol, type RelayHelloAck, type RelayMessage, type RelayRequestOpen } from "./relay-protocol.js";
+import { decodeRelayMessage, encodeRelayMessage, relayCapabilities, relayInitialWindowBytes, relayMaxChunkBytes, relayMaxFrameBytes, relayProtocolVersion, relayWebSocketProtocol, type RelayHelloAck, type RelayMessage, type RelayRequestOpen } from "./relay-protocol.js";
 
 type RuntimeRelayState = {
   enabled: boolean;
@@ -18,12 +20,14 @@ type RuntimeRelayState = {
 
 type RuntimeChannel = {
   open: RelayRequestOpen;
-  chunks: Buffer[];
+  body: PassThrough | null;
   bytes: number;
   nextSequence: number;
   controller: AbortController;
   running: boolean;
   cancelled: boolean;
+  responseCredit: number;
+  responseCreditWaiters: Array<() => void>;
 };
 
 export type RuntimeRelayClientOptions = {
@@ -93,7 +97,12 @@ export class RuntimeRelayClient {
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     this.reconnectTimer = null;
     this.heartbeatTimer = null;
-    for (const channel of this.channels.values()) channel.controller.abort();
+    for (const channel of this.channels.values()) {
+      channel.cancelled = true;
+      channel.controller.abort();
+      channel.body?.destroy();
+      for (const resolve of channel.responseCreditWaiters.splice(0)) resolve();
+    }
     this.channels.clear();
     this.socket?.close(1000);
     this.socket = null;
@@ -151,7 +160,7 @@ export class RuntimeRelayClient {
     socket.on("message", data => {
       try {
         const message = decodeRelayMessage(this.messageText(data));
-        void this.handleMessage(socket, configuration, message).catch(error => {
+        this.messageQueue = this.messageQueue.then(() => this.handleMessage(socket, configuration, message)).catch(error => {
           this.state.last_error = errorCode(error);
           socket.close(1008);
         });
@@ -167,7 +176,12 @@ export class RuntimeRelayClient {
       this.hello = null;
       if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
-      for (const channel of this.channels.values()) channel.controller.abort();
+      for (const channel of this.channels.values()) {
+        channel.cancelled = true;
+        channel.controller.abort();
+        channel.body?.destroy();
+        for (const resolve of channel.responseCreditWaiters.splice(0)) resolve();
+      }
       this.channels.clear();
       this.state = { ...this.state, connected: false, connection_epoch: null, active_channels: 0, reconnect_attempts: this.failures + 1 };
       this.failures += 1;
@@ -195,6 +209,19 @@ export class RuntimeRelayClient {
     socket.send(encodeRelayMessage(message));
   }
 
+  private messageQueue = Promise.resolve();
+
+  private releaseResponseCredit(channel: RuntimeChannel, bytes: number) {
+    channel.responseCredit += bytes;
+    for (const resolve of channel.responseCreditWaiters.splice(0)) resolve();
+  }
+
+  private async consumeResponseCredit(channel: RuntimeChannel, bytes: number) {
+    while (!channel.cancelled && channel.responseCredit < bytes) await new Promise<void>(resolve => channel.responseCreditWaiters.push(resolve));
+    if (channel.cancelled) throw new DOMException("request_cancelled", "AbortError");
+    channel.responseCredit -= bytes;
+  }
+
   private async handleMessage(socket: WebSocket, configuration: RelayConfiguration, message: RelayMessage) {
     if (message.type === "hello_ack") {
       if (message.device_id !== configuration.device_id || message.runtime_instance_id !== this.options.runtimeInstanceId) throw new Error("relay_identity_mismatch");
@@ -218,24 +245,28 @@ export class RuntimeRelayClient {
     if (message.type === "request_open") {
       if (this.channels.size >= this.hello.max_concurrent_channels) throw new Error("relay_channel_limit");
       if (this.channels.has(message.channel_id)) throw new Error("relay_channel_conflict");
-      this.channels.set(message.channel_id, { open: message, chunks: [], bytes: 0, nextSequence: 0, controller: new AbortController(), running: false, cancelled: false });
+      const method = message.method.toUpperCase();
+      if (!/^(GET|HEAD|POST|PUT|PATCH|DELETE)$/.test(method)) throw new Error("method_not_allowed");
+      const channel: RuntimeChannel = { open: message, body: ["GET", "HEAD"].includes(method) ? null : new PassThrough({ highWaterMark: relayMaxChunkBytes }), bytes: 0, nextSequence: 0, controller: new AbortController(), running: true, cancelled: false, responseCredit: relayInitialWindowBytes, responseCreditWaiters: [] };
+      this.channels.set(message.channel_id, channel);
+      void this.forward(socket, channel);
       return;
     }
     if (message.type === "request_chunk") {
       const channel = this.channels.get(message.channel_id);
-      if (!channel || channel.running || message.sequence !== channel.nextSequence) throw new Error("relay_chunk_sequence_invalid");
+      if (!channel || !channel.running || !channel.body || message.sequence !== channel.nextSequence) throw new Error("relay_chunk_sequence_invalid");
       const bytes = Buffer.from(message.data, "base64");
       channel.bytes += bytes.length;
       if (channel.bytes > 50 * 1024 * 1024) throw new Error("body_too_large");
-      channel.chunks.push(bytes);
       channel.nextSequence += 1;
+      if (!channel.body.write(bytes)) await once(channel.body, "drain");
+      if (!channel.cancelled) this.send(socket, { type: "window_update", ...this.identity(), channel_id: channel.open.channel_id, direction: "request", bytes: bytes.length });
       return;
     }
     if (message.type === "request_end") {
       const channel = this.channels.get(message.channel_id);
-      if (!channel || channel.running) throw new Error("relay_channel_invalid");
-      channel.running = true;
-      void this.forward(socket, channel);
+      if (!channel || !channel.running) throw new Error("relay_channel_invalid");
+      channel.body?.end();
       return;
     }
     if (message.type === "request_cancel") {
@@ -243,7 +274,16 @@ export class RuntimeRelayClient {
       if (!channel) return;
       channel.cancelled = true;
       channel.controller.abort();
+      channel.body?.destroy();
+      for (const resolve of channel.responseCreditWaiters.splice(0)) resolve();
       this.channels.delete(message.channel_id);
+      return;
+    }
+    if (message.type === "window_update") {
+      const channel = this.channels.get(message.channel_id);
+      if (message.direction !== "response") throw new Error("relay_channel_invalid");
+      if (!channel) return;
+      this.releaseResponseCredit(channel, message.bytes);
       return;
     }
     throw new Error("unsupported_relay_message");
@@ -254,12 +294,14 @@ export class RuntimeRelayClient {
     timer.unref();
     try {
       const method = channel.open.method.toUpperCase();
-      if (!/^(GET|HEAD|POST|PUT|PATCH|DELETE)$/.test(method)) throw new Error("method_not_allowed");
       const port = this.options.runtimePort();
       if (!Number.isInteger(port) || port < 1) throw new Error("runtime_unavailable");
-      const body = ["GET", "HEAD"].includes(method) ? undefined : Buffer.concat(channel.chunks, channel.bytes);
-      channel.chunks.length = 0;
-      const response = await fetch(`http://127.0.0.1:${port}${channel.open.path}`, { method, headers: requestHeaders(channel.open.headers, this.options.localToken), body, signal: channel.controller.signal });
+      const init: RequestInit & { duplex?: "half" } = { method, headers: requestHeaders(channel.open.headers, this.options.localToken), signal: channel.controller.signal };
+      if (channel.body) {
+        init.body = channel.body as unknown as BodyInit;
+        init.duplex = "half";
+      }
+      const response = await fetch(`http://127.0.0.1:${port}${channel.open.path}`, init);
       if (channel.cancelled) return;
       clearTimeout(timer);
       this.send(socket, { type: "response_open", ...this.identity(), channel_id: channel.open.channel_id, status: response.status, headers: responseHeaders(response.headers) });
@@ -272,6 +314,7 @@ export class RuntimeRelayClient {
           const bytes = Buffer.from(next.value);
           for (let offset = 0; offset < bytes.length; offset += relayMaxChunkBytes) {
             const chunk = bytes.subarray(offset, Math.min(bytes.length, offset + relayMaxChunkBytes));
+            await this.consumeResponseCredit(channel, chunk.length);
             this.send(socket, { type: "response_chunk", ...this.identity(), channel_id: channel.open.channel_id, sequence, data: chunk.toString("base64") });
             sequence += 1;
           }
