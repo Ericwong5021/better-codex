@@ -109,7 +109,7 @@ Restart Codex from the Better Codex launcher, and `Task board` and `Agents` appe
 
 Remote access is optional and keeps the local Runtime authoritative. Open `More` → `Remote access` and copy the VPS installation prompt into Codex:
 
-The Hub runs in Docker on your Linux server and uses either the bundled Caddy HTTPS service or your existing reverse proxy.
+The Relay runs in Docker on your Linux server and uses either the bundled Caddy HTTPS service or your existing reverse proxy. Your Runtime makes an outbound WSS connection; the Relay forwards live browser traffic and stores no projects, tasks, conversations, Agent configuration, or attachments.
 
 Codex verifies the signed, version-pinned [self-hosting runbook](SELF_HOSTING.md), inspects the environment, preserves existing services and partial installations, and verifies the public service before reporting success. After deployment, enter the public URL in Better Codex to get the Runtime connection command. The same page then shows service status, version, browser access, and a verified upgrade prompt.
 
@@ -119,7 +119,7 @@ Codex verifies the signed, version-pinned [self-hosting runbook](SELF_HOSTING.md
 No. Better Codex is an independent open-source project built on top of Codex Desktop. It is not affiliated with or endorsed by OpenAI.
 
 **Where does my data go?**<br>
-By default, it stays on your computer. Projects, tasks, assignments, and run state live in a local SQLite database (`~/.better-codex/better-codex.db` on macOS, `%USERPROFILE%\.better-codex\better-codex.db` on Windows), and the runtime listens on `127.0.0.1` only. If you opt into Self-host sync, a filtered board and conversation projection is sent to the Hub you deploy; the local database remains authoritative. See the [Self-hosting runbook](SELF_HOSTING.md) for the exact boundary.
+It stays on your computer. Projects, tasks, assignments, conversations, Agent configuration, attachments, and run state live in the local SQLite database (`~/.better-codex/better-codex.db` on macOS, `%USERPROFILE%\.better-codex\better-codex.db` on Windows), and the Runtime listens on `127.0.0.1` only. Optional remote access sends live HTTPS/WSS traffic through your Relay while the Runtime is online; the Relay does not persist business data. See the [Self-hosting runbook](SELF_HOSTING.md) for the exact boundary.
 
 **Why does Better Codex register an MCP server?**<br>
 Codex uses the local MCP app to recognize the Better Codex app entry and route. This puts the task board into the Codex navigation flow instead of placing it over the last conversation route. The MCP server runs locally over stdio. It is not a cloud service and does not upload task data.

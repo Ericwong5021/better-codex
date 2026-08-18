@@ -1,6 +1,6 @@
 # Better Codex Self-hosting Runbook for AI Agents
 
-This runbook is the source of truth for an AI agent installing or upgrading Better Codex Hub on a VPS. The user prompt supplies the target version. Inspect first, preserve existing services and data, and do not report success until the public deployment and Runtime connection are verified.
+This runbook is the source of truth for an AI agent installing or upgrading Better Codex Relay on a VPS. The user prompt supplies the target version. Inspect first, preserve existing services and data, and do not report success until the public deployment and Runtime tunnel are verified.
 
 ## Execution contract
 
@@ -11,8 +11,8 @@ This runbook is the source of truth for an AI agent installing or upgrading Bett
 - Ask before privileged commands, firewall changes, proxy changes, service reloads, or destructive recovery.
 - Do not stop or replace unrelated websites, containers, proxies, or services.
 - Do not delete `/opt/better-codex`, deployment volumes, or existing secrets to recover from an interrupted installation.
-- Do not expose the Hub application port directly to the public Internet.
-- Keep the local Runtime and remote Hub on the same Better Codex version.
+- Do not expose the Relay application port directly to the public Internet.
+- Keep the local Runtime and remote Relay on a compatible `relay/v1` release. Matching versions are preferred during upgrades.
 - Stop after a failed acceptance gate, diagnose the cause, and resume from that stage.
 
 ## Inputs
@@ -66,7 +66,7 @@ Confirm that DNS points to the target server and identify the owner of ports 80 
 Select one deployment mode:
 
 - `standalone`: ports 80 and 443 are free. Use the bundled Caddy service.
-- `existing-proxy`: Nginx, Apache, Caddy, a control panel, or another trusted gateway already owns 80 or 443. Preserve it and publish the Hub only on an unused loopback port.
+- `existing-proxy`: Nginx, Apache, Caddy, a control panel, or another trusted gateway already owns 80 or 443. Preserve it and publish the Relay only on an unused loopback port.
 
 Do not start the build until the mode is known.
 
@@ -120,7 +120,7 @@ services:
       - "127.0.0.1:4318:4318"
 ```
 
-Start only the Hub:
+Start only the Relay. The Compose service remains named `hub` as a compatibility alias during the rollback window:
 
 ```bash
 docker compose --env-file .env -f compose.yaml -f compose.proxy.yaml config --quiet
@@ -152,11 +152,12 @@ Record the selected Compose files because every later status, backup, and upgrad
 
 Verify all of these:
 
-1. The Hub container is healthy.
-2. `https://<DOMAIN>/healthz` returns `ok: true`, `name: "Better Codex Hub"`, `deployment: "vps"`, and the requested version.
+1. The Relay container is healthy.
+2. `https://<DOMAIN>/healthz` returns `ok: true`, `name: "Better Codex Relay"`, `protocol_version: "relay/v1"`, and the requested version.
 3. The certificate is valid for the requested domain.
 4. The browser login page loads and valid credentials open the task board.
-5. The public WebSocket endpoint `/api/v1/control` upgrades through the proxy.
+5. The public WebSocket endpoint `/api/v1/runtime/connect` upgrades through the proxy and rejects unauthenticated connections.
+6. The Relay SQLite database contains only settings, Web sessions, devices, and audit tables, with no Project, Issue, Agent, Conversation, attachment, Projection, or Remote Command data.
 
 Do not treat a healthy internal container as deployment success when the public URL fails.
 
@@ -165,27 +166,29 @@ Do not treat a healthy internal container as deployment success when the public 
 Run on the computer where Better Codex is installed:
 
 ```bash
-better-codex sync connect --url "https://<PUBLIC_HOST>"
+better-codex relay connect --url "https://<PUBLIC_HOST>"
 ```
 
-The command opens a browser approval page. Sign in to the remote Hub, approve the device, then wait for the command to finish.
+The command opens a browser approval page. Sign in to the remote Relay, approve the Runtime device, then wait for the outbound WSS connection to finish.
 
 Run:
 
 ```bash
-better-codex sync now
-better-codex sync status
+better-codex relay status
+better-codex relay doctor
 ```
 
-Acceptance requires `connected: true`, `last_error: null`, the correct Hub URL, and an empty pending queue.
+Acceptance requires `connected: true`, `last_error: null`, the correct Relay URL, `protocol_version: "relay/v1"`, and matching online Runtime details in public `/healthz`.
 
 ## End-to-end acceptance
 
-Complete both directions:
+Complete the live Runtime flow through the public browser:
 
-1. Create or edit an Issue locally and confirm it appears remotely.
-2. Edit the Issue remotely and confirm it first becomes pending, then is applied locally and acknowledged.
-3. Confirm the Runtime remains online and the pending queue returns to zero.
+1. Sign in and confirm Projects, Issues, Agents, Runtime status, and Conversations match the local Runtime.
+2. Create, edit, move, archive, and restore an Issue and confirm each result is immediately visible locally without a pending Projection or command queue.
+3. Start and stop an Agent, send a Conversation reply, and transfer an attachment through the public UI.
+4. Stop the local Runtime and confirm public business requests fail immediately without stale data or queued writes.
+5. Restart the Runtime and confirm the tunnel, page, and SSE updates recover without manual data synchronization.
 
 Health, login, deployment output, or uploaded assets alone are insufficient.
 
@@ -195,13 +198,15 @@ Health, login, deployment output, or uploaded assets alone are insufficient.
 - A failed Docker build: preserve configuration and secrets, diagnose network, disk, or registry failure, then rerun the same Compose mode.
 - Ports 80 or 443 in use: switch to `existing-proxy`; do not stop the existing gateway unless the user explicitly chooses that action.
 - Public `502`: verify the loopback listener, selected Compose files, gateway upstream, Host header, and container health.
-- `untrusted_host`: align the domain in `.env`, the public request Host, and the proxy Host header, then recreate the Hub container.
-- Version or protocol mismatch: align the local Runtime and Hub to the same release before reconnecting.
+- `untrusted_host`: align the domain in `.env`, the public request Host, and the proxy Host header, then recreate the Relay container.
+- `runtime_offline`: verify the local service, `better-codex relay status`, outbound DNS/TLS, Device Token, and proxy WebSocket upgrade path. Relay does not queue requests while offline.
+- Version or protocol mismatch: install compatible `relay/v1` releases on the Runtime and Relay, then reconnect.
+- Browser shows an older shell after upgrade: reload `/web` with a version query once so the Service Worker activates the new assets.
 - Never use `docker compose down -v` as routine recovery.
 
 ## Upgrade
 
-Before an upgrade, create and verify a backup, record the current source commit and deployment mode, verify the target release, deploy it with the same proxy and resource configuration, then require public health to report the target version. If validation fails, restore the previous source and deployment without deleting data.
+Before an upgrade, create and verify a Relay authentication database backup, preserve any legacy Hub database for rollback, record the current source commit and deployment mode, verify the target release, deploy it with the same proxy and resource configuration, then require public health to report the target version. If validation fails, restore the previous source and deployment without deleting data.
 
 Download `selfhost.sh` from the verified GitHub Release assets and verify its checksum against the signed manifest before executing it. Run `selfhost.sh upgrade vps v<VERSION>` with `sudo`. Never pipe an unverified network response into a shell.
 
@@ -211,8 +216,8 @@ Return only non-secret deployment facts:
 
 - deployment mode;
 - public URL;
-- installed Better Codex version and sync protocol;
-- public health, browser login, WebSocket, Runtime connection, and two-way sync results;
+- installed Better Codex version and Relay protocol;
+- public health, browser login, WebSocket, Runtime connection, live remote operations, offline failure, and recovery results;
 - backup result and location;
 - status command;
 - upgrade command;

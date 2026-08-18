@@ -105,7 +105,7 @@ The installer adds the CLI, Skill, local runtime, and system launcher, then regi
 
 Restart Codex from the Better Codex launcher, and `Task board` and `Agents` appear as two entries in your sidebar. Run `better-codex uninstall` to remove Better Codex completely.
 
-To access your board remotely from a browser, deploy your own Hub and Web UI with the [Self-hosting runbook](SELF_HOSTING.md).
+To access your board remotely from a browser, deploy your own Relay and Web UI with the [Self-hosting runbook](SELF_HOSTING.md). Your local Runtime makes an outbound WSS connection; the Relay forwards live traffic and stores no projects, tasks, conversations, Agent configuration, or attachments.
 
 ## FAQ
 
@@ -113,7 +113,7 @@ To access your board remotely from a browser, deploy your own Hub and Web UI wit
 No. Better Codex is an independent open-source project built on top of Codex Desktop. It is not affiliated with or endorsed by OpenAI.
 
 **Where does my data go?**<br>
-By default, it stays on your computer. Projects, tasks, assignments, and run state live in a local SQLite database (`~/.better-codex/better-codex.db` on macOS, `%USERPROFILE%\.better-codex\better-codex.db` on Windows), and the runtime listens on `127.0.0.1` only. If you opt into Self-host sync, a filtered board and conversation projection is sent to the Hub you deploy; the local database remains authoritative. See the [Self-hosting runbook](SELF_HOSTING.md) for the exact boundary.
+It stays on your computer. Projects, tasks, assignments, conversations, Agent configuration, attachments, and run state live in the local SQLite database (`~/.better-codex/better-codex.db` on macOS, `%USERPROFILE%\.better-codex\better-codex.db` on Windows), and the Runtime listens on `127.0.0.1` only. Optional remote access sends live HTTPS/WSS traffic through your Relay while the Runtime is online; the Relay does not persist business data. See the [Self-hosting runbook](SELF_HOSTING.md) for the exact boundary.
 
 **Why does Better Codex register an MCP server?**<br>
 Codex uses the local MCP app to recognize the Better Codex app entry and route. This puts the task board into the Codex navigation flow instead of placing it over the last conversation route. The MCP server runs locally over stdio. It is not a cloud service and does not upload task data.

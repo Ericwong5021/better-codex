@@ -105,7 +105,7 @@ Better Codex 以轻量 Node.js bundle 运行，需要 Node.js 22.5 或更新版�
 
 从 Better Codex 启动入口重启 Codex，侧边栏会出现 `任务看板` 和 `智能体` 两个入口。完全卸载可运行 `better-codex uninstall`。
 
-需要从浏览器远程访问自己的看板时，可以部署独立的 Hub 和 Web UI。服务器准备、HTTPS、设备配对、备份恢复和升级方法见英文版 [Self-hosting runbook](SELF_HOSTING.md)。
+需要从浏览器远程访问自己的看板时，可以部署独立的 Relay 和 Web UI。本机 Runtime 主动建立出站 WSS，Relay 只实时转发浏览器流量，不保存项目、任务、会话、智能体配置或附件。服务器准备、HTTPS、设备配对、备份恢复和升级方法见英文版 [Self-hosting runbook](SELF_HOSTING.md)。
 
 ## 常见问题
 
@@ -113,7 +113,7 @@ Better Codex 以轻量 Node.js bundle 运行，需要 Node.js 22.5 或更新版�
 不是。Better Codex 是一个独立的开源项目，基于 Codex Desktop 二次开发，与 OpenAI 没有隶属或背书关系。
 
 **我的数据会去哪里？**<br>
-默认不会离开本机。项目、任务、分配关系和运行状态保存在本机 SQLite 数据库（macOS 在 `~/.better-codex/better-codex.db`，Windows 在 `%USERPROFILE%\.better-codex\better-codex.db`），运行时只监听 `127.0.0.1`。只有主动启用 Self-host 同步后，经过裁剪的看板和会话数据才会发送到你部署的 Hub，本机数据库仍是权威数据源。具体边界见英文版 [Self-hosting runbook](SELF_HOSTING.md)。
+不会持久化到远端。项目、任务、分配关系、会话、智能体配置、附件和运行状态保存在本机 SQLite 数据库（macOS 在 `~/.better-codex/better-codex.db`，Windows 在 `%USERPROFILE%\.better-codex\better-codex.db`），Runtime 只监听 `127.0.0.1`。可选远程访问只在 Runtime 在线时通过自托管 Relay 实时转发 HTTPS/WSS 流量，Relay 不保存业务数据。具体边界见英文版 [Self-hosting runbook](SELF_HOSTING.md)。
 
 **为什么需要注册 MCP？**<br>
 Codex 通过本地 MCP 应用识别 Better Codex 的应用入口和路由，让任务看板可以进入 Codex 的导航流程，而不是覆盖在最后访问的会话页面上。MCP 通过本机 stdio 运行，不是云端服务，也不会上传任务数据。
