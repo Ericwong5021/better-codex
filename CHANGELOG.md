@@ -4,6 +4,14 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+### Added
+
+- Route the complete remote Web UI through an authenticated outbound Runtime WebSocket tunnel with streaming, backpressure, cancellation, file transfer, and idempotent writes while keeping local SQLite authoritative.
+
+### Changed
+
+- Replace the default projection-based Hub with a data-blind Relay, retain projection sync as an explicit rollback mode, and migrate self-hosted deployments without copying business data to the VPS.
+
 ## [0.4.9-beta.4] - 2026-08-18
 
 ### Fixed
