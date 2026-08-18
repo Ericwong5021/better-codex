@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { createServer } from "node:http";
+import { createServer, request as httpRequest } from "node:http";
 import test from "node:test";
 import WebSocket, { type RawData } from "ws";
 import { createRelayServer } from "../src/relay-server.js";
@@ -24,6 +24,17 @@ async function waitFor(check: () => boolean, timeout = 5000) {
     await new Promise(resolve => setTimeout(resolve, 20));
   }
   throw new Error("condition_timeout");
+}
+
+function requestStatus(port: number, path: string, headers: Record<string, string>) {
+  return new Promise<number>((resolve, reject) => {
+    const request = httpRequest({ host: "127.0.0.1", port, path, headers }, response => {
+      response.resume();
+      response.once("end", () => resolve(response.statusCode || 0));
+    });
+    request.once("error", reject);
+    request.end();
+  });
 }
 
 test("relay authenticates one runtime, replaces old connections, and stores no business tables", async () => {
@@ -79,6 +90,17 @@ test("relay authenticates one runtime, replaces old connections, and stores no b
   second.send(encodeRelayMessage({ type: "heartbeat", protocol_version: relayProtocolVersion, device_id: device.device_id, runtime_instance_id: "runtime-2", connection_epoch: 1, active_channels: 0, timestamp: new Date().toISOString() }));
   await staleRejected;
   assert.equal(relay.runtime(), null);
+  const rotated = relay.store.rotateDeviceToken(device.device_id);
+  const rejectedOldToken = new WebSocket(`${socketBase}/api/v1/runtime/connect`, relayWebSocketProtocol, { headers: { authorization: `Bearer ${device.device_token}` } });
+  const [, oldTokenResponse] = await once(rejectedOldToken, "unexpected-response");
+  assert.equal((oldTokenResponse as { statusCode: number }).statusCode, 401);
+  (oldTokenResponse as { resume: () => void }).resume();
+  relay.store.revokeDevice(device.device_id);
+  const rejectedRevokedToken = new WebSocket(`${socketBase}/api/v1/runtime/connect`, relayWebSocketProtocol, { headers: { authorization: `Bearer ${rotated.device_token}` } });
+  const [, revokedResponse] = await once(rejectedRevokedToken, "unexpected-response");
+  assert.equal((revokedResponse as { statusCode: number }).statusCode, 401);
+  (revokedResponse as { resume: () => void }).resume();
+  assert.doesNotMatch(JSON.stringify(relay.store.auditEvents(100)), new RegExp(`${device.device_token}|${rotated.device_token}`));
   await relay.close();
 });
 
@@ -89,6 +111,9 @@ test("relay Web session requires same-origin CSRF for protected requests", async
   const address = relay.server.address();
   assert.ok(address && typeof address === "object");
   const base = `http://127.0.0.1:${address.port}`;
+  assert.equal((await fetch(`${base}/relay/status`)).status, 401);
+  assert.equal(await requestStatus(address.port, "/healthz", { host: "evil.example" }), 403);
+  assert.equal((await fetch(`${base}/relay/session`, { method: "POST", headers: { "content-type": "application/json", origin: "https://evil.example" }, body: JSON.stringify({ username: "admin", password: "relay-password-123" }) })).status, 403);
   const login = await fetch(`${base}/relay/session`, { method: "POST", headers: { "content-type": "application/json", origin: base }, body: JSON.stringify({ username: "admin", password: "relay-password-123" }) });
   assert.equal(login.status, 200);
   const session = await login.json() as { csrf_token: string };
@@ -97,6 +122,11 @@ test("relay Web session requires same-origin CSRF for protected requests", async
   assert.equal((await fetch(`${base}/relay/session`, { headers: { cookie } })).status, 200);
   assert.equal((await fetch(`${base}/relay/logout`, { method: "DELETE", headers: { cookie, origin: base } })).status, 403);
   assert.equal((await fetch(`${base}/relay/logout`, { method: "DELETE", headers: { cookie, origin: base, "x-csrf-token": session.csrf_token } })).status, 200);
+  for (let attempt = 0; attempt < 5; attempt++) {
+    assert.equal((await fetch(`${base}/relay/session`, { method: "POST", headers: { "content-type": "application/json", origin: base }, body: JSON.stringify({ username: "admin", password: "wrong-password" }) })).status, 401);
+  }
+  assert.equal((await fetch(`${base}/relay/session`, { method: "POST", headers: { "content-type": "application/json", origin: base }, body: JSON.stringify({ username: "admin", password: "relay-password-123" }) })).status, 429);
+  assert.doesNotMatch(JSON.stringify(relay.store.auditEvents(100)), /relay-password-123|wrong-password/);
   await relay.close();
 });
 
@@ -142,7 +172,7 @@ test("runtime relay client forwards concurrent HTTP requests with only the local
     request.on("end", () => {
       const body = Buffer.concat(chunks).toString("utf8");
       response.writeHead(200, { "content-type": "application/json", "x-runtime": "local" });
-      response.end(JSON.stringify({ path: request.url, method: request.method, body, body_bytes: Buffer.byteLength(body), chunk_count: chunks.length, relay: request.headers["x-better-codex-relay"], request_id: request.headers["x-better-codex-request-id"] }));
+      response.end(JSON.stringify({ path: request.url, method: request.method, body, body_bytes: Buffer.byteLength(body), chunk_count: chunks.length, relay: request.headers["x-better-codex-relay"], request_id: request.headers["x-better-codex-request-id"], cookie: request.headers.cookie, csrf: request.headers["x-csrf-token"] }));
     });
   });
   local.listen(0, "127.0.0.1");
@@ -163,9 +193,12 @@ test("runtime relay client forwards concurrent HTTP requests with only the local
   client.start();
   await waitFor(() => client.status().connected);
 
+  assert.equal((await fetch(`${base}/api/echo`)).status, 401);
+
   const login = await fetch(`${base}/relay/session`, { method: "POST", headers: { "content-type": "application/json", origin: base }, body: JSON.stringify({ username: "admin", password: "relay-password-123" }) });
   const session = await login.json() as { csrf_token: string };
   const cookie = String(login.headers.get("set-cookie") || "").split(";")[0];
+  assert.equal((await fetch(`${base}/api/relay/disconnect`, { method: "POST", headers: { cookie, origin: base, "x-csrf-token": session.csrf_token } })).status, 404);
   const health = await fetch(`${base}/health`, { headers: { cookie } });
   assert.equal(health.status, 200);
   const healthBody = await health.json() as { path: string; method: string; body: string; relay: string; request_id: string };
@@ -177,15 +210,17 @@ test("runtime relay client forwards concurrent HTTP requests with only the local
 
   const responses = await Promise.all(Array.from({ length: 8 }, async (_, index) => {
     const requestId = `request-${index}-abcdef`;
-    const response = await fetch(`${base}/api/echo?index=${index}`, { method: "POST", headers: { cookie, origin: base, "content-type": "application/json", "x-csrf-token": session.csrf_token, "x-better-codex-request-id": requestId }, body: JSON.stringify({ index }) });
+    const response = await fetch(`${base}/api/echo?index=${index}`, { method: "POST", headers: { authorization: "Bearer browser-secret", cookie, origin: base, "content-type": "application/json", "x-csrf-token": session.csrf_token, "x-better-codex-request-id": requestId }, body: JSON.stringify({ index }) });
     assert.equal(response.status, 200);
-    return response.json() as Promise<{ path: string; body: string; request_id: string }>;
+    return response.json() as Promise<{ path: string; body: string; request_id: string; cookie?: string; csrf?: string }>;
   }));
   assert.equal(responses.length, 8);
   for (const [index, response] of responses.entries()) {
     assert.equal(response.path, `/api/echo?index=${index}`);
     assert.equal(response.body, JSON.stringify({ index }));
     assert.equal(response.request_id, `request-${index}-abcdef`);
+    assert.equal(response.cookie, undefined);
+    assert.equal(response.csrf, undefined);
   }
 
   const large = await fetch(`${base}/api/large`, { headers: { cookie } });

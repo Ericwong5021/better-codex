@@ -448,6 +448,7 @@ async function requestRuntime(request) {
   const headers = REMOTE ? {} : { authorization: "Bearer " + sessionToken };
   if (REMOTE && method !== "GET") headers["x-csrf-token"] = csrfToken;
   if (request.commandId) headers["x-better-codex-command-id"] = request.commandId;
+  if (RELAY && request.commandId) headers["x-better-codex-request-id"] = request.commandId;
   if (request.body !== undefined) headers["content-type"] = "application/json";
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), Math.min(Math.max(Number(request.timeoutMs) || 10_000, 1_000), 300_000));

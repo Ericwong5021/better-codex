@@ -12,7 +12,7 @@ import { normalizeCodexLocale, readCodexLocale } from "./locale.js";
 import { readCodexUserProfile } from "./user-profile.js";
 import { readCodexUsage } from "./codex-usage.js";
 import { readModelCatalog } from "./model-catalog.js";
-import { attachmentPath, runPath, runtimePort, token, updateLogPath } from "./config.js";
+import { attachmentPath, databasePath, runPath, runtimePort, token, updateLogPath } from "./config.js";
 import { acquireRuntimeLock, clearRuntimeState, createRuntimeIdentity, publishRuntimeState } from "./runtime-state.js";
 import { activeCoreCommand, checkGatewayUpdate, getGatewayUpdateState, installGatewayUpdate, recordGatewayUpdateActivation, startGatewayUpdateChecks } from "./updater.js";
 import { packagedBuild } from "./build.js";
@@ -29,6 +29,7 @@ import { readSyncConfiguration, removeSyncConfiguration } from "./sync-config.js
 import { chooseNativeDirectory } from "./native-dialog.js";
 import { RuntimeRelayClient } from "./runtime-relay-client.js";
 import { removeRelayConfiguration } from "./relay-config.js";
+import { requestFingerprint, RequestReceiptStore, type RequestReceiptResponse } from "./request-receipts.js";
 
 const accessToken = token();
 const mockupEnabled = !isSea() && !packagedBuild && process.argv.includes("--mockup");
@@ -37,6 +38,7 @@ const maxWebSessions = 32;
 const maxPastedImageBytes = 10 * 1024 * 1024;
 const maxPastedImageBodyBytes = Math.ceil(maxPastedImageBytes * 4 / 3) + 1024;
 const codexStatePath = join(process.env.CODEX_HOME || join(homedir(), ".codex"), ".codex-global-state.json");
+const preloadedRequestBodies = new WeakMap<IncomingMessage, Buffer>();
 
 function savePastedImage(value: unknown) {
   const data = cleanString(value, maxPastedImageBodyBytes);
@@ -150,6 +152,17 @@ function sendPreflight(response: ServerResponse) {
 }
 
 function readBody(request: IncomingMessage, limit = 1024 * 1024) {
+  const preloaded = preloadedRequestBodies.get(request);
+  if (preloaded) {
+    if (preloaded.length > limit) return Promise.reject(new Error("body_too_large"));
+    try {
+      const value = preloaded.length ? JSON.parse(preloaded.toString("utf8")) : {};
+      if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid_json");
+      return Promise.resolve(value as Record<string, unknown>);
+    } catch {
+      return Promise.reject(new Error("invalid_json"));
+    }
+  }
   return new Promise<Record<string, unknown>>((resolve, reject) => {
     const declaredLength = Number(request.headers["content-length"]);
     if (Number.isFinite(declaredLength) && declaredLength > limit) {
@@ -193,6 +206,76 @@ function readBody(request: IncomingMessage, limit = 1024 * 1024) {
       }
     });
   });
+}
+
+function readRawBody(request: IncomingMessage, limit: number) {
+  return new Promise<Buffer>((resolveBody, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    let settled = false;
+    const onData = (chunk: Buffer | string) => {
+      if (settled) return;
+      const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      size += value.length;
+      if (size > limit) {
+        settled = true;
+        chunks.length = 0;
+        request.off("data", onData);
+        request.resume();
+        reject(new Error("body_too_large"));
+        return;
+      }
+      chunks.push(value);
+    };
+    request.on("data", onData);
+    request.once("error", error => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    });
+    request.once("end", () => {
+      if (settled) return;
+      settled = true;
+      resolveBody(Buffer.concat(chunks, size));
+    });
+  });
+}
+
+function receiptHeaders(response: ServerResponse) {
+  const allowed = new Set(["cache-control", "content-language", "content-type", "etag", "location", "x-accel-buffering"]);
+  const headers: Record<string, string> = {};
+  for (const [name, value] of Object.entries(response.getHeaders())) {
+    if (!allowed.has(name.toLowerCase()) || value === undefined) continue;
+    headers[name.toLowerCase()] = Array.isArray(value) ? value.join(", ") : String(value);
+  }
+  return headers;
+}
+
+function captureReceiptResponse(response: ServerResponse, finish: (receipt: RequestReceiptResponse) => void) {
+  const chunks: Buffer[] = [];
+  let finished = false;
+  const originalWrite = response.write.bind(response);
+  const originalEnd = response.end.bind(response);
+  const capture = (chunk: unknown) => {
+    if (typeof chunk === "string" || Buffer.isBuffer(chunk) || chunk instanceof Uint8Array) chunks.push(Buffer.from(chunk));
+  };
+  response.write = ((chunk: unknown, ...args: unknown[]) => {
+    capture(chunk);
+    return originalWrite(chunk as never, ...args as never[]);
+  }) as typeof response.write;
+  response.end = ((chunk?: unknown, ...args: unknown[]) => {
+    capture(chunk);
+    if (!finished) {
+      finished = true;
+      finish({ status: response.statusCode, headers: receiptHeaders(response), body: Buffer.concat(chunks) });
+    }
+    return originalEnd(chunk as never, ...args as never[]);
+  }) as typeof response.end;
+}
+
+function sendReceipt(response: ServerResponse, receipt: RequestReceiptResponse) {
+  response.writeHead(receipt.status, { ...receipt.headers, "content-length": receipt.body.length });
+  response.end(receipt.body);
 }
 
 function requireVersion(body: Record<string, unknown>, current: Record<string, unknown>) {
@@ -453,7 +536,7 @@ function errorCode(error: unknown) {
 
 function errorStatus(code: string) {
   if (code === "body_too_large") return 413;
-  if (code === "version_conflict" || code === "request_id_conflict" || code === "reply_busy" || code === "update_in_progress" || code === "issue_execution_locked" || code === "issue_execution_running" || code === "issue_session_handed_off" || code === "issue_session_starting" || code === "issue_session_already_bound" || code === "session_relay_not_leader" || code === "session_command_not_claimed" || code === "session_command_outcome_unknown") return 409;
+  if (code === "version_conflict" || code === "request_id_conflict" || code === "request_outcome_unknown" || code === "reply_busy" || code === "update_in_progress" || code === "issue_execution_locked" || code === "issue_execution_running" || code === "issue_session_handed_off" || code === "issue_session_starting" || code === "issue_session_already_bound" || code === "session_relay_not_leader" || code === "session_command_not_claimed" || code === "session_command_outcome_unknown") return 409;
   if (code.endsWith("_not_found")) return 404;
   if (code === "database_unavailable" || code === "database_integrity_check_failed") return 503;
   return 400;
@@ -484,6 +567,14 @@ export function startServer() {
     throw error;
   }
   let cleaned = false;
+  let requestReceipts: RequestReceiptStore;
+  try {
+    requestReceipts = new RequestReceiptStore(databasePath);
+  } catch (error) {
+    store.close();
+    clearRuntimeState(identity.instanceId);
+    throw error;
+  }
   let updateRelaunchScheduled = false;
   let updateInstallInProgress = false;
   const webSessions = new Map<string, number>();
@@ -606,6 +697,7 @@ export function startServer() {
     }
     eventClients.clear();
     clearRuntimeState(identity.instanceId);
+    requestReceipts.close();
     store.close();
   };
   const server = createServer((request, response) => {
@@ -615,6 +707,19 @@ export function startServer() {
       const path = url.pathname.split("/").filter(Boolean);
       const method = request.method ?? "GET";
       const mockupLocale = normalizeMockupLocale(url.searchParams.get("locale"));
+      const relayRequest = validAccessToken(bearerToken(request)) && request.headers["x-better-codex-relay"] === "1";
+
+      if (relayRequest && url.pathname.startsWith("/api/") && !["GET", "HEAD", "OPTIONS"].includes(method)) {
+        const requestId = String(request.headers["x-better-codex-request-id"] || "");
+        if (!/^[A-Za-z0-9_-]{8,200}$/.test(requestId)) throw new Error("invalid_request_id");
+        const rawBody = await readRawBody(request, 50 * 1024 * 1024);
+        preloadedRequestBodies.set(request, rawBody);
+        const receipt = requestReceipts.begin(requestId, method, `${url.pathname}${url.search}`, requestFingerprint(method, `${url.pathname}${url.search}`, rawBody));
+        if (receipt.kind === "conflict") throw new Error("request_id_conflict");
+        if (receipt.kind === "unknown") throw new Error("request_outcome_unknown");
+        if (receipt.kind === "replay") return sendReceipt(response, receipt.response);
+        captureReceiptResponse(response, result => requestReceipts.finish(requestId, result));
+      }
 
       if (url.pathname.startsWith("/api/") && !["GET", "OPTIONS"].includes(method)) {
         response.once("finish", () => {
@@ -1565,10 +1670,13 @@ export function startServer() {
     if (!mockupEnabled) relayClient.start();
     console.log(`Better Codex Runtime ${coreVersion} listening on http://127.0.0.1:${address.port}`);
   });
-  const stop = () => server.close(() => {
-    cleanup();
-    process.exit(0);
-  });
+  const stop = () => {
+    server.close(() => {
+      cleanup();
+      process.exit(0);
+    });
+    server.closeAllConnections();
+  };
   server.once("error", error => {
     cleanup();
     console.error(error.message);

@@ -44,6 +44,7 @@
     "dist/relay-cli.js",
     "dist/relay-config.js",
     "dist/relay-protocol.js",
+    "dist/request-receipts.js",
     "dist/relay-server.js",
     "dist/relay-store.js",
     "dist/runtime-relay-client.js",

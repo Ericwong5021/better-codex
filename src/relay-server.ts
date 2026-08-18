@@ -282,7 +282,7 @@ export function createRelayServer(options: RelayServerOptions) {
     const active = runtime;
     if (!active) return sendJson(response, 503, { error: "runtime_offline" });
     if (active.channels.size >= maxConcurrentChannels) return sendJson(response, 429, { error: "relay_channel_limit" });
-    if (["/api/shutdown"].includes(url.pathname) || url.pathname.startsWith("/api/session-relay/") || url.pathname.startsWith("/api/mockup/") || url.pathname.startsWith("/api/sync/")) return sendJson(response, 404, { error: "not_found" });
+    if (["/api/shutdown"].includes(url.pathname) || url.pathname.startsWith("/api/session-relay/") || url.pathname.startsWith("/api/mockup/") || url.pathname.startsWith("/api/sync/") || url.pathname.startsWith("/api/relay/")) return sendJson(response, 404, { error: "not_found" });
     const channelId = randomUUID();
     const suppliedRequestId = String(request.headers["x-better-codex-request-id"] || "");
     const requestId = /^[A-Za-z0-9_-]{8,200}$/.test(suppliedRequestId) ? suppliedRequestId : randomUUID();

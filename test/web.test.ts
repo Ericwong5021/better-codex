@@ -103,6 +103,7 @@ test("web host boots the shared DOM injection behind a local session", async () 
     assert.match(hostScript, /consumeFragmentToken\(\)/);
     assert.match(hostScript, /sessionStorage\.setItem\("better-codex-web-session", sessionToken\)/);
     assert.match(hostScript, /authorization: "Bearer " \+ sessionToken/);
+    assert.match(hostScript, /headers\["x-better-codex-request-id"\] = request\.commandId/);
     assert.doesNotMatch(hostScript, /authorization: "Bearer " \+ request\.token/);
     assert.match(hostScript, /response\.status === 401/);
     assert.match(hostScript, /window\.betterCodexHost = Object\.freeze/);
@@ -212,6 +213,7 @@ test("web host boots the shared DOM injection behind a local session", async () 
       body: JSON.stringify({ name: "Event project", workspace_path: home }),
     });
     assert.equal(eventMutation.status, 201);
+    const eventProject = await eventMutation.json() as { id: string };
     while (!eventSource.includes("event: change")) {
       const chunk = await readStreamChunk(eventReader);
       if (chunk.done) break;
@@ -220,6 +222,23 @@ test("web host boots the shared DOM injection behind a local session", async () 
     assert.match(eventSource, /event: change/);
     assert.match(eventSource, /id: 1/);
     eventController.abort();
+
+    const relayHeaders = { authorization: `Bearer ${token}`, "x-better-codex-relay": "1", "x-better-codex-request-id": "relay-create-issue-1", "content-type": "application/json" };
+    const relayIssueBody = JSON.stringify({ project_id: eventProject.id, title: "Relay idempotent issue", description: "Created once" });
+    const relayIssue = await fetch(`${base}/api/issues`, { method: "POST", headers: relayHeaders, body: relayIssueBody });
+    assert.equal(relayIssue.status, 201);
+    const relayIssueResult = await relayIssue.json() as { id: string };
+    const replayedRelayIssue = await fetch(`${base}/api/issues`, { method: "POST", headers: relayHeaders, body: relayIssueBody });
+    assert.equal(replayedRelayIssue.status, 201);
+    assert.equal(((await replayedRelayIssue.json()) as { id: string }).id, relayIssueResult.id);
+    const conflictingRelayIssue = await fetch(`${base}/api/issues`, { method: "POST", headers: relayHeaders, body: JSON.stringify({ project_id: eventProject.id, title: "Different issue" }) });
+    assert.equal(conflictingRelayIssue.status, 409);
+    assert.deepEqual(await conflictingRelayIssue.json(), { error: "request_id_conflict" });
+    const issuesAfterReplay = await fetch(`${base}/api/issues?search=${encodeURIComponent("Relay idempotent issue")}`, { headers: { authorization: `Bearer ${token}` } }).then(response => response.json()) as Array<{ id: string }>;
+    assert.deepEqual(issuesAfterReplay.map(issue => issue.id), [relayIssueResult.id]);
+    const missingRelayRequestId = await fetch(`${base}/api/projects`, { method: "POST", headers: { authorization: `Bearer ${token}`, "x-better-codex-relay": "1", "content-type": "application/json" }, body: JSON.stringify({ name: "Missing receipt", workspace_path: home }) });
+    assert.equal(missingRelayRequestId.status, 400);
+    assert.deepEqual(await missingRelayRequestId.json(), { error: "invalid_request_id" });
 
     const replayController = new AbortController();
     const replayResponse = await fetch(`${base}/api/events`, {
@@ -242,7 +261,7 @@ test("web host boots the shared DOM injection behind a local session", async () 
     assert.ok(resetReader);
     const resetSource = new TextDecoder().decode((await readStreamChunk(resetReader)).value);
     assert.match(resetSource, /event: reset/);
-    assert.match(resetSource, /id: 1/);
+    assert.match(resetSource, /id: 2/);
     resetController.abort();
 
     const englishInjection = await fetch(`${base}/web/injection.js?locale=en-US&session=${sessionToken}`);
