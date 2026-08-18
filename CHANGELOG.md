@@ -4,6 +4,12 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.9-beta.2] - 2026-08-18
+
+### Fixed
+
+- Keep native session relay polling and lease heartbeats active while the Codex window is hidden.
+
 ## [0.4.9-beta.1] - 2026-08-18
 
 ### Added
@@ -536,7 +542,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.1...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.2...HEAD
+[0.4.9-beta.2]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.1...v0.4.9-beta.2
 [0.4.9-beta.1]: https://github.com/Ericwong5021/better-codex/compare/v0.4.8...v0.4.9-beta.1
 [0.4.8]: https://github.com/Ericwong5021/better-codex/compare/v0.4.7...v0.4.8
 [0.4.7]: https://github.com/Ericwong5021/better-codex/compare/v0.4.6...v0.4.7

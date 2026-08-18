@@ -287,7 +287,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     if (READ_ONLY) document.documentElement.setAttribute("data-better-codex-read-only", "true");
     const HELP_MODE_MARKDOWN = ${helpModeMarkdown};
     const previous = window.__betterCodexInjection__;
-    if (previous?.version === VERSION && previous?.endpoint === ${baseUrl} && previous?.profile === PROFILE && previous?.host === HOST_KIND) {
+    if (previous?.version === VERSION && previous?.endpoint === ${baseUrl} && previous?.profile === PROFILE && previous?.host === HOST_KIND && typeof previous?.pulse === "function") {
       previous.refresh();
       return { installed: true, reused: true };
     }
@@ -706,6 +706,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     let updateTimer = null;
     let relayTimer = null;
     let relayBusy = false;
+    let relayHeartbeatBusy = false;
     let relayTurnProbeAt = 0;
     let relayCapability = "unknown";
     let relayCapabilityError = "";
@@ -1804,6 +1805,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function heartbeatSessionRelay() {
+      if (relayHeartbeatBusy || destroyed) return Promise.resolve();
+      relayHeartbeatBusy = true;
       return api("/api/session-relay/poll", {
         method: "POST",
         body: JSON.stringify({
@@ -1813,7 +1816,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           capability_error: relayCapabilityError,
           busy: true
         })
-      }).catch(() => {});
+      }).catch(() => {}).finally(() => {
+        relayHeartbeatBusy = false;
+      });
     }
 
     async function executeSessionCommand(command) {
@@ -2007,10 +2012,20 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       }
     }
 
+    function pulseSessionRelay() {
+      if (destroyed) return false;
+      if (relayBusy) {
+        if (relayCapability === "ready") void heartbeatSessionRelay();
+        return true;
+      }
+      void pollSessionRelay();
+      return true;
+    }
+
     function startSessionRelay() {
       if (relayTimer !== null) return;
-      void pollSessionRelay();
-      relayTimer = setInterval(() => void pollSessionRelay(), 1000);
+      pulseSessionRelay();
+      relayTimer = setInterval(pulseSessionRelay, 1000);
     }
 
     function diagnosticTarget(target) {
@@ -6870,7 +6885,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       updateTimer = setInterval(() => { if (!document.hidden) void checkUpdateNotice(); }, 15000);
     }
 
-    window.__betterCodexInjection__ = { version: VERSION, profile: PROFILE, host: HOST_KIND, endpoint: BASE_URL, refresh, open: openRoute, openThread, close, destroy };
+    window.__betterCodexInjection__ = { version: VERSION, profile: PROFILE, host: HOST_KIND, endpoint: BASE_URL, refresh, pulse: pulseSessionRelay, open: openRoute, openThread, close, destroy };
     document.addEventListener("click", onClick, true);
     document.addEventListener("pointerdown", onSessionPointerDown, true);
     document.addEventListener("pointermove", onSessionPointerMove, true);
