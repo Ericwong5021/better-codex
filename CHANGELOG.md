@@ -4,6 +4,8 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.9-beta.6] - 2026-08-19
+
 ### Fixed
 
 - Preserve remote Issue and reply attachments across Relay retries with deterministic local paths, bounded request bodies, and cleanup on rejected writes.
@@ -569,7 +571,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.5...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.6...HEAD
+[0.4.9-beta.6]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.5...v0.4.9-beta.6
 [0.4.9-beta.5]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.4...v0.4.9-beta.5
 [0.4.9-beta.4]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.3...v0.4.9-beta.4
 [0.4.9-beta.3]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.2...v0.4.9-beta.3
