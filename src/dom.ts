@@ -578,33 +578,21 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     Object.assign(localeResources.en, {
       "远程访问": "Remote access",
       "从浏览器安全访问你的任务看板": "Access your task board securely from a browser",
-      "让 Codex 协助安装": "Ask Codex to install",
-      "把提示词发给服务器上的 Codex，或能 SSH 连接服务器的本地 Codex": "Send the prompt to Codex on the server, or to local Codex with SSH access",
-      "VPS 安装提示词": "VPS installation prompt",
-      "复制提示词": "Copy prompt",
+      "部署 Hub": "Deploy Hub",
+      "复制提示词，交给能访问 VPS 的 Codex": "Copy the prompt for Codex with VPS access",
+      "复制安装提示词": "Copy install prompt",
       "提示词已复制": "Prompt copied",
-      "绑定 Better Codex": "Connect Better Codex",
-      "输入部署完成后的访问地址": "Enter the URL shown after deployment",
+      "连接 Hub": "Connect Hub",
+      "输入 VPS 部署后的 HTTPS 地址": "Enter the HTTPS URL of the VPS deployment",
       "访问地址": "Access URL",
-      "复制绑定指令": "Copy connect command",
-      "远程服务状态": "Remote service status",
-      "未绑定远程服务": "No remote service connected",
-      "未绑定": "Not connected",
-      "完成部署和绑定后，这里会显示服务状态、版本和访问入口。": "After deployment and connection, service status, version, and the access link appear here.",
-      "已连接": "Connected",
+      "复制连接指令": "Copy connect command",
       "服务在线": "Online",
       "无法访问": "Unavailable",
       "服务版本": "Service version",
       "同步协议": "Sync protocol",
       "最后同步": "Last sync",
       "尚未同步": "Not synced yet",
-      "打开远程访问": "Open remote access",
       "刷新状态": "Refresh status",
-      "升级远程服务": "Upgrade remote service",
-      "复制升级指令": "Copy upgrade command",
-      "复制升级提示词": "Copy upgrade prompt",
-      "升级提示词已复制": "Upgrade prompt copied",
-      "远程服务已是当前版本": "Remote service is up to date",
       "指令已复制": "Command copied",
       "状态检查失败": "Status check failed",
       "部署在 VPS": "Deployed on VPS",
@@ -4195,13 +4183,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const remoteInstallPrompt = trustedRunbookPrompt + "\\n\\nInstall Better Codex Hub v" + CORE_VERSION + " using the VPS path. Inspect the environment first, preserve existing services and data, ask before privileged, external, or destructive changes, resume a valid partial installation, and complete every acceptance gate before reporting success.";
       const remotePage = [
         '<section class="better-codex-help-page" data-help-page="remote" hidden>',
-        '<div class="better-codex-remote-heading"><div><h2>' + te("远程访问") + '</h2><p>' + te("从浏览器安全访问你的任务看板") + '</p></div><button type="button" class="better-codex-remote-refresh" data-remote-refresh>' + icon("refresh") + '<span>' + te("刷新状态") + '</span></button></div>',
-        '<div data-remote-guidance>',
-        '<div class="better-codex-remote-setup">',
-        '<section class="better-codex-remote-step"><span class="better-codex-remote-step-number">1</span><div><h3>' + te("让 Codex 协助安装") + '</h3><p data-remote-install-hint>' + te("把提示词发给服务器上的 Codex，或能 SSH 连接服务器的本地 Codex") + '</p><div class="better-codex-remote-command"><span data-remote-install-prompt-label>' + te("VPS 安装提示词") + '</span><button type="button" data-remote-copy-install aria-label="' + te("复制提示词") + '">' + icon("copy") + '<span>' + te("复制提示词") + '</span></button></div></div></section>',
-        '<section class="better-codex-remote-step"><span class="better-codex-remote-step-number">2</span><div><h3>' + te("绑定 Better Codex") + '</h3><p>' + te("输入部署完成后的访问地址") + '</p><div class="better-codex-remote-url"><input type="url" data-remote-url inputmode="url" autocomplete="url" placeholder="https://codex.example.com" aria-label="' + te("访问地址") + '"><button type="button" data-remote-copy-connect disabled>' + icon("copy") + '<span>' + te("复制绑定指令") + '</span></button></div></div></section>',
-        '</div></div>',
-        '<section class="better-codex-remote-status" data-remote-status="loading"><div class="better-codex-remote-status-head"><span class="better-codex-remote-status-icon">' + icon("server") + '</span><div><strong data-remote-status-title>' + te("检测中") + '</strong><small data-remote-status-subtitle>' + te("正在检查") + '</small></div><span class="better-codex-remote-status-badge" data-remote-status-badge>' + te("检测中") + '</span></div><div class="better-codex-remote-status-empty" data-remote-status-empty>' + te("完成部署和绑定后，这里会显示服务状态、版本和访问入口。") + '</div><dl data-remote-status-details hidden><div><dt>' + te("服务版本") + '</dt><dd data-remote-version>--</dd></div><div><dt>' + te("同步协议") + '</dt><dd data-remote-protocol>--</dd></div><div><dt>' + te("最后同步") + '</dt><dd data-remote-sync>--</dd></div></dl><div class="better-codex-remote-actions" data-remote-actions hidden><a data-remote-open target="_blank" rel="noreferrer">' + icon("external") + '<span>' + te("访问网站") + '</span></a></div></section>',
+        '<div class="better-codex-help-page-heading better-codex-remote-heading"><div><h2>' + te("远程访问") + '</h2><p>' + te("从浏览器安全访问你的任务看板") + '</p></div><button type="button" class="better-codex-remote-refresh" data-remote-refresh hidden>' + icon("refresh") + '<span>' + te("刷新状态") + '</span></button></div>',
+        '<div class="better-codex-remote-setup" data-remote-guidance>',
+        '<section class="better-codex-remote-step"><div><h3>' + te("部署 Hub") + '</h3><p>' + te("复制提示词，交给能访问 VPS 的 Codex") + '</p></div><button type="button" class="better-codex-remote-install" data-remote-copy-install>' + icon("copy") + '<span>' + te("复制安装提示词") + '</span></button></section>',
+        '<section class="better-codex-remote-step"><div><h3>' + te("连接 Hub") + '</h3><p>' + te("输入 VPS 部署后的 HTTPS 地址") + '</p></div><div class="better-codex-remote-url"><input type="url" data-remote-url inputmode="url" autocomplete="url" placeholder="https://codex.example.com" aria-label="' + te("访问地址") + '"><button type="button" data-remote-copy-connect disabled>' + icon("copy") + '<span>' + te("复制连接指令") + '</span></button></div></section>',
+        '</div>',
+        '<section class="better-codex-remote-status" data-remote-status="loading" hidden><div class="better-codex-remote-status-head"><span class="better-codex-remote-status-icon">' + icon("server") + '</span><div><strong data-remote-status-title>' + te("检测中") + '</strong><small data-remote-status-subtitle>' + te("正在检查") + '</small></div><span class="better-codex-remote-status-badge" data-remote-status-badge>' + te("检测中") + '</span></div><dl data-remote-status-details hidden><div><dt>' + te("服务版本") + '</dt><dd data-remote-version>--</dd></div><div><dt>' + te("同步协议") + '</dt><dd data-remote-protocol>--</dd></div><div><dt>' + te("最后同步") + '</dt><dd data-remote-sync>--</dd></div></dl><div class="better-codex-remote-actions" data-remote-actions hidden><a data-remote-open target="_blank" rel="noreferrer">' + icon("external") + '<span>' + te("访问网站") + '</span></a></div></section>',
         '<p class="better-codex-help-error" data-remote-error hidden></p>',
         '</section>',
       ].join("");
@@ -4288,7 +4275,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const remoteStatusTitle = dialog.querySelector("[data-remote-status-title]");
       const remoteStatusSubtitle = dialog.querySelector("[data-remote-status-subtitle]");
       const remoteStatusBadge = dialog.querySelector("[data-remote-status-badge]");
-      const remoteStatusEmpty = dialog.querySelector("[data-remote-status-empty]");
       const remoteStatusDetails = dialog.querySelector("[data-remote-status-details]");
       const remoteActions = dialog.querySelector("[data-remote-actions]");
       const remoteOpen = dialog.querySelector("[data-remote-open]");
@@ -4330,24 +4316,22 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (!remote) {
           remotePageNode.dataset.remoteConnected = "false";
           remoteGuidance.hidden = false;
-          remoteStatus.dataset.remoteStatus = "empty";
-          remoteStatusTitle.textContent = te("未绑定远程服务");
-          remoteStatusSubtitle.textContent = te("完成部署和绑定后，这里会显示服务状态、版本和访问入口。");
-          remoteStatusBadge.textContent = te("未绑定");
-          remoteStatusEmpty.hidden = false;
+          remoteRefresh.hidden = true;
+          remoteStatus.hidden = true;
           remoteStatusDetails.hidden = true;
           remoteActions.hidden = true;
           return;
         }
         remotePageNode.dataset.remoteConnected = "true";
         remoteGuidance.hidden = true;
+        remoteRefresh.hidden = false;
+        remoteStatus.hidden = false;
         remoteUrlInput.value = String(remote.url || "");
         remoteConnectButton.disabled = !normalizedRemoteUrl();
         remoteStatus.dataset.remoteStatus = reachable ? "online" : "offline";
         remoteStatusTitle.textContent = String(remote.name || "Better Codex Hub");
         remoteStatusSubtitle.textContent = te("部署在 VPS") + " · " + String(remote.url || "");
         remoteStatusBadge.textContent = te(reachable ? "服务在线" : "无法访问");
-        remoteStatusEmpty.hidden = true;
         remoteStatusDetails.hidden = false;
         remoteActions.hidden = false;
         dialog.querySelector("[data-remote-version]").textContent = remote.version ? "v" + String(remote.version).replace(/^v/, "") : "--";
@@ -4369,6 +4353,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         try {
           renderRemoteStatus(await api("/api/remote-access/status"));
         } catch (error) {
+          remoteRefresh.hidden = false;
+          remoteStatus.hidden = false;
           remoteRefresh.disabled = false;
           remoteRefresh.dataset.loading = "false";
           remoteStatus.dataset.remoteStatus = "offline";

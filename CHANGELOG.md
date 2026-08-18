@@ -4,6 +4,15 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+### Added
+
+- Choose a local project folder through the system directory picker when creating projects from the task board or project workspace, including the remote Web UI.
+- Open Issue card actions with a touch long press on pointer-coarse devices.
+
+### Changed
+
+- Simplify remote access setup around the supported VPS Hub flow and remove the retired Cloudflare deployment path.
+
 ## [0.4.8] - 2026-08-17
 
 ### Added
