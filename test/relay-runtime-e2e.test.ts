@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -19,7 +19,9 @@ async function availablePort() {
 }
 
 function startRuntime(home: string, port: number, token: string) {
-  return spawn(process.execPath, ["--import", "tsx", "src/cli.ts", "serve"], {
+  const builtCli = join(process.cwd(), "dist", "cli.js");
+  const arguments_ = existsSync(builtCli) ? [builtCli, "serve"] : ["--import", "tsx", "src/cli.ts", "serve"];
+  return spawn(process.execPath, arguments_, {
     cwd: process.cwd(),
     env: {
       ...process.env,

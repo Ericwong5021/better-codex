@@ -8,7 +8,7 @@ All notable changes to Better Codex are recorded here.
 
 ### Fixed
 
-- Terminate the complete Relay E2E Runtime process group so Intel packaging exits after successful tests.
+- Terminate the complete Relay E2E Runtime process group during packaging.
 
 ## [0.4.9-beta.7] - 2026-08-19
 
