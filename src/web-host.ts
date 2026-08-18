@@ -3,6 +3,14 @@ import { betterCodexWebAppRegistrationJavaScript } from "./web-app.js";
 
 const betterCodexLogoUrl = `data:image/png;base64,${betterCodexLogoPng().toString("base64")}`;
 
+export type BetterCodexWebHostKind = "local" | "remote-projection" | "relay";
+
+function webHostKind(value: boolean | BetterCodexWebHostKind) {
+  if (value === true) return "remote-projection";
+  if (value === false) return "local";
+  return value;
+}
+
 const webHostHtml = String.raw`<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -226,7 +234,10 @@ const usagePanel = document.getElementById("web-usage");
 const usageTitle = document.getElementById("web-usage-title");
 const usageBody = document.getElementById("web-usage-body");
 let installing = false;
-const REMOTE = document.documentElement.dataset.betterCodexRemote === "true";
+const HOST_KIND = document.documentElement.dataset.betterCodexHost || (document.documentElement.dataset.betterCodexRemote === "true" ? "remote-projection" : "local");
+const REMOTE = HOST_KIND !== "local";
+const RELAY = HOST_KIND === "relay";
+const SESSION_PATH = RELAY ? "/relay/session" : "/web/session";
 let sessionToken = REMOTE ? "" : sessionStorage.getItem("better-codex-web-session") || "";
 let csrfToken = REMOTE ? sessionStorage.getItem("better-codex-web-csrf") || "" : "";
 const eventCursorKey = "better-codex-web-event-cursor";
@@ -235,6 +246,7 @@ let usageLoadedAt = 0;
 let usageLoading = false;
 let cachedUsage;
 let installPrompt;
+let relayRetryTimer;
 
 function profileText(zh, en) {
   return profileLocale === "zh-CN" ? zh : en;
@@ -354,7 +366,7 @@ function consumeFragmentToken() {
 }
 
 async function establishSession(token) {
-  const response = await fetch("/web/session", {
+  const response = await fetch(SESSION_PATH, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(REMOTE ? { username: usernameInput?.value.trim() || "", password: token } : { token }),
@@ -362,7 +374,7 @@ async function establishSession(token) {
   if (!response.ok) throw new Error(REMOTE ? "密码无效或登录请求过于频繁" : "令牌无效，请重新运行 better-codex web");
   const session = await response.json();
   if (REMOTE) {
-    if (typeof session.csrf_token !== "string" || !session.csrf_token) throw new Error("Hub 未返回有效的 Web 会话");
+    if (typeof session.csrf_token !== "string" || !session.csrf_token) throw new Error((RELAY ? "Relay" : "Hub") + " 未返回有效的 Web 会话");
     csrfToken = session.csrf_token;
     sessionStorage.setItem("better-codex-web-csrf", csrfToken);
   } else {
@@ -373,10 +385,10 @@ async function establishSession(token) {
 }
 
 async function restoreRemoteSession() {
-  const response = await fetch("/web/session");
+  const response = await fetch(SESSION_PATH);
   if (!response.ok) throw new Error("Web 会话已失效，请重新登录");
   const session = await response.json();
-  if (typeof session.csrf_token !== "string" || !session.csrf_token) throw new Error("Hub 未返回有效的 Web 会话");
+  if (typeof session.csrf_token !== "string" || !session.csrf_token) throw new Error((RELAY ? "Relay" : "Hub") + " 未返回有效的 Web 会话");
   csrfToken = session.csrf_token;
   sessionStorage.setItem("better-codex-web-csrf", csrfToken);
 }
@@ -390,6 +402,41 @@ function expireSession() {
   connectError.textContent = REMOTE ? "Web 会话已失效，请重新登录" : "Web 会话已失效，请重新运行 better-codex web";
   connectError.hidden = false;
   if (!connectDialog.open) connectDialog.showModal();
+}
+
+function scheduleRelayRecovery() {
+  if (!RELAY || relayRetryTimer) return;
+  relayRetryTimer = setTimeout(async () => {
+    relayRetryTimer = undefined;
+    try {
+      const response = await fetch("/relay/status");
+      if (response.status === 401) return expireSession();
+      const status = await response.json();
+      if (response.ok && status?.runtime?.online) {
+        connectError.hidden = true;
+        loadInjection();
+        return;
+      }
+    } catch {}
+    scheduleRelayRecovery();
+  }, 2000);
+}
+
+function showRelayOffline() {
+  if (!RELAY) return;
+  connectError.textContent = "本机 Runtime 当前离线，连接恢复后将自动重试";
+  connectError.hidden = false;
+  if (!connectDialog.open) connectDialog.showModal();
+  scheduleRelayRecovery();
+}
+
+async function relayRuntimeOnline() {
+  if (!RELAY) return true;
+  const response = await fetch("/relay/status");
+  if (response.status === 401) throw new Error("Web 会话已失效，请重新登录");
+  if (!response.ok) throw new Error("Relay 状态暂时不可用");
+  const status = await response.json();
+  return status?.runtime?.online === true;
 }
 
 async function requestRuntime(request) {
@@ -410,6 +457,7 @@ async function requestRuntime(request) {
     try { value = await response.json(); }
     catch { value = { error: response.statusText || "request_failed" }; }
     if (response.status === 401) setTimeout(expireSession, 0);
+    if (RELAY && response.status === 503) setTimeout(showRelayOffline, 0);
     if (!response.ok) throw new Error(value.error || response.statusText || "request_failed");
     return value;
   } catch (error) {
@@ -486,8 +534,8 @@ function subscribeRuntime(listener) {
 
 window.betterCodexHost = Object.freeze({
   version: 1,
-  kind: REMOTE ? "remote" : "web",
-  capabilities: Object.freeze({ issues: "read-write", agents: REMOTE ? "read-only" : "read-write", liveUpdates: true, nativeThreads: false }),
+  kind: RELAY ? "web" : REMOTE ? "remote" : "web",
+  capabilities: Object.freeze({ issues: "read-write", agents: REMOTE && !RELAY ? "read-only" : "read-write", liveUpdates: true, nativeThreads: false }),
   request: requestRuntime,
   subscribe: subscribeRuntime,
 });
@@ -508,12 +556,15 @@ function loadInjection() {
   script.src = "/web/injection.js?locale=" + encodeURIComponent(navigator.language || document.documentElement.lang || "en") + (REMOTE ? "" : "&session=" + encodeURIComponent(sessionToken));
   script.onload = () => {
     installing = false;
+    script.dataset.betterCodexLoaded = "true";
     connectDialog.close();
     openCurrentRoute();
   };
   script.onerror = () => {
     installing = false;
-    if (!connectDialog.open) connectDialog.showModal();
+    script.remove();
+    if (RELAY) showRelayOffline();
+    else if (!connectDialog.open) connectDialog.showModal();
   };
   document.head.appendChild(script);
 }
@@ -523,6 +574,10 @@ async function boot(token = "") {
     if (token) await establishSession(token);
     if (REMOTE && !csrfToken) await restoreRemoteSession();
     if (!REMOTE && !sessionToken) throw new Error("请运行 better-codex web 获取本地访问令牌");
+    if (RELAY && !await relayRuntimeOnline()) {
+      showRelayOffline();
+      return;
+    }
     loadInjection();
   } catch (error) {
     connectError.textContent = error instanceof Error ? error.message : "连接失败";
@@ -598,10 +653,20 @@ ${betterCodexWebAppRegistrationJavaScript()}
 void boot(consumeFragmentToken());
 `;
 
-export function betterCodexWebHostHtml(remote = false) {
-  return remote
+export function betterCodexWebHostHtml(host: boolean | BetterCodexWebHostKind = false) {
+  const kind = webHostKind(host);
+  if (kind === "relay") {
+    return webHostHtml
+      .replace('<html lang="zh-CN">', '<html lang="zh-CN" data-better-codex-remote="true" data-better-codex-host="relay">')
+      .replace("Local connection", "Better Codex Relay")
+      .replace("请运行 <code>better-codex web</code> 自动打开，或粘贴本地访问令牌。令牌只用于连接本机 Runtime。", "登录后将通过加密隧道直接连接你的本机 Runtime。Relay 不保存任务、智能体或会话数据。")
+      .replace('<label><span>访问令牌</span>', '<label><span>账户</span><input id="web-username" type="text" autocomplete="username" spellcheck="false" required></label><label><span>访问令牌</span>')
+      .replace("访问令牌", "访问密码")
+      .replace('autocomplete="off"', 'autocomplete="current-password"');
+  }
+  return kind === "remote-projection"
     ? webHostHtml
-      .replace('<html lang="zh-CN">', '<html lang="zh-CN" data-better-codex-remote="true">')
+      .replace('<html lang="zh-CN">', '<html lang="zh-CN" data-better-codex-remote="true" data-better-codex-host="remote-projection">')
       .replace("本地工作台", "远端工作台")
       .replace("Local connection", "Self-hosted Hub")
       .replace("请运行 <code>better-codex web</code> 自动打开，或粘贴本地访问令牌。令牌只用于连接本机 Runtime。", "输入 Web 访问密码以管理经过隐私裁剪的远端看板投影。")
@@ -615,8 +680,9 @@ export function betterCodexWebHostCss() {
   return webHostCss;
 }
 
-export function betterCodexWebHostJavaScript(remote = false) {
-  if (!remote) return webHostJavaScript;
+export function betterCodexWebHostJavaScript(host: boolean | BetterCodexWebHostKind = false) {
+  const kind = webHostKind(host);
+  if (kind === "local" || kind === "relay") return webHostJavaScript;
   return webHostJavaScript
     .replace('kind: "web",', 'kind: "remote",')
     .replace('issues: "read-write", agents: "read-write", liveUpdates: true, nativeThreads: false', 'issues: "read-write", agents: "read-only", liveUpdates: true, nativeThreads: false')

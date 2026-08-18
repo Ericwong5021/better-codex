@@ -647,12 +647,14 @@ export function startServer() {
         return sendWeb(response, 200, JSON.stringify({ token: sessionToken }), "application/json; charset=utf-8");
       }
       if (url.pathname === "/web/injection.js" && method === "GET") {
+        const relayRequest = validAccessToken(bearerToken(request)) && request.headers["x-better-codex-relay"] === "1";
+        const locale = normalizeCodexLocale(url.searchParams.get("locale"));
+        if (relayRequest) return sendWeb(response, 200, injectionScript(0, "", "install", locale, "web"), "text/javascript; charset=utf-8");
         const sessionToken = url.searchParams.get("session") || "";
         if (!sameOriginBrowserRequest(request)) return sendJson(response, 403, { error: "forbidden" });
         if (!validWebSession(webSessions, sessionToken)) return sendJson(response, 401, { error: "unauthorized" });
         const address = server.address();
         const activePort = typeof address === "object" && address ? address.port : 0;
-        const locale = normalizeCodexLocale(url.searchParams.get("locale"));
         return sendWeb(response, 200, injectionScript(activePort, sessionToken, "install", locale, "web"), "text/javascript; charset=utf-8");
       }
       if (!authorized(request, url, webSessions)) return sendJson(response, 401, { error: "unauthorized" });

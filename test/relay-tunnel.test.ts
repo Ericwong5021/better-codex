@@ -42,6 +42,18 @@ test("relay authenticates one runtime, replaces old connections, and stores no b
   assert.equal(health.name, "Better Codex Relay");
   assert.equal(health.runtime.online, false);
 
+  const page = await fetch(`${base}/web`);
+  assert.equal(page.status, 200);
+  const html = await page.text();
+  assert.match(html, /data-better-codex-host="relay"/);
+  assert.match(html, /Better Codex Relay/);
+  assert.match(html, /Relay 不保存任务、智能体或会话数据/);
+  const host = await fetch(`${base}/web/host.js`).then(response => response.text());
+  assert.match(host, /const SESSION_PATH = RELAY \? "\/relay\/session"/);
+  assert.match(host, /agents: REMOTE && !RELAY \? "read-only" : "read-write"/);
+  assert.match(host, /连接恢复后将自动重试/);
+  assert.doesNotMatch(host, /Hub 管理命令/);
+
   const first = new WebSocket(`${socketBase}/api/v1/runtime/connect`, relayWebSocketProtocol, { headers: { authorization: `Bearer ${device.device_token}` } });
   await once(first, "open");
   first.send(encodeRelayMessage({ type: "hello", protocol_version: relayProtocolVersion, device_id: device.device_id, runtime_instance_id: "runtime-1", core_version: "0.5.0", capabilities: ["http-stream", "sse", "file-upload", "request-cancel"] }));

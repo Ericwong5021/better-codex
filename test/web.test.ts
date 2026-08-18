@@ -177,6 +177,17 @@ test("web host boots the shared DOM injection behind a local session", async () 
     assert.match(source, /--bc-host-" \+ mode \+ "-font-ui/);
     assert.doesNotThrow(() => new Function(source));
 
+    const relayInjection = await fetch(`${base}/web/injection.js?locale=en-US`, {
+      headers: { authorization: `Bearer ${token}`, "x-better-codex-relay": "1", "sec-fetch-site": "cross-site" },
+    });
+    assert.equal(relayInjection.status, 200);
+    const relaySource = await relayInjection.text();
+    assert.doesNotMatch(relaySource, new RegExp(token));
+    assert.doesNotMatch(relaySource, new RegExp(sessionToken));
+    assert.match(relaySource, /const HOST_KIND = "web"/);
+    assert.match(relaySource, /const INITIAL_LOCALE = "en"/);
+    assert.doesNotThrow(() => new Function(relaySource));
+
     const webBootstrap = await fetch(`${base}/api/bootstrap`, { headers: { authorization: `Bearer ${sessionToken}` } });
     assert.equal(webBootstrap.status, 200);
 
