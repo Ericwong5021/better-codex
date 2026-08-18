@@ -258,6 +258,7 @@ test("runtime relay client forwards concurrent HTTP requests with only the local
   }
   assert.match(eventText, /event: change/);
   eventsController.abort();
+  await eventsReader.cancel().catch(() => {});
   await waitFor(() => sseClosed === 1 && (relay.runtime()?.activeChannels || 0) === 0);
 
   let cancelOffset = 0;
@@ -294,6 +295,7 @@ test("runtime relay client forwards concurrent HTTP requests with only the local
   assert.ok(reconnectedReader);
   assert.match(new TextDecoder().decode((await reconnectedReader.read()).value), /event: change/);
   reconnectedEventsController.abort();
+  await reconnectedReader.cancel().catch(() => {});
   await waitFor(() => sseClosed === 2);
   restarted.stop();
   await relay.close();

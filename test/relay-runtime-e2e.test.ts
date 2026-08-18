@@ -115,6 +115,7 @@ test("public Relay drives the real Runtime and recovers without storing business
     const change = new TextDecoder().decode((await eventReader.read()).value);
     assert.match(change, /event: change/);
     eventController.abort();
+    await eventReader.cancel().catch(() => {});
 
     const attachmentData = Buffer.from("relay attachment payload").toString("base64");
     const issueBody = JSON.stringify({ project_id: project.id, title: "Relay issue", description: "Created through public Relay", request_id: "relay-business-create-1", files: [{ name: "proof.txt", type: "text/plain", data: `data:text/plain;base64,${attachmentData}` }] });
