@@ -1607,9 +1607,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const method = String(options.method || "GET").toUpperCase();
       if (READ_ONLY && method !== "GET") return Promise.reject(new Error("remote_read_only"));
       const requestPath = path + (path.includes("?") ? "&" : "?") + "locale=" + encodeURIComponent(state.locale);
+      const commandId = method === "GET" ? "" : globalThis.crypto?.randomUUID?.() || VERSION + "-command-" + Date.now() + "-" + Math.random().toString(36).slice(2);
       const attempt = (retriesLeft) => {
         if (typeof window.betterCodexHost?.request === "function") {
-          return Promise.resolve(window.betterCodexHost.request({ path: requestPath, method: options.method || "GET", body: options.body, timeoutMs: options.timeoutMs })).catch(error => {
+          return Promise.resolve(window.betterCodexHost.request({ path: requestPath, method: options.method || "GET", body: options.body, timeoutMs: options.timeoutMs, commandId })).catch(error => {
             if (retriesLeft > 0 && error instanceof Error && error.message === "runtime_bridge_timeout") return attempt(retriesLeft - 1);
             throw error;
           });
@@ -1623,7 +1624,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           }, Number(options.timeoutMs) || 10000);
           bridgeRequests.set(id, { resolve, reject, timer });
           try {
-            window.betterCodexRequest(JSON.stringify({ id, token: BRIDGE_TOKEN, path: requestPath, method: options.method || "GET", body: options.body, timeoutMs: options.timeoutMs }));
+            window.betterCodexRequest(JSON.stringify({ id, token: BRIDGE_TOKEN, path: requestPath, method: options.method || "GET", body: options.body, timeoutMs: options.timeoutMs, commandId }));
           } catch (error) {
             bridgeRequests.delete(id);
             clearTimeout(timer);

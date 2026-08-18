@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { closeSync, existsSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
@@ -38,6 +38,7 @@ const webSessionTtlMs = 12 * 60 * 60 * 1000;
 const maxWebSessions = 32;
 const maxPastedImageBytes = 10 * 1024 * 1024;
 const maxPastedImageBodyBytes = Math.ceil(maxPastedImageBytes * 4 / 3) + 1024;
+const maxRemoteFileBodyBytes = Math.ceil(20 * 1024 * 1024 * 4 / 3) + 64 * 1024;
 const codexStatePath = join(process.env.CODEX_HOME || join(homedir(), ".codex"), ".codex-global-state.json");
 const preloadedRequestBodies = new WeakMap<IncomingMessage, Buffer>();
 
@@ -61,7 +62,7 @@ function savePastedImage(value: unknown) {
   return { name, path };
 }
 
-function saveRemoteFile(value: { name: string; type: string; data: string }) {
+function saveRemoteFile(value: { name: string; type: string; data: string }, requestId: string, index: number) {
   const match = value.data.match(/^data:([a-z0-9][a-z0-9.+-]*\/[a-z0-9][a-z0-9.+-]*);base64,([A-Za-z0-9+/]+={0,2})$/i);
   if (!match || match[1].toLowerCase() !== value.type.toLowerCase()) throw new Error("invalid_file_attachment");
   const bytes = Buffer.from(match[2], "base64");
@@ -69,10 +70,48 @@ function saveRemoteFile(value: { name: string; type: string; data: string }) {
   const inputName = basename(value.name).replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^[-.]+/, "").slice(0, 120) || "file";
   const extension = extname(inputName).slice(0, 16);
   const stem = basename(inputName, extension).slice(0, Math.max(1, 100 - extension.length));
-  const name = `web-${Date.now()}-${randomUUID().slice(0, 8)}-${stem}${extension}`;
+  const digest = createHash("sha256").update(requestId).update("\0").update(String(index)).update("\0").update(inputName).update("\0").update(value.type).update("\0").update(bytes).digest("hex").slice(0, 24);
+  const name = `web-${digest}-${stem}${extension}`;
   const path = join(attachmentPath, name);
+  if (existsSync(path)) {
+    if (!readFileSync(path).equals(bytes)) throw new Error("invalid_file_attachment");
+    return { path, created: false };
+  }
   writeFileSync(path, bytes, { flag: "wx", mode: 0o600 });
-  return path;
+  return { path, created: true };
+}
+
+function saveRemoteFiles(value: unknown, requestId: string) {
+  if (value === undefined) return { paths: [] as string[], cleanup: () => {} };
+  if (!Array.isArray(value) || value.length > 4) throw new Error("invalid_file_attachment");
+  const paths: string[] = [];
+  const createdPaths: string[] = [];
+  const cleanup = () => {
+    for (const path of createdPaths) {
+      try { unlinkSync(path); } catch {}
+    }
+  };
+  try {
+    for (const [index, item] of value.entries()) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("invalid_file_attachment");
+      const file = item as Record<string, unknown>;
+      if (typeof file.name !== "string" || typeof file.type !== "string" || typeof file.data !== "string") throw new Error("invalid_file_attachment");
+      const saved = saveRemoteFile({ name: file.name, type: file.type, data: file.data }, requestId, index);
+      paths.push(saved.path);
+      if (saved.created) createdPaths.push(saved.path);
+    }
+    return { paths, cleanup };
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
+}
+
+function withRemoteFilePaths(value: unknown, paths: string[]) {
+  const text = cleanString(value, 100000);
+  if (!paths.length) return text;
+  const block = `附带文件：\n${paths.map(path => `- ${path}`).join("\n")}`;
+  return text ? `${text}\n\n${block}` : block;
 }
 
 async function reconcileInterruptedIssues(store: Store, issues: Issue[]) {
@@ -610,15 +649,12 @@ export function startServer() {
       return store.conversationProjection(issueId, conversation.messages);
     },
     (issueId, requestId, message, files) => {
-      const paths: string[] = [];
+      const saved = saveRemoteFiles(files, requestId);
       try {
-        for (const file of files) paths.push(saveRemoteFile(file));
-        const fileBlock = paths.length ? `附带文件：\n${paths.map(path => `- ${path}`).join("\n")}` : "";
+        const fileBlock = saved.paths.length ? `附带文件：\n${saved.paths.map(path => `- ${path}`).join("\n")}` : "";
         worker.sendIssueMessage(issueId, requestId, [message, fileBlock].filter(Boolean).join("\n\n"));
       } catch (error) {
-        for (const path of paths) {
-          try { unlinkSync(path); } catch {}
-        }
+        saved.cleanup();
         throw error;
       }
     },
@@ -635,19 +671,7 @@ export function startServer() {
       if (!worker.generateProjectOverview(projectId, agentId, feedback)) throw new Error("project_overview_unavailable");
     },
     files => {
-      const paths: string[] = [];
-      const cleanup = () => {
-        for (const path of paths) {
-          try { unlinkSync(path); } catch {}
-        }
-      };
-      try {
-        for (const file of files) paths.push(saveRemoteFile(file));
-        return { paths, cleanup };
-      } catch (error) {
-        cleanup();
-        throw error;
-      }
+      return saveRemoteFiles(files, randomUUID());
     },
     chooseNativeDirectory,
   );
@@ -1500,7 +1524,7 @@ export function startServer() {
         return sendJson(response, 201, withReplyStatus(issue));
       }
       if (url.pathname === "/api/issues" && method === "POST") {
-        const body = await readBody(request);
+        const body = await readBody(request, maxRemoteFileBodyBytes);
         const projectId = cleanString(body.project_id, 200);
         const requestId = cleanString(body.request_id, 200);
         if ("ai_enrich" in body && typeof body.ai_enrich !== "boolean") throw new Error("invalid_ai_enrich");
@@ -1516,20 +1540,27 @@ export function startServer() {
         }
         const agentId = cleanString(body.agent_id, 200);
         if (aiEnrich && agentId && !store.getAgentProfile(agentId)) throw new Error("agent_not_found");
-        const created = store.createIssueRequest({
-          projectId,
-          title: cleanString(body.title, 500),
-          description: cleanString(body.description, 100000),
-          status: aiEnrich ? "backlog" : "status" in body ? asStatus(body.status) : undefined,
-          priority: "priority" in body ? asPriority(body.priority) : undefined,
-          labels: asLabels(body.labels),
-          threadId: "",
-          workspacePath,
-          agentEnabled,
-          agentId,
-          userAssigned: body.user_assigned === true,
-          enrichmentStatus: aiEnrich ? "pending" : null,
-        }, requestId);
+        const files = saveRemoteFiles(body.files, requestId || String(request.headers["x-better-codex-request-id"] || randomUUID()));
+        let created;
+        try {
+          created = store.createIssueRequest({
+            projectId,
+            title: cleanString(body.title, 500),
+            description: withRemoteFilePaths(body.description, files.paths),
+            status: aiEnrich ? "backlog" : "status" in body ? asStatus(body.status) : undefined,
+            priority: "priority" in body ? asPriority(body.priority) : undefined,
+            labels: asLabels(body.labels),
+            threadId: "",
+            workspacePath,
+            agentEnabled,
+            agentId,
+            userAssigned: body.user_assigned === true,
+            enrichmentStatus: aiEnrich ? "pending" : null,
+          }, requestId);
+        } catch (error) {
+          files.cleanup();
+          throw error;
+        }
         const { issue } = created;
         if (created.replayed) return sendJson(response, 200, issue);
         if (aiEnrich) worker.enrichIssue(issue, issue.description, agentId);
@@ -1544,12 +1575,20 @@ export function startServer() {
           return sendJson(response, 200, { ...current, reply_status: store.getIssueReplyState(current.id).status });
         }
         if (method === "PATCH" && path.length === 3) {
-          const body = await readBody(request);
+          const body = await readBody(request, maxRemoteFileBodyBytes);
           const version = Number(body.version);
           if (!Number.isInteger(version) || version < 1) throw new Error("invalid_version");
           const patch = parseIssuePatch(body);
-          if ((issue.active_run_status || issue.session_active_turn_id || store.getIssueReplyState(issue.id).status === "running") && Object.keys(patch).some(key => key !== "reply_draft")) throw new Error("issue_execution_running");
-          const updated = store.updateIssue(issue.id, version, patch);
+          const files = saveRemoteFiles(body.files, String(request.headers["x-better-codex-request-id"] || randomUUID()));
+          if (files.paths.length) patch.description = withRemoteFilePaths(patch.description ?? issue.description, files.paths);
+          let updated;
+          try {
+            if ((issue.active_run_status || issue.session_active_turn_id || store.getIssueReplyState(issue.id).status === "running") && Object.keys(patch).some(key => key !== "reply_draft")) throw new Error("issue_execution_running");
+            updated = store.updateIssue(issue.id, version, patch);
+          } catch (error) {
+            files.cleanup();
+            throw error;
+          }
           if (store.isDispatchable(updated)) worker.wake();
           return sendJson(response, 200, updated);
         }
@@ -1638,38 +1677,48 @@ export function startServer() {
           if (updateInstallInProgress) throw new Error("update_in_progress");
           if (issue.archived_at) throw new Error("issue_archived");
           if (issue.session_handoff_at && !issue.session_owned) throw new Error("issue_session_handed_off");
-          const body = await readBody(request);
+          const body = await readBody(request, maxRemoteFileBodyBytes);
           const requestId = cleanString(body.request_id, 200) || randomUUID();
-          const message = cleanString(body.message, 100000).trim();
-          if (!message) throw new Error("message_required");
-          const existingCommand = store.getSessionCommandByRequest(issue.id, requestId);
-          if (existingCommand && existingCommand.status !== "failed" && existingCommand.status !== "cancelled") {
-            if (String(existingCommand.payload.request_message || "") !== message) throw new Error("request_id_conflict");
+          const files = saveRemoteFiles(body.files, requestId);
+          let filesCommitted = false;
+          try {
+            const message = withRemoteFilePaths(body.message, files.paths).trim();
+            if (!message) throw new Error("message_required");
+            const existingCommand = store.getSessionCommandByRequest(issue.id, requestId);
+            if (existingCommand && existingCommand.status !== "failed" && existingCommand.status !== "cancelled") {
+              if (String(existingCommand.payload.request_message || "") !== message) throw new Error("request_id_conflict");
+              filesCommitted = true;
+              const reply = store.getIssueReplyState(issue.id);
+              return sendJson(response, 202, existingCommand.kind === "steer"
+                ? { issue_id: issue.id, request_id: requestId, status: "running", message, steered: true }
+                : reply);
+            }
+            if (!issue.session_thread_id && issue.active_run_status) throw new Error("issue_session_starting");
+            if (!issue.session_thread_id && !store.canAutoStartFromUserMessage(issue)) {
+              throw new Error(store.getAutoDispatch() ? "backlog_reply_blocked" : "manual_start_required");
+            }
+            if (!issue.session_thread_id) {
+              const description = issue.description.trim();
+              const updated = store.updateIssue(issue.id, issue.version, {
+                description: description.endsWith(message) ? description : [description, message].filter(Boolean).join("\n\n"),
+                agent_enabled: true,
+                pending_actor: "agent",
+                needs_attention: true,
+              });
+              filesCommitted = true;
+              if (!worker.startIssue(updated.id)) throw new Error("issue_not_started");
+              return sendJson(response, 202, { issue_id: issue.id, request_id: requestId, status: "running", message, initial_run: true });
+            }
+            const queued = worker.sendIssueMessage(issue.id, requestId, message);
+            filesCommitted = true;
             const reply = store.getIssueReplyState(issue.id);
-            return sendJson(response, 202, existingCommand.kind === "steer"
+            return sendJson(response, 202, queued.steered
               ? { issue_id: issue.id, request_id: requestId, status: "running", message, steered: true }
               : reply);
+          } catch (error) {
+            if (!filesCommitted) files.cleanup();
+            throw error;
           }
-          if (!issue.session_thread_id && issue.active_run_status) throw new Error("issue_session_starting");
-          if (!issue.session_thread_id && !store.canAutoStartFromUserMessage(issue)) {
-            throw new Error(store.getAutoDispatch() ? "backlog_reply_blocked" : "manual_start_required");
-          }
-          if (!issue.session_thread_id) {
-            const description = issue.description.trim();
-            const updated = store.updateIssue(issue.id, issue.version, {
-              description: description.endsWith(message) ? description : [description, message].filter(Boolean).join("\n\n"),
-              agent_enabled: true,
-              pending_actor: "agent",
-              needs_attention: true,
-            });
-            if (!worker.startIssue(updated.id)) throw new Error("issue_not_started");
-            return sendJson(response, 202, { issue_id: issue.id, request_id: requestId, status: "running", message, initial_run: true });
-          }
-          const queued = worker.sendIssueMessage(issue.id, requestId, message);
-          const reply = store.getIssueReplyState(issue.id);
-          return sendJson(response, 202, queued.steered
-            ? { issue_id: issue.id, request_id: requestId, status: "running", message, steered: true }
-            : reply);
         }
       }
       if (url.pathname === "/api/shutdown" && method === "POST") {
