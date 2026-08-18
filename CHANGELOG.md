@@ -4,6 +4,11 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserve remote Issue and reply attachments across Relay retries with deterministic local paths, bounded request bodies, and cleanup on rejected writes.
+- Keep one Relay request ID across Web UI timeout retries and verify the public Relay against a real Runtime through offline recovery.
+
 ## [0.4.9-beta.5] - 2026-08-19
 
 ### Added
