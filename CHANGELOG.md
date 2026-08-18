@@ -4,6 +4,8 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.9-beta.1] - 2026-08-18
+
 ### Added
 
 - Choose a local project folder through the system directory picker when creating projects from the task board or project workspace, including the remote Web UI.
@@ -534,7 +536,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.8...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.1...HEAD
+[0.4.9-beta.1]: https://github.com/Ericwong5021/better-codex/compare/v0.4.8...v0.4.9-beta.1
 [0.4.8]: https://github.com/Ericwong5021/better-codex/compare/v0.4.7...v0.4.8
 [0.4.7]: https://github.com/Ericwong5021/better-codex/compare/v0.4.6...v0.4.7
 [0.4.6]: https://github.com/Ericwong5021/better-codex/compare/v0.4.5...v0.4.6
