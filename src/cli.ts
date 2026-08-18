@@ -28,6 +28,7 @@ import {
   token,
   canonicalPath,
   packagedLibexecSkillsPath,
+  relayConfigPath,
   syncConfigPath,
 } from "./config.js";
 import { readRuntimeState } from "./runtime-state.js";
@@ -40,6 +41,7 @@ import { installService, repairServiceConfiguration, restartService, serviceLogs
 import { activeVersions, checkForUpdates, maybeDelegateToActiveCore, recordGatewayUpdateActivation, rollbackActivatedUpdate, rollbackAllUpdates, selectedUpdateChannel, setUpdateChannel, updateAll, updateCompatibility, type UpdateChannel } from "./updater.js";
 import { requireCodexExecutablePath } from "./codex-cli.js";
 import { normalizeHubUrl, readSyncConfiguration, removeSyncConfiguration, writeSyncConfiguration } from "./sync-config.js";
+import { normalizeRelayUrl, readRelayConfiguration, removeRelayConfiguration, writeRelayConfiguration } from "./relay-config.js";
 
 function accessToken() {
   return token();
@@ -644,7 +646,7 @@ function print(value: unknown) {
 }
 
 function usage() {
-  console.log("better-codex version | web | sync connect <url> [--pairing-code CODE|--admin-token TOKEN] [--transport auto|websocket|http] | sync migrate --to <url> --from-admin-token TOKEN | sync status|now|disconnect | update [check|compatibility|rollback|channel stable|preview] [--channel stable|preview] | setup [--yes] | launch [--restart] | launcher install|uninstall|status | mcp install|uninstall|status | doctor | enable | disable | start [--launch] | stop | status | uninstall | data delete [--yes] | inject [--launch] [--port N] | eject [--port N] | service install|uninstall|start|stop|restart|status|logs | project list|create | agent list | issue list|get|create|update|status|open");
+  console.log("better-codex version | web | relay connect <url> [--pairing-code CODE|--admin-token TOKEN] | relay status|disconnect|doctor | sync connect <url> [--pairing-code CODE|--admin-token TOKEN] [--transport auto|websocket|http] | sync migrate --to <url> --from-admin-token TOKEN | sync status|now|disconnect | update [check|compatibility|rollback|channel stable|preview] [--channel stable|preview] | setup [--yes] | launch [--restart] | launcher install|uninstall|status | mcp install|uninstall|status | doctor | enable | disable | start [--launch] | stop | status | uninstall | data delete [--yes] | inject [--launch] [--port N] | eject [--port N] | service install|uninstall|start|stop|restart|status|logs | project list|create | agent list | issue list|get|create|update|status|open");
 }
 
 function selfCommand() {
@@ -838,7 +840,7 @@ async function uninstall() {
 
 async function deleteData(confirmed: boolean) {
   if (readRuntimeState()) throw new Error("data_delete_requires_stopped_runtime");
-  const paths = [databasePath, `${databasePath}-wal`, `${databasePath}-shm`, join(dirname(databasePath), "backups"), syncConfigPath];
+  const paths = [databasePath, `${databasePath}-wal`, `${databasePath}-shm`, join(dirname(databasePath), "backups"), syncConfigPath, relayConfigPath];
   if (!confirmed && !(await confirmDataDelete(paths))) return { deleted: false, paths };
   for (const path of paths) rmSync(path, { recursive: true, force: true });
   return { deleted: true, paths };
@@ -980,6 +982,83 @@ async function finishSyncConnect(base: string, deviceName: string, deviceId: str
       throw error;
     }
   }
+
+async function relayCommand(action: string | undefined, args: string[]) {
+  if (action === "connect") {
+    const relayUrl = option(args, "--url") ?? positionals(args)[0];
+    if (!relayUrl) throw new Error("relay_url_required");
+    const base = normalizeRelayUrl(relayUrl);
+    const deviceName = option(args, "--name") ?? hostname();
+    const pairingCode = option(args, "--pairing-code");
+    const adminToken = option(args, "--admin-token");
+    let credentials: { device_id: string; device_token: string };
+    if (pairingCode) {
+      const response = await fetch(`${base}/api/v1/devices/pair`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pairing_code: pairingCode, name: deviceName, replace_existing: true }), signal: AbortSignal.timeout(15_000) });
+      const body = await response.json().catch(() => ({})) as Record<string, unknown>;
+      if (!response.ok) throw new Error(String(body.error || `relay_http_${response.status}`));
+      credentials = { device_id: String(body.device_id || ""), device_token: String(body.device_token || "") };
+    } else if (adminToken) {
+      const pairingResponse = await fetch(`${base}/api/v1/admin/pairing-codes`, { method: "POST", headers: { authorization: `Bearer ${adminToken}` }, signal: AbortSignal.timeout(15_000) });
+      const pairing = await pairingResponse.json().catch(() => ({})) as Record<string, unknown>;
+      if (!pairingResponse.ok) throw new Error(String(pairing.error || `relay_http_${pairingResponse.status}`));
+      const response = await fetch(`${base}/api/v1/devices/pair`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pairing_code: pairing.pairing_code, name: deviceName, replace_existing: true }), signal: AbortSignal.timeout(15_000) });
+      const body = await response.json().catch(() => ({})) as Record<string, unknown>;
+      if (!response.ok) throw new Error(String(body.error || `relay_http_${response.status}`));
+      credentials = { device_id: String(body.device_id || ""), device_token: String(body.device_token || "") };
+    } else {
+      credentials = await requestDeviceCredentials(base, deviceName);
+    }
+    if (!credentials.device_id || !credentials.device_token) throw new Error("invalid_pair_response");
+    const previous = readRelayConfiguration();
+    const configuration = writeRelayConfiguration({ relay_url: base, device_id: credentials.device_id, device_name: deviceName, device_token: credentials.device_token });
+    try {
+      await ensureRuntime();
+      await request("/api/relay/connect", { method: "POST" });
+      for (let attempt = 0; attempt < 60; attempt += 1) {
+        const status = await request("/api/relay/status") as { connected?: boolean; last_error?: string };
+        if (status.connected || status.last_error === "unauthorized") return print({ connected: status.connected === true, relay_url: configuration.relay_url, device_id: configuration.device_id, status });
+        await new Promise(resolve => setTimeout(resolve, 250));
+      }
+      return print({ connected: false, relay_url: configuration.relay_url, device_id: configuration.device_id, status: await request("/api/relay/status") });
+    } catch (error) {
+      if (previous) writeRelayConfiguration(previous);
+      else removeRelayConfiguration();
+      throw error;
+    }
+  }
+  if (action === "status") {
+    const configuration = readRelayConfiguration();
+    if (!configuration) return print({ connected: false });
+    try {
+      await ensureRuntime();
+      return print(await request("/api/relay/status"));
+    } catch {
+      return print({ connected: false, runtime: false, relay_url: configuration.relay_url, device_name: configuration.device_name });
+    }
+  }
+  if (action === "disconnect") {
+    try {
+      await ensureRuntime();
+      return print(await request("/api/relay/disconnect", { method: "POST" }));
+    } catch {
+      removeRelayConfiguration();
+      return print({ connected: false, runtime: false });
+    }
+  }
+  if (action === "doctor") {
+    const configuration = readRelayConfiguration();
+    if (!configuration) return print({ ok: false, connected: false, error: "relay_not_connected" });
+    const [local, remote] = await Promise.all([
+      (async () => {
+        try { await ensureRuntime(); return await request("/api/relay/status"); } catch (error) { return { connected: false, error: error instanceof Error ? error.message : "runtime_unavailable" }; }
+      })(),
+      fetch(`${configuration.relay_url}/healthz`, { signal: AbortSignal.timeout(15_000) }).then(async response => ({ status: response.status, body: await response.json().catch(() => ({})) })).catch(error => ({ status: 0, body: { error: error instanceof Error ? error.message : "relay_unavailable" } })),
+    ]);
+    const remoteBody = remote.body as Record<string, unknown>;
+    return print({ ok: Boolean((local as { connected?: boolean }).connected) && remote.status === 200 && remoteBody.name === "Better Codex Relay" && remoteBody.protocol_version === "relay/v1", local, remote });
+  }
+  usage();
+}
 
 async function issueCommand(action: string | undefined, args: string[]) {
   if (action === "list") {
@@ -1214,6 +1293,7 @@ async function main() {
     }
   }
   if (command === "doctor") return print(await doctor());
+  if (command === "relay") return relayCommand(action, args);
   if (command === "sync") return syncCommand(action, args);
   if (command === "enable") {
     setInjectionEnabled(false);

@@ -27,6 +27,8 @@ import { betterCodexWebManifest, betterCodexWebServiceWorker } from "./web-app.j
 import { SyncClient } from "./sync-client.js";
 import { readSyncConfiguration, removeSyncConfiguration } from "./sync-config.js";
 import { chooseNativeDirectory } from "./native-dialog.js";
+import { RuntimeRelayClient } from "./runtime-relay-client.js";
+import { removeRelayConfiguration } from "./relay-config.js";
 
 const accessToken = token();
 const mockupEnabled = !isSea() && !packagedBuild && process.argv.includes("--mockup");
@@ -555,6 +557,8 @@ export function startServer() {
     },
     chooseNativeDirectory,
   );
+  let activeRuntimePort = 0;
+  const relayClient = new RuntimeRelayClient({ runtimePort: () => activeRuntimePort, localToken: accessToken, runtimeInstanceId: identity.instanceId, coreVersion: identity.version });
   const sendEvent = (response: ServerResponse, event: string, revision: number) => {
     response.write(`id: ${revision}\nevent: ${event}\ndata: ${JSON.stringify({ revision })}\n\n`);
   };
@@ -594,6 +598,7 @@ export function startServer() {
     cleaned = true;
     worker.stop();
     syncClient.stop();
+    relayClient.stop();
     stopUpdateChecks();
     for (const [response, heartbeat] of eventClients) {
       clearInterval(heartbeat);
@@ -652,6 +657,17 @@ export function startServer() {
       }
       if (!authorized(request, url, webSessions)) return sendJson(response, 401, { error: "unauthorized" });
       if (url.pathname === "/api/sync/status" && method === "GET") return sendJson(response, 200, syncClient.status());
+      if (url.pathname === "/api/relay/status" && method === "GET") return sendJson(response, 200, relayClient.status());
+      if (url.pathname === "/api/relay/connect" && method === "POST") {
+        relayClient.start();
+        relayClient.reconnect();
+        return sendJson(response, 200, relayClient.status());
+      }
+      if (url.pathname === "/api/relay/disconnect" && method === "POST") {
+        relayClient.stop();
+        removeRelayConfiguration();
+        return sendJson(response, 200, relayClient.status());
+      }
       if (url.pathname === "/api/remote-access/status" && method === "GET") {
         const configuration = readSyncConfiguration();
         const status = syncClient.status();
@@ -1540,9 +1556,11 @@ export function startServer() {
   server.listen(runtimePort, "127.0.0.1", () => {
     const address = server.address();
     if (typeof address !== "object" || !address) throw new Error("runtime_address_unavailable");
+    activeRuntimePort = address.port;
     publishRuntimeState({ ...identity, port: address.port });
     if (!mockupEnabled) worker.start();
     if (!mockupEnabled) syncClient.start();
+    if (!mockupEnabled) relayClient.start();
     console.log(`Better Codex Runtime ${coreVersion} listening on http://127.0.0.1:${address.port}`);
   });
   const stop = () => server.close(() => {
