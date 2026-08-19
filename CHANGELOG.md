@@ -4,6 +4,10 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.9-beta.15] - 2026-08-19
+
+- Prevent eval and stdin entrypoints from recursively spawning Better Codex child processes.
+
 ## [0.4.9-beta.14] - 2026-08-19
 
 ### Fixed
@@ -619,7 +623,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.14...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.15...HEAD
+[0.4.9-beta.15]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.14...v0.4.9-beta.15
 [0.4.9-beta.14]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.13...v0.4.9-beta.14
 [0.4.9-beta.13]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.12...v0.4.9-beta.13
 [0.4.9-beta.12]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.11...v0.4.9-beta.12

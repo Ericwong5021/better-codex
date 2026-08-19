@@ -3,21 +3,23 @@ import { coreVersion } from "./compatibility.js";
 import { codexExecutablePath } from "./codex-cli.js";
 import type { SessionCommand } from "./db.js";
 
-type RelayPoll = {
+export type RelayPoll = {
   leader: boolean;
   acquired: boolean;
+  expires_at: string;
+  previous_relay_id: string | null;
   command: SessionCommand | null;
   thread_ids: string[];
   active_turns: Array<{ thread_id: string; turn_id: string }>;
 };
 
-type SessionRelayHost = {
-  poll: (relayId: string, busy: boolean) => RelayPoll;
-  release: (relayId: string, error: string) => void;
-  checkpoint: (commandId: string, relayId: string, result: Record<string, unknown>) => void;
-  complete: (commandId: string, relayId: string, result: Record<string, unknown>) => void;
-  fail: (commandId: string, relayId: string, error: string, threadId?: string, turnId?: string) => void;
-  event: (method: string, params: Record<string, unknown>) => void;
+export type SessionRelayHost = {
+  poll: (relayId: string, busy: boolean) => RelayPoll | Promise<RelayPoll>;
+  release: (relayId: string, error: string) => void | Promise<void>;
+  checkpoint: (commandId: string, relayId: string, result: Record<string, unknown>) => void | Promise<void>;
+  complete: (commandId: string, relayId: string, result: Record<string, unknown>) => void | Promise<void>;
+  fail: (commandId: string, relayId: string, error: string, threadId?: string, turnId?: string) => void | Promise<void>;
+  event: (method: string, params: Record<string, unknown>) => void | Promise<void>;
 };
 
 type PendingRequest = {
@@ -292,7 +294,7 @@ export class RuntimeSessionRelay {
     if (this.pollBusy || this.stopped || !this.child) return;
     this.pollBusy = true;
     try {
-      const result = this.host.poll(this.relayId, false);
+      const result = await this.host.poll(this.relayId, false);
       this.threads.clear();
       for (const value of result.thread_ids) {
         const threadId = sessionId(value);
@@ -315,7 +317,7 @@ export class RuntimeSessionRelay {
   private heartbeat(relayId: string) {
     if (relayId !== this.relayId || !this.child) return;
     try {
-      this.host.poll(relayId, true);
+      void this.host.poll(relayId, true);
     } catch {}
   }
 

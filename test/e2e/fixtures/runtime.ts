@@ -71,6 +71,7 @@ export async function startRuntimeFixture(): Promise<RuntimeFixture> {
         BETTER_CODEX_DB: join(fixtureHome, "better-codex.db"),
         BETTER_CODEX_PORT: String(port),
         BETTER_CODEX_TOKEN: token,
+        BETTER_CODEX_DISABLE_RUNTIME_SESSION_RELAY: "1",
         CODEX_HOME: codexHome,
       },
       stdio: ["ignore", "pipe", "pipe"],

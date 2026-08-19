@@ -43,6 +43,11 @@ export const syncConfigPath = join(betterCodexHome, "sync-credentials.json");
 export const relayConfigPath = join(betterCodexHome, "relay-credentials.json");
 export const runtimeStatePath = join(runPath, "runtime.json");
 export const runtimeLockPath = join(runPath, "runtime.lock");
+export const sessionHostPidPath = join(runPath, "session-host.pid");
+export const sessionHostLogPath = join(logPath, "session-host.log");
+export const sessionHostSocketPath = process.platform === "win32"
+  ? `\\\\.\\pipe\\better-codex-session-host-${betterCodexProfile}`
+  : join(runPath, "session-host");
 export const runtimeLogPath = join(logPath, "runtime.log");
 export const injectorLogPath = join(logPath, "injector.log");
 export const updateLogPath = join(logPath, "update.log");
@@ -63,6 +68,13 @@ export const debugLoggingEnabled = !isSea() && !packagedBuild;
 
 export function canonicalPath(value: string) {
   try { return realpathSync(value); } catch { return resolve(value); }
+}
+
+export function sourceProcessArguments(args: string[]) {
+  const entrypoint = process.argv[1];
+  const evalArgument = process.execArgv.some(argument => argument === "-e" || argument === "--eval" || argument.startsWith("--eval=") || argument === "-p" || argument === "--print" || argument.startsWith("--print=") || argument === "--input-type" || argument.startsWith("--input-type="));
+  if (!entrypoint || entrypoint === "-" || evalArgument) return null;
+  return [...process.execArgv, entrypoint, ...args];
 }
 
 export function packagedLibexecSkillsPath(entrypoint: string) {

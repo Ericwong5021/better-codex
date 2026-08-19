@@ -10,7 +10,7 @@ import { mockupSessionActive } from "./injection-state.js";
 import { codexExecutablePath } from "./codex-cli.js";
 import { renderMarkdown } from "./markdown.js";
 import { readConversationActivity, readConversationResult } from "./session-transcript.js";
-import { RuntimeSessionRelay } from "./session-relay.js";
+import { SessionHostClient } from "./session-host-client.js";
 import { projectDocumentKeys, type ProjectDocumentDiagram, type ProjectDocumentKey } from "./sync-contract.js";
 
 const interval = 60000;
@@ -50,12 +50,12 @@ export class IssueWorker {
   private readonly projectOverviews = new Map<string, ChildProcess | null>();
   private readonly manualQueue = new Set<string>();
   private readonly stoppingRuns = new Set<string>();
-  private readonly sessionRelay: RuntimeSessionRelay;
+  private readonly sessionRelay: SessionHostClient;
   private reconcilingSessions = false;
   private stopped = true;
 
   constructor(private readonly store: Store, private readonly onChange: () => void = () => {}) {
-    this.sessionRelay = new RuntimeSessionRelay({
+    this.sessionRelay = new SessionHostClient({
       poll: (relayId, busy) => this.pollSessionRelay(relayId, `runtime:${process.pid}`, "ready", undefined, busy),
       release: (relayId, error) => {
         this.store.releaseSessionRelay(relayId, error);
@@ -82,7 +82,6 @@ export class IssueWorker {
   start() {
     this.stopped = false;
     this.store.recoverInterruptedRuns();
-    for (const command of this.store.failClaimedSessionCommands()) this.handleSessionCommandFailure(command, command.error || "runtime_restarted");
     for (const issueId of this.store.listManualStartQueue()) this.manualQueue.add(issueId);
     for (const pending of this.store.listPendingSchedulerRuns()) {
       const executionResultPath = join(runLogPath, `${pending.claim.runId}-result.txt`);

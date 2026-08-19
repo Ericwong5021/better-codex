@@ -5,7 +5,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { isSea } from "node:sea";
 import { appIconIcns, appIconIco } from "./brand-assets.js";
-import { betterCodexHome, betterCodexProfile, ensureDirectories, launchIntegrationStatePath, logPath, peerBetterCodexHome } from "./config.js";
+import { betterCodexHome, betterCodexProfile, ensureDirectories, launchIntegrationStatePath, logPath, peerBetterCodexHome, sourceProcessArguments } from "./config.js";
 
 type WindowsOwnedShortcut = {
   path: string;
@@ -167,11 +167,13 @@ function validateLegacyWindowsState(state: LaunchIntegrationState) {
 }
 
 function launcherCommand() {
+  const sourceArgs = sourceProcessArguments([]);
   const command = process.env.BETTER_CODEX_LAUNCHER_PATH
     ? [resolve(process.env.BETTER_CODEX_LAUNCHER_PATH)]
     : isSea()
       ? [resolve(process.execPath)]
-      : [resolve(process.execPath), ...process.execArgv, resolve(process.argv[1])];
+      : sourceArgs ? [resolve(process.execPath), ...sourceArgs] : null;
+  if (!command) throw new Error("launcher_requires_file_entrypoint");
   if (process.platform !== "win32") return command;
 
   ensureDirectories();

@@ -586,12 +586,15 @@ async function installTarget(target: Target, runtimePort: number, accessToken: s
     const foreignDevelopmentInjection = betterCodexProfile === "development"
       && ((existing.profile && existing.profile !== betterCodexProfile) || (!existing.profile && existing.endpoint && existing.endpoint !== expectedEndpoint));
     if (foreignDevelopmentInjection) throw new Error("profile_not_active");
+    const storedIdentifier = await evaluate(connection, "window.__betterCodexNewDocumentScriptId || null");
     if (existing.version === injectionVersion() && existing.profile === betterCodexProfile && existing.endpoint === expectedEndpoint && existing.pulse) {
-      const storedIdentifier = await evaluate(connection, "window.__betterCodexNewDocumentScriptId || null");
       await evaluate(connection, "window.__betterCodexInjection__.refresh()");
       const current = readCompatibilityStatus();
       writeCompatibilityStatus({ codexVersion: current?.codexVersion ?? desktopVersion(), compatible: true, reason: null, targetId: target.id, capabilities: current?.capabilities ?? null }, true);
       return { targetId: target.id, title: target.title, installed: true, reused: true, identifier: typeof storedIdentifier === "string" ? storedIdentifier : undefined };
+    }
+    if (typeof storedIdentifier === "string" && storedIdentifier) {
+      try { await connection.send("Page.removeScriptToEvaluateOnNewDocument", { identifier: storedIdentifier }); } catch {}
     }
     const source = injectionScript(runtimePort, accessToken, "install", readCodexLocale());
     const registration = await connection.send("Page.addScriptToEvaluateOnNewDocument", { source });
@@ -662,6 +665,10 @@ export async function cdpRestartAndInject(port: number, runtimePort: number, acc
   if (!['darwin', 'win32'].includes(process.platform)) throw new Error(`setup_unsupported_${process.platform}`);
   await quitCodex();
   return cdpInject(port, runtimePort, accessToken, true);
+}
+
+export async function cdpRefreshAndInject(port: number, runtimePort: number, accessToken: string) {
+  return cdpInject(port, runtimePort, accessToken, false);
 }
 
 export async function cdpEject(port: number, accessToken: string, ownership?: InjectionOwnership) {

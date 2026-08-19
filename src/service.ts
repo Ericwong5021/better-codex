@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { isSea } from "node:sea";
-import { betterCodexHome, betterCodexProfile, cdpPort, ensureDirectories, logPath, runPath, runtimeLogPath } from "./config.js";
+import { betterCodexHome, betterCodexProfile, cdpPort, ensureDirectories, logPath, runPath, runtimeLogPath, sourceProcessArguments } from "./config.js";
 
 const label = "com.better-codex.runtime";
 const legacyLabel = "com.better-codex.gateway";
@@ -17,7 +17,10 @@ function xml(value: string) {
 }
 
 function command() {
-  return isSea() ? [process.env.BETTER_CODEX_LAUNCHER_PATH || process.execPath, "runtime"] : [process.execPath, ...process.execArgv, process.argv[1], "runtime"];
+  if (isSea()) return [process.env.BETTER_CODEX_LAUNCHER_PATH || process.execPath, "runtime"];
+  const args = sourceProcessArguments(["runtime"]);
+  if (!args) throw new Error("service_requires_file_entrypoint");
+  return [process.execPath, ...args];
 }
 
 function quotePowerShell(value: string) {

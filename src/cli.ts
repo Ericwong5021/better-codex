@@ -6,7 +6,7 @@ import { isSea } from "node:sea";
 import { homedir, hostname } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
-import { cdpEject, cdpInject, cdpOpenThread, cdpRestartAndInject, cdpStatus, codexInstallationStatus, codexProcessRunning, chooseCodexRestartAction, launchCodex, requiresCodexRestartForLaunch, watchInjection } from "./cdp.js";
+import { cdpEject, cdpInject, cdpOpenThread, cdpRefreshAndInject, cdpRestartAndInject, cdpStatus, codexInstallationStatus, codexProcessRunning, chooseCodexRestartAction, launchCodex, requiresCodexRestartForLaunch, watchInjection } from "./cdp.js";
 import { removeManagedAgentProfiles } from "./agent-profiles.js";
 import { coreVersion } from "./compatibility.js";
 import {
@@ -29,6 +29,7 @@ import {
   canonicalPath,
   packagedLibexecSkillsPath,
   relayConfigPath,
+  sourceProcessArguments,
   syncConfigPath,
 } from "./config.js";
 import { readRuntimeState } from "./runtime-state.js";
@@ -42,6 +43,8 @@ import { activeVersions, checkForUpdates, maybeDelegateToActiveCore, recordGatew
 import { requireCodexExecutablePath } from "./codex-cli.js";
 import { normalizeHubUrl, readSyncConfiguration, removeSyncConfiguration, writeSyncConfiguration } from "./sync-config.js";
 import { normalizeRelayUrl, readRelayConfiguration, removeRelayConfiguration, writeRelayConfiguration } from "./relay-config.js";
+import { startSessionHost } from "./session-host.js";
+import { stopSessionHostProcess } from "./session-host-client.js";
 
 function accessToken() {
   return token();
@@ -120,9 +123,10 @@ async function health() {
 }
 
 function spawnSelf(args: string[], logFile: string, detached = true) {
+  const ownArgs = isSea() ? args : sourceProcessArguments(args);
+  if (!ownArgs) throw new Error("self_requires_file_entrypoint");
   ensureDirectories();
   const descriptor = openSync(logFile, "a");
-  const ownArgs = isSea() ? args : [...process.execArgv, process.argv[1], ...args];
   const child = spawn(process.execPath, ownArgs, {
     cwd: process.cwd(),
     detached,
@@ -312,7 +316,12 @@ async function applyUpdate(previousRuntimePid: number, updates: { core: string |
     setInjectionEnabled(false);
     installService();
     await ensureRuntime();
-    const injection = await cdpRestartAndInject(cdpPort, activeRuntimePort(), accessToken());
+    let injection: unknown = { refreshed: false, pending: true, reason: "codex_not_connected" };
+    try {
+      injection = { refreshed: true, targets: await cdpRefreshAndInject(cdpPort, activeRuntimePort(), accessToken()) };
+    } catch (error) {
+      injection = { refreshed: false, pending: true, error: error instanceof Error ? error.message : "injection_refresh_pending" };
+    }
     const launchIntegration = installLaunchIntegration();
     const runtime = await health();
     if (updates.core && runtime.version !== updates.core) throw new Error("core_activation_version_mismatch");
@@ -651,7 +660,9 @@ function usage() {
 
 function selfCommand() {
   if (isSea()) return [resolve(process.env.BETTER_CODEX_LAUNCHER_PATH ?? process.execPath)];
-  return [resolve(process.execPath), ...process.execArgv, resolve(process.argv[1])];
+  const args = sourceProcessArguments([]);
+  if (!args) throw new Error("self_requires_file_entrypoint");
+  return [resolve(process.execPath), ...args];
 }
 
 function codexCliPath() {
@@ -785,6 +796,7 @@ async function uninstall() {
   if (dataHome === resolve(homedir()) || dirname(dataHome) === dataHome) throw new Error("unsafe_better_codex_home");
   setInjectionEnabled(false);
   await stopInjector();
+  await stopSessionHostProcess();
   let injection: unknown = { removed: false, reason: "cdp_unavailable" };
   try { injection = await cdpEject(cdpPort, accessToken(), injectionOwnership()); } catch {}
   try { await request("/api/shutdown", { method: "POST" }); } catch {}
@@ -1172,6 +1184,7 @@ async function main() {
     }
     return print(result);
   }
+  if (command === "session-host") return startSessionHost();
   if (command === "runtime") return runRuntime();
   if (command === "serve") return (await import("./server.js")).startServer();
   if (command === "web") return print(await openWebApp());
@@ -1336,7 +1349,10 @@ async function main() {
     }
     if (action === "uninstall") return print(uninstallService());
     if (action === "start") return print(startService());
-    if (action === "stop") return print(stopService());
+    if (action === "stop") {
+      await stopSessionHostProcess();
+      return print(stopService());
+    }
     if (action === "restart") return print(restartService());
     if (action === "status") return print(serviceStatus());
     if (action === "logs") return console.log(serviceLogs(Number(option(args, "--lines") ?? 50)));
