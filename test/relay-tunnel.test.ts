@@ -130,6 +130,30 @@ test("relay Web session requires same-origin CSRF for protected requests", async
   await relay.close();
 });
 
+test("runtime relay client retries after an unexpected HTTP response", async () => {
+  const relay = createRelayServer({ host: "127.0.0.1", port: 0, database: ":memory:", adminToken: "d".repeat(64), webUsername: "admin", webPassword: "relay-password-123", secureCookies: false });
+  const pairing = relay.store.createPairingCode();
+  const device = relay.store.pairDevice("Runtime A", pairing.pairing_code);
+  const unavailable = createServer();
+  unavailable.on("upgrade", (_request, socket) => {
+    socket.end("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n");
+  });
+  unavailable.listen(0, "127.0.0.1");
+  await once(unavailable, "listening");
+  const address = unavailable.address();
+  assert.ok(address && typeof address === "object");
+  const configuration = { enabled: true, relay_url: `http://127.0.0.1:${address.port}`, device_id: device.device_id, device_name: device.device_name, device_token: device.device_token, created_at: new Date().toISOString() } as const;
+  const client = new RuntimeRelayClient({ runtimePort: () => 4317, localToken: "local-runtime-token", runtimeInstanceId: "runtime-retry", coreVersion: "0.5.0", configuration: () => configuration });
+  client.start();
+  await waitFor(() => client.status().last_error === "relay_http_502" && client.status().reconnect_attempts > 0);
+  await new Promise<void>((resolve, reject) => unavailable.close(error => error ? reject(error) : resolve()));
+  relay.server.listen(address.port, "127.0.0.1");
+  await once(relay.server, "listening");
+  await waitFor(() => client.status().connected);
+  client.stop();
+  await relay.close();
+});
+
 test("runtime relay client forwards concurrent HTTP requests with only the local token", async () => {
   const localToken = "local-runtime-token";
   let sseClosed = 0;

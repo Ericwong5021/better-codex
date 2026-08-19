@@ -152,10 +152,12 @@ export class RuntimeRelayClient {
       this.opening = false;
       socket.send(encodeRelayMessage({ type: "hello", protocol_version: relayProtocolVersion, device_id: configuration.device_id, runtime_instance_id: this.options.runtimeInstanceId, core_version: this.options.coreVersion, capabilities: [...relayCapabilities] }));
     });
-    socket.on("unexpected-response", (_request, response) => {
+    socket.on("unexpected-response", (request, response) => {
       authenticationFailure = response.statusCode === 401 || response.statusCode === 403;
       this.state.last_error = authenticationFailure ? "unauthorized" : `relay_http_${response.statusCode}`;
       response.resume();
+      request.destroy();
+      socket.terminate();
     });
     socket.on("message", data => {
       try {
