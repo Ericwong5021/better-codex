@@ -4,6 +4,10 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep the Runtime responsive while the system directory picker is open.
+
 ## [0.4.9-beta.10] - 2026-08-19
 
 ### Fixed
