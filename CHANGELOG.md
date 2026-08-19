@@ -4,6 +4,10 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+### Fixed
+
+- Treat Relay-hosted WebUI as remote so browser attachments are streamed to the Runtime.
+
 ## [0.4.9-beta.11] - 2026-08-19
 
 ### Fixed
