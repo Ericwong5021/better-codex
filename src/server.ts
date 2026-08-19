@@ -1414,7 +1414,7 @@ export function startServer() {
         return sendJson(response, 200, project);
       }
       if (url.pathname === "/api/system/directory" && method === "POST") {
-        return sendJson(response, 200, { workspace_path: chooseNativeDirectory() });
+        return sendJson(response, 200, { workspace_path: await chooseNativeDirectory() });
       }
       if (path[0] === "api" && path[1] === "projects" && path[2] && path.length === 3 && method === "GET") {
         const project = store.getProject(decodeURIComponent(path[2]));

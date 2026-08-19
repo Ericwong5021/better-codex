@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -109,7 +109,7 @@ export function showNativeChoiceDialog(options: NativeDialogOptions) {
   return "cancelled";
 }
 
-export function chooseNativeDirectory() {
+export async function chooseNativeDirectory() {
   try {
     if (process.platform === "win32") {
       const script = [
@@ -121,10 +121,14 @@ export function chooseNativeDirectory() {
         "$result = $dialog.ShowDialog()",
         "if ($result -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $dialog.SelectedPath }",
       ].join("; ");
-      return execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-STA", "-Command", script], { encoding: "utf8", windowsHide: true }).trim();
+      return await new Promise<string>(resolve => {
+        execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-STA", "-Command", script], { encoding: "utf8", windowsHide: true }, (error, output) => resolve(error ? "" : output.trim()));
+      });
     }
     if (process.platform === "darwin") {
-      return execFileSync("/usr/bin/osascript", ["-e", 'POSIX path of (choose folder with prompt "选择 Codex 项目文件夹")'], { encoding: "utf8" }).trim().replace(/\/$/, "");
+      return await new Promise<string>(resolve => {
+        execFile("/usr/bin/osascript", ["-e", 'POSIX path of (choose folder with prompt "选择 Codex 项目文件夹")'], { encoding: "utf8" }, (error, output) => resolve(error ? "" : output.trim().replace(/\/$/, "")));
+      });
     }
   } catch {}
   return "";

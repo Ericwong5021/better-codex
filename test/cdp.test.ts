@@ -7,6 +7,7 @@ import { targetAllowed } from "../src/compatibility.js";
 
 const source = readFileSync(new URL("../src/cdp.ts", import.meta.url), "utf8");
 const nativeDialogSource = readFileSync(new URL("../src/native-dialog.ts", import.meta.url), "utf8");
+const serverSource = readFileSync(new URL("../src/server.ts", import.meta.url), "utf8");
 
 test("injector reacts to renderer target changes instead of waiting for its fallback sweep", () => {
   assert.ok(source.includes('connection.send("Target.setDiscoverTargets", { discover: true })'));
@@ -95,6 +96,15 @@ test("Windows launch detects Codex without starting PowerShell or probing CDP", 
   assert.match(branch, /tasklist\.exe/);
   assert.match(branch, /IMAGENAME eq ChatGPT\.exe/);
   assert.doesNotMatch(branch, /Get-CimInstance/);
+});
+
+test("directory picker does not block the Runtime request loop", () => {
+  const start = nativeDialogSource.indexOf("export async function chooseNativeDirectory");
+  assert.ok(start >= 0);
+  const body = nativeDialogSource.slice(start);
+  assert.match(body, /execFile\(/);
+  assert.doesNotMatch(body, /execFileSync\(/);
+  assert.match(serverSource, /workspace_path: await chooseNativeDirectory\(\)/);
 });
 
 test("every main target scan has a total deadline and candidate cap", () => {
