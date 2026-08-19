@@ -4,6 +4,10 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.9-beta.19] - 2026-08-19
+
+- Remove password confirmation from every update path and keep local Codex distinct from remote Relay and Web hosts.
+
 ## [0.4.9-beta.18] - 2026-08-19
 
 - Keep Codex open while installers upgrade the Core, Runtime, Skill, MCP registration, and page integration.
@@ -639,7 +643,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.18...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.19...HEAD
+[0.4.9-beta.19]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.18...v0.4.9-beta.19
 [0.4.9-beta.18]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.17...v0.4.9-beta.18
 [0.4.9-beta.17]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.16...v0.4.9-beta.17
 [0.4.9-beta.16]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.15...v0.4.9-beta.16

@@ -283,7 +283,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const HOST_CAPABILITIES = window.betterCodexHost?.capabilities || {};
     const READ_ONLY = HOST_CAPABILITIES.issues === "read-only";
     const AGENTS_READ_ONLY = HOST_CAPABILITIES.agents === "read-only";
-    const REMOTE = window.betterCodexHost?.kind !== "local";
+    const REMOTE = window.betterCodexHost?.kind === "remote" || document.documentElement.dataset.betterCodexHost === "relay";
     if (READ_ONLY) document.documentElement.setAttribute("data-better-codex-read-only", "true");
     const HELP_MODE_MARKDOWN = ${helpModeMarkdown};
     const previous = window.__betterCodexInjection__;
@@ -600,10 +600,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     });
     localeResources.en["有任务正在运行，请等待任务结束后再更新。"] = "A task is running. Wait for it to finish before updating.";
     localeResources.en["更新正在进行中，请稍候。"] = "An update is already in progress. Please wait.";
-    localeResources.en["管理员密码不正确。"] = "The administrator password is incorrect.";
     localeResources.en["当前部署尚未启用在线升级。"] = "Online updates are not enabled for this deployment.";
-    localeResources.en["输入管理员密码"] = "Enter administrator password";
-    localeResources.en["确认升级"] = "Confirm update";
     localeResources.en["远程服务升级完成。"] = "The remote service update is complete.";
     localeResources.en["远程服务正在重启，页面稍后会自动恢复。"] = "The remote service is restarting. This page will reconnect automatically.";
     localeResources.en["正在备份并升级远程服务，请不要关闭页面。"] = "Backing up and updating the remote service. Keep this page open.";
@@ -949,7 +946,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #better-codex-update-notice .better-codex-update-description { margin: 0; color: var(--color-token-text-secondary, var(--bc-muted)); font-size: var(--font-size-small, var(--bc-text-sm)); line-height: 1.4; text-wrap: pretty; }
         #better-codex-update-notice .better-codex-update-error { margin: 4px 0 0; color: var(--bc-danger); font-size: var(--font-size-small, var(--bc-text-sm)); line-height: 1.4; }
         #better-codex-update-notice .better-codex-update-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; margin: 0 2px 0 6px; }
-        #better-codex-update-notice .better-codex-update-password { width: 168px; min-height: 32px; box-sizing: border-box; border: 1px solid var(--color-token-border, var(--bc-border)); border-radius: 999px; color: inherit; background: var(--color-token-background-primary, var(--bc-surface)); padding: 0 11px; font: inherit; font-size: var(--font-size-small, var(--bc-text-sm)); }
         #better-codex-update-notice .better-codex-update-button { display: inline-flex; min-height: 32px; align-items: center; justify-content: center; border: 0; border-radius: 999px; padding: 0 10px; color: var(--color-token-foreground, var(--bc-foreground)); background: var(--color-token-button-secondary-background, var(--bc-hover)); font: inherit; font-size: var(--font-size-small, var(--bc-text-sm)); font-weight: 600; cursor: pointer; transition: transform .15s,color .15s,background-color .15s; }
         #better-codex-update-notice .better-codex-update-button.is-primary { color: var(--color-token-background-primary, var(--bc-primary-foreground)); background: var(--color-token-foreground, var(--bc-primary)); }
         #better-codex-update-notice .better-codex-update-button:active { transform: scale(.96); }
@@ -2134,7 +2130,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (value.startsWith("update_activation_failed:")) value = value.slice("update_activation_failed:".length);
       if (value === "reply_busy" || value === "issue_execution_running") return t("有任务正在运行，请等待任务结束后再更新。");
       if (value === "update_in_progress") return t("更新正在进行中，请稍候。");
-      if (value === "update_password_invalid") return t("管理员密码不正确。");
       if (value === "hub_update_not_configured") return t("当前部署尚未启用在线升级。");
       if (value === "core_version_mismatch" || value === "compatibility_manifest_mismatch") return t("下载的更新版本与发布版本不一致，请稍后重试。");
       if (value === "core_validation_failed" || value === "core_health_validation_failed" || value === "update_asset_invalid" || value === "update_manifest_invalid" || value === "update_compatibility_invalid" || value === "update_core_invalid") return t("更新包验证失败，已保留当前版本。");
@@ -2331,37 +2326,18 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const title = notice.querySelector(".better-codex-update-title");
         const description = notice.querySelector(".better-codex-update-description");
         const error = notice.querySelector(".better-codex-update-error");
-        let password = notice.querySelector("[data-update-password]");
-        if (REMOTE && !password) {
-          password = document.createElement("input");
-          password.className = "better-codex-update-password";
-          password.type = "password";
-          password.autocomplete = "current-password";
-          password.placeholder = t("输入管理员密码");
-          password.setAttribute("aria-label", t("输入管理员密码"));
-          password.setAttribute("data-update-password", "true");
-          install.before(password);
-          install.textContent = t("确认升级");
-          password.focus();
-          return;
-        }
-        if (REMOTE && !password.value) {
-          password.focus();
-          return;
-        }
         notice.dataset.status = "installing";
         install.disabled = true;
         menuToggle.disabled = true;
         close.disabled = true;
         ignore.disabled = true;
         later.disabled = true;
-        if (password) password.disabled = true;
         install.textContent = t("正在更新");
         title.textContent = t("正在更新 Better Codex");
         description.textContent = REMOTE ? t("正在备份并升级远程服务，请不要关闭页面。") : t("正在下载并校验新版本，请不要关闭 Codex。");
         error.hidden = true;
         try {
-          const result = await api("/api/update/install", { method: "POST", body: REMOTE ? JSON.stringify({ password: password.value }) : undefined });
+          const result = await api("/api/update/install", { method: "POST" });
           if (updateNotice !== notice) return;
           if (result?.accepted !== true) throw new Error("update_not_accepted");
           await waitForUpdateCompletion(notice);
@@ -2373,7 +2349,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           close.disabled = false;
           ignore.disabled = false;
           later.disabled = false;
-          if (password) password.disabled = false;
           install.textContent = t("重试");
           title.textContent = t("更新未完成");
           description.textContent = t("Better Codex 保持当前版本运行。");
