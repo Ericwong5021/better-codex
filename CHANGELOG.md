@@ -4,6 +4,8 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.9-beta.12] - 2026-08-19
+
 ### Fixed
 
 - Treat Relay-hosted WebUI as remote so browser attachments are streamed to the Runtime.
@@ -605,7 +607,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.11...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.12...HEAD
+[0.4.9-beta.12]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.11...v0.4.9-beta.12
 [0.4.9-beta.11]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.10...v0.4.9-beta.11
 [0.4.9-beta.10]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.9...v0.4.9-beta.10
 [0.4.9-beta.9]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.8...v0.4.9-beta.9
