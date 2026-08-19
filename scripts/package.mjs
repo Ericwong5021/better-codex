@@ -23,6 +23,19 @@ const packageRoot = join(work, "package");
 const archiveName = `better-codex-cli-${packageJson.version}-${platform}-${architecture}.${platform === "win32" ? "zip" : "tar.gz"}`;
 const archive = join(output, archiveName);
 const coreName = `better-codex-core-${packageJson.version}-${platform}-${architecture}`;
+const embedSkill = {
+  name: "embed-skill",
+  setup(buildApi) {
+    buildApi.onLoad({ filter: /[/\\]bundled-skill\.ts$/ }, () => {
+      const skill = readFileSync(join(root, "skills", "better-codex", "SKILL.md"), "utf8");
+      const interfaceMetadata = readFileSync(join(root, "skills", "better-codex", "agents", "openai.yaml"), "utf8");
+      return {
+        contents: `export function bundledBetterCodexSkill(){return{skill:${javascriptStringLiteral(skill)},interface:${javascriptStringLiteral(interfaceMetadata)}}}\n`,
+        loader: "js",
+      };
+    });
+  },
+};
 const embedBrandAssets = {
   name: "embed-brand-assets",
   setup(buildApi) {
@@ -53,15 +66,23 @@ try {
     target: "node22",
     outfile: bundle,
     define: { __BETTER_CODEX_PACKAGED__: "true" },
-    plugins: [embedBrandAssets],
+    plugins: [embedSkill, embedBrandAssets],
   });
   await chmod(bundle, 0o755);
-  const versionEnv = { ...process.env, BETTER_CODEX_HOME: join(work, "home"), BETTER_CODEX_DISABLE_DELEGATION: "1" };
+  const versionEnv = { ...process.env, BETTER_CODEX_HOME: join(work, "home"), BETTER_CODEX_DISABLE_DELEGATION: "1", CODEX_HOME: join(work, "codex") };
   const versionOutput = execFileSync(process.execPath, [bundle, "version", "--json"], { encoding: "utf8", env: versionEnv });
   const versions = JSON.parse(versionOutput);
   if (versions.core !== packageJson.version || (versions.managedCore && versions.managedCore !== packageJson.version)) {
     throw new Error(`package_version_mismatch: expected ${packageJson.version}, got core ${versions.core || "unknown"} managed ${versions.managedCore || "unknown"}`);
   }
+  const mcpOutput = execFileSync(process.execPath, [bundle, "mcp"], {
+    encoding: "utf8",
+    env: versionEnv,
+    input: `${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } })}\n${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} })}\n`,
+  }).trim().split("\n").map(line => JSON.parse(line));
+  const mcpInitialize = mcpOutput.find(message => message.id === 1);
+  const mcpTools = mcpOutput.find(message => message.id === 2);
+  if (mcpInitialize?.result?.serverInfo?.version !== packageJson.version || !mcpTools?.result?.tools?.some(tool => tool.name === "board")) throw new Error("package_mcp_validation_failed");
   execFileSync(process.execPath, [bundle, "version"], { stdio: "inherit", env: versionEnv });
   await mkdir(output, { recursive: true });
   await copyFile(bundle, join(output, coreName));

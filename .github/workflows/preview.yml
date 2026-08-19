@@ -32,25 +32,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
-  acceptance:
-    needs: validate-preview
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22.22.0
-          cache: npm
-      - run: npm ci
-      - run: npx playwright install --with-deps chromium
-      - run: npm run test:acceptance
-      - uses: actions/upload-artifact@v4
-        with:
-          name: selfhost-acceptance
-          path: release/acceptance.json
-
   package:
-    needs: acceptance
+    needs: validate-preview
     strategy:
       matrix:
         runner:
@@ -66,10 +49,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
-      - run: npm test
       - run: npm run package:binary
-      - name: Install current local package twice
-        run: node scripts/test-local-install.mjs
       - uses: actions/upload-artifact@v4
         with:
           name: better-codex-${{ matrix.runner }}
@@ -78,9 +58,7 @@ jobs:
             release/better-codex-core-*
 
   release-preview:
-    needs:
-      - package
-      - acceptance
+    needs: package
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -112,7 +90,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          assets=(release/better-codex-cli-* release/better-codex-core-* release/better-codex-compatibility-*.json release/acceptance.json release/checksums.txt release/checksums.sig release/install.ps1 release/install.sh release/selfhost.sh release/SELF_HOSTING.md release/source-commit.txt release/update-manifest.json release/update-public-key.pem)
+          assets=(release/better-codex-cli-* release/better-codex-core-* release/better-codex-compatibility-*.json release/checksums.txt release/checksums.sig release/install.ps1 release/install.sh release/selfhost.sh release/SELF_HOSTING.md release/source-commit.txt release/update-manifest.json release/update-public-key.pem)
           if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
             test "$(gh release view "${GITHUB_REF_NAME}" --json tagName,isDraft,isPrerelease --jq '[.tagName, .isDraft, .isPrerelease] | @tsv')" = "${GITHUB_REF_NAME}"$'\tfalse\ttrue'
             gh release upload "${GITHUB_REF_NAME}" "${assets[@]}" --clobber

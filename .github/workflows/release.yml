@@ -85,6 +85,42 @@ jobs:
           name: selfhost-acceptance
           path: release/acceptance.json
 
+  web-ui:
+    needs: validate-release
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.0
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install chromium
+      - run: npm run typecheck
+      - run: npm run test:web
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  node-24-lifecycle:
+    needs: validate-release
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx tsx --test test/cdp-lifecycle.test.ts
+
   package:
     needs: acceptance
     strategy:
@@ -117,6 +153,8 @@ jobs:
     needs:
       - package
       - acceptance
+      - web-ui
+      - node-24-lifecycle
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

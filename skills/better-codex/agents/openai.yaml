@@ -1,4 +1,4 @@
 interface:
   display_name: "Better Codex"
-  short_description: "Schedule completed Better Codex issue runs"
-  default_prompt: "Use $better-codex to schedule the completed issue run."
+  short_description: "Install, upgrade, use, and operate Better Codex"
+  default_prompt: "Use $better-codex to help me install, upgrade, configure, or use Better Codex safely."

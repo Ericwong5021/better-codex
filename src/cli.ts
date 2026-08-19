@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { accessSync, closeSync, constants, cpSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { isSea } from "node:sea";
 import { homedir, hostname } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { cdpEject, cdpInject, cdpOpenThread, cdpRefreshAndInject, cdpRestartAndInject, cdpStatus, codexInstallationStatus, codexProcessRunning, chooseCodexRestartAction, launchCodex, requiresCodexRestartForLaunch, watchInjection } from "./cdp.js";
 import { removeManagedAgentProfiles } from "./agent-profiles.js";
@@ -38,6 +38,7 @@ import { installLaunchIntegration, launchIntegrationStatus, uninstallLaunchInteg
 import { readCodexLocale } from "./locale.js";
 import { betterCodexMcpName, startMcpAppServer } from "./mcp-app.js";
 import { packagedBuild } from "./build.js";
+import { bundledBetterCodexSkill } from "./bundled-skill.js";
 import { installService, repairServiceConfiguration, restartService, serviceLogs, serviceStatus, startService, stopService, uninstallService } from "./service.js";
 import { activeVersions, checkForUpdates, maybeDelegateToActiveCore, recordGatewayUpdateActivation, rollbackActivatedUpdate, rollbackAllUpdates, selectedUpdateChannel, setUpdateChannel, updateAll, updateCompatibility, type UpdateChannel } from "./updater.js";
 import { requireCodexExecutablePath } from "./codex-cli.js";
@@ -314,6 +315,7 @@ async function applyUpdate(previousRuntimePid: number, updates: { core: string |
     }
     if (drainPath && existsSync(drainPath)) unlinkSync(drainPath);
     setInjectionEnabled(false);
+    const mcp = installMcp();
     installService();
     await ensureRuntime();
     let injection: unknown = { refreshed: false, pending: true, reason: "codex_not_connected" };
@@ -327,7 +329,7 @@ async function applyUpdate(previousRuntimePid: number, updates: { core: string |
     if (updates.core && runtime.version !== updates.core) throw new Error("core_activation_version_mismatch");
     if (updates.compatibility && activeVersions().compatibility !== updates.compatibility) throw new Error("compatibility_activation_version_mismatch");
     recordGatewayUpdateActivation("success");
-    return { updated: true, runtime, injection, launchIntegration };
+    return { updated: true, runtime, injection, launchIntegration, mcp };
   } catch (error) {
     rollbackActivatedUpdate(updates);
     try {
@@ -660,6 +662,7 @@ function usage() {
 
 function selfCommand() {
   if (isSea()) return [resolve(process.env.BETTER_CODEX_LAUNCHER_PATH ?? process.execPath)];
+  if (packagedBuild && process.env.BETTER_CODEX_BASE_ENTRYPOINT) return [resolve(process.execPath), resolve(process.env.BETTER_CODEX_BASE_ENTRYPOINT)];
   const args = sourceProcessArguments([]);
   if (!args) throw new Error("self_requires_file_entrypoint");
   return [resolve(process.execPath), ...args];
@@ -669,12 +672,24 @@ function codexCliPath() {
   return requireCodexExecutablePath({ applicationPath: codexInstallationStatus().path });
 }
 
+function packagedMcpTransport(command: string | undefined, args: string[]) {
+  if (!packagedBuild || !command || !existsSync(command)) return false;
+  if (args.length === 2 && args[1] === "mcp" && ["node", "node.exe"].includes(basename(command).toLowerCase()) && basename(args[0]).toLowerCase() === "better-codex.cjs" && existsSync(args[0])) return true;
+  return args.length === 1 && args[0] === "mcp" && ["better-codex", "better-codex.exe"].includes(basename(command).toLowerCase());
+}
+
 function mcpStatus() {
   try {
+    const [command, ...commandArgs] = selfCommand();
+    const expectedArgs = [...commandArgs, "mcp"];
     const value = execFileSync(codexCliPath(), ["mcp", "get", betterCodexMcpName, "--json"], { encoding: "utf8", windowsHide: true });
-    return { installed: true, configuration: JSON.parse(value) as unknown };
+    const configuration = JSON.parse(value) as { transport?: { command?: string; args?: string[] } };
+    const transportCommand = configuration.transport?.command;
+    const transportArgs = configuration.transport?.args ?? [];
+    const configured = (transportCommand === command && JSON.stringify(transportArgs) === JSON.stringify(expectedArgs)) || packagedMcpTransport(transportCommand, transportArgs);
+    return { installed: true, configured, configuration };
   } catch {
-    return { installed: false };
+    return { installed: false, configured: false };
   }
 }
 
@@ -684,8 +699,7 @@ function installMcp() {
   const expectedArgs = [...commandArgs, "mcp"];
   const current = mcpStatus();
   if (current.installed) {
-    const transport = (current.configuration as { transport?: { command?: string; args?: string[] } }).transport;
-    if (transport?.command === command && JSON.stringify(transport.args ?? []) === JSON.stringify(expectedArgs)) return { ...current, existing: true };
+    if (current.configured) return { ...current, existing: true };
     execFileSync(cli, ["mcp", "remove", betterCodexMcpName], { stdio: "pipe", windowsHide: true });
   }
   execFileSync(cli, ["mcp", "add", betterCodexMcpName, "--", command, ...expectedArgs], { stdio: "pipe", windowsHide: true });
@@ -732,7 +746,9 @@ function writable(path: string) {
 
 function installBundledSkills() {
   const codexHome = process.env.CODEX_HOME || join(homedir(), ".codex");
-  const installed = existsSync(join(codexHome, "skills", "better-codex", "SKILL.md")) && existsSync(updatePublicKeyPath);
+  const skillRoot = join(codexHome, "skills");
+  const skillDirectory = join(skillRoot, "better-codex");
+  const installed = existsSync(join(skillDirectory, "SKILL.md")) && existsSync(updatePublicKeyPath);
   const obsoleteIssueSkill = join(codexHome, "skills", "better-codex-issue");
   const launcher = process.env.BETTER_CODEX_LAUNCHER_PATH;
   const candidates = [
@@ -742,19 +758,54 @@ function installBundledSkills() {
     launcher ? join(dirname(launcher), "..", "libexec", "skills") : null,
   ].filter((value): value is string => Boolean(value));
   const source = candidates.find(path => existsSync(join(path, "better-codex", "SKILL.md")) && existsSync(resolve(path, "..", "update-public-key.pem")));
+  const embedded = packagedBuild ? bundledBetterCodexSkill() : null;
+  if (embedded) {
+    const skillPath = join(skillDirectory, "SKILL.md");
+    const interfacePath = join(skillDirectory, "agents", "openai.yaml");
+    const current = existsSync(skillPath) && existsSync(interfacePath) && readFileSync(skillPath, "utf8") === embedded.skill && readFileSync(interfacePath, "utf8") === embedded.interface;
+    if (!current) {
+      mkdirSync(skillRoot, { recursive: true });
+      const staging = join(skillRoot, `.better-codex-${randomUUID()}`);
+      const backup = join(skillRoot, `.better-codex-backup-${randomUUID()}`);
+      mkdirSync(join(staging, "agents"), { recursive: true });
+      writeFileSync(join(staging, "SKILL.md"), embedded.skill, { mode: 0o644 });
+      writeFileSync(join(staging, "agents", "openai.yaml"), embedded.interface, { mode: 0o644 });
+      let backedUp = false;
+      try {
+        if (existsSync(skillDirectory)) {
+          renameSync(skillDirectory, backup);
+          backedUp = true;
+        }
+        renameSync(staging, skillDirectory);
+        if (backedUp) {
+          try { rmSync(backup, { recursive: true, force: true }); } catch {}
+        }
+      } catch (error) {
+        rmSync(staging, { recursive: true, force: true });
+        if (backedUp && !existsSync(skillDirectory)) renameSync(backup, skillDirectory);
+        throw error;
+      }
+    }
+    if (!existsSync(updatePublicKeyPath) && source) {
+      mkdirSync(dirname(updatePublicKeyPath), { recursive: true });
+      cpSync(resolve(source, "..", "update-public-key.pem"), updatePublicKeyPath, { force: true });
+    }
+    rmSync(obsoleteIssueSkill, { recursive: true, force: true });
+    return { installed: true, existing: current, updated: !current, embedded: true, path: skillRoot, updateKey: existsSync(updatePublicKeyPath) };
+  }
   if (!source) {
     if (installed) rmSync(obsoleteIssueSkill, { recursive: true, force: true });
     return installed
-      ? { installed: true, existing: true, path: join(codexHome, "skills"), updateKey: true }
+      ? { installed: true, existing: true, path: skillRoot, updateKey: true }
       : { installed: false, reason: "bundled_skills_unavailable", updateKey: false };
   }
-  mkdirSync(join(codexHome, "skills"), { recursive: true });
-  cpSync(join(source, "better-codex"), join(codexHome, "skills", "better-codex"), { recursive: true, force: true });
+  mkdirSync(skillRoot, { recursive: true });
+  cpSync(join(source, "better-codex"), skillDirectory, { recursive: true, force: true });
   rmSync(obsoleteIssueSkill, { recursive: true, force: true });
   const publicKey = resolve(source, "..", "update-public-key.pem");
   mkdirSync(dirname(updatePublicKeyPath), { recursive: true });
   cpSync(publicKey, updatePublicKeyPath, { force: true });
-  return { installed: true, path: join(codexHome, "skills"), updateKey: true };
+  return { installed: true, path: skillRoot, updateKey: true };
 }
 
 async function doctor() {
@@ -788,7 +839,7 @@ async function doctor() {
     mcp,
     updateKey,
   };
-  return { ok: Boolean(runtime.ok) && Boolean((database as { ok?: boolean }).ok) && codex.installed && Boolean((compatibility as { compatible?: boolean } | null)?.compatible) && injection.available && skills.betterCodex && mcp.installed && updateKey, checks };
+  return { ok: Boolean(runtime.ok) && Boolean((database as { ok?: boolean }).ok) && codex.installed && Boolean((compatibility as { compatible?: boolean } | null)?.compatible) && injection.available && skills.betterCodex && mcp.installed && mcp.configured && updateKey, checks };
 }
 
 async function uninstall() {
@@ -1134,6 +1185,7 @@ async function main() {
   const [command, action, ...args] = commandArguments();
   const delegated = maybeDelegateToActiveCore();
   if (delegated !== null) process.exit(delegated);
+  if (packagedBuild) installBundledSkills();
   if (command === "apply-update") {
     const versions = activeVersions();
     return print(await applyUpdate(Number(action), {
@@ -1173,16 +1225,17 @@ async function main() {
     if (action === "rollback") return print(rollbackAllUpdates());
     if (action && !action.startsWith("--")) return usage();
     const result = await updateAll(channel);
+    const mcp = installMcp();
     if (result.compatibility.updated && injectionEnabled()) {
       try {
         await ensureRuntime();
         await cdpInject(cdpPort, activeRuntimePort(), accessToken(), false);
-        return print({ ...result, injection: { restored: true } });
+        return print({ ...result, mcp, injection: { restored: true } });
       } catch (error) {
-        return print({ ...result, injection: { restored: false, pending: true, error: error instanceof Error ? error.message : "injection_unavailable" } });
+        return print({ ...result, mcp, injection: { restored: false, pending: true, error: error instanceof Error ? error.message : "injection_unavailable" } });
       }
     }
-    return print(result);
+    return print({ ...result, mcp });
   }
   if (command === "session-host") return startSessionHost();
   if (command === "runtime") return runRuntime();

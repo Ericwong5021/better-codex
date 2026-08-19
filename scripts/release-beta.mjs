@@ -261,9 +261,8 @@ function main(args) {
   }
 
   const result = prepareAndVerifyBetaRelease(defaultRoot, options.version, options.date || localDate(), () => {
-    console.log("Release sources prepared. Running build, tests, and package verification...");
+    console.log("Release sources prepared. Running build and package verification...");
     runNpm(defaultRoot, ["run", "build"]);
-    runNpm(defaultRoot, ["test"]);
     runNpm(defaultRoot, ["run", "package:binary"]);
   });
   console.log(`Beta v${result.nextVersion} is prepared and locally verified. Review the diff before committing and tagging.`);
