@@ -465,6 +465,14 @@ export function createHubServer(options: HubServerOptions) {
         const issue = store.board().issues.find(item => item.id === decodeURIComponent(issueMatch[1]) || item.identifier === decodeURIComponent(issueMatch[1]));
         return issue ? sendJson(response, 200, issueForWeb(issue)) : sendJson(response, 404, { error: "issue_not_found" });
       }
+      if (issueMatch && method === "DELETE") {
+        if (!browser) return sendJson(response, 401, { error: "unauthorized" });
+        if (!trustedOrigin(request, true) || !csrfValid) return sendJson(response, 403, { error: "csrf_invalid" });
+        const body = await readBody(request);
+        const command = store.createRemoteCommand({ command_id: body.command_id ?? request.headers["x-better-codex-command-id"], operation: "issue.delete", entity_id: decodeURIComponent(issueMatch[1]), base_revision: body.version, payload: {} });
+        notifyControl(command.device_id);
+        return sendJson(response, 202, { ok: true, command_id: command.command_id });
+      }
       if (url.pathname === "/api/issues" && method === "POST") {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" });
         if (!trustedOrigin(request, true) || !csrfValid) return sendJson(response, 403, { error: "csrf_invalid" });

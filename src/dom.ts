@@ -376,7 +376,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const systemLocale = resolveSystemLocale(INITIAL_LOCALE);
     const MOCKUP_PROJECT_ID = "mockup-better-codex";
     const initialProjectRoute = webProjectRoute();
-    const state = { projects: [], projectsLoaded: false, issues: [], projectIssues: [], projectDetailId: initialProjectRoute?.projectId || "", projectDocumentView: "charter", agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: initialProjectRoute ? "projects" : ["issues", "agents", "projects"].includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, autoDispatchPending: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", mockup: false, keepCreate: rememberedKeepCreate, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], project: [], label: [] } };
+    const state = { projects: [], projectsLoaded: false, issues: [], projectIssues: [], projectDetailId: initialProjectRoute?.projectId || "", projectDocumentView: "charter", projectDocumentPending: null, projectDocumentError: null, agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: initialProjectRoute ? "projects" : ["issues", "agents", "projects"].includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, autoDispatchPending: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", mockup: false, keepCreate: rememberedKeepCreate, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], project: [], label: [] } };
     function webProjectRoute() {
       if (HOST_KIND !== "web") return null;
       const match = location.pathname.match(/^\\/web\\/projects(?:\\/([^/?#]+))?\\/?$/);
@@ -648,6 +648,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "等待生成": "Waiting to generate",
       "已生成": "Generated",
       "生成失败": "Generation failed",
+      "生成任务已提交，等待运行端接收。": "The generation task was submitted and is waiting for the runtime.",
+      "生成中…": "Generating…",
+      "项目文档生成超时，请重试。": "Project documentation generation timed out. Try again.",
+      "运行端未及时响应，请确认 Better Codex 在线后重试。": "The runtime did not respond in time. Confirm Better Codex is online and try again.",
+      "项目文件夹不可用，无法生成文档。": "The project folder is unavailable, so documentation cannot be generated.",
+      "项目文档生成未能完成，请重试。": "Project documentation could not be completed. Try again.",
       "当前显示上一版本，新的内容正在生成。": "Showing the previous version while new content is generated.",
       "这个视图正在形成": "This view is taking shape",
       "代码、Issue 与会话证据正在被整理为结构化文档。": "Code, issue, and conversation evidence is being organized into structured documentation.",
@@ -1199,6 +1205,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #\${PANEL_ID} .better-codex-project-document-orbit { display: grid; width: 46px; height: 46px; place-items: center; margin-bottom: 14px; border: 1px solid var(--bc-divider); border-radius: 50%; color: var(--bc-info); }
         #\${PANEL_ID} .better-codex-project-document-orbit.is-active { animation: better-codex-project-document-float 2.4s ease-in-out infinite; }
         #\${PANEL_ID} .better-codex-project-document-orbit svg { width: 19px; height: 19px; }
+        #\${PANEL_ID} .better-codex-project-document-loading.is-error .better-codex-project-document-orbit { color: var(--bc-danger); }
         #\${PANEL_ID} .better-codex-project-document-loading > strong { color: var(--bc-foreground); font-size: var(--bc-text-md); }
         #\${PANEL_ID} .better-codex-project-document-loading > p { max-width: 44ch; margin: 7px 0 18px; font-size: var(--bc-text-caption); line-height: 1.65; }
         #\${PANEL_ID} .better-codex-project-document-skeleton { display: grid; width: min(340px,70vw); gap: 7px; }
@@ -1208,11 +1215,22 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #\${PANEL_ID} .better-codex-project-document-skeleton i:nth-child(4) { width: 64%; animation-delay: .36s; }
         #\${PANEL_ID} .better-codex-project-document-form { display: grid; flex: 0 0 auto; gap: 10px; border-top: 1px solid var(--bc-divider); background: var(--bc-surface); padding: 12px 14px 14px; }
         #\${PANEL_ID} .better-codex-project-document-form label { display: grid; gap: 5px; color: var(--bc-muted); font-size: var(--bc-text-xs); }
-        #\${PANEL_ID} .better-codex-project-document-form textarea, #\${PANEL_ID} .better-codex-project-document-form select { width: 100%; box-sizing: border-box; border: 1px solid var(--bc-divider); border-radius: var(--bc-radius-sm,10px); outline: 0; color: var(--bc-foreground); background: var(--bc-control); font: inherit; font-size: var(--bc-text-caption); }
+        #\${PANEL_ID} .better-codex-project-document-form textarea { width: 100%; box-sizing: border-box; border: 1px solid var(--bc-divider); border-radius: var(--bc-radius-sm,10px); outline: 0; color: var(--bc-foreground); background: var(--bc-control); font: inherit; font-size: var(--bc-text-caption); }
         #\${PANEL_ID} .better-codex-project-document-form textarea { min-height: 52px; max-height: 120px; resize: vertical; padding: 9px 10px; line-height: 1.5; }
-        #\${PANEL_ID} .better-codex-project-document-form select { min-height: 36px; padding: 0 30px 0 9px; }
-        #\${PANEL_ID} .better-codex-project-document-form textarea:focus, #\${PANEL_ID} .better-codex-project-document-form select:focus { border-color: var(--bc-ring); }
+        #\${PANEL_ID} .better-codex-project-document-form textarea:focus { border-color: var(--bc-ring); }
         #\${PANEL_ID} .better-codex-project-document-form > div { display: grid; grid-template-columns: minmax(180px,1fr) auto; align-items: end; gap: 10px; }
+        #\${PANEL_ID} .better-codex-project-document-agent-picker { position: relative; display: grid; min-width: 0; gap: 5px; }
+        #\${PANEL_ID} .better-codex-project-document-agent-picker > span:first-child { color: var(--bc-muted); font-size: var(--bc-text-xs); }
+        #\${PANEL_ID} .better-codex-project-document-agent-picker .better-codex-agent-picker-trigger { display: flex; width: 100%; min-height: 36px; box-sizing: border-box; align-items: center; justify-content: space-between; gap: 8px; border: 1px solid var(--bc-divider); border-radius: var(--bc-radius-sm,10px); color: var(--bc-foreground); background: var(--bc-control); padding: 0 10px; font: inherit; font-size: var(--bc-text-caption); text-align: left; cursor: pointer; }
+        #\${PANEL_ID} .better-codex-project-document-agent-picker .better-codex-agent-picker-trigger:focus-visible { outline: 2px solid var(--bc-ring); outline-offset: 1px; }
+        #\${PANEL_ID} .better-codex-project-document-agent-picker .better-codex-agent-picker-trigger > span { display: flex; min-width: 0; align-items: center; gap: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        #\${PANEL_ID} .better-codex-project-document-agent-picker .better-codex-agent-picker-trigger > svg { width: 13px; height: 13px; flex: 0 0 auto; color: var(--bc-faint); transform: rotate(-90deg); transition: transform .15s cubic-bezier(.16,1,.3,1); }
+        #\${PANEL_ID} .better-codex-project-document-agent-picker.is-open .better-codex-agent-picker-trigger > svg { transform: rotate(90deg); }
+        #\${PANEL_ID} .better-codex-project-document-agent-picker .better-codex-agent-menu { top: auto; right: 0; bottom: calc(100% + 6px); display: none; width: 100%; min-width: 220px; transform-origin: bottom right; }
+        #\${PANEL_ID} .better-codex-project-document-agent-picker.is-open .better-codex-agent-menu { display: block; animation: better-codex-menu-enter var(--bc-motion-fast) var(--bc-ease-out); }
+        #\${PANEL_ID} .better-codex-project-document-agent-avatar { display: inline-flex; width: 18px; height: 18px; flex: 0 0 18px; align-items: center; justify-content: center; overflow: hidden; border-radius: 999px; }
+        #\${PANEL_ID} .better-codex-project-document-agent-avatar img, #\${PANEL_ID} .better-codex-project-document-agent-avatar svg { display: block; width: 100%; height: 100%; object-fit: cover; }
+        #\${PANEL_ID} .better-codex-project-document-form output { color: var(--bc-danger); font-size: var(--bc-text-caption); line-height: 1.45; }
         #\${PANEL_ID} .better-codex-project-document-form .better-codex-submit { display: inline-flex; min-height: 36px; align-items: center; justify-content: center; gap: 7px; padding-inline: 13px; }
         #\${PANEL_ID} .better-codex-project-document-form .better-codex-submit svg { width: 14px; height: 14px; }
         @keyframes better-codex-project-document-pulse { 0%,100% { opacity: .45; transform: scale(.94); } 50% { opacity: 1; transform: scale(1); } }
@@ -2107,6 +2125,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (value === "backlog_reply_blocked") return t("待规划中的 Issue 不会自动触发任务，请先移出待规划区。");
       if (value === "project_required") return t("无法确定会话所属项目。请先把会话放入一个项目。");
       if (value === "issue_archived") return t("该会话对应的 Issue 已归档，请先取消归档。");
+      if (["project_overview_timeout", "project_overview_unavailable", "project_document_invalid_output", "remote_command_timeout", "workspace_missing"].includes(value)) return projectDocumentErrorLabel(value);
       return t(value);
     }
 
@@ -3011,6 +3030,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const contextLockAttrs = permissions.contextLocked ? ' disabled aria-disabled="true"' : "";
       const contextLockClass = permissions.contextLocked ? " is-disabled" : "";
       const archiveLockAttrs = permissions.archiveLocked ? ' disabled aria-disabled="true"' : "";
+      const deleteLockAttrs = permissions.archiveLocked || permissions.executionRunning ? ' disabled aria-disabled="true"' : "";
       const stopItem = permissions.executionRunning ? '<div class="better-codex-context-divider"></div><button class="better-codex-context-item is-danger" type="button" data-context-action="stop">' + icon("stop") + '<span>' + escapeHtml(t("停止任务")) + '</span></button>' : "";
       const statusItems = Object.entries(statusLabels).map(([value, text]) => '<button class="better-codex-context-item" type="button"' + contextLockAttrs + ' data-context-action="update" data-context-field="status" data-context-value="' + value + '"><span class="better-codex-context-check">' + (issue.status === value ? icon("check") : "") + '</span>' + statusIcon(value) + '<span>' + escapeHtml(t(text)) + "</span></button>").join("");
       const priorityItems = Object.entries(priorityLabels).map(([value, text]) => '<button class="better-codex-context-item" type="button"' + contextLockAttrs + ' data-context-action="update" data-context-field="priority" data-context-value="' + value + '"><span class="better-codex-context-check">' + (issue.priority === value ? icon("check") : "") + '</span>' + priorityIcon(value) + '<span>' + escapeHtml(t(value === "none" ? "无优先级" : text + "优先级")) + "</span></button>").join("");
@@ -3034,7 +3054,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       menu.setAttribute(OWNED, "true");
       menu.dataset.issueId = issue.id;
       menu.dataset.align = clientX + 430 > window.innerWidth ? "left" : "right";
-      menu.innerHTML = '<div class="better-codex-context-item-wrap' + contextLockClass + '"><button class="better-codex-context-item" type="button"' + contextLockAttrs + '>' + statusIcon(issue.status) + '<span>' + escapeHtml(t("状态")) + '</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu">' + statusItems + '</div></div><div class="better-codex-context-item-wrap' + contextLockClass + '"><button class="better-codex-context-item" type="button"' + contextLockAttrs + '>' + priorityIcon(issue.priority) + '<span>' + escapeHtml(t("优先级")) + '</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu">' + priorityItems + '</div></div><div class="better-codex-context-item-wrap' + contextLockClass + '"><button class="better-codex-context-item" type="button"' + contextLockAttrs + '>' + icon("user") + '<span>' + escapeHtml(t("指定负责人")) + '</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu is-assignee">' + assigneeItems + '</div></div>' + stopItem + (workspacePath ? '<div class="better-codex-context-divider"></div><button class="better-codex-context-item" type="button" data-context-action="copy-workspace">' + icon("folder") + '<span>' + escapeHtml(t("复制本地 workdir 路径")) + '</span></button>' : "") + '<div class="better-codex-context-divider"></div><button class="better-codex-context-item" type="button"' + archiveLockAttrs + ' data-context-action="archive">' + icon("archive") + '<span>' + escapeHtml(t("归档")) + '</span></button>';
+      menu.innerHTML = '<div class="better-codex-context-item-wrap' + contextLockClass + '"><button class="better-codex-context-item" type="button"' + contextLockAttrs + '>' + statusIcon(issue.status) + '<span>' + escapeHtml(t("状态")) + '</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu">' + statusItems + '</div></div><div class="better-codex-context-item-wrap' + contextLockClass + '"><button class="better-codex-context-item" type="button"' + contextLockAttrs + '>' + priorityIcon(issue.priority) + '<span>' + escapeHtml(t("优先级")) + '</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu">' + priorityItems + '</div></div><div class="better-codex-context-item-wrap' + contextLockClass + '"><button class="better-codex-context-item" type="button"' + contextLockAttrs + '>' + icon("user") + '<span>' + escapeHtml(t("指定负责人")) + '</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu is-assignee">' + assigneeItems + '</div></div>' + stopItem + (workspacePath ? '<div class="better-codex-context-divider"></div><button class="better-codex-context-item" type="button" data-context-action="copy-workspace">' + icon("folder") + '<span>' + escapeHtml(t("复制本地 workdir 路径")) + '</span></button>' : "") + '<div class="better-codex-context-divider"></div><button class="better-codex-context-item" type="button"' + archiveLockAttrs + ' data-context-action="archive">' + icon("archive") + '<span>' + escapeHtml(t("归档")) + '</span></button>' + (state.mockup ? "" : '<button class="better-codex-context-item is-danger" type="button"' + deleteLockAttrs + ' data-context-action="delete">' + icon("trash") + '<span>' + escapeHtml(t("删除任务")) + '</span></button>');
       document.body.appendChild(menu);
       const rect = menu.getBoundingClientRect();
       menu.style.left = Math.max(8, Math.min(clientX, window.innerWidth - rect.width - 8)) + "px";
@@ -3069,6 +3089,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const currentPermissions = issuePermissions(current);
         if (currentPermissions.contextLocked && (item.dataset.contextAction === "update" || item.dataset.contextAction === "assign")) return closeIssueMenu();
         if (currentPermissions.archiveLocked && item.dataset.contextAction === "archive") return closeIssueMenu();
+        if ((currentPermissions.archiveLocked || currentPermissions.executionRunning) && item.dataset.contextAction === "delete") return closeIssueMenu();
         if (item.dataset.contextAction === "copy-workspace") {
           closeIssueMenu();
           return void perform(() => copyText(workspacePath));
@@ -3090,6 +3111,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             await api("/api/issues/" + encodeURIComponent(current.id) + "/archive", { method: "POST", body: JSON.stringify({ version: current.version }) });
             await loadIssues();
           });
+        }
+        if (item.dataset.contextAction === "delete") {
+          closeIssueMenu();
+          return void confirmAction("删除任务", "确定删除任务 “" + current.title + "” 吗？", "删除").then(confirmed => confirmed && perform(async () => {
+            await api("/api/issues/" + encodeURIComponent(current.id), { method: "DELETE", body: JSON.stringify({ version: current.version }) });
+            await loadIssues();
+          }));
         }
         if (item.dataset.contextAction === "assign") {
           const kind = item.getAttribute("data-assignee-kind") || "";
@@ -3372,6 +3400,15 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       projects.id = "better-codex-projects";
       projects.className = "better-codex-projects";
       projects.addEventListener("click", onProjectsClick);
+      projects.addEventListener("keydown", event => {
+        if (event.key !== "Escape") return;
+        const picker = projects.querySelector("[data-project-document-agent-picker].is-open");
+        if (!picker) return;
+        picker.classList.remove("is-open");
+        const trigger = picker.querySelector("[data-project-document-agent-toggle]");
+        trigger?.setAttribute("aria-expanded", "false");
+        trigger?.focus();
+      });
       projects.addEventListener("submit", onProjectDocumentSubmit);
       section.append(toolbar, board, ...(boardScrollControl ? [boardScrollControl] : []), agents, projects, recovery);
       return section;
@@ -3898,9 +3935,21 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       });
     }
 
-    function projectDocumentAgentOptions(selectedId) {
-      const custom = state.agents.filter(agent => !agent.is_default && agent.id).map(agent => '<option value="' + escapeHtml(agent.id) + '"' + (agent.id === selectedId ? " selected" : "") + '>' + escapeHtml(agentDisplayName(agent)) + '</option>').join("");
-      return '<option value=""' + (!selectedId ? " selected" : "") + '>' + te("使用默认智能体") + '</option>' + custom;
+    function projectDocumentAgentPicker(selectedId) {
+      const defaultAgent = state.agents.find(agent => agent.is_default);
+      const options = [{ value: "", label: t("使用默认智能体"), agent: defaultAgent }, ...state.agents.filter(agent => !agent.is_default && agent.id).map(agent => ({ value: agent.id, label: agentDisplayName(agent), agent }))];
+      const current = options.find(option => option.value === selectedId) || options[0];
+      const avatar = option => option.agent ? agentAvatarMarkup(option.agent, "better-codex-project-document-agent-avatar") : '<span class="better-codex-project-document-agent-avatar">' + icon("bot") + '</span>';
+      const rows = options.map(option => '<button class="better-codex-agent-menu-item' + (option.value === current.value ? " is-selected" : "") + '" type="button" role="option" aria-selected="' + String(option.value === current.value) + '" data-project-document-agent-option="' + escapeHtml(option.value) + '"><span class="better-codex-agent-menu-item-copy">' + avatar(option) + '<span>' + escapeHtml(option.label) + '</span></span><span class="better-codex-agent-menu-item-check">' + (option.value === current.value ? icon("check") : "") + '</span></button>').join("");
+      return '<div class="better-codex-project-document-agent-picker better-codex-agent-setting" data-project-document-agent-picker><span>' + te("生成智能体") + '</span><input type="hidden" name="agent_id" value="' + escapeHtml(current.value) + '"><button class="better-codex-agent-picker-trigger" type="button" role="combobox" aria-haspopup="listbox" aria-expanded="false" data-project-document-agent-toggle><span>' + avatar(current) + '<span data-project-document-agent-label>' + escapeHtml(current.label) + '</span></span>' + icon("chevron") + '</button><div class="better-codex-agent-menu" role="listbox"><div class="better-codex-agent-menu-title">' + te("生成智能体") + '</div>' + rows + '</div></div>';
+    }
+
+    function projectDocumentErrorLabel(error) {
+      const value = String(error || "");
+      if (value === "project_overview_timeout") return t("项目文档生成超时，请重试。");
+      if (value === "remote_command_timeout") return t("运行端未及时响应，请确认 Better Codex 在线后重试。");
+      if (value === "workspace_missing") return t("项目文件夹不可用，无法生成文档。");
+      return t("项目文档生成未能完成，请重试。");
     }
 
     function projectDocumentDiagramMarkup(diagram) {
@@ -3948,29 +3997,35 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       });
     }
 
-    function projectDocumentLoading(view) {
-      const idle = view.status === "idle";
-      const title = view.status === "failed" ? "生成失败" : view.status === "queued" ? "等待生成" : idle ? "尚未生成这个视图" : "这个视图正在形成";
-      const copy = view.status === "failed" ? "该视图生成失败，重新生成时可附上修改意见。" : idle ? "选择智能体后生成七个相互关联的项目视图。" : "代码、Issue 与会话证据正在被整理为结构化文档。";
+    function projectDocumentLoading(view, overallError = "") {
+      const failed = view.status === "failed" || Boolean(overallError);
+      const idle = view.status === "idle" && !failed;
+      const title = failed ? "生成失败" : view.status === "queued" ? "等待生成" : idle ? "尚未生成这个视图" : "这个视图正在形成";
+      const copy = failed ? projectDocumentErrorLabel(view.error || overallError) : idle ? t("选择智能体后生成七个相互关联的项目视图。") : t("代码、Issue 与会话证据正在被整理为结构化文档。");
       const active = ["queued", "generating"].includes(view.status);
-      return '<div class="better-codex-project-document-loading"><span class="better-codex-project-document-orbit' + (active ? " is-active" : "") + '">' + icon("sparkles") + '</span><strong>' + te(title) + '</strong><p>' + te(copy) + '</p>' + (active ? '<div class="better-codex-project-document-skeleton"><i></i><i></i><i></i><i></i></div>' : "") + '</div>';
+      return '<div class="better-codex-project-document-loading' + (failed ? " is-error" : "") + '"><span class="better-codex-project-document-orbit' + (active ? " is-active" : "") + '">' + icon(failed ? "shield" : "sparkles") + '</span><strong>' + te(title) + '</strong><p>' + escapeHtml(copy) + '</p>' + (active ? '<div class="better-codex-project-document-skeleton"><i></i><i></i><i></i><i></i></div>' : "") + '</div>';
     }
 
     function projectDocumentWorkspace(project) {
-      const views = normalizedProjectDocumentViews(project);
+      const pending = state.projectDocumentPending?.projectId === project.id ? state.projectDocumentPending : null;
+      const sourceViews = normalizedProjectDocumentViews(project);
+      const views = pending && project.overview_status !== "generating" ? sourceViews.map(view => ({ ...view, status: "queued", error: null })) : sourceViews;
       const active = views.find(view => view.key === state.projectDocumentView) || views[0];
-      const generating = project.overview_status === "generating";
-      const done = views.filter(view => view.status === "ready").length;
+      const generating = Boolean(pending) || project.overview_status === "generating";
+      const done = sourceViews.filter(view => view.status === "ready").length;
       const current = views.find(view => view.status === "generating");
       const tabs = views.map(view => '<button type="button" role="tab" aria-selected="' + String(view.key === active.key) + '" class="better-codex-project-document-tab' + (view.key === active.key ? " is-active" : "") + '" data-project-document-view="' + view.key + '">' + icon(view.icon) + '<span>' + te(view.label) + '</span><i data-status="' + escapeHtml(view.status) + '"></i></button>').join("");
       const segments = views.map(view => '<i data-status="' + escapeHtml(view.status) + '"></i>').join("");
-      const progressText = current ? t("正在生成 {view}").replace("{view}", t(current.label)) : t("已完成 {done}/7 个视图").replace("{done}", String(done));
+      const progressText = pending ? t("生成任务已提交，等待运行端接收。") : current ? t("正在生成 {view}").replace("{view}", t(current.label)) : t("已完成 {done}/7 个视图").replace("{done}", String(done));
       const progress = generating ? '<section class="better-codex-project-document-progress"><div><span>' + icon("sparkles") + '<strong>' + escapeHtml(progressText) + '</strong></span><b>' + escapeHtml(Math.round(done / 7 * 100) + "%") + '</b></div><div class="better-codex-project-document-segments">' + segments + '</div></section>' : "";
       const stale = active.html && ["queued", "generating"].includes(active.status) ? '<div class="better-codex-project-document-notice">' + icon("refresh") + '<span>' + te("当前显示上一版本，新的内容正在生成。") + '</span></div>' : "";
-      const failed = active.status === "failed" && active.html ? '<div class="better-codex-project-document-notice is-error">' + icon("shield") + '<span>' + te("该视图生成失败，重新生成时可附上修改意见。") + '</span></div>' : "";
-      const content = active.html ? stale + failed + projectDocumentDiagramMarkup(active.diagram) + '<article class="better-codex-project-document-content">' + active.html + '</article>' : projectDocumentLoading(active);
-      const agentId = project.document_agent_id || "";
-      const form = state.mockup ? "" : '<form class="better-codex-project-document-form" data-project-document-form="' + escapeHtml(project.id) + '"><label><span>' + te("修改意见") + '</span><textarea name="feedback" maxlength="4000" placeholder="' + te("告诉智能体哪些内容需要修正、补充或重新组织") + '">' + escapeHtml(project.document_feedback || "") + '</textarea></label><div><label><span>' + te("生成智能体") + '</span><select name="agent_id">' + projectDocumentAgentOptions(agentId) + '</select></label><button class="better-codex-submit" type="submit"' + (generating ? " disabled" : "") + '>' + icon(generating ? "refresh" : "sparkles") + '<span>' + te(views.some(view => view.html) ? "重新生成全部" : "生成完整文档") + '</span></button></div></form>';
+      const overallError = !pending && project.overview_status === "failed" && !views.some(view => view.status === "failed") ? project.overview_error : "";
+      const failed = active.html && (active.status === "failed" || overallError) ? '<div class="better-codex-project-document-notice is-error">' + icon("shield") + '<span>' + escapeHtml(projectDocumentErrorLabel(active.error || overallError)) + '</span></div>' : "";
+      const content = active.html ? stale + failed + projectDocumentDiagramMarkup(active.diagram) + '<article class="better-codex-project-document-content">' + active.html + '</article>' : projectDocumentLoading(active, overallError);
+      const agentId = pending?.agentId ?? project.document_agent_id ?? "";
+      const feedback = pending?.feedback ?? project.document_feedback ?? "";
+      const inlineError = state.projectDocumentError?.projectId === project.id ? '<output>' + escapeHtml(state.projectDocumentError.message) + '</output>' : "";
+      const form = state.mockup ? "" : '<form class="better-codex-project-document-form" data-project-document-form="' + escapeHtml(project.id) + '"><label><span>' + te("修改意见") + '</span><textarea name="feedback" maxlength="4000" placeholder="' + te("告诉智能体哪些内容需要修正、补充或重新组织") + '">' + escapeHtml(feedback) + '</textarea></label><div>' + projectDocumentAgentPicker(agentId) + '<button class="better-codex-submit" type="submit"' + (generating ? " disabled" : "") + '>' + icon(generating ? "refresh" : "sparkles") + '<span>' + te(pending ? "生成中…" : views.some(view => view.html) ? "重新生成全部" : "生成完整文档") + '</span></button></div>' + inlineError + '</form>';
       return '<section class="better-codex-project-panel better-codex-project-document-panel"><header class="better-codex-project-panel-head"><strong>' + te("项目文档") + '</strong><span>' + escapeHtml(done + "/7") + '</span></header>' + progress + '<nav class="better-codex-project-document-tabs" role="tablist" aria-label="' + te("项目文档") + '">' + tabs + '</nav><div class="better-codex-project-document-scroll">' + content + '</div>' + form + '</section>';
     }
 
@@ -4018,6 +4073,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     async function loadProjects(options = {}) {
       const projects = await api("/api/projects");
       const projectsChanged = JSON.stringify(projects) !== JSON.stringify(state.projects);
+      const pending = state.projectDocumentPending;
+      if (pending) {
+        const project = projects.find(item => item.id === pending.projectId);
+        if (project && (project.overview_status === "generating" || String(project.updated_at || "") !== pending.updatedAt)) state.projectDocumentPending = null;
+      }
       state.projects = projects;
       state.projectsLoaded = true;
       if (state.projectDetailId) {
@@ -4045,6 +4105,31 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function onProjectsClick(event) {
+      const agentOption = event.target.closest("[data-project-document-agent-option]");
+      if (agentOption) {
+        const picker = agentOption.closest("[data-project-document-agent-picker]");
+        const input = picker?.querySelector('[name="agent_id"]');
+        if (!picker || !input) return;
+        input.value = agentOption.dataset.projectDocumentAgentOption || "";
+        picker.outerHTML = projectDocumentAgentPicker(input.value);
+        return;
+      }
+      const agentToggle = event.target.closest("[data-project-document-agent-toggle]");
+      if (agentToggle) {
+        const picker = agentToggle.closest("[data-project-document-agent-picker]");
+        const opening = !picker.classList.contains("is-open");
+        panel.querySelectorAll("[data-project-document-agent-picker].is-open").forEach(item => {
+          item.classList.remove("is-open");
+          item.querySelector("[data-project-document-agent-toggle]")?.setAttribute("aria-expanded", "false");
+        });
+        picker.classList.toggle("is-open", opening);
+        agentToggle.setAttribute("aria-expanded", String(opening));
+        return;
+      }
+      panel.querySelectorAll("[data-project-document-agent-picker].is-open").forEach(item => {
+        item.classList.remove("is-open");
+        item.querySelector("[data-project-document-agent-toggle]")?.setAttribute("aria-expanded", "false");
+      });
       const back = event.target.closest("[data-project-back],[data-project-home]");
       if (back) {
         if (HOST_KIND === "web" && history.state?.betterCodexProjectFromHome) return history.back();
@@ -4076,17 +4161,30 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const form = event.target.closest("[data-project-document-form]");
       if (!form) return;
       event.preventDefault();
-      const button = form.querySelector("button[type=submit]");
-      if (button) button.disabled = true;
+      if (state.projectDocumentPending?.projectId === form.dataset.projectDocumentForm) return;
       const data = new FormData(form);
-      void perform(async () => {
-        const result = await api("/api/projects/" + encodeURIComponent(form.dataset.projectDocumentForm) + "/overview", { method: "POST", body: JSON.stringify({ agent_id: String(data.get("agent_id") || ""), feedback: String(data.get("feedback") || "") }) });
-        if (result.command_id) {
-          const command = await waitForRemoteCommand(result.command_id);
-          if (command.status !== "applied") throw new Error(command.error || "command_rejected");
+      const projectId = form.dataset.projectDocumentForm;
+      const project = state.projects.find(item => item.id === projectId);
+      const agentId = String(data.get("agent_id") || "");
+      const feedback = String(data.get("feedback") || "");
+      state.projectDocumentError = null;
+      state.projectDocumentPending = { projectId, agentId, feedback, updatedAt: String(project?.updated_at || "") };
+      renderProjects();
+      void (async () => {
+        try {
+          const result = await api("/api/projects/" + encodeURIComponent(projectId) + "/overview", { method: "POST", body: JSON.stringify({ agent_id: agentId, feedback }) });
+          if (result.command_id) {
+            const command = await waitForRemoteCommand(result.command_id);
+            if (command.status !== "applied") throw new Error(command.error || "command_rejected");
+          }
+          await loadProjects();
+        } catch (error) {
+          state.projectDocumentPending = null;
+          state.projectDocumentError = { projectId, message: projectDocumentErrorLabel(error instanceof Error ? error.message : error) };
+          showError(error);
+          renderProjects();
         }
-        await loadProjects();
-      });
+      })();
     }
 
     function openCreateProjectDialog() {

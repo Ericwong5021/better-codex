@@ -722,6 +722,10 @@ export class HubStore {
     if (operation === "issue.stop" && !running) throw new Error("issue_not_running");
     if (payload.agent_id && !this.board().agents.some(agent => agent.id === payload.agent_id)) throw new Error("agent_not_found");
     const deviceId = this.writerDeviceId(settingOperation || createOperation ? "" : entityId, entityType);
+    if (operation === "issue.delete") {
+      const runtimeRow = this.db.prepare("SELECT payload_json FROM runtime_projection WHERE device_id = ?").get(deviceId) as { payload_json: string } | undefined;
+      if (!runtimeRow || (JSON.parse(runtimeRow.payload_json) as RuntimeProjection).protocol_version !== syncProtocolVersion) throw new Error("incompatible_protocol");
+    }
     const requestedAt = now();
     const expiresAt = after(24 * 60 * 60_000);
     this.db.prepare("UPDATE remote_commands SET status = 'expired', finished_at = ?, error = 'superseded' WHERE entity_id = ? AND status IN ('conflict', 'rejected')").run(requestedAt, entityId);
@@ -821,7 +825,12 @@ export class HubStore {
         const workspacePath = cleanString(result.workspace_path ?? "", 4096).trim();
         this.db.prepare("UPDATE remote_commands SET payload_json = ? WHERE command_id = ?").run(JSON.stringify({ workspace_path: workspacePath }), ack.command_id);
       }
-      if (ack.status === "applied" && row.operation !== "settings.auto-dispatch" && row.operation !== "project.pick_directory") {
+      if (ack.status === "applied" && row.operation === "issue.delete") {
+        const timestamp = now();
+        this.db.prepare("UPDATE entities SET deleted_at = ?, updated_at = ? WHERE entity_type = 'issue' AND entity_id = ? AND owner_device_id = ?").run(timestamp, timestamp, row.entity_id, deviceId);
+        this.db.prepare("DELETE FROM conversations WHERE issue_id = ?").run(row.entity_id);
+      }
+      if (ack.status === "applied" && row.operation !== "settings.auto-dispatch" && row.operation !== "project.pick_directory" && row.operation !== "issue.delete") {
         const entityType: SyncEntityType = row.operation.startsWith("project.") ? "project" : "issue";
         const projectionId = row.operation === "project.create" && ack.projection && "id" in ack.projection ? ack.projection.id : row.entity_id;
         const projection = cleanProjection(entityType, projectionId, ack.projection);

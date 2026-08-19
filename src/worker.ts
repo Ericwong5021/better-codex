@@ -15,6 +15,7 @@ import { projectDocumentKeys, type ProjectDocumentDiagram, type ProjectDocumentK
 
 const interval = 60000;
 const schedulerTimeout = 180000;
+const projectDocumentTimeout = 600000;
 const schedulerSchema = {
   type: "object",
   additionalProperties: false,
@@ -306,7 +307,7 @@ export class IssueWorker {
         child.kill("SIGTERM");
         forceTimer = setTimeout(() => child.kill("SIGKILL"), 5000);
         forceTimer.unref();
-      }, schedulerTimeout);
+      }, projectDocumentTimeout);
       timeout.unref();
       const finish = (code?: number | null) => {
         if (finished) return;

@@ -1245,6 +1245,10 @@ export class Store {
           if (!current) throw new Error("issue_not_found");
           if (!["issue.reply", "issue.stop"].includes(command.operation) && current.version !== command.base_revision) throw new Error("version_conflict");
           if (!["issue.reply", "issue.stop"].includes(command.operation) && (current.active_run_status || current.session_active_turn_id || this.getIssueReplyState(current.id).status === "running")) throw new Error("issue_execution_running");
+          if (command.operation === "issue.delete") {
+            this.deleteArchivedIssue(current.id, current.version);
+            return { command_id: command.command_id, status: "applied", error: null, projection: null } satisfies RemoteCommandAck;
+          }
           if (command.operation === "issue.archive") issue = this.archiveIssue(current.id, current.version);
           else if (command.operation === "issue.restore") issue = this.unarchiveIssue(current.id, current.version);
           else if (command.operation === "issue.reply") {
@@ -2066,12 +2070,13 @@ export class Store {
     const issue = this.getIssue(id);
     if (!issue) throw new Error("issue_not_found");
     if (issue.version !== version) throw new Error("version_conflict");
-    if (!issue.archived_at) throw new Error("issue_not_archived");
+    if (issue.enrichment_status === "pending") throw new Error("issue_enrichment_pending");
+    if (issue.active_run_status || issue.session_active_turn_id || this.getIssueReplyState(issue.id).status === "running") throw new Error("issue_execution_running");
     this.db.exec("BEGIN IMMEDIATE");
     try {
       this.db.prepare("DELETE FROM issue_replies WHERE issue_id = ?").run(issue.id);
       this.db.prepare("DELETE FROM issue_runs WHERE issue_id = ?").run(issue.id);
-      const result = this.db.prepare("DELETE FROM issues WHERE id = ? AND version = ? AND archived_at IS NOT NULL").run(issue.id, version);
+      const result = this.db.prepare("DELETE FROM issues WHERE id = ? AND version = ?").run(issue.id, version);
       if (result.changes !== 1) throw new Error("version_conflict");
       this.db.exec("COMMIT");
     } catch (error) {
