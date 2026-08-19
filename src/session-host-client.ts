@@ -59,7 +59,7 @@ export class SessionHostClient implements SessionRelayHost {
   constructor(private readonly host: SessionRelayHost) {}
 
   start() {
-    if (!this.stopped || process.env.BETTER_CODEX_DISABLE_RUNTIME_SESSION_RELAY === "1" || process.env.BETTER_CODEX_DISABLE_DELEGATION === "1") return;
+    if (!this.stopped || process.env.BETTER_CODEX_DISABLE_RUNTIME_SESSION_RELAY === "1" || process.env.BETTER_CODEX_DISABLE_DELEGATION === "1" || process.env.NODE_TEST_CONTEXT) return;
     this.stopped = false;
     void this.connect();
   }
