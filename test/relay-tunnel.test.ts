@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import { createServer, request as httpRequest } from "node:http";
+import type { Socket } from "node:net";
 import test from "node:test";
 import WebSocket, { type RawData } from "ws";
 import { createRelayServer } from "../src/relay-server.js";
@@ -135,7 +136,9 @@ test("runtime relay client retries after an unexpected HTTP response", async () 
   const pairing = relay.store.createPairingCode();
   const device = relay.store.pairDevice("Runtime A", pairing.pairing_code);
   const unavailable = createServer();
+  let unavailableSocket: Socket | undefined;
   unavailable.on("upgrade", (_request, socket) => {
+    unavailableSocket = socket;
     socket.end("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n");
   });
   unavailable.listen(0, "127.0.0.1");
@@ -146,6 +149,7 @@ test("runtime relay client retries after an unexpected HTTP response", async () 
   const client = new RuntimeRelayClient({ runtimePort: () => 4317, localToken: "local-runtime-token", runtimeInstanceId: "runtime-retry", coreVersion: "0.5.0", configuration: () => configuration });
   client.start();
   await waitFor(() => client.status().last_error === "relay_http_502" && client.status().reconnect_attempts > 0);
+  unavailableSocket?.destroy();
   await new Promise<void>((resolve, reject) => unavailable.close(error => error ? reject(error) : resolve()));
   relay.server.listen(address.port, "127.0.0.1");
   await once(relay.server, "listening");
