@@ -4,6 +4,10 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+### Fixed
+
+- Resume Relay reconnect backoff after an HTTP handshake failure instead of leaving the WebSocket pending.
+
 ## [0.4.9-beta.12] - 2026-08-19
 
 ### Fixed
