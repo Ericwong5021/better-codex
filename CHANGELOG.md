@@ -4,6 +4,10 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+### Fixed
+
+- Close the simulated failed Relay upgrade connection so Windows packaging can finish the reconnect regression test.
+
 ## [0.4.9-beta.13] - 2026-08-19
 
 ### Fixed
