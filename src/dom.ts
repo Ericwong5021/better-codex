@@ -283,7 +283,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const HOST_CAPABILITIES = window.betterCodexHost?.capabilities || {};
     const READ_ONLY = HOST_CAPABILITIES.issues === "read-only";
     const AGENTS_READ_ONLY = HOST_CAPABILITIES.agents === "read-only";
-    const REMOTE = window.betterCodexHost?.kind === "remote";
+    const REMOTE = window.betterCodexHost?.kind !== "local";
     if (READ_ONLY) document.documentElement.setAttribute("data-better-codex-read-only", "true");
     const HELP_MODE_MARKDOWN = ${helpModeMarkdown};
     const previous = window.__betterCodexInjection__;

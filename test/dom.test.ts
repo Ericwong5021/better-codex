@@ -14,6 +14,7 @@ test("generated injection script is valid JavaScript", () => {
   assert.ok(source.includes("panel?.remove()"));
   assert.ok(source.includes("showAutoDispatchHelp(\"settings\")"));
   assert.ok(source.includes('HOST_KIND === "web" ? INITIAL_LOCALE : bootstrap.locale'));
+  assert.ok(source.includes('const REMOTE = window.betterCodexHost?.kind !== "local"'));
   assert.doesNotMatch(source, /window\.location\.reload\(\)/);
   assert.doesNotMatch(source, /localizeOwnedTree|localizedText|translateText/);
 });
