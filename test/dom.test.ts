@@ -777,7 +777,7 @@ test("archive is an action and cancelled is not an issue status", () => {
 
   assert.doesNotMatch(source, /statusCancelled|cancelled:\s*"已取消"|data-context-value="cancelled"/);
   assert.ok(source.includes('data-context-action="archive">\' + icon("archive") + \'<span>\' + escapeHtml(t("归档"))'));
-  const archiveAction = source.slice(source.indexOf('if (item.dataset.contextAction === "archive")'), source.indexOf('if (item.dataset.contextAction === "assign")'));
+  const archiveAction = source.match(/if \(item\.dataset\.contextAction === "archive"\) \{[\s\S]*?await loadIssues\(\);\n\s*\}/)?.[0] || "";
   assert.ok(archiveAction.includes('/archive'));
   assert.doesNotMatch(archiveAction, /confirmAction|删除任务/);
 });
