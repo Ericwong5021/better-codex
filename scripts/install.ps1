@@ -671,28 +671,14 @@ try {
   if ($hadChannel) { Copy-Item -Force $channelPath $backupChannel }
   try {
   $codexProcesses = if ($NoService) { @() } else { @(Get-CodexProcesses) }
-  if (@($codexProcesses).Count -gt 0) {
-    $choice = Read-Host "Codex is currently running. Quit Codex and continue installation? [Y/n]"
-    if ($choice -and $choice -notin @("y", "Y")) {
-      Write-Output "Installation cancelled."
-      return
-    }
-  }
+  $preserveCodex = @($codexProcesses).Count -gt 0
+  if ($preserveCodex) { Write-Step "Codex will remain open while Better Codex is upgraded..." }
   if ((Test-Path $executable) -and -not $NoService) {
     Write-Step "Stopping the existing Better Codex helpers..."
     $disableResult = Invoke-BetterCodexCapture $executable @("disable") 10000
     if ($disableResult.TimedOut) { Write-Step "The existing injection did not respond; continuing with process cleanup..." }
     $serviceStopResult = Invoke-BetterCodexCapture $executable @("service", "stop") 10000
     if ($serviceStopResult.TimedOut) { Write-Step "The existing runtime did not stop in time; continuing with process cleanup..." }
-  }
-  if (@($codexProcesses).Count -gt 0) {
-    Write-Step "Stopping Codex..."
-    @(Get-CodexProcesses) | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-    for ($attempt = 0; $attempt -lt 60; $attempt++) {
-      if (@(Get-CodexProcesses).Count -eq 0) { break }
-      Start-Sleep -Milliseconds 250
-    }
-    if (@(Get-CodexProcesses).Count -gt 0) { throw "Codex did not quit completely. Quit it manually and run the installer again." }
   }
   Write-Step "Installing Node.js bundle to $BinDirectory..."
   New-Item -ItemType Directory -Force -Path $BinDirectory | Out-Null
@@ -716,8 +702,9 @@ try {
   if ($versionResult.Output) { Write-Host ($versionResult.Output.TrimEnd()) }
   if ($versionResult.ExitCode -ne 0) { throw "Better Codex executable verification failed." }
   if (-not $NoService) {
-    Write-Step "Registering runtime and injecting Better Codex..."
-    $setupResult = Invoke-BetterCodexCapture $executable @("setup", "--yes") 120000 $true
+    Write-Step "Registering runtime and refreshing Better Codex..."
+    $setupArguments = if ($preserveCodex) { @("setup", "--yes", "--preserve-codex") } else { @("setup", "--yes") }
+    $setupResult = Invoke-BetterCodexCapture $executable $setupArguments 120000 $true
     if ($setupResult.ExitCode -ne 0) {
       Write-Host ($setupResult.Output.TrimEnd())
       throw "Better Codex setup failed with exit code $($setupResult.ExitCode)."
@@ -725,8 +712,9 @@ try {
     Write-Step "Running installation diagnostics..."
     $doctor = $null
     $doctorOutput = $null
+    $doctorArguments = if ($preserveCodex) { @("doctor", "--allow-pending-injection") } else { @("doctor") }
     for ($attempt = 1; $attempt -le 8; $attempt++) {
-      $doctorResult = Invoke-BetterCodexCapture $executable @("doctor") 20000
+      $doctorResult = Invoke-BetterCodexCapture $executable $doctorArguments 20000
       $doctorOutput = $doctorResult.Output
       $doctorExitCode = $doctorResult.ExitCode
       try {
@@ -746,6 +734,7 @@ try {
       Write-Host ($doctorOutput.TrimEnd())
       throw "Better Codex installation verification failed."
     }
+    if ($preserveCodex) { Write-Step "Codex remained open. Core, Runtime, Skill, and MCP are upgraded. Reopen Codex from the Better Codex launcher only if the page did not refresh." }
   }
   $readyVersion = Get-InstalledVersion $executable
   if (-not $readyVersion -or -not (Test-VersionAtLeast $readyVersion $targetVersion)) {

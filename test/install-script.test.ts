@@ -51,7 +51,7 @@ if ($ErrorActionPreference -ne "Stop") { throw "ErrorActionPreference was not re
 
 test("all installer commands that merge native stderr use the compatibility wrapper", () => {
   assert.match(source, /function Invoke-NativeCapture/);
-  assert.match(source, /Invoke-BetterCodexCapture \$executable @\("setup", "--yes"\)/);
+  assert.match(source, /Invoke-BetterCodexCapture \$executable \$setupArguments/);
 });
 
 test("installers require Node interactively before replacing a legacy executable", () => {
@@ -97,7 +97,7 @@ if ($script:NodeExecutable) { throw "Node executable changed after rejection" }
 
 test("Windows legacy migration removes the EXE only after the new bundle passes diagnostics", () => {
   const installBundle = source.indexOf("Copy-Item -Force $packagedExecutable $bundlePath");
-  const diagnostics = source.indexOf('Invoke-BetterCodexCapture $executable @("doctor")', installBundle);
+  const diagnostics = source.indexOf("Invoke-BetterCodexCapture $executable $doctorArguments", installBundle);
   const removeLegacy = source.indexOf("Remove-Item -LiteralPath $legacyExecutable -Force", diagnostics);
   assert.ok(installBundle >= 0 && diagnostics > installBundle && removeLegacy > diagnostics);
   assert.doesNotMatch(source, /@\("uninstall"\)/);
@@ -441,7 +441,7 @@ try {
 });
 
 test("Windows installer opts persistent runtime commands out of success-time job cleanup", () => {
-  assert.match(source, /Invoke-BetterCodexCapture \$executable @\("setup", "--yes"\) 120000 \$true/);
+  assert.match(source, /Invoke-BetterCodexCapture \$executable \$setupArguments 120000 \$true/);
   assert.match(source, /Invoke-BetterCodexCapture \$Executable @\("service", "restart"\) 30000 \$true/);
   assert.match(source, /Invoke-BetterCodexCapture \$Executable @\("inject", "--launch"\) 60000 \$true/);
   assert.match(source, /Invoke-BetterCodexCapture \$executable @\("service", "install"\) 10000 \$true/);
@@ -479,19 +479,20 @@ if (Test-VersionAtLeast "0.4.2" "0.4.3-beta.1") { throw "stable must not downgra
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
 });
 
-test("Windows installer disables helpers before terminating the full Codex package process tree", () => {
-  const consent = source.indexOf('Read-Host "Codex is currently running. Quit Codex and continue installation? [Y/n]"');
-  const disable = source.indexOf('Invoke-BetterCodexCapture $executable @("disable")', consent);
-  const terminate = source.indexOf("Stop-Process -Id $_.ProcessId -Force", consent);
+test("Windows installer preserves Codex while refreshing Better Codex", () => {
+  const preserve = source.indexOf("$preserveCodex = @($codexProcesses).Count -gt 0");
+  const disable = source.indexOf('Invoke-BetterCodexCapture $executable @("disable")', preserve);
+  const setup = source.indexOf('@("setup", "--yes", "--preserve-codex")', disable);
 
-  assert.ok(consent >= 0, "Codex quit consent is missing");
-  assert.ok(disable > consent, "disable must happen after user consent");
-  assert.ok(terminate > disable, "disable must finish or time out before Codex is terminated");
+  assert.ok(preserve >= 0, "running Codex detection is missing");
+  assert.ok(disable > preserve, "helpers must stop before replacement");
+  assert.ok(setup > disable, "preserved Codex setup is missing");
   assert.match(source, /function Get-CodexProcesses/);
   assert.match(source, /ExecutablePath -notlike "\*\\WindowsApps\\OpenAI\.Codex_\*"/);
   assert.match(source, /\.SessionId -ne \$sessionId/);
   assert.match(source, /GetOwnerSid/);
-  assert.match(source, /Stop-Process -Id \$_\.ProcessId -Force -ErrorAction SilentlyContinue/);
+  assert.doesNotMatch(source, /Codex is currently running\. Quit Codex/);
+  assert.doesNotMatch(source, /Stop-Process -Id \$_\.ProcessId -Force -ErrorAction SilentlyContinue/);
   assert.doesNotMatch(source, /& \$executable disable/);
 });
 
@@ -519,13 +520,13 @@ test("remote installers authenticate checksums before extracting bundles", () =>
   assert.match(shellSource, /checksums\.sig/);
 });
 
-test("macOS installer bounds upgrade, shutdown, setup, diagnostics, and rollback commands", () => {
+test("macOS installer bounds upgrade, setup, diagnostics, and rollback commands", () => {
   assert.match(shellSource, /run_with_timeout\(\)/);
-  assert.match(shellSource, /run_with_timeout 10 "\$EXISTING_BINARY" disable/);
   assert.match(shellSource, /run_with_timeout 600 "\$EXISTING_BINARY" update/);
-  assert.match(shellSource, /run_with_timeout 120 "\$BIN_DIR\/better-codex" setup --yes/);
+  assert.match(shellSource, /run_with_timeout 120 "\$BIN_DIR\/better-codex" setup \$SETUP_ARGUMENTS/);
   assert.match(shellSource, /run_with_timeout 20 "\$BIN_DIR\/better-codex" doctor/);
   assert.match(shellSource, /run_with_timeout 30 "\$BIN_DIR\/better-codex" enable/);
+  assert.match(shellSource, /run_with_timeout 10 "\$BIN_DIR\/better-codex" disable/);
   assert.doesNotMatch(shellSource, /^\s*"\$EXISTING_BINARY" (?:disable|update|inject|launcher|service)/m);
   assert.doesNotMatch(shellSource, /^\s*"\$BIN_DIR\/better-codex" (?:disable|doctor|enable|launcher|service|setup|version)/m);
   assert.match(shellSource, /kill -TERM -- "-\$child_pid"/);

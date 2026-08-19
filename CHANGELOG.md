@@ -4,6 +4,12 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.9-beta.18] - 2026-08-19
+
+- Keep Codex open while installers upgrade the Core, Runtime, Skill, MCP registration, and page integration.
+- Start one injector through a serialized readiness path instead of depending on Runtime polling.
+- Report page injection as ready only when the injector, sidebar entry, and panel are active.
+
 ## [0.4.9-beta.17] - 2026-08-19
 
 - Bundle the Better Codex usage Skill and keep it synchronized during Core upgrades.
@@ -633,7 +639,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.17...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.18...HEAD
+[0.4.9-beta.18]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.17...v0.4.9-beta.18
 [0.4.9-beta.17]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.16...v0.4.9-beta.17
 [0.4.9-beta.16]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.15...v0.4.9-beta.16
 [0.4.9-beta.15]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.14...v0.4.9-beta.15

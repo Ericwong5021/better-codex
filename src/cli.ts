@@ -250,20 +250,48 @@ function injectorPid() {
   return Number.isInteger(pid) && processAlive(pid) && isInjectorProcess(pid) ? pid : null;
 }
 
-function startInjector(portNumber: number) {
+const injectorStartLockPath = `${injectorPidPath}.start`;
+
+function tryStartInjector(portNumber: number) {
   const existing = injectorPid();
   if (existing) return existing;
-  const pid = spawnSelf(["watch-inject", String(portNumber)], injectorLogPath).pid;
-  if (!pid) throw new Error("injector_start_failed");
-  writeFileSync(injectorPidPath, String(pid));
-  return pid;
+  let lock: number;
+  try {
+    lock = openSync(injectorStartLockPath, "wx", 0o600);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") return null;
+    throw error;
+  }
+  try {
+    writeFileSync(lock, String(process.pid));
+    const current = injectorPid();
+    if (current) return current;
+    const pid = spawnSelf(["watch-inject", String(portNumber)], injectorLogPath).pid;
+    if (!pid) throw new Error("injector_start_failed");
+    writeFileSync(injectorPidPath, String(pid));
+    return pid;
+  } finally {
+    closeSync(lock);
+    try { unlinkSync(injectorStartLockPath); } catch {}
+  }
 }
 
-async function waitForInjector() {
-  for (let attempt = 0; attempt < 30; attempt += 1) {
+async function ensureInjector(portNumber: number) {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
     const pid = injectorPid();
     if (pid) return pid;
-    await new Promise(resolve => setTimeout(resolve, 100));
+    const started = tryStartInjector(portNumber);
+    if (started) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+      const running = injectorPid();
+      if (running) return running;
+    } else {
+      try {
+        if (Date.now() - statSync(injectorStartLockPath).mtimeMs > 5000) unlinkSync(injectorStartLockPath);
+      } catch {}
+    }
+    await new Promise(resolve => setTimeout(resolve, 50));
   }
   throw new Error("injector_start_failed");
 }
@@ -273,34 +301,27 @@ async function runRuntime() {
   const server = (await import("./server.js")).startServer();
   await stopInjector();
   let stopping = false;
-  let watcher: ReturnType<typeof spawn> | null = null;
-  const startWatcher = () => {
-    if (stopping || watcher || !injectionEnabled()) return;
-    watcher = spawnSelf(["watch-inject", String(cdpPort)], injectorLogPath, false);
-    if (!watcher.pid) throw new Error("injector_start_failed");
-    writeFileSync(injectorPidPath, String(watcher.pid));
-    watcher.once("exit", () => {
-      watcher = null;
-    });
-  };
-  const reconcileWatcher = () => {
-    if (!injectionEnabled()) {
-      watcher?.kill("SIGTERM");
-      return;
+  let reconciling = false;
+  const reconcileWatcher = async () => {
+    if (stopping || reconciling) return;
+    reconciling = true;
+    try {
+      if (injectionEnabled()) await ensureInjector(cdpPort);
+      else await stopInjector();
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : "injector_reconcile_failed");
+    } finally {
+      reconciling = false;
     }
-    startWatcher();
   };
-  startWatcher();
-  const watcherTimer = setInterval(reconcileWatcher, 1000);
+  void reconcileWatcher();
+  const watcherTimer = setInterval(() => void reconcileWatcher(), 1000);
   watcherTimer.unref();
   process.once("exit", () => {
     stopping = true;
     clearInterval(watcherTimer);
-    watcher?.kill("SIGTERM");
-    if (watcher?.pid && existsSync(injectorPidPath)) {
-      const recorded = Number(readFileSync(injectorPidPath, "utf8"));
-      if (recorded === watcher.pid) unlinkSync(injectorPidPath);
-    }
+    const pid = injectorPid();
+    if (pid) try { process.kill(pid, "SIGTERM"); } catch {}
   });
   return server;
 }
@@ -808,7 +829,7 @@ function installBundledSkills() {
   return { installed: true, path: skillRoot, updateKey: true };
 }
 
-async function doctor() {
+async function doctor(allowPendingInjection = false) {
   const service = serviceStatus();
   const state = readRuntimeState();
   let runtime: Record<string, unknown> = { ok: false, error: "runtime_unavailable" };
@@ -827,6 +848,10 @@ async function doctor() {
   };
   const mcp = mcpStatus();
   const updateKey = (!isSea() && !packagedBuild) || existsSync(updatePublicKeyPath);
+  const injectedTarget = injection.targets.some(target => Boolean((target as { entry?: boolean }).entry) && Boolean((target as { panel?: boolean }).panel));
+  const activeInjectorPid = injectorPid();
+  const injectionReady = injectionEnabled() && Boolean(activeInjectorPid) && injectedTarget;
+  const pendingInjection = allowPendingInjection && !injectionReady;
   const checks = {
     core: { ok: true, ...activeVersions(), profile: betterCodexProfile, home: betterCodexHome, executable: process.env.BETTER_CODEX_LAUNCHER_PATH ?? process.execPath },
     service: { ok: service.installed, ...service },
@@ -834,12 +859,12 @@ async function doctor() {
     database,
     codex,
     compatibility,
-    injection,
+    injection: { ...injection, enabled: injectionEnabled(), injectorPid: activeInjectorPid, ready: injectionReady, pending: pendingInjection },
     skills,
     mcp,
     updateKey,
   };
-  return { ok: Boolean(runtime.ok) && Boolean((database as { ok?: boolean }).ok) && codex.installed && Boolean((compatibility as { compatible?: boolean } | null)?.compatible) && injection.available && skills.betterCodex && mcp.installed && mcp.configured && updateKey, checks };
+  return { ok: Boolean(runtime.ok) && Boolean((database as { ok?: boolean }).ok) && codex.installed && Boolean((compatibility as { compatible?: boolean } | null)?.compatible) && (injectionReady || pendingInjection) && skills.betterCodex && mcp.installed && mcp.configured && updateKey, checks };
 }
 
 async function uninstall() {
@@ -1269,14 +1294,14 @@ async function main() {
         setInjectionEnabled(true);
         await ensureRuntime();
         const injection = await cdpInject(cdpPort, activeRuntimePort(), accessToken(), true);
-        startInjector(cdpPort);
+        await ensureInjector(cdpPort);
         return { launched: true, restarted: false, codexStarted: true, switchedFrom, injection };
       }
       if (restartChoice === "reset-runtime") {
         await restartRuntime();
         setInjectionEnabled(true);
         launchCodex(cdpPort, true);
-        startInjector(cdpPort);
+        await ensureInjector(cdpPort);
         try {
           const injection = await cdpInject(cdpPort, activeRuntimePort(), accessToken(), false);
           return { launched: true, restarted: false, runtimeReset: true, openedCurrentCodex: true, switchedFrom, injection };
@@ -1290,7 +1315,7 @@ async function main() {
         launchCodex(cdpPort, true);
         try {
           const injection = await cdpInject(cdpPort, activeRuntimePort(), accessToken(), true);
-          startInjector(cdpPort);
+          await ensureInjector(cdpPort);
           return { launched: true, restarted: false, openedCurrentCodex: true, switchedFrom, injection };
         } catch (error) {
           setInjectionEnabled(false);
@@ -1303,7 +1328,7 @@ async function main() {
         launchCodex(cdpPort, true);
         try {
           const injection = await cdpInject(cdpPort, activeRuntimePort(), accessToken(), true);
-          startInjector(cdpPort);
+          await ensureInjector(cdpPort);
           return { launched: true, restarted: false, openedCurrentCodex: true, injection };
         } catch (error) {
           setInjectionEnabled(false);
@@ -1314,7 +1339,7 @@ async function main() {
       setInjectionEnabled(true);
       try {
         const injection = await cdpRestartAndInject(cdpPort, activeRuntimePort(), accessToken());
-        await waitForInjector();
+        await ensureInjector(cdpPort);
         return { launched: true, restarted: true, injection };
       } catch (error) {
         setInjectionEnabled(false);
@@ -1331,6 +1356,7 @@ async function main() {
   if (command === "setup") {
     const values = [action, ...args].filter(Boolean) as string[];
     const json = values.includes("--json");
+    const preserveCodex = values.includes("--preserve-codex");
     if (!values.includes("--yes") && !(await confirmSetup())) return print({ configured: false });
     progress("installing_runtime", json);
     setInjectionEnabled(false);
@@ -1346,9 +1372,18 @@ async function main() {
       progress("waiting_for_codex", json);
       if (!codexInstallationStatus().installed) throw new Error("codex_not_found");
       progress("injecting", json);
-      const injection = await cdpRestartAndInject(cdpPort, activeRuntimePort(), accessToken());
+      let injection: unknown;
+      if (preserveCodex) {
+        try {
+          injection = { refreshed: true, targets: await cdpRefreshAndInject(cdpPort, activeRuntimePort(), accessToken()) };
+        } catch (error) {
+          injection = { refreshed: false, pending: true, error: error instanceof Error ? error.message : "injection_refresh_pending" };
+        }
+      } else {
+        injection = await cdpRestartAndInject(cdpPort, activeRuntimePort(), accessToken());
+      }
       setInjectionEnabled(true);
-      const pid = await waitForInjector();
+      const pid = await ensureInjector(cdpPort);
       const launchIntegration = installLaunchIntegration();
       progress("ready", json);
       return print({ configured: true, stages: ["installing_runtime", "installing_mcp", "starting_runtime", "waiting_for_codex", "injecting", "installing_launcher", "ready"], runtime, injection, launchIntegration, skills, mcp, injectorPid: pid });
@@ -1358,7 +1393,7 @@ async function main() {
       throw error;
     }
   }
-  if (command === "doctor") return print(await doctor());
+  if (command === "doctor") return print(await doctor([action, ...args].includes("--allow-pending-injection")));
   if (command === "relay") return relayCommand(action, args);
   if (command === "sync") return syncCommand(action, args);
   if (command === "enable") {
@@ -1369,7 +1404,7 @@ async function main() {
       const selectedPort = Number(option([action, ...args].filter(Boolean) as string[], "--port") ?? cdpPort);
       await cdpInject(selectedPort, activeRuntimePort(), accessToken(), false);
       setInjectionEnabled(true);
-      await waitForInjector();
+      await ensureInjector(selectedPort);
       return print({ enabled: true, runtime, injection: await cdpStatus(selectedPort) });
     } catch (error) {
       setInjectionEnabled(false);
@@ -1419,7 +1454,7 @@ async function main() {
     let injection: unknown = await cdpStatus(selectedPort);
     if ((injection as { available?: boolean }).available || [action, ...args].includes("--launch")) {
       await cdpInject(selectedPort, activeRuntimePort(), accessToken(), [action, ...args].includes("--launch"));
-      startInjector(selectedPort);
+      await ensureInjector(selectedPort);
       injection = await cdpStatus(selectedPort);
     }
     return print({ runtime, injection });
@@ -1447,7 +1482,7 @@ async function main() {
         const removed = await cdpEject(selectedPort, accessToken(), injectionOwnership());
         const injection = await cdpInject(selectedPort, activeRuntimePort(), accessToken(), false);
         setInjectionEnabled(true);
-        const injectorPid = await waitForInjector();
+        const injectorPid = await ensureInjector(selectedPort);
         return { refreshed: true, removed, injection, injectorPid };
       } catch (error) {
         setInjectionEnabled(false);
@@ -1468,7 +1503,7 @@ async function main() {
       const launch = [action, ...args].includes("--launch");
       await cdpInject(selectedPort, activeRuntimePort(), accessToken(), launch);
       setInjectionEnabled(true);
-      const pid = await waitForInjector();
+      const pid = await ensureInjector(selectedPort);
       return print({ ...(await cdpStatus(selectedPort)), injectorPid: pid });
     } catch (error) {
       setInjectionEnabled(false);

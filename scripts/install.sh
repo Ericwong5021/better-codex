@@ -404,36 +404,6 @@ codex_running() {
   return 1
 }
 
-stop_better_codex_helpers() {
-  if [ -n "${EXISTING_BINARY:-}" ]; then
-    run_with_timeout 10 "$EXISTING_BINARY" disable >/dev/null 2>&1 || true
-    run_with_timeout 10 "$EXISTING_BINARY" service stop >/dev/null 2>&1 || true
-  fi
-}
-
-quit_codex() {
-  local app bundle_id pid
-  stop_better_codex_helpers
-  for app in /Applications/Codex.app /Applications/ChatGPT.app; do
-    [ -f "$app/Contents/Info.plist" ] || continue
-    bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist" 2>/dev/null || true)"
-    [ -n "$bundle_id" ] && (/usr/bin/osascript -e "tell application id \"$bundle_id\" to quit" >/dev/null 2>&1 || true) &
-  done
-  for _ in $(seq 1 20); do
-    if ! codex_running; then
-      return 0
-    fi
-    sleep 0.25
-  done
-  for app in /Applications/Codex.app /Applications/ChatGPT.app; do
-    while IFS= read -r pid; do
-      [ -n "$pid" ] && /bin/kill -9 "$pid" >/dev/null 2>&1 || true
-    done < <(/usr/bin/pgrep -f "^$app/Contents/MacOS/" 2>/dev/null || true)
-  done
-  sleep 0.5
-  ! codex_running
-}
-
 WORK_DIR="$(mktemp -d)"
 BACKUP_DIR="$WORK_DIR/previous"
 mkdir -p "$BACKUP_DIR"
@@ -574,23 +544,10 @@ if [ -n "$TARGET_VERSION" ] && [ "$PACKAGED_VERSION" != "$TARGET_VERSION" ]; the
   printf '[Better Codex] Package version %s does not match target v%s. Installation cancelled.\n' "$PACKAGED_VERSION" "$TARGET_VERSION" >&2
   exit 1
 fi
+PRESERVE_CODEX=0
 if [ "$WITH_SERVICE" = "1" ] && codex_running; then
-  if [ ! -r /dev/tty ]; then
-    echo "Codex is running. Quit it completely and run the installer again." >&2
-    exit 1
-  fi
-  printf 'Codex is currently running. Quit Codex and continue installation? [Y/n] ' >/dev/tty
-  read -r CHOICE </dev/tty
-  if [ -n "$CHOICE" ] && [ "$CHOICE" != "y" ] && [ "$CHOICE" != "Y" ]; then
-    echo "Installation cancelled."
-    exit 0
-  fi
-  INSTALL_MUTATED=1
-  printf '[Better Codex] Stopping Codex...\n'
-  if ! quit_codex; then
-    echo "Codex did not quit. Quit it manually and run the installer again." >&2
-    exit 1
-  fi
+  PRESERVE_CODEX=1
+  printf '[Better Codex] Codex will remain open while Better Codex is upgraded...\n'
 fi
 mkdir -p "$BIN_DIR"
 INSTALL_MUTATED=1
@@ -608,21 +565,34 @@ fi
 
 run_with_timeout 10 "$BIN_DIR/better-codex" version
 if [ "$WITH_SERVICE" = "1" ]; then
-  printf '[Better Codex] Registering runtime and injecting Better Codex...\n'
+  printf '[Better Codex] Registering runtime and refreshing Better Codex...\n'
   SETUP_LOG="$WORK_DIR/setup.log"
-  if ! run_with_timeout 120 "$BIN_DIR/better-codex" setup --yes >"$SETUP_LOG" 2>&1; then
+  if [ "$PRESERVE_CODEX" = "1" ]; then
+    SETUP_ARGUMENTS="--yes --preserve-codex"
+  else
+    SETUP_ARGUMENTS="--yes"
+  fi
+  if ! run_with_timeout 120 "$BIN_DIR/better-codex" setup $SETUP_ARGUMENTS >"$SETUP_LOG" 2>&1; then
     cat "$SETUP_LOG" >&2
     exit 1
   fi
   printf '[Better Codex] Running installation diagnostics...\n'
   DOCTOR_LOG="$WORK_DIR/doctor.log"
-  if ! run_with_timeout 20 "$BIN_DIR/better-codex" doctor >"$DOCTOR_LOG" 2>&1; then
+  if [ "$PRESERVE_CODEX" = "1" ]; then
+    DOCTOR_ARGUMENTS="--allow-pending-injection"
+  else
+    DOCTOR_ARGUMENTS=""
+  fi
+  if ! run_with_timeout 20 "$BIN_DIR/better-codex" doctor $DOCTOR_ARGUMENTS >"$DOCTOR_LOG" 2>&1; then
     cat "$DOCTOR_LOG" >&2
     exit 1
   fi
   if ! awk '/"ok":/ { found=1; ok=($0 ~ /true/); exit } END { if (!found || !ok) exit 1 }' "$DOCTOR_LOG"; then
     cat "$DOCTOR_LOG" >&2
     exit 1
+  fi
+  if [ "$PRESERVE_CODEX" = "1" ]; then
+    printf '[Better Codex] Codex remained open. Core, Runtime, Skill, and MCP are upgraded. Reopen Codex from the Better Codex launcher only if the page did not refresh.\n'
   fi
 fi
 READY_VERSION="$(installed_version "$BIN_DIR/better-codex" || true)"

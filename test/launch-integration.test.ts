@@ -141,12 +141,15 @@ test("shortcut launch restores the bridge when keeping the current Codex", () =>
   const branch = cliSource.slice(start, end);
   assert.match(branch, /setInjectionEnabled\(true\)/);
   assert.match(branch, /cdpInject\(cdpPort, activeRuntimePort\(\), accessToken\(\), true\)/);
-  assert.match(branch, /startInjector\(cdpPort\)/);
+  assert.match(branch, /ensureInjector\(cdpPort\)/);
 });
 
-test("injector pid validation checks the process command", () => {
+test("injector startup is serialized and independent from runtime polling", () => {
   assert.match(cliSource, /function isInjectorProcess\(pid: number\)/);
   assert.match(cliSource, /processAlive\(pid\) && isInjectorProcess\(pid\)/);
+  assert.match(cliSource, /openSync\(injectorStartLockPath, "wx", 0o600\)/);
+  assert.match(cliSource, /async function ensureInjector\(portNumber: number\)/);
+  assert.doesNotMatch(cliSource, /waitForInjector/);
 });
 
 test("launcher coalesces clicks to the latest profile intent and leases the shared lock", () => {
