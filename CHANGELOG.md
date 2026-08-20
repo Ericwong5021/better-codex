@@ -4,6 +4,13 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.9-beta.23] - 2026-08-20
+
+- Keep archived and deleted Issues synchronized with their linked Codex threads.
+- Surface actionable Relay and browser diagnostics while redacting sensitive request data.
+- Improve task-board loading, Issue dialogs, Agent creation, and mobile Web navigation.
+- Add a compact label picker with touch-friendly menus for remote Issue editing.
+
 ## [0.4.9-beta.22] - 2026-08-20
 
 - Keep active Hub and Relay browser sessions signed in while they remain in use.
@@ -661,7 +668,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.22...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.23...HEAD
+[0.4.9-beta.23]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.22...v0.4.9-beta.23
 [0.4.9-beta.22]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.21...v0.4.9-beta.22
 [0.4.9-beta.21]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.20...v0.4.9-beta.21
 [0.4.9-beta.20]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.19...v0.4.9-beta.20
