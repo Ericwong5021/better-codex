@@ -59,6 +59,9 @@ type RelayChannel = {
   method: string;
   request: IncomingMessage;
   response: ServerResponse;
+  path: string;
+  headers: Record<string, string>;
+  recoverable: boolean;
   requestSequence: number;
   responseSequence: number;
   responseStarted: boolean;
@@ -66,6 +69,7 @@ type RelayChannel = {
   requestBytes: number;
   requestCredit: number;
   requestQueue: Buffer[];
+  requestChunks: Buffer[];
   requestEnded: boolean;
   requestEndSent: boolean;
   timeout: NodeJS.Timeout;
@@ -243,12 +247,14 @@ export function createRelayServer(options: RelayServerOptions) {
   const authorizations = new Map<string, DeviceAuthorization>();
   const loginAttempts = new Map<string, { count: number; resetAt: number }>();
   let runtime: ActiveRuntime | null = null;
+  const retryableChannels = new Map<string, RelayChannel>();
   const finishChannel = (active: ActiveRuntime, channel: RelayChannel) => {
     if (channel.completed) return;
     channel.completed = true;
     clearTimeout(channel.timeout);
     active.channels.delete(channel.id);
     active.activeChannels = active.channels.size;
+    retryableChannels.delete(channel.id);
   };
   const failChannel = (active: ActiveRuntime, channel: RelayChannel, error: string, detail = error) => {
     if (channel.completed) return;
@@ -270,6 +276,9 @@ export function createRelayServer(options: RelayServerOptions) {
   const failRuntimeChannels = (active: ActiveRuntime, error: string, detail = error) => {
     for (const channel of [...active.channels.values()]) failChannel(active, channel, error, detail);
   };
+  const sendRequestOpen = (active: ActiveRuntime, channel: RelayChannel) => {
+    active.socket.send(encodeRelayMessage({ type: "request_open", protocol_version: relayProtocolVersion, device_id: active.deviceId, runtime_instance_id: active.runtimeInstanceId, connection_epoch: active.connectionEpoch, channel_id: channel.id, request_id: channel.requestId, method: channel.method, path: channel.path, headers: channel.headers }));
+  };
   const flushRequest = (active: ActiveRuntime, channel: RelayChannel) => {
     if (channel.completed) return;
     while (channel.requestQueue.length && channel.requestCredit >= channel.requestQueue[0].length) {
@@ -289,6 +298,18 @@ export function createRelayServer(options: RelayServerOptions) {
     }
     channel.request.resume();
   };
+  const replayChannel = (active: ActiveRuntime, channel: RelayChannel) => {
+    channel.requestSequence = 0;
+    channel.responseSequence = 0;
+    channel.responseStarted = false;
+    channel.requestCredit = relayInitialWindowBytes;
+    channel.requestQueue = [...channel.requestChunks];
+    channel.requestEndSent = false;
+    active.channels.set(channel.id, channel);
+    active.activeChannels = active.channels.size;
+    sendRequestOpen(active, channel);
+    flushRequest(active, channel);
+  };
   const forwardRequest = (request: IncomingMessage, response: ServerResponse, url: URL, method: string) => {
     const active = runtime;
     if (!active) return sendJson(response, 503, { error: "runtime_offline" });
@@ -298,17 +319,24 @@ export function createRelayServer(options: RelayServerOptions) {
     const suppliedRequestId = String(request.headers["x-better-codex-request-id"] || "");
     const requestId = /^[A-Za-z0-9_-]{8,200}$/.test(suppliedRequestId) ? suppliedRequestId : randomUUID();
     const timeout = setTimeout(() => {
-      const channel = active.channels.get(channelId);
-      if (!channel) return;
-      active.socket.send(encodeRelayMessage({ type: "request_cancel", protocol_version: relayProtocolVersion, device_id: active.deviceId, runtime_instance_id: active.runtimeInstanceId, connection_epoch: active.connectionEpoch, channel_id: channelId, reason: "relay_request_timeout" }));
-      failChannel(active, channel, "relay_request_timeout");
+      const channel = runtime?.channels.get(channelId) || retryableChannels.get(channelId);
+      if (!channel || channel.completed) return;
+      const current = runtime;
+      if (current?.channels.has(channelId)) {
+        try { current.socket.send(encodeRelayMessage({ type: "request_cancel", protocol_version: relayProtocolVersion, device_id: current.deviceId, runtime_instance_id: current.runtimeInstanceId, connection_epoch: current.connectionEpoch, channel_id: channelId, reason: "relay_request_timeout" })); } catch {}
+        failChannel(current, channel, "relay_request_timeout");
+      } else {
+        channel.completed = true;
+        retryableChannels.delete(channelId);
+        sendJson(channel.response, relayErrorStatus("relay_request_timeout"), { error: "relay_request_timeout", request_id: channel.requestId, channel_id: channel.id, method: channel.method, request_bytes: channel.requestBytes, request_ended: channel.requestEnded, response_started: false });
+      }
     }, 120_000);
     timeout.unref();
-    const channel: RelayChannel = { id: channelId, requestId, method, request, response, requestSequence: 0, responseSequence: 0, responseStarted: false, completed: false, requestBytes: 0, requestCredit: relayInitialWindowBytes, requestQueue: [], requestEnded: false, requestEndSent: false, timeout };
+    const recoverable = !["GET", "HEAD", "OPTIONS"].includes(method) && /^[A-Za-z0-9_-]{8,200}$/.test(suppliedRequestId);
+    const channel: RelayChannel = { id: channelId, requestId, method, request, response, path: `${url.pathname}${url.search}`, headers: forwardedRequestHeaders(request, requestId), recoverable, requestSequence: 0, responseSequence: 0, responseStarted: false, completed: false, requestBytes: 0, requestCredit: relayInitialWindowBytes, requestQueue: [], requestChunks: [], requestEnded: false, requestEndSent: false, timeout };
     active.channels.set(channelId, channel);
     active.activeChannels = active.channels.size;
-    const path = `${url.pathname}${url.search}`;
-    active.socket.send(encodeRelayMessage({ type: "request_open", protocol_version: relayProtocolVersion, device_id: active.deviceId, runtime_instance_id: active.runtimeInstanceId, connection_epoch: active.connectionEpoch, channel_id: channelId, request_id: requestId, method, path, headers: forwardedRequestHeaders(request, requestId) }));
+    sendRequestOpen(active, channel);
     request.on("data", chunkValue => {
       if (channel.completed) return;
       request.pause();
@@ -321,7 +349,9 @@ export function createRelayServer(options: RelayServerOptions) {
         return;
       }
       for (let offset = 0; offset < bytes.length; offset += relayMaxChunkBytes) {
-        channel.requestQueue.push(bytes.subarray(offset, Math.min(bytes.length, offset + relayMaxChunkBytes)));
+        const chunk = bytes.subarray(offset, Math.min(bytes.length, offset + relayMaxChunkBytes));
+        channel.requestQueue.push(chunk);
+        if (channel.recoverable) channel.requestChunks.push(chunk);
       }
       flushRequest(active, channel);
     });
@@ -331,13 +361,27 @@ export function createRelayServer(options: RelayServerOptions) {
     });
     request.once("error", error => {
       if (channel.completed) return;
-      active.socket.send(encodeRelayMessage({ type: "request_cancel", protocol_version: relayProtocolVersion, device_id: active.deviceId, runtime_instance_id: active.runtimeInstanceId, connection_epoch: active.connectionEpoch, channel_id: channelId, reason: "browser_request_error" }));
-      failChannel(active, channel, "relay_stream_interrupted", "browser_request_error:" + String((error as NodeJS.ErrnoException).code || error.message || "unknown"));
+      const current = runtime;
+      if (current?.channels.has(channelId)) {
+        try { current.socket.send(encodeRelayMessage({ type: "request_cancel", protocol_version: relayProtocolVersion, device_id: current.deviceId, runtime_instance_id: current.runtimeInstanceId, connection_epoch: current.connectionEpoch, channel_id: channelId, reason: "browser_request_error" })); } catch {}
+        failChannel(current, channel, "relay_stream_interrupted", "browser_request_error:" + String((error as NodeJS.ErrnoException).code || error.message || "unknown"));
+      } else {
+        channel.completed = true;
+        clearTimeout(channel.timeout);
+        retryableChannels.delete(channelId);
+      }
     });
     response.once("close", () => {
       if (channel.completed) return;
-      try { active.socket.send(encodeRelayMessage({ type: "request_cancel", protocol_version: relayProtocolVersion, device_id: active.deviceId, runtime_instance_id: active.runtimeInstanceId, connection_epoch: active.connectionEpoch, channel_id: channelId, reason: "browser_disconnected" })); } catch {}
-      finishChannel(active, channel);
+      const current = runtime;
+      if (current?.channels.has(channelId)) {
+        try { current.socket.send(encodeRelayMessage({ type: "request_cancel", protocol_version: relayProtocolVersion, device_id: current.deviceId, runtime_instance_id: current.runtimeInstanceId, connection_epoch: current.connectionEpoch, channel_id: channelId, reason: "browser_disconnected" })); } catch {}
+        finishChannel(current, channel);
+      } else {
+        channel.completed = true;
+        clearTimeout(channel.timeout);
+        retryableChannels.delete(channelId);
+      }
     });
   };
   const server = createServer((request, response) => {
@@ -534,6 +578,7 @@ export function createRelayServer(options: RelayServerOptions) {
               if (previous) failRuntimeChannels(previous, "relay_connection_replaced");
               previous?.socket.close(4001);
               connection?.send(encodeRelayMessage({ type: "hello_ack", protocol_version: relayProtocolVersion, device_id: device.id, runtime_instance_id: message.runtime_instance_id, connection_epoch: epoch, heartbeat_interval_ms: heartbeatIntervalMs, max_concurrent_channels: maxConcurrentChannels, max_chunk_bytes: relayMaxChunkBytes }));
+              for (const channel of [...retryableChannels.values()]) replayChannel(active, channel);
               store.audit(device.id, "runtime_connected", relayProtocolVersion);
               return;
             }
@@ -598,7 +643,16 @@ export function createRelayServer(options: RelayServerOptions) {
         },
         close: () => {
           if (runtime?.socket === connection) {
-            failRuntimeChannels(runtime, "relay_stream_interrupted", socketError ? "runtime_socket_error:" + socketError : "runtime_socket_closed");
+            const interrupted = runtime;
+            for (const channel of [...interrupted.channels.values()]) {
+              if (channel.recoverable && channel.requestEnded && !channel.responseStarted) {
+                interrupted.channels.delete(channel.id);
+                retryableChannels.set(channel.id, channel);
+              } else {
+                failChannel(interrupted, channel, "relay_stream_interrupted", socketError ? "runtime_socket_error:" + socketError : "runtime_socket_closed");
+              }
+            }
+            interrupted.activeChannels = interrupted.channels.size;
             runtime = null;
           }
           if (active) store.audit(device.id, "runtime_disconnected");
@@ -627,6 +681,12 @@ export function createRelayServer(options: RelayServerOptions) {
 
   const close = () => new Promise<void>((resolveClose, reject) => {
     clearInterval(heartbeatSweep);
+    for (const channel of retryableChannels.values()) {
+      channel.completed = true;
+      clearTimeout(channel.timeout);
+      channel.response.end();
+    }
+    retryableChannels.clear();
     runtime?.socket.close(1001);
     runtime = null;
     server.close(error => {

@@ -27,6 +27,20 @@ async function waitFor(check: () => boolean, timeout = 5000) {
   throw new Error("condition_timeout");
 }
 
+function waitForMessage(socket: WebSocket, predicate: (value: Record<string, unknown>) => boolean) {
+  return new Promise<Record<string, unknown>>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("websocket_matching_message_timeout")), 3000);
+    const onMessage = (data: RawData) => {
+      const value = JSON.parse(data.toString()) as Record<string, unknown>;
+      if (!predicate(value)) return;
+      clearTimeout(timer);
+      socket.off("message", onMessage);
+      resolve(value);
+    };
+    socket.on("message", onMessage);
+  });
+}
+
 function requestStatus(port: number, path: string, headers: Record<string, string>) {
   return new Promise<number>((resolve, reject) => {
     const request = httpRequest({ host: "127.0.0.1", port, path, headers }, response => {
@@ -128,6 +142,54 @@ test("relay Web session requires same-origin CSRF for protected requests", async
   }
   assert.equal((await fetch(`${base}/relay/session`, { method: "POST", headers: { "content-type": "application/json", origin: base }, body: JSON.stringify({ username: "admin", password: "relay-password-123" }) })).status, 429);
   assert.doesNotMatch(JSON.stringify(relay.store.auditEvents(100)), /relay-password-123|wrong-password/);
+  await relay.close();
+});
+
+test("relay retries a complete idempotent write after Runtime reconnects", async () => {
+  const relay = createRelayServer({ host: "127.0.0.1", port: 0, database: ":memory:", adminToken: "f".repeat(64), webUsername: "admin", webPassword: "relay-password-123", secureCookies: false });
+  relay.server.listen(0, "127.0.0.1");
+  await once(relay.server, "listening");
+  const address = relay.server.address();
+  assert.ok(address && typeof address === "object");
+  const base = `http://127.0.0.1:${address.port}`;
+  const socketBase = `ws://127.0.0.1:${address.port}`;
+  const device = relay.store.pairDevice("Runtime Retry", relay.store.createPairingCode().pairing_code);
+  const connect = async (instance: string, onOpen?: (socket: WebSocket) => void) => {
+    const socket = new WebSocket(`${socketBase}/api/v1/runtime/connect`, relayWebSocketProtocol, { headers: { authorization: `Bearer ${device.device_token}` } });
+    await once(socket, "open");
+    onOpen?.(socket);
+    const acknowledged = waitForMessage(socket, value => value.type === "hello_ack");
+    socket.send(encodeRelayMessage({ type: "hello", protocol_version: relayProtocolVersion, device_id: device.device_id, runtime_instance_id: instance, core_version: "0.5.0", capabilities: ["http-stream"] }));
+    await acknowledged;
+    return socket;
+  };
+  const first = await connect("runtime-retry-1");
+  const login = await fetch(`${base}/relay/session`, { method: "POST", headers: { "content-type": "application/json", origin: base }, body: JSON.stringify({ username: "admin", password: "relay-password-123" }) });
+  const session = await login.json() as { csrf_token: string };
+  const cookie = String(login.headers.get("set-cookie") || "").split(";")[0];
+  const requestEnded = waitForMessage(first, value => value.type === "request_end");
+  const response = fetch(`${base}/api/retryable-write`, { method: "POST", headers: { cookie, origin: base, "x-csrf-token": session.csrf_token, "content-type": "application/json", "x-better-codex-request-id": "retryable-write-1" }, body: JSON.stringify({ value: "once" }) });
+  await requestEnded;
+  const firstClosed = once(first, "close");
+  first.close();
+  await firstClosed;
+  let replayedOpenPromise: Promise<Record<string, unknown>> | undefined;
+  let replayedEndPromise: Promise<Record<string, unknown>> | undefined;
+  const second = await connect("runtime-retry-2", socket => {
+    replayedOpenPromise = waitForMessage(socket, value => value.type === "request_open");
+    replayedEndPromise = waitForMessage(socket, value => value.type === "request_end");
+  });
+  const replayedOpen = await replayedOpenPromise!;
+  assert.equal(replayedOpen.request_id, "retryable-write-1");
+  assert.equal(replayedOpen.method, "POST");
+  const replayedEnd = await replayedEndPromise!;
+  second.send(encodeRelayMessage({ type: "response_open", protocol_version: relayProtocolVersion, device_id: device.device_id, runtime_instance_id: "runtime-retry-2", connection_epoch: 2, channel_id: String(replayedEnd.channel_id), status: 202, headers: { "content-type": "application/json" } }));
+  second.send(encodeRelayMessage({ type: "response_chunk", protocol_version: relayProtocolVersion, device_id: device.device_id, runtime_instance_id: "runtime-retry-2", connection_epoch: 2, channel_id: String(replayedEnd.channel_id), sequence: 0, data: Buffer.from('{"retried":true}').toString("base64") }));
+  second.send(encodeRelayMessage({ type: "response_end", protocol_version: relayProtocolVersion, device_id: device.device_id, runtime_instance_id: "runtime-retry-2", connection_epoch: 2, channel_id: String(replayedEnd.channel_id) }));
+  const completed = await response;
+  assert.equal(completed.status, 202);
+  assert.deepEqual(await completed.json(), { retried: true });
+  second.close();
   await relay.close();
 });
 
