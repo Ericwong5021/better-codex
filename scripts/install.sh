@@ -263,7 +263,7 @@ run_with_timeout() {
 
 installed_version() {
   local binary="$1" raw core managed
-  raw="$(run_with_timeout 10 "$binary" version --json 2>/dev/null)" || return 1
+  raw="$(run_with_timeout 30 "$binary" version --json 2>/dev/null)" || return 1
   core="$(printf '%s' "$raw" | sed -n 's/.*"core":"\([^"]*\)".*/\1/p')"
   managed="$(printf '%s' "$raw" | sed -n 's/.*"managedCore":"\([^"]*\)".*/\1/p')"
   if [ -n "$managed" ] && [ -n "$core" ] && version_at_least "$managed" "$core"; then
@@ -277,7 +277,7 @@ installed_version() {
 
 packaged_core_version() {
   local binary="$1" validation_home="$2" raw core
-  raw="$(run_with_timeout 10 env BETTER_CODEX_HOME="$validation_home" BETTER_CODEX_DISABLE_DELEGATION=1 "$binary" version --json 2>/dev/null)" || return 1
+  raw="$(run_with_timeout 30 env BETTER_CODEX_HOME="$validation_home" BETTER_CODEX_DISABLE_DELEGATION=1 "$binary" version --json 2>/dev/null)" || return 1
   core="$(printf '%s' "$raw" | sed -n 's/.*"core":"\([^"]*\)".*/\1/p')"
   [ -n "$core" ] || return 1
   printf '%s' "$core"
@@ -288,8 +288,8 @@ installation_ready() {
   if [ "$WITH_SERVICE" != "1" ]; then
     return 0
   fi
-  run_with_timeout 15 "$binary" launcher install >/dev/null 2>&1 || return 1
-  output="$(run_with_timeout 20 "$binary" doctor 2>/dev/null)" || return 1
+  run_with_timeout 30 "$binary" launcher install >/dev/null 2>&1 || return 1
+  output="$(run_with_timeout 60 "$binary" doctor 2>/dev/null)" || return 1
   printf '%s' "$output" | awk '/"ok":/ { found=1; ok=($0 ~ /true/); exit } END { if (!found || !ok) exit 1 }'
 }
 
@@ -301,7 +301,7 @@ desired_update_channel() {
 
 set_installed_channel() {
   local binary="$1" channel="$2"
-  run_with_timeout 10 "$binary" update channel "$channel" >/dev/null
+  run_with_timeout 30 "$binary" update channel "$channel" >/dev/null
   grep -Eq '"channel"[[:space:]]*:[[:space:]]*"'"$channel"'"' "$CHANNEL_PATH"
 }
 
@@ -423,7 +423,7 @@ PREVIOUS_INJECTION_ENABLED=1
 [ -e "$UPDATE_KEY_PATH" ] && { cp -p "$UPDATE_KEY_PATH" "$BACKUP_DIR/update-public-key.pem"; HAD_UPDATE_KEY=1; }
 [ -e "$CHANNEL_PATH" ] && { cp -p "$CHANNEL_PATH" "$BACKUP_DIR/channel.json"; HAD_CHANNEL=1; }
 if [ "$HAD_BINARY" = "1" ] && [ "$WITH_SERVICE" = "1" ]; then
-  if ! PREVIOUS_SERVICE_STATUS="$(run_with_timeout 10 "$BIN_DIR/better-codex" service status 2>/dev/null)"; then
+  if ! PREVIOUS_SERVICE_STATUS="$(run_with_timeout 30 "$BIN_DIR/better-codex" service status 2>/dev/null)"; then
     echo "Unable to read the existing Better Codex service state; no installation changes were made." >&2
     exit 1
   fi

@@ -4,6 +4,10 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.9-beta.21] - 2026-08-20
+
+- Allow installer health commands enough time to finish on slower macOS CLI cold starts.
+
 ## [0.4.9-beta.20] - 2026-08-20
 
 - Browse folders on the local Runtime when creating projects from the remote Web workspace.
@@ -650,7 +654,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.20...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.21...HEAD
+[0.4.9-beta.21]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.20...v0.4.9-beta.21
 [0.4.9-beta.20]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.19...v0.4.9-beta.20
 [0.4.9-beta.19]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.18...v0.4.9-beta.19
 [0.4.9-beta.18]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.17...v0.4.9-beta.18
