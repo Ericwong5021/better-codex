@@ -4,6 +4,13 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.9-beta.22] - 2026-08-20
+
+- Keep active Hub and Relay browser sessions signed in while they remain in use.
+- Open expanded Issue details inside the current workspace with clearer navigation back to the board.
+- Keep compact Web dialogs, conversations, shortcuts, and attachment transfers stable on mobile browsers.
+- Let remote users collapse the Web sidebar and resume the current route after the Runtime reconnects.
+
 ## [0.4.9-beta.21] - 2026-08-20
 
 - Allow installer health commands enough time to finish on slower macOS CLI cold starts.
@@ -654,7 +661,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.21...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.22...HEAD
+[0.4.9-beta.22]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.21...v0.4.9-beta.22
 [0.4.9-beta.21]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.20...v0.4.9-beta.21
 [0.4.9-beta.20]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.19...v0.4.9-beta.20
 [0.4.9-beta.19]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.18...v0.4.9-beta.19
