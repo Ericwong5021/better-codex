@@ -15,6 +15,9 @@ test("generated injection script is valid JavaScript", () => {
   assert.ok(source.includes("showAutoDispatchHelp(\"settings\")"));
   assert.ok(source.includes('HOST_KIND === "web" ? INITIAL_LOCALE : bootstrap.locale'));
   assert.ok(source.includes('const REMOTE = window.betterCodexHost?.kind === "remote" || document.documentElement.dataset.betterCodexHost === "relay"'));
+  assert.ok(source.includes('value.replace(/\\s+/g, "")'));
+  assert.ok(source.includes('mockupText(issue.description).replace(/[#*_\`~>\[\]()]/g, "").replace(/\\s+/g, " ").trim()'));
+  assert.doesNotMatch(source, /\.replace\(\/s\+\/g,/);
   assert.doesNotMatch(source, /window\.location\.reload\(\)/);
   assert.doesNotMatch(source, /localizeOwnedTree|localizedText|translateText/);
 });
@@ -44,6 +47,9 @@ test("board bridge retries timed out GET requests without repeating writes", () 
   assert.match(source, /const method = String\(options\.method \|\| "GET"\)\.toUpperCase\(\)/);
   assert.match(source, /return attempt\(method === "GET" \? 1 : 0\)/);
   assert.match(source, /retriesLeft > 0 && error instanceof Error && error\.message === "runtime_bridge_timeout"/);
+  assert.match(source, /timeoutMs: files\.length \? 120_000 : undefined/);
+  assert.match(source, /const transferTimeoutMs = files\.length \? 120_000 : undefined/);
+  assert.match(source, /"relay_stream"/);
   assert.match(source, /result\?\.accepted !== true/);
   assert.match(source, /await waitForUpdateCompletion\(notice\)/);
 });
@@ -454,7 +460,9 @@ test("agent assignment options expose compact model and reasoning tags", () => {
 test("agent issue creation refreshes profiles and reuses their names and avatars", () => {
   const source = injectionScript(4317, "test-token", "install");
 
-  assert.ok(source.includes('state.agents = await api("/api/agents")'));
+  assert.ok(source.includes("const [agents, projects, refreshedIssue] = await Promise.all(["));
+  assert.ok(source.includes('api("/api/agents")'));
+  assert.ok(source.includes("state.agents = agents"));
   assert.ok(source.includes('agentAvatarMarkup(agent, "better-codex-agent-avatar")'));
   assert.ok(source.includes('agentAvatarMarkup(selectedAgent, "better-codex-agent-avatar")'));
   assert.ok(source.includes("syncAgentAvatar(runAvatar, selectedAgent)"));
@@ -548,10 +556,10 @@ test("agent issue creation reserves enough height for its scaled footer", () => 
 test("issue detail dialog separates compact and expanded sizes", () => {
   const css = betterCodexDesignSystemCss();
 
-  assert.match(css, /#better-codex-dialog\[data-detail="true"\]\[data-expanded="false"\]\s*\{[^}]*width:\s*min\(720px,[^}]*height:\s*fit-content;/s);
-  assert.match(css, /#better-codex-dialog\[data-detail="true"\]\[data-expanded="false"\]:has\(\.better-codex-conversation\)\s*\{[^}]*height:\s*min\(62vh,\s*640px\)/s);
-  assert.match(css, /#better-codex-dialog\[data-detail="true"\]\[data-expanded="true"\]\s*\{[^}]*width:\s*min\(1200px,[^}]*height:\s*fit-content;/s);
-  assert.match(css, /#better-codex-dialog\[data-detail="true"\]\[data-expanded="true"\]:has\(\.better-codex-conversation\)\s*\{[^}]*height:\s*min\(76vh,\s*780px\)/s);
+  assert.match(css, /#better-codex-dialog\[data-detail="true"\]\[data-expanded="false"\]\s*\{[^}]*width:\s*min\(1200px,[^}]*height:\s*fit-content;/s);
+  assert.match(css, /#better-codex-dialog\[data-detail="true"\]\[data-expanded="false"\]:has\(\.better-codex-conversation\)\s*\{[^}]*height:\s*min\(76vh,\s*780px\)/s);
+  assert.match(css, /#better-codex-dialog\[data-detail="true"\]\[data-expanded="true"\]\s*\{[^}]*inset:\s*var\(--bc-dialog-fullscreen-top,[^}]*width:\s*var\(--bc-dialog-fullscreen-width,[^}]*height:\s*var\(--bc-dialog-fullscreen-height,/s);
+  assert.match(css, /#better-codex-dialog\[data-detail="true"\]\[data-expanded="true"\]:has\(\.better-codex-conversation\)\s*\{[^}]*height:\s*var\(--bc-dialog-fullscreen-height,/s);
   assert.match(css, /#better-codex-dialog\[data-detail="true"\]\[data-expanded="false"\],[\s\S]*?#better-codex-dialog\[data-detail="true"\]\[data-expanded="true"\]\s*\{\s*width:\s*calc\(100vw - 24px\);/s);
 });
 
@@ -719,7 +727,7 @@ test("issue details render the latest conversation result and reply composer", (
   assert.match(css, /\.better-codex-bubble\s*\{/s);
   assert.match(css, /\.better-codex-composer\s*\{[^}]*border-radius:\s*23px;[^}]*padding:\s*8px;/s);
   assert.match(css, /\.better-codex-composer textarea\s*\{[^}]*height:\s*calc\(2\.9em\s*\+\s*8px\);/s);
-  assert.match(css, /#better-codex-dialog\[data-detail="true"\]\[data-expanded="true"\] \.better-codex-composer textarea\s*\{[^}]*height:\s*calc\(5\.8em\s*\+\s*8px\);/s);
+  assert.match(css, /#better-codex-dialog\[data-detail="true"\] \.better-codex-composer textarea\s*\{[^}]*height:\s*calc\(5\.8em\s*\+\s*8px\);/s);
   assert.match(css, /\.better-codex-composer textarea\s*\{[^}]*resize:\s*none;/s);
   assert.match(css, /\.better-codex-composer-toolbar\s*\{[^}]*height:\s*30px;/s);
   assert.match(css, /\.better-codex-composer-attach,[\s\S]*?\.better-codex-composer-send\s*\{[^}]*width:\s*30px;[^}]*height:\s*30px;/s);

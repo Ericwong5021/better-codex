@@ -408,7 +408,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const names = { Space: "Space", Enter: "Enter", Tab: "Tab", Escape: "Escape", Backspace: "Backspace", Delete: "Delete", ArrowUp: "Up", ArrowDown: "Down", ArrowLeft: "Left", ArrowRight: "Right", Comma: "Comma", Period: "Period", Slash: "Slash", Backslash: "Backslash", Semicolon: "Semicolon", Quote: "Quote", BracketLeft: "BracketLeft", BracketRight: "BracketRight", Minus: "Minus", Equal: "Equal", Backquote: "Backquote", NumpadAdd: "NumpadAdd", NumpadSubtract: "NumpadSubtract", NumpadMultiply: "NumpadMultiply", NumpadDivide: "NumpadDivide", NumpadDecimal: "NumpadDecimal" };
       if (names[source]) return names[source];
       const value = String(key || "").trim();
-      return value.length === 1 ? value.toUpperCase() : value.replace(/\s+/g, "");
+      return value.length === 1 ? value.toUpperCase() : value.replace(/\\s+/g, "");
     }
     function shortcutFromKeyboardEvent(event) {
       const key = shortcutKeyFromCode(event.code, event.key);
@@ -4921,7 +4921,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           const activity = activityState
             ? '<span class="better-codex-activity" data-run="' + escapeHtml(activityState) + '">' + activityIcon + '<span class="' + (enrichmentLocked || executionRunning || permissions.remotePending ? "better-codex-shimmer" : "") + '">' + activityLabel + '</span></span>'
             : "";
-          const description = mockupText(issue.description).replace(/[#*_\`~>\[\]()]/g, "").replace(/\s+/g, " ").trim();
+          const description = mockupText(issue.description).replace(/[#*_\`~>\[\]()]/g, "").replace(/\\s+/g, " ").trim();
           const issueProject = state.projects.find(item => item.id === issue.project_id);
           const projectChip = projectLabel(issueProject)
             ? '<span class="better-codex-chip">' + icon("folder") + '<span>' + escapeHtml(projectLabel(issueProject)) + '</span></span>'
@@ -5295,6 +5295,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const compact = HOST_KIND === "web" && window.matchMedia("(max-width: 720px)").matches;
         if (!compact) {
           dialog.style.removeProperty("--bc-mobile-viewport-top");
+          dialog.style.removeProperty("--bc-mobile-viewport-height");
           dialog.style.removeProperty("--bc-mobile-layout-height");
           dialog.style.removeProperty("--bc-mobile-keyboard-translation");
           mobileDialogLayoutHeight = 0;
@@ -5305,12 +5306,20 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const viewportHeight = viewport?.height || window.innerHeight;
         const active = document.activeElement;
         const activeInput = active instanceof HTMLElement && dialog.contains(active) && active.matches("input, textarea, [contenteditable='true']");
-        if (!activeInput || !mobileDialogLayoutHeight || viewportHeight >= mobileDialogLayoutHeight) mobileDialogLayoutHeight = Math.max(window.innerHeight, viewportHeight);
-        const layoutHeight = Math.max(mobileDialogLayoutHeight, window.innerHeight, viewportHeight);
-        const keyboardOffset = activeInput ? Math.max(0, layoutHeight - viewportHeight) : 0;
         dialog.style.setProperty("--bc-mobile-viewport-top", (viewport?.offsetTop || 0) + "px");
-        dialog.style.setProperty("--bc-mobile-layout-height", layoutHeight + "px");
-        dialog.style.setProperty("--bc-mobile-keyboard-translation", -keyboardOffset + "px");
+        if (!issue) {
+          mobileDialogLayoutHeight = 0;
+          dialog.style.setProperty("--bc-mobile-viewport-height", viewportHeight + "px");
+          dialog.style.removeProperty("--bc-mobile-layout-height");
+          dialog.style.removeProperty("--bc-mobile-keyboard-translation");
+        } else {
+          dialog.style.removeProperty("--bc-mobile-viewport-height");
+          if (!activeInput || !mobileDialogLayoutHeight || viewportHeight >= mobileDialogLayoutHeight) mobileDialogLayoutHeight = Math.max(window.innerHeight, viewportHeight);
+          const layoutHeight = Math.max(mobileDialogLayoutHeight, window.innerHeight, viewportHeight);
+          const keyboardOffset = activeInput ? Math.max(0, layoutHeight - viewportHeight) : 0;
+          dialog.style.setProperty("--bc-mobile-layout-height", layoutHeight + "px");
+          dialog.style.setProperty("--bc-mobile-keyboard-translation", -keyboardOffset + "px");
+        }
         mobileInputFrame = requestAnimationFrame(() => {
           mobileInputFrame = null;
           if (!(active instanceof HTMLElement) || !dialog.contains(active) || !active.matches("input, textarea, [contenteditable='true']")) return;
@@ -5598,7 +5607,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const conversationState = issue.reply_status || "idle";
         const conversationStatus = conversationStatusMarkup(conversationState);
         const conversationBody = sessionId ? '<p class="better-codex-markdown-empty">' + te("加载对话…") + '</p>' : "";
-        return '<section class="better-codex-conversation"><div class="better-codex-conversation-head"><span>' + te("对话") + '</span><span class="better-codex-conversation-status" data-conversation-status data-state="' + escapeHtml(conversationState) + '"' + (conversationStatus ? "" : " hidden") + '>' + conversationStatus + '</span></div><div class="better-codex-timeline" data-conversation-body>' + conversationBody + '</div></section><div class="better-codex-conversation-feedback" data-conversation-feedback hidden></div>' + conversationComposer();
+        return '<div class="better-codex-conversation-shell"><section class="better-codex-conversation"><div class="better-codex-conversation-head"><span>' + te("对话") + '</span><span class="better-codex-conversation-status" data-conversation-status data-state="' + escapeHtml(conversationState) + '"' + (conversationStatus ? "" : " hidden") + '>' + conversationStatus + '</span></div><div class="better-codex-timeline" data-conversation-body>' + conversationBody + '</div></section><div class="better-codex-conversation-feedback" data-conversation-feedback hidden></div>' + conversationComposer() + '</div>';
       }
 
       function conversationStatusMarkup(replyStatus) {
@@ -5653,7 +5662,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           return "无法加载会话。请检查网络和 Better Codex Runtime，然后重新加载。";
         }
         if (value.includes("timeout") || value.includes("timed out") || value.includes("deadline")) return "回复等待超时。请检查模型服务连接后重试。";
-        if (["reply_network_error", "apiconnectionerror", "network", "fetch", "econn", "enotfound", "dns", "socket", "runtime_bridge_unavailable"].some(marker => value.includes(marker))) return "网络连接异常，回复未完成。请检查网络和 Better Codex Runtime 后重试。";
+        if (["reply_network_error", "apiconnectionerror", "network", "fetch", "econn", "enotfound", "dns", "socket", "relay_stream", "runtime_bridge_unavailable"].some(marker => value.includes(marker))) return "网络连接异常，回复未完成。请检查网络和 Better Codex Runtime 后重试。";
         if (["reply_permission_denied", "permission", "eacces", "eperm", "forbidden", "unauthorized", "401", "403", "approval"].some(marker => value.includes(marker))) return "当前权限不足，无法完成回复。请调整智能体权限或允许所需操作后重试。";
         if (value.includes("runtime_stopped")) return "Better Codex Runtime 已停止。请重新启动后重试。";
         if (value.includes("reply_busy")) return "上一条回复仍在进行中。请稍后重新加载。";
@@ -5813,7 +5822,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         }
         try {
           lastReplyStatus = "running";
-          const reply = await api("/api/issues/" + encodeURIComponent(issue.id) + "/reply", { method: "POST", body: JSON.stringify({ message, request_id: requestId, files }) });
+          const reply = await api("/api/issues/" + encodeURIComponent(issue.id) + "/reply", { method: "POST", body: JSON.stringify({ message, request_id: requestId, files }), timeoutMs: files.length ? 120_000 : undefined });
           if (reply.initial_run) {
             await loadIssues();
             dialog.close();
@@ -6504,10 +6513,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             ...assignee,
             ...(!issue ? { request_id: createRequestId } : {})
           };
-          if (issue) await api("/api/issues/" + encodeURIComponent(issue.id), { method: "PATCH", body: JSON.stringify({ ...body, version: issue.version }) });
+          const transferTimeoutMs = files.length ? 120_000 : undefined;
+          if (issue) await api("/api/issues/" + encodeURIComponent(issue.id), { method: "PATCH", body: JSON.stringify({ ...body, version: issue.version }), timeoutMs: transferTimeoutMs });
           else {
             writeCreateDraft(draft, createRequestId);
-            await api("/api/issues", { method: "POST", body: JSON.stringify({ ...body, project_id: draft.projectId }) });
+            await api("/api/issues", { method: "POST", body: JSON.stringify({ ...body, project_id: draft.projectId }), timeoutMs: transferTimeoutMs });
             state.projectId = draft.projectId;
           }
           traceDialog("dialog_submit_success", { action: issue ? "update_issue" : "create_issue" });
