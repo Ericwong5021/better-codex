@@ -4,6 +4,8 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.9-beta.25] - 2026-08-21
+
 - Retry idempotent Relay writes through brief Runtime disconnects and report an error only after bounded reconnect attempts fail.
 
 ## [0.4.9-beta.24] - 2026-08-20
@@ -674,7 +676,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.24...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.25...HEAD
+[0.4.9-beta.25]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.24...v0.4.9-beta.25
 [0.4.9-beta.24]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.23...v0.4.9-beta.24
 [0.4.9-beta.23]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.22...v0.4.9-beta.23
 [0.4.9-beta.22]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.21...v0.4.9-beta.22
