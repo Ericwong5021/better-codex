@@ -6,7 +6,7 @@ import { injectionScript } from "./dom.js";
 import { clearWebSessionCookie, cookies, passwordHash, passwordMatches, readHubSecret, validateWebPassword, validateWebUsername, webSessionCookie } from "./hub-auth.js";
 import { issuePriorities, issueStatuses } from "./db.js";
 import { HubStore } from "./hub-store.js";
-import { supportedSyncProtocolVersions, syncProtocolVersion, type RemoteCommandAck, type SyncPushRequest } from "./sync-contract.js";
+import { legacySyncProtocolVersion, supportedSyncProtocolVersions, syncProtocolVersion, type RemoteCommandAck, type SyncPushRequest } from "./sync-contract.js";
 import { betterCodexWebHostCss, betterCodexWebHostHtml, betterCodexWebHostJavaScript } from "./web-host.js";
 import { betterCodexWebIconPng } from "./brand-assets.js";
 import { betterCodexWebManifest, betterCodexWebServiceWorker } from "./web-app.js";
@@ -360,7 +360,7 @@ export function createHubServer(options: HubServerOptions) {
         if (!trustedOrigin(request, true) || !csrfValid) return sendJson(response, 403, { error: "csrf_invalid" });
         const runtime = store.runtime();
         if (!runtime || runtime.health_state !== "online") return sendJson(response, 503, { error: "runtime_offline" });
-        if (runtime.protocol_version !== syncProtocolVersion) return sendJson(response, 409, { error: "incompatible_protocol" });
+        if (runtime.protocol_version === legacySyncProtocolVersion) return sendJson(response, 409, { error: "incompatible_protocol" });
         const body = await readBody(request, 4096);
         if (typeof body.enabled !== "boolean") throw new Error("invalid_auto_dispatch");
         const activeCommand = store.activeAutoDispatchCommand();
@@ -424,6 +424,17 @@ export function createHubServer(options: HubServerOptions) {
         if (!runtime || runtime.health_state !== "online") return sendJson(response, 503, { error: "runtime_offline" });
         if (runtime.protocol_version !== syncProtocolVersion) return sendJson(response, 409, { error: "incompatible_protocol" });
         const command = store.createRemoteCommand({ command_id: request.headers["x-better-codex-command-id"], operation: "project.pick_directory", base_revision: null, payload: {} });
+        notifyControl(command.device_id);
+        return sendJson(response, 202, { command_id: command.command_id });
+      }
+      if (url.pathname === "/api/system/directories" && method === "POST") {
+        if (!browser) return sendJson(response, 401, { error: "unauthorized" });
+        if (!trustedOrigin(request, true) || !csrfValid) return sendJson(response, 403, { error: "csrf_invalid" });
+        const runtime = store.runtime();
+        if (!runtime || runtime.health_state !== "online") return sendJson(response, 503, { error: "runtime_offline" });
+        if (runtime.protocol_version !== syncProtocolVersion) return sendJson(response, 409, { error: "incompatible_protocol" });
+        const body = await readBody(request, 8192);
+        const command = store.createRemoteCommand({ command_id: request.headers["x-better-codex-command-id"], operation: "project.browse_directory", base_revision: null, payload: { path: body.path } });
         notifyControl(command.device_id);
         return sendJson(response, 202, { command_id: command.command_id });
       }

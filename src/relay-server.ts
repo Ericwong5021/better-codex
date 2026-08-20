@@ -532,7 +532,8 @@ export function createRelayServer(options: RelayServerOptions) {
             }
             if (message.type === "response_open") {
               const channel = active.channels.get(message.channel_id);
-              if (!channel || channel.responseStarted) throw new Error("relay_channel_invalid");
+              if (!channel) return;
+              if (channel.responseStarted) throw new Error("relay_channel_invalid");
               channel.responseStarted = true;
               clearTimeout(channel.timeout);
               const headers = forwardedResponseHeaders(message.headers);
@@ -545,7 +546,8 @@ export function createRelayServer(options: RelayServerOptions) {
             }
             if (message.type === "response_chunk") {
               const channel = active.channels.get(message.channel_id);
-              if (!channel || !channel.responseStarted || message.sequence !== channel.responseSequence) throw new Error("relay_chunk_sequence_invalid");
+              if (!channel) return;
+              if (!channel.responseStarted || message.sequence !== channel.responseSequence) throw new Error("relay_chunk_sequence_invalid");
               channel.responseSequence += 1;
               const bytes = Buffer.from(message.data, "base64");
               if (!channel.response.write(bytes)) await once(channel.response, "drain");
@@ -554,7 +556,8 @@ export function createRelayServer(options: RelayServerOptions) {
             }
             if (message.type === "response_end") {
               const channel = active.channels.get(message.channel_id);
-              if (!channel || !channel.responseStarted) throw new Error("relay_channel_invalid");
+              if (!channel) return;
+              if (!channel.responseStarted) throw new Error("relay_channel_invalid");
               channel.response.end();
               finishChannel(active, channel);
               return;

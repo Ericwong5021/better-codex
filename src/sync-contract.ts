@@ -1,9 +1,9 @@
 import type { IssuePriority, IssueReplyStatus, IssueSessionStatus, IssueStatus } from "./db.js";
 import type { ConversationMessage } from "./session-transcript.js";
 
-export const legacySyncProtocolVersion = "sync/v6" as const;
-export const previousSyncProtocolVersion = "sync/v7" as const;
-export const syncProtocolVersion = "sync/v8" as const;
+export const legacySyncProtocolVersion = "sync/v7" as const;
+export const previousSyncProtocolVersion = "sync/v8" as const;
+export const syncProtocolVersion = "sync/v9" as const;
 export const supportedSyncProtocolVersions = [syncProtocolVersion, previousSyncProtocolVersion, legacySyncProtocolVersion] as const;
 export type SyncProtocolVersion = typeof supportedSyncProtocolVersions[number];
 export const syncEntityTypes = ["project", "issue", "agent_directory"] as const;
@@ -280,7 +280,16 @@ export type SyncPushResponse = {
   lease_expires_at: string;
 };
 
-export const remoteCommandOperations = ["project.pick_directory", "project.create", "project.overview", "issue.create", "issue.update", "issue.move", "issue.start", "issue.stop", "issue.reply", "issue.archive", "issue.restore", "issue.delete", "settings.auto-dispatch"] as const;
+export type DirectoryBrowserResult = {
+  path: string;
+  parent_path: string | null;
+  home_path: string;
+  root_path: string;
+  directories: Array<{ name: string; path: string }>;
+  truncated: boolean;
+};
+
+export const remoteCommandOperations = ["project.pick_directory", "project.browse_directory", "project.create", "project.overview", "issue.create", "issue.update", "issue.move", "issue.start", "issue.stop", "issue.reply", "issue.archive", "issue.restore", "issue.delete", "settings.auto-dispatch"] as const;
 export type RemoteCommandOperation = typeof remoteCommandOperations[number];
 export type RemoteCommandStatus = "pending" | "dispatched" | "applied" | "rejected" | "conflict" | "expired";
 
@@ -314,7 +323,7 @@ export type RemoteCommandAck = {
   status: Exclude<RemoteCommandStatus, "pending" | "dispatched" | "expired">;
   error: string | null;
   projection: ProjectProjection | IssueProjection | null;
-  result?: { workspace_path?: string };
+  result?: { workspace_path?: string } | DirectoryBrowserResult;
   delivery_id?: string | null;
 };
 

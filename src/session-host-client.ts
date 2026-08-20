@@ -114,9 +114,7 @@ export class SessionHostClient implements SessionRelayHost {
         runtime_instance_id: `${process.pid}:${Date.now()}`,
       });
     } catch {
-      if (!hostPid()) {
-        try { spawnHost(); } catch {}
-      }
+      try { spawnHost(); } catch {}
       this.scheduleReconnect();
     } finally {
       this.connecting = false;

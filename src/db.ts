@@ -4,7 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { databasePath, developmentDatabaseSnapshotSourcePath } from "./config.js";
 import { syncProtocolVersion } from "./sync-contract.js";
-import { projectDocumentKeys, type ConversationProjection, type IssueProjection, type ProjectDocumentKey, type ProjectDocumentView, type ProjectProjection, type RemoteCommand, type RemoteCommandAck, type SyncEntityType, type SyncProjection } from "./sync-contract.js";
+import { projectDocumentKeys, type ConversationProjection, type DirectoryBrowserResult, type IssueProjection, type ProjectDocumentKey, type ProjectDocumentView, type ProjectProjection, type RemoteCommand, type RemoteCommandAck, type SyncEntityType, type SyncProjection } from "./sync-contract.js";
 
 export const issueStatuses = ["backlog", "todo", "in_progress", "in_review", "done", "blocked"] as const;
 export const issuePriorities = ["none", "low", "medium", "high", "urgent"] as const;
@@ -1182,7 +1182,7 @@ export class Store {
     } satisfies IssueProjection;
   }
 
-  async applyRemoteCommand(command: RemoteCommand, handlers: { files?: (files: Array<{ name: string; type: string; data: string }>) => { paths: string[]; cleanup: () => void } | Promise<{ paths: string[]; cleanup: () => void }>; reply?: (issueId: string, requestId: string, message: string, files: Array<{ name: string; type: string; data: string }>) => void | Promise<void>; stop?: (issueId: string) => void | Promise<void>; projectCreate?: (projectId: string, name: string, workspacePath: string) => void | Promise<void>; projectOverview?: (projectId: string, agentId: string, feedback: string) => void | Promise<void>; chooseDirectory?: () => string | Promise<string> } = {}): Promise<RemoteCommandAck> {
+  async applyRemoteCommand(command: RemoteCommand, handlers: { files?: (files: Array<{ name: string; type: string; data: string }>) => { paths: string[]; cleanup: () => void } | Promise<{ paths: string[]; cleanup: () => void }>; reply?: (issueId: string, requestId: string, message: string, files: Array<{ name: string; type: string; data: string }>) => void | Promise<void>; stop?: (issueId: string) => void | Promise<void>; projectCreate?: (projectId: string, name: string, workspacePath: string) => void | Promise<void>; projectOverview?: (projectId: string, agentId: string, feedback: string) => void | Promise<void>; chooseDirectory?: () => string | Promise<string>; browseDirectory?: (path: string) => DirectoryBrowserResult | Promise<DirectoryBrowserResult> } = {}): Promise<RemoteCommandAck> {
     const receipt = this.db.prepare("SELECT result_json FROM sync_command_receipts WHERE command_id = ?").get(command.command_id) as { result_json: string } | undefined;
     if (receipt) return JSON.parse(receipt.result_json) as RemoteCommandAck;
     const result = await (async () => {
@@ -1201,6 +1201,11 @@ export class Store {
           if (command.base_revision !== null || !handlers.chooseDirectory) throw new Error("directory_picker_unavailable");
           const workspacePath = String(await handlers.chooseDirectory()).trim();
           return { command_id: command.command_id, status: "applied", error: null, projection: null, result: { workspace_path: workspacePath } } satisfies RemoteCommandAck;
+        }
+        if (command.operation === "project.browse_directory") {
+          if (command.base_revision !== null || !handlers.browseDirectory || typeof payload.path !== "string") throw new Error("directory_browser_unavailable");
+          const directory = await handlers.browseDirectory(payload.path);
+          return { command_id: command.command_id, status: "applied", error: null, projection: null, result: directory } satisfies RemoteCommandAck;
         }
         if (command.operation === "settings.auto-dispatch") {
           if (command.entity_id !== "auto-dispatch" || command.base_revision !== null || typeof payload.enabled !== "boolean") throw new Error("invalid_auto_dispatch");

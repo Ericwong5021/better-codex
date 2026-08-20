@@ -256,7 +256,8 @@ export class RuntimeRelayClient {
     }
     if (message.type === "request_chunk") {
       const channel = this.channels.get(message.channel_id);
-      if (!channel || !channel.running || !channel.body || message.sequence !== channel.nextSequence) throw new Error("relay_chunk_sequence_invalid");
+      if (!channel) return;
+      if (!channel.running || !channel.body || message.sequence !== channel.nextSequence) throw new Error("relay_chunk_sequence_invalid");
       const bytes = Buffer.from(message.data, "base64");
       channel.bytes += bytes.length;
       if (channel.bytes > 50 * 1024 * 1024) throw new Error("body_too_large");
@@ -267,7 +268,8 @@ export class RuntimeRelayClient {
     }
     if (message.type === "request_end") {
       const channel = this.channels.get(message.channel_id);
-      if (!channel || !channel.running) throw new Error("relay_channel_invalid");
+      if (!channel) return;
+      if (!channel.running) throw new Error("relay_channel_invalid");
       channel.body?.end();
       return;
     }

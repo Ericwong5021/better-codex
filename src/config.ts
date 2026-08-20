@@ -43,6 +43,7 @@ export const syncConfigPath = join(betterCodexHome, "sync-credentials.json");
 export const relayConfigPath = join(betterCodexHome, "relay-credentials.json");
 export const runtimeStatePath = join(runPath, "runtime.json");
 export const runtimeLockPath = join(runPath, "runtime.lock");
+export const sessionHostLockPath = join(runPath, "session-host.lock");
 export const sessionHostPidPath = join(runPath, "session-host.pid");
 export const sessionHostLogPath = join(logPath, "session-host.log");
 export const sessionHostSocketPath = process.platform === "win32"

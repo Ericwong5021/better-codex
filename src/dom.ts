@@ -346,7 +346,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const SEND_MODE_KEY = "better-codex-send-mode";
     const AGENT_INSPECTOR_WIDTH_KEY = "better-codex-agent-inspector-width";
     const CREATE_DIALOG_EXPANDED_KEY = "better-codex-create-dialog-expanded";
-    const ISSUE_DIALOG_EXPANDED_KEY = "better-codex-issue-dialog-expanded";
     const AGENT_INSPECTOR_MIN_WIDTH = 320;
     const AGENT_DIRECTORY_MIN_WIDTH = 320;
     const THREAD_OPEN_TIMEOUT_MS = 10000;
@@ -545,7 +544,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "Better Codex 服务需要重启": "Better Codex needs to restart", "当前页面与后台服务的连接已失效。请在终端运行下面的命令，完成后重新连接。": "The connection between this page and the background service has expired. Run the command below in your terminal, then reconnect.", "复制重启命令": "Copy restart command", "复制消息": "Copy message", "已复制": "Copied", "重新连接": "Reconnect", "正在连接…": "Connecting…", "错误详情": "Error details",
       "全部": "All", "已分配": "Assigned", "未分配": "Unassigned", "待规划": "Backlog", "待办": "Todo", "进行中": "In progress", "待审核": "In review", "调度中": "Scheduling", "已完成": "Done", "已阻塞": "Blocked", "归档": "Archive", "拖到这里即可归档": "Drop here to archive", "查看已归档卡片": "View archived cards", "已归档任务": "Archived tasks", "搜索已归档任务": "Search archived tasks", "所有项目": "All projects", "全部删除": "Delete all", "删除已归档聊天": "Delete archived chat", "删除项目中的全部内容": "Delete all project content", "确定删除项目中的全部已归档任务吗？": "Delete all archived tasks in this project?", "取消归档": "Unarchive", "已归档卡片": "Archived cards", "暂无已归档卡片": "No archived cards", "归档列表加载失败": "Unable to load archived cards",
       "无": "None", "低": "Low", "中": "Medium", "高": "High", "紧急": "Urgent", "超高": "Extra high", "无优先级": "No priority", "优先级": "Priority", "状态": "Status", "日期": "Date", "筛选": "Filter", "标签": "Labels",
-      "新建": "New", "新建 issue": "New issue", "新建任务": "New task", "新建智能体": "New agent", "创建": "Create", "创建任务": "Create task", "删除": "Delete", "删除任务": "Delete task", "删除智能体": "Delete agent", "保存": "Save", "确认": "Confirm", "取消": "Cancel", "关闭": "Close", "重试": "Retry", "稍后": "Later", "展开": "Expand", "缩小": "Minimize", "缩放头像": "Zoom avatar",
+      "新建": "New", "新建 issue": "New issue", "新建任务": "New task", "新建智能体": "New agent", "创建": "Create", "创建任务": "Create task", "删除": "Delete", "删除任务": "Delete task", "删除智能体": "Delete agent", "保存": "Save", "确认": "Confirm", "取消": "Cancel", "关闭": "Close", "重试": "Retry", "稍后": "Later", "展开": "Expand", "缩小": "Minimize", "退出全屏": "Exit full screen", "缩放头像": "Zoom avatar",
       "项目": "Project", "无项目": "No project", "选择项目": "Select project", "选择责任人": "Select owner", "选择执行智能体": "Select agent", "更多创建选项": "More creation options", "任务标题": "Task title", "添加描述...": "Add description...", "添加标签": "Add label", "添加附件": "Add attachment", "移除附件": "Remove attachment", "搜索任务": "Search tasks", "搜索项目": "Search projects", "搜索项目...": "Search projects...", "搜索智能体": "Search agents",
       "负责人": "Owner", "创建者": "Creator", "指定负责人": "Assign owner", "由我创建": "Created by me", "由我": "By me", "我": "Me", "你": "You", "未指派": "Not assigned", "未提供": "Not provided", "已同步": "Synced",
       "自动运行": "Auto-run", "手动运行": "Manual run", "切换为自动运行": "Switch to auto-run", "切换为手动运行": "Switch to manual run", "切换到智能体": "Switch to agents", "手动创建": "Manual creation", "通过智能体创建": "Create with agent", "运行模式说明": "Run mode", "帮助与设置": "Help and settings", "设置": "Settings", "快捷键": "Shortcuts", "快捷键设置": "Keyboard shortcuts", "为常用操作设置键盘快捷键。": "Set keyboard shortcuts for common actions.", "创建 Issue": "Create Issue", "打开创建 Issue 窗口": "Open the Create Issue window", "设置快捷键": "Set shortcut", "点击录入": "Click to record", "按下新的快捷键": "Press a new shortcut", "未设置": "Not set", "清除快捷键": "Clear shortcut", "关于": "About", "会话结束提醒": "Session completion alerts", "Issue 会话结束后在当前窗口显示提醒": "Show an alert in the current window when an issue session ends", "弹窗持续时间": "Popup duration", "1 秒": "1 second", "5 秒": "5 seconds", "10 秒": "10 seconds", "永久": "Permanent", "会话已结束": "Session ended", "通知": "Notifications", "语言": "Language", "界面语言": "Interface language", "选择 Better Codex 的界面语言": "Choose the language used by Better Codex", "调度": "Scheduling", "调度器模型": "Scheduler model", "这个模型用于 Issue 状态调度": "This model is used for Issue status routing", "调度器思考强度": "Scheduler reasoning effort", "这个强度用于 Issue 状态调度": "This level is used for Issue status routing", "跟随系统": "System", "中文": "Chinese", "软件更新": "Software updates", "更新状态": "Update status", "检查新版本": "Check for updates", "检查中…": "Checking…", "发现新版本": "Update available", "无法检查更新": "Unable to check", "版本信息": "Version info", "兼容版本": "Compatibility version", "运行状态": "Runtime status", "运行正常": "Running", "正在检查": "Checking", "已是最新版本": "Up to date", "从开始到完成，让 Codex 里的工作清晰可见。": "From start to finish, keep your work in Codex clear and visible.", "如果你喜欢 Better Codex，欢迎给我们一个 Star。": "If you like Better Codex, please give us a Star.", "最大并发": "Max concurrency", "模型": "Model", "推理": "Reasoning", "指令": "Instructions", "默认": "Default", "自定义": "Custom",
@@ -567,6 +566,20 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "已经执行过对话的 Issue 只能修改状态、优先级和指派人。": "Issues with an executed conversation can only change status, priority, and assignee.", "终止任务后才能打开对话，是否终止任务？": "The task must be stopped before opening the conversation. Stop it now?", "终止并打开": "Stop and open", "正在终止…": "Stopping…", "忽略当前版本": "Ignore this version", "立即更新": "Update now", "暂无项目": "No projects", "告诉智能体要做什么，例如：“修复项目里任务运行状态不可见的问题”": "Tell the agent what to do, for example: “Fix the invisible task run status in the project”"
     } };
     localeResources.en["创建新项目"] = "Create new project";
+    localeResources.en["浏览本机文件夹"] = "Browse folders on this device";
+    localeResources.en["更改文件夹"] = "Change folder";
+    localeResources.en["目录路径"] = "Folder path";
+    localeResources.en["上一级"] = "Up one level";
+    localeResources.en["主目录"] = "Home";
+    localeResources.en["文件系统"] = "File system";
+    localeResources.en["前往"] = "Go";
+    localeResources.en["打开文件夹"] = "Open folder";
+    localeResources.en["选择当前文件夹"] = "Choose this folder";
+    localeResources.en["正在读取文件夹…"] = "Loading folders…";
+    localeResources.en["这个文件夹中没有子文件夹"] = "This folder has no subfolders";
+    localeResources.en["仅显示前 500 个文件夹"] = "Showing the first 500 folders";
+    localeResources.en["无法读取文件夹"] = "Unable to read this folder";
+    localeResources.en["本机 Runtime 版本不支持远程文件夹浏览"] = "The local Runtime does not support remote folder browsing";
     localeResources.en["文件不能超过 10 MB"] = "Files must be 10 MB or smaller";
     localeResources.en["部分文件超过 10 MB，已跳过"] = "Some files larger than 10 MB were skipped";
     localeResources.en["最多传输 4 个文件且总大小不能超过 20 MB"] = "Transfer up to 4 files with a total size of 20 MB or less";
@@ -1314,7 +1327,27 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #better-codex-project-dialog .better-codex-project-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px; }
         #better-codex-project-dialog .better-codex-project-dialog-actions button[type="submit"] { color: var(--bc-primary-foreground); background: var(--bc-primary); }
         #better-codex-project-dialog output { display: block; margin-top: 10px; color: var(--bc-danger); font-size: var(--bc-text-sm); }
+        #better-codex-project-dialog output[hidden] { display: none; }
         #better-codex-project-dialog button:active { transform: scale(.96); }
+        #better-codex-project-dialog[data-directory-browser="true"] { width: min(640px,calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow-y: auto; overscroll-behavior: contain; }
+        #better-codex-project-dialog .better-codex-directory-browser { display: flex; min-height: 0; flex-direction: column; margin-top: 14px; overflow: hidden; border: 1px solid var(--bc-border); border-radius: var(--bc-radius-md, 12px); background: var(--bc-surface); }
+        #better-codex-project-dialog .better-codex-directory-browser[hidden] { display: none; }
+        #better-codex-project-dialog .better-codex-directory-toolbar { display: grid; grid-template-columns: 40px minmax(0,1fr) auto; gap: 6px; align-items: center; padding: 8px; border-bottom: 1px solid var(--bc-divider); background: var(--bc-raised); }
+        #better-codex-project-dialog .better-codex-directory-toolbar input { min-width: 0; min-height: 40px; background: var(--bc-control); }
+        #better-codex-project-dialog .better-codex-directory-toolbar button, #better-codex-project-dialog .better-codex-directory-shortcuts button, #better-codex-project-dialog .better-codex-directory-select { display: inline-flex; min-width: 40px; min-height: 40px; align-items: center; justify-content: center; gap: 6px; border: 0; border-radius: var(--bc-radius-sm, 10px); color: var(--bc-foreground); background: var(--bc-control); padding: 0 11px; font: inherit; cursor: pointer; }
+        #better-codex-project-dialog .better-codex-directory-toolbar button:disabled, #better-codex-project-dialog .better-codex-directory-shortcuts button:disabled, #better-codex-project-dialog .better-codex-directory-select:disabled { opacity: .45; cursor: not-allowed; }
+        #better-codex-project-dialog .better-codex-directory-shortcuts { display: flex; gap: 6px; padding: 7px 8px; border-bottom: 1px solid var(--bc-divider); }
+        #better-codex-project-dialog .better-codex-directory-shortcuts button { min-height: 32px; padding: 0 10px; color: var(--bc-muted); background: transparent; font-size: var(--bc-text-sm); }
+        #better-codex-project-dialog .better-codex-directory-list { height: min(300px,34dvh); min-height: 160px; overflow-y: auto; overscroll-behavior: contain; padding: 6px; }
+        #better-codex-project-dialog .better-codex-directory-row { display: grid; grid-template-columns: 20px minmax(0,1fr) 16px; width: 100%; min-height: 40px; align-items: center; gap: 8px; border: 0; border-radius: var(--bc-radius-sm, 10px); color: var(--bc-foreground); background: transparent; padding: 0 10px; font: inherit; text-align: left; cursor: pointer; }
+        #better-codex-project-dialog .better-codex-directory-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        #better-codex-project-dialog .better-codex-directory-row > svg:last-child { color: var(--bc-muted); }
+        #better-codex-project-dialog .better-codex-directory-state { display: flex; height: 100%; min-height: 148px; align-items: center; justify-content: center; color: var(--bc-muted); padding: 0 18px; font-size: var(--bc-text-sm); text-align: center; }
+        #better-codex-project-dialog .better-codex-directory-footer { display: flex; min-height: 56px; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid var(--bc-divider); padding: 8px; }
+        #better-codex-project-dialog .better-codex-directory-footer [data-directory-status] { min-width: 0; overflow-wrap: anywhere; color: var(--bc-muted); font-size: var(--bc-text-sm); font-weight: 400; }
+        #better-codex-project-dialog .better-codex-directory-select { flex: 0 0 auto; color: var(--bc-primary-foreground); background: var(--bc-primary); }
+        @media (hover:hover) { #better-codex-project-dialog .better-codex-directory-row:hover, #better-codex-project-dialog .better-codex-directory-toolbar button:hover, #better-codex-project-dialog .better-codex-directory-shortcuts button:hover { background: var(--bc-hover); } }
+        @media (max-width: 480px) { #better-codex-project-dialog[data-directory-browser="true"] { width: calc(100vw - 20px); max-height: calc(100dvh - 20px); } #better-codex-project-dialog[data-directory-browser="true"] form { padding: 18px; } #better-codex-project-dialog .better-codex-directory-toolbar { grid-template-columns: 40px minmax(0,1fr); } #better-codex-project-dialog .better-codex-directory-toolbar [data-directory-go] { grid-column: 1 / -1; } #better-codex-project-dialog .better-codex-directory-footer { align-items: stretch; flex-direction: column; } #better-codex-project-dialog .better-codex-directory-select { width: 100%; } }
         #better-codex-confirm { position: fixed; inset: 0; box-sizing: border-box; width: min(420px,calc(100vw - 40px)); margin: auto; overflow: hidden; border: 1px solid var(--bc-border); border-radius: 13px; color: var(--bc-foreground); background: var(--bc-raised); padding: 0; box-shadow: var(--bc-floating-shadow); font-family: var(--bc-font-ui); }
         #better-codex-confirm::backdrop { background: var(--bc-scrim); backdrop-filter: blur(4px); }
         #better-codex-confirm .better-codex-confirm-body { padding: 20px 20px 17px; }
@@ -4169,17 +4202,84 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const dialog = document.createElement("dialog");
       dialog.id = "better-codex-project-dialog";
       dialog.setAttribute(OWNED, "true");
-      dialog.innerHTML = '<form><h2>' + te("创建 Codex 项目") + '</h2><p>' + te("创建后会加入 Codex 的项目列表。") + '</p><label><span>' + te("项目名称") + '</span><input name="name" maxlength="120" autocomplete="off" required></label><label><span>' + te("项目文件夹") + '</span><span class="better-codex-project-folder-field"><input name="workspace_path" maxlength="4096" placeholder="' + te("选择本地项目文件夹") + '" autocomplete="off" spellcheck="false" readonly required><button type="button" data-project-choose-folder>' + te("选择文件夹") + '</button></span></label><output hidden></output><div class="better-codex-project-dialog-actions"><button type="button" data-project-create-cancel>' + te("取消") + '</button><button type="submit" disabled>' + te("创建项目") + '</button></div></form>';
-      const finish = () => { dialog.close(); dialog.remove(); };
+      dialog.dataset.directoryBrowser = REMOTE ? "true" : "false";
+      const directoryBrowser = REMOTE ? '<section class="better-codex-directory-browser" aria-label="' + te("浏览本机文件夹") + '"><div class="better-codex-directory-toolbar"><button type="button" data-directory-up aria-label="' + te("上一级") + '" disabled>' + icon("send") + '</button><input data-directory-path maxlength="4096" aria-label="' + te("目录路径") + '" autocomplete="off" spellcheck="false"><button type="button" data-directory-go>' + te("前往") + '</button></div><div class="better-codex-directory-shortcuts"><button type="button" data-directory-home>' + icon("folder") + '<span>' + te("主目录") + '</span></button><button type="button" data-directory-root>' + icon("folder") + '<span>' + te("文件系统") + '</span></button></div><div class="better-codex-directory-list" aria-label="' + te("浏览本机文件夹") + '"></div><div class="better-codex-directory-footer"><span data-directory-status aria-live="polite"></span><button class="better-codex-directory-select" type="button" data-directory-select disabled>' + te("选择当前文件夹") + '</button></div></section>' : "";
+      dialog.innerHTML = '<form><h2>' + te("创建 Codex 项目") + '</h2><p>' + te("创建后会加入 Codex 的项目列表。") + '</p><label><span>' + te("项目名称") + '</span><input name="name" maxlength="120" autocomplete="off" required></label><label><span>' + te("项目文件夹") + '</span><span class="better-codex-project-folder-field"><input name="workspace_path" maxlength="4096" placeholder="' + te("选择本地项目文件夹") + '" autocomplete="off" spellcheck="false" readonly required><button type="button" data-project-choose-folder>' + te("选择文件夹") + '</button></span></label>' + directoryBrowser + '<output hidden></output><div class="better-codex-project-dialog-actions"><button type="button" data-project-create-cancel>' + te("取消") + '</button><button type="submit" disabled>' + te("创建项目") + '</button></div></form>';
+      let directoryRequest = 0;
+      let currentDirectory = null;
+      const workspaceInput = dialog.querySelector('[name="workspace_path"]');
+      const nameInput = dialog.querySelector('[name="name"]');
+      const submit = dialog.querySelector('button[type="submit"]');
+      const output = dialog.querySelector("output");
+      const chooseButton = dialog.querySelector("[data-project-choose-folder]");
+      const directoryPanel = dialog.querySelector(".better-codex-directory-browser");
+      const directoryPath = dialog.querySelector("[data-directory-path]");
+      const directoryList = dialog.querySelector(".better-codex-directory-list");
+      const directoryStatus = dialog.querySelector("[data-directory-status]");
+      const directorySelect = dialog.querySelector("[data-directory-select]");
+      const directoryUp = dialog.querySelector("[data-directory-up]");
+      const directoryHome = dialog.querySelector("[data-directory-home]");
+      const directoryRoot = dialog.querySelector("[data-directory-root]");
+      const finish = () => { directoryRequest += 1; dialog.close(); dialog.remove(); };
       dialog.querySelector("[data-project-create-cancel]").addEventListener("click", finish);
+      const applyWorkspacePath = workspacePath => {
+        workspaceInput.value = workspacePath;
+        workspaceInput.title = workspacePath;
+        submit.disabled = false;
+        chooseButton.textContent = t("更改文件夹");
+        if (!nameInput.value.trim()) nameInput.value = workspacePath.replace(/[\\\\/]+$/, "").split(/[\\\\/]/).pop() || "";
+        if (directoryPanel) directoryPanel.hidden = true;
+        nameInput.focus();
+        nameInput.select();
+      };
+      const directoryErrorLabel = error => {
+        const value = error instanceof Error ? error.message : "";
+        return value === "incompatible_protocol" ? t("本机 Runtime 版本不支持远程文件夹浏览") : t("无法读取文件夹");
+      };
+      const renderDirectory = directory => {
+        currentDirectory = directory;
+        directoryPath.value = directory.path;
+        directoryUp.disabled = !directory.parent_path;
+        directoryUp.dataset.path = directory.parent_path || "";
+        directoryHome.disabled = directory.home_path === directory.path;
+        directoryHome.dataset.path = directory.home_path;
+        directoryRoot.disabled = directory.root_path === directory.path;
+        directoryRoot.dataset.path = directory.root_path;
+        directorySelect.disabled = false;
+        directoryStatus.textContent = directory.truncated ? t("仅显示前 500 个文件夹") : "";
+        directoryList.innerHTML = directory.directories.length
+          ? directory.directories.map(entry => '<button class="better-codex-directory-row" type="button" data-directory-entry="' + escapeHtml(entry.path) + '" title="' + escapeHtml(entry.path) + '" aria-label="' + te("打开文件夹") + ': ' + escapeHtml(entry.name) + '">' + icon("folder") + '<span>' + escapeHtml(entry.name) + '</span>' + icon("chevron") + '</button>').join("")
+          : '<span class="better-codex-directory-state">' + te("这个文件夹中没有子文件夹") + '</span>';
+      };
+      const loadRemoteDirectory = async path => {
+        const request = ++directoryRequest;
+        directoryPanel.hidden = false;
+        directoryPanel.setAttribute("aria-busy", "true");
+        directorySelect.disabled = true;
+        directoryStatus.textContent = "";
+        directoryList.innerHTML = '<span class="better-codex-directory-state">' + te("正在读取文件夹…") + '</span>';
+        try {
+          const result = await api("/api/system/directories", { method: "POST", body: JSON.stringify({ path: String(path || "") }), timeoutMs: 30000 });
+          const command = result.command_id ? await waitForRemoteCommand(result.command_id, 30000) : null;
+          if (command && command.status !== "applied") throw new Error(command.error || "command_rejected");
+          const directory = command?.payload || result;
+          if (!directory || typeof directory.path !== "string" || typeof directory.home_path !== "string" || typeof directory.root_path !== "string" || !Array.isArray(directory.directories) || directory.directories.some(entry => !entry || typeof entry.name !== "string" || typeof entry.path !== "string")) throw new Error("invalid_directory_response");
+          if (request !== directoryRequest || !dialog.isConnected) return;
+          renderDirectory(directory);
+        } catch (error) {
+          if (request !== directoryRequest || !dialog.isConnected) return;
+          currentDirectory = null;
+          directoryList.innerHTML = '<span class="better-codex-directory-state">' + escapeHtml(directoryErrorLabel(error)) + '</span>';
+          directoryStatus.textContent = directoryErrorLabel(error);
+          directorySelect.disabled = true;
+        } finally {
+          if (request === directoryRequest && dialog.isConnected) directoryPanel.removeAttribute("aria-busy");
+        }
+      };
       const chooseFolder = async () => {
-        const button = dialog.querySelector("[data-project-choose-folder]");
-        const output = dialog.querySelector("output");
-        const workspaceInput = dialog.querySelector('[name="workspace_path"]');
-        const nameInput = dialog.querySelector('[name="name"]');
-        const submit = dialog.querySelector('button[type="submit"]');
-        button.disabled = true;
-        button.textContent = t("正在选择…");
+        if (REMOTE) return void loadRemoteDirectory(workspaceInput.value || currentDirectory?.path || "");
+        chooseButton.disabled = true;
+        chooseButton.textContent = t("正在选择…");
         output.hidden = true;
         try {
           const result = await api("/api/system/directory", { method: "POST", timeoutMs: 300000 });
@@ -4187,21 +4287,32 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           if (command && command.status !== "applied") throw new Error(command.error || "command_rejected");
           const workspacePath = String(command?.payload?.workspace_path || result.workspace_path || "");
           if (!workspacePath) return;
-          workspaceInput.value = workspacePath;
-          workspaceInput.title = workspacePath;
-          submit.disabled = false;
-          if (!nameInput.value.trim()) nameInput.value = workspacePath.replace(/[\\\\/]+$/, "").split(/[\\\\/]/).pop() || "";
-          nameInput.focus();
-          nameInput.select();
+          applyWorkspacePath(workspacePath);
         } catch (error) {
           output.textContent = error instanceof Error ? error.message : t("无法选择文件夹");
           output.hidden = false;
         } finally {
-          button.disabled = false;
-          button.textContent = t("选择文件夹");
+          chooseButton.disabled = false;
+          chooseButton.textContent = workspaceInput.value ? t("更改文件夹") : t("选择文件夹");
         }
       };
       dialog.querySelector("[data-project-choose-folder]").addEventListener("click", () => { void chooseFolder(); });
+      if (REMOTE) {
+        directoryList.addEventListener("click", event => {
+          const row = event.target.closest("[data-directory-entry]");
+          if (row) void loadRemoteDirectory(row.dataset.directoryEntry);
+        });
+        directoryUp.addEventListener("click", () => { if (directoryUp.dataset.path) void loadRemoteDirectory(directoryUp.dataset.path); });
+        directoryHome.addEventListener("click", () => { if (directoryHome.dataset.path) void loadRemoteDirectory(directoryHome.dataset.path); });
+        directoryRoot.addEventListener("click", () => { if (directoryRoot.dataset.path) void loadRemoteDirectory(directoryRoot.dataset.path); });
+        dialog.querySelector("[data-directory-go]").addEventListener("click", () => { void loadRemoteDirectory(directoryPath.value); });
+        directoryPath.addEventListener("keydown", event => {
+          if (event.key !== "Enter") return;
+          event.preventDefault();
+          void loadRemoteDirectory(directoryPath.value);
+        });
+        directorySelect.addEventListener("click", () => { if (currentDirectory?.path) applyWorkspacePath(currentDirectory.path); });
+      }
       dialog.querySelector("form").addEventListener("submit", event => {
         event.preventDefault();
         const submit = dialog.querySelector('button[type="submit"]');
@@ -4232,8 +4343,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       bindModalDismiss(dialog, finish);
       document.body.appendChild(dialog);
       dialog.showModal();
-      void chooseFolder();
-      dialog.querySelector('[name="name"]').focus();
+      if (REMOTE) {
+        void loadRemoteDirectory("");
+        directoryPath.focus();
+      } else {
+        void chooseFolder();
+      }
     }
 
     function showAutoDispatchHelp(initialView = "mode") {
@@ -5109,7 +5224,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         runStatus: issue?.mockup_run_status || "not-started",
         labels: (issue?.labels || []).join(", "),
         projectId: issue?.project_id || state.projectId,
-        expanded: localStorage.getItem(issue ? ISSUE_DIALOG_EXPANDED_KEY : CREATE_DIALOG_EXPANDED_KEY) === "true",
+        expanded: issue ? false : localStorage.getItem(CREATE_DIALOG_EXPANDED_KEY) === "true",
         descriptionExpanded: false,
         reply: issue?.reply_draft || "",
         attachments: [],
@@ -5144,16 +5259,36 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       let retainCreateDraft = !issue;
       let createRequestId = issue ? "" : cachedCreateDraft?.requestId || globalThis.crypto?.randomUUID?.() || VERSION + "-create-" + Date.now() + "-" + Math.random().toString(36).slice(2);
       let submitInFlight = false;
+      let mobileInputFrame = null;
+      let mobileDialogLayoutHeight = 0;
       const mobileDialogViewport = () => {
+        if (mobileInputFrame !== null) {
+          cancelAnimationFrame(mobileInputFrame);
+          mobileInputFrame = null;
+        }
         const compact = HOST_KIND === "web" && window.matchMedia("(max-width: 720px)").matches;
         if (!compact) {
           dialog.style.removeProperty("--bc-mobile-viewport-top");
-          dialog.style.removeProperty("--bc-mobile-viewport-height");
+          dialog.style.removeProperty("--bc-mobile-layout-height");
+          dialog.style.removeProperty("--bc-mobile-keyboard-translation");
+          mobileDialogLayoutHeight = 0;
           return;
         }
         const viewport = window.visualViewport;
+        const viewportHeight = viewport?.height || window.innerHeight;
+        const active = document.activeElement;
+        const activeInput = active instanceof HTMLElement && dialog.contains(active) && active.matches("input, textarea, [contenteditable='true']");
+        if (!activeInput || !mobileDialogLayoutHeight || viewportHeight >= mobileDialogLayoutHeight) mobileDialogLayoutHeight = Math.max(window.innerHeight, viewportHeight);
+        const layoutHeight = Math.max(mobileDialogLayoutHeight, window.innerHeight, viewportHeight);
+        const keyboardOffset = activeInput ? Math.max(0, layoutHeight - viewportHeight) : 0;
         dialog.style.setProperty("--bc-mobile-viewport-top", (viewport?.offsetTop || 0) + "px");
-        dialog.style.setProperty("--bc-mobile-viewport-height", (viewport?.height || window.innerHeight) + "px");
+        dialog.style.setProperty("--bc-mobile-layout-height", layoutHeight + "px");
+        dialog.style.setProperty("--bc-mobile-keyboard-translation", -keyboardOffset + "px");
+        mobileInputFrame = requestAnimationFrame(() => {
+          mobileInputFrame = null;
+          if (!(active instanceof HTMLElement) || !dialog.contains(active) || !active.matches("input, textarea, [contenteditable='true']")) return;
+          (active.closest(".better-codex-composer") || active).scrollIntoView({ block: "nearest", inline: "nearest" });
+        });
       };
       const dirtyDraftFields = new Set();
       const dialogKind = () => issue ? "issue" : draft.mode === "agent" ? "create_agent" : "create_manual";
@@ -5427,7 +5562,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const crumb = issue
           ? '<span data-dialog-breadcrumb-project>' + escapeHtml(projectLabel(breadcrumbProject) || t("未提供")) + '</span><span aria-hidden="true">' + icon("chevron") + '</span><strong>' + title + '</strong>'
           : '<strong>' + title + '</strong>';
-        return '<div class="better-codex-dialog-head"><div class="better-codex-dialog-breadcrumb">' + crumb + '</div><div class="better-codex-dialog-head-actions">' + restoreButton + openThreadButton + startNowButton + '<button class="better-codex-icon-button" type="button" data-dialog-expand aria-label="' + te(draft.expanded ? "缩小" : "展开") + '">' + icon(draft.expanded ? "shrink" : "expand") + '</button><button class="better-codex-icon-button" type="button" data-dialog-close aria-label="' + te("关闭") + '">' + icon("close") + '</button></div></div>';
+        return '<div class="better-codex-dialog-head"><div class="better-codex-dialog-breadcrumb">' + crumb + '</div><div class="better-codex-dialog-head-actions">' + restoreButton + openThreadButton + startNowButton + '<button class="better-codex-icon-button" type="button" data-dialog-expand aria-label="' + te(draft.expanded ? (issue ? "退出全屏" : "缩小") : "展开") + '">' + icon(draft.expanded ? "shrink" : "expand") + '</button><button class="better-codex-icon-button" type="button" data-dialog-close aria-label="' + te("关闭") + '">' + icon("close") + '</button></div></div>';
       }
 
       function conversationPanel() {
@@ -6129,6 +6264,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const projectMenu = dialog.querySelector(".better-codex-project-menu");
         const projectSearch = dialog.querySelector(".better-codex-project-search");
         const positionProjectMenu = () => {
+          if (HOST_KIND === "web" && window.matchMedia("(max-width: 720px)").matches) {
+            projectMenu.classList.remove("is-above");
+            projectMenu.style.removeProperty("max-height");
+            projectMenu.querySelector("[data-project-options]").style.removeProperty("max-height");
+            return;
+          }
           const viewportTop = window.visualViewport?.offsetTop || 0;
           const viewportBottom = viewportTop + (window.visualViewport?.height || window.innerHeight);
           const buttonRect = projectButton.getBoundingClientRect();
@@ -6151,7 +6292,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           projectSearch.value = "";
           projectMenu.querySelectorAll("[data-dialog-project-option]").forEach(option => { option.hidden = false; });
           positionProjectMenu();
-          projectSearch.focus();
+          if (!(HOST_KIND === "web" && window.matchMedia("(max-width: 720px)").matches)) projectSearch.focus();
           projectDismiss = dismissEvent => {
             if (projectMenu.contains(dismissEvent.target) || projectButton.contains(dismissEvent.target)) return;
             projectMenu.hidden = true;
@@ -6217,10 +6358,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         });
         dialog.querySelector("[data-dialog-expand]")?.addEventListener("click", event => {
           draft.expanded = !draft.expanded;
-          localStorage.setItem(issue ? ISSUE_DIALOG_EXPANDED_KEY : CREATE_DIALOG_EXPANDED_KEY, String(draft.expanded));
+          if (!issue) localStorage.setItem(CREATE_DIALOG_EXPANDED_KEY, String(draft.expanded));
           dialog.dataset.expanded = String(draft.expanded);
           const button = event.currentTarget;
-          button.setAttribute("aria-label", t(draft.expanded ? "缩小" : "展开"));
+          button.setAttribute("aria-label", t(draft.expanded ? (issue ? "退出全屏" : "缩小") : "展开"));
           button.innerHTML = icon(draft.expanded ? "shrink" : "expand");
         });
         dialog.querySelector("[data-dialog-switch]")?.addEventListener("click", () => {
@@ -6472,6 +6613,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         window.visualViewport?.removeEventListener("resize", mobileDialogViewport);
         window.visualViewport?.removeEventListener("scroll", mobileDialogViewport);
         window.removeEventListener("resize", mobileDialogViewport);
+        if (mobileInputFrame !== null) cancelAnimationFrame(mobileInputFrame);
         dialog.remove();
       }, { once: true });
       bindModalDismiss(dialog, () => dialog.close());

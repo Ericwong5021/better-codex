@@ -31,6 +31,7 @@ import { RuntimeRelayClient } from "./runtime-relay-client.js";
 import { readRelayConfiguration, removeRelayConfiguration } from "./relay-config.js";
 import { requestFingerprint, RequestReceiptStore, type RequestReceiptResponse } from "./request-receipts.js";
 import { disableProjectionSync, readRemoteMode } from "./remote-mode.js";
+import { browseDirectory } from "./directory-browser.js";
 
 const accessToken = token();
 const mockupEnabled = !isSea() && !packagedBuild && process.argv.includes("--mockup");
@@ -674,6 +675,7 @@ export function startServer() {
       return saveRemoteFiles(files, randomUUID());
     },
     chooseNativeDirectory,
+    browseDirectory,
   );
   let activeRuntimePort = 0;
   const relayClient = new RuntimeRelayClient({ runtimePort: () => activeRuntimePort, localToken: accessToken, runtimeInstanceId: identity.instanceId, coreVersion: identity.version });
@@ -1415,6 +1417,10 @@ export function startServer() {
       }
       if (url.pathname === "/api/system/directory" && method === "POST") {
         return sendJson(response, 200, { workspace_path: await chooseNativeDirectory() });
+      }
+      if (url.pathname === "/api/system/directories" && method === "POST") {
+        const body = await readBody(request, 8192);
+        return sendJson(response, 200, await browseDirectory(body.path));
       }
       if (path[0] === "api" && path[1] === "projects" && path[2] && path.length === 3 && method === "GET") {
         const project = store.getProject(decodeURIComponent(path[2]));

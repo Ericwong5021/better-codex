@@ -3,7 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, renameSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { issuePriorities, issueStatuses } from "./db.js";
-import { forbiddenProjectionKeys, normalizeAgentDirectoryProjection, normalizeAgentModelCatalogProjection, normalizeCodexUsageProjection, projectDocumentKeys, remoteCommandOperations, runtimeProjectionSignature, supportedSyncProtocolVersions, syncEntityTypes, syncProtocolVersion, type AgentDirectoryProjection, type ConversationProjection, type HubBoard, type IssueProjection, type ProjectDocumentView, type ProjectProjection, type RemoteCommand, type RemoteCommandAck, type RemoteCommandOperation, type RemoteCommandStatus, type RuntimeProjection, type SyncChange, type SyncEntityType, type SyncProjection, type SyncPushRequest } from "./sync-contract.js";
+import { forbiddenProjectionKeys, normalizeAgentDirectoryProjection, normalizeAgentModelCatalogProjection, normalizeCodexUsageProjection, previousSyncProtocolVersion, projectDocumentKeys, remoteCommandOperations, runtimeProjectionSignature, supportedSyncProtocolVersions, syncEntityTypes, syncProtocolVersion, type AgentDirectoryProjection, type ConversationProjection, type DirectoryBrowserResult, type HubBoard, type IssueProjection, type ProjectDocumentView, type ProjectProjection, type RemoteCommand, type RemoteCommandAck, type RemoteCommandOperation, type RemoteCommandStatus, type RuntimeProjection, type SyncChange, type SyncEntityType, type SyncProjection, type SyncPushRequest } from "./sync-contract.js";
 import { coreVersion } from "./version.js";
 
 function now() {
@@ -215,6 +215,7 @@ function cleanCommandPayload(operation: RemoteCommandOperation, value: unknown) 
         ? ["project_id", "title", "description", "status", "priority", "labels", "agent_id"]
       : operation === "issue.reply" ? ["message", "files"]
       : operation === "issue.move" ? ["status", "before_id"]
+      : operation === "project.browse_directory" ? ["path"]
       : operation === "project.create" ? ["name", "workspace_path"]
       : operation === "project.overview" ? ["agent_id", "feedback"]
       : operation === "settings.auto-dispatch" ? ["enabled"] : [];
@@ -252,6 +253,7 @@ function cleanCommandPayload(operation: RemoteCommandOperation, value: unknown) 
   if (source.message !== undefined) payload.message = cleanString(source.message, 100_000, false).trim();
   if (source.feedback !== undefined) payload.feedback = cleanString(source.feedback, 4_000).trim();
   if (source.name !== undefined) payload.name = cleanString(source.name, 120, false).trim();
+  if (source.path !== undefined) payload.path = cleanString(source.path, 4096).trim();
   if (source.workspace_path !== undefined) payload.workspace_path = cleanString(source.workspace_path, 4096, false).trim();
   if (source.files !== undefined) {
     if (!Array.isArray(source.files) || source.files.length > 4) throw new Error("invalid_files");
@@ -273,8 +275,30 @@ function cleanCommandPayload(operation: RemoteCommandOperation, value: unknown) 
   if (operation === "issue.start" && !payload.title) throw new Error("invalid_command_payload");
   if (operation === "issue.reply" && !payload.message && !(payload.files as unknown[] | undefined)?.length) throw new Error("message_required");
   if (operation === "project.create" && (!payload.name || !payload.workspace_path)) throw new Error("invalid_command_payload");
+  if (operation === "project.browse_directory" && typeof payload.path !== "string") throw new Error("invalid_command_payload");
   if (operation === "settings.auto-dispatch" && typeof source.enabled !== "boolean") throw new Error("invalid_auto_dispatch");
   return payload;
+}
+
+function cleanDirectoryBrowserResult(value: unknown): DirectoryBrowserResult {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid_command_result");
+  const source = value as Record<string, unknown>;
+  const keys = ["path", "parent_path", "home_path", "root_path", "directories", "truncated"];
+  if (Object.keys(source).some(key => !keys.includes(key)) || !Array.isArray(source.directories) || source.directories.length > 500 || typeof source.truncated !== "boolean") throw new Error("invalid_command_result");
+  const directories = source.directories.map(value => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid_command_result");
+    const entry = value as Record<string, unknown>;
+    if (Object.keys(entry).some(key => key !== "name" && key !== "path")) throw new Error("invalid_command_result");
+    return { name: cleanString(entry.name, 512, false), path: cleanString(entry.path, 4096, false) };
+  });
+  return {
+    path: cleanString(source.path, 4096, false),
+    parent_path: source.parent_path === null ? null : cleanString(source.parent_path, 4096, false),
+    home_path: cleanString(source.home_path, 4096, false),
+    root_path: cleanString(source.root_path, 4096, false),
+    directories,
+    truncated: source.truncated,
+  };
 }
 
 export class HubStore {
@@ -686,7 +710,7 @@ export class HubStore {
     if (!remoteCommandOperations.includes(input.operation as never)) throw new Error("invalid_command_operation");
     const operation = input.operation as RemoteCommandOperation;
     const settingOperation = operation === "settings.auto-dispatch";
-    const directoryOperation = operation === "project.pick_directory";
+    const directoryOperation = operation === "project.pick_directory" || operation === "project.browse_directory";
     const projectOperation = operation.startsWith("project.");
     const createOperation = operation === "issue.create" || operation === "project.create" || directoryOperation;
     const commandId = input.command_id === undefined ? randomUUID() : cleanString(input.command_id, 200, false);
@@ -722,9 +746,13 @@ export class HubStore {
     if (operation === "issue.stop" && !running) throw new Error("issue_not_running");
     if (payload.agent_id && !this.board().agents.some(agent => agent.id === payload.agent_id)) throw new Error("agent_not_found");
     const deviceId = this.writerDeviceId(settingOperation || createOperation ? "" : entityId, entityType);
-    if (operation === "issue.delete") {
+    if (operation === "issue.delete" || operation === "project.browse_directory") {
       const runtimeRow = this.db.prepare("SELECT payload_json FROM runtime_projection WHERE device_id = ?").get(deviceId) as { payload_json: string } | undefined;
-      if (!runtimeRow || (JSON.parse(runtimeRow.payload_json) as RuntimeProjection).protocol_version !== syncProtocolVersion) throw new Error("incompatible_protocol");
+      const protocolVersion = runtimeRow ? (JSON.parse(runtimeRow.payload_json) as RuntimeProjection).protocol_version : null;
+      const incompatible = operation === "project.browse_directory"
+        ? protocolVersion !== syncProtocolVersion
+        : protocolVersion !== syncProtocolVersion && protocolVersion !== previousSyncProtocolVersion;
+      if (incompatible) throw new Error("incompatible_protocol");
     }
     const requestedAt = now();
     const expiresAt = after(24 * 60 * 60_000);
@@ -767,7 +795,7 @@ export class HubStore {
         const deliveryId = randomUUID();
         const dispatchedAt = now();
         const operation = this.db.prepare("SELECT operation FROM remote_commands WHERE command_id = ?").get(row.command_id) as { operation: RemoteCommandOperation } | undefined;
-        const dispatchExpiresAt = after(operation?.operation === "project.pick_directory" ? 300_000 : 90_000);
+        const dispatchExpiresAt = after(operation?.operation === "project.pick_directory" || operation?.operation === "project.browse_directory" ? 300_000 : 90_000);
         const result = this.db.prepare("UPDATE remote_commands SET status = 'dispatched', delivery_id = ?, dispatched_at = ?, dispatch_expires_at = ?, attempt_count = COALESCE(attempt_count, 0) + 1 WHERE command_id = ? AND device_id = ? AND status = 'pending'").run(deliveryId, dispatchedAt, dispatchExpiresAt, row.command_id, deviceId);
         if (result.changes !== 1) continue;
         this.recordCommandChange(row.command_id, "dispatched", deliveryId);
@@ -822,15 +850,18 @@ export class HubStore {
       if (ack.status === "applied" && row.operation === "project.pick_directory") {
         const result = ack.result;
         if (!result || typeof result !== "object" || Array.isArray(result) || Object.keys(result).some(key => key !== "workspace_path")) throw new Error("invalid_command_result");
-        const workspacePath = cleanString(result.workspace_path ?? "", 4096).trim();
+        const workspacePath = cleanString("workspace_path" in result ? result.workspace_path ?? "" : "", 4096).trim();
         this.db.prepare("UPDATE remote_commands SET payload_json = ? WHERE command_id = ?").run(JSON.stringify({ workspace_path: workspacePath }), ack.command_id);
+      }
+      if (ack.status === "applied" && row.operation === "project.browse_directory") {
+        this.db.prepare("UPDATE remote_commands SET payload_json = ? WHERE command_id = ?").run(JSON.stringify(cleanDirectoryBrowserResult(ack.result)), ack.command_id);
       }
       if (ack.status === "applied" && row.operation === "issue.delete") {
         const timestamp = now();
         this.db.prepare("UPDATE entities SET deleted_at = ?, updated_at = ? WHERE entity_type = 'issue' AND entity_id = ? AND owner_device_id = ?").run(timestamp, timestamp, row.entity_id, deviceId);
         this.db.prepare("DELETE FROM conversations WHERE issue_id = ?").run(row.entity_id);
       }
-      if (ack.status === "applied" && row.operation !== "settings.auto-dispatch" && row.operation !== "project.pick_directory" && row.operation !== "issue.delete") {
+      if (ack.status === "applied" && row.operation !== "settings.auto-dispatch" && row.operation !== "project.pick_directory" && row.operation !== "project.browse_directory" && row.operation !== "issue.delete") {
         const entityType: SyncEntityType = row.operation.startsWith("project.") ? "project" : "issue";
         const projectionId = row.operation === "project.create" && ack.projection && "id" in ack.projection ? ack.projection.id : row.entity_id;
         const projection = cleanProjection(entityType, projectionId, ack.projection);

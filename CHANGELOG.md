@@ -4,6 +4,13 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.9-beta.20] - 2026-08-20
+
+- Browse folders on the local Runtime when creating projects from the remote Web workspace.
+- Keep a single Session Host active and recover stale process locks and local endpoints safely.
+- Ignore late Relay frames for channels that have already closed.
+- Improve Issue detail sizing, full-screen behavior, project menus, and keyboard handling on compact Web layouts.
+
 ## [0.4.9-beta.19] - 2026-08-19
 
 - Remove password confirmation from every update path and keep local Codex distinct from remote Relay and Web hosts.
@@ -643,7 +650,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.19...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.20...HEAD
+[0.4.9-beta.20]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.19...v0.4.9-beta.20
 [0.4.9-beta.19]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.18...v0.4.9-beta.19
 [0.4.9-beta.18]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.17...v0.4.9-beta.18
 [0.4.9-beta.17]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.16...v0.4.9-beta.17

@@ -4,7 +4,7 @@ import { coreVersion } from "./compatibility.js";
 import type { Store } from "./db.js";
 import { readModelCatalog } from "./model-catalog.js";
 import { readSyncConfiguration, type SyncConfiguration } from "./sync-config.js";
-import { supportedSyncProtocolVersions, syncProtocolVersion, type AgentDirectoryProjection, type AgentModelCatalogProjection, type CodexUsageProjection, type ConversationProjection, type RemoteCommand, type RemoteCommandAck, type RemoteFilePayload, type RuntimeProjection, type SyncChange, type SyncProtocolVersion, type SyncPushResponse } from "./sync-contract.js";
+import { legacySyncProtocolVersion, supportedSyncProtocolVersions, syncProtocolVersion, type AgentDirectoryProjection, type AgentModelCatalogProjection, type CodexUsageProjection, type ConversationProjection, type DirectoryBrowserResult, type RemoteCommand, type RemoteCommandAck, type RemoteFilePayload, type RuntimeProjection, type SyncChange, type SyncProtocolVersion, type SyncPushResponse } from "./sync-contract.js";
 import { controlCapabilities, controlProtocolVersion, decodeControlMessage, encodeControlMessage } from "./control-protocol.js";
 
 type SyncState = {
@@ -66,6 +66,7 @@ export class SyncClient {
     private readonly projectOverview: (projectId: string, agentId: string, feedback: string) => void | Promise<void> = () => { throw new Error("remote_project_overview_unavailable"); },
     private readonly files: (files: RemoteFilePayload[]) => { paths: string[]; cleanup: () => void } | Promise<{ paths: string[]; cleanup: () => void }> = () => { throw new Error("remote_files_unavailable"); },
     private readonly chooseDirectory: () => string | Promise<string> = () => { throw new Error("directory_picker_unavailable"); },
+    private readonly browseDirectory: (path: string) => DirectoryBrowserResult | Promise<DirectoryBrowserResult> = () => { throw new Error("directory_browser_unavailable"); },
   ) {}
 
   start() {
@@ -246,7 +247,7 @@ export class SyncClient {
       queue_depth: queue.pending,
       health_state: "online",
       usage,
-      ...(protocolVersion === syncProtocolVersion ? {
+      ...(protocolVersion !== legacySyncProtocolVersion ? {
         agent_models: agentModelCatalog,
         auto_dispatch: this.store.getAutoDispatch(),
         scheduler_model: this.store.getSchedulerModel(defaultAgent.model),
@@ -299,7 +300,7 @@ export class SyncClient {
 
   private async push(configuration: SyncConfiguration) {
     const protocolVersion = await this.negotiatedSyncProtocol(configuration);
-    const [usage, agentModelCatalog] = await Promise.all([this.accountUsage(), protocolVersion === syncProtocolVersion ? readModelCatalog() : Promise.resolve([])]);
+    const [usage, agentModelCatalog] = await Promise.all([this.accountUsage(), protocolVersion !== legacySyncProtocolVersion ? readModelCatalog() : Promise.resolve([])]);
     let directoryPending = true;
     for (let page = 0; page < 100; page += 1) {
       const limit = directoryPending ? 99 : 100;
@@ -378,7 +379,7 @@ export class SyncClient {
         : await hubRequest<{ commands: RemoteCommand[] }>(configuration, "/api/v1/sync/commands?limit=100");
       if (!Array.isArray(result.commands)) throw new Error("invalid_command_response");
       for (const command of result.commands) {
-        const ack = { ...(await this.store.applyRemoteCommand(command, { files: this.files, reply: this.reply, stop: this.stopIssue, projectCreate: this.projectCreate, projectOverview: this.projectOverview, chooseDirectory: this.chooseDirectory })), delivery_id: command.delivery_id ?? null };
+        const ack = { ...(await this.store.applyRemoteCommand(command, { files: this.files, reply: this.reply, stop: this.stopIssue, projectCreate: this.projectCreate, projectOverview: this.projectOverview, chooseDirectory: this.chooseDirectory, browseDirectory: this.browseDirectory })), delivery_id: command.delivery_id ?? null };
         if (claimed) await this.controlRpc("commands.ack", ack as unknown as Record<string, unknown>);
         else await hubRequest<RemoteCommandAck>(configuration, `/api/v1/sync/commands/${encodeURIComponent(command.command_id)}/ack`, { method: "POST", body: JSON.stringify(ack) });
         if (ack.status === "applied") this.commandApplied(command, ack);
@@ -395,7 +396,7 @@ export class SyncClient {
       name: profile.name,
       name_en: profile.name_en,
       description: profile.description,
-      ...(protocolVersion === syncProtocolVersion ? { model: profile.model, reasoning_effort: profile.reasoning_effort } : {}),
+      ...(protocolVersion !== legacySyncProtocolVersion ? { model: profile.model, reasoning_effort: profile.reasoning_effort } : {}),
       avatar: this.store.getAgentAvatar(profile.id),
       version: profile.version,
       created_at: profile.created_at,
