@@ -458,12 +458,11 @@ test("agent assignment options expose compact model and reasoning tags", () => {
   assert.match(betterCodexDesignSystemCss(), /better-codex-dialog-select\.is-assignee \.better-codex-dialog-select-menu\s*\{[^}]*top:\s*calc\(100% \+ var\(--bc-space-2\)\);[^}]*bottom:\s*auto;/s);
 });
 
-test("agent issue creation refreshes profiles and reuses their names and avatars", () => {
+test("agent issue creation reuses loaded profile names and avatars", () => {
   const source = injectionScript(4317, "test-token", "install");
 
-  assert.ok(source.includes("const [agents, projects, refreshedIssue] = await Promise.all(["));
-  assert.ok(source.includes('api("/api/agents")'));
-  assert.ok(source.includes("state.agents = agents"));
+  assert.ok(source.includes('state.agents = bootstrap.agents || []'));
+  assert.ok(source.includes('function openEditor(issue = null, initialStatus = "todo", createMode = "agent")'));
   assert.ok(source.includes('agentAvatarMarkup(agent, "better-codex-agent-avatar")'));
   assert.ok(source.includes('agentAvatarMarkup(selectedAgent, "better-codex-agent-avatar")'));
   assert.ok(source.includes("syncAgentAvatar(runAvatar, selectedAgent)"));
@@ -797,7 +796,7 @@ test("every modal dialog closes only when its backdrop is clicked", () => {
 
   assert.ok(source.includes("function bindModalDismiss(dialog, dismiss)"));
   assert.ok(source.includes("event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom"));
-  assert.equal(bindings.length, 3);
+  assert.equal(bindings.length, 4);
 });
 
 test("Codex-native visual values live behind semantic design tokens", () => {
