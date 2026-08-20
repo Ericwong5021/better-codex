@@ -518,6 +518,7 @@ export function createRelayServer(options: RelayServerOptions) {
       let connection: WebSocketConnection | null = null;
       let active: ActiveRuntime | null = null;
       let messageQueue = Promise.resolve();
+      let socketError = "";
       connection = upgradeWebSocket(request, socket, [relayWebSocketProtocol], {
         message: source => {
           messageQueue = messageQueue.then(async () => {
@@ -597,13 +598,16 @@ export function createRelayServer(options: RelayServerOptions) {
         },
         close: () => {
           if (runtime?.socket === connection) {
-            failRuntimeChannels(runtime, "relay_stream_interrupted", "runtime_socket_closed");
+            failRuntimeChannels(runtime, "relay_stream_interrupted", socketError ? "runtime_socket_error:" + socketError : "runtime_socket_closed");
             runtime = null;
           }
           if (active) store.audit(device.id, "runtime_disconnected");
           active = null;
         },
-        error: error => store.audit(device.id, "runtime_socket_error", error.message),
+        error: error => {
+          socketError = error.message;
+          store.audit(device.id, "runtime_socket_error", error.message);
+        },
       });
       connection?.acceptHead(head);
     } catch {
