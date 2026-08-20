@@ -5,6 +5,7 @@ import { betterCodexDesignSystemCss } from "./design-system.js";
 import { renderMarkdown } from "./markdown.js";
 import { betterCodexMcpRoute } from "./mcp-app.js";
 import {
+  ArrowLeft,
   ArrowLeftRight,
   ArrowUp,
   Archive,
@@ -81,6 +82,7 @@ const lucideIcons = Object.fromEntries(Object.entries({
   filter: ListFilter,
   display: SlidersHorizontal,
   board: Columns3,
+  back: ArrowLeft,
   switch: ArrowLeftRight,
   expand: Maximize2,
   shrink: Minimize2,
@@ -544,7 +546,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "Better Codex 服务需要重启": "Better Codex needs to restart", "当前页面与后台服务的连接已失效。请在终端运行下面的命令，完成后重新连接。": "The connection between this page and the background service has expired. Run the command below in your terminal, then reconnect.", "复制重启命令": "Copy restart command", "复制消息": "Copy message", "已复制": "Copied", "重新连接": "Reconnect", "正在连接…": "Connecting…", "错误详情": "Error details",
       "全部": "All", "已分配": "Assigned", "未分配": "Unassigned", "待规划": "Backlog", "待办": "Todo", "进行中": "In progress", "待审核": "In review", "调度中": "Scheduling", "已完成": "Done", "已阻塞": "Blocked", "归档": "Archive", "拖到这里即可归档": "Drop here to archive", "查看已归档卡片": "View archived cards", "已归档任务": "Archived tasks", "搜索已归档任务": "Search archived tasks", "所有项目": "All projects", "全部删除": "Delete all", "删除已归档聊天": "Delete archived chat", "删除项目中的全部内容": "Delete all project content", "确定删除项目中的全部已归档任务吗？": "Delete all archived tasks in this project?", "取消归档": "Unarchive", "已归档卡片": "Archived cards", "暂无已归档卡片": "No archived cards", "归档列表加载失败": "Unable to load archived cards",
       "无": "None", "低": "Low", "中": "Medium", "高": "High", "紧急": "Urgent", "超高": "Extra high", "无优先级": "No priority", "优先级": "Priority", "状态": "Status", "日期": "Date", "筛选": "Filter", "标签": "Labels",
-      "新建": "New", "新建 issue": "New issue", "新建任务": "New task", "新建智能体": "New agent", "创建": "Create", "创建任务": "Create task", "删除": "Delete", "删除任务": "Delete task", "删除智能体": "Delete agent", "保存": "Save", "确认": "Confirm", "取消": "Cancel", "关闭": "Close", "重试": "Retry", "稍后": "Later", "展开": "Expand", "缩小": "Minimize", "退出全屏": "Exit full screen", "缩放头像": "Zoom avatar",
+      "新建": "New", "新建 issue": "New issue", "新建任务": "New task", "新建智能体": "New agent", "创建": "Create", "创建任务": "Create task", "删除": "Delete", "删除任务": "Delete task", "删除智能体": "Delete agent", "保存": "Save", "确认": "Confirm", "取消": "Cancel", "关闭": "Close", "返回": "Back", "重试": "Retry", "稍后": "Later", "展开": "Expand", "缩小": "Minimize", "退出全屏": "Exit full screen", "缩放头像": "Zoom avatar",
       "项目": "Project", "无项目": "No project", "选择项目": "Select project", "选择责任人": "Select owner", "选择执行智能体": "Select agent", "更多创建选项": "More creation options", "任务标题": "Task title", "添加描述...": "Add description...", "添加标签": "Add label", "添加附件": "Add attachment", "移除附件": "Remove attachment", "搜索任务": "Search tasks", "搜索项目": "Search projects", "搜索项目...": "Search projects...", "搜索智能体": "Search agents",
       "负责人": "Owner", "创建者": "Creator", "指定负责人": "Assign owner", "由我创建": "Created by me", "由我": "By me", "我": "Me", "你": "You", "未指派": "Not assigned", "未提供": "Not provided", "已同步": "Synced",
       "自动运行": "Auto-run", "手动运行": "Manual run", "切换为自动运行": "Switch to auto-run", "切换为手动运行": "Switch to manual run", "切换到智能体": "Switch to agents", "手动创建": "Manual creation", "通过智能体创建": "Create with agent", "运行模式说明": "Run mode", "帮助与设置": "Help and settings", "设置": "Settings", "快捷键": "Shortcuts", "快捷键设置": "Keyboard shortcuts", "为常用操作设置键盘快捷键。": "Set keyboard shortcuts for common actions.", "创建 Issue": "Create Issue", "打开创建 Issue 窗口": "Open the Create Issue window", "设置快捷键": "Set shortcut", "点击录入": "Click to record", "按下新的快捷键": "Press a new shortcut", "未设置": "Not set", "清除快捷键": "Clear shortcut", "关于": "About", "会话结束提醒": "Session completion alerts", "Issue 会话结束后在当前窗口显示提醒": "Show an alert in the current window when an issue session ends", "弹窗持续时间": "Popup duration", "1 秒": "1 second", "5 秒": "5 seconds", "10 秒": "10 seconds", "永久": "Permanent", "会话已结束": "Session ended", "通知": "Notifications", "语言": "Language", "界面语言": "Interface language", "选择 Better Codex 的界面语言": "Choose the language used by Better Codex", "调度": "Scheduling", "调度器模型": "Scheduler model", "这个模型用于 Issue 状态调度": "This model is used for Issue status routing", "调度器思考强度": "Scheduler reasoning effort", "这个强度用于 Issue 状态调度": "This level is used for Issue status routing", "跟随系统": "System", "中文": "Chinese", "软件更新": "Software updates", "更新状态": "Update status", "检查新版本": "Check for updates", "检查中…": "Checking…", "发现新版本": "Update available", "无法检查更新": "Unable to check", "版本信息": "Version info", "兼容版本": "Compatibility version", "运行状态": "Runtime status", "运行正常": "Running", "正在检查": "Checking", "已是最新版本": "Up to date", "从开始到完成，让 Codex 里的工作清晰可见。": "From start to finish, keep your work in Codex clear and visible.", "如果你喜欢 Better Codex，欢迎给我们一个 Star。": "If you like Better Codex, please give us a Star.", "最大并发": "Max concurrency", "模型": "Model", "推理": "Reasoning", "指令": "Instructions", "默认": "Default", "自定义": "Custom",
@@ -5192,9 +5194,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     async function openEditor(issue = null, initialStatus = "todo", createMode = "agent") {
-      state.agents = await api("/api/agents");
-      if (!state.mockup) state.projects = await api("/api/projects");
-      if (issue) issue = await api("/api/issues/" + encodeURIComponent(issue.id));
+      const [agents, projects, refreshedIssue] = await Promise.all([
+        api("/api/agents"),
+        state.mockup ? Promise.resolve(state.projects) : api("/api/projects"),
+        issue ? api("/api/issues/" + encodeURIComponent(issue.id)) : Promise.resolve(null),
+      ]);
+      state.agents = agents;
+      state.projects = projects;
+      if (issue) issue = refreshedIssue;
       state.selected = issue;
       document.getElementById("better-codex-dialog")?.remove();
       const cachedCreateDraft = issue ? null : readCreateDraft();
@@ -5261,6 +5268,25 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       let submitInFlight = false;
       let mobileInputFrame = null;
       let mobileDialogLayoutHeight = 0;
+      let dialogBoundsObserver = null;
+      const clearIssueFullscreenBounds = () => {
+        dialog.style.removeProperty("--bc-dialog-fullscreen-top");
+        dialog.style.removeProperty("--bc-dialog-fullscreen-left");
+        dialog.style.removeProperty("--bc-dialog-fullscreen-width");
+        dialog.style.removeProperty("--bc-dialog-fullscreen-height");
+      };
+      const syncIssueFullscreenBounds = () => {
+        const compact = HOST_KIND === "web" && window.matchMedia("(max-width: 720px)").matches;
+        if (!issue || !draft.expanded || compact || !panel?.isConnected) {
+          clearIssueFullscreenBounds();
+          return;
+        }
+        const bounds = panel.getBoundingClientRect();
+        dialog.style.setProperty("--bc-dialog-fullscreen-top", bounds.top + "px");
+        dialog.style.setProperty("--bc-dialog-fullscreen-left", bounds.left + "px");
+        dialog.style.setProperty("--bc-dialog-fullscreen-width", bounds.width + "px");
+        dialog.style.setProperty("--bc-dialog-fullscreen-height", bounds.height + "px");
+      };
       const mobileDialogViewport = () => {
         if (mobileInputFrame !== null) {
           cancelAnimationFrame(mobileInputFrame);
@@ -5272,6 +5298,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           dialog.style.removeProperty("--bc-mobile-layout-height");
           dialog.style.removeProperty("--bc-mobile-keyboard-translation");
           mobileDialogLayoutHeight = 0;
+          syncIssueFullscreenBounds();
           return;
         }
         const viewport = window.visualViewport;
@@ -5560,9 +5587,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           : "";
         const title = draft.mode === "agent" ? t("通过智能体创建") : issue ? escapeHtml(issue.identifier) : t("手动创建");
         const crumb = issue
-          ? '<span data-dialog-breadcrumb-project>' + escapeHtml(projectLabel(breadcrumbProject) || t("未提供")) + '</span><span aria-hidden="true">' + icon("chevron") + '</span><strong>' + title + '</strong>'
+          ? '<span class="better-codex-dialog-route-root">' + te("任务看板") + '</span><span class="better-codex-dialog-route-root-separator" aria-hidden="true">' + icon("chevron") + '</span><span data-dialog-breadcrumb-project>' + escapeHtml(projectLabel(breadcrumbProject) || t("未提供")) + '</span><span aria-hidden="true">' + icon("chevron") + '</span><strong>' + title + '</strong>'
           : '<strong>' + title + '</strong>';
-        return '<div class="better-codex-dialog-head"><div class="better-codex-dialog-breadcrumb">' + crumb + '</div><div class="better-codex-dialog-head-actions">' + restoreButton + openThreadButton + startNowButton + '<button class="better-codex-icon-button" type="button" data-dialog-expand aria-label="' + te(draft.expanded ? (issue ? "退出全屏" : "缩小") : "展开") + '">' + icon(draft.expanded ? "shrink" : "expand") + '</button><button class="better-codex-icon-button" type="button" data-dialog-close aria-label="' + te("关闭") + '">' + icon("close") + '</button></div></div>';
+        const backButton = issue ? '<button class="better-codex-dialog-back" type="button" data-dialog-back aria-label="' + te("返回") + '">' + icon("back") + '</button>' : "";
+        return '<div class="better-codex-dialog-head"><div class="better-codex-dialog-head-leading">' + backButton + '<nav class="better-codex-dialog-breadcrumb" aria-label="' + te("任务看板") + '">' + crumb + '</nav></div><div class="better-codex-dialog-head-actions">' + restoreButton + openThreadButton + startNowButton + '<button class="better-codex-icon-button" type="button" data-dialog-expand aria-label="' + te(draft.expanded ? (issue ? "退出全屏" : "缩小") : "展开") + '">' + icon(draft.expanded ? "shrink" : "expand") + '</button><button class="better-codex-icon-button" type="button" data-dialog-close aria-label="' + te("关闭") + '">' + icon("close") + '</button></div></div>';
       }
 
       function conversationPanel() {
@@ -6181,7 +6209,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             if (sendButton?.dataset.composerMode === "send") void sendReply();
           }
         });
-        if (issue && sessionId) void loadConversation();
+        if (issue && sessionId && dialog.open) void loadConversation();
         const closeDialogSelects = () => {
           dialog.querySelectorAll("[data-dialog-select]").forEach(picker => {
             picker.classList.remove("is-open");
@@ -6356,13 +6384,19 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           syncDraft();
           void startIssueNow();
         });
-        dialog.querySelector("[data-dialog-expand]")?.addEventListener("click", event => {
-          draft.expanded = !draft.expanded;
+        const setDialogExpanded = expanded => {
+          draft.expanded = expanded;
           if (!issue) localStorage.setItem(CREATE_DIALOG_EXPANDED_KEY, String(draft.expanded));
+          if (issue && draft.expanded) syncIssueFullscreenBounds();
           dialog.dataset.expanded = String(draft.expanded);
-          const button = event.currentTarget;
-          button.setAttribute("aria-label", t(draft.expanded ? (issue ? "退出全屏" : "缩小") : "展开"));
-          button.innerHTML = icon(draft.expanded ? "shrink" : "expand");
+          if (issue && !draft.expanded) clearIssueFullscreenBounds();
+          const button = dialog.querySelector("[data-dialog-expand]");
+          button?.setAttribute("aria-label", t(draft.expanded ? (issue ? "退出全屏" : "缩小") : "展开"));
+          if (button) button.innerHTML = icon(draft.expanded ? "shrink" : "expand");
+        };
+        dialog.querySelector("[data-dialog-back]")?.addEventListener("click", () => setDialogExpanded(false));
+        dialog.querySelector("[data-dialog-expand]")?.addEventListener("click", () => {
+          setDialogExpanded(!draft.expanded);
         });
         dialog.querySelector("[data-dialog-switch]")?.addEventListener("click", () => {
           syncDraft();
@@ -6613,6 +6647,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         window.visualViewport?.removeEventListener("resize", mobileDialogViewport);
         window.visualViewport?.removeEventListener("scroll", mobileDialogViewport);
         window.removeEventListener("resize", mobileDialogViewport);
+        dialogBoundsObserver?.disconnect();
         if (mobileInputFrame !== null) cancelAnimationFrame(mobileInputFrame);
         dialog.remove();
       }, { once: true });
@@ -6620,11 +6655,16 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       renderDialog();
       dialog.showModal();
       mobileDialogViewport();
+      if (issue && panel && typeof ResizeObserver === "function") {
+        dialogBoundsObserver = new ResizeObserver(syncIssueFullscreenBounds);
+        dialogBoundsObserver.observe(panel);
+      }
       window.visualViewport?.addEventListener("resize", mobileDialogViewport, { passive: true });
       window.visualViewport?.addEventListener("scroll", mobileDialogViewport, { passive: true });
       window.addEventListener("resize", mobileDialogViewport, { passive: true });
       traceDialog("dialog_open", { dialog_open: dialog.open });
       dialog.querySelector(HOST_KIND === "web" && window.matchMedia("(max-width: 720px)").matches ? "[data-dialog-close]" : draft.mode === "agent" ? '[name="prompt"]' : '[name="title"]')?.focus();
+      if (issue && sessionId) requestAnimationFrame(() => void loadConversation());
     }
 
     function onBoardClick(event) {
