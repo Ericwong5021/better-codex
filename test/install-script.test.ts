@@ -574,7 +574,7 @@ test("macOS timeout helper terminates a command that never exits", {
 });
 
 test("macOS installer aborts before mutation when previous service state is unknown", () => {
-  const status = shellSource.indexOf('PREVIOUS_SERVICE_STATUS="$(run_with_timeout 10');
+  const status = shellSource.indexOf('PREVIOUS_SERVICE_STATUS="$(run_with_timeout 30');
   const mutation = shellSource.indexOf("INSTALL_MUTATED=0", status);
   assert.ok(status >= 0 && mutation > status, "previous service state capture is missing");
   const capture = shellSource.slice(status, mutation);
