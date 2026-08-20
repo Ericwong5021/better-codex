@@ -240,6 +240,7 @@ export function createHubServer(options: HubServerOptions) {
       const admin = token.length > 0 && secretEqual(token, options.adminToken);
       const browserToken = cookies(request.headers.cookie).get("better_codex_session") || "";
       const browser = store.webSession(browserToken);
+      if (browser) response.setHeader("set-cookie", webSessionCookie(browserToken, secureCookies, Math.max(1, Math.ceil((Date.parse(browser.expires_at) - Date.now()) / 1000))));
       const csrfValid = Boolean(browser && typeof request.headers["x-csrf-token"] === "string" && secretEqual(request.headers["x-csrf-token"], browser.csrf_token));
       if (url.pathname === "/web/session" && method === "GET") {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" });

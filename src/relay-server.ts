@@ -375,6 +375,7 @@ export function createRelayServer(options: RelayServerOptions) {
 
       const sessionToken = parseCookies(request.headers.cookie).get("better_codex_relay_session") || "";
       const session = store.webSession(sessionToken);
+      if (session) response.setHeader("set-cookie", relaySessionCookie(sessionToken, secureCookies, Math.max(1, Math.ceil((Date.parse(session.expires_at) - Date.now()) / 1000))));
       const csrfValid = Boolean(session && typeof request.headers["x-csrf-token"] === "string" && secretEqual(request.headers["x-csrf-token"], session.csrf_token));
       const admin = secretEqual(bearer(request), options.adminToken);
       if (url.pathname === "/relay/session" && method === "GET") {

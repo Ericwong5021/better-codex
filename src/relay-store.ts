@@ -15,6 +15,9 @@ function tokenHash(value: string) {
   return createHash("sha256").update(value).digest("hex");
 }
 
+const webSessionIdleLifetimeMilliseconds = 12 * 60 * 60 * 1000;
+const webSessionMaximumLifetimeMilliseconds = 30 * 24 * 60 * 60 * 1000;
+
 function settingKey(value: string) {
   if (!/^[a-z0-9:_-]{1,240}$/i.test(value)) throw new Error("invalid_relay_setting");
   return value;
@@ -111,11 +114,11 @@ export class RelayStore {
     return this.setting("web_password_hash") || "";
   }
 
-  createWebSession(ttlMilliseconds = 12 * 60 * 60 * 1000) {
+  createWebSession() {
     const token = randomBytes(32).toString("base64url");
     const csrfToken = randomBytes(32).toString("base64url");
     const createdAt = now();
-    const expiresAt = after(ttlMilliseconds);
+    const expiresAt = after(webSessionIdleLifetimeMilliseconds);
     this.database.prepare("DELETE FROM relay_web_sessions WHERE expires_at <= ?").run(createdAt);
     this.database.prepare("INSERT INTO relay_web_sessions (token_hash, csrf_token, created_at, expires_at, last_seen_at) VALUES (?, ?, ?, ?, ?)").run(tokenHash(token), csrfToken, createdAt, expiresAt, createdAt);
     return { token, csrf_token: csrfToken, created_at: createdAt, expires_at: expiresAt };
@@ -129,9 +132,11 @@ export class RelayStore {
       this.database.prepare("DELETE FROM relay_web_sessions WHERE token_hash = ?").run(tokenHash(token));
       return null;
     }
-    const seenAt = now();
-    this.database.prepare("UPDATE relay_web_sessions SET last_seen_at = ? WHERE token_hash = ?").run(seenAt, tokenHash(token));
-    return { ...row, last_seen_at: seenAt };
+    const seenAtMilliseconds = Date.now();
+    const seenAt = new Date(seenAtMilliseconds).toISOString();
+    const expiresAt = new Date(Math.min(seenAtMilliseconds + webSessionIdleLifetimeMilliseconds, Date.parse(row.created_at) + webSessionMaximumLifetimeMilliseconds)).toISOString();
+    this.database.prepare("UPDATE relay_web_sessions SET expires_at = ?, last_seen_at = ? WHERE token_hash = ?").run(expiresAt, seenAt, tokenHash(token));
+    return { ...row, expires_at: expiresAt, last_seen_at: seenAt };
   }
 
   revokeWebSession(token: string) {

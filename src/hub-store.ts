@@ -19,6 +19,8 @@ function tokenHash(value: string) {
 }
 
 const hubSchemaVersion = 7;
+const webSessionIdleLifetimeMilliseconds = 12 * 60 * 60_000;
+const webSessionMaximumLifetimeMilliseconds = 30 * 24 * 60 * 60_000;
 
 function backupBeforeMigration(file: string) {
   if (!existsSync(file)) return;
@@ -516,7 +518,7 @@ export class HubStore {
     const token = randomBytes(32).toString("base64url");
     const csrf_token = randomBytes(32).toString("base64url");
     const created_at = now();
-    const expires_at = after(12 * 60 * 60_000);
+    const expires_at = after(webSessionIdleLifetimeMilliseconds);
     this.db.prepare("INSERT INTO web_sessions (token_hash, csrf_token, created_at, expires_at, last_seen_at) VALUES (?, ?, ?, ?, ?)").run(tokenHash(token), csrf_token, created_at, expires_at, created_at);
     this.audit("browser", "web_session_created");
     return { token, csrf_token, expires_at };
@@ -524,11 +526,14 @@ export class HubStore {
 
   webSession(token: string) {
     if (!token) return null;
-    this.db.prepare("DELETE FROM web_sessions WHERE expires_at <= ?").run(now());
-    const row = this.db.prepare("SELECT csrf_token, expires_at FROM web_sessions WHERE token_hash = ? AND expires_at > ?").get(tokenHash(token), now()) as { csrf_token: string; expires_at: string } | undefined;
+    const timestampMilliseconds = Date.now();
+    const timestamp = new Date(timestampMilliseconds).toISOString();
+    this.db.prepare("DELETE FROM web_sessions WHERE expires_at <= ?").run(timestamp);
+    const row = this.db.prepare("SELECT csrf_token, created_at, expires_at, last_seen_at FROM web_sessions WHERE token_hash = ? AND expires_at > ?").get(tokenHash(token), timestamp) as { csrf_token: string; created_at: string; expires_at: string; last_seen_at: string } | undefined;
     if (!row) return null;
-    this.db.prepare("UPDATE web_sessions SET last_seen_at = ? WHERE token_hash = ?").run(now(), tokenHash(token));
-    return row;
+    const expires_at = new Date(Math.min(timestampMilliseconds + webSessionIdleLifetimeMilliseconds, Date.parse(row.created_at) + webSessionMaximumLifetimeMilliseconds)).toISOString();
+    this.db.prepare("UPDATE web_sessions SET expires_at = ?, last_seen_at = ? WHERE token_hash = ?").run(expires_at, timestamp, tokenHash(token));
+    return { csrf_token: row.csrf_token, expires_at };
   }
 
   setReadOnly(readOnly: boolean) {
