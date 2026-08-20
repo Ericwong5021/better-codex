@@ -31,15 +31,15 @@ const webHostHtml = String.raw`<!doctype html>
 <body>
   <a class="web-skip-link" href="#web-main">跳到主要内容</a>
   <div class="web-shell">
-    <aside class="web-sidebar" aria-label="Better Codex 导航">
+    <aside id="web-sidebar" class="web-sidebar" aria-label="Better Codex 导航">
       <header class="web-brand">
         <img class="web-brand-logo" src="${betterCodexLogoUrl}" alt="">
         <strong>Better Codex</strong>
         <button id="web-install" class="web-icon-button" type="button" aria-label="安装 Better Codex" hidden>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg>
         </button>
-        <button id="web-theme" class="web-icon-button" type="button" aria-label="切换深色模式">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.66 6.34l1.41-1.41"></path></svg>
+        <button id="web-sidebar-collapse" class="web-icon-button web-sidebar-collapse" type="button" aria-label="收起侧边栏" aria-controls="web-sidebar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M9 3v18"></path><path d="m16 9-3 3 3 3"></path></svg>
         </button>
       </header>
       <nav role="navigation" aria-label="主导航">
@@ -47,6 +47,11 @@ const webHostHtml = String.raw`<!doctype html>
           <div class="web-sidebar-section" data-app-action-sidebar-section></div>
         </div>
       </nav>
+      <div class="web-sidebar-tools">
+        <button id="web-theme" class="web-icon-button" type="button" aria-label="切换深色模式">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.66 6.34l1.41-1.41"></path></svg>
+        </button>
+      </div>
       <footer class="web-account">
         <button id="web-profile" class="web-profile" type="button" aria-expanded="false" aria-controls="web-usage">
           <span id="web-avatar" class="web-avatar"><span id="web-avatar-initials">你</span><i class="web-online" aria-hidden="true"></i></span>
@@ -63,6 +68,9 @@ const webHostHtml = String.raw`<!doctype html>
       </footer>
     </aside>
     <main id="web-main" class="web-main">
+      <button id="web-sidebar-expand" class="web-icon-button web-sidebar-expand" type="button" aria-label="展开侧边栏" aria-controls="web-sidebar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M9 3v18"></path><path d="m14 9 3 3-3 3"></path></svg>
+      </button>
       <div class="web-surface" data-better-codex-web-surface>
         <div class="web-native-layout" data-app-shell-main-content-layout>
           <div class="app-shell-main-content-frame">
@@ -142,6 +150,8 @@ body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; 
 .web-icon-button { display: grid; width: 34px; height: 34px; border: 0; border-radius: 9px; padding: 8px; place-items: center; background: transparent; cursor: pointer; }
 .web-icon-button[hidden] { display: none; }
 .web-icon-button svg { width: 17px; height: 17px; }
+.web-sidebar-tools { display: flex; justify-content: flex-end; padding: 4px 6px; }
+.web-sidebar-expand { position: absolute; z-index: 40; top: 14px; left: 14px; display: none; background: var(--web-sidebar); box-shadow: 0 1px 3px rgb(0 0 0 / .1); }
 .web-sidebar nav { min-height: 0; flex: 1; }
 .web-sidebar-scroll { height: 100%; overflow: auto; }
 .web-sidebar-section { display: grid; gap: 3px; margin-top: 10px; }
@@ -177,6 +187,7 @@ body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; 
 .web-usage-progress::-webkit-progress-value { border-radius: 999px; background: #2fa15f; }
 .web-usage-progress::-moz-progress-bar { border-radius: 999px; background: #2fa15f; }
 .web-main, .web-surface { min-width: 0; min-height: 0; height: 100%; }
+.web-main { position: relative; }
 .web-surface { position: relative; }
 .web-native-layout, .app-shell-main-content-frame { width: 100%; height: 100%; }
 .web-native-view { display: grid; height: 100%; place-content: center; padding: 30px; text-align: center; }
@@ -197,11 +208,17 @@ body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; 
 .web-connect output { display: block; margin-top: 9px; color: #d34e4e; font-size: 11px; }
 .web-connect button { width: 100%; min-height: 38px; margin-top: 16px; border: 0; border-radius: 10px; color: var(--web-canvas); background: var(--web-ink); cursor: pointer; }
 @media (hover:hover) { .web-nav-button:hover, .web-icon-button:hover, .web-profile:hover { background: var(--web-hover); } }
+@media (min-width: 721px) {
+  html[data-web-sidebar-collapsed="true"] .web-shell { grid-template-columns: minmax(0, 1fr); }
+  html[data-web-sidebar-collapsed="true"] .web-sidebar { display: none; }
+  html[data-web-sidebar-collapsed="true"] .web-sidebar-expand { display: grid; }
+  html[data-web-sidebar-collapsed="true"] #better-codex-panel .better-codex-toolbar { padding-left: 58px; }
+}
 @media (max-width: 720px) {
   .web-shell { display: block; }
   .web-main { width: 100%; height: calc(100% - 58px); }
   .web-sidebar { position: fixed; z-index: 50; right: 0; bottom: 0; left: 0; width: 100%; height: 58px; flex-direction: row; align-items: center; justify-content: center; padding: 6px max(10px, env(safe-area-inset-right)) max(6px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left)); box-shadow: inset 0 1px var(--web-line); }
-  .web-brand, .web-account { display: none; }
+  .web-brand, .web-sidebar-tools, .web-account, .web-sidebar-expand { display: none; }
   .web-sidebar nav, .web-sidebar-scroll { width: 100%; height: auto; }
   .web-sidebar-section { display: flex; justify-content: center; gap: 8px; margin: 0; }
   .web-nav-button:not(#better-codex-entry):not(#better-codex-agents-entry):not(#better-codex-projects-entry) { display: none; }
@@ -225,6 +242,8 @@ const tokenInput = document.getElementById("web-token");
 const usernameInput = document.getElementById("web-username");
 const connectError = document.getElementById("web-connect-error");
 const installButton = document.getElementById("web-install");
+const sidebarCollapseButton = document.getElementById("web-sidebar-collapse");
+const sidebarExpandButton = document.getElementById("web-sidebar-expand");
 const profileButton = document.getElementById("web-profile");
 const profileName = document.getElementById("web-profile-name");
 const profileKind = document.getElementById("web-profile-kind");
@@ -414,7 +433,10 @@ function scheduleRelayRecovery() {
       const status = await response.json();
       if (response.ok && status?.runtime?.online) {
         connectError.hidden = true;
-        loadInjection();
+        if (window.__betterCodexInjection__) {
+          if (connectDialog.open) connectDialog.close();
+          openCurrentRoute();
+        } else loadInjection();
         return;
       }
     } catch {}
@@ -424,7 +446,7 @@ function scheduleRelayRecovery() {
 
 function showRelayOffline() {
   if (!RELAY) return;
-  connectError.textContent = "本机 Runtime 当前离线，连接恢复后将自动重试";
+  connectError.textContent = "远程连接暂时中断，连接恢复后将自动重试";
   connectError.hidden = false;
   if (!connectDialog.open) connectDialog.showModal();
   scheduleRelayRecovery();
@@ -458,7 +480,7 @@ async function requestRuntime(request) {
     try { value = await response.json(); }
     catch { value = { error: response.statusText || "request_failed" }; }
     if (response.status === 401) setTimeout(expireSession, 0);
-    if (RELAY && response.status === 503) setTimeout(showRelayOffline, 0);
+    if (RELAY && response.status === 503 && value.error === "runtime_offline") setTimeout(showRelayOffline, 0);
     if (!response.ok) throw new Error(value.error || response.statusText || "request_failed");
     return value;
   } catch (error) {
@@ -624,6 +646,18 @@ document.getElementById("web-back-to-board").addEventListener("click", () => {
 
 const theme = localStorage.getItem("better-codex-web-theme");
 if (theme === "dark" || (!theme && matchMedia("(prefers-color-scheme: dark)").matches)) document.documentElement.dataset.theme = "dark";
+const sidebarCollapsed = localStorage.getItem("better-codex-web-sidebar-collapsed") === "true";
+if (sidebarCollapsed) document.documentElement.dataset.webSidebarCollapsed = "true";
+sidebarCollapseButton.addEventListener("click", () => {
+  document.documentElement.dataset.webSidebarCollapsed = "true";
+  localStorage.setItem("better-codex-web-sidebar-collapsed", "true");
+  sidebarExpandButton.focus();
+});
+sidebarExpandButton.addEventListener("click", () => {
+  delete document.documentElement.dataset.webSidebarCollapsed;
+  localStorage.setItem("better-codex-web-sidebar-collapsed", "false");
+  sidebarCollapseButton.focus();
+});
 document.getElementById("web-theme").addEventListener("click", () => {
   const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
   document.documentElement.dataset.theme = next;
