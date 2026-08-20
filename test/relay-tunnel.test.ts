@@ -379,7 +379,7 @@ test("runtime relay client forwards concurrent HTTP requests with only the local
   const uploadBody = new ReadableStream<Uint8Array>({
     pull(controller) {
       if (uploadOffset >= uploadBytes) return controller.close();
-      const size = Math.min(32 * 1024, uploadBytes - uploadOffset);
+      const size = Math.min(64 * 1024, uploadBytes - uploadOffset);
       uploadOffset += size;
       controller.enqueue(new Uint8Array(size).fill(120));
     },
