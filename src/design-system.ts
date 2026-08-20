@@ -6968,6 +6968,11 @@ export function betterCodexDesignSystemCss() {
         z-index: 410;
       }
 
+      #better-codex-dialog[data-host="web"][data-detail="true"] .better-codex-dialog-select.is-open,
+      #better-codex-dialog[data-host="web"][data-detail="true"] .better-codex-project-picker:has(.better-codex-project-menu:not([hidden])) {
+        z-index: 410;
+      }
+
       #better-codex-dialog[data-host="web"][data-detail="true"] .better-codex-label-picker.is-open .better-codex-label-menu {
         position: fixed;
         z-index: 420;
