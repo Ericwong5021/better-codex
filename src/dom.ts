@@ -5565,6 +5565,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (!compact) {
           dialog.style.removeProperty("--bc-mobile-viewport-top");
           dialog.style.removeProperty("--bc-mobile-viewport-height");
+          dialog.style.removeProperty("--bc-mobile-viewport-bottom");
           dialog.style.removeProperty("--bc-mobile-layout-height");
           dialog.style.removeProperty("--bc-mobile-keyboard-translation");
           syncIssueFullscreenBounds();
@@ -5573,8 +5574,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const viewport = window.visualViewport;
         const viewportHeight = viewport?.height || window.innerHeight;
         const active = document.activeElement;
-        dialog.style.setProperty("--bc-mobile-viewport-top", (viewport?.offsetTop || 0) + "px");
+        const viewportTop = viewport?.offsetTop || 0;
+        dialog.style.setProperty("--bc-mobile-viewport-top", viewportTop + "px");
         dialog.style.setProperty("--bc-mobile-viewport-height", viewportHeight + "px");
+        dialog.style.setProperty("--bc-mobile-viewport-bottom", Math.max(0, window.innerHeight - viewportTop - viewportHeight) + "px");
         dialog.style.removeProperty("--bc-mobile-layout-height");
         dialog.style.removeProperty("--bc-mobile-keyboard-translation");
         mobileInputFrame = requestAnimationFrame(() => {
