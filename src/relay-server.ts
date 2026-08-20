@@ -250,14 +250,25 @@ export function createRelayServer(options: RelayServerOptions) {
     active.channels.delete(channel.id);
     active.activeChannels = active.channels.size;
   };
-  const failChannel = (active: ActiveRuntime, channel: RelayChannel, error: string) => {
+  const failChannel = (active: ActiveRuntime, channel: RelayChannel, error: string, detail = error) => {
     if (channel.completed) return;
-    if (!channel.response.headersSent) sendJson(channel.response, relayErrorStatus(error), { error });
+    if (!channel.response.headersSent) sendJson(channel.response, relayErrorStatus(error), {
+      error,
+      detail,
+      request_id: channel.requestId,
+      channel_id: channel.id,
+      method: channel.method,
+      request_bytes: channel.requestBytes,
+      request_ended: channel.requestEnded,
+      response_started: channel.responseStarted,
+      connection_epoch: active.connectionEpoch,
+      runtime_instance_id: active.runtimeInstanceId,
+    });
     else channel.response.end();
     finishChannel(active, channel);
   };
-  const failRuntimeChannels = (active: ActiveRuntime, error: string) => {
-    for (const channel of [...active.channels.values()]) failChannel(active, channel, error);
+  const failRuntimeChannels = (active: ActiveRuntime, error: string, detail = error) => {
+    for (const channel of [...active.channels.values()]) failChannel(active, channel, error, detail);
   };
   const flushRequest = (active: ActiveRuntime, channel: RelayChannel) => {
     if (channel.completed) return;
@@ -318,10 +329,10 @@ export function createRelayServer(options: RelayServerOptions) {
       channel.requestEnded = true;
       flushRequest(active, channel);
     });
-    request.once("error", () => {
+    request.once("error", error => {
       if (channel.completed) return;
       active.socket.send(encodeRelayMessage({ type: "request_cancel", protocol_version: relayProtocolVersion, device_id: active.deviceId, runtime_instance_id: active.runtimeInstanceId, connection_epoch: active.connectionEpoch, channel_id: channelId, reason: "browser_request_error" }));
-      failChannel(active, channel, "relay_stream_interrupted");
+      failChannel(active, channel, "relay_stream_interrupted", "browser_request_error:" + String((error as NodeJS.ErrnoException).code || error.message || "unknown"));
     });
     response.once("close", () => {
       if (channel.completed) return;
@@ -586,7 +597,7 @@ export function createRelayServer(options: RelayServerOptions) {
         },
         close: () => {
           if (runtime?.socket === connection) {
-            failRuntimeChannels(runtime, "relay_stream_interrupted");
+            failRuntimeChannels(runtime, "relay_stream_interrupted", "runtime_socket_closed");
             runtime = null;
           }
           if (active) store.audit(device.id, "runtime_disconnected");
