@@ -32,6 +32,7 @@ import { readRelayConfiguration, removeRelayConfiguration } from "./relay-config
 import { requestFingerprint, RequestReceiptStore, type RequestReceiptResponse } from "./request-receipts.js";
 import { disableProjectionSync, readRemoteMode } from "./remote-mode.js";
 import { browseDirectory } from "./directory-browser.js";
+import { applyCodexThreadAction } from "./codex-thread.js";
 
 const accessToken = token();
 const mockupEnabled = !isSea() && !packagedBuild && process.argv.includes("--mockup");
@@ -164,6 +165,10 @@ function sendJson(response: ServerResponse, status: number, value: unknown) {
     "vary": "Origin",
   });
   response.end(body);
+}
+
+function projectSummaries<T extends { document_views?: unknown; overview_html?: unknown }>(projects: T[]) {
+  return projects.map(({ document_views: _documentViews, overview_html: _overviewHtml, ...project }) => project);
 }
 
 function sendWeb(response: ServerResponse, status: number, body: string | Buffer, contentType: string, headers: Record<string, string> = {}) {
@@ -676,6 +681,7 @@ export function startServer() {
     },
     chooseNativeDirectory,
     browseDirectory,
+    (issueId, action) => applyCodexThreadAction(store.listIssueThreadIds(issueId), action),
   );
   let activeRuntimePort = 0;
   const relayClient = new RuntimeRelayClient({ runtimePort: () => activeRuntimePort, localToken: accessToken, runtimeInstanceId: identity.instanceId, coreVersion: identity.version });
@@ -899,7 +905,7 @@ export function startServer() {
         const agentReasoningEfforts = [...new Set(agentModelCatalog.flatMap(model => model.supportedReasoningEfforts.map(effort => effort.value)))];
         const mockup = mockupEnabled ? readMockupState(mockupLocale) : null;
         if (!mockup) syncCodexProjects(store);
-        return sendJson(response, 200, { projects: mockup ? mockup.projects : store.listProjects(), agents: mockup ? mockup.agents : visibleAgentProfiles(), statuses: issueStatuses, priorities: issuePriorities, appearance: readCodexAppearance(), locale: readCodexLocale(), user: readCodexUserProfile(), agentModelCatalog, agentModels, agentReasoningEfforts, autoDispatch: mockup ? mockup.auto_dispatch : store.getAutoDispatch(), schedulerModel: mockup ? mockup.scheduler_model : store.getSchedulerModel(defaultAgentProfile().model), schedulerReasoningEffort: mockup ? mockup.scheduler_reasoning_effort : store.getSchedulerReasoningEffort(), mockup: mockupEnabled });
+        return sendJson(response, 200, { projects: projectSummaries(mockup ? mockup.projects : store.listProjects()), agents: mockup ? mockup.agents : visibleAgentProfiles(), statuses: issueStatuses, priorities: issuePriorities, appearance: readCodexAppearance(), locale: readCodexLocale(), user: readCodexUserProfile(), agentModelCatalog, agentModels, agentReasoningEfforts, autoDispatch: mockup ? mockup.auto_dispatch : store.getAutoDispatch(), schedulerModel: mockup ? mockup.scheduler_model : store.getSchedulerModel(defaultAgentProfile().model), schedulerReasoningEffort: mockup ? mockup.scheduler_reasoning_effort : store.getSchedulerReasoningEffort(), mockup: mockupEnabled });
       }
       if (url.pathname === "/api/account/usage" && method === "GET") {
         return sendJson(response, 200, { usage: await readCodexUsage() });
@@ -1644,26 +1650,38 @@ export function startServer() {
           const body = await readBody(request);
           const version = Number(body.version);
           if (!Number.isInteger(version) || version < 1) throw new Error("invalid_version");
+          if (issue.version !== version) throw new Error("version_conflict");
+          if (issue.enrichment_status === "pending") throw new Error("issue_enrichment_pending");
           if (issue.session_active_turn_id || store.getIssueReplyState(issue.id).status === "running") throw new Error("issue_execution_running");
           if (issue.active_run_status) {
             await worker.stopIssue(issue.id);
             const current = store.getIssue(issue.id);
             if (!current) throw new Error("issue_not_found");
             if (current.active_run_status) throw new Error("issue_execution_running");
+            await applyCodexThreadAction(store.listIssueThreadIds(issue.id), "archive");
             const updated = store.archiveIssue(issue.id, current.version);
             return sendJson(response, 200, updated);
           }
+          await applyCodexThreadAction(store.listIssueThreadIds(issue.id), "archive");
           const updated = store.archiveIssue(issue.id, version);
           return sendJson(response, 200, updated);
         }
         if (method === "POST" && path[3] === "unarchive") {
           const body = await readBody(request);
+          if (issue.version !== Number(body.version)) throw new Error("version_conflict");
+          await applyCodexThreadAction(store.listIssueThreadIds(issue.id), "unarchive");
           const updated = store.unarchiveIssue(issue.id, Number(body.version));
           return sendJson(response, 200, updated);
         }
         if (method === "DELETE" && path.length === 3) {
           const body = await readBody(request);
-          store.deleteArchivedIssue(issue.id, Number(body.version));
+          const version = Number(body.version);
+          if (!Number.isInteger(version) || version < 1) throw new Error("invalid_version");
+          if (issue.version !== version) throw new Error("version_conflict");
+          if (issue.enrichment_status === "pending") throw new Error("issue_enrichment_pending");
+          if (issue.active_run_status || issue.session_active_turn_id || store.getIssueReplyState(issue.id).status === "running") throw new Error("issue_execution_running");
+          await applyCodexThreadAction(store.listIssueThreadIds(issue.id), "delete");
+          store.deleteArchivedIssue(issue.id, version);
           return sendJson(response, 200, { ok: true });
         }
         if (method === "GET" && path[3] === "conversation" && path.length === 4) {

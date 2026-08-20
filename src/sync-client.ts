@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { defaultAgentProfile } from "./agent-profiles.js";
 import { coreVersion } from "./compatibility.js";
-import type { Store } from "./db.js";
+import type { IssueThreadAction, Store } from "./db.js";
 import { readModelCatalog } from "./model-catalog.js";
 import { readSyncConfiguration, type SyncConfiguration } from "./sync-config.js";
 import { legacySyncProtocolVersion, supportedSyncProtocolVersions, syncProtocolVersion, type AgentDirectoryProjection, type AgentModelCatalogProjection, type CodexUsageProjection, type ConversationProjection, type DirectoryBrowserResult, type RemoteCommand, type RemoteCommandAck, type RemoteFilePayload, type RuntimeProjection, type SyncChange, type SyncProtocolVersion, type SyncPushResponse } from "./sync-contract.js";
@@ -67,6 +67,7 @@ export class SyncClient {
     private readonly files: (files: RemoteFilePayload[]) => { paths: string[]; cleanup: () => void } | Promise<{ paths: string[]; cleanup: () => void }> = () => { throw new Error("remote_files_unavailable"); },
     private readonly chooseDirectory: () => string | Promise<string> = () => { throw new Error("directory_picker_unavailable"); },
     private readonly browseDirectory: (path: string) => DirectoryBrowserResult | Promise<DirectoryBrowserResult> = () => { throw new Error("directory_browser_unavailable"); },
+    private readonly threadAction: (issueId: string, action: IssueThreadAction) => void | Promise<void> = () => { throw new Error("codex_thread_action_unavailable"); },
   ) {}
 
   start() {
@@ -379,7 +380,7 @@ export class SyncClient {
         : await hubRequest<{ commands: RemoteCommand[] }>(configuration, "/api/v1/sync/commands?limit=100");
       if (!Array.isArray(result.commands)) throw new Error("invalid_command_response");
       for (const command of result.commands) {
-        const ack = { ...(await this.store.applyRemoteCommand(command, { files: this.files, reply: this.reply, stop: this.stopIssue, projectCreate: this.projectCreate, projectOverview: this.projectOverview, chooseDirectory: this.chooseDirectory, browseDirectory: this.browseDirectory })), delivery_id: command.delivery_id ?? null };
+        const ack = { ...(await this.store.applyRemoteCommand(command, { files: this.files, reply: this.reply, stop: this.stopIssue, projectCreate: this.projectCreate, projectOverview: this.projectOverview, chooseDirectory: this.chooseDirectory, browseDirectory: this.browseDirectory, threadAction: this.threadAction })), delivery_id: command.delivery_id ?? null };
         if (claimed) await this.controlRpc("commands.ack", ack as unknown as Record<string, unknown>);
         else await hubRequest<RemoteCommandAck>(configuration, `/api/v1/sync/commands/${encodeURIComponent(command.command_id)}/ack`, { method: "POST", body: JSON.stringify(ack) });
         if (ack.status === "applied") this.commandApplied(command, ack);

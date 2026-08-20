@@ -71,6 +71,7 @@ export type IssueReplyState = {
 export type IssueSessionStatus = "starting" | "active" | "stopping" | "waiting_on_approval" | "waiting_on_user" | "idle" | "interrupted" | "failed" | "disconnected";
 export type SessionCommandKind = "start" | "turn" | "steer" | "interrupt";
 export type SessionCommandStatus = "pending" | "claimed" | "completed" | "failed" | "cancelled";
+export type IssueThreadAction = "archive" | "unarchive" | "delete";
 
 export type IssueSession = {
   issue_id: string;
@@ -1182,7 +1183,7 @@ export class Store {
     } satisfies IssueProjection;
   }
 
-  async applyRemoteCommand(command: RemoteCommand, handlers: { files?: (files: Array<{ name: string; type: string; data: string }>) => { paths: string[]; cleanup: () => void } | Promise<{ paths: string[]; cleanup: () => void }>; reply?: (issueId: string, requestId: string, message: string, files: Array<{ name: string; type: string; data: string }>) => void | Promise<void>; stop?: (issueId: string) => void | Promise<void>; projectCreate?: (projectId: string, name: string, workspacePath: string) => void | Promise<void>; projectOverview?: (projectId: string, agentId: string, feedback: string) => void | Promise<void>; chooseDirectory?: () => string | Promise<string>; browseDirectory?: (path: string) => DirectoryBrowserResult | Promise<DirectoryBrowserResult> } = {}): Promise<RemoteCommandAck> {
+  async applyRemoteCommand(command: RemoteCommand, handlers: { files?: (files: Array<{ name: string; type: string; data: string }>) => { paths: string[]; cleanup: () => void } | Promise<{ paths: string[]; cleanup: () => void }>; reply?: (issueId: string, requestId: string, message: string, files: Array<{ name: string; type: string; data: string }>) => void | Promise<void>; stop?: (issueId: string) => void | Promise<void>; projectCreate?: (projectId: string, name: string, workspacePath: string) => void | Promise<void>; projectOverview?: (projectId: string, agentId: string, feedback: string) => void | Promise<void>; chooseDirectory?: () => string | Promise<string>; browseDirectory?: (path: string) => DirectoryBrowserResult | Promise<DirectoryBrowserResult>; threadAction?: (issueId: string, action: IssueThreadAction) => void | Promise<void> } = {}): Promise<RemoteCommandAck> {
     const receipt = this.db.prepare("SELECT result_json FROM sync_command_receipts WHERE command_id = ?").get(command.command_id) as { result_json: string } | undefined;
     if (receipt) return JSON.parse(receipt.result_json) as RemoteCommandAck;
     const result = await (async () => {
@@ -1250,12 +1251,28 @@ export class Store {
           if (!current) throw new Error("issue_not_found");
           if (!["issue.reply", "issue.stop"].includes(command.operation) && current.version !== command.base_revision) throw new Error("version_conflict");
           if (!["issue.reply", "issue.stop"].includes(command.operation) && (current.active_run_status || current.session_active_turn_id || this.getIssueReplyState(current.id).status === "running")) throw new Error("issue_execution_running");
+          if (["issue.archive", "issue.delete"].includes(command.operation) && current.enrichment_status === "pending") throw new Error("issue_enrichment_pending");
           if (command.operation === "issue.delete") {
+            if (this.listIssueThreadIds(current.id).length) {
+              if (!handlers.threadAction) throw new Error("codex_thread_action_unavailable");
+              await handlers.threadAction(current.id, "delete");
+            }
             this.deleteArchivedIssue(current.id, current.version);
             return { command_id: command.command_id, status: "applied", error: null, projection: null } satisfies RemoteCommandAck;
           }
-          if (command.operation === "issue.archive") issue = this.archiveIssue(current.id, current.version);
-          else if (command.operation === "issue.restore") issue = this.unarchiveIssue(current.id, current.version);
+          if (command.operation === "issue.archive") {
+            if (this.listIssueThreadIds(current.id).length) {
+              if (!handlers.threadAction) throw new Error("codex_thread_action_unavailable");
+              await handlers.threadAction(current.id, "archive");
+            }
+            issue = this.archiveIssue(current.id, current.version);
+          } else if (command.operation === "issue.restore") {
+            if (this.listIssueThreadIds(current.id).length) {
+              if (!handlers.threadAction) throw new Error("codex_thread_action_unavailable");
+              await handlers.threadAction(current.id, "unarchive");
+            }
+            issue = this.unarchiveIssue(current.id, current.version);
+          }
           else if (command.operation === "issue.reply") {
             if (current.archived_at) throw new Error("issue_archived");
             if (!handlers.reply) throw new Error("remote_reply_unavailable");
@@ -2088,6 +2105,13 @@ export class Store {
       this.db.exec("ROLLBACK");
       throw error;
     }
+  }
+
+  listIssueThreadIds(id: string) {
+    const issue = this.getIssue(id);
+    if (!issue) throw new Error("issue_not_found");
+    const rows = this.db.prepare("SELECT thread_id FROM issue_runs WHERE issue_id = ? AND thread_id IS NOT NULL UNION SELECT thread_id FROM issue_sessions WHERE issue_id = ? AND thread_id IS NOT NULL").all(id, id) as Array<{ thread_id: string }>;
+    return [...new Set([issue.thread_id, ...rows.map(row => row.thread_id)].filter((value): value is string => Boolean(value) && /^[a-f0-9-]{36}$/i.test(value)))];
   }
 
   recoverInterruptedRuns() {
