@@ -303,7 +303,7 @@ test("web host boots the shared DOM injection behind a local session", async () 
 
     const threadFallback = await fetch(`${base}/local/00000000-0000-4000-8000-000000000000`);
     assert.equal(threadFallback.status, 200);
-    assert.match(await threadFallback.text(), /会话已在 Codex 中打开/);
+    assert.match(await threadFallback.text(), /正在加载任务看板/);
     assert.equal(syncQueueCount(join(home, "better-codex.db")), initialSyncQueueCount);
   } finally {
     await stopRuntime(runtime);

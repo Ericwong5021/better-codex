@@ -377,7 +377,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const systemLocale = resolveSystemLocale(INITIAL_LOCALE);
     const MOCKUP_PROJECT_ID = "mockup-better-codex";
     const initialProjectRoute = webProjectRoute();
-    const state = { projects: [], projectsLoaded: false, issues: [], projectIssues: [], projectDetailId: initialProjectRoute?.projectId || "", projectDocumentView: "charter", projectDocumentPending: null, projectDocumentError: null, agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: initialProjectRoute ? "projects" : ["issues", "agents", "projects"].includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, autoDispatchPending: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", mockup: false, keepCreate: rememberedKeepCreate, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], project: [], label: [] } };
+    const state = { projects: [], projectsLoaded: false, issues: [], issuesLoaded: false, projectIssues: [], projectDetailId: initialProjectRoute?.projectId || "", projectDocumentView: "charter", projectDocumentPending: null, projectDocumentError: null, agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: initialProjectRoute ? "projects" : ["issues", "agents", "projects"].includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, autoDispatchPending: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", mockup: false, keepCreate: rememberedKeepCreate, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], project: [], label: [] } };
     function webProjectRoute() {
       if (HOST_KIND !== "web") return null;
       const match = location.pathname.match(/^\\/web\\/projects(?:\\/([^/?#]+))?\\/?$/);
@@ -546,7 +546,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "Better Codex 服务需要重启": "Better Codex needs to restart", "当前页面与后台服务的连接已失效。请在终端运行下面的命令，完成后重新连接。": "The connection between this page and the background service has expired. Run the command below in your terminal, then reconnect.", "复制重启命令": "Copy restart command", "复制消息": "Copy message", "已复制": "Copied", "重新连接": "Reconnect", "正在连接…": "Connecting…", "错误详情": "Error details",
       "全部": "All", "已分配": "Assigned", "未分配": "Unassigned", "待规划": "Backlog", "待办": "Todo", "进行中": "In progress", "待审核": "In review", "调度中": "Scheduling", "已完成": "Done", "已阻塞": "Blocked", "归档": "Archive", "拖到这里即可归档": "Drop here to archive", "查看已归档卡片": "View archived cards", "已归档任务": "Archived tasks", "搜索已归档任务": "Search archived tasks", "所有项目": "All projects", "全部删除": "Delete all", "删除已归档聊天": "Delete archived chat", "删除项目中的全部内容": "Delete all project content", "确定删除项目中的全部已归档任务吗？": "Delete all archived tasks in this project?", "取消归档": "Unarchive", "已归档卡片": "Archived cards", "暂无已归档卡片": "No archived cards", "归档列表加载失败": "Unable to load archived cards",
       "无": "None", "低": "Low", "中": "Medium", "高": "High", "紧急": "Urgent", "超高": "Extra high", "无优先级": "No priority", "优先级": "Priority", "状态": "Status", "日期": "Date", "筛选": "Filter", "标签": "Labels",
-      "新建": "New", "新建 issue": "New issue", "新建任务": "New task", "新建智能体": "New agent", "创建": "Create", "创建任务": "Create task", "删除": "Delete", "删除任务": "Delete task", "删除智能体": "Delete agent", "保存": "Save", "确认": "Confirm", "取消": "Cancel", "关闭": "Close", "返回": "Back", "重试": "Retry", "稍后": "Later", "展开": "Expand", "缩小": "Minimize", "退出全屏": "Exit full screen", "缩放头像": "Zoom avatar",
+      "新建": "New", "新建 issue": "New issue", "新建任务": "New task", "新建智能体": "New agent", "创建": "Create", "创建任务": "Create task", "删除": "Delete", "删除任务": "Delete task", "删除智能体": "Delete agent", "保存": "Save", "确认": "Confirm", "取消": "Cancel", "关闭": "Close", "返回": "Back", "重试": "Retry", "稍后": "Later", "展开": "Expand", "全屏": "Full screen", "缩小": "Minimize", "退出全屏": "Exit full screen", "缩放头像": "Zoom avatar",
       "项目": "Project", "无项目": "No project", "选择项目": "Select project", "选择责任人": "Select owner", "选择执行智能体": "Select agent", "更多创建选项": "More creation options", "任务标题": "Task title", "添加描述...": "Add description...", "添加标签": "Add label", "添加附件": "Add attachment", "移除附件": "Remove attachment", "搜索任务": "Search tasks", "搜索项目": "Search projects", "搜索项目...": "Search projects...", "搜索智能体": "Search agents",
       "负责人": "Owner", "创建者": "Creator", "指定负责人": "Assign owner", "由我创建": "Created by me", "由我": "By me", "我": "Me", "你": "You", "未指派": "Not assigned", "未提供": "Not provided", "已同步": "Synced",
       "自动运行": "Auto-run", "手动运行": "Manual run", "切换为自动运行": "Switch to auto-run", "切换为手动运行": "Switch to manual run", "切换到智能体": "Switch to agents", "手动创建": "Manual creation", "通过智能体创建": "Create with agent", "运行模式说明": "Run mode", "帮助与设置": "Help and settings", "设置": "Settings", "快捷键": "Shortcuts", "快捷键设置": "Keyboard shortcuts", "为常用操作设置键盘快捷键。": "Set keyboard shortcuts for common actions.", "创建 Issue": "Create Issue", "打开创建 Issue 窗口": "Open the Create Issue window", "设置快捷键": "Set shortcut", "点击录入": "Click to record", "按下新的快捷键": "Press a new shortcut", "未设置": "Not set", "清除快捷键": "Clear shortcut", "关于": "About", "会话结束提醒": "Session completion alerts", "Issue 会话结束后在当前窗口显示提醒": "Show an alert in the current window when an issue session ends", "弹窗持续时间": "Popup duration", "1 秒": "1 second", "5 秒": "5 seconds", "10 秒": "10 seconds", "永久": "Permanent", "会话已结束": "Session ended", "通知": "Notifications", "语言": "Language", "界面语言": "Interface language", "选择 Better Codex 的界面语言": "Choose the language used by Better Codex", "调度": "Scheduling", "调度器模型": "Scheduler model", "这个模型用于 Issue 状态调度": "This model is used for Issue status routing", "调度器思考强度": "Scheduler reasoning effort", "这个强度用于 Issue 状态调度": "This level is used for Issue status routing", "跟随系统": "System", "中文": "Chinese", "软件更新": "Software updates", "更新状态": "Update status", "检查新版本": "Check for updates", "检查中…": "Checking…", "发现新版本": "Update available", "无法检查更新": "Unable to check", "版本信息": "Version info", "兼容版本": "Compatibility version", "运行状态": "Runtime status", "运行正常": "Running", "正在检查": "Checking", "已是最新版本": "Up to date", "从开始到完成，让 Codex 里的工作清晰可见。": "From start to finish, keep your work in Codex clear and visible.", "如果你喜欢 Better Codex，欢迎给我们一个 Star。": "If you like Better Codex, please give us a Star.", "最大并发": "Max concurrency", "模型": "Model", "推理": "Reasoning", "指令": "Instructions", "默认": "Default", "自定义": "Custom",
@@ -555,7 +555,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "通用任务处理": "General task handling", "代码实现": "Code implementation", "最大": "Maximum", "极致": "Ultra", "发送": "Send", "副本": "Copy", "复制卡片": "Copy card", "更多操作": "More actions", "本次启动关闭": "Disable for this launch", "正在重启 Better Codex": "Restarting Better Codex", "正在下载并校验新版本，请保持 Codex 打开。": "Downloading and verifying the update. Keep Codex open.", "正在重启 Better Codex Runtime，稍后会自动恢复。": "Restarting Better Codex Runtime. It will recover shortly.", "Better Codex 已恢复到上一版本。": "Better Codex has been restored to the previous version.",
       "展示模式": "Mockup mode", "导出展示数据": "Export mockup data", "导入展示数据": "Import mockup data", "重置展示数据": "Reset mockup data", "重置布局": "Reset layout", "重置": "Reset", "恢复默认展示卡片和布局吗？": "Restore the default mockup cards and layout?", "展示数据不能超过 16 MB": "Mockup data cannot exceed 16 MB", "展示数据格式无效": "The mockup data format is invalid", "展示卡片缺少标题": "A mockup card is missing a title", "展示模式不支持此操作": "This action is not supported in mockup mode", "展示模式不会运行真实任务": "Mockup mode does not run real tasks", "任务不存在": "Task not found",
       "修复任务卡片拖拽错位": "Fix task card drag misalignment", "复现缩放状态下的卡片拖拽偏移，并修正坐标计算与落点反馈。": "Reproduce card drag offset while zoomed, then correct the coordinate calculation and drop feedback.", "重写首页首屏价值主张": "Rewrite the homepage value proposition", "提炼 Better Codex 的核心价值，让新访客快速理解产品用途。": "Clarify Better Codex's core value so new visitors quickly understand what it does.", "调研独立开发者工作流": "Research indie developer workflows", "整理从想法到交付的常见流程、主要痛点和决策节点。": "Document common flows, key pain points, and decision points from idea to delivery.", "整理本地安装步骤": "Organize local installation steps", "核对安装、启动与常见异常处理步骤，统一文档表达。": "Verify installation, startup, and common troubleshooting steps, then unify the documentation.", "优化首次启动加载速度": "Improve first-launch loading speed", "定位启动阶段主要耗时，缩短进入任务看板前的等待时间。": "Identify the main startup costs and shorten the wait before the task board opens.", "整理功能亮点短文案": "Write concise feature highlights", "为任务分派、会话协作和代码审核分别撰写简洁说明。": "Write concise descriptions for task assignment, conversation collaboration, and code review.", "对比三款任务看板体验": "Compare three task board experiences", "对比 Linear、Notion 和 Trello 的卡片密度、拖拽与筛选体验。": "Compare card density, drag and drop, and filtering in Linear, Notion, and Trello.", "撰写产品发布介绍": "Write a product launch introduction", "围绕目标用户、核心问题和使用方式准备公开发布稿。": "Prepare launch copy around target users, the core problem, and how the product is used.", "完善会话回复失败提示": "Improve failed reply messages", "梳理超时、网络异常和权限问题的提示文案与重试入口。": "Refine messages and retry paths for timeouts, network failures, and permission issues.", "优化空状态引导语": "Improve empty-state guidance", "重写空看板与空会话的标题、说明和首个行动提示。": "Rewrite the title, explanation, and first action prompt for empty boards and conversations.", "收集首批用户常见问题": "Collect early user FAQs", "汇总安装、任务分派、运行状态和数据存储相关问题。": "Compile questions about installation, task assignment, runtime status, and data storage.", "准备更新日志发布稿": "Prepare release notes", "整理本次新增、修复和已知限制，形成可直接发布的更新日志。": "Organize this release's additions, fixes, and known limitations into publish-ready notes.", "统一看板筛选状态": "Unify task board filter state", "检查筛选逻辑与顶部计数，确保切换后卡片结果同步更新。": "Check filter logic and the top count so card results update together after a change.", "检查 Windows 安装流程": "Check the Windows installation flow", "核对安装、启动、权限与卸载流程，记录关键异常。": "Verify installation, startup, permissions, and uninstall flows, and record key issues.", "起草用户访谈邀请信": "Draft a user interview invitation", "说明访谈目的、所需时间和隐私边界，给出清晰回复方式。": "Explain the interview purpose, time needed, and privacy boundaries, with a clear way to reply.", "归档版本发布资料": "Archive release materials", "整理版本说明、截图、校验结果和发布链接，方便后续复盘。": "Organize release notes, screenshots, verification results, and launch links for later review.", "性能": "Performance", "文案": "Copywriting", "调研": "Research", "文档": "Documentation", "写作": "Writing",
-      "选择头像": "Choose avatar", "预设头像": "Preset avatars", "自定义": "Custom", "更换": "Change", "保存失败": "Save failed", "创建失败": "Creation failed", "加载失败": "Loading failed", "启动失败": "Start failed", "发送失败": "Send failed", "回复失败": "Reply failed", "回复": "Reply", "回复中": "Replying", "回复完成": "Reply completed", "回复进行中…": "Replying…", "回复已完成": "Reply completed", "等待对话": "Waiting for conversation", "加载中…": "Loading…", "加载对话…": "Loading conversation…", "正在打开…": "Opening…", "在此回复智能体…": "Reply to the agent here…", "对话": "Conversation", "详情": "Details", "关闭详情": "Close details", "Issue 详情": "Issue details", "名称": "Name", "介绍": "Description", "智能体名称": "Agent name", "尚未添加介绍": "No description yet", "没有匹配的智能体": "No matching agents", "此分类暂无智能体": "No agents in this category",
+      "选择头像": "Choose avatar", "预设头像": "Preset avatars", "自定义": "Custom", "更换": "Change", "保存失败": "Save failed", "创建失败": "Creation failed", "加载失败": "Loading failed", "启动失败": "Start failed", "发送失败": "Send failed", "回复失败": "Reply failed", "回复": "Reply", "回复中": "Replying", "回复完成": "Reply completed", "回复进行中…": "Replying…", "回复已完成": "Reply completed", "等待对话": "Waiting for conversation", "加载中…": "Loading…", "正在加载任务看板": "Loading task board", "加载对话…": "Loading conversation…", "正在打开…": "Opening…", "在此回复智能体…": "Reply to the agent here…", "对话": "Conversation", "详情": "Details", "关闭详情": "Close details", "Issue 详情": "Issue details", "名称": "Name", "介绍": "Description", "智能体名称": "Agent name", "尚未添加介绍": "No description yet", "没有匹配的智能体": "No matching agents", "此分类暂无智能体": "No agents in this category",
       "裁剪头像": "Crop avatar", "拖动图片调整位置": "Drag the image to adjust its position", "正在更新": "Updating", "正在更新 Better Codex": "Updating Better Codex", "更新完成": "Update complete", "更新未完成": "Update incomplete", "稍后提醒": "Remind me later", "Better Codex 有新版本": "A new Better Codex version is available", "Better Codex 已是最新版本": "Better Codex is up to date", "Better Codex 保持当前版本运行。": "Better Codex will continue running on the current version.", "正在下载并校验新版本，请不要关闭 Codex。": "Downloading and verifying the update. Please do not close Codex.", "正在重启 Codex，稍后会自动恢复。": "Restarting Codex. It will resume shortly.", "刚刚完成检查，无需更新。": "Just checked. No update is needed.", "任务已完成": "Task completed", "知道了": "Got it", "关闭": "Close", "附带文件：": "Attached files:", "部分文件无法读取本地路径，已跳过": "Some files could not be read locally and were skipped", "当前环境无法读取本地文件路径": "The current environment cannot read local file paths", "无关联对话。": "No linked conversation.", "暂无对话，可在下方回复或打开完整对话。": "No conversation yet. Reply below or open the full conversation.", "图片不能超过 10 MB": "Images must be 10 MB or smaller", "请选择 PNG、JPEG 或 WebP 图片": "Choose a PNG, JPEG or WebP image", "无法读取这张图片": "Unable to read this image", "创建智能体 Issue 需要本地工作区：请先打开该项目下的一个 Codex 会话": "Creating an agent issue requires a local workspace. Open a Codex conversation in this project first.",
       "粘贴的图片": "Pasted image", "图片保存失败": "Unable to save the image",
       "创建任务": "Create task", "添加描述": "Add description", "展开描述": "Show more", "收起描述": "Show less", "新建 issue": "New issue", "项目": "Project", "状态": "Status", "优先级": "Priority", "选择项目": "Select project", "保存": "Save", "删除": "Delete",
@@ -563,7 +563,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "确定删除任务 “": "Delete task “", "确定删除所有已归档任务吗？": "Delete all archived tasks?", "吗？": "”?", "创建后先由 ": "After creation, ", " 整理卡片，再自动开始工作。": " will organize the card and start working automatically.", "刚刚": "Just now", "分钟": "minutes", "小时": "hours", "天": "days", "更新于": "Updated", "个筛选": "filters", "个智能体工作中": "agents working", "条": "items",
       "代码实现": "Code implementation", "最近 24 小时": "Last 24 hours", "最近 7 天": "Last 7 days", "最近 30 天": "Last 30 days", "暂无可选项": "No options available", "清除筛选": "Clear filters", "复制本地 workdir 路径": "Copy local workdir path",
       "工作中": "Working", "排队中": "Queued", "理解中": "Thinking", "执行失败": "Execution failed", "已停止": "Stopped", "未开始": "Not started", "无法连接 Better Codex Runtime": "Unable to connect to Better Codex Runtime",
-      "在会话中打开": "Open in conversation", "前往会话": "Open conversation", "请前往会话继续对话": "Continue in the conversation", "任务正在进行中": "Task is running", "立即开始任务": "Start task now", "切换到手动": "Switch to manual", "继续创建": "Keep creating", "指派给": "Assign to", "可选": "Optional", "建议": "Suggestions", "创建第一个任务": "Create your first task", "写下要完成的事，交给智能体处理。": "Describe what needs to be done and let an agent handle it.", "开始对话": "Start the conversation", "补充下一步要求，智能体会继续处理。": "Add your next request and the agent will continue.", "在下方输入消息并发送": "Type a message below and send it", "正在处理任务": "Working on the task", "智能体回复产生后会显示在这里。": "The agent's response will appear here when available.", "请稍候": "Please wait", "输入下一步要求…": "Enter your next request…", "调整侧边栏宽度": "Resize sidebar",
+      "在会话中打开": "Open in conversation", "前往会话": "Open conversation", "请前往会话继续对话": "Continue in the conversation", "任务正在进行中": "Task is running", "立即开始任务": "Start task now", "切换到手动": "Switch to manual", "继续创建": "Keep creating", "指派给": "Assign to", "可选": "Optional", "建议": "Suggestions", "开始对话": "Start the conversation", "补充下一步要求，智能体会继续处理。": "Add your next request and the agent will continue.", "在下方输入消息并发送": "Type a message below and send it", "正在处理任务": "Working on the task", "智能体回复产生后会显示在这里。": "The agent's response will appear here when available.", "请稍候": "Please wait", "输入下一步要求…": "Enter your next request…", "调整侧边栏宽度": "Resize sidebar",
       "头像": "Avatar", "上传图片": "Upload image", "使用此头像": "Use this avatar", "点击选择预设图标，或上传图片": "Choose a preset icon or upload an image", "从预设图标中选择，也可以上传图片": "Choose a preset icon or upload an image", "创建智能体": "Create agent", "Codex 默认智能体": "Default Codex agent", "说明这个智能体适合承担什么工作": "Describe what this agent is good at", "定义职责、工作方式和输出要求": "Define responsibilities, workflow, and output requirements", "权限": "Permissions", "只读": "Read-only", "工作区可写": "Workspace write access", "完全访问": "Full access", "仅可读取工作区文件，不能修改": "Can read workspace files but cannot modify them", "可修改当前工作区内的文件": "Can modify files in the current workspace", "可不受限制地访问互联网和电脑上的任何文件": "Unrestricted access to the internet and files on this computer",
       "已经执行过对话的 Issue 只能修改状态、优先级和指派人。": "Issues with an executed conversation can only change status, priority, and assignee.", "终止任务后才能打开对话，是否终止任务？": "The task must be stopped before opening the conversation. Stop it now?", "终止并打开": "Stop and open", "正在终止…": "Stopping…", "忽略当前版本": "Ignore this version", "立即更新": "Update now", "暂无项目": "No projects", "告诉智能体要做什么，例如：“修复项目里任务运行状态不可见的问题”": "Tell the agent what to do, for example: “Fix the invisible task run status in the project”"
     } };
@@ -703,6 +703,17 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "创建 Codex 项目": "Create Codex project",
       "无法选择文件夹": "Unable to choose a folder",
     });
+    Object.assign(localeResources.en, {
+      "错误报告": "Error report",
+      "发生了一个错误": "An error occurred",
+      "完整错误、请求信息和相关日志已保留，可直接复制给开发者。": "The full error, request details, and related logs are ready to copy.",
+      "上一条": "Previous",
+      "下一条": "Next",
+      "复制当前错误": "Copy current error",
+      "复制全部错误": "Copy all errors",
+      "移除当前错误": "Remove current error",
+      "复制失败": "Copy failed",
+    });
     const bridgeRequests = new Map();
     const appServerRequests = new Map();
     const sessionHandoffPending = new Set();
@@ -711,6 +722,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     let bridgeSequence = 0;
     let appServerSequence = 0;
     let diagnosticSequence = 0;
+    const diagnosticLog = [];
+    const errorQueue = [];
+    let errorQueueIndex = 0;
+    let errorDialog = null;
     let entry = null;
     let agentsEntry = null;
     let projectsEntry = null;
@@ -1037,6 +1052,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #better-codex-context-menu .better-codex-context-tag[data-tone="model"] { color: #1684c4; background: #e8f5fc; }
         #better-codex-context-menu .better-codex-context-tag[data-tone="reasoning"] { color: #198754; background: #eaf7ef; }
         #\${PANEL_ID} .better-codex-board { display: flex; gap: 12px; min-height: 0; flex: 1; overflow-x: auto; overflow-y: hidden; padding: 0 16px 10px; }
+        #\${PANEL_ID} .better-codex-board-loading { display: flex; min-width: 100%; min-height: 100%; align-items: center; justify-content: center; flex-direction: column; gap: 12px; color: var(--bc-muted); font-size: var(--bc-text-sm); }
+        #\${PANEL_ID} .better-codex-board-loading > span { width: 24px; height: 24px; box-sizing: border-box; border: 2px solid var(--bc-border); border-top-color: var(--bc-foreground); border-radius: 50%; animation: better-codex-board-loading-spin .8s linear infinite; }
+        #\${PANEL_ID} .better-codex-board-loading strong { font-weight: 560; }
+        @keyframes better-codex-board-loading-spin { to { transform: rotate(360deg); } }
         #\${PANEL_ID} .better-codex-column { box-sizing: border-box; display: flex; width: 280px; min-width: 280px; min-height: 200px; flex-direction: column; border-radius: 12px; padding: 8px; }
         #\${PANEL_ID} .better-codex-column[data-status="backlog"], #\${PANEL_ID} .better-codex-column[data-status="todo"], #\${PANEL_ID} .better-codex-column[data-status="archive"] { background: rgba(228,228,231,.42); }
         #\${PANEL_ID} .better-codex-column[data-status="in_progress"] { background: rgba(245,181,45,.07); }
@@ -1654,9 +1673,16 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     function api(path, options = {}) {
       const method = String(options.method || "GET").toUpperCase();
-      if (READ_ONLY && method !== "GET") return Promise.reject(new Error("remote_read_only"));
       const requestPath = path + (path.includes("?") ? "&" : "?") + "locale=" + encodeURIComponent(state.locale);
       const commandId = method === "GET" ? "" : globalThis.crypto?.randomUUID?.() || VERSION + "-command-" + Date.now() + "-" + Math.random().toString(36).slice(2);
+      const startedAt = Date.now();
+      const bodyBytes = typeof options.body === "string" ? new TextEncoder().encode(options.body).byteLength : 0;
+      appendDiagnostic("api_request", { method, path: requestPath, command_id: commandId, request_body_bytes: bodyBytes });
+      if (READ_ONLY && method !== "GET") {
+        const error = new Error("remote_read_only");
+        reportGlobalError(error, { source: "api", method, path: requestPath, command_id: commandId, request_body_bytes: bodyBytes });
+        return Promise.reject(error);
+      }
       const attempt = (retriesLeft) => {
         if (typeof window.betterCodexHost?.request === "function") {
           return Promise.resolve(window.betterCodexHost.request({ path: requestPath, method: options.method || "GET", body: options.body, timeoutMs: options.timeoutMs, commandId })).catch(error => {
@@ -1686,7 +1712,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           throw error;
         });
       };
-      return attempt(method === "GET" ? 1 : 0);
+      return attempt(method === "GET" ? 1 : 0).then(value => {
+        appendDiagnostic("api_response", { method, path: requestPath, command_id: commandId, elapsed_ms: Date.now() - startedAt });
+        return value;
+      }).catch(error => {
+        appendDiagnostic("api_failure", { method, path: requestPath, command_id: commandId, request_body_bytes: bodyBytes, elapsed_ms: Date.now() - startedAt, error: error instanceof Error ? error.message : String(error || "request_failed"), diagnostics: error?.betterCodexDiagnostics || {} });
+        reportGlobalError(error, { source: "api", method, path: requestPath, command_id: commandId, request_body_bytes: bodyBytes, elapsed_ms: Date.now() - startedAt });
+        throw error;
+      });
     }
 
     function startLiveUpdates() {
@@ -2099,6 +2132,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         document_focused: document.hasFocus(),
         ...fields,
       };
+      appendDiagnostic(event, body);
       try {
         void window.electronBridge?.sendMessageFromView?.({
           type: "log-message",
@@ -2140,8 +2174,175 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       bridgeRequests.delete(id);
       clearTimeout(pending.timer);
       if (result?.ok) pending.resolve(result.value);
-      else pending.reject(new Error(result?.value?.error || "request_failed"));
+      else {
+        const error = new Error(result?.value?.error || "request_failed");
+        if (result?.value?.diagnostics) error.betterCodexDiagnostics = result.value.diagnostics;
+        pending.reject(error);
+      }
     };
+
+    function diagnosticValue(value, depth = 0) {
+      if (value === null || value === undefined || typeof value === "boolean" || typeof value === "number") return value;
+      if (typeof value === "string") return value.length > 4000 ? value.slice(0, 4000) + "…" : value;
+      if (value instanceof Error) return { name: value.name, message: value.message, stack: String(value.stack || "").slice(0, 12000) };
+      if (depth >= 4) return "[depth limited]";
+      if (Array.isArray(value)) return value.slice(0, 50).map(item => diagnosticValue(item, depth + 1));
+      if (typeof value !== "object") return String(value);
+      const result = {};
+      for (const [key, item] of Object.entries(value).slice(0, 80)) {
+        if (/authorization|cookie|token|password|secret|request_body|response_body|content|prompt/i.test(key) && !/bytes|length|size/i.test(key)) result[key] = "[redacted]";
+        else result[key] = diagnosticValue(item, depth + 1);
+      }
+      return result;
+    }
+
+    function appendDiagnostic(event, fields = {}) {
+      diagnosticLog.push({ time: new Date().toISOString(), event, ...diagnosticValue(fields) });
+      if (diagnosticLog.length > 80) diagnosticLog.splice(0, diagnosticLog.length - 80);
+    }
+
+    function errorCause(error) {
+      const causes = [];
+      let current = error?.cause;
+      for (let depth = 0; current && depth < 4; depth += 1) {
+        causes.push(current instanceof Error ? { name: current.name, message: current.message, stack: String(current.stack || "").slice(0, 6000) } : diagnosticValue(current));
+        current = current?.cause;
+      }
+      return causes;
+    }
+
+    function formatErrorReport(records) {
+      return JSON.stringify({
+        report: "Better Codex error report",
+        exported_at: new Date().toISOString(),
+        errors: records,
+      }, null, 2);
+    }
+
+    function renderErrorDialog() {
+      if (!errorDialog?.isConnected || !errorQueue.length) return;
+      errorQueueIndex = Math.max(0, Math.min(errorQueueIndex, errorQueue.length - 1));
+      const record = errorQueue[errorQueueIndex];
+      errorDialog.querySelector("[data-error-report-message]").textContent = record.display_message;
+      errorDialog.querySelector("[data-error-report-time]").textContent = new Date(record.time).toLocaleString(state.locale === "zh-CN" ? "zh-CN" : "en-US");
+      errorDialog.querySelector("[data-error-report-counter]").textContent = String(errorQueueIndex + 1) + " / " + String(errorQueue.length);
+      errorDialog.querySelector("[data-error-report-detail]").textContent = formatErrorReport([record]);
+      errorDialog.querySelector("[data-error-report-previous]").disabled = errorQueueIndex === 0;
+      errorDialog.querySelector("[data-error-report-next]").disabled = errorQueueIndex >= errorQueue.length - 1;
+    }
+
+    function ensureErrorDialog() {
+      if (errorDialog?.isConnected) return errorDialog;
+      const dialog = document.createElement("dialog");
+      dialog.id = "better-codex-error-dialog";
+      dialog.setAttribute(OWNED, "true");
+      dialog.setAttribute("aria-labelledby", "better-codex-error-report-title");
+      dialog.setAttribute("aria-describedby", "better-codex-error-report-description");
+      dialog.innerHTML = '<div class="better-codex-error-report-shell"><header class="better-codex-error-report-head"><span class="better-codex-error-report-icon" aria-hidden="true">' + icon("permissionDanger") + '</span><div><h2 id="better-codex-error-report-title">' + te("错误报告") + '</h2><p id="better-codex-error-report-description">' + te("完整错误、请求信息和相关日志已保留，可直接复制给开发者。") + '</p></div><button class="better-codex-error-report-close" type="button" data-error-report-close aria-label="' + te("关闭") + '">' + icon("close") + '</button></header><section class="better-codex-error-report-summary"><strong data-error-report-message>' + te("发生了一个错误") + '</strong><span data-error-report-time></span></section><pre class="better-codex-error-report-detail" data-error-report-detail tabindex="0"></pre><footer class="better-codex-error-report-footer"><div class="better-codex-error-report-navigation"><button type="button" data-error-report-previous>' + te("上一条") + '</button><output data-error-report-counter>1 / 1</output><button type="button" data-error-report-next>' + te("下一条") + '</button></div><div class="better-codex-error-report-actions"><button type="button" data-error-report-dismiss>' + te("移除当前错误") + '</button><button type="button" data-error-report-copy-all>' + te("复制全部错误") + '</button><button class="is-primary" type="button" data-error-report-copy>' + te("复制当前错误") + '</button></div></footer></div>';
+      const copyRecords = async (button, records) => {
+        const label = button.textContent;
+        try {
+          await copyText(formatErrorReport(records));
+          button.textContent = t("已复制");
+        } catch {
+          button.textContent = t("复制失败");
+        }
+        setTimeout(() => { if (button.isConnected) button.textContent = label; }, 1600);
+      };
+      dialog.querySelector("[data-error-report-close]").addEventListener("click", () => dialog.close());
+      dialog.querySelector("[data-error-report-previous]").addEventListener("click", () => { errorQueueIndex -= 1; renderErrorDialog(); });
+      dialog.querySelector("[data-error-report-next]").addEventListener("click", () => { errorQueueIndex += 1; renderErrorDialog(); });
+      dialog.querySelector("[data-error-report-copy]").addEventListener("click", event => void copyRecords(event.currentTarget, [errorQueue[errorQueueIndex]]));
+      dialog.querySelector("[data-error-report-copy-all]").addEventListener("click", event => void copyRecords(event.currentTarget, errorQueue));
+      dialog.querySelector("[data-error-report-dismiss]").addEventListener("click", () => {
+        errorQueue.splice(errorQueueIndex, 1);
+        if (!errorQueue.length) return dialog.close();
+        errorQueueIndex = Math.min(errorQueueIndex, errorQueue.length - 1);
+        renderErrorDialog();
+      });
+      dialog.addEventListener("cancel", event => { event.preventDefault(); dialog.close(); });
+      bindModalDismiss(dialog, () => dialog.close());
+      document.body.appendChild(dialog);
+      errorDialog = dialog;
+      return dialog;
+    }
+
+    function reportGlobalError(error, context = {}) {
+      const value = error instanceof Error ? error : new Error(typeof error === "string" ? error : String(error?.message || error || "request_failed"));
+      if (value.betterCodexReported) return null;
+      installStyle();
+      try { Object.defineProperty(value, "betterCodexReported", { value: true, configurable: true }); } catch {}
+      const selected = state.selected;
+      const record = {
+        id: globalThis.crypto?.randomUUID?.() || "error-" + Date.now() + "-" + Math.random().toString(36).slice(2),
+        time: new Date().toISOString(),
+        display_message: errorLabel(value),
+        name: value.name || "Error",
+        message: value.message || "request_failed",
+        stack: String(value.stack || "").slice(0, 12000),
+        causes: errorCause(value),
+        context: diagnosticValue({
+          source: context.source || "application",
+          issue_id: selected?.id || "",
+          issue_identifier: selected?.identifier || "",
+          ...context,
+        }),
+        diagnostics: diagnosticValue(value.betterCodexDiagnostics || {}),
+        environment: {
+          core_version: CORE_VERSION,
+          compatibility_version: VERSION,
+          host: HOST_KIND,
+          locale: state.locale,
+          path: location.pathname,
+          online: navigator.onLine,
+          user_agent: navigator.userAgent,
+          viewport: String(window.innerWidth) + "x" + String(window.innerHeight),
+        },
+        related_logs: diagnosticLog.slice(-30),
+        occurrences: 1,
+        occurrence_times: [new Date().toISOString()],
+      };
+      const fingerprint = [record.message, record.context.source || "", record.context.path || "", record.diagnostics.response_detail || ""].join("|");
+      const repeatedIndex = errorQueue.findIndex(item => item.fingerprint === fingerprint);
+      if (repeatedIndex >= 0) {
+        const repeated = errorQueue[repeatedIndex];
+        repeated.occurrences += 1;
+        repeated.occurrence_times.push(record.time);
+        if (repeated.occurrence_times.length > 20) repeated.occurrence_times.shift();
+        repeated.related_logs = diagnosticLog.slice(-30);
+        errorQueueIndex = repeatedIndex;
+        const dialog = ensureErrorDialog();
+        renderErrorDialog();
+        if (!dialog.open) dialog.showModal();
+        return repeated.id;
+      }
+      record.fingerprint = fingerprint;
+      appendDiagnostic("error_reported", { id: record.id, message: record.message, source: record.context.source });
+      record.related_logs = diagnosticLog.slice(-30);
+      errorQueue.push(record);
+      if (errorQueue.length > 50) errorQueue.shift();
+      errorQueueIndex = errorQueue.length - 1;
+      const dialog = ensureErrorDialog();
+      renderErrorDialog();
+      if (!dialog.open) dialog.showModal();
+      dialog.querySelector("[data-error-report-copy]")?.focus();
+      return record.id;
+    }
+
+    function onWindowError(event) {
+      reportGlobalError(event.error || event.message, { source: "window_error", filename: event.filename || "", line: event.lineno || 0, column: event.colno || 0 });
+    }
+
+    function onUnhandledRejection(event) {
+      reportGlobalError(event.reason, { source: "unhandled_rejection" });
+    }
+
+    function onExternalError(event) {
+      const detail = event.detail && typeof event.detail === "object" ? event.detail : {};
+      const error = detail.error instanceof Error ? detail.error : new Error(String(detail.message || detail.error || "request_failed"));
+      if (detail.diagnostics) error.betterCodexDiagnostics = detail.diagnostics;
+      reportGlobalError(error, { source: detail.source || "host", ...diagnosticValue(detail.context || {}) });
+    }
 
     function errorLabel(error) {
       const value = error instanceof Error ? error.message : String(error || "request_failed");
@@ -2177,6 +2378,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function showError(error) {
+      reportGlobalError(error, { source: "ui_action" });
       state.error = errorLabel(error);
       const output = panel?.querySelector("#better-codex-error");
       if (output) {
@@ -2310,6 +2512,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       }
       if (!force && (dismissedUpdateVersion === noticeVersion || ignoredUpdateVersion === noticeVersion)) return;
       if (updateNotice?.dataset.version === noticeVersion && updateNotice.dataset.status === (activationError ? "error" : "available")) return;
+      if (activationError) reportGlobalError(new Error(String(update.error || "update_activation_failed")), { source: "update_activation" });
       updateNoticeResizeObserver?.disconnect();
       updateNoticeResizeObserver = null;
       updateNotice?.remove();
@@ -2378,6 +2581,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           await waitForUpdateCompletion(notice);
         } catch (reason) {
           if (updateNotice !== notice) return;
+          reportGlobalError(reason, { source: "update_install" });
           notice.dataset.status = "install-error";
           install.disabled = false;
           menuToggle.disabled = false;
@@ -3745,6 +3949,36 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const suggestedAgents = ${JSON.stringify(suggestedAgents)};
 
     let agentInspectorClosing = false;
+    let agentCreateFullscreen = false;
+    let agentWindowBoundsObserver = null;
+
+    function clearAgentCreateFullscreenBounds(inspector) {
+      inspector?.style.removeProperty("--bc-agent-fullscreen-top");
+      inspector?.style.removeProperty("--bc-agent-fullscreen-left");
+      inspector?.style.removeProperty("--bc-agent-fullscreen-width");
+      inspector?.style.removeProperty("--bc-agent-fullscreen-height");
+    }
+
+    function syncAgentCreateFullscreenBounds(inspector) {
+      const compact = HOST_KIND === "web" && window.matchMedia("(max-width: 720px)").matches;
+      if (!agentCreateFullscreen || compact || !panel?.isConnected) return clearAgentCreateFullscreenBounds(inspector);
+      const bounds = panel.getBoundingClientRect();
+      inspector.style.setProperty("--bc-agent-fullscreen-top", bounds.top + "px");
+      inspector.style.setProperty("--bc-agent-fullscreen-left", bounds.left + "px");
+      inspector.style.setProperty("--bc-agent-fullscreen-width", bounds.width + "px");
+      inspector.style.setProperty("--bc-agent-fullscreen-height", bounds.height + "px");
+    }
+
+    function setAgentCreateFullscreen(fullscreen) {
+      const inspector = panel?.querySelector('.better-codex-agent-inspector[data-agent-window="create"]');
+      if (!inspector) return;
+      agentCreateFullscreen = Boolean(fullscreen);
+      inspector.dataset.fullscreen = String(agentCreateFullscreen);
+      syncAgentCreateFullscreenBounds(inspector);
+      const button = inspector.querySelector("[data-agent-window-expand]");
+      button?.setAttribute("aria-label", t(agentCreateFullscreen ? "退出全屏" : "全屏"));
+      if (button) button.innerHTML = icon(agentCreateFullscreen ? "shrink" : "expand");
+    }
 
     function agentInspectorWidthLimit() {
       const available = panel?.getBoundingClientRect().width || window.innerWidth;
@@ -3826,6 +4060,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     function closeAgentInspector() {
       if (state.agentPane === "preview") return;
       const inspector = panel?.querySelector(".better-codex-agent-inspector");
+      if (state.agentPane === "create" && inspector?.matches("dialog")) {
+        inspector.close();
+        return;
+      }
       if (inspector?.classList.contains("is-closing")) return;
       const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
       if (!inspector || reduceMotion) {
@@ -3897,7 +4135,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         { value: "danger-full-access", label: t("完全访问"), description: t("可不受限制地访问互联网和电脑上的任何文件"), icon: "permissionDanger", tone: "warning" },
       ];
       const animateAttr = options.animateEnter ? ' data-animate="enter"' : "";
-       return '<aside class="better-codex-agent-inspector"' + animateAttr + '><div class="better-codex-agent-inspector-resize" data-agent-inspector-resize role="separator" aria-orientation="vertical" aria-label="' + te("调整侧边栏宽度") + '" tabindex="0"></div><form data-agent-form="' + (creating ? "create" : isDefault ? "default" : "update") + '" data-agent-key="' + escapeHtml(creating ? "" : agentKey(draft)) + '"><header class="better-codex-agent-inspector-head"><span>' + heading + '</span><button class="better-codex-agent-card-action" type="button" data-agent-close-pane aria-label="' + te("关闭详情") + '">' + icon("close") + '</button></header><div class="better-codex-agent-inspector-scroll">' + profileHead + identity + '<h3>' + te("详情") + '</h3><div class="better-codex-agent-inspector-group">' + agentPicker("model", t("模型"), model, modelOptions) + agentPicker("reasoning_effort", t("推理"), effort, effortOptions) + agentPicker("sandbox_mode", t("权限"), sandboxMode, sandboxOptions) + agentNumberInput("max_concurrency", t("最大并发"), draft.max_concurrency, 1, 20) + '</div>' + instructionField + '<div class="better-codex-agent-inspector-error" hidden></div></div>' + (readOnly ? "" : '<footer class="better-codex-agent-inspector-footer">' + deleteButton + '<button class="better-codex-submit" type="submit">' + te(creating ? "创建" : "保存") + '</button></footer>') + '</form></aside>';
+      const tag = creating ? "dialog" : "aside";
+      const windowAttr = creating ? ' data-agent-window="create" data-fullscreen="' + agentCreateFullscreen + '"' : "";
+      const resizeHandle = creating ? "" : '<div class="better-codex-agent-inspector-resize" data-agent-inspector-resize role="separator" aria-orientation="vertical" aria-label="' + te("调整侧边栏宽度") + '" tabindex="0"></div>';
+      const leading = creating ? '<div class="better-codex-agent-inspector-head-leading"><button class="better-codex-agent-window-back" type="button" data-agent-window-back aria-label="' + te("返回") + '">' + icon("back") + '</button><nav class="better-codex-agent-window-title" aria-label="' + te("智能体") + '"><span>' + te("智能体") + '</span><span aria-hidden="true">&gt;</span><strong>' + te("创建智能体") + '</strong></nav></div>' : '<span>' + heading + '</span>';
+      const windowAction = creating ? '<button class="better-codex-agent-card-action" type="button" data-agent-window-expand aria-label="' + te(agentCreateFullscreen ? "退出全屏" : "全屏") + '">' + icon(agentCreateFullscreen ? "shrink" : "expand") + '</button>' : "";
+      return '<' + tag + ' class="better-codex-agent-inspector"' + animateAttr + windowAttr + '>' + resizeHandle + '<form data-agent-form="' + (creating ? "create" : isDefault ? "default" : "update") + '" data-agent-key="' + escapeHtml(creating ? "" : agentKey(draft)) + '"><header class="better-codex-agent-inspector-head">' + leading + '<div class="better-codex-agent-inspector-head-actions">' + windowAction + '<button class="better-codex-agent-card-action" type="button" data-agent-close-pane aria-label="' + te(creating ? "关闭" : "关闭详情") + '">' + icon("close") + '</button></div></header><div class="better-codex-agent-inspector-scroll">' + profileHead + identity + '<h3>' + te("详情") + '</h3><div class="better-codex-agent-inspector-group">' + agentPicker("model", t("模型"), model, modelOptions) + agentPicker("reasoning_effort", t("推理"), effort, effortOptions) + agentPicker("sandbox_mode", t("权限"), sandboxMode, sandboxOptions) + agentNumberInput("max_concurrency", t("最大并发"), draft.max_concurrency, 1, 20) + '</div>' + instructionField + '<div class="better-codex-agent-inspector-error" hidden></div></div>' + (readOnly ? "" : '<footer class="better-codex-agent-inspector-footer">' + deleteButton + '<button class="better-codex-submit" type="submit">' + te(creating ? "创建" : "保存") + '</button></footer>') + '</form></' + tag + '>';
     }
 
     function renderAgents() {
@@ -3927,8 +4170,32 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         return '<button class="better-codex-agent-suggestion' + (selected ? " is-selected" : "") + '" type="button" data-agent-template="' + item.key + '" aria-pressed="' + selected + '"><span class="better-codex-agent-suggestion-icon" data-tone="' + escapeHtml(item.tone) + '">' + icon(item.icon, "", "2.4") + '</span><span><strong>' + te(item.name) + '</strong><small>' + te(item.description) + '</small></span></button>';
       }).join("");
       const animateEnter = previousPane === "preview" && state.agentPane !== "preview";
+      agentWindowBoundsObserver?.disconnect();
+      agentWindowBoundsObserver = null;
       container.innerHTML = '<div class="better-codex-agent-shell" data-pane="' + state.agentPane + '"><section class="better-codex-agent-directory"><header class="better-codex-agent-page-heading"><h1>' + te("智能体") + '</h1><p>' + te("创建和管理你的智能体") + '</p></header><div class="better-codex-agent-search-wrap">' + icon("search") + '<input class="better-codex-search" data-agent-search type="search" value="' + escapeHtml(state.agentSearch) + '" placeholder="' + te("搜索智能体") + '" aria-label="' + te("搜索智能体") + '"></div><div class="better-codex-agent-list">' + (rows || empty) + '</div>' + (state.agentView === "all" && !query ? '<div class="better-codex-agent-suggestions"><h3>' + te("建议") + '</h3>' + suggestions + '</div>' : "") + '</section>' + agentInspector(selected, { animateEnter }) + '</div>';
-      applyAgentInspectorWidth(container.querySelector(".better-codex-agent-inspector"));
+      const inspector = container.querySelector(".better-codex-agent-inspector");
+      if (state.agentPane !== "create") return applyAgentInspectorWidth(inspector);
+      inspector.addEventListener("cancel", event => {
+        event.preventDefault();
+        closeAgentInspector();
+      });
+      inspector.addEventListener("close", () => {
+        agentWindowBoundsObserver?.disconnect();
+        agentWindowBoundsObserver = null;
+        agentCreateFullscreen = false;
+        if (state.agentPane !== "create") return;
+        state.agentPane = "preview";
+        state.selectedAgentId = "";
+        state.agentDraft = null;
+        renderAgents();
+      }, { once: true });
+      bindModalDismiss(inspector, closeAgentInspector);
+      inspector.showModal();
+      setAgentCreateFullscreen(agentCreateFullscreen);
+      if (panel && typeof ResizeObserver === "function") {
+        agentWindowBoundsObserver = new ResizeObserver(() => syncAgentCreateFullscreenBounds(inspector));
+        agentWindowBoundsObserver.observe(panel);
+      }
     }
 
     function projectRootPaths(project) {
@@ -4270,6 +4537,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           renderDirectory(directory);
         } catch (error) {
           if (request !== directoryRequest || !dialog.isConnected) return;
+          reportGlobalError(error, { source: "directory_browser" });
           currentDirectory = null;
           directoryList.innerHTML = '<span class="better-codex-directory-state">' + escapeHtml(directoryErrorLabel(error)) + '</span>';
           directoryStatus.textContent = directoryErrorLabel(error);
@@ -4291,6 +4559,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           if (!workspacePath) return;
           applyWorkspacePath(workspacePath);
         } catch (error) {
+          reportGlobalError(error, { source: "directory_picker" });
           output.textContent = error instanceof Error ? error.message : t("无法选择文件夹");
           output.hidden = false;
         } finally {
@@ -4336,6 +4605,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           await loadProjects();
           await openProjectDetail(project.id);
         }).catch(error => {
+          reportGlobalError(error, { source: "project_create" });
           output.textContent = error instanceof Error ? error.message : t("创建失败");
           output.hidden = false;
           submit.disabled = false;
@@ -4547,6 +4817,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         dialog.querySelector("[data-remote-sync]").textContent = value.last_sync_at ? new Date(value.last_sync_at).toLocaleString(state.locale === "zh-CN" ? "zh-CN" : "en") : te("尚未同步");
         remoteOpen.href = String(remote.url || "");
         if (!reachable && remote.error) {
+          reportGlobalError(new Error(String(remote.error)), { source: "remote_status" });
           remoteError.textContent = te("状态检查失败") + ": " + String(remote.error);
           remoteError.hidden = false;
         }
@@ -4889,8 +5160,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         return matchesView && issueMatchesFilters(issue);
       });
       const board = panel.querySelector("#better-codex-board");
-      if (!visible.length && !state.search && filterCount === 0 && state.view === "all") {
-        board.innerHTML = '<section class="better-codex-board-empty"><h2>' + te("创建第一个任务") + '</h2><p>' + te("写下要完成的事，交给智能体处理。") + '</p><div><button type="button" data-add-status="todo">' + icon("plus") + '<span>' + te("新建任务") + '</span></button><button type="button" data-archive-open>' + icon("archive") + '<span>' + te("查看已归档卡片") + '</span></button></div></section>';
+      if (!state.issuesLoaded) {
+        board.innerHTML = '<section class="better-codex-board-loading" role="status" aria-live="polite"><span aria-hidden="true"></span><strong>' + te("正在加载任务看板") + '</strong></section>';
         requestAnimationFrame(syncBoardScrollControl);
         return;
       }
@@ -4938,7 +5209,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const columnButton = archiveColumn
           ? '<button class="better-codex-column-icon" type="button" data-archive-open aria-label="' + te("查看已归档卡片") + '" title="' + te("查看已归档卡片") + '">' + icon("archive") + '</button>'
           : '<button class="better-codex-column-icon" type="button" data-add-status="' + status + '" aria-label="' + te("新建任务") + '">' + icon("plus") + '</button>';
-        return '<section class="better-codex-column" data-status="' + status + '"><div class="better-codex-column-head"><span class="better-codex-column-title">' + statusIcon(status) + '<span>' + te(statusLabel) + '</span>' + (archiveColumn ? "" : '<span>' + issues.length + '</span>') + '</span><span class="better-codex-column-actions">' + columnButton + '</span></div><div class="better-codex-cards">' + (cards || '<div class="better-codex-empty">' + te(archiveColumn ? "拖到这里即可归档" : "暂无任务") + '</div>') + '</div></section>';
+        return '<section class="better-codex-column" data-status="' + status + '"><div class="better-codex-column-head"><span class="better-codex-column-title">' + statusIcon(status) + '<span>' + te(statusLabel) + '</span>' + (archiveColumn ? "" : '<span>' + issues.length + '</span>') + '</span><span class="better-codex-column-actions">' + columnButton + '</span></div><div class="better-codex-cards">' + (cards || (archiveColumn ? '<div class="better-codex-empty">' + te("拖到这里即可归档") + '</div>' : "")) + '</div></section>';
       }).join("");
       requestAnimationFrame(syncBoardScrollControl);
     }
@@ -4958,6 +5229,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       }
       issueSessionSnapshot = new Map(issues.map(issue => [issue.id, { activeRunStatus: issue.active_run_status || "", replyStatus: issue.reply_status || "idle", lastActivityFinishedAt: issue.last_activity_finished_at || "" }]));
       state.issues = issues;
+      state.issuesLoaded = true;
       syncSessionHandoffFromHost();
       const dialog = document.getElementById("better-codex-dialog");
       const dialogIssue = dialog?.dataset.issueId ? issues.find(issue => issue.id === dialog.dataset.issueId) : null;
@@ -5026,11 +5298,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           if (context.projectId) {
             await ensureContextProject(context);
           } else if (!state.projects.some(item => item.id === state.projectId)) {
-            state.projectId = state.projects.find(item => item.id === rememberedProjectId)?.id || state.projects[0]?.id || "";
+            state.projectId = HOST_KIND === "web" ? "" : state.projects.find(item => item.id === rememberedProjectId)?.id || state.projects[0]?.id || "";
           }
-          if (state.projectId) localStorage.setItem(PROJECT_KEY, state.projectId);
         }
         await loadSurface({ preserveInspector: true });
+        if (!state.mockup && HOST_KIND === "web") state.projectId = projectsByRecentActivity(state.projects)[0]?.id || "";
+        if (state.projectId) localStorage.setItem(PROJECT_KEY, state.projectId);
         if (!completionNoticesRestored) {
           completionNoticesRestored = true;
           restoreCompletionNotices();
@@ -5048,6 +5321,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     function startAgentCreate(draft = null) {
       if (AGENTS_READ_ONLY) return;
       agentInspectorClosing = false;
+      agentCreateFullscreen = false;
       state.agentPane = "create";
       state.selectedAgentId = "";
       state.agentDraft = draft
@@ -5089,6 +5363,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           state.agentDraft = null;
           await loadAgents();
         } catch (caught) {
+          reportGlobalError(caught, { source: "agent_save", mode });
           error.textContent = t(caught instanceof Error ? caught.message : "保存失败");
           error.hidden = false;
           submit.disabled = false;
@@ -5098,6 +5373,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     function onAgentsClick(event) {
       if (suppressAgentOutside) return;
+      if (event.target.closest("[data-agent-window-back]")) return setAgentCreateFullscreen(false);
+      if (event.target.closest("[data-agent-window-expand]")) return setAgentCreateFullscreen(!agentCreateFullscreen);
       if (event.target.closest("[data-agent-close-pane]")) return closeAgentInspector();
       const row = event.target.closest(".better-codex-agent-directory [data-agent-key]");
       if (row) {
@@ -5193,15 +5470,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       }
     }
 
-    async function openEditor(issue = null, initialStatus = "todo", createMode = "agent") {
-      const [agents, projects, refreshedIssue] = await Promise.all([
-        api("/api/agents"),
-        state.mockup ? Promise.resolve(state.projects) : api("/api/projects"),
-        issue ? api("/api/issues/" + encodeURIComponent(issue.id)) : Promise.resolve(null),
-      ]);
-      state.agents = agents;
-      state.projects = projects;
-      if (issue) issue = refreshedIssue;
+    function openEditor(issue = null, initialStatus = "todo", createMode = "agent") {
       state.selected = issue;
       document.getElementById("better-codex-dialog")?.remove();
       const cachedCreateDraft = issue ? null : readCreateDraft();
@@ -5246,6 +5515,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       let conversationTimer = null;
       let conversationLoadFailures = 0;
       let conversationFailureState = "";
+      let conversationFailureKey = "";
       let conversationMessages = [];
       let lastReplyMessage = "";
       let lastReplyRequestId = "";
@@ -5267,7 +5537,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       let createRequestId = issue ? "" : cachedCreateDraft?.requestId || globalThis.crypto?.randomUUID?.() || VERSION + "-create-" + Date.now() + "-" + Math.random().toString(36).slice(2);
       let submitInFlight = false;
       let mobileInputFrame = null;
-      let mobileDialogLayoutHeight = 0;
       let dialogBoundsObserver = null;
       const clearIssueFullscreenBounds = () => {
         dialog.style.removeProperty("--bc-dialog-fullscreen-top");
@@ -5298,31 +5567,20 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           dialog.style.removeProperty("--bc-mobile-viewport-height");
           dialog.style.removeProperty("--bc-mobile-layout-height");
           dialog.style.removeProperty("--bc-mobile-keyboard-translation");
-          mobileDialogLayoutHeight = 0;
           syncIssueFullscreenBounds();
           return;
         }
         const viewport = window.visualViewport;
         const viewportHeight = viewport?.height || window.innerHeight;
         const active = document.activeElement;
-        const activeInput = active instanceof HTMLElement && dialog.contains(active) && active.matches("input, textarea, [contenteditable='true']");
         dialog.style.setProperty("--bc-mobile-viewport-top", (viewport?.offsetTop || 0) + "px");
-        if (!issue) {
-          mobileDialogLayoutHeight = 0;
-          dialog.style.setProperty("--bc-mobile-viewport-height", viewportHeight + "px");
-          dialog.style.removeProperty("--bc-mobile-layout-height");
-          dialog.style.removeProperty("--bc-mobile-keyboard-translation");
-        } else {
-          dialog.style.removeProperty("--bc-mobile-viewport-height");
-          if (!activeInput || !mobileDialogLayoutHeight || viewportHeight >= mobileDialogLayoutHeight) mobileDialogLayoutHeight = Math.max(window.innerHeight, viewportHeight);
-          const layoutHeight = Math.max(mobileDialogLayoutHeight, window.innerHeight, viewportHeight);
-          const keyboardOffset = activeInput ? Math.max(0, layoutHeight - viewportHeight) : 0;
-          dialog.style.setProperty("--bc-mobile-layout-height", layoutHeight + "px");
-          dialog.style.setProperty("--bc-mobile-keyboard-translation", -keyboardOffset + "px");
-        }
+        dialog.style.setProperty("--bc-mobile-viewport-height", viewportHeight + "px");
+        dialog.style.removeProperty("--bc-mobile-layout-height");
+        dialog.style.removeProperty("--bc-mobile-keyboard-translation");
         mobileInputFrame = requestAnimationFrame(() => {
           mobileInputFrame = null;
           if (!(active instanceof HTMLElement) || !dialog.contains(active) || !active.matches("input, textarea, [contenteditable='true']")) return;
+          if (issue) return;
           (active.closest(".better-codex-composer") || active).scrollIntoView({ block: "nearest", inline: "nearest" });
         });
       };
@@ -5672,9 +5930,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       function showConversationFailure(error, action = "reply", message = "") {
         const feedback = dialog.querySelector("[data-conversation-feedback]");
         if (!feedback) return;
+        const failure = error instanceof Error ? error : new Error(String(error || "request_failed"));
+        const failureKey = action + ":" + failure.message;
+        if (failureKey !== conversationFailureKey) reportGlobalError(failure, { source: "conversation", action });
+        conversationFailureKey = failureKey;
         conversationFailureState = "failed";
         if (message) lastReplyMessage = message;
-        feedback.innerHTML = '<span>' + te(replyFailureMessage(error, action)) + '</span><button type="button" data-conversation-retry="' + action + '">' + te(action === "load" ? "重新加载" : "重试回复") + '</button>';
+        feedback.innerHTML = '<span>' + te(replyFailureMessage(failure.message, action)) + '</span><button type="button" data-conversation-retry="' + action + '">' + te(action === "load" ? "重新加载" : "重试回复") + '</button>';
         feedback.hidden = false;
         syncConversationStatus("failed");
         feedback.querySelector("[data-conversation-retry]")?.addEventListener("click", event => {
@@ -5690,6 +5952,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const feedback = dialog.querySelector("[data-conversation-feedback]");
         if (!feedback) return;
         conversationFailureState = "";
+        conversationFailureKey = "";
         feedback.hidden = true;
         feedback.innerHTML = "";
       }
@@ -5788,7 +6051,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             conversationTimer = setTimeout(() => void loadConversation({ quiet: true }), 2500);
             return;
           }
-          showConversationFailure(error instanceof Error ? error.message : "加载失败", "load");
+          showConversationFailure(error, "load");
         }
       }
 
@@ -5814,6 +6077,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
               message = withAttachments(text, draft.replyAttachments);
             }
           } catch (error) {
+            reportGlobalError(error, { source: "attachment_prepare", action: "reply" });
             errorOutput.textContent = t(error instanceof Error ? error.message : "图片保存失败");
             errorOutput.hidden = false;
             send.disabled = false;
@@ -5847,7 +6111,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           conversationTimer = setTimeout(() => void loadConversation({ quiet: true }), 1500);
         } catch (error) {
           lastReplyRequestId = requestId;
-          showConversationFailure(error instanceof Error ? error.message : "发送失败", "reply", message);
+          showConversationFailure(error, "reply", message);
           scheduleReplyRecovery(requestId, message);
           send.disabled = false;
         }
@@ -5866,6 +6130,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           const updated = await stopIssueSession(issue.id);
           refreshIssueState(updated);
         } catch (error) {
+          reportGlobalError(error, { source: "issue_stop" });
           if (errorOutput) {
             errorOutput.textContent = errorLabel(error);
             errorOutput.hidden = false;
@@ -5908,6 +6173,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             }
           }
         } catch (error) {
+          reportGlobalError(error, { source: "issue_restore" });
           if (errorOutput) {
             errorOutput.textContent = errorLabel(error);
             errorOutput.hidden = false;
@@ -5967,7 +6233,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (draft.mode === "agent") return '<div class="better-codex-dialog-properties">' + projectChip + '</div>';
         const statuses = Object.entries(statusLabels).map(([value, text]) => ({ value, label: t(text), visual: statusIcon(value) }));
         const priorities = Object.entries(priorityLabels).map(([value, text]) => ({ value, label: t(value === "none" ? "无优先级" : text + "优先级"), visual: priorityIcon(value) }));
-        return '<div class="better-codex-dialog-properties">' + dialogSelect("status", t("状态"), draft.status, statuses) + dialogSelect("priority", t("优先级"), draft.priority, priorities) + '<label class="better-codex-property">' + icon("tag") + '<input name="labels" value="' + escapeHtml(draft.labels) + '" placeholder="' + te("添加标签") + '" aria-label="' + te("标签") + '"></label>' + projectChip + '</div>';
+        return '<div class="better-codex-dialog-properties">' + dialogSelect("status", t("状态"), draft.status, statuses) + dialogSelect("priority", t("优先级"), draft.priority, priorities) + '<label class="better-codex-property better-codex-label-property">' + icon("tag") + '<input name="labels" value="' + escapeHtml(draft.labels) + '" placeholder="' + te("添加标签") + '" aria-label="' + te("标签") + '"></label>' + projectChip + '</div>';
       }
 
       function attachmentPaths(items = draft.attachments) {
@@ -6044,7 +6310,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (!accepted.length) {
           const errorOutput = dialog.querySelector(".better-codex-dialog-error");
           if (errorOutput) {
-            errorOutput.textContent = t(REMOTE && attachments.length >= 4 ? "最多传输 4 个文件且总大小不能超过 20 MB" : files.some(file => file.size > 10 * 1024 * 1024) ? "图片不能超过 10 MB" : "请选择 PNG、JPEG 或 WebP 图片");
+            const message = REMOTE && attachments.length >= 4 ? "最多传输 4 个文件且总大小不能超过 20 MB" : files.some(file => file.size > 10 * 1024 * 1024) ? "图片不能超过 10 MB" : "请选择 PNG、JPEG 或 WebP 图片";
+            reportGlobalError(new Error(message), { source: "attachment_paste", action: replyPaste ? "reply" : issue ? "edit" : "create", file_count: files.length, total_bytes: files.reduce((sum, file) => sum + file.size, 0) });
+            errorOutput.textContent = t(message);
             errorOutput.hidden = false;
           }
           return;
@@ -6197,6 +6465,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             const errorOutput = dialog.querySelector(".better-codex-dialog-error");
             const showAttachError = message => {
               if (!errorOutput) return;
+              reportGlobalError(new Error(message), { source: "attachment_picker", action: "reply" });
               errorOutput.textContent = t(message);
               errorOutput.hidden = false;
             };
@@ -6403,7 +6672,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           button?.setAttribute("aria-label", t(draft.expanded ? (issue ? "退出全屏" : "缩小") : "展开"));
           if (button) button.innerHTML = icon(draft.expanded ? "shrink" : "expand");
         };
-        dialog.querySelector("[data-dialog-back]")?.addEventListener("click", () => setDialogExpanded(false));
+        dialog.querySelector("[data-dialog-back]")?.addEventListener("click", () => dialog.close());
         dialog.querySelector("[data-dialog-expand]")?.addEventListener("click", () => {
           setDialogExpanded(!draft.expanded);
         });
@@ -6425,6 +6694,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             const showAttachError = message => {
               const errorOutput = dialog.querySelector(".better-codex-dialog-error");
               if (!errorOutput) return;
+              reportGlobalError(new Error(message), { source: "attachment_picker", action: issue ? "edit" : "create" });
               errorOutput.textContent = t(message);
               errorOutput.hidden = false;
             };
@@ -6539,6 +6809,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           }
         } catch (error) {
           traceDialog("dialog_submit_error", { action: issue ? "update_issue" : "create_issue", error: String(error instanceof Error ? error.message : "create_failed").slice(0, 200) });
+          reportGlobalError(error, { source: "issue_dialog_submit", action: issue ? "update" : "create" });
           errorOutput.textContent = t(error instanceof Error ? error.message : "创建失败");
           errorOutput.hidden = false;
           submitInFlight = false;
@@ -6580,6 +6851,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           await loadIssues();
           dialog.close();
         } catch (error) {
+          reportGlobalError(error, { source: "issue_start" });
           errorOutput.textContent = t(error instanceof Error ? error.message : "启动失败");
           errorOutput.hidden = false;
           button.disabled = false;
@@ -7101,6 +7373,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       updateNoticeResizeObserver = null;
       boardScrollResizeObserver?.disconnect();
       boardScrollResizeObserver = null;
+      agentWindowBoundsObserver?.disconnect();
+      agentWindowBoundsObserver = null;
       Array.from(completionNoticeDismissals.values()).forEach(dismissNotice => dismissNotice(false));
       completionNoticeTimers.forEach(timer => clearTimeout(timer));
       completionNoticeTimers.clear();
@@ -7134,11 +7408,15 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       document.removeEventListener("visibilitychange", onVisibilityChange);
       window.removeEventListener("codex-message-from-view", onHostMessageFromView, true);
       window.removeEventListener("message", onAppServerMessage, true);
+      window.removeEventListener("error", onWindowError);
+      window.removeEventListener("unhandledrejection", onUnhandledRejection);
+      window.removeEventListener("better-codex:error", onExternalError);
       close();
       document.querySelectorAll('[' + OWNED + '="true"]').forEach(node => node.remove());
       ["light", "dark"].forEach(mode => ["canvas", "ink", "accent", "surface", "control", "raised", "hover", "pressed", "hairline"].forEach(token => document.documentElement.style.removeProperty("--bc-host-" + mode + "-" + token)));
       delete window.__betterCodexBridgeResolve;
       delete window.__betterCodexInjection__;
+      errorDialog = null;
     }
 
     function mount() {
@@ -7152,7 +7430,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       updateTimer = setInterval(() => { if (!document.hidden) void checkUpdateNotice(); }, 15000);
     }
 
-    window.__betterCodexInjection__ = { version: VERSION, profile: PROFILE, host: HOST_KIND, endpoint: BASE_URL, refresh, pulse: () => true, open: openRoute, openThread, close, destroy };
+    window.__betterCodexInjection__ = { version: VERSION, profile: PROFILE, host: HOST_KIND, endpoint: BASE_URL, refresh, pulse: () => true, open: openRoute, openThread, close, destroy, reportError: reportGlobalError };
     document.addEventListener("click", onClick, true);
     document.addEventListener("pointerdown", onSessionPointerDown, true);
     document.addEventListener("pointermove", onSessionPointerMove, true);
@@ -7162,6 +7440,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     document.addEventListener("visibilitychange", onVisibilityChange);
     window.addEventListener("codex-message-from-view", onHostMessageFromView, true);
     window.addEventListener("message", onAppServerMessage, true);
+    window.addEventListener("error", onWindowError);
+    window.addEventListener("unhandledrejection", onUnhandledRejection);
+    window.addEventListener("better-codex:error", onExternalError);
     if (document.documentElement) mount();
     else document.addEventListener("DOMContentLoaded", mount, { once: true });
     return { installed: true, reused: false };

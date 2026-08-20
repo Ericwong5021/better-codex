@@ -231,7 +231,7 @@ test("issue creation uses a primary split button with a project creation menu", 
   assert.ok(source.includes('project.innerHTML = icon("folder") + "<span>" + escapeHtml(t("创建新项目"))'));
   assert.ok(source.includes('openCreateProjectDialog()'));
   assert.ok(source.includes("通过智能体创建"));
-  assert.ok(source.includes('async function openEditor(issue = null, initialStatus = "todo", createMode = "agent")'));
+  assert.ok(source.includes('function openEditor(issue = null, initialStatus = "todo", createMode = "agent") {\n      state.selected = issue;'));
   assert.ok(source.includes('const draftMode = issue ? "manual" : createMode === "manual" ? "manual" : "agent"'));
   assert.doesNotMatch(source, /state\.createMode/);
   assert.ok(source.includes('te(draft.mode === "agent" ? "切换到手动" : "切换到智能体")'));
@@ -290,7 +290,8 @@ test("project lists order recent activity first", () => {
   assert.ok(source.includes("Math.max(projectActivity, issueActivity.get(project?.id) || 0)"));
   assert.ok(source.includes('if (key === "project") return projectsByRecentActivity(state.projects).map'));
   assert.ok(source.includes("const options = projectsByRecentActivity(state.projects).map"));
-  assert.equal(source.match(/projectsByRecentActivity\(state\.projects\)/g)?.length, 3);
+  assert.ok(source.includes('if (!state.mockup && HOST_KIND === "web") state.projectId = projectsByRecentActivity(state.projects)[0]?.id || ""'));
+  assert.equal(source.match(/projectsByRecentActivity\(state\.projects\)/g)?.length, 4);
 });
 
 test("column cards fill the padded column evenly", () => {
