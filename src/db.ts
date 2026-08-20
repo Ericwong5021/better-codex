@@ -2111,7 +2111,7 @@ export class Store {
     const issue = this.getIssue(id);
     if (!issue) throw new Error("issue_not_found");
     const rows = this.db.prepare("SELECT thread_id FROM issue_runs WHERE issue_id = ? AND thread_id IS NOT NULL UNION SELECT thread_id FROM issue_sessions WHERE issue_id = ? AND thread_id IS NOT NULL").all(id, id) as Array<{ thread_id: string }>;
-    return [...new Set([issue.thread_id, ...rows.map(row => row.thread_id)].filter((value): value is string => Boolean(value) && /^[a-f0-9-]{36}$/i.test(value)))];
+    return [...new Set([issue.thread_id, ...rows.map(row => row.thread_id)].filter((value): value is string => typeof value === "string" && /^[a-f0-9-]{36}$/i.test(value)))];
   }
 
   recoverInterruptedRuns() {
