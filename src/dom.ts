@@ -6191,6 +6191,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         return '<span class="better-codex-project-picker"><button class="better-codex-property" type="button" data-dialog-project>' + icon("folder") + '<span data-project-label>' + escapeHtml(projectLabel(selectedProject) || t("选择项目")) + '</span>' + icon("chevron") + '</button><span class="better-codex-project-menu" hidden><input class="better-codex-project-search" type="search" placeholder="' + te("搜索项目...") + '" aria-label="' + te("搜索项目") + '"><span data-project-options>' + (options || '<span class="better-codex-project-empty">' + te("暂无项目") + '</span>') + '</span></span></span>';
       }
 
+      function labelPicker() {
+        const selected = draft.labels.split(/[,，]/).map(value => value.trim()).filter(Boolean);
+        const options = [...new Set([...state.issues.flatMap(item => item.labels || []), ...selected])].sort((left, right) => String(left).localeCompare(String(right), state.locale));
+        const rows = options.map(value => '<button class="better-codex-dialog-select-option" type="button" role="option" aria-selected="' + selected.includes(value) + '" data-dialog-label-option="' + escapeHtml(value) + '"><span class="better-codex-dialog-select-option-visual">' + icon("tag") + '</span><span>' + escapeHtml(value) + '</span><span class="better-codex-dialog-select-check">' + (selected.includes(value) ? icon("check") : "") + '</span></button>').join("");
+        return '<span class="better-codex-label-picker" data-dialog-label-picker><button class="better-codex-property better-codex-label-trigger" type="button" aria-label="' + te("标签") + '" aria-haspopup="listbox" aria-expanded="false" data-dialog-label-toggle>' + icon("tag") + '</button><span class="better-codex-label-menu"><label class="better-codex-property better-codex-label-property">' + icon("tag") + '<input name="labels" value="' + escapeHtml(draft.labels) + '" placeholder="' + te("添加标签") + '" aria-label="' + te("标签") + '"></label><span class="better-codex-label-options" role="listbox" aria-multiselectable="true">' + (rows || '<span class="better-codex-project-empty">' + te("暂无可选项") + '</span>') + '</span></span></span>';
+      }
+
       function dialogSelect(name, ariaLabel, selected, options, modifier = "") {
         const current = options.find(option => option.value === selected) || options[0] || { value: "", label: t("未提供"), visual: "" };
         const visual = option => typeof option.visual === "function" ? option.visual() : option.visual || "";
@@ -6233,7 +6240,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (draft.mode === "agent") return '<div class="better-codex-dialog-properties">' + projectChip + '</div>';
         const statuses = Object.entries(statusLabels).map(([value, text]) => ({ value, label: t(text), visual: statusIcon(value) }));
         const priorities = Object.entries(priorityLabels).map(([value, text]) => ({ value, label: t(value === "none" ? "无优先级" : text + "优先级"), visual: priorityIcon(value) }));
-        return '<div class="better-codex-dialog-properties">' + dialogSelect("status", t("状态"), draft.status, statuses) + dialogSelect("priority", t("优先级"), draft.priority, priorities) + '<label class="better-codex-property better-codex-label-property">' + icon("tag") + '<input name="labels" value="' + escapeHtml(draft.labels) + '" placeholder="' + te("添加标签") + '" aria-label="' + te("标签") + '"></label>' + projectChip + '</div>';
+        return '<div class="better-codex-dialog-properties">' + dialogSelect("status", t("状态"), draft.status, statuses) + dialogSelect("priority", t("优先级"), draft.priority, priorities) + labelPicker() + projectChip + '</div>';
       }
 
       function attachmentPaths(items = draft.attachments) {
@@ -6409,12 +6416,24 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         }
         const content = dialog.querySelector(draft.mode === "agent" ? '[name="prompt"]' : '[name="title"]');
         applyDialogPermissions();
+        const syncLabelOptions = () => {
+          const selected = new Set(String(dialog.querySelector('[name="labels"]')?.value || "").split(/[,，]/).map(value => value.trim()).filter(Boolean));
+          dialog.querySelectorAll("[data-dialog-label-option]").forEach(option => {
+            const active = selected.has(option.dataset.dialogLabelOption);
+            option.setAttribute("aria-selected", String(active));
+            option.querySelector(".better-codex-dialog-select-check").innerHTML = active ? icon("check") : "";
+          });
+        };
         content?.addEventListener("input", () => {
           dirtyDraftFields.add(draft.mode === "agent" ? "prompt" : "title");
           updateSubmitState();
         });
         dialog.querySelectorAll('[name="description"], [name="labels"]').forEach(control => control.addEventListener("input", () => {
           dirtyDraftFields.add(control.getAttribute("name"));
+          if (control.matches('[name="labels"]')) {
+            draft.labels = control.value;
+            syncLabelOptions();
+          }
           requestAnimationFrame(updateDescriptionDisclosure);
         }));
         requestAnimationFrame(updateDescriptionDisclosure);
@@ -6495,6 +6514,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             const menu = picker.querySelector(".better-codex-dialog-select-menu");
             if (menu) menu.hidden = true;
           });
+          dialog.querySelectorAll("[data-dialog-label-picker]").forEach(picker => {
+            picker.classList.remove("is-open");
+            picker.querySelector("[data-dialog-label-toggle]")?.setAttribute("aria-expanded", "false");
+          });
           if (selectDismiss) document.removeEventListener("pointerdown", selectDismiss, true);
           selectDismiss = null;
         };
@@ -6512,6 +6535,34 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             closeDialogSelects();
           };
           setTimeout(() => document.addEventListener("pointerdown", selectDismiss, true), 0);
+        }));
+        dialog.querySelectorAll("[data-dialog-label-toggle]").forEach(toggle => toggle.addEventListener("click", event => {
+          event.stopPropagation();
+          const picker = toggle.closest("[data-dialog-label-picker]");
+          const opening = !picker.classList.contains("is-open");
+          closeDialogSelects();
+          if (!opening) return;
+          picker.classList.add("is-open");
+          toggle.setAttribute("aria-expanded", "true");
+          selectDismiss = dismissEvent => {
+            if (picker.contains(dismissEvent.target)) return;
+            closeDialogSelects();
+          };
+          setTimeout(() => document.addEventListener("pointerdown", selectDismiss, true), 0);
+        }));
+        dialog.querySelectorAll("[data-dialog-label-option]").forEach(option => option.addEventListener("click", event => {
+          event.stopPropagation();
+          const picker = option.closest("[data-dialog-label-picker]");
+          const input = picker.querySelector('[name="labels"]');
+          const labels = new Set(String(input.value || "").split(/[,，]/).map(value => value.trim()).filter(Boolean));
+          const value = option.dataset.dialogLabelOption;
+          if (labels.has(value)) labels.delete(value);
+          else labels.add(value);
+          input.value = [...labels].join(", ");
+          draft.labels = input.value;
+          dirtyDraftFields.add("labels");
+          syncLabelOptions();
+          updateSubmitState();
         }));
         dialog.querySelectorAll("[data-dialog-select-option]").forEach(option => option.addEventListener("click", event => {
           event.stopPropagation();
