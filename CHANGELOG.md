@@ -4,6 +4,8 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+- Retry idempotent Relay writes through brief Runtime disconnects and report an error only after bounded reconnect attempts fail.
+
 ## [0.4.9-beta.24] - 2026-08-20
 
 - Keep login, reconnect, and user-stopped conversation states interactive without blocking error dialogs.

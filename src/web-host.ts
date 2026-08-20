@@ -617,7 +617,7 @@ async function requestRuntime(request) {
   const method = String(request.method || "GET").toUpperCase();
   if (method !== "GET" && !request.commandId) request.commandId = crypto.randomUUID();
   const startedAt = Date.now();
-  const timeoutMs = Math.min(Math.max(Number(request.timeoutMs) || 10_000, 1_000), 300_000);
+  const timeoutMs = Math.min(Math.max(Number(request.timeoutMs) || (RELAY && method !== "GET" ? 45_000 : 10_000), 1_000), 300_000);
   const requestBodyBytes = typeof request.body === "string" ? new TextEncoder().encode(request.body).byteLength : 0;
   const diagnostics = extra => ({
     source: "web_host_request",

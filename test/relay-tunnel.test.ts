@@ -145,8 +145,8 @@ test("relay Web session requires same-origin CSRF for protected requests", async
   await relay.close();
 });
 
-test("relay retries a complete idempotent write after Runtime reconnects", async () => {
-  const relay = createRelayServer({ host: "127.0.0.1", port: 0, database: ":memory:", adminToken: "f".repeat(64), webUsername: "admin", webPassword: "relay-password-123", secureCookies: false });
+test("relay buffers and retries an idempotent write through repeated Runtime reconnects", async () => {
+  const relay = createRelayServer({ host: "127.0.0.1", port: 0, database: ":memory:", adminToken: "f".repeat(64), webUsername: "admin", webPassword: "relay-password-123", secureCookies: false, reconnectGraceMs: 1000, maxReplayAttempts: 3 });
   relay.server.listen(0, "127.0.0.1");
   await once(relay.server, "listening");
   const address = relay.server.address();
@@ -163,33 +163,90 @@ test("relay retries a complete idempotent write after Runtime reconnects", async
     await acknowledged;
     return socket;
   };
-  const first = await connect("runtime-retry-1");
   const login = await fetch(`${base}/relay/session`, { method: "POST", headers: { "content-type": "application/json", origin: base }, body: JSON.stringify({ username: "admin", password: "relay-password-123" }) });
   const session = await login.json() as { csrf_token: string };
   const cookie = String(login.headers.get("set-cookie") || "").split(";")[0];
-  const requestEnded = waitForMessage(first, value => value.type === "request_end");
   const response = fetch(`${base}/api/retryable-write`, { method: "POST", headers: { cookie, origin: base, "x-csrf-token": session.csrf_token, "content-type": "application/json", "x-better-codex-request-id": "retryable-write-1" }, body: JSON.stringify({ value: "once" }) });
-  await requestEnded;
-  const firstClosed = once(first, "close");
-  first.close();
-  await firstClosed;
-  let replayedOpenPromise: Promise<Record<string, unknown>> | undefined;
-  let replayedEndPromise: Promise<Record<string, unknown>> | undefined;
-  const second = await connect("runtime-retry-2", socket => {
-    replayedOpenPromise = waitForMessage(socket, value => value.type === "request_open");
-    replayedEndPromise = waitForMessage(socket, value => value.type === "request_end");
+  assert.equal(await Promise.race([response.then(() => "settled"), new Promise(resolve => setTimeout(() => resolve("pending"), 25))]), "pending");
+  let firstOpenPromise: Promise<Record<string, unknown>> | undefined;
+  let firstEndPromise: Promise<Record<string, unknown>> | undefined;
+  const first = await connect("runtime-retry-1", socket => {
+    firstOpenPromise = waitForMessage(socket, value => value.type === "request_open");
+    firstEndPromise = waitForMessage(socket, value => value.type === "request_end");
   });
-  const replayedOpen = await replayedOpenPromise!;
+  assert.equal((await firstOpenPromise!).request_id, "retryable-write-1");
+  await firstEndPromise;
+  const firstClosed = once(first, "close");
+  let secondOpenPromise: Promise<Record<string, unknown>> | undefined;
+  let secondEndPromise: Promise<Record<string, unknown>> | undefined;
+  const second = await connect("runtime-retry-2", socket => {
+    secondOpenPromise = waitForMessage(socket, value => value.type === "request_open");
+    secondEndPromise = waitForMessage(socket, value => value.type === "request_end");
+  });
+  await firstClosed;
+  assert.equal((await secondOpenPromise!).request_id, "retryable-write-1");
+  await secondEndPromise;
+  const secondClosed = once(second, "close");
+  second.close();
+  await secondClosed;
+  let thirdOpenPromise: Promise<Record<string, unknown>> | undefined;
+  let thirdEndPromise: Promise<Record<string, unknown>> | undefined;
+  const third = await connect("runtime-retry-3", socket => {
+    thirdOpenPromise = waitForMessage(socket, value => value.type === "request_open");
+    thirdEndPromise = waitForMessage(socket, value => value.type === "request_end");
+  });
+  const replayedOpen = await thirdOpenPromise!;
+  const replayedEnd = await thirdEndPromise!;
   assert.equal(replayedOpen.request_id, "retryable-write-1");
   assert.equal(replayedOpen.method, "POST");
-  const replayedEnd = await replayedEndPromise!;
-  second.send(encodeRelayMessage({ type: "response_open", protocol_version: relayProtocolVersion, device_id: device.device_id, runtime_instance_id: "runtime-retry-2", connection_epoch: 2, channel_id: String(replayedEnd.channel_id), status: 202, headers: { "content-type": "application/json" } }));
-  second.send(encodeRelayMessage({ type: "response_chunk", protocol_version: relayProtocolVersion, device_id: device.device_id, runtime_instance_id: "runtime-retry-2", connection_epoch: 2, channel_id: String(replayedEnd.channel_id), sequence: 0, data: Buffer.from('{"retried":true}').toString("base64") }));
-  second.send(encodeRelayMessage({ type: "response_end", protocol_version: relayProtocolVersion, device_id: device.device_id, runtime_instance_id: "runtime-retry-2", connection_epoch: 2, channel_id: String(replayedEnd.channel_id) }));
+  third.send(encodeRelayMessage({ type: "response_open", protocol_version: relayProtocolVersion, device_id: device.device_id, runtime_instance_id: "runtime-retry-3", connection_epoch: 3, channel_id: String(replayedEnd.channel_id), status: 202, headers: { "content-type": "application/json" } }));
+  third.send(encodeRelayMessage({ type: "response_chunk", protocol_version: relayProtocolVersion, device_id: device.device_id, runtime_instance_id: "runtime-retry-3", connection_epoch: 3, channel_id: String(replayedEnd.channel_id), sequence: 0, data: Buffer.from('{"retried":true}').toString("base64") }));
+  third.send(encodeRelayMessage({ type: "response_end", protocol_version: relayProtocolVersion, device_id: device.device_id, runtime_instance_id: "runtime-retry-3", connection_epoch: 3, channel_id: String(replayedEnd.channel_id) }));
   const completed = await response;
   assert.equal(completed.status, 202);
   assert.deepEqual(await completed.json(), { retried: true });
-  second.close();
+  third.close();
+  await relay.close();
+});
+
+test("relay reports an idempotent write only after reconnect attempts are exhausted", async () => {
+  const relay = createRelayServer({ host: "127.0.0.1", port: 0, database: ":memory:", adminToken: "e".repeat(64), webUsername: "admin", webPassword: "relay-password-123", secureCookies: false, reconnectGraceMs: 1000, maxReplayAttempts: 2 });
+  relay.server.listen(0, "127.0.0.1");
+  await once(relay.server, "listening");
+  const address = relay.server.address();
+  assert.ok(address && typeof address === "object");
+  const base = `http://127.0.0.1:${address.port}`;
+  const socketBase = `ws://127.0.0.1:${address.port}`;
+  const device = relay.store.pairDevice("Runtime Retry Limit", relay.store.createPairingCode().pairing_code);
+  const login = await fetch(`${base}/relay/session`, { method: "POST", headers: { "content-type": "application/json", origin: base }, body: JSON.stringify({ username: "admin", password: "relay-password-123" }) });
+  const session = await login.json() as { csrf_token: string };
+  const cookie = String(login.headers.get("set-cookie") || "").split(";")[0];
+  const response = fetch(`${base}/api/retry-limit`, { method: "POST", headers: { cookie, origin: base, "x-csrf-token": session.csrf_token, "content-type": "application/json", "x-better-codex-request-id": "retry-limit-write-1" }, body: JSON.stringify({ value: "once" }) });
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    let ended: Promise<Record<string, unknown>> | undefined;
+    const socket = new WebSocket(`${socketBase}/api/v1/runtime/connect`, relayWebSocketProtocol, { headers: { authorization: `Bearer ${device.device_token}` } });
+    await once(socket, "open");
+    ended = waitForMessage(socket, value => value.type === "request_end");
+    const acknowledged = waitForMessage(socket, value => value.type === "hello_ack");
+    socket.send(encodeRelayMessage({ type: "hello", protocol_version: relayProtocolVersion, device_id: device.device_id, runtime_instance_id: `runtime-limit-${attempt}`, core_version: "0.5.0", capabilities: ["http-stream"] }));
+    await acknowledged;
+    await ended;
+    const closed = once(socket, "close");
+    socket.close();
+    await closed;
+  }
+  const failed = await response;
+  assert.equal(failed.status, 502);
+  const failure = await failed.json() as Record<string, unknown>;
+  assert.equal(failure.error, "relay_stream_interrupted");
+  assert.equal(failure.detail, "relay_retries_exhausted");
+  assert.equal(failure.request_id, "retry-limit-write-1");
+  assert.equal(failure.method, "POST");
+  assert.equal(failure.request_ended, true);
+  assert.equal(failure.response_started, false);
+  assert.equal(failure.connection_epoch, 2);
+  assert.equal(failure.runtime_instance_id, "runtime-limit-2");
+  assert.equal(failure.replay_attempts, 2);
   await relay.close();
 });
 
