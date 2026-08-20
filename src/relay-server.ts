@@ -55,6 +55,7 @@ type ActiveRuntime = {
 
 type RelayChannel = {
   id: string;
+  deviceId: string;
   requestId: string;
   method: string;
   request: IncomingMessage;
@@ -333,7 +334,7 @@ export function createRelayServer(options: RelayServerOptions) {
     }, 120_000);
     timeout.unref();
     const recoverable = !["GET", "HEAD", "OPTIONS"].includes(method) && /^[A-Za-z0-9_-]{8,200}$/.test(suppliedRequestId);
-    const channel: RelayChannel = { id: channelId, requestId, method, request, response, path: `${url.pathname}${url.search}`, headers: forwardedRequestHeaders(request, requestId), recoverable, requestSequence: 0, responseSequence: 0, responseStarted: false, completed: false, requestBytes: 0, requestCredit: relayInitialWindowBytes, requestQueue: [], requestChunks: [], requestEnded: false, requestEndSent: false, timeout };
+    const channel: RelayChannel = { id: channelId, deviceId: active.deviceId, requestId, method, request, response, path: `${url.pathname}${url.search}`, headers: forwardedRequestHeaders(request, requestId), recoverable, requestSequence: 0, responseSequence: 0, responseStarted: false, completed: false, requestBytes: 0, requestCredit: relayInitialWindowBytes, requestQueue: [], requestChunks: [], requestEnded: false, requestEndSent: false, timeout };
     active.channels.set(channelId, channel);
     active.activeChannels = active.channels.size;
     sendRequestOpen(active, channel);
@@ -578,7 +579,7 @@ export function createRelayServer(options: RelayServerOptions) {
               if (previous) failRuntimeChannels(previous, "relay_connection_replaced");
               previous?.socket.close(4001);
               connection?.send(encodeRelayMessage({ type: "hello_ack", protocol_version: relayProtocolVersion, device_id: device.id, runtime_instance_id: message.runtime_instance_id, connection_epoch: epoch, heartbeat_interval_ms: heartbeatIntervalMs, max_concurrent_channels: maxConcurrentChannels, max_chunk_bytes: relayMaxChunkBytes }));
-              for (const channel of [...retryableChannels.values()]) replayChannel(active, channel);
+              for (const channel of [...retryableChannels.values()]) if (channel.deviceId === active.deviceId) replayChannel(active, channel);
               store.audit(device.id, "runtime_connected", relayProtocolVersion);
               return;
             }
