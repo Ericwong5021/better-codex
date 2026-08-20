@@ -6197,7 +6197,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       function labelPicker() {
         const selected = draft.labels.split(/[,，]/).map(value => value.trim()).filter(Boolean);
         const options = [...new Set([...state.issues.flatMap(item => Array.isArray(item.labels) ? item.labels : []), ...selected])].sort((left, right) => String(left).localeCompare(String(right), state.locale));
-        const rows = options.map(value => '<button class="better-codex-dialog-select-option" type="button" role="option" aria-selected="' + selected.includes(value) + '" data-dialog-label-option="' + escapeHtml(value) + '"><span class="better-codex-dialog-select-option-visual">' + icon("tag") + '</span><span>' + escapeHtml(value) + '</span><span class="better-codex-dialog-select-check">' + (selected.includes(value) ? icon("check") : "") + '</span></button>').join("");
+        const rows = options.map(value => '<button class="better-codex-dialog-select-option' + (selected.includes(value) ? " is-selected" : "") + '" type="button" role="option" aria-selected="' + selected.includes(value) + '" data-dialog-label-option="' + escapeHtml(value) + '"><span class="better-codex-dialog-select-option-visual">' + icon("tag") + '</span><span>' + escapeHtml(value) + '</span><span class="better-codex-dialog-select-check">' + (selected.includes(value) ? icon("check") : "") + '</span></button>').join("");
         return '<span class="better-codex-label-picker" data-dialog-label-picker><button class="better-codex-property better-codex-label-trigger" type="button" aria-label="' + te("标签") + '" aria-haspopup="listbox" aria-expanded="false" data-dialog-label-toggle>' + icon("tag") + '</button><span class="better-codex-label-menu"><label class="better-codex-property better-codex-label-property">' + icon("tag") + '<input name="labels" value="' + escapeHtml(draft.labels) + '" placeholder="' + te("添加标签") + '" aria-label="' + te("标签") + '"></label><span class="better-codex-label-options" role="listbox" aria-multiselectable="true">' + (rows || '<span class="better-codex-project-empty">' + te("暂无可选项") + '</span>') + '</span></span></span>';
       }
 
@@ -6423,6 +6423,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           const selected = new Set(String(dialog.querySelector('[name="labels"]')?.value || "").split(/[,，]/).map(value => value.trim()).filter(Boolean));
           dialog.querySelectorAll("[data-dialog-label-option]").forEach(option => {
             const active = selected.has(option.dataset.dialogLabelOption);
+            option.classList.toggle("is-selected", active);
             option.setAttribute("aria-selected", String(active));
             option.querySelector(".better-codex-dialog-select-check").innerHTML = active ? icon("check") : "";
           });

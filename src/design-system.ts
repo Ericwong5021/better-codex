@@ -6945,6 +6945,7 @@ export function betterCodexDesignSystemCss() {
         max-height: 40px;
         aspect-ratio: 1;
         border-radius: 50%;
+        touch-action: manipulation;
       }
 
       #better-codex-dialog[data-host="web"][data-detail="true"] .better-codex-dialog-properties > [data-dialog-select="status"] .better-codex-dialog-select-label,
@@ -7014,6 +7015,10 @@ export function betterCodexDesignSystemCss() {
         gap: 2px;
         overscroll-behavior: contain;
         -webkit-overflow-scrolling: touch;
+      }
+
+      #better-codex-dialog[data-host="web"][data-detail="true"] :is(.better-codex-dialog-select-menu, .better-codex-label-options) .better-codex-dialog-select-option {
+        min-height: 40px;
       }
 
       #better-codex-dialog[data-host="web"][data-detail="true"] .better-codex-project-picker {
