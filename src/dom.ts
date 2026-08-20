@@ -6030,7 +6030,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (reply.request_id) lastReplyRequestId = reply.request_id;
         const stateName = reply.status || "idle";
         lastReplyStatus = stateName;
-        if (!sessionHandoff && (stateName === "failed" || stateName === "interrupted")) showConversationFailure(reply.error, "reply", reply.message);
+        const expectedInterruption = stateName === "interrupted" && ["user_stopped", "session_interrupted"].includes(String(reply.error || ""));
+        if (!sessionHandoff && (stateName === "failed" || (stateName === "interrupted" && !expectedInterruption))) showConversationFailure(reply.error, "reply", reply.message);
         else {
           clearConversationFailure();
           syncConversationStatus(stateName);

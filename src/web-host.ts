@@ -339,7 +339,7 @@ function renderHostError() {
   webErrorDialog.querySelector("[data-web-error-next]").disabled = hostErrorIndex >= hostErrorQueue.length - 1;
 }
 
-function reportHostError(error, context = {}) {
+function reportHostError(error, context = {}, present = true) {
   const value = error instanceof Error ? error : new Error(String(error || "request_failed"));
   if (value.betterCodexReported) return;
   if (window.__betterCodexInjection__?.reportError) {
@@ -358,7 +358,7 @@ function reportHostError(error, context = {}) {
     repeated.related_logs = hostDiagnosticLog.slice(-30);
     hostErrorIndex = repeatedIndex;
     renderHostError();
-    if (!webErrorDialog.open) webErrorDialog.showModal();
+    if (present && !webErrorDialog.open) webErrorDialog.showModal();
     return;
   }
   hostErrorQueue.push({
@@ -378,8 +378,8 @@ function reportHostError(error, context = {}) {
   if (hostErrorQueue.length > 50) hostErrorQueue.shift();
   hostErrorIndex = hostErrorQueue.length - 1;
   renderHostError();
-  if (!webErrorDialog.open) webErrorDialog.showModal();
-  webErrorDialog.querySelector("[data-web-error-copy]").focus();
+  if (present && !webErrorDialog.open) webErrorDialog.showModal();
+  if (present) webErrorDialog.querySelector("[data-web-error-copy]").focus();
 }
 
 const copyHostRecords = async (button, records) => {
@@ -564,7 +564,7 @@ function expireSession() {
   connectError.textContent = REMOTE ? "Web 会话已失效，请重新登录" : "Web 会话已失效，请重新运行 better-codex web";
   connectError.hidden = false;
   if (!connectDialog.open) connectDialog.showModal();
-  reportHostError(new Error(connectError.textContent), { source: "session_expired" });
+  reportHostError(new Error(connectError.textContent), { source: "session_expired" }, false);
 }
 
 function scheduleRelayRecovery() {
@@ -596,7 +596,7 @@ function showRelayOffline() {
   if (!connectDialog.open) connectDialog.showModal();
   if (!window.__betterCodexInjection__ && !relayOfflineReported) {
     relayOfflineReported = true;
-    reportHostError(new Error("runtime_offline"), { source: "relay_status" });
+    reportHostError(new Error("runtime_offline"), { source: "relay_status" }, false);
   }
   scheduleRelayRecovery();
 }
@@ -793,7 +793,7 @@ async function boot(token = "") {
     connectError.textContent = error instanceof Error ? error.message : "连接失败";
     connectError.hidden = false;
     if (!connectDialog.open) connectDialog.showModal();
-    reportHostError(error, { source: "boot" });
+    reportHostError(error, { source: "boot" }, false);
   }
 }
 
