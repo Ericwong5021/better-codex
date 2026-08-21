@@ -621,6 +621,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "服务在线": "Online",
       "无法访问": "Unavailable",
       "服务版本": "Service version",
+      "检查升级": "Check for update",
+      "升级": "Upgrade",
+      "最新": "Current",
       "同步协议": "Sync protocol",
       "最后同步": "Last sync",
       "尚未同步": "Not synced yet",
@@ -5552,7 +5555,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         '<section class="better-codex-remote-step"><div><h3>' + te("部署 Hub") + '</h3><p>' + te("复制提示词，交给能访问 VPS 的 Codex") + '</p></div><button type="button" class="better-codex-remote-install" data-remote-copy-install>' + icon("copy") + '<span>' + te("复制安装提示词") + '</span></button></section>',
         '<section class="better-codex-remote-step"><div><h3>' + te("连接 Hub") + '</h3><p>' + te("输入 VPS 部署后的 HTTPS 地址") + '</p></div><div class="better-codex-remote-url"><input type="url" data-remote-url inputmode="url" autocomplete="url" placeholder="https://codex.example.com" aria-label="' + te("访问地址") + '"><button type="button" data-remote-copy-connect disabled>' + icon("copy") + '<span>' + te("复制连接指令") + '</span></button></div></section>',
         '</div>',
-        '<section class="better-codex-remote-status" data-remote-status="loading" hidden><div class="better-codex-remote-status-head"><span class="better-codex-remote-status-icon">' + icon("server") + '</span><div><strong data-remote-status-title>' + te("检测中") + '</strong><small data-remote-status-subtitle>' + te("正在检查") + '</small></div><span class="better-codex-remote-status-badge" data-remote-status-badge>' + te("检测中") + '</span></div><dl data-remote-status-details hidden><div><dt>' + te("服务版本") + '</dt><dd data-remote-version>--</dd></div><div><dt>' + te("同步协议") + '</dt><dd data-remote-protocol>--</dd></div><div><dt>' + te("最后同步") + '</dt><dd data-remote-sync>--</dd></div></dl><div class="better-codex-remote-actions" data-remote-actions hidden><a data-remote-open target="_blank" rel="noreferrer">' + icon("external") + '<span>' + te("访问网站") + '</span></a></div></section>',
+        '<section class="better-codex-remote-status" data-remote-status="loading" hidden><div class="better-codex-remote-status-head"><span class="better-codex-remote-status-icon">' + icon("server") + '</span><div><strong data-remote-status-title>' + te("检测中") + '</strong><small data-remote-status-subtitle>' + te("正在检查") + '</small></div><span class="better-codex-remote-status-badge" data-remote-status-badge>' + te("检测中") + '</span></div><dl data-remote-status-details hidden><div><dt class="better-codex-remote-version-label"><span>' + te("服务版本") + '</span><button type="button" class="better-codex-remote-upgrade" data-remote-upgrade aria-label="' + te("检查升级") + '" hidden>' + icon("refresh") + '<span data-remote-upgrade-label>' + te("升级") + '</span></button></dt><dd data-remote-version>--</dd></div><div><dt>' + te("同步协议") + '</dt><dd data-remote-protocol>--</dd></div><div><dt>' + te("最后同步") + '</dt><dd data-remote-sync>--</dd></div></dl><div class="better-codex-remote-actions" data-remote-actions hidden><a data-remote-open target="_blank" rel="noreferrer">' + icon("external") + '<span>' + te("访问网站") + '</span></a></div></section>',
         '<section class="better-codex-remote-sessions" data-remote-sessions hidden><button type="button" class="better-codex-remote-sessions-toggle" data-remote-sessions-toggle aria-expanded="false"><span class="better-codex-remote-sessions-icon">' + icon("userCheck") + '</span><span class="better-codex-remote-sessions-heading"><strong>' + te("登录设备") + '</strong><small>' + te("管理已登录 Better Codex Relay 的浏览器") + '</small></span><span class="better-codex-remote-sessions-count" data-remote-sessions-count hidden></span><span class="better-codex-remote-sessions-chevron">' + icon("chevronDown") + '</span></button><div class="better-codex-remote-sessions-panel" data-remote-sessions-panel hidden><div class="better-codex-remote-sessions-list" data-remote-sessions-list><p>' + te("正在读取登录设备…") + '</p></div></div></section>',
         '<p class="better-codex-help-error" data-remote-error hidden></p>',
         '</section>',
@@ -5641,6 +5644,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const remoteStatusSubtitle = dialog.querySelector("[data-remote-status-subtitle]");
       const remoteStatusBadge = dialog.querySelector("[data-remote-status-badge]");
       const remoteStatusDetails = dialog.querySelector("[data-remote-status-details]");
+      const remoteUpgrade = dialog.querySelector("[data-remote-upgrade]");
+      const remoteUpgradeLabel = dialog.querySelector("[data-remote-upgrade-label]");
       const remoteActions = dialog.querySelector("[data-remote-actions]");
       const remoteOpen = dialog.querySelector("[data-remote-open]");
       const remoteError = dialog.querySelector("[data-remote-error]");
@@ -5677,7 +5682,17 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           delete button.dataset.copied;
         }, 1600);
       };
-      const renderRemoteStatus = value => {
+      const renderRemoteUpgrade = (update, visible) => {
+        if (!remoteUpgrade || !remoteUpgradeLabel) return;
+        remoteUpgrade.hidden = !REMOTE || !visible;
+        if (remoteUpgrade.hidden) return;
+        const installing = update?.status === "installing" || update?.status === "restarting";
+        remoteUpgrade.disabled = installing;
+        remoteUpgrade.dataset.loading = String(installing);
+        remoteUpgradeLabel.textContent = t(installing ? "正在更新" : update?.status === "error" ? "重试" : "升级");
+        remoteUpgrade.title = update?.status === "available" && update.latestVersion ? t("升级") + " v" + String(update.latestVersion).replace(/^v/, "") : t("检查升级");
+      };
+      const renderRemoteStatus = (value, update = null) => {
         if (!remoteStatus) return;
         const remote = value?.remote;
         const reachable = remote?.reachable === true;
@@ -5690,6 +5705,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           remoteRefresh.hidden = true;
           remoteStatus.hidden = true;
           remoteStatusDetails.hidden = true;
+          remoteUpgrade.hidden = true;
           remoteActions.hidden = true;
           remoteSessions.hidden = true;
           return;
@@ -5705,6 +5721,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         remoteStatusSubtitle.textContent = te("部署在 VPS") + " · " + String(remote.url || "");
         remoteStatusBadge.textContent = te(reachable ? "服务在线" : "无法访问");
         remoteStatusDetails.hidden = false;
+        renderRemoteUpgrade(update, true);
         remoteActions.hidden = false;
         remoteSessions.hidden = REMOTE || value.remote_mode !== "relay";
         dialog.querySelector("[data-remote-version]").textContent = remote.version ? "v" + String(remote.version).replace(/^v/, "") : "--";
@@ -5767,7 +5784,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         remoteStatus.dataset.remoteStatus = "loading";
         remoteStatusBadge.textContent = te("检测中");
         try {
-          renderRemoteStatus(await api("/api/remote-access/status"));
+          const [status, update] = await Promise.all([
+            api("/api/remote-access/status"),
+            REMOTE ? api("/api/update", { passive: true }).catch(() => null) : Promise.resolve(null),
+          ]);
+          renderRemoteStatus(status, update);
           if (remoteSessionsToggle?.getAttribute("aria-expanded") === "true") await loadRemoteSessions(force);
         } catch (error) {
           remoteRefresh.hidden = false;
@@ -5797,6 +5818,28 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (!url) return;
         await copyText('better-codex relay connect --url "' + url + '"');
         await copiedFeedback(button);
+      });
+      remoteUpgrade?.addEventListener("click", async () => {
+        remoteUpgrade.disabled = true;
+        remoteUpgrade.dataset.loading = "true";
+        remoteUpgradeLabel.textContent = t("检查中…");
+        remoteError.hidden = true;
+        try {
+          const update = await api("/api/update/check", { method: "POST" });
+          if (update?.status === "available") {
+            if (update.installSupported === false) throw new Error("hub_update_not_configured");
+            finish();
+            renderUpdateNotice(update, true);
+            return;
+          }
+          if (update?.status === "error") throw new Error(String(update.error || "update_check_failed"));
+          renderRemoteUpgrade(update, true);
+          if (update?.status === "current") remoteUpgradeLabel.textContent = t("最新");
+        } catch (error) {
+          renderRemoteUpgrade({ status: "error" }, true);
+          remoteError.textContent = updateErrorLabel(error);
+          remoteError.hidden = false;
+        }
       });
       remoteRefresh?.addEventListener("click", () => void loadRemoteStatus(true));
       remoteSessionsToggle?.addEventListener("click", () => {

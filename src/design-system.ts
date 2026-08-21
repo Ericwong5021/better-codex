@@ -1291,6 +1291,7 @@ export function betterCodexDesignSystemCss() {
     }
 
     #better-codex-auto-dispatch-help-dialog .better-codex-remote-refresh[hidden],
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-upgrade[hidden],
     #better-codex-auto-dispatch-help-dialog .better-codex-remote-setup[hidden],
     #better-codex-auto-dispatch-help-dialog .better-codex-remote-status[hidden],
     #better-codex-auto-dispatch-help-dialog .better-codex-remote-sessions[hidden],
@@ -1508,6 +1509,44 @@ export function betterCodexDesignSystemCss() {
       font-size: var(--bc-text-caption);
     }
 
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-version-label {
+      display: flex;
+      min-height: 28px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-top: -3px;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-upgrade {
+      display: inline-flex;
+      min-height: 26px;
+      flex: 0 0 auto;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      border: 0;
+      border-radius: var(--bc-radius-pill);
+      color: var(--bc-color-text);
+      background: var(--bc-color-control);
+      padding: 0 8px;
+      font: inherit;
+      font-size: var(--bc-text-caption);
+      font-weight: 650;
+      white-space: nowrap;
+      cursor: pointer;
+      transition: background var(--bc-motion-fast) var(--bc-ease-out), transform var(--bc-motion-fast) var(--bc-ease-out);
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-upgrade svg {
+      width: 13px;
+      height: 13px;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-upgrade[data-loading="true"] svg {
+      animation: better-codex-spin .85s linear infinite;
+    }
+
     #better-codex-auto-dispatch-help-dialog .better-codex-remote-status dd {
       overflow: hidden;
       margin: 4px 0 0;
@@ -1699,6 +1738,7 @@ export function betterCodexDesignSystemCss() {
     }
 
     #better-codex-auto-dispatch-help-dialog .better-codex-remote-refresh:disabled,
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-upgrade:disabled,
     #better-codex-auto-dispatch-help-dialog .better-codex-remote-url button:disabled,
     #better-codex-auto-dispatch-help-dialog .better-codex-remote-actions button:disabled {
       color: var(--bc-color-text-faint);
@@ -1708,6 +1748,7 @@ export function betterCodexDesignSystemCss() {
 
     @media (hover: hover) {
       #better-codex-auto-dispatch-help-dialog .better-codex-remote-refresh:hover:not(:disabled),
+      #better-codex-auto-dispatch-help-dialog .better-codex-remote-upgrade:hover:not(:disabled),
       #better-codex-auto-dispatch-help-dialog .better-codex-remote-install:hover:not(:disabled),
       #better-codex-auto-dispatch-help-dialog .better-codex-remote-url button:hover:not(:disabled),
       #better-codex-auto-dispatch-help-dialog .better-codex-remote-actions a:hover,
@@ -1725,6 +1766,7 @@ export function betterCodexDesignSystemCss() {
     }
 
     #better-codex-auto-dispatch-help-dialog .better-codex-remote-refresh:focus-visible,
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-upgrade:focus-visible,
     #better-codex-auto-dispatch-help-dialog .better-codex-remote-install:focus-visible,
     #better-codex-auto-dispatch-help-dialog .better-codex-remote-url button:focus-visible,
     #better-codex-auto-dispatch-help-dialog .better-codex-remote-actions a:focus-visible,
@@ -1740,6 +1782,7 @@ export function betterCodexDesignSystemCss() {
     }
 
     #better-codex-auto-dispatch-help-dialog .better-codex-remote-install:active:not(:disabled),
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-upgrade:active:not(:disabled),
     #better-codex-auto-dispatch-help-dialog .better-codex-remote-url button:active:not(:disabled),
     #better-codex-auto-dispatch-help-dialog .better-codex-remote-actions a:active,
     #better-codex-auto-dispatch-help-dialog .better-codex-remote-actions button:active:not(:disabled) {
