@@ -4,6 +4,10 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.9-beta.33] - 2026-08-21
+
+- Expose Codex usage and light or dark theme controls in compact Web navigation.
+
 ## [0.4.9-beta.32] - 2026-08-21
 
 - Add a project overview dashboard with work health, release milestones, active work, attention items, and collaborators.
@@ -707,7 +711,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.32...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.33...HEAD
+[0.4.9-beta.33]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.32...v0.4.9-beta.33
 [0.4.9-beta.32]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.31...v0.4.9-beta.32
 [0.4.9-beta.31]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.30...v0.4.9-beta.31
 [0.4.9-beta.30]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.29...v0.4.9-beta.30
