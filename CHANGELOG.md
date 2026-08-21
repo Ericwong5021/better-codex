@@ -4,6 +4,11 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.9-beta.28] - 2026-08-21
+
+- Route linked Codex thread actions through the persistent Session Host and stop stale hosts during upgrades and restarts.
+- Keep compact Web navigation, project Issue loading, and clipboard fallback reliable on mobile browsers.
+
 ## [0.4.9-beta.27] - 2026-08-21
 
 - Remember Relay browser devices, list active sessions locally, and revoke access without changing the account password.
@@ -685,7 +690,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.27...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.28...HEAD
+[0.4.9-beta.28]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.27...v0.4.9-beta.28
 [0.4.9-beta.27]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.26...v0.4.9-beta.27
 [0.4.9-beta.26]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.25...v0.4.9-beta.26
 [0.4.9-beta.25]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.24...v0.4.9-beta.25
