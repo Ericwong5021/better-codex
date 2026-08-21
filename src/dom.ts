@@ -2188,9 +2188,15 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const turnId = normalizeSessionId(value?.turn_id);
         if (!threadId || !turnId) return;
         try {
-          const summary = await sendAppServerRequest("thread/read", { threadId, includeTurns: false });
-          const status = summary?.thread?.status && typeof summary.thread.status === "object" ? summary.thread.status : {};
-          const statusType = String(status.type || "");
+          let summary = await sendAppServerRequest("thread/read", { threadId, includeTurns: false });
+          let status = summary?.thread?.status && typeof summary.thread.status === "object" ? summary.thread.status : {};
+          let statusType = String(status.type || "");
+          if (statusType === "notLoaded") {
+            await resumePersistedThread(threadId);
+            summary = await sendAppServerRequest("thread/read", { threadId, includeTurns: false });
+            status = summary?.thread?.status && typeof summary.thread.status === "object" ? summary.thread.status : {};
+            statusType = String(status.type || "");
+          }
           if (statusType === "active") {
             queueRelayEvent("thread/status/changed", {
               threadId,

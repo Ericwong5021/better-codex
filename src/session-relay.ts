@@ -478,10 +478,17 @@ export class RuntimeSessionRelay {
       const turnId = sessionId(value.turn_id);
       if (!threadId || !turnId) continue;
       try {
-        const summary = object(await this.request("thread/read", { threadId, includeTurns: false }));
-        const thread = object(summary.thread);
-        const status = object(thread.status);
-        const statusType = String(status.type || "");
+        let summary = object(await this.request("thread/read", { threadId, includeTurns: false }));
+        let thread = object(summary.thread);
+        let status = object(thread.status);
+        let statusType = String(status.type || "");
+        if (statusType === "notLoaded") {
+          await this.resume(threadId);
+          summary = object(await this.request("thread/read", { threadId, includeTurns: false }));
+          thread = object(summary.thread);
+          status = object(thread.status);
+          statusType = String(status.type || "");
+        }
         if (statusType === "active") {
           this.emit({
             method: "thread/status/changed",
