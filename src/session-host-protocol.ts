@@ -1,5 +1,7 @@
 export const sessionHostProtocolVersion = "session-host/v1" as const;
 
+export type SessionHostThreadAction = "archive" | "unarchive" | "delete";
+
 export type SessionHostPoll = {
   leader: boolean;
   acquired: boolean;
@@ -22,6 +24,9 @@ export type SessionHostHelloAck = {
   protocol_version: typeof sessionHostProtocolVersion;
   host_pid: number;
   relay_id: string;
+  capabilities?: {
+    thread_actions?: boolean;
+  };
 };
 
 export type SessionHostPollRequest = {
@@ -54,5 +59,19 @@ export type SessionHostShutdown = {
   token: string;
 };
 
-export type SessionHostMessage = SessionHostHello | SessionHostPollResponse | SessionHostDeliveryAck | SessionHostShutdown;
-export type SessionHostServerMessage = SessionHostHelloAck | SessionHostPollRequest | SessionHostDelivery;
+export type SessionHostThreadActionRequest = {
+  type: "thread_action_request";
+  request_id: string;
+  thread_ids: string[];
+  action: SessionHostThreadAction;
+};
+
+export type SessionHostThreadActionResponse = {
+  type: "thread_action_response";
+  request_id: string;
+  ok: boolean;
+  error?: string;
+};
+
+export type SessionHostMessage = SessionHostHello | SessionHostPollResponse | SessionHostDeliveryAck | SessionHostShutdown | SessionHostThreadActionRequest;
+export type SessionHostServerMessage = SessionHostHelloAck | SessionHostPollRequest | SessionHostDelivery | SessionHostThreadActionResponse;

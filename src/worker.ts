@@ -5,7 +5,7 @@ import { createInterface } from "node:readline";
 import { join } from "node:path";
 import { agentConfigProfileName, defaultAgentProfile } from "./agent-profiles.js";
 import { debugLoggingEnabled, schedulerRuntimePath, schedulerSchemaPath, runLogPath, workerLogPath } from "./config.js";
-import { agentSandboxModes, Store, type AgentSandboxMode, type ClaimedIssue, type Issue, type Project, type SchedulerDecision, type SessionCommand } from "./db.js";
+import { agentSandboxModes, Store, type AgentSandboxMode, type ClaimedIssue, type Issue, type IssueThreadAction, type Project, type SchedulerDecision, type SessionCommand } from "./db.js";
 import { mockupSessionActive } from "./injection-state.js";
 import { codexExecutablePath } from "./codex-cli.js";
 import { renderMarkdown } from "./markdown.js";
@@ -98,6 +98,10 @@ export class IssueWorker {
   wake() {
     if (this.stopped) return;
     this.schedule(0);
+  }
+
+  applyThreadAction(issueId: string, action: IssueThreadAction) {
+    return this.sessionRelay.threadAction(this.store.listIssueThreadIds(issueId), action);
   }
 
   pauseForUpdate() {

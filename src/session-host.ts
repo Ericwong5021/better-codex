@@ -4,7 +4,7 @@ import { createServer, type Socket } from "node:net";
 import { chmodSync, closeSync, linkSync, openSync, readFileSync, statSync, unlinkSync, writeFileSync, type Stats } from "node:fs";
 import { ensureDirectories, sessionHostLockPath, sessionHostPidPath, sessionHostSocketPath, token } from "./config.js";
 import { RuntimeSessionRelay, type RelayPoll, type SessionRelayHost } from "./session-relay.js";
-import { sessionHostProtocolVersion, type SessionHostDelivery, type SessionHostMessage, type SessionHostServerMessage } from "./session-host-protocol.js";
+import { sessionHostProtocolVersion, type SessionHostDelivery, type SessionHostMessage, type SessionHostServerMessage, type SessionHostThreadAction } from "./session-host-protocol.js";
 
 type QueuedDelivery = {
   message: SessionHostDelivery;
@@ -113,6 +113,7 @@ class SessionHostServer {
   private readonly pendingPolls = new Map<string, (result: RelayPoll) => void>();
   private socket: Socket | null = null;
   private output = "";
+  private authenticated = false;
   private shuttingDown = false;
   private lockToken: string | null = null;
   private recoveredOwner: Partial<SessionHostLock> | null = null;
@@ -180,9 +181,13 @@ class SessionHostServer {
     if (this.socket) this.socket.destroy();
     this.socket = socket;
     this.output = "";
+    this.authenticated = false;
     socket.on("data", chunk => this.read(chunk));
     socket.once("close", () => {
-      if (this.socket === socket) this.socket = null;
+      if (this.socket === socket) {
+        this.socket = null;
+        this.authenticated = false;
+      }
       for (const delivery of this.deliveries) delivery.sent = false;
       for (const resolve of this.pendingPolls.values()) resolve(this.offlinePoll());
       this.pendingPolls.clear();
@@ -209,8 +214,29 @@ class SessionHostServer {
         this.socket?.destroy();
         return;
       }
-      if (this.socket) writeMessage(this.socket, { type: "hello_ack", protocol_version: sessionHostProtocolVersion, host_pid: process.pid, relay_id: `session-host:${process.pid}` });
+      this.authenticated = true;
+      if (this.socket) writeMessage(this.socket, { type: "hello_ack", protocol_version: sessionHostProtocolVersion, host_pid: process.pid, relay_id: `session-host:${process.pid}`, capabilities: { thread_actions: true } });
       this.flushDeliveries();
+      return;
+    }
+    if (message.type === "thread_action_request") {
+      const socket = this.socket;
+      if (!socket || !this.authenticated) {
+        socket?.destroy();
+        return;
+      }
+      const validAction = ["archive", "unarchive", "delete"].includes(message.action);
+      const validIds = Array.isArray(message.thread_ids) && message.thread_ids.every(value => typeof value === "string");
+      if (!validAction || !validIds) {
+        writeMessage(socket, { type: "thread_action_response", request_id: String(message.request_id || ""), ok: false, error: "session_host_thread_action_invalid" });
+        return;
+      }
+      try {
+        await this.relay.threadAction(message.thread_ids, message.action as SessionHostThreadAction);
+        if (this.socket === socket) writeMessage(socket, { type: "thread_action_response", request_id: message.request_id, ok: true });
+      } catch (error) {
+        if (this.socket === socket) writeMessage(socket, { type: "thread_action_response", request_id: message.request_id, ok: false, error: error instanceof Error ? error.message : "codex_thread_action_failed" });
+      }
       return;
     }
     if (message.type === "poll_response") {

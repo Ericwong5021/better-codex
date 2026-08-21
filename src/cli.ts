@@ -336,6 +336,7 @@ async function applyUpdate(previousRuntimePid: number, updates: { core: string |
     }
     if (drainPath && existsSync(drainPath)) unlinkSync(drainPath);
     setInjectionEnabled(false);
+    await stopSessionHostProcess();
     const mcp = installMcp();
     installService();
     await ensureRuntime();
@@ -1363,6 +1364,7 @@ async function main() {
     await stopInjector();
     try {
       try { await request("/api/shutdown", { method: "POST" }); } catch {}
+      await stopSessionHostProcess();
       const skills = installBundledSkills();
       if (!skills.installed || !skills.updateKey) throw new Error("reason" in skills ? skills.reason : "bundled_assets_unavailable");
       const mcp = installMcp();
@@ -1433,6 +1435,7 @@ async function main() {
           break;
         }
       }
+      await stopSessionHostProcess();
       return print(installService());
     }
     if (action === "uninstall") return print(uninstallService());
@@ -1441,7 +1444,10 @@ async function main() {
       await stopSessionHostProcess();
       return print(stopService());
     }
-    if (action === "restart") return print(restartService());
+    if (action === "restart") {
+      await stopSessionHostProcess();
+      return print(restartService());
+    }
     if (action === "status") return print(serviceStatus());
     if (action === "logs") return console.log(serviceLogs(Number(option(args, "--lines") ?? 50)));
     return usage();

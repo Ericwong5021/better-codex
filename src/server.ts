@@ -32,7 +32,6 @@ import { readRelayConfiguration, removeRelayConfiguration, type RelayConfigurati
 import { requestFingerprint, RequestReceiptStore, type RequestReceiptResponse } from "./request-receipts.js";
 import { disableProjectionSync, readRemoteMode } from "./remote-mode.js";
 import { browseDirectory } from "./directory-browser.js";
-import { applyCodexThreadAction } from "./codex-thread.js";
 
 const accessToken = token();
 const mockupEnabled = !isSea() && !packagedBuild && process.argv.includes("--mockup");
@@ -694,7 +693,7 @@ export function startServer() {
     },
     chooseNativeDirectory,
     browseDirectory,
-    (issueId, action) => applyCodexThreadAction(store.listIssueThreadIds(issueId), action),
+    (issueId, action) => worker.applyThreadAction(issueId, action),
   );
   let activeRuntimePort = 0;
   const relayClient = new RuntimeRelayClient({ runtimePort: () => activeRuntimePort, localToken: accessToken, runtimeInstanceId: identity.instanceId, coreVersion: identity.version });
@@ -1690,18 +1689,18 @@ export function startServer() {
             const current = store.getIssue(issue.id);
             if (!current) throw new Error("issue_not_found");
             if (current.active_run_status) throw new Error("issue_execution_running");
-            await applyCodexThreadAction(store.listIssueThreadIds(issue.id), "archive");
+            await worker.applyThreadAction(issue.id, "archive");
             const updated = store.archiveIssue(issue.id, current.version);
             return sendJson(response, 200, updated);
           }
-          await applyCodexThreadAction(store.listIssueThreadIds(issue.id), "archive");
+          await worker.applyThreadAction(issue.id, "archive");
           const updated = store.archiveIssue(issue.id, version);
           return sendJson(response, 200, updated);
         }
         if (method === "POST" && path[3] === "unarchive") {
           const body = await readBody(request);
           if (issue.version !== Number(body.version)) throw new Error("version_conflict");
-          await applyCodexThreadAction(store.listIssueThreadIds(issue.id), "unarchive");
+          await worker.applyThreadAction(issue.id, "unarchive");
           const updated = store.unarchiveIssue(issue.id, Number(body.version));
           return sendJson(response, 200, updated);
         }
@@ -1712,7 +1711,7 @@ export function startServer() {
           if (issue.version !== version) throw new Error("version_conflict");
           if (issue.enrichment_status === "pending") throw new Error("issue_enrichment_pending");
           if (issue.active_run_status || issue.session_active_turn_id || store.getIssueReplyState(issue.id).status === "running") throw new Error("issue_execution_running");
-          await applyCodexThreadAction(store.listIssueThreadIds(issue.id), "delete");
+          await worker.applyThreadAction(issue.id, "delete");
           store.deleteArchivedIssue(issue.id, version);
           return sendJson(response, 200, { ok: true });
         }

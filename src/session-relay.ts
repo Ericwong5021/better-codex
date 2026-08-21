@@ -1,7 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { coreVersion } from "./compatibility.js";
 import { codexExecutablePath } from "./codex-cli.js";
-import type { SessionCommand } from "./db.js";
+import type { IssueThreadAction, SessionCommand } from "./db.js";
 
 export type RelayPoll = {
   leader: boolean;
@@ -50,6 +50,18 @@ function appServerError(value: unknown) {
   return "app_server_request_failed";
 }
 
+function missingThread(error: unknown) {
+  const value = String(error instanceof Error ? error.message : error || "").toLowerCase();
+  return value.includes("thread not found") || value.includes("thread_not_found") || value.includes("rollout not found");
+}
+
+function actionAlreadyApplied(action: IssueThreadAction, error: unknown) {
+  const value = String(error instanceof Error ? error.message : error || "").toLowerCase();
+  if (action === "archive") return value.includes("already archived") || value.includes("thread_archived");
+  if (action === "unarchive") return value.includes("not archived") || value.includes("already unarchived");
+  return missingThread(error);
+}
+
 function eventTurnId(event: RelayEvent) {
   if (event.method === "item/completed") return sessionId(event.params.turnId);
   if (event.method === "turn/started" || event.method === "turn/completed") return sessionId(object(event.params.turn).id);
@@ -73,6 +85,7 @@ export class RuntimeSessionRelay {
   private readonly threads = new Set<string>();
   private readonly pending = new Map<number, PendingRequest>();
   private bufferedEvents: RelayEvent[] = [];
+  private operationQueue: Promise<void> = Promise.resolve();
 
   constructor(private readonly host: SessionRelayHost) {}
 
@@ -96,6 +109,27 @@ export class RuntimeSessionRelay {
     this.rejectPending("runtime_stopped");
     if (this.relayId) this.host.release(this.relayId, "runtime_stopped");
     child?.kill("SIGTERM");
+  }
+
+  threadAction(threadIds: string[], action: IssueThreadAction) {
+    const ids = [...new Set(threadIds.filter(value => /^[a-f0-9-]{36}$/i.test(value)))];
+    if (!ids.length) return Promise.resolve();
+    return this.serialize(async () => {
+      for (const threadId of ids) {
+        try {
+          await this.request(`thread/${action}`, { threadId });
+        } catch (error) {
+          if (!missingThread(error) && !actionAlreadyApplied(action, error)) throw error;
+        }
+        if (action !== "unarchive") this.threads.delete(threadId);
+      }
+    });
+  }
+
+  private serialize<T>(operation: () => Promise<T>) {
+    const result = this.operationQueue.then(() => operation(), () => operation());
+    this.operationQueue = result.then(() => undefined, () => undefined);
+    return result;
   }
 
   private connect() {
@@ -321,7 +355,11 @@ export class RuntimeSessionRelay {
     } catch {}
   }
 
-  private async execute(command: SessionCommand, relayId: string) {
+  private execute(command: SessionCommand, relayId: string) {
+    return this.serialize(() => this.executeCommand(command, relayId));
+  }
+
+  private async executeCommand(command: SessionCommand, relayId: string) {
     const payload = command.payload;
     let threadId = sessionId(command.thread_id);
     let turnId = sessionId(command.turn_id);
