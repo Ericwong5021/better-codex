@@ -4,6 +4,11 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.9-beta.27] - 2026-08-21
+
+- Remember Relay browser devices, list active sessions locally, and revoke access without changing the account password.
+- Keep expanded conversations at the full mobile viewport height.
+
 ## [0.4.9-beta.26] - 2026-08-21
 
 - Replace handwritten Relay WebSocket framing with the maintained transport so large Issue requests do not disconnect the Runtime.
@@ -680,7 +685,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.26...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.27...HEAD
+[0.4.9-beta.27]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.26...v0.4.9-beta.27
 [0.4.9-beta.26]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.25...v0.4.9-beta.26
 [0.4.9-beta.25]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.24...v0.4.9-beta.25
 [0.4.9-beta.24]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.23...v0.4.9-beta.24
