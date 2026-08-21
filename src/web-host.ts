@@ -160,6 +160,8 @@ body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; 
 .web-sidebar-section { display: grid; gap: 3px; margin-top: 10px; }
 .web-nav-button { display: grid; grid-template-columns: 20px minmax(0, 1fr); width: 100%; min-height: 38px; align-items: center; gap: 8px; border: 0; border-radius: 10px; padding: 0 10px; background: transparent; text-align: left; cursor: pointer; transition: background-color 120ms cubic-bezier(.16,1,.3,1), transform 120ms cubic-bezier(.16,1,.3,1); }
 .web-nav-button svg { width: 16px; height: 16px; }
+.web-nav-auxiliary, .web-nav-more-menu { display: contents; }
+.web-nav-more-entry { display: none; }
 .text-fade-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .web-account { position: relative; border-radius: 12px; background: transparent; }
 .web-account:has(.web-profile[aria-expanded="true"]) { background: var(--web-hover); }
@@ -245,12 +247,18 @@ body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; 
   .web-main { width: 100%; height: calc(100% - 58px); }
   .web-sidebar { position: fixed; z-index: 50; right: 0; bottom: 0; left: 0; width: 100%; height: 58px; flex-direction: row; align-items: center; justify-content: center; padding: 6px max(10px, env(safe-area-inset-right)) max(6px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left)); box-shadow: inset 0 1px var(--web-line); }
   .web-brand, .web-account, .web-sidebar-expand { display: none; }
-  .web-sidebar nav, .web-sidebar-scroll { width: 100%; height: auto; }
+  .web-sidebar nav, .web-sidebar-scroll { width: 100%; height: auto; overflow: visible; }
   .web-sidebar-section { display: flex; justify-content: center; gap: 8px; margin: 0; }
-  .web-nav-button:not(#better-codex-entry):not(#better-codex-agents-entry):not(#better-codex-projects-entry) { display: none; }
-  .web-nav-button { display: grid; grid-template-columns: 20px auto; width: min(150px, calc(50vw - 18px)); min-height: 42px; justify-content: center; gap: 7px; padding: 0 12px; }
-  .web-sidebar-section:has(#better-codex-projects-entry) .web-nav-button { width: min(132px, calc(33.333vw - 12px)); }
+  .web-nav-button:not(#better-codex-entry):not(#better-codex-agents-entry):not(#better-codex-projects-entry):not(#better-codex-more-entry) { display: none; }
+  .web-nav-button { display: grid; grid-template-columns: 20px auto; min-height: 42px; justify-content: center; gap: 7px; padding: 0 12px; }
+  #better-codex-entry, #better-codex-agents-entry { width: min(150px, calc((100vw - 82px) / 2)); }
+  .web-nav-auxiliary { position: relative; display: block; flex: 0 0 46px; }
+  .web-nav-more-entry { display: grid; width: 46px; grid-template-columns: 20px; padding: 0; }
+  .web-nav-more-menu { position: absolute; right: 0; bottom: calc(100% + 10px); display: none; width: min(220px, calc(100vw - 20px)); border: 1px solid var(--web-line); border-radius: 14px; padding: 6px; background: var(--web-raised); box-shadow: 0 12px 32px rgb(0 0 0 / .14), 0 2px 8px rgb(0 0 0 / .08); }
+  .web-nav-more-menu[data-open="true"] { display: grid; }
+  .web-nav-more-menu .web-nav-button { display: grid; width: 100%; min-height: 44px; grid-template-columns: 20px minmax(0, 1fr); justify-content: start; padding: 0 12px; text-align: left; }
   .web-nav-button .text-fade-truncate { display: block; }
+  #better-codex-more-entry .text-fade-truncate { display: none; }
   .web-error-report { width: calc(100vw - 20px); height: min(90dvh, 760px); max-height: calc(100dvh - 20px); }
   .web-error-report header { grid-template-columns: 36px minmax(0, 1fr) 36px; gap: 8px; padding: 16px; }
   .web-error-report-icon, .web-error-report header > button { width: 36px; height: 36px; }
@@ -321,15 +329,21 @@ function hostErrorReport(records) {
 }
 
 async function copyHostError(value) {
-  if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(value);
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      return;
+    }
+  } catch {}
   const input = document.createElement("textarea");
   input.value = value;
   input.style.position = "fixed";
   input.style.opacity = "0";
   document.body.appendChild(input);
   input.select();
-  document.execCommand("copy");
+  const copied = document.execCommand("copy");
   input.remove();
+  if (!copied) throw new Error("clipboard_write_failed");
 }
 
 function renderHostError() {

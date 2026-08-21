@@ -298,6 +298,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const ENTRY_ID = "better-codex-entry";
     const AGENTS_ENTRY_ID = "better-codex-agents-entry";
     const PROJECTS_ENTRY_ID = "better-codex-projects-entry";
+    const MORE_ENTRY_ID = "better-codex-more-entry";
     const PANEL_ID = "better-codex-panel";
     const STYLE_ID = "better-codex-style";
     const OWNED = "data-better-codex-owned";
@@ -377,7 +378,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const systemLocale = resolveSystemLocale(INITIAL_LOCALE);
     const MOCKUP_PROJECT_ID = "mockup-better-codex";
     const initialProjectRoute = webProjectRoute();
-    const state = { projects: [], projectsLoaded: false, issues: [], issuesLoaded: false, projectIssues: [], projectDetailId: initialProjectRoute?.projectId || "", projectDocumentView: "charter", projectDocumentPending: null, projectDocumentError: null, agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: initialProjectRoute ? "projects" : ["issues", "agents", "projects"].includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, autoDispatchPending: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", mockup: false, keepCreate: rememberedKeepCreate, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], project: [], label: [] } };
+    const state = { projects: [], projectsLoaded: false, issues: [], issuesLoaded: false, projectIssues: [], projectIssuesProjectId: "", projectDetailId: initialProjectRoute?.projectId || "", projectDocumentView: "charter", projectDocumentPending: null, projectDocumentError: null, agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: initialProjectRoute ? "projects" : ["issues", "agents", "projects"].includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, autoDispatchPending: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", mockup: false, keepCreate: rememberedKeepCreate, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], project: [], label: [] } };
     function webProjectRoute() {
       if (HOST_KIND !== "web") return null;
       const match = location.pathname.match(/^\\/web\\/projects(?:\\/([^/?#]+))?\\/?$/);
@@ -688,6 +689,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     Object.assign(localeResources.en, {
       "项目管理": "Projects",
       "管理项目": "Manage projects",
+      "更多": "More",
+      "更多功能": "More features",
       "创建项目": "Create project",
       "项目名称": "Project name",
       "项目文件夹": "Project folder",
@@ -696,6 +699,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "正在选择…": "Choosing…",
       "返回项目列表": "Back to projects",
       "最近 Issue 与对话": "Recent issues and conversations",
+      "正在加载最近 Issue": "Loading recent issues",
       "项目介绍": "Project overview",
       "重新生成": "Regenerate",
       "生成项目介绍": "Generate overview",
@@ -740,6 +744,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     let entry = null;
     let agentsEntry = null;
     let projectsEntry = null;
+    let auxiliaryNavigation = null;
+    let moreEntry = null;
+    let auxiliaryMenu = null;
+    let auxiliaryMenuDismiss = null;
     let panel = null;
     let observer = null;
     let refreshPending = false;
@@ -962,9 +970,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       style.id = STYLE_ID;
       style.setAttribute(OWNED, "true");
       style.textContent = \`
-        #\${ENTRY_ID}[aria-current="page"], #\${AGENTS_ENTRY_ID}[aria-current="page"], #\${PROJECTS_ENTRY_ID}[aria-current="page"] { background: var(--color-background-primary-soft-active, var(--color-token-list-hover-background, color-mix(in srgb, currentColor 8%, transparent))); }
-        html[data-better-codex-open="true"] \${SELECTORS.sidebarNavigation} [aria-current="page"]:not(#\${ENTRY_ID}):not(#\${AGENTS_ENTRY_ID}):not(#\${PROJECTS_ENTRY_ID}) { background: transparent !important; }
-        html[data-better-codex-open="true"] \${SELECTORS.sidebarNavigation} [aria-current="page"]:not(#\${ENTRY_ID}):not(#\${AGENTS_ENTRY_ID}):not(#\${PROJECTS_ENTRY_ID}) .text-token-list-active-selection-foreground { color: var(--color-token-foreground) !important; }
+        #\${ENTRY_ID}[aria-current="page"], #\${AGENTS_ENTRY_ID}[aria-current="page"], #\${PROJECTS_ENTRY_ID}[aria-current="page"], #\${MORE_ENTRY_ID}[aria-current="page"] { background: var(--color-background-primary-soft-active, var(--color-token-list-hover-background, color-mix(in srgb, currentColor 8%, transparent))); }
+        html[data-better-codex-open="true"] \${SELECTORS.sidebarNavigation} [aria-current="page"]:not(#\${ENTRY_ID}):not(#\${AGENTS_ENTRY_ID}):not(#\${PROJECTS_ENTRY_ID}):not(#\${MORE_ENTRY_ID}) { background: transparent !important; }
+        html[data-better-codex-open="true"] \${SELECTORS.sidebarNavigation} [aria-current="page"]:not(#\${ENTRY_ID}):not(#\${AGENTS_ENTRY_ID}):not(#\${PROJECTS_ENTRY_ID}):not(#\${MORE_ENTRY_ID}) .text-token-list-active-selection-foreground { color: var(--color-token-foreground) !important; }
         [\${HOST}="true"] { position: relative !important; z-index: 31 !important; pointer-events: none !important; }
         [\${HIDDEN}="true"] { visibility: hidden !important; pointer-events: none !important; }
         html { --bc-page: oklch(.988087 0 0); --bc-surface: oklch(1 0 0); --bc-raised: oklch(1 0 0); --bc-hover: oklch(.967 .001 286.375); --bc-selected: oklch(.95 .002 286.375); --bc-foreground: oklch(.141 .005 285.823); --bc-muted: oklch(.505 .016 285.938); --bc-faint: oklch(.606 .016 285.938); --bc-border: oklch(.92 .004 286.32); --bc-divider: oklch(.945 .003 286.32); --bc-input: oklch(.92 .004 286.32); --bc-ring: oklch(.705 .015 286.067); --bc-primary: oklch(.21 .006 285.885); --bc-primary-foreground: oklch(.985 0 0); --bc-warning: oklch(.75 .16 85); --bc-success: oklch(.55 .16 145); --bc-info: oklch(.55 .18 250); --bc-danger: oklch(.577 .245 27.325); --bc-priority-none: oklch(.62 .01 286); --bc-priority-low: oklch(.55 .1 250); --bc-priority-medium: oklch(.76 .15 95); --bc-priority-high: oklch(.68 .18 52); --bc-priority-urgent: var(--bc-danger); --bc-surface-shadow: 0 1px 2px rgb(15 23 42 / .04),0 1px 1px rgb(15 23 42 / .03); --bc-card-shadow: 0 1px 3px rgb(15 23 42 / .10); --bc-floating-shadow: 0 16px 40px rgb(15 23 42 / .14),0 3px 10px rgb(15 23 42 / .08); --bc-menu-shadow: 0 8px 24px rgb(15 23 42 / .08),0 2px 6px rgb(15 23 42 / .05); --bc-scrim: rgb(24 24 27 / .22); color-scheme: light; }
@@ -1179,6 +1187,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #\${PANEL_ID} .better-codex-project-panel-head strong { font-size: var(--bc-text-md); font-weight: 650; }
         #\${PANEL_ID} .better-codex-project-panel-head span { color: var(--bc-muted); font-size: var(--bc-text-caption); }
         #\${PANEL_ID} .better-codex-project-issues { min-height: 0; flex: 1; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 0 7px 8px; }
+        #\${PANEL_ID} .better-codex-project-issues-loading { display: grid; min-height: 100%; place-content: center; justify-items: center; gap: 10px; color: var(--bc-muted); font-size: var(--bc-text-caption); }
+        #\${PANEL_ID} .better-codex-project-issues-loading > span { width: 24px; height: 24px; box-sizing: border-box; border: 2px solid var(--bc-divider); border-top-color: var(--bc-foreground); border-radius: 50%; animation: better-codex-board-loading-spin .8s linear infinite; }
         #\${PANEL_ID} .better-codex-project-issue { overflow: hidden; border-radius: var(--bc-radius-sm, 10px); }
         #\${PANEL_ID} .better-codex-project-issue-toggle { display: grid; width: 100%; min-height: 56px; grid-template-columns: 18px minmax(0,1fr) auto; align-items: center; gap: 9px; border: 0; border-radius: inherit; color: inherit; background: transparent; padding: 8px 9px; font: inherit; text-align: left; cursor: pointer; }
         #\${PANEL_ID} .better-codex-project-issue-toggle:focus-visible { outline: 2px solid var(--bc-ring); outline-offset: -2px; }
@@ -1283,7 +1293,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         @media (hover:hover) { #\${PANEL_ID} .better-codex-project-document-tab:hover { color: var(--bc-foreground); background: var(--bc-hover); } }
         @media (max-width: 980px) { #\${PANEL_ID} .better-codex-project-summary, #\${PANEL_ID} .better-codex-project-columns { grid-template-columns: 1fr; } #\${PANEL_ID} .better-codex-project-columns { height: auto; } #\${PANEL_ID} .better-codex-project-panel:first-child { height: min(50dvh,480px); min-height: 320px; } #\${PANEL_ID} .better-codex-project-document-panel { height: min(86dvh,820px); min-height: 620px; } }
         @media (max-width: 640px) { #\${PANEL_ID} .better-codex-projects { padding: 12px 12px 24px; } #\${PANEL_ID} .better-codex-project-list { grid-template-columns: 1fr; } #\${PANEL_ID} .better-codex-project-summary { padding: 18px; } #\${PANEL_ID} .better-codex-project-columns { grid-template-columns: minmax(0,1fr); } #\${PANEL_ID} .better-codex-project-document-tab { padding-inline: 8px; } #\${PANEL_ID} .better-codex-project-document-tab svg { display: none; } #\${PANEL_ID} .better-codex-project-document-form > div { grid-template-columns: 1fr; } }
-        @media (prefers-reduced-motion:reduce) { #\${PANEL_ID} .better-codex-project-document-progress svg, #\${PANEL_ID} .better-codex-project-document-segments i, #\${PANEL_ID} .better-codex-project-document-tab > i, #\${PANEL_ID} .better-codex-project-document-notice svg, #\${PANEL_ID} .better-codex-project-document-orbit, #\${PANEL_ID} .better-codex-project-document-skeleton i { animation: none; } }
+        @media (prefers-reduced-motion:reduce) { #\${PANEL_ID} .better-codex-project-issues-loading > span, #\${PANEL_ID} .better-codex-project-document-progress svg, #\${PANEL_ID} .better-codex-project-document-segments i, #\${PANEL_ID} .better-codex-project-document-tab > i, #\${PANEL_ID} .better-codex-project-document-notice svg, #\${PANEL_ID} .better-codex-project-document-orbit, #\${PANEL_ID} .better-codex-project-document-skeleton i { animation: none; } }
         #\${PANEL_ID} .better-codex-agent-heading { display: none; min-width: 0; align-items: baseline; gap: 4px; }
         #\${PANEL_ID} .better-codex-agent-heading strong { color: #18181b; font-size: var(--bc-text-md); font-weight: 650; }
         #\${PANEL_ID} .better-codex-agent-heading span { color: var(--bc-muted); font-size: var(--bc-text-sm); }
@@ -1592,15 +1602,59 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       button.addEventListener("click", event => {
         event.preventDefault();
         event.stopPropagation();
+        closeAuxiliaryMenu();
         openRoute(surface);
       });
       return button;
     }
 
+    function closeAuxiliaryMenu() {
+      if (moreEntry) moreEntry.setAttribute("aria-expanded", "false");
+      if (auxiliaryMenu) auxiliaryMenu.removeAttribute("data-open");
+      if (auxiliaryMenuDismiss) document.removeEventListener("pointerdown", auxiliaryMenuDismiss, true);
+      auxiliaryMenuDismiss = null;
+    }
+
+    function createAuxiliaryNavigation() {
+      const navigation = document.createElement("div");
+      navigation.className = "web-nav-auxiliary";
+      navigation.setAttribute(OWNED, "true");
+      moreEntry = nativeButton(t("更多"));
+      moreEntry.id = MORE_ENTRY_ID;
+      moreEntry.classList.add("web-nav-more-entry");
+      moreEntry.setAttribute(OWNED, "true");
+      moreEntry.setAttribute("aria-label", t("更多功能"));
+      moreEntry.setAttribute("title", t("更多功能"));
+      moreEntry.setAttribute("aria-haspopup", "menu");
+      moreEntry.setAttribute("aria-expanded", "false");
+      moreEntry.setAttribute("aria-controls", "better-codex-more-menu");
+      syncEntryIcon(moreEntry, "more");
+      auxiliaryMenu = document.createElement("div");
+      auxiliaryMenu.id = "better-codex-more-menu";
+      auxiliaryMenu.className = "web-nav-more-menu";
+      auxiliaryMenu.setAttribute(OWNED, "true");
+      auxiliaryMenu.setAttribute("aria-label", t("更多功能"));
+      moreEntry.addEventListener("click", event => {
+        event.preventDefault();
+        event.stopPropagation();
+        const opening = moreEntry.getAttribute("aria-expanded") !== "true";
+        closeAuxiliaryMenu();
+        if (!opening) return;
+        moreEntry.setAttribute("aria-expanded", "true");
+        auxiliaryMenu.setAttribute("data-open", "true");
+        auxiliaryMenuDismiss = pointerEvent => {
+          if (!navigation.contains(pointerEvent.target)) closeAuxiliaryMenu();
+        };
+        setTimeout(() => document.addEventListener("pointerdown", auxiliaryMenuDismiss, true), 0);
+      });
+      navigation.append(moreEntry, auxiliaryMenu);
+      return navigation;
+    }
+
     function syncEntryIcon(button, surface) {
       const svg = button.querySelector("svg");
       if (svg) {
-        const definition = LUCIDE_ICONS[surface === "agents" ? "bot" : surface === "projects" ? "folder" : "issues"];
+        const definition = LUCIDE_ICONS[surface === "agents" ? "bot" : surface === "projects" ? "folder" : surface === "more" ? "more" : "issues"];
         if (svg.getAttribute("viewBox") !== "0 0 24 24") svg.setAttribute("viewBox", "0 0 24 24");
         if (svg.getAttribute("fill") !== "none") svg.setAttribute("fill", "none");
         if (svg.getAttribute("stroke") !== "currentColor") svg.setAttribute("stroke", "currentColor");
@@ -1643,13 +1697,23 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (!projectsEntry) projectsEntry = createEntry("项目管理", PROJECTS_ENTRY_ID, "管理项目", "projects");
       syncEntryLabel(projectsEntry, "项目管理", "管理项目");
       syncEntryIcon(projectsEntry, "projects");
-      if (projectsEntry.parentElement !== parent || projectsEntry.previousElementSibling !== agentsEntry) agentsEntry.after(projectsEntry);
+      if (HOST_KIND === "web") {
+        if (!auxiliaryNavigation) auxiliaryNavigation = createAuxiliaryNavigation();
+        syncEntryLabel(moreEntry, "更多", "更多功能");
+        syncEntryIcon(moreEntry, "more");
+        if (auxiliaryNavigation.parentElement !== parent || auxiliaryNavigation.previousElementSibling !== agentsEntry) agentsEntry.after(auxiliaryNavigation);
+        if (projectsEntry.parentElement !== auxiliaryMenu) auxiliaryMenu.append(projectsEntry);
+      } else if (projectsEntry.parentElement !== parent || projectsEntry.previousElementSibling !== agentsEntry) agentsEntry.after(projectsEntry);
       const currentEntry = active && state.surface === "issues" ? entry : active && state.surface === "agents" ? agentsEntry : active && state.surface === "projects" ? projectsEntry : null;
       for (const item of [entry, agentsEntry, projectsEntry]) {
         if (item === currentEntry && item.getAttribute("aria-current") !== "page") item.setAttribute("aria-current", "page");
         if (item !== currentEntry && item.hasAttribute("aria-current")) item.removeAttribute("aria-current");
       }
-      return entry.isConnected && agentsEntry.isConnected && projectsEntry.isConnected;
+      if (moreEntry) {
+        if (active && state.surface === "projects" && moreEntry.getAttribute("aria-current") !== "page") moreEntry.setAttribute("aria-current", "page");
+        if ((!active || state.surface !== "projects") && moreEntry.hasAttribute("aria-current")) moreEntry.removeAttribute("aria-current");
+      }
+      return entry.isConnected && agentsEntry.isConnected && projectsEntry.isConnected && (HOST_KIND !== "web" || auxiliaryNavigation?.isConnected);
     }
 
     function findMount() {
@@ -3228,15 +3292,21 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     async function copyText(value) {
-      if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(value);
+      try {
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(value);
+          return;
+        }
+      } catch {}
       const input = document.createElement("textarea");
       input.value = value;
       input.style.position = "fixed";
       input.style.opacity = "0";
       document.body.appendChild(input);
       input.select();
-      document.execCommand("copy");
+      const copied = document.execCommand("copy");
       input.remove();
+      if (!copied) throw new Error("clipboard_write_failed");
     }
 
     async function stopIssueSession(issueId) {
@@ -4351,12 +4421,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         return renderProjects();
       }
       const paths = projectRootPaths(project);
-      const issues = [...state.projectIssues].sort((left, right) => String(right.updated_at).localeCompare(String(left.updated_at)));
-      const issueRows = issues.length ? issues.map(issue => '<article class="better-codex-project-issue"><button class="better-codex-project-issue-toggle" type="button" data-project-issue="' + escapeHtml(issue.id) + '" aria-label="' + te("打开 Issue 详情") + '">' + statusIcon(issue.status) + '<span class="better-codex-project-issue-title"><strong>' + escapeHtml(issue.title) + '</strong><span><b>' + escapeHtml(issue.identifier) + '</b><span>' + te("更新于 " + timeAgo(issue.updated_at)) + '</span>' + (issue.archived_at ? '<em>' + te("已归档") + '</em>' : "") + '</span></span>' + icon("chevron") + '</button></article>').join("") : '<div class="better-codex-empty">' + te("暂无关联 Issue") + '</div>';
+      const issuesLoading = state.projectIssuesProjectId !== project.id;
+      const issues = issuesLoading ? [] : [...state.projectIssues].sort((left, right) => String(right.updated_at).localeCompare(String(left.updated_at)));
+      const issueRows = issuesLoading ? '<div class="better-codex-project-issues-loading" role="status" aria-live="polite"><span aria-hidden="true"></span><strong>' + te("正在加载最近 Issue") + '</strong></div>' : issues.length ? issues.map(issue => '<article class="better-codex-project-issue"><button class="better-codex-project-issue-toggle" type="button" data-project-issue="' + escapeHtml(issue.id) + '" aria-label="' + te("打开 Issue 详情") + '">' + statusIcon(issue.status) + '<span class="better-codex-project-issue-title"><strong>' + escapeHtml(issue.title) + '</strong><span><b>' + escapeHtml(issue.identifier) + '</b><span>' + te("更新于 " + timeAgo(issue.updated_at)) + '</span>' + (issue.archived_at ? '<em>' + te("已归档") + '</em>' : "") + '</span></span>' + icon("chevron") + '</button></article>').join("") : '<div class="better-codex-empty">' + te("暂无关联 Issue") + '</div>';
       const projectName = projectLabel(project);
       if (heading) heading.innerHTML = '<button class="better-codex-project-back" type="button" data-project-back aria-label="' + te("返回项目列表") + '">' + icon("chevron") + '</button><nav class="better-codex-project-breadcrumb" aria-label="' + te("项目管理") + '"><button type="button" data-project-home>' + te("项目管理") + '</button><span aria-hidden="true">&gt;</span><strong title="' + escapeHtml(projectName) + '">' + escapeHtml(projectName) + '</strong></nav>';
       if (HOST_KIND === "web" && state.surface === "projects") document.title = t("项目管理") + " > " + projectName + " · Better Codex";
-      container.innerHTML = '<section class="better-codex-project-detail"><section class="better-codex-project-summary"><div><span class="better-codex-project-eyebrow">' + te("项目概况") + '</span><h1>' + escapeHtml(projectName) + '</h1><p>' + escapeHtml(project.description || t("尚未生成项目介绍")) + '</p></div><div class="better-codex-project-paths"><strong>' + te("项目文件夹") + '</strong>' + (paths.length ? paths.map(path => '<div class="better-codex-project-path" title="' + escapeHtml(path) + '">' + icon("folder") + '<span>' + escapeHtml(path) + '</span></div>').join("") : '<div class="better-codex-project-path"><span>' + te("未提供") + '</span></div>') + '</div></section><div class="better-codex-project-columns"><section class="better-codex-project-panel"><header class="better-codex-project-panel-head"><strong>' + te("最近 Issue 与对话") + '</strong><span>' + escapeHtml(String(issues.length)) + '</span></header><div class="better-codex-project-issues">' + issueRows + '</div></section>' + projectDocumentWorkspace(project) + '</div></section>';
+      container.innerHTML = '<section class="better-codex-project-detail"><section class="better-codex-project-summary"><div><span class="better-codex-project-eyebrow">' + te("项目概况") + '</span><h1>' + escapeHtml(projectName) + '</h1><p>' + escapeHtml(project.description || t("尚未生成项目介绍")) + '</p></div><div class="better-codex-project-paths"><strong>' + te("项目文件夹") + '</strong>' + (paths.length ? paths.map(path => '<div class="better-codex-project-path" title="' + escapeHtml(path) + '">' + icon("folder") + '<span>' + escapeHtml(path) + '</span></div>').join("") : '<div class="better-codex-project-path"><span>' + te("未提供") + '</span></div>') + '</div></section><div class="better-codex-project-columns"><section class="better-codex-project-panel"><header class="better-codex-project-panel-head"><strong>' + te("最近 Issue 与对话") + '</strong><span>' + (issuesLoading ? "…" : escapeHtml(String(issues.length))) + '</span></header><div class="better-codex-project-issues">' + issueRows + '</div></section>' + projectDocumentWorkspace(project) + '</div></section>';
       requestAnimationFrame(() => layoutProjectDocumentDiagrams(container));
     }
 
@@ -4373,14 +4444,24 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (state.projectDetailId) {
         if (!state.projects.some(project => project.id === state.projectDetailId)) {
           state.projectDetailId = "";
+          state.projectIssues = [];
+          state.projectIssuesProjectId = "";
           syncWebProjectRoute("", "replace");
         }
         else {
+          const projectId = state.projectDetailId;
+          if (state.projectIssuesProjectId !== projectId) {
+            state.projectIssues = [];
+            renderProjects();
+          }
           const [activeIssues, archivedIssues] = await Promise.all([
-            api("/api/issues?project_id=" + encodeURIComponent(state.projectDetailId)),
-            api("/api/issues?archived=1&project_id=" + encodeURIComponent(state.projectDetailId)),
+            api("/api/issues?project_id=" + encodeURIComponent(projectId)),
+            api("/api/issues?archived=1&project_id=" + encodeURIComponent(projectId)),
           ]);
-          state.projectIssues = [...activeIssues, ...archivedIssues];
+          if (state.projectDetailId === projectId) {
+            state.projectIssues = [...activeIssues, ...archivedIssues];
+            state.projectIssuesProjectId = projectId;
+          }
         }
       }
       if (options.background && !projectsChanged && !state.projectDetailId) return;
@@ -4389,6 +4470,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     async function openProjectDetail(projectId) {
       state.projectDetailId = projectId;
+      state.projectIssues = [];
+      state.projectIssuesProjectId = "";
       syncWebProjectRoute(projectId);
       renderProjects();
       await loadProjects();
@@ -7321,7 +7404,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       routeSuppressed = false;
       routeSeen = false;
       if (surface === "projects") {
-        state.projectDetailId = typeof options.projectId === "string" ? options.projectId : "";
+        const projectId = typeof options.projectId === "string" ? options.projectId : "";
+        if (projectId !== state.projectDetailId) {
+          state.projectIssues = [];
+          state.projectIssuesProjectId = "";
+        }
+        state.projectDetailId = projectId;
         if (HOST_KIND === "web") {
           const mode = options.history || (webProjectRoute() ? "replace" : "push");
           syncWebProjectRoute(state.projectDetailId, mode);
@@ -7359,6 +7447,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       closeFilterMenu();
       closeCreateMenu();
       closeIssueMenu();
+      closeAuxiliaryMenu();
       if (pollTimer !== null) {
         clearInterval(pollTimer);
         pollTimer = null;
@@ -7457,7 +7546,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     function onClick(event) {
       if (!active || suppressAgentOutside) return;
       const target = event.target?.closest?.("button,a,[role='button']," + SELECTORS.threadRow);
-      if (!target || target === entry || target === agentsEntry || target === projectsEntry || target.closest("#" + PANEL_ID) || target.closest("#better-codex-dialog") || target.closest("#better-codex-agent-dialog") || target.closest("#better-codex-project-dialog") || target.closest("#better-codex-avatar-picker")) return;
+      if (!target || target === entry || target === agentsEntry || target === projectsEntry || target === moreEntry || target.closest("#" + PANEL_ID) || target.closest("#better-codex-dialog") || target.closest("#better-codex-agent-dialog") || target.closest("#better-codex-project-dialog") || target.closest("#better-codex-avatar-picker")) return;
       if (Date.now() < suppressSessionClickUntil && target.closest(SELECTORS.threadRow)) {
         suppressSessionClickUntil = 0;
         event.preventDefault();
@@ -7522,6 +7611,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       sessionHandoffPending.clear();
       closeFilterMenu();
       closeIssueMenu();
+      closeAuxiliaryMenu();
       observer?.disconnect();
       for (const pending of bridgeRequests.values()) {
         clearTimeout(pending.timer);
