@@ -2758,7 +2758,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         timeline,
         occurrences: record.occurrences,
       };
-      if (["window_error", "unhandled_rejection"].includes(source) && record.stack) report.stack = String(record.stack).split("\n").slice(0, 8).join("\n");
+      if (["window_error", "unhandled_rejection"].includes(source) && record.stack) report.stack = String(record.stack).split("\\n").slice(0, 8).join("\\n");
       return report;
     }
 
@@ -5060,7 +5060,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const healthTone = blocked ? "danger" : attention.length ? "warning" : "success";
       const healthLabel = blocked ? t("有风险") : attention.length ? t("需关注") : t("进展正常");
       const activeAgentIds = new Set(activeIssues.filter(issue => ["in_progress", "in_review", "blocked"].includes(issue.status)).map(issue => String(issue.agent_id || "default")));
-      const agents = [...state.agents].sort((left, right) => Number(activeAgentIds.has(agentKey(right))) - Number(activeAgentIds.has(agentKey(left))).slice(0, 3);
+      const agents = [...state.agents].sort((left, right) => Number(activeAgentIds.has(agentKey(right))) - Number(activeAgentIds.has(agentKey(left)))).slice(0, 3);
       const peopleAvatars = '<span class="better-codex-project-dashboard-avatar" title="' + escapeHtml(state.user.name || t("你")) + '">' + escapeHtml(state.user.initials || (state.user.name || t("你")).slice(0, 2)) + '</span>' + agents.map(agent => agentAvatarMarkup(agent, "better-codex-project-dashboard-avatar")).join("");
       const page = state.projectPage === "planning" ? "planning" : "overview";
       const header = '<header class="better-codex-project-dashboard-head"><div class="better-codex-project-dashboard-title"><div><h1>' + escapeHtml(projectLabel(project)) + '</h1><span class="better-codex-project-health" data-tone="' + healthTone + '">' + escapeHtml(healthLabel) + '</span></div><p>' + escapeHtml(project.description || t("尚未生成项目介绍")) + '</p></div><div class="better-codex-project-dashboard-people" aria-label="' + te("项目协作者") + '">' + peopleAvatars + '</div></header><nav class="better-codex-project-dashboard-tabs" aria-label="' + te("项目页面") + '"><button type="button" data-project-dashboard-view="overview"' + (page === "overview" ? ' aria-current="page"' : "") + '>' + te("概览") + '</button><button type="button" data-project-dashboard-view="planning"' + (page === "planning" ? ' aria-current="page"' : "") + '>' + te("规划") + '</button><button type="button" data-project-dashboard-work>' + te("工作") + '</button></nav>';
