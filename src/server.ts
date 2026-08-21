@@ -42,6 +42,7 @@ const maxWebSessions = 32;
 const maxPastedImageBytes = 10 * 1024 * 1024;
 const maxPastedImageBodyBytes = Math.ceil(maxPastedImageBytes * 4 / 3) + 1024;
 const maxRemoteFileBodyBytes = Math.ceil(20 * 1024 * 1024 * 4 / 3) + 64 * 1024;
+const maxIssueDescriptionLength = 100000;
 const codexStatePath = join(process.env.CODEX_HOME || join(homedir(), ".codex"), ".codex-global-state.json");
 const preloadedRequestBodies = new WeakMap<IncomingMessage, Buffer>();
 
@@ -110,8 +111,9 @@ function saveRemoteFiles(value: unknown, requestId: string) {
   }
 }
 
-function withRemoteFilePaths(value: unknown, paths: string[]) {
-  const text = cleanString(value, 100000);
+function withRemoteFilePaths(value: unknown, paths: string[], lengthError = "invalid_string") {
+  if (typeof value === "string" && value.length > maxIssueDescriptionLength) throw new Error(lengthError);
+  const text = cleanString(value, maxIssueDescriptionLength);
   if (!paths.length) return text;
   const block = `附带文件：\n${paths.map(path => `- ${path}`).join("\n")}`;
   return text ? `${text}\n\n${block}` : block;
@@ -425,6 +427,11 @@ function cleanString(value: unknown, limit = 10000) {
   return value.trim();
 }
 
+function issueDescription(value: unknown) {
+  if (typeof value === "string" && value.length > maxIssueDescriptionLength) throw new Error("issue_description_too_long");
+  return cleanString(value, maxIssueDescriptionLength);
+}
+
 function codexProjectTimestamp(value: unknown) {
   const timestamp = typeof value === "number" ? value : Number.NaN;
   if (!Number.isFinite(timestamp) || timestamp <= 0) return undefined;
@@ -560,7 +567,7 @@ function parseIssuePatch(body: Record<string, unknown>) {
   if ("thread_id" in body) throw new Error("issue_session_binding_disabled");
   if ("project_id" in body) patch.project_id = cleanString(body.project_id, 200);
   if ("title" in body) patch.title = cleanString(body.title, 500);
-  if ("description" in body) patch.description = cleanString(body.description, 100000);
+  if ("description" in body) patch.description = issueDescription(body.description);
   if ("reply_draft" in body) patch.reply_draft = cleanString(body.reply_draft, 100000);
   if ("status" in body) patch.status = asStatus(body.status);
   if ("priority" in body) patch.priority = asPriority(body.priority);
@@ -963,7 +970,7 @@ export function startServer() {
         const agentReasoningEfforts = [...new Set(agentModelCatalog.flatMap(model => model.supportedReasoningEfforts.map(effort => effort.value)))];
         const mockup = mockupEnabled ? readMockupState(mockupLocale) : null;
         if (!mockup) syncCodexProjects(store);
-        return sendJson(response, 200, { projects: projectSummaries(mockup ? mockup.projects : store.listProjects()), agents: mockup ? mockup.agents : visibleAgentProfiles(), statuses: issueStatuses, priorities: issuePriorities, appearance: readCodexAppearance(), locale: readCodexLocale(), user: readCodexUserProfile(), agentModelCatalog, agentModels, agentReasoningEfforts, autoDispatch: mockup ? mockup.auto_dispatch : store.getAutoDispatch(), schedulerModel: mockup ? mockup.scheduler_model : store.getSchedulerModel(defaultAgentProfile().model), schedulerReasoningEffort: mockup ? mockup.scheduler_reasoning_effort : store.getSchedulerReasoningEffort(), mockup: mockupEnabled, featureManifest: featureManifest() });
+        return sendJson(response, 200, { projects: projectSummaries(mockup ? mockup.projects : store.listProjects()), agents: mockup ? mockup.agents : visibleAgentProfiles(), statuses: issueStatuses, priorities: issuePriorities, appearance: readCodexAppearance(), locale: readCodexLocale(), user: readCodexUserProfile(), agentModelCatalog, agentModels, agentReasoningEfforts, autoDispatch: mockup ? mockup.auto_dispatch : store.getAutoDispatch(), schedulerModel: mockup ? mockup.scheduler_model : store.getSchedulerModel(defaultAgentProfile().model), schedulerReasoningEffort: mockup ? mockup.scheduler_reasoning_effort : store.getSchedulerReasoningEffort(), limits: { issue_description: maxIssueDescriptionLength }, mockup: mockupEnabled, featureManifest: featureManifest() });
       }
       if (url.pathname === "/api/account/usage" && method === "GET") {
         return sendJson(response, 200, { usage: await readCodexUsage() });
@@ -1616,7 +1623,7 @@ export function startServer() {
           created = store.createIssueRequest({
             projectId,
             title: cleanString(body.title, 500),
-            description: withRemoteFilePaths(body.description, files.paths),
+            description: withRemoteFilePaths(body.description, files.paths, "issue_description_too_long"),
             status: aiEnrich ? "backlog" : "status" in body ? asStatus(body.status) : undefined,
             priority: "priority" in body ? asPriority(body.priority) : undefined,
             labels: asLabels(body.labels),
