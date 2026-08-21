@@ -169,7 +169,7 @@ body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; 
 .web-account:has(.web-profile[aria-expanded="true"]) { background: var(--web-hover); }
 .web-profile { position: relative; z-index: 1; display: grid; grid-template-columns: 30px minmax(0, 1fr); width: 100%; min-height: 48px; align-items: center; gap: 9px; border: 0; border-radius: 10px; padding: 6px 70px 6px 6px; background: transparent; text-align: left; cursor: pointer; }
 .web-account-theme { position: absolute; z-index: 2; top: 7px; right: 27px; }
-.web-avatar { position: relative; display: grid; width: 28px; height: 28px; place-items: center; border-radius: 50%; color: #fff; background: #2fa15f; font-size: 9px; font-weight: 700; }
+.web-avatar { position: relative; display: grid; width: 28px; height: 28px; place-items: center; border-radius: 50%; color: #fff; background: #2fa15f center / cover no-repeat; font-size: 9px; font-weight: 700; }
 .web-profile > span:nth-child(2) { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
 .web-profile strong, .web-profile small { overflow: hidden; white-space: nowrap; }
 .web-profile strong { font-size: 11px; font-weight: 620; }
@@ -473,6 +473,9 @@ function updateWebProfile(detail) {
   profileName.title = name;
   profileAvatarInitials.textContent = initials;
   if (typeof user.color === "string" && /^#[0-9a-f]{6}$/i.test(user.color)) profileAvatar.style.backgroundColor = user.color;
+  const avatar = typeof user.avatar === "string" && user.avatar.startsWith("data:image/") ? user.avatar : "";
+  profileAvatar.style.backgroundImage = avatar ? 'url("' + avatar.replaceAll('"', '%22') + '")' : "none";
+  profileAvatarInitials.hidden = Boolean(avatar);
   profileKind.textContent = profileText("Codex 账户", "Codex account");
   installButton.setAttribute("aria-label", profileText("安装 Better Codex", "Install Better Codex"));
   usageTitle.textContent = profileText("剩余用量", "Usage remaining");

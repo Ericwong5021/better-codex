@@ -10,7 +10,7 @@ import { legacySyncProtocolVersion, supportedSyncProtocolVersions, syncProtocolV
 import { betterCodexWebHostCss, betterCodexWebHostHtml, betterCodexWebHostJavaScript } from "./web-host.js";
 import { betterCodexWebIconPng } from "./brand-assets.js";
 import { betterCodexWebManifest, betterCodexWebServiceWorker } from "./web-app.js";
-import { avatarInitials } from "./user-profile.js";
+import { avatarColor, avatarInitials } from "./user-profile.js";
 import { renderMarkdown } from "./markdown.js";
 import { deviceAuthorizationPage } from "./device-authorization-page.js";
 import { controlCapabilities, controlProtocolVersion, decodeControlMessage, encodeControlMessage } from "./control-protocol.js";
@@ -150,7 +150,20 @@ function errorStatus(code: string) {
   return 400;
 }
 
-function issueForWeb(issue: ReturnType<HubStore["board"]>["issues"][number]) {
+function userForWeb(user: NonNullable<ReturnType<HubStore["webUser"]>>) {
+  return {
+    id: user.id,
+    name: user.nickname,
+    email: "",
+    handle: user.username,
+    initials: avatarInitials(user.nickname),
+    color: avatarColor(user.id),
+    avatar: user.avatar,
+  };
+}
+
+function issueForWeb(store: HubStore, issue: ReturnType<HubStore["board"]>["issues"][number]) {
+  const assigneeUser = issue.user_assigned ? issue.assignee_user_id ? store.webUser(issue.assignee_user_id) || store.defaultWebUser() : store.defaultWebUser() : null;
   return {
     ...issue,
     version: issue.local_revision,
@@ -162,6 +175,8 @@ function issueForWeb(issue: ReturnType<HubStore["board"]>["issues"][number]) {
     agent_enabled: issue.agent_enabled,
     agent_id: issue.agent_id,
     user_assigned: issue.user_assigned,
+    assignee_user_id: issue.assignee_user_id,
+    assignee_user: assigneeUser ? userForWeb(assigneeUser) : null,
     pending_actor: issue.pending_actor,
     enrichment_status: null,
     reply_draft: "",
@@ -226,15 +241,16 @@ export function createHubServer(options: HubServerOptions) {
           return sendJson(response, 429, { error: "login_rate_limited" }, { "retry-after": String(Math.max(1, Math.ceil((attempt.resetAt - Date.now()) / 1000))) });
         }
         const body = await readBody(request, 4096);
-        if (String(body.username ?? "") !== store.webUsername() || !passwordMatches(String(body.password ?? ""), store.webPasswordHash() || "")) {
+        const user = store.webUserCredentials(String(body.username ?? "").trim());
+        if (!user || !passwordMatches(String(body.password ?? ""), user.password_hash)) {
           const current = attempt && attempt.resetAt > Date.now() ? attempt : { count: 0, resetAt: Date.now() + 15 * 60_000 };
           loginAttempts.set(client, { ...current, count: current.count + 1 });
           store.audit(client, "web_login_failed");
           return sendJson(response, 401, { error: "unauthorized" });
         }
         loginAttempts.delete(client);
-        const session = store.createWebSession();
-        return sendJson(response, 200, { csrf_token: session.csrf_token, expires_at: session.expires_at }, { "set-cookie": webSessionCookie(session.token, secureCookies) });
+        const session = store.createWebSession(user.id);
+        return sendJson(response, 200, { csrf_token: session.csrf_token, expires_at: session.expires_at, user: userForWeb(session.user) }, { "set-cookie": webSessionCookie(session.token, secureCookies) });
       }
 
       const token = bearer(request);
@@ -245,7 +261,7 @@ export function createHubServer(options: HubServerOptions) {
       const csrfValid = Boolean(browser && typeof request.headers["x-csrf-token"] === "string" && secretEqual(request.headers["x-csrf-token"], browser.csrf_token));
       if (url.pathname === "/web/session" && method === "GET") {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" });
-        return sendJson(response, 200, { csrf_token: browser.csrf_token, expires_at: browser.expires_at });
+        return sendJson(response, 200, { csrf_token: browser.csrf_token, expires_at: browser.expires_at, user: userForWeb(browser.user) });
       }
       if (url.pathname === "/web/session" && method === "DELETE") {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" }, { "set-cookie": clearWebSessionCookie(secureCookies) });
@@ -257,6 +273,12 @@ export function createHubServer(options: HubServerOptions) {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" });
         const locale = String(url.searchParams.get("locale") || "").toLowerCase().startsWith("zh") ? "zh-CN" : "en";
         return sendText(response, 200, injectionScript(0, "", "install", locale, "web"), "text/javascript; charset=utf-8");
+      }
+      if (url.pathname === "/api/profile" && method === "PATCH") {
+        if (!browser) return sendJson(response, 401, { error: "unauthorized" });
+        if (!trustedOrigin(request, true) || !csrfValid) return sendJson(response, 403, { error: "csrf_invalid" });
+        const body = await readBody(request, 600_000);
+        return sendJson(response, 200, { user: userForWeb(store.setWebUserProfile(browser.user.id, body.nickname, body.avatar)) });
       }
       const deviceAuthorization = url.pathname.match(/^\/web\/device-authorizations\/([^/]+)$/);
       if (deviceAuthorization && method === "GET") {
@@ -329,7 +351,6 @@ export function createHubServer(options: HubServerOptions) {
         const board = store.board();
         const runtime = board.runtime;
         const agentModelCatalog = runtime?.agent_models || [];
-        const userName = store.webUsername() || "admin";
         return sendJson(response, 200, {
           projects: board.projects,
           agents: agentsForWeb(board),
@@ -337,7 +358,7 @@ export function createHubServer(options: HubServerOptions) {
           priorities: issuePriorities,
           appearance: { theme: "system", accent: "green" },
           locale: "zh-CN",
-          user: { id: `remote:${userName}`, name: userName, email: "", handle: userName, initials: avatarInitials(userName), color: "#16a34a" },
+          user: userForWeb(browser.user),
           agentModelCatalog,
           agentModels: agentModelCatalog.map(model => model.id),
           agentReasoningEfforts: [...new Set(agentModelCatalog.flatMap(model => model.supportedReasoningEfforts.map(effort => effort.value)))],
@@ -473,13 +494,13 @@ export function createHubServer(options: HubServerOptions) {
         const search = (url.searchParams.get("search") || "").toLowerCase();
         const archived = url.searchParams.get("archived") === "1";
         const issues = board.issues.filter(issue => Boolean(issue.archived_at) === archived && (!projectId || issue.project_id === projectId) && (!search || `${issue.identifier} ${issue.title} ${issue.description}`.toLowerCase().includes(search)));
-        return sendJson(response, 200, issues.map(issueForWeb));
+        return sendJson(response, 200, issues.map(issue => issueForWeb(store, issue)));
       }
       const issueMatch = url.pathname.match(/^\/api\/issues\/([^/]+)$/);
       if (issueMatch && method === "GET") {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" });
         const issue = store.board().issues.find(item => item.id === decodeURIComponent(issueMatch[1]) || item.identifier === decodeURIComponent(issueMatch[1]));
-        return issue ? sendJson(response, 200, issueForWeb(issue)) : sendJson(response, 404, { error: "issue_not_found" });
+        return issue ? sendJson(response, 200, issueForWeb(store, issue)) : sendJson(response, 404, { error: "issue_not_found" });
       }
       if (issueMatch && method === "DELETE") {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" });
@@ -498,27 +519,31 @@ export function createHubServer(options: HubServerOptions) {
           operation: "issue.create",
           entity_id: body.id,
           base_revision: null,
-          payload: { project_id: body.project_id, title: body.title, description: body.description, status: body.status, priority: body.priority, labels: body.labels, agent_enabled: body.agent_enabled, agent_id: body.agent_id, user_assigned: body.user_assigned, files: body.files },
+          payload: { project_id: body.project_id, title: body.title, description: body.description, status: body.status, priority: body.priority, labels: body.labels, agent_enabled: body.agent_enabled, agent_id: body.agent_id, user_assigned: body.user_assigned, assignee_user_id: body.user_assigned === true ? browser.user.id : null, ai_enrich: body.ai_enrich, files: body.files },
         });
         notifyControl(command.device_id);
         const issue = store.board().issues.find(item => item.id === command.entity_id)!;
-        return sendJson(response, 202, issueForWeb(issue));
+        return sendJson(response, 202, issueForWeb(store, issue));
       }
       if (issueMatch && method === "PATCH") {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" });
         if (!trustedOrigin(request, true) || !csrfValid) return sendJson(response, 403, { error: "csrf_invalid" });
         const body = await readBody(request, 30 * 1024 * 1024);
         const issueId = decodeURIComponent(issueMatch[1]);
+        const current = store.board().issues.find(item => item.id === issueId || item.identifier === issueId);
+        const assigneeUserId = body.user_assigned === true
+          ? typeof body.assignee_user_id === "string" && body.assignee_user_id === current?.assignee_user_id ? body.assignee_user_id : browser.user.id
+          : null;
         const command = store.createRemoteCommand({
           command_id: body.command_id ?? request.headers["x-better-codex-command-id"],
           operation: "issue.update",
           entity_id: issueId,
           base_revision: body.version,
-          payload: { project_id: body.project_id, title: body.title, description: body.description, status: body.status, priority: body.priority, labels: body.labels, sort_order: body.sort_order, pinned: body.pinned, agent_enabled: body.agent_enabled, agent_id: body.agent_id, user_assigned: body.user_assigned, files: body.files },
+          payload: { project_id: body.project_id, title: body.title, description: body.description, status: body.status, priority: body.priority, labels: body.labels, sort_order: body.sort_order, pinned: body.pinned, agent_enabled: body.agent_enabled, agent_id: body.agent_id, user_assigned: body.user_assigned, assignee_user_id: assigneeUserId, files: body.files },
         });
         notifyControl(command.device_id);
         const issue = store.board().issues.find(item => item.id === command.entity_id)!;
-        return sendJson(response, 202, issueForWeb(issue));
+        return sendJson(response, 202, issueForWeb(store, issue));
       }
       const conversationMatch = url.pathname.match(/^\/api\/issues\/([^/]+)\/conversation$/);
       if (conversationMatch && method === "GET") {
@@ -540,7 +565,7 @@ export function createHubServer(options: HubServerOptions) {
             reply = { request_id: command.command_id, status: "failed", message: String(command.payload.message || ""), error: command.error || "command_rejected", started_at: command.requested_at, finished_at: command.finished_at || undefined };
           }
         }
-        return sendJson(response, 200, { issue_id: issue.id, found: messages.length > 0, messages: messages.map(message => ({ ...message, html: renderMarkdown(message.markdown) })), reply, updated_at: projection?.updated_at || issue.updated_at, issue: issueForWeb(issue) });
+        return sendJson(response, 200, { issue_id: issue.id, found: messages.length > 0, messages: messages.map(message => ({ ...message, html: renderMarkdown(message.markdown) })), reply, updated_at: projection?.updated_at || issue.updated_at, issue: issueForWeb(store, issue) });
       }
       const replyMatch = url.pathname.match(/^\/api\/issues\/([^/]+)\/reply$/);
       if (replyMatch && method === "POST") {
@@ -571,7 +596,7 @@ export function createHubServer(options: HubServerOptions) {
         const command = store.createRemoteCommand({ command_id: body.command_id ?? request.headers["x-better-codex-command-id"], operation, entity_id: decodeURIComponent(issueAction[1]), base_revision: body.version, payload });
         notifyControl(command.device_id);
         const issue = store.board().issues.find(item => item.id === command.entity_id)!;
-        return sendJson(response, 202, issueForWeb(issue));
+        return sendJson(response, 202, issueForWeb(store, issue));
       }
       const commandStatus = url.pathname.match(/^\/api\/v1\/commands\/([^/]+)$/);
       if (commandStatus && method === "GET") {

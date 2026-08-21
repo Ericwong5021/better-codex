@@ -567,25 +567,28 @@ export class IssueWorker {
         return;
       }
       try {
+        const humanAssigned = current.user_assigned;
         const updated = this.store.updateIssue(issue.id, current.version, {
           ...(result
             ? {
                 title: result.title,
                 description: current.description,
                 status: "todo",
-                agent_enabled: true,
-                agent_id: agentId,
-                user_assigned: false,
-                pending_actor: "agent",
+                agent_enabled: !humanAssigned,
+                agent_id: humanAssigned ? null : agentId,
+                user_assigned: humanAssigned,
+                assignee_user_id: humanAssigned ? current.assignee_user_id : null,
+                pending_actor: humanAssigned ? "user" : "agent",
                 needs_attention: true,
                 enrichment_status: null,
               }
             : {
                 title: "任务理解失败",
                 status: "blocked",
-                agent_enabled: true,
-                agent_id: agentId,
-                user_assigned: false,
+                agent_enabled: !humanAssigned,
+                agent_id: humanAssigned ? null : agentId,
+                user_assigned: humanAssigned,
+                assignee_user_id: humanAssigned ? current.assignee_user_id : null,
                 pending_actor: "user",
                 needs_attention: true,
                 enrichment_status: "failed",
@@ -625,9 +628,10 @@ export class IssueWorker {
       this.store.updateIssue(issue.id, issue.version, {
         title: "任务理解失败",
         status: "blocked",
-        agent_enabled: true,
-        agent_id: issue.agent_id,
-        user_assigned: false,
+        agent_enabled: !issue.user_assigned,
+        agent_id: issue.user_assigned ? null : issue.agent_id,
+        user_assigned: issue.user_assigned,
+        assignee_user_id: issue.user_assigned ? issue.assignee_user_id : null,
         pending_actor: "user",
         needs_attention: true,
         enrichment_status: "failed",

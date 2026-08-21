@@ -18,7 +18,7 @@ function tokenHash(value: string) {
   return createHash("sha256").update(value).digest("hex");
 }
 
-const hubSchemaVersion = 7;
+const hubSchemaVersion = 8;
 const webSessionIdleLifetimeMilliseconds = 12 * 60 * 60_000;
 const webSessionMaximumLifetimeMilliseconds = 30 * 24 * 60 * 60_000;
 
@@ -170,6 +170,7 @@ function cleanProjection(type: SyncEntityType, id: string, value: unknown): Sync
   if (typeof source.sort_order !== "number" || !Number.isFinite(source.sort_order)) throw new Error("invalid_projection");
   for (const field of ["pinned", "assigned", "agent_enabled", "user_assigned", "has_conversation", "needs_attention"] as const) if (typeof source[field] !== "boolean") throw new Error("invalid_projection");
   if (source.agent_id !== null && (typeof source.agent_id !== "string" || !/^[a-f0-9-]{36}$/i.test(source.agent_id))) throw new Error("invalid_projection");
+  if (source.assignee_user_id !== undefined && source.assignee_user_id !== null && (typeof source.assignee_user_id !== "string" || source.assignee_user_id.length > 200)) throw new Error("invalid_projection");
   if (source.pending_actor !== "user" && source.pending_actor !== "agent") throw new Error("invalid_projection");
   if (source.archived_at !== null && (typeof source.archived_at !== "string" || source.archived_at.length > 64)) throw new Error("invalid_projection");
   if (source.active_run_status !== null && !["claimed", "running", "scheduling"].includes(String(source.active_run_status))) throw new Error("invalid_projection");
@@ -193,6 +194,7 @@ function cleanProjection(type: SyncEntityType, id: string, value: unknown): Sync
     agent_enabled: source.agent_enabled as boolean,
     agent_id: source.agent_id as string | null,
     user_assigned: source.user_assigned as boolean,
+    assignee_user_id: typeof source.assignee_user_id === "string" ? source.assignee_user_id : null,
     pending_actor: source.pending_actor,
     active_run_status: source.active_run_status as IssueProjection["active_run_status"],
     latest_run_status: source.latest_run_status as IssueProjection["latest_run_status"],
@@ -260,9 +262,9 @@ function cleanCommandPayload(operation: RemoteCommandOperation, value: unknown) 
   if (!value || typeof value !== "object" || Array.isArray(value) || (operation !== "project.create" && containsForbiddenKey(value))) throw new Error("invalid_command_payload");
   const source = value as Record<string, unknown>;
   const allowed = operation === "issue.create"
-    ? ["project_id", "title", "description", "status", "priority", "labels", "agent_enabled", "agent_id", "user_assigned", "files"]
+    ? ["project_id", "title", "description", "status", "priority", "labels", "agent_enabled", "agent_id", "user_assigned", "assignee_user_id", "ai_enrich", "files"]
     : operation === "issue.update"
-      ? ["project_id", "title", "description", "status", "priority", "labels", "sort_order", "pinned", "agent_enabled", "agent_id", "user_assigned", "files"]
+      ? ["project_id", "title", "description", "status", "priority", "labels", "sort_order", "pinned", "agent_enabled", "agent_id", "user_assigned", "assignee_user_id", "files"]
       : operation === "issue.start"
         ? ["project_id", "title", "description", "status", "priority", "labels", "agent_id"]
       : operation === "issue.reply" ? ["message", "files"]
@@ -301,6 +303,8 @@ function cleanCommandPayload(operation: RemoteCommandOperation, value: unknown) 
     payload.agent_id = agentId;
   }
   if (source.user_assigned !== undefined) payload.user_assigned = source.user_assigned === true;
+  if (source.assignee_user_id !== undefined) payload.assignee_user_id = source.assignee_user_id === null ? null : cleanString(source.assignee_user_id, 200);
+  if (source.ai_enrich !== undefined) payload.ai_enrich = source.ai_enrich === true;
   if (source.enabled !== undefined) payload.enabled = source.enabled === true;
   if (source.before_id !== undefined) payload.before_id = cleanString(source.before_id, 200);
   if (source.message !== undefined) payload.message = cleanString(source.message, operation === "project.planning.reply" ? 12_000 : 100_000, false).trim();
@@ -415,8 +419,19 @@ export class HubStore {
         created_at TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS hub_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS web_users (
+        id TEXT PRIMARY KEY,
+        username TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        nickname TEXT NOT NULL,
+        avatar TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        disabled_at TEXT
+      );
       CREATE TABLE IF NOT EXISTS web_sessions (
         token_hash TEXT PRIMARY KEY,
+        user_id TEXT REFERENCES web_users(id) ON DELETE CASCADE,
         csrf_token TEXT NOT NULL,
         created_at TEXT NOT NULL,
         expires_at TEXT NOT NULL,
@@ -512,6 +527,27 @@ export class HubStore {
         throw error;
       }
     }
+    const userVersion = Number((this.db.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM hub_migrations").get() as { version: number }).version);
+    if (userVersion < 8) {
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        const columns = this.db.prepare("PRAGMA table_info(web_sessions)").all() as Array<{ name: string }>;
+        if (!columns.some(column => column.name === "user_id")) this.db.exec("ALTER TABLE web_sessions ADD COLUMN user_id TEXT REFERENCES web_users(id) ON DELETE CASCADE");
+        const legacyUsername = this.db.prepare("SELECT value FROM hub_settings WHERE key = 'web_username'").get() as { value: string } | undefined;
+        const legacyPassword = this.db.prepare("SELECT value FROM hub_settings WHERE key = 'web_password_hash'").get() as { value: string } | undefined;
+        if (legacyUsername?.value && legacyPassword?.value) {
+          const timestamp = now();
+          this.db.prepare("INSERT OR IGNORE INTO web_users (id, username, password_hash, nickname, avatar, created_at, updated_at) VALUES (?, ?, ?, ?, '', ?, ?)")
+            .run(randomUUID(), legacyUsername.value, legacyPassword.value, legacyUsername.value, timestamp, timestamp);
+        }
+        this.db.exec("DELETE FROM web_sessions");
+        this.db.prepare("INSERT INTO hub_migrations (version, applied_at) VALUES (8, ?)").run(now());
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    }
   }
 
   close() {
@@ -532,48 +568,92 @@ export class HubStore {
     return this.db.prepare("SELECT seq, actor, event, detail, created_at FROM hub_audit ORDER BY seq DESC LIMIT ?").all(Math.min(Math.max(Math.trunc(limit), 1), 1000));
   }
 
-  webPasswordHash() {
-    const row = this.db.prepare("SELECT value FROM hub_settings WHERE key = 'web_password_hash'").get() as { value: string } | undefined;
-    return row?.value ?? null;
+  private webUserFromRow(row: Record<string, unknown>) {
+    const nickname = String(row.nickname || row.username || "");
+    return {
+      id: String(row.id),
+      username: String(row.username),
+      nickname,
+      avatar: String(row.avatar || ""),
+      initials: Array.from(nickname.replace(/\s+/g, "")).slice(0, 2).join("") || "?",
+      disabled: Boolean(row.disabled_at),
+      created_at: String(row.created_at),
+      updated_at: String(row.updated_at),
+    };
   }
 
-  webUsername() {
-    const row = this.db.prepare("SELECT value FROM hub_settings WHERE key = 'web_username'").get() as { value: string } | undefined;
-    return row?.value ?? null;
+  webUserCredentials(username: string) {
+    const row = this.db.prepare("SELECT * FROM web_users WHERE username = ? COLLATE NOCASE AND disabled_at IS NULL").get(username) as Record<string, unknown> | undefined;
+    return row ? { ...this.webUserFromRow(row), password_hash: String(row.password_hash) } : null;
   }
 
-  setWebCredentials(username: string, encoded: string) {
+  webUser(id: string) {
+    const row = this.db.prepare("SELECT * FROM web_users WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+    return row ? this.webUserFromRow(row) : null;
+  }
+
+  listWebUsers() {
+    return (this.db.prepare("SELECT * FROM web_users ORDER BY disabled_at IS NOT NULL, nickname COLLATE NOCASE, username COLLATE NOCASE").all() as Record<string, unknown>[]).map(row => this.webUserFromRow(row));
+  }
+
+  defaultWebUser() {
+    const row = this.db.prepare("SELECT * FROM web_users WHERE disabled_at IS NULL ORDER BY created_at, rowid LIMIT 1").get() as Record<string, unknown> | undefined;
+    return row ? this.webUserFromRow(row) : null;
+  }
+
+  createWebUser(username: string, encoded: string) {
     if (!encoded.startsWith("scrypt$") || !username) throw new Error("hub_web_credentials_invalid");
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
-      const timestamp = now();
-      this.db.prepare("INSERT INTO hub_settings (key, value, updated_at) VALUES ('web_username', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at").run(username, timestamp);
-      this.db.prepare("INSERT INTO hub_settings (key, value, updated_at) VALUES ('web_password_hash', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at").run(encoded, timestamp);
-      this.db.exec("DELETE FROM web_sessions");
-      this.audit("admin", "web_credentials_rotated");
-      this.db.exec("COMMIT");
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
+    const id = randomUUID();
+    const timestamp = now();
+    this.db.prepare("INSERT INTO web_users (id, username, password_hash, nickname, avatar, created_at, updated_at) VALUES (?, ?, ?, ?, '', ?, ?)")
+      .run(id, username, encoded, username, timestamp, timestamp);
+    this.audit(id, "web_user_created");
+    return this.webUser(id)!;
   }
 
-  setWebPasswordHash(encoded: string) {
-    this.setWebCredentials(this.webUsername() || "admin", encoded);
+  setWebUserPassword(username: string, encoded: string) {
+    if (!encoded.startsWith("scrypt$") || !username) throw new Error("hub_web_credentials_invalid");
+    const user = this.webUserCredentials(username) || this.listWebUsers().find(item => item.username.toLowerCase() === username.toLowerCase());
+    if (!user) throw new Error("web_user_not_found");
+    this.db.prepare("UPDATE web_users SET password_hash = ?, updated_at = ? WHERE id = ?").run(encoded, now(), user.id);
+    this.db.prepare("DELETE FROM web_sessions WHERE user_id = ?").run(user.id);
+    this.audit(user.id, "web_password_rotated");
+    return this.webUser(user.id)!;
   }
 
   ensureWebCredentials(username: string, encoded: string) {
-    if (!this.webPasswordHash() || !this.webUsername()) this.setWebCredentials(username, encoded);
+    const count = this.db.prepare("SELECT COUNT(*) AS value FROM web_users").get() as { value: number };
+    if (Number(count.value) === 0) this.createWebUser(username, encoded);
   }
 
-  createWebSession() {
+  setWebUserDisabled(username: string, disabled: boolean) {
+    const row = this.db.prepare("SELECT id FROM web_users WHERE username = ? COLLATE NOCASE").get(username) as { id: string } | undefined;
+    if (!row) throw new Error("web_user_not_found");
+    this.db.prepare("UPDATE web_users SET disabled_at = ?, updated_at = ? WHERE id = ?").run(disabled ? now() : null, now(), row.id);
+    if (disabled) this.db.prepare("DELETE FROM web_sessions WHERE user_id = ?").run(row.id);
+    this.audit(row.id, disabled ? "web_user_disabled" : "web_user_enabled");
+    return this.webUser(row.id)!;
+  }
+
+  setWebUserProfile(id: string, nicknameValue: unknown, avatarValue: unknown) {
+    const nickname = cleanString(nicknameValue, 80, false).replace(/\s+/g, " ").trim();
+    const avatar = cleanAvatar(avatarValue);
+    const result = this.db.prepare("UPDATE web_users SET nickname = ?, avatar = ?, updated_at = ? WHERE id = ? AND disabled_at IS NULL").run(nickname, avatar, now(), id);
+    if (Number(result.changes) !== 1) throw new Error("web_user_not_found");
+    this.audit(id, "web_profile_updated");
+    return this.webUser(id)!;
+  }
+
+  createWebSession(userId: string) {
+    const user = this.webUser(userId);
+    if (!user || user.disabled) throw new Error("web_user_not_found");
     const token = randomBytes(32).toString("base64url");
     const csrf_token = randomBytes(32).toString("base64url");
     const created_at = now();
     const expires_at = after(webSessionIdleLifetimeMilliseconds);
-    this.db.prepare("INSERT INTO web_sessions (token_hash, csrf_token, created_at, expires_at, last_seen_at) VALUES (?, ?, ?, ?, ?)").run(tokenHash(token), csrf_token, created_at, expires_at, created_at);
-    this.audit("browser", "web_session_created");
-    return { token, csrf_token, expires_at };
+    this.db.prepare("INSERT INTO web_sessions (token_hash, user_id, csrf_token, created_at, expires_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?)").run(tokenHash(token), userId, csrf_token, created_at, expires_at, created_at);
+    this.audit(userId, "web_session_created");
+    return { token, csrf_token, expires_at, user };
   }
 
   webSession(token: string) {
@@ -581,11 +661,12 @@ export class HubStore {
     const timestampMilliseconds = Date.now();
     const timestamp = new Date(timestampMilliseconds).toISOString();
     this.db.prepare("DELETE FROM web_sessions WHERE expires_at <= ?").run(timestamp);
-    const row = this.db.prepare("SELECT csrf_token, created_at, expires_at, last_seen_at FROM web_sessions WHERE token_hash = ? AND expires_at > ?").get(tokenHash(token), timestamp) as { csrf_token: string; created_at: string; expires_at: string; last_seen_at: string } | undefined;
+    const row = this.db.prepare("SELECT web_sessions.user_id, web_sessions.csrf_token, web_sessions.created_at, web_sessions.expires_at, web_sessions.last_seen_at FROM web_sessions JOIN web_users ON web_users.id = web_sessions.user_id WHERE web_sessions.token_hash = ? AND web_sessions.expires_at > ? AND web_users.disabled_at IS NULL").get(tokenHash(token), timestamp) as { user_id: string; csrf_token: string; created_at: string; expires_at: string; last_seen_at: string } | undefined;
     if (!row) return null;
     const expires_at = new Date(Math.min(timestampMilliseconds + webSessionIdleLifetimeMilliseconds, Date.parse(row.created_at) + webSessionMaximumLifetimeMilliseconds)).toISOString();
     this.db.prepare("UPDATE web_sessions SET expires_at = ?, last_seen_at = ? WHERE token_hash = ?").run(expires_at, timestamp, tokenHash(token));
-    return { csrf_token: row.csrf_token, expires_at };
+    const user = this.webUser(row.user_id);
+    return user ? { csrf_token: row.csrf_token, expires_at, user } : null;
   }
 
   setReadOnly(readOnly: boolean) {
@@ -1016,9 +1097,9 @@ export class HubStore {
           id: command.entity_id,
           identifier: `PENDING-${command.entity_id.slice(0, 8).toUpperCase()}`,
           project_id: String(command.payload.project_id),
-          title: String(command.payload.title),
+          title: command.payload.ai_enrich === true ? "正在理解任务" : String(command.payload.title),
           description: String(command.payload.description || ""),
-          status: command.payload.status as IssueProjection["status"] || "todo",
+          status: command.payload.ai_enrich === true ? "backlog" : command.payload.status as IssueProjection["status"] || "todo",
           priority: command.payload.priority as IssueProjection["priority"] || "medium",
           labels: command.payload.labels as string[] || [],
           sort_order: Number.MAX_SAFE_INTEGER,
@@ -1028,6 +1109,7 @@ export class HubStore {
           agent_enabled: command.payload.agent_enabled === true,
           agent_id: typeof command.payload.agent_id === "string" && command.payload.agent_id ? command.payload.agent_id : null,
           user_assigned: command.payload.user_assigned === true,
+          assignee_user_id: typeof command.payload.assignee_user_id === "string" && command.payload.assignee_user_id ? command.payload.assignee_user_id : null,
           pending_actor: command.payload.agent_enabled === true ? "agent" : "user",
           active_run_status: null,
           latest_run_status: null,
@@ -1046,7 +1128,7 @@ export class HubStore {
       if (!issue) continue;
       if (["pending", "dispatched"].includes(command.status) && ["issue.update", "issue.move", "issue.start"].includes(command.operation)) {
         Object.assign(issue, command.payload, { updated_at: command.requested_at });
-        if (command.operation === "issue.start") Object.assign(issue, { agent_enabled: true, user_assigned: false, pending_actor: "agent", assigned: true });
+        if (command.operation === "issue.start") Object.assign(issue, { agent_enabled: true, user_assigned: false, assignee_user_id: null, pending_actor: "agent", assigned: true });
       }
       Object.assign(issue, { remote_state: { command_id: command.command_id, status: command.status, operation: command.operation, error: command.error } });
     }

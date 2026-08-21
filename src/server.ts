@@ -623,6 +623,7 @@ function parseIssuePatch(body: Record<string, unknown>) {
     if (typeof body.user_assigned !== "boolean") throw new Error("invalid_user_assigned");
     patch.user_assigned = body.user_assigned;
   }
+  if ("assignee_user_id" in body) patch.assignee_user_id = body.assignee_user_id === null ? null : cleanString(body.assignee_user_id, 200) || null;
   if ("needs_attention" in body) {
     if (typeof body.needs_attention !== "boolean") throw new Error("invalid_needs_attention");
     patch.needs_attention = body.needs_attention;
@@ -702,14 +703,9 @@ export function startServer() {
       if (command.operation === "issue.start") worker.startIssue(command.entity_id);
       if (["issue.archive", "issue.restore", "issue.delete"].includes(command.operation)) worker.wake();
       if (command.operation === "settings.auto-dispatch" && command.payload.enabled === true) worker.wake();
-      if (command.operation === "issue.create" && command.payload.agent_enabled === true && command.payload.user_assigned !== true) {
+      if (command.operation === "issue.create" && command.payload.ai_enrich === true) {
         const issue = store.getIssue(command.entity_id);
-        const description = issue?.description.trim() || "";
-        const generatedPlaceholder = description.split(/\n/).find(line => line.trim())?.replace(/^[#*\s-]+/, "").trim().slice(0, 120) || "";
-        if (issue && description && issue.title === generatedPlaceholder) {
-          const pending = store.updateIssue(issue.id, issue.version, { status: "backlog", enrichment_status: "pending" });
-          worker.enrichIssue(pending, pending.description, pending.agent_id || "");
-        }
+        if (issue?.description.trim() && issue.enrichment_status === "pending") worker.enrichIssue(issue, issue.description, issue.agent_id || "");
       }
     },
     async issueId => {
@@ -1697,7 +1693,8 @@ export function startServer() {
         const requestId = cleanString(body.request_id, 200);
         if ("ai_enrich" in body && typeof body.ai_enrich !== "boolean") throw new Error("invalid_ai_enrich");
         const aiEnrich = body.ai_enrich === true;
-        const agentEnabled = body.agent_enabled === true || aiEnrich;
+        const userAssigned = body.user_assigned === true;
+        const agentEnabled = (body.agent_enabled === true || aiEnrich) && !userAssigned;
         if ("thread_id" in body) throw new Error("issue_session_binding_disabled");
         let workspacePath = cleanString(body.workspace_path, 4096);
         const project = store.getProject(projectId);
@@ -1722,7 +1719,7 @@ export function startServer() {
             workspacePath,
             agentEnabled,
             agentId,
-            userAssigned: body.user_assigned === true,
+            userAssigned,
             enrichmentStatus: aiEnrich ? "pending" : null,
           }, requestId);
         } catch (error) {

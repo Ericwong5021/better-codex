@@ -1,9 +1,9 @@
 import type { IssuePriority, IssueReplyStatus, IssueSessionStatus, IssueStatus } from "./db.js";
 import type { ConversationMessage } from "./session-transcript.js";
 
-export const legacySyncProtocolVersion = "sync/v7" as const;
-export const previousSyncProtocolVersion = "sync/v8" as const;
-export const syncProtocolVersion = "sync/v9" as const;
+export const legacySyncProtocolVersion = "sync/v8" as const;
+export const previousSyncProtocolVersion = "sync/v9" as const;
+export const syncProtocolVersion = "sync/v10" as const;
 export const supportedSyncProtocolVersions = [syncProtocolVersion, previousSyncProtocolVersion, legacySyncProtocolVersion] as const;
 export type SyncProtocolVersion = typeof supportedSyncProtocolVersions[number];
 export const syncEntityTypes = ["project", "issue", "agent_directory"] as const;
@@ -123,6 +123,7 @@ export type IssueProjection = {
   agent_enabled: boolean;
   agent_id: string | null;
   user_assigned: boolean;
+  assignee_user_id: string | null;
   pending_actor: "user" | "agent";
   active_run_status: "claimed" | "running" | "scheduling" | null;
   latest_run_status: "claimed" | "running" | "scheduling" | "completed" | "failed" | "interrupted" | null;

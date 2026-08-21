@@ -139,6 +139,7 @@ export type Issue = {
   agent_enabled: boolean;
   agent_id: string | null;
   user_assigned: boolean;
+  assignee_user_id: string | null;
   needs_attention: boolean;
   pending_actor: PendingActor;
   enrichment_status: EnrichmentStatus;
@@ -273,11 +274,12 @@ type IssueInput = {
   agentEnabled?: boolean;
   agentId?: string;
   userAssigned?: boolean;
+  assigneeUserId?: string;
   enrichmentStatus?: EnrichmentStatus;
   session?: ImportedSessionInput;
 };
 
-export type IssuePatch = Partial<Pick<Issue, "project_id" | "title" | "description" | "status" | "priority" | "labels" | "sort_order" | "pinned" | "thread_id" | "workspace_path" | "agent_enabled" | "agent_id" | "user_assigned" | "needs_attention" | "pending_actor" | "enrichment_status" | "reply_draft">>;
+export type IssuePatch = Partial<Pick<Issue, "project_id" | "title" | "description" | "status" | "priority" | "labels" | "sort_order" | "pinned" | "thread_id" | "workspace_path" | "agent_enabled" | "agent_id" | "user_assigned" | "assignee_user_id" | "needs_attention" | "pending_actor" | "enrichment_status" | "reply_draft">>;
 
 type AgentProfileInput = Pick<AgentProfile, "name" | "name_en" | "description" | "instructions" | "model" | "reasoning_effort"> & { service_tier?: AgentServiceTier; sandbox_mode?: AgentSandboxMode; max_concurrency?: number };
 type AgentProfilePatch = Partial<AgentProfileInput>;
@@ -1061,7 +1063,7 @@ export class Store {
       CREATE TRIGGER sync_project_update AFTER UPDATE OF name, identifier_prefix, workspace_path, root_paths_json, description, overview_html, overview_status, overview_error, overview_updated_at, project_documents_json, document_agent_id, document_feedback ON projects BEGIN ${dirty("project", "NEW.id")} END;
       CREATE TRIGGER sync_project_delete AFTER DELETE ON projects BEGIN ${removed("project", "OLD.id")} END;
       CREATE TRIGGER sync_issue_insert AFTER INSERT ON issues BEGIN ${dirty("issue", "NEW.id")} END;
-      CREATE TRIGGER sync_issue_update AFTER UPDATE OF project_id, title, description, status, priority, labels_json, sort_order, pinned, archived_at, agent_id, agent_enabled, user_assigned, needs_attention, pending_actor ON issues BEGIN ${dirty("issue", "NEW.id")} END;
+      CREATE TRIGGER sync_issue_update AFTER UPDATE OF project_id, title, description, status, priority, labels_json, sort_order, pinned, archived_at, agent_id, agent_enabled, user_assigned, assignee_user_id, needs_attention, pending_actor ON issues BEGIN ${dirty("issue", "NEW.id")} END;
       CREATE TRIGGER sync_issue_delete AFTER DELETE ON issues BEGIN ${removed("issue", "OLD.id")} END;
       CREATE TRIGGER sync_run_insert AFTER INSERT ON issue_runs BEGIN ${dirty("issue", "NEW.issue_id")} END;
       CREATE TRIGGER sync_run_update AFTER UPDATE OF status, scheduler_status, thread_id ON issue_runs BEGIN ${dirty("issue", "NEW.issue_id")} END;
@@ -1080,7 +1082,9 @@ export class Store {
     if (!columns.has("agent_enabled")) this.db.exec("ALTER TABLE issues ADD COLUMN agent_enabled INTEGER NOT NULL DEFAULT 0");
     if (!columns.has("agent_id")) this.db.exec("ALTER TABLE issues ADD COLUMN agent_id TEXT");
     if (!columns.has("user_assigned")) this.db.exec("ALTER TABLE issues ADD COLUMN user_assigned INTEGER NOT NULL DEFAULT 0");
+    if (!columns.has("assignee_user_id")) this.db.exec("ALTER TABLE issues ADD COLUMN assignee_user_id TEXT");
     this.db.exec("CREATE INDEX IF NOT EXISTS issues_agent_id ON issues(agent_id)");
+    this.db.exec("CREATE INDEX IF NOT EXISTS issues_assignee_user_id ON issues(assignee_user_id)");
   }
 
   private ensureDispatchColumns() {
@@ -1450,6 +1454,7 @@ export class Store {
       agent_enabled: issue.agent_enabled,
       agent_id: issue.agent_id,
       user_assigned: issue.user_assigned,
+      assignee_user_id: issue.assignee_user_id,
       pending_actor: issue.pending_actor,
       active_run_status: issue.active_run_status ?? null,
       latest_run_status: issue.latest_run_status ?? null,
@@ -1543,6 +1548,8 @@ export class Store {
             agentEnabled: payload.agent_enabled === true,
             agentId: typeof payload.agent_id === "string" ? payload.agent_id : undefined,
             userAssigned: payload.user_assigned === true,
+            assigneeUserId: typeof payload.assignee_user_id === "string" ? payload.assignee_user_id : undefined,
+            enrichmentStatus: payload.ai_enrich === true ? "pending" : null,
           });
         } else {
           const current = this.getIssue(command.entity_id);
@@ -1591,6 +1598,7 @@ export class Store {
               if (payload.agent_enabled !== undefined) patch.agent_enabled = Boolean(payload.agent_enabled);
               if (payload.agent_id !== undefined) patch.agent_id = String(payload.agent_id) || null;
               if (payload.user_assigned !== undefined) patch.user_assigned = Boolean(payload.user_assigned);
+              if (payload.assignee_user_id !== undefined) patch.assignee_user_id = typeof payload.assignee_user_id === "string" ? payload.assignee_user_id || null : null;
               if (command.operation === "issue.start") {
                 patch.agent_enabled = true;
                 patch.user_assigned = false;
@@ -2488,6 +2496,8 @@ export class Store {
     if (input.priority && !issuePriorities.includes(input.priority)) throw new Error("invalid_priority");
     const importedSession = input.session;
     const userAssigned = Boolean(input.userAssigned) && !Boolean(input.agentEnabled) && !importedSession;
+    const assigneeUserId = userAssigned ? String(input.assigneeUserId || "").trim() || null : null;
+    if (assigneeUserId && (assigneeUserId.length > 200 || assigneeUserId.includes("\0"))) throw new Error("invalid_assignee_user_id");
     const agentId = input.agentEnabled && input.agentId ? input.agentId : null;
     if (agentId && !this.getAgentProfile(agentId)) throw new Error("agent_not_found");
     const agentEnabled = (Boolean(input.agentEnabled) || Boolean(importedSession)) && !userAssigned;
@@ -2523,9 +2533,9 @@ export class Store {
       this.db.prepare(`
         INSERT INTO issues (
           id, identifier, project_id, title, description, status, priority, labels_json,
-          sort_order, pinned, archived_at, thread_id, workspace_path, agent_enabled, agent_id, user_assigned,
+          sort_order, pinned, archived_at, thread_id, workspace_path, agent_enabled, agent_id, user_assigned, assignee_user_id,
            needs_attention, pending_actor, enrichment_status, version, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
       `).run(
         id,
         identifier,
@@ -2541,6 +2551,7 @@ export class Store {
         Number(agentEnabled),
         agentId,
         Number(userAssigned),
+        assigneeUserId,
         needsAttention,
         pendingActor,
         enrichmentStatus,
@@ -2572,6 +2583,7 @@ export class Store {
     if (patch.sort_order !== undefined && !Number.isFinite(patch.sort_order)) throw new Error("invalid_sort_order");
     if (patch.agent_id && !this.getAgentProfile(patch.agent_id)) throw new Error("agent_not_found");
     if (patch.pending_actor !== undefined) patch.pending_actor = asPendingActor(patch.pending_actor);
+    if (patch.assignee_user_id !== undefined && patch.assignee_user_id !== null && (patch.assignee_user_id.length > 200 || patch.assignee_user_id.includes("\0"))) throw new Error("invalid_assignee_user_id");
     if (patch.needs_attention !== undefined) patch.needs_attention = Boolean(patch.needs_attention);
     this.db.exec("BEGIN IMMEDIATE");
     try {
@@ -2587,12 +2599,14 @@ export class Store {
         patch.agent_id = null;
         if (patch.pending_actor === undefined) patch.pending_actor = "user";
       }
+      if (patch.user_assigned === false) patch.assignee_user_id = null;
       if (patch.agent_enabled === false) {
         patch.agent_id = null;
         if (patch.pending_actor === undefined) patch.pending_actor = "user";
       }
       if (patch.agent_enabled === true) {
         patch.user_assigned = false;
+        patch.assignee_user_id = null;
         if (patch.pending_actor === undefined) patch.pending_actor = "agent";
       }
       if (patch.status === "done") {
@@ -2632,6 +2646,7 @@ export class Store {
         agent_enabled: "agent_enabled",
         agent_id: "agent_id",
         user_assigned: "user_assigned",
+        assignee_user_id: "assignee_user_id",
         needs_attention: "needs_attention",
         pending_actor: "pending_actor",
         enrichment_status: "enrichment_status",
@@ -2645,7 +2660,7 @@ export class Store {
         values.push(
           key === "labels" ? JSON.stringify(value)
             : key === "pinned" || key === "agent_enabled" || key === "user_assigned" || key === "needs_attention" ? Number(value)
-              : key === "thread_id" || key === "workspace_path" || key === "agent_id" || key === "enrichment_status" ? value || null
+              : key === "thread_id" || key === "workspace_path" || key === "agent_id" || key === "assignee_user_id" || key === "enrichment_status" ? value || null
                 : value,
         );
       }
