@@ -307,6 +307,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     previous?.destroy?.();
 
     const ENTRY_ID = "better-codex-entry";
+    const SCHEDULED_ENTRY_ID = "better-codex-scheduled-entry";
     const AGENTS_ENTRY_ID = "better-codex-agents-entry";
     const PROJECTS_ENTRY_ID = "better-codex-projects-entry";
     const MORE_ENTRY_ID = "better-codex-more-entry";
@@ -391,10 +392,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const systemLocale = resolveSystemLocale(INITIAL_LOCALE);
     const MOCKUP_PROJECT_ID = "mockup-better-codex";
     const hasFeature = feature => ENABLED_FEATURES.has(feature);
-    const availableSurfaces = ["issues", "agents", ...(hasFeature("project-management") ? ["projects"] : [])];
+    const availableSurfaces = ["issues", ...(!REMOTE ? ["scheduled"] : []), "agents", ...(hasFeature("project-management") ? ["projects"] : [])];
     const initialProjectRoute = hasFeature("project-management") ? webProjectRoute() : null;
     if (HOST_KIND === "web" && !hasFeature("project-management") && /^\\/web\\/projects(?:\\/|$)/.test(location.pathname)) history.replaceState({ betterCodex: true, betterCodexSurface: "issues" }, "", "/web");
-    const state = { projects: [], projectsLoaded: false, issues: [], issuesLoaded: false, projectIssues: [], projectIssuesProjectId: "", projectDetailId: initialProjectRoute?.projectId || "", projectPage: "overview", projectDocumentView: "charter", projectDocumentPending: null, projectDocumentError: null, projectPlanningPending: null, projectPlanningError: null, agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: initialProjectRoute ? "projects" : availableSurfaces.includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, autoDispatchPending: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", issueDescriptionLimit: 100000, mockup: false, keepCreate: rememberedKeepCreate, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], project: [], label: [] } };
+    const state = { projects: [], projectsLoaded: false, issues: [], issuesLoaded: false, scheduledTasks: [], scheduledTasksLoaded: false, projectIssues: [], projectIssuesProjectId: "", projectDetailId: initialProjectRoute?.projectId || "", projectPage: "overview", projectDocumentView: "charter", projectDocumentPending: null, projectDocumentError: null, projectPlanningPending: null, projectPlanningError: null, agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: initialProjectRoute ? "projects" : availableSurfaces.includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, autoDispatchPending: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", issueDescriptionLimit: 100000, mockup: false, keepCreate: rememberedKeepCreate, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], project: [], label: [] } };
     const pendingIssueRemovals = new Map();
     const projectPlanningDrafts = new Map();
     function webProjectRoute() {
@@ -859,6 +860,74 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "任务内容超过长度限制，请缩短内容或作为附件上传。": "The task content is too long. Shorten it or upload it as an attachment.",
       "网络连接不稳定，正在等待恢复。": "The network connection is unstable. Waiting to reconnect.",
     });
+    Object.assign(localeResources["zh-CN"], {
+      invalid_scheduled_task_name: "请输入定时任务名称",
+      invalid_scheduled_task_prompt: "请输入任务内容",
+      invalid_scheduled_task_time: "请选择有效的执行时间",
+      invalid_scheduled_task_interval: "请输入有效的循环间隔",
+      invalid_scheduled_task_repeat: "循环状态无效",
+      invalid_scheduled_task_enabled: "启用状态无效",
+      scheduled_task_not_found: "定时任务不存在",
+      scheduled_task_running: "这个任务已有一次执行正在进行",
+      workspace_invalid: "项目文件夹不可用",
+    });
+    Object.assign(localeResources.en, {
+      "定时任务": "Scheduled",
+      "管理定时任务": "Manage scheduled tasks",
+      "新建定时任务": "New scheduled task",
+      "编辑定时任务": "Edit scheduled task",
+      "正在加载定时任务": "Loading scheduled tasks",
+      "还没有定时任务": "No scheduled tasks yet",
+      "设置执行时间和循环间隔，Better Codex 会按计划创建任务并交给智能体执行。": "Choose a start time and recurrence. Better Codex will create a task and hand it to an agent on schedule.",
+      "按计划创建独立任务并交给智能体执行": "Create an independent task on schedule and hand it to an agent",
+      "例如：每天整理项目进展": "For example: Summarize project progress every day",
+      "任务内容": "Task instructions",
+      "说明每次需要完成的具体任务": "Describe exactly what each run should complete",
+      "执行智能体": "Agent",
+      "默认智能体": "Default agent",
+      "使用智能体当前的模型、推理和权限设置": "Uses the agent's current model, reasoning, and permission settings",
+      "首次执行": "First run",
+      "循环执行": "Repeat",
+      "按固定间隔持续执行这个任务": "Continue running this task at a fixed interval",
+      "每隔": "Every",
+      "单位": "Unit",
+      "分钟": "Minutes",
+      "小时": "Hours",
+      "天": "Days",
+      "周": "Weeks",
+      "立即启用": "Enable now",
+      "关闭后会保存为已暂停状态": "Turn this off to save the task as paused",
+      "执行一次": "Run once",
+      "个任务": "tasks",
+      "已启用": "Active",
+      "已暂停": "Paused",
+      "执行中": "Running",
+      "等待执行": "Waiting",
+      "暂停": "Pause",
+      "启用": "Enable",
+      "立即运行": "Run now",
+      "最近运行": "Recent runs",
+      "尚未运行": "No runs yet",
+      "尚未创建任务": "Task not created yet",
+      "查看任务": "View task",
+      "下次执行": "Next run",
+      "当前计划": "Schedule",
+      "暂无下次执行": "No next run",
+      "暂无已启用的计划": "No active schedules",
+      "创建或启用一个定时任务": "Create or enable a scheduled task",
+      "删除定时任务": "Delete scheduled task",
+      "删除后不会影响已经创建或正在执行的任务。": "Deleting this schedule will not affect tasks that were already created or are running.",
+      "未知项目": "Unknown project",
+      invalid_scheduled_task_name: "Enter a scheduled task name",
+      invalid_scheduled_task_prompt: "Enter task instructions",
+      invalid_scheduled_task_time: "Choose a valid start time",
+      invalid_scheduled_task_interval: "Enter a valid recurrence interval",
+      invalid_scheduled_task_repeat: "The recurrence state is invalid",
+      invalid_scheduled_task_enabled: "The enabled state is invalid",
+      scheduled_task_not_found: "Scheduled task not found",
+      scheduled_task_running: "A run for this task is already in progress",
+      workspace_invalid: "The project folder is unavailable",
+    });
     const bridgeRequests = new Map();
     const appServerRequests = new Map();
     const sessionHandoffPending = new Set();
@@ -872,6 +941,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     let errorQueueIndex = 0;
     let errorDialog = null;
     let entry = null;
+    let scheduledEntry = null;
     let agentsEntry = null;
     let projectsEntry = null;
     let auxiliaryNavigation = null;
@@ -1104,9 +1174,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       style.id = STYLE_ID;
       style.setAttribute(OWNED, "true");
       style.textContent = \`
-        #\${ENTRY_ID}[aria-current="page"], #\${AGENTS_ENTRY_ID}[aria-current="page"], #\${PROJECTS_ENTRY_ID}[aria-current="page"], #\${MORE_ENTRY_ID}[aria-current="page"] { background: var(--color-background-primary-soft-active, var(--color-token-list-hover-background, color-mix(in srgb, currentColor 8%, transparent))); }
-        html[data-better-codex-open="true"] \${SELECTORS.sidebarNavigation} [aria-current="page"]:not(#\${ENTRY_ID}):not(#\${AGENTS_ENTRY_ID}):not(#\${PROJECTS_ENTRY_ID}):not(#\${MORE_ENTRY_ID}) { background: transparent !important; }
-        html[data-better-codex-open="true"] \${SELECTORS.sidebarNavigation} [aria-current="page"]:not(#\${ENTRY_ID}):not(#\${AGENTS_ENTRY_ID}):not(#\${PROJECTS_ENTRY_ID}):not(#\${MORE_ENTRY_ID}) .text-token-list-active-selection-foreground { color: var(--color-token-foreground) !important; }
+        #\${ENTRY_ID}[aria-current="page"], #\${SCHEDULED_ENTRY_ID}[aria-current="page"], #\${AGENTS_ENTRY_ID}[aria-current="page"], #\${PROJECTS_ENTRY_ID}[aria-current="page"], #\${MORE_ENTRY_ID}[aria-current="page"] { background: var(--color-background-primary-soft-active, var(--color-token-list-hover-background, color-mix(in srgb, currentColor 8%, transparent))); }
+        html[data-better-codex-open="true"] \${SELECTORS.sidebarNavigation} [aria-current="page"]:not(#\${ENTRY_ID}):not(#\${SCHEDULED_ENTRY_ID}):not(#\${AGENTS_ENTRY_ID}):not(#\${PROJECTS_ENTRY_ID}):not(#\${MORE_ENTRY_ID}) { background: transparent !important; }
+        html[data-better-codex-open="true"] \${SELECTORS.sidebarNavigation} [aria-current="page"]:not(#\${ENTRY_ID}):not(#\${SCHEDULED_ENTRY_ID}):not(#\${AGENTS_ENTRY_ID}):not(#\${PROJECTS_ENTRY_ID}):not(#\${MORE_ENTRY_ID}) .text-token-list-active-selection-foreground { color: var(--color-token-foreground) !important; }
         [\${HOST}="true"] { position: relative !important; z-index: 31 !important; pointer-events: none !important; }
         [\${HIDDEN}="true"] { visibility: hidden !important; pointer-events: none !important; }
         html { --bc-page: oklch(.988087 0 0); --bc-surface: oklch(1 0 0); --bc-raised: oklch(1 0 0); --bc-hover: oklch(.967 .001 286.375); --bc-selected: oklch(.95 .002 286.375); --bc-foreground: oklch(.141 .005 285.823); --bc-muted: oklch(.505 .016 285.938); --bc-faint: oklch(.606 .016 285.938); --bc-border: oklch(.92 .004 286.32); --bc-divider: oklch(.945 .003 286.32); --bc-input: oklch(.92 .004 286.32); --bc-ring: oklch(.705 .015 286.067); --bc-primary: oklch(.21 .006 285.885); --bc-primary-foreground: oklch(.985 0 0); --bc-warning: oklch(.75 .16 85); --bc-success: oklch(.55 .16 145); --bc-info: oklch(.55 .18 250); --bc-danger: oklch(.577 .245 27.325); --bc-priority-none: oklch(.62 .01 286); --bc-priority-low: oklch(.55 .1 250); --bc-priority-medium: oklch(.76 .15 95); --bc-priority-high: oklch(.68 .18 52); --bc-priority-urgent: var(--bc-danger); --bc-surface-shadow: 0 1px 2px rgb(15 23 42 / .04),0 1px 1px rgb(15 23 42 / .03); --bc-card-shadow: 0 1px 3px rgb(15 23 42 / .10); --bc-floating-shadow: 0 16px 40px rgb(15 23 42 / .14),0 3px 10px rgb(15 23 42 / .08); --bc-menu-shadow: 0 8px 24px rgb(15 23 42 / .08),0 2px 6px rgb(15 23 42 / .05); --bc-scrim: rgb(24 24 27 / .22); color-scheme: light; }
@@ -1286,6 +1356,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #\${PANEL_ID}[data-surface="projects"] .better-codex-project-heading, #\${PANEL_ID}[data-surface="projects"] .better-codex-project-actions { display: flex; }
         #\${PANEL_ID} .better-codex-projects { display: none; min-height: 0; flex: 1; overflow-y: auto; padding: 18px 22px 32px; }
         #\${PANEL_ID}[data-surface="projects"] .better-codex-projects { display: block; }
+        #\${PANEL_ID} .better-codex-scheduled-heading, #\${PANEL_ID} .better-codex-scheduled-actions { display: none; align-items: center; gap: 8px; }
+        #\${PANEL_ID} .better-codex-scheduled-heading strong { font-size: var(--bc-text-md); font-weight: 650; }
+        #\${PANEL_ID} .better-codex-scheduled-heading span { color: var(--bc-muted); font-size: var(--bc-text-sm); }
+        #\${PANEL_ID}[data-surface="scheduled"] .better-codex-issue-only, #\${PANEL_ID}[data-surface="scheduled"] .better-codex-agent-heading, #\${PANEL_ID}[data-surface="scheduled"] .better-codex-agent-actions, #\${PANEL_ID}[data-surface="scheduled"] .better-codex-project-heading, #\${PANEL_ID}[data-surface="scheduled"] .better-codex-project-actions { display: none; }
+        #\${PANEL_ID}[data-surface="scheduled"] .better-codex-scheduled-heading, #\${PANEL_ID}[data-surface="scheduled"] .better-codex-scheduled-actions { display: flex; }
+        #\${PANEL_ID} .better-codex-scheduled { display: none; min-height: 0; flex: 1; overflow-y: auto; padding: 18px 22px 32px; }
+        #\${PANEL_ID}[data-surface="scheduled"] .better-codex-scheduled { display: block; }
         #\${PANEL_ID} .better-codex-project-list { display: grid; width: min(1120px,100%); margin: 0 auto; grid-template-columns: repeat(auto-fill,minmax(300px,1fr)); gap: 12px; }
         #\${PANEL_ID} .better-codex-project-card { display: flex; min-height: 152px; box-sizing: border-box; flex-direction: column; border: 0; border-radius: var(--bc-radius-lg, 16px); color: var(--bc-foreground); background: var(--bc-surface); padding: 16px; text-align: left; cursor: pointer; transition: transform .15s cubic-bezier(.16,1,.3,1), background-color .15s cubic-bezier(.16,1,.3,1); }
         #\${PANEL_ID} .better-codex-project-card:active { transform: scale(.98); }
@@ -1986,7 +2063,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     function syncEntryIcon(button, surface) {
       const svg = button.querySelector("svg");
       if (svg) {
-        const iconKey = { agents: "bot", projects: "folder", more: "more", usage: "usage", moon: "moon", sun: "sun" }[surface] || "issues";
+        const iconKey = { scheduled: "calendar", agents: "bot", projects: "folder", more: "more", usage: "usage", moon: "moon", sun: "sun" }[surface] || "issues";
         const definition = LUCIDE_ICONS[iconKey];
         if (svg.getAttribute("viewBox") !== "0 0 24 24") svg.setAttribute("viewBox", "0 0 24 24");
         if (svg.getAttribute("fill") !== "none") svg.setAttribute("fill", "none");
@@ -2033,10 +2110,17 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       } else if (entry.parentElement !== parent || entry !== parent.firstElementChild) {
         parent.prepend(entry);
       }
+      if (!scheduledEntry && !REMOTE) scheduledEntry = createEntry("定时任务", SCHEDULED_ENTRY_ID, "管理定时任务", "scheduled");
+      if (scheduledEntry) {
+        syncEntryLabel(scheduledEntry, "定时任务", "管理定时任务");
+        syncEntryIcon(scheduledEntry, "scheduled");
+        if (scheduledEntry.parentElement !== parent || scheduledEntry.previousElementSibling !== entry) entry.after(scheduledEntry);
+      }
       if (!agentsEntry) agentsEntry = createEntry("智能体", AGENTS_ENTRY_ID, "管理智能体", "agents");
       syncEntryLabel(agentsEntry, "智能体", "管理智能体");
       syncEntryIcon(agentsEntry, "agents");
-      if (agentsEntry.parentElement !== parent || agentsEntry.previousElementSibling !== entry) entry.after(agentsEntry);
+      const agentReference = scheduledEntry || entry;
+      if (agentsEntry.parentElement !== parent || agentsEntry.previousElementSibling !== agentReference) agentReference.after(agentsEntry);
       if (!projectsEntry) projectsEntry = createEntry("项目管理", PROJECTS_ENTRY_ID, "管理项目", "projects");
       syncEntryLabel(projectsEntry, "项目管理", "管理项目");
       syncEntryIcon(projectsEntry, "projects");
@@ -2050,8 +2134,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (auxiliaryNavigation.parentElement !== parent || auxiliaryNavigation.previousElementSibling !== agentsEntry) agentsEntry.after(auxiliaryNavigation);
         if (projectsEntry.parentElement !== auxiliaryMenu || projectsEntry !== auxiliaryMenu.firstElementChild) auxiliaryMenu.prepend(projectsEntry);
       } else if (projectsEntry.parentElement !== parent || projectsEntry.previousElementSibling !== agentsEntry) agentsEntry.after(projectsEntry);
-      const currentEntry = active && state.surface === "issues" ? entry : active && state.surface === "agents" ? agentsEntry : active && state.surface === "projects" ? projectsEntry : null;
-      for (const item of [entry, agentsEntry, projectsEntry]) {
+      const currentEntry = active && state.surface === "issues" ? entry : active && state.surface === "scheduled" ? scheduledEntry : active && state.surface === "agents" ? agentsEntry : active && state.surface === "projects" ? projectsEntry : null;
+      for (const item of [entry, scheduledEntry, agentsEntry, projectsEntry].filter(Boolean)) {
         if (item === currentEntry && item.getAttribute("aria-current") !== "page") item.setAttribute("aria-current", "page");
         if (item !== currentEntry && item.hasAttribute("aria-current")) item.removeAttribute("aria-current");
       }
@@ -2059,7 +2143,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (active && state.surface === "projects" && moreEntry.getAttribute("aria-current") !== "page") moreEntry.setAttribute("aria-current", "page");
         if ((!active || state.surface !== "projects") && moreEntry.hasAttribute("aria-current")) moreEntry.removeAttribute("aria-current");
       }
-      return entry.isConnected && agentsEntry.isConnected && projectsEntry.isConnected && (HOST_KIND !== "web" || auxiliaryNavigation?.isConnected);
+      return entry.isConnected && (!scheduledEntry || scheduledEntry.isConnected) && agentsEntry.isConnected && projectsEntry.isConnected && (HOST_KIND !== "web" || auxiliaryNavigation?.isConnected);
     }
 
     function findMount() {
@@ -4198,6 +4282,16 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       addAgent.insertAdjacentHTML("afterbegin", icon("plus"));
       addAgent.addEventListener("click", () => startAgentCreate());
       agentActions.append(addAgent);
+      const scheduledHeading = document.createElement("div");
+      scheduledHeading.className = "better-codex-scheduled-heading";
+      scheduledHeading.innerHTML = '<strong>' + te("定时任务") + '</strong><span data-scheduled-heading-meta></span>';
+      const scheduledActions = document.createElement("div");
+      scheduledActions.className = "better-codex-scheduled-actions";
+      const addScheduledTask = actionButton("新建定时任务");
+      addScheduledTask.classList.add("is-bordered");
+      addScheduledTask.innerHTML = icon("plus") + '<span>' + te("新建定时任务") + '</span>';
+      addScheduledTask.addEventListener("click", () => openScheduledTaskDialog());
+      scheduledActions.append(addScheduledTask);
       const projectHeading = document.createElement("div");
       projectHeading.className = "better-codex-project-heading";
       projectHeading.innerHTML = '<strong>' + te("项目管理") + '</strong><span data-project-heading-meta></span>';
@@ -4209,7 +4303,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       addProject.insertAdjacentHTML("afterbegin", icon("plus"));
       addProject.addEventListener("click", () => state.projectDetailId ? openEditor() : openCreateProjectDialog());
       projectActions.append(addProject);
-      toolbar.append(tabs, agentHeading, projectHeading, error, actions, agentActions, projectActions);
+      toolbar.append(tabs, scheduledHeading, agentHeading, projectHeading, error, actions, scheduledActions, agentActions, projectActions);
       const board = document.createElement("main");
       board.id = "better-codex-board";
       board.className = "better-codex-board better-codex-issue-only";
@@ -4281,6 +4375,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (search) { search.focus(); search.setSelectionRange(search.value.length, search.value.length); }
       });
       agents.addEventListener("submit", onAgentSubmit);
+      const scheduledTasks = document.createElement("main");
+      scheduledTasks.id = "better-codex-scheduled";
+      scheduledTasks.className = "better-codex-scheduled";
+      scheduledTasks.addEventListener("click", onScheduledTasksClick);
       const projects = document.createElement("main");
       projects.id = "better-codex-projects";
       projects.className = "better-codex-projects";
@@ -4301,7 +4399,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       });
       projects.addEventListener("submit", onProjectDocumentSubmit);
       projects.addEventListener("submit", onProjectPlanningSubmit);
-      section.append(toolbar, board, ...(boardScrollControl ? [boardScrollControl] : []), agents, projects, recovery);
+      section.append(toolbar, board, ...(boardScrollControl ? [boardScrollControl] : []), scheduledTasks, agents, projects, recovery);
       return section;
     }
 
@@ -6119,6 +6217,196 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       }).catch(() => {});
     }
 
+    function scheduledTaskDateTime(value) {
+      const date = new Date(value);
+      if (!Number.isFinite(date.getTime())) return t("未设置");
+      return new Intl.DateTimeFormat(state.locale === "zh-CN" ? "zh-CN" : "en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(date);
+    }
+
+    function scheduledTaskLocalValue(value) {
+      const date = new Date(value);
+      if (!Number.isFinite(date.getTime())) return "";
+      return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+    }
+
+    function scheduledTaskIntervalLabel(task) {
+      if (!task.repeat) return t("执行一次");
+      const unit = state.locale === "zh-CN"
+        ? { minute: "分钟", hour: "小时", day: "天", week: "周" }[task.interval_unit]
+        : { minute: "minute", hour: "hour", day: "day", week: "week" }[task.interval_unit];
+      if (state.locale === "zh-CN") return "每 " + task.interval_value + " " + unit;
+      return "Every " + task.interval_value + " " + unit + (Number(task.interval_value) === 1 ? "" : "s");
+    }
+
+    function scheduledTaskRunState(run) {
+      if (run.status === "failed") return { key: "failed", label: t("执行失败") };
+      if (run.status === "pending") return { key: "pending", label: t("等待执行") };
+      if (run.active_run_status) return { key: "running", label: t("执行中") };
+      if (run.issue_status === "done") return { key: "completed", label: t("已完成") };
+      if (run.issue_status === "in_review") return { key: "review", label: t("待审核") };
+      if (run.issue_status === "blocked") return { key: "failed", label: t("已阻塞") };
+      return { key: "pending", label: t("排队中") };
+    }
+
+    function scheduledTaskAgentName(task) {
+      const agent = state.agents.find(item => item.id === task.agent_id);
+      return agent ? agentDisplayName(agent) : t("默认智能体");
+    }
+
+    function scheduledTaskProjectName(task) {
+      return projectLabel(state.projects.find(project => project.id === task.project_id)) || t("未知项目");
+    }
+
+    function renderScheduledTasks() {
+      const container = panel?.querySelector("#better-codex-scheduled");
+      if (!container) return;
+      const enabled = state.scheduledTasks.filter(task => task.enabled);
+      const running = state.scheduledTasks.filter(task => task.recent_runs?.some(run => run.status === "pending" || run.active_run_status)).length;
+      const next = enabled.filter(task => task.next_run_at).sort((left, right) => String(left.next_run_at).localeCompare(String(right.next_run_at)))[0];
+      const headingMeta = panel.querySelector("[data-scheduled-heading-meta]");
+      if (headingMeta) headingMeta.textContent = state.scheduledTasks.length + " " + t("个任务");
+      const actions = panel.querySelector(".better-codex-scheduled-actions");
+      if (actions) actions.hidden = state.mockup;
+      if (!state.scheduledTasksLoaded) {
+        container.innerHTML = '<section class="better-codex-scheduled-loading" role="status"><span></span><strong>' + te("正在加载定时任务") + '</strong></section>';
+        return;
+      }
+      if (!state.scheduledTasks.length) {
+        container.innerHTML = '<section class="better-codex-scheduled-empty">' + icon("calendar") + '<h1>' + te("还没有定时任务") + '</h1><p>' + te("设置执行时间和循环间隔，Better Codex 会按计划创建任务并交给智能体执行。") + '</p>' + (state.mockup ? "" : '<button class="better-codex-submit" type="button" data-scheduled-create>' + icon("plus") + '<span>' + te("新建定时任务") + '</span></button>') + '</section>';
+        return;
+      }
+      const rows = state.scheduledTasks.map(task => {
+        const latest = task.recent_runs?.[0];
+        const active = Boolean(latest && (latest.status === "pending" || latest.active_run_status));
+        const runRows = (task.recent_runs || []).map(run => {
+          const runState = scheduledTaskRunState(run);
+          const issue = run.issue_id ? '<button type="button" data-scheduled-issue="' + escapeHtml(run.issue_id) + '">' + escapeHtml(run.issue_identifier || t("查看任务")) + icon("chevron") + '</button>' : '<span>' + escapeHtml(run.error || t("尚未创建任务")) + '</span>';
+          return '<li><span class="better-codex-scheduled-run-state" data-state="' + runState.key + '"><i></i>' + escapeHtml(runState.label) + '</span><time datetime="' + escapeHtml(run.scheduled_for) + '">' + escapeHtml(scheduledTaskDateTime(run.scheduled_for)) + '</time>' + issue + '</li>';
+        }).join("");
+        const recent = runRows ? '<details class="better-codex-scheduled-runs"><summary>' + te("最近运行") + '<span>' + escapeHtml(String(task.recent_runs.length)) + '</span>' + icon("chevron") + '</summary><ul>' + runRows + '</ul></details>' : '<div class="better-codex-scheduled-never">' + te("尚未运行") + '</div>';
+        return '<article class="better-codex-scheduled-row" data-enabled="' + task.enabled + '"><div class="better-codex-scheduled-row-main"><span class="better-codex-scheduled-status" data-state="' + (task.enabled ? active ? "running" : "enabled" : "paused") + '"><i></i>' + escapeHtml(task.enabled ? active ? t("执行中") : t("已启用") : t("已暂停")) + '</span><div class="better-codex-scheduled-copy"><h2>' + escapeHtml(task.name) + '</h2><p>' + escapeHtml(task.prompt.replace(/\\s+/g, " ")) + '</p><div><span>' + icon("folder") + escapeHtml(scheduledTaskProjectName(task)) + '</span><span>' + icon("bot") + escapeHtml(scheduledTaskAgentName(task)) + '</span></div></div><div class="better-codex-scheduled-timing"><span>' + escapeHtml(scheduledTaskIntervalLabel(task)) + '</span><strong>' + escapeHtml(task.enabled && task.next_run_at ? scheduledTaskDateTime(task.next_run_at) : t("暂无下次执行")) + '</strong><small>' + te(task.enabled && task.next_run_at ? "下次执行" : "当前计划") + '</small></div><div class="better-codex-scheduled-row-actions"><button type="button" data-scheduled-run="' + escapeHtml(task.id) + '" aria-label="' + te("立即运行") + '" title="' + te("立即运行") + '"' + (active || state.mockup ? " disabled" : "") + '>' + icon("refresh") + '</button><button type="button" data-scheduled-toggle="' + escapeHtml(task.id) + '" aria-label="' + te(task.enabled ? "暂停" : "启用") + '" title="' + te(task.enabled ? "暂停" : "启用") + '"' + (state.mockup ? " disabled" : "") + '>' + icon(task.enabled ? "stop" : "check") + '</button><button type="button" data-scheduled-edit="' + escapeHtml(task.id) + '" aria-label="' + te("编辑") + '" title="' + te("编辑") + '"' + (state.mockup ? " disabled" : "") + '>' + icon("edit") + '</button><button class="is-danger" type="button" data-scheduled-delete="' + escapeHtml(task.id) + '" aria-label="' + te("删除") + '" title="' + te("删除") + '"' + (state.mockup ? " disabled" : "") + '>' + icon("trash") + '</button></div></div>' + recent + '</article>';
+      }).join("");
+      container.innerHTML = '<section class="better-codex-scheduled-shell"><header class="better-codex-scheduled-overview"><div><span>' + te("下次执行") + '</span><strong>' + escapeHtml(next?.next_run_at ? scheduledTaskDateTime(next.next_run_at) : t("暂无已启用的计划")) + '</strong><small>' + escapeHtml(next?.name || t("创建或启用一个定时任务")) + '</small></div><dl><div><dt>' + te("已启用") + '</dt><dd>' + enabled.length + '</dd></div><div><dt>' + te("执行中") + '</dt><dd>' + running + '</dd></div><div><dt>' + te("已暂停") + '</dt><dd>' + (state.scheduledTasks.length - enabled.length) + '</dd></div></dl></header><div class="better-codex-scheduled-list">' + rows + '</div></section>';
+    }
+
+    async function loadScheduledTasks(options = {}) {
+      const tasks = await requestList("/api/scheduled-tasks", "scheduledTasks", { passive: Boolean(options.background) });
+      const changed = JSON.stringify(tasks) !== JSON.stringify(state.scheduledTasks);
+      state.scheduledTasks = tasks;
+      state.scheduledTasksLoaded = true;
+      if (options.background && !changed) return;
+      render();
+    }
+
+    function openScheduledTaskDialog(task = null) {
+      if (state.mockup || REMOTE) return;
+      document.getElementById("better-codex-scheduled-dialog")?.remove();
+      const firstProject = state.projects.find(project => project.id === (task?.project_id || state.projectId) && project.workspace_path) || state.projects.find(project => project.workspace_path) || state.projects[0];
+      const start = task?.starts_at || new Date(Math.ceil((Date.now() + 300_000) / 300_000) * 300_000).toISOString();
+      const projectOptions = state.projects.map(project => '<option value="' + escapeHtml(project.id) + '"' + (project.id === firstProject?.id ? " selected" : "") + '>' + escapeHtml(projectLabel(project)) + '</option>').join("");
+      const agentOptions = state.agents.filter(agent => !agent.is_default && agent.id).map(agent => '<option value="' + escapeHtml(agent.id) + '"' + (agent.id === task?.agent_id ? " selected" : "") + '>' + escapeHtml(agentDisplayName(agent)) + '</option>').join("");
+      const dialog = document.createElement("dialog");
+      dialog.id = "better-codex-scheduled-dialog";
+      dialog.innerHTML = '<form method="dialog"><header><div><span class="better-codex-scheduled-dialog-icon">' + icon("calendar") + '</span><div><h2>' + te(task ? "编辑定时任务" : "新建定时任务") + '</h2><p>' + te("按计划创建独立任务并交给智能体执行") + '</p></div></div><button type="button" data-scheduled-dialog-close aria-label="' + te("关闭") + '">' + icon("close") + '</button></header><div class="better-codex-scheduled-dialog-body"><label class="is-wide"><span>' + te("名称") + '</span><input name="name" maxlength="120" value="' + escapeHtml(task?.name || "") + '" placeholder="' + te("例如：每天整理项目进展") + '" required></label><label class="is-wide"><span>' + te("任务内容") + '</span><textarea name="prompt" maxlength="100000" rows="7" placeholder="' + te("说明每次需要完成的具体任务") + '" required>' + escapeHtml(task?.prompt || "") + '</textarea></label><label><span>' + te("项目") + '</span><select name="project_id" required>' + projectOptions + '</select><small data-scheduled-project-path>' + escapeHtml(firstProject?.workspace_path || t("未提供项目文件夹")) + '</small></label><label><span>' + te("执行智能体") + '</span><select name="agent_id"><option value="">' + te("默认智能体") + '</option>' + agentOptions + '</select><small>' + te("使用智能体当前的模型、推理和权限设置") + '</small></label><label class="is-wide"><span>' + te("首次执行") + '</span><input name="starts_at" type="datetime-local" value="' + escapeHtml(scheduledTaskLocalValue(start)) + '" required></label><label class="better-codex-scheduled-switch is-wide"><span><strong>' + te("循环执行") + '</strong><small>' + te("按固定间隔持续执行这个任务") + '</small></span><input name="repeat" type="checkbox"' + (task?.repeat ? " checked" : "") + '></label><div class="better-codex-scheduled-interval is-wide"><label><span>' + te("每隔") + '</span><input name="interval_value" type="number" min="1" max="999" value="' + escapeHtml(String(task?.interval_value || 1)) + '"></label><label><span>' + te("单位") + '</span><select name="interval_unit"><option value="minute"' + (task?.interval_unit === "minute" ? " selected" : "") + '>' + te("分钟") + '</option><option value="hour"' + (!task || task.interval_unit === "hour" ? " selected" : "") + '>' + te("小时") + '</option><option value="day"' + (task?.interval_unit === "day" ? " selected" : "") + '>' + te("天") + '</option><option value="week"' + (task?.interval_unit === "week" ? " selected" : "") + '>' + te("周") + '</option></select></label></div><label class="better-codex-scheduled-switch is-wide"><span><strong>' + te("立即启用") + '</strong><small>' + te("关闭后会保存为已暂停状态") + '</small></span><input name="enabled" type="checkbox"' + (task?.enabled === false ? "" : " checked") + '></label><output hidden></output></div><footer><button type="button" data-scheduled-dialog-cancel>' + te("取消") + '</button><button class="better-codex-submit" type="submit">' + te(task ? "保存" : "创建") + '</button></footer></form>';
+      const form = dialog.querySelector("form");
+      const repeat = form.elements.repeat;
+      const interval = dialog.querySelector(".better-codex-scheduled-interval");
+      const syncRepeat = () => {
+        interval.hidden = !repeat.checked;
+        form.elements.interval_value.required = repeat.checked;
+        form.elements.interval_unit.required = repeat.checked;
+      };
+      const syncProjectPath = () => {
+        const project = state.projects.find(item => item.id === form.elements.project_id.value);
+        dialog.querySelector("[data-scheduled-project-path]").textContent = project?.workspace_path || t("未提供项目文件夹");
+      };
+      repeat.addEventListener("change", syncRepeat);
+      form.elements.project_id.addEventListener("change", syncProjectPath);
+      dialog.querySelector("[data-scheduled-dialog-close]").addEventListener("click", () => dialog.close());
+      dialog.querySelector("[data-scheduled-dialog-cancel]").addEventListener("click", () => dialog.close());
+      form.addEventListener("submit", event => {
+        event.preventDefault();
+        if (!form.reportValidity()) return;
+        const submit = form.querySelector('[type="submit"]');
+        const error = form.querySelector("output");
+        submit.disabled = true;
+        error.hidden = true;
+        void perform(async () => {
+          try {
+            const body = {
+              name: form.elements.name.value,
+              prompt: form.elements.prompt.value,
+              project_id: form.elements.project_id.value,
+              agent_id: form.elements.agent_id.value,
+              starts_at: new Date(form.elements.starts_at.value).toISOString(),
+              repeat: repeat.checked,
+              interval_value: Number(form.elements.interval_value.value),
+              interval_unit: form.elements.interval_unit.value,
+              enabled: form.elements.enabled.checked,
+              ...(task ? { version: task.version } : {})
+            };
+            await api(task ? "/api/scheduled-tasks/" + encodeURIComponent(task.id) : "/api/scheduled-tasks", { method: task ? "PATCH" : "POST", body: JSON.stringify(body) });
+            await loadScheduledTasks();
+            dialog.close();
+          } catch (caught) {
+            reportGlobalError(caught, { source: "scheduled_task_save" });
+            error.textContent = t(caught instanceof Error ? caught.message : "保存失败");
+            error.hidden = false;
+            submit.disabled = false;
+          }
+        });
+      });
+      dialog.addEventListener("cancel", event => { event.preventDefault(); dialog.close(); });
+      dialog.addEventListener("close", () => dialog.remove(), { once: true });
+      bindModalDismiss(dialog, () => dialog.close());
+      document.body.append(dialog);
+      syncRepeat();
+      dialog.showModal();
+      form.elements.name.focus();
+    }
+
+    function onScheduledTasksClick(event) {
+      if (event.target.closest("[data-scheduled-create]")) return openScheduledTaskDialog();
+      const edit = event.target.closest("[data-scheduled-edit]");
+      if (edit) return openScheduledTaskDialog(state.scheduledTasks.find(task => task.id === edit.dataset.scheduledEdit));
+      const toggle = event.target.closest("[data-scheduled-toggle]");
+      if (toggle) {
+        const task = state.scheduledTasks.find(item => item.id === toggle.dataset.scheduledToggle);
+        if (!task) return;
+        return void perform(async () => {
+          toggle.disabled = true;
+          await api("/api/scheduled-tasks/" + encodeURIComponent(task.id), { method: "PATCH", body: JSON.stringify({ version: task.version, enabled: !task.enabled }) });
+          await loadScheduledTasks();
+        });
+      }
+      const run = event.target.closest("[data-scheduled-run]");
+      if (run) {
+        const task = state.scheduledTasks.find(item => item.id === run.dataset.scheduledRun);
+        if (!task) return;
+        return void perform(async () => {
+          run.disabled = true;
+          await api("/api/scheduled-tasks/" + encodeURIComponent(task.id) + "/run", { method: "POST" });
+          await loadScheduledTasks();
+        });
+      }
+      const remove = event.target.closest("[data-scheduled-delete]");
+      if (remove) {
+        const task = state.scheduledTasks.find(item => item.id === remove.dataset.scheduledDelete);
+        if (!task) return;
+        return void confirmAction("删除定时任务", "删除后不会影响已经创建或正在执行的任务。", "删除").then(confirmed => confirmed && perform(async () => {
+          await api("/api/scheduled-tasks/" + encodeURIComponent(task.id), { method: "DELETE", body: JSON.stringify({ version: task.version }) });
+          await loadScheduledTasks();
+        }));
+      }
+      const issueButton = event.target.closest("[data-scheduled-issue]");
+      if (issueButton) return void perform(async () => {
+        const issue = await api("/api/issues/" + encodeURIComponent(issueButton.dataset.scheduledIssue));
+        openRoute("issues");
+        await loadIssues();
+        await openEditor(issue);
+      });
+    }
+
     function syncAutoDispatch() {
       const button = panel?.querySelector("#better-codex-auto-dispatch");
       if (!button) return;
@@ -6144,7 +6432,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     function render() {
       if (!panel) return;
       panel.dataset.surface = state.surface;
-      if (HOST_KIND === "web" && state.surface !== "projects") document.title = t(state.surface === "agents" ? "智能体" : "任务看板") + " · Better Codex";
+      if (HOST_KIND === "web" && state.surface !== "projects") document.title = t(state.surface === "agents" ? "智能体" : state.surface === "scheduled" ? "定时任务" : "任务看板") + " · Better Codex";
+      renderScheduledTasks();
       renderAgents();
       renderProjects();
       syncAutoDispatch();
@@ -6287,7 +6576,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     async function loadSurface(options = {}) {
-      if (state.surface === "agents") await loadAgents(options);
+      if (state.surface === "scheduled") await loadScheduledTasks(options);
+      else if (state.surface === "agents") await loadAgents(options);
       else if (state.surface === "projects") await loadProjects(options);
       else await loadIssues(options);
     }
@@ -8539,7 +8829,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     function onClick(event) {
       if (!active || suppressAgentOutside) return;
       const target = event.target?.closest?.("button,a,[role='button']," + SELECTORS.threadRow);
-      if (!target || target === entry || target === agentsEntry || target === projectsEntry || target === moreEntry || target === usageEntry || target === themeEntry || target.closest("#" + PANEL_ID) || target.closest("#better-codex-dialog") || target.closest("#better-codex-agent-dialog") || target.closest("#better-codex-project-dialog") || target.closest("#better-codex-avatar-picker")) return;
+      if (!target || target === entry || target === scheduledEntry || target === agentsEntry || target === projectsEntry || target === moreEntry || target === usageEntry || target === themeEntry || target.closest("#" + PANEL_ID) || target.closest("#better-codex-dialog") || target.closest("#better-codex-agent-dialog") || target.closest("#better-codex-scheduled-dialog") || target.closest("#better-codex-project-dialog") || target.closest("#better-codex-avatar-picker")) return;
       if (Date.now() < suppressSessionClickUntil && target.closest(SELECTORS.threadRow)) {
         suppressSessionClickUntil = 0;
         event.preventDefault();
@@ -8606,6 +8896,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       closeFilterMenu();
       closeIssueMenu();
       closeAuxiliaryMenu();
+      document.getElementById("better-codex-scheduled-dialog")?.remove();
       observer?.disconnect();
       for (const pending of bridgeRequests.values()) {
         clearTimeout(pending.timer);

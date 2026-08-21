@@ -6461,6 +6461,7 @@ export function betterCodexDesignSystemCss() {
     }
 
     #better-codex-dialog,
+    #better-codex-scheduled-dialog,
     #better-codex-agent-dialog,
     #better-codex-error-dialog {
       position: fixed;
@@ -8003,6 +8004,756 @@ export function betterCodexDesignSystemCss() {
       }
     }
 
+    #better-codex-panel .better-codex-scheduled-shell {
+      width: min(1120px, 100%);
+      margin: 0 auto;
+    }
+
+    #better-codex-panel .better-codex-scheduled-overview {
+      display: flex;
+      min-height: 90px;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--bc-space-5);
+      border-radius: var(--bc-radius-lg);
+      background: var(--bc-color-surface);
+      padding: var(--bc-space-4) var(--bc-space-5);
+      box-shadow: var(--bc-inset-hairline);
+    }
+
+    #better-codex-panel .better-codex-scheduled-overview > div {
+      min-width: 0;
+    }
+
+    #better-codex-panel .better-codex-scheduled-overview > div > span,
+    #better-codex-panel .better-codex-scheduled-overview > div > small {
+      display: block;
+      color: var(--bc-color-text-muted);
+      font-size: var(--bc-text-caption);
+    }
+
+    #better-codex-panel .better-codex-scheduled-overview > div > strong {
+      display: block;
+      margin-block: 4px;
+      font-size: var(--bc-text-xl);
+      font-weight: 650;
+      line-height: 1.15;
+      font-variant-numeric: tabular-nums;
+    }
+
+    #better-codex-panel .better-codex-scheduled-overview dl {
+      display: flex;
+      flex: 0 0 auto;
+      margin: 0;
+    }
+
+    #better-codex-panel .better-codex-scheduled-overview dl > div {
+      min-width: 82px;
+      padding-inline: var(--bc-space-4);
+      text-align: right;
+    }
+
+    #better-codex-panel .better-codex-scheduled-overview dl > div + div {
+      border-left: 1px solid var(--bc-color-hairline);
+    }
+
+    #better-codex-panel .better-codex-scheduled-overview dt {
+      color: var(--bc-color-text-muted);
+      font-size: var(--bc-text-caption);
+    }
+
+    #better-codex-panel .better-codex-scheduled-overview dd {
+      margin: 4px 0 0;
+      font-size: var(--bc-text-xl);
+      font-weight: 650;
+      font-variant-numeric: tabular-nums;
+    }
+
+    #better-codex-panel .better-codex-scheduled-list {
+      margin-top: var(--bc-space-3);
+      overflow: hidden;
+      border-radius: var(--bc-radius-lg);
+      background: var(--bc-color-surface);
+      box-shadow: var(--bc-inset-hairline);
+    }
+
+    #better-codex-panel .better-codex-scheduled-row + .better-codex-scheduled-row {
+      border-top: 1px solid var(--bc-color-hairline);
+    }
+
+    #better-codex-panel .better-codex-scheduled-row[data-enabled="false"] .better-codex-scheduled-copy,
+    #better-codex-panel .better-codex-scheduled-row[data-enabled="false"] .better-codex-scheduled-timing {
+      opacity: .62;
+    }
+
+    #better-codex-panel .better-codex-scheduled-row-main {
+      display: grid;
+      min-height: 116px;
+      grid-template-columns: 86px minmax(240px, 1fr) minmax(130px, 170px) auto;
+      align-items: center;
+      gap: var(--bc-space-4);
+      padding: var(--bc-space-4) var(--bc-space-5);
+    }
+
+    #better-codex-panel .better-codex-scheduled-status,
+    #better-codex-panel .better-codex-scheduled-run-state {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--bc-color-text-muted);
+      font-size: var(--bc-text-caption);
+      font-weight: 600;
+    }
+
+    #better-codex-panel .better-codex-scheduled-status i,
+    #better-codex-panel .better-codex-scheduled-run-state i {
+      width: 7px;
+      height: 7px;
+      flex: 0 0 7px;
+      border-radius: var(--bc-radius-pill);
+      background: currentColor;
+    }
+
+    #better-codex-panel .better-codex-scheduled-status[data-state="enabled"],
+    #better-codex-panel .better-codex-scheduled-run-state[data-state="completed"] {
+      color: var(--bc-success);
+    }
+
+    #better-codex-panel .better-codex-scheduled-status[data-state="running"],
+    #better-codex-panel .better-codex-scheduled-run-state[data-state="running"] {
+      color: var(--bc-color-focus);
+    }
+
+    #better-codex-panel .better-codex-scheduled-run-state[data-state="failed"] {
+      color: var(--bc-color-danger);
+    }
+
+    #better-codex-panel .better-codex-scheduled-copy {
+      min-width: 0;
+    }
+
+    #better-codex-panel .better-codex-scheduled-copy h2 {
+      margin: 0;
+      overflow: hidden;
+      font-size: var(--bc-text-lg);
+      font-weight: 650;
+      line-height: 1.35;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #better-codex-panel .better-codex-scheduled-copy p {
+      margin: 5px 0 0;
+      overflow: hidden;
+      color: var(--bc-color-text-muted);
+      font-size: var(--bc-text-sm);
+      line-height: 1.5;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #better-codex-panel .better-codex-scheduled-copy > div {
+      display: flex;
+      min-width: 0;
+      flex-wrap: wrap;
+      gap: var(--bc-space-3);
+      margin-top: 9px;
+    }
+
+    #better-codex-panel .better-codex-scheduled-copy > div > span {
+      display: inline-flex;
+      min-width: 0;
+      align-items: center;
+      gap: 5px;
+      color: var(--bc-color-text-faint);
+      font-size: var(--bc-text-caption);
+    }
+
+    #better-codex-panel .better-codex-scheduled-copy > div svg {
+      width: 13px;
+      height: 13px;
+      flex: 0 0 13px;
+    }
+
+    #better-codex-panel .better-codex-scheduled-timing {
+      min-width: 0;
+      text-align: right;
+    }
+
+    #better-codex-panel .better-codex-scheduled-timing span,
+    #better-codex-panel .better-codex-scheduled-timing small {
+      display: block;
+      color: var(--bc-color-text-muted);
+      font-size: var(--bc-text-caption);
+    }
+
+    #better-codex-panel .better-codex-scheduled-timing strong {
+      display: block;
+      margin-block: 4px;
+      overflow: hidden;
+      font-size: var(--bc-text-sm);
+      font-weight: 650;
+      font-variant-numeric: tabular-nums;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #better-codex-panel .better-codex-scheduled-row-actions {
+      display: grid;
+      grid-template-columns: repeat(2, 40px);
+      gap: var(--bc-space-1);
+    }
+
+    #better-codex-panel .better-codex-scheduled-row-actions button,
+    #better-codex-panel .better-codex-scheduled-runs button {
+      display: inline-flex;
+      width: 40px;
+      height: 40px;
+      align-items: center;
+      justify-content: center;
+      border: 0;
+      border-radius: var(--bc-radius-sm);
+      color: var(--bc-color-text-muted);
+      background: transparent;
+      padding: 0;
+      cursor: pointer;
+      touch-action: manipulation;
+      transition: transform var(--bc-motion-fast) var(--bc-ease-out), background-color var(--bc-motion-fast) ease-out, color var(--bc-motion-fast) ease-out;
+    }
+
+    #better-codex-panel .better-codex-scheduled-row-actions button:active,
+    #better-codex-panel .better-codex-scheduled-runs button:active {
+      transform: scale(.96);
+    }
+
+    #better-codex-panel .better-codex-scheduled-row-actions button:focus-visible,
+    #better-codex-panel .better-codex-scheduled-runs button:focus-visible {
+      outline: 0;
+      box-shadow: var(--bc-focus-ring);
+    }
+
+    #better-codex-panel .better-codex-scheduled-row-actions button:disabled {
+      cursor: default;
+      opacity: .34;
+    }
+
+    #better-codex-panel .better-codex-scheduled-row-actions button.is-danger {
+      color: var(--bc-color-danger);
+    }
+
+    #better-codex-panel .better-codex-scheduled-row-actions svg {
+      width: 15px;
+      height: 15px;
+    }
+
+    #better-codex-panel .better-codex-scheduled-runs {
+      border-top: 1px solid var(--bc-color-hairline);
+      background: color-mix(in srgb, var(--bc-color-surface) 78%, var(--bc-color-canvas));
+    }
+
+    #better-codex-panel .better-codex-scheduled-runs summary {
+      display: flex;
+      min-height: 42px;
+      align-items: center;
+      gap: 7px;
+      padding-inline: var(--bc-space-5);
+      color: var(--bc-color-text-muted);
+      font-size: var(--bc-text-caption);
+      cursor: pointer;
+      list-style: none;
+    }
+
+    #better-codex-panel .better-codex-scheduled-runs summary::-webkit-details-marker {
+      display: none;
+    }
+
+    #better-codex-panel .better-codex-scheduled-runs summary > svg {
+      width: 13px;
+      height: 13px;
+      margin-left: auto;
+      transition: transform var(--bc-motion-fast) var(--bc-ease-out);
+    }
+
+    #better-codex-panel .better-codex-scheduled-runs[open] summary > svg {
+      transform: rotate(90deg);
+    }
+
+    #better-codex-panel .better-codex-scheduled-runs ul {
+      margin: 0;
+      padding: 0 var(--bc-space-5) var(--bc-space-3);
+      list-style: none;
+    }
+
+    #better-codex-panel .better-codex-scheduled-runs li {
+      display: grid;
+      min-height: 40px;
+      grid-template-columns: 94px 130px minmax(0, 1fr);
+      align-items: center;
+      gap: var(--bc-space-3);
+      border-top: 1px solid var(--bc-color-hairline);
+      font-size: var(--bc-text-caption);
+    }
+
+    #better-codex-panel .better-codex-scheduled-runs li > time {
+      color: var(--bc-color-text-muted);
+      font-variant-numeric: tabular-nums;
+    }
+
+    #better-codex-panel .better-codex-scheduled-runs li > button {
+      width: auto;
+      min-width: 0;
+      justify-content: flex-start;
+      gap: 5px;
+      overflow: hidden;
+      color: var(--bc-color-text);
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #better-codex-panel .better-codex-scheduled-runs li > button svg {
+      width: 13px;
+      height: 13px;
+      flex: 0 0 13px;
+    }
+
+    #better-codex-panel .better-codex-scheduled-runs li > span:last-child,
+    #better-codex-panel .better-codex-scheduled-never {
+      color: var(--bc-color-text-faint);
+      font-size: var(--bc-text-caption);
+    }
+
+    #better-codex-panel .better-codex-scheduled-never {
+      min-height: 42px;
+      box-sizing: border-box;
+      border-top: 1px solid var(--bc-color-hairline);
+      background: color-mix(in srgb, var(--bc-color-surface) 78%, var(--bc-color-canvas));
+      padding: 13px var(--bc-space-5);
+    }
+
+    #better-codex-panel .better-codex-scheduled-empty,
+    #better-codex-panel .better-codex-scheduled-loading {
+      display: flex;
+      width: min(520px, 100%);
+      min-height: 55vh;
+      box-sizing: border-box;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      margin: 0 auto;
+      text-align: center;
+    }
+
+    #better-codex-panel .better-codex-scheduled-empty > svg {
+      width: 30px;
+      height: 30px;
+      color: var(--bc-color-text-muted);
+    }
+
+    #better-codex-panel .better-codex-scheduled-empty h1 {
+      margin: var(--bc-space-3) 0 0;
+      font-size: var(--bc-text-xl);
+      font-weight: 650;
+    }
+
+    #better-codex-panel .better-codex-scheduled-empty p {
+      max-width: 46ch;
+      margin: var(--bc-space-2) 0 var(--bc-space-4);
+      color: var(--bc-color-text-muted);
+      font-size: var(--bc-text-sm);
+      line-height: 1.7;
+      text-wrap: pretty;
+    }
+
+    #better-codex-panel .better-codex-scheduled-empty .better-codex-submit {
+      display: inline-flex;
+      min-height: 40px;
+      align-items: center;
+      gap: 7px;
+      border: 0;
+      border-radius: var(--bc-radius-sm);
+      color: var(--bc-color-on-primary);
+      background: var(--bc-color-primary);
+      padding-inline: var(--bc-space-4);
+      font: inherit;
+      cursor: pointer;
+    }
+
+    #better-codex-panel .better-codex-scheduled-loading {
+      gap: var(--bc-space-3);
+      color: var(--bc-color-text-muted);
+      font-size: var(--bc-text-sm);
+    }
+
+    #better-codex-panel .better-codex-scheduled-loading span {
+      width: 20px;
+      height: 20px;
+      border: 2px solid var(--bc-color-hairline);
+      border-top-color: var(--bc-color-text-muted);
+      border-radius: var(--bc-radius-pill);
+      animation: better-codex-project-document-spin .9s linear infinite;
+    }
+
+    #better-codex-scheduled-dialog {
+      position: fixed;
+      inset: 0;
+      width: min(680px, calc(100vw - 32px));
+      max-height: min(820px, calc(100dvh - 32px));
+      box-sizing: border-box;
+      margin: auto;
+      overflow: hidden;
+      border: 0;
+      border-radius: var(--bc-radius-lg);
+      color: var(--bc-color-text);
+      background: var(--bc-color-canvas);
+      padding: 0;
+      box-shadow: var(--bc-elevation-float);
+      font-family: var(--bc-font-ui);
+    }
+
+    #better-codex-scheduled-dialog::backdrop {
+      background: var(--bc-color-scrim);
+    }
+
+    #better-codex-scheduled-dialog form {
+      display: flex;
+      max-height: inherit;
+      flex-direction: column;
+    }
+
+    #better-codex-scheduled-dialog header,
+    #better-codex-scheduled-dialog footer {
+      display: flex;
+      flex: 0 0 auto;
+      align-items: center;
+      justify-content: space-between;
+      border-color: var(--bc-color-hairline);
+      background: var(--bc-color-surface);
+    }
+
+    #better-codex-scheduled-dialog header {
+      min-height: 68px;
+      border-bottom: 1px solid var(--bc-color-hairline);
+      padding: 0 var(--bc-space-4) 0 var(--bc-space-5);
+    }
+
+    #better-codex-scheduled-dialog header > div {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      gap: var(--bc-space-3);
+    }
+
+    #better-codex-scheduled-dialog header h2,
+    #better-codex-scheduled-dialog header p {
+      margin: 0;
+    }
+
+    #better-codex-scheduled-dialog header h2 {
+      font-size: var(--bc-text-lg);
+      font-weight: 650;
+    }
+
+    #better-codex-scheduled-dialog header p {
+      margin-top: 3px;
+      color: var(--bc-color-text-muted);
+      font-size: var(--bc-text-caption);
+    }
+
+    #better-codex-scheduled-dialog .better-codex-scheduled-dialog-icon {
+      display: inline-flex;
+      width: 38px;
+      height: 38px;
+      flex: 0 0 38px;
+      align-items: center;
+      justify-content: center;
+      border-radius: var(--bc-radius-sm);
+      color: var(--bc-color-text);
+      background: var(--bc-color-control);
+    }
+
+    #better-codex-scheduled-dialog .better-codex-scheduled-dialog-icon svg {
+      width: 18px;
+      height: 18px;
+    }
+
+    #better-codex-scheduled-dialog header > button,
+    #better-codex-scheduled-dialog footer button {
+      min-height: 40px;
+      border: 0;
+      border-radius: var(--bc-radius-sm);
+      color: var(--bc-color-text-muted);
+      background: transparent;
+      padding-inline: var(--bc-space-3);
+      font: inherit;
+      cursor: pointer;
+      touch-action: manipulation;
+      transition: transform var(--bc-motion-fast) var(--bc-ease-out), background-color var(--bc-motion-fast) ease-out, color var(--bc-motion-fast) ease-out;
+    }
+
+    #better-codex-scheduled-dialog header > button {
+      display: inline-flex;
+      width: 40px;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+    }
+
+    #better-codex-scheduled-dialog button:active {
+      transform: scale(.96);
+    }
+
+    #better-codex-scheduled-dialog button:focus-visible,
+    #better-codex-scheduled-dialog :is(input, textarea, select):focus-visible {
+      outline: 0;
+      box-shadow: var(--bc-focus-ring);
+    }
+
+    #better-codex-scheduled-dialog .better-codex-scheduled-dialog-body {
+      display: grid;
+      min-height: 0;
+      overflow-y: auto;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: var(--bc-space-4);
+      padding: var(--bc-space-5);
+      overscroll-behavior: contain;
+    }
+
+    #better-codex-scheduled-dialog label {
+      display: flex;
+      min-width: 0;
+      flex-direction: column;
+      gap: 7px;
+      color: var(--bc-color-text-muted);
+      font-size: var(--bc-text-caption);
+    }
+
+    #better-codex-scheduled-dialog label.is-wide,
+    #better-codex-scheduled-dialog .better-codex-scheduled-interval,
+    #better-codex-scheduled-dialog output {
+      grid-column: 1 / -1;
+    }
+
+    #better-codex-scheduled-dialog :is(input, textarea, select) {
+      width: 100%;
+      min-width: 0;
+      min-height: 40px;
+      box-sizing: border-box;
+      border: 0;
+      border-radius: var(--bc-radius-sm);
+      outline: 0;
+      color: var(--bc-color-text);
+      background: var(--bc-color-control);
+      padding: 9px 11px;
+      font: inherit;
+      font-size: var(--bc-text-sm);
+      box-shadow: var(--bc-inset-hairline);
+    }
+
+    #better-codex-scheduled-dialog textarea {
+      min-height: 126px;
+      resize: vertical;
+      line-height: 1.6;
+    }
+
+    #better-codex-scheduled-dialog label > small {
+      overflow: hidden;
+      color: var(--bc-color-text-faint);
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #better-codex-scheduled-dialog .better-codex-scheduled-switch {
+      min-height: 52px;
+      box-sizing: border-box;
+      align-items: center;
+      justify-content: space-between;
+      flex-direction: row;
+      gap: var(--bc-space-4);
+      border-radius: var(--bc-radius-md);
+      background: var(--bc-color-surface);
+      padding: 9px 12px;
+      box-shadow: var(--bc-inset-hairline);
+    }
+
+    #better-codex-scheduled-dialog .better-codex-scheduled-switch span {
+      min-width: 0;
+    }
+
+    #better-codex-scheduled-dialog .better-codex-scheduled-switch strong,
+    #better-codex-scheduled-dialog .better-codex-scheduled-switch small {
+      display: block;
+    }
+
+    #better-codex-scheduled-dialog .better-codex-scheduled-switch strong {
+      color: var(--bc-color-text);
+      font-size: var(--bc-text-sm);
+    }
+
+    #better-codex-scheduled-dialog .better-codex-scheduled-switch small {
+      margin-top: 3px;
+      color: var(--bc-color-text-muted);
+    }
+
+    #better-codex-scheduled-dialog .better-codex-scheduled-switch input {
+      width: 18px;
+      min-height: 18px;
+      flex: 0 0 18px;
+      accent-color: var(--bc-color-primary);
+      box-shadow: none;
+    }
+
+    #better-codex-scheduled-dialog .better-codex-scheduled-interval {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: var(--bc-space-4);
+    }
+
+    #better-codex-scheduled-dialog .better-codex-scheduled-interval[hidden] {
+      display: none;
+    }
+
+    #better-codex-scheduled-dialog output {
+      color: var(--bc-color-danger);
+      font-size: var(--bc-text-caption);
+    }
+
+    #better-codex-scheduled-dialog footer {
+      min-height: 64px;
+      justify-content: flex-end;
+      gap: var(--bc-space-2);
+      border-top: 1px solid var(--bc-color-hairline);
+      padding-inline: var(--bc-space-4);
+    }
+
+    #better-codex-scheduled-dialog footer .better-codex-submit {
+      min-width: 84px;
+      color: var(--bc-color-on-primary);
+      background: var(--bc-color-primary);
+    }
+
+    #better-codex-scheduled-dialog footer button:disabled {
+      cursor: wait;
+      opacity: .55;
+    }
+
+    @media (hover: hover) {
+      #better-codex-panel .better-codex-scheduled-row-actions button:not(:disabled):hover,
+      #better-codex-panel .better-codex-scheduled-runs button:hover,
+      #better-codex-scheduled-dialog header > button:hover,
+      #better-codex-scheduled-dialog footer button:not(.better-codex-submit):hover {
+        color: var(--bc-color-text);
+        background: var(--bc-color-hover);
+      }
+
+      #better-codex-panel .better-codex-scheduled-row-actions button.is-danger:hover {
+        color: var(--bc-color-danger);
+        background: var(--bc-color-danger-soft);
+      }
+    }
+
+    @media (max-width: 860px) {
+      #better-codex-panel .better-codex-scheduled-row-main {
+        grid-template-columns: 82px minmax(0, 1fr) auto;
+      }
+
+      #better-codex-panel .better-codex-scheduled-timing {
+        grid-column: 2;
+        text-align: left;
+      }
+
+      #better-codex-panel .better-codex-scheduled-row-actions {
+        grid-column: 3;
+        grid-row: 1 / 3;
+      }
+    }
+
+    @media (max-width: 640px) {
+      #better-codex-panel .better-codex-scheduled {
+        padding: var(--bc-space-3) var(--bc-space-3) calc(var(--bc-space-5) + env(safe-area-inset-bottom));
+      }
+
+      #better-codex-panel .better-codex-scheduled-overview {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      #better-codex-panel .better-codex-scheduled-overview dl {
+        width: 100%;
+      }
+
+      #better-codex-panel .better-codex-scheduled-overview dl > div {
+        min-width: 0;
+        flex: 1;
+        padding-inline: var(--bc-space-3);
+        text-align: left;
+      }
+
+      #better-codex-panel .better-codex-scheduled-overview dl > div:first-child {
+        padding-left: 0;
+      }
+
+      #better-codex-panel .better-codex-scheduled-row-main {
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: var(--bc-space-3);
+        padding: var(--bc-space-4);
+      }
+
+      #better-codex-panel .better-codex-scheduled-status {
+        grid-column: 1;
+      }
+
+      #better-codex-panel .better-codex-scheduled-copy {
+        grid-column: 1 / -1;
+        grid-row: 2;
+      }
+
+      #better-codex-panel .better-codex-scheduled-timing {
+        grid-column: 1 / -1;
+        grid-row: 3;
+      }
+
+      #better-codex-panel .better-codex-scheduled-row-actions {
+        grid-column: 2;
+        grid-row: 1;
+        grid-template-columns: repeat(4, 40px);
+      }
+
+      #better-codex-panel .better-codex-scheduled-runs li {
+        grid-template-columns: 90px minmax(0, 1fr);
+      }
+
+      #better-codex-panel .better-codex-scheduled-runs li > button,
+      #better-codex-panel .better-codex-scheduled-runs li > span:last-child {
+        grid-column: 1 / -1;
+      }
+
+      #better-codex-scheduled-dialog {
+        width: min(100vw - 16px, 680px);
+        max-height: calc(100dvh - 16px - env(safe-area-inset-bottom));
+      }
+
+      #better-codex-scheduled-dialog .better-codex-scheduled-dialog-body {
+        grid-template-columns: minmax(0, 1fr);
+        padding: var(--bc-space-4);
+      }
+
+      #better-codex-scheduled-dialog label.is-wide,
+      #better-codex-scheduled-dialog .better-codex-scheduled-interval,
+      #better-codex-scheduled-dialog output {
+        grid-column: 1;
+      }
+    }
+
+    @media (max-width: 430px) {
+      #better-codex-panel .better-codex-scheduled-row-actions {
+        grid-template-columns: repeat(2, 40px);
+      }
+
+      #better-codex-scheduled-dialog header p {
+        display: none;
+      }
+    }
+
     @media (max-width: 350px) {
       #better-codex-panel .better-codex-actions {
         grid-template-columns: minmax(0, 1fr);
@@ -8030,6 +8781,7 @@ export function betterCodexDesignSystemCss() {
 
     @media (prefers-reduced-motion: reduce) {
       #better-codex-dialog,
+      #better-codex-scheduled-dialog,
       #better-codex-agent-dialog,
       #better-codex-confirm,
       #better-codex-avatar-picker,
@@ -8047,6 +8799,7 @@ export function betterCodexDesignSystemCss() {
 
       #better-codex-panel button,
       #better-codex-dialog button,
+      #better-codex-scheduled-dialog button,
       #better-codex-agent-dialog button,
       #better-codex-confirm button,
       #better-codex-context-menu button,

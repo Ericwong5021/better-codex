@@ -5,7 +5,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { homedir } from "node:os";
 import { isSea } from "node:sea";
 import { compareVersions, coreVersion, readCompatibilityStatus } from "./compatibility.js";
-import { agentSandboxModes, cleanMaxConcurrency, issuePriorities, issueStatuses, Store, type AgentModel, type AgentReasoningEffort, type AgentSandboxMode, type AgentServiceTier, type Issue, type IssuePriority, type IssueStatus } from "./db.js";
+import { agentSandboxModes, cleanMaxConcurrency, issuePriorities, issueStatuses, scheduledTaskIntervalUnits, Store, type AgentModel, type AgentReasoningEffort, type AgentSandboxMode, type AgentServiceTier, type Issue, type IssuePriority, type IssueStatus, type ScheduledTask, type ScheduledTaskInput, type ScheduledTaskIntervalUnit } from "./db.js";
 import { defaultAgentProfile, syncAgentProfiles, updateDefaultAgentProfile } from "./agent-profiles.js";
 import { readCodexAppearance } from "./appearance.js";
 import { normalizeCodexLocale, readCodexLocale } from "./locale.js";
@@ -430,6 +430,40 @@ function cleanString(value: unknown, limit = 10000) {
 function issueDescription(value: unknown) {
   if (typeof value === "string" && value.length > maxIssueDescriptionLength) throw new Error("issue_description_too_long");
   return cleanString(value, maxIssueDescriptionLength);
+}
+
+function scheduledTaskInput(store: Store, body: Record<string, unknown>, current?: ScheduledTask): ScheduledTaskInput {
+  const projectId = cleanString(body.project_id ?? current?.project_id, 200);
+  const project = store.getProject(projectId);
+  if (!project) throw new Error("project_not_found");
+  const workspacePath = cleanString(project.workspace_path, 4096);
+  if (!workspacePath) throw new Error("workspace_required");
+  try {
+    if (!statSync(workspacePath).isDirectory()) throw new Error("workspace_invalid");
+  } catch {
+    throw new Error("workspace_invalid");
+  }
+  const agentId = cleanString(body.agent_id ?? current?.agent_id, 200);
+  if (agentId && !store.getAgentProfile(agentId)) throw new Error("agent_not_found");
+  if (body.repeat !== undefined && typeof body.repeat !== "boolean") throw new Error("invalid_scheduled_task_repeat");
+  const repeat = body.repeat === undefined ? Boolean(current?.repeat) : body.repeat === true;
+  const intervalValue = repeat ? Number(body.interval_value ?? current?.interval_value) : undefined;
+  const intervalUnit = repeat ? cleanString(body.interval_unit ?? current?.interval_unit, 20) as ScheduledTaskIntervalUnit : undefined;
+  if (repeat && (!Number.isInteger(intervalValue) || intervalValue! < 1 || intervalValue! > 999 || !scheduledTaskIntervalUnits.includes(intervalUnit!))) throw new Error("invalid_scheduled_task_interval");
+  const enabled = body.enabled === undefined ? current?.enabled !== false : body.enabled === true;
+  if (body.enabled !== undefined && typeof body.enabled !== "boolean") throw new Error("invalid_scheduled_task_enabled");
+  return {
+    name: cleanString(body.name ?? current?.name, 120),
+    prompt: cleanString(body.prompt ?? current?.prompt, 100000),
+    projectId,
+    workspacePath,
+    agentId,
+    startsAt: cleanString(body.starts_at ?? current?.starts_at, 64),
+    repeat,
+    intervalValue,
+    intervalUnit,
+    enabled,
+  };
 }
 
 function codexProjectTimestamp(value: unknown) {
@@ -978,6 +1012,10 @@ export function startServer() {
         if (!mockup) syncCodexProjects(store);
         return sendJson(response, 200, { projects: projectSummaries(mockup ? mockup.projects : store.listProjects()), agents: mockup ? mockup.agents : visibleAgentProfiles(), statuses: issueStatuses, priorities: issuePriorities, appearance: readCodexAppearance(), locale: readCodexLocale(), user: readCodexUserProfile(), agentModelCatalog, agentModels, agentReasoningEfforts, autoDispatch: mockup ? mockup.auto_dispatch : store.getAutoDispatch(), schedulerModel: mockup ? mockup.scheduler_model : store.getSchedulerModel(defaultAgentProfile().model), schedulerReasoningEffort: mockup ? mockup.scheduler_reasoning_effort : store.getSchedulerReasoningEffort(), limits: { issue_description: maxIssueDescriptionLength }, mockup: mockupEnabled, featureManifest: featureManifest() });
       }
+      if (mockupEnabled && path[0] === "api" && path[1] === "scheduled-tasks") {
+        if (method === "GET" && path.length === 2) return sendJson(response, 200, []);
+        return sendJson(response, 400, { error: "mockup_action_not_supported" });
+      }
       if (url.pathname === "/api/account/usage" && method === "GET") {
         return sendJson(response, 200, { usage: await readCodexUsage() });
       }
@@ -1366,6 +1404,41 @@ export function startServer() {
         const model = catalog.find(item => item.id === store.getSchedulerModel(defaultAgentProfile().model));
         if (!model?.supportedReasoningEfforts.some(item => item.value === effort)) throw new Error("invalid_scheduler_reasoning_effort");
         return sendJson(response, 200, { reasoning_effort: store.setSchedulerReasoningEffort(effort) });
+      }
+      if (url.pathname === "/api/scheduled-tasks" && method === "GET") {
+        return sendJson(response, 200, store.listScheduledTasks());
+      }
+      if (url.pathname === "/api/scheduled-tasks" && method === "POST") {
+        const body = await readBody(request);
+        const task = store.createScheduledTask(scheduledTaskInput(store, body));
+        worker.wake();
+        return sendJson(response, 201, task);
+      }
+      if (path[0] === "api" && path[1] === "scheduled-tasks" && path[2]) {
+        const taskId = decodeURIComponent(path[2]);
+        const task = store.getScheduledTask(taskId);
+        if (!task) return sendJson(response, 404, { error: "scheduled_task_not_found" });
+        if (method === "PATCH" && path.length === 3) {
+          const body = await readBody(request);
+          const version = Number(body.version);
+          if (!Number.isInteger(version) || version < 1) throw new Error("invalid_version");
+          const updated = store.updateScheduledTask(task.id, version, scheduledTaskInput(store, body, task));
+          worker.wake();
+          return sendJson(response, 200, updated);
+        }
+        if (method === "DELETE" && path.length === 3) {
+          const body = await readBody(request);
+          const version = Number(body.version);
+          if (!Number.isInteger(version) || version < 1) throw new Error("invalid_version");
+          store.deleteScheduledTask(task.id, version);
+          return sendJson(response, 200, { deleted: true });
+        }
+        if (method === "POST" && path[3] === "run" && path.length === 4) {
+          if (updateInstallInProgress) throw new Error("update_in_progress");
+          store.runScheduledTaskNow(task.id);
+          worker.wake();
+          return sendJson(response, 202, store.getScheduledTask(task.id));
+        }
       }
       if (url.pathname === "/api/update" && method === "GET") return sendJson(response, 200, getGatewayUpdateState());
       if (url.pathname === "/api/update/check" && method === "POST") return sendJson(response, 200, await checkGatewayUpdate());

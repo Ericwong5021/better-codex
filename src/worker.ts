@@ -641,10 +641,12 @@ export class IssueWorker {
     }
   }
 
-  private schedule(delay = interval) {
+  private schedule(delay?: number) {
     if (this.stopped) return;
     if (this.timer) clearTimeout(this.timer);
-    this.timer = setTimeout(() => void this.tick(), delay);
+    const next = this.store.nextScheduledTaskAt();
+    const scheduledDelay = next ? Math.max(0, Math.min(interval, Date.parse(next) - Date.now())) : interval;
+    this.timer = setTimeout(() => void this.tick(), delay ?? scheduledDelay);
     this.timer.unref();
   }
 
@@ -683,6 +685,8 @@ export class IssueWorker {
   private async tick() {
     try {
       if (mockupSessionActive()) return;
+      this.store.claimDueScheduledTasks();
+      this.dispatchPendingScheduledTasks();
       await this.reconcileDesktopRuns();
       for (const issueId of [...this.manualQueue]) {
         const issue = this.store.getIssue(issueId);
@@ -705,6 +709,27 @@ export class IssueWorker {
       createWriteStream(workerLogPath, { flags: "a" }).end(`${new Date().toISOString()} ${output}\n`);
     } finally {
       this.schedule();
+    }
+  }
+
+  private dispatchPendingScheduledTasks() {
+    for (const pending of this.store.listPendingScheduledTaskRuns()) {
+      try {
+        const created = this.store.createIssueRequest({
+          id: pending.run.id,
+          projectId: pending.task.project_id,
+          title: pending.task.name,
+          description: pending.task.prompt,
+          status: "todo",
+          workspacePath: pending.task.workspace_path,
+          agentEnabled: true,
+          agentId: pending.task.agent_id || undefined,
+        }, `scheduled-task:${pending.run.id}`);
+        this.store.attachScheduledTaskRun(pending.run.id, created.issue.id);
+        if (!this.startIssue(created.issue.id)) throw new Error("issue_not_started");
+      } catch (error) {
+        this.store.failScheduledTaskRun(pending.run.id, error instanceof Error ? error.message : "scheduled_task_dispatch_failed");
+      }
     }
   }
 

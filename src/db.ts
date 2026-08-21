@@ -170,6 +170,62 @@ export type ClaimedIssue = {
   workspacePath: string;
 };
 
+export const scheduledTaskIntervalUnits = ["minute", "hour", "day", "week"] as const;
+export type ScheduledTaskIntervalUnit = typeof scheduledTaskIntervalUnits[number];
+
+export type ScheduledTaskRun = {
+  id: string;
+  scheduled_task_id: string;
+  issue_id: string | null;
+  issue_identifier: string | null;
+  issue_status: IssueStatus | null;
+  active_run_status: "claimed" | "running" | "scheduling" | null;
+  scheduled_for: string;
+  status: "pending" | "dispatched" | "failed";
+  attempts: number;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ScheduledTask = {
+  id: string;
+  name: string;
+  prompt: string;
+  project_id: string;
+  workspace_path: string;
+  agent_id: string | null;
+  starts_at: string;
+  repeat: boolean;
+  interval_value: number | null;
+  interval_unit: ScheduledTaskIntervalUnit | null;
+  enabled: boolean;
+  next_run_at: string | null;
+  last_run_at: string | null;
+  version: number;
+  created_at: string;
+  updated_at: string;
+  recent_runs: ScheduledTaskRun[];
+};
+
+export type ScheduledTaskInput = {
+  name: string;
+  prompt: string;
+  projectId: string;
+  workspacePath: string;
+  agentId?: string;
+  startsAt: string;
+  repeat?: boolean;
+  intervalValue?: number;
+  intervalUnit?: ScheduledTaskIntervalUnit;
+  enabled?: boolean;
+};
+
+export type PendingScheduledTaskRun = {
+  run: ScheduledTaskRun;
+  task: ScheduledTask;
+};
+
 export type SchedulerDecision = {
   status: "done" | "in_review" | "blocked";
   reason: string;
@@ -236,7 +292,7 @@ export function cleanMaxConcurrency(value: number | undefined) {
   return value;
 }
 
-const latestSchemaVersion = 16;
+const latestSchemaVersion = 17;
 
 function now() {
   return new Date().toISOString();
@@ -354,6 +410,77 @@ function issueFromRow(row: Record<string, unknown>): Issue {
     session_relay_connected: Boolean(row.session_relay_connected),
     pending_actor: row.pending_actor === "agent" ? "agent" : "user",
   } as Issue;
+}
+
+function scheduledTaskRunFromRow(row: Record<string, unknown>): ScheduledTaskRun {
+  return {
+    id: String(row.id),
+    scheduled_task_id: String(row.scheduled_task_id),
+    issue_id: row.issue_id ? String(row.issue_id) : null,
+    issue_identifier: row.issue_identifier ? String(row.issue_identifier) : null,
+    issue_status: row.issue_status ? String(row.issue_status) as IssueStatus : null,
+    active_run_status: row.active_run_status ? String(row.active_run_status) as ScheduledTaskRun["active_run_status"] : null,
+    scheduled_for: String(row.scheduled_for),
+    status: String(row.status) as ScheduledTaskRun["status"],
+    attempts: Number(row.attempts || 0),
+    error: row.error ? String(row.error) : null,
+    created_at: String(row.created_at),
+    updated_at: String(row.updated_at),
+  };
+}
+
+function scheduledTaskFromRow(row: Record<string, unknown>, recentRuns: ScheduledTaskRun[] = []): ScheduledTask {
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    prompt: String(row.prompt),
+    project_id: String(row.project_id),
+    workspace_path: String(row.workspace_path),
+    agent_id: row.agent_id ? String(row.agent_id) : null,
+    starts_at: String(row.starts_at),
+    repeat: Boolean(row.repeat),
+    interval_value: row.interval_value === null || row.interval_value === undefined ? null : Number(row.interval_value),
+    interval_unit: row.interval_unit ? String(row.interval_unit) as ScheduledTaskIntervalUnit : null,
+    enabled: Boolean(row.enabled),
+    next_run_at: row.next_run_at ? String(row.next_run_at) : null,
+    last_run_at: row.last_run_at ? String(row.last_run_at) : null,
+    version: Number(row.version),
+    created_at: String(row.created_at),
+    updated_at: String(row.updated_at),
+    recent_runs: recentRuns,
+  };
+}
+
+function scheduledTaskIntervalMilliseconds(value: number, unit: ScheduledTaskIntervalUnit) {
+  const units = { minute: 60_000, hour: 3_600_000, day: 86_400_000, week: 604_800_000 };
+  return value * units[unit];
+}
+
+function nextScheduledTaskTime(startsAt: string, repeat: boolean, intervalValue: number | null, intervalUnit: ScheduledTaskIntervalUnit | null, after = Date.now()) {
+  const start = Date.parse(startsAt);
+  if (!repeat) return new Date(Math.max(start, after)).toISOString();
+  if (!intervalValue || !intervalUnit) throw new Error("invalid_scheduled_task_interval");
+  const interval = scheduledTaskIntervalMilliseconds(intervalValue, intervalUnit);
+  if (start > after) return new Date(start).toISOString();
+  return new Date(start + (Math.floor((after - start) / interval) + 1) * interval).toISOString();
+}
+
+function cleanScheduledTaskInput(input: ScheduledTaskInput) {
+  const name = input.name.trim();
+  const prompt = input.prompt.trim();
+  const workspacePath = input.workspacePath.trim();
+  const agentId = (input.agentId || "").trim();
+  const starts = new Date(input.startsAt);
+  const repeat = Boolean(input.repeat);
+  const intervalValue = repeat ? Number(input.intervalValue) : null;
+  const intervalUnit = repeat ? input.intervalUnit || null : null;
+  if (!name || name.length > 120 || name.includes("\0")) throw new Error("invalid_scheduled_task_name");
+  if (!prompt || prompt.length > 100000 || prompt.includes("\0")) throw new Error("invalid_scheduled_task_prompt");
+  if (!workspacePath || workspacePath.length > 4096 || workspacePath.includes("\0")) throw new Error("workspace_required");
+  if (agentId.length > 200 || agentId.includes("\0")) throw new Error("invalid_agent_id");
+  if (!Number.isFinite(starts.getTime())) throw new Error("invalid_scheduled_task_time");
+  if (repeat && (!Number.isInteger(intervalValue) || intervalValue < 1 || intervalValue > 999 || !intervalUnit || !scheduledTaskIntervalUnits.includes(intervalUnit))) throw new Error("invalid_scheduled_task_interval");
+  return { name, prompt, projectId: input.projectId, workspacePath, agentId, startsAt: starts.toISOString(), repeat, intervalValue, intervalUnit, enabled: input.enabled !== false };
 }
 
 function emptyProjectDocumentViews(): ProjectDocumentView[] {
@@ -819,6 +946,51 @@ export class Store {
           CREATE INDEX IF NOT EXISTS project_plan_revisions_project ON project_plan_revisions(project_id, revision DESC);
         `);
         this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (16, ?)").run(now());
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    }
+    if (fromVersion < 17) {
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS scheduled_tasks (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            prompt TEXT NOT NULL,
+            project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            workspace_path TEXT NOT NULL,
+            agent_id TEXT REFERENCES agent_profiles(id) ON DELETE SET NULL,
+            starts_at TEXT NOT NULL,
+            repeat INTEGER NOT NULL DEFAULT 0,
+            interval_value INTEGER,
+            interval_unit TEXT,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            next_run_at TEXT,
+            last_run_at TEXT,
+            version INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          );
+          CREATE TABLE IF NOT EXISTS scheduled_task_runs (
+            id TEXT PRIMARY KEY,
+            scheduled_task_id TEXT NOT NULL REFERENCES scheduled_tasks(id) ON DELETE CASCADE,
+            issue_id TEXT REFERENCES issues(id) ON DELETE SET NULL,
+            scheduled_for TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            attempts INTEGER NOT NULL DEFAULT 0,
+            available_at TEXT NOT NULL,
+            error TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS scheduled_tasks_due ON scheduled_tasks(enabled, next_run_at);
+          CREATE INDEX IF NOT EXISTS scheduled_task_runs_task ON scheduled_task_runs(scheduled_task_id, created_at DESC);
+          CREATE INDEX IF NOT EXISTS scheduled_task_runs_pending ON scheduled_task_runs(status, available_at);
+        `);
+        this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (17, ?)").run(now());
         this.db.exec("COMMIT");
       } catch (error) {
         this.db.exec("ROLLBACK");
@@ -1514,6 +1686,216 @@ export class Store {
       ON CONFLICT(key) DO UPDATE SET value = excluded.value
     `).run(value);
     return this.getSchedulerReasoningEffort();
+  }
+
+  listScheduledTaskRuns(taskId: string, limit = 5) {
+    const rows = this.db.prepare(`
+      SELECT scheduled_task_runs.*, issues.identifier AS issue_identifier, issues.status AS issue_status,
+        (
+          SELECT issue_runs.status
+          FROM issue_runs
+          WHERE issue_runs.issue_id = issues.id
+            AND issue_runs.status IN ('claimed', 'running', 'scheduling')
+          ORDER BY issue_runs.started_at DESC
+          LIMIT 1
+        ) AS active_run_status
+      FROM scheduled_task_runs
+      LEFT JOIN issues ON issues.id = scheduled_task_runs.issue_id
+      WHERE scheduled_task_runs.scheduled_task_id = ?
+      ORDER BY scheduled_task_runs.created_at DESC
+      LIMIT ?
+    `).all(taskId, Math.max(1, Math.min(50, Math.floor(limit)))) as Record<string, unknown>[];
+    return rows.map(scheduledTaskRunFromRow);
+  }
+
+  listScheduledTasks() {
+    const rows = this.db.prepare("SELECT * FROM scheduled_tasks ORDER BY enabled DESC, COALESCE(next_run_at, starts_at), created_at DESC").all() as Record<string, unknown>[];
+    return rows.map(row => scheduledTaskFromRow(row, this.listScheduledTaskRuns(String(row.id))));
+  }
+
+  getScheduledTask(id: string) {
+    const row = this.db.prepare("SELECT * FROM scheduled_tasks WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+    return row ? scheduledTaskFromRow(row, this.listScheduledTaskRuns(id)) : undefined;
+  }
+
+  createScheduledTask(input: ScheduledTaskInput) {
+    const cleaned = cleanScheduledTaskInput(input);
+    if (!this.getProject(cleaned.projectId)) throw new Error("project_not_found");
+    if (cleaned.agentId && !this.getAgentProfile(cleaned.agentId)) throw new Error("agent_not_found");
+    const id = randomUUID();
+    const timestamp = now();
+    const nextRunAt = nextScheduledTaskTime(cleaned.startsAt, cleaned.repeat, cleaned.intervalValue, cleaned.intervalUnit);
+    this.db.prepare(`
+      INSERT INTO scheduled_tasks (
+        id, name, prompt, project_id, workspace_path, agent_id, starts_at, repeat,
+        interval_value, interval_unit, enabled, next_run_at, last_run_at, version, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 1, ?, ?)
+    `).run(id, cleaned.name, cleaned.prompt, cleaned.projectId, cleaned.workspacePath, cleaned.agentId || null, cleaned.startsAt, Number(cleaned.repeat), cleaned.intervalValue, cleaned.intervalUnit, Number(cleaned.enabled), nextRunAt, timestamp, timestamp);
+    return this.getScheduledTask(id)!;
+  }
+
+  updateScheduledTask(id: string, version: number, input: ScheduledTaskInput) {
+    const current = this.getScheduledTask(id);
+    if (!current) throw new Error("scheduled_task_not_found");
+    if (!Number.isInteger(version) || version !== current.version) throw new Error("version_conflict");
+    const cleaned = cleanScheduledTaskInput(input);
+    if (!this.getProject(cleaned.projectId)) throw new Error("project_not_found");
+    if (cleaned.agentId && !this.getAgentProfile(cleaned.agentId)) throw new Error("agent_not_found");
+    const scheduleChanged = cleaned.startsAt !== current.starts_at || cleaned.repeat !== current.repeat || cleaned.intervalValue !== current.interval_value || cleaned.intervalUnit !== current.interval_unit;
+    const nextRunAt = scheduleChanged || cleaned.enabled && (!current.next_run_at || Date.parse(current.next_run_at) <= Date.now())
+      ? nextScheduledTaskTime(cleaned.startsAt, cleaned.repeat, cleaned.intervalValue, cleaned.intervalUnit)
+      : current.next_run_at;
+    const result = this.db.prepare(`
+      UPDATE scheduled_tasks
+      SET name = ?, prompt = ?, project_id = ?, workspace_path = ?, agent_id = ?, starts_at = ?, repeat = ?,
+          interval_value = ?, interval_unit = ?, enabled = ?, next_run_at = ?, version = version + 1, updated_at = ?
+      WHERE id = ? AND version = ?
+    `).run(cleaned.name, cleaned.prompt, cleaned.projectId, cleaned.workspacePath, cleaned.agentId || null, cleaned.startsAt, Number(cleaned.repeat), cleaned.intervalValue, cleaned.intervalUnit, Number(cleaned.enabled), nextRunAt, now(), id, version);
+    if (Number(result.changes) !== 1) throw new Error("version_conflict");
+    return this.getScheduledTask(id)!;
+  }
+
+  deleteScheduledTask(id: string, version: number) {
+    const result = this.db.prepare("DELETE FROM scheduled_tasks WHERE id = ? AND version = ?").run(id, version);
+    if (Number(result.changes) !== 1) {
+      if (!this.getScheduledTask(id)) throw new Error("scheduled_task_not_found");
+      throw new Error("version_conflict");
+    }
+  }
+
+  runScheduledTaskNow(id: string) {
+    this.db.exec("BEGIN IMMEDIATE");
+    let runId = "";
+    try {
+      const task = this.db.prepare("SELECT 1 AS value FROM scheduled_tasks WHERE id = ?").get(id);
+      if (!task) throw new Error("scheduled_task_not_found");
+      const active = this.db.prepare(`
+        SELECT 1 AS value
+        FROM scheduled_task_runs
+        LEFT JOIN issues ON issues.id = scheduled_task_runs.issue_id
+        WHERE scheduled_task_runs.scheduled_task_id = ?
+          AND (
+            scheduled_task_runs.status = 'pending'
+            OR scheduled_task_runs.status = 'dispatched' AND issues.archived_at IS NULL AND issues.status NOT IN ('done', 'in_review', 'blocked')
+          )
+        LIMIT 1
+      `).get(id);
+      if (active) throw new Error("scheduled_task_running");
+      const timestamp = now();
+      runId = randomUUID();
+      this.db.prepare(`
+        INSERT INTO scheduled_task_runs (id, scheduled_task_id, issue_id, scheduled_for, status, attempts, available_at, error, created_at, updated_at)
+        VALUES (?, ?, NULL, ?, 'pending', 0, ?, NULL, ?, ?)
+      `).run(runId, id, timestamp, timestamp, timestamp, timestamp);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    return this.listScheduledTaskRuns(id, 50).find(run => run.id === runId)!;
+  }
+
+  claimDueScheduledTasks(limit = 20) {
+    const timestamp = now();
+    const claimed: ScheduledTaskRun[] = [];
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const rows = this.db.prepare(`
+        SELECT scheduled_tasks.*
+        FROM scheduled_tasks
+        WHERE scheduled_tasks.enabled = 1
+          AND scheduled_tasks.next_run_at IS NOT NULL
+          AND scheduled_tasks.next_run_at <= ?
+          AND NOT EXISTS (
+            SELECT 1
+            FROM scheduled_task_runs
+            LEFT JOIN issues ON issues.id = scheduled_task_runs.issue_id
+            WHERE scheduled_task_runs.scheduled_task_id = scheduled_tasks.id
+              AND (
+                scheduled_task_runs.status = 'pending'
+                OR scheduled_task_runs.status = 'dispatched' AND issues.archived_at IS NULL AND issues.status NOT IN ('done', 'in_review', 'blocked')
+              )
+          )
+        ORDER BY scheduled_tasks.next_run_at
+        LIMIT ?
+      `).all(timestamp, Math.max(1, Math.min(100, Math.floor(limit)))) as Record<string, unknown>[];
+      for (const row of rows) {
+        const task = scheduledTaskFromRow(row);
+        const runId = randomUUID();
+        const scheduledFor = task.next_run_at!;
+        this.db.prepare(`
+          INSERT INTO scheduled_task_runs (id, scheduled_task_id, issue_id, scheduled_for, status, attempts, available_at, error, created_at, updated_at)
+          VALUES (?, ?, NULL, ?, 'pending', 0, ?, NULL, ?, ?)
+        `).run(runId, task.id, scheduledFor, timestamp, timestamp, timestamp);
+        const nextRunAt = task.repeat ? nextScheduledTaskTime(task.starts_at, true, task.interval_value, task.interval_unit, Date.now()) : null;
+        this.db.prepare("UPDATE scheduled_tasks SET enabled = ?, next_run_at = ?, last_run_at = ?, version = version + 1, updated_at = ? WHERE id = ?")
+          .run(Number(task.repeat), nextRunAt, timestamp, timestamp, task.id);
+        claimed.push(scheduledTaskRunFromRow({ id: runId, scheduled_task_id: task.id, issue_id: null, issue_identifier: null, issue_status: null, active_run_status: null, scheduled_for: scheduledFor, status: "pending", attempts: 0, error: null, created_at: timestamp, updated_at: timestamp }));
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    return claimed;
+  }
+
+  listPendingScheduledTaskRuns(limit = 20): PendingScheduledTaskRun[] {
+    const rows = this.db.prepare(`
+      SELECT scheduled_task_runs.id AS pending_run_id, scheduled_task_runs.scheduled_for AS pending_scheduled_for,
+        scheduled_task_runs.attempts AS pending_attempts, scheduled_task_runs.error AS pending_error,
+        scheduled_task_runs.created_at AS pending_created_at, scheduled_task_runs.updated_at AS pending_updated_at,
+        scheduled_tasks.*
+      FROM scheduled_task_runs
+      JOIN scheduled_tasks ON scheduled_tasks.id = scheduled_task_runs.scheduled_task_id
+      WHERE scheduled_task_runs.status = 'pending' AND scheduled_task_runs.available_at <= ? AND scheduled_task_runs.attempts < 3
+      ORDER BY scheduled_task_runs.available_at, scheduled_task_runs.created_at
+      LIMIT ?
+    `).all(now(), Math.max(1, Math.min(100, Math.floor(limit)))) as Record<string, unknown>[];
+    return rows.map(row => ({
+      run: scheduledTaskRunFromRow({
+        id: row.pending_run_id,
+        scheduled_task_id: row.id,
+        issue_id: null,
+        issue_identifier: null,
+        issue_status: null,
+        active_run_status: null,
+        scheduled_for: row.pending_scheduled_for,
+        status: "pending",
+        attempts: row.pending_attempts,
+        error: row.pending_error,
+        created_at: row.pending_created_at,
+        updated_at: row.pending_updated_at,
+      }),
+      task: scheduledTaskFromRow(row),
+    }));
+  }
+
+  nextScheduledTaskAt() {
+    const row = this.db.prepare(`
+      SELECT MIN(value) AS value
+      FROM (
+        SELECT next_run_at AS value FROM scheduled_tasks WHERE enabled = 1 AND next_run_at IS NOT NULL
+        UNION ALL
+        SELECT available_at AS value FROM scheduled_task_runs WHERE status = 'pending' AND attempts < 3
+      )
+    `).get() as { value: string | null };
+    return row.value || null;
+  }
+
+  attachScheduledTaskRun(runId: string, issueId: string) {
+    const result = this.db.prepare("UPDATE scheduled_task_runs SET issue_id = ?, status = 'dispatched', error = NULL, updated_at = ? WHERE id = ? AND status = 'pending'").run(issueId, now(), runId);
+    if (Number(result.changes) !== 1) throw new Error("scheduled_task_run_not_pending");
+  }
+
+  failScheduledTaskRun(runId: string, error: string) {
+    const row = this.db.prepare("SELECT attempts FROM scheduled_task_runs WHERE id = ? AND status = 'pending'").get(runId) as { attempts: number } | undefined;
+    if (!row) return;
+    const attempts = Number(row.attempts) + 1;
+    const status = attempts >= 3 ? "failed" : "pending";
+    const retryDelay = [60_000, 300_000, 900_000][Math.min(attempts - 1, 2)];
+    this.db.prepare("UPDATE scheduled_task_runs SET status = ?, attempts = ?, available_at = ?, error = ?, updated_at = ? WHERE id = ?")
+      .run(status, attempts, new Date(Date.now() + retryDelay).toISOString(), error.slice(0, 2000), now(), runId);
   }
 
   getDefaultAgentMaxConcurrency() {

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-export type WebCommandKind = "issue" | "project" | "agent" | "setting";
+export type WebCommandKind = "issue" | "project" | "agent" | "setting" | "scheduled";
 
 export type WebCommandEnvelope = {
   command_id: string;
@@ -23,6 +23,9 @@ const projectPlanning = /^\/api\/projects\/([^/]+)\/planning\/(messages|reset)$/
 const agentCollection = /^\/api\/agents$/;
 const agentItem = /^\/api\/agents\/([^/]+)$/;
 const settingItem = /^\/api\/settings\/(auto-dispatch|scheduler-model|scheduler-reasoning-effort)$/;
+const scheduledCollection = /^\/api\/scheduled-tasks$/;
+const scheduledItem = /^\/api\/scheduled-tasks\/([^/]+)$/;
+const scheduledAction = /^\/api\/scheduled-tasks\/([^/]+)\/run$/;
 
 function decoded(value: string) {
   try { return decodeURIComponent(value); } catch { return value; }
@@ -48,6 +51,11 @@ export function webCommandTarget(methodValue: string, pathValue: string) {
   if (agentCollection.test(pathname) && method === "POST") return { kind: "agent" as const, entity_id: null };
   match = pathname.match(settingItem);
   if (match && method === "PATCH") return { kind: "setting" as const, entity_id: match[1] };
+  match = pathname.match(scheduledItem);
+  if (match && ["PATCH", "DELETE"].includes(method)) return { kind: "scheduled" as const, entity_id: decoded(match[1]) };
+  match = pathname.match(scheduledAction);
+  if (match && method === "POST") return { kind: "scheduled" as const, entity_id: decoded(match[1]) };
+  if (scheduledCollection.test(pathname) && method === "POST") return { kind: "scheduled" as const, entity_id: null };
   return null;
 }
 
