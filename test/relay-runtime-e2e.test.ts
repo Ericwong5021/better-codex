@@ -38,11 +38,17 @@ function startRuntime(home: string, port: number, token: string) {
   });
 }
 
-async function stopRuntime(child: ChildProcess) {
-  if (process.platform !== "win32" && child.pid) {
-    try { process.kill(-child.pid, "SIGTERM"); } catch {}
-  } else if (child.exitCode === null) {
-    child.kill("SIGTERM");
+async function stopRuntime(child: ChildProcess, port: number, token: string) {
+  if (child.exitCode === null) {
+    let requested = false;
+    try {
+      requested = (await fetch(`http://127.0.0.1:${port}/api/shutdown`, { method: "POST", headers: { authorization: `Bearer ${token}` } })).ok;
+    } catch {}
+    if (!requested && process.platform !== "win32" && child.pid) {
+      try { process.kill(-child.pid, "SIGTERM"); } catch {}
+    } else if (!requested && child.exitCode === null) {
+      child.kill("SIGTERM");
+    }
   }
   if (child.exitCode !== null) return;
   await Promise.race([
@@ -157,7 +163,7 @@ test("public Relay drives the real Runtime and recovers without storing business
     const restoredResponse = await request(`/api/issues/${issue.id}/unarchive`, { method: "POST", body: JSON.stringify({ version: archived.version }) });
     assert.equal(restoredResponse.status, 200);
 
-    await stopRuntime(runtime);
+    await stopRuntime(runtime, runtimePort, runtimeToken);
     await waitFor(() => relay.runtime() === null, undefined, 5000);
     await waitFor(async () => {
       const health = await fetch(`${base}/healthz`).then(response => response.json()) as { runtime: { state: string } };
@@ -176,7 +182,7 @@ test("public Relay drives the real Runtime and recovers without storing business
     assert.equal(((await recovered.json()) as { id: string }).id, issue.id);
     assert.deepEqual(relay.store.tableNames(), ["relay_audit", "relay_commands", "relay_devices", "relay_settings", "relay_web_sessions", "sqlite_sequence"]);
   } finally {
-    await stopRuntime(runtime).catch(() => {});
+    await stopRuntime(runtime, runtimePort, runtimeToken).catch(() => {});
     await relay.close();
     rmSync(home, { recursive: true, force: true });
   }

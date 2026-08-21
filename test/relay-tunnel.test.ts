@@ -176,6 +176,7 @@ test("relay keeps safe reads pending during the Runtime reconnect grace period",
   const stopped = once(second, "close");
   second.close(relayRuntimeStoppedCloseCode);
   await stopped;
+  await waitFor(() => relay.runtime() === null);
   const stoppedHealth = await fetch(`${base}/healthz`).then(response => response.json()) as { runtime: { online: boolean; state: string } };
   assert.equal(stoppedHealth.runtime.online, false);
   assert.equal(stoppedHealth.runtime.state, "offline");
