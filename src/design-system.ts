@@ -6868,38 +6868,49 @@ export function betterCodexDesignSystemCss() {
         white-space: normal;
       }
       #better-codex-dialog .better-codex-dialog-footer {
-        display: grid;
-        grid-template-columns: var(--bc-control-height) minmax(0, 1fr);
-        align-items: start;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding-inline: var(--bc-space-2);
         padding-block: var(--bc-space-2);
       }
       #better-codex-dialog .better-codex-dialog-footer-right {
-        display: grid;
+        display: flex;
         min-width: 0;
-        grid-template-columns: minmax(0, 1fr) auto;
+        flex: 1 1 auto;
         align-items: center;
-        gap: var(--bc-space-2);
+        justify-content: flex-end;
+        gap: 4px;
       }
       #better-codex-dialog .better-codex-switch-mode {
-        width: 100%;
+        width: auto;
         min-width: 0;
-        grid-column: 1 / -1;
+        flex: 0 1 auto;
         height: auto;
         min-height: var(--bc-control-height);
         justify-content: flex-start;
-        padding-block: var(--bc-space-2);
+        gap: 4px;
+        padding: var(--bc-space-2) 4px;
         text-align: left;
-        white-space: normal;
+        white-space: nowrap;
       }
-      #better-codex-dialog .better-codex-keep-open { grid-column: 1; min-width: 0; white-space: normal; }
+      #better-codex-dialog .better-codex-keep-open {
+        min-width: 0;
+        flex: 0 0 auto;
+        gap: 4px;
+        white-space: nowrap;
+      }
       #better-codex-dialog .better-codex-submit {
-        grid-column: 2;
         min-width: 0;
         max-width: 100%;
+        flex: 0 0 auto;
         height: auto;
         min-height: var(--bc-control-height);
-        padding-block: var(--bc-space-2);
-        white-space: normal;
+        padding: var(--bc-space-2) 10px;
+        white-space: nowrap;
+      }
+      #better-codex-dialog .better-codex-agent-picker .better-codex-dialog-select-trigger {
+        max-width: min(260px, calc(100vw - 120px));
       }
       #better-codex-update-notice {
         right: 12px;
