@@ -6961,6 +6961,11 @@ export function betterCodexDesignSystemCss() {
         --bc-dialog-content-gutter: var(--bc-space-4);
       }
 
+      #better-codex-dialog[data-host="web"][data-detail="true"][data-expanded]:has(.better-codex-conversation) {
+        height: var(--bc-mobile-viewport-height, 100dvh);
+        max-height: none;
+      }
+
       #better-codex-dialog[data-host="web"]::backdrop {
         background: var(--bc-color-canvas);
         backdrop-filter: none;
