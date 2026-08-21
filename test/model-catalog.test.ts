@@ -30,5 +30,6 @@ test("normalizes the live Codex model/list response", () => {
       { value: "low", description: "Fast" },
       { value: "high", description: "Deep" },
     ],
+    serviceTiers: [],
   }]);
 });

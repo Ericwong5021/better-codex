@@ -161,7 +161,9 @@ test("public Relay drives the real Runtime and recovers without storing business
     await waitFor(() => relay.runtime() === null, undefined, 5000);
     const offline = await request(`/api/issues/${issue.id}`);
     assert.equal(offline.status, 503);
-    assert.deepEqual(await offline.json(), { error: "runtime_offline" });
+    const offlineBody = await offline.json() as { error: string; trace_id: string };
+    assert.equal(offlineBody.error, "runtime_offline");
+    assert.match(offlineBody.trace_id, /^[0-9a-f-]{36}$/);
 
     runtime = startRuntime(home, runtimePort, runtimeToken);
     await waitFor(() => relay.runtime() !== null, runtime);

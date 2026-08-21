@@ -47,7 +47,7 @@ test("board bridge retries timed out GET requests without repeating writes", () 
   assert.match(source, /const method = String\(options\.method \|\| "GET"\)\.toUpperCase\(\)/);
   assert.match(source, /return attempt\(method === "GET" \? 1 : 0\)/);
   assert.match(source, /\["runtime_bridge_timeout", "runtime_response_invalid"\]\.includes\(error\.message\)/);
-  assert.ok(source.includes('requestList(issuePath, "issues")'));
+  assert.ok(source.includes('requestList(issuePath, "issues", { passive: Boolean(options.background) })'));
   assert.ok(source.includes('requestList("/api/agents", "agents")'));
   assert.match(source, /timeoutMs: files\.length \? 120_000 : undefined/);
   assert.match(source, /const transferTimeoutMs = files\.length \? 120_000 : undefined/);

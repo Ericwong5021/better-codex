@@ -91,6 +91,7 @@ test("default Codex agent reflects the root config.toml model settings", () => {
       instructions: "使用 Codex 默认配置承接并执行 Better Codex Issue。",
       model: "gpt-5.6-sol",
       reasoning_effort: "high",
+      service_tier: "default",
       sandbox_mode: "workspace-write",
       version: 1,
       created_at: "",
@@ -180,7 +181,7 @@ test("core workflow persists, orders status moves, and rejects stale writes", ()
     const restored = store.getIssue(first.id);
     assert.equal(restored?.status, "in_progress");
     assert.equal(restored?.thread_id, "local:thread-1");
-    assert.equal(store.health().schemaVersion, 14);
+    assert.equal(store.health().schemaVersion, 16);
     store.close();
   } finally {
     rmSync(target.directory, { recursive: true, force: true });
@@ -1138,7 +1139,7 @@ test("legacy cancelled issues migrate to archived backlog issues", () => {
     const restored = store.unarchiveIssue(issue.id, migrated.version);
     const moved = store.updateIssue(issue.id, restored.version, { status: "todo" });
     assert.equal(store.isDispatchable(moved), false);
-    assert.equal(store.health().schemaVersion, 14);
+    assert.equal(store.health().schemaVersion, 16);
   } finally {
     store?.close();
     rmSync(target.directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
@@ -1177,7 +1178,7 @@ test("newer database schema is rejected without migration", () => {
   const target = temporaryDatabase();
   try {
     const future = new DatabaseSync(target.file);
-    future.exec("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL); INSERT INTO schema_migrations VALUES (15, '2026-01-01T00:00:00.000Z')");
+    future.exec("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL); INSERT INTO schema_migrations VALUES (17, '2026-01-01T00:00:00.000Z')");
     future.close();
     assert.throws(() => new Store(target.file), /database_schema_too_new/);
   } finally {
@@ -1221,7 +1222,7 @@ test("legacy database is backed up before migration", () => {
     legacy.close();
 
     const store = new Store(target.file);
-    assert.equal(store.health().schemaVersion, 14);
+    assert.equal(store.health().schemaVersion, 16);
     assert.ok(store.lastBackupPath);
     assert.ok(existsSync(store.lastBackupPath!));
     assert.equal(store.getProject("legacy")?.name, "Legacy");

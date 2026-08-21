@@ -282,7 +282,9 @@ test("relay leaves unsupported writes outside the persistent command queue", asy
   const cookie = String(login.headers.get("set-cookie") || "").split(";")[0];
   const response = await fetch(`${base}/api/retry-limit`, { method: "POST", headers: { cookie, origin: base, "x-csrf-token": session.csrf_token, "content-type": "application/json", "x-better-codex-command-id": "unsupported-command-1" }, body: JSON.stringify({ value: "once" }) });
   assert.equal(response.status, 503);
-  assert.deepEqual(await response.json(), { error: "runtime_offline" });
+  const body = await response.json() as { error: string; trace_id: string };
+  assert.equal(body.error, "runtime_offline");
+  assert.match(body.trace_id, /^[0-9a-f-]{36}$/);
   assert.equal(relay.store.pendingCommandCount(), 0);
   await relay.close();
 });

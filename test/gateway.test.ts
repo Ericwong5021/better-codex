@@ -90,7 +90,7 @@ test("gateway completes the issue workflow and survives restart", async () => {
   try {
     await waitForGateway(port, gateway);
     const health = await (await fetch(`http://127.0.0.1:${port}/health`)).json() as { database: { schemaVersion: number } };
-    assert.equal(health.database.schemaVersion, 14);
+    assert.equal(health.database.schemaVersion, 16);
 
     const bootstrap = await (await request("/api/bootstrap")).json() as { projects: Array<{ external_id: string | null; created_at: string }>; agents: Array<{ id: string; name: string; is_default?: boolean }>; appearance: unknown };
     assert.equal(
@@ -110,6 +110,7 @@ test("gateway completes the issue workflow and survives restart", async () => {
       instructions: "使用 Codex 默认配置承接并执行 Better Codex Issue。",
       model: "默认模型",
       reasoning_effort: "默认推理等级",
+      service_tier: "default",
       sandbox_mode: "workspace-write",
       max_concurrency: 5,
       version: 1,
