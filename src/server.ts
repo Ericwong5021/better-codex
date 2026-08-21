@@ -160,7 +160,8 @@ function sendJson(response: ServerResponse, status: number, value: unknown) {
     "content-type": "application/json; charset=utf-8",
     "access-control-allow-origin": "app://-",
     "access-control-allow-methods": "GET, POST, PATCH, DELETE, OPTIONS",
-    "access-control-allow-headers": "authorization, content-type",
+    "access-control-allow-headers": "authorization, content-type, x-better-codex-trace-id",
+    "access-control-expose-headers": "x-better-codex-trace-id, x-better-codex-request-id",
     "access-control-allow-private-network": "true",
     "cross-origin-resource-policy": "cross-origin",
     "vary": "Origin",
@@ -203,7 +204,7 @@ function sendPreflight(response: ServerResponse) {
   response.writeHead(204, {
     "access-control-allow-origin": "app://-",
     "access-control-allow-methods": "GET, POST, PATCH, DELETE, OPTIONS",
-    "access-control-allow-headers": "authorization, content-type",
+    "access-control-allow-headers": "authorization, content-type, x-better-codex-trace-id",
     "access-control-allow-private-network": "true",
     "access-control-max-age": "600",
     "vary": "Origin",
@@ -758,6 +759,9 @@ export function startServer() {
     store.close();
   };
   const server = createServer((request, response) => {
+    const suppliedTraceId = String(request.headers["x-better-codex-trace-id"] || "");
+    const requestTraceId = /^[A-Za-z0-9_-]{8,200}$/.test(suppliedTraceId) ? suppliedTraceId : "";
+    if (requestTraceId) response.setHeader("x-better-codex-trace-id", requestTraceId);
     void (async () => {
       if (!request.url || !loopback(request) || !trustedOrigin(request)) return sendJson(response, 403, { error: "forbidden" });
       const url = new URL(request.url, "http://127.0.0.1");
@@ -1810,7 +1814,8 @@ export function startServer() {
       return sendJson(response, 404, { error: "not_found" });
     })().catch((error) => {
       const code = errorCode(error);
-      if (!response.headersSent) sendJson(response, errorStatus(code), { error: code });
+      if (requestTraceId) console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "request", event: "request_failed", trace_id: requestTraceId, method: request.method || "GET", path: request.url || "", error: code })}`);
+      if (!response.headersSent) sendJson(response, errorStatus(code), { error: code, ...(requestTraceId ? { trace_id: requestTraceId } : {}) });
       else response.end();
     });
   });

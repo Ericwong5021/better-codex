@@ -95,7 +95,7 @@ const webHostHtml = String.raw`<!doctype html>
   </dialog>
   <dialog id="web-error-report" class="web-error-report" aria-labelledby="web-error-report-title" aria-describedby="web-error-report-description">
     <div class="web-error-report-shell">
-      <header><span class="web-error-report-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"></path><path d="M12 17h.01"></path><path d="M10.3 3.6 2.4 17.2A2 2 0 0 0 4.1 20h15.8a2 2 0 0 0 1.7-2.8L13.7 3.6a2 2 0 0 0-3.4 0Z"></path></svg></span><div><h2 id="web-error-report-title">错误报告</h2><p id="web-error-report-description">完整错误、请求信息和相关日志已保留，可直接复制给开发者。</p></div><button type="button" data-web-error-close aria-label="关闭"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18"></path></svg></button></header>
+      <header><span class="web-error-report-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"></path><path d="M12 17h.01"></path><path d="M10.3 3.6 2.4 17.2A2 2 0 0 0 4.1 20h15.8a2 2 0 0 0 1.7-2.8L13.7 3.6a2 2 0 0 0-3.4 0Z"></path></svg></span><div><h2 id="web-error-report-title">错误报告</h2><p id="web-error-report-description">错误信息、请求信息和同链路关键日志已保留，可直接复制给开发者。</p></div><button type="button" data-web-error-close aria-label="关闭"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18"></path></svg></button></header>
       <section class="web-error-report-summary"><strong data-web-error-message>发生了一个错误</strong><span data-web-error-time></span></section>
       <pre data-web-error-detail tabindex="0"></pre>
       <footer><div class="web-error-report-navigation"><button type="button" data-web-error-previous>上一条</button><output data-web-error-counter>1 / 1</output><button type="button" data-web-error-next>下一条</button></div><div class="web-error-report-actions"><button type="button" data-web-error-dismiss>移除当前错误</button><button type="button" data-web-error-copy-all>复制全部错误</button><button class="is-primary" type="button" data-web-error-copy>复制当前错误</button></div></footer>
@@ -334,8 +334,25 @@ function hostDiagnostic(event, fields = {}) {
   if (hostDiagnosticLog.length > 80) hostDiagnosticLog.splice(0, hostDiagnosticLog.length - 80);
 }
 
+function hostTraceTimeline(traceId) {
+  return traceId ? hostDiagnosticLog.filter(log => log.trace_id === traceId).slice(-8) : [];
+}
+
 function hostErrorReport(records) {
-  return JSON.stringify({ report: "Better Codex error report", exported_at: new Date().toISOString(), errors: records }, null, 2);
+  return JSON.stringify({
+    report: "Better Codex error report",
+    exported_at: new Date().toISOString(),
+    errors: records.map(record => ({
+      time: record.time,
+      error: { code: record.message, type: record.name },
+      source: record.context?.source || "web_host",
+      trace_id: record.context?.trace_id || record.diagnostics?.trace_id || "",
+      request: record.diagnostics ? Object.fromEntries(Object.entries(record.diagnostics).filter(([key, value]) => !["source", "trace_id", "trace_timeline"].includes(key) && value !== "" && value !== null && value !== undefined)) : {},
+      timeline: record.related_logs,
+      occurrences: record.occurrences,
+      ...(["window_error", "unhandled_rejection"].includes(record.context?.source) && record.stack ? { stack: String(record.stack).split("\n").slice(0, 8).join("\n") } : {}),
+    })),
+  }, null, 2);
 }
 
 async function copyHostError(value) {
@@ -371,12 +388,14 @@ function renderHostError() {
 function reportHostError(error, context = {}, present = true) {
   const value = error instanceof Error ? error : new Error(String(error || "request_failed"));
   if (value.betterCodexReported) return;
+  const traceId = String(context.trace_id || value.betterCodexDiagnostics?.trace_id || "");
+  context = { ...context, ...(traceId ? { trace_id: traceId } : {}) };
   if (window.__betterCodexInjection__?.reportError) {
     window.dispatchEvent(new CustomEvent("better-codex:error", { detail: { error: value, diagnostics: value.betterCodexDiagnostics || {}, source: context.source || "web_host", context } }));
     return;
   }
   try { Object.defineProperty(value, "betterCodexReported", { value: true, configurable: true }); } catch {}
-  hostDiagnostic("error_reported", { message: value.message, source: context.source || "web_host" });
+  hostDiagnostic("error_reported", { trace_id: traceId, message: value.message, source: context.source || "web_host" });
   const fingerprint = [value.message || "request_failed", context.source || "web_host", context.path || ""].join("|");
   const repeatedIndex = hostErrorQueue.findIndex(item => item.fingerprint === fingerprint);
   if (repeatedIndex >= 0) {
@@ -384,7 +403,10 @@ function reportHostError(error, context = {}, present = true) {
     repeated.occurrences += 1;
     repeated.occurrence_times.push(new Date().toISOString());
     if (repeated.occurrence_times.length > 20) repeated.occurrence_times.shift();
-    repeated.related_logs = hostDiagnosticLog.slice(-30);
+    repeated.time = new Date().toISOString();
+    repeated.context = context;
+    repeated.diagnostics = value.betterCodexDiagnostics || {};
+    repeated.related_logs = hostTraceTimeline(traceId);
     hostErrorIndex = repeatedIndex;
     renderHostError();
     if (present && !webErrorDialog.open) webErrorDialog.showModal();
@@ -400,7 +422,7 @@ function reportHostError(error, context = {}, present = true) {
     context,
     diagnostics: value.betterCodexDiagnostics || {},
     environment: { host_kind: HOST_KIND, path: location.pathname, online: navigator.onLine, user_agent: navigator.userAgent, viewport: String(innerWidth) + "x" + String(innerHeight) },
-    related_logs: hostDiagnosticLog.slice(-30),
+    related_logs: hostTraceTimeline(traceId),
     occurrences: 1,
     occurrence_times: [new Date().toISOString()],
   });
@@ -723,6 +745,7 @@ function commandHeaders(command) {
   if (REMOTE) headers["x-csrf-token"] = csrfToken;
   if (command.commandId) headers["x-better-codex-command-id"] = command.commandId;
   if (RELAY && command.commandId) headers["x-better-codex-request-id"] = command.commandId;
+  if (command.traceId) headers["x-better-codex-trace-id"] = command.traceId;
   if (command.body !== undefined) headers["content-type"] = "application/json";
   return headers;
 }
@@ -783,14 +806,17 @@ async function requestRuntime(request) {
   }
   const method = String(request.method || "GET").toUpperCase();
   if (method !== "GET" && !request.commandId) request.commandId = crypto.randomUUID();
+  request.traceId = /^[A-Za-z0-9_-]{8,200}$/.test(String(request.traceId || "")) ? String(request.traceId) : crypto.randomUUID();
+  const traceId = request.traceId;
   const startedAt = Date.now();
   const timeoutMs = Math.min(Math.max(Number(request.timeoutMs) || (RELAY && method !== "GET" ? 45_000 : 10_000), 1_000), 300_000);
   const requestBodyBytes = typeof request.body === "string" ? new TextEncoder().encode(request.body).byteLength : 0;
   let attemptCount = 0;
   const queued = queueableCommand(method, request.path, requestBodyBytes);
-  if (queued) await writeQueuedCommand({ commandId: request.commandId, method, path: request.path, body: request.body, createdAt: Date.now(), attempts: 0, nextAttemptAt: Date.now() });
+  if (queued) await writeQueuedCommand({ commandId: request.commandId, traceId, method, path: request.path, body: request.body, createdAt: Date.now(), attempts: 0, nextAttemptAt: Date.now() });
   const diagnostics = extra => ({
     source: "web_host_request",
+    trace_id: traceId,
     host_kind: HOST_KIND,
     method,
     path: request.path,
@@ -800,7 +826,6 @@ async function requestRuntime(request) {
     elapsed_ms: Date.now() - startedAt,
     attempt_count: attemptCount,
     online: navigator.onLine,
-    host_logs: hostDiagnosticLog.slice(-20),
     ...extra,
   });
   const requestError = (message, extra = {}, cause) => {
@@ -808,7 +833,7 @@ async function requestRuntime(request) {
     error.betterCodexDiagnostics = diagnostics(extra);
     return error;
   };
-  hostDiagnostic("request_start", { method, path: request.path, command_id: request.commandId || "", request_body_bytes: requestBodyBytes, timeout_ms: timeoutMs });
+  hostDiagnostic("request_start", { trace_id: traceId, method, path: request.path, command_id: request.commandId || "", request_body_bytes: requestBodyBytes, timeout_ms: timeoutMs });
   const headers = commandHeaders(request);
   if (REMOTE && method === "GET") delete headers["x-csrf-token"];
   const controller = new AbortController();
@@ -824,7 +849,7 @@ async function requestRuntime(request) {
         const retryable = method === "GET" && ["TypeError", "NetworkError"].includes(error?.name) && !controller.signal.aborted && attemptCount <= delays.length;
         if (!retryable) throw error;
         const delay = delays[attemptCount - 1] + Math.floor(Math.random() * 126);
-        hostDiagnostic("request_retry", { method, path: request.path, command_id: request.commandId || "", attempt: attemptCount, attempt_elapsed_ms: Date.now() - attemptStartedAt, delay_ms: delay, error: error?.message || "network_error" });
+        hostDiagnostic("request_retry", { trace_id: traceId, method, path: request.path, command_id: request.commandId || "", attempt: attemptCount, attempt_elapsed_ms: Date.now() - attemptStartedAt, delay_ms: delay, error: error?.message || "network_error" });
         await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
@@ -838,7 +863,7 @@ async function requestRuntime(request) {
       responseParseError = error;
       value = { error: response.statusText || "request_failed" };
     }
-    hostDiagnostic("request_response", { method, path: request.path, command_id: request.commandId || "", http_status: response.status, elapsed_ms: Date.now() - startedAt, attempt_count: attemptCount });
+    hostDiagnostic("request_response", { trace_id: traceId, method, path: request.path, command_id: request.commandId || "", http_status: response.status, elapsed_ms: Date.now() - startedAt, attempt_count: attemptCount });
     if (queued && commandAcceptedOrTerminal(response.status, String(value?.error || ""))) await deleteQueuedCommand(request.commandId);
     if (response.status === 401) setTimeout(expireSession, 0);
     if (RELAY && response.status === 503 && value.error === "runtime_offline") setTimeout(showRelayOffline, 0);
@@ -846,13 +871,15 @@ async function requestRuntime(request) {
       http_status: response.status,
       http_status_text: response.statusText,
       response_request_id: response.headers.get("x-better-codex-request-id") || value.request_id || "",
+      response_trace_id: response.headers.get("x-better-codex-trace-id") || value.trace_id || traceId,
       response_detail: value.detail || "",
       relay_channel_id: value.channel_id || "",
       relay_request_bytes: Number(value.request_bytes) || 0,
       relay_request_ended: typeof value.request_ended === "boolean" ? value.request_ended : null,
       relay_response_started: typeof value.response_started === "boolean" ? value.response_started : null,
-      relay_connection_epoch: Number(value.connection_epoch) || 0,
+      relay_connection_epoch: value.connection_epoch === undefined || value.connection_epoch === null ? null : Number(value.connection_epoch),
       relay_runtime_instance_id: value.runtime_instance_id || "",
+      relay_replay_attempts: value.replay_attempts === undefined || value.replay_attempts === null ? null : Number(value.replay_attempts),
     }, responseParseError || undefined);
     if (responseParseError) throw requestError("runtime_response_invalid", {
       http_status: response.status,
@@ -861,14 +888,14 @@ async function requestRuntime(request) {
     }, responseParseError);
     return value;
   } catch (error) {
-    hostDiagnostic("request_failure", { method, path: request.path, command_id: request.commandId || "", elapsed_ms: Date.now() - startedAt, attempt_count: attemptCount, failure_type: error?.betterCodexDiagnostics?.failure_type || (error?.name === "AbortError" ? "timeout" : error?.name || "network_error"), error: error?.message || "runtime_unavailable" });
+    hostDiagnostic("request_failure", { trace_id: traceId, method, path: request.path, command_id: request.commandId || "", elapsed_ms: Date.now() - startedAt, attempt_count: attemptCount, failure_type: error?.betterCodexDiagnostics?.failure_type || (error?.name === "AbortError" ? "timeout" : error?.name || "network_error"), error: error?.message || "runtime_unavailable" });
     if (queued && (error?.name === "AbortError" || !error?.betterCodexDiagnostics)) {
       scheduleCommandQueueDrain(1000);
       return { command_id: request.commandId, status: "pending", queued: true };
     }
-    if (error?.name === "AbortError") throw requestError("runtime_bridge_timeout", { failure_type: "timeout", host_logs: hostDiagnosticLog.slice(-20) }, error);
-    if (!error?.betterCodexDiagnostics) throw requestError("browser_transport_failed", { failure_type: "network_transport", network_error: error?.message || "network_error", host_logs: hostDiagnosticLog.slice(-20) }, error);
-    error.betterCodexDiagnostics.host_logs = hostDiagnosticLog.slice(-20);
+    if (error?.name === "AbortError") throw requestError("runtime_bridge_timeout", { failure_type: "timeout", trace_timeline: hostTraceTimeline(traceId) }, error);
+    if (!error?.betterCodexDiagnostics) throw requestError("browser_transport_failed", { failure_type: "network_transport", network_error: error?.message || "network_error", trace_timeline: hostTraceTimeline(traceId) }, error);
+    error.betterCodexDiagnostics.trace_timeline = hostTraceTimeline(traceId);
     throw error;
   } finally {
     clearTimeout(timeout);

@@ -1,4 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { activeCompatibility, capabilityExpression, clearCompatibilityStatus, missingCapabilities, navigationExpression, readCompatibilityStatus, targetAllowed, type RendererCapabilities, writeCompatibilityStatus } from "./compatibility.js";
@@ -133,12 +134,16 @@ class Connection {
 
 async function bridgeRequest(connection: Connection, runtimePort: number, accessToken: string, payload: unknown) {
   let requestId = "";
+  let traceId = "";
+  let path = "";
+  let method = "GET";
   let result: { ok: boolean; status: number; value: unknown };
   try {
-    const request = JSON.parse(String(payload)) as { id?: unknown; token?: unknown; path?: unknown; method?: unknown; body?: unknown };
+    const request = JSON.parse(String(payload)) as { id?: unknown; token?: unknown; path?: unknown; method?: unknown; body?: unknown; traceId?: unknown };
     requestId = typeof request.id === "string" ? request.id : "";
-    const path = typeof request.path === "string" ? request.path : "";
-    const method = typeof request.method === "string" ? request.method : "GET";
+    path = typeof request.path === "string" ? request.path : "";
+    method = typeof request.method === "string" ? request.method : "GET";
+    traceId = typeof request.traceId === "string" && /^[A-Za-z0-9_-]{8,200}$/.test(request.traceId) ? request.traceId : randomUUID();
     if (!requestId || request.token !== accessToken || !/^\/api\/(?:bootstrap(?:[?]|$)|update(?:\/(?:install|check))?(?:[?]|$)|remote-access\/(?:status|sessions(?:\/[^/?]+)?)(?:[?]|$)|projects(?:\/ensure)?(?:[?]|$)|issues(?:[/?]|$)|session-relay(?:[/?]|$)|agents(?:[/?]|$)|mockup\/(?:state|reset)(?:[?]|$)|settings\/auto-dispatch(?:[?]|$)|settings\/scheduler-model(?:[?]|$)|settings\/scheduler-reasoning-effort(?:[?]|$))/.test(path) || !["GET", "POST", "PUT", "PATCH", "DELETE"].includes(method)) throw new Error("invalid_bridge_request");
     const response = await fetch(`http://127.0.0.1:${runtimePort}${path}`, {
       method,
@@ -146,12 +151,16 @@ async function bridgeRequest(connection: Connection, runtimePort: number, access
       headers: {
         authorization: `Bearer ${accessToken}`,
         "content-type": "application/json",
+        "x-better-codex-trace-id": traceId,
       },
       body: typeof request.body === "string" && method !== "GET" ? request.body : undefined,
     });
-    result = { ok: response.ok, status: response.status, value: await response.json() };
+    const value = await response.json() as Record<string, unknown>;
+    result = response.ok
+      ? { ok: true, status: response.status, value }
+      : { ok: false, status: response.status, value: { ...value, diagnostics: { source: "cdp_bridge_request", trace_id: traceId, method, path, http_status: response.status } } };
   } catch (error) {
-    result = { ok: false, status: 0, value: { error: error instanceof Error ? error.message : "runtime_unavailable" } };
+    result = { ok: false, status: 0, value: { error: error instanceof Error ? error.message : "runtime_unavailable", diagnostics: { source: "cdp_bridge_request", trace_id: traceId, method, path, failure_type: "transport" } } };
   }
   if (!requestId) return;
   await evaluate(connection, `window.__betterCodexBridgeResolve?.(${JSON.stringify(requestId)}, ${JSON.stringify(result)})`);

@@ -5,7 +5,7 @@ import type { Socket } from "node:net";
 import test from "node:test";
 import WebSocket, { type RawData } from "ws";
 import { createRelayServer } from "../src/relay-server.js";
-import { encodeRelayMessage, relayProtocolVersion, relayWebSocketProtocol } from "../src/relay-protocol.js";
+import { encodeRelayMessage, relayProtocolVersion, relayRuntimeStoppedCloseCode, relayWebSocketProtocol } from "../src/relay-protocol.js";
 import { RuntimeRelayClient } from "../src/runtime-relay-client.js";
 
 function message(socket: WebSocket) {
@@ -64,9 +64,10 @@ test("relay authenticates one runtime, replaces old connections, and stores no b
   const pairing = relay.store.createPairingCode();
   const device = relay.store.pairDevice("Runtime A", pairing.pairing_code);
 
-  const health = await fetch(`${base}/healthz`).then(response => response.json()) as { runtime: { online: boolean }; name: string };
+  const health = await fetch(`${base}/healthz`).then(response => response.json()) as { runtime: { online: boolean; state: string }; name: string };
   assert.equal(health.name, "Better Codex Relay");
   assert.equal(health.runtime.online, false);
+  assert.equal(health.runtime.state, "offline");
 
   const page = await fetch(`${base}/web`);
   assert.equal(page.status, 200);
@@ -116,6 +117,71 @@ test("relay authenticates one runtime, replaces old connections, and stores no b
   assert.equal((revokedResponse as { statusCode: number }).statusCode, 401);
   (revokedResponse as { resume: () => void }).resume();
   assert.doesNotMatch(JSON.stringify(relay.store.auditEvents(100)), new RegExp(`${device.device_token}|${rotated.device_token}`));
+  await relay.close();
+});
+
+test("relay keeps safe reads pending during the Runtime reconnect grace period", async () => {
+  const relay = createRelayServer({ host: "127.0.0.1", port: 0, database: ":memory:", adminToken: "g".repeat(64), webUsername: "admin", webPassword: "relay-password-123", secureCookies: false, reconnectGraceMs: 1000, maxReplayAttempts: 2 });
+  relay.server.listen(0, "127.0.0.1");
+  await once(relay.server, "listening");
+  const address = relay.server.address();
+  assert.ok(address && typeof address === "object");
+  const base = `http://127.0.0.1:${address.port}`;
+  const socketBase = `ws://127.0.0.1:${address.port}`;
+  const device = relay.store.pairDevice("Runtime Grace", relay.store.createPairingCode().pairing_code);
+  const connect = async (instance: string, onOpen?: (socket: WebSocket) => void) => {
+    const socket = new WebSocket(`${socketBase}/api/v1/runtime/connect`, relayWebSocketProtocol, { headers: { authorization: `Bearer ${device.device_token}` } });
+    await once(socket, "open");
+    onOpen?.(socket);
+    const acknowledged = waitForMessage(socket, value => value.type === "hello_ack");
+    socket.send(encodeRelayMessage({ type: "hello", protocol_version: relayProtocolVersion, device_id: device.device_id, runtime_instance_id: instance, core_version: "0.5.0", capabilities: ["http-stream"] }));
+    await acknowledged;
+    return socket;
+  };
+  const login = await fetch(`${base}/relay/session`, { method: "POST", headers: { "content-type": "application/json", origin: base }, body: JSON.stringify({ username: "admin", password: "relay-password-123" }) });
+  const cookie = String(login.headers.get("set-cookie") || "").split(";")[0];
+  const first = await connect("runtime-grace");
+  const firstOpen = waitForMessage(first, value => value.type === "request_open");
+  const firstEnd = waitForMessage(first, value => value.type === "request_end");
+  let settled = false;
+  const pendingResponse = fetch(`${base}/api/issues`, { headers: { cookie } }).finally(() => { settled = true; });
+  await firstOpen;
+  await firstEnd;
+  const firstClosed = once(first, "close");
+  first.terminate();
+  await firstClosed;
+  const reconnectingHealth = await fetch(`${base}/healthz`).then(response => response.json()) as { runtime: { online: boolean; state: string; reconnect_deadline_at: string } };
+  assert.equal(reconnectingHealth.runtime.online, false);
+  assert.equal(reconnectingHealth.runtime.state, "reconnecting");
+  assert.ok(Date.parse(reconnectingHealth.runtime.reconnect_deadline_at) > Date.now());
+  await new Promise(resolve => setTimeout(resolve, 50));
+  assert.equal(settled, false);
+  let replayedOpenPromise: Promise<Record<string, unknown>> | undefined;
+  let replayedEndPromise: Promise<Record<string, unknown>> | undefined;
+  const second = await connect("runtime-grace", socket => {
+    replayedOpenPromise = waitForMessage(socket, value => value.type === "request_open");
+    replayedEndPromise = waitForMessage(socket, value => value.type === "request_end");
+  });
+  const replayedOpen = await replayedOpenPromise!;
+  const replayedEnd = await replayedEndPromise!;
+  assert.equal(replayedOpen.method, "GET");
+  assert.equal(replayedOpen.path, "/api/issues");
+  const channelId = String(replayedEnd.channel_id);
+  second.send(encodeRelayMessage({ type: "response_open", protocol_version: relayProtocolVersion, device_id: device.device_id, runtime_instance_id: "runtime-grace", connection_epoch: 2, channel_id: channelId, status: 200, headers: { "content-type": "application/json" } }));
+  second.send(encodeRelayMessage({ type: "response_chunk", protocol_version: relayProtocolVersion, device_id: device.device_id, runtime_instance_id: "runtime-grace", connection_epoch: 2, channel_id: channelId, sequence: 0, data: Buffer.from('{"issues":[]}').toString("base64") }));
+  second.send(encodeRelayMessage({ type: "response_end", protocol_version: relayProtocolVersion, device_id: device.device_id, runtime_instance_id: "runtime-grace", connection_epoch: 2, channel_id: channelId }));
+  const response = await pendingResponse;
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { issues: [] });
+  const events = relay.store.auditEvents(100) as Array<{ event: string }>;
+  assert.ok(events.some(event => event.event === "runtime_reconnecting"));
+  assert.ok(events.some(event => event.event === "runtime_reconnected"));
+  const stopped = once(second, "close");
+  second.close(relayRuntimeStoppedCloseCode);
+  await stopped;
+  const stoppedHealth = await fetch(`${base}/healthz`).then(response => response.json()) as { runtime: { online: boolean; state: string } };
+  assert.equal(stoppedHealth.runtime.online, false);
+  assert.equal(stoppedHealth.runtime.state, "offline");
   await relay.close();
 });
 

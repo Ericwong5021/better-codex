@@ -87,6 +87,7 @@ type RelayChannel = {
   sessionId: string;
   deviceId: string;
   requestId: string;
+  traceId: string;
   method: string;
   request: IncomingMessage;
   response: ServerResponse;
@@ -285,7 +286,7 @@ function connectionMatches(runtime: ActiveRuntime | null, message: Exclude<Relay
 }
 
 function forwardedRequestHeaders(request: IncomingMessage, requestId: string) {
-  const allowed = new Set(["accept", "accept-language", "content-type", "if-none-match", "last-event-id", "range"]);
+  const allowed = new Set(["accept", "accept-language", "content-type", "if-none-match", "last-event-id", "range", "x-better-codex-trace-id"]);
   const headers: Record<string, string> = { "x-better-codex-request-id": requestId };
   for (const [name, value] of Object.entries(request.headers)) {
     if (!allowed.has(name.toLowerCase()) || value === undefined) continue;
@@ -380,6 +381,7 @@ export function createRelayServer(options: RelayServerOptions) {
     if (!channel.response.headersSent) sendJson(channel.response, relayErrorStatus(error), {
       error,
       detail,
+      trace_id: channel.traceId,
       request_id: channel.requestId,
       channel_id: channel.id,
       method: channel.method,
@@ -611,9 +613,11 @@ export function createRelayServer(options: RelayServerOptions) {
     const channelId = randomUUID();
     const suppliedRequestId = String(request.headers["x-better-codex-request-id"] || "");
     const requestId = /^[A-Za-z0-9_-]{8,200}$/.test(suppliedRequestId) ? suppliedRequestId : randomUUID();
+    const suppliedTraceId = String(request.headers["x-better-codex-trace-id"] || "");
+    const traceId = /^[A-Za-z0-9_-]{8,200}$/.test(suppliedTraceId) ? suppliedTraceId : randomUUID();
     const recoverable = Boolean(presence && ["GET", "HEAD"].includes(method));
-    if (!active && !recoverable) return sendJson(response, 503, { error: "runtime_offline" });
-    if ((active?.activeChannels || 0) + retryableChannels.size >= maxConcurrentChannels) return sendJson(response, 429, { error: "relay_channel_limit" });
+    if (!active && !recoverable) return sendJson(response, 503, { error: "runtime_offline", trace_id: traceId });
+    if ((active?.activeChannels || 0) + retryableChannels.size >= maxConcurrentChannels) return sendJson(response, 429, { error: "relay_channel_limit", trace_id: traceId });
     const timeout = setTimeout(() => {
       const channel = runtime?.channels.get(channelId) || retryableChannels.get(channelId);
       if (!channel || channel.completed) return;
@@ -626,7 +630,7 @@ export function createRelayServer(options: RelayServerOptions) {
       }
     }, 120_000);
     timeout.unref();
-    const channel: RelayChannel = { id: channelId, sessionId, deviceId: presence?.deviceId || "", requestId, method, request, response, path: `${url.pathname}${url.search}`, headers: forwardedRequestHeaders(request, requestId), recoverable, requestSequence: 0, responseSequence: 0, responseStarted: false, completed: false, requestBytes: 0, requestCredit: relayInitialWindowBytes, requestQueue: [], requestChunks: [], requestEnded: false, requestEndSent: false, replayAttempts: 0, retryTimeout: null, connectionEpoch: presence?.connectionEpoch || 0, runtimeInstanceId: presence?.runtimeInstanceId || "", timeout };
+    const channel: RelayChannel = { id: channelId, sessionId, deviceId: presence?.deviceId || "", requestId, traceId, method, request, response, path: `${url.pathname}${url.search}`, headers: forwardedRequestHeaders(request, requestId), recoverable, requestSequence: 0, responseSequence: 0, responseStarted: false, completed: false, requestBytes: 0, requestCredit: relayInitialWindowBytes, requestQueue: [], requestChunks: [], requestEnded: false, requestEndSent: false, replayAttempts: 0, retryTimeout: null, connectionEpoch: presence?.connectionEpoch || 0, runtimeInstanceId: presence?.runtimeInstanceId || "", timeout };
     request.on("data", chunkValue => {
       if (channel.completed) return;
       request.pause();
