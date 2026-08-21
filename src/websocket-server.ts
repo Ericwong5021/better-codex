@@ -4,7 +4,7 @@ import WebSocket, { WebSocketServer, type RawData } from "ws";
 
 export type WebSocketConnectionHandlers = {
   message: (value: string) => void;
-  close: () => void;
+  close: (code: number, reason: string) => void;
   error?: (error: Error) => void;
 };
 
@@ -39,7 +39,7 @@ export class WebSocketConnection {
     this.closed = true;
     if (this.socket) this.socket.close(code);
     else this.rawSocket.end();
-    this.handlers.close();
+    this.handlers.close(code, "");
   }
 
   acceptHead(head: Buffer) {
@@ -51,15 +51,15 @@ export class WebSocketConnection {
         if (isBinary) return this.close(1003);
         this.handlers.message(messageText(data));
       });
-      socket.once("close", () => this.finish());
+      socket.once("close", (code, reason) => this.finish(code, reason));
       socket.once("error", error => this.handlers.error?.(error));
     });
   }
 
-  private finish() {
+  private finish(code: number, reason: Buffer) {
     if (this.closed) return;
     this.closed = true;
-    this.handlers.close();
+    this.handlers.close(code, reason.toString("utf8"));
   }
 }
 

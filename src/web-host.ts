@@ -656,7 +656,7 @@ let commandQueueDatabase;
 let commandQueueDrainTimer;
 
 function queueableCommand(method, path, bodyBytes) {
-  if (!commandQueueEnabled || bodyBytes > 512 * 1024) return false;
+  if (!commandQueueEnabled || bodyBytes > 2 * 1024 * 1024) return false;
   const pathname = new URL(path, location.origin).pathname;
   if (method === "POST" && /^\/api\/issues$/.test(pathname)) return true;
   if (method === "POST" && /^\/api\/issues\/from-thread$/.test(pathname)) return true;
@@ -786,6 +786,7 @@ async function requestRuntime(request) {
   const startedAt = Date.now();
   const timeoutMs = Math.min(Math.max(Number(request.timeoutMs) || (RELAY && method !== "GET" ? 45_000 : 10_000), 1_000), 300_000);
   const requestBodyBytes = typeof request.body === "string" ? new TextEncoder().encode(request.body).byteLength : 0;
+  let attemptCount = 0;
   const queued = queueableCommand(method, request.path, requestBodyBytes);
   if (queued) await writeQueuedCommand({ commandId: request.commandId, method, path: request.path, body: request.body, createdAt: Date.now(), attempts: 0, nextAttemptAt: Date.now() });
   const diagnostics = extra => ({
@@ -797,6 +798,7 @@ async function requestRuntime(request) {
     request_body_bytes: requestBodyBytes,
     timeout_ms: timeoutMs,
     elapsed_ms: Date.now() - startedAt,
+    attempt_count: attemptCount,
     online: navigator.onLine,
     host_logs: hostDiagnosticLog.slice(-20),
     ...extra,
@@ -811,8 +813,24 @@ async function requestRuntime(request) {
   if (REMOTE && method === "GET") delete headers["x-csrf-token"];
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const fetchResponse = async () => {
+    const delays = [250, 1000];
+    while (true) {
+      attemptCount += 1;
+      const attemptStartedAt = Date.now();
+      try {
+        return await fetch(request.path, { method, headers, body: request.body, signal: controller.signal });
+      } catch (error) {
+        const retryable = method === "GET" && ["TypeError", "NetworkError"].includes(error?.name) && !controller.signal.aborted && attemptCount <= delays.length;
+        if (!retryable) throw error;
+        const delay = delays[attemptCount - 1] + Math.floor(Math.random() * 126);
+        hostDiagnostic("request_retry", { method, path: request.path, command_id: request.commandId || "", attempt: attemptCount, attempt_elapsed_ms: Date.now() - attemptStartedAt, delay_ms: delay, error: error?.message || "network_error" });
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  };
   try {
-    const response = await fetch(request.path, { method, headers, body: request.body, signal: controller.signal });
+    const response = await fetchResponse();
     let value;
     let responseParseError = null;
     try { value = await response.json(); }
@@ -820,7 +838,7 @@ async function requestRuntime(request) {
       responseParseError = error;
       value = { error: response.statusText || "request_failed" };
     }
-    hostDiagnostic("request_response", { method, path: request.path, command_id: request.commandId || "", http_status: response.status, elapsed_ms: Date.now() - startedAt });
+    hostDiagnostic("request_response", { method, path: request.path, command_id: request.commandId || "", http_status: response.status, elapsed_ms: Date.now() - startedAt, attempt_count: attemptCount });
     if (queued && commandAcceptedOrTerminal(response.status, String(value?.error || ""))) await deleteQueuedCommand(request.commandId);
     if (response.status === 401) setTimeout(expireSession, 0);
     if (RELAY && response.status === 503 && value.error === "runtime_offline") setTimeout(showRelayOffline, 0);
@@ -843,13 +861,13 @@ async function requestRuntime(request) {
     }, responseParseError);
     return value;
   } catch (error) {
-    hostDiagnostic("request_failure", { method, path: request.path, command_id: request.commandId || "", elapsed_ms: Date.now() - startedAt, error: error?.message || "runtime_unavailable" });
+    hostDiagnostic("request_failure", { method, path: request.path, command_id: request.commandId || "", elapsed_ms: Date.now() - startedAt, attempt_count: attemptCount, failure_type: error?.betterCodexDiagnostics?.failure_type || (error?.name === "AbortError" ? "timeout" : error?.name || "network_error"), error: error?.message || "runtime_unavailable" });
     if (queued && (error?.name === "AbortError" || !error?.betterCodexDiagnostics)) {
       scheduleCommandQueueDrain(1000);
       return { command_id: request.commandId, status: "pending", queued: true };
     }
     if (error?.name === "AbortError") throw requestError("runtime_bridge_timeout", { failure_type: "timeout", host_logs: hostDiagnosticLog.slice(-20) }, error);
-    if (!error?.betterCodexDiagnostics) throw requestError(error?.message || "runtime_unavailable", { failure_type: error?.name || "network_error", host_logs: hostDiagnosticLog.slice(-20) }, error);
+    if (!error?.betterCodexDiagnostics) throw requestError("browser_transport_failed", { failure_type: "network_transport", network_error: error?.message || "network_error", host_logs: hostDiagnosticLog.slice(-20) }, error);
     error.betterCodexDiagnostics.host_logs = hostDiagnosticLog.slice(-20);
     throw error;
   } finally {

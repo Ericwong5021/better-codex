@@ -8,7 +8,7 @@ import { createWebCommand, webCommandTarget } from "./command-contract.js";
 import { coreVersion } from "./compatibility.js";
 import { deviceAuthorizationPage } from "./device-authorization-page.js";
 import { clearRelaySessionCookie, parseCookies, passwordHash, passwordMatches, readHubSecret, relaySessionCookie, validateWebPassword, validateWebUsername } from "./relay-auth.js";
-import { decodeRelayMessage, encodeRelayMessage, relayCapabilities, relayInitialWindowBytes, relayMaxChunkBytes, relayProtocolVersion, relayWebSocketProtocol, type RelayHello, type RelayMessage } from "./relay-protocol.js";
+import { decodeRelayMessage, encodeRelayMessage, relayCapabilities, relayInitialWindowBytes, relayMaxChunkBytes, relayProtocolVersion, relayRuntimeReconnectCloseCode, relayRuntimeStoppedCloseCode, relayWebSocketProtocol, type RelayHello, type RelayMessage } from "./relay-protocol.js";
 import { RelayStore, type RelayCommand } from "./relay-store.js";
 import { betterCodexWebManifest, betterCodexWebServiceWorker } from "./web-app.js";
 import { betterCodexWebHostCss, betterCodexWebHostHtml, betterCodexWebHostJavaScript } from "./web-host.js";
@@ -55,6 +55,19 @@ type ActiveRuntime = {
   channels: Map<string, RelayChannel>;
   commandChannels: Map<string, RelayCommandChannel>;
   socket: WebSocketConnection;
+};
+
+type ReconnectingRuntime = {
+  deviceId: string;
+  deviceName: string;
+  runtimeInstanceId: string;
+  connectionEpoch: number;
+  protocolVersion: string;
+  coreVersion: string;
+  connectedAt: string;
+  lastHeartbeatAt: string;
+  disconnectedAt: string;
+  reconnectDeadlineAt: string;
 };
 
 type RelayCommandChannel = {
@@ -243,10 +256,22 @@ function errorStatus(code: string) {
   return 400;
 }
 
-function publicRuntime(runtime: ActiveRuntime | null) {
-  if (!runtime) return { online: false };
+function publicRuntime(runtime: ActiveRuntime | null, reconnecting: ReconnectingRuntime | null) {
+  if (!runtime && !reconnecting) return { online: false, state: "offline" };
+  if (!runtime && reconnecting) return {
+    online: false,
+    state: "reconnecting",
+    device_name: reconnecting.deviceName,
+    core_version: reconnecting.coreVersion,
+    connected_at: reconnecting.connectedAt,
+    last_heartbeat_at: reconnecting.lastHeartbeatAt,
+    disconnected_at: reconnecting.disconnectedAt,
+    reconnect_deadline_at: reconnecting.reconnectDeadlineAt,
+    active_channels: 0,
+  };
   return {
     online: true,
+    state: "online",
     device_name: runtime.deviceName,
     core_version: runtime.coreVersion,
     connected_at: runtime.connectedAt,
@@ -297,10 +322,42 @@ export function createRelayServer(options: RelayServerOptions) {
   const authorizations = new Map<string, DeviceAuthorization>();
   const loginAttempts = new Map<string, { count: number; resetAt: number }>();
   let runtime: ActiveRuntime | null = null;
+  let reconnectingRuntime: ReconnectingRuntime | null = null;
+  let reconnectGraceTimeout: NodeJS.Timeout | null = null;
   const retryableChannels = new Map<string, RelayChannel>();
   const commandWaiters = new Map<string, Set<{ response: ServerResponse; timeout: NodeJS.Timeout }>>();
   const syncActiveChannels = (active: ActiveRuntime) => {
     active.activeChannels = active.channels.size + active.commandChannels.size;
+  };
+  const clearReconnectGrace = () => {
+    if (reconnectGraceTimeout) clearTimeout(reconnectGraceTimeout);
+    reconnectGraceTimeout = null;
+    reconnectingRuntime = null;
+  };
+  const startReconnectGrace = (interrupted: ActiveRuntime, detail: string, code: number) => {
+    clearReconnectGrace();
+    const disconnectedAt = new Date();
+    const reconnecting = {
+      deviceId: interrupted.deviceId,
+      deviceName: interrupted.deviceName,
+      runtimeInstanceId: interrupted.runtimeInstanceId,
+      connectionEpoch: interrupted.connectionEpoch,
+      protocolVersion: interrupted.protocolVersion,
+      coreVersion: interrupted.coreVersion,
+      connectedAt: interrupted.connectedAt,
+      lastHeartbeatAt: interrupted.lastHeartbeatAt,
+      disconnectedAt: disconnectedAt.toISOString(),
+      reconnectDeadlineAt: new Date(disconnectedAt.getTime() + reconnectGraceMs).toISOString(),
+    } satisfies ReconnectingRuntime;
+    reconnectingRuntime = reconnecting;
+    store.audit(interrupted.deviceId, "runtime_reconnecting", `${detail}:code=${code}`);
+    reconnectGraceTimeout = setTimeout(() => {
+      if (reconnectingRuntime !== reconnecting || runtime) return;
+      reconnectingRuntime = null;
+      reconnectGraceTimeout = null;
+      store.audit(interrupted.deviceId, "runtime_reconnect_timeout", detail);
+    }, reconnectGraceMs);
+    reconnectGraceTimeout.unref();
   };
   const finishChannel = (active: ActiveRuntime | null, channel: RelayChannel) => {
     if (channel.completed) return;
@@ -536,7 +593,7 @@ export function createRelayServer(options: RelayServerOptions) {
   const forwardCommand = async (request: IncomingMessage, response: ServerResponse, url: URL, method: string, sessionId: string) => {
     const suppliedRequestId = String(request.headers["x-better-codex-request-id"] || request.headers["x-better-codex-command-id"] || "");
     if (!/^[A-Za-z0-9_-]{8,200}$/.test(suppliedRequestId)) return forwardRequest(request, response, url, method, sessionId);
-    const body = await readRawBody(request, Math.min(maxRequestBytes, 512 * 1024));
+    const body = await readRawBody(request, Math.min(maxRequestBytes, 2 * 1024 * 1024));
     const path = `${url.pathname}${url.search}`;
     const command = createWebCommand(suppliedRequestId, method, path, body);
     if (!command) return sendJson(response, 400, { error: "command_not_supported" });
@@ -549,11 +606,12 @@ export function createRelayServer(options: RelayServerOptions) {
   };
   function forwardRequest(request: IncomingMessage, response: ServerResponse, url: URL, method: string, sessionId: string) {
     const active = runtime;
+    const presence = active || reconnectingRuntime;
     if (["/api/shutdown"].includes(url.pathname) || url.pathname.startsWith("/api/session-relay/") || url.pathname.startsWith("/api/mockup/") || url.pathname.startsWith("/api/sync/") || url.pathname.startsWith("/api/relay/")) return sendJson(response, 404, { error: "not_found" });
     const channelId = randomUUID();
     const suppliedRequestId = String(request.headers["x-better-codex-request-id"] || "");
     const requestId = /^[A-Za-z0-9_-]{8,200}$/.test(suppliedRequestId) ? suppliedRequestId : randomUUID();
-    const recoverable = false;
+    const recoverable = Boolean(presence && ["GET", "HEAD"].includes(method));
     if (!active && !recoverable) return sendJson(response, 503, { error: "runtime_offline" });
     if ((active?.activeChannels || 0) + retryableChannels.size >= maxConcurrentChannels) return sendJson(response, 429, { error: "relay_channel_limit" });
     const timeout = setTimeout(() => {
@@ -568,7 +626,7 @@ export function createRelayServer(options: RelayServerOptions) {
       }
     }, 120_000);
     timeout.unref();
-    const channel: RelayChannel = { id: channelId, sessionId, deviceId: active?.deviceId || "", requestId, method, request, response, path: `${url.pathname}${url.search}`, headers: forwardedRequestHeaders(request, requestId), recoverable, requestSequence: 0, responseSequence: 0, responseStarted: false, completed: false, requestBytes: 0, requestCredit: relayInitialWindowBytes, requestQueue: [], requestChunks: [], requestEnded: false, requestEndSent: false, replayAttempts: 0, retryTimeout: null, connectionEpoch: active?.connectionEpoch || 0, runtimeInstanceId: active?.runtimeInstanceId || "", timeout };
+    const channel: RelayChannel = { id: channelId, sessionId, deviceId: presence?.deviceId || "", requestId, method, request, response, path: `${url.pathname}${url.search}`, headers: forwardedRequestHeaders(request, requestId), recoverable, requestSequence: 0, responseSequence: 0, responseStarted: false, completed: false, requestBytes: 0, requestCredit: relayInitialWindowBytes, requestQueue: [], requestChunks: [], requestEnded: false, requestEndSent: false, replayAttempts: 0, retryTimeout: null, connectionEpoch: presence?.connectionEpoch || 0, runtimeInstanceId: presence?.runtimeInstanceId || "", timeout };
     request.on("data", chunkValue => {
       if (channel.completed) return;
       request.pause();
@@ -637,7 +695,7 @@ export function createRelayServer(options: RelayServerOptions) {
         queueChannel(current, channel, "runtime_socket_closed");
       }
     } else {
-      queueChannel(null, channel, "runtime_offline");
+      queueChannel(null, channel, "runtime_reconnecting");
     }
   }
   const server = createServer((request, response) => {
@@ -651,7 +709,7 @@ export function createRelayServer(options: RelayServerOptions) {
         return response.end();
       }
       if (!trustedOrigin(request)) return sendJson(response, 403, { error: "forbidden" });
-      if (url.pathname === "/healthz" && method === "GET") return sendJson(response, 200, { ok: true, name: "Better Codex Relay", version: coreVersion, protocol_version: relayProtocolVersion, runtime: publicRuntime(runtime), pending_commands: store.pendingCommandCount() });
+      if (url.pathname === "/healthz" && method === "GET") return sendJson(response, 200, { ok: true, name: "Better Codex Relay", version: coreVersion, protocol_version: relayProtocolVersion, runtime: publicRuntime(runtime, reconnectingRuntime), pending_commands: store.pendingCommandCount() });
       if ((["/", "/web", "/web/projects"].includes(url.pathname) || url.pathname.startsWith("/web/projects/")) && method === "GET") return sendText(response, 200, betterCodexWebHostHtml("relay"), "text/html; charset=utf-8", { "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'" });
       if (url.pathname === "/web/host.css" && method === "GET") return sendText(response, 200, betterCodexWebHostCss(), "text/css; charset=utf-8");
       if (url.pathname === "/web/host.js" && method === "GET") return sendText(response, 200, betterCodexWebHostJavaScript("relay"), "text/javascript; charset=utf-8");
@@ -716,7 +774,7 @@ export function createRelayServer(options: RelayServerOptions) {
       }
       if (url.pathname === "/relay/status" && method === "GET") {
         if (!session) return sendJson(response, 401, { error: "unauthorized" });
-        return sendJson(response, 200, { ok: true, name: "Better Codex Relay", version: coreVersion, protocol_version: relayProtocolVersion, runtime: publicRuntime(runtime), pending_commands: store.pendingCommandCount() });
+        return sendJson(response, 200, { ok: true, name: "Better Codex Relay", version: coreVersion, protocol_version: relayProtocolVersion, runtime: publicRuntime(runtime, reconnectingRuntime), pending_commands: store.pendingCommandCount() });
       }
       if (url.pathname === "/relay/device" && method === "GET") {
         if (!session) return sendJson(response, 401, { error: "unauthorized" });
@@ -852,6 +910,8 @@ export function createRelayServer(options: RelayServerOptions) {
               if (active || message.device_id !== device.id) throw new Error("relay_hello_invalid");
               const epoch = store.nextConnectionEpoch(device.id);
               const previous = runtime;
+              const reconnecting = reconnectingRuntime;
+              clearReconnectGrace();
               const timestamp = new Date().toISOString();
               active = { deviceId: device.id, deviceName: device.name, runtimeInstanceId: message.runtime_instance_id, connectionEpoch: epoch, protocolVersion: message.protocol_version, coreVersion: message.core_version, capabilities: message.capabilities, connectedAt: timestamp, lastHeartbeatAt: timestamp, activeChannels: 0, channels: new Map(), commandChannels: new Map(), socket: connection! };
               runtime = active;
@@ -864,6 +924,7 @@ export function createRelayServer(options: RelayServerOptions) {
               connection?.send(encodeRelayMessage({ type: "hello_ack", protocol_version: relayProtocolVersion, device_id: device.id, runtime_instance_id: message.runtime_instance_id, connection_epoch: epoch, heartbeat_interval_ms: heartbeatIntervalMs, max_concurrent_channels: maxConcurrentChannels, max_chunk_bytes: relayMaxChunkBytes }));
               for (const channel of [...retryableChannels.values()]) if (!channel.deviceId || channel.deviceId === active.deviceId) replayChannel(active, channel);
               pumpCommands(active);
+              if (reconnecting?.deviceId === active.deviceId) store.audit(device.id, "runtime_reconnected", reconnecting.runtimeInstanceId === active.runtimeInstanceId ? "same_instance" : "different_instance");
               store.audit(device.id, "runtime_connected", relayProtocolVersion);
               return;
             }
@@ -959,17 +1020,23 @@ export function createRelayServer(options: RelayServerOptions) {
             }
           });
         },
-        close: () => {
+        close: (code, _reason) => {
           if (runtime?.socket === connection) {
             const interrupted = runtime;
             runtime = null;
+            const detail = socketError ? "runtime_socket_error:" + socketError : code === relayRuntimeReconnectCloseCode ? "runtime_reconnect_requested" : code === relayRuntimeStoppedCloseCode ? "runtime_stopped" : "runtime_socket_closed";
+            const recoverable = ![1001, 1008, 4001, 4002, 4003, relayRuntimeStoppedCloseCode].includes(code);
+            if (recoverable) startReconnectGrace(interrupted, detail, code);
+            else clearReconnectGrace();
             for (const channel of [...interrupted.channels.values()]) {
-              queueChannel(interrupted, channel, socketError ? "runtime_socket_error:" + socketError : "runtime_socket_closed");
+              if (recoverable) queueChannel(interrupted, channel, detail);
+              else failChannel(interrupted, channel, "runtime_unavailable", detail);
             }
-            for (const channel of [...interrupted.commandChannels.values()]) retryCommandChannel(interrupted, channel, socketError ? "runtime_socket_error:" + socketError : "runtime_socket_closed");
+            for (const channel of [...interrupted.commandChannels.values()]) retryCommandChannel(interrupted, channel, detail);
             syncActiveChannels(interrupted);
+            if (!recoverable && code === relayRuntimeStoppedCloseCode) store.audit(device.id, "runtime_stopped");
           }
-          if (active) store.audit(device.id, "runtime_disconnected", socketError ? "runtime_socket_error:" + socketError : "runtime_socket_closed");
+          if (active) store.audit(device.id, "runtime_disconnected", socketError ? "runtime_socket_error:" + socketError : `runtime_socket_closed:code=${code}`);
           active = null;
         },
         error: error => {
@@ -998,6 +1065,7 @@ export function createRelayServer(options: RelayServerOptions) {
 
   const close = () => new Promise<void>((resolveClose, reject) => {
     clearInterval(heartbeatSweep);
+    clearReconnectGrace();
     for (const channel of retryableChannels.values()) {
       channel.completed = true;
       clearTimeout(channel.timeout);

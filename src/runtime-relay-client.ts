@@ -2,7 +2,7 @@ import WebSocket, { type RawData } from "ws";
 import { PassThrough } from "node:stream";
 import { once } from "node:events";
 import { readRelayConfiguration, type RelayConfiguration } from "./relay-config.js";
-import { decodeRelayMessage, encodeRelayMessage, relayCapabilities, relayInitialWindowBytes, relayMaxChunkBytes, relayMaxFrameBytes, relayProtocolVersion, relayWebSocketProtocol, type RelayHelloAck, type RelayMessage, type RelayRequestOpen } from "./relay-protocol.js";
+import { decodeRelayMessage, encodeRelayMessage, relayCapabilities, relayInitialWindowBytes, relayMaxChunkBytes, relayMaxFrameBytes, relayProtocolVersion, relayRuntimeReconnectCloseCode, relayRuntimeStoppedCloseCode, relayWebSocketProtocol, type RelayHelloAck, type RelayMessage, type RelayRequestOpen } from "./relay-protocol.js";
 
 type RuntimeRelayState = {
   enabled: boolean;
@@ -104,7 +104,7 @@ export class RuntimeRelayClient {
       for (const resolve of channel.responseCreditWaiters.splice(0)) resolve();
     }
     this.channels.clear();
-    this.socket?.close(1000);
+    this.socket?.close(relayRuntimeStoppedCloseCode);
     this.socket = null;
     this.hello = null;
     this.state = { ...this.state, connected: false, active_channels: 0 };
@@ -113,7 +113,7 @@ export class RuntimeRelayClient {
   reconnect() {
     this.failures = 0;
     this.state.reconnect_attempts = 0;
-    this.socket?.close(1000);
+    this.socket?.close(relayRuntimeReconnectCloseCode);
     if (this.running) this.schedule(0);
   }
 
