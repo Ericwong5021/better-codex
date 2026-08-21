@@ -1121,7 +1121,10 @@ export function betterCodexDesignSystemCss() {
 
     #better-codex-auto-dispatch-help-dialog .better-codex-remote-refresh[hidden],
     #better-codex-auto-dispatch-help-dialog .better-codex-remote-setup[hidden],
-    #better-codex-auto-dispatch-help-dialog .better-codex-remote-status[hidden] {
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-status[hidden],
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-sessions[hidden],
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-sessions-panel[hidden],
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-sessions-count[hidden] {
       display: none;
     }
 
@@ -1354,6 +1357,176 @@ export function betterCodexDesignSystemCss() {
       background: var(--bc-color-primary);
     }
 
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-sessions {
+      width: 100%;
+      max-width: 540px;
+      box-sizing: border-box;
+      margin: 10px auto 0;
+      overflow: hidden;
+      border-radius: var(--bc-radius-lg);
+      background: var(--bc-color-control);
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-sessions-toggle {
+      display: flex;
+      width: 100%;
+      min-height: 62px;
+      align-items: center;
+      gap: 10px;
+      border: 0;
+      border-radius: inherit;
+      color: var(--bc-color-text);
+      background: transparent;
+      padding: 10px 14px;
+      font: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-sessions-icon,
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-session-icon {
+      display: inline-flex;
+      width: 34px;
+      height: 34px;
+      flex: 0 0 34px;
+      align-items: center;
+      justify-content: center;
+      border-radius: var(--bc-radius-sm);
+      color: var(--bc-color-text);
+      background: var(--bc-color-pressed);
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-sessions-icon svg,
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-session-icon svg {
+      width: 17px;
+      height: 17px;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-sessions-heading {
+      display: block;
+      min-width: 0;
+      flex: 1;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-sessions-heading strong,
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-sessions-heading small {
+      display: block;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-sessions-heading strong {
+      font-size: var(--bc-text-body);
+      font-weight: 650;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-sessions-heading small {
+      overflow: hidden;
+      margin-top: 3px;
+      color: var(--bc-color-text-muted);
+      font-size: var(--bc-text-caption);
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-sessions-count {
+      flex: 0 0 auto;
+      color: var(--bc-color-text-muted);
+      font-size: var(--bc-text-caption);
+      font-weight: 600;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-sessions-chevron {
+      display: inline-flex;
+      width: 18px;
+      height: 18px;
+      flex: 0 0 18px;
+      color: var(--bc-color-text-muted);
+      transition: transform var(--bc-motion-fast) var(--bc-ease-out);
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-sessions-chevron svg {
+      width: 18px;
+      height: 18px;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-sessions-toggle[aria-expanded="true"] .better-codex-remote-sessions-chevron {
+      transform: rotate(180deg);
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-sessions-panel {
+      box-shadow: inset 0 1px 0 var(--bc-color-hairline);
+      padding: 0 14px;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-sessions-list > p {
+      margin: 0;
+      padding: 14px 0;
+      color: var(--bc-color-text-muted);
+      font-size: var(--bc-text-sm);
+      text-align: center;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-sessions-list article {
+      display: grid;
+      min-height: 62px;
+      grid-template-columns: 34px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 0;
+      box-shadow: inset 0 -1px 0 var(--bc-color-hairline);
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-sessions-list article:last-child {
+      box-shadow: none;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-sessions-list article > div {
+      min-width: 0;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-sessions-list article strong,
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-sessions-list article small {
+      display: block;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-sessions-list article strong {
+      overflow: hidden;
+      font-size: var(--bc-text-sm);
+      font-weight: 650;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-sessions-list article small {
+      overflow: hidden;
+      margin-top: 4px;
+      color: var(--bc-color-text-muted);
+      font-size: var(--bc-text-caption);
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-sessions-list article button {
+      display: inline-flex;
+      min-height: 34px;
+      align-items: center;
+      gap: 6px;
+      border: 0;
+      border-radius: var(--bc-radius-sm);
+      color: var(--bc-color-danger);
+      background: var(--bc-color-danger-soft);
+      padding: 0 10px;
+      font: inherit;
+      font-size: var(--bc-text-caption);
+      font-weight: 650;
+      cursor: pointer;
+      transition: background var(--bc-motion-fast) var(--bc-ease-out), transform var(--bc-motion-fast) var(--bc-ease-out);
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-sessions-list article button svg {
+      width: 14px;
+      height: 14px;
+    }
+
     #better-codex-auto-dispatch-help-dialog .better-codex-remote-refresh:disabled,
     #better-codex-auto-dispatch-help-dialog .better-codex-remote-url button:disabled,
     #better-codex-auto-dispatch-help-dialog .better-codex-remote-actions button:disabled {
@@ -1370,6 +1543,14 @@ export function betterCodexDesignSystemCss() {
       #better-codex-auto-dispatch-help-dialog .better-codex-remote-actions button:hover:not(:disabled) {
         background: var(--bc-color-hover);
       }
+
+      #better-codex-auto-dispatch-help-dialog .better-codex-remote-sessions-toggle:hover {
+        background: var(--bc-color-hover);
+      }
+
+      #better-codex-auto-dispatch-help-dialog .better-codex-remote-sessions-list article button:hover:not(:disabled) {
+        background: color-mix(in oklch, var(--bc-color-danger) 18%, var(--bc-color-control));
+      }
     }
 
     #better-codex-auto-dispatch-help-dialog .better-codex-remote-refresh:focus-visible,
@@ -1381,10 +1562,20 @@ export function betterCodexDesignSystemCss() {
       box-shadow: var(--bc-focus-ring);
     }
 
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-sessions-toggle:focus-visible,
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-sessions-list article button:focus-visible {
+      outline: 0;
+      box-shadow: inset var(--bc-focus-ring);
+    }
+
     #better-codex-auto-dispatch-help-dialog .better-codex-remote-install:active:not(:disabled),
     #better-codex-auto-dispatch-help-dialog .better-codex-remote-url button:active:not(:disabled),
     #better-codex-auto-dispatch-help-dialog .better-codex-remote-actions a:active,
     #better-codex-auto-dispatch-help-dialog .better-codex-remote-actions button:active:not(:disabled) {
+      transform: scale(.97);
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-sessions-list article button:active:not(:disabled) {
       transform: scale(.97);
     }
 
@@ -2242,6 +2433,15 @@ export function betterCodexDesignSystemCss() {
       #better-codex-auto-dispatch-help-dialog .better-codex-remote-actions {
         align-items: stretch;
         flex-direction: column;
+      }
+
+      #better-codex-auto-dispatch-help-dialog .better-codex-remote-sessions-list article {
+        grid-template-columns: 34px minmax(0, 1fr);
+      }
+
+      #better-codex-auto-dispatch-help-dialog .better-codex-remote-sessions-list article button {
+        grid-column: 1 / -1;
+        justify-content: center;
       }
 
       #better-codex-auto-dispatch-help-dialog .better-codex-help-page.is-active {

@@ -2,8 +2,9 @@ import { passwordHash, passwordMatches, readHubSecret, validateWebPassword, vali
 
 export { passwordHash, passwordMatches, readHubSecret, validateWebPassword, validateWebUsername };
 
-export function relaySessionCookie(token: string, secure = true, maxAgeSeconds = 12 * 60 * 60) {
-  return `better_codex_relay_session=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAgeSeconds}${secure ? "; Secure" : ""}`;
+export function relaySessionCookie(token: string, secure = true, maxAgeSeconds?: number) {
+  const lifetime = typeof maxAgeSeconds === "number" ? `; Max-Age=${Math.max(1, Math.floor(maxAgeSeconds))}` : "";
+  return `better_codex_relay_session=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Strict${lifetime}${secure ? "; Secure" : ""}`;
 }
 
 export function clearRelaySessionCookie(secure = true) {

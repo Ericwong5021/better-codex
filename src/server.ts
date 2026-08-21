@@ -28,7 +28,7 @@ import { SyncClient } from "./sync-client.js";
 import { readSyncConfiguration, removeSyncConfiguration } from "./sync-config.js";
 import { chooseNativeDirectory } from "./native-dialog.js";
 import { RuntimeRelayClient } from "./runtime-relay-client.js";
-import { readRelayConfiguration, removeRelayConfiguration } from "./relay-config.js";
+import { readRelayConfiguration, removeRelayConfiguration, type RelayConfiguration } from "./relay-config.js";
 import { requestFingerprint, RequestReceiptStore, type RequestReceiptResponse } from "./request-receipts.js";
 import { disableProjectionSync, readRemoteMode } from "./remote-mode.js";
 import { browseDirectory } from "./directory-browser.js";
@@ -165,6 +165,19 @@ function sendJson(response: ServerResponse, status: number, value: unknown) {
     "vary": "Origin",
   });
   response.end(body);
+}
+
+async function relayWebSessionRequest(configuration: RelayConfiguration, pathname: string, method: "GET" | "DELETE") {
+  const remoteResponse = await fetch(`${configuration.relay_url}${pathname}`, {
+    method,
+    headers: { accept: "application/json", authorization: `Bearer ${configuration.device_token}` },
+    redirect: "error",
+    signal: AbortSignal.timeout(8_000),
+  });
+  const text = await remoteResponse.text();
+  if (Buffer.byteLength(text) > 65_536) throw new Error("relay_response_too_large");
+  const value = (() => { try { return JSON.parse(text) as Record<string, unknown>; } catch { throw new Error("invalid_relay_response"); } })();
+  return { status: remoteResponse.status, value };
 }
 
 function projectSummaries<T extends { document_views?: unknown; overview_html?: unknown }>(projects: T[]) {
@@ -811,6 +824,25 @@ export function startServer() {
         relayClient.stop();
         removeRelayConfiguration();
         return sendJson(response, 200, relayClient.status());
+      }
+      if (url.pathname === "/api/remote-access/sessions" && method === "GET") {
+        if (relayRequest) return sendJson(response, 403, { error: "local_access_required" });
+        const configuration = readRelayConfiguration();
+        if (remoteMode !== "relay" || !configuration) return sendJson(response, 409, { error: "remote_mode_disabled" });
+        const result = await relayWebSessionRequest(configuration, "/api/v1/runtime/web-sessions", "GET");
+        if (result.status >= 200 && result.status < 300 && !Array.isArray(result.value.sessions)) return sendJson(response, 502, { error: "invalid_relay_response" });
+        return sendJson(response, result.status, result.value);
+      }
+      const remoteAccessSessionMatch = url.pathname.match(/^\/api\/remote-access\/sessions\/([^/]+)$/);
+      if (remoteAccessSessionMatch && method === "DELETE") {
+        if (relayRequest) return sendJson(response, 403, { error: "local_access_required" });
+        const configuration = readRelayConfiguration();
+        if (remoteMode !== "relay" || !configuration) return sendJson(response, 409, { error: "remote_mode_disabled" });
+        const sessionId = decodeURIComponent(remoteAccessSessionMatch[1]);
+        if (!/^[0-9a-f-]{36}$/i.test(sessionId)) return sendJson(response, 400, { error: "invalid_web_session" });
+        const result = await relayWebSessionRequest(configuration, `/api/v1/runtime/web-sessions/${encodeURIComponent(sessionId)}`, "DELETE");
+        if (result.status >= 200 && result.status < 300 && result.value.ok !== true) return sendJson(response, 502, { error: "invalid_relay_response" });
+        return sendJson(response, result.status, result.value);
       }
       if (url.pathname === "/api/remote-access/status" && method === "GET") {
         if (remoteMode === "relay") {

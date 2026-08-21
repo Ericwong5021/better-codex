@@ -612,6 +612,17 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "状态检查失败": "Status check failed",
       "部署在 VPS": "Deployed on VPS",
       "检测中": "Checking",
+      "登录设备": "Signed-in devices",
+      "管理已登录 Better Codex Relay 的浏览器": "Manage browsers signed in to Better Codex Relay",
+      "正在读取登录设备…": "Loading signed-in devices…",
+      "暂无登录设备": "No signed-in devices",
+      "最近活动": "Last active",
+      "已记住": "Remembered",
+      "临时会话": "Temporary session",
+      "退出登录": "Sign out",
+      "此设备需要重新输入账户密码才能访问。": "This device will need the account password to sign in again.",
+      "设备读取失败": "Unable to load devices",
+      "台设备": " devices",
     });
     localeResources.en["有任务正在运行，请等待任务结束后再更新。"] = "A task is running. Wait for it to finish before updating.";
     localeResources.en["更新正在进行中，请稍候。"] = "An update is already in progress. Please wait.";
@@ -4667,6 +4678,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         '<section class="better-codex-remote-step"><div><h3>' + te("连接 Hub") + '</h3><p>' + te("输入 VPS 部署后的 HTTPS 地址") + '</p></div><div class="better-codex-remote-url"><input type="url" data-remote-url inputmode="url" autocomplete="url" placeholder="https://codex.example.com" aria-label="' + te("访问地址") + '"><button type="button" data-remote-copy-connect disabled>' + icon("copy") + '<span>' + te("复制连接指令") + '</span></button></div></section>',
         '</div>',
         '<section class="better-codex-remote-status" data-remote-status="loading" hidden><div class="better-codex-remote-status-head"><span class="better-codex-remote-status-icon">' + icon("server") + '</span><div><strong data-remote-status-title>' + te("检测中") + '</strong><small data-remote-status-subtitle>' + te("正在检查") + '</small></div><span class="better-codex-remote-status-badge" data-remote-status-badge>' + te("检测中") + '</span></div><dl data-remote-status-details hidden><div><dt>' + te("服务版本") + '</dt><dd data-remote-version>--</dd></div><div><dt>' + te("同步协议") + '</dt><dd data-remote-protocol>--</dd></div><div><dt>' + te("最后同步") + '</dt><dd data-remote-sync>--</dd></div></dl><div class="better-codex-remote-actions" data-remote-actions hidden><a data-remote-open target="_blank" rel="noreferrer">' + icon("external") + '<span>' + te("访问网站") + '</span></a></div></section>',
+        '<section class="better-codex-remote-sessions" data-remote-sessions hidden><button type="button" class="better-codex-remote-sessions-toggle" data-remote-sessions-toggle aria-expanded="false"><span class="better-codex-remote-sessions-icon">' + icon("userCheck") + '</span><span class="better-codex-remote-sessions-heading"><strong>' + te("登录设备") + '</strong><small>' + te("管理已登录 Better Codex Relay 的浏览器") + '</small></span><span class="better-codex-remote-sessions-count" data-remote-sessions-count hidden></span><span class="better-codex-remote-sessions-chevron">' + icon("chevronDown") + '</span></button><div class="better-codex-remote-sessions-panel" data-remote-sessions-panel hidden><div class="better-codex-remote-sessions-list" data-remote-sessions-list><p>' + te("正在读取登录设备…") + '</p></div></div></section>',
         '<p class="better-codex-help-error" data-remote-error hidden></p>',
         '</section>',
       ].join("");
@@ -4758,7 +4770,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const remoteOpen = dialog.querySelector("[data-remote-open]");
       const remoteError = dialog.querySelector("[data-remote-error]");
       const remoteRefresh = dialog.querySelector("[data-remote-refresh]");
+      const remoteSessions = dialog.querySelector("[data-remote-sessions]");
+      const remoteSessionsToggle = dialog.querySelector("[data-remote-sessions-toggle]");
+      const remoteSessionsPanel = dialog.querySelector("[data-remote-sessions-panel]");
+      const remoteSessionsList = dialog.querySelector("[data-remote-sessions-list]");
+      const remoteSessionsCount = dialog.querySelector("[data-remote-sessions-count]");
       let remoteStatusLoaded = false;
+      let remoteSessionsLoaded = false;
       const normalizedRemoteUrl = () => {
         try {
           const url = new URL(remoteUrlInput.value.trim());
@@ -4798,6 +4816,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           remoteStatus.hidden = true;
           remoteStatusDetails.hidden = true;
           remoteActions.hidden = true;
+          remoteSessions.hidden = true;
           return;
         }
         remotePageNode.dataset.remoteConnected = "true";
@@ -4812,6 +4831,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         remoteStatusBadge.textContent = te(reachable ? "服务在线" : "无法访问");
         remoteStatusDetails.hidden = false;
         remoteActions.hidden = false;
+        remoteSessions.hidden = REMOTE || value.remote_mode !== "relay";
         dialog.querySelector("[data-remote-version]").textContent = remote.version ? "v" + String(remote.version).replace(/^v/, "") : "--";
         dialog.querySelector("[data-remote-protocol]").textContent = String(remote.protocol_version || "--");
         dialog.querySelector("[data-remote-sync]").textContent = value.last_sync_at ? new Date(value.last_sync_at).toLocaleString(state.locale === "zh-CN" ? "zh-CN" : "en") : te("尚未同步");
@@ -4820,6 +4840,48 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           reportGlobalError(new Error(String(remote.error)), { source: "remote_status" });
           remoteError.textContent = te("状态检查失败") + ": " + String(remote.error);
           remoteError.hidden = false;
+        }
+      };
+      const renderRemoteSessions = value => {
+        const sessions = Array.isArray(value?.sessions) ? value.sessions : [];
+        remoteSessionsList.replaceChildren();
+        remoteSessionsCount.textContent = String(sessions.length) + te("台设备");
+        remoteSessionsCount.hidden = false;
+        if (!sessions.length) {
+          const empty = document.createElement("p");
+          empty.textContent = t("暂无登录设备");
+          remoteSessionsList.append(empty);
+          return;
+        }
+        for (const session of sessions) {
+          const item = document.createElement("article");
+          const identity = document.createElement("span");
+          identity.className = "better-codex-remote-session-icon";
+          identity.innerHTML = icon("userCheck");
+          const detail = document.createElement("div");
+          const name = document.createElement("strong");
+          name.textContent = String(session.device_name || t("登录设备"));
+          const metadata = document.createElement("small");
+          const lastSeen = session.last_seen_at ? new Date(session.last_seen_at).toLocaleString(state.locale === "zh-CN" ? "zh-CN" : "en") : "--";
+          metadata.textContent = t("最近活动") + " " + lastSeen + " · " + t(session.remembered ? "已记住" : "临时会话") + (session.client_ip ? " · " + String(session.client_ip) : "");
+          detail.append(name, metadata);
+          const revoke = document.createElement("button");
+          revoke.type = "button";
+          revoke.dataset.remoteSessionRevoke = String(session.id || "");
+          revoke.innerHTML = icon("userX") + "<span>" + te("退出登录") + "</span>";
+          item.append(identity, detail, revoke);
+          remoteSessionsList.append(item);
+        }
+      };
+      const loadRemoteSessions = async (force = false) => {
+        if (!remoteSessionsList || (remoteSessionsLoaded && !force)) return;
+        remoteSessionsLoaded = true;
+        remoteSessionsList.innerHTML = "<p>" + te("正在读取登录设备…") + "</p>";
+        try {
+          renderRemoteSessions(await api("/api/remote-access/sessions"));
+        } catch (error) {
+          remoteSessionsLoaded = false;
+          remoteSessionsList.innerHTML = "<p>" + te("设备读取失败") + ": " + escapeHtml(error instanceof Error ? error.message : String(error)) + "</p>";
         }
       };
       loadRemoteStatus = async (force = false) => {
@@ -4831,6 +4893,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         remoteStatusBadge.textContent = te("检测中");
         try {
           renderRemoteStatus(await api("/api/remote-access/status"));
+          if (remoteSessionsToggle?.getAttribute("aria-expanded") === "true") await loadRemoteSessions(force);
         } catch (error) {
           remoteRefresh.hidden = false;
           remoteStatus.hidden = false;
@@ -4861,6 +4924,22 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         await copiedFeedback(button);
       });
       remoteRefresh?.addEventListener("click", () => void loadRemoteStatus(true));
+      remoteSessionsToggle?.addEventListener("click", () => {
+        const expanded = remoteSessionsToggle.getAttribute("aria-expanded") !== "true";
+        remoteSessionsToggle.setAttribute("aria-expanded", String(expanded));
+        remoteSessionsPanel.hidden = !expanded;
+        if (expanded) void loadRemoteSessions();
+      });
+      remoteSessionsList?.addEventListener("click", event => {
+        const button = event.target.closest("[data-remote-session-revoke]");
+        if (!button) return;
+        void confirmAction("退出登录", "此设备需要重新输入账户密码才能访问。", "退出登录").then(confirmed => confirmed && perform(async () => {
+          button.disabled = true;
+          await api("/api/remote-access/sessions/" + encodeURIComponent(button.dataset.remoteSessionRevoke), { method: "DELETE" });
+          remoteSessionsLoaded = false;
+          await loadRemoteSessions(true);
+        }));
+      });
       const languageSwitch = dialog.querySelector("[data-language-value]");
       languageSwitch.querySelectorAll("[data-language]").forEach(button => button.addEventListener("click", () => {
         const setting = button.dataset.language;

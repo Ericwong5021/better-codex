@@ -206,7 +206,11 @@ body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; 
 .web-connect p { margin: 0 0 20px; color: var(--web-muted); font-size: 12px; line-height: 1.7; }
 .web-connect code { border-radius: 5px; padding: 2px 5px; color: var(--web-ink); background: var(--web-hover); }
 .web-connect label { display: grid; gap: 7px; color: var(--web-muted); font-size: 10px; font-weight: 600; }
+.web-connect label + label:not(.web-remember) { margin-top: 12px; }
 .web-connect input { width: 100%; height: 39px; border: 0; border-radius: 10px; padding: 0 11px; color: var(--web-ink); background: var(--web-hover); }
+.web-connect label.web-remember { display: flex; min-height: 40px; align-items: center; gap: 9px; margin-top: 4px; color: var(--web-ink); font-size: 12px; font-weight: 560; cursor: pointer; }
+.web-connect label.web-remember input { width: 16px; height: 16px; flex: 0 0 16px; margin: 0; padding: 0; accent-color: var(--web-ink); }
+.web-connect label.web-remember small { margin-left: auto; color: var(--web-muted); font-size: 10px; font-weight: 500; }
 .web-connect output { display: block; margin-top: 9px; color: #d34e4e; font-size: 11px; }
 .web-connect button { width: 100%; min-height: 38px; margin-top: 16px; border: 0; border-radius: 10px; color: var(--web-canvas); background: var(--web-ink); cursor: pointer; }
 .web-error-report { width: min(820px, calc(100vw - 48px)); height: min(82dvh, 760px); max-height: calc(100dvh - 48px); overflow: hidden; border: 0; border-radius: 20px; padding: 0; color: var(--web-ink); background: var(--web-raised); box-shadow: 0 20px 60px rgb(0 0 0 / .2), 0 3px 12px rgb(0 0 0 / .08); overscroll-behavior: contain; }
@@ -270,6 +274,7 @@ const connectDialog = document.getElementById("web-connect");
 const connectForm = document.getElementById("web-connect-form");
 const tokenInput = document.getElementById("web-token");
 const usernameInput = document.getElementById("web-username");
+const rememberInput = document.getElementById("web-remember");
 const connectError = document.getElementById("web-connect-error");
 const webErrorDialog = document.getElementById("web-error-report");
 const installButton = document.getElementById("web-install");
@@ -527,11 +532,18 @@ function consumeFragmentToken() {
   return REMOTE ? "" : token;
 }
 
+function loginDeviceName() {
+  const userAgent = navigator.userAgent || "";
+  const browser = /Edg\//.test(userAgent) ? "Edge" : /Firefox\//.test(userAgent) ? "Firefox" : /Chrome\//.test(userAgent) ? "Chrome" : /Safari\//.test(userAgent) ? "Safari" : "浏览器";
+  const platform = navigator.userAgentData?.platform || navigator.platform || (/Android/.test(userAgent) ? "Android" : /iPhone|iPad/.test(userAgent) ? "iOS" : "设备");
+  return browser + " · " + platform;
+}
+
 async function establishSession(token) {
   const response = await fetch(SESSION_PATH, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(REMOTE ? { username: usernameInput?.value.trim() || "", password: token } : { token }),
+    body: JSON.stringify(REMOTE ? { username: usernameInput?.value.trim() || "", password: token, remember: RELAY && rememberInput?.checked === true, device_name: RELAY ? loginDeviceName() : undefined } : { token }),
   });
   if (!response.ok) throw new Error(REMOTE ? "密码无效或登录请求过于频繁" : "令牌无效，请重新运行 better-codex web");
   const session = await response.json();
@@ -878,9 +890,11 @@ export function betterCodexWebHostHtml(host: boolean | BetterCodexWebHostKind = 
       .replace('<html lang="zh-CN">', '<html lang="zh-CN" data-better-codex-remote="true" data-better-codex-host="relay">')
       .replace("Local connection", "Better Codex Relay")
       .replace("请运行 <code>better-codex web</code> 自动打开，或粘贴本地访问令牌。令牌只用于连接本机 Runtime。", "登录后将通过加密隧道直接连接你的本机 Runtime。Relay 不保存任务、智能体或会话数据。")
-      .replace('<label><span>访问令牌</span>', '<label><span>账户</span><input id="web-username" type="text" autocomplete="username" spellcheck="false" required></label><label><span>访问令牌</span>')
+      .replace('<label><span>访问令牌</span>', '<label><span>账户</span><input id="web-username" name="username" type="text" autocomplete="username" spellcheck="false" required></label><label><span>访问令牌</span>')
       .replace("访问令牌", "访问密码")
-      .replace('autocomplete="off"', 'autocomplete="current-password"');
+      .replace('<input id="web-token" type="password"', '<input id="web-token" name="password" type="password"')
+      .replace('autocomplete="off"', 'autocomplete="current-password"')
+      .replace('<output id="web-connect-error"', '<label class="web-remember"><input id="web-remember" name="remember" type="checkbox" checked><span>记住此设备</span><small>最长 90 天</small></label><output id="web-connect-error"');
   }
   return kind === "remote-projection"
     ? webHostHtml

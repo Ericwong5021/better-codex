@@ -57,6 +57,7 @@ type ActiveRuntime = {
 
 type RelayChannel = {
   id: string;
+  sessionId: string;
   deviceId: string;
   requestId: string;
   method: string;
@@ -196,7 +197,7 @@ function secretEqual(left: string, right: string) {
 function errorStatus(code: string) {
   if (code === "unauthorized") return 401;
   if (["forbidden", "csrf_invalid", "untrusted_host"].includes(code)) return 403;
-  if (["device_not_found", "device_authorization_not_found"].includes(code)) return 404;
+  if (["device_not_found", "device_authorization_not_found", "web_session_not_found"].includes(code)) return 404;
   if (["relay_protocol_mismatch", "runtime_already_paired"].includes(code)) return 409;
   if (code === "body_too_large") return 413;
   if (code === "login_rate_limited") return 429;
@@ -235,6 +236,7 @@ function forwardedResponseHeaders(headers: Record<string, string>) {
 }
 
 function relayErrorStatus(error: string) {
+  if (error === "unauthorized") return 401;
   if (error === "request_cancelled" || error === "relay_request_timeout") return 504;
   if (error === "runtime_unavailable") return 503;
   if (error === "relay_channel_limit") return 429;
@@ -290,6 +292,19 @@ export function createRelayServer(options: RelayServerOptions) {
     });
     else channel.response.end();
     finishChannel(active, channel);
+  };
+  const revokeSessionChannels = (sessionId: string) => {
+    const active = runtime;
+    if (active) {
+      for (const channel of active.channels.values()) {
+        if (channel.sessionId !== sessionId) continue;
+        try { active.socket.send(encodeRelayMessage({ type: "request_cancel", protocol_version: relayProtocolVersion, device_id: active.deviceId, runtime_instance_id: active.runtimeInstanceId, connection_epoch: active.connectionEpoch, channel_id: channel.id, reason: "web_session_revoked" })); } catch {}
+        failChannel(active, channel, "unauthorized", "web_session_revoked");
+      }
+    }
+    for (const channel of retryableChannels.values()) {
+      if (channel.sessionId === sessionId) failChannel(null, channel, "unauthorized", "web_session_revoked");
+    }
   };
   const sendRequestOpen = (active: ActiveRuntime, channel: RelayChannel) => {
     active.socket.send(encodeRelayMessage({ type: "request_open", protocol_version: relayProtocolVersion, device_id: active.deviceId, runtime_instance_id: active.runtimeInstanceId, connection_epoch: active.connectionEpoch, channel_id: channel.id, request_id: channel.requestId, method: channel.method, path: channel.path, headers: channel.headers }));
@@ -359,7 +374,7 @@ export function createRelayServer(options: RelayServerOptions) {
       queueChannel(active, channel, "runtime_socket_closed");
     }
   };
-  const forwardRequest = (request: IncomingMessage, response: ServerResponse, url: URL, method: string) => {
+  const forwardRequest = (request: IncomingMessage, response: ServerResponse, url: URL, method: string, sessionId: string) => {
     const active = runtime;
     if (["/api/shutdown"].includes(url.pathname) || url.pathname.startsWith("/api/session-relay/") || url.pathname.startsWith("/api/mockup/") || url.pathname.startsWith("/api/sync/") || url.pathname.startsWith("/api/relay/")) return sendJson(response, 404, { error: "not_found" });
     const channelId = randomUUID();
@@ -380,7 +395,7 @@ export function createRelayServer(options: RelayServerOptions) {
       }
     }, 120_000);
     timeout.unref();
-    const channel: RelayChannel = { id: channelId, deviceId: active?.deviceId || "", requestId, method, request, response, path: `${url.pathname}${url.search}`, headers: forwardedRequestHeaders(request, requestId), recoverable, requestSequence: 0, responseSequence: 0, responseStarted: false, completed: false, requestBytes: 0, requestCredit: relayInitialWindowBytes, requestQueue: [], requestChunks: [], requestEnded: false, requestEndSent: false, replayAttempts: 0, retryTimeout: null, connectionEpoch: active?.connectionEpoch || 0, runtimeInstanceId: active?.runtimeInstanceId || "", timeout };
+    const channel: RelayChannel = { id: channelId, sessionId, deviceId: active?.deviceId || "", requestId, method, request, response, path: `${url.pathname}${url.search}`, headers: forwardedRequestHeaders(request, requestId), recoverable, requestSequence: 0, responseSequence: 0, responseStarted: false, completed: false, requestBytes: 0, requestCredit: relayInitialWindowBytes, requestQueue: [], requestChunks: [], requestEnded: false, requestEndSent: false, replayAttempts: 0, retryTimeout: null, connectionEpoch: active?.connectionEpoch || 0, runtimeInstanceId: active?.runtimeInstanceId || "", timeout };
     request.on("data", chunkValue => {
       if (channel.completed) return;
       request.pause();
@@ -491,14 +506,29 @@ export function createRelayServer(options: RelayServerOptions) {
           return sendJson(response, 401, { error: "unauthorized" });
         }
         loginAttempts.delete(client);
-        const session = store.createWebSession();
+        const session = store.createWebSession({ remembered: body.remember === true, deviceName: body.device_name, userAgent: request.headers["user-agent"], clientIp: client });
         store.audit(client, "web_login_succeeded");
-        return sendJson(response, 200, { csrf_token: session.csrf_token, expires_at: session.expires_at }, { "set-cookie": relaySessionCookie(session.token, secureCookies) });
+        const cookieLifetime = session.remembered ? Math.max(1, Math.ceil((Date.parse(session.expires_at) - Date.now()) / 1000)) : undefined;
+        return sendJson(response, 200, { csrf_token: session.csrf_token, expires_at: session.expires_at }, { "set-cookie": relaySessionCookie(session.token, secureCookies, cookieLifetime) });
+      }
+
+      const runtimeSessionDevice = url.pathname.startsWith("/api/v1/runtime/web-sessions") ? store.deviceForToken(bearer(request)) : null;
+      if (url.pathname === "/api/v1/runtime/web-sessions" && method === "GET") {
+        if (!runtimeSessionDevice) return sendJson(response, 401, { error: "unauthorized" });
+        return sendJson(response, 200, { sessions: store.webSessions() });
+      }
+      const runtimeSessionMatch = url.pathname.match(/^\/api\/v1\/runtime\/web-sessions\/([^/]+)$/);
+      if (runtimeSessionMatch && method === "DELETE") {
+        if (!runtimeSessionDevice) return sendJson(response, 401, { error: "unauthorized" });
+        const revoked = store.revokeWebSessionById(decodeURIComponent(runtimeSessionMatch[1]));
+        revokeSessionChannels(revoked.id);
+        store.audit(runtimeSessionDevice.id, "web_session_revoked", revoked.id);
+        return sendJson(response, 200, { ok: true, ...revoked });
       }
 
       const sessionToken = parseCookies(request.headers.cookie).get("better_codex_relay_session") || "";
       const session = store.webSession(sessionToken);
-      if (session) response.setHeader("set-cookie", relaySessionCookie(sessionToken, secureCookies, Math.max(1, Math.ceil((Date.parse(session.expires_at) - Date.now()) / 1000))));
+      if (session) response.setHeader("set-cookie", relaySessionCookie(sessionToken, secureCookies, session.remembered ? Math.max(1, Math.ceil((Date.parse(session.expires_at) - Date.now()) / 1000)) : undefined));
       const csrfValid = Boolean(session && typeof request.headers["x-csrf-token"] === "string" && secretEqual(request.headers["x-csrf-token"], session.csrf_token));
       const admin = secretEqual(bearer(request), options.adminToken);
       if (url.pathname === "/relay/session" && method === "GET") {
@@ -592,16 +622,16 @@ export function createRelayServer(options: RelayServerOptions) {
       }
       if (url.pathname === "/web/injection.js" && method === "GET") {
         if (!session) return sendJson(response, 401, { error: "unauthorized" });
-        return forwardRequest(request, response, url, method);
+        return forwardRequest(request, response, url, method, session.id);
       }
       if (url.pathname === "/health" && method === "GET") {
         if (!session) return sendJson(response, 401, { error: "unauthorized" });
-        return forwardRequest(request, response, url, method);
+        return forwardRequest(request, response, url, method, session.id);
       }
       if (url.pathname.startsWith("/api/")) {
         if (!session) return sendJson(response, 401, { error: "unauthorized" });
         if (!["GET", "HEAD"].includes(method) && (!trustedOrigin(request, true) || !csrfValid)) return sendJson(response, 403, { error: "csrf_invalid" });
-        return forwardRequest(request, response, url, method);
+        return forwardRequest(request, response, url, method, session.id);
       }
       return sendJson(response, 404, { error: "not_found" });
     })().catch(error => {

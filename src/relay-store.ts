@@ -17,6 +17,8 @@ function tokenHash(value: string) {
 
 const webSessionIdleLifetimeMilliseconds = 12 * 60 * 60 * 1000;
 const webSessionMaximumLifetimeMilliseconds = 30 * 24 * 60 * 60 * 1000;
+const rememberedWebSessionIdleLifetimeMilliseconds = 30 * 24 * 60 * 60 * 1000;
+const rememberedWebSessionMaximumLifetimeMilliseconds = 90 * 24 * 60 * 60 * 1000;
 
 function settingKey(value: string) {
   if (!/^[a-z0-9:_-]{1,240}$/i.test(value)) throw new Error("invalid_relay_setting");
@@ -24,10 +26,15 @@ function settingKey(value: string) {
 }
 
 type SessionRow = {
+  id: string;
   csrf_token: string;
   created_at: string;
   expires_at: string;
   last_seen_at: string;
+  remembered: number;
+  device_name: string;
+  user_agent: string;
+  client_ip: string;
 };
 
 type DeviceRow = {
@@ -53,10 +60,15 @@ export class RelayStore {
       );
       CREATE TABLE IF NOT EXISTS relay_web_sessions (
         token_hash TEXT PRIMARY KEY,
+        id TEXT NOT NULL UNIQUE,
         csrf_token TEXT NOT NULL,
         created_at TEXT NOT NULL,
         expires_at TEXT NOT NULL,
-        last_seen_at TEXT NOT NULL
+        last_seen_at TEXT NOT NULL,
+        remembered INTEGER NOT NULL DEFAULT 0,
+        device_name TEXT NOT NULL DEFAULT '浏览器设备',
+        user_agent TEXT NOT NULL DEFAULT '',
+        client_ip TEXT NOT NULL DEFAULT ''
       );
       CREATE TABLE IF NOT EXISTS relay_devices (
         id TEXT PRIMARY KEY,
@@ -73,6 +85,16 @@ export class RelayStore {
         created_at TEXT NOT NULL
       );
     `);
+    const webSessionColumns = new Set((this.database.prepare("PRAGMA table_info(relay_web_sessions)").all() as Array<{ name: string }>).map(column => column.name));
+    if (!webSessionColumns.has("id")) this.database.exec("ALTER TABLE relay_web_sessions ADD COLUMN id TEXT");
+    if (!webSessionColumns.has("remembered")) this.database.exec("ALTER TABLE relay_web_sessions ADD COLUMN remembered INTEGER NOT NULL DEFAULT 0");
+    if (!webSessionColumns.has("device_name")) this.database.exec("ALTER TABLE relay_web_sessions ADD COLUMN device_name TEXT NOT NULL DEFAULT '浏览器设备'");
+    if (!webSessionColumns.has("user_agent")) this.database.exec("ALTER TABLE relay_web_sessions ADD COLUMN user_agent TEXT NOT NULL DEFAULT ''");
+    if (!webSessionColumns.has("client_ip")) this.database.exec("ALTER TABLE relay_web_sessions ADD COLUMN client_ip TEXT NOT NULL DEFAULT ''");
+    const sessionsWithoutId = this.database.prepare("SELECT token_hash FROM relay_web_sessions WHERE id IS NULL OR id = ''").all() as Array<{ token_hash: string }>;
+    const assignSessionId = this.database.prepare("UPDATE relay_web_sessions SET id = ? WHERE token_hash = ?");
+    for (const session of sessionsWithoutId) assignSessionId.run(randomUUID(), session.token_hash);
+    this.database.exec("CREATE UNIQUE INDEX IF NOT EXISTS relay_web_sessions_id ON relay_web_sessions(id)");
   }
 
   close() {
@@ -114,19 +136,24 @@ export class RelayStore {
     return this.setting("web_password_hash") || "";
   }
 
-  createWebSession() {
+  createWebSession(input: { remembered?: boolean; deviceName?: unknown; userAgent?: unknown; clientIp?: unknown } = {}) {
     const token = randomBytes(32).toString("base64url");
+    const id = randomUUID();
     const csrfToken = randomBytes(32).toString("base64url");
     const createdAt = now();
-    const expiresAt = after(webSessionIdleLifetimeMilliseconds);
+    const remembered = input.remembered === true;
+    const expiresAt = after(remembered ? rememberedWebSessionIdleLifetimeMilliseconds : webSessionIdleLifetimeMilliseconds);
+    const deviceName = typeof input.deviceName === "string" ? input.deviceName.replace(/[\r\n\0]/g, " ").trim().slice(0, 120) || "浏览器设备" : "浏览器设备";
+    const userAgent = typeof input.userAgent === "string" ? input.userAgent.replace(/[\r\n\0]/g, " ").trim().slice(0, 500) : "";
+    const clientIp = typeof input.clientIp === "string" ? input.clientIp.replace(/[\r\n\0]/g, " ").trim().slice(0, 120) : "";
     this.database.prepare("DELETE FROM relay_web_sessions WHERE expires_at <= ?").run(createdAt);
-    this.database.prepare("INSERT INTO relay_web_sessions (token_hash, csrf_token, created_at, expires_at, last_seen_at) VALUES (?, ?, ?, ?, ?)").run(tokenHash(token), csrfToken, createdAt, expiresAt, createdAt);
-    return { token, csrf_token: csrfToken, created_at: createdAt, expires_at: expiresAt };
+    this.database.prepare("INSERT INTO relay_web_sessions (token_hash, id, csrf_token, created_at, expires_at, last_seen_at, remembered, device_name, user_agent, client_ip) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(tokenHash(token), id, csrfToken, createdAt, expiresAt, createdAt, remembered ? 1 : 0, deviceName, userAgent, clientIp);
+    return { token, id, csrf_token: csrfToken, created_at: createdAt, expires_at: expiresAt, remembered };
   }
 
   webSession(token: string) {
     if (!token) return null;
-    const row = this.database.prepare("SELECT csrf_token, created_at, expires_at, last_seen_at FROM relay_web_sessions WHERE token_hash = ?").get(tokenHash(token)) as SessionRow | undefined;
+    const row = this.database.prepare("SELECT id, csrf_token, created_at, expires_at, last_seen_at, remembered, device_name, user_agent, client_ip FROM relay_web_sessions WHERE token_hash = ?").get(tokenHash(token)) as SessionRow | undefined;
     if (!row) return null;
     if (Date.parse(row.expires_at) <= Date.now()) {
       this.database.prepare("DELETE FROM relay_web_sessions WHERE token_hash = ?").run(tokenHash(token));
@@ -134,13 +161,33 @@ export class RelayStore {
     }
     const seenAtMilliseconds = Date.now();
     const seenAt = new Date(seenAtMilliseconds).toISOString();
-    const expiresAt = new Date(Math.min(seenAtMilliseconds + webSessionIdleLifetimeMilliseconds, Date.parse(row.created_at) + webSessionMaximumLifetimeMilliseconds)).toISOString();
+    const idleLifetime = row.remembered === 1 ? rememberedWebSessionIdleLifetimeMilliseconds : webSessionIdleLifetimeMilliseconds;
+    const maximumLifetime = row.remembered === 1 ? rememberedWebSessionMaximumLifetimeMilliseconds : webSessionMaximumLifetimeMilliseconds;
+    const expiresAtMilliseconds = Math.min(seenAtMilliseconds + idleLifetime, Date.parse(row.created_at) + maximumLifetime);
+    if (expiresAtMilliseconds <= seenAtMilliseconds) {
+      this.database.prepare("DELETE FROM relay_web_sessions WHERE token_hash = ?").run(tokenHash(token));
+      return null;
+    }
+    const expiresAt = new Date(expiresAtMilliseconds).toISOString();
     this.database.prepare("UPDATE relay_web_sessions SET expires_at = ?, last_seen_at = ? WHERE token_hash = ?").run(expiresAt, seenAt, tokenHash(token));
-    return { ...row, expires_at: expiresAt, last_seen_at: seenAt };
+    return { ...row, remembered: row.remembered === 1, expires_at: expiresAt, last_seen_at: seenAt };
   }
 
   revokeWebSession(token: string) {
     if (token) this.database.prepare("DELETE FROM relay_web_sessions WHERE token_hash = ?").run(tokenHash(token));
+  }
+
+  webSessions() {
+    const timestamp = now();
+    this.database.prepare("DELETE FROM relay_web_sessions WHERE expires_at <= ?").run(timestamp);
+    return (this.database.prepare("SELECT id, device_name, created_at, expires_at, last_seen_at, remembered, client_ip FROM relay_web_sessions ORDER BY last_seen_at DESC").all() as Array<Omit<SessionRow, "csrf_token" | "user_agent">>).map(session => ({ ...session, remembered: session.remembered === 1 }));
+  }
+
+  revokeWebSessionById(idValue: unknown) {
+    const id = typeof idValue === "string" ? idValue.trim() : "";
+    const result = this.database.prepare("DELETE FROM relay_web_sessions WHERE id = ?").run(id);
+    if (result.changes !== 1) throw new Error("web_session_not_found");
+    return { id };
   }
 
   createPairingCode(ttlMilliseconds = 10 * 60 * 1000) {
