@@ -724,6 +724,52 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "个文件夹": "folders",
       "创建 Codex 项目": "Create Codex project",
       "无法选择文件夹": "Unable to choose a folder",
+      "新建工作项": "New work item",
+      "有风险": "At risk",
+      "需关注": "Needs attention",
+      "进展正常": "On track",
+      "探索": "Explore",
+      "计划": "Plan",
+      "开发": "Build",
+      "验证": "Validate",
+      "交付": "Deliver",
+      "下一版本": "Next version",
+      "稳定版本": "Stable release",
+      "今天": "Today",
+      "你": "You",
+      "未指派": "Unassigned",
+      "正在加载当前工作": "Loading current work",
+      "当前没有进行中的工作": "No work is currently in progress",
+      "正在加载待处理事项": "Loading attention items",
+      "需解阻": "Unblock",
+      "需复核": "Review",
+      "需处理": "Action needed",
+      "没有需要你处理的事项": "Nothing needs your attention",
+      "项目负责人": "Project owner",
+      "待命": "Standing by",
+      "未提供项目文件夹": "No project folder",
+      "项目协作者": "Project collaborators",
+      "项目页面": "Project pages",
+      "概览": "Overview",
+      "工作": "Work",
+      "项目说明": "Project brief",
+      "当前状态": "Current status",
+      "进行中": "In progress",
+      "待复核": "Awaiting review",
+      "阻塞": "Blocked",
+      "当前版本": "Current version",
+      "下一里程碑": "Next milestone",
+      "当前阶段": "Current phase",
+      "版本计划与里程碑": "Release plan and milestones",
+      "已发布": "Released",
+      "当前安装": "Installed",
+      "版本收口": "Release hardening",
+      "稳定交付": "Stable delivery",
+      "当前安装版本": "Currently installed",
+      "预计": "Estimated",
+      "当前工作": "Current work",
+      "等你处理": "Needs your attention",
+      "活跃协作者": "Active collaborators",
     });
     Object.assign(localeResources.en, {
       "错误报告": "Error report",
@@ -1178,7 +1224,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #\${PANEL_ID} .better-codex-project-empty { width: min(520px,100%); margin: 16vh auto 0; text-align: center; }
         #\${PANEL_ID} .better-codex-project-empty strong { display: block; font-size: var(--bc-text-md); }
         #\${PANEL_ID} .better-codex-project-empty p { margin: 7px 0 0; color: var(--bc-muted); font-size: var(--bc-text-sm); line-height: 1.7; }
-        #\${PANEL_ID} .better-codex-project-detail { width: min(1240px,100%); margin: 0 auto; }
+        #\${PANEL_ID} .better-codex-project-detail { width: min(1440px,100%); margin: 0 auto; }
         #\${PANEL_ID} .better-codex-project-back { display: inline-flex; min-height: 36px; align-items: center; gap: 7px; border: 0; border-radius: var(--bc-radius-sm, 10px); color: var(--bc-muted); background: transparent; padding: 0 9px; font: inherit; font-size: var(--bc-text-sm); cursor: pointer; }
         #\${PANEL_ID} .better-codex-project-back svg { width: 15px; height: 15px; transform: rotate(180deg); }
         #\${PANEL_ID} .better-codex-project-summary { display: grid; grid-template-columns: minmax(0,1fr) minmax(260px,.7fr); gap: 24px; margin-top: 14px; border-radius: var(--bc-radius-xl, 20px); background: var(--bc-surface); padding: 24px; }
@@ -1206,6 +1252,104 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #\${PANEL_ID} .better-codex-project-issue-title > span { display: flex; align-items: center; gap: 6px; margin-top: 4px; color: var(--bc-faint); font-size: var(--bc-text-caption); }
         #\${PANEL_ID} .better-codex-project-issue-toggle > svg { width: 14px; height: 14px; color: var(--bc-faint); transition: transform .15s cubic-bezier(.16,1,.3,1); }
         #\${PANEL_ID} .better-codex-project-issue-toggle:hover > svg { transform: translateX(2px); }
+        #\${PANEL_ID} .better-codex-project-dashboard { display: grid; gap: 14px; }
+        #\${PANEL_ID} .better-codex-project-dashboard-head { display: flex; min-width: 0; align-items: flex-start; justify-content: space-between; gap: 24px; padding: 4px 2px 0; }
+        #\${PANEL_ID} .better-codex-project-dashboard-title { min-width: 0; }
+        #\${PANEL_ID} .better-codex-project-dashboard-title > div { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; }
+        #\${PANEL_ID} .better-codex-project-dashboard-title h1 { margin: 0; font-size: clamp(24px,2.2vw,34px); font-weight: 680; line-height: 1.2; letter-spacing: -.025em; }
+        #\${PANEL_ID} .better-codex-project-dashboard-title p { max-width: 74ch; margin: 8px 0 0; color: var(--bc-muted); font-size: var(--bc-text-sm); line-height: 1.65; }
+        #\${PANEL_ID} .better-codex-project-health { display: inline-flex; min-height: 26px; align-items: center; gap: 6px; border-radius: 999px; padding: 0 10px; color: var(--bc-success); background: color-mix(in oklch,var(--bc-success) 11%,transparent); font-size: var(--bc-text-caption); font-weight: 650; }
+        #\${PANEL_ID} .better-codex-project-health::before { width: 6px; height: 6px; border-radius: 50%; background: currentColor; content: ""; }
+        #\${PANEL_ID} .better-codex-project-health[data-tone="warning"] { color: var(--bc-warning); background: color-mix(in oklch,var(--bc-warning) 12%,transparent); }
+        #\${PANEL_ID} .better-codex-project-health[data-tone="danger"] { color: var(--bc-danger); background: color-mix(in oklch,var(--bc-danger) 11%,transparent); }
+        #\${PANEL_ID} .better-codex-project-dashboard-people { display: flex; flex: 0 0 auto; align-items: center; }
+        #\${PANEL_ID} .better-codex-project-dashboard-avatar { display: inline-flex; width: 32px; height: 32px; box-sizing: border-box; align-items: center; justify-content: center; overflow: hidden; margin-left: -7px; border: 2px solid var(--bc-page); border-radius: 999px; color: var(--bc-muted); background: var(--bc-control); font-size: 11px; font-weight: 700; }
+        #\${PANEL_ID} .better-codex-project-dashboard-avatar:first-child { margin-left: 0; }
+        #\${PANEL_ID} .better-codex-project-dashboard-avatar img, #\${PANEL_ID} .better-codex-project-dashboard-avatar svg { display: block; width: 100%; height: 100%; object-fit: cover; }
+        #\${PANEL_ID} .better-codex-project-dashboard-avatar.is-icon svg, #\${PANEL_ID} .better-codex-project-dashboard-avatar.is-fallback svg { width: 16px; height: 16px; }
+        #\${PANEL_ID} .better-codex-project-dashboard-tabs { display: flex; width: fit-content; align-items: center; gap: 3px; border-radius: 13px; background: var(--bc-control); padding: 3px; }
+        #\${PANEL_ID} .better-codex-project-dashboard-tabs button { min-height: 34px; border: 0; border-radius: 10px; color: var(--bc-muted); background: transparent; padding: 0 16px; font: inherit; font-size: var(--bc-text-sm); font-weight: 600; cursor: pointer; }
+        #\${PANEL_ID} .better-codex-project-dashboard-tabs button[aria-current="page"] { color: var(--bc-foreground); background: var(--bc-surface); box-shadow: var(--bc-surface-shadow); }
+        #\${PANEL_ID} .better-codex-project-dashboard-tabs button:focus-visible { outline: 2px solid var(--bc-ring); outline-offset: 1px; }
+        #\${PANEL_ID} .better-codex-project-dashboard-summary { display: grid; grid-template-columns: minmax(0,1.1fr) minmax(260px,.9fr) minmax(280px,.92fr); gap: 14px; }
+        #\${PANEL_ID} .better-codex-project-dashboard-card { min-width: 0; border-radius: var(--bc-radius-lg,16px); background: var(--bc-surface); padding: 18px 20px; }
+        #\${PANEL_ID} .better-codex-project-dashboard-card > strong, #\${PANEL_ID} .better-codex-project-section-head strong { font-size: var(--bc-text-md); font-weight: 650; }
+        #\${PANEL_ID} .better-codex-project-dashboard-description p { display: -webkit-box; max-width: 62ch; margin: 12px 0 0; overflow: hidden; color: var(--bc-muted); font-size: var(--bc-text-sm); line-height: 1.7; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+        #\${PANEL_ID} .better-codex-project-dashboard-path { display: flex; min-width: 0; align-items: center; gap: 6px; margin-top: 14px; color: var(--bc-faint); font-size: var(--bc-text-caption); }
+        #\${PANEL_ID} .better-codex-project-dashboard-path svg { width: 13px; height: 13px; flex: 0 0 auto; }
+        #\${PANEL_ID} .better-codex-project-dashboard-path span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        #\${PANEL_ID} .better-codex-project-metrics { display: grid; grid-template-columns: repeat(3,1fr); margin-top: 17px; }
+        #\${PANEL_ID} .better-codex-project-metric { display: grid; justify-items: center; gap: 4px; border-left: 1px solid var(--bc-divider); }
+        #\${PANEL_ID} .better-codex-project-metric:first-child { border-left: 0; }
+        #\${PANEL_ID} .better-codex-project-metric b { color: var(--bc-info); font-size: 24px; font-weight: 650; }
+        #\${PANEL_ID} .better-codex-project-metric[data-tone="warning"] b { color: var(--bc-warning); }
+        #\${PANEL_ID} .better-codex-project-metric[data-tone="danger"] b { color: var(--bc-danger); }
+        #\${PANEL_ID} .better-codex-project-metric span { color: var(--bc-muted); font-size: var(--bc-text-caption); }
+        #\${PANEL_ID} .better-codex-project-cycle { display: grid; grid-template-columns: 118px minmax(0,1fr); gap: 18px; }
+        #\${PANEL_ID} .better-codex-project-cycle-steps { display: grid; align-content: start; }
+        #\${PANEL_ID} .better-codex-project-cycle-step { position: relative; display: flex; min-height: 29px; align-items: center; gap: 8px; color: var(--bc-faint); font-size: var(--bc-text-caption); }
+        #\${PANEL_ID} .better-codex-project-cycle-step::before { z-index: 1; width: 9px; height: 9px; box-sizing: border-box; border: 1.5px solid currentColor; border-radius: 50%; background: var(--bc-surface); content: ""; }
+        #\${PANEL_ID} .better-codex-project-cycle-step:not(:last-child)::after { position: absolute; top: 19px; bottom: -10px; left: 4px; width: 1px; background: var(--bc-divider); content: ""; }
+        #\${PANEL_ID} .better-codex-project-cycle-step.is-complete { color: var(--bc-muted); }
+        #\${PANEL_ID} .better-codex-project-cycle-step.is-complete::before { border-color: var(--bc-muted); background: var(--bc-muted); box-shadow: inset 0 0 0 2px var(--bc-surface); }
+        #\${PANEL_ID} .better-codex-project-cycle-step.is-current { color: var(--bc-info); font-weight: 650; }
+        #\${PANEL_ID} .better-codex-project-cycle-step.is-current::before { border: 3px solid var(--bc-info); background: var(--bc-surface); }
+        #\${PANEL_ID} .better-codex-project-cycle-facts { display: grid; align-content: center; gap: 10px; }
+        #\${PANEL_ID} .better-codex-project-cycle-facts div { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 10px; color: var(--bc-muted); font-size: var(--bc-text-caption); }
+        #\${PANEL_ID} .better-codex-project-cycle-facts b { overflow: hidden; color: var(--bc-foreground); font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+        #\${PANEL_ID} .better-codex-project-timeline { min-width: 0; border-radius: var(--bc-radius-lg,16px); background: var(--bc-surface); padding: 18px 20px 20px; }
+        #\${PANEL_ID} .better-codex-project-section-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+        #\${PANEL_ID} .better-codex-project-section-head > span:not(.better-codex-project-timeline-legend) { color: var(--bc-faint); font-size: var(--bc-text-caption); }
+        #\${PANEL_ID} .better-codex-project-timeline-legend { display: flex; align-items: center; gap: 14px; color: var(--bc-muted); font-size: var(--bc-text-caption); }
+        #\${PANEL_ID} .better-codex-project-timeline-legend span { display: inline-flex; align-items: center; gap: 5px; }
+        #\${PANEL_ID} .better-codex-project-timeline-legend i { width: 7px; height: 7px; border-radius: 50%; background: var(--bc-success); }
+        #\${PANEL_ID} .better-codex-project-timeline-legend span:nth-child(2) i { background: var(--bc-warning); }
+        #\${PANEL_ID} .better-codex-project-timeline-legend span:nth-child(3) i { border: 1px dashed var(--bc-info); background: transparent; }
+        #\${PANEL_ID} .better-codex-project-timeline-scroll { overflow-x: auto; margin-top: 16px; padding-bottom: 3px; }
+        #\${PANEL_ID} .better-codex-project-timeline-canvas { position: relative; min-width: 920px; }
+        #\${PANEL_ID} .better-codex-project-timeline-dates { display: grid; grid-template-columns: repeat(13,1fr); color: var(--bc-faint); font-size: var(--bc-text-xs); }
+        #\${PANEL_ID} .better-codex-project-timeline-dates span { padding-bottom: 8px; text-align: left; }
+        #\${PANEL_ID} .better-codex-project-timeline-track { position: relative; display: grid; min-height: 116px; grid-template-columns: repeat(12,1fr); grid-template-rows: repeat(3,31px); gap: 7px 0; border-top: 1px solid var(--bc-divider); padding: 12px 0 0; background-image: linear-gradient(to right,var(--bc-divider) 1px,transparent 1px); background-size: calc(100% / 12) 100%; }
+        #\${PANEL_ID} .better-codex-project-version-band { z-index: 1; display: flex; min-width: 0; grid-column: var(--start) / span var(--span); grid-row: var(--row); align-items: center; gap: 8px; align-self: center; height: 28px; box-sizing: border-box; overflow: hidden; border-radius: 999px; color: color-mix(in oklch,var(--bc-success) 88%,var(--bc-foreground)); background: color-mix(in oklch,var(--bc-success) 12%,var(--bc-surface)); padding: 0 12px; font-size: var(--bc-text-caption); white-space: nowrap; }
+        #\${PANEL_ID} .better-codex-project-version-band b { overflow: hidden; font-weight: 650; text-overflow: ellipsis; }
+        #\${PANEL_ID} .better-codex-project-version-band span { color: var(--bc-muted); }
+        #\${PANEL_ID} .better-codex-project-version-band[data-tone="current"] { color: color-mix(in oklch,var(--bc-warning) 84%,var(--bc-foreground)); background: color-mix(in oklch,var(--bc-warning) 13%,var(--bc-surface)); }
+        #\${PANEL_ID} .better-codex-project-version-band[data-tone="planned"] { border: 1px dashed color-mix(in oklch,var(--bc-info) 68%,var(--bc-divider)); color: var(--bc-info); background: color-mix(in oklch,var(--bc-info) 6%,var(--bc-surface)); }
+        #\${PANEL_ID} .better-codex-project-version-progress { margin-left: auto; border-radius: 999px; background: color-mix(in oklch,var(--bc-warning) 16%,var(--bc-surface)); padding: 2px 7px; color: inherit !important; font-weight: 650; }
+        #\${PANEL_ID} .better-codex-project-today { position: absolute; z-index: 2; top: -29px; bottom: 0; left: 33.333%; width: 1px; background: color-mix(in oklch,var(--bc-info) 74%,transparent); pointer-events: none; }
+        #\${PANEL_ID} .better-codex-project-today span { position: absolute; top: -1px; left: 0; border-radius: 999px; color: var(--bc-info); background: color-mix(in oklch,var(--bc-info) 9%,var(--bc-surface)); padding: 3px 7px; font-size: var(--bc-text-xs); font-weight: 650; transform: translate(-50%,-100%); white-space: nowrap; }
+        #\${PANEL_ID} .better-codex-project-milestones { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; margin-top: 12px; }
+        #\${PANEL_ID} .better-codex-project-milestone { display: flex; min-width: 0; align-items: flex-start; gap: 8px; color: var(--bc-muted); font-size: var(--bc-text-caption); }
+        #\${PANEL_ID} .better-codex-project-milestone svg { width: 14px; height: 14px; flex: 0 0 auto; margin-top: 1px; color: var(--bc-success); }
+        #\${PANEL_ID} .better-codex-project-milestone[data-tone="current"] svg { color: var(--bc-warning); }
+        #\${PANEL_ID} .better-codex-project-milestone[data-tone="planned"] svg { color: var(--bc-info); }
+        #\${PANEL_ID} .better-codex-project-milestone b, #\${PANEL_ID} .better-codex-project-milestone span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        #\${PANEL_ID} .better-codex-project-milestone b { color: var(--bc-foreground); font-weight: 600; }
+        #\${PANEL_ID} .better-codex-project-dashboard-lists { display: grid; grid-template-columns: minmax(0,1.05fr) minmax(320px,.95fr); gap: 14px; }
+        #\${PANEL_ID} .better-codex-project-work-list, #\${PANEL_ID} .better-codex-project-attention-list { display: grid; margin-top: 10px; }
+        #\${PANEL_ID} .better-codex-project-work-row, #\${PANEL_ID} .better-codex-project-attention-row { display: grid; width: 100%; min-height: 43px; box-sizing: border-box; align-items: center; gap: 10px; border: 0; border-top: 1px solid var(--bc-divider); color: inherit; background: transparent; padding: 7px 2px; font: inherit; text-align: left; cursor: pointer; }
+        #\${PANEL_ID} .better-codex-project-work-row { grid-template-columns: 18px 74px minmax(0,1fr) auto; }
+        #\${PANEL_ID} .better-codex-project-attention-row { grid-template-columns: 30px minmax(0,1fr) auto; }
+        #\${PANEL_ID} .better-codex-project-work-row:first-child, #\${PANEL_ID} .better-codex-project-attention-row:first-child { border-top: 0; }
+        #\${PANEL_ID} .better-codex-project-work-row:hover, #\${PANEL_ID} .better-codex-project-attention-row:hover { background: var(--bc-hover); }
+        #\${PANEL_ID} .better-codex-project-work-row:focus-visible, #\${PANEL_ID} .better-codex-project-attention-row:focus-visible { outline: 2px solid var(--bc-ring); outline-offset: -2px; }
+        #\${PANEL_ID} .better-codex-project-work-row > svg { width: 15px; height: 15px; }
+        #\${PANEL_ID} .better-codex-project-work-row > b { color: var(--bc-faint); font-size: var(--bc-text-caption); font-weight: 550; }
+        #\${PANEL_ID} .better-codex-project-work-title, #\${PANEL_ID} .better-codex-project-attention-copy { min-width: 0; }
+        #\${PANEL_ID} .better-codex-project-work-title strong, #\${PANEL_ID} .better-codex-project-attention-copy strong { display: block; overflow: hidden; font-size: var(--bc-text-sm); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+        #\${PANEL_ID} .better-codex-project-work-title span, #\${PANEL_ID} .better-codex-project-attention-copy span { display: block; margin-top: 3px; overflow: hidden; color: var(--bc-faint); font-size: var(--bc-text-caption); text-overflow: ellipsis; white-space: nowrap; }
+        #\${PANEL_ID} .better-codex-project-work-state, #\${PANEL_ID} .better-codex-project-attention-state { border-radius: 999px; background: var(--bc-control); padding: 3px 8px; color: var(--bc-muted); font-size: var(--bc-text-xs); white-space: nowrap; }
+        #\${PANEL_ID} .better-codex-project-attention-icon { display: inline-flex; width: 28px; height: 28px; align-items: center; justify-content: center; border-radius: 9px; color: var(--bc-warning); background: color-mix(in oklch,var(--bc-warning) 10%,transparent); }
+        #\${PANEL_ID} .better-codex-project-attention-icon svg { width: 14px; height: 14px; }
+        #\${PANEL_ID} .better-codex-project-collaborators { padding-block: 15px; }
+        #\${PANEL_ID} .better-codex-project-collaborator-list { display: grid; grid-template-columns: repeat(auto-fit,minmax(210px,1fr)); margin-top: 10px; }
+        #\${PANEL_ID} .better-codex-project-collaborator { display: flex; min-width: 0; align-items: center; gap: 10px; border-left: 1px solid var(--bc-divider); padding: 4px 16px; }
+        #\${PANEL_ID} .better-codex-project-collaborator:first-child { border-left: 0; padding-left: 0; }
+        #\${PANEL_ID} .better-codex-project-collaborator > div { min-width: 0; }
+        #\${PANEL_ID} .better-codex-project-collaborator strong, #\${PANEL_ID} .better-codex-project-collaborator span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        #\${PANEL_ID} .better-codex-project-collaborator strong { font-size: var(--bc-text-sm); font-weight: 600; }
+        #\${PANEL_ID} .better-codex-project-collaborator span { margin-top: 3px; color: var(--bc-faint); font-size: var(--bc-text-caption); }
+        #\${PANEL_ID} .better-codex-project-dashboard-empty { padding: 20px 0; color: var(--bc-faint); font-size: var(--bc-text-sm); text-align: center; }
         #\${PANEL_ID} .better-codex-project-document-panel { background: color-mix(in oklch,var(--bc-surface) 96%,var(--bc-control)); }
         #\${PANEL_ID} .better-codex-project-document-panel > .better-codex-project-panel-head { border-bottom: 1px solid var(--bc-divider); }
         #\${PANEL_ID} .better-codex-project-document-progress { margin: 10px 14px 0; border-radius: var(--bc-radius-sm,10px); background: var(--bc-control); padding: 10px 12px; }
@@ -1300,8 +1444,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         @keyframes better-codex-project-document-skeleton { 0%,100% { opacity: .32; } 50% { opacity: .85; } }
         @media (hover:hover) { #\${PANEL_ID} .better-codex-project-card:hover, #\${PANEL_ID} .better-codex-project-issue-toggle:hover, #\${PANEL_ID} .better-codex-project-back:hover { background: var(--bc-hover); } }
         @media (hover:hover) { #\${PANEL_ID} .better-codex-project-document-tab:hover { color: var(--bc-foreground); background: var(--bc-hover); } }
-        @media (max-width: 980px) { #\${PANEL_ID} .better-codex-project-summary, #\${PANEL_ID} .better-codex-project-columns { grid-template-columns: 1fr; } #\${PANEL_ID} .better-codex-project-columns { height: auto; } #\${PANEL_ID} .better-codex-project-panel:first-child { height: min(50dvh,480px); min-height: 320px; } #\${PANEL_ID} .better-codex-project-document-panel { height: min(86dvh,820px); min-height: 620px; } }
-        @media (max-width: 640px) { #\${PANEL_ID} .better-codex-projects { padding: 12px 12px 24px; } #\${PANEL_ID} .better-codex-project-list { grid-template-columns: 1fr; } #\${PANEL_ID} .better-codex-project-summary { padding: 18px; } #\${PANEL_ID} .better-codex-project-columns { grid-template-columns: minmax(0,1fr); } #\${PANEL_ID} .better-codex-project-document-tab { padding-inline: 8px; } #\${PANEL_ID} .better-codex-project-document-tab svg { display: none; } #\${PANEL_ID} .better-codex-project-document-form > div { grid-template-columns: 1fr; } }
+        @media (max-width: 1120px) { #\${PANEL_ID} .better-codex-project-dashboard-summary { grid-template-columns: repeat(2,minmax(0,1fr)); } #\${PANEL_ID} .better-codex-project-cycle { grid-column: 1 / -1; } }
+        @media (max-width: 980px) { #\${PANEL_ID} .better-codex-project-summary, #\${PANEL_ID} .better-codex-project-columns, #\${PANEL_ID} .better-codex-project-dashboard-lists { grid-template-columns: 1fr; } #\${PANEL_ID} .better-codex-project-columns { height: auto; } #\${PANEL_ID} .better-codex-project-panel:first-child { height: min(50dvh,480px); min-height: 320px; } #\${PANEL_ID} .better-codex-project-document-panel { height: min(86dvh,820px); min-height: 620px; } }
+        @media (max-width: 640px) { #\${PANEL_ID} .better-codex-projects { padding: 12px 12px 24px; } #\${PANEL_ID} .better-codex-project-list, #\${PANEL_ID} .better-codex-project-dashboard-summary { grid-template-columns: 1fr; } #\${PANEL_ID} .better-codex-project-summary { padding: 18px; } #\${PANEL_ID} .better-codex-project-columns { grid-template-columns: minmax(0,1fr); } #\${PANEL_ID} .better-codex-project-document-tab { padding-inline: 8px; } #\${PANEL_ID} .better-codex-project-document-tab svg { display: none; } #\${PANEL_ID} .better-codex-project-document-form > div { grid-template-columns: 1fr; } #\${PANEL_ID} .better-codex-project-dashboard-head { gap: 12px; } #\${PANEL_ID} .better-codex-project-dashboard-people { display: none; } #\${PANEL_ID} .better-codex-project-cycle { grid-column: auto; grid-template-columns: 100px minmax(0,1fr); } #\${PANEL_ID} .better-codex-project-timeline { padding-inline: 14px; } #\${PANEL_ID} .better-codex-project-timeline-legend { display: none; } #\${PANEL_ID} .better-codex-project-milestones { grid-template-columns: 1fr; } #\${PANEL_ID} .better-codex-project-work-row { grid-template-columns: 18px 62px minmax(0,1fr); } #\${PANEL_ID} .better-codex-project-work-state { display: none; } #\${PANEL_ID} .better-codex-project-collaborator-list { grid-template-columns: 1fr; } #\${PANEL_ID} .better-codex-project-collaborator { border-top: 1px solid var(--bc-divider); border-left: 0; padding: 10px 0; } #\${PANEL_ID} .better-codex-project-collaborator:first-child { border-top: 0; } }
         @media (prefers-reduced-motion:reduce) { #\${PANEL_ID} .better-codex-project-issues-loading > span, #\${PANEL_ID} .better-codex-project-document-progress svg, #\${PANEL_ID} .better-codex-project-document-segments i, #\${PANEL_ID} .better-codex-project-document-tab > i, #\${PANEL_ID} .better-codex-project-document-notice svg, #\${PANEL_ID} .better-codex-project-document-orbit, #\${PANEL_ID} .better-codex-project-document-skeleton i { animation: none; } }
         #\${PANEL_ID} .better-codex-agent-heading { display: none; min-width: 0; align-items: baseline; gap: 4px; }
         #\${PANEL_ID} .better-codex-agent-heading strong { color: #18181b; font-size: var(--bc-text-md); font-weight: 650; }
@@ -3774,7 +3919,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const addProject = actionButton("创建项目");
       addProject.classList.add("is-bordered");
       addProject.insertAdjacentHTML("afterbegin", icon("plus"));
-      addProject.addEventListener("click", () => openCreateProjectDialog());
+      addProject.addEventListener("click", () => state.projectDetailId ? openEditor() : openCreateProjectDialog());
       projectActions.append(addProject);
       toolbar.append(tabs, agentHeading, projectHeading, error, actions, agentActions, projectActions);
       const board = document.createElement("main");
@@ -4544,12 +4689,82 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       return '<section class="better-codex-project-panel better-codex-project-document-panel"><header class="better-codex-project-panel-head"><strong>' + te("项目文档") + '</strong><span>' + escapeHtml(done + "/7") + '</span></header>' + progress + '<nav class="better-codex-project-document-tabs" role="tablist" aria-label="' + te("项目文档") + '">' + tabs + '</nav><div class="better-codex-project-document-scroll">' + content + '</div>' + form + '</section>';
     }
 
+    function projectVersionPlan() {
+      const source = String(CORE_VERSION || "0.0.0").replace(/^v/i, "");
+      const beta = source.match(/^(\d+)\.(\d+)\.(\d+)-beta\.(\d+)$/i);
+      const stable = source.match(/^(\d+)\.(\d+)\.(\d+)$/);
+      if (beta) return { current: "v" + source, next: "v" + beta[1] + "." + beta[2] + "." + beta[3] + "-beta." + (Number(beta[4]) + 1), stable: "v" + beta[1] + "." + beta[2] + "." + beta[3] };
+      if (stable) return { current: "v" + source, next: "v" + stable[1] + "." + stable[2] + "." + (Number(stable[3]) + 1), stable: "v" + stable[1] + "." + stable[2] + "." + (Number(stable[3]) + 1) };
+      return { current: "v" + source, next: t("下一版本"), stable: t("稳定版本") };
+    }
+
+    function projectDateLabel(value) {
+      return new Intl.DateTimeFormat(state.locale === "zh-CN" ? "zh-CN" : "en", { month: "numeric", day: "numeric" }).format(value);
+    }
+
+    function projectDashboardMarkup(project, issues, issuesLoading, paths) {
+      const activeIssues = issues.filter(issue => !issue.archived_at);
+      const counts = activeIssues.reduce((result, issue) => {
+        result[issue.status] = (result[issue.status] || 0) + 1;
+        return result;
+      }, {});
+      const running = activeIssues.filter(issue => issue.status === "in_progress" || ["claimed", "running", "scheduling"].includes(issue.active_run_status)).length;
+      const review = counts.in_review || 0;
+      const blocked = counts.blocked || 0;
+      const attention = activeIssues.filter(issue => issue.needs_attention || issue.status === "blocked" || issue.pending_actor === "user" && issue.status === "in_review");
+      const healthTone = blocked ? "danger" : attention.length ? "warning" : "success";
+      const healthLabel = blocked ? t("有风险") : attention.length ? t("需关注") : t("进展正常");
+      const phase = blocked || review ? 3 : counts.in_progress ? 2 : counts.todo ? 1 : counts.backlog ? 0 : activeIssues.length && activeIssues.every(issue => issue.status === "done") ? 4 : 1;
+      const phaseLabels = ["探索", "计划", "开发", "验证", "交付"];
+      const phases = phaseLabels.map((label, index) => '<span class="better-codex-project-cycle-step' + (index < phase ? " is-complete" : index === phase ? " is-current" : "") + '">' + te(label) + '</span>').join("");
+      const weights = { backlog: 0, todo: .18, in_progress: .56, in_review: .82, blocked: .5, done: 1 };
+      const progress = activeIssues.length ? Math.round(activeIssues.reduce((sum, issue) => sum + (weights[issue.status] || 0), 0) / activeIssues.length * 100) : 0;
+      const versions = projectVersionPlan();
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const day = 86400000;
+      const ticks = Array.from({ length: 13 }, (_, index) => new Date(today.getTime() + (index * 7 - 28) * day));
+      const firstTarget = new Date(today.getTime() + 14 * day);
+      const stableTarget = new Date(today.getTime() + 42 * day);
+      const dateTicks = ticks.map((date, index) => '<span>' + escapeHtml(index === 4 ? t("今天") : projectDateLabel(date)) + '</span>').join("");
+      const priority = { blocked: 0, in_review: 1, in_progress: 2, todo: 3, backlog: 4, done: 5 };
+      const work = [...activeIssues].filter(issue => ["blocked", "in_review", "in_progress", "todo"].includes(issue.status)).sort((left, right) => (priority[left.status] ?? 9) - (priority[right.status] ?? 9) || String(right.updated_at).localeCompare(String(left.updated_at))).slice(0, 5);
+      const issueAssignee = issue => {
+        if (issue.user_assigned) return state.user.name || t("你");
+        if (!issue.agent_enabled) return t("未指派");
+        const agent = state.agents.find(item => agentKey(item) === String(issue.agent_id || "default"));
+        return agent ? agentDisplayName(agent) : "Codex";
+      };
+      const workRows = issuesLoading
+        ? '<div class="better-codex-project-dashboard-empty">' + te("正在加载当前工作") + '</div>'
+        : work.length ? work.map(issue => '<button class="better-codex-project-work-row" type="button" data-project-issue="' + escapeHtml(issue.id) + '">' + statusIcon(issue.status) + '<b>' + escapeHtml(issue.identifier) + '</b><span class="better-codex-project-work-title"><strong>' + escapeHtml(issue.title) + '</strong><span>' + escapeHtml(issueAssignee(issue)) + ' · ' + te("更新于 " + timeAgo(issue.updated_at)) + '</span></span><span class="better-codex-project-work-state">' + te(statusLabels[issue.status] || issue.status) + '</span></button>').join("")
+        : '<div class="better-codex-project-dashboard-empty">' + te("当前没有进行中的工作") + '</div>';
+      const attentionRows = issuesLoading
+        ? '<div class="better-codex-project-dashboard-empty">' + te("正在加载待处理事项") + '</div>'
+        : attention.length ? attention.slice(0, 4).map(issue => {
+          const label = issue.status === "blocked" ? t("需解阻") : issue.status === "in_review" ? t("需复核") : t("需处理");
+          return '<button class="better-codex-project-attention-row" type="button" data-project-issue="' + escapeHtml(issue.id) + '"><span class="better-codex-project-attention-icon">' + icon(issue.status === "blocked" ? "shield" : "review") + '</span><span class="better-codex-project-attention-copy"><strong>' + escapeHtml(issue.title) + '</strong><span>' + escapeHtml(issue.identifier) + ' · ' + escapeHtml(issueAssignee(issue)) + '</span></span><span class="better-codex-project-attention-state">' + escapeHtml(label) + '</span></button>';
+        }).join("") : '<div class="better-codex-project-dashboard-empty">' + te("没有需要你处理的事项") + '</div>';
+      const activeAgentIds = new Set(activeIssues.filter(issue => ["in_progress", "in_review", "blocked"].includes(issue.status)).map(issue => String(issue.agent_id || "default")));
+      const agents = [...state.agents].sort((left, right) => Number(activeAgentIds.has(agentKey(right))) - Number(activeAgentIds.has(agentKey(left)))).slice(0, 3);
+      const peopleAvatars = '<span class="better-codex-project-dashboard-avatar" title="' + escapeHtml(state.user.name || t("你")) + '">' + escapeHtml(state.user.initials || (state.user.name || t("你")).slice(0, 2)) + '</span>' + agents.map(agent => agentAvatarMarkup(agent, "better-codex-project-dashboard-avatar")).join("");
+      const collaborators = '<article class="better-codex-project-collaborator"><span class="better-codex-project-dashboard-avatar">' + escapeHtml(state.user.initials || (state.user.name || t("你")).slice(0, 2)) + '</span><div><strong>' + escapeHtml(state.user.name || t("你")) + '</strong><span>' + te("项目负责人") + '</span></div></article>' + agents.map(agent => {
+        const agentIssue = activeIssues.find(issue => String(issue.agent_id || "default") === agentKey(agent) && ["in_progress", "in_review", "blocked"].includes(issue.status));
+        return '<article class="better-codex-project-collaborator">' + agentAvatarMarkup(agent, "better-codex-project-dashboard-avatar") + '<div><strong>' + escapeHtml(agentDisplayName(agent)) + '</strong><span>' + escapeHtml(agentIssue ? agentIssue.title : t("待命")) + '</span></div></article>';
+      }).join("");
+      const path = paths[0] || t("未提供项目文件夹");
+      return '<section class="better-codex-project-dashboard"><header class="better-codex-project-dashboard-head"><div class="better-codex-project-dashboard-title"><div><h1>' + escapeHtml(projectLabel(project)) + '</h1><span class="better-codex-project-health" data-tone="' + healthTone + '">' + escapeHtml(healthLabel) + '</span></div></div><div class="better-codex-project-dashboard-people" aria-label="' + te("项目协作者") + '">' + peopleAvatars + '</div></header><nav class="better-codex-project-dashboard-tabs" aria-label="' + te("项目页面") + '"><button type="button" aria-current="page">' + te("概览") + '</button><button type="button" data-project-dashboard-work>' + te("工作") + '</button></nav><section class="better-codex-project-dashboard-summary"><article class="better-codex-project-dashboard-card better-codex-project-dashboard-description"><strong>' + te("项目说明") + '</strong><p>' + escapeHtml(project.description || t("尚未生成项目介绍")) + '</p><div class="better-codex-project-dashboard-path" title="' + escapeHtml(path) + '">' + icon("folder") + '<span>' + escapeHtml(path) + '</span></div></article><article class="better-codex-project-dashboard-card"><strong>' + te("当前状态") + '</strong><div class="better-codex-project-metrics"><span class="better-codex-project-metric"><b>' + escapeHtml(String(running)) + '</b><span>' + te("进行中") + '</span></span><span class="better-codex-project-metric" data-tone="warning"><b>' + escapeHtml(String(review)) + '</b><span>' + te("待复核") + '</span></span><span class="better-codex-project-metric" data-tone="danger"><b>' + escapeHtml(String(blocked)) + '</b><span>' + te("阻塞") + '</span></span></div></article><article class="better-codex-project-dashboard-card better-codex-project-cycle"><div class="better-codex-project-cycle-steps">' + phases + '</div><div class="better-codex-project-cycle-facts"><div><span>' + te("当前版本") + '</span><b>' + escapeHtml(versions.current) + '</b></div><div><span>' + te("下一里程碑") + '</span><b>' + escapeHtml(versions.next) + '</b></div><div><span>' + te("当前阶段") + '</span><b>' + te(phaseLabels[phase]) + '</b></div></div></article></section><section class="better-codex-project-timeline"><header class="better-codex-project-section-head"><strong>' + te("版本计划与里程碑") + '</strong><span class="better-codex-project-timeline-legend"><span><i></i>' + te("已发布") + '</span><span><i></i>' + te("进行中") + '</span><span><i></i>' + te("计划") + '</span></span></header><div class="better-codex-project-timeline-scroll"><div class="better-codex-project-timeline-canvas"><div class="better-codex-project-timeline-dates">' + dateTicks + '</div><div class="better-codex-project-timeline-track"><span class="better-codex-project-today"><span>' + te("今天") + ' ' + escapeHtml(projectDateLabel(today)) + '</span></span><div class="better-codex-project-version-band" style="--start:1;--span:4;--row:1"><b>' + escapeHtml(versions.current) + '</b><span>' + te("当前安装") + '</span></div><div class="better-codex-project-version-band" data-tone="current" style="--start:5;--span:4;--row:2"><b>' + escapeHtml(versions.next) + '</b><span>' + te("版本收口") + '</span><span class="better-codex-project-version-progress">' + escapeHtml(progress + "%") + '</span></div><div class="better-codex-project-version-band" data-tone="planned" style="--start:9;--span:4;--row:3"><b>' + escapeHtml(versions.stable) + '</b><span>' + te("稳定交付") + '</span></div></div></div></div><div class="better-codex-project-milestones"><span class="better-codex-project-milestone">' + icon("check") + '<span><b>' + escapeHtml(versions.current) + '</b><span>' + te("当前安装版本") + '</span></span></span><span class="better-codex-project-milestone" data-tone="current">' + icon("calendar") + '<span><b>' + te("预计") + ' ' + escapeHtml(projectDateLabel(firstTarget)) + '</b><span>' + escapeHtml(versions.next) + '</span></span></span><span class="better-codex-project-milestone" data-tone="planned">' + icon("calendar") + '<span><b>' + te("预计") + ' ' + escapeHtml(projectDateLabel(stableTarget)) + '</b><span>' + escapeHtml(versions.stable) + '</span></span></span></div></section><section class="better-codex-project-dashboard-lists"><article class="better-codex-project-dashboard-card"><header class="better-codex-project-section-head"><strong>' + te("当前工作") + '</strong><span>' + escapeHtml(String(work.length)) + '</span></header><div class="better-codex-project-work-list">' + workRows + '</div></article><article class="better-codex-project-dashboard-card"><header class="better-codex-project-section-head"><strong>' + te("等你处理") + '</strong><span>' + escapeHtml(String(attention.length)) + '</span></header><div class="better-codex-project-attention-list">' + attentionRows + '</div></article></section><section class="better-codex-project-dashboard-card better-codex-project-collaborators"><header class="better-codex-project-section-head"><strong>' + te("活跃协作者") + '</strong></header><div class="better-codex-project-collaborator-list">' + collaborators + '</div></section></section>';
+    }
+
     function renderProjects() {
       const container = panel?.querySelector("#better-codex-projects");
       if (!container) return;
       const heading = panel.querySelector(".better-codex-project-heading");
       const createButton = panel.querySelector(".better-codex-project-actions .better-codex-button");
-      if (createButton) createButton.hidden = false;
+      if (createButton) {
+        createButton.hidden = false;
+        createButton.innerHTML = icon("plus") + '<span>' + te(state.projectDetailId ? "新建工作项" : "创建项目") + '</span>';
+      }
       if (!state.projectDetailId) {
         if (heading) heading.innerHTML = '<strong>' + te("项目管理") + '</strong><span>' + escapeHtml(state.projects.length + " " + t("个项目")) + '</span>';
         if (HOST_KIND === "web" && state.surface === "projects") document.title = t("项目管理") + " · Better Codex";
@@ -4576,14 +4791,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         return renderProjects();
       }
       const paths = projectRootPaths(project);
+      state.projectId = project.id;
+      localStorage.setItem(PROJECT_KEY, state.projectId);
       const issuesLoading = state.projectIssuesProjectId !== project.id;
       const issues = issuesLoading ? [] : [...state.projectIssues].sort((left, right) => String(right.updated_at).localeCompare(String(left.updated_at)));
-      const issueRows = issuesLoading ? '<div class="better-codex-project-issues-loading" role="status" aria-live="polite"><span aria-hidden="true"></span><strong>' + te("正在加载最近 Issue") + '</strong></div>' : issues.length ? issues.map(issue => '<article class="better-codex-project-issue"><button class="better-codex-project-issue-toggle" type="button" data-project-issue="' + escapeHtml(issue.id) + '" aria-label="' + te("打开 Issue 详情") + '">' + statusIcon(issue.status) + '<span class="better-codex-project-issue-title"><strong>' + escapeHtml(issue.title) + '</strong><span><b>' + escapeHtml(issue.identifier) + '</b><span>' + te("更新于 " + timeAgo(issue.updated_at)) + '</span>' + (issue.archived_at ? '<em>' + te("已归档") + '</em>' : "") + '</span></span>' + icon("chevron") + '</button></article>').join("") : '<div class="better-codex-empty">' + te("暂无关联 Issue") + '</div>';
       const projectName = projectLabel(project);
       if (heading) heading.innerHTML = '<button class="better-codex-project-back" type="button" data-project-back aria-label="' + te("返回项目列表") + '">' + icon("chevron") + '</button><nav class="better-codex-project-breadcrumb" aria-label="' + te("项目管理") + '"><button type="button" data-project-home>' + te("项目管理") + '</button><span aria-hidden="true">&gt;</span><strong title="' + escapeHtml(projectName) + '">' + escapeHtml(projectName) + '</strong></nav>';
       if (HOST_KIND === "web" && state.surface === "projects") document.title = t("项目管理") + " > " + projectName + " · Better Codex";
-      container.innerHTML = '<section class="better-codex-project-detail"><section class="better-codex-project-summary"><div><span class="better-codex-project-eyebrow">' + te("项目概况") + '</span><h1>' + escapeHtml(projectName) + '</h1><p>' + escapeHtml(project.description || t("尚未生成项目介绍")) + '</p></div><div class="better-codex-project-paths"><strong>' + te("项目文件夹") + '</strong>' + (paths.length ? paths.map(path => '<div class="better-codex-project-path" title="' + escapeHtml(path) + '">' + icon("folder") + '<span>' + escapeHtml(path) + '</span></div>').join("") : '<div class="better-codex-project-path"><span>' + te("未提供") + '</span></div>') + '</div></section><div class="better-codex-project-columns"><section class="better-codex-project-panel"><header class="better-codex-project-panel-head"><strong>' + te("最近 Issue 与对话") + '</strong><span>' + (issuesLoading ? "…" : escapeHtml(String(issues.length))) + '</span></header><div class="better-codex-project-issues">' + issueRows + '</div></section>' + projectDocumentWorkspace(project) + '</div></section>';
-      requestAnimationFrame(() => layoutProjectDocumentDiagrams(container));
+      container.innerHTML = '<section class="better-codex-project-detail">' + projectDashboardMarkup(project, issues, issuesLoading, paths) + '</section>';
     }
 
     async function loadProjects(options = {}) {
@@ -4625,6 +4840,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     async function openProjectDetail(projectId) {
       state.projectDetailId = projectId;
+      state.projectId = projectId;
+      localStorage.setItem(PROJECT_KEY, state.projectId);
       state.projectIssues = [];
       state.projectIssuesProjectId = "";
       syncWebProjectRoute(projectId);
@@ -4664,6 +4881,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         state.projectDetailId = "";
         syncWebProjectRoute("", "replace");
         renderProjects();
+        return;
+      }
+      const work = event.target.closest("[data-project-dashboard-work]");
+      if (work) {
+        state.projectId = state.projectDetailId;
+        state.filters.project = state.projectDetailId ? [state.projectDetailId] : [];
+        open("issues");
         return;
       }
       const documentView = event.target.closest("[data-project-document-view]");
