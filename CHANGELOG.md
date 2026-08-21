@@ -4,6 +4,14 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.9-beta.34] - 2026-08-21
+
+- Add project planning sessions and an interactive planning workspace for tracked milestones and work items.
+- Add Fast agent execution through supported Codex priority service tiers.
+- Preserve Relay reads across brief Runtime reconnects and correlate remote request failures with trace IDs.
+- Validate complete Issue descriptions before saving.
+- Add an isolated development delivery workflow.
+
 ## [0.4.9-beta.33] - 2026-08-21
 
 - Expose Codex usage and light or dark theme controls in compact Web navigation.
@@ -711,7 +719,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.33...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.34...HEAD
+[0.4.9-beta.34]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.33...v0.4.9-beta.34
 [0.4.9-beta.33]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.32...v0.4.9-beta.33
 [0.4.9-beta.32]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.31...v0.4.9-beta.32
 [0.4.9-beta.31]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.30...v0.4.9-beta.31
