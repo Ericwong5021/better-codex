@@ -12,6 +12,7 @@ import { renderMarkdown } from "./markdown.js";
 import { readConversationActivity, readConversationResult } from "./session-transcript.js";
 import { SessionHostClient } from "./session-host-client.js";
 import { projectDocumentKeys, type ProjectDocumentDiagram, type ProjectDocumentKey, type ProjectPlanItem, type ProjectPlanSnapshot } from "./sync-contract.js";
+import { codexSemanticInput, codexSemanticRequestFingerprint, normalizeCodexSemanticReferences, type CodexSemanticReference } from "./codex-semantics.js";
 
 const interval = 60000;
 const schedulerTimeout = 180000;
@@ -764,7 +765,7 @@ export class IssueWorker {
     }
   }
 
-  private sessionPayload(issue: Issue, workspacePath: string, message: string) {
+  private sessionPayload(issue: Issue, workspacePath: string, message: string, semanticReferences: CodexSemanticReference[] = [], semanticCommand: "review" | "compact" | "" = "") {
     const profile = issue.agent_id ? this.store.getAgentProfile(issue.agent_id) : defaultAgentProfile();
     const model = profile?.model && profile.model !== "默认模型" ? profile.model : "";
     const effort = profile?.reasoning_effort && profile.reasoning_effort !== "默认推理等级" ? profile.reasoning_effort : "";
@@ -776,6 +777,8 @@ export class IssueWorker {
       workspace_path: workspacePath,
       title: `${issue.identifier} ${issue.title}`.trim().slice(0, 200),
       message,
+      input: codexSemanticInput(message, semanticReferences),
+      semantic_command: semanticCommand,
       model,
       effort,
       service_tier: serviceTier,
@@ -787,12 +790,15 @@ export class IssueWorker {
     };
   }
 
-  sendIssueMessage(issueId: string, requestId: string, message: string) {
+  sendIssueMessage(issueId: string, requestId: string, message: string, semanticReferences: unknown = [], semanticCommand: "review" | "compact" | "" = "") {
     const issue = this.store.getIssue(issueId);
     if (!issue) throw new Error("issue_not_found");
+    const references = normalizeCodexSemanticReferences(semanticReferences);
+    const requestInput = codexSemanticRequestFingerprint(message, references, semanticCommand);
     const existingCommand = this.store.getSessionCommandByRequest(issueId, requestId);
     if (existingCommand) {
-      if (String(existingCommand.payload.request_message || "") !== message) throw new Error("request_id_conflict");
+      const existingInput = String(existingCommand.payload.request_input || "");
+      if (existingInput ? existingInput !== requestInput : String(existingCommand.payload.request_message || "") !== message) throw new Error("request_id_conflict");
       if (existingCommand.status !== "failed" && existingCommand.status !== "cancelled") {
         return { command: existingCommand, steered: existingCommand.kind === "steer", replayed: true };
       }
@@ -810,15 +816,15 @@ export class IssueWorker {
         });
         return { command, steered: true, replayed: false };
       }
-      if (existingCommand.kind === "start" || existingCommand.kind === "turn") {
+      if (["start", "turn", "review", "compact"].includes(existingCommand.kind)) {
         if (existingCommand.turn_id || (existingCommand.thread_id && existingCommand.error === "session_outcome_unknown")) throw new Error("session_command_outcome_unknown");
         const retrySession = this.store.getIssueSession(issueId);
         const replaceSession = existingCommand.kind === "start" && Boolean(retrySession && !retrySession.active_turn_id);
         const queued = this.store.enqueueSessionReply({
           issueId,
           requestId,
-          kind: existingCommand.kind,
-          threadId: existingCommand.kind === "turn" ? existingCommand.thread_id : null,
+          kind: existingCommand.kind as "start" | "turn" | "review" | "compact",
+          threadId: existingCommand.kind === "start" ? null : existingCommand.thread_id,
           payload: existingCommand.payload,
           message,
           hostId: existingCommand.host_id,
@@ -829,19 +835,20 @@ export class IssueWorker {
     }
     let session = this.store.getIssueSession(issueId);
     if (!session) throw new Error("session_required");
-    let payload: Record<string, unknown> = this.sessionPayload(issue, issue.workspace_path || "", message);
-    const replaceSession = Boolean(!session.active_turn_id && session.config_fingerprint !== payload.config_fingerprint);
+    let payload: Record<string, unknown> = this.sessionPayload(issue, issue.workspace_path || "", message, references, semanticCommand);
+    const replaceSession = Boolean(!semanticCommand && !session.active_turn_id && session.config_fingerprint !== payload.config_fingerprint);
     if (replaceSession) {
-      payload = this.sessionPayload(issue, issue.workspace_path || "", [issue.description.trim(), message].filter(Boolean).join("\n\n"));
+      payload = this.sessionPayload(issue, issue.workspace_path || "", [issue.description.trim(), message].filter(Boolean).join("\n\n"), references, semanticCommand);
     }
-    payload = { ...payload, request_message: message };
+    payload = { ...payload, request_message: message, request_input: requestInput };
     const commandSession = replaceSession ? undefined : session;
     const activeTurnId = commandSession?.active_turn_id || null;
+    if (semanticCommand && activeTurnId) throw new Error("issue_execution_running");
     if (!activeTurnId) {
       const queued = this.store.enqueueSessionReply({
         issueId,
         requestId,
-        kind: commandSession ? "turn" : "start",
+        kind: semanticCommand || (commandSession ? "turn" : "start"),
         threadId: commandSession?.thread_id || null,
         payload,
         message,
@@ -912,7 +919,7 @@ export class IssueWorker {
       }
       return;
     }
-    if (command.kind === "start" || command.kind === "turn") {
+    if (["start", "turn", "review", "compact"].includes(command.kind)) {
       if (this.store.getIssueReplyState(command.issue_id).status === "running") this.store.finishSessionReply(command.issue_id, error === "user_stopped" ? "interrupted" : "failed", error);
     }
   }

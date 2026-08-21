@@ -73,7 +73,7 @@ export type IssueReplyState = {
 };
 
 export type IssueSessionStatus = "starting" | "active" | "stopping" | "waiting_on_approval" | "waiting_on_user" | "idle" | "interrupted" | "failed" | "disconnected";
-export type SessionCommandKind = "start" | "turn" | "steer" | "interrupt";
+export type SessionCommandKind = "start" | "turn" | "review" | "compact" | "steer" | "interrupt";
 export type SessionCommandStatus = "pending" | "claimed" | "completed" | "failed" | "cancelled";
 export type IssueThreadAction = "archive" | "unarchive" | "delete";
 
@@ -3480,7 +3480,7 @@ export class Store {
   enqueueSessionReply(input: {
     issueId: string;
     requestId: string;
-    kind: "start" | "turn";
+    kind: "start" | "turn" | "review" | "compact";
     threadId?: string | null;
     payload: Record<string, unknown>;
     message: string;
@@ -3661,7 +3661,7 @@ export class Store {
         `).run(command.id);
         continue;
       }
-      const commandError = (command.kind === "start" || command.kind === "turn") && command.thread_id
+      const commandError = (["start", "turn", "review"] as SessionCommandKind[]).includes(command.kind) && command.thread_id
         ? "session_outcome_unknown"
         : relayId ? "relay_replaced" : "runtime_restarted";
       this.db.prepare(`
@@ -3718,7 +3718,7 @@ export class Store {
       const row = this.db.prepare("SELECT * FROM session_commands WHERE id = ? AND status = 'claimed' AND relay_id = ?").get(commandId, relayId) as Record<string, unknown> | undefined;
       if (!row) throw new Error("session_command_not_claimed");
       const command = sessionCommandFromRow(row);
-      if (command.kind !== "start" && command.kind !== "turn") throw new Error("session_command_checkpoint_invalid");
+      if (!["start", "turn", "review"].includes(command.kind)) throw new Error("session_command_checkpoint_invalid");
       const threadId = typeof result.thread_id === "string" ? result.thread_id : command.thread_id;
       const turnId = typeof result.turn_id === "string" ? result.turn_id : command.turn_id;
       if (!threadId || !/^[a-f0-9-]{36}$/i.test(threadId)) throw new Error("session_thread_invalid");
@@ -3781,8 +3781,8 @@ export class Store {
       const threadId = typeof result.thread_id === "string" ? result.thread_id : command.thread_id;
       const turnId = typeof result.turn_id === "string" ? result.turn_id : command.turn_id;
       const timestamp = now();
-      if ((command.kind === "start" || command.kind === "turn" || command.kind === "steer") && (!threadId || !/^[a-f0-9-]{36}$/i.test(threadId))) throw new Error("session_thread_invalid");
-      if ((command.kind === "start" || command.kind === "turn" || command.kind === "steer") && (!turnId || !/^[a-f0-9-]{36}$/i.test(turnId))) throw new Error("session_turn_invalid");
+      if (command.kind !== "interrupt" && (!threadId || !/^[a-f0-9-]{36}$/i.test(threadId))) throw new Error("session_thread_invalid");
+      if (["start", "turn", "review", "steer"].includes(command.kind) && (!turnId || !/^[a-f0-9-]{36}$/i.test(turnId))) throw new Error("session_turn_invalid");
       if (command.kind === "start") {
         const existingBinding = this.db.prepare("SELECT thread_id FROM issue_sessions WHERE issue_id = ?").get(command.issue_id) as { thread_id: string } | undefined;
         if (existingBinding && existingBinding.thread_id !== threadId) throw new Error("issue_session_already_bound");
@@ -3804,17 +3804,26 @@ export class Store {
             last_error = NULL,
             updated_at = excluded.updated_at
         `).run(command.issue_id, command.host_id, threadId, turnId, command.id, String(command.payload.config_fingerprint || ""), timestamp, timestamp);
-      } else if (command.kind === "turn" || command.kind === "steer") {
+      } else if (command.kind === "turn" || command.kind === "review" || command.kind === "steer") {
         const binding = this.db.prepare("SELECT thread_id FROM issue_sessions WHERE issue_id = ?").get(command.issue_id) as { thread_id: string } | undefined;
         if (!binding || binding.thread_id !== threadId) throw new Error("issue_session_mismatch");
         this.db.prepare(`
           UPDATE issue_sessions
           SET status = 'active', active_turn_id = ?,
-              active_command_id = CASE WHEN ? = 'turn' THEN ? ELSE active_command_id END,
-              last_agent_message = CASE WHEN ? = 'turn' AND active_turn_id IS NOT ? THEN '' ELSE last_agent_message END,
+              active_command_id = CASE WHEN ? IN ('turn', 'review') THEN ? ELSE active_command_id END,
+              last_agent_message = CASE WHEN ? IN ('turn', 'review') AND active_turn_id IS NOT ? THEN '' ELSE last_agent_message END,
               last_error = NULL, updated_at = ?
           WHERE issue_id = ? AND thread_id = ?
         `).run(turnId, command.kind, command.id, command.kind, turnId, timestamp, command.issue_id, threadId);
+      } else if (command.kind === "compact") {
+        const binding = this.db.prepare("SELECT thread_id FROM issue_sessions WHERE issue_id = ?").get(command.issue_id) as { thread_id: string } | undefined;
+        if (!binding || binding.thread_id !== threadId) throw new Error("issue_session_mismatch");
+        this.db.prepare("UPDATE issue_sessions SET status = 'idle', active_turn_id = NULL, active_command_id = NULL, last_error = NULL, updated_at = ? WHERE issue_id = ? AND thread_id = ?")
+          .run(timestamp, command.issue_id, threadId);
+        this.db.prepare("UPDATE issue_replies SET status = 'succeeded', error = NULL, finished_at = ? WHERE issue_id = ? AND status = 'running'")
+          .run(timestamp, command.issue_id);
+        this.db.prepare("UPDATE issues SET status = CASE WHEN status = 'done' THEN status ELSE 'in_review' END, needs_attention = CASE WHEN status = 'done' THEN needs_attention ELSE 1 END, pending_actor = CASE WHEN status = 'done' THEN pending_actor ELSE 'user' END, version = version + 1, updated_at = ? WHERE id = ? AND archived_at IS NULL")
+          .run(timestamp, command.issue_id);
       }
       if (command.run_id && threadId && turnId && command.kind !== "interrupt") {
         const run = this.db.prepare(`
@@ -3893,7 +3902,7 @@ export class Store {
             `).run(threadId, turnId || null, turnId || null, command.run_id, command.issue_id);
           }
         }
-      } else if (command.kind === "turn" && threadId && turnId) {
+      } else if ((command.kind === "turn" || command.kind === "review") && threadId && turnId) {
         const binding = this.db.prepare("SELECT thread_id FROM issue_sessions WHERE issue_id = ?").get(command.issue_id) as { thread_id: string } | undefined;
         if (binding?.thread_id === threadId) {
           this.db.prepare(`
@@ -4027,7 +4036,7 @@ export class Store {
       }
       const commandId = session.active_turn_id ? null : session.active_command_id;
       if (commandId) {
-        const command = this.db.prepare("SELECT run_id, status, cancel_requested FROM session_commands WHERE id = ? AND issue_id = ? AND kind IN ('start', 'turn')").get(commandId, session.issue_id) as { run_id: string | null; status: SessionCommandStatus; cancel_requested: number } | undefined;
+        const command = this.db.prepare("SELECT run_id, status, cancel_requested FROM session_commands WHERE id = ? AND issue_id = ? AND kind IN ('start', 'turn', 'review')").get(commandId, session.issue_id) as { run_id: string | null; status: SessionCommandStatus; cancel_requested: number } | undefined;
         if (!command || command.status !== "claimed" || command.cancel_requested) {
           this.db.prepare("UPDATE issue_sessions SET active_command_id = NULL, updated_at = ? WHERE issue_id = ? AND active_command_id = ? AND active_turn_id IS NULL")
             .run(timestamp, session.issue_id, commandId);

@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { coreVersion } from "./compatibility.js";
 import { codexExecutablePath } from "./codex-cli.js";
 import type { IssueThreadAction, SessionCommand } from "./db.js";
+import { normalizeCodexSemanticInput } from "./codex-semantics.js";
 
 export type RelayPoll = {
   leader: boolean;
@@ -405,13 +406,26 @@ export class RuntimeSessionRelay {
         turnId = sessionId(object(turn.turn).id);
         if (!turnId) throw new Error("desktop_turn_start_invalid");
         this.host.checkpoint(command.id, relayId, { thread_id: threadId, turn_id: turnId });
+      } else if (command.kind === "review") {
+        if (!threadId) throw new Error("session_thread_invalid");
+        this.currentThreadId = threadId;
+        await this.resume(threadId);
+        const review = object(await this.request("review/start", { threadId, target: { type: "uncommittedChanges" }, delivery: "inline" }));
+        turnId = sessionId(object(review.turn).id);
+        if (!turnId) throw new Error("desktop_turn_start_invalid");
+        this.host.checkpoint(command.id, relayId, { thread_id: threadId, turn_id: turnId });
+      } else if (command.kind === "compact") {
+        if (!threadId) throw new Error("session_thread_invalid");
+        this.currentThreadId = threadId;
+        await this.resume(threadId);
+        await this.request("thread/compact/start", { threadId });
       } else if (command.kind === "steer") {
         if (!threadId || !turnId) throw new Error("session_turn_invalid");
         this.currentThreadId = threadId;
         const steered = object(await this.request("turn/steer", {
           threadId,
           expectedTurnId: turnId,
-          input: [{ type: "text", text: String(payload.message || "") }],
+          input: normalizeCodexSemanticInput(payload.input, String(payload.message || "")),
         }));
         turnId = sessionId(steered.turnId) || turnId;
       } else if (command.kind === "interrupt") {
@@ -423,7 +437,7 @@ export class RuntimeSessionRelay {
       }
       this.host.complete(command.id, relayId, { thread_id: threadId, turn_id: turnId });
       this.commandInFlight = false;
-      this.flush(turnId, command.kind === "steer" || command.kind === "interrupt");
+      this.flush(turnId, command.kind === "steer" || command.kind === "interrupt" || command.kind === "compact");
       if (threadId) this.threads.add(threadId);
     } catch (error) {
       const commandError = error instanceof Error ? error.message : "app_server_request_failed";
@@ -452,7 +466,7 @@ export class RuntimeSessionRelay {
   private turnStartParams(threadId: string, payload: Record<string, unknown>) {
     const params: Record<string, unknown> = {
       threadId,
-      input: [{ type: "text", text: String(payload.message || "") }],
+      input: normalizeCodexSemanticInput(payload.input, String(payload.message || "")),
       approvalPolicy: String(payload.approval_policy || "on-request"),
       approvalsReviewer: String(payload.approvals_reviewer || "auto_review"),
     };

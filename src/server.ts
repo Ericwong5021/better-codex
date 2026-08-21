@@ -11,6 +11,7 @@ import { readCodexAppearance } from "./appearance.js";
 import { normalizeCodexLocale, readCodexLocale } from "./locale.js";
 import { readCodexUserProfile } from "./user-profile.js";
 import { readCodexUsage } from "./codex-usage.js";
+import { codexSemanticRequestFingerprint, normalizeCodexSemanticSelections, readCodexSkills, resolveCodexSemanticReferences, searchCodexFiles } from "./codex-semantics.js";
 import { readModelCatalog } from "./model-catalog.js";
 import { attachmentPath, databasePath, runPath, runtimePort, token, updateLogPath } from "./config.js";
 import { acquireRuntimeLock, clearRuntimeState, createRuntimeIdentity, publishRuntimeState } from "./runtime-state.js";
@@ -1855,6 +1856,16 @@ export function startServer() {
             issue: store.getIssue(current.id),
           });
         }
+        if (method === "GET" && path[3] === "semantics" && path.length === 4) {
+          if (!issue.workspace_path) throw new Error("workspace_required");
+          const skills = (await readCodexSkills(issue.workspace_path)).map(({ name, description, scope, ref }) => ({ name, description, scope, ref }));
+          return sendJson(response, 200, { skills });
+        }
+        if (method === "GET" && path[3] === "mentions" && path.length === 4) {
+          if (!issue.workspace_path) throw new Error("workspace_required");
+          const files = (await searchCodexFiles(issue.workspace_path, cleanString(url.searchParams.get("query"), 500))).map(({ name, displayPath, kind, ref }) => ({ name, displayPath, kind, ref }));
+          return sendJson(response, 200, { files });
+        }
         if (method === "POST" && path[3] === "reply" && path.length === 4) {
           if (updateInstallInProgress) throw new Error("update_in_progress");
           if (issue.archived_at) throw new Error("issue_archived");
@@ -1866,9 +1877,16 @@ export function startServer() {
           try {
             const message = withRemoteFilePaths(body.message, files.paths).trim();
             if (!message) throw new Error("message_required");
+            const messageCommand = /^\/(review|compact)$/.exec(message)?.[1] || "";
+            const semanticCommand = ["review", "compact"].includes(String(body.command || messageCommand)) ? String(body.command || messageCommand) as "review" | "compact" : "";
+            const semanticSelections = normalizeCodexSemanticSelections(body.semantic_references);
+            if (!issue.session_thread_id && (semanticCommand || semanticSelections.length)) throw new Error("session_required");
+            const semanticReferences = await resolveCodexSemanticReferences(issue.workspace_path || "", semanticSelections);
             const existingCommand = store.getSessionCommandByRequest(issue.id, requestId);
             if (existingCommand && existingCommand.status !== "failed" && existingCommand.status !== "cancelled") {
-              if (String(existingCommand.payload.request_message || "") !== message) throw new Error("request_id_conflict");
+              const requestInput = codexSemanticRequestFingerprint(message, semanticReferences, semanticCommand);
+              const existingInput = String(existingCommand.payload.request_input || "");
+              if (existingInput ? existingInput !== requestInput : String(existingCommand.payload.request_message || "") !== message) throw new Error("request_id_conflict");
               filesCommitted = true;
               const reply = store.getIssueReplyState(issue.id);
               return sendJson(response, 202, existingCommand.kind === "steer"
@@ -1891,7 +1909,7 @@ export function startServer() {
               if (!worker.startIssue(updated.id)) throw new Error("issue_not_started");
               return sendJson(response, 202, { issue_id: issue.id, request_id: requestId, status: "running", message, initial_run: true });
             }
-            const queued = worker.sendIssueMessage(issue.id, requestId, message);
+            const queued = worker.sendIssueMessage(issue.id, requestId, message, semanticReferences, semanticCommand);
             filesCommitted = true;
             const reply = store.getIssueReplyState(issue.id);
             return sendJson(response, 202, queued.steered

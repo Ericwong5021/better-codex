@@ -2469,10 +2469,23 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       return value.includes("thread not found") || value.includes("thread_not_found");
     }
 
+    function semanticInput(payload) {
+      if (!Array.isArray(payload.input)) return [{ type: "text", text: String(payload.message || "") }];
+      const input = payload.input.slice(0, 33).flatMap(item => {
+        if (!item || typeof item !== "object") return [];
+        if (item.type === "text") return [{ type: "text", text: String(item.text || "").slice(0, 100000) }];
+        if (!["skill", "mention"].includes(item.type)) return [];
+        const name = String(item.name || "").trim().slice(0, 500);
+        const path = String(item.path || "").trim().slice(0, 4096);
+        return name && path ? [{ type: item.type, name, path }] : [];
+      });
+      return input.some(item => item.type === "text") ? input : [{ type: "text", text: String(payload.message || "") }, ...input];
+    }
+
     function turnStartParams(threadId, payload) {
       const params = {
         threadId,
-        input: [{ type: "text", text: String(payload.message || "") }],
+        input: semanticInput(payload),
         approvalPolicy: String(payload.approval_policy || "on-request"),
         approvalsReviewer: String(payload.approvals_reviewer || "auto_review")
       };
@@ -2554,13 +2567,29 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             method: "POST",
             body: JSON.stringify({ relay_id: relayId, result: { thread_id: threadId, turn_id: turnId } })
           });
+        } else if (command.kind === "review") {
+          if (!threadId) throw new Error("session_thread_invalid");
+          relayCurrentThreadId = threadId;
+          await resumePersistedThread(threadId);
+          const review = await sendAppServerRequest("review/start", { threadId, target: { type: "uncommittedChanges" }, delivery: "inline" });
+          turnId = normalizeSessionId(review?.turn?.id);
+          if (!turnId) throw new Error("desktop_turn_start_invalid");
+          await api("/api/session-relay/commands/" + encodeURIComponent(command.id) + "/checkpoint", {
+            method: "POST",
+            body: JSON.stringify({ relay_id: relayId, result: { thread_id: threadId, turn_id: turnId } })
+          });
+        } else if (command.kind === "compact") {
+          if (!threadId) throw new Error("session_thread_invalid");
+          relayCurrentThreadId = threadId;
+          await resumePersistedThread(threadId);
+          await sendAppServerRequest("thread/compact/start", { threadId });
         } else if (command.kind === "steer") {
           if (!threadId || !turnId) throw new Error("session_turn_invalid");
           relayCurrentThreadId = threadId;
           const steered = await sendAppServerRequest("turn/steer", {
             threadId,
             expectedTurnId: turnId,
-            input: [{ type: "text", text: String(payload.message || "") }]
+            input: semanticInput(payload)
           });
           turnId = normalizeSessionId(steered?.turnId) || turnId;
         } else if (command.kind === "interrupt") {
@@ -2575,7 +2604,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           body: JSON.stringify({ relay_id: relayId, result: { thread_id: threadId, turn_id: turnId } })
         });
         relayCommandInFlight = false;
-        flushRelayEvents(turnId, command.kind === "steer" || command.kind === "interrupt");
+        flushRelayEvents(turnId, command.kind === "steer" || command.kind === "interrupt" || command.kind === "compact");
         if (threadId) relayThreads.add(threadId);
       } catch (error) {
         const commandError = error instanceof Error ? error.message : "desktop_bridge_request_failed";
@@ -6891,6 +6920,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         expanded: issue ? false : localStorage.getItem(CREATE_DIALOG_EXPANDED_KEY) === "true",
         descriptionExpanded: false,
         reply: issue?.reply_draft || "",
+        replySemanticReferences: [],
         attachments: [],
         replyAttachments: []
       };
@@ -6906,6 +6936,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       let conversationFailureKey = "";
       let conversationMessages = [];
       let lastReplyMessage = "";
+      let lastReplySemanticReferences = [];
+      let lastReplyCommand = "";
       let lastReplyRequestId = "";
       let lastReplyStatus = issue?.reply_status || "idle";
       let replyRecoveryRequestId = "";
@@ -6926,6 +6958,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       let submitInFlight = false;
       let mobileInputFrame = null;
       let dialogBoundsObserver = null;
+      let semanticCatalog = null;
+      let semanticMenuState = null;
+      let semanticSearchSequence = 0;
+      let semanticSearchTimer = null;
       const clearIssueFullscreenBounds = () => {
         dialog.style.removeProperty("--bc-dialog-fullscreen-top");
         dialog.style.removeProperty("--bc-dialog-fullscreen-left");
@@ -7288,6 +7324,172 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         status.hidden = !status.innerHTML;
       }
 
+      function semanticToken(input) {
+        const cursor = Number(input?.selectionStart);
+        if (!input || !Number.isInteger(cursor)) return null;
+        const before = input.value.slice(0, cursor);
+        const match = before.match(/(^|\s)([/@$])([^\s]*)$/);
+        if (!match) return null;
+        return { trigger: match[2], query: match[3], start: cursor - match[2].length - match[3].length, end: cursor };
+      }
+
+      function semanticCommands() {
+        const zh = state.locale === "zh-CN";
+        return [
+          { kind: "command", name: "review", label: "/review", description: zh ? "审查工作区中的未提交改动" : "Review uncommitted workspace changes", icon: "review" },
+          { kind: "command", name: "compact", label: "/compact", description: zh ? "压缩当前会话上下文" : "Compact the current conversation context", icon: "sparkles" },
+          { kind: "command", name: "status", label: "/status", description: zh ? "查看当前会话与智能体状态" : "Show the current session and agent status", icon: "usage" },
+          { kind: "command", name: "skills", label: "/skills", description: zh ? "浏览并调用 Codex Skills" : "Browse and invoke Codex Skills", icon: "wrench" },
+          { kind: "command", name: "mentions", label: "/mentions", description: zh ? "搜索工作区文件" : "Search workspace files", icon: "code" },
+        ];
+      }
+
+      function semanticStatusMarkup() {
+        const agent = state.agents.find(item => item.id === issue?.agent_id);
+        const zh = state.locale === "zh-CN";
+        const rows = [
+          [zh ? "会话" : "Session", issue?.session_status || "idle"],
+          [zh ? "智能体" : "Agent", agent?.name || "Codex"],
+          [zh ? "模型" : "Model", agent?.model || (zh ? "默认模型" : "Default model")],
+          [zh ? "推理" : "Reasoning", agent?.reasoning_effort || (zh ? "默认" : "Default")],
+        ];
+        return '<div class="better-codex-semantic-status"><div class="better-codex-semantic-status-title">' + icon("usage") + '<span>' + te(zh ? "当前会话" : "Current session") + '</span></div>' + rows.map(row => '<div><span>' + escapeHtml(row[0]) + '</span><strong>' + escapeHtml(row[1]) + '</strong></div>').join("") + '</div>';
+      }
+
+      function renderSemanticMenu() {
+        const menu = dialog.querySelector("[data-semantic-menu]");
+        const input = dialog.querySelector('[name="reply"]');
+        if (!menu || !input) return;
+        if (!semanticMenuState) {
+          menu.hidden = true;
+          menu.innerHTML = "";
+          input.setAttribute("aria-expanded", "false");
+          return;
+        }
+        if (semanticMenuState.status) {
+          menu.innerHTML = semanticStatusMarkup();
+          menu.hidden = false;
+          input.setAttribute("aria-expanded", "true");
+          return;
+        }
+        const items = semanticMenuState.items || [];
+        if (semanticMenuState.loading && !items.length) {
+          menu.innerHTML = '<div class="better-codex-semantic-empty">' + icon("refresh", "better-codex-spin") + '<span>' + te(state.locale === "zh-CN" ? "正在读取 Codex 语义…" : "Loading Codex semantics…") + '</span></div>';
+        } else if (!items.length) {
+          menu.innerHTML = '<div class="better-codex-semantic-empty">' + te(state.locale === "zh-CN" ? "没有匹配项" : "No matches") + '</div>';
+        } else {
+          menu.innerHTML = items.map((item, index) => '<button type="button" role="option" aria-selected="' + (index === semanticMenuState.index) + '" data-semantic-option="' + index + '"><span class="better-codex-semantic-icon">' + icon(item.icon || (item.kind === "skill" ? "wrench" : item.kind === "mention" ? "code" : "terminal")) + '</span><span class="better-codex-semantic-copy"><strong>' + escapeHtml(item.label) + '</strong><small>' + escapeHtml(item.description || "") + '</small></span><kbd>' + escapeHtml(item.scope || "") + '</kbd></button>').join("");
+        }
+        menu.hidden = false;
+        input.setAttribute("aria-expanded", "true");
+        menu.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
+      }
+
+      function closeSemanticMenu() {
+        semanticMenuState = null;
+        semanticSearchSequence += 1;
+        if (semanticSearchTimer !== null) clearTimeout(semanticSearchTimer);
+        semanticSearchTimer = null;
+        renderSemanticMenu();
+      }
+
+      async function loadSemanticCatalog() {
+        if (semanticCatalog) return semanticCatalog;
+        try {
+          const data = await api("/api/issues/" + encodeURIComponent(issue.id) + "/semantics");
+          semanticCatalog = { skills: Array.isArray(data?.skills) ? data.skills : [] };
+        } catch {
+          semanticCatalog = { skills: [] };
+        }
+        return semanticCatalog;
+      }
+
+      function semanticSkillItems(query) {
+        const value = query.toLowerCase();
+        return (semanticCatalog?.skills || []).filter(skill => !value || skill.name.toLowerCase().includes(value) || String(skill.description || "").toLowerCase().includes(value)).slice(0, 12).map(skill => ({ kind: "skill", name: skill.name, ref: skill.ref, label: "$" + skill.name, description: skill.description, scope: skill.scope, icon: "wrench" }));
+      }
+
+      function syncSemanticMenu() {
+        const input = dialog.querySelector('[name="reply"]');
+        const token = semanticToken(input);
+        if (!token) return closeSemanticMenu();
+        if (token.trigger === "/") {
+          const query = token.query.toLowerCase();
+          const items = semanticCommands().filter(item => !query || item.name.includes(query));
+          semanticMenuState = { token, items, index: Math.min(semanticMenuState?.index || 0, Math.max(0, items.length - 1)) };
+          return renderSemanticMenu();
+        }
+        if (token.trigger === "$") {
+          semanticMenuState = { token, items: semanticSkillItems(token.query), index: 0, loading: !semanticCatalog };
+          renderSemanticMenu();
+          if (!semanticCatalog) void loadSemanticCatalog().then(() => {
+            const current = semanticToken(dialog.querySelector('[name="reply"]'));
+            if (!current || current.trigger !== "$" || current.query !== token.query) return;
+            semanticMenuState = { token: current, items: semanticSkillItems(current.query), index: 0 };
+            renderSemanticMenu();
+          });
+          return;
+        }
+        const sequence = ++semanticSearchSequence;
+        semanticMenuState = { token, items: [], index: 0, loading: true };
+        renderSemanticMenu();
+        if (semanticSearchTimer !== null) clearTimeout(semanticSearchTimer);
+        semanticSearchTimer = setTimeout(() => {
+          semanticSearchTimer = null;
+          void api("/api/issues/" + encodeURIComponent(issue.id) + "/mentions?query=" + encodeURIComponent(token.query)).then(data => {
+            if (sequence !== semanticSearchSequence) return;
+            const current = semanticToken(dialog.querySelector('[name="reply"]'));
+            if (!current || current.trigger !== "@" || current.query !== token.query) return;
+            const items = (Array.isArray(data?.files) ? data.files : []).slice(0, 12).map(file => ({ kind: "mention", name: file.displayPath || file.name, ref: file.ref, label: "@" + (file.displayPath || file.name), description: file.kind === "directory" ? (state.locale === "zh-CN" ? "目录" : "Directory") : (state.locale === "zh-CN" ? "工作区文件" : "Workspace file"), icon: "code" }));
+            semanticMenuState = { token: current, items, index: 0 };
+            renderSemanticMenu();
+          }).catch(() => {
+            if (sequence !== semanticSearchSequence) return;
+            semanticMenuState = { token, items: [], index: 0 };
+            renderSemanticMenu();
+          });
+        }, 120);
+      }
+
+      function replaceSemanticToken(value) {
+        const input = dialog.querySelector('[name="reply"]');
+        const token = semanticMenuState?.token || semanticToken(input);
+        if (!input || !token) return;
+        input.value = input.value.slice(0, token.start) + value + input.value.slice(token.end);
+        const cursor = token.start + value.length;
+        input.setSelectionRange(cursor, cursor);
+        draft.reply = input.value;
+        latestReplyDraft = input.value;
+        scheduleReplyDraft(input.value);
+        updateReplySendState();
+      }
+
+      function selectSemanticOption(index = semanticMenuState?.index || 0) {
+        const item = semanticMenuState?.items?.[index];
+        if (!item) return;
+        if (item.kind === "command") {
+          if (item.name === "skills") {
+            replaceSemanticToken("$");
+            semanticMenuState = null;
+            return syncSemanticMenu();
+          }
+          if (item.name === "mentions") {
+            replaceSemanticToken("@");
+            semanticMenuState = null;
+            return syncSemanticMenu();
+          }
+          replaceSemanticToken(item.label);
+          closeSemanticMenu();
+          return;
+        }
+        const token = (item.kind === "skill" ? "$" : "@") + item.name;
+        replaceSemanticToken(token + " ");
+        const reference = { type: item.kind, name: item.name, ref: item.ref };
+        draft.replySemanticReferences = draft.replySemanticReferences.filter(value => !(value.type === reference.type && value.name === reference.name));
+        draft.replySemanticReferences.push(reference);
+        closeSemanticMenu();
+      }
+
       function conversationComposer() {
         if (!issue || !sessionId) return "";
         const stopping = issue.session_status === "stopping";
@@ -7299,7 +7501,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const actionLabel = t(stopping ? "正在停止…" : working ? "停止任务" : "发送");
         const attachments = attachmentList(draft.replyAttachments, "reply");
         const attachButton = '<button class="better-codex-composer-attach" type="button" data-conversation-attach aria-label="' + te("添加附件") + '" title="' + te("添加附件") + '"' + inputDisabled + '>' + icon("plus", "", "1.9") + '</button>';
-        return '<div class="better-codex-composer" data-state="' + mode + '">' + attachments + '<textarea name="reply" rows="2" placeholder="' + te(archived ? "取消归档后继续对话" : sessionHandoff ? "请前往会话继续对话" : "输入下一步要求…") + '" aria-label="' + te("回复") + '"' + inputDisabled + '>' + escapeHtml(draft.reply) + '</textarea><div class="better-codex-composer-toolbar">' + attachButton + '<button class="better-codex-composer-send" type="button" data-conversation-send data-composer-mode="' + mode + '" aria-label="' + escapeHtml(actionLabel) + '" title="' + escapeHtml(actionLabel) + '"' + actionDisabled + '>' + icon(working ? "stop" : "send", "", working ? "2.5" : "2") + '</button></div></div>';
+        return '<div class="better-codex-composer" data-state="' + mode + '">' + attachments + '<div class="better-codex-semantic-menu" id="better-codex-semantic-menu" data-semantic-menu role="listbox" hidden></div><textarea name="reply" rows="2" placeholder="' + te(archived ? "取消归档后继续对话" : sessionHandoff ? "请前往会话继续对话" : "输入下一步要求…") + '" aria-label="' + te("回复") + '" aria-autocomplete="list" aria-controls="better-codex-semantic-menu" aria-expanded="false"' + inputDisabled + '>' + escapeHtml(draft.reply) + '</textarea><div class="better-codex-composer-toolbar">' + attachButton + '<button class="better-codex-composer-send" type="button" data-conversation-send data-composer-mode="' + mode + '" aria-label="' + escapeHtml(actionLabel) + '" title="' + escapeHtml(actionLabel) + '"' + actionDisabled + '>' + icon(working ? "stop" : "send", "", working ? "2.5" : "2") + '</button></div></div>';
       }
 
       function replyFailureMessage(error, action) {
@@ -7333,7 +7535,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           if (event.currentTarget.dataset.conversationRetry === "load") void loadConversation();
           else {
             const retryRequestId = lastReplyStatus === "interrupted" ? "" : lastReplyRequestId;
-            void sendReply(lastReplyMessage, retryRequestId);
+            void sendReply(lastReplyMessage, retryRequestId, lastReplySemanticReferences, lastReplyCommand);
           }
         });
       }
@@ -7534,14 +7736,40 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         }
       }
 
-      async function sendReply(retryMessage = "", retryRequestId = "") {
+      async function sendReply(retryMessage = "", retryRequestId = "", retrySemanticReferences = null, retryCommand = "") {
         const textarea = dialog.querySelector('[name="reply"]');
         const send = dialog.querySelector("[data-conversation-send]");
         const errorOutput = dialog.querySelector(".better-codex-dialog-error");
         const retrying = Boolean(retryMessage);
         const text = String(retryMessage || textarea?.value || "").trim();
+        const slashCommand = /^\/(review|compact|status|skills|mentions)$/.exec(text)?.[1] || "";
+        const semanticCommand = retryCommand || (["review", "compact"].includes(slashCommand) ? slashCommand : "");
+        const semanticReferences = retrying ? (retrySemanticReferences || []) : draft.replySemanticReferences.filter(reference => text.includes((reference.type === "skill" ? "$" : "@") + reference.name));
         const requestId = retryRequestId || (globalThis.crypto?.randomUUID?.() || VERSION + "-reply-" + Date.now() + "-" + Math.random().toString(36).slice(2));
         if (sessionHandoff || !issue || !sessionId || (!text && !draft.replyAttachments.length) || !send || !errorOutput) return;
+        if (!retrying && slashCommand === "status") {
+          if (textarea) textarea.value = "";
+          draft.reply = "";
+          latestReplyDraft = "";
+          draft.replySemanticReferences = [];
+          semanticMenuState = { status: true };
+          renderSemanticMenu();
+          persistReplyDraft("");
+          updateReplySendState();
+          return;
+        }
+        if (!retrying && (slashCommand === "skills" || slashCommand === "mentions")) {
+          if (textarea) {
+            textarea.value = slashCommand === "skills" ? "$" : "@";
+            textarea.setSelectionRange(1, 1);
+          }
+          draft.reply = textarea?.value || "";
+          latestReplyDraft = draft.reply;
+          scheduleReplyDraft(draft.reply);
+          syncSemanticMenu();
+          updateReplySendState();
+          return;
+        }
         stopReplyRecovery();
         send.disabled = true;
         errorOutput.hidden = true;
@@ -7565,7 +7793,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         }
         try {
           lastReplyStatus = "running";
-          const reply = await api("/api/issues/" + encodeURIComponent(issue.id) + "/reply", { method: "POST", body: JSON.stringify({ message, request_id: requestId, files }), timeoutMs: files.length ? 120_000 : undefined });
+          lastReplySemanticReferences = semanticReferences.map(reference => ({ ...reference }));
+          lastReplyCommand = semanticCommand;
+          const reply = await api("/api/issues/" + encodeURIComponent(issue.id) + "/reply", { method: "POST", body: JSON.stringify({ message, request_id: requestId, files, semantic_references: semanticReferences, command: semanticCommand }), timeoutMs: files.length ? 120_000 : undefined });
           if (reply.initial_run) {
             await loadIssues();
             dialog.close();
@@ -7575,6 +7805,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           stopReplyRecovery();
           draft.reply = "";
           latestReplyDraft = "";
+          draft.replySemanticReferences = [];
+          closeSemanticMenu();
           draft.replyAttachments.forEach(releaseAttachment);
           draft.replyAttachments = [];
           if (textarea) textarea.value = "";
@@ -7940,10 +8172,28 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const sendButton = dialog.querySelector("[data-conversation-send]");
         replyInput?.addEventListener("input", () => {
           draft.reply = replyInput.value;
+          draft.replySemanticReferences = draft.replySemanticReferences.filter(reference => replyInput.value.includes((reference.type === "skill" ? "$" : "@") + reference.name));
           scheduleReplyDraft(replyInput.value);
           updateReplySendState();
+          syncSemanticMenu();
         });
-        replyInput?.addEventListener("blur", flushReplyDraft);
+        replyInput?.addEventListener("focus", () => {
+          void loadSemanticCatalog();
+          syncSemanticMenu();
+        });
+        replyInput?.addEventListener("blur", () => {
+          flushReplyDraft();
+          setTimeout(() => {
+            if (!dialog.querySelector("[data-semantic-menu]:hover")) closeSemanticMenu();
+          }, 120);
+        });
+        dialog.querySelector("[data-semantic-menu]")?.addEventListener("pointerdown", event => event.preventDefault());
+        dialog.querySelector("[data-semantic-menu]")?.addEventListener("click", event => {
+          const option = event.target.closest("[data-semantic-option]");
+          if (!option) return;
+          selectSemanticOption(Number(option.dataset.semanticOption));
+          replyInput?.focus();
+        });
         sendButton?.addEventListener("click", event => {
           const button = event.currentTarget;
           if (button.dataset.composerMode === "stop") void stopIssueFromDialog(button);
@@ -7996,6 +8246,26 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           });
         });
         replyInput?.addEventListener("keydown", event => {
+          if (semanticMenuState) {
+            const items = semanticMenuState.items || [];
+            if (event.key === "Escape") {
+              event.preventDefault();
+              closeSemanticMenu();
+              return;
+            }
+            if (items.length && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+              event.preventDefault();
+              const offset = event.key === "ArrowDown" ? 1 : -1;
+              semanticMenuState.index = (semanticMenuState.index + offset + items.length) % items.length;
+              renderSemanticMenu();
+              return;
+            }
+            if (items.length && (event.key === "Enter" || event.key === "Tab")) {
+              event.preventDefault();
+              selectSemanticOption();
+              return;
+            }
+          }
           if (isSendKeyboardEvent(event)) {
             event.preventDefault();
             if (sendButton?.dataset.composerMode === "send") void sendReply();

@@ -6259,6 +6259,7 @@ export function betterCodexDesignSystemCss() {
     }
 
     #better-codex-dialog .better-codex-composer {
+      position: relative;
       display: grid;
       flex: 0 0 auto;
       grid-template-columns: minmax(0, 1fr);
@@ -6269,6 +6270,160 @@ export function betterCodexDesignSystemCss() {
       background: var(--bc-color-input);
       padding: 8px;
       box-shadow: var(--bc-inset-hairline);
+    }
+
+    #better-codex-dialog .better-codex-semantic-menu {
+      position: absolute;
+      right: 0;
+      bottom: calc(100% + 8px);
+      left: 0;
+      z-index: 8;
+      max-height: min(320px, 42vh);
+      overflow: auto;
+      border: 1px solid var(--bc-color-hairline);
+      border-radius: var(--bc-radius-md);
+      background: var(--bc-color-surface-raised);
+      padding: var(--bc-space-1);
+      box-shadow: var(--bc-elevation-menu);
+      overscroll-behavior: contain;
+    }
+
+    #better-codex-dialog .better-codex-semantic-menu[hidden] {
+      display: none;
+    }
+
+    #better-codex-dialog .better-codex-semantic-menu button {
+      display: grid;
+      width: 100%;
+      min-height: 42px;
+      grid-template-columns: 24px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: var(--bc-space-2);
+      border: 0;
+      border-radius: var(--bc-radius-xs);
+      color: var(--bc-color-text);
+      background: transparent;
+      padding: 6px 8px;
+      font: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    #better-codex-dialog .better-codex-semantic-menu button[aria-selected="true"] {
+      background: var(--bc-color-hover);
+    }
+
+    #better-codex-dialog .better-codex-semantic-icon {
+      display: inline-flex;
+      width: 24px;
+      height: 24px;
+      align-items: center;
+      justify-content: center;
+      border-radius: var(--bc-radius-xs);
+      color: var(--bc-color-text-muted);
+      background: var(--bc-color-control);
+    }
+
+    #better-codex-dialog .better-codex-semantic-icon svg {
+      width: 14px;
+      height: 14px;
+    }
+
+    #better-codex-dialog .better-codex-semantic-copy {
+      display: flex;
+      min-width: 0;
+      flex-direction: column;
+      gap: 1px;
+    }
+
+    #better-codex-dialog .better-codex-semantic-copy strong,
+    #better-codex-dialog .better-codex-semantic-copy small {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #better-codex-dialog .better-codex-semantic-copy strong {
+      font-size: var(--bc-text-sm);
+      font-weight: 600;
+    }
+
+    #better-codex-dialog .better-codex-semantic-copy small,
+    #better-codex-dialog .better-codex-semantic-menu kbd,
+    #better-codex-dialog .better-codex-semantic-empty {
+      color: var(--bc-color-text-muted);
+      font-size: var(--bc-text-caption);
+      font-weight: 400;
+    }
+
+    #better-codex-dialog .better-codex-semantic-menu kbd {
+      max-width: 80px;
+      overflow: hidden;
+      border: 0;
+      background: transparent;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #better-codex-dialog .better-codex-semantic-empty {
+      display: flex;
+      min-height: 44px;
+      align-items: center;
+      justify-content: center;
+      gap: var(--bc-space-2);
+      padding: var(--bc-space-2);
+    }
+
+    #better-codex-dialog .better-codex-semantic-empty svg {
+      width: 14px;
+      height: 14px;
+    }
+
+    #better-codex-dialog .better-codex-semantic-empty .better-codex-spin {
+      animation: better-codex-spin .85s linear infinite;
+    }
+
+    #better-codex-dialog .better-codex-semantic-status {
+      display: grid;
+      gap: 2px;
+      padding: var(--bc-space-2);
+    }
+
+    #better-codex-dialog .better-codex-semantic-status-title,
+    #better-codex-dialog .better-codex-semantic-status > div:not(.better-codex-semantic-status-title) {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--bc-space-3);
+    }
+
+    #better-codex-dialog .better-codex-semantic-status-title {
+      justify-content: flex-start;
+      padding: 2px 2px 8px;
+      font-size: var(--bc-text-sm);
+      font-weight: 600;
+    }
+
+    #better-codex-dialog .better-codex-semantic-status-title svg {
+      width: 15px;
+      height: 15px;
+    }
+
+    #better-codex-dialog .better-codex-semantic-status > div:not(.better-codex-semantic-status-title) {
+      min-height: 28px;
+      border-top: 1px solid var(--bc-color-hairline);
+      padding: 0 2px;
+      color: var(--bc-color-text-muted);
+      font-size: var(--bc-text-caption);
+    }
+
+    #better-codex-dialog .better-codex-semantic-status strong {
+      max-width: 65%;
+      overflow: hidden;
+      color: var(--bc-color-text);
+      font-weight: 500;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     #better-codex-dialog[data-detail="true"] .better-codex-composer {
