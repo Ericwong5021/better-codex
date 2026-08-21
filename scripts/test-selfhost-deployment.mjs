@@ -122,7 +122,7 @@ try {
   assert.match(page.value, /data-better-codex-host="relay"/);
   assert.match(String(page.headers["strict-transport-security"]), /max-age=31536000/);
   const tableOutput = composeOutput(["exec", "-T", "hub", "node", "--input-type=module", "-e", "import { DatabaseSync } from 'node:sqlite'; const db=new DatabaseSync('/data/better-codex-relay.db',{readOnly:true}); process.stdout.write(JSON.stringify(db.prepare(\"SELECT name FROM sqlite_master WHERE type='table' ORDER BY name\").all().map(row=>row.name))); db.close();"], environment);
-  assert.deepEqual(JSON.parse(tableOutput), ["relay_audit", "relay_devices", "relay_settings", "relay_web_sessions", "sqlite_sequence"]);
+  assert.deepEqual(JSON.parse(tableOutput), ["relay_audit", "relay_commands", "relay_devices", "relay_settings", "relay_web_sessions", "sqlite_sequence"]);
   const logout = await request(httpsPort, "/relay/logout", { method: "DELETE", headers: browserHeaders });
   assert.equal(logout.status, 200);
   socket.close();
