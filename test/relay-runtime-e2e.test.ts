@@ -66,7 +66,7 @@ async function waitFor(check: () => boolean | Promise<boolean>, process?: ChildP
 test("public Relay drives the real Runtime and recovers without storing business data", { timeout: 45_000 }, async () => {
   const home = mkdtempSync(join(tmpdir(), "better-codex-relay-runtime-"));
   mkdirSync(join(home, "codex"));
-  const relay = createRelayServer({ host: "127.0.0.1", port: 0, database: ":memory:", adminToken: "e".repeat(64), webUsername: "admin", webPassword: "relay-password-123", secureCookies: false, heartbeatIntervalMs: 1000 });
+  const relay = createRelayServer({ host: "127.0.0.1", port: 0, database: ":memory:", adminToken: "e".repeat(64), webUsername: "admin", webPassword: "relay-password-123", secureCookies: false, heartbeatIntervalMs: 1000, reconnectGraceMs: 250 });
   relay.server.listen(0, "127.0.0.1");
   await once(relay.server, "listening");
   const relayAddress = relay.server.address();
@@ -159,6 +159,10 @@ test("public Relay drives the real Runtime and recovers without storing business
 
     await stopRuntime(runtime);
     await waitFor(() => relay.runtime() === null, undefined, 5000);
+    await waitFor(async () => {
+      const health = await fetch(`${base}/healthz`).then(response => response.json()) as { runtime: { state: string } };
+      return health.runtime.state === "offline";
+    }, undefined, 5000);
     const offline = await request(`/api/issues/${issue.id}`);
     assert.equal(offline.status, 503);
     const offlineBody = await offline.json() as { error: string; trace_id: string };

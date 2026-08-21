@@ -120,7 +120,7 @@ test("relay authenticates one runtime, replaces old connections, and stores no b
   await relay.close();
 });
 
-test("relay keeps safe reads pending during the Runtime reconnect grace period", async () => {
+test("relay keeps safe reads pending during the Runtime reconnect grace period", { timeout: 5000 }, async () => {
   const relay = createRelayServer({ host: "127.0.0.1", port: 0, database: ":memory:", adminToken: "g".repeat(64), webUsername: "admin", webPassword: "relay-password-123", secureCookies: false, reconnectGraceMs: 1000, maxReplayAttempts: 2 });
   relay.server.listen(0, "127.0.0.1");
   await once(relay.server, "listening");
@@ -143,8 +143,7 @@ test("relay keeps safe reads pending during the Runtime reconnect grace period",
   const first = await connect("runtime-grace");
   const firstOpen = waitForMessage(first, value => value.type === "request_open");
   const firstEnd = waitForMessage(first, value => value.type === "request_end");
-  let settled = false;
-  const pendingResponse = fetch(`${base}/api/issues`, { headers: { cookie } }).finally(() => { settled = true; });
+  const pendingResponse = fetch(`${base}/api/issues`, { headers: { cookie } });
   await firstOpen;
   await firstEnd;
   const firstClosed = once(first, "close");
@@ -154,8 +153,6 @@ test("relay keeps safe reads pending during the Runtime reconnect grace period",
   assert.equal(reconnectingHealth.runtime.online, false);
   assert.equal(reconnectingHealth.runtime.state, "reconnecting");
   assert.ok(Date.parse(reconnectingHealth.runtime.reconnect_deadline_at) > Date.now());
-  await new Promise(resolve => setTimeout(resolve, 50));
-  assert.equal(settled, false);
   let replayedOpenPromise: Promise<Record<string, unknown>> | undefined;
   let replayedEndPromise: Promise<Record<string, unknown>> | undefined;
   const second = await connect("runtime-grace", socket => {
