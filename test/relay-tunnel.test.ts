@@ -52,7 +52,7 @@ function requestStatus(port: number, path: string, headers: Record<string, strin
   });
 }
 
-test("relay authenticates one runtime, replaces old connections, and stores no business tables", async () => {
+test("relay authenticates one runtime, replaces old connections, and stores no business tables", { timeout: 5000 }, async () => {
   const adminToken = "a".repeat(64);
   const relay = createRelayServer({ host: "127.0.0.1", port: 0, database: ":memory:", adminToken, webUsername: "admin", webPassword: "relay-password-123", secureCookies: false, heartbeatIntervalMs: 1000 });
   relay.server.listen(0, "127.0.0.1");
@@ -108,14 +108,16 @@ test("relay authenticates one runtime, replaces old connections, and stores no b
   assert.equal(relay.runtime(), null);
   const rotated = relay.store.rotateDeviceToken(device.device_id);
   const rejectedOldToken = new WebSocket(`${socketBase}/api/v1/runtime/connect`, relayWebSocketProtocol, { headers: { authorization: `Bearer ${device.device_token}` } });
-  const [, oldTokenResponse] = await once(rejectedOldToken, "unexpected-response");
+  const [oldTokenRequest, oldTokenResponse] = await once(rejectedOldToken, "unexpected-response");
   assert.equal((oldTokenResponse as { statusCode: number }).statusCode, 401);
   (oldTokenResponse as { resume: () => void }).resume();
+  (oldTokenRequest as { destroy: () => void }).destroy();
   relay.store.revokeDevice(device.device_id);
   const rejectedRevokedToken = new WebSocket(`${socketBase}/api/v1/runtime/connect`, relayWebSocketProtocol, { headers: { authorization: `Bearer ${rotated.device_token}` } });
-  const [, revokedResponse] = await once(rejectedRevokedToken, "unexpected-response");
+  const [revokedRequest, revokedResponse] = await once(rejectedRevokedToken, "unexpected-response");
   assert.equal((revokedResponse as { statusCode: number }).statusCode, 401);
   (revokedResponse as { resume: () => void }).resume();
+  (revokedRequest as { destroy: () => void }).destroy();
   assert.doesNotMatch(JSON.stringify(relay.store.auditEvents(100)), new RegExp(`${device.device_token}|${rotated.device_token}`));
   await relay.close();
 });
