@@ -15,6 +15,7 @@ export type IssueStatus = typeof issueStatuses[number];
 export type IssuePriority = typeof issuePriorities[number];
 export type AgentModel = string;
 export type AgentReasoningEffort = string;
+export type AgentServiceTier = "default" | "fast";
 export type AgentSandboxMode = "read-only" | "workspace-write" | "danger-full-access";
 
 export type AgentProfile = {
@@ -26,6 +27,7 @@ export type AgentProfile = {
   instructions: string;
   model: AgentModel;
   reasoning_effort: AgentReasoningEffort;
+  service_tier: AgentServiceTier;
   sandbox_mode: AgentSandboxMode;
   max_concurrency: number;
   version: number;
@@ -219,7 +221,7 @@ type IssueInput = {
 
 export type IssuePatch = Partial<Pick<Issue, "project_id" | "title" | "description" | "status" | "priority" | "labels" | "sort_order" | "pinned" | "thread_id" | "workspace_path" | "agent_enabled" | "agent_id" | "user_assigned" | "needs_attention" | "pending_actor" | "enrichment_status" | "reply_draft">>;
 
-type AgentProfileInput = Pick<AgentProfile, "name" | "name_en" | "description" | "instructions" | "model" | "reasoning_effort"> & { sandbox_mode?: AgentSandboxMode; max_concurrency?: number };
+type AgentProfileInput = Pick<AgentProfile, "name" | "name_en" | "description" | "instructions" | "model" | "reasoning_effort"> & { service_tier?: AgentServiceTier; sandbox_mode?: AgentSandboxMode; max_concurrency?: number };
 type AgentProfilePatch = Partial<AgentProfileInput>;
 
 export const defaultAgentMaxConcurrency = 5;
@@ -232,7 +234,7 @@ export function cleanMaxConcurrency(value: number | undefined) {
   return value;
 }
 
-const latestSchemaVersion = 14;
+const latestSchemaVersion = 15;
 
 function now() {
   return new Date().toISOString();
@@ -328,7 +330,9 @@ function cleanAgentProfile(input: AgentProfileInput) {
   if (!input.reasoning_effort.trim() || input.reasoning_effort.length > 20) throw new Error("invalid_agent_reasoning_effort");
   const sandbox_mode = input.sandbox_mode || "workspace-write";
   if (!agentSandboxModes.includes(sandbox_mode)) throw new Error("invalid_agent_sandbox_mode");
-  return { name, name_en, description, instructions, model: input.model, reasoning_effort: input.reasoning_effort, sandbox_mode, max_concurrency: cleanMaxConcurrency(input.max_concurrency) };
+  const service_tier = input.service_tier || "default";
+  if (service_tier !== "default" && service_tier !== "fast") throw new Error("invalid_agent_service_tier");
+  return { name, name_en, description, instructions, model: input.model, reasoning_effort: input.reasoning_effort, service_tier, sandbox_mode, max_concurrency: cleanMaxConcurrency(input.max_concurrency) };
 }
 
 function cleanLabels(values: string[]) {
@@ -760,6 +764,7 @@ export class Store {
         throw error;
       }
     }
+    if (fromVersion < 15) this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (15, ?)").run(now());
   }
 
   private ensureProjectColumns() {
@@ -901,6 +906,7 @@ export class Store {
         instructions TEXT NOT NULL,
         model TEXT NOT NULL,
         reasoning_effort TEXT NOT NULL,
+        service_tier TEXT NOT NULL DEFAULT 'default',
         sandbox_mode TEXT NOT NULL DEFAULT 'workspace-write',
         max_concurrency INTEGER NOT NULL DEFAULT ${defaultAgentMaxConcurrency},
         version INTEGER NOT NULL DEFAULT 1,
@@ -912,6 +918,7 @@ export class Store {
     if (!columns.has("sandbox_mode")) this.db.exec("ALTER TABLE agent_profiles ADD COLUMN sandbox_mode TEXT NOT NULL DEFAULT 'workspace-write'");
     if (!columns.has("max_concurrency")) this.db.exec(`ALTER TABLE agent_profiles ADD COLUMN max_concurrency INTEGER NOT NULL DEFAULT ${defaultAgentMaxConcurrency}`);
     if (!columns.has("name_en")) this.db.exec("ALTER TABLE agent_profiles ADD COLUMN name_en TEXT NOT NULL DEFAULT ''");
+    if (!columns.has("service_tier")) this.db.exec("ALTER TABLE agent_profiles ADD COLUMN service_tier TEXT NOT NULL DEFAULT 'default'");
     const englishNames = new Map([
       ["代码审查", "Code Review"],
       ["前端实现", "Frontend Implementation"],
@@ -1593,9 +1600,9 @@ export class Store {
     const role = `better_codex_${id.replaceAll("-", "")}`;
     const timestamp = now();
     this.db.prepare(`
-      INSERT INTO agent_profiles (id, role, name, name_en, description, instructions, model, reasoning_effort, sandbox_mode, max_concurrency, version, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
-    `).run(id, role, profile.name, profile.name_en, profile.description, profile.instructions, profile.model, profile.reasoning_effort, profile.sandbox_mode, profile.max_concurrency, timestamp, timestamp);
+      INSERT INTO agent_profiles (id, role, name, name_en, description, instructions, model, reasoning_effort, service_tier, sandbox_mode, max_concurrency, version, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+    `).run(id, role, profile.name, profile.name_en, profile.description, profile.instructions, profile.model, profile.reasoning_effort, profile.service_tier, profile.sandbox_mode, profile.max_concurrency, timestamp, timestamp);
     return this.getAgentProfile(id)!;
   }
 
@@ -1610,13 +1617,14 @@ export class Store {
       instructions: patch.instructions ?? current.instructions,
       model: patch.model ?? current.model,
       reasoning_effort: patch.reasoning_effort ?? current.reasoning_effort,
+      service_tier: patch.service_tier ?? current.service_tier,
       sandbox_mode: patch.sandbox_mode ?? current.sandbox_mode ?? "workspace-write",
       max_concurrency: patch.max_concurrency ?? current.max_concurrency,
     });
     const result = this.db.prepare(`
-      UPDATE agent_profiles SET name = ?, name_en = ?, description = ?, instructions = ?, model = ?, reasoning_effort = ?, sandbox_mode = ?, max_concurrency = ?, version = version + 1, updated_at = ?
+      UPDATE agent_profiles SET name = ?, name_en = ?, description = ?, instructions = ?, model = ?, reasoning_effort = ?, service_tier = ?, sandbox_mode = ?, max_concurrency = ?, version = version + 1, updated_at = ?
       WHERE id = ? AND version = ?
-    `).run(profile.name, profile.name_en, profile.description, profile.instructions, profile.model, profile.reasoning_effort, profile.sandbox_mode, profile.max_concurrency, now(), current.id, version);
+    `).run(profile.name, profile.name_en, profile.description, profile.instructions, profile.model, profile.reasoning_effort, profile.service_tier, profile.sandbox_mode, profile.max_concurrency, now(), current.id, version);
     if (result.changes !== 1) throw new Error("version_conflict");
     return this.getAgentProfile(current.id)!;
   }

@@ -17,6 +17,7 @@ export type AgentProjection = {
   description: string;
   model?: string;
   reasoning_effort?: string;
+  service_tier?: string;
   avatar: string;
   version: number;
   created_at: string;
@@ -111,10 +112,17 @@ export type RuntimeProjection = {
   scheduler_reasoning_effort?: string;
   default_agent_model?: string;
   default_agent_reasoning_effort?: string;
+  default_agent_service_tier?: string;
 };
 
 export type AgentReasoningEffortProjection = {
   value: string;
+  description: string;
+};
+
+export type AgentServiceTierProjection = {
+  id: string;
+  name: string;
   description: string;
 };
 
@@ -125,6 +133,7 @@ export type AgentModelCatalogProjection = {
   isDefault: boolean;
   defaultReasoningEffort: string;
   supportedReasoningEfforts: AgentReasoningEffortProjection[];
+  serviceTiers: AgentServiceTierProjection[];
 };
 
 export type CodexUsageWindowProjection = {
@@ -212,6 +221,7 @@ export function normalizeAgentDirectoryProjection(value: unknown, id: string): A
       description: optionalProjectionString(agent.description, 500),
       model: optionalProjectionString(agent.model, 200),
       reasoning_effort: optionalProjectionString(agent.reasoning_effort, 40),
+      service_tier: optionalProjectionString(agent.service_tier, 20),
       avatar: normalizeAgentAvatar(agent.avatar),
       version: Number(agent.version),
       created_at: requiredProjectionString(agent.created_at, 64),
@@ -238,6 +248,14 @@ export function normalizeAgentModelCatalogProjection(value: unknown): AgentModel
       })
       : [];
     const defaultReasoningEffort = projectionString(source.defaultReasoningEffort, 40) || efforts[0]?.value || "medium";
+    const serviceTiers = Array.isArray(source.serviceTiers)
+      ? source.serviceTiers.slice(0, 10).flatMap((item): AgentServiceTierProjection[] => {
+        if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+        const tier = item as Record<string, unknown>;
+        const tierId = projectionString(tier.id, 40);
+        return tierId ? [{ id: tierId, name: projectionString(tier.name, 80) || tierId, description: projectionString(tier.description, 500) }] : [];
+      })
+      : [];
     return [{
       id,
       displayName: projectionString(source.displayName, 200) || id,
@@ -245,6 +263,7 @@ export function normalizeAgentModelCatalogProjection(value: unknown): AgentModel
       isDefault: source.isDefault === true,
       defaultReasoningEffort,
       supportedReasoningEfforts: efforts.length ? efforts : [{ value: defaultReasoningEffort, description: "" }],
+      serviceTiers,
     }];
   });
 }

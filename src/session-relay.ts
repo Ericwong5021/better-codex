@@ -376,6 +376,7 @@ export class RuntimeSessionRelay {
           sandbox: String(payload.sandbox_mode || "workspace-write"),
         };
         if (payload.model) params.model = String(payload.model);
+        if (payload.service_tier) params.serviceTier = String(payload.service_tier);
         if (payload.developer_instructions) params.developerInstructions = String(payload.developer_instructions);
         const started = object(await this.request("thread/start", params));
         threadId = sessionId(object(started.thread).id);
@@ -458,6 +459,7 @@ export class RuntimeSessionRelay {
     if (payload.workspace_path) params.cwd = String(payload.workspace_path);
     if (payload.model) params.model = String(payload.model);
     if (payload.effort) params.effort = String(payload.effort);
+    if (payload.service_tier) params.serviceTier = String(payload.service_tier);
     return params;
   }
 

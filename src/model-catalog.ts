@@ -7,6 +7,12 @@ export type ReasoningEffortOption = {
   description: string;
 };
 
+export type ModelServiceTier = {
+  id: string;
+  name: string;
+  description: string;
+};
+
 export type ModelCatalogEntry = {
   id: string;
   displayName: string;
@@ -14,23 +20,25 @@ export type ModelCatalogEntry = {
   isDefault: boolean;
   defaultReasoningEffort: string;
   supportedReasoningEfforts: ReasoningEffortOption[];
+  serviceTiers: ModelServiceTier[];
 };
 
 const fallbackCatalog: ModelCatalogEntry[] = [
-  ["gpt-5.6-sol", "GPT-5.6-Sol", "low", ["low", "medium", "high", "xhigh", "max", "ultra"]],
-  ["gpt-5.6-terra", "GPT-5.6-Terra", "medium", ["low", "medium", "high", "xhigh", "max", "ultra"]],
-  ["gpt-5.6-luna", "GPT-5.6-Luna", "medium", ["low", "medium", "high", "xhigh", "max"]],
-  ["gpt-5.5", "GPT-5.5", "medium", ["low", "medium", "high", "xhigh"]],
-  ["gpt-5.4", "GPT-5.4", "medium", ["low", "medium", "high", "xhigh"]],
-  ["gpt-5.4-mini", "GPT-5.4-Mini", "medium", ["low", "medium", "high", "xhigh"]],
-  ["gpt-5.3-codex-spark", "GPT-5.3-Codex-Spark", "high", ["low", "medium", "high", "xhigh"]],
-].map(([id, displayName, defaultReasoningEffort, efforts], index) => ({
+  ["gpt-5.6-sol", "GPT-5.6-Sol", "low", ["low", "medium", "high", "xhigh", "max", "ultra"], true],
+  ["gpt-5.6-terra", "GPT-5.6-Terra", "medium", ["low", "medium", "high", "xhigh", "max", "ultra"], true],
+  ["gpt-5.6-luna", "GPT-5.6-Luna", "medium", ["low", "medium", "high", "xhigh", "max"], true],
+  ["gpt-5.5", "GPT-5.5", "medium", ["low", "medium", "high", "xhigh"], true],
+  ["gpt-5.4", "GPT-5.4", "medium", ["low", "medium", "high", "xhigh"], true],
+  ["gpt-5.4-mini", "GPT-5.4-Mini", "medium", ["low", "medium", "high", "xhigh"], false],
+  ["gpt-5.3-codex-spark", "GPT-5.3-Codex-Spark", "high", ["low", "medium", "high", "xhigh"], false],
+].map(([id, displayName, defaultReasoningEffort, efforts, fast], index) => ({
   id: id as string,
   displayName: displayName as string,
   description: "",
   isDefault: index === 0,
   defaultReasoningEffort: defaultReasoningEffort as string,
   supportedReasoningEfforts: (efforts as string[]).map(value => ({ value, description: "" })),
+  serviceTiers: fast ? [{ id: "priority", name: "Fast", description: "1.5x speed, increased usage" }] : [],
 }));
 
 export function normalizeModelCatalog(value: unknown): ModelCatalogEntry[] {
@@ -48,6 +56,12 @@ export function normalizeModelCatalog(value: unknown): ModelCatalogEntry[] {
       const value = String(source.reasoningEffort || "").trim();
       return value ? [{ value, description: String(source.description || "") }] : [];
     }) : [];
+    const serviceTiers = Array.isArray(model.serviceTiers) ? model.serviceTiers.flatMap((tier): ModelServiceTier[] => {
+      if (!tier || typeof tier !== "object") return [];
+      const source = tier as Record<string, unknown>;
+      const tierId = String(source.id || "").trim();
+      return tierId ? [{ id: tierId, name: String(source.name || tierId), description: String(source.description || "") }] : [];
+    }) : [];
     const defaultEffort = String(model.defaultReasoningEffort || efforts[0]?.value || "medium");
     return [{
       id,
@@ -56,6 +70,7 @@ export function normalizeModelCatalog(value: unknown): ModelCatalogEntry[] {
       isDefault: model.isDefault === true,
       defaultReasoningEffort: defaultEffort,
       supportedReasoningEfforts: efforts.length ? efforts : [{ value: defaultEffort, description: "" }],
+      serviceTiers,
     }];
   });
 }

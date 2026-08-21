@@ -3876,8 +3876,48 @@ export function betterCodexDesignSystemCss() {
     }
 
     #better-codex-panel .better-codex-agent-row-copy em {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      gap: 3px;
       color: var(--bc-color-text-faint);
       font-size: var(--bc-text-caption);
+    }
+
+    #better-codex-panel .better-codex-agent-row-copy em > span {
+      display: inline-flex;
+      min-width: 0;
+      align-items: center;
+      gap: 3px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #better-codex-panel .better-codex-agent-row-copy em > span:nth-child(2) {
+      flex: 0 0 auto;
+    }
+
+    #better-codex-panel .better-codex-fast-mark,
+    #better-codex-dialog .better-codex-fast-mark,
+    #better-codex-context-menu .better-codex-fast-mark {
+      display: inline-flex;
+      width: 12px;
+      height: 12px;
+      flex: 0 0 auto;
+      align-items: center;
+      justify-content: center;
+      color: #111;
+      line-height: 1;
+    }
+
+    #better-codex-panel .better-codex-fast-mark svg,
+    #better-codex-dialog .better-codex-fast-mark svg,
+    #better-codex-context-menu .better-codex-fast-mark svg {
+      width: 11px;
+      height: 11px;
+      fill: currentColor;
+      stroke: currentColor;
     }
 
     #better-codex-panel .better-codex-agent-row-chevron {
@@ -4445,6 +4485,90 @@ export function betterCodexDesignSystemCss() {
       margin-top: 2px;
     }
 
+    #better-codex-panel .better-codex-agent-fast-setting > span:first-child {
+      display: flex;
+      min-width: 0;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    #better-codex-panel .better-codex-agent-fast-setting strong {
+      font-size: var(--bc-text-md);
+      font-weight: 450;
+    }
+
+    #better-codex-panel .better-codex-agent-fast-setting small {
+      color: var(--bc-color-text-faint);
+      font-size: var(--bc-text-caption);
+      line-height: 1.35;
+    }
+
+    #better-codex-panel .better-codex-agent-fast-setting.is-disabled {
+      opacity: .46;
+    }
+
+    #better-codex-panel .better-codex-agent-switch {
+      position: relative;
+      display: inline-flex;
+      width: 34px;
+      height: 20px;
+      flex: 0 0 auto;
+    }
+
+    #better-codex-panel .better-codex-agent-switch input {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      margin: 0;
+      opacity: 0;
+      cursor: pointer;
+    }
+
+    #better-codex-panel .better-codex-agent-switch i {
+      position: relative;
+      display: block;
+      width: 34px;
+      height: 20px;
+      border-radius: var(--bc-radius-pill);
+      background: var(--bc-color-control);
+      box-shadow: var(--bc-inset-hairline);
+      transition: background-color var(--bc-motion-fast) ease-out;
+    }
+
+    #better-codex-panel .better-codex-agent-switch i::after {
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--bc-color-surface-raised);
+      box-shadow: var(--bc-elevation-sm);
+      content: "";
+      transition: transform var(--bc-motion-fast) var(--bc-ease-out);
+    }
+
+    #better-codex-panel .better-codex-agent-switch input:checked + i {
+      background: #111;
+    }
+
+    #better-codex-panel .better-codex-agent-switch input:checked + i::after {
+      transform: translateX(14px);
+    }
+
+    #better-codex-panel .better-codex-agent-switch input:focus-visible + i {
+      box-shadow: var(--bc-focus-ring);
+    }
+
+    #better-codex-panel .better-codex-agent-switch input:disabled {
+      cursor: not-allowed;
+    }
+
+    #better-codex-context-menu .better-codex-context-tag .better-codex-fast-mark,
+    #better-codex-dialog .better-codex-dialog-select-tag .better-codex-fast-mark {
+      margin-left: 2px;
+    }
+
     #better-codex-panel .better-codex-agent-picker-trigger {
       display: inline-flex;
       max-width: 245px;
@@ -4466,6 +4590,14 @@ export function betterCodexDesignSystemCss() {
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+
+    #better-codex-panel .better-codex-agent-picker-trigger .better-codex-fast-mark {
+      display: none;
+    }
+
+    #better-codex-panel form:has(input[name="fast"]:checked) [data-agent-picker="model"] .better-codex-fast-mark {
+      display: inline-flex;
     }
 
     #better-codex-panel .better-codex-agent-picker-trigger svg {

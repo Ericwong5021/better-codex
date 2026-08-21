@@ -5,7 +5,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { homedir } from "node:os";
 import { isSea } from "node:sea";
 import { compareVersions, coreVersion, readCompatibilityStatus } from "./compatibility.js";
-import { agentSandboxModes, cleanMaxConcurrency, issuePriorities, issueStatuses, Store, type AgentModel, type AgentReasoningEffort, type AgentSandboxMode, type Issue, type IssuePriority, type IssueStatus } from "./db.js";
+import { agentSandboxModes, cleanMaxConcurrency, issuePriorities, issueStatuses, Store, type AgentModel, type AgentReasoningEffort, type AgentSandboxMode, type AgentServiceTier, type Issue, type IssuePriority, type IssueStatus } from "./db.js";
 import { defaultAgentProfile, syncAgentProfiles, updateDefaultAgentProfile } from "./agent-profiles.js";
 import { readCodexAppearance } from "./appearance.js";
 import { normalizeCodexLocale, readCodexLocale } from "./locale.js";
@@ -517,6 +517,12 @@ function asSandboxMode(value: unknown): AgentSandboxMode {
   return value as AgentSandboxMode;
 }
 
+function asServiceTier(value: unknown): AgentServiceTier {
+  if (value === undefined || value === null || value === "") return "default";
+  if (value !== "default" && value !== "fast") throw new Error("invalid_agent_service_tier");
+  return value;
+}
+
 function agentProfileInput(body: Record<string, unknown>) {
   return {
     name: cleanString(body.name, 80),
@@ -525,6 +531,7 @@ function agentProfileInput(body: Record<string, unknown>) {
     instructions: cleanString(body.instructions, 100000),
     model: cleanString(body.model, 80) as AgentModel,
     reasoning_effort: cleanString(body.reasoning_effort, 20) as AgentReasoningEffort,
+    service_tier: asServiceTier(body.service_tier),
     sandbox_mode: asSandboxMode(body.sandbox_mode),
     max_concurrency: asMaxConcurrency(body.max_concurrency),
   };
@@ -535,7 +542,7 @@ function defaultAgentInput(body: Record<string, unknown>) {
   const reasoning_effort = cleanString(body.reasoning_effort, 20) as AgentReasoningEffort;
   if (!model) throw new Error("invalid_agent_model");
   if (!reasoning_effort) throw new Error("invalid_agent_reasoning_effort");
-  return { model, reasoning_effort, sandbox_mode: asSandboxMode(body.sandbox_mode), max_concurrency: asMaxConcurrency(body.max_concurrency) };
+  return { model, reasoning_effort, service_tier: asServiceTier(body.service_tier), sandbox_mode: asSandboxMode(body.sandbox_mode), max_concurrency: asMaxConcurrency(body.max_concurrency) };
 }
 
 function asAgentAvatar(value: unknown) {

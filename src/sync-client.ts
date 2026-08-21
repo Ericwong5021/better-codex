@@ -255,6 +255,7 @@ export class SyncClient {
         scheduler_reasoning_effort: this.store.getSchedulerReasoningEffort(),
         default_agent_model: defaultAgent.model,
         default_agent_reasoning_effort: defaultAgent.reasoning_effort,
+        default_agent_service_tier: defaultAgent.service_tier,
       } : {}),
     };
   }
@@ -397,7 +398,7 @@ export class SyncClient {
       name: profile.name,
       name_en: profile.name_en,
       description: profile.description,
-      ...(protocolVersion !== legacySyncProtocolVersion ? { model: profile.model, reasoning_effort: profile.reasoning_effort } : {}),
+      ...(protocolVersion !== legacySyncProtocolVersion ? { model: profile.model, reasoning_effort: profile.reasoning_effort, service_tier: profile.service_tier } : {}),
       avatar: this.store.getAgentAvatar(profile.id),
       version: profile.version,
       created_at: profile.created_at,

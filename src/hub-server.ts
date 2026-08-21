@@ -176,7 +176,7 @@ function issueForWeb(issue: ReturnType<HubStore["board"]>["issues"][number]) {
 function agentsForWeb(board: ReturnType<HubStore["board"]>) {
   const runtime = board.runtime;
   return [
-    { id: "", role: "codex", name: "Codex", name_en: "Codex", description: "", instructions: "", model: runtime?.default_agent_model || "", reasoning_effort: runtime?.default_agent_reasoning_effort || "", sandbox_mode: "workspace-write", max_concurrency: 5, version: 1, created_at: "", updated_at: "", avatar: board.default_avatar, is_default: true, remote_read_only: true },
+    { id: "", role: "codex", name: "Codex", name_en: "Codex", description: "", instructions: "", model: runtime?.default_agent_model || "", reasoning_effort: runtime?.default_agent_reasoning_effort || "", service_tier: runtime?.default_agent_service_tier || "default", sandbox_mode: "workspace-write", max_concurrency: 5, version: 1, created_at: "", updated_at: "", avatar: board.default_avatar, is_default: true, remote_read_only: true },
     ...board.agents.map(agent => ({ ...agent, instructions: "", sandbox_mode: "workspace-write", max_concurrency: 5, is_default: false, remote_read_only: true })),
   ];
 }

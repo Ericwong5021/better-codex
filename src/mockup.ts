@@ -224,6 +224,7 @@ function normalizeAgent(value: unknown, index: number): MockupRecord {
     instructions,
     model: String(source.model || "gpt-5.6-sol"),
     reasoning_effort: String(source.reasoning_effort || "medium"),
+    service_tier: source.service_tier === "fast" ? "fast" : "default",
     sandbox_mode: String(source.sandbox_mode || "workspace-write"),
     is_default: isDefault,
     max_concurrency: maxConcurrency,

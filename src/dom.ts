@@ -70,6 +70,7 @@ import {
   UserRoundX,
   Wrench,
   X,
+  Zap,
 } from "lucide-static";
 
 function lucideDefinition(svg: string) {
@@ -107,6 +108,7 @@ const lucideIcons = Object.fromEntries(Object.entries({
   bug: Bug,
   terminal: Terminal,
   wrench: Wrench,
+  fast: Zap,
   code: FileCode2,
   test: FlaskConical,
   docs: BookOpen,
@@ -390,7 +392,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const availableSurfaces = ["issues", "agents", ...(hasFeature("project-management") ? ["projects"] : [])];
     const initialProjectRoute = hasFeature("project-management") ? webProjectRoute() : null;
     if (HOST_KIND === "web" && !hasFeature("project-management") && /^\\/web\\/projects(?:\\/|$)/.test(location.pathname)) history.replaceState({ betterCodex: true, betterCodexSurface: "issues" }, "", "/web");
-    const state = { projects: [], projectsLoaded: false, issues: [], issuesLoaded: false, projectIssues: [], projectIssuesProjectId: "", projectDetailId: initialProjectRoute?.projectId || "", projectDocumentView: "charter", projectDocumentPending: null, projectDocumentError: null, agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: initialProjectRoute ? "projects" : availableSurfaces.includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, autoDispatchPending: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", mockup: false, keepCreate: rememberedKeepCreate, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], project: [], label: [] } };
+    const state = { projects: [], projectsLoaded: false, issues: [], issuesLoaded: false, projectIssues: [], projectIssuesProjectId: "", projectDetailId: initialProjectRoute?.projectId || "", projectDocumentView: "charter", projectDocumentPending: null, projectDocumentError: null, agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: initialProjectRoute ? "projects" : availableSurfaces.includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, autoDispatchPending: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", issueDescriptionLimit: 100000, mockup: false, keepCreate: rememberedKeepCreate, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], project: [], label: [] } };
     const pendingIssueRemovals = new Map();
     function webProjectRoute() {
       if (HOST_KIND !== "web") return null;
@@ -563,7 +565,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "新建": "New", "新建 issue": "New issue", "新建任务": "New task", "新建智能体": "New agent", "创建": "Create", "创建任务": "Create task", "删除": "Delete", "删除任务": "Delete task", "删除智能体": "Delete agent", "保存": "Save", "确认": "Confirm", "取消": "Cancel", "关闭": "Close", "返回": "Back", "重试": "Retry", "稍后": "Later", "展开": "Expand", "全屏": "Full screen", "缩小": "Minimize", "退出全屏": "Exit full screen", "缩放头像": "Zoom avatar",
       "项目": "Project", "无项目": "No project", "选择项目": "Select project", "选择责任人": "Select owner", "选择执行智能体": "Select agent", "更多创建选项": "More creation options", "任务标题": "Task title", "添加描述...": "Add description...", "添加标签": "Add label", "添加附件": "Add attachment", "移除附件": "Remove attachment", "搜索任务": "Search tasks", "搜索项目": "Search projects", "搜索项目...": "Search projects...", "搜索智能体": "Search agents",
       "负责人": "Owner", "创建者": "Creator", "指定负责人": "Assign owner", "由我创建": "Created by me", "由我": "By me", "我": "Me", "你": "You", "未指派": "Not assigned", "未提供": "Not provided", "已同步": "Synced",
-      "自动运行": "Auto-run", "手动运行": "Manual run", "切换为自动运行": "Switch to auto-run", "切换为手动运行": "Switch to manual run", "切换到智能体": "Switch to agents", "手动创建": "Manual creation", "通过智能体创建": "Create with agent", "运行模式说明": "Run mode", "帮助与设置": "Help and settings", "设置": "Settings", "快捷键": "Shortcuts", "快捷键设置": "Keyboard shortcuts", "为常用操作设置键盘快捷键。": "Set keyboard shortcuts for common actions.", "创建 Issue": "Create Issue", "打开创建 Issue 窗口": "Open the Create Issue window", "设置快捷键": "Set shortcut", "点击录入": "Click to record", "按下新的快捷键": "Press a new shortcut", "未设置": "Not set", "清除快捷键": "Clear shortcut", "关于": "About", "会话结束提醒": "Session completion alerts", "Issue 会话结束后在当前窗口显示提醒": "Show an alert in the current window when an issue session ends", "弹窗持续时间": "Popup duration", "1 秒": "1 second", "5 秒": "5 seconds", "10 秒": "10 seconds", "永久": "Permanent", "会话已结束": "Session ended", "通知": "Notifications", "语言": "Language", "界面语言": "Interface language", "选择 Better Codex 的界面语言": "Choose the language used by Better Codex", "调度": "Scheduling", "调度器模型": "Scheduler model", "这个模型用于 Issue 状态调度": "This model is used for Issue status routing", "调度器思考强度": "Scheduler reasoning effort", "这个强度用于 Issue 状态调度": "This level is used for Issue status routing", "跟随系统": "System", "中文": "Chinese", "软件更新": "Software updates", "更新状态": "Update status", "检查新版本": "Check for updates", "检查中…": "Checking…", "发现新版本": "Update available", "无法检查更新": "Unable to check", "版本信息": "Version info", "兼容版本": "Compatibility version", "运行状态": "Runtime status", "运行正常": "Running", "正在检查": "Checking", "已是最新版本": "Up to date", "从开始到完成，让 Codex 里的工作清晰可见。": "From start to finish, keep your work in Codex clear and visible.", "如果你喜欢 Better Codex，欢迎给我们一个 Star。": "If you like Better Codex, please give us a Star.", "最大并发": "Max concurrency", "模型": "Model", "推理": "Reasoning", "指令": "Instructions", "默认": "Default", "自定义": "Custom",
+      "自动运行": "Auto-run", "手动运行": "Manual run", "切换为自动运行": "Switch to auto-run", "切换为手动运行": "Switch to manual run", "切换到智能体": "Switch to agents", "手动创建": "Manual creation", "通过智能体创建": "Create with agent", "运行模式说明": "Run mode", "帮助与设置": "Help and settings", "设置": "Settings", "快捷键": "Shortcuts", "快捷键设置": "Keyboard shortcuts", "为常用操作设置键盘快捷键。": "Set keyboard shortcuts for common actions.", "创建 Issue": "Create Issue", "打开创建 Issue 窗口": "Open the Create Issue window", "设置快捷键": "Set shortcut", "点击录入": "Click to record", "按下新的快捷键": "Press a new shortcut", "未设置": "Not set", "清除快捷键": "Clear shortcut", "关于": "About", "会话结束提醒": "Session completion alerts", "Issue 会话结束后在当前窗口显示提醒": "Show an alert in the current window when an issue session ends", "弹窗持续时间": "Popup duration", "1 秒": "1 second", "5 秒": "5 seconds", "10 秒": "10 seconds", "永久": "Permanent", "会话已结束": "Session ended", "通知": "Notifications", "语言": "Language", "界面语言": "Interface language", "选择 Better Codex 的界面语言": "Choose the language used by Better Codex", "调度": "Scheduling", "调度器模型": "Scheduler model", "这个模型用于 Issue 状态调度": "This model is used for Issue status routing", "调度器思考强度": "Scheduler reasoning effort", "这个强度用于 Issue 状态调度": "This level is used for Issue status routing", "跟随系统": "System", "中文": "Chinese", "软件更新": "Software updates", "更新状态": "Update status", "检查新版本": "Check for updates", "检查中…": "Checking…", "发现新版本": "Update available", "无法检查更新": "Unable to check", "版本信息": "Version info", "兼容版本": "Compatibility version", "运行状态": "Runtime status", "运行正常": "Running", "正在检查": "Checking", "已是最新版本": "Up to date", "从开始到完成，让 Codex 里的工作清晰可见。": "From start to finish, keep your work in Codex clear and visible.", "如果你喜欢 Better Codex，欢迎给我们一个 Star。": "If you like Better Codex, please give us a Star.", "最大并发": "Max concurrency", "模型": "Model", "推理": "Reasoning", "Fast": "Fast", "更快响应，增加用量": "Faster responses with increased usage", "指令": "Instructions", "默认": "Default", "自定义": "Custom",
       "点击": "Click", "，或者在已完成的会话卡片中": ", or use", "新消息，智能体才会执行任务。": "to post a new message in a completed conversation card. Only then will the agent run the task.", "会主动执行分配给自己的任务，但是不会执行": "automatically runs tasks assigned to it, but does not run", "区域的任务。": "tasks.",
       "代码审查": "Code review", "问题排查": "Troubleshooting", "前端实现": "Frontend implementation", "文档写作": "Documentation", "创意探索": "Creative exploration", "终端工程": "Terminal engineering", "通用助手": "General assistant", "修复工具": "Fixer", "安全审查": "Security review", "测试验证": "Test verification", "插件": "Plugins", "数据与存储": "Data and storage", "检查改动的正确性、回归风险和可维护性": "Review changes for correctness, regression risk, and maintainability", "负责 Codex 原生风格的界面实现与视觉验证": "Build and visually verify interfaces in the native Codex style", "定位崩溃、回归和异常行为的根因": "Find the root cause of crashes, regressions, and unexpected behavior",
       "通用任务处理": "General task handling", "代码实现": "Code implementation", "最大": "Maximum", "极致": "Ultra", "发送": "Send", "副本": "Copy", "复制卡片": "Copy card", "更多操作": "More actions", "本次启动关闭": "Disable for this launch", "正在重启 Better Codex": "Restarting Better Codex", "正在下载并校验新版本，请保持 Codex 打开。": "Downloading and verifying the update. Keep Codex open.", "正在重启 Better Codex Runtime，稍后会自动恢复。": "Restarting Better Codex Runtime. It will recover shortly.", "Better Codex 已恢复到上一版本。": "Better Codex has been restored to the previous version.",
@@ -784,7 +786,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     Object.assign(localeResources.en, {
       "错误报告": "Error report",
       "发生了一个错误": "An error occurred",
-      "完整错误、请求信息和相关日志已保留，可直接复制给开发者。": "The full error, request details, and related logs are ready to copy.",
+      "错误信息、请求信息和直接相关日志已保留，可直接复制给开发者。": "The error, request details, and directly related logs are ready to copy.",
       "上一条": "Previous",
       "下一条": "Next",
       "复制当前错误": "Copy current error",
@@ -792,6 +794,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "移除当前错误": "Remove current error",
       "复制失败": "Copy failed",
       "列表数据暂时无法读取，请稍后重试。": "List data is temporarily unavailable. Try again shortly.",
+      "任务内容超过长度限制，请缩短内容或作为附件上传。": "The task content is too long. Shorten it or upload it as an attachment.",
+      "网络连接不稳定，正在等待恢复。": "The network connection is unstable. Waiting to reconnect.",
     });
     const bridgeRequests = new Map();
     const appServerRequests = new Map();
@@ -821,6 +825,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     let pollTimer = null;
     let liveUnsubscribe = null;
     let liveDirty = false;
+    let passiveNetworkErrorVisible = false;
     let updateTimer = null;
     let relayTimer = null;
     let relayBusy = false;
@@ -1947,10 +1952,17 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       };
     }
 
+    function transientNetworkError(error) {
+      const message = error instanceof Error ? error.message : String(error || "");
+      const failureType = String(error?.betterCodexDiagnostics?.failure_type || "");
+      return failureType === "network_transport" || ["browser_transport_failed", "Failed to fetch", "NetworkError when attempting to fetch resource."].includes(message);
+    }
+
     function api(path, options = {}) {
       const method = String(options.method || "GET").toUpperCase();
       const requestPath = path + (path.includes("?") ? "&" : "?") + "locale=" + encodeURIComponent(state.locale);
       const commandId = method === "GET" ? "" : globalThis.crypto?.randomUUID?.() || VERSION + "-command-" + Date.now() + "-" + Math.random().toString(36).slice(2);
+      const traceId = globalThis.crypto?.randomUUID?.() || VERSION + "-trace-" + Date.now() + "-" + Math.random().toString(36).slice(2);
       const removalMatch = path.match(/^\\/api\\/issues\\/([^\\/?]+)(?:\\/(archive))?(?:\\?.*)?$/);
       const removalId = removalMatch && (method === "DELETE" || method === "POST" && removalMatch[2] === "archive") ? decodeURIComponent(removalMatch[1]) : "";
       const removalIssue = removalId ? state.issues.find(issue => issue.id === removalId) : null;
@@ -1961,15 +1973,15 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       }
       const startedAt = Date.now();
       const bodyBytes = typeof options.body === "string" ? new TextEncoder().encode(options.body).byteLength : 0;
-      appendDiagnostic("api_request", { method, path: requestPath, command_id: commandId, request_body_bytes: bodyBytes });
+      appendDiagnostic("api_request", { trace_id: traceId, method, path: requestPath, command_id: commandId, request_body_bytes: bodyBytes });
       if (READ_ONLY && method !== "GET") {
         const error = new Error("remote_read_only");
-        reportGlobalError(error, { source: "api", method, path: requestPath, command_id: commandId, request_body_bytes: bodyBytes });
+        reportGlobalError(error, { source: "api", trace_id: traceId, method, path: requestPath, command_id: commandId, request_body_bytes: bodyBytes });
         return Promise.reject(error);
       }
       const attempt = (retriesLeft) => {
         if (typeof window.betterCodexHost?.request === "function") {
-          return Promise.resolve(window.betterCodexHost.request({ path: requestPath, method: options.method || "GET", body: options.body, timeoutMs: options.timeoutMs, commandId })).catch(error => {
+          return Promise.resolve(window.betterCodexHost.request({ path: requestPath, method: options.method || "GET", body: options.body, timeoutMs: options.timeoutMs, commandId, traceId })).catch(error => {
             if (retriesLeft > 0 && error instanceof Error && ["runtime_bridge_timeout", "runtime_response_invalid"].includes(error.message)) return attempt(retriesLeft - 1);
             throw error;
           });
@@ -1983,7 +1995,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           }, Number(options.timeoutMs) || 10000);
           bridgeRequests.set(id, { resolve, reject, timer });
           try {
-            window.betterCodexRequest(JSON.stringify({ id, token: BRIDGE_TOKEN, path: requestPath, method: options.method || "GET", body: options.body, timeoutMs: options.timeoutMs, commandId }));
+            window.betterCodexRequest(JSON.stringify({ id, token: BRIDGE_TOKEN, path: requestPath, method: options.method || "GET", body: options.body, timeoutMs: options.timeoutMs, commandId, traceId }));
           } catch (error) {
             bridgeRequests.delete(id);
             clearTimeout(timer);
@@ -1997,7 +2009,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         });
       };
       return attempt(method === "GET" ? 1 : 0).then(value => {
-        appendDiagnostic("api_response", { method, path: requestPath, command_id: commandId, elapsed_ms: Date.now() - startedAt });
+        appendDiagnostic("api_response", { trace_id: traceId, method, path: requestPath, command_id: commandId, elapsed_ms: Date.now() - startedAt });
         if (removalId && value?.queued === true) settleIssueRemoval(removalId, commandId);
         else if (removalId) pendingIssueRemovals.delete(removalId);
         return value;
@@ -2010,8 +2022,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             render();
           }
         }
-        appendDiagnostic("api_failure", { method, path: requestPath, command_id: commandId, request_body_bytes: bodyBytes, elapsed_ms: Date.now() - startedAt, error: error instanceof Error ? error.message : String(error || "request_failed"), diagnostics: error?.betterCodexDiagnostics || {} });
-        reportGlobalError(error, { source: "api", method, path: requestPath, command_id: commandId, request_body_bytes: bodyBytes, elapsed_ms: Date.now() - startedAt });
+        appendDiagnostic("api_failure", { trace_id: traceId, method, path: requestPath, command_id: commandId, request_body_bytes: bodyBytes, elapsed_ms: Date.now() - startedAt, error: error instanceof Error ? error.message : String(error || "request_failed") });
+        if (!options.passive || !transientNetworkError(error)) reportGlobalError(error, { source: "api", trace_id: traceId, method, path: requestPath, command_id: commandId, request_body_bytes: bodyBytes, elapsed_ms: Date.now() - startedAt });
         throw error;
       });
     }
@@ -2053,15 +2065,15 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       throw error;
     }
 
-    async function requestList(path, kind) {
-      const key = kind + ":" + path;
+    async function requestList(path, kind, options = {}) {
+      const key = kind + ":" + path + ":" + String(Boolean(options.passive));
       if (listRequests.has(key)) return listRequests.get(key);
       const request = (async () => {
         try {
-          return listResponse(await api(path), path, kind);
+          return listResponse(await api(path, options), path, kind);
         } catch (error) {
           if (!(error instanceof Error) || error.message !== "invalid_" + kind + "_response") throw error;
-          return listResponse(await api(path), path, kind);
+          return listResponse(await api(path, options), path, kind);
         }
       })();
       listRequests.set(key, request);
@@ -2072,8 +2084,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       }
     }
 
-    function requestProjects() {
-      return requestList("/api/projects", "projects");
+    function requestProjects(options = {}) {
+      return requestList("/api/projects", "projects", options);
     }
 
     function startLiveUpdates() {
@@ -2084,15 +2096,20 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           liveDirty = true;
           return;
         }
-        if (active && !panel?.dataset.recovery) void perform(() => REMOTE ? Promise.all([loadSurface({ background: true }), loadAutoDispatch()]) : loadSurface({ background: true }));
+        if (active && !panel?.dataset.recovery) void perform(() => REMOTE ? Promise.all([loadSurface({ background: true }), loadAutoDispatch({ background: true })]) : loadSurface({ background: true }), { background: true });
       });
       return typeof liveUnsubscribe === "function";
     }
 
     function onVisibilityChange() {
-      if (document.hidden || !liveDirty || !active || panel?.dataset.recovery) return;
+      if (document.hidden || (!liveDirty && !passiveNetworkErrorVisible) || !active || panel?.dataset.recovery) return;
       liveDirty = false;
-      void perform(() => REMOTE ? Promise.all([loadSurface({ background: true }), loadAutoDispatch()]) : loadSurface({ background: true }));
+      void perform(() => REMOTE ? Promise.all([loadSurface({ background: true }), loadAutoDispatch({ background: true })]) : loadSurface({ background: true }), { background: true });
+    }
+
+    function onNetworkOnline() {
+      if (!active || panel?.dataset.recovery) return;
+      void perform(() => REMOTE ? Promise.all([loadSurface({ background: true }), loadAutoDispatch({ background: true })]) : loadSurface({ background: true }), { background: true });
     }
 
     function appServerError(value) {
@@ -2238,6 +2255,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (payload.workspace_path) params.cwd = String(payload.workspace_path);
       if (payload.model) params.model = String(payload.model);
       if (payload.effort) params.effort = String(payload.effort);
+      if (payload.service_tier) params.serviceTier = String(payload.service_tier);
       return params;
     }
 
@@ -2274,6 +2292,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             sandbox: String(payload.sandbox_mode || "workspace-write")
           };
           if (payload.model) params.model = String(payload.model);
+          if (payload.service_tier) params.serviceTier = String(payload.service_tier);
           if (payload.developer_instructions) params.developerInstructions = String(payload.developer_instructions);
           const started = await sendAppServerRequest("thread/start", params);
           threadId = normalizeSessionId(started?.thread?.id);
@@ -2561,6 +2580,25 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (diagnosticLog.length > 80) diagnosticLog.splice(0, diagnosticLog.length - 80);
     }
 
+    function relatedDiagnosticLogs(record) {
+      const keys = ["trace_id", "command_id", "request_id", "issue_id", "issue_identifier", "thread_id", "turn_id"];
+      const sources = [record.context || {}, record.diagnostics || {}];
+      const traceId = sources.map(source => String(source.trace_id || "")).find(Boolean);
+      const hostTimeline = Array.isArray(record.diagnostics?.trace_timeline) ? record.diagnostics.trace_timeline : [];
+      if (traceId) return [...hostTimeline, ...diagnosticLog.filter(log => String(log.trace_id || "") === traceId)].sort((left, right) => String(left.time || "").localeCompare(String(right.time || ""))).slice(-8);
+      const correlations = new Map(keys.map(key => [key, sources.map(source => String(source[key] || "")).filter(Boolean)]));
+      const paths = sources.flatMap(source => [source.path, source.response_path]).map(value => String(value || "")).filter(Boolean);
+      const message = String(record.message || "");
+      const matchesCorrelation = log => keys.some(key => correlations.get(key).includes(String(log[key] || ""))) || paths.includes(String(log.path || log.response_path || ""));
+      const matchesFailure = log => /error|fail|invalid|reject|timeout/i.test(String(log.event || "")) || String(log.error || log.message || "") === message;
+      const failures = diagnosticLog.filter(log => log.id === record.id || matchesFailure(log) && (matchesCorrelation(log) || String(log.error || log.message || "") === message)).slice(-4);
+      const firstFailure = failures[0];
+      if (!firstFailure) return [];
+      const firstFailureIndex = diagnosticLog.indexOf(firstFailure);
+      const request = diagnosticLog.slice(0, firstFailureIndex).reverse().find(log => log.event === "api_request" && matchesCorrelation(log));
+      return request ? [request, ...failures].slice(-5) : failures;
+    }
+
     function errorCause(error) {
       const causes = [];
       let current = error?.cause;
@@ -2571,11 +2609,44 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       return causes;
     }
 
+    function compactFields(fields) {
+      return Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== "" && value !== null && value !== undefined));
+    }
+
+    function compactErrorRecord(record) {
+      const context = record.context || {};
+      const diagnostics = record.diagnostics || {};
+      const traceId = String(context.trace_id || diagnostics.trace_id || "");
+      const source = String(context.source || diagnostics.source || "application");
+      const stage = record.message === "browser_transport_failed" ? "browser_transport" : diagnostics.relay_channel_id ? "relay_runtime_transport" : source === "api" || diagnostics.source === "web_host_request" ? "runtime_request" : source;
+      const outcome = diagnostics.relay_request_ended === true && diagnostics.relay_response_started !== true ? "request_sent_result_unknown" : diagnostics.relay_response_started === true ? "response_started" : record.message === "runtime_offline" ? "request_not_forwarded" : "request_failed";
+      const checks = {
+        browser_transport_failed: "browser_network_and_relay_health",
+        relay_stream_interrupted: "request_receipt_and_relay_connection",
+        runtime_socket_closed: "request_receipt_and_relay_connection",
+        runtime_offline: "runtime_process_and_relay_connection",
+        runtime_bridge_timeout: "runtime_health_and_request_receipt",
+      };
+      const timeline = Array.isArray(record.related_logs) ? record.related_logs : [];
+      const lastCheckpoint = timeline.filter(entry => entry.event !== "error_reported").at(-1)?.event || "";
+      const report = {
+        time: record.time,
+        error: compactFields({ code: record.message, message: record.display_message, type: record.name }),
+        diagnosis: compactFields({ stage, outcome, last_checkpoint: lastCheckpoint, next_check: checks[record.message] || "matching_trace_timeline" }),
+        trace: compactFields({ trace_id: traceId, command_id: context.command_id || diagnostics.command_id, request_id: diagnostics.response_request_id || context.request_id, channel_id: diagnostics.relay_channel_id, connection_epoch: diagnostics.relay_connection_epoch, runtime_instance_id: diagnostics.relay_runtime_instance_id }),
+        request: compactFields({ method: context.method || diagnostics.method, path: context.path || diagnostics.path, http_status: diagnostics.http_status, elapsed_ms: context.elapsed_ms || diagnostics.elapsed_ms, attempt_count: diagnostics.attempt_count, request_ended: diagnostics.relay_request_ended, response_started: diagnostics.relay_response_started, replay_attempts: diagnostics.relay_replay_attempts }),
+        timeline,
+        occurrences: record.occurrences,
+      };
+      if (["window_error", "unhandled_rejection"].includes(source) && record.stack) report.stack = String(record.stack).split("\n").slice(0, 8).join("\n");
+      return report;
+    }
+
     function formatErrorReport(records) {
       return JSON.stringify({
         report: "Better Codex error report",
         exported_at: new Date().toISOString(),
-        errors: records,
+        errors: records.map(compactErrorRecord),
       }, null, 2);
     }
 
@@ -2598,7 +2669,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       dialog.setAttribute(OWNED, "true");
       dialog.setAttribute("aria-labelledby", "better-codex-error-report-title");
       dialog.setAttribute("aria-describedby", "better-codex-error-report-description");
-      dialog.innerHTML = '<div class="better-codex-error-report-shell"><header class="better-codex-error-report-head"><span class="better-codex-error-report-icon" aria-hidden="true">' + icon("permissionDanger") + '</span><div><h2 id="better-codex-error-report-title">' + te("错误报告") + '</h2><p id="better-codex-error-report-description">' + te("完整错误、请求信息和相关日志已保留，可直接复制给开发者。") + '</p></div><button class="better-codex-error-report-close" type="button" data-error-report-close aria-label="' + te("关闭") + '">' + icon("close") + '</button></header><section class="better-codex-error-report-summary"><strong data-error-report-message>' + te("发生了一个错误") + '</strong><span data-error-report-time></span></section><pre class="better-codex-error-report-detail" data-error-report-detail tabindex="0"></pre><footer class="better-codex-error-report-footer"><div class="better-codex-error-report-navigation"><button type="button" data-error-report-previous>' + te("上一条") + '</button><output data-error-report-counter>1 / 1</output><button type="button" data-error-report-next>' + te("下一条") + '</button></div><div class="better-codex-error-report-actions"><button type="button" data-error-report-dismiss>' + te("移除当前错误") + '</button><button type="button" data-error-report-copy-all>' + te("复制全部错误") + '</button><button class="is-primary" type="button" data-error-report-copy>' + te("复制当前错误") + '</button></div></footer></div>';
+      dialog.innerHTML = '<div class="better-codex-error-report-shell"><header class="better-codex-error-report-head"><span class="better-codex-error-report-icon" aria-hidden="true">' + icon("permissionDanger") + '</span><div><h2 id="better-codex-error-report-title">' + te("错误报告") + '</h2><p id="better-codex-error-report-description">' + te("错误信息、请求信息和直接相关日志已保留，可直接复制给开发者。") + '</p></div><button class="better-codex-error-report-close" type="button" data-error-report-close aria-label="' + te("关闭") + '">' + icon("close") + '</button></header><section class="better-codex-error-report-summary"><strong data-error-report-message>' + te("发生了一个错误") + '</strong><span data-error-report-time></span></section><pre class="better-codex-error-report-detail" data-error-report-detail tabindex="0"></pre><footer class="better-codex-error-report-footer"><div class="better-codex-error-report-navigation"><button type="button" data-error-report-previous>' + te("上一条") + '</button><output data-error-report-counter>1 / 1</output><button type="button" data-error-report-next>' + te("下一条") + '</button></div><div class="better-codex-error-report-actions"><button type="button" data-error-report-dismiss>' + te("移除当前错误") + '</button><button type="button" data-error-report-copy-all>' + te("复制全部错误") + '</button><button class="is-primary" type="button" data-error-report-copy>' + te("复制当前错误") + '</button></div></footer></div>';
       const copyRecords = async (button, records) => {
         const label = button.textContent;
         try {
@@ -2658,7 +2729,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           user_agent: navigator.userAgent,
           viewport: String(window.innerWidth) + "x" + String(window.innerHeight),
         },
-        related_logs: diagnosticLog.slice(-30),
+        related_logs: [],
         occurrences: 1,
         occurrence_times: [new Date().toISOString()],
       };
@@ -2666,10 +2737,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const repeatedIndex = errorQueue.findIndex(item => item.fingerprint === fingerprint);
       if (repeatedIndex >= 0) {
         const repeated = errorQueue[repeatedIndex];
+        repeated.time = record.time;
+        repeated.context = record.context;
+        repeated.diagnostics = record.diagnostics;
         repeated.occurrences += 1;
         repeated.occurrence_times.push(record.time);
         if (repeated.occurrence_times.length > 20) repeated.occurrence_times.shift();
-        repeated.related_logs = diagnosticLog.slice(-30);
+        repeated.related_logs = relatedDiagnosticLogs(repeated);
         errorQueueIndex = repeatedIndex;
         const dialog = ensureErrorDialog();
         renderErrorDialog();
@@ -2677,8 +2751,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         return repeated.id;
       }
       record.fingerprint = fingerprint;
-      appendDiagnostic("error_reported", { id: record.id, message: record.message, source: record.context.source });
-      record.related_logs = diagnosticLog.slice(-30);
+      appendDiagnostic("error_reported", { id: record.id, trace_id: record.context.trace_id || record.diagnostics.trace_id || "", message: record.message, source: record.context.source });
+      record.related_logs = relatedDiagnosticLogs(record);
       errorQueue.push(record);
       if (errorQueue.length > 50) errorQueue.shift();
       errorQueueIndex = errorQueue.length - 1;
@@ -2716,6 +2790,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (value === "manual_start_required") return t("当前为手动运行，请先点击“立即开始任务”。");
       if (value === "backlog_reply_blocked") return t("待规划中的 Issue 不会自动触发任务，请先移出待规划区。");
       if (value === "project_required") return t("无法确定会话所属项目。请先把会话放入一个项目。");
+      if (value === "issue_description_too_long") return t("任务内容超过长度限制，请缩短内容或作为附件上传。");
+      if (value === "browser_transport_failed") return t("网络连接不稳定，正在等待恢复。");
       if (["runtime_response_invalid", "invalid_projects_response", "invalid_issues_response", "invalid_agents_response"].includes(value)) return t("列表数据暂时无法读取，请稍后重试。");
       if (value === "issue_archived") return t("该会话对应的 Issue 已归档，请先取消归档。");
       if (["project_overview_timeout", "project_overview_unavailable", "project_document_invalid_output", "remote_command_timeout", "workspace_missing"].includes(value)) return projectDocumentErrorLabel(value);
@@ -2739,6 +2815,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function showError(error) {
+      passiveNetworkErrorVisible = false;
       reportGlobalError(error, { source: "ui_action" });
       state.error = errorLabel(error);
       const output = panel?.querySelector("#better-codex-error");
@@ -2748,7 +2825,24 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       }
     }
 
+    function showPassiveNetworkError() {
+      if (state.error && !passiveNetworkErrorVisible) return;
+      passiveNetworkErrorVisible = true;
+      state.error = t("网络连接不稳定，正在等待恢复。");
+      const output = panel?.querySelector("#better-codex-error");
+      if (output) {
+        output.textContent = state.error;
+        output.hidden = false;
+      }
+    }
+
+    function clearPassiveNetworkError() {
+      if (!passiveNetworkErrorVisible) return;
+      clearError();
+    }
+
     function clearError() {
+      passiveNetworkErrorVisible = false;
       state.error = "";
       const output = panel?.querySelector("#better-codex-error");
       if (output) {
@@ -2960,8 +3054,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     async function checkUpdateNotice() {
       try {
-        renderUpdateNotice(await api("/api/update"));
-      } catch {
+        renderUpdateNotice(await api("/api/update", { passive: true }));
+        clearPassiveNetworkError();
+      } catch (error) {
+        if (transientNetworkError(error)) showPassiveNetworkError();
       }
     }
 
@@ -3130,11 +3226,17 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (!permanent) completionNoticeTimers.set(notice, setTimeout(() => dismiss(true), remaining));
     }
 
-    async function perform(action) {
-      clearError();
+    async function perform(action, options = {}) {
+      if (!options.background) clearError();
       try {
-        return await action();
+        const result = await action();
+        if (options.background) clearPassiveNetworkError();
+        return result;
       } catch (error) {
+        if (options.background && transientNetworkError(error)) {
+          showPassiveNetworkError();
+          return null;
+        }
         showError(error);
         return null;
       }
@@ -3646,7 +3748,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const noneSelected = !issue.user_assigned && !issue.agent_enabled;
       const userName = state.user.name || t("我");
       const userAvatar = '<span class="better-codex-context-avatar is-user is-initials" style="background:' + escapeHtml(state.user.color || "#16a34a") + '">' + escapeHtml(state.user.initials || t("你")) + '</span>';
-      const contextAssigneeTags = agent => agentConfigTags(agent).map(tag => '<span class="better-codex-context-tag" data-tone="' + escapeHtml(tag.tone) + '">' + escapeHtml(tag.value) + '</span>').join("");
+      const contextAssigneeTags = agent => agentConfigTags(agent).map(tag => '<span class="better-codex-context-tag" data-tone="' + escapeHtml(tag.tone) + '">' + escapeHtml(tag.value) + (tag.fast ? fastMark() : "") + '</span>').join("");
       const contextAssigneeLabel = (name, tags = "") => '<span class="better-codex-context-assignee-label"><span class="better-codex-context-assignee-name">' + escapeHtml(name) + '</span>' + tags + '</span>';
       const unassignedAvatar = '<span class="better-codex-context-avatar is-fallback">' + icon("user") + '</span>';
       const assigneeItems = [
@@ -4298,10 +4400,19 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       return ({ medium: "mid" })[raw] || raw;
     }
 
+    function modelSupportsFast(model) {
+      const entry = state.agentModelCatalog.find(item => item.id === model);
+      return entry?.serviceTiers?.some(tier => ["fast", "priority"].includes(String(tier.id || "").toLowerCase()) || String(tier.name || "").toLowerCase() === "fast") === true;
+    }
+
+    function fastMark() {
+      return '<span class="better-codex-fast-mark" title="Fast" aria-label="Fast">' + icon("fast", "", "2") + '</span>';
+    }
+
     function agentConfigTags(agent) {
       const model = modelTag(agent?.model);
       const reasoning = reasoningTag(agent?.reasoning_effort);
-      return [model ? { value: model, tone: "model" } : null, reasoning ? { value: reasoning, tone: "reasoning" } : null].filter(Boolean);
+      return [model ? { value: model, tone: "model", fast: agent?.service_tier === "fast" } : null, reasoning ? { value: reasoning, tone: "reasoning" } : null].filter(Boolean);
     }
 
     function agentOptionLabel(agent, name) {
@@ -4356,6 +4467,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     function agentPicker(name, label, selected, options) {
       const current = options.find(option => option.value === selected) || options[0] || { value: "", label: "未提供" };
+      const fastSuffix = name === "model" ? fastMark() : "";
       const rows = options.map(option => {
         const hasDescription = Boolean(option.description);
         const copy = hasDescription
@@ -4363,13 +4475,17 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           : '<span class="better-codex-agent-menu-item-copy">' + (option.icon ? '<span class="better-codex-agent-menu-item-icon">' + icon(option.icon) + '</span>' : "") + '<span>' + escapeHtml(option.label) + '</span></span>';
         return '<button class="better-codex-agent-menu-item' + (option.value === current.value ? " is-selected" : "") + (option.tone === "warning" ? " is-warning" : "") + '" type="button" role="option" aria-selected="' + (option.value === current.value) + '" data-agent-option="' + escapeHtml(name) + '" data-agent-option-value="' + escapeHtml(option.value) + '">' + copy + '<span class="better-codex-agent-menu-item-check">' + (option.value === current.value ? icon("check") : "") + '</span></button>';
       }).join("");
-      return '<div class="better-codex-agent-setting" data-agent-picker="' + escapeHtml(name) + '"><span>' + escapeHtml(label) + '</span><input type="hidden" name="' + escapeHtml(name) + '" value="' + escapeHtml(current.value) + '"><button class="better-codex-agent-picker-trigger" type="button" role="combobox" aria-haspopup="listbox" aria-expanded="false" data-agent-picker-toggle="' + escapeHtml(name) + '"><span data-agent-picker-label>' + escapeHtml(current.label) + '</span>' + icon("chevron") + '</button><div class="better-codex-agent-menu" role="listbox"><div class="better-codex-agent-menu-title">' + escapeHtml(label) + '</div>' + rows + '</div></div>';
+      return '<div class="better-codex-agent-setting" data-agent-picker="' + escapeHtml(name) + '"><span>' + escapeHtml(label) + '</span><input type="hidden" name="' + escapeHtml(name) + '" value="' + escapeHtml(current.value) + '"><button class="better-codex-agent-picker-trigger" type="button" role="combobox" aria-haspopup="listbox" aria-expanded="false" data-agent-picker-toggle="' + escapeHtml(name) + '"><span data-agent-picker-label>' + escapeHtml(current.label) + '</span>' + fastSuffix + icon("chevron") + '</button><div class="better-codex-agent-menu" role="listbox"><div class="better-codex-agent-menu-title">' + escapeHtml(label) + '</div>' + rows + '</div></div>';
     }
 
     function agentNumberInput(name, label, value, min, max) {
       const numericValue = Number(value);
       const current = Number.isInteger(numericValue) ? Math.min(max, Math.max(min, numericValue)) : 5;
       return '<label class="better-codex-agent-setting"><span>' + escapeHtml(label) + '</span><input class="better-codex-agent-number-input" type="number" name="' + escapeHtml(name) + '" min="' + min + '" max="' + max + '" step="1" value="' + current + '" aria-label="' + escapeHtml(label) + '"></label>';
+    }
+
+    function agentFastToggle(checked, enabled) {
+      return '<label class="better-codex-agent-setting better-codex-agent-fast-setting' + (enabled ? "" : " is-disabled") + '"><span><strong>' + te("Fast") + '</strong><small>' + te("更快响应，增加用量") + '</small></span><span class="better-codex-agent-switch"><input type="checkbox" name="fast" aria-label="Fast"' + (checked ? " checked" : "") + (enabled ? "" : " disabled") + '><i></i></span></label>';
     }
 
     const suggestedAgents = ${JSON.stringify(suggestedAgents)};
@@ -4536,6 +4652,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const instructions = creating ? draft.instructions || "" : draft.instructions || "";
       const defaultModel = state.agentModelCatalog.find(item => item.isDefault) || state.agentModelCatalog[0];
       const model = draft.model || defaultModel?.id || "";
+      const fast = draft.service_tier === "fast";
+      const fastEnabled = !readOnly && (modelSupportsFast(model) || fast);
       let effortOptions = effortsForModel(model);
       const preferredEffort = draft.reasoning_effort || state.agentModelCatalog.find(item => item.id === model)?.defaultReasoningEffort;
       if (preferredEffort && !effortOptions.some(item => item.value === preferredEffort)) effortOptions = [{ value: preferredEffort, label: effortLabel(preferredEffort), description: t("当前模型目录未提供此配置"), tone: "warning" }, ...effortOptions];
@@ -4566,7 +4684,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const resizeHandle = creating ? "" : '<div class="better-codex-agent-inspector-resize" data-agent-inspector-resize role="separator" aria-orientation="vertical" aria-label="' + te("调整侧边栏宽度") + '" tabindex="0"></div>';
       const leading = creating ? '<div class="better-codex-agent-inspector-head-leading"><button class="better-codex-agent-window-back" type="button" data-agent-window-back aria-label="' + te("返回") + '">' + icon("back") + '</button><nav class="better-codex-agent-window-title" aria-label="' + te("智能体") + '"><span>' + te("智能体") + '</span><span aria-hidden="true">&gt;</span><strong>' + te("创建智能体") + '</strong></nav></div>' : '<span>' + heading + '</span>';
       const windowAction = creating ? '<button class="better-codex-agent-card-action" type="button" data-agent-window-expand aria-label="' + te(agentCreateFullscreen ? "退出全屏" : "全屏") + '">' + icon(agentCreateFullscreen ? "shrink" : "expand") + '</button>' : "";
-      return '<' + tag + ' class="better-codex-agent-inspector"' + animateAttr + windowAttr + '>' + resizeHandle + '<form data-agent-form="' + (creating ? "create" : isDefault ? "default" : "update") + '" data-agent-key="' + escapeHtml(creating ? "" : agentKey(draft)) + '"><header class="better-codex-agent-inspector-head">' + leading + '<div class="better-codex-agent-inspector-head-actions">' + windowAction + '<button class="better-codex-agent-card-action" type="button" data-agent-close-pane aria-label="' + te(creating ? "关闭" : "关闭详情") + '">' + icon("close") + '</button></div></header><div class="better-codex-agent-inspector-scroll">' + profileHead + identity + '<h3>' + te("详情") + '</h3><div class="better-codex-agent-inspector-group">' + agentPicker("model", t("模型"), model, modelOptions) + agentPicker("reasoning_effort", t("推理"), effort, effortOptions) + agentPicker("sandbox_mode", t("权限"), sandboxMode, sandboxOptions) + agentNumberInput("max_concurrency", t("最大并发"), draft.max_concurrency, 1, 20) + '</div>' + instructionField + '<div class="better-codex-agent-inspector-error" hidden></div></div>' + (readOnly ? "" : '<footer class="better-codex-agent-inspector-footer">' + deleteButton + '<button class="better-codex-submit" type="submit">' + te(creating ? "创建" : "保存") + '</button></footer>') + '</form></' + tag + '>';
+      return '<' + tag + ' class="better-codex-agent-inspector"' + animateAttr + windowAttr + '>' + resizeHandle + '<form data-agent-form="' + (creating ? "create" : isDefault ? "default" : "update") + '" data-agent-key="' + escapeHtml(creating ? "" : agentKey(draft)) + '"><header class="better-codex-agent-inspector-head">' + leading + '<div class="better-codex-agent-inspector-head-actions">' + windowAction + '<button class="better-codex-agent-card-action" type="button" data-agent-close-pane aria-label="' + te(creating ? "关闭" : "关闭详情") + '">' + icon("close") + '</button></div></header><div class="better-codex-agent-inspector-scroll">' + profileHead + identity + '<h3>' + te("详情") + '</h3><div class="better-codex-agent-inspector-group">' + agentPicker("model", t("模型"), model, modelOptions) + agentFastToggle(fast, fastEnabled) + agentPicker("reasoning_effort", t("推理"), effort, effortOptions) + agentPicker("sandbox_mode", t("权限"), sandboxMode, sandboxOptions) + agentNumberInput("max_concurrency", t("最大并发"), draft.max_concurrency, 1, 20) + '</div>' + instructionField + '<div class="better-codex-agent-inspector-error" hidden></div></div>' + (readOnly ? "" : '<footer class="better-codex-agent-inspector-footer">' + deleteButton + '<button class="better-codex-submit" type="submit">' + te(creating ? "创建" : "保存") + '</button></footer>') + '</form></' + tag + '>';
     }
 
     function renderAgents() {
@@ -4586,9 +4704,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const rows = agents.map(agent => {
         const key = agentKey(agent);
         const avatar = agentAvatarMarkup(agent, "better-codex-agent-list-avatar");
-        const meta = modelLabel(agent.model) + " · " + effortLabel(agent.reasoning_effort) + (state.locale === "zh-CN" ? "推理" : " reasoning");
+        const meta = '<span>' + escapeHtml(modelLabel(agent.model)) + (agent.service_tier === "fast" ? fastMark() : "") + '</span><span aria-hidden="true"> · </span><span>' + escapeHtml(effortLabel(agent.reasoning_effort) + (state.locale === "zh-CN" ? "推理" : " reasoning")) + '</span>';
         const description = state.mockup && agent.is_default ? "" : agent.description || (agent.is_default ? "" : t("尚未添加介绍"));
-        return '<button class="better-codex-agent-row' + (key === state.selectedAgentId ? " is-selected" : "") + '" type="button" data-agent-key="' + escapeHtml(key) + '">' + avatar + '<span class="better-codex-agent-row-copy"><strong>' + escapeHtml(agentDisplayName(agent)) + (agent.is_default ? '<small>' + te("默认") + '</small>' : "") + '</strong>' + (description ? '<span>' + escapeHtml(description) + '</span>' : '') + '<em>' + escapeHtml(meta) + '</em></span><span class="better-codex-agent-row-chevron">' + icon("chevron") + '</span></button>';
+        return '<button class="better-codex-agent-row' + (key === state.selectedAgentId ? " is-selected" : "") + '" type="button" data-agent-key="' + escapeHtml(key) + '">' + avatar + '<span class="better-codex-agent-row-copy"><strong>' + escapeHtml(agentDisplayName(agent)) + (agent.is_default ? '<small>' + te("默认") + '</small>' : "") + '</strong>' + (description ? '<span>' + escapeHtml(description) + '</span>' : '') + '<em>' + meta + '</em></span><span class="better-codex-agent-row-chevron">' + icon("chevron") + '</span></button>';
       }).join("");
       const empty = '<div class="better-codex-agent-list-empty">' + te(query ? "没有匹配的智能体" : "此分类暂无智能体") + '</div>';
       const suggestions = suggestedAgents.map(item => {
@@ -4847,7 +4965,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     async function loadProjects(options = {}) {
-      const projects = await requestProjects();
+      const requestOptions = { passive: Boolean(options.background) };
+      const projects = await requestProjects(requestOptions);
       const projectsChanged = JSON.stringify(projects) !== JSON.stringify(state.projects);
       const pending = state.projectDocumentPending;
       if (pending) {
@@ -4870,8 +4989,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             renderProjects();
           }
           const [activeIssues, archivedIssues] = await Promise.all([
-            requestList("/api/issues?project_id=" + encodeURIComponent(projectId), "issues"),
-            requestList("/api/issues?archived=1&project_id=" + encodeURIComponent(projectId), "issues"),
+            requestList("/api/issues?project_id=" + encodeURIComponent(projectId), "issues", requestOptions),
+            requestList("/api/issues?archived=1&project_id=" + encodeURIComponent(projectId), "issues", requestOptions),
           ]);
           if (state.projectDetailId === projectId) {
             state.projectIssues = [...activeIssues, ...archivedIssues];
@@ -5807,7 +5926,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const issuePath = "/api/issues" + (query.toString() ? "?" + query : "");
       let issues;
       try {
-        issues = await requestList(issuePath, "issues");
+        issues = await requestList(issuePath, "issues", { passive: Boolean(options.background) });
       } catch (error) {
         if (pendingIssueRemovals.size) return state.issues;
         throw error;
@@ -5834,7 +5953,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     async function loadAgents(options = {}) {
-      const agents = await requestList("/api/agents", "agents");
+      const agents = await requestList("/api/agents", "agents", { passive: Boolean(options.background) });
       const changed = JSON.stringify(agents) !== JSON.stringify(state.agents);
       state.agents = agents;
       if (options.preserveInspector && panel?.dataset.surface === "agents" && state.agentPane !== "preview") return;
@@ -5842,8 +5961,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       render();
     }
 
-    async function loadAutoDispatch() {
-      const result = await api("/api/settings/auto-dispatch");
+    async function loadAutoDispatch(options = {}) {
+      const result = await api("/api/settings/auto-dispatch", { passive: Boolean(options.background) });
       state.autoDispatch = result.enabled === true;
       syncAutoDispatch();
       return state.autoDispatch;
@@ -5893,6 +6012,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         state.autoDispatch = Boolean(bootstrap.autoDispatch);
         state.schedulerModel = bootstrap.schedulerModel || state.agentModelCatalog.find(model => model.isDefault)?.id || state.agentModels[0] || "gpt-5.6-sol";
         state.schedulerReasoningEffort = bootstrap.schedulerReasoningEffort || "high";
+        const issueDescriptionLimit = Number(bootstrap.limits?.issue_description);
+        if (Number.isInteger(issueDescriptionLimit) && issueDescriptionLimit > 0) state.issueDescriptionLimit = issueDescriptionLimit;
         bootstrapReady = true;
         syncAutoDispatch();
         if (state.mockup) {
@@ -5951,6 +6072,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         instructions: form.elements.instructions?.value || "",
         model: form.elements.model.value,
         reasoning_effort: form.elements.reasoning_effort.value,
+        service_tier: form.elements.fast?.checked ? "fast" : "default",
         sandbox_mode: form.elements.sandbox_mode.value,
         max_concurrency: Number(form.elements.max_concurrency?.value || 5),
         avatar: form.elements.avatar?.value || "",
@@ -6037,6 +6159,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           const modelDefault = state.agentModelCatalog.find(item => item.id === value)?.defaultReasoningEffort;
           const nextEffort = efforts.some(item => item.value === oldEffort) ? oldEffort : modelDefault || efforts[0]?.value || "medium";
           effortPicker.outerHTML = agentPicker("reasoning_effort", t("推理"), nextEffort, efforts);
+          const fastInput = form.elements.fast;
+          if (fastInput) {
+            const enabled = modelSupportsFast(value);
+            fastInput.disabled = !enabled;
+            if (!enabled) fastInput.checked = false;
+            fastInput.closest(".better-codex-agent-fast-setting")?.classList.toggle("is-disabled", !enabled);
+          }
         }
         return;
       }
@@ -6809,7 +6938,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       function dialogSelect(name, ariaLabel, selected, options, modifier = "") {
         const current = options.find(option => option.value === selected) || options[0] || { value: "", label: t("未提供"), visual: "" };
         const visual = option => typeof option.visual === "function" ? option.visual() : option.visual || "";
-        const tagMarkup = option => (option.tags || []).map(tag => '<span class="better-codex-dialog-select-tag" data-tone="' + escapeHtml(tag.tone || "model") + '">' + escapeHtml(tag.value) + '</span>').join("");
+        const tagMarkup = option => (option.tags || []).map(tag => '<span class="better-codex-dialog-select-tag" data-tone="' + escapeHtml(tag.tone || "model") + '">' + escapeHtml(tag.value) + (tag.fast ? fastMark() : "") + '</span>').join("");
         const labelMarkup = option => escapeHtml(option.label) + tagMarkup(option);
         const rows = options.map(option => '<button class="better-codex-dialog-select-option' + (option.value === current.value ? " is-selected" : "") + '" type="button" role="option" aria-selected="' + (option.value === current.value) + '" data-dialog-select-option="' + escapeHtml(name) + '" data-dialog-select-value="' + escapeHtml(option.value) + '"><span class="better-codex-dialog-select-option-visual">' + visual(option) + '</span><span>' + labelMarkup(option) + '</span><span class="better-codex-dialog-select-check">' + (option.value === current.value ? icon("check") : "") + '</span></button>').join("");
         return '<span class="better-codex-dialog-select ' + escapeHtml(modifier) + '" data-dialog-select="' + escapeHtml(name) + '"><input type="hidden" name="' + escapeHtml(name) + '" value="' + escapeHtml(current.value) + '"><button class="better-codex-property better-codex-dialog-select-trigger" type="button" role="combobox" aria-label="' + escapeHtml(ariaLabel) + '" aria-haspopup="listbox" aria-expanded="false" data-dialog-select-toggle="' + escapeHtml(name) + '"><span class="better-codex-dialog-select-trigger-visual">' + visual(current) + '</span><span class="better-codex-dialog-select-label" data-dialog-select-label>' + labelMarkup(current) + '</span>' + icon("chevron") + '</button><span class="better-codex-dialog-select-menu" role="listbox" hidden>' + rows + '</span></span>';
@@ -7023,6 +7152,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           dialog.innerHTML = '<form>' + header() + assigneePicker() + '<input class="better-codex-manual-title" name="title" maxlength="500" placeholder="' + te("任务标题") + '" value="' + escapeHtml(draft.title) + '"><textarea class="better-codex-dialog-editor" name="description" placeholder="' + te("添加描述...") + '">' + escapeHtml(draft.description) + '</textarea>' + propertyRows() + attachmentList() + '<div class="better-codex-dialog-error" hidden></div>' + footer() + '</form>';
         }
         const content = dialog.querySelector(draft.mode === "agent" ? '[name="prompt"]' : '[name="title"]');
+        dialog.querySelector("form")?.addEventListener("pointerdown", event => {
+          const compactAgentCreate = HOST_KIND === "web" && window.matchMedia("(max-width: 720px)").matches && !issue && draft.mode === "agent";
+          if (!compactAgentCreate || document.activeElement !== content) return;
+          const target = event.target;
+          if (target.closest("[data-dialog-close], textarea, [contenteditable='true'], input:not([type]), input[type='text'], input[type='search'], input[type='email'], input[type='url'], input[type='tel'], input[type='number'], input[type='password']")) return;
+          event.preventDefault();
+        }, true);
         applyDialogPermissions();
         const syncLabelOptions = () => {
           const selected = new Set(String(dialog.querySelector('[name="labels"]')?.value || "").split(/[,，]/).map(value => value.trim()).filter(Boolean));
@@ -7034,6 +7170,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           });
         };
         content?.addEventListener("input", () => {
+          content.removeAttribute("aria-invalid");
           dirtyDraftFields.add(draft.mode === "agent" ? "prompt" : "title");
           updateSubmitState();
         });
@@ -7404,6 +7541,17 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const prompt = draft.prompt.trim();
         const title = draft.mode === "agent" ? prompt.split(/\\n/).find(line => line.trim())?.replace(/^[#*\\s-]+/, "").trim().slice(0, 120) || "" : draft.title.trim();
         if (!title) return;
+        const description = draft.mode === "agent" ? prompt : draft.description;
+        if (description.length > state.issueDescriptionLimit) {
+          const editor = dialog.querySelector(draft.mode === "agent" ? '[name="prompt"]' : '[name="description"]');
+          errorOutput.textContent = state.locale === "zh-CN"
+            ? "内容长度 " + description.length + "，超过 " + state.issueDescriptionLimit + " 的限制。请缩短内容或作为附件上传。"
+            : "Content length is " + description.length + ", above the " + state.issueDescriptionLimit + " limit. Shorten it or upload it as an attachment.";
+          errorOutput.hidden = false;
+          editor?.setAttribute("aria-invalid", "true");
+          editor?.focus();
+          return;
+        }
         submitInFlight = true;
         submit.disabled = true;
         errorOutput.hidden = true;
@@ -7607,7 +7755,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       window.visualViewport?.addEventListener("scroll", mobileDialogViewport, { passive: true });
       window.addEventListener("resize", mobileDialogViewport, { passive: true });
       traceDialog("dialog_open", { dialog_open: dialog.open });
-      dialog.querySelector(HOST_KIND === "web" && window.matchMedia("(max-width: 720px)").matches ? "[data-dialog-close]" : draft.mode === "agent" ? '[name="prompt"]' : '[name="title"]')?.focus();
+      dialog.querySelector(draft.mode === "agent" ? '[name="prompt"]' : HOST_KIND === "web" && window.matchMedia("(max-width: 720px)").matches ? "[data-dialog-close]" : '[name="title"]')?.focus();
       if (issue && sessionId) requestAnimationFrame(() => void loadConversation());
     }
 
@@ -7878,7 +8026,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       mountPanel();
       render();
       void (ready ? loadSurface({ preserveInspector: true }) : load());
-      if (!startLiveUpdates() && pollTimer === null) pollTimer = setInterval(() => { if (!document.hidden && active && !panel?.dataset.recovery) void perform(() => loadSurface({ background: true })); }, 3000);
+      if (!startLiveUpdates() && pollTimer === null) pollTimer = setInterval(() => { if (!document.hidden && active && !panel?.dataset.recovery) void perform(() => loadSurface({ background: true }), { background: true }); }, 3000);
     }
 
     function close(options = {}) {
@@ -8078,6 +8226,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       document.removeEventListener("pointercancel", onSessionPointerCancel, true);
       document.removeEventListener("keydown", onGlobalShortcut, true);
       document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("online", onNetworkOnline);
       window.removeEventListener("codex-message-from-view", onHostMessageFromView, true);
       window.removeEventListener("message", onAppServerMessage, true);
       window.removeEventListener("error", onWindowError);
@@ -8110,6 +8259,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     document.addEventListener("pointercancel", onSessionPointerCancel, true);
     document.addEventListener("keydown", onGlobalShortcut, true);
     document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("online", onNetworkOnline);
     window.addEventListener("codex-message-from-view", onHostMessageFromView, true);
     window.addEventListener("message", onAppServerMessage, true);
     window.addEventListener("error", onWindowError);

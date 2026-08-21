@@ -179,6 +179,7 @@ function cleanRuntime(value: unknown, deviceId: string): RuntimeProjection {
     scheduler_reasoning_effort: typeof source.scheduler_reasoning_effort === "string" ? cleanString(source.scheduler_reasoning_effort, 40) : "",
     default_agent_model: typeof source.default_agent_model === "string" ? cleanString(source.default_agent_model, 200) : "",
     default_agent_reasoning_effort: typeof source.default_agent_reasoning_effort === "string" ? cleanString(source.default_agent_reasoning_effort, 40) : "",
+    default_agent_service_tier: typeof source.default_agent_service_tier === "string" ? cleanString(source.default_agent_service_tier, 20) : "default",
   };
 }
 

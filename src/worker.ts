@@ -345,6 +345,7 @@ export class IssueWorker {
     return createHash("sha256").update(JSON.stringify({
       agent_id: agentId || "default",
       developer_instructions: developerInstructions,
+      service_tier: profile?.service_tier || "default",
       sandbox_mode: this.sandboxMode(agentId),
     })).digest("hex");
   }
@@ -615,6 +616,7 @@ export class IssueWorker {
     const profile = issue.agent_id ? this.store.getAgentProfile(issue.agent_id) : defaultAgentProfile();
     const model = profile?.model && profile.model !== "默认模型" ? profile.model : "";
     const effort = profile?.reasoning_effort && profile.reasoning_effort !== "默认推理等级" ? profile.reasoning_effort : "";
+    const serviceTier = profile?.service_tier === "fast" ? "fast" : "default";
     const sandboxMode = this.sandboxMode(issue.agent_id);
     const developerInstructions = issue.agent_id ? profile?.instructions || "" : "";
     const configFingerprint = this.sessionConfigFingerprint(issue.agent_id);
@@ -624,6 +626,7 @@ export class IssueWorker {
       message,
       model,
       effort,
+      service_tier: serviceTier,
       sandbox_mode: sandboxMode,
       developer_instructions: developerInstructions,
       config_fingerprint: configFingerprint,

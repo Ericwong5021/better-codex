@@ -53,6 +53,7 @@ export function defaultAgentProfile(path = configPath) {
     instructions: "使用 Codex 默认配置承接并执行 Better Codex Issue。",
     model: topLevelString(source, "model") || "默认模型",
     reasoning_effort: topLevelString(source, "model_reasoning_effort") || "默认推理等级",
+    service_tier: ["fast", "priority"].includes(topLevelString(source, "service_tier")) ? "fast" as const : "default" as const,
     sandbox_mode: sandboxMode(source),
     version: 1,
     created_at: "",
@@ -61,9 +62,9 @@ export function defaultAgentProfile(path = configPath) {
   };
 }
 
-export function updateDefaultAgentProfile(input: { model: string; reasoning_effort: string; sandbox_mode?: AgentSandboxMode }, path = configPath) {
+export function updateDefaultAgentProfile(input: { model: string; reasoning_effort: string; service_tier?: "default" | "fast"; sandbox_mode?: AgentSandboxMode }, path = configPath) {
   const source = existsSync(path) ? readFileSync(path, "utf8") : "";
-  const next = withTopLevelString(withTopLevelString(withTopLevelString(source, "model", input.model), "model_reasoning_effort", input.reasoning_effort), "sandbox_mode", input.sandbox_mode || defaultSandboxMode);
+  const next = withTopLevelString(withTopLevelString(withTopLevelString(withTopLevelString(source, "model", input.model), "model_reasoning_effort", input.reasoning_effort), "service_tier", input.service_tier || "default"), "sandbox_mode", input.sandbox_mode || defaultSandboxMode);
   mkdirSync(dirname(path), { recursive: true });
   if (next !== source) writeFileSync(path, next, { mode: 0o600 });
   return defaultAgentProfile(path);
@@ -124,6 +125,7 @@ export function syncAgentProfiles(profiles: AgentProfile[], home = codexHome) {
     const configuration = [
       `model = ${quoted(profile.model)}`,
       `model_reasoning_effort = ${quoted(profile.reasoning_effort)}`,
+      `service_tier = ${quoted(profile.service_tier)}`,
       `sandbox_mode = ${quoted(profile.sandbox_mode)}`,
       profile.instructions ? `developer_instructions = ${quoted(profile.instructions)}` : "",
       "",
