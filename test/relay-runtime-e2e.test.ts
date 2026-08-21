@@ -168,7 +168,7 @@ test("public Relay drives the real Runtime and recovers without storing business
     const recovered = await request(`/api/issues/${issue.id}`);
     assert.equal(recovered.status, 200);
     assert.equal(((await recovered.json()) as { id: string }).id, issue.id);
-    assert.deepEqual(relay.store.tableNames(), ["relay_audit", "relay_devices", "relay_settings", "relay_web_sessions", "sqlite_sequence"]);
+    assert.deepEqual(relay.store.tableNames(), ["relay_audit", "relay_commands", "relay_devices", "relay_settings", "relay_web_sessions", "sqlite_sequence"]);
   } finally {
     await stopRuntime(runtime).catch(() => {});
     await relay.close();

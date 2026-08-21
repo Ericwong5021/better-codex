@@ -1761,7 +1761,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const method = String(options.method || "GET").toUpperCase();
       const requestPath = path + (path.includes("?") ? "&" : "?") + "locale=" + encodeURIComponent(state.locale);
       const commandId = method === "GET" ? "" : globalThis.crypto?.randomUUID?.() || VERSION + "-command-" + Date.now() + "-" + Math.random().toString(36).slice(2);
-      const removalMatch = path.match(/^\/api\/issues\/([^/?]+)(?:\/(archive))?(?:\?.*)?$/);
+      const removalMatch = path.match(/^\\/api\\/issues\\/([^\\/?]+)(?:\\/(archive))?(?:\\?.*)?$/);
       const removalId = removalMatch && (method === "DELETE" || method === "POST" && removalMatch[2] === "archive") ? decodeURIComponent(removalMatch[1]) : "";
       const removalIssue = removalId ? state.issues.find(issue => issue.id === removalId) : null;
       if (removalIssue && !READ_ONLY) {

@@ -99,7 +99,7 @@ test("relay authenticates one runtime, replaces old connections, and stores no b
   const heartbeat = await message(second);
   assert.equal(heartbeat.type, "heartbeat_ack");
   assert.equal(relay.runtime()?.activeChannels, 0);
-  assert.deepEqual(relay.store.tableNames(), ["relay_audit", "relay_devices", "relay_settings", "relay_web_sessions", "sqlite_sequence"]);
+  assert.deepEqual(relay.store.tableNames(), ["relay_audit", "relay_commands", "relay_devices", "relay_settings", "relay_web_sessions", "sqlite_sequence"]);
 
   const staleRejected = once(second, "close");
   second.send(encodeRelayMessage({ type: "heartbeat", protocol_version: relayProtocolVersion, device_id: device.device_id, runtime_instance_id: "runtime-2", connection_epoch: 1, active_channels: 0, timestamp: new Date().toISOString() }));
@@ -145,7 +145,7 @@ test("relay Web session requires same-origin CSRF for protected requests", async
   await relay.close();
 });
 
-test("relay buffers and retries an idempotent write through repeated Runtime reconnects", async () => {
+test("relay persists an offline command and completes it after a Runtime reconnect", async () => {
   const relay = createRelayServer({ host: "127.0.0.1", port: 0, database: ":memory:", adminToken: "f".repeat(64), webUsername: "admin", webPassword: "relay-password-123", secureCookies: false, reconnectGraceMs: 1000, maxReplayAttempts: 3 });
   relay.server.listen(0, "127.0.0.1");
   await once(relay.server, "listening");
@@ -166,87 +166,58 @@ test("relay buffers and retries an idempotent write through repeated Runtime rec
   const login = await fetch(`${base}/relay/session`, { method: "POST", headers: { "content-type": "application/json", origin: base }, body: JSON.stringify({ username: "admin", password: "relay-password-123" }) });
   const session = await login.json() as { csrf_token: string };
   const cookie = String(login.headers.get("set-cookie") || "").split(";")[0];
-  const response = fetch(`${base}/api/retryable-write`, { method: "POST", headers: { cookie, origin: base, "x-csrf-token": session.csrf_token, "content-type": "application/json", "x-better-codex-request-id": "retryable-write-1" }, body: JSON.stringify({ value: "once" }) });
-  assert.equal(await Promise.race([response.then(() => "settled"), new Promise(resolve => setTimeout(() => resolve("pending"), 25))]), "pending");
+  const response = await fetch(`${base}/api/issues/issue-1/archive`, { method: "POST", headers: { cookie, origin: base, "x-csrf-token": session.csrf_token, "content-type": "application/json", "x-better-codex-command-id": "offline-command-1" }, body: JSON.stringify({ version: 1 }) });
+  assert.equal(response.status, 202);
+  assert.deepEqual(await response.json(), { command_id: "offline-command-1", status: "pending", queued: true });
   let firstOpenPromise: Promise<Record<string, unknown>> | undefined;
   let firstEndPromise: Promise<Record<string, unknown>> | undefined;
   const first = await connect("runtime-retry-1", socket => {
     firstOpenPromise = waitForMessage(socket, value => value.type === "request_open");
     firstEndPromise = waitForMessage(socket, value => value.type === "request_end");
   });
-  assert.equal((await firstOpenPromise!).request_id, "retryable-write-1");
+  assert.equal((await firstOpenPromise!).request_id, "offline-command-1");
   await firstEndPromise;
   const firstClosed = once(first, "close");
+  first.close();
+  await firstClosed;
+  await new Promise(resolve => setTimeout(resolve, 1100));
   let secondOpenPromise: Promise<Record<string, unknown>> | undefined;
   let secondEndPromise: Promise<Record<string, unknown>> | undefined;
   const second = await connect("runtime-retry-2", socket => {
     secondOpenPromise = waitForMessage(socket, value => value.type === "request_open");
     secondEndPromise = waitForMessage(socket, value => value.type === "request_end");
   });
-  await firstClosed;
-  assert.equal((await secondOpenPromise!).request_id, "retryable-write-1");
-  await secondEndPromise;
-  const secondClosed = once(second, "close");
-  second.close();
-  await secondClosed;
-  let thirdOpenPromise: Promise<Record<string, unknown>> | undefined;
-  let thirdEndPromise: Promise<Record<string, unknown>> | undefined;
-  const third = await connect("runtime-retry-3", socket => {
-    thirdOpenPromise = waitForMessage(socket, value => value.type === "request_open");
-    thirdEndPromise = waitForMessage(socket, value => value.type === "request_end");
-  });
-  const replayedOpen = await thirdOpenPromise!;
-  const replayedEnd = await thirdEndPromise!;
-  assert.equal(replayedOpen.request_id, "retryable-write-1");
+  const replayedOpen = await secondOpenPromise!;
+  const replayedEnd = await secondEndPromise!;
+  assert.equal(replayedOpen.request_id, "offline-command-1");
   assert.equal(replayedOpen.method, "POST");
-  third.send(encodeRelayMessage({ type: "response_open", protocol_version: relayProtocolVersion, device_id: device.device_id, runtime_instance_id: "runtime-retry-3", connection_epoch: 3, channel_id: String(replayedEnd.channel_id), status: 202, headers: { "content-type": "application/json" } }));
-  third.send(encodeRelayMessage({ type: "response_chunk", protocol_version: relayProtocolVersion, device_id: device.device_id, runtime_instance_id: "runtime-retry-3", connection_epoch: 3, channel_id: String(replayedEnd.channel_id), sequence: 0, data: Buffer.from('{"retried":true}').toString("base64") }));
-  third.send(encodeRelayMessage({ type: "response_end", protocol_version: relayProtocolVersion, device_id: device.device_id, runtime_instance_id: "runtime-retry-3", connection_epoch: 3, channel_id: String(replayedEnd.channel_id) }));
-  const completed = await response;
-  assert.equal(completed.status, 202);
-  assert.deepEqual(await completed.json(), { retried: true });
-  third.close();
+  assert.equal(replayedOpen.path, "/api/issues/issue-1/archive");
+  second.send(encodeRelayMessage({ type: "response_open", protocol_version: relayProtocolVersion, device_id: device.device_id, runtime_instance_id: "runtime-retry-2", connection_epoch: 2, channel_id: String(replayedEnd.channel_id), status: 200, headers: { "content-type": "application/json" } }));
+  second.send(encodeRelayMessage({ type: "response_chunk", protocol_version: relayProtocolVersion, device_id: device.device_id, runtime_instance_id: "runtime-retry-2", connection_epoch: 2, channel_id: String(replayedEnd.channel_id), sequence: 0, data: Buffer.from('{"ok":true}').toString("base64") }));
+  second.send(encodeRelayMessage({ type: "response_end", protocol_version: relayProtocolVersion, device_id: device.device_id, runtime_instance_id: "runtime-retry-2", connection_epoch: 2, channel_id: String(replayedEnd.channel_id) }));
+  await waitFor(() => relay.store.relayCommand("offline-command-1")?.status === "applied");
+  const completed = await fetch(`${base}/api/commands/offline-command-1`, { headers: { cookie } });
+  assert.equal(completed.status, 200);
+  assert.deepEqual(await completed.json(), { command_id: "offline-command-1", status: "applied", response_status: 200, error: null, payload: { ok: true } });
+  assert.equal(relay.store.relayCommand("offline-command-1")?.attempt_count, 2);
+  second.close();
   await relay.close();
 });
 
-test("relay reports an idempotent write only after reconnect attempts are exhausted", async () => {
+test("relay leaves unsupported writes outside the persistent command queue", async () => {
   const relay = createRelayServer({ host: "127.0.0.1", port: 0, database: ":memory:", adminToken: "e".repeat(64), webUsername: "admin", webPassword: "relay-password-123", secureCookies: false, reconnectGraceMs: 1000, maxReplayAttempts: 2 });
   relay.server.listen(0, "127.0.0.1");
   await once(relay.server, "listening");
   const address = relay.server.address();
   assert.ok(address && typeof address === "object");
   const base = `http://127.0.0.1:${address.port}`;
-  const socketBase = `ws://127.0.0.1:${address.port}`;
-  const device = relay.store.pairDevice("Runtime Retry Limit", relay.store.createPairingCode().pairing_code);
   const login = await fetch(`${base}/relay/session`, { method: "POST", headers: { "content-type": "application/json", origin: base }, body: JSON.stringify({ username: "admin", password: "relay-password-123" }) });
   const session = await login.json() as { csrf_token: string };
   const cookie = String(login.headers.get("set-cookie") || "").split(";")[0];
-  const response = fetch(`${base}/api/retry-limit`, { method: "POST", headers: { cookie, origin: base, "x-csrf-token": session.csrf_token, "content-type": "application/json", "x-better-codex-request-id": "retry-limit-write-1" }, body: JSON.stringify({ value: "once" }) });
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    let ended: Promise<Record<string, unknown>> | undefined;
-    const socket = new WebSocket(`${socketBase}/api/v1/runtime/connect`, relayWebSocketProtocol, { headers: { authorization: `Bearer ${device.device_token}` } });
-    await once(socket, "open");
-    ended = waitForMessage(socket, value => value.type === "request_end");
-    const acknowledged = waitForMessage(socket, value => value.type === "hello_ack");
-    socket.send(encodeRelayMessage({ type: "hello", protocol_version: relayProtocolVersion, device_id: device.device_id, runtime_instance_id: `runtime-limit-${attempt}`, core_version: "0.5.0", capabilities: ["http-stream"] }));
-    await acknowledged;
-    await ended;
-    const closed = once(socket, "close");
-    socket.close();
-    await closed;
-  }
-  const failed = await response;
-  assert.equal(failed.status, 502);
-  const failure = await failed.json() as Record<string, unknown>;
-  assert.equal(failure.error, "relay_stream_interrupted");
-  assert.equal(failure.detail, "relay_retries_exhausted");
-  assert.equal(failure.request_id, "retry-limit-write-1");
-  assert.equal(failure.method, "POST");
-  assert.equal(failure.request_ended, true);
-  assert.equal(failure.response_started, false);
-  assert.equal(failure.connection_epoch, 2);
-  assert.equal(failure.runtime_instance_id, "runtime-limit-2");
-  assert.equal(failure.replay_attempts, 2);
+  const response = await fetch(`${base}/api/retry-limit`, { method: "POST", headers: { cookie, origin: base, "x-csrf-token": session.csrf_token, "content-type": "application/json", "x-better-codex-command-id": "unsupported-command-1" }, body: JSON.stringify({ value: "once" }) });
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), { error: "runtime_offline" });
+  assert.equal(relay.store.pendingCommandCount(), 0);
   await relay.close();
 });
 

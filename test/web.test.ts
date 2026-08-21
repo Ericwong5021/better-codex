@@ -120,7 +120,8 @@ test("web host boots the shared DOM injection behind a local session", async () 
     assert.match(hostScript, /consumeFragmentToken\(\)/);
     assert.match(hostScript, /sessionStorage\.setItem\("better-codex-web-session", sessionToken\)/);
     assert.match(hostScript, /authorization: "Bearer " \+ sessionToken/);
-    assert.match(hostScript, /headers\["x-better-codex-request-id"\] = request\.commandId/);
+    assert.match(hostScript, /headers\["x-better-codex-command-id"\] = command\.commandId/);
+    assert.match(hostScript, /headers\["x-better-codex-request-id"\] = command\.commandId/);
     assert.match(hostScript, /RELAY && method !== "GET" \? 45_000 : 10_000/);
     assert.doesNotMatch(hostScript, /authorization: "Bearer " \+ request\.token/);
     assert.match(hostScript, /response\.status === 401/);
