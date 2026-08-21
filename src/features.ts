@@ -3,7 +3,7 @@ import { coreVersion } from "./version.js";
 export const featureList = [
   { id: "issues", availability: "release" },
   { id: "agents", availability: "release" },
-  { id: "projects", availability: "beta" },
+  { id: "project-management", availability: "beta" },
 ] as const;
 
 export type FeatureId = typeof featureList[number]["id"];

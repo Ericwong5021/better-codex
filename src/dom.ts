@@ -381,9 +381,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const systemLocale = resolveSystemLocale(INITIAL_LOCALE);
     const MOCKUP_PROJECT_ID = "mockup-better-codex";
     const hasFeature = feature => ENABLED_FEATURES.has(feature);
-    const availableSurfaces = ["issues", "agents", ...(hasFeature("projects") ? ["projects"] : [])];
-    const initialProjectRoute = hasFeature("projects") ? webProjectRoute() : null;
-    if (HOST_KIND === "web" && !hasFeature("projects") && /^\\/web\\/projects(?:\\/|$)/.test(location.pathname)) history.replaceState({ betterCodex: true, betterCodexSurface: "issues" }, "", "/web");
+    const availableSurfaces = ["issues", "agents", ...(hasFeature("project-management") ? ["projects"] : [])];
+    const initialProjectRoute = hasFeature("project-management") ? webProjectRoute() : null;
+    if (HOST_KIND === "web" && !hasFeature("project-management") && /^\\/web\\/projects(?:\\/|$)/.test(location.pathname)) history.replaceState({ betterCodex: true, betterCodexSurface: "issues" }, "", "/web");
     const state = { projects: [], projectsLoaded: false, issues: [], issuesLoaded: false, projectIssues: [], projectIssuesProjectId: "", projectDetailId: initialProjectRoute?.projectId || "", projectDocumentView: "charter", projectDocumentPending: null, projectDocumentError: null, agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: initialProjectRoute ? "projects" : availableSurfaces.includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, autoDispatchPending: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", mockup: false, keepCreate: rememberedKeepCreate, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], project: [], label: [] } };
     const pendingIssueRemovals = new Map();
     function webProjectRoute() {
@@ -1706,12 +1706,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (!projectsEntry) projectsEntry = createEntry("项目管理", PROJECTS_ENTRY_ID, "管理项目", "projects");
       syncEntryLabel(projectsEntry, "项目管理", "管理项目");
       syncEntryIcon(projectsEntry, "projects");
-      projectsEntry.hidden = !hasFeature("projects");
+      projectsEntry.hidden = !hasFeature("project-management");
       if (HOST_KIND === "web") {
         if (!auxiliaryNavigation) auxiliaryNavigation = createAuxiliaryNavigation();
         syncEntryLabel(moreEntry, "更多", "更多功能");
         syncEntryIcon(moreEntry, "more");
-        auxiliaryNavigation.hidden = !hasFeature("projects");
+        auxiliaryNavigation.hidden = !hasFeature("project-management");
         if (auxiliaryNavigation.parentElement !== parent || auxiliaryNavigation.previousElementSibling !== agentsEntry) agentsEntry.after(auxiliaryNavigation);
         if (projectsEntry.parentElement !== auxiliaryMenu) auxiliaryMenu.append(projectsEntry);
       } else if (projectsEntry.parentElement !== parent || projectsEntry.previousElementSibling !== agentsEntry) agentsEntry.after(projectsEntry);
@@ -7727,7 +7727,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function refresh() {
-      if (HOST_KIND === "web" && !hasFeature("projects") && /^\\/web\\/projects(?:\\/|$)/.test(location.pathname)) history.replaceState({ betterCodex: true, betterCodexSurface: "issues" }, "", "/web");
+      if (HOST_KIND === "web" && !hasFeature("project-management") && /^\\/web\\/projects(?:\\/|$)/.test(location.pathname)) history.replaceState({ betterCodex: true, betterCodexSurface: "issues" }, "", "/web");
       const betterCodexRoute = isBetterCodexRoute();
       const entriesAvailable = ensureEntry();
       if (!entriesAvailable) {
