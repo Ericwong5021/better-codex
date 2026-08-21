@@ -3618,7 +3618,9 @@ export function betterCodexDesignSystemCss() {
     }
 
     #better-codex-dialog .better-codex-dialog-select-tag {
+      display: inline-flex;
       flex: 0 0 auto;
+      align-items: center;
       border-radius: 999px;
       padding: 1px 5px;
       font-size: var(--bc-text-xs);
