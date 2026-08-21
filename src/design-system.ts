@@ -688,6 +688,177 @@ export function betterCodexDesignSystemCss() {
       background: var(--bc-color-control);
     }
 
+    #better-codex-panel .better-codex-project-planning-layout {
+      color: var(--bc-color-text);
+      font-family: var(--bc-font-ui);
+      font-size: var(--bc-text-base);
+    }
+
+    #better-codex-panel .better-codex-project-dashboard-tabs {
+      gap: var(--bc-space-1);
+      border-radius: var(--bc-radius-md);
+      background: var(--bc-color-control);
+      padding: var(--bc-space-1);
+    }
+
+    #better-codex-panel .better-codex-project-dashboard-tabs button {
+      min-height: var(--bc-control-height);
+      border: 0;
+      border-radius: var(--bc-radius-sm);
+      color: var(--bc-color-text-muted);
+      background: transparent;
+      padding-inline: var(--bc-control-padding);
+      font: inherit;
+      font-size: var(--bc-text-md);
+      font-weight: 500;
+      transition: transform var(--bc-motion-fast) var(--bc-ease-out), background-color var(--bc-motion-fast) ease-out, color var(--bc-motion-fast) ease-out;
+      touch-action: manipulation;
+    }
+
+    #better-codex-panel .better-codex-project-dashboard-tabs button[aria-current="page"] {
+      color: var(--bc-color-text);
+      background: var(--bc-color-surface);
+      box-shadow: var(--bc-elevation-card);
+    }
+
+    #better-codex-panel .better-codex-project-planning-overview .better-codex-project-section-head button,
+    #better-codex-panel .better-codex-project-planning-panel-head > button,
+    #better-codex-panel .better-codex-project-planning-starters button {
+      min-height: var(--bc-control-height);
+      border: 0;
+      border-radius: var(--bc-radius-sm);
+      padding-inline: var(--bc-control-padding);
+      font: inherit;
+      font-size: var(--bc-text-md);
+      font-weight: 500;
+      transition: transform var(--bc-motion-fast) var(--bc-ease-out), background-color var(--bc-motion-fast) ease-out, color var(--bc-motion-fast) ease-out;
+      touch-action: manipulation;
+    }
+
+    #better-codex-panel .better-codex-project-planning-overview .better-codex-project-section-head button {
+      color: var(--bc-color-text-muted);
+      background: transparent;
+    }
+
+    #better-codex-panel .better-codex-project-planning-panel-head > button {
+      color: var(--bc-color-text);
+      background: var(--bc-color-control);
+    }
+
+    #better-codex-panel .better-codex-project-planning-starters {
+      gap: var(--bc-space-1);
+    }
+
+    #better-codex-panel .better-codex-project-planning-starters > span {
+      margin-bottom: var(--bc-space-2);
+      color: var(--bc-color-text-muted);
+      font-size: var(--bc-text-sm);
+    }
+
+    #better-codex-panel .better-codex-project-planning-starters button {
+      min-height: var(--bc-row-height);
+      border: 0;
+      color: var(--bc-color-text);
+      background: transparent;
+      padding-block: var(--bc-space-2);
+      line-height: 1.45;
+    }
+
+    #better-codex-panel .better-codex-project-planning-form {
+      gap: var(--bc-space-2);
+      border-color: var(--bc-color-hairline);
+      background: var(--bc-color-surface);
+      padding: var(--bc-space-3);
+    }
+
+    #better-codex-panel .better-codex-project-planning-form textarea {
+      min-height: calc(var(--bc-row-height) * 2);
+      border: 0;
+      border-radius: var(--bc-radius-md);
+      color: var(--bc-color-text);
+      background: var(--bc-color-input);
+      padding: 10px 12px;
+      box-shadow: var(--bc-inset-hairline);
+      font: inherit;
+      font-size: var(--bc-text-md);
+      line-height: 1.5;
+    }
+
+    #better-codex-panel .better-codex-project-planning-form textarea::placeholder {
+      color: var(--bc-color-text-faint);
+    }
+
+    #better-codex-panel .better-codex-project-planning-form textarea:focus {
+      border-color: transparent;
+      background: var(--bc-color-input);
+      box-shadow: var(--bc-inset-hairline), var(--bc-focus-ring);
+    }
+
+    #better-codex-panel .better-codex-project-planning-form .better-codex-project-document-agent-picker .better-codex-agent-picker-trigger {
+      min-height: var(--bc-control-height);
+      border: 0;
+      border-radius: var(--bc-radius-sm);
+      color: var(--bc-color-text-muted);
+      background: transparent;
+      padding-inline: var(--bc-control-padding);
+      box-shadow: none;
+      font: inherit;
+      font-size: var(--bc-text-md);
+    }
+
+    #better-codex-panel .better-codex-project-planning-form .better-codex-project-document-agent-picker .better-codex-agent-picker-trigger:focus-visible {
+      outline: 0;
+      background: var(--bc-color-hover);
+      box-shadow: var(--bc-focus-ring);
+    }
+
+    #better-codex-panel .better-codex-project-planning-agent {
+      min-height: var(--bc-control-height);
+      color: var(--bc-color-text-muted);
+      font-size: var(--bc-text-md);
+    }
+
+    #better-codex-panel .better-codex-project-planning-form .better-codex-submit {
+      min-height: var(--bc-control-height);
+      border: 0;
+      border-radius: var(--bc-radius-sm);
+      color: var(--bc-color-on-primary);
+      background: var(--bc-color-primary);
+      padding-inline: var(--bc-control-padding);
+      box-shadow: none;
+      font: inherit;
+      font-size: var(--bc-text-md);
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform var(--bc-motion-fast) var(--bc-ease-out), background-color var(--bc-motion-fast) ease-out, opacity var(--bc-motion-fast) ease-out;
+      touch-action: manipulation;
+    }
+
+    #better-codex-panel .better-codex-project-planning-form .better-codex-submit:disabled {
+      cursor: not-allowed;
+      opacity: .45;
+    }
+
+    #better-codex-panel .better-codex-project-planning-form output {
+      color: var(--bc-color-danger);
+      font-size: var(--bc-text-sm);
+    }
+
+    @media (hover: hover) {
+      #better-codex-panel .better-codex-project-dashboard-tabs button:hover,
+      #better-codex-panel .better-codex-project-planning-overview .better-codex-project-section-head button:hover,
+      #better-codex-panel .better-codex-project-planning-panel-head > button:hover:not(:disabled),
+      #better-codex-panel .better-codex-project-planning-starters button:hover,
+      #better-codex-panel .better-codex-project-planning-form .better-codex-agent-picker-trigger:hover {
+        color: var(--bc-color-text);
+        background: var(--bc-color-hover);
+      }
+
+      #better-codex-panel .better-codex-project-planning-form .better-codex-submit:hover:not(:disabled) {
+        background: color-mix(in srgb, var(--bc-color-primary) 88%, var(--bc-color-canvas));
+      }
+    }
+
     #better-codex-panel .better-codex-create-split {
       position: relative;
       display: inline-flex;
