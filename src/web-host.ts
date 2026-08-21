@@ -60,6 +60,7 @@ const webHostHtml = String.raw`<!doctype html>
           <div class="web-usage-heading">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>
             <strong id="web-usage-title">剩余用量</strong>
+            <button id="web-usage-close" class="web-usage-close" type="button" aria-label="关闭额度"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"></path></svg></button>
           </div>
           <div id="web-usage-body" class="web-usage-body"><span class="web-usage-status">点击查看 Codex 额度</span></div>
         </section>
@@ -162,6 +163,7 @@ body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; 
 .web-nav-button svg { width: 16px; height: 16px; }
 .web-nav-auxiliary, .web-nav-more-menu { display: contents; }
 .web-nav-more-entry { display: none; }
+.web-nav-mobile-action { display: none; }
 .text-fade-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .web-account { position: relative; border-radius: 12px; background: transparent; }
 .web-account:has(.web-profile[aria-expanded="true"]) { background: var(--web-hover); }
@@ -177,9 +179,10 @@ body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; 
 .web-profile[aria-expanded="true"] .web-profile-chevron { transform: rotate(90deg); }
 .web-usage { margin: 0 6px; border-top: 1px solid var(--web-line); padding: 9px 4px 10px; }
 .web-usage[hidden] { display: none; }
-.web-usage-heading { display: flex; align-items: center; gap: 6px; color: var(--web-muted); font-size: 10px; }
+.web-usage-heading { display: grid; grid-template-columns: 13px minmax(0, 1fr); align-items: center; gap: 6px; color: var(--web-muted); font-size: 10px; }
 .web-usage-heading svg { width: 13px; height: 13px; }
 .web-usage-heading strong { font-weight: 590; }
+.web-usage-close { display: none; }
 .web-usage-body { display: grid; gap: 10px; margin-top: 9px; }
 .web-usage-status { color: var(--web-muted); font-size: 10px; line-height: 1.5; }
 .web-usage-window { display: grid; gap: 6px; }
@@ -248,7 +251,7 @@ body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; 
   .web-brand, .web-account, .web-sidebar-expand { display: none; }
   .web-sidebar nav, .web-sidebar-scroll { width: 100%; height: auto; overflow: visible; }
   .web-sidebar-section { display: flex; justify-content: center; gap: 8px; margin: 0; }
-  .web-nav-button:not(#better-codex-entry):not(#better-codex-agents-entry):not(#better-codex-projects-entry):not(#better-codex-more-entry) { display: none; }
+  .web-sidebar-section > .web-nav-button:not(#better-codex-entry):not(#better-codex-agents-entry):not(#better-codex-projects-entry):not(#better-codex-more-entry) { display: none; }
   .web-nav-button { display: grid; grid-template-columns: 20px auto; min-height: 42px; justify-content: center; gap: 7px; padding: 0 12px; }
   #better-codex-entry, #better-codex-agents-entry { width: min(150px, calc((100vw - 82px) / 2)); }
   .web-nav-auxiliary { position: relative; display: block; flex: 0 0 46px; }
@@ -256,6 +259,13 @@ body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; 
   .web-nav-more-menu { position: absolute; right: 0; bottom: calc(100% + 10px); display: none; width: min(220px, calc(100vw - 20px)); border: 1px solid var(--web-line); border-radius: 14px; padding: 6px; background: var(--web-raised); box-shadow: 0 12px 32px rgb(0 0 0 / .14), 0 2px 8px rgb(0 0 0 / .08); }
   .web-nav-more-menu[data-open="true"] { display: grid; }
   .web-nav-more-menu .web-nav-button { display: grid; width: 100%; min-height: 44px; grid-template-columns: 20px minmax(0, 1fr); justify-content: start; padding: 0 12px; text-align: left; }
+  .web-nav-more-menu .web-nav-button[hidden] { display: none; }
+  .web-account:has(.web-profile[aria-expanded="true"]) { position: fixed; z-index: 60; right: max(10px, env(safe-area-inset-right)); bottom: calc(68px + env(safe-area-inset-bottom)); display: block; width: min(280px, calc(100vw - 20px)); border: 1px solid var(--web-line); border-radius: 14px; padding: 6px; background: var(--web-raised); box-shadow: 0 12px 32px rgb(0 0 0 / .14), 0 2px 8px rgb(0 0 0 / .08); }
+  .web-account:has(.web-profile[aria-expanded="true"]) .web-profile, .web-account:has(.web-profile[aria-expanded="true"]) .web-account-theme { display: none; }
+  .web-account:has(.web-profile[aria-expanded="true"]) .web-usage { margin: 0; border: 0; padding: 10px; }
+  .web-account:has(.web-profile[aria-expanded="true"]) .web-usage-heading { grid-template-columns: 13px minmax(0, 1fr) 28px; }
+  .web-account:has(.web-profile[aria-expanded="true"]) .web-usage-close { display: grid; width: 28px; height: 28px; border: 0; border-radius: 8px; padding: 0; place-items: center; color: var(--web-muted); background: transparent; cursor: pointer; }
+  .web-account:has(.web-profile[aria-expanded="true"]) .web-usage-close svg { width: 15px; height: 15px; }
   .web-nav-button .text-fade-truncate { display: block; }
   #better-codex-more-entry .text-fade-truncate { display: none; }
   .web-error-report { width: calc(100vw - 20px); height: min(90dvh, 760px); max-height: calc(100dvh - 20px); }
@@ -293,6 +303,7 @@ const profileKind = document.getElementById("web-profile-kind");
 const profileAvatar = document.getElementById("web-avatar");
 const profileAvatarInitials = document.getElementById("web-avatar-initials");
 const usagePanel = document.getElementById("web-usage");
+const usageCloseButton = document.getElementById("web-usage-close");
 const usageTitle = document.getElementById("web-usage-title");
 const usageBody = document.getElementById("web-usage-body");
 let installing = false;
@@ -443,6 +454,7 @@ function updateWebProfile(detail) {
   profileKind.textContent = profileText("Codex 账户", "Codex account");
   installButton.setAttribute("aria-label", profileText("安装 Better Codex", "Install Better Codex"));
   usageTitle.textContent = profileText("剩余用量", "Usage remaining");
+  usageCloseButton.setAttribute("aria-label", profileText("关闭额度", "Close usage"));
   profileButton.setAttribute("aria-label", profileText("查看 Codex 额度", "View Codex usage"));
   if (usageLoadedAt) renderUsage(cachedUsage);
 }
@@ -536,6 +548,10 @@ profileButton.addEventListener("click", () => {
   profileButton.setAttribute("aria-expanded", String(expanded));
   usagePanel.hidden = !expanded;
   if (expanded) void loadUsage();
+});
+usageCloseButton.addEventListener("click", () => {
+  profileButton.setAttribute("aria-expanded", "false");
+  usagePanel.hidden = true;
 });
 
 function consumeFragmentToken() {

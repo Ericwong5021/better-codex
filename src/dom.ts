@@ -21,6 +21,7 @@ import {
   CircleCheckBig,
   CircleDashed,
   CircleDot,
+  CircleGauge,
   CircleHelp,
   CircleSlash2,
   Cloud,
@@ -41,6 +42,7 @@ import {
   Maximize2,
   Minimize2,
   Minus,
+  Moon,
   Paperclip,
   Pencil,
   Plus,
@@ -57,6 +59,7 @@ import {
   Square,
   SquareKanban,
   Star,
+  Sun,
   Tag,
   Terminal,
   TriangleAlert,
@@ -140,6 +143,9 @@ const lucideIcons = Object.fromEntries(Object.entries({
   priorityLow: SignalLow,
   priorityMedium: SignalMedium,
   priorityHigh: SignalHigh,
+  usage: CircleGauge,
+  moon: Moon,
+  sun: Sun,
 }).map(([key, svg]) => [key, lucideDefinition(svg)]));
 
 Object.assign(lucideIcons, {
@@ -698,6 +704,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "管理项目": "Manage projects",
       "更多": "More",
       "更多功能": "More features",
+      "Codex 额度": "Codex usage",
+      "查看 Codex 额度": "View Codex usage",
+      "切换为深色主题": "Switch to dark theme",
+      "切换为浅色主题": "Switch to light theme",
       "创建项目": "Create project",
       "项目名称": "Project name",
       "项目文件夹": "Project folder",
@@ -801,6 +811,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     let auxiliaryNavigation = null;
     let moreEntry = null;
     let auxiliaryMenu = null;
+    let usageEntry = null;
+    let themeEntry = null;
     let auxiliaryMenuDismiss = null;
     let panel = null;
     let observer = null;
@@ -1788,6 +1800,26 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       auxiliaryMenu.className = "web-nav-more-menu";
       auxiliaryMenu.setAttribute(OWNED, "true");
       auxiliaryMenu.setAttribute("aria-label", t("更多功能"));
+      usageEntry = nativeButton(t("Codex 额度"));
+      usageEntry.id = "better-codex-usage-entry";
+      usageEntry.classList.add("web-nav-mobile-action");
+      usageEntry.setAttribute(OWNED, "true");
+      usageEntry.addEventListener("click", event => {
+        event.preventDefault();
+        event.stopPropagation();
+        closeAuxiliaryMenu();
+        document.getElementById("web-profile")?.click();
+      });
+      themeEntry = nativeButton("");
+      themeEntry.id = "better-codex-theme-entry";
+      themeEntry.classList.add("web-nav-mobile-action");
+      themeEntry.setAttribute(OWNED, "true");
+      themeEntry.addEventListener("click", event => {
+        event.preventDefault();
+        event.stopPropagation();
+        closeAuxiliaryMenu();
+        document.getElementById("web-theme")?.click();
+      });
       moreEntry.addEventListener("click", event => {
         event.preventDefault();
         event.stopPropagation();
@@ -1801,6 +1833,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         };
         setTimeout(() => document.addEventListener("pointerdown", auxiliaryMenuDismiss, true), 0);
       });
+      auxiliaryMenu.append(usageEntry, themeEntry);
       navigation.append(moreEntry, auxiliaryMenu);
       return navigation;
     }
@@ -1808,7 +1841,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     function syncEntryIcon(button, surface) {
       const svg = button.querySelector("svg");
       if (svg) {
-        const definition = LUCIDE_ICONS[surface === "agents" ? "bot" : surface === "projects" ? "folder" : surface === "more" ? "more" : "issues"];
+        const iconKey = { agents: "bot", projects: "folder", more: "more", usage: "usage", moon: "moon", sun: "sun" }[surface] || "issues";
+        const definition = LUCIDE_ICONS[iconKey];
         if (svg.getAttribute("viewBox") !== "0 0 24 24") svg.setAttribute("viewBox", "0 0 24 24");
         if (svg.getAttribute("fill") !== "none") svg.setAttribute("fill", "none");
         if (svg.getAttribute("stroke") !== "currentColor") svg.setAttribute("stroke", "currentColor");
@@ -1828,6 +1862,16 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       else if (!content && button.textContent !== text) button.textContent = text;
       if (button.getAttribute("aria-label") !== title) button.setAttribute("aria-label", title);
       if (button.getAttribute("title") !== title) button.setAttribute("title", title);
+    }
+
+    function syncMobileActions() {
+      if (!usageEntry || !themeEntry) return;
+      syncEntryLabel(usageEntry, "Codex 额度", "查看 Codex 额度");
+      syncEntryIcon(usageEntry, "usage");
+      const light = document.documentElement.dataset.theme === "dark";
+      const label = light ? "切换为浅色主题" : "切换为深色主题";
+      syncEntryLabel(themeEntry, label, label);
+      syncEntryIcon(themeEntry, light ? "sun" : "moon");
     }
 
     function ensureEntry() {
@@ -1856,9 +1900,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (!auxiliaryNavigation) auxiliaryNavigation = createAuxiliaryNavigation();
         syncEntryLabel(moreEntry, "更多", "更多功能");
         syncEntryIcon(moreEntry, "more");
-        auxiliaryNavigation.hidden = !hasFeature("project-management");
+        syncMobileActions();
+        auxiliaryNavigation.hidden = false;
         if (auxiliaryNavigation.parentElement !== parent || auxiliaryNavigation.previousElementSibling !== agentsEntry) agentsEntry.after(auxiliaryNavigation);
-        if (projectsEntry.parentElement !== auxiliaryMenu) auxiliaryMenu.append(projectsEntry);
+        if (projectsEntry.parentElement !== auxiliaryMenu || projectsEntry !== auxiliaryMenu.firstElementChild) auxiliaryMenu.prepend(projectsEntry);
       } else if (projectsEntry.parentElement !== parent || projectsEntry.previousElementSibling !== agentsEntry) agentsEntry.after(projectsEntry);
       const currentEntry = active && state.surface === "issues" ? entry : active && state.surface === "agents" ? agentsEntry : active && state.surface === "projects" ? projectsEntry : null;
       for (const item of [entry, agentsEntry, projectsEntry]) {
@@ -7945,7 +7990,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     function onClick(event) {
       if (!active || suppressAgentOutside) return;
       const target = event.target?.closest?.("button,a,[role='button']," + SELECTORS.threadRow);
-      if (!target || target === entry || target === agentsEntry || target === projectsEntry || target === moreEntry || target.closest("#" + PANEL_ID) || target.closest("#better-codex-dialog") || target.closest("#better-codex-agent-dialog") || target.closest("#better-codex-project-dialog") || target.closest("#better-codex-avatar-picker")) return;
+      if (!target || target === entry || target === agentsEntry || target === projectsEntry || target === moreEntry || target === usageEntry || target === themeEntry || target.closest("#" + PANEL_ID) || target.closest("#better-codex-dialog") || target.closest("#better-codex-agent-dialog") || target.closest("#better-codex-project-dialog") || target.closest("#better-codex-avatar-picker")) return;
       if (Date.now() < suppressSessionClickUntil && target.closest(SELECTORS.threadRow)) {
         suppressSessionClickUntil = 0;
         event.preventDefault();
