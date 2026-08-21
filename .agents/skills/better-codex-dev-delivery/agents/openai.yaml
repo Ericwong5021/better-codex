@@ -1,0 +1,4 @@
+interface:
+  display_name: "Better Codex Dev Delivery"
+  short_description: "Commit, push, and deploy exact Better Codex dev source"
+  default_prompt: "Use $better-codex-dev-delivery to commit and push all local Better Codex code, then deploy the exact main SHA locally and to the VPS."
