@@ -394,6 +394,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     if (HOST_KIND === "web" && !hasFeature("project-management") && /^\\/web\\/projects(?:\\/|$)/.test(location.pathname)) history.replaceState({ betterCodex: true, betterCodexSurface: "issues" }, "", "/web");
     const state = { projects: [], projectsLoaded: false, issues: [], issuesLoaded: false, projectIssues: [], projectIssuesProjectId: "", projectDetailId: initialProjectRoute?.projectId || "", projectPage: "overview", projectDocumentView: "charter", projectDocumentPending: null, projectDocumentError: null, projectPlanningPending: null, projectPlanningError: null, agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: initialProjectRoute ? "projects" : availableSurfaces.includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, autoDispatchPending: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", issueDescriptionLimit: 100000, mockup: false, keepCreate: rememberedKeepCreate, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], project: [], label: [] } };
     const pendingIssueRemovals = new Map();
+    const projectPlanningDrafts = new Map();
     function webProjectRoute() {
       if (HOST_KIND !== "web") return null;
       const match = location.pathname.match(/^\\/web\\/projects(?:\\/([^/?#]+))?\\/?$/);
@@ -4265,6 +4266,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       projects.id = "better-codex-projects";
       projects.className = "better-codex-projects";
       projects.addEventListener("click", onProjectsClick);
+      projects.addEventListener("input", event => {
+        if (!event.target.matches("[data-project-planning-form] textarea[name=message]")) return;
+        const projectId = event.target.closest("[data-project-planning-form]")?.dataset.projectPlanningForm;
+        if (projectId) projectPlanningDrafts.set(projectId, event.target.value);
+      });
       projects.addEventListener("keydown", event => {
         if (event.key !== "Escape") return;
         const picker = projects.querySelector("[data-project-document-agent-picker].is-open");
@@ -5045,7 +5051,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         ? '<input type="hidden" name="agent_id" value="' + escapeHtml(planning.agent_id || "") + '"><span class="better-codex-project-planning-agent">' + (selectedAgent ? agentAvatarMarkup(selectedAgent, "better-codex-project-document-agent-avatar") + '<span>' + escapeHtml(agentDisplayName(selectedAgent)) + '</span>' : icon("bot") + '<span>' + te("使用默认智能体") + '</span>') + '</span>'
         : projectDocumentAgentPicker("");
       const inlineError = state.projectPlanningError?.projectId === project.id ? '<output>' + escapeHtml(state.projectPlanningError.message) + '</output>' : "";
-      const form = state.mockup ? "" : '<form class="better-codex-project-planning-form" data-project-planning-form="' + escapeHtml(project.id) + '"><textarea name="message" maxlength="12000" rows="3" placeholder="' + te("询问项目规划…") + '"' + (running ? " disabled" : "") + '></textarea><div>' + agentControl + '<button class="better-codex-submit" type="submit"' + (running ? " disabled" : "") + '>' + icon(running ? "refresh" : "send") + '<span>' + te(running ? "规划中…" : "发送") + '</span></button></div>' + inlineError + '</form>';
+      const draft = projectPlanningDrafts.get(project.id) || "";
+      const form = state.mockup ? "" : '<form class="better-codex-project-planning-form" data-project-planning-form="' + escapeHtml(project.id) + '"><textarea name="message" maxlength="12000" rows="3" placeholder="' + te("询问项目规划…") + '"' + (running ? " disabled" : "") + '>' + escapeHtml(draft) + '</textarea><div>' + agentControl + '<button class="better-codex-submit" type="submit"' + (running ? " disabled" : "") + '>' + icon(running ? "refresh" : "send") + '<span>' + te(running ? "规划中…" : "发送") + '</span></button></div>' + inlineError + '</form>';
       const reset = planning.messages.length && !state.mockup ? '<button type="button" data-project-planning-reset="' + escapeHtml(project.id) + '"' + (running ? " disabled" : "") + '>' + icon("refresh") + '<span>' + te("新对话") + '</span></button>' : "";
       return '<section class="better-codex-project-planning-layout"><article class="better-codex-project-plan"><header class="better-codex-project-planning-panel-head"><div><span>' + te("项目规划") + '</span><strong>' + escapeHtml(planning.revision ? t("计划版本") + " " + planning.revision : t("项目事实")) + '</strong></div><span>' + (planning.updated_at ? escapeHtml(timeAgo(planning.updated_at)) : te("暂无明确日期")) + '</span></header>' + failure + planBody + '<footer class="better-codex-project-plan-foot">' + te("计划内容来自规划对话，不会自动修改 Issue。") + '</footer></article><aside class="better-codex-project-planning-chat"><header class="better-codex-project-planning-panel-head"><div><span>' + te("规划对话") + '</span><strong>' + te("与智能体对话，把目标、里程碑、风险和交付证据整理成可执行计划。") + '</strong></div>' + reset + '</header><div class="better-codex-project-planning-messages" aria-live="polite">' + conversation + (running ? '<div class="better-codex-project-planning-running">' + icon("refresh") + '<span>' + te("规划中…") + '</span></div>' : "") + '</div>' + form + '</aside></section>';
     }
@@ -5131,6 +5138,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const requestOptions = { passive: Boolean(options.background) };
       const projects = await requestProjects(requestOptions);
       const projectsChanged = JSON.stringify(projects) !== JSON.stringify(state.projects);
+      let projectIssuesChanged = false;
       const pending = state.projectDocumentPending;
       if (pending) {
         const project = projects.find(item => item.id === pending.projectId);
@@ -5161,12 +5169,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             requestList("/api/issues?archived=1&project_id=" + encodeURIComponent(projectId), "issues", requestOptions),
           ]);
           if (state.projectDetailId === projectId) {
-            state.projectIssues = [...activeIssues, ...archivedIssues];
+            const projectIssues = [...activeIssues, ...archivedIssues];
+            projectIssuesChanged = JSON.stringify(projectIssues) !== JSON.stringify(state.projectIssues);
+            state.projectIssues = projectIssues;
             state.projectIssuesProjectId = projectId;
           }
         }
       }
-      if (options.background && !projectsChanged && !state.projectDetailId) return;
+      if (options.background && ((!projectsChanged && !projectIssuesChanged) || panel?.querySelector("#better-codex-projects textarea:focus"))) return;
       render();
     }
 
@@ -5231,6 +5241,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const textarea = panel.querySelector("[data-project-planning-form] textarea[name=message]");
         if (!textarea) return;
         textarea.value = planningPrompt.dataset.projectPlanningPrompt || "";
+        const projectId = textarea.closest("[data-project-planning-form]")?.dataset.projectPlanningForm;
+        if (projectId) projectPlanningDrafts.set(projectId, textarea.value);
         textarea.focus();
         textarea.setSelectionRange(textarea.value.length, textarea.value.length);
         return;
@@ -5244,6 +5256,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             const command = await waitForRemoteCommand(result.command_id);
             if (command.status !== "applied") throw new Error(command.error || "command_rejected");
           }
+          projectPlanningDrafts.delete(projectId);
           state.projectPlanningError = null;
           await loadProjects();
         }));
@@ -5319,6 +5332,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (!message) return void form.querySelector("textarea")?.focus();
       state.projectPlanningError = null;
       state.projectPlanningPending = { projectId, message, updatedAt: String(project?.updated_at || "") };
+      projectPlanningDrafts.delete(projectId);
       renderProjects();
       void (async () => {
         try {
@@ -5330,6 +5344,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           await loadProjects();
         } catch (error) {
           state.projectPlanningPending = null;
+          projectPlanningDrafts.set(projectId, message);
           state.projectPlanningError = { projectId, message: projectPlanningErrorLabel(error instanceof Error ? error.message : error) };
           showError(error);
           renderProjects();
