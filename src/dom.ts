@@ -6103,7 +6103,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         dialog.dataset.executionLocked = String(executionLocked);
         dialog.dataset.locked = String(editingLocked);
         dialog.querySelectorAll("input, textarea, select, button").forEach(control => {
-          if (control.matches("[data-dialog-close], [data-dialog-expand], [data-dialog-open-thread], [data-dialog-stop], [data-dialog-restore], [data-description-toggle]")) {
+          if (control.matches("[data-dialog-close], [data-dialog-expand], [data-dialog-open-thread], [data-dialog-stop], [data-dialog-restore], [data-description-toggle], [data-conversation-copy]")) {
             control.disabled = false;
             return;
           }

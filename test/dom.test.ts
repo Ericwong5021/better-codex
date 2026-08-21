@@ -719,6 +719,7 @@ test("issue details render the latest conversation result and reply composer", (
   assert.ok(source.includes("在此回复智能体"));
   assert.ok(source.includes("data-conversation-send"));
   assert.ok(source.includes("data-conversation-attach"));
+  assert.ok(permissions.includes("[data-conversation-copy]"));
   assert.ok(source.includes('data-composer-mode="\' + mode + \'"'));
   assert.ok(source.includes('button.dataset.composerMode === "stop"'));
   assert.ok(source.includes("stopIssueFromDialog(button)"));
