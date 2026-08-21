@@ -3,8 +3,9 @@ import { existsSync, linkSync, mkdirSync, unlinkSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { databasePath, developmentDatabaseSnapshotSourcePath } from "./config.js";
+import { renderMarkdown } from "./markdown.js";
 import { syncProtocolVersion } from "./sync-contract.js";
-import { projectDocumentKeys, type ConversationProjection, type DirectoryBrowserResult, type IssueProjection, type ProjectDocumentKey, type ProjectDocumentView, type ProjectProjection, type RemoteCommand, type RemoteCommandAck, type SyncEntityType, type SyncProjection } from "./sync-contract.js";
+import { projectDocumentKeys, type ConversationProjection, type DirectoryBrowserResult, type IssueProjection, type ProjectDocumentKey, type ProjectDocumentView, type ProjectPlanningState, type ProjectPlanSnapshot, type ProjectProjection, type RemoteCommand, type RemoteCommandAck, type SyncEntityType, type SyncProjection } from "./sync-contract.js";
 
 export const issueStatuses = ["backlog", "todo", "in_progress", "in_review", "done", "blocked"] as const;
 export const issuePriorities = ["none", "low", "medium", "high", "urgent"] as const;
@@ -51,6 +52,7 @@ export type Project = {
   document_views: ProjectDocumentView[];
   document_agent_id: string | null;
   document_feedback: string;
+  planning: ProjectPlanningState;
   next_issue_number: number;
   created_at: string;
   updated_at: string;
@@ -234,7 +236,7 @@ export function cleanMaxConcurrency(value: number | undefined) {
   return value;
 }
 
-const latestSchemaVersion = 15;
+const latestSchemaVersion = 16;
 
 function now() {
   return new Date().toISOString();
@@ -397,6 +399,22 @@ function projectDocumentViewsFromRow(row: Record<string, unknown>) {
   return views;
 }
 
+function emptyProjectPlanning(): ProjectPlanningState {
+  return { status: "idle", error: null, agent_id: null, revision: 0, updated_at: null, messages: [], plan: null };
+}
+
+function projectPlanFromJson(value: unknown): ProjectPlanSnapshot | null {
+  try {
+    const source = JSON.parse(String(value || "null")) as ProjectPlanSnapshot;
+    if (!source || typeof source !== "object" || Array.isArray(source) || typeof source.summary !== "string") return null;
+    const keys = ["outcomes", "milestones", "workstreams", "risks", "decisions", "open_questions", "delivery", "evidence"] as const;
+    if (keys.some(key => !Array.isArray(source[key]))) return null;
+    return source;
+  } catch {
+    return null;
+  }
+}
+
 function projectFromRow(row: Record<string, unknown>): Project {
   let rootPaths: string[] = [];
   try {
@@ -420,6 +438,7 @@ function projectFromRow(row: Record<string, unknown>): Project {
     document_views: projectDocumentViewsFromRow(row),
     document_agent_id: row.document_agent_id ? String(row.document_agent_id) : null,
     document_feedback: String(row.document_feedback || ""),
+    planning: emptyProjectPlanning(),
     next_issue_number: Number(row.next_issue_number || 1),
     created_at: String(row.created_at),
     updated_at: String(row.updated_at),
@@ -485,6 +504,7 @@ export class Store {
     this.ensureReplyDraftColumn();
     this.ensureSessionHandoffColumn();
     this.ensureProjectColumns();
+    this.recoverProjectPlanning();
     this.ensureSyncTriggers();
     const integrity = this.db.prepare("PRAGMA quick_check").get() as Record<string, unknown> | undefined;
     if (String(integrity?.quick_check ?? "") !== "ok") {
@@ -765,6 +785,46 @@ export class Store {
       }
     }
     if (fromVersion < 15) this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (15, ?)").run(now());
+    if (fromVersion < 16) {
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS project_planning_sessions (
+            project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+            thread_id TEXT UNIQUE,
+            agent_id TEXT,
+            status TEXT NOT NULL DEFAULT 'idle',
+            last_error TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          );
+          CREATE TABLE IF NOT EXISTS project_planning_messages (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            role TEXT NOT NULL CHECK(role IN ('user', 'agent')),
+            markdown TEXT NOT NULL,
+            html TEXT NOT NULL,
+            created_at TEXT NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS project_planning_messages_project ON project_planning_messages(project_id, created_at);
+          CREATE TABLE IF NOT EXISTS project_plan_revisions (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            revision INTEGER NOT NULL,
+            plan_json TEXT NOT NULL,
+            source_message_id TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE(project_id, revision)
+          );
+          CREATE INDEX IF NOT EXISTS project_plan_revisions_project ON project_plan_revisions(project_id, revision DESC);
+        `);
+        this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (16, ?)").run(now());
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    }
   }
 
   private ensureProjectColumns() {
@@ -787,6 +847,13 @@ export class Store {
       }
     }
     this.db.prepare("UPDATE projects SET overview_status = 'failed', overview_error = 'runtime_restarted' WHERE overview_status = 'generating'").run();
+  }
+
+  private recoverProjectPlanning() {
+    const timestamp = now();
+    const projects = this.db.prepare("SELECT project_id FROM project_planning_sessions WHERE status = 'running'").all() as Array<{ project_id: string }>;
+    this.db.prepare("UPDATE project_planning_sessions SET status = 'failed', last_error = 'runtime_restarted', updated_at = ? WHERE status = 'running'").run(timestamp);
+    for (const project of projects) this.db.prepare("UPDATE projects SET updated_at = ? WHERE id = ?").run(timestamp, project.project_id);
   }
 
   private ensureSyncTriggers() {
@@ -1181,6 +1248,7 @@ export class Store {
         document_views: project.document_views,
         document_agent_id: project.document_agent_id,
         document_feedback: project.document_feedback,
+        planning: project.planning,
         created_at: project.created_at,
         updated_at: project.updated_at,
         local_revision: Math.max(1, Date.parse(project.updated_at) || 1),
@@ -1225,7 +1293,7 @@ export class Store {
     } satisfies IssueProjection;
   }
 
-  async applyRemoteCommand(command: RemoteCommand, handlers: { files?: (files: Array<{ name: string; type: string; data: string }>) => { paths: string[]; cleanup: () => void } | Promise<{ paths: string[]; cleanup: () => void }>; reply?: (issueId: string, requestId: string, message: string, files: Array<{ name: string; type: string; data: string }>) => void | Promise<void>; stop?: (issueId: string) => void | Promise<void>; projectCreate?: (projectId: string, name: string, workspacePath: string) => void | Promise<void>; projectOverview?: (projectId: string, agentId: string, feedback: string) => void | Promise<void>; chooseDirectory?: () => string | Promise<string>; browseDirectory?: (path: string) => DirectoryBrowserResult | Promise<DirectoryBrowserResult>; threadAction?: (issueId: string, action: IssueThreadAction) => void | Promise<void> } = {}): Promise<RemoteCommandAck> {
+  async applyRemoteCommand(command: RemoteCommand, handlers: { files?: (files: Array<{ name: string; type: string; data: string }>) => { paths: string[]; cleanup: () => void } | Promise<{ paths: string[]; cleanup: () => void }>; reply?: (issueId: string, requestId: string, message: string, files: Array<{ name: string; type: string; data: string }>) => void | Promise<void>; stop?: (issueId: string) => void | Promise<void>; projectCreate?: (projectId: string, name: string, workspacePath: string) => void | Promise<void>; projectOverview?: (projectId: string, agentId: string, feedback: string) => void | Promise<void>; projectPlanningReply?: (projectId: string, agentId: string, message: string) => void | Promise<void>; projectPlanningReset?: (projectId: string) => void | Promise<void>; chooseDirectory?: () => string | Promise<string>; browseDirectory?: (path: string) => DirectoryBrowserResult | Promise<DirectoryBrowserResult>; threadAction?: (issueId: string, action: IssueThreadAction) => void | Promise<void> } = {}): Promise<RemoteCommandAck> {
     const receipt = this.db.prepare("SELECT result_json FROM sync_command_receipts WHERE command_id = ?").get(command.command_id) as { result_json: string } | undefined;
     if (receipt) return JSON.parse(receipt.result_json) as RemoteCommandAck;
     const result = await (async () => {
@@ -1271,6 +1339,22 @@ export class Store {
           const agentId = typeof payload.agent_id === "string" ? payload.agent_id.trim().slice(0, 200) : "";
           const feedback = typeof payload.feedback === "string" ? payload.feedback.trim().slice(0, 4000) : "";
           await handlers.projectOverview(project.id, agentId, feedback);
+          return { command_id: command.command_id, status: "applied", error: null, projection: this.syncProjection("project", project.id) as ProjectProjection } satisfies RemoteCommandAck;
+        }
+        if (command.operation === "project.planning.reply") {
+          const project = this.getProject(command.entity_id);
+          if (!project) throw new Error("project_not_found");
+          if ((this.syncProjection("project", project.id) as ProjectProjection).local_revision !== command.base_revision) throw new Error("version_conflict");
+          if (!handlers.projectPlanningReply) throw new Error("remote_project_planning_unavailable");
+          await handlers.projectPlanningReply(project.id, typeof payload.agent_id === "string" ? payload.agent_id.trim().slice(0, 200) : "", typeof payload.message === "string" ? payload.message.trim().slice(0, 12000) : "");
+          return { command_id: command.command_id, status: "applied", error: null, projection: this.syncProjection("project", project.id) as ProjectProjection } satisfies RemoteCommandAck;
+        }
+        if (command.operation === "project.planning.reset") {
+          const project = this.getProject(command.entity_id);
+          if (!project) throw new Error("project_not_found");
+          if ((this.syncProjection("project", project.id) as ProjectProjection).local_revision !== command.base_revision) throw new Error("version_conflict");
+          if (!handlers.projectPlanningReset) throw new Error("remote_project_planning_unavailable");
+          await handlers.projectPlanningReset(project.id);
           return { command_id: command.command_id, status: "applied", error: null, projection: this.syncProjection("project", project.id) as ProjectProjection } satisfies RemoteCommandAck;
         }
         let issue: Issue;
@@ -1472,15 +1556,120 @@ export class Store {
     return Boolean(this.getAutoDispatch() && !issue.archived_at && !["backlog", "done"].includes(issue.status));
   }
 
+  private projectPlanningState(projectId: string): ProjectPlanningState {
+    const session = this.db.prepare("SELECT agent_id, status, last_error, updated_at FROM project_planning_sessions WHERE project_id = ?").get(projectId) as { agent_id: string | null; status: string; last_error: string | null; updated_at: string } | undefined;
+    const messages = (this.db.prepare(`
+      SELECT id, role, markdown, html, created_at FROM (
+        SELECT id, role, markdown, html, created_at FROM project_planning_messages WHERE project_id = ? ORDER BY created_at DESC LIMIT 80
+      ) ORDER BY created_at
+    `).all(projectId) as Array<{ id: string; role: "user" | "agent"; markdown: string; html: string; created_at: string }>);
+    const revision = this.db.prepare("SELECT revision, plan_json, created_at FROM project_plan_revisions WHERE project_id = ? ORDER BY revision DESC LIMIT 1").get(projectId) as { revision: number; plan_json: string; created_at: string } | undefined;
+    return {
+      status: session && ["running", "ready", "failed"].includes(session.status) ? session.status as ProjectPlanningState["status"] : "idle",
+      error: session?.last_error || null,
+      agent_id: session?.agent_id || null,
+      revision: Number(revision?.revision || 0),
+      updated_at: session?.updated_at || revision?.created_at || null,
+      messages,
+      plan: projectPlanFromJson(revision?.plan_json),
+    };
+  }
+
+  private withProjectPlanning(project: Project) {
+    return { ...project, planning: this.projectPlanningState(project.id) };
+  }
+
   listProjects() {
     return (this.db.prepare(`
       SELECT * FROM projects ORDER BY updated_at DESC, name COLLATE NOCASE
-    `).all() as Array<Record<string, unknown>>).map(projectFromRow);
+    `).all() as Array<Record<string, unknown>>).map(row => this.withProjectPlanning(projectFromRow(row)));
   }
 
   getProject(id: string) {
     const row = this.db.prepare("SELECT * FROM projects WHERE id = ?").get(id) as Record<string, unknown> | undefined;
-    return row ? projectFromRow(row) : undefined;
+    return row ? this.withProjectPlanning(projectFromRow(row)) : undefined;
+  }
+
+  startProjectPlanningTurn(id: string, agentId: string, message: string) {
+    const project = this.getProject(id);
+    const markdown = message.trim().slice(0, 12000);
+    if (!project) throw new Error("project_not_found");
+    if (!markdown) throw new Error("project_planning_message_required");
+    const session = this.db.prepare("SELECT thread_id, agent_id, status FROM project_planning_sessions WHERE project_id = ?").get(id) as { thread_id: string | null; agent_id: string | null; status: string } | undefined;
+    if (session?.status === "running") throw new Error("project_planning_busy");
+    if (session?.thread_id && session.agent_id !== (agentId || null)) throw new Error("project_planning_agent_locked");
+    const timestamp = now();
+    const messageId = randomUUID();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare(`
+        INSERT INTO project_planning_sessions (project_id, thread_id, agent_id, status, last_error, created_at, updated_at)
+        VALUES (?, ?, ?, 'running', NULL, ?, ?)
+        ON CONFLICT(project_id) DO UPDATE SET agent_id = excluded.agent_id, status = 'running', last_error = NULL, updated_at = excluded.updated_at
+      `).run(id, session?.thread_id || null, agentId || null, timestamp, timestamp);
+      this.db.prepare("INSERT INTO project_planning_messages (id, project_id, role, markdown, html, created_at) VALUES (?, ?, 'user', ?, ?, ?)")
+        .run(messageId, id, markdown, renderMarkdown(markdown), timestamp);
+      this.db.prepare("UPDATE projects SET updated_at = ? WHERE id = ?").run(timestamp, id);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    return { project: this.getProject(id)!, messageId, threadId: session?.thread_id || null };
+  }
+
+  finishProjectPlanningTurn(id: string, sourceMessageId: string, threadId: string, reply: string, plan: ProjectPlanSnapshot) {
+    const session = this.db.prepare("SELECT status FROM project_planning_sessions WHERE project_id = ?").get(id) as { status: string } | undefined;
+    if (session?.status !== "running") throw new Error("project_planning_not_running");
+    const markdown = reply.trim().slice(0, 120000);
+    if (!markdown) throw new Error("project_planning_invalid_output");
+    const timestamp = now();
+    const responseId = randomUUID();
+    const current = this.db.prepare("SELECT MAX(revision) AS revision FROM project_plan_revisions WHERE project_id = ?").get(id) as { revision: number | null };
+    const revision = Number(current.revision || 0) + 1;
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare("INSERT INTO project_planning_messages (id, project_id, role, markdown, html, created_at) VALUES (?, ?, 'agent', ?, ?, ?)")
+        .run(responseId, id, markdown, renderMarkdown(markdown), timestamp);
+      this.db.prepare("INSERT INTO project_plan_revisions (id, project_id, revision, plan_json, source_message_id, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+        .run(randomUUID(), id, revision, JSON.stringify(plan), sourceMessageId, timestamp);
+      this.db.prepare("UPDATE project_planning_sessions SET thread_id = ?, status = 'ready', last_error = NULL, updated_at = ? WHERE project_id = ?")
+        .run(threadId, timestamp, id);
+      this.db.prepare("DELETE FROM project_plan_revisions WHERE project_id = ? AND revision NOT IN (SELECT revision FROM project_plan_revisions WHERE project_id = ? ORDER BY revision DESC LIMIT 30)").run(id, id);
+      this.db.prepare("UPDATE projects SET updated_at = ? WHERE id = ?").run(timestamp, id);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    return this.getProject(id)!;
+  }
+
+  failProjectPlanningTurn(id: string, error: string) {
+    const timestamp = now();
+    this.db.prepare("UPDATE project_planning_sessions SET status = 'failed', last_error = ?, updated_at = ? WHERE project_id = ?")
+      .run(error.slice(0, 2000), timestamp, id);
+    this.db.prepare("UPDATE projects SET updated_at = ? WHERE id = ?").run(timestamp, id);
+    return this.getProject(id);
+  }
+
+  resetProjectPlanning(id: string) {
+    if (!this.getProject(id)) throw new Error("project_not_found");
+    const session = this.db.prepare("SELECT status FROM project_planning_sessions WHERE project_id = ?").get(id) as { status: string } | undefined;
+    if (session?.status === "running") throw new Error("project_planning_busy");
+    const timestamp = now();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare("DELETE FROM project_plan_revisions WHERE project_id = ?").run(id);
+      this.db.prepare("DELETE FROM project_planning_messages WHERE project_id = ?").run(id);
+      this.db.prepare("DELETE FROM project_planning_sessions WHERE project_id = ?").run(id);
+      this.db.prepare("UPDATE projects SET updated_at = ? WHERE id = ?").run(timestamp, id);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    return this.getProject(id)!;
   }
 
   ensureProject(input: ProjectInput) {

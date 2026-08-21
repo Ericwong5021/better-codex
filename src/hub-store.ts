@@ -3,7 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, renameSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { issuePriorities, issueStatuses } from "./db.js";
-import { forbiddenProjectionKeys, normalizeAgentDirectoryProjection, normalizeAgentModelCatalogProjection, normalizeCodexUsageProjection, previousSyncProtocolVersion, projectDocumentKeys, remoteCommandOperations, runtimeProjectionSignature, supportedSyncProtocolVersions, syncEntityTypes, syncProtocolVersion, type AgentDirectoryProjection, type ConversationProjection, type DirectoryBrowserResult, type HubBoard, type IssueProjection, type ProjectDocumentView, type ProjectProjection, type RemoteCommand, type RemoteCommandAck, type RemoteCommandOperation, type RemoteCommandStatus, type RuntimeProjection, type SyncChange, type SyncEntityType, type SyncProjection, type SyncPushRequest } from "./sync-contract.js";
+import { forbiddenProjectionKeys, normalizeAgentDirectoryProjection, normalizeAgentModelCatalogProjection, normalizeCodexUsageProjection, previousSyncProtocolVersion, projectDocumentKeys, remoteCommandOperations, runtimeProjectionSignature, supportedSyncProtocolVersions, syncEntityTypes, syncProtocolVersion, type AgentDirectoryProjection, type ConversationProjection, type DirectoryBrowserResult, type HubBoard, type IssueProjection, type ProjectDocumentView, type ProjectPlanItem, type ProjectProjection, type RemoteCommand, type RemoteCommandAck, type RemoteCommandOperation, type RemoteCommandStatus, type RuntimeProjection, type SyncChange, type SyncEntityType, type SyncProjection, type SyncPushRequest } from "./sync-contract.js";
 import { coreVersion } from "./version.js";
 
 function now() {
@@ -88,6 +88,54 @@ function cleanProjectDocumentViews(value: unknown): ProjectDocumentView[] {
   return projectDocumentKeys.map(key => found.get(key) || { key, status: "idle", markdown: "", html: "", diagram: null, error: null, updated_at: null });
 }
 
+function cleanProjectPlanning(value: unknown): NonNullable<ProjectProjection["planning"]> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid_projection");
+  const source = value as Record<string, unknown>;
+  if (!["idle", "running", "ready", "failed"].includes(String(source.status)) || !Number.isInteger(source.revision) || Number(source.revision) < 0) throw new Error("invalid_projection");
+  if (!Array.isArray(source.messages) || source.messages.length > 80) throw new Error("invalid_projection");
+  const messages = source.messages.map(message => {
+    if (!message || typeof message !== "object" || Array.isArray(message)) throw new Error("invalid_projection");
+    const item = message as Record<string, unknown>;
+    if (item.role !== "user" && item.role !== "agent") throw new Error("invalid_projection");
+    return { id: cleanString(item.id, 80, false), role: item.role, markdown: cleanString(item.markdown, 120_000), html: cleanString(item.html, 500_000), created_at: cleanString(item.created_at, 64, false) };
+  });
+  const planSource = source.plan === null ? null : source.plan as Record<string, unknown>;
+  const plan = planSource ? (() => {
+    if (typeof planSource !== "object" || Array.isArray(planSource)) throw new Error("invalid_projection");
+    const result = { summary: cleanString(planSource.summary, 4_000) } as NonNullable<NonNullable<ProjectProjection["planning"]>["plan"]>;
+    for (const key of ["outcomes", "milestones", "workstreams", "risks", "decisions", "open_questions", "delivery", "evidence"] as const) {
+      const values = planSource[key];
+      if (!Array.isArray(values) || values.length > 24) throw new Error("invalid_projection");
+      result[key] = values.map(value => {
+        if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid_projection");
+        const item = value as Record<string, unknown>;
+        if (!["proposed", "confirmed", "in_progress", "blocked", "done"].includes(String(item.status)) || !["code", "issue", "conversation", "user", "inference"].includes(String(item.source))) throw new Error("invalid_projection");
+        if (!Array.isArray(item.dependencies) || item.dependencies.length > 12 || !Array.isArray(item.evidence) || item.evidence.length > 12) throw new Error("invalid_projection");
+        return {
+          id: cleanString(item.id, 80, false),
+          title: cleanString(item.title, 300, false),
+          detail: cleanString(item.detail, 2_000),
+          status: item.status as ProjectPlanItem["status"],
+          source: item.source as ProjectPlanItem["source"],
+          target_date: item.target_date === null ? null : cleanString(item.target_date, 10, false),
+          dependencies: item.dependencies.map(dependency => cleanString(dependency, 80, false)),
+          evidence: item.evidence.map(evidence => cleanString(evidence, 500, false)),
+        };
+      });
+    }
+    return result;
+  })() : null;
+  return {
+    status: source.status as NonNullable<ProjectProjection["planning"]>["status"],
+    error: source.error === null ? null : cleanString(source.error, 2_000),
+    agent_id: source.agent_id === null ? null : cleanString(source.agent_id, 200),
+    revision: Number(source.revision),
+    updated_at: source.updated_at === null ? null : cleanString(source.updated_at, 64, false),
+    messages,
+    plan,
+  };
+}
+
 function containsForbiddenKey(value: unknown): boolean {
   if (Array.isArray(value)) return value.some(containsForbiddenKey);
   if (!value || typeof value !== "object") return false;
@@ -111,6 +159,7 @@ function cleanProjection(type: SyncEntityType, id: string, value: unknown): Sync
     document_views: source.document_views === undefined ? undefined : cleanProjectDocumentViews(source.document_views),
     document_agent_id: source.document_agent_id === undefined ? undefined : source.document_agent_id === null ? null : cleanString(source.document_agent_id, 200),
     document_feedback: source.document_feedback === undefined ? undefined : cleanString(source.document_feedback, 4_000),
+    planning: source.planning === undefined ? undefined : cleanProjectPlanning(source.planning),
     created_at: cleanString(source.created_at, 64, false),
     updated_at: cleanString(source.updated_at, 64, false),
     local_revision: Number(source.local_revision),
@@ -221,6 +270,7 @@ function cleanCommandPayload(operation: RemoteCommandOperation, value: unknown) 
       : operation === "project.browse_directory" ? ["path"]
       : operation === "project.create" ? ["name", "workspace_path"]
       : operation === "project.overview" ? ["agent_id", "feedback"]
+      : operation === "project.planning.reply" ? ["agent_id", "message"]
       : operation === "settings.auto-dispatch" ? ["enabled"] : [];
   if (Object.keys(source).some(key => !allowed.includes(key))) throw new Error("forbidden_command_field");
   const payload: Record<string, unknown> = {};
@@ -253,7 +303,7 @@ function cleanCommandPayload(operation: RemoteCommandOperation, value: unknown) 
   if (source.user_assigned !== undefined) payload.user_assigned = source.user_assigned === true;
   if (source.enabled !== undefined) payload.enabled = source.enabled === true;
   if (source.before_id !== undefined) payload.before_id = cleanString(source.before_id, 200);
-  if (source.message !== undefined) payload.message = cleanString(source.message, 100_000, false).trim();
+  if (source.message !== undefined) payload.message = cleanString(source.message, operation === "project.planning.reply" ? 12_000 : 100_000, false).trim();
   if (source.feedback !== undefined) payload.feedback = cleanString(source.feedback, 4_000).trim();
   if (source.name !== undefined) payload.name = cleanString(source.name, 120, false).trim();
   if (source.path !== undefined) payload.path = cleanString(source.path, 4096).trim();
@@ -278,6 +328,7 @@ function cleanCommandPayload(operation: RemoteCommandOperation, value: unknown) 
   if (operation === "issue.start" && !payload.title) throw new Error("invalid_command_payload");
   if (operation === "issue.reply" && !payload.message && !(payload.files as unknown[] | undefined)?.length) throw new Error("message_required");
   if (operation === "project.create" && (!payload.name || !payload.workspace_path)) throw new Error("invalid_command_payload");
+  if (operation === "project.planning.reply" && !payload.message) throw new Error("message_required");
   if (operation === "project.browse_directory" && typeof payload.path !== "string") throw new Error("invalid_command_payload");
   if (operation === "settings.auto-dispatch" && typeof source.enabled !== "boolean") throw new Error("invalid_auto_dispatch");
   return payload;

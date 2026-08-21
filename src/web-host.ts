@@ -684,7 +684,7 @@ function queueableCommand(method, path, bodyBytes) {
   if (method === "POST" && /^\/api\/issues\/from-thread$/.test(pathname)) return true;
   if (["PATCH", "DELETE"].includes(method) && /^\/api\/issues\/[^/]+$/.test(pathname)) return true;
   if (method === "POST" && /^\/api\/issues\/[^/]+\/(start|stop|move|archive|unarchive|reply|session-handoff)$/.test(pathname)) return true;
-  if (method === "POST" && (/^\/api\/projects$/.test(pathname) || /^\/api\/projects\/ensure$/.test(pathname) || /^\/api\/projects\/[^/]+\/overview$/.test(pathname))) return true;
+  if (method === "POST" && (/^\/api\/projects$/.test(pathname) || /^\/api\/projects\/ensure$/.test(pathname) || /^\/api\/projects\/[^/]+\/(overview|planning\/(messages|reset))$/.test(pathname))) return true;
   if (method === "POST" && /^\/api\/agents$/.test(pathname)) return true;
   if (["PATCH", "DELETE"].includes(method) && /^\/api\/agents\/[^/]+$/.test(pathname)) return true;
   return method === "PATCH" && /^\/api\/settings\/(auto-dispatch|scheduler-model|scheduler-reasoning-effort)$/.test(pathname);

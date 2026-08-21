@@ -453,6 +453,19 @@ export function createHubServer(options: HubServerOptions) {
         notifyControl(command.device_id);
         return sendJson(response, 202, { command_id: command.command_id });
       }
+      const projectPlanning = url.pathname.match(/^\/api\/projects\/([^/]+)\/planning\/(messages|reset)$/);
+      if (projectPlanning && method === "POST") {
+        if (!browser) return sendJson(response, 401, { error: "unauthorized" });
+        if (!trustedOrigin(request, true) || !csrfValid) return sendJson(response, 403, { error: "csrf_invalid" });
+        const project = store.board().projects.find(item => item.id === decodeURIComponent(projectPlanning[1]));
+        if (!project) return sendJson(response, 404, { error: "project_not_found" });
+        const body = await readBody(request);
+        const operation = projectPlanning[2] === "reset" ? "project.planning.reset" : "project.planning.reply";
+        const payload = operation === "project.planning.reply" ? { agent_id: body.agent_id, message: body.message } : {};
+        const command = store.createRemoteCommand({ command_id: body.command_id ?? request.headers["x-better-codex-command-id"], operation, entity_id: project.id, base_revision: project.local_revision, payload });
+        notifyControl(command.device_id);
+        return sendJson(response, 202, { command_id: command.command_id });
+      }
       if (url.pathname === "/api/issues" && method === "GET") {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" });
         const board = store.board();

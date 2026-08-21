@@ -19,6 +19,7 @@ const issueAction = /^\/api\/issues\/([^/]+)\/(start|stop|move|archive|unarchive
 const projectCollection = /^\/api\/projects$/;
 const projectEnsure = /^\/api\/projects\/ensure$/;
 const projectOverview = /^\/api\/projects\/([^/]+)\/overview$/;
+const projectPlanning = /^\/api\/projects\/([^/]+)\/planning\/(messages|reset)$/;
 const agentCollection = /^\/api\/agents$/;
 const agentItem = /^\/api\/agents\/([^/]+)$/;
 const settingItem = /^\/api\/settings\/(auto-dispatch|scheduler-model|scheduler-reasoning-effort)$/;
@@ -37,6 +38,8 @@ export function webCommandTarget(methodValue: string, pathValue: string) {
   if (issueCollection.test(pathname) && method === "POST") return { kind: "issue" as const, entity_id: null };
   if (issueFromThread.test(pathname) && method === "POST") return { kind: "issue" as const, entity_id: null };
   match = pathname.match(projectOverview);
+  if (match && method === "POST") return { kind: "project" as const, entity_id: decoded(match[1]) };
+  match = pathname.match(projectPlanning);
   if (match && method === "POST") return { kind: "project" as const, entity_id: decoded(match[1]) };
   if (projectCollection.test(pathname) && method === "POST") return { kind: "project" as const, entity_id: null };
   if (projectEnsure.test(pathname) && method === "POST") return { kind: "project" as const, entity_id: null };

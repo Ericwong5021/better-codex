@@ -706,6 +706,12 @@ export function startServer() {
     (projectId, agentId, feedback) => {
       if (!worker.generateProjectOverview(projectId, agentId, feedback)) throw new Error("project_overview_unavailable");
     },
+    (projectId, agentId, message) => {
+      if (!worker.sendProjectPlanningMessage(projectId, agentId, message)) throw new Error("project_planning_unavailable");
+    },
+    projectId => {
+      worker.resetProjectPlanning(projectId);
+    },
     files => {
       return saveRemoteFiles(files, randomUUID());
     },
@@ -1029,7 +1035,7 @@ export function startServer() {
         const projectId = `mockup-project-${randomUUID()}`;
         const updated = updateMockupState(mockupLocale, state => {
           const workspacePath = cleanString(body.workspace_path, 4096);
-          state.projects.push({ id: projectId, external_id: projectId, name: cleanString(body.name, 120), workspace_path: workspacePath, root_paths: workspacePath ? [workspacePath] : [], description: "", overview_html: "", overview_status: "idle", overview_error: null, overview_updated_at: null });
+          state.projects.push({ id: projectId, external_id: projectId, name: cleanString(body.name, 120), workspace_path: workspacePath, root_paths: workspacePath ? [workspacePath] : [], description: "", overview_html: "", overview_status: "idle", overview_error: null, overview_updated_at: null, planning: { status: "idle", error: null, agent_id: null, revision: 0, updated_at: null, messages: [], plan: null } });
         }).state;
         return sendJson(response, 201, updated.projects.find(project => project.id === projectId));
       }
@@ -1506,6 +1512,18 @@ export function startServer() {
         const feedback = cleanString(body.feedback, 4000);
         if (project.overview_status !== "generating" && !worker.generateProjectOverview(project.id, agentId, feedback)) throw new Error("project_overview_unavailable");
         return sendJson(response, 202, store.getProject(project.id));
+      }
+      if (path[0] === "api" && path[1] === "projects" && path[2] && path[3] === "planning" && path[4] === "messages" && path.length === 5 && method === "POST") {
+        const projectId = decodeURIComponent(path[2]);
+        if (!store.getProject(projectId)) return sendJson(response, 404, { error: "project_not_found" });
+        const body = await readBody(request);
+        const agentId = cleanString(body.agent_id, 200);
+        const message = cleanString(body.message, 12000);
+        if (!worker.sendProjectPlanningMessage(projectId, agentId, message)) throw new Error("project_planning_unavailable");
+        return sendJson(response, 202, store.getProject(projectId));
+      }
+      if (path[0] === "api" && path[1] === "projects" && path[2] && path[3] === "planning" && path[4] === "reset" && path.length === 5 && method === "POST") {
+        return sendJson(response, 200, worker.resetProjectPlanning(decodeURIComponent(path[2])));
       }
       if (path[0] === "api" && path[1] === "sessions" && path[2] && path[3] === "workspace" && path.length === 4 && method === "GET") {
         const threadId = normalizeSessionId(decodeURIComponent(path[2]));

@@ -48,6 +48,46 @@ export type ProjectDocumentView = {
   updated_at: string | null;
 };
 
+export type ProjectPlanSource = "code" | "issue" | "conversation" | "user" | "inference";
+export type ProjectPlanStatus = "proposed" | "confirmed" | "in_progress" | "blocked" | "done";
+export type ProjectPlanItem = {
+  id: string;
+  title: string;
+  detail: string;
+  status: ProjectPlanStatus;
+  source: ProjectPlanSource;
+  target_date: string | null;
+  dependencies: string[];
+  evidence: string[];
+};
+export type ProjectPlanSnapshot = {
+  summary: string;
+  outcomes: ProjectPlanItem[];
+  milestones: ProjectPlanItem[];
+  workstreams: ProjectPlanItem[];
+  risks: ProjectPlanItem[];
+  decisions: ProjectPlanItem[];
+  open_questions: ProjectPlanItem[];
+  delivery: ProjectPlanItem[];
+  evidence: ProjectPlanItem[];
+};
+export type ProjectPlanningMessage = {
+  id: string;
+  role: "user" | "agent";
+  markdown: string;
+  html: string;
+  created_at: string;
+};
+export type ProjectPlanningState = {
+  status: "idle" | "running" | "ready" | "failed";
+  error: string | null;
+  agent_id: string | null;
+  revision: number;
+  updated_at: string | null;
+  messages: ProjectPlanningMessage[];
+  plan: ProjectPlanSnapshot | null;
+};
+
 export type ProjectProjection = {
   id: string;
   name: string;
@@ -61,6 +101,7 @@ export type ProjectProjection = {
   document_views?: ProjectDocumentView[];
   document_agent_id?: string | null;
   document_feedback?: string;
+  planning?: ProjectPlanningState;
   created_at: string;
   updated_at: string;
   local_revision: number;
@@ -308,7 +349,7 @@ export type DirectoryBrowserResult = {
   truncated: boolean;
 };
 
-export const remoteCommandOperations = ["project.pick_directory", "project.browse_directory", "project.create", "project.overview", "issue.create", "issue.update", "issue.move", "issue.start", "issue.stop", "issue.reply", "issue.archive", "issue.restore", "issue.delete", "settings.auto-dispatch"] as const;
+export const remoteCommandOperations = ["project.pick_directory", "project.browse_directory", "project.create", "project.overview", "project.planning.reply", "project.planning.reset", "issue.create", "issue.update", "issue.move", "issue.start", "issue.stop", "issue.reply", "issue.archive", "issue.restore", "issue.delete", "settings.auto-dispatch"] as const;
 export type RemoteCommandOperation = typeof remoteCommandOperations[number];
 export type RemoteCommandStatus = "pending" | "dispatched" | "applied" | "rejected" | "conflict" | "expired";
 

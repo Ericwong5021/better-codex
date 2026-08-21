@@ -181,8 +181,8 @@ export function defaultMockupState(locale: MockupLocale = "zh-CN"): MockupState 
   const agents = defaultAgents(locale);
   const documents = defaultProjectDocuments(locale);
   const project = locale === "en"
-    ? { id: projectId, external_id: "mockup", name: "Better Codex Desktop", workspace_path: "", root_paths: [], description: "A project and agent workspace that makes Codex work visible from intent to delivery.", overview_html: String(documents[0].html), overview_status: "generating", overview_error: null, overview_updated_at: null, document_views: documents, document_agent_id: "agent-product", document_feedback: "" }
-    : { id: projectId, external_id: "mockup", name: "better-codex", workspace_path: "", root_paths: [], description: "把 Codex 的任务、会话、智能体与真实交付连接起来的项目工作台。", overview_html: String(documents[0].html), overview_status: "generating", overview_error: null, overview_updated_at: null, document_views: documents, document_agent_id: "agent-product", document_feedback: "" };
+    ? { id: projectId, external_id: "mockup", name: "Better Codex Desktop", workspace_path: "", root_paths: [], description: "A project and agent workspace that makes Codex work visible from intent to delivery.", overview_html: String(documents[0].html), overview_status: "generating", overview_error: null, overview_updated_at: null, document_views: documents, document_agent_id: "agent-product", document_feedback: "", planning: { status: "idle", error: null, agent_id: null, revision: 0, updated_at: null, messages: [], plan: null } }
+    : { id: projectId, external_id: "mockup", name: "better-codex", workspace_path: "", root_paths: [], description: "把 Codex 的任务、会话、智能体与真实交付连接起来的项目工作台。", overview_html: String(documents[0].html), overview_status: "generating", overview_error: null, overview_updated_at: null, document_views: documents, document_agent_id: "agent-product", document_feedback: "", planning: { status: "idle", error: null, agent_id: null, revision: 0, updated_at: null, messages: [], plan: null } };
   return {
     version: 1,
     revision: 1,
