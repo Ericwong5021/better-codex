@@ -4,6 +4,10 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.9-beta.30] - 2026-08-21
+
+- Keep the Preview project-management feature flag consistent across the manifest and Web navigation.
+
 ## [0.4.9-beta.29] - 2026-08-21
 
 - Persist supported Web commands across Runtime outages with Relay queuing, browser outbox recovery, idempotent Runtime receipts, and durable Codex thread effects.
@@ -694,7 +698,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.29...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.30...HEAD
+[0.4.9-beta.30]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.29...v0.4.9-beta.30
 [0.4.9-beta.29]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.28...v0.4.9-beta.29
 [0.4.9-beta.28]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.27...v0.4.9-beta.28
 [0.4.9-beta.27]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.26...v0.4.9-beta.27
