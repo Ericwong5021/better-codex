@@ -43,6 +43,22 @@ function errorCode(error: unknown) {
   return error instanceof Error ? error.message : "relay_client_error";
 }
 
+function errorCauseCode(error: unknown) {
+  let current = error;
+  for (let depth = 0; depth < 4 && current instanceof Error; depth += 1) {
+    const code = String((current as Error & { code?: unknown }).code || "");
+    if (/^[A-Z0-9_]{2,80}$/.test(code)) return code;
+    current = current.cause;
+  }
+  return "";
+}
+
+function runtimeForwardError(error: unknown) {
+  if (error instanceof Error && error.name === "AbortError") return "request_cancelled";
+  const code = errorCauseCode(error);
+  return code ? `runtime_fetch_failed:${code}` : "runtime_fetch_failed";
+}
+
 function relaySocketUrl(configuration: RelayConfiguration) {
   const url = new URL(configuration.relay_url);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
@@ -224,6 +240,21 @@ export class RuntimeRelayClient {
     channel.responseCredit -= bytes;
   }
 
+  private async fetchRuntime(channel: RuntimeChannel, method: string, init: RequestInit & { duplex?: "half" }) {
+    const delays = [250, 1000];
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        const port = this.options.runtimePort();
+        if (!Number.isInteger(port) || port < 1) throw new Error("runtime_unavailable");
+        return await fetch(`http://127.0.0.1:${port}${channel.open.path}`, init);
+      } catch (error) {
+        const retryable = ["GET", "HEAD"].includes(method) && !channel.cancelled && !channel.controller.signal.aborted && (error instanceof TypeError || error instanceof Error && error.message === "runtime_unavailable") && attempt < delays.length;
+        if (!retryable) throw new Error(runtimeForwardError(error), { cause: error });
+        await new Promise(resolve => setTimeout(resolve, delays[attempt]));
+      }
+    }
+  }
+
   private async handleMessage(socket: WebSocket, configuration: RelayConfiguration, message: RelayMessage) {
     if (message.type === "hello_ack") {
       if (message.device_id !== configuration.device_id || message.runtime_instance_id !== this.options.runtimeInstanceId) throw new Error("relay_identity_mismatch");
@@ -298,14 +329,12 @@ export class RuntimeRelayClient {
     timer.unref();
     try {
       const method = channel.open.method.toUpperCase();
-      const port = this.options.runtimePort();
-      if (!Number.isInteger(port) || port < 1) throw new Error("runtime_unavailable");
       const init: RequestInit & { duplex?: "half" } = { method, headers: requestHeaders(channel.open.headers, this.options.localToken), signal: channel.controller.signal };
       if (channel.body) {
         init.body = channel.body as unknown as BodyInit;
         init.duplex = "half";
       }
-      const response = await fetch(`http://127.0.0.1:${port}${channel.open.path}`, init);
+      const response = await this.fetchRuntime(channel, method, init);
       if (channel.cancelled) return;
       clearTimeout(timer);
       this.send(socket, { type: "response_open", ...this.identity(), channel_id: channel.open.channel_id, status: response.status, headers: responseHeaders(response.headers) });
