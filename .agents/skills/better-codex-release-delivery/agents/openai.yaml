@@ -1,0 +1,4 @@
+interface:
+  display_name: "Better Codex Release Delivery"
+  short_description: "Commit, publish, and deploy a verified Better Codex release"
+  default_prompt: "Use $better-codex-release-delivery to commit all local Better Codex changes, publish a stable release, and install it locally and on the VPS."

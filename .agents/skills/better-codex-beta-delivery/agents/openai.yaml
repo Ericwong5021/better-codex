@@ -1,0 +1,4 @@
+interface:
+  display_name: "Better Codex Beta Delivery"
+  short_description: "Commit, publish, and deploy a verified Better Codex beta"
+  default_prompt: "Use $better-codex-beta-delivery to commit all local Better Codex changes, publish a new beta, and install it locally and on the VPS."
