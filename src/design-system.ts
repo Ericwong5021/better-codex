@@ -130,6 +130,7 @@ export function betterCodexDesignSystemCss() {
     #better-codex-panel,
     #better-codex-archive-dialog,
     #better-codex-dialog,
+    #better-codex-attachment-dialog,
     #better-codex-agent-dialog,
     #better-codex-confirm,
     #better-codex-auto-dispatch-help-dialog,
@@ -5686,6 +5687,374 @@ export function betterCodexDesignSystemCss() {
 
     #better-codex-dialog .better-codex-bubble.is-user .better-codex-bubble-content {
       color: color-mix(in oklch, var(--bc-foreground) 82%, var(--bc-muted));
+    }
+
+    #better-codex-dialog .better-codex-message-attachments {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+      gap: var(--bc-space-2);
+      max-width: 620px;
+      margin-top: var(--bc-space-3);
+    }
+
+    #better-codex-dialog .better-codex-message-attachment {
+      display: flex;
+      min-width: 0;
+      min-height: 52px;
+      align-items: center;
+      gap: var(--bc-space-3);
+      border: 0;
+      border-radius: var(--bc-radius-sm);
+      color: var(--bc-foreground);
+      background: var(--bc-color-control);
+      padding: 7px 9px;
+      box-shadow: var(--bc-inset-hairline);
+      font: inherit;
+      text-align: left;
+      cursor: pointer;
+      touch-action: manipulation;
+      transition: background-color var(--bc-motion-fast), transform var(--bc-motion-fast);
+    }
+
+    #better-codex-dialog .better-codex-message-attachment:active {
+      transform: scale(.97);
+    }
+
+    #better-codex-dialog .better-codex-message-attachment:focus-visible {
+      outline: none;
+      box-shadow: var(--bc-inset-hairline), var(--bc-focus-ring);
+    }
+
+    @media (hover: hover) {
+      #better-codex-dialog .better-codex-message-attachment:hover {
+        background: var(--bc-color-hover);
+      }
+    }
+
+    #better-codex-dialog .better-codex-message-attachment-icon {
+      display: inline-flex;
+      width: 36px;
+      height: 36px;
+      flex: 0 0 auto;
+      align-items: center;
+      justify-content: center;
+      border-radius: var(--bc-radius-xs);
+      color: var(--bc-muted);
+      background: var(--bc-color-canvas);
+      box-shadow: var(--bc-inset-hairline);
+    }
+
+    #better-codex-dialog .better-codex-message-attachment-icon[data-kind="image"] {
+      color: var(--bc-priority-low);
+    }
+
+    #better-codex-dialog .better-codex-message-attachment-icon svg {
+      width: 17px;
+      height: 17px;
+    }
+
+    #better-codex-dialog .better-codex-message-attachment-copy {
+      display: flex;
+      min-width: 0;
+      flex: 1;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    #better-codex-dialog .better-codex-message-attachment-copy strong,
+    #better-codex-dialog .better-codex-message-attachment-copy small {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #better-codex-dialog .better-codex-message-attachment-copy strong {
+      font-size: var(--bc-text-md);
+      font-weight: 580;
+    }
+
+    #better-codex-dialog .better-codex-message-attachment-copy small {
+      color: var(--bc-faint);
+      font-size: var(--bc-text-sm);
+    }
+
+    #better-codex-dialog .better-codex-message-attachment-open {
+      display: inline-flex;
+      width: 24px;
+      height: 24px;
+      flex: 0 0 auto;
+      align-items: center;
+      justify-content: center;
+      color: var(--bc-faint);
+    }
+
+    #better-codex-dialog .better-codex-message-attachment-open svg {
+      width: 14px;
+      height: 14px;
+    }
+
+    #better-codex-attachment-dialog {
+      width: min(940px, calc(100vw - 48px));
+      height: min(760px, calc(100dvh - 48px));
+      max-height: calc(100dvh - 48px);
+      margin: auto;
+      overflow: hidden;
+      border: 0;
+      border-radius: var(--bc-radius-lg);
+      color: var(--bc-foreground);
+      background: var(--bc-color-canvas);
+      padding: 0;
+      box-shadow: var(--bc-elevation-float);
+    }
+
+    #better-codex-attachment-dialog::backdrop {
+      background: var(--bc-color-scrim);
+    }
+
+    #better-codex-attachment-dialog .better-codex-attachment-shell {
+      display: flex;
+      width: 100%;
+      height: 100%;
+      min-height: 0;
+      flex-direction: column;
+    }
+
+    #better-codex-attachment-dialog header,
+    #better-codex-attachment-dialog footer {
+      display: flex;
+      flex: 0 0 auto;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--bc-space-4);
+      background: var(--bc-color-surface);
+    }
+
+    #better-codex-attachment-dialog header {
+      min-height: 64px;
+      padding: 0 var(--bc-space-4) 0 var(--bc-space-5);
+      box-shadow: inset 0 -1px var(--bc-color-hairline);
+    }
+
+    #better-codex-attachment-dialog header > div {
+      display: flex;
+      min-width: 0;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    #better-codex-attachment-dialog header span,
+    #better-codex-attachment-dialog footer > span {
+      color: var(--bc-faint);
+      font-size: var(--bc-text-sm);
+    }
+
+    #better-codex-attachment-dialog header strong {
+      overflow: hidden;
+      font-size: var(--bc-text-lg);
+      font-weight: 620;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #better-codex-attachment-dialog header button {
+      display: inline-flex;
+      width: 40px;
+      height: 40px;
+      flex: 0 0 auto;
+      align-items: center;
+      justify-content: center;
+      border: 0;
+      border-radius: var(--bc-radius-xs);
+      color: var(--bc-muted);
+      background: transparent;
+      padding: 0;
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+
+    #better-codex-attachment-dialog header button:focus-visible,
+    #better-codex-attachment-dialog footer a:focus-visible {
+      outline: none;
+      box-shadow: var(--bc-focus-ring);
+    }
+
+    @media (hover: hover) {
+      #better-codex-attachment-dialog header button:hover,
+      #better-codex-attachment-dialog footer a:hover {
+        background: var(--bc-color-hover);
+      }
+    }
+
+    #better-codex-attachment-dialog .better-codex-attachment-body {
+      display: flex;
+      min-height: 0;
+      flex: 1;
+      align-items: center;
+      justify-content: center;
+      overflow: auto;
+      overscroll-behavior: contain;
+      background: color-mix(in oklch, var(--bc-color-surface) 72%, var(--bc-color-canvas));
+      padding: var(--bc-space-4);
+    }
+
+    #better-codex-attachment-dialog .better-codex-attachment-body > img {
+      display: block;
+      max-width: 100%;
+      max-height: 100%;
+      border-radius: var(--bc-radius-xs);
+      object-fit: contain;
+      outline: 1px solid color-mix(in oklch, var(--bc-color-text) 12%, transparent);
+      outline-offset: -1px;
+    }
+
+    #better-codex-attachment-dialog .better-codex-attachment-body > iframe {
+      width: 100%;
+      height: 100%;
+      min-height: 360px;
+      border: 0;
+      border-radius: var(--bc-radius-xs);
+      background: #fff;
+    }
+
+    #better-codex-attachment-dialog .better-codex-attachment-body > pre {
+      box-sizing: border-box;
+      width: 100%;
+      min-height: 100%;
+      margin: 0;
+      overflow: auto;
+      border-radius: var(--bc-radius-xs);
+      color: var(--bc-foreground);
+      background: var(--bc-color-canvas);
+      padding: var(--bc-space-5);
+      box-shadow: var(--bc-inset-hairline);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: var(--bc-text-sm);
+      line-height: 1.65;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    #better-codex-attachment-dialog .better-codex-attachment-loading,
+    #better-codex-attachment-dialog .better-codex-attachment-file {
+      display: flex;
+      max-width: 420px;
+      align-items: center;
+      flex-direction: column;
+      gap: var(--bc-space-3);
+      color: var(--bc-muted);
+      text-align: center;
+    }
+
+    #better-codex-attachment-dialog .better-codex-attachment-loading svg {
+      animation: better-codex-dialog-open-thread-spin 1s linear infinite;
+    }
+
+    #better-codex-attachment-dialog .better-codex-attachment-file > svg {
+      width: 34px;
+      height: 34px;
+      color: var(--bc-faint);
+    }
+
+    #better-codex-attachment-dialog .better-codex-attachment-file strong {
+      color: var(--bc-foreground);
+      font-size: var(--bc-text-lg);
+      font-weight: 620;
+      overflow-wrap: anywhere;
+    }
+
+    #better-codex-attachment-dialog .better-codex-attachment-file span {
+      line-height: 1.6;
+      text-wrap: pretty;
+    }
+
+    #better-codex-attachment-dialog .better-codex-attachment-file.is-error strong {
+      color: var(--bc-danger);
+    }
+
+    #better-codex-attachment-dialog footer {
+      min-height: 64px;
+      padding: 0 var(--bc-space-4) 0 var(--bc-space-5);
+      box-shadow: inset 0 1px var(--bc-color-hairline);
+    }
+
+    #better-codex-attachment-dialog footer > div {
+      display: flex;
+      align-items: center;
+      gap: var(--bc-space-2);
+    }
+
+    #better-codex-attachment-dialog footer a {
+      display: inline-flex;
+      min-height: 40px;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      border-radius: var(--bc-radius-xs);
+      color: var(--bc-foreground);
+      background: transparent;
+      padding: 0 13px;
+      font-size: var(--bc-text-md);
+      font-weight: 560;
+      text-decoration: none;
+      touch-action: manipulation;
+      transition: background-color var(--bc-motion-fast), transform var(--bc-motion-fast);
+    }
+
+    #better-codex-attachment-dialog footer a:active {
+      transform: scale(.96);
+    }
+
+    #better-codex-attachment-dialog footer a.is-primary {
+      color: var(--bc-primary-foreground);
+      background: var(--bc-primary);
+    }
+
+    @media (hover: hover) {
+      #better-codex-attachment-dialog footer a.is-primary:hover {
+        background: color-mix(in oklch, var(--bc-primary) 88%, var(--bc-color-canvas));
+      }
+    }
+
+    @media (max-width: 600px) {
+      #better-codex-attachment-dialog {
+        width: 100vw;
+        height: 100dvh;
+        max-height: 100dvh;
+        border-radius: 0;
+      }
+
+      #better-codex-attachment-dialog header {
+        padding-top: env(safe-area-inset-top);
+      }
+
+      #better-codex-attachment-dialog footer {
+        min-height: calc(64px + env(safe-area-inset-bottom));
+        padding-bottom: env(safe-area-inset-bottom);
+      }
+
+      #better-codex-attachment-dialog footer > span {
+        display: none;
+      }
+
+      #better-codex-attachment-dialog footer > div {
+        width: 100%;
+        justify-content: flex-end;
+      }
+
+      #better-codex-attachment-dialog .better-codex-attachment-body {
+        padding: var(--bc-space-2);
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      #better-codex-dialog .better-codex-message-attachment,
+      #better-codex-attachment-dialog footer a {
+        transition: none;
+      }
+
+      #better-codex-attachment-dialog .better-codex-attachment-loading svg {
+        animation: none;
+      }
     }
 
     #better-codex-dialog .better-codex-markdown > :first-child,

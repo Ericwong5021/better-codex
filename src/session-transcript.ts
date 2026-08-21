@@ -1,7 +1,7 @@
-import { closeSync, existsSync, openSync, readSync, readdirSync, createReadStream, statSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, createReadStream, statSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, extname, isAbsolute, join } from "node:path";
 import { renderMarkdown } from "./markdown.js";
 
 const MAX_MESSAGES = 80;
@@ -77,6 +77,20 @@ export type ConversationMessage = {
   html: string;
   phase: string | null;
   timestamp: string | null;
+  attachments?: ConversationAttachment[];
+};
+
+export type ConversationAttachment = {
+  name: string;
+  type: string;
+  kind: "image" | "pdf" | "text" | "file";
+  source: "local" | "url";
+  url?: string;
+};
+
+export type ConversationAttachmentData = ConversationAttachment & {
+  size: number;
+  data: string;
 };
 
 export type ConversationActivity = {
@@ -120,6 +134,58 @@ function agentTextFingerprint(message: string, phase: string | null) {
   return `${phase || ""}|${stripMemoryCitation(message).replace(/\s+/g, " ").trim()}`;
 }
 
+function attachmentType(value: string) {
+  const extension = extname(value.split(/[?#]/, 1)[0]).toLowerCase();
+  const types: Record<string, string> = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif", ".avif": "image/avif", ".bmp": "image/bmp", ".svg": "image/svg+xml",
+    ".pdf": "application/pdf", ".txt": "text/plain", ".md": "text/markdown", ".log": "text/plain", ".csv": "text/csv", ".json": "application/json", ".yaml": "text/yaml", ".yml": "text/yaml", ".xml": "application/xml",
+    ".doc": "application/msword", ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", ".xls": "application/vnd.ms-excel", ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".ppt": "application/vnd.ms-powerpoint", ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".zip": "application/zip", ".gz": "application/gzip", ".tar": "application/x-tar",
+  };
+  return types[extension] || "application/octet-stream";
+}
+
+function attachmentKind(type: string): ConversationAttachment["kind"] {
+  if (type.startsWith("image/")) return "image";
+  if (type === "application/pdf") return "pdf";
+  if (type.startsWith("text/") || ["application/json", "application/xml"].includes(type)) return "text";
+  return "file";
+}
+
+function attachmentName(value: string) {
+  if (!/^https?:\/\//i.test(value)) return basename(value) || value;
+  try {
+    const name = basename(decodeURIComponent(new URL(value).pathname));
+    return name || new URL(value).hostname;
+  } catch {
+    return value;
+  }
+}
+
+export function conversationContent(value: string) {
+  const markdown = String(value || "").replace(/\r\n?/g, "\n").trim();
+  const lines = markdown.split("\n");
+  let marker = -1;
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    if (["附带文件：", "Attached files:"].includes(lines[index].trim())) {
+      marker = index;
+      break;
+    }
+  }
+  if (marker < 0) return { markdown, attachments: [] as Array<ConversationAttachment & { value: string }> };
+  const trailing = lines.slice(marker + 1).filter(line => line.trim());
+  if (!trailing.length || trailing.some(line => !/^\s*[-*]\s+\S/.test(line))) return { markdown, attachments: [] as Array<ConversationAttachment & { value: string }> };
+  const values = trailing.map(line => line.replace(/^\s*[-*]\s+/, "").trim()).filter(Boolean).slice(0, 16);
+  const attachments = values.flatMap(value => {
+    const remote = /^https?:\/\//i.test(value);
+    if (!remote && !isAbsolute(value)) return [];
+    const type = attachmentType(value);
+    return [{ name: attachmentName(value), type, kind: attachmentKind(type), source: remote ? "url" as const : "local" as const, ...(remote ? { url: value } : {}), value }];
+  });
+  if (!attachments.length) return { markdown, attachments: [] as Array<ConversationAttachment & { value: string }> };
+  return { markdown: lines.slice(0, marker).join("\n").trim(), attachments };
+}
+
 function extractAssistantText(content: unknown) {
   if (!Array.isArray(content)) return "";
   const parts: string[] = [];
@@ -150,13 +216,15 @@ async function readConversationMessages(rolloutPath: string) {
   const pushUser = (message: string, timestamp: string | null) => {
     flushPendingAgent(null);
     lastIncludedUserAt = timestamp;
+    const content = conversationContent(message);
     messages.push({
       id: `user-${index++}`,
       role: "user",
       markdown: message,
-      html: renderMarkdown(message),
+      html: renderMarkdown(content.markdown),
       phase: null,
       timestamp,
+      ...(content.attachments.length ? { attachments: content.attachments.map(({ value: _value, ...attachment }) => attachment) } : {}),
     });
   };
 
@@ -183,13 +251,15 @@ async function readConversationMessages(rolloutPath: string) {
     ) {
       return;
     }
+    const content = conversationContent(message);
     messages.push({
       id: `agent-${index++}`,
       role: "agent",
       markdown: message,
-      html: renderMarkdown(message),
+      html: renderMarkdown(content.markdown),
       phase,
       timestamp,
+      ...(content.attachments.length ? { attachments: content.attachments.map(({ value: _value, ...attachment }) => attachment) } : {}),
     });
   };
 
@@ -406,4 +476,23 @@ export async function readConversationResult(threadId: string | null | undefined
     }
   } catch {}
   return result;
+}
+
+export async function readConversationAttachment(threadId: string | null | undefined, messageId: string, attachmentIndex: number): Promise<ConversationAttachmentData> {
+  if (!Number.isInteger(attachmentIndex) || attachmentIndex < 0 || attachmentIndex >= 16) throw new Error("attachment_not_found");
+  const conversation = await readConversationResult(threadId);
+  const message = conversation.messages.find(item => item.id === messageId);
+  if (!message) throw new Error("attachment_not_found");
+  const content = conversationContent(message.markdown);
+  const attachment = content.attachments[attachmentIndex];
+  if (!attachment || attachment.source !== "local") throw new Error("attachment_not_found");
+  let stats;
+  try {
+    stats = statSync(attachment.value);
+  } catch {
+    throw new Error("attachment_not_found");
+  }
+  if (!stats.isFile() || stats.size <= 0 || stats.size > 10 * 1024 * 1024) throw new Error("attachment_unavailable");
+  const { value: _value, ...metadata } = attachment;
+  return { ...metadata, size: stats.size, data: `data:${attachment.type};base64,${readFileSync(attachment.value).toString("base64")}` };
 }

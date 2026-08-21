@@ -3926,7 +3926,7 @@ export class Store {
     const issue = this.getIssue(issueId);
     if (!issue) throw new Error("issue_not_found");
     const reply = this.getIssueReplyState(issueId);
-    const projected = messages.slice(-80).map(message => ({ ...message, html: "" }));
+    const projected = messages.slice(-80).map(({ attachments: _attachments, ...message }) => ({ ...message, html: "" }));
     if (reply.status === "running" && reply.message && !projected.some(message => message.role === "user" && message.markdown === reply.message)) {
       projected.push({ id: `reply-${reply.request_id || issueId}`, role: "user", markdown: reply.message, html: "", phase: null, timestamp: reply.started_at || null });
     }

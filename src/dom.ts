@@ -28,6 +28,7 @@ import {
   Columns3,
   Copy,
   Database,
+  Download,
   Ellipsis,
   ExternalLink,
   FileCode2,
@@ -117,6 +118,7 @@ const lucideIcons = Object.fromEntries(Object.entries({
   permissionWorkspace: FolderOpen,
   permissionDanger: TriangleAlert,
   database: Database,
+  download: Download,
   server: Server,
   cloud: Cloud,
   copy: Copy,
@@ -604,6 +606,20 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     localeResources.en["最多传输 4 个文件且总大小不能超过 20 MB"] = "Transfer up to 4 files with a total size of 20 MB or less";
     localeResources.en["部分文件超出传输限制，已跳过"] = "Some files exceeded the transfer limits and were skipped";
     localeResources.en["无法读取文件"] = "Unable to read the file";
+    Object.assign(localeResources.en, {
+      "附件预览": "Attachment preview",
+      "附件": "Attachment",
+      "打开附件": "Open attachment",
+      "下载附件": "Download attachment",
+      "正在加载附件…": "Loading attachment…",
+      "无法打开附件": "Unable to open attachment",
+      "不支持预览此文件，可下载后查看。": "Preview is unavailable for this file. Download it to view the contents.",
+      "图片": "Image",
+      "PDF 文档": "PDF document",
+      "文本文档": "Text document",
+      "文件": "File",
+      "原始链接": "Original link",
+    });
     localeResources.en["源码开发版"] = "Source development build";
     localeResources.en["发现兼容更新"] = "Compatibility update available";
     localeResources.en["源码开发版仅检查兼容层更新，核心版本请更新源码并重新构建。"] = "Source builds only check for compatibility updates. Update the source and rebuild to change the core version.";
@@ -7003,6 +7019,93 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         return new Date(time).toLocaleDateString(state.locale);
       }
 
+      function attachmentTypeLabel(attachment) {
+        if (attachment.kind === "image") return t("图片");
+        if (attachment.kind === "pdf") return t("PDF 文档");
+        if (attachment.kind === "text") return t("文本文档");
+        return t("文件");
+      }
+
+      function conversationAttachments(message, messageIndex) {
+        if (!Array.isArray(message.attachments) || !message.attachments.length) return "";
+        const items = message.attachments.map((attachment, attachmentIndex) => '<button class="better-codex-message-attachment" type="button" data-conversation-attachment="' + attachmentIndex + '" data-conversation-attachment-message="' + messageIndex + '" aria-label="' + te("打开附件") + ' ' + escapeHtml(attachment.name || t("附件")) + '"><span class="better-codex-message-attachment-icon" data-kind="' + escapeHtml(attachment.kind || "file") + '">' + icon(attachment.kind === "image" ? "image" : attachment.kind === "text" || attachment.kind === "pdf" ? "docs" : "paperclip") + '</span><span class="better-codex-message-attachment-copy"><strong>' + escapeHtml(attachment.name || t("附件")) + '</strong><small>' + escapeHtml(attachmentTypeLabel(attachment)) + '</small></span><span class="better-codex-message-attachment-open">' + icon("external") + '</span></button>').join("");
+        return '<div class="better-codex-message-attachments">' + items + '</div>';
+      }
+
+      function attachmentSize(value) {
+        const size = Number(value) || 0;
+        if (size < 1024) return size + " B";
+        if (size < 1024 * 1024) return (size / 1024).toFixed(size < 10240 ? 1 : 0) + " KB";
+        return (size / 1024 / 1024).toFixed(1) + " MB";
+      }
+
+      function attachmentBlob(data, type) {
+        const encoded = String(data || "").split(",", 2)[1] || "";
+        const binary = atob(encoded);
+        const bytes = new Uint8Array(binary.length);
+        for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+        return new Blob([bytes], { type: type || "application/octet-stream" });
+      }
+
+      async function openConversationAttachment(messageIndex, attachmentIndex) {
+        const message = conversationMessages[messageIndex];
+        const attachment = message?.attachments?.[attachmentIndex];
+        if (!attachment) return;
+        document.getElementById("better-codex-attachment-dialog")?.remove();
+        const preview = document.createElement("dialog");
+        preview.id = "better-codex-attachment-dialog";
+        preview.setAttribute(OWNED, "true");
+        preview.setAttribute("aria-labelledby", "better-codex-attachment-title");
+        preview.innerHTML = '<div class="better-codex-attachment-shell"><header><div><span>' + te("附件预览") + '</span><strong id="better-codex-attachment-title">' + escapeHtml(attachment.name || t("附件")) + '</strong></div><button type="button" data-attachment-close aria-label="' + te("关闭") + '">' + icon("close") + '</button></header><div class="better-codex-attachment-body" data-attachment-body><div class="better-codex-attachment-loading">' + icon("refresh") + '<span>' + te("正在加载附件…") + '</span></div></div><footer><span data-attachment-meta>' + escapeHtml(attachmentTypeLabel(attachment)) + '</span><div><a data-attachment-original hidden target="_blank" rel="noreferrer noopener">' + icon("external") + '<span>' + te("原始链接") + '</span></a><a class="is-primary" data-attachment-download download="' + escapeHtml(attachment.name || t("附件")) + '">' + icon("download") + '<span>' + te("下载附件") + '</span></a></div></footer></div>';
+        document.body.appendChild(preview);
+        let objectUrl = "";
+        const finish = () => {
+          preview.close();
+          if (objectUrl) URL.revokeObjectURL(objectUrl);
+          preview.remove();
+        };
+        preview.querySelector("[data-attachment-close]").addEventListener("click", finish);
+        preview.addEventListener("cancel", event => { event.preventDefault(); finish(); });
+        preview.addEventListener("click", event => event.stopPropagation());
+        bindModalDismiss(preview, finish);
+        preview.showModal();
+        preview.querySelector("[data-attachment-close]").focus();
+        const body = preview.querySelector("[data-attachment-body]");
+        const download = preview.querySelector("[data-attachment-download]");
+        const original = preview.querySelector("[data-attachment-original]");
+        const meta = preview.querySelector("[data-attachment-meta]");
+        const render = async (source, data = attachment) => {
+          if (data.kind === "image") body.innerHTML = '<img src="' + escapeHtml(source) + '" alt="' + escapeHtml(data.name || t("附件")) + '">';
+          else if (data.kind === "pdf") body.innerHTML = '<iframe src="' + escapeHtml(source) + '" title="' + escapeHtml(data.name || t("附件")) + '"></iframe>';
+          else if (data.kind === "text") {
+            const text = data.data ? await attachmentBlob(data.data, data.type).text() : "";
+            body.innerHTML = text ? '<pre>' + escapeHtml(text.slice(0, 500000)) + '</pre>' : '<iframe src="' + escapeHtml(source) + '" title="' + escapeHtml(data.name || t("附件")) + '"></iframe>';
+          } else body.innerHTML = '<div class="better-codex-attachment-file">' + icon("paperclip") + '<strong>' + escapeHtml(data.name || t("附件")) + '</strong><span>' + te("不支持预览此文件，可下载后查看。") + '</span></div>';
+        };
+        try {
+          if (attachment.source === "url" && attachment.url) {
+            download.href = attachment.url;
+            download.target = "_blank";
+            download.rel = "noreferrer noopener";
+            original.href = attachment.url;
+            original.hidden = false;
+            await render(attachment.url);
+            return;
+          }
+          const result = await api("/api/issues/" + encodeURIComponent(issue.id) + "/attachments/" + encodeURIComponent(message.id) + "/" + attachmentIndex, { timeoutMs: 120_000 });
+          const blob = attachmentBlob(result.data, result.type);
+          objectUrl = URL.createObjectURL(blob);
+          download.href = objectUrl;
+          download.download = result.name || attachment.name || t("附件");
+          meta.textContent = attachmentTypeLabel(result) + " · " + attachmentSize(result.size);
+          await render(objectUrl, result);
+        } catch (error) {
+          reportGlobalError(error, { source: "attachment_preview", issue_id: issue.id, message_id: message.id, attachment_index: attachmentIndex });
+          body.innerHTML = '<div class="better-codex-attachment-file is-error">' + icon("paperclip") + '<strong>' + te("无法打开附件") + '</strong><span>' + escapeHtml(error instanceof Error ? t(error.message) : t("无法读取文件")) + '</span></div>';
+          download.hidden = true;
+        }
+      }
+
       function conversationBubbles(messages, profile = null) {
         const agent = state.agents.find(item => item.id === issue?.agent_id) || state.agents.find(item => item.is_default) || null;
         const agentName = agent ? agentDisplayName(agent) : (issue?.agent_enabled ? "Codex" : t("智能体"));
@@ -7015,7 +7118,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             : agentAvatarMarkup(agent, "better-codex-bubble-avatar");
           const name = isUser ? (user.name || t("你")) : agentName;
           const time = relativeTime(message.timestamp);
-          return '<article class="better-codex-bubble ' + (isUser ? "is-user" : "is-agent") + '">' + avatar + '<div class="better-codex-bubble-main"><button class="better-codex-bubble-copy" type="button" data-conversation-copy="' + index + '" aria-label="' + te("复制消息") + '" title="' + te("复制消息") + '">' + icon("copy") + '</button><div class="better-codex-bubble-meta"><strong>' + escapeHtml(name) + '</strong>' + (time ? '<time datetime="' + escapeHtml(message.timestamp || "") + '">' + escapeHtml(time) + '</time>' : "") + '</div><div class="better-codex-bubble-content">' + (message.html || renderPlainBubble(message.markdown || "")) + '</div></div></article>';
+          const content = message.html || (message.attachments?.length ? "" : renderPlainBubble(message.markdown || ""));
+          return '<article class="better-codex-bubble ' + (isUser ? "is-user" : "is-agent") + '">' + avatar + '<div class="better-codex-bubble-main"><button class="better-codex-bubble-copy" type="button" data-conversation-copy="' + index + '" aria-label="' + te("复制消息") + '" title="' + te("复制消息") + '">' + icon("copy") + '</button><div class="better-codex-bubble-meta"><strong>' + escapeHtml(name) + '</strong>' + (time ? '<time datetime="' + escapeHtml(message.timestamp || "") + '">' + escapeHtml(time) + '</time>' : "") + '</div>' + (content ? '<div class="better-codex-bubble-content">' + content + '</div>' : "") + conversationAttachments(message, index) + '</div></article>';
         }).join("");
       }
 
@@ -7498,6 +7602,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           else if (button.dataset.composerMode === "send") void sendReply();
         });
         dialog.querySelector("[data-conversation-body]")?.addEventListener("click", async event => {
+          const attachmentButton = event.target.closest("[data-conversation-attachment]");
+          if (attachmentButton) {
+            await openConversationAttachment(Number(attachmentButton.dataset.conversationAttachmentMessage), Number(attachmentButton.dataset.conversationAttachment));
+            return;
+          }
           const button = event.target.closest("[data-conversation-copy]");
           if (!button) return;
           const message = conversationMessages[Number(button.dataset.conversationCopy)];

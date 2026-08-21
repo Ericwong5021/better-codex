@@ -17,7 +17,7 @@ import { acquireRuntimeLock, clearRuntimeState, createRuntimeIdentity, publishRu
 import { activeCoreCommand, checkGatewayUpdate, getGatewayUpdateState, installGatewayUpdate, recordGatewayUpdateActivation, startGatewayUpdateChecks } from "./updater.js";
 import { packagedBuild } from "./build.js";
 import { basename, dirname, extname, join, resolve } from "node:path";
-import { normalizeSessionId, readConversationActivity, readConversationResult, sessionWorkspace } from "./session-transcript.js";
+import { normalizeSessionId, readConversationActivity, readConversationAttachment, readConversationResult, sessionWorkspace } from "./session-transcript.js";
 import { IssueWorker } from "./worker.js";
 import { maxMockupBytes, normalizeMockupLocale, readMockupState, replaceMockupState, resetMockupState, updateMockupState } from "./mockup.js";
 import { injectionScript } from "./dom.js";
@@ -812,7 +812,7 @@ export function startServer() {
       }
       if ((url.pathname === "/web" || url.pathname === "/web/projects" || url.pathname.startsWith("/web/projects/") || url.pathname.startsWith("/local/")) && method === "GET") {
         return sendWeb(response, 200, betterCodexWebHostHtml(), "text/html; charset=utf-8", {
-          "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+          "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; frame-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
         });
       }
       if (url.pathname === "/web/host.css" && method === "GET") return sendWeb(response, 200, betterCodexWebHostCss(), "text/css; charset=utf-8");
@@ -1766,6 +1766,11 @@ export function startServer() {
           store.deleteArchivedIssue(issue.id, version);
           worker.wake();
           return sendJson(response, 200, { ok: true });
+        }
+        if (method === "GET" && path[3] === "attachments" && path.length === 6) {
+          const threadId = issue.run_thread_id || issue.session_thread_id || issue.thread_id || "";
+          const attachment = await readConversationAttachment(threadId, decodeURIComponent(path[4]), Number(path[5]));
+          return sendJson(response, 200, attachment);
         }
         if (method === "GET" && path[3] === "conversation" && path.length === 4) {
           if (store.isEnrichmentPending(issue)) throw new Error("issue_enrichment_pending");
