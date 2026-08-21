@@ -258,18 +258,20 @@ function errorStatus(code: string) {
 }
 
 function publicRuntime(runtime: ActiveRuntime | null, reconnecting: ReconnectingRuntime | null) {
-  if (!runtime && !reconnecting) return { online: false, state: "offline" };
-  if (!runtime && reconnecting) return {
-    online: false,
-    state: "reconnecting",
-    device_name: reconnecting.deviceName,
-    core_version: reconnecting.coreVersion,
-    connected_at: reconnecting.connectedAt,
-    last_heartbeat_at: reconnecting.lastHeartbeatAt,
-    disconnected_at: reconnecting.disconnectedAt,
-    reconnect_deadline_at: reconnecting.reconnectDeadlineAt,
-    active_channels: 0,
-  };
+  if (!runtime) {
+    if (!reconnecting) return { online: false, state: "offline" };
+    return {
+      online: false,
+      state: "reconnecting",
+      device_name: reconnecting.deviceName,
+      core_version: reconnecting.coreVersion,
+      connected_at: reconnecting.connectedAt,
+      last_heartbeat_at: reconnecting.lastHeartbeatAt,
+      disconnected_at: reconnecting.disconnectedAt,
+      reconnect_deadline_at: reconnecting.reconnectDeadlineAt,
+      active_channels: 0,
+    };
+  }
   return {
     online: true,
     state: "online",

@@ -91,9 +91,9 @@ function cleanProjectDocumentViews(value: unknown): ProjectDocumentView[] {
 function cleanProjectPlanning(value: unknown): NonNullable<ProjectProjection["planning"]> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid_projection");
   const source = value as Record<string, unknown>;
-  if (!["idle", "running", "ready", "failed"].includes(String(source.status)) || !Number.isInteger(source.revision) || Number(source.revision) < 0) throw new Error("invalid_projection");
+  if (!["idle", "running", "ready", "failed"].includes(String(source.status)) || typeof source.revision !== "number" || !Number.isInteger(source.revision) || source.revision < 0) throw new Error("invalid_projection");
   if (!Array.isArray(source.messages) || source.messages.length > 80) throw new Error("invalid_projection");
-  const messages = source.messages.map(message => {
+  const messages: NonNullable<ProjectProjection["planning"]>["messages"] = source.messages.map(message => {
     if (!message || typeof message !== "object" || Array.isArray(message)) throw new Error("invalid_projection");
     const item = message as Record<string, unknown>;
     if (item.role !== "user" && item.role !== "agent") throw new Error("invalid_projection");
