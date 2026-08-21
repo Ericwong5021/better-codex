@@ -4,6 +4,11 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.9-beta.32] - 2026-08-21
+
+- Add a project overview dashboard with work health, release milestones, active work, attention items, and collaborators.
+- Keep conversation results copyable while an Issue is running or otherwise editing-locked.
+
 ## [0.4.9-beta.31] - 2026-08-21
 
 - Recover interrupted Issue turns after Session Host replacement instead of leaving them permanently active.
@@ -702,7 +707,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.31...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.32...HEAD
+[0.4.9-beta.32]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.31...v0.4.9-beta.32
 [0.4.9-beta.31]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.30...v0.4.9-beta.31
 [0.4.9-beta.30]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.29...v0.4.9-beta.30
 [0.4.9-beta.29]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.28...v0.4.9-beta.29
