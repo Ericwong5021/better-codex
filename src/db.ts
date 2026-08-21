@@ -1248,7 +1248,7 @@ export class Store {
         document_views: project.document_views,
         document_agent_id: project.document_agent_id,
         document_feedback: project.document_feedback,
-        planning: project.planning,
+        planning: { ...project.planning, messages: project.planning.messages.slice(-40) },
         created_at: project.created_at,
         updated_at: project.updated_at,
         local_revision: Math.max(1, Date.parse(project.updated_at) || 1),

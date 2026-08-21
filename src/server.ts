@@ -184,8 +184,8 @@ async function relayWebSessionRequest(configuration: RelayConfiguration, pathnam
   return { status: remoteResponse.status, value };
 }
 
-function projectSummaries<T extends { document_views?: unknown; overview_html?: unknown }>(projects: T[]) {
-  return projects.map(({ document_views: _documentViews, overview_html: _overviewHtml, ...project }) => project);
+function projectSummaries<T extends { document_views?: unknown; overview_html?: unknown; planning?: unknown }>(projects: T[]) {
+  return projects.map(({ document_views: _documentViews, overview_html: _overviewHtml, planning: _planning, ...project }) => project);
 }
 
 function sendWeb(response: ServerResponse, status: number, body: string | Buffer, contentType: string, headers: Record<string, string> = {}) {
@@ -611,7 +611,7 @@ function errorCode(error: unknown) {
 
 function errorStatus(code: string) {
   if (code === "body_too_large") return 413;
-  if (code === "version_conflict" || code === "request_id_conflict" || code === "request_outcome_unknown" || code === "remote_mode_disabled" || code === "reply_busy" || code === "update_in_progress" || code === "issue_execution_locked" || code === "issue_execution_running" || code === "issue_session_handed_off" || code === "issue_session_starting" || code === "issue_session_already_bound" || code === "session_relay_not_leader" || code === "session_command_not_claimed" || code === "session_command_outcome_unknown") return 409;
+  if (code === "version_conflict" || code === "request_id_conflict" || code === "request_outcome_unknown" || code === "remote_mode_disabled" || code === "reply_busy" || code === "update_in_progress" || code === "issue_execution_locked" || code === "issue_execution_running" || code === "issue_session_handed_off" || code === "issue_session_starting" || code === "issue_session_already_bound" || code === "session_relay_not_leader" || code === "session_command_not_claimed" || code === "session_command_outcome_unknown" || code === "project_planning_busy" || code === "project_planning_agent_locked") return 409;
   if (code.endsWith("_not_found")) return 404;
   if (code === "database_unavailable" || code === "database_integrity_check_failed") return 503;
   return 400;
@@ -706,18 +706,18 @@ export function startServer() {
     (projectId, agentId, feedback) => {
       if (!worker.generateProjectOverview(projectId, agentId, feedback)) throw new Error("project_overview_unavailable");
     },
-    (projectId, agentId, message) => {
-      if (!worker.sendProjectPlanningMessage(projectId, agentId, message)) throw new Error("project_planning_unavailable");
-    },
-    projectId => {
-      worker.resetProjectPlanning(projectId);
-    },
     files => {
       return saveRemoteFiles(files, randomUUID());
     },
     chooseNativeDirectory,
     browseDirectory,
     (issueId, action) => worker.applyThreadAction(issueId, action),
+    (projectId, agentId, message) => {
+      if (!worker.sendProjectPlanningMessage(projectId, agentId, message)) throw new Error("project_planning_unavailable");
+    },
+    projectId => {
+      worker.resetProjectPlanning(projectId);
+    },
   );
   let activeRuntimePort = 0;
   const relayClient = new RuntimeRelayClient({ runtimePort: () => activeRuntimePort, localToken: accessToken, runtimeInstanceId: identity.instanceId, coreVersion: identity.version });

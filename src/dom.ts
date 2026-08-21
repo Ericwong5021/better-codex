@@ -392,7 +392,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const availableSurfaces = ["issues", "agents", ...(hasFeature("project-management") ? ["projects"] : [])];
     const initialProjectRoute = hasFeature("project-management") ? webProjectRoute() : null;
     if (HOST_KIND === "web" && !hasFeature("project-management") && /^\\/web\\/projects(?:\\/|$)/.test(location.pathname)) history.replaceState({ betterCodex: true, betterCodexSurface: "issues" }, "", "/web");
-    const state = { projects: [], projectsLoaded: false, issues: [], issuesLoaded: false, projectIssues: [], projectIssuesProjectId: "", projectDetailId: initialProjectRoute?.projectId || "", projectDocumentView: "charter", projectDocumentPending: null, projectDocumentError: null, agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: initialProjectRoute ? "projects" : availableSurfaces.includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, autoDispatchPending: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", issueDescriptionLimit: 100000, mockup: false, keepCreate: rememberedKeepCreate, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], project: [], label: [] } };
+    const state = { projects: [], projectsLoaded: false, issues: [], issuesLoaded: false, projectIssues: [], projectIssuesProjectId: "", projectDetailId: initialProjectRoute?.projectId || "", projectPage: "overview", projectDocumentView: "charter", projectDocumentPending: null, projectDocumentError: null, projectPlanningPending: null, projectPlanningError: null, agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: initialProjectRoute ? "projects" : availableSurfaces.includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, autoDispatchPending: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", issueDescriptionLimit: 100000, mockup: false, keepCreate: rememberedKeepCreate, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], project: [], label: [] } };
     const pendingIssueRemovals = new Map();
     function webProjectRoute() {
       if (HOST_KIND !== "web") return null;
@@ -782,6 +782,48 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "当前工作": "Current work",
       "等你处理": "Needs your attention",
       "活跃协作者": "Active collaborators",
+      "概览": "Overview",
+      "规划": "Planning",
+      "工作": "Work",
+      "项目规划": "Project plan",
+      "规划对话": "Planning conversation",
+      "与智能体对话，把目标、里程碑、风险和交付证据整理成可执行计划。": "Talk with an agent to turn goals, milestones, risks, and delivery evidence into an actionable plan.",
+      "规划摘要": "Plan summary",
+      "预期成果": "Outcomes",
+      "里程碑": "Milestones",
+      "工作流": "Workstreams",
+      "风险": "Risks",
+      "决策": "Decisions",
+      "待确认": "Open questions",
+      "交付路径": "Delivery",
+      "证据": "Evidence",
+      "尚未生成项目计划": "No project plan yet",
+      "从一个问题开始，智能体会读取代码、Issue 和关联会话。": "Start with a question. The agent will read the code, issues, and linked conversations.",
+      "梳理这个项目的目标、范围和非目标": "Clarify this project's goals, scope, and non-goals",
+      "根据当前代码和 Issue 生成下一阶段计划": "Create the next-stage plan from the current code and issues",
+      "找出当前最大的风险、依赖和待确认问题": "Find the biggest risks, dependencies, and open questions",
+      "询问项目规划…": "Ask about the project plan…",
+      "新对话": "New conversation",
+      "开始新规划对话": "Start a new planning conversation",
+      "这会清除当前规划对话和计划版本。": "This clears the current planning conversation and plan revisions.",
+      "规划中…": "Planning…",
+      "计划版本": "Plan revision",
+      "暂无明确日期": "No target date",
+      "依赖": "Dependencies",
+      "用户确认": "User confirmed",
+      "智能体推断": "Agent inference",
+      "代码事实": "Code fact",
+      "Issue 事实": "Issue fact",
+      "会话事实": "Conversation fact",
+      "用户输入": "User input",
+      "建议": "Proposed",
+      "已确认": "Confirmed",
+      "阻塞": "Blocked",
+      "计划生成失败，当前仍显示上一版本。": "Plan generation failed. The previous revision is still shown.",
+      "规划会话正在运行，请等待完成。": "The planning conversation is running. Wait for it to finish.",
+      "规划会话未能完成，请重试。": "The planning conversation could not be completed. Try again.",
+      "项目事实": "Project facts",
+      "计划内容来自规划对话，不会自动修改 Issue。": "Plan content comes from the planning conversation and does not automatically change issues.",
     });
     Object.assign(localeResources.en, {
       "错误报告": "Error report",
@@ -1454,6 +1496,84 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #\${PANEL_ID} .better-codex-project-document-form output { color: var(--bc-danger); font-size: var(--bc-text-caption); line-height: 1.45; }
         #\${PANEL_ID} .better-codex-project-document-form .better-codex-submit { display: inline-flex; min-height: 36px; align-items: center; justify-content: center; gap: 7px; padding-inline: 13px; }
         #\${PANEL_ID} .better-codex-project-document-form .better-codex-submit svg { width: 14px; height: 14px; }
+        #\${PANEL_ID} .better-codex-project-dashboard-tabs button:active, #\${PANEL_ID} .better-codex-project-planning-overview button:active, #\${PANEL_ID} .better-codex-project-planning-starters button:active, #\${PANEL_ID} .better-codex-project-planning-panel-head > button:active, #\${PANEL_ID} .better-codex-project-planning-form .better-codex-submit:active { transform: scale(.97); }
+        #\${PANEL_ID} .better-codex-project-planning-overview { display: grid; align-content: start; }
+        #\${PANEL_ID} .better-codex-project-planning-overview .better-codex-project-section-head button { display: inline-flex; min-height: 32px; align-items: center; gap: 5px; border: 0; border-radius: var(--bc-radius-sm,10px); color: var(--bc-info); background: transparent; padding: 0 7px; font: inherit; font-size: var(--bc-text-caption); font-weight: 650; cursor: pointer; }
+        #\${PANEL_ID} .better-codex-project-planning-overview .better-codex-project-section-head button svg { width: 13px; height: 13px; }
+        #\${PANEL_ID} .better-codex-project-planning-overview p { display: -webkit-box; margin: 12px 0 0; overflow: hidden; color: var(--bc-muted); font-size: var(--bc-text-sm); line-height: 1.65; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+        #\${PANEL_ID} .better-codex-project-overview-milestones > div { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 0; margin-top: 10px; }
+        #\${PANEL_ID} .better-codex-project-overview-milestones .better-codex-project-plan-item { border-top: 0; border-left: 1px solid var(--bc-divider); padding: 8px 16px; }
+        #\${PANEL_ID} .better-codex-project-overview-milestones .better-codex-project-plan-item:first-child { border-left: 0; padding-left: 0; }
+        #\${PANEL_ID} .better-codex-project-overview-milestones .better-codex-project-plan-item:last-child { padding-right: 0; }
+        #\${PANEL_ID} .better-codex-project-planning-layout { display: grid; min-height: clamp(640px,calc(100dvh - 245px),860px); grid-template-columns: minmax(0,1.42fr) minmax(340px,.78fr); gap: 14px; align-items: stretch; }
+        #\${PANEL_ID} .better-codex-project-plan, #\${PANEL_ID} .better-codex-project-planning-chat { display: flex; min-width: 0; min-height: 0; overflow: hidden; flex-direction: column; border-radius: var(--bc-radius-lg,16px); background: var(--bc-surface); }
+        #\${PANEL_ID} .better-codex-project-planning-panel-head { display: flex; min-height: 62px; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--bc-divider); padding: 0 18px; }
+        #\${PANEL_ID} .better-codex-project-planning-panel-head > div { display: grid; min-width: 0; gap: 3px; }
+        #\${PANEL_ID} .better-codex-project-planning-panel-head > div > span { color: var(--bc-faint); font-size: var(--bc-text-xs); font-weight: 650; letter-spacing: .04em; text-transform: uppercase; }
+        #\${PANEL_ID} .better-codex-project-planning-panel-head > div > strong { overflow: hidden; font-size: var(--bc-text-sm); font-weight: 650; line-height: 1.4; text-overflow: ellipsis; }
+        #\${PANEL_ID} .better-codex-project-planning-panel-head > span { flex: 0 0 auto; color: var(--bc-faint); font-size: var(--bc-text-caption); }
+        #\${PANEL_ID} .better-codex-project-planning-panel-head > button { display: inline-flex; min-height: 36px; flex: 0 0 auto; align-items: center; gap: 6px; border: 0; border-radius: var(--bc-radius-sm,10px); color: var(--bc-muted); background: var(--bc-control); padding: 0 10px; font: inherit; font-size: var(--bc-text-caption); cursor: pointer; }
+        #\${PANEL_ID} .better-codex-project-planning-panel-head > button:disabled { opacity: .45; cursor: not-allowed; }
+        #\${PANEL_ID} .better-codex-project-planning-panel-head > button svg { width: 13px; height: 13px; }
+        #\${PANEL_ID} .better-codex-project-planning-alert { display: flex; align-items: center; gap: 8px; color: var(--bc-danger); background: color-mix(in oklch,var(--bc-danger) 8%,transparent); padding: 9px 18px; font-size: var(--bc-text-caption); }
+        #\${PANEL_ID} .better-codex-project-planning-alert svg { width: 14px; height: 14px; flex: 0 0 auto; }
+        #\${PANEL_ID} .better-codex-project-plan-scroll { min-height: 0; flex: 1; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 0 20px 24px; }
+        #\${PANEL_ID} .better-codex-project-plan-summary { padding: 22px 0 20px; border-bottom: 1px solid var(--bc-divider); }
+        #\${PANEL_ID} .better-codex-project-plan-summary > span { color: var(--bc-faint); font-size: var(--bc-text-xs); font-weight: 650; letter-spacing: .04em; text-transform: uppercase; }
+        #\${PANEL_ID} .better-codex-project-plan-summary p { max-width: 72ch; margin: 8px 0 0; color: var(--bc-foreground); font-size: var(--bc-text-md); line-height: 1.72; text-wrap: pretty; }
+        #\${PANEL_ID} .better-codex-project-plan-section { padding-top: 22px; }
+        #\${PANEL_ID} .better-codex-project-plan-section > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 8px; }
+        #\${PANEL_ID} .better-codex-project-plan-section > header strong { font-size: var(--bc-text-md); font-weight: 680; }
+        #\${PANEL_ID} .better-codex-project-plan-section > header span { color: var(--bc-faint); font-family: var(--bc-font-mono,ui-monospace,monospace); font-size: var(--bc-text-xs); }
+        #\${PANEL_ID} .better-codex-project-plan-item { display: grid; grid-template-columns: 28px minmax(0,1fr); gap: 10px; border-top: 1px solid var(--bc-divider); padding: 13px 0; }
+        #\${PANEL_ID} .better-codex-project-plan-index { padding-top: 2px; color: var(--bc-faint); font-family: var(--bc-font-mono,ui-monospace,monospace); font-size: var(--bc-text-xs); }
+        #\${PANEL_ID} .better-codex-project-plan-item > div { min-width: 0; }
+        #\${PANEL_ID} .better-codex-project-plan-item header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+        #\${PANEL_ID} .better-codex-project-plan-item header strong { font-size: var(--bc-text-sm); font-weight: 650; line-height: 1.45; }
+        #\${PANEL_ID} .better-codex-project-plan-status { flex: 0 0 auto; border-radius: 999px; color: var(--bc-muted); background: var(--bc-control); padding: 3px 7px; font-size: var(--bc-text-xs); font-weight: 650; }
+        #\${PANEL_ID} .better-codex-project-plan-item[data-plan-status="blocked"] .better-codex-project-plan-status { color: var(--bc-danger); background: color-mix(in oklch,var(--bc-danger) 9%,transparent); }
+        #\${PANEL_ID} .better-codex-project-plan-item[data-plan-status="in_progress"] .better-codex-project-plan-status { color: var(--bc-info); background: color-mix(in oklch,var(--bc-info) 9%,transparent); }
+        #\${PANEL_ID} .better-codex-project-plan-item[data-plan-status="done"] .better-codex-project-plan-status, #\${PANEL_ID} .better-codex-project-plan-item[data-plan-status="confirmed"] .better-codex-project-plan-status { color: var(--bc-success); background: color-mix(in oklch,var(--bc-success) 9%,transparent); }
+        #\${PANEL_ID} .better-codex-project-plan-item p { margin: 5px 0 0; color: var(--bc-muted); font-size: var(--bc-text-caption); line-height: 1.62; }
+        #\${PANEL_ID} .better-codex-project-plan-item footer { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; margin-top: 8px; color: var(--bc-faint); font-size: var(--bc-text-xs); }
+        #\${PANEL_ID} .better-codex-project-plan-item footer [data-plan-source="user"] { color: var(--bc-info); }
+        #\${PANEL_ID} .better-codex-project-plan-item footer [data-plan-source="inference"] { color: var(--bc-warning); }
+        #\${PANEL_ID} .better-codex-project-plan-item details { margin-top: 8px; color: var(--bc-faint); font-size: var(--bc-text-xs); }
+        #\${PANEL_ID} .better-codex-project-plan-item summary { width: fit-content; cursor: pointer; }
+        #\${PANEL_ID} .better-codex-project-plan-item ul { margin: 7px 0 0; padding-left: 18px; color: var(--bc-muted); line-height: 1.55; }
+        #\${PANEL_ID} .better-codex-project-plan-empty { display: grid; min-height: 360px; flex: 1; place-content: center; justify-items: center; padding: 32px; text-align: center; }
+        #\${PANEL_ID} .better-codex-project-plan-empty > svg { width: 25px; height: 25px; margin-bottom: 13px; color: var(--bc-faint); }
+        #\${PANEL_ID} .better-codex-project-plan-empty strong { font-size: var(--bc-text-md); }
+        #\${PANEL_ID} .better-codex-project-plan-empty p { max-width: 42ch; margin: 7px 0 0; color: var(--bc-muted); font-size: var(--bc-text-caption); line-height: 1.6; }
+        #\${PANEL_ID} .better-codex-project-plan-foot { flex: 0 0 auto; border-top: 1px solid var(--bc-divider); color: var(--bc-faint); padding: 10px 18px; font-size: var(--bc-text-xs); }
+        #\${PANEL_ID} .better-codex-project-planning-messages { min-height: 0; flex: 1; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 16px 16px 20px; }
+        #\${PANEL_ID} .better-codex-project-planning-message { max-width: 92%; margin-bottom: 20px; }
+        #\${PANEL_ID} .better-codex-project-planning-message[data-role="user"] { margin-left: auto; }
+        #\${PANEL_ID} .better-codex-project-planning-message header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 5px; color: var(--bc-faint); font-size: var(--bc-text-xs); }
+        #\${PANEL_ID} .better-codex-project-planning-message header strong { color: var(--bc-muted); font-weight: 650; }
+        #\${PANEL_ID} .better-codex-project-planning-message > div { color: var(--bc-foreground); font-size: var(--bc-text-sm); line-height: 1.65; }
+        #\${PANEL_ID} .better-codex-project-planning-message[data-role="user"] > div { border-radius: var(--bc-radius-md,12px) var(--bc-radius-xs,6px) var(--bc-radius-md,12px) var(--bc-radius-md,12px); background: var(--bc-control); padding: 10px 12px; }
+        #\${PANEL_ID} .better-codex-project-planning-message p { margin: 0 0 9px; }
+        #\${PANEL_ID} .better-codex-project-planning-message p:last-child { margin-bottom: 0; }
+        #\${PANEL_ID} .better-codex-project-planning-message ul, #\${PANEL_ID} .better-codex-project-planning-message ol { margin: 8px 0; padding-left: 20px; }
+        #\${PANEL_ID} .better-codex-project-planning-message code { border-radius: var(--bc-radius-xs,6px); background: var(--bc-control); padding: 2px 4px; font-family: var(--bc-font-mono,ui-monospace,monospace); font-size: .92em; }
+        #\${PANEL_ID} .better-codex-project-planning-starters { display: grid; align-content: center; gap: 7px; min-height: 100%; }
+        #\${PANEL_ID} .better-codex-project-planning-starters > span { margin-bottom: 8px; color: var(--bc-muted); font-size: var(--bc-text-caption); line-height: 1.6; }
+        #\${PANEL_ID} .better-codex-project-planning-starters button { display: grid; min-height: 48px; grid-template-columns: minmax(0,1fr) 14px; align-items: center; gap: 8px; border: 1px solid var(--bc-divider); border-radius: var(--bc-radius-sm,10px); color: var(--bc-foreground); background: transparent; padding: 8px 10px; font: inherit; font-size: var(--bc-text-caption); line-height: 1.45; text-align: left; cursor: pointer; }
+        #\${PANEL_ID} .better-codex-project-planning-starters button svg { width: 13px; height: 13px; color: var(--bc-faint); }
+        #\${PANEL_ID} .better-codex-project-planning-running { display: flex; align-items: center; gap: 7px; color: var(--bc-info); font-size: var(--bc-text-caption); }
+        #\${PANEL_ID} .better-codex-project-planning-running svg, #\${PANEL_ID} .better-codex-project-planning-form .better-codex-submit:disabled svg { animation: better-codex-project-document-spin 1.2s linear infinite; }
+        #\${PANEL_ID} .better-codex-project-planning-form { display: grid; flex: 0 0 auto; gap: 8px; border-top: 1px solid var(--bc-divider); padding: 12px; }
+        #\${PANEL_ID} .better-codex-project-planning-form textarea { box-sizing: border-box; width: 100%; min-height: 70px; max-height: 180px; resize: vertical; border: 1px solid var(--bc-divider); border-radius: var(--bc-radius-sm,10px); outline: 0; color: var(--bc-foreground); background: var(--bc-control); padding: 10px 11px; font: inherit; font-size: var(--bc-text-sm); line-height: 1.5; }
+        #\${PANEL_ID} .better-codex-project-planning-form textarea:focus { border-color: var(--bc-ring); }
+        #\${PANEL_ID} .better-codex-project-planning-form > div { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: end; gap: 8px; }
+        #\${PANEL_ID} .better-codex-project-planning-form .better-codex-project-document-agent-picker > span:first-child { display: none; }
+        #\${PANEL_ID} .better-codex-project-planning-agent { display: inline-flex; min-height: 36px; align-items: center; gap: 7px; color: var(--bc-muted); font-size: var(--bc-text-caption); }
+        #\${PANEL_ID} .better-codex-project-planning-agent > svg { width: 18px; height: 18px; }
+        #\${PANEL_ID} .better-codex-project-planning-form .better-codex-submit { display: inline-flex; min-height: 36px; align-items: center; justify-content: center; gap: 7px; padding-inline: 13px; }
+        #\${PANEL_ID} .better-codex-project-planning-form .better-codex-submit svg { width: 14px; height: 14px; }
+        #\${PANEL_ID} .better-codex-project-planning-form output { grid-column: 1 / -1; color: var(--bc-danger); font-size: var(--bc-text-caption); }
+        #\${PANEL_ID} .better-codex-project-planning-form button:focus-visible, #\${PANEL_ID} .better-codex-project-planning-starters button:focus-visible, #\${PANEL_ID} .better-codex-project-planning-panel-head > button:focus-visible, #\${PANEL_ID} .better-codex-project-planning-overview button:focus-visible { outline: 2px solid var(--bc-ring); outline-offset: 1px; }
         @keyframes better-codex-project-document-pulse { 0%,100% { opacity: .45; transform: scale(.94); } 50% { opacity: 1; transform: scale(1); } }
         @keyframes better-codex-project-document-segment { 0%,100% { opacity: .4; } 50% { opacity: 1; } }
         @keyframes better-codex-project-document-spin { to { transform: rotate(360deg); } }
@@ -1462,9 +1582,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         @media (hover:hover) { #\${PANEL_ID} .better-codex-project-card:hover, #\${PANEL_ID} .better-codex-project-issue-toggle:hover, #\${PANEL_ID} .better-codex-project-back:hover { background: var(--bc-hover); } }
         @media (hover:hover) { #\${PANEL_ID} .better-codex-project-document-tab:hover { color: var(--bc-foreground); background: var(--bc-hover); } }
         @media (max-width: 1120px) { #\${PANEL_ID} .better-codex-project-dashboard-summary { grid-template-columns: repeat(2,minmax(0,1fr)); } #\${PANEL_ID} .better-codex-project-cycle { grid-column: 1 / -1; } }
-        @media (max-width: 980px) { #\${PANEL_ID} .better-codex-project-summary, #\${PANEL_ID} .better-codex-project-columns, #\${PANEL_ID} .better-codex-project-dashboard-lists { grid-template-columns: 1fr; } #\${PANEL_ID} .better-codex-project-columns { height: auto; } #\${PANEL_ID} .better-codex-project-panel:first-child { height: min(50dvh,480px); min-height: 320px; } #\${PANEL_ID} .better-codex-project-document-panel { height: min(86dvh,820px); min-height: 620px; } }
-        @media (max-width: 640px) { #\${PANEL_ID} .better-codex-projects { padding: 12px 12px 24px; } #\${PANEL_ID} .better-codex-project-list, #\${PANEL_ID} .better-codex-project-dashboard-summary { grid-template-columns: 1fr; } #\${PANEL_ID} .better-codex-project-summary { padding: 18px; } #\${PANEL_ID} .better-codex-project-columns { grid-template-columns: minmax(0,1fr); } #\${PANEL_ID} .better-codex-project-document-tab { padding-inline: 8px; } #\${PANEL_ID} .better-codex-project-document-tab svg { display: none; } #\${PANEL_ID} .better-codex-project-document-form > div { grid-template-columns: 1fr; } #\${PANEL_ID} .better-codex-project-dashboard-head { gap: 12px; } #\${PANEL_ID} .better-codex-project-dashboard-people { display: none; } #\${PANEL_ID} .better-codex-project-cycle { grid-column: auto; grid-template-columns: 100px minmax(0,1fr); } #\${PANEL_ID} .better-codex-project-timeline { padding-inline: 14px; } #\${PANEL_ID} .better-codex-project-timeline-legend { display: none; } #\${PANEL_ID} .better-codex-project-milestones { grid-template-columns: 1fr; } #\${PANEL_ID} .better-codex-project-work-row { grid-template-columns: 18px 62px minmax(0,1fr); } #\${PANEL_ID} .better-codex-project-work-state { display: none; } #\${PANEL_ID} .better-codex-project-collaborator-list { grid-template-columns: 1fr; } #\${PANEL_ID} .better-codex-project-collaborator { border-top: 1px solid var(--bc-divider); border-left: 0; padding: 10px 0; } #\${PANEL_ID} .better-codex-project-collaborator:first-child { border-top: 0; } }
-        @media (prefers-reduced-motion:reduce) { #\${PANEL_ID} .better-codex-project-issues-loading > span, #\${PANEL_ID} .better-codex-project-document-progress svg, #\${PANEL_ID} .better-codex-project-document-segments i, #\${PANEL_ID} .better-codex-project-document-tab > i, #\${PANEL_ID} .better-codex-project-document-notice svg, #\${PANEL_ID} .better-codex-project-document-orbit, #\${PANEL_ID} .better-codex-project-document-skeleton i { animation: none; } }
+        @media (max-width: 980px) { #\${PANEL_ID} .better-codex-project-summary, #\${PANEL_ID} .better-codex-project-columns, #\${PANEL_ID} .better-codex-project-dashboard-lists, #\${PANEL_ID} .better-codex-project-planning-layout { grid-template-columns: 1fr; } #\${PANEL_ID} .better-codex-project-columns { height: auto; } #\${PANEL_ID} .better-codex-project-panel:first-child { height: min(50dvh,480px); min-height: 320px; } #\${PANEL_ID} .better-codex-project-document-panel { height: min(86dvh,820px); min-height: 620px; } #\${PANEL_ID} .better-codex-project-planning-layout { min-height: 0; } #\${PANEL_ID} .better-codex-project-plan, #\${PANEL_ID} .better-codex-project-planning-chat { height: min(78dvh,760px); min-height: 560px; } }
+        @media (max-width: 640px) { #\${PANEL_ID} .better-codex-projects { padding: 12px 12px 24px; } #\${PANEL_ID} .better-codex-project-list, #\${PANEL_ID} .better-codex-project-dashboard-summary, #\${PANEL_ID} .better-codex-project-overview-milestones > div { grid-template-columns: 1fr; } #\${PANEL_ID} .better-codex-project-summary { padding: 18px; } #\${PANEL_ID} .better-codex-project-columns { grid-template-columns: minmax(0,1fr); } #\${PANEL_ID} .better-codex-project-document-tab { padding-inline: 8px; } #\${PANEL_ID} .better-codex-project-document-tab svg { display: none; } #\${PANEL_ID} .better-codex-project-document-form > div { grid-template-columns: 1fr; } #\${PANEL_ID} .better-codex-project-dashboard-head { gap: 12px; } #\${PANEL_ID} .better-codex-project-dashboard-people { display: none; } #\${PANEL_ID} .better-codex-project-cycle { grid-column: auto; grid-template-columns: 100px minmax(0,1fr); } #\${PANEL_ID} .better-codex-project-timeline { padding-inline: 14px; } #\${PANEL_ID} .better-codex-project-timeline-legend { display: none; } #\${PANEL_ID} .better-codex-project-milestones { grid-template-columns: 1fr; } #\${PANEL_ID} .better-codex-project-work-row { grid-template-columns: 18px 62px minmax(0,1fr); } #\${PANEL_ID} .better-codex-project-work-state { display: none; } #\${PANEL_ID} .better-codex-project-collaborator-list { grid-template-columns: 1fr; } #\${PANEL_ID} .better-codex-project-collaborator { border-top: 1px solid var(--bc-divider); border-left: 0; padding: 10px 0; } #\${PANEL_ID} .better-codex-project-collaborator:first-child { border-top: 0; } #\${PANEL_ID} .better-codex-project-overview-milestones .better-codex-project-plan-item { border-top: 1px solid var(--bc-divider); border-left: 0; padding: 12px 0; } #\${PANEL_ID} .better-codex-project-planning-panel-head { padding-inline: 14px; } #\${PANEL_ID} .better-codex-project-plan-scroll { padding-inline: 14px; } #\${PANEL_ID} .better-codex-project-plan-item { grid-template-columns: 24px minmax(0,1fr); gap: 7px; } }
+        @media (prefers-reduced-motion:reduce) { #\${PANEL_ID} .better-codex-project-issues-loading > span, #\${PANEL_ID} .better-codex-project-document-progress svg, #\${PANEL_ID} .better-codex-project-document-segments i, #\${PANEL_ID} .better-codex-project-document-tab > i, #\${PANEL_ID} .better-codex-project-document-notice svg, #\${PANEL_ID} .better-codex-project-document-orbit, #\${PANEL_ID} .better-codex-project-document-skeleton i, #\${PANEL_ID} .better-codex-project-planning-running svg, #\${PANEL_ID} .better-codex-project-planning-form .better-codex-submit:disabled svg { animation: none; } }
         #\${PANEL_ID} .better-codex-agent-heading { display: none; min-width: 0; align-items: baseline; gap: 4px; }
         #\${PANEL_ID} .better-codex-agent-heading strong { color: #18181b; font-size: var(--bc-text-md); font-weight: 650; }
         #\${PANEL_ID} .better-codex-agent-heading span { color: var(--bc-muted); font-size: var(--bc-text-sm); }
@@ -2794,6 +2914,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (value === "browser_transport_failed") return t("网络连接不稳定，正在等待恢复。");
       if (["runtime_response_invalid", "invalid_projects_response", "invalid_issues_response", "invalid_agents_response"].includes(value)) return t("列表数据暂时无法读取，请稍后重试。");
       if (value === "issue_archived") return t("该会话对应的 Issue 已归档，请先取消归档。");
+      if (["project_planning_busy", "project_planning_agent_locked", "project_planning_unavailable", "project_planning_invalid_output", "project_planning_session_missing"].includes(value)) return projectPlanningErrorLabel(value);
       if (["project_overview_timeout", "project_overview_unavailable", "project_document_invalid_output", "remote_command_timeout", "workspace_missing"].includes(value)) return projectDocumentErrorLabel(value);
       return t(value);
     }
@@ -4154,6 +4275,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         trigger?.focus();
       });
       projects.addEventListener("submit", onProjectDocumentSubmit);
+      projects.addEventListener("submit", onProjectPlanningSubmit);
       section.append(toolbar, board, ...(boardScrollControl ? [boardScrollControl] : []), agents, projects, recovery);
       return section;
     }
@@ -4852,44 +4974,97 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       return '<section class="better-codex-project-panel better-codex-project-document-panel"><header class="better-codex-project-panel-head"><strong>' + te("项目文档") + '</strong><span>' + escapeHtml(done + "/7") + '</span></header>' + progress + '<nav class="better-codex-project-document-tabs" role="tablist" aria-label="' + te("项目文档") + '">' + tabs + '</nav><div class="better-codex-project-document-scroll">' + content + '</div>' + form + '</section>';
     }
 
-    function projectVersionPlan() {
-      const source = String(CORE_VERSION || "0.0.0").replace(/^v/i, "");
-      const beta = source.match(/^(\d+)\.(\d+)\.(\d+)-beta\.(\d+)$/i);
-      const stable = source.match(/^(\d+)\.(\d+)\.(\d+)$/);
-      if (beta) return { current: "v" + source, next: "v" + beta[1] + "." + beta[2] + "." + beta[3] + "-beta." + (Number(beta[4]) + 1), stable: "v" + beta[1] + "." + beta[2] + "." + beta[3] };
-      if (stable) return { current: "v" + source, next: "v" + stable[1] + "." + stable[2] + "." + (Number(stable[3]) + 1), stable: "v" + stable[1] + "." + stable[2] + "." + (Number(stable[3]) + 1) };
-      return { current: "v" + source, next: t("下一版本"), stable: t("稳定版本") };
+    function projectPlanningState(project) {
+      const planning = project.planning || {};
+      return {
+        status: ["idle", "running", "ready", "failed"].includes(planning.status) ? planning.status : "idle",
+        error: planning.error || null,
+        agent_id: planning.agent_id || null,
+        revision: Number(planning.revision) || 0,
+        updated_at: planning.updated_at || null,
+        messages: Array.isArray(planning.messages) ? planning.messages : [],
+        plan: planning.plan || null,
+      };
     }
 
-    function projectDateLabel(value) {
-      return new Intl.DateTimeFormat(state.locale === "zh-CN" ? "zh-CN" : "en", { month: "numeric", day: "numeric" }).format(value);
+    function projectPlanningSourceLabel(source) {
+      return t({ code: "代码事实", issue: "Issue 事实", conversation: "会话事实", user: "用户输入", inference: "智能体推断" }[source] || "智能体推断");
+    }
+
+    function projectPlanningStatusLabel(status) {
+      return t({ proposed: "建议", confirmed: "已确认", in_progress: "进行中", blocked: "阻塞", done: "已完成" }[status] || "建议");
+    }
+
+    function projectPlanningItemMarkup(item, index) {
+      const dependencies = Array.isArray(item.dependencies) && item.dependencies.length ? '<span>' + te("依赖") + ' ' + escapeHtml(item.dependencies.join("、")) + '</span>' : "";
+      const evidence = Array.isArray(item.evidence) && item.evidence.length ? '<details><summary>' + te("证据") + ' ' + escapeHtml(String(item.evidence.length)) + '</summary><ul>' + item.evidence.map(value => '<li>' + escapeHtml(value) + '</li>').join("") + '</ul></details>' : "";
+      const date = item.target_date ? '<time datetime="' + escapeHtml(item.target_date) + '">' + escapeHtml(item.target_date) + '</time>' : "";
+      return '<article class="better-codex-project-plan-item" data-plan-status="' + escapeHtml(item.status || "proposed") + '"><span class="better-codex-project-plan-index">' + escapeHtml(String(index + 1).padStart(2, "0")) + '</span><div><header><strong>' + escapeHtml(item.title || t("待确认")) + '</strong><span class="better-codex-project-plan-status">' + escapeHtml(projectPlanningStatusLabel(item.status)) + '</span></header>' + (item.detail ? '<p>' + escapeHtml(item.detail) + '</p>' : "") + '<footer><span data-plan-source="' + escapeHtml(item.source || "inference") + '">' + escapeHtml(projectPlanningSourceLabel(item.source)) + '</span>' + date + dependencies + '</footer>' + evidence + '</div></article>';
+    }
+
+    function projectPlanningSection(plan, key, label) {
+      const items = Array.isArray(plan?.[key]) ? plan[key] : [];
+      if (!items.length) return "";
+      return '<section class="better-codex-project-plan-section" data-plan-section="' + escapeHtml(key) + '"><header><strong>' + te(label) + '</strong><span>' + escapeHtml(String(items.length)) + '</span></header><div>' + items.map((item, index) => projectPlanningItemMarkup(item, index)).join("") + '</div></section>';
+    }
+
+    function projectPlanningErrorLabel(error) {
+      const value = String(error || "");
+      if (value === "project_planning_busy") return t("规划会话正在运行，请等待完成。");
+      if (value === "workspace_missing") return t("项目文件夹不可用，无法生成文档。");
+      if (value === "remote_command_timeout") return t("运行端未及时响应，请确认 Better Codex 在线后重试。");
+      return t("规划会话未能完成，请重试。");
+    }
+
+    function projectPlanningMarkup(project) {
+      const planning = projectPlanningState(project);
+      const pending = state.projectPlanningPending?.projectId === project.id ? state.projectPlanningPending : null;
+      const running = planning.status === "running" || Boolean(pending);
+      const plan = planning.plan;
+      const sections = plan ? [
+        ["outcomes", "预期成果"],
+        ["milestones", "里程碑"],
+        ["workstreams", "工作流"],
+        ["risks", "风险"],
+        ["decisions", "决策"],
+        ["open_questions", "待确认"],
+        ["delivery", "交付路径"],
+        ["evidence", "证据"],
+      ].map(([key, label]) => projectPlanningSection(plan, key, label)).join("") : "";
+      const planBody = plan
+        ? '<div class="better-codex-project-plan-scroll"><section class="better-codex-project-plan-summary"><span>' + te("规划摘要") + '</span><p>' + escapeHtml(plan.summary || t("尚未生成项目计划")) + '</p></section>' + sections + '</div>'
+        : '<div class="better-codex-project-plan-empty">' + icon("layout") + '<strong>' + te("尚未生成项目计划") + '</strong><p>' + te("从一个问题开始，智能体会读取代码、Issue 和关联会话。") + '</p></div>';
+      const failure = planning.status === "failed" ? '<div class="better-codex-project-planning-alert">' + icon("shield") + '<span>' + te("计划生成失败，当前仍显示上一版本。") + '</span></div>' : "";
+      const messages = [...planning.messages];
+      if (pending && !messages.some(message => message.role === "user" && message.markdown === pending.message)) messages.push({ id: "pending", role: "user", markdown: pending.message, html: "", created_at: new Date().toISOString() });
+      const conversation = messages.length
+        ? messages.map(message => '<article class="better-codex-project-planning-message" data-role="' + escapeHtml(message.role) + '"><header><strong>' + escapeHtml(message.role === "user" ? state.user.name || t("你") : "Codex") + '</strong><time>' + escapeHtml(timeAgo(message.created_at)) + '</time></header><div>' + (message.role === "agent" && message.html ? message.html : '<p>' + escapeHtml(message.markdown) + '</p>') + '</div></article>').join("")
+        : '<div class="better-codex-project-planning-starters"><span>' + te("从一个问题开始，智能体会读取代码、Issue 和关联会话。") + '</span>' + ["梳理这个项目的目标、范围和非目标", "根据当前代码和 Issue 生成下一阶段计划", "找出当前最大的风险、依赖和待确认问题"].map(prompt => '<button type="button" data-project-planning-prompt="' + escapeHtml(prompt) + '">' + escapeHtml(t(prompt)) + icon("chevron") + '</button>').join("") + '</div>';
+      const selectedAgent = state.agents.find(agent => agentKey(agent) === String(planning.agent_id || "default"));
+      const agentControl = planning.messages.length || planning.agent_id
+        ? '<input type="hidden" name="agent_id" value="' + escapeHtml(planning.agent_id || "") + '"><span class="better-codex-project-planning-agent">' + (selectedAgent ? agentAvatarMarkup(selectedAgent, "better-codex-project-document-agent-avatar") + '<span>' + escapeHtml(agentDisplayName(selectedAgent)) + '</span>' : icon("bot") + '<span>' + te("使用默认智能体") + '</span>') + '</span>'
+        : projectDocumentAgentPicker("");
+      const inlineError = state.projectPlanningError?.projectId === project.id ? '<output>' + escapeHtml(state.projectPlanningError.message) + '</output>' : "";
+      const form = state.mockup ? "" : '<form class="better-codex-project-planning-form" data-project-planning-form="' + escapeHtml(project.id) + '"><textarea name="message" maxlength="12000" rows="3" placeholder="' + te("询问项目规划…") + '"' + (running ? " disabled" : "") + '></textarea><div>' + agentControl + '<button class="better-codex-submit" type="submit"' + (running ? " disabled" : "") + '>' + icon(running ? "refresh" : "send") + '<span>' + te(running ? "规划中…" : "发送") + '</span></button></div>' + inlineError + '</form>';
+      const reset = planning.messages.length && !state.mockup ? '<button type="button" data-project-planning-reset="' + escapeHtml(project.id) + '"' + (running ? " disabled" : "") + '>' + icon("refresh") + '<span>' + te("新对话") + '</span></button>' : "";
+      return '<section class="better-codex-project-planning-layout"><article class="better-codex-project-plan"><header class="better-codex-project-planning-panel-head"><div><span>' + te("项目规划") + '</span><strong>' + escapeHtml(planning.revision ? t("计划版本") + " " + planning.revision : t("项目事实")) + '</strong></div><span>' + (planning.updated_at ? escapeHtml(timeAgo(planning.updated_at)) : te("暂无明确日期")) + '</span></header>' + failure + planBody + '<footer class="better-codex-project-plan-foot">' + te("计划内容来自规划对话，不会自动修改 Issue。") + '</footer></article><aside class="better-codex-project-planning-chat"><header class="better-codex-project-planning-panel-head"><div><span>' + te("规划对话") + '</span><strong>' + te("与智能体对话，把目标、里程碑、风险和交付证据整理成可执行计划。") + '</strong></div>' + reset + '</header><div class="better-codex-project-planning-messages" aria-live="polite">' + conversation + (running ? '<div class="better-codex-project-planning-running">' + icon("refresh") + '<span>' + te("规划中…") + '</span></div>' : "") + '</div>' + form + '</aside></section>';
     }
 
     function projectDashboardMarkup(project, issues, issuesLoading, paths) {
       const activeIssues = issues.filter(issue => !issue.archived_at);
-      const counts = activeIssues.reduce((result, issue) => {
-        result[issue.status] = (result[issue.status] || 0) + 1;
-        return result;
-      }, {});
+      const counts = activeIssues.reduce((result, issue) => { result[issue.status] = (result[issue.status] || 0) + 1; return result; }, {});
       const running = activeIssues.filter(issue => issue.status === "in_progress" || ["claimed", "running", "scheduling"].includes(issue.active_run_status)).length;
       const review = counts.in_review || 0;
       const blocked = counts.blocked || 0;
       const attention = activeIssues.filter(issue => issue.needs_attention || issue.status === "blocked" || issue.pending_actor === "user" && issue.status === "in_review");
       const healthTone = blocked ? "danger" : attention.length ? "warning" : "success";
       const healthLabel = blocked ? t("有风险") : attention.length ? t("需关注") : t("进展正常");
-      const phase = blocked || review ? 3 : counts.in_progress ? 2 : counts.todo ? 1 : counts.backlog ? 0 : activeIssues.length && activeIssues.every(issue => issue.status === "done") ? 4 : 1;
-      const phaseLabels = ["探索", "计划", "开发", "验证", "交付"];
-      const phases = phaseLabels.map((label, index) => '<span class="better-codex-project-cycle-step' + (index < phase ? " is-complete" : index === phase ? " is-current" : "") + '">' + te(label) + '</span>').join("");
-      const weights = { backlog: 0, todo: .18, in_progress: .56, in_review: .82, blocked: .5, done: 1 };
-      const progress = activeIssues.length ? Math.round(activeIssues.reduce((sum, issue) => sum + (weights[issue.status] || 0), 0) / activeIssues.length * 100) : 0;
-      const versions = projectVersionPlan();
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const day = 86400000;
-      const ticks = Array.from({ length: 13 }, (_, index) => new Date(today.getTime() + (index * 7 - 28) * day));
-      const firstTarget = new Date(today.getTime() + 14 * day);
-      const stableTarget = new Date(today.getTime() + 42 * day);
-      const dateTicks = ticks.map((date, index) => '<span>' + escapeHtml(index === 4 ? t("今天") : projectDateLabel(date)) + '</span>').join("");
+      const activeAgentIds = new Set(activeIssues.filter(issue => ["in_progress", "in_review", "blocked"].includes(issue.status)).map(issue => String(issue.agent_id || "default")));
+      const agents = [...state.agents].sort((left, right) => Number(activeAgentIds.has(agentKey(right))) - Number(activeAgentIds.has(agentKey(left))).slice(0, 3);
+      const peopleAvatars = '<span class="better-codex-project-dashboard-avatar" title="' + escapeHtml(state.user.name || t("你")) + '">' + escapeHtml(state.user.initials || (state.user.name || t("你")).slice(0, 2)) + '</span>' + agents.map(agent => agentAvatarMarkup(agent, "better-codex-project-dashboard-avatar")).join("");
+      const page = state.projectPage === "planning" ? "planning" : "overview";
+      const header = '<header class="better-codex-project-dashboard-head"><div class="better-codex-project-dashboard-title"><div><h1>' + escapeHtml(projectLabel(project)) + '</h1><span class="better-codex-project-health" data-tone="' + healthTone + '">' + escapeHtml(healthLabel) + '</span></div><p>' + escapeHtml(project.description || t("尚未生成项目介绍")) + '</p></div><div class="better-codex-project-dashboard-people" aria-label="' + te("项目协作者") + '">' + peopleAvatars + '</div></header><nav class="better-codex-project-dashboard-tabs" aria-label="' + te("项目页面") + '"><button type="button" data-project-dashboard-view="overview"' + (page === "overview" ? ' aria-current="page"' : "") + '>' + te("概览") + '</button><button type="button" data-project-dashboard-view="planning"' + (page === "planning" ? ' aria-current="page"' : "") + '>' + te("规划") + '</button><button type="button" data-project-dashboard-work>' + te("工作") + '</button></nav>';
+      if (page === "planning") return '<section class="better-codex-project-dashboard">' + header + projectPlanningMarkup(project) + '</section>';
       const priority = { blocked: 0, in_review: 1, in_progress: 2, todo: 3, backlog: 4, done: 5 };
       const work = [...activeIssues].filter(issue => ["blocked", "in_review", "in_progress", "todo"].includes(issue.status)).sort((left, right) => (priority[left.status] ?? 9) - (priority[right.status] ?? 9) || String(right.updated_at).localeCompare(String(left.updated_at))).slice(0, 5);
       const issueAssignee = issue => {
@@ -4898,25 +5073,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const agent = state.agents.find(item => agentKey(item) === String(issue.agent_id || "default"));
         return agent ? agentDisplayName(agent) : "Codex";
       };
-      const workRows = issuesLoading
-        ? '<div class="better-codex-project-dashboard-empty">' + te("正在加载当前工作") + '</div>'
-        : work.length ? work.map(issue => '<button class="better-codex-project-work-row" type="button" data-project-issue="' + escapeHtml(issue.id) + '">' + statusIcon(issue.status) + '<b>' + escapeHtml(issue.identifier) + '</b><span class="better-codex-project-work-title"><strong>' + escapeHtml(issue.title) + '</strong><span>' + escapeHtml(issueAssignee(issue)) + ' · ' + te("更新于 " + timeAgo(issue.updated_at)) + '</span></span><span class="better-codex-project-work-state">' + te(statusLabels[issue.status] || issue.status) + '</span></button>').join("")
-        : '<div class="better-codex-project-dashboard-empty">' + te("当前没有进行中的工作") + '</div>';
-      const attentionRows = issuesLoading
-        ? '<div class="better-codex-project-dashboard-empty">' + te("正在加载待处理事项") + '</div>'
-        : attention.length ? attention.slice(0, 4).map(issue => {
-          const label = issue.status === "blocked" ? t("需解阻") : issue.status === "in_review" ? t("需复核") : t("需处理");
-          return '<button class="better-codex-project-attention-row" type="button" data-project-issue="' + escapeHtml(issue.id) + '"><span class="better-codex-project-attention-icon">' + icon(issue.status === "blocked" ? "shield" : "review") + '</span><span class="better-codex-project-attention-copy"><strong>' + escapeHtml(issue.title) + '</strong><span>' + escapeHtml(issue.identifier) + ' · ' + escapeHtml(issueAssignee(issue)) + '</span></span><span class="better-codex-project-attention-state">' + escapeHtml(label) + '</span></button>';
-        }).join("") : '<div class="better-codex-project-dashboard-empty">' + te("没有需要你处理的事项") + '</div>';
-      const activeAgentIds = new Set(activeIssues.filter(issue => ["in_progress", "in_review", "blocked"].includes(issue.status)).map(issue => String(issue.agent_id || "default")));
-      const agents = [...state.agents].sort((left, right) => Number(activeAgentIds.has(agentKey(right))) - Number(activeAgentIds.has(agentKey(left)))).slice(0, 3);
-      const peopleAvatars = '<span class="better-codex-project-dashboard-avatar" title="' + escapeHtml(state.user.name || t("你")) + '">' + escapeHtml(state.user.initials || (state.user.name || t("你")).slice(0, 2)) + '</span>' + agents.map(agent => agentAvatarMarkup(agent, "better-codex-project-dashboard-avatar")).join("");
-      const collaborators = '<article class="better-codex-project-collaborator"><span class="better-codex-project-dashboard-avatar">' + escapeHtml(state.user.initials || (state.user.name || t("你")).slice(0, 2)) + '</span><div><strong>' + escapeHtml(state.user.name || t("你")) + '</strong><span>' + te("项目负责人") + '</span></div></article>' + agents.map(agent => {
-        const agentIssue = activeIssues.find(issue => String(issue.agent_id || "default") === agentKey(agent) && ["in_progress", "in_review", "blocked"].includes(issue.status));
-        return '<article class="better-codex-project-collaborator">' + agentAvatarMarkup(agent, "better-codex-project-dashboard-avatar") + '<div><strong>' + escapeHtml(agentDisplayName(agent)) + '</strong><span>' + escapeHtml(agentIssue ? agentIssue.title : t("待命")) + '</span></div></article>';
-      }).join("");
+      const workRows = issuesLoading ? '<div class="better-codex-project-dashboard-empty">' + te("正在加载当前工作") + '</div>' : work.length ? work.map(issue => '<button class="better-codex-project-work-row" type="button" data-project-issue="' + escapeHtml(issue.id) + '">' + statusIcon(issue.status) + '<b>' + escapeHtml(issue.identifier) + '</b><span class="better-codex-project-work-title"><strong>' + escapeHtml(issue.title) + '</strong><span>' + escapeHtml(issueAssignee(issue)) + ' · ' + te("更新于 " + timeAgo(issue.updated_at)) + '</span></span><span class="better-codex-project-work-state">' + te(statusLabels[issue.status] || issue.status) + '</span></button>').join("") : '<div class="better-codex-project-dashboard-empty">' + te("当前没有进行中的工作") + '</div>';
+      const attentionRows = issuesLoading ? '<div class="better-codex-project-dashboard-empty">' + te("正在加载待处理事项") + '</div>' : attention.length ? attention.slice(0, 4).map(issue => '<button class="better-codex-project-attention-row" type="button" data-project-issue="' + escapeHtml(issue.id) + '"><span class="better-codex-project-attention-icon">' + icon(issue.status === "blocked" ? "shield" : "review") + '</span><span class="better-codex-project-attention-copy"><strong>' + escapeHtml(issue.title) + '</strong><span>' + escapeHtml(issue.identifier) + ' · ' + escapeHtml(issueAssignee(issue)) + '</span></span><span class="better-codex-project-attention-state">' + escapeHtml(issue.status === "blocked" ? t("需解阻") : issue.status === "in_review" ? t("需复核") : t("需处理")) + '</span></button>').join("") : '<div class="better-codex-project-dashboard-empty">' + te("没有需要你处理的事项") + '</div>';
+      const planning = projectPlanningState(project);
+      const milestoneItems = Array.isArray(planning.plan?.milestones) ? planning.plan.milestones.slice(0, 3) : [];
+      const milestones = milestoneItems.length ? milestoneItems.map((item, index) => projectPlanningItemMarkup(item, index)).join("") : '<div class="better-codex-project-dashboard-empty">' + te("尚未生成项目计划") + '</div>';
       const path = paths[0] || t("未提供项目文件夹");
-      return '<section class="better-codex-project-dashboard"><header class="better-codex-project-dashboard-head"><div class="better-codex-project-dashboard-title"><div><h1>' + escapeHtml(projectLabel(project)) + '</h1><span class="better-codex-project-health" data-tone="' + healthTone + '">' + escapeHtml(healthLabel) + '</span></div></div><div class="better-codex-project-dashboard-people" aria-label="' + te("项目协作者") + '">' + peopleAvatars + '</div></header><nav class="better-codex-project-dashboard-tabs" aria-label="' + te("项目页面") + '"><button type="button" aria-current="page">' + te("概览") + '</button><button type="button" data-project-dashboard-work>' + te("工作") + '</button></nav><section class="better-codex-project-dashboard-summary"><article class="better-codex-project-dashboard-card better-codex-project-dashboard-description"><strong>' + te("项目说明") + '</strong><p>' + escapeHtml(project.description || t("尚未生成项目介绍")) + '</p><div class="better-codex-project-dashboard-path" title="' + escapeHtml(path) + '">' + icon("folder") + '<span>' + escapeHtml(path) + '</span></div></article><article class="better-codex-project-dashboard-card"><strong>' + te("当前状态") + '</strong><div class="better-codex-project-metrics"><span class="better-codex-project-metric"><b>' + escapeHtml(String(running)) + '</b><span>' + te("进行中") + '</span></span><span class="better-codex-project-metric" data-tone="warning"><b>' + escapeHtml(String(review)) + '</b><span>' + te("待复核") + '</span></span><span class="better-codex-project-metric" data-tone="danger"><b>' + escapeHtml(String(blocked)) + '</b><span>' + te("阻塞") + '</span></span></div></article><article class="better-codex-project-dashboard-card better-codex-project-cycle"><div class="better-codex-project-cycle-steps">' + phases + '</div><div class="better-codex-project-cycle-facts"><div><span>' + te("当前版本") + '</span><b>' + escapeHtml(versions.current) + '</b></div><div><span>' + te("下一里程碑") + '</span><b>' + escapeHtml(versions.next) + '</b></div><div><span>' + te("当前阶段") + '</span><b>' + te(phaseLabels[phase]) + '</b></div></div></article></section><section class="better-codex-project-timeline"><header class="better-codex-project-section-head"><strong>' + te("版本计划与里程碑") + '</strong><span class="better-codex-project-timeline-legend"><span><i></i>' + te("已发布") + '</span><span><i></i>' + te("进行中") + '</span><span><i></i>' + te("计划") + '</span></span></header><div class="better-codex-project-timeline-scroll"><div class="better-codex-project-timeline-canvas"><div class="better-codex-project-timeline-dates">' + dateTicks + '</div><div class="better-codex-project-timeline-track"><span class="better-codex-project-today"><span>' + te("今天") + ' ' + escapeHtml(projectDateLabel(today)) + '</span></span><div class="better-codex-project-version-band" style="--start:1;--span:4;--row:1"><b>' + escapeHtml(versions.current) + '</b><span>' + te("当前安装") + '</span></div><div class="better-codex-project-version-band" data-tone="current" style="--start:5;--span:4;--row:2"><b>' + escapeHtml(versions.next) + '</b><span>' + te("版本收口") + '</span><span class="better-codex-project-version-progress">' + escapeHtml(progress + "%") + '</span></div><div class="better-codex-project-version-band" data-tone="planned" style="--start:9;--span:4;--row:3"><b>' + escapeHtml(versions.stable) + '</b><span>' + te("稳定交付") + '</span></div></div></div></div><div class="better-codex-project-milestones"><span class="better-codex-project-milestone">' + icon("check") + '<span><b>' + escapeHtml(versions.current) + '</b><span>' + te("当前安装版本") + '</span></span></span><span class="better-codex-project-milestone" data-tone="current">' + icon("calendar") + '<span><b>' + te("预计") + ' ' + escapeHtml(projectDateLabel(firstTarget)) + '</b><span>' + escapeHtml(versions.next) + '</span></span></span><span class="better-codex-project-milestone" data-tone="planned">' + icon("calendar") + '<span><b>' + te("预计") + ' ' + escapeHtml(projectDateLabel(stableTarget)) + '</b><span>' + escapeHtml(versions.stable) + '</span></span></span></div></section><section class="better-codex-project-dashboard-lists"><article class="better-codex-project-dashboard-card"><header class="better-codex-project-section-head"><strong>' + te("当前工作") + '</strong><span>' + escapeHtml(String(work.length)) + '</span></header><div class="better-codex-project-work-list">' + workRows + '</div></article><article class="better-codex-project-dashboard-card"><header class="better-codex-project-section-head"><strong>' + te("等你处理") + '</strong><span>' + escapeHtml(String(attention.length)) + '</span></header><div class="better-codex-project-attention-list">' + attentionRows + '</div></article></section><section class="better-codex-project-dashboard-card better-codex-project-collaborators"><header class="better-codex-project-section-head"><strong>' + te("活跃协作者") + '</strong></header><div class="better-codex-project-collaborator-list">' + collaborators + '</div></section></section>';
+      return '<section class="better-codex-project-dashboard">' + header + '<section class="better-codex-project-dashboard-summary"><article class="better-codex-project-dashboard-card better-codex-project-dashboard-description"><strong>' + te("项目事实") + '</strong><p>' + escapeHtml(project.description || t("尚未生成项目介绍")) + '</p><div class="better-codex-project-dashboard-path" title="' + escapeHtml(path) + '">' + icon("folder") + '<span>' + escapeHtml(path) + '</span></div></article><article class="better-codex-project-dashboard-card"><strong>' + te("当前状态") + '</strong><div class="better-codex-project-metrics"><span class="better-codex-project-metric"><b>' + escapeHtml(String(running)) + '</b><span>' + te("进行中") + '</span></span><span class="better-codex-project-metric" data-tone="warning"><b>' + escapeHtml(String(review)) + '</b><span>' + te("待复核") + '</span></span><span class="better-codex-project-metric" data-tone="danger"><b>' + escapeHtml(String(blocked)) + '</b><span>' + te("阻塞") + '</span></span></div></article><article class="better-codex-project-dashboard-card better-codex-project-planning-overview"><header class="better-codex-project-section-head"><strong>' + te("项目规划") + '</strong><button type="button" data-project-dashboard-view="planning">' + te(planning.revision ? "计划版本" : "规划") + (planning.revision ? " " + escapeHtml(String(planning.revision)) : "") + icon("chevron") + '</button></header><p>' + escapeHtml(planning.plan?.summary || t("从一个问题开始，智能体会读取代码、Issue 和关联会话。")) + '</p></article></section><section class="better-codex-project-dashboard-card better-codex-project-overview-milestones"><header class="better-codex-project-section-head"><strong>' + te("里程碑") + '</strong><span>' + escapeHtml(String(milestoneItems.length)) + '</span></header><div>' + milestones + '</div></section><section class="better-codex-project-dashboard-lists"><article class="better-codex-project-dashboard-card"><header class="better-codex-project-section-head"><strong>' + te("当前工作") + '</strong><span>' + escapeHtml(String(work.length)) + '</span></header><div class="better-codex-project-work-list">' + workRows + '</div></article><article class="better-codex-project-dashboard-card"><header class="better-codex-project-section-head"><strong>' + te("等你处理") + '</strong><span>' + escapeHtml(String(attention.length)) + '</span></header><div class="better-codex-project-attention-list">' + attentionRows + '</div></article></section></section>';
     }
 
     function renderProjects() {
@@ -4973,6 +5136,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const project = projects.find(item => item.id === pending.projectId);
         if (project && (project.overview_status === "generating" || String(project.updated_at || "") !== pending.updatedAt)) state.projectDocumentPending = null;
       }
+      const planningPending = state.projectPlanningPending;
+      if (planningPending) {
+        const project = projects.find(item => item.id === planningPending.projectId);
+        if (project && (project.planning?.status === "running" || String(project.updated_at || "") !== planningPending.updatedAt)) state.projectPlanningPending = null;
+      }
       state.projects = projects;
       state.projectsLoaded = true;
       if (state.projectDetailId) {
@@ -5004,6 +5172,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     async function openProjectDetail(projectId) {
       state.projectDetailId = projectId;
+      state.projectPage = "overview";
       state.projectId = projectId;
       localStorage.setItem(PROJECT_KEY, state.projectId);
       state.projectIssues = [];
@@ -5047,6 +5216,38 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         renderProjects();
         return;
       }
+      const dashboardView = event.target.closest("[data-project-dashboard-view]");
+      if (dashboardView) {
+        state.projectPage = dashboardView.dataset.projectDashboardView === "planning" ? "planning" : "overview";
+        renderProjects();
+        if (state.projectPage === "planning") requestAnimationFrame(() => {
+          const messages = panel.querySelector(".better-codex-project-planning-messages");
+          if (messages) messages.scrollTop = messages.scrollHeight;
+        });
+        return;
+      }
+      const planningPrompt = event.target.closest("[data-project-planning-prompt]");
+      if (planningPrompt) {
+        const textarea = panel.querySelector("[data-project-planning-form] textarea[name=message]");
+        if (!textarea) return;
+        textarea.value = planningPrompt.dataset.projectPlanningPrompt || "";
+        textarea.focus();
+        textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+        return;
+      }
+      const planningReset = event.target.closest("[data-project-planning-reset]");
+      if (planningReset && !planningReset.disabled) {
+        const projectId = planningReset.dataset.projectPlanningReset;
+        return void confirmAction("开始新规划对话", "这会清除当前规划对话和计划版本。", "新对话").then(confirmed => confirmed && perform(async () => {
+          const result = await api("/api/projects/" + encodeURIComponent(projectId) + "/planning/reset", { method: "POST", body: "{}" });
+          if (result.command_id) {
+            const command = await waitForRemoteCommand(result.command_id);
+            if (command.status !== "applied") throw new Error(command.error || "command_rejected");
+          }
+          state.projectPlanningError = null;
+          await loadProjects();
+        }));
+      }
       const work = event.target.closest("[data-project-dashboard-work]");
       if (work) {
         state.projectId = state.projectDetailId;
@@ -5068,6 +5269,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       }
       const project = event.target.closest("[data-project-id]");
       if (project) {
+        state.projectPage = "overview";
         state.projectDocumentView = "charter";
         void perform(() => openProjectDetail(project.dataset.projectId));
       }
@@ -5097,6 +5299,38 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         } catch (error) {
           state.projectDocumentPending = null;
           state.projectDocumentError = { projectId, message: projectDocumentErrorLabel(error instanceof Error ? error.message : error) };
+          showError(error);
+          renderProjects();
+        }
+      })();
+    }
+
+    function onProjectPlanningSubmit(event) {
+      const form = event.target.closest("[data-project-planning-form]");
+      if (!form) return;
+      event.preventDefault();
+      const projectId = form.dataset.projectPlanningForm;
+      if (state.projectPlanningPending?.projectId === projectId) return;
+      const project = state.projects.find(item => item.id === projectId);
+      if (projectPlanningState(project || {}).status === "running") return;
+      const data = new FormData(form);
+      const message = String(data.get("message") || "").trim();
+      const agentId = String(data.get("agent_id") || "");
+      if (!message) return void form.querySelector("textarea")?.focus();
+      state.projectPlanningError = null;
+      state.projectPlanningPending = { projectId, message, updatedAt: String(project?.updated_at || "") };
+      renderProjects();
+      void (async () => {
+        try {
+          const result = await api("/api/projects/" + encodeURIComponent(projectId) + "/planning/messages", { method: "POST", body: JSON.stringify({ agent_id: agentId, message }) });
+          if (result.command_id) {
+            const command = await waitForRemoteCommand(result.command_id);
+            if (command.status !== "applied") throw new Error(command.error || "command_rejected");
+          }
+          await loadProjects();
+        } catch (error) {
+          state.projectPlanningPending = null;
+          state.projectPlanningError = { projectId, message: projectPlanningErrorLabel(error instanceof Error ? error.message : error) };
           showError(error);
           renderProjects();
         }

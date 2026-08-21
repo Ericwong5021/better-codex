@@ -49,7 +49,7 @@ const projectPlanningSchema = {
             },
           },
         }]),
-      }),
+      ]),
     },
   },
 };
@@ -417,7 +417,7 @@ export class IssueWorker {
     if (existsSync(outputPath)) unlinkSync(outputPath);
     const profile = project.planning.agent_id ? ["--profile", agentConfigProfileName(project.planning.agent_id)] : [];
     const args = threadId
-      ? ["exec", "resume", ...profile, "--json", "--output-schema", projectPlanningSchemaPath, "--output-last-message", outputPath, threadId, prompt]
+      ? ["exec", "resume", "--json", "--output-schema", projectPlanningSchemaPath, "--output-last-message", outputPath, threadId, prompt]
       : ["exec", ...profile, "--json", "--color", "never", "--output-schema", projectPlanningSchemaPath, "--output-last-message", outputPath, "--skip-git-repo-check", ...project.root_paths.slice(1).filter(path => existsSync(path)).flatMap(path => ["--add-dir", path]), "-C", workspacePath, "-s", "read-only", prompt];
     return new Promise<{ threadId: string; output: string } | null>(resolve => {
       const child = spawn(codexExecutablePath(), args, {
