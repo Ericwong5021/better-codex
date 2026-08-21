@@ -4,6 +4,10 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.10-beta.1] - 2026-08-22
+
+- Start the 0.4.10 Preview line from the 0.4.9 release baseline.
+
 ## [0.4.9] - 2026-08-22
 
 ### Added
@@ -739,7 +743,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.1...HEAD
+[0.4.10-beta.1]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9...v0.4.10-beta.1
 [0.4.9]: https://github.com/Ericwong5021/better-codex/compare/v0.4.8...v0.4.9
 [0.4.9-beta.34]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.33...v0.4.9-beta.34
 [0.4.9-beta.33]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.32...v0.4.9-beta.33
