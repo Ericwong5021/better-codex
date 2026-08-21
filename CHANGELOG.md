@@ -4,6 +4,10 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.9-beta.29] - 2026-08-21
+
+- Persist supported Web commands across Runtime outages with Relay queuing, browser outbox recovery, idempotent Runtime receipts, and durable Codex thread effects.
+
 ## [0.4.9-beta.28] - 2026-08-21
 
 - Route linked Codex thread actions through the persistent Session Host and stop stale hosts during upgrades and restarts.
@@ -690,7 +694,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.28...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.29...HEAD
+[0.4.9-beta.29]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.28...v0.4.9-beta.29
 [0.4.9-beta.28]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.27...v0.4.9-beta.28
 [0.4.9-beta.27]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.26...v0.4.9-beta.27
 [0.4.9-beta.26]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.25...v0.4.9-beta.26
