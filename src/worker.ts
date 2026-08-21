@@ -5,7 +5,7 @@ import { createInterface } from "node:readline";
 import { join } from "node:path";
 import { agentConfigProfileName, defaultAgentProfile } from "./agent-profiles.js";
 import { debugLoggingEnabled, schedulerRuntimePath, schedulerSchemaPath, runLogPath, workerLogPath } from "./config.js";
-import { agentSandboxModes, Store, type AgentSandboxMode, type ClaimedIssue, type Issue, type IssueThreadAction, type Project, type SchedulerDecision, type SessionCommand } from "./db.js";
+import { agentSandboxModes, Store, type AgentSandboxMode, type ClaimedIssue, type Issue, type IssueThreadAction, type PendingThreadAction, type Project, type SchedulerDecision, type SessionCommand } from "./db.js";
 import { mockupSessionActive } from "./injection-state.js";
 import { codexExecutablePath } from "./codex-cli.js";
 import { renderMarkdown } from "./markdown.js";
@@ -45,6 +45,7 @@ export function issuePrompt(claim: ClaimedIssue) {
 
 export class IssueWorker {
   private timer: NodeJS.Timeout | null = null;
+  private threadActionTimer: NodeJS.Timeout | null = null;
   private readonly schedulers = new Map<string, { child: ChildProcess; claim: ClaimedIssue }>();
   private readonly enrichments = new Map<string, ChildProcess>();
   private readonly projectOverviews = new Map<string, ChildProcess | null>();
@@ -52,6 +53,7 @@ export class IssueWorker {
   private readonly stoppingRuns = new Set<string>();
   private readonly sessionRelay: SessionHostClient;
   private reconcilingSessions = false;
+  private drainingThreadActions = false;
   private stopped = true;
 
   constructor(private readonly store: Store, private readonly onChange: () => void = () => {}) {
@@ -91,6 +93,7 @@ export class IssueWorker {
     }
     for (const issue of this.store.listPendingEnrichmentIssues()) this.enrichIssue(issue, issue.description, issue.agent_id || "");
     this.sessionRelay.start();
+    this.scheduleThreadActions(250);
     void this.reconcileDesktopRuns();
     this.schedule(0);
   }
@@ -98,6 +101,7 @@ export class IssueWorker {
   wake() {
     if (this.stopped) return;
     this.schedule(0);
+    this.scheduleThreadActions(0);
   }
 
   applyThreadAction(issueId: string, action: IssueThreadAction) {
@@ -108,7 +112,9 @@ export class IssueWorker {
     if (this.store.hasActiveIssueRuns() || this.schedulers.size || this.enrichments.size || this.projectOverviews.size) return false;
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
+    if (this.threadActionTimer) clearTimeout(this.threadActionTimer);
     this.timer = null;
+    this.threadActionTimer = null;
     this.manualQueue.clear();
     this.sessionRelay.stop();
     return true;
@@ -198,7 +204,9 @@ export class IssueWorker {
   stop() {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
+    if (this.threadActionTimer) clearTimeout(this.threadActionTimer);
     this.timer = null;
+    this.threadActionTimer = null;
     this.manualQueue.clear();
     this.sessionRelay.stop();
     for (const { child, claim } of this.schedulers.values()) {
@@ -514,6 +522,38 @@ export class IssueWorker {
     if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => void this.tick(), delay);
     this.timer.unref();
+  }
+
+  private scheduleThreadActions(delay: number) {
+    if (this.stopped) return;
+    if (this.threadActionTimer) clearTimeout(this.threadActionTimer);
+    this.threadActionTimer = setTimeout(() => void this.drainThreadActions(), delay);
+    this.threadActionTimer.unref();
+  }
+
+  private async drainThreadActions() {
+    if (this.stopped || this.drainingThreadActions) return;
+    this.drainingThreadActions = true;
+    this.threadActionTimer = null;
+    try {
+      for (const entry of this.store.listPendingThreadActions()) await this.runThreadAction(entry);
+    } finally {
+      this.drainingThreadActions = false;
+      if (this.stopped) return;
+      const next = this.store.nextThreadActionAt();
+      this.scheduleThreadActions(next ? Math.max(0, Math.min(interval, Date.parse(next) - Date.now())) : interval);
+    }
+  }
+
+  private async runThreadAction(entry: PendingThreadAction) {
+    try {
+      await this.sessionRelay.threadAction([entry.thread_id], entry.action);
+      if (this.stopped) return;
+      this.store.completeThreadAction(entry);
+    } catch (error) {
+      if (this.stopped) return;
+      this.store.failThreadAction(entry, error instanceof Error ? error.message : String(error));
+    }
   }
 
   private async tick() {

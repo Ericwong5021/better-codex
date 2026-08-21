@@ -180,7 +180,7 @@ test("core workflow persists, orders status moves, and rejects stale writes", ()
     const restored = store.getIssue(first.id);
     assert.equal(restored?.status, "in_progress");
     assert.equal(restored?.thread_id, "local:thread-1");
-    assert.equal(store.health().schemaVersion, 13);
+    assert.equal(store.health().schemaVersion, 14);
     store.close();
   } finally {
     rmSync(target.directory, { recursive: true, force: true });
@@ -750,6 +750,13 @@ test("stopping a claimed desktop start before turn binding releases the run", as
     assert.equal(stopped.active_run_status, null);
     const archived = store.archiveIssue(stopped.id, stopped.version);
     assert.ok(archived.archived_at);
+    assert.deepEqual(store.listPendingThreadActions().map(entry => ({ thread_id: entry.thread_id, action: entry.action })), [{ thread_id: threadId, action: "archive" }]);
+    const restored = store.unarchiveIssue(archived.id, archived.version);
+    assert.deepEqual(store.listPendingThreadActions().map(entry => ({ thread_id: entry.thread_id, action: entry.action })), [{ thread_id: threadId, action: "unarchive" }]);
+    const archivedAgain = store.archiveIssue(restored.id, restored.version);
+    store.deleteArchivedIssue(archivedAgain.id, archivedAgain.version);
+    assert.equal(store.getIssue(stopped.id), undefined);
+    assert.deepEqual(store.listPendingThreadActions().map(entry => ({ thread_id: entry.thread_id, action: entry.action })), [{ thread_id: threadId, action: "delete" }]);
     store.close();
   } finally {
     rmSync(target.directory, { recursive: true, force: true });
@@ -1131,7 +1138,7 @@ test("legacy cancelled issues migrate to archived backlog issues", () => {
     const restored = store.unarchiveIssue(issue.id, migrated.version);
     const moved = store.updateIssue(issue.id, restored.version, { status: "todo" });
     assert.equal(store.isDispatchable(moved), false);
-    assert.equal(store.health().schemaVersion, 13);
+    assert.equal(store.health().schemaVersion, 14);
   } finally {
     store?.close();
     rmSync(target.directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
@@ -1170,7 +1177,7 @@ test("newer database schema is rejected without migration", () => {
   const target = temporaryDatabase();
   try {
     const future = new DatabaseSync(target.file);
-    future.exec("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL); INSERT INTO schema_migrations VALUES (14, '2026-01-01T00:00:00.000Z')");
+    future.exec("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL); INSERT INTO schema_migrations VALUES (15, '2026-01-01T00:00:00.000Z')");
     future.close();
     assert.throws(() => new Store(target.file), /database_schema_too_new/);
   } finally {
@@ -1214,7 +1221,7 @@ test("legacy database is backed up before migration", () => {
     legacy.close();
 
     const store = new Store(target.file);
-    assert.equal(store.health().schemaVersion, 13);
+    assert.equal(store.health().schemaVersion, 14);
     assert.ok(store.lastBackupPath);
     assert.ok(existsSync(store.lastBackupPath!));
     assert.equal(store.getProject("legacy")?.name, "Legacy");

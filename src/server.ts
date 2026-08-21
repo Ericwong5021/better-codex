@@ -32,6 +32,8 @@ import { readRelayConfiguration, removeRelayConfiguration, type RelayConfigurati
 import { requestFingerprint, RequestReceiptStore, type RequestReceiptResponse } from "./request-receipts.js";
 import { disableProjectionSync, readRemoteMode } from "./remote-mode.js";
 import { browseDirectory } from "./directory-browser.js";
+import { featureManifest } from "./features.js";
+import { webCommandTarget } from "./command-contract.js";
 
 const accessToken = token();
 const mockupEnabled = !isSea() && !packagedBuild && process.argv.includes("--mockup");
@@ -649,6 +651,7 @@ export function startServer() {
     undefined,
     command => {
       if (command.operation === "issue.start") worker.startIssue(command.entity_id);
+      if (["issue.archive", "issue.restore", "issue.delete"].includes(command.operation)) worker.wake();
       if (command.operation === "settings.auto-dispatch" && command.payload.enabled === true) worker.wake();
       if (command.operation === "issue.create" && command.payload.agent_enabled === true && command.payload.user_assigned !== true) {
         const issue = store.getIssue(command.entity_id);
@@ -755,9 +758,11 @@ export function startServer() {
       const method = request.method ?? "GET";
       const mockupLocale = normalizeMockupLocale(url.searchParams.get("locale"));
       const relayRequest = validAccessToken(bearerToken(request)) && request.headers["x-better-codex-relay"] === "1";
+      const browserCommandId = String(request.headers["x-better-codex-command-id"] || "");
+      const localCommandRequest = !relayRequest && authorized(request, url, webSessions) && /^[A-Za-z0-9_-]{8,200}$/.test(browserCommandId) && Boolean(webCommandTarget(method, `${url.pathname}${url.search}`));
 
-      if (relayRequest && url.pathname.startsWith("/api/") && !["GET", "HEAD", "OPTIONS"].includes(method)) {
-        const requestId = String(request.headers["x-better-codex-request-id"] || "");
+      if ((relayRequest || localCommandRequest) && url.pathname.startsWith("/api/") && !["GET", "HEAD", "OPTIONS"].includes(method)) {
+        const requestId = relayRequest ? String(request.headers["x-better-codex-request-id"] || "") : browserCommandId;
         if (!/^[A-Za-z0-9_-]{8,200}$/.test(requestId)) throw new Error("invalid_request_id");
         const rawBody = await readRawBody(request, 50 * 1024 * 1024);
         preloadedRequestBodies.set(request, rawBody);
@@ -810,6 +815,17 @@ export function startServer() {
         return sendWeb(response, 200, injectionScript(activePort, sessionToken, "install", locale, "web"), "text/javascript; charset=utf-8");
       }
       if (!authorized(request, url, webSessions)) return sendJson(response, 401, { error: "unauthorized" });
+      const commandStatusMatch = url.pathname.match(/^\/api\/commands\/([A-Za-z0-9_-]{8,200})$/);
+      if (commandStatusMatch && method === "GET") {
+        const receipt = requestReceipts.status(commandStatusMatch[1]);
+        if (receipt.kind === "missing") return sendJson(response, 404, { error: "command_not_found" });
+        if (receipt.kind === "pending") return sendJson(response, 202, { command_id: commandStatusMatch[1], status: "processing", queued: true });
+        let payload: unknown = null;
+        try { payload = JSON.parse(receipt.response.body.toString("utf8")); } catch {}
+        const status = receipt.response.status === 409 ? "conflict" : receipt.response.status >= 200 && receipt.response.status < 400 ? "applied" : "rejected";
+        const error = payload && typeof payload === "object" && "error" in payload ? String((payload as { error: unknown }).error) : null;
+        return sendJson(response, 200, { command_id: commandStatusMatch[1], status, response_status: receipt.response.status, error, payload });
+      }
       if (url.pathname === "/api/sync/status" && method === "GET") return sendJson(response, 200, { ...syncClient.status(), remote_mode: remoteMode, enabled: remoteMode === "projection" });
       if (url.pathname === "/api/relay/status" && method === "GET") return sendJson(response, 200, { ...relayClient.status(), remote_mode: remoteMode, enabled: remoteMode === "relay" && relayClient.status().enabled });
       if (url.pathname === "/api/relay/connect" && method === "POST") {
@@ -936,7 +952,7 @@ export function startServer() {
         const agentReasoningEfforts = [...new Set(agentModelCatalog.flatMap(model => model.supportedReasoningEfforts.map(effort => effort.value)))];
         const mockup = mockupEnabled ? readMockupState(mockupLocale) : null;
         if (!mockup) syncCodexProjects(store);
-        return sendJson(response, 200, { projects: projectSummaries(mockup ? mockup.projects : store.listProjects()), agents: mockup ? mockup.agents : visibleAgentProfiles(), statuses: issueStatuses, priorities: issuePriorities, appearance: readCodexAppearance(), locale: readCodexLocale(), user: readCodexUserProfile(), agentModelCatalog, agentModels, agentReasoningEfforts, autoDispatch: mockup ? mockup.auto_dispatch : store.getAutoDispatch(), schedulerModel: mockup ? mockup.scheduler_model : store.getSchedulerModel(defaultAgentProfile().model), schedulerReasoningEffort: mockup ? mockup.scheduler_reasoning_effort : store.getSchedulerReasoningEffort(), mockup: mockupEnabled });
+        return sendJson(response, 200, { projects: projectSummaries(mockup ? mockup.projects : store.listProjects()), agents: mockup ? mockup.agents : visibleAgentProfiles(), statuses: issueStatuses, priorities: issuePriorities, appearance: readCodexAppearance(), locale: readCodexLocale(), user: readCodexUserProfile(), agentModelCatalog, agentModels, agentReasoningEfforts, autoDispatch: mockup ? mockup.auto_dispatch : store.getAutoDispatch(), schedulerModel: mockup ? mockup.scheduler_model : store.getSchedulerModel(defaultAgentProfile().model), schedulerReasoningEffort: mockup ? mockup.scheduler_reasoning_effort : store.getSchedulerReasoningEffort(), mockup: mockupEnabled, featureManifest: featureManifest() });
       }
       if (url.pathname === "/api/account/usage" && method === "GET") {
         return sendJson(response, 200, { usage: await readCodexUsage() });
@@ -1689,19 +1705,19 @@ export function startServer() {
             const current = store.getIssue(issue.id);
             if (!current) throw new Error("issue_not_found");
             if (current.active_run_status) throw new Error("issue_execution_running");
-            await worker.applyThreadAction(issue.id, "archive");
             const updated = store.archiveIssue(issue.id, current.version);
+            worker.wake();
             return sendJson(response, 200, updated);
           }
-          await worker.applyThreadAction(issue.id, "archive");
           const updated = store.archiveIssue(issue.id, version);
+          worker.wake();
           return sendJson(response, 200, updated);
         }
         if (method === "POST" && path[3] === "unarchive") {
           const body = await readBody(request);
           if (issue.version !== Number(body.version)) throw new Error("version_conflict");
-          await worker.applyThreadAction(issue.id, "unarchive");
           const updated = store.unarchiveIssue(issue.id, Number(body.version));
+          worker.wake();
           return sendJson(response, 200, updated);
         }
         if (method === "DELETE" && path.length === 3) {
@@ -1711,8 +1727,8 @@ export function startServer() {
           if (issue.version !== version) throw new Error("version_conflict");
           if (issue.enrichment_status === "pending") throw new Error("issue_enrichment_pending");
           if (issue.active_run_status || issue.session_active_turn_id || store.getIssueReplyState(issue.id).status === "running") throw new Error("issue_execution_running");
-          await worker.applyThreadAction(issue.id, "delete");
           store.deleteArchivedIssue(issue.id, version);
+          worker.wake();
           return sendJson(response, 200, { ok: true });
         }
         if (method === "GET" && path[3] === "conversation" && path.length === 4) {

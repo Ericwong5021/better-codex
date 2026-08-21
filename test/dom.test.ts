@@ -46,7 +46,9 @@ test("board bridge retries timed out GET requests without repeating writes", () 
   assert.match(source, /runtime_bridge_timeout/);
   assert.match(source, /const method = String\(options\.method \|\| "GET"\)\.toUpperCase\(\)/);
   assert.match(source, /return attempt\(method === "GET" \? 1 : 0\)/);
-  assert.match(source, /retriesLeft > 0 && error instanceof Error && error\.message === "runtime_bridge_timeout"/);
+  assert.match(source, /\["runtime_bridge_timeout", "runtime_response_invalid"\]\.includes\(error\.message\)/);
+  assert.ok(source.includes('requestList(issuePath, "issues")'));
+  assert.ok(source.includes('requestList("/api/agents", "agents")'));
   assert.match(source, /timeoutMs: files\.length \? 120_000 : undefined/);
   assert.match(source, /const transferTimeoutMs = files\.length \? 120_000 : undefined/);
   assert.match(source, /"relay_stream"/);
@@ -90,7 +92,7 @@ test("returning from a native settings route resumes the remembered Better Codex
   const refresh = source.slice(source.indexOf("function refresh()"), source.indexOf("function scheduleRefresh()"));
 
   assert.ok(refresh.includes("const resumeSurface = sessionStorage.getItem(RESUME_SURFACE_KEY)"));
-  assert.ok(refresh.includes('if (!active && betterCodexRoute && !routeSuppressed && ["issues", "agents", "projects"].includes(resumeSurface)) return open(resumeSurface)'));
+  assert.ok(refresh.includes("if (!active && betterCodexRoute && !routeSuppressed && availableSurfaces.includes(resumeSurface)) return open(resumeSurface)"));
 });
 
 test("collapsing the native sidebar keeps Better Codex mounted on its MCP route", () => {
@@ -461,7 +463,7 @@ test("agent assignment options expose compact model and reasoning tags", () => {
 test("agent issue creation reuses loaded profile names and avatars", () => {
   const source = injectionScript(4317, "test-token", "install");
 
-  assert.ok(source.includes('state.agents = bootstrap.agents || []'));
+  assert.ok(source.includes('state.agents = listResponse(bootstrap.agents, "/api/bootstrap", "agents")'));
   assert.ok(source.includes('function openEditor(issue = null, initialStatus = "todo", createMode = "agent")'));
   assert.ok(source.includes('agentAvatarMarkup(agent, "better-codex-agent-avatar")'));
   assert.ok(source.includes('agentAvatarMarkup(selectedAgent, "better-codex-agent-avatar")'));

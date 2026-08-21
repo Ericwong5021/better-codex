@@ -4,11 +4,12 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { isIP } from "node:net";
 import { resolve } from "node:path";
 import { betterCodexWebIconPng } from "./brand-assets.js";
+import { createWebCommand, webCommandTarget } from "./command-contract.js";
 import { coreVersion } from "./compatibility.js";
 import { deviceAuthorizationPage } from "./device-authorization-page.js";
 import { clearRelaySessionCookie, parseCookies, passwordHash, passwordMatches, readHubSecret, relaySessionCookie, validateWebPassword, validateWebUsername } from "./relay-auth.js";
 import { decodeRelayMessage, encodeRelayMessage, relayCapabilities, relayInitialWindowBytes, relayMaxChunkBytes, relayProtocolVersion, relayWebSocketProtocol, type RelayHello, type RelayMessage } from "./relay-protocol.js";
-import { RelayStore } from "./relay-store.js";
+import { RelayStore, type RelayCommand } from "./relay-store.js";
 import { betterCodexWebManifest, betterCodexWebServiceWorker } from "./web-app.js";
 import { betterCodexWebHostCss, betterCodexWebHostHtml, betterCodexWebHostJavaScript } from "./web-host.js";
 import { upgradeWebSocket, type WebSocketConnection } from "./websocket-server.js";
@@ -52,7 +53,20 @@ type ActiveRuntime = {
   lastHeartbeatAt: string;
   activeChannels: number;
   channels: Map<string, RelayChannel>;
+  commandChannels: Map<string, RelayCommandChannel>;
   socket: WebSocketConnection;
+};
+
+type RelayCommandChannel = {
+  id: string;
+  commandId: string;
+  deliveryId: string;
+  responseStatus: number | null;
+  responseHeaders: Record<string, string>;
+  responseSequence: number;
+  responseChunks: Buffer[];
+  responseBytes: number;
+  timeout: NodeJS.Timeout;
 };
 
 type RelayChannel = {
@@ -161,6 +175,31 @@ function readBody(request: IncomingMessage, limit = 1024 * 1024) {
   });
 }
 
+function readRawBody(request: IncomingMessage, limit: number) {
+  return new Promise<Buffer>((resolveBody, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    let failed = false;
+    request.on("data", chunk => {
+      if (failed) return;
+      const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      size += value.length;
+      if (size > limit) {
+        failed = true;
+        chunks.length = 0;
+        request.resume();
+        reject(new Error("body_too_large"));
+        return;
+      }
+      chunks.push(value);
+    });
+    request.on("end", () => {
+      if (!failed) resolveBody(Buffer.concat(chunks, size));
+    });
+    request.on("error", reject);
+  });
+}
+
 function trustedOrigin(request: IncomingMessage, required = false) {
   const origin = request.headers.origin;
   if (!origin) return !required;
@@ -259,6 +298,10 @@ export function createRelayServer(options: RelayServerOptions) {
   const loginAttempts = new Map<string, { count: number; resetAt: number }>();
   let runtime: ActiveRuntime | null = null;
   const retryableChannels = new Map<string, RelayChannel>();
+  const commandWaiters = new Map<string, Set<{ response: ServerResponse; timeout: NodeJS.Timeout }>>();
+  const syncActiveChannels = (active: ActiveRuntime) => {
+    active.activeChannels = active.channels.size + active.commandChannels.size;
+  };
   const finishChannel = (active: ActiveRuntime | null, channel: RelayChannel) => {
     if (channel.completed) return;
     channel.completed = true;
@@ -267,11 +310,11 @@ export function createRelayServer(options: RelayServerOptions) {
     channel.retryTimeout = null;
     if (active?.channels.get(channel.id) === channel) {
       active.channels.delete(channel.id);
-      active.activeChannels = active.channels.size;
+      syncActiveChannels(active);
     }
     if (runtime?.channels.get(channel.id) === channel) {
       runtime.channels.delete(channel.id);
-      runtime.activeChannels = runtime.channels.size;
+      syncActiveChannels(runtime);
     }
     retryableChannels.delete(channel.id);
   };
@@ -339,7 +382,7 @@ export function createRelayServer(options: RelayServerOptions) {
     }
     if (active?.channels.get(channel.id) === channel) {
       active.channels.delete(channel.id);
-      active.activeChannels = active.channels.size;
+      syncActiveChannels(active);
     }
     retryableChannels.set(channel.id, channel);
     if (channel.retryTimeout) clearTimeout(channel.retryTimeout);
@@ -366,7 +409,7 @@ export function createRelayServer(options: RelayServerOptions) {
     channel.requestQueue = [...channel.requestChunks];
     channel.requestEndSent = false;
     active.channels.set(channel.id, channel);
-    active.activeChannels = active.channels.size;
+    syncActiveChannels(active);
     try {
       sendRequestOpen(active, channel);
       flushRequest(active, channel);
@@ -374,15 +417,145 @@ export function createRelayServer(options: RelayServerOptions) {
       queueChannel(active, channel, "runtime_socket_closed");
     }
   };
-  const forwardRequest = (request: IncomingMessage, response: ServerResponse, url: URL, method: string, sessionId: string) => {
+  const sendCommandResult = (response: ServerResponse, command: RelayCommand) => {
+    if (response.headersSent || response.destroyed) return;
+    const status = command.response_status || (command.status === "expired" ? 504 : 202);
+    if (command.response_body && command.response_status) {
+      response.writeHead(status, { ...securityHeaders(), ...forwardedResponseHeaders(command.response_headers), "content-length": command.response_body.length });
+      response.end(command.response_body);
+      return;
+    }
+    sendJson(response, status, { command_id: command.command_id, status: command.status, error: command.last_error });
+  };
+  const queuedCommandResponse = (response: ServerResponse, command: RelayCommand) => {
+    if (!response.headersSent && !response.destroyed) sendJson(response, 202, { command_id: command.command_id, status: command.status, queued: true }, { "x-better-codex-command-status": command.status });
+  };
+  const sendCommandStatus = (response: ServerResponse, command: RelayCommand) => {
+    let payload: unknown = null;
+    if (command.response_body) {
+      try { payload = JSON.parse(command.response_body.toString("utf8")); } catch {}
+    }
+    sendJson(response, 200, { command_id: command.command_id, status: command.status, response_status: command.response_status, error: command.last_error || (payload && typeof payload === "object" && "error" in payload ? String((payload as { error: unknown }).error) : null), payload });
+  };
+  const resolveCommandWaiters = (command: RelayCommand) => {
+    const waiters = commandWaiters.get(command.command_id);
+    if (!waiters) return;
+    commandWaiters.delete(command.command_id);
+    for (const waiter of waiters) {
+      clearTimeout(waiter.timeout);
+      sendCommandResult(waiter.response, command);
+    }
+  };
+  const waitForCommand = (response: ServerResponse, command: RelayCommand) => {
+    const timeout = setTimeout(() => {
+      const waiters = commandWaiters.get(command.command_id);
+      if (waiters) {
+        for (const waiter of waiters) if (waiter.response === response) waiters.delete(waiter);
+        if (!waiters.size) commandWaiters.delete(command.command_id);
+      }
+      const current = store.relayCommand(command.command_id) || command;
+      if (["applied", "rejected", "conflict", "expired"].includes(current.status)) sendCommandResult(response, current);
+      else queuedCommandResponse(response, current);
+    }, 15_000);
+    timeout.unref();
+    const waiter = { response, timeout };
+    const waiters = commandWaiters.get(command.command_id) || new Set<{ response: ServerResponse; timeout: NodeJS.Timeout }>();
+    waiters.add(waiter);
+    commandWaiters.set(command.command_id, waiters);
+    response.once("close", () => {
+      clearTimeout(timeout);
+      waiters.delete(waiter);
+      if (!waiters.size) commandWaiters.delete(command.command_id);
+    });
+  };
+  let pumpCommands = (active: ActiveRuntime) => {};
+  const retryCommandChannel = (active: ActiveRuntime, channel: RelayCommandChannel, error: string) => {
+    clearTimeout(channel.timeout);
+    active.commandChannels.delete(channel.id);
+    syncActiveChannels(active);
+    store.retryCommand(channel.commandId, channel.deliveryId, error);
+  };
+  const finishCommandChannel = (active: ActiveRuntime, channel: RelayCommandChannel) => {
+    clearTimeout(channel.timeout);
+    active.commandChannels.delete(channel.id);
+    syncActiveChannels(active);
+    const status = channel.responseStatus || 502;
+    const body = Buffer.concat(channel.responseChunks, channel.responseBytes);
+    let responseError = "";
+    try { responseError = String(JSON.parse(body.toString("utf8"))?.error || ""); } catch {}
+    if (status === 408 || status === 425 || status === 429 || status >= 500 || responseError === "request_outcome_unknown") {
+      store.retryCommand(channel.commandId, channel.deliveryId, `runtime_http_${status}`);
+      return;
+    }
+    store.completeCommand(channel.commandId, channel.deliveryId, status, channel.responseHeaders, body);
+    const command = store.relayCommand(channel.commandId);
+    if (command) resolveCommandWaiters(command);
+  };
+  const dispatchCommand = (active: ActiveRuntime, command: RelayCommand) => {
+    if (!command.delivery_id) return;
+    const channelId = randomUUID();
+    const channel = {
+      id: channelId,
+      commandId: command.command_id,
+      deliveryId: command.delivery_id,
+      responseStatus: null,
+      responseHeaders: {},
+      responseSequence: 0,
+      responseChunks: [],
+      responseBytes: 0,
+      timeout: setTimeout(() => {}, 0),
+    } satisfies RelayCommandChannel;
+    clearTimeout(channel.timeout);
+    channel.timeout = setTimeout(() => {
+      if (!active.commandChannels.has(channel.id)) return;
+      try { active.socket.send(encodeRelayMessage({ type: "request_cancel", protocol_version: relayProtocolVersion, device_id: active.deviceId, runtime_instance_id: active.runtimeInstanceId, connection_epoch: active.connectionEpoch, channel_id: channel.id, reason: "relay_command_timeout" })); } catch {}
+      retryCommandChannel(active, channel, "relay_command_timeout");
+    }, 120_000);
+    channel.timeout.unref();
+    active.commandChannels.set(channel.id, channel);
+    syncActiveChannels(active);
+    try {
+      active.socket.send(encodeRelayMessage({ type: "request_open", protocol_version: relayProtocolVersion, device_id: active.deviceId, runtime_instance_id: active.runtimeInstanceId, connection_epoch: active.connectionEpoch, channel_id: channel.id, request_id: command.command_id, method: command.method, path: command.path, headers: command.headers }));
+      let sequence = 0;
+      for (let offset = 0; offset < command.body.length; offset += relayMaxChunkBytes) {
+        const chunk = command.body.subarray(offset, Math.min(command.body.length, offset + relayMaxChunkBytes));
+        active.socket.send(encodeRelayMessage({ type: "request_chunk", protocol_version: relayProtocolVersion, device_id: active.deviceId, runtime_instance_id: active.runtimeInstanceId, connection_epoch: active.connectionEpoch, channel_id: channel.id, sequence, data: chunk.toString("base64") }));
+        sequence += 1;
+      }
+      active.socket.send(encodeRelayMessage({ type: "request_end", protocol_version: relayProtocolVersion, device_id: active.deviceId, runtime_instance_id: active.runtimeInstanceId, connection_epoch: active.connectionEpoch, channel_id: channel.id }));
+    } catch {
+      retryCommandChannel(active, channel, "runtime_socket_closed");
+    }
+  };
+  pumpCommands = (active: ActiveRuntime) => {
+    if (runtime !== active) return;
+    const capacity = Math.max(0, maxConcurrentChannels - active.activeChannels);
+    if (!capacity) return;
+    for (const command of store.claimCommands(active.deviceId, Math.min(capacity, 8))) dispatchCommand(active, command);
+  };
+  const forwardCommand = async (request: IncomingMessage, response: ServerResponse, url: URL, method: string, sessionId: string) => {
+    const suppliedRequestId = String(request.headers["x-better-codex-request-id"] || request.headers["x-better-codex-command-id"] || "");
+    if (!/^[A-Za-z0-9_-]{8,200}$/.test(suppliedRequestId)) return forwardRequest(request, response, url, method, sessionId);
+    const body = await readRawBody(request, Math.min(maxRequestBytes, 512 * 1024));
+    const path = `${url.pathname}${url.search}`;
+    const command = createWebCommand(suppliedRequestId, method, path, body);
+    if (!command) return sendJson(response, 400, { error: "command_not_supported" });
+    const result = store.enqueueCommand(sessionId, command, forwardedRequestHeaders(request, command.command_id));
+    if (result.kind === "conflict") return sendJson(response, 409, { error: "request_id_conflict", command_id: command.command_id });
+    if (["applied", "rejected", "conflict", "expired"].includes(result.command.status)) return sendCommandResult(response, result.command);
+    if (!runtime) return queuedCommandResponse(response, result.command);
+    waitForCommand(response, result.command);
+    pumpCommands(runtime);
+  };
+  function forwardRequest(request: IncomingMessage, response: ServerResponse, url: URL, method: string, sessionId: string) {
     const active = runtime;
     if (["/api/shutdown"].includes(url.pathname) || url.pathname.startsWith("/api/session-relay/") || url.pathname.startsWith("/api/mockup/") || url.pathname.startsWith("/api/sync/") || url.pathname.startsWith("/api/relay/")) return sendJson(response, 404, { error: "not_found" });
     const channelId = randomUUID();
     const suppliedRequestId = String(request.headers["x-better-codex-request-id"] || "");
     const requestId = /^[A-Za-z0-9_-]{8,200}$/.test(suppliedRequestId) ? suppliedRequestId : randomUUID();
-    const recoverable = !["GET", "HEAD", "OPTIONS"].includes(method) && /^[A-Za-z0-9_-]{8,200}$/.test(suppliedRequestId);
+    const recoverable = false;
     if (!active && !recoverable) return sendJson(response, 503, { error: "runtime_offline" });
-    if ((active?.channels.size || 0) + retryableChannels.size >= maxConcurrentChannels) return sendJson(response, 429, { error: "relay_channel_limit" });
+    if ((active?.activeChannels || 0) + retryableChannels.size >= maxConcurrentChannels) return sendJson(response, 429, { error: "relay_channel_limit" });
     const timeout = setTimeout(() => {
       const channel = runtime?.channels.get(channelId) || retryableChannels.get(channelId);
       if (!channel || channel.completed) return;
@@ -457,7 +630,7 @@ export function createRelayServer(options: RelayServerOptions) {
       channel.connectionEpoch = current.connectionEpoch;
       channel.runtimeInstanceId = current.runtimeInstanceId;
       current.channels.set(channelId, channel);
-      current.activeChannels = current.channels.size;
+      syncActiveChannels(current);
       try {
         sendRequestOpen(current, channel);
       } catch {
@@ -466,7 +639,7 @@ export function createRelayServer(options: RelayServerOptions) {
     } else {
       queueChannel(null, channel, "runtime_offline");
     }
-  };
+  }
   const server = createServer((request, response) => {
     void (async () => {
       if (!request.url) return sendJson(response, 400, { error: "invalid_request" });
@@ -478,7 +651,7 @@ export function createRelayServer(options: RelayServerOptions) {
         return response.end();
       }
       if (!trustedOrigin(request)) return sendJson(response, 403, { error: "forbidden" });
-      if (url.pathname === "/healthz" && method === "GET") return sendJson(response, 200, { ok: true, name: "Better Codex Relay", version: coreVersion, protocol_version: relayProtocolVersion, runtime: publicRuntime(runtime) });
+      if (url.pathname === "/healthz" && method === "GET") return sendJson(response, 200, { ok: true, name: "Better Codex Relay", version: coreVersion, protocol_version: relayProtocolVersion, runtime: publicRuntime(runtime), pending_commands: store.pendingCommandCount() });
       if ((["/", "/web", "/web/projects"].includes(url.pathname) || url.pathname.startsWith("/web/projects/")) && method === "GET") return sendText(response, 200, betterCodexWebHostHtml("relay"), "text/html; charset=utf-8", { "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'" });
       if (url.pathname === "/web/host.css" && method === "GET") return sendText(response, 200, betterCodexWebHostCss(), "text/css; charset=utf-8");
       if (url.pathname === "/web/host.js" && method === "GET") return sendText(response, 200, betterCodexWebHostJavaScript("relay"), "text/javascript; charset=utf-8");
@@ -508,7 +681,7 @@ export function createRelayServer(options: RelayServerOptions) {
         loginAttempts.delete(client);
         const session = store.createWebSession({ remembered: body.remember === true, deviceName: body.device_name, userAgent: request.headers["user-agent"], clientIp: client });
         store.audit(client, "web_login_succeeded");
-        const cookieLifetime = session.remembered ? Math.max(1, Math.ceil((Date.parse(session.expires_at) - Date.now()) / 1000)) : undefined;
+        const cookieLifetime = session.remembered ? "persistent" : undefined;
         return sendJson(response, 200, { csrf_token: session.csrf_token, expires_at: session.expires_at }, { "set-cookie": relaySessionCookie(session.token, secureCookies, cookieLifetime) });
       }
 
@@ -528,7 +701,7 @@ export function createRelayServer(options: RelayServerOptions) {
 
       const sessionToken = parseCookies(request.headers.cookie).get("better_codex_relay_session") || "";
       const session = store.webSession(sessionToken);
-      if (session) response.setHeader("set-cookie", relaySessionCookie(sessionToken, secureCookies, session.remembered ? Math.max(1, Math.ceil((Date.parse(session.expires_at) - Date.now()) / 1000)) : undefined));
+      if (session) response.setHeader("set-cookie", relaySessionCookie(sessionToken, secureCookies, session.remembered ? "persistent" : undefined));
       const csrfValid = Boolean(session && typeof request.headers["x-csrf-token"] === "string" && secretEqual(request.headers["x-csrf-token"], session.csrf_token));
       const admin = secretEqual(bearer(request), options.adminToken);
       if (url.pathname === "/relay/session" && method === "GET") {
@@ -543,7 +716,7 @@ export function createRelayServer(options: RelayServerOptions) {
       }
       if (url.pathname === "/relay/status" && method === "GET") {
         if (!session) return sendJson(response, 401, { error: "unauthorized" });
-        return sendJson(response, 200, { ok: true, name: "Better Codex Relay", version: coreVersion, protocol_version: relayProtocolVersion, runtime: publicRuntime(runtime) });
+        return sendJson(response, 200, { ok: true, name: "Better Codex Relay", version: coreVersion, protocol_version: relayProtocolVersion, runtime: publicRuntime(runtime), pending_commands: store.pendingCommandCount() });
       }
       if (url.pathname === "/relay/device" && method === "GET") {
         if (!session) return sendJson(response, 401, { error: "unauthorized" });
@@ -628,9 +801,18 @@ export function createRelayServer(options: RelayServerOptions) {
         if (!session) return sendJson(response, 401, { error: "unauthorized" });
         return forwardRequest(request, response, url, method, session.id);
       }
+      const commandStatusMatch = url.pathname.match(/^\/api\/commands\/([A-Za-z0-9_-]{8,200})$/);
+      if (commandStatusMatch && method === "GET") {
+        if (!session) return sendJson(response, 401, { error: "unauthorized" });
+        const command = store.relayCommand(commandStatusMatch[1]);
+        if (!command || command.session_id !== session.id) return sendJson(response, 404, { error: "command_not_found" });
+        if (["applied", "rejected", "conflict", "expired"].includes(command.status)) return sendCommandStatus(response, command);
+        return sendJson(response, 202, { command_id: command.command_id, status: command.status, attempt_count: command.attempt_count, queued: true });
+      }
       if (url.pathname.startsWith("/api/")) {
         if (!session) return sendJson(response, 401, { error: "unauthorized" });
         if (!["GET", "HEAD"].includes(method) && (!trustedOrigin(request, true) || !csrfValid)) return sendJson(response, 403, { error: "csrf_invalid" });
+        if (webCommandTarget(method, `${url.pathname}${url.search}`)) return forwardCommand(request, response, url, method, session.id);
         return forwardRequest(request, response, url, method, session.id);
       }
       return sendJson(response, 404, { error: "not_found" });
@@ -671,15 +853,17 @@ export function createRelayServer(options: RelayServerOptions) {
               const epoch = store.nextConnectionEpoch(device.id);
               const previous = runtime;
               const timestamp = new Date().toISOString();
-              active = { deviceId: device.id, deviceName: device.name, runtimeInstanceId: message.runtime_instance_id, connectionEpoch: epoch, protocolVersion: message.protocol_version, coreVersion: message.core_version, capabilities: message.capabilities, connectedAt: timestamp, lastHeartbeatAt: timestamp, activeChannels: 0, channels: new Map(), socket: connection! };
+              active = { deviceId: device.id, deviceName: device.name, runtimeInstanceId: message.runtime_instance_id, connectionEpoch: epoch, protocolVersion: message.protocol_version, coreVersion: message.core_version, capabilities: message.capabilities, connectedAt: timestamp, lastHeartbeatAt: timestamp, activeChannels: 0, channels: new Map(), commandChannels: new Map(), socket: connection! };
               runtime = active;
               if (previous) {
                 store.audit(device.id, "runtime_connection_replaced", previous.runtimeInstanceId === active.runtimeInstanceId ? "same_instance" : "different_instance");
                 for (const channel of [...previous.channels.values()]) queueChannel(previous, channel, "relay_connection_replaced");
+                for (const channel of [...previous.commandChannels.values()]) retryCommandChannel(previous, channel, "relay_connection_replaced");
               }
               previous?.socket.close(4001);
               connection?.send(encodeRelayMessage({ type: "hello_ack", protocol_version: relayProtocolVersion, device_id: device.id, runtime_instance_id: message.runtime_instance_id, connection_epoch: epoch, heartbeat_interval_ms: heartbeatIntervalMs, max_concurrent_channels: maxConcurrentChannels, max_chunk_bytes: relayMaxChunkBytes }));
               for (const channel of [...retryableChannels.values()]) if (!channel.deviceId || channel.deviceId === active.deviceId) replayChannel(active, channel);
+              pumpCommands(active);
               store.audit(device.id, "runtime_connected", relayProtocolVersion);
               return;
             }
@@ -691,7 +875,13 @@ export function createRelayServer(options: RelayServerOptions) {
             }
             if (message.type === "response_open") {
               const channel = active.channels.get(message.channel_id);
-              if (!channel) return;
+              if (!channel) {
+                const commandChannel = active.commandChannels.get(message.channel_id);
+                if (!commandChannel || commandChannel.responseStatus !== null) return;
+                commandChannel.responseStatus = message.status;
+                commandChannel.responseHeaders = forwardedResponseHeaders(message.headers);
+                return;
+              }
               if (channel.responseStarted) throw new Error("relay_channel_invalid");
               channel.responseStarted = true;
               if (channel.retryTimeout) clearTimeout(channel.retryTimeout);
@@ -707,7 +897,20 @@ export function createRelayServer(options: RelayServerOptions) {
             }
             if (message.type === "response_chunk") {
               const channel = active.channels.get(message.channel_id);
-              if (!channel) return;
+              if (!channel) {
+                const commandChannel = active.commandChannels.get(message.channel_id);
+                if (!commandChannel || commandChannel.responseStatus === null || message.sequence !== commandChannel.responseSequence) throw new Error("relay_chunk_sequence_invalid");
+                const bytes = Buffer.from(message.data, "base64");
+                commandChannel.responseSequence += 1;
+                commandChannel.responseBytes += bytes.length;
+                if (commandChannel.responseBytes > 4 * 1024 * 1024) {
+                  retryCommandChannel(active, commandChannel, "relay_command_response_too_large");
+                  return;
+                }
+                commandChannel.responseChunks.push(bytes);
+                connection?.send(encodeRelayMessage({ type: "window_update", protocol_version: relayProtocolVersion, device_id: active.deviceId, runtime_instance_id: active.runtimeInstanceId, connection_epoch: active.connectionEpoch, channel_id: commandChannel.id, direction: "response", bytes: bytes.length }));
+                return;
+              }
               if (!channel.responseStarted || message.sequence !== channel.responseSequence) throw new Error("relay_chunk_sequence_invalid");
               channel.responseSequence += 1;
               const bytes = Buffer.from(message.data, "base64");
@@ -717,7 +920,13 @@ export function createRelayServer(options: RelayServerOptions) {
             }
             if (message.type === "response_end") {
               const channel = active.channels.get(message.channel_id);
-              if (!channel) return;
+              if (!channel) {
+                const commandChannel = active.commandChannels.get(message.channel_id);
+                if (!commandChannel || commandChannel.responseStatus === null) return;
+                finishCommandChannel(active, commandChannel);
+                pumpCommands(active);
+                return;
+              }
               if (!channel.responseStarted) throw new Error("relay_channel_invalid");
               channel.response.end();
               finishChannel(active, channel);
@@ -725,7 +934,13 @@ export function createRelayServer(options: RelayServerOptions) {
             }
             if (message.type === "response_error") {
               const channel = active.channels.get(message.channel_id);
-              if (!channel) return;
+              if (!channel) {
+                const commandChannel = active.commandChannels.get(message.channel_id);
+                if (!commandChannel) return;
+                retryCommandChannel(active, commandChannel, message.error);
+                pumpCommands(active);
+                return;
+              }
               failChannel(active, channel, message.error);
               return;
             }
@@ -751,7 +966,8 @@ export function createRelayServer(options: RelayServerOptions) {
             for (const channel of [...interrupted.channels.values()]) {
               queueChannel(interrupted, channel, socketError ? "runtime_socket_error:" + socketError : "runtime_socket_closed");
             }
-            interrupted.activeChannels = interrupted.channels.size;
+            for (const channel of [...interrupted.commandChannels.values()]) retryCommandChannel(interrupted, channel, socketError ? "runtime_socket_error:" + socketError : "runtime_socket_closed");
+            syncActiveChannels(interrupted);
           }
           if (active) store.audit(device.id, "runtime_disconnected", socketError ? "runtime_socket_error:" + socketError : "runtime_socket_closed");
           active = null;
@@ -768,10 +984,13 @@ export function createRelayServer(options: RelayServerOptions) {
   });
 
   const heartbeatSweep = setInterval(() => {
-    if (!runtime) return;
-    if (Date.now() - Date.parse(runtime.lastHeartbeatAt) > heartbeatIntervalMs * 3) {
-      store.audit(runtime.deviceId, "runtime_heartbeat_timeout");
-      runtime.socket.close(4004);
+    if (runtime) {
+      if (Date.now() - Date.parse(runtime.lastHeartbeatAt) > heartbeatIntervalMs * 3) {
+        store.audit(runtime.deviceId, "runtime_heartbeat_timeout");
+        runtime.socket.close(4004);
+      } else {
+        pumpCommands(runtime);
+      }
     }
     for (const [id, authorization] of authorizations) if (Date.parse(authorization.expires_at) <= Date.now() || authorization.status === "consumed") authorizations.delete(id);
   }, Math.min(5000, heartbeatIntervalMs));
@@ -786,6 +1005,14 @@ export function createRelayServer(options: RelayServerOptions) {
       channel.response.end();
     }
     retryableChannels.clear();
+    for (const [commandId, waiters] of commandWaiters) {
+      for (const waiter of waiters) {
+        clearTimeout(waiter.timeout);
+        if (!waiter.response.headersSent && !waiter.response.destroyed) sendJson(waiter.response, 202, { command_id: commandId, status: "pending", queued: true });
+      }
+    }
+    commandWaiters.clear();
+    if (runtime) for (const channel of runtime.commandChannels.values()) clearTimeout(channel.timeout);
     runtime?.socket.close(1001);
     runtime = null;
     server.close(error => {

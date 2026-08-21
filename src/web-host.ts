@@ -212,7 +212,6 @@ body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; 
 .web-connect input { width: 100%; height: 39px; border: 0; border-radius: 10px; padding: 0 11px; color: var(--web-ink); background: var(--web-hover); }
 .web-connect label.web-remember { display: flex; min-height: 40px; align-items: center; gap: 9px; margin-top: 4px; color: var(--web-ink); font-size: 12px; font-weight: 560; cursor: pointer; }
 .web-connect label.web-remember input { width: 16px; height: 16px; flex: 0 0 16px; margin: 0; padding: 0; accent-color: var(--web-ink); }
-.web-connect label.web-remember small { margin-left: auto; color: var(--web-muted); font-size: 10px; font-weight: 500; }
 .web-connect output { display: block; margin-top: 9px; color: #d34e4e; font-size: 11px; }
 .web-connect button { width: 100%; min-height: 38px; margin-top: 16px; border: 0; border-radius: 10px; color: var(--web-canvas); background: var(--web-ink); cursor: pointer; }
 .web-error-report { width: min(820px, calc(100vw - 48px)); height: min(82dvh, 760px); max-height: calc(100dvh - 48px); overflow: hidden; border: 0; border-radius: 20px; padding: 0; color: var(--web-ink); background: var(--web-raised); box-shadow: 0 20px 60px rgb(0 0 0 / .2), 0 3px 12px rgb(0 0 0 / .08); overscroll-behavior: contain; }
@@ -636,6 +635,132 @@ async function relayRuntimeOnline() {
   return status?.runtime?.online === true;
 }
 
+const commandQueueEnabled = HOST_KIND === "relay" || HOST_KIND === "local";
+let commandQueueDatabase;
+let commandQueueDrainTimer;
+
+function queueableCommand(method, path, bodyBytes) {
+  if (!commandQueueEnabled || bodyBytes > 512 * 1024) return false;
+  const pathname = new URL(path, location.origin).pathname;
+  if (method === "POST" && /^\/api\/issues$/.test(pathname)) return true;
+  if (method === "POST" && /^\/api\/issues\/from-thread$/.test(pathname)) return true;
+  if (["PATCH", "DELETE"].includes(method) && /^\/api\/issues\/[^/]+$/.test(pathname)) return true;
+  if (method === "POST" && /^\/api\/issues\/[^/]+\/(start|stop|move|archive|unarchive|reply|session-handoff)$/.test(pathname)) return true;
+  if (method === "POST" && (/^\/api\/projects$/.test(pathname) || /^\/api\/projects\/ensure$/.test(pathname) || /^\/api\/projects\/[^/]+\/overview$/.test(pathname))) return true;
+  if (method === "POST" && /^\/api\/agents$/.test(pathname)) return true;
+  if (["PATCH", "DELETE"].includes(method) && /^\/api\/agents\/[^/]+$/.test(pathname)) return true;
+  return method === "PATCH" && /^\/api\/settings\/(auto-dispatch|scheduler-model|scheduler-reasoning-effort)$/.test(pathname);
+}
+
+function openCommandQueue() {
+  if (!commandQueueEnabled || !globalThis.indexedDB) return Promise.resolve(null);
+  if (commandQueueDatabase) return commandQueueDatabase;
+  commandQueueDatabase = new Promise((resolve, reject) => {
+    const request = indexedDB.open("better-codex-command-queue", 1);
+    request.onupgradeneeded = () => {
+      const database = request.result;
+      if (!database.objectStoreNames.contains("commands")) database.createObjectStore("commands", { keyPath: "commandId" });
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error("command_queue_unavailable"));
+  }).catch(() => null);
+  return commandQueueDatabase;
+}
+
+async function writeQueuedCommand(command) {
+  const database = await openCommandQueue();
+  if (!database) return;
+  await new Promise((resolve, reject) => {
+    const transaction = database.transaction("commands", "readwrite");
+    transaction.objectStore("commands").put(command);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+    transaction.onabort = () => reject(transaction.error);
+  });
+}
+
+async function deleteQueuedCommand(commandId) {
+  const database = await openCommandQueue();
+  if (!database) return;
+  await new Promise((resolve, reject) => {
+    const transaction = database.transaction("commands", "readwrite");
+    transaction.objectStore("commands").delete(commandId);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+    transaction.onabort = () => reject(transaction.error);
+  });
+}
+
+async function queuedCommands() {
+  const database = await openCommandQueue();
+  if (!database) return [];
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction("commands", "readonly");
+    const request = transaction.objectStore("commands").getAll();
+    request.onsuccess = () => resolve(request.result || []);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function commandHeaders(command) {
+  const headers = REMOTE ? {} : { authorization: "Bearer " + sessionToken };
+  if (REMOTE) headers["x-csrf-token"] = csrfToken;
+  if (command.commandId) headers["x-better-codex-command-id"] = command.commandId;
+  if (RELAY && command.commandId) headers["x-better-codex-request-id"] = command.commandId;
+  if (command.body !== undefined) headers["content-type"] = "application/json";
+  return headers;
+}
+
+function commandAcceptedOrTerminal(status, error = "") {
+  return status === 202 || (status >= 200 && status < 500 && ![401, 408, 425, 429].includes(status) && error !== "request_outcome_unknown");
+}
+
+function scheduleCommandQueueDrain(delay = 1000) {
+  if (!commandQueueEnabled || commandQueueDrainTimer) return;
+  commandQueueDrainTimer = setTimeout(() => {
+    commandQueueDrainTimer = null;
+    void drainCommandQueue();
+  }, delay);
+}
+
+async function drainCommandQueue() {
+  if (!commandQueueEnabled) return;
+  if (!navigator.onLine || (REMOTE && !csrfToken) || (!REMOTE && !sessionToken)) {
+    scheduleCommandQueueDrain(5000);
+    return;
+  }
+  let commands;
+  try { commands = (await queuedCommands()).sort((left, right) => left.createdAt - right.createdAt); }
+  catch {
+    scheduleCommandQueueDrain(5000);
+    return;
+  }
+  for (const command of commands) {
+    if (Number(command.nextAttemptAt) > Date.now()) continue;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    try {
+      const response = await fetch(command.path, { method: command.method, headers: commandHeaders(command), body: command.body, signal: controller.signal });
+      let responseError = "";
+      try { responseError = String((await response.clone().json())?.error || ""); } catch {}
+      if (commandAcceptedOrTerminal(response.status, responseError)) {
+        clearTimeout(timeout);
+        await deleteQueuedCommand(command.commandId);
+        continue;
+      }
+    } catch {}
+    const attempts = Number(command.attempts || 0) + 1;
+    const delays = [1000, 5000, 30000, 120000, 600000, 1800000];
+    await writeQueuedCommand({ ...command, attempts, nextAttemptAt: Date.now() + delays[Math.min(attempts - 1, delays.length - 1)] });
+    clearTimeout(timeout);
+    break;
+  }
+  scheduleCommandQueueDrain(5000);
+}
+
+window.addEventListener("online", () => scheduleCommandQueueDrain(0));
+scheduleCommandQueueDrain(0);
+
 async function requestRuntime(request) {
   if (typeof request.path !== "string" || !request.path.startsWith("/api/")) {
     throw new Error("invalid_bridge_request");
@@ -645,6 +770,8 @@ async function requestRuntime(request) {
   const startedAt = Date.now();
   const timeoutMs = Math.min(Math.max(Number(request.timeoutMs) || (RELAY && method !== "GET" ? 45_000 : 10_000), 1_000), 300_000);
   const requestBodyBytes = typeof request.body === "string" ? new TextEncoder().encode(request.body).byteLength : 0;
+  const queued = queueableCommand(method, request.path, requestBodyBytes);
+  if (queued) await writeQueuedCommand({ commandId: request.commandId, method, path: request.path, body: request.body, createdAt: Date.now(), attempts: 0, nextAttemptAt: Date.now() });
   const diagnostics = extra => ({
     source: "web_host_request",
     host_kind: HOST_KIND,
@@ -664,19 +791,21 @@ async function requestRuntime(request) {
     return error;
   };
   hostDiagnostic("request_start", { method, path: request.path, command_id: request.commandId || "", request_body_bytes: requestBodyBytes, timeout_ms: timeoutMs });
-  const headers = REMOTE ? {} : { authorization: "Bearer " + sessionToken };
-  if (REMOTE && method !== "GET") headers["x-csrf-token"] = csrfToken;
-  if (request.commandId) headers["x-better-codex-command-id"] = request.commandId;
-  if (RELAY && request.commandId) headers["x-better-codex-request-id"] = request.commandId;
-  if (request.body !== undefined) headers["content-type"] = "application/json";
+  const headers = commandHeaders(request);
+  if (REMOTE && method === "GET") delete headers["x-csrf-token"];
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(request.path, { method, headers, body: request.body, signal: controller.signal });
     let value;
+    let responseParseError = null;
     try { value = await response.json(); }
-    catch { value = { error: response.statusText || "request_failed" }; }
+    catch (error) {
+      responseParseError = error;
+      value = { error: response.statusText || "request_failed" };
+    }
     hostDiagnostic("request_response", { method, path: request.path, command_id: request.commandId || "", http_status: response.status, elapsed_ms: Date.now() - startedAt });
+    if (queued && commandAcceptedOrTerminal(response.status, String(value?.error || ""))) await deleteQueuedCommand(request.commandId);
     if (response.status === 401) setTimeout(expireSession, 0);
     if (RELAY && response.status === 503 && value.error === "runtime_offline") setTimeout(showRelayOffline, 0);
     if (!response.ok) throw requestError(value.error || response.statusText || "request_failed", {
@@ -690,10 +819,19 @@ async function requestRuntime(request) {
       relay_response_started: typeof value.response_started === "boolean" ? value.response_started : null,
       relay_connection_epoch: Number(value.connection_epoch) || 0,
       relay_runtime_instance_id: value.runtime_instance_id || "",
-    });
+    }, responseParseError || undefined);
+    if (responseParseError) throw requestError("runtime_response_invalid", {
+      http_status: response.status,
+      http_status_text: response.statusText,
+      response_content_type: response.headers.get("content-type") || "",
+    }, responseParseError);
     return value;
   } catch (error) {
     hostDiagnostic("request_failure", { method, path: request.path, command_id: request.commandId || "", elapsed_ms: Date.now() - startedAt, error: error?.message || "runtime_unavailable" });
+    if (queued && (error?.name === "AbortError" || !error?.betterCodexDiagnostics)) {
+      scheduleCommandQueueDrain(1000);
+      return { command_id: request.commandId, status: "pending", queued: true };
+    }
     if (error?.name === "AbortError") throw requestError("runtime_bridge_timeout", { failure_type: "timeout", host_logs: hostDiagnosticLog.slice(-20) }, error);
     if (!error?.betterCodexDiagnostics) throw requestError(error?.message || "runtime_unavailable", { failure_type: error?.name || "network_error", host_logs: hostDiagnosticLog.slice(-20) }, error);
     error.betterCodexDiagnostics.host_logs = hostDiagnosticLog.slice(-20);
@@ -908,7 +1046,7 @@ export function betterCodexWebHostHtml(host: boolean | BetterCodexWebHostKind = 
       .replace("访问令牌", "访问密码")
       .replace('<input id="web-token" type="password"', '<input id="web-token" name="password" type="password"')
       .replace('autocomplete="off"', 'autocomplete="current-password"')
-      .replace('<output id="web-connect-error"', '<label class="web-remember"><input id="web-remember" name="remember" type="checkbox" checked><span>记住此设备</span><small>最长 90 天</small></label><output id="web-connect-error"');
+      .replace('<output id="web-connect-error"', '<label class="web-remember"><input id="web-remember" name="remember" type="checkbox" checked><span>记住此设备</span></label><output id="web-connect-error"');
   }
   return kind === "remote-projection"
     ? webHostHtml

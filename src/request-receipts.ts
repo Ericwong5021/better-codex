@@ -13,6 +13,7 @@ type ReceiptRow = {
   response_status: number | null;
   response_headers_json: string | null;
   response_body: Uint8Array | null;
+  lease_expires_at: string | null;
 };
 
 export function requestFingerprint(method: string, path: string, body: Buffer) {
@@ -35,28 +36,48 @@ export class RequestReceiptStore {
         response_status INTEGER,
         response_headers_json TEXT,
         response_body BLOB,
+        attempt_count INTEGER NOT NULL DEFAULT 1,
+        lease_expires_at TEXT,
         created_at TEXT NOT NULL,
         finished_at TEXT
       )
     `);
+    const columns = new Set((this.db.prepare("PRAGMA table_info(request_receipts)").all() as Array<{ name: string }>).map(column => column.name));
+    if (!columns.has("attempt_count")) this.db.exec("ALTER TABLE request_receipts ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 1");
+    if (!columns.has("lease_expires_at")) this.db.exec("ALTER TABLE request_receipts ADD COLUMN lease_expires_at TEXT");
     this.db.prepare("DELETE FROM request_receipts WHERE finished_at IS NOT NULL AND finished_at < ?").run(new Date(Date.now() - 7 * 24 * 60 * 60_000).toISOString());
   }
 
   begin(requestId: string, method: string, path: string, fingerprint: string) {
-    const row = this.db.prepare("SELECT request_fingerprint, status, response_status, response_headers_json, response_body FROM request_receipts WHERE request_id = ?").get(requestId) as ReceiptRow | undefined;
+    const row = this.db.prepare("SELECT request_fingerprint, status, response_status, response_headers_json, response_body, lease_expires_at FROM request_receipts WHERE request_id = ?").get(requestId) as ReceiptRow | undefined;
     if (row) {
       if (row.request_fingerprint !== fingerprint) return { kind: "conflict" as const };
-      if (row.status !== "finished" || row.response_status === null || !row.response_headers_json || !row.response_body) return { kind: "unknown" as const };
+      if (row.status !== "finished") {
+        if (row.lease_expires_at && Date.parse(row.lease_expires_at) <= Date.now()) {
+          this.db.prepare("UPDATE request_receipts SET attempt_count = attempt_count + 1, lease_expires_at = ? WHERE request_id = ? AND status = 'processing'")
+            .run(new Date(Date.now() + 10 * 60_000).toISOString(), requestId);
+          return { kind: "new" as const };
+        }
+        return { kind: "unknown" as const };
+      }
+      if (row.response_status === null || !row.response_headers_json || !row.response_body) return { kind: "unknown" as const };
       const headers = JSON.parse(row.response_headers_json) as Record<string, string>;
       return { kind: "replay" as const, response: { status: row.response_status, headers, body: Buffer.from(row.response_body) } };
     }
-    this.db.prepare("INSERT INTO request_receipts (request_id, method, path, request_fingerprint, status, created_at) VALUES (?, ?, ?, ?, 'processing', ?)").run(requestId, method, path, fingerprint, new Date().toISOString());
+    this.db.prepare("INSERT INTO request_receipts (request_id, method, path, request_fingerprint, status, attempt_count, lease_expires_at, created_at) VALUES (?, ?, ?, ?, 'processing', 1, ?, ?)").run(requestId, method, path, fingerprint, new Date(Date.now() + 10 * 60_000).toISOString(), new Date().toISOString());
     return { kind: "new" as const };
   }
 
   finish(requestId: string, response: RequestReceiptResponse) {
-    this.db.prepare("UPDATE request_receipts SET status = 'finished', response_status = ?, response_headers_json = ?, response_body = ?, finished_at = ? WHERE request_id = ? AND status = 'processing'")
+    this.db.prepare("UPDATE request_receipts SET status = 'finished', response_status = ?, response_headers_json = ?, response_body = ?, lease_expires_at = NULL, finished_at = ? WHERE request_id = ? AND status = 'processing'")
       .run(response.status, JSON.stringify(response.headers), response.body, new Date().toISOString(), requestId);
+  }
+
+  status(requestId: string) {
+    const row = this.db.prepare("SELECT request_fingerprint, status, response_status, response_headers_json, response_body, lease_expires_at FROM request_receipts WHERE request_id = ?").get(requestId) as ReceiptRow | undefined;
+    if (!row) return { kind: "missing" as const };
+    if (row.status !== "finished" || row.response_status === null || !row.response_headers_json || !row.response_body) return { kind: "pending" as const };
+    return { kind: "replay" as const, response: { status: row.response_status, headers: JSON.parse(row.response_headers_json) as Record<string, string>, body: Buffer.from(row.response_body) } };
   }
 
   close() {

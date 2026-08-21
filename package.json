@@ -27,6 +27,7 @@
     "dist/config.js",
     "dist/db.js",
     "dist/dom.js",
+    "dist/features.js",
     "dist/injection-state.js",
     "dist/hub-auth.js",
     "dist/hub-cli.js",

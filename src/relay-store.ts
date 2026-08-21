@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, renameSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import type { WebCommandEnvelope } from "./command-contract.js";
 
 function now() {
   return new Date().toISOString();
@@ -17,8 +18,7 @@ function tokenHash(value: string) {
 
 const webSessionIdleLifetimeMilliseconds = 12 * 60 * 60 * 1000;
 const webSessionMaximumLifetimeMilliseconds = 30 * 24 * 60 * 60 * 1000;
-const rememberedWebSessionIdleLifetimeMilliseconds = 30 * 24 * 60 * 60 * 1000;
-const rememberedWebSessionMaximumLifetimeMilliseconds = 90 * 24 * 60 * 60 * 1000;
+const rememberedWebSessionExpiresAt = "9999-12-31T23:59:59.999Z";
 
 function settingKey(value: string) {
   if (!/^[a-z0-9:_-]{1,240}$/i.test(value)) throw new Error("invalid_relay_setting");
@@ -43,6 +43,48 @@ type DeviceRow = {
   created_at: string;
   revoked_at: string | null;
 };
+
+export type RelayCommand = {
+  command_id: string;
+  session_id: string;
+  device_id: string | null;
+  kind: string;
+  entity_id: string | null;
+  method: string;
+  path: string;
+  headers: Record<string, string>;
+  body: Buffer;
+  fingerprint: string;
+  status: "pending" | "dispatched" | "applied" | "rejected" | "conflict" | "expired";
+  delivery_id: string | null;
+  attempt_count: number;
+  available_at: string;
+  dispatch_expires_at: string | null;
+  expires_at: string;
+  response_status: number | null;
+  response_headers: Record<string, string>;
+  response_body: Buffer | null;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type RelayCommandRow = Omit<RelayCommand, "headers" | "body" | "response_headers" | "response_body"> & {
+  headers_json: string;
+  body_blob: Uint8Array;
+  response_headers_json: string | null;
+  response_body_blob: Uint8Array | null;
+};
+
+function relayCommandFromRow(row: RelayCommandRow): RelayCommand {
+  return {
+    ...row,
+    headers: JSON.parse(row.headers_json) as Record<string, string>,
+    body: Buffer.from(row.body_blob),
+    response_headers: row.response_headers_json ? JSON.parse(row.response_headers_json) as Record<string, string> : {},
+    response_body: row.response_body_blob ? Buffer.from(row.response_body_blob) : null,
+  };
+}
 
 export class RelayStore {
   private readonly database: DatabaseSync;
@@ -84,6 +126,32 @@ export class RelayStore {
         detail TEXT,
         created_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS relay_commands (
+        command_id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        device_id TEXT,
+        kind TEXT NOT NULL,
+        entity_id TEXT,
+        method TEXT NOT NULL,
+        path TEXT NOT NULL,
+        headers_json TEXT NOT NULL,
+        body_blob BLOB NOT NULL,
+        fingerprint TEXT NOT NULL,
+        status TEXT NOT NULL,
+        delivery_id TEXT,
+        attempt_count INTEGER NOT NULL DEFAULT 0,
+        available_at TEXT NOT NULL,
+        dispatch_expires_at TEXT,
+        expires_at TEXT NOT NULL,
+        response_status INTEGER,
+        response_headers_json TEXT,
+        response_body_blob BLOB,
+        last_error TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS relay_commands_delivery ON relay_commands(status, available_at, dispatch_expires_at, created_at);
+      CREATE INDEX IF NOT EXISTS relay_commands_session ON relay_commands(session_id, created_at);
     `);
     const webSessionColumns = new Set((this.database.prepare("PRAGMA table_info(relay_web_sessions)").all() as Array<{ name: string }>).map(column => column.name));
     if (!webSessionColumns.has("id")) this.database.exec("ALTER TABLE relay_web_sessions ADD COLUMN id TEXT");
@@ -94,6 +162,7 @@ export class RelayStore {
     const sessionsWithoutId = this.database.prepare("SELECT token_hash FROM relay_web_sessions WHERE id IS NULL OR id = ''").all() as Array<{ token_hash: string }>;
     const assignSessionId = this.database.prepare("UPDATE relay_web_sessions SET id = ? WHERE token_hash = ?");
     for (const session of sessionsWithoutId) assignSessionId.run(randomUUID(), session.token_hash);
+    this.database.prepare("UPDATE relay_web_sessions SET expires_at = ? WHERE remembered = 1").run(rememberedWebSessionExpiresAt);
     this.database.exec("CREATE UNIQUE INDEX IF NOT EXISTS relay_web_sessions_id ON relay_web_sessions(id)");
   }
 
@@ -142,7 +211,7 @@ export class RelayStore {
     const csrfToken = randomBytes(32).toString("base64url");
     const createdAt = now();
     const remembered = input.remembered === true;
-    const expiresAt = after(remembered ? rememberedWebSessionIdleLifetimeMilliseconds : webSessionIdleLifetimeMilliseconds);
+    const expiresAt = remembered ? rememberedWebSessionExpiresAt : after(webSessionIdleLifetimeMilliseconds);
     const deviceName = typeof input.deviceName === "string" ? input.deviceName.replace(/[\r\n\0]/g, " ").trim().slice(0, 120) || "浏览器设备" : "浏览器设备";
     const userAgent = typeof input.userAgent === "string" ? input.userAgent.replace(/[\r\n\0]/g, " ").trim().slice(0, 500) : "";
     const clientIp = typeof input.clientIp === "string" ? input.clientIp.replace(/[\r\n\0]/g, " ").trim().slice(0, 120) : "";
@@ -155,20 +224,18 @@ export class RelayStore {
     if (!token) return null;
     const row = this.database.prepare("SELECT id, csrf_token, created_at, expires_at, last_seen_at, remembered, device_name, user_agent, client_ip FROM relay_web_sessions WHERE token_hash = ?").get(tokenHash(token)) as SessionRow | undefined;
     if (!row) return null;
-    if (Date.parse(row.expires_at) <= Date.now()) {
+    if (row.remembered !== 1 && Date.parse(row.expires_at) <= Date.now()) {
       this.database.prepare("DELETE FROM relay_web_sessions WHERE token_hash = ?").run(tokenHash(token));
       return null;
     }
     const seenAtMilliseconds = Date.now();
     const seenAt = new Date(seenAtMilliseconds).toISOString();
-    const idleLifetime = row.remembered === 1 ? rememberedWebSessionIdleLifetimeMilliseconds : webSessionIdleLifetimeMilliseconds;
-    const maximumLifetime = row.remembered === 1 ? rememberedWebSessionMaximumLifetimeMilliseconds : webSessionMaximumLifetimeMilliseconds;
-    const expiresAtMilliseconds = Math.min(seenAtMilliseconds + idleLifetime, Date.parse(row.created_at) + maximumLifetime);
+    const expiresAtMilliseconds = row.remembered === 1 ? Date.parse(rememberedWebSessionExpiresAt) : Math.min(seenAtMilliseconds + webSessionIdleLifetimeMilliseconds, Date.parse(row.created_at) + webSessionMaximumLifetimeMilliseconds);
     if (expiresAtMilliseconds <= seenAtMilliseconds) {
       this.database.prepare("DELETE FROM relay_web_sessions WHERE token_hash = ?").run(tokenHash(token));
       return null;
     }
-    const expiresAt = new Date(expiresAtMilliseconds).toISOString();
+    const expiresAt = row.remembered === 1 ? rememberedWebSessionExpiresAt : new Date(expiresAtMilliseconds).toISOString();
     this.database.prepare("UPDATE relay_web_sessions SET expires_at = ?, last_seen_at = ? WHERE token_hash = ?").run(expiresAt, seenAt, tokenHash(token));
     return { ...row, remembered: row.remembered === 1, expires_at: expiresAt, last_seen_at: seenAt };
   }
@@ -179,7 +246,7 @@ export class RelayStore {
 
   webSessions() {
     const timestamp = now();
-    this.database.prepare("DELETE FROM relay_web_sessions WHERE expires_at <= ?").run(timestamp);
+    this.database.prepare("DELETE FROM relay_web_sessions WHERE remembered = 0 AND expires_at <= ?").run(timestamp);
     return (this.database.prepare("SELECT id, device_name, created_at, expires_at, last_seen_at, remembered, client_ip FROM relay_web_sessions ORDER BY last_seen_at DESC").all() as Array<Omit<SessionRow, "csrf_token" | "user_agent">>).map(session => ({ ...session, remembered: session.remembered === 1 }));
   }
 
@@ -266,6 +333,95 @@ export class RelayStore {
       this.database.exec("ROLLBACK");
       throw error;
     }
+  }
+
+  enqueueCommand(sessionId: string, command: WebCommandEnvelope, headers: Record<string, string>) {
+    const existing = this.relayCommand(command.command_id);
+    if (existing) return existing.fingerprint === command.fingerprint ? { kind: "existing" as const, command: existing } : { kind: "conflict" as const, command: existing };
+    const timestamp = now();
+    const expiresAt = after(7 * 24 * 60 * 60_000);
+    this.database.prepare(`
+      INSERT INTO relay_commands (
+        command_id, session_id, device_id, kind, entity_id, method, path, headers_json, body_blob, fingerprint,
+        status, delivery_id, attempt_count, available_at, dispatch_expires_at, expires_at, created_at, updated_at
+      ) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, 0, ?, NULL, ?, ?, ?)
+    `).run(command.command_id, sessionId, command.kind, command.entity_id, command.method, command.path, JSON.stringify(headers), command.body, command.fingerprint, timestamp, expiresAt, timestamp, timestamp);
+    return { kind: "new" as const, command: this.relayCommand(command.command_id)! };
+  }
+
+  relayCommand(commandId: string) {
+    const row = this.database.prepare("SELECT * FROM relay_commands WHERE command_id = ?").get(commandId) as RelayCommandRow | undefined;
+    return row ? relayCommandFromRow(row) : null;
+  }
+
+  claimCommands(deviceId: string, limit = 8, leaseMilliseconds = 120_000) {
+    const timestamp = now();
+    const leaseExpiresAt = after(leaseMilliseconds);
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      this.database.prepare("UPDATE relay_commands SET status = 'expired', delivery_id = NULL, dispatch_expires_at = NULL, updated_at = ? WHERE status IN ('pending', 'dispatched') AND expires_at <= ?").run(timestamp, timestamp);
+      this.database.prepare("UPDATE relay_commands SET status = 'pending', delivery_id = NULL, dispatch_expires_at = NULL, available_at = ?, updated_at = ? WHERE status = 'dispatched' AND dispatch_expires_at <= ?").run(timestamp, timestamp, timestamp);
+      const rows = this.database.prepare(`
+        SELECT command_id
+        FROM relay_commands AS candidate
+        WHERE status = 'pending'
+          AND available_at <= ?
+          AND expires_at > ?
+          AND attempt_count < 20
+          AND (device_id IS NULL OR device_id = ?)
+          AND (
+            entity_id IS NULL
+            OR NOT EXISTS (
+              SELECT 1
+              FROM relay_commands AS earlier
+              WHERE earlier.kind = candidate.kind
+                AND earlier.entity_id = candidate.entity_id
+                AND earlier.status IN ('pending', 'dispatched')
+                AND (earlier.created_at < candidate.created_at OR (earlier.created_at = candidate.created_at AND earlier.command_id < candidate.command_id))
+            )
+          )
+        ORDER BY created_at, command_id
+        LIMIT ?
+      `).all(timestamp, timestamp, deviceId, Math.max(1, Math.min(limit, 32))) as Array<{ command_id: string }>;
+      const claimed: RelayCommand[] = [];
+      const update = this.database.prepare("UPDATE relay_commands SET device_id = ?, status = 'dispatched', delivery_id = ?, attempt_count = attempt_count + 1, dispatch_expires_at = ?, updated_at = ? WHERE command_id = ? AND status = 'pending'");
+      for (const row of rows) {
+        const deliveryId = randomUUID();
+        const result = update.run(deviceId, deliveryId, leaseExpiresAt, timestamp, row.command_id);
+        if (result.changes === 1) {
+          const command = this.relayCommand(row.command_id);
+          if (command) claimed.push(command);
+        }
+      }
+      this.database.exec("COMMIT");
+      return claimed;
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  completeCommand(commandId: string, deliveryId: string, status: number, headers: Record<string, string>, body: Buffer) {
+    const commandStatus = status === 409 ? "conflict" : status >= 200 && status < 400 ? "applied" : "rejected";
+    const result = this.database.prepare("UPDATE relay_commands SET status = ?, response_status = ?, response_headers_json = ?, response_body_blob = ?, delivery_id = NULL, dispatch_expires_at = NULL, last_error = NULL, updated_at = ? WHERE command_id = ? AND delivery_id = ? AND status = 'dispatched'")
+      .run(commandStatus, status, JSON.stringify(headers), body, now(), commandId, deliveryId);
+    return result.changes === 1;
+  }
+
+  retryCommand(commandId: string, deliveryId: string, error: string) {
+    const command = this.relayCommand(commandId);
+    if (!command || command.status !== "dispatched" || command.delivery_id !== deliveryId) return false;
+    const delays = [1000, 5000, 30000, 120000, 600000, 1800000];
+    const delay = delays[Math.min(Math.max(0, command.attempt_count - 1), delays.length - 1)];
+    const status = command.attempt_count >= 20 || Date.parse(command.expires_at) <= Date.now() ? "expired" : "pending";
+    const result = this.database.prepare("UPDATE relay_commands SET status = ?, delivery_id = NULL, dispatch_expires_at = NULL, available_at = ?, last_error = ?, updated_at = ? WHERE command_id = ? AND delivery_id = ? AND status = 'dispatched'")
+      .run(status, new Date(Date.now() + delay).toISOString(), error.slice(0, 1000), now(), commandId, deliveryId);
+    return result.changes === 1;
+  }
+
+  pendingCommandCount() {
+    const row = this.database.prepare("SELECT COUNT(*) AS count FROM relay_commands WHERE status IN ('pending', 'dispatched')").get() as { count: number };
+    return Number(row.count);
   }
 
   audit(actorValue: unknown, eventValue: unknown, detailValue?: unknown) {

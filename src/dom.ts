@@ -4,6 +4,7 @@ import { betterCodexProfile } from "./config.js";
 import { betterCodexDesignSystemCss } from "./design-system.js";
 import { renderMarkdown } from "./markdown.js";
 import { betterCodexMcpRoute } from "./mcp-app.js";
+import { featureManifest } from "./features.js";
 import {
   ArrowLeft,
   ArrowLeftRight,
@@ -334,6 +335,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       threadRoutePrefix: "/local/",
     } : ${JSON.stringify(compatibility.navigation)};
     const BETTER_CODEX_ROUTE = ${JSON.stringify(betterCodexMcpRoute)};
+    const FEATURE_MANIFEST = ${JSON.stringify(featureManifest())};
+    const ENABLED_FEATURES = new Set(FEATURE_MANIFEST.features.filter(feature => feature.enabled).map(feature => feature.id));
     const SIDEBAR_NAVIGATION_ITEM = SELECTORS.sidebarNavigationItem || ".sidebar-item";
     const LUCIDE_ICONS = ${JSON.stringify(lucideIcons)};
     const AGENT_AVATAR_PRESETS = ${JSON.stringify(agentAvatarPresets)};
@@ -377,8 +380,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
     const systemLocale = resolveSystemLocale(INITIAL_LOCALE);
     const MOCKUP_PROJECT_ID = "mockup-better-codex";
-    const initialProjectRoute = webProjectRoute();
-    const state = { projects: [], projectsLoaded: false, issues: [], issuesLoaded: false, projectIssues: [], projectIssuesProjectId: "", projectDetailId: initialProjectRoute?.projectId || "", projectDocumentView: "charter", projectDocumentPending: null, projectDocumentError: null, agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: initialProjectRoute ? "projects" : ["issues", "agents", "projects"].includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, autoDispatchPending: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", mockup: false, keepCreate: rememberedKeepCreate, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], project: [], label: [] } };
+    const hasFeature = feature => ENABLED_FEATURES.has(feature);
+    const availableSurfaces = ["issues", "agents", ...(hasFeature("projects") ? ["projects"] : [])];
+    const initialProjectRoute = hasFeature("projects") ? webProjectRoute() : null;
+    if (HOST_KIND === "web" && !hasFeature("projects") && /^\\/web\\/projects(?:\\/|$)/.test(location.pathname)) history.replaceState({ betterCodex: true, betterCodexSurface: "issues" }, "", "/web");
+    const state = { projects: [], projectsLoaded: false, issues: [], issuesLoaded: false, projectIssues: [], projectIssuesProjectId: "", projectDetailId: initialProjectRoute?.projectId || "", projectDocumentView: "charter", projectDocumentPending: null, projectDocumentError: null, agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: initialProjectRoute ? "projects" : availableSurfaces.includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, autoDispatchPending: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", mockup: false, keepCreate: rememberedKeepCreate, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], project: [], label: [] } };
+    const pendingIssueRemovals = new Map();
     function webProjectRoute() {
       if (HOST_KIND !== "web") return null;
       const match = location.pathname.match(/^\\/web\\/projects(?:\\/([^/?#]+))?\\/?$/);
@@ -728,6 +735,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "复制全部错误": "Copy all errors",
       "移除当前错误": "Remove current error",
       "复制失败": "Copy failed",
+      "列表数据暂时无法读取，请稍后重试。": "List data is temporarily unavailable. Try again shortly.",
     });
     const bridgeRequests = new Map();
     const appServerRequests = new Map();
@@ -790,6 +798,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     let draggingIssueId = "";
     let sessionDragPointer = null;
     let sessionDropInFlight = false;
+    const listRequests = new Map();
     let suppressSessionClickUntil = 0;
     let codexLogoSequence = 0;
     let active = false;
@@ -1697,10 +1706,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (!projectsEntry) projectsEntry = createEntry("项目管理", PROJECTS_ENTRY_ID, "管理项目", "projects");
       syncEntryLabel(projectsEntry, "项目管理", "管理项目");
       syncEntryIcon(projectsEntry, "projects");
+      projectsEntry.hidden = !hasFeature("projects");
       if (HOST_KIND === "web") {
         if (!auxiliaryNavigation) auxiliaryNavigation = createAuxiliaryNavigation();
         syncEntryLabel(moreEntry, "更多", "更多功能");
         syncEntryIcon(moreEntry, "more");
+        auxiliaryNavigation.hidden = !hasFeature("projects");
         if (auxiliaryNavigation.parentElement !== parent || auxiliaryNavigation.previousElementSibling !== agentsEntry) agentsEntry.after(auxiliaryNavigation);
         if (projectsEntry.parentElement !== auxiliaryMenu) auxiliaryMenu.append(projectsEntry);
       } else if (projectsEntry.parentElement !== parent || projectsEntry.previousElementSibling !== agentsEntry) agentsEntry.after(projectsEntry);
@@ -1750,6 +1761,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const method = String(options.method || "GET").toUpperCase();
       const requestPath = path + (path.includes("?") ? "&" : "?") + "locale=" + encodeURIComponent(state.locale);
       const commandId = method === "GET" ? "" : globalThis.crypto?.randomUUID?.() || VERSION + "-command-" + Date.now() + "-" + Math.random().toString(36).slice(2);
+      const removalMatch = path.match(/^\/api\/issues\/([^/?]+)(?:\/(archive))?(?:\?.*)?$/);
+      const removalId = removalMatch && (method === "DELETE" || method === "POST" && removalMatch[2] === "archive") ? decodeURIComponent(removalMatch[1]) : "";
+      const removalIssue = removalId ? state.issues.find(issue => issue.id === removalId) : null;
+      if (removalIssue && !READ_ONLY) {
+        pendingIssueRemovals.set(removalId, { commandId, issue: removalIssue });
+        state.issues = state.issues.filter(issue => issue.id !== removalId);
+        render();
+      }
       const startedAt = Date.now();
       const bodyBytes = typeof options.body === "string" ? new TextEncoder().encode(options.body).byteLength : 0;
       appendDiagnostic("api_request", { method, path: requestPath, command_id: commandId, request_body_bytes: bodyBytes });
@@ -1761,7 +1780,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const attempt = (retriesLeft) => {
         if (typeof window.betterCodexHost?.request === "function") {
           return Promise.resolve(window.betterCodexHost.request({ path: requestPath, method: options.method || "GET", body: options.body, timeoutMs: options.timeoutMs, commandId })).catch(error => {
-            if (retriesLeft > 0 && error instanceof Error && error.message === "runtime_bridge_timeout") return attempt(retriesLeft - 1);
+            if (retriesLeft > 0 && error instanceof Error && ["runtime_bridge_timeout", "runtime_response_invalid"].includes(error.message)) return attempt(retriesLeft - 1);
             throw error;
           });
         }
@@ -1781,7 +1800,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             reject(error instanceof Error ? error : new Error("runtime_bridge_unavailable"));
           }
         }).catch(error => {
-          if (retriesLeft > 0 && error instanceof Error && error.message === "runtime_bridge_timeout") {
+          if (retriesLeft > 0 && error instanceof Error && ["runtime_bridge_timeout", "runtime_response_invalid"].includes(error.message)) {
             return attempt(retriesLeft - 1);
           }
           throw error;
@@ -1789,12 +1808,82 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       };
       return attempt(method === "GET" ? 1 : 0).then(value => {
         appendDiagnostic("api_response", { method, path: requestPath, command_id: commandId, elapsed_ms: Date.now() - startedAt });
+        if (removalId && value?.queued === true) settleIssueRemoval(removalId, commandId);
+        else if (removalId) pendingIssueRemovals.delete(removalId);
         return value;
       }).catch(error => {
+        if (removalId) {
+          const pending = pendingIssueRemovals.get(removalId);
+          if (pending?.commandId === commandId) {
+            pendingIssueRemovals.delete(removalId);
+            if (!state.issues.some(issue => issue.id === removalId)) state.issues.push(pending.issue);
+            render();
+          }
+        }
         appendDiagnostic("api_failure", { method, path: requestPath, command_id: commandId, request_body_bytes: bodyBytes, elapsed_ms: Date.now() - startedAt, error: error instanceof Error ? error.message : String(error || "request_failed"), diagnostics: error?.betterCodexDiagnostics || {} });
         reportGlobalError(error, { source: "api", method, path: requestPath, command_id: commandId, request_body_bytes: bodyBytes, elapsed_ms: Date.now() - startedAt });
         throw error;
       });
+    }
+
+    function settleIssueRemoval(issueId, commandId, attempt = 0) {
+      const pending = pendingIssueRemovals.get(issueId);
+      if (!pending || pending.commandId !== commandId) return;
+      const delays = [1000, 2000, 5000, 10000, 30000, 120000, 600000];
+      setTimeout(async () => {
+        const current = pendingIssueRemovals.get(issueId);
+        if (!current || current.commandId !== commandId) return;
+        try {
+          const result = await api("/api/commands/" + encodeURIComponent(commandId));
+          if (result?.queued === true || ["pending", "dispatched", "processing"].includes(result?.status)) return settleIssueRemoval(issueId, commandId, attempt + 1);
+          if (["rejected", "conflict", "expired"].includes(result?.status)) throw new Error(result.error || "command_rejected");
+          pendingIssueRemovals.delete(issueId);
+          void loadIssues({ background: true }).catch(() => {});
+        } catch (error) {
+          if (error instanceof Error && ["command_not_found", "runtime_offline", "runtime_unavailable", "runtime_bridge_timeout", "relay_stream_interrupted", "request_outcome_unknown"].includes(error.message)) return settleIssueRemoval(issueId, commandId, attempt + 1);
+          pendingIssueRemovals.delete(issueId);
+          if (!state.issues.some(issue => issue.id === issueId)) state.issues.push(current.issue);
+          render();
+          void loadIssues({ background: true }).catch(() => {});
+        }
+      }, delays[Math.min(attempt, delays.length - 1)]);
+    }
+
+    function listResponse(value, path, kind) {
+      if (Array.isArray(value)) return value;
+      const diagnostics = {
+        response_path: path,
+        response_kind: kind,
+        response_type: value === null ? "null" : typeof value,
+        response_keys: value && typeof value === "object" ? Object.keys(value).slice(0, 20) : [],
+      };
+      appendDiagnostic("api_invalid_response", diagnostics);
+      const error = new Error("invalid_" + kind + "_response");
+      error.betterCodexDiagnostics = diagnostics;
+      throw error;
+    }
+
+    async function requestList(path, kind) {
+      const key = kind + ":" + path;
+      if (listRequests.has(key)) return listRequests.get(key);
+      const request = (async () => {
+        try {
+          return listResponse(await api(path), path, kind);
+        } catch (error) {
+          if (!(error instanceof Error) || error.message !== "invalid_" + kind + "_response") throw error;
+          return listResponse(await api(path), path, kind);
+        }
+      })();
+      listRequests.set(key, request);
+      try {
+        return await request;
+      } finally {
+        if (listRequests.get(key) === request) listRequests.delete(key);
+      }
+    }
+
+    function requestProjects() {
+      return requestList("/api/projects", "projects");
     }
 
     function startLiveUpdates() {
@@ -2431,6 +2520,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (value === "manual_start_required") return t("当前为手动运行，请先点击“立即开始任务”。");
       if (value === "backlog_reply_blocked") return t("待规划中的 Issue 不会自动触发任务，请先移出待规划区。");
       if (value === "project_required") return t("无法确定会话所属项目。请先把会话放入一个项目。");
+      if (["runtime_response_invalid", "invalid_projects_response", "invalid_issues_response", "invalid_agents_response"].includes(value)) return t("列表数据暂时无法读取，请稍后重试。");
       if (value === "issue_archived") return t("该会话对应的 Issue 已归档，请先取消归档。");
       if (["project_overview_timeout", "project_overview_unavailable", "project_document_invalid_output", "remote_command_timeout", "workspace_missing"].includes(value)) return projectDocumentErrorLabel(value);
       return t(value);
@@ -2959,13 +3049,41 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       };
       const load = async () => {
         try {
-          archivedIssues = await api("/api/issues?archived=1");
+          archivedIssues = await requestList("/api/issues?archived=1", "issues");
           const projects = projectsByRecentActivity(state.projects.filter(project => archivedIssues.some(issue => issue.project_id === project.id)), archivedIssues);
           projectOptions = projects;
           render();
         } catch {
           const list = dialog.querySelector("[data-archive-list]");
           if (list) list.innerHTML = '<div class="better-codex-archive-empty">' + te("归档列表加载失败") + '</div>';
+        }
+      };
+      const restoreArchivedIssue = issue => {
+        if (!archivedIssues.some(item => item.id === issue.id)) archivedIssues.push(issue);
+        if (dialog.isConnected) render();
+      };
+      const settleArchivedRemoval = (issue, commandId, attempt = 0) => {
+        const delays = [1000, 2000, 5000, 10000, 30000, 120000, 600000];
+        setTimeout(async () => {
+          try {
+            const result = await api("/api/commands/" + encodeURIComponent(commandId));
+            if (result?.queued === true || ["pending", "dispatched", "processing"].includes(result?.status)) return settleArchivedRemoval(issue, commandId, attempt + 1);
+            if (["rejected", "conflict", "expired"].includes(result?.status)) restoreArchivedIssue(issue);
+          } catch (error) {
+            if (error instanceof Error && ["command_not_found", "runtime_offline", "runtime_unavailable", "runtime_bridge_timeout", "relay_stream_interrupted", "request_outcome_unknown"].includes(error.message)) return settleArchivedRemoval(issue, commandId, attempt + 1);
+            restoreArchivedIssue(issue);
+          }
+        }, delays[Math.min(attempt, delays.length - 1)]);
+      };
+      const deleteArchivedIssue = async issue => {
+        archivedIssues = archivedIssues.filter(item => item.id !== issue.id);
+        render();
+        try {
+          const result = await api("/api/issues/" + encodeURIComponent(issue.id), { method: "DELETE", body: JSON.stringify({ version: Number(issue.version) }) });
+          if (result?.queued === true && result.command_id) settleArchivedRemoval(issue, result.command_id);
+        } catch (error) {
+          restoreArchivedIssue(issue);
+          throw error;
         }
       };
       search.addEventListener("input", render);
@@ -3029,8 +3147,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           const targetProjectId = projectDeleteAll.dataset.archiveProjectDelete || "";
           const targetIssues = archivedIssues.filter(issue => (issue.project_id || "") === targetProjectId);
           return void confirmAction("删除任务", "确定删除项目中的全部已归档任务吗？", "删除").then(confirmed => confirmed && perform(async () => {
-            for (const issue of targetIssues) await api("/api/issues/" + encodeURIComponent(issue.id), { method: "DELETE", body: JSON.stringify({ version: Number(issue.version) }) });
-            await load();
+            for (const issue of targetIssues) await deleteArchivedIssue(issue);
           }));
         }
         if (restore) return void perform(async () => {
@@ -3039,13 +3156,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           await load();
         });
         if (remove) return void confirmAction("删除任务", "确定删除任务 “" + remove.dataset.archiveDelete + "” 吗？", "删除").then(confirmed => confirmed && perform(async () => {
-          await api("/api/issues/" + encodeURIComponent(remove.dataset.archiveDelete), { method: "DELETE", body: JSON.stringify({ version: Number(remove.dataset.archiveVersion) }) });
-          await load();
+          const issue = archivedIssues.find(item => item.id === remove.dataset.archiveDelete);
+          if (issue) await deleteArchivedIssue(issue);
         }));
         if (deleteAll) return void confirmAction("删除任务", "确定删除所有已归档任务吗？", "删除").then(confirmed => confirmed && perform(async () => {
-          for (const issue of archivedIssues) await api("/api/issues/" + encodeURIComponent(issue.id), { method: "DELETE", body: JSON.stringify({ version: Number(issue.version) }) });
-          await loadIssues();
-          await load();
+          for (const issue of [...archivedIssues]) await deleteArchivedIssue(issue);
         }));
         if (!event.target.closest("[data-archive-project-menu]")) {
           dialog.querySelectorAll("[data-archive-project-menu]").forEach(menu => menu.remove());
@@ -3583,10 +3698,44 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       addIssue.className = "better-codex-create-primary";
       addIssue.setAttribute("aria-label", t("新建 issue"));
       addIssue.innerHTML = icon("plus") + "<span>" + te("新建 issue") + "</span>";
-      addIssue.addEventListener("click", () => {
+      let addIssueLongPress = null;
+      let suppressAddIssueClickUntil = 0;
+      const resetAddIssueLongPress = () => {
+        if (addIssueLongPress?.timer) clearTimeout(addIssueLongPress.timer);
+        addIssueLongPress = null;
+      };
+      addIssue.addEventListener("click", event => {
+        if (Date.now() < suppressAddIssueClickUntil) {
+          suppressAddIssueClickUntil = 0;
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
         closeCreateMenu();
         void perform(() => openEditor());
       });
+      if (HOST_KIND === "web") {
+        addIssue.addEventListener("pointerdown", event => {
+          if (event.pointerType !== "touch" || event.isPrimary === false || event.button !== 0) return;
+          resetAddIssueLongPress();
+          const press = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, timer: null };
+          press.timer = setTimeout(() => {
+            if (addIssueLongPress !== press) return;
+            suppressAddIssueClickUntil = Date.now() + 700;
+            openCreateMenu(createToggle);
+            resetAddIssueLongPress();
+          }, 500);
+          addIssueLongPress = press;
+        });
+        addIssue.addEventListener("pointermove", event => {
+          if (!addIssueLongPress || event.pointerId !== addIssueLongPress.pointerId) return;
+          const deltaX = event.clientX - addIssueLongPress.startX;
+          const deltaY = event.clientY - addIssueLongPress.startY;
+          if (deltaX * deltaX + deltaY * deltaY > 64) resetAddIssueLongPress();
+        });
+        addIssue.addEventListener("pointerup", resetAddIssueLongPress);
+        addIssue.addEventListener("pointercancel", resetAddIssueLongPress);
+      }
       const createToggle = actionButton("");
       createToggle.id = "better-codex-create-toggle";
       createToggle.className = "better-codex-create-toggle";
@@ -4432,7 +4581,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     async function loadProjects(options = {}) {
-      const projects = await api("/api/projects");
+      const projects = await requestProjects();
       const projectsChanged = JSON.stringify(projects) !== JSON.stringify(state.projects);
       const pending = state.projectDocumentPending;
       if (pending) {
@@ -4455,8 +4604,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             renderProjects();
           }
           const [activeIssues, archivedIssues] = await Promise.all([
-            api("/api/issues?project_id=" + encodeURIComponent(projectId)),
-            api("/api/issues?archived=1&project_id=" + encodeURIComponent(projectId)),
+            requestList("/api/issues?project_id=" + encodeURIComponent(projectId), "issues"),
+            requestList("/api/issues?archived=1&project_id=" + encodeURIComponent(projectId), "issues"),
           ]);
           if (state.projectDetailId === projectId) {
             state.projectIssues = [...activeIssues, ...archivedIssues];
@@ -5380,7 +5529,15 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (options.background && (draggingIssueId || sessionDragPointer?.dragging)) return;
       const query = new URLSearchParams();
       if (state.search) query.set("search", state.search);
-      const issues = await api("/api/issues" + (query.toString() ? "?" + query : ""));
+      const issuePath = "/api/issues" + (query.toString() ? "?" + query : "");
+      let issues;
+      try {
+        issues = await requestList(issuePath, "issues");
+      } catch (error) {
+        if (pendingIssueRemovals.size) return state.issues;
+        throw error;
+      }
+      issues = issues.filter(issue => !pendingIssueRemovals.has(issue.id));
       const changed = JSON.stringify(issues) !== JSON.stringify(state.issues);
       if (issueSessionSnapshot.size) {
         const ended = issues.filter(issue => {
@@ -5402,7 +5559,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     async function loadAgents(options = {}) {
-      const agents = await api("/api/agents");
+      const agents = await requestList("/api/agents", "agents");
       const changed = JSON.stringify(agents) !== JSON.stringify(state.agents);
       state.agents = agents;
       if (options.preserveInspector && panel?.dataset.surface === "agents" && state.agentPane !== "preview") return;
@@ -5420,7 +5577,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     async function waitForRemoteCommand(commandId, timeoutMs = 30_000) {
       const deadline = Date.now() + timeoutMs;
       while (Date.now() < deadline) {
-        const command = await api("/api/v1/commands/" + encodeURIComponent(commandId));
+        const command = await api((HOST_KIND === "remote-projection" ? "/api/v1/commands/" : "/api/commands/") + encodeURIComponent(commandId));
         if (["applied", "rejected", "conflict", "expired"].includes(command.status)) return command;
         await new Promise(resolve => setTimeout(resolve, 500));
       }
@@ -5443,8 +5600,18 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (bootstrap.user && typeof bootstrap.user === "object") state.user = bootstrap.user;
         if (HOST_KIND === "web") window.dispatchEvent(new CustomEvent("better-codex:bootstrap", { detail: { user: state.user, locale: state.locale } }));
         state.mockup = Boolean(bootstrap.mockup);
-        state.agents = bootstrap.agents || [];
-        state.projects = bootstrap.projects || [];
+        try {
+          state.agents = listResponse(bootstrap.agents, "/api/bootstrap", "agents");
+        } catch (error) {
+          if (!(error instanceof Error) || error.message !== "invalid_agents_response") throw error;
+          state.agents = await requestList("/api/agents", "agents");
+        }
+        try {
+          state.projects = listResponse(bootstrap.projects, "/api/bootstrap", "projects");
+        } catch (error) {
+          if (!(error instanceof Error) || error.message !== "invalid_projects_response") throw error;
+          state.projects = await requestProjects();
+        }
         state.agentModelCatalog = bootstrap.agentModelCatalog || (bootstrap.agentModels || []).map(id => ({ id, displayName: id, description: "", isDefault: false, defaultReasoningEffort: "medium", supportedReasoningEfforts: (bootstrap.agentReasoningEfforts || []).map(value => ({ value, description: "" })) }));
         state.agentModels = state.agentModelCatalog.map(model => model.id);
         state.agentReasoningEfforts = bootstrap.agentReasoningEfforts || [];
@@ -7255,7 +7422,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           if (String(error instanceof Error ? error.message : error) !== "issue_not_found") throw error;
         }
         if (!issue) {
-          state.projects = await api("/api/projects");
+          state.projects = await requestProjects();
           let project = context.projectId ? await ensureContextProject(context) : null;
           let workspacePath = String(project?.workspace_path || "").trim();
           if (!workspacePath) workspacePath = await resolveWorkspacePath(context);
@@ -7401,6 +7568,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function openRoute(surface = state.surface, options = {}) {
+      if (!availableSurfaces.includes(surface)) surface = "issues";
       routeSuppressed = false;
       routeSeen = false;
       if (surface === "projects") {
@@ -7425,6 +7593,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     function open(surface = state.surface) {
       if (destroyed) return;
+      if (!availableSurfaces.includes(surface)) surface = "issues";
       const ready = bootstrapReady;
       routeSuppressed = false;
       state.surface = surface;
@@ -7558,6 +7727,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function refresh() {
+      if (HOST_KIND === "web" && !hasFeature("projects") && /^\\/web\\/projects(?:\\/|$)/.test(location.pathname)) history.replaceState({ betterCodex: true, betterCodexSurface: "issues" }, "", "/web");
       const betterCodexRoute = isBetterCodexRoute();
       const entriesAvailable = ensureEntry();
       if (!entriesAvailable) {
@@ -7570,7 +7740,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (!betterCodexRoute) routeSuppressed = false;
       syncSessionHandoffFromHost();
       if (active && routeSeen && !betterCodexRoute) return close({ resume: true, suppressRoute: false });
-      if (!active && betterCodexRoute && !routeSuppressed && ["issues", "agents", "projects"].includes(resumeSurface)) return open(resumeSurface);
+      if (!active && betterCodexRoute && !routeSuppressed && availableSurfaces.includes(resumeSurface)) return open(resumeSurface);
       if (active) mountPanel();
     }
 

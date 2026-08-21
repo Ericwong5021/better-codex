@@ -73,6 +73,15 @@ export type SessionCommandKind = "start" | "turn" | "steer" | "interrupt";
 export type SessionCommandStatus = "pending" | "claimed" | "completed" | "failed" | "cancelled";
 export type IssueThreadAction = "archive" | "unarchive" | "delete";
 
+export type PendingThreadAction = {
+  thread_id: string;
+  issue_id: string;
+  action: IssueThreadAction;
+  event_id: string;
+  attempts: number;
+  available_at: string;
+};
+
 export type IssueSession = {
   issue_id: string;
   host_id: string;
@@ -223,7 +232,7 @@ export function cleanMaxConcurrency(value: number | undefined) {
   return value;
 }
 
-const latestSchemaVersion = 13;
+const latestSchemaVersion = 14;
 
 function now() {
   return new Date().toISOString();
@@ -727,6 +736,30 @@ export class Store {
       this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (12, ?)").run(timestamp);
     }
     if (fromVersion < 13) this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (13, ?)").run(now());
+    if (fromVersion < 14) {
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS thread_action_queue (
+            thread_id TEXT PRIMARY KEY,
+            issue_id TEXT NOT NULL,
+            action TEXT NOT NULL CHECK(action IN ('archive', 'unarchive', 'delete')),
+            event_id TEXT NOT NULL UNIQUE,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            available_at TEXT NOT NULL,
+            last_error TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS thread_action_queue_available ON thread_action_queue(attempts, available_at);
+        `);
+        this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (14, ?)").run(now());
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    }
   }
 
   private ensureProjectColumns() {
@@ -1050,11 +1083,13 @@ export class Store {
 
   health() {
     const integrity = this.db.prepare("PRAGMA quick_check").get() as Record<string, unknown> | undefined;
+    const threadActions = this.db.prepare("SELECT SUM(CASE WHEN attempts < 5 THEN 1 ELSE 0 END) AS pending, SUM(CASE WHEN attempts >= 5 THEN 1 ELSE 0 END) AS failed FROM thread_action_queue").get() as { pending: number | null; failed: number | null };
     return {
       ok: String(integrity?.quick_check ?? "") === "ok",
       schemaVersion: this.schemaVersion(),
       latestSchemaVersion,
       lastBackupPath: this.lastBackupPath,
+      effects: { pending: Number(threadActions.pending || 0), failed: Number(threadActions.failed || 0) },
     };
   }
 
@@ -1253,24 +1288,12 @@ export class Store {
           if (!["issue.reply", "issue.stop"].includes(command.operation) && (current.active_run_status || current.session_active_turn_id || this.getIssueReplyState(current.id).status === "running")) throw new Error("issue_execution_running");
           if (["issue.archive", "issue.delete"].includes(command.operation) && current.enrichment_status === "pending") throw new Error("issue_enrichment_pending");
           if (command.operation === "issue.delete") {
-            if (this.listIssueThreadIds(current.id).length) {
-              if (!handlers.threadAction) throw new Error("codex_thread_action_unavailable");
-              await handlers.threadAction(current.id, "delete");
-            }
             this.deleteArchivedIssue(current.id, current.version);
             return { command_id: command.command_id, status: "applied", error: null, projection: null } satisfies RemoteCommandAck;
           }
           if (command.operation === "issue.archive") {
-            if (this.listIssueThreadIds(current.id).length) {
-              if (!handlers.threadAction) throw new Error("codex_thread_action_unavailable");
-              await handlers.threadAction(current.id, "archive");
-            }
             issue = this.archiveIssue(current.id, current.version);
           } else if (command.operation === "issue.restore") {
-            if (this.listIssueThreadIds(current.id).length) {
-              if (!handlers.threadAction) throw new Error("codex_thread_action_unavailable");
-              await handlers.threadAction(current.id, "unarchive");
-            }
             issue = this.unarchiveIssue(current.id, current.version);
           }
           else if (command.operation === "issue.reply") {
@@ -2070,10 +2093,20 @@ export class Store {
     if (!issue) throw new Error("issue_not_found");
     if (issue.version !== version) throw new Error("version_conflict");
     if (issue.enrichment_status === "pending") throw new Error("issue_enrichment_pending");
-    const result = this.db.prepare("UPDATE issues SET archived_at = ?, needs_attention = 0, pending_actor = 'user', version = version + 1, updated_at = ? WHERE id = ? AND version = ?")
-      .run(now(), now(), issue.id, version);
-    if (result.changes !== 1) throw new Error("version_conflict");
-    return this.getIssue(issue.id)!;
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const timestamp = now();
+      this.enqueueThreadAction(issue.id, "archive", timestamp);
+      const result = this.db.prepare("UPDATE issues SET archived_at = ?, needs_attention = 0, pending_actor = 'user', version = version + 1, updated_at = ? WHERE id = ? AND version = ?")
+        .run(timestamp, timestamp, issue.id, version);
+      if (result.changes !== 1) throw new Error("version_conflict");
+      const updated = this.getIssue(issue.id)!;
+      this.db.exec("COMMIT");
+      return updated;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   unarchiveIssue(id: string, version: number) {
@@ -2081,10 +2114,20 @@ export class Store {
     const issue = this.getIssue(id);
     if (!issue) throw new Error("issue_not_found");
     if (issue.version !== version) throw new Error("version_conflict");
-    const result = this.db.prepare("UPDATE issues SET archived_at = NULL, version = version + 1, updated_at = ? WHERE id = ? AND version = ? AND archived_at IS NOT NULL")
-      .run(now(), issue.id, version);
-    if (result.changes !== 1) throw new Error("version_conflict");
-    return this.getIssue(issue.id)!;
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const timestamp = now();
+      this.enqueueThreadAction(issue.id, "unarchive", timestamp);
+      const result = this.db.prepare("UPDATE issues SET archived_at = NULL, version = version + 1, updated_at = ? WHERE id = ? AND version = ? AND archived_at IS NOT NULL")
+        .run(timestamp, issue.id, version);
+      if (result.changes !== 1) throw new Error("version_conflict");
+      const updated = this.getIssue(issue.id)!;
+      this.db.exec("COMMIT");
+      return updated;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   deleteArchivedIssue(id: string, version: number) {
@@ -2096,6 +2139,7 @@ export class Store {
     if (issue.active_run_status || issue.session_active_turn_id || this.getIssueReplyState(issue.id).status === "running") throw new Error("issue_execution_running");
     this.db.exec("BEGIN IMMEDIATE");
     try {
+      this.enqueueThreadAction(issue.id, "delete", now());
       this.db.prepare("DELETE FROM issue_replies WHERE issue_id = ?").run(issue.id);
       this.db.prepare("DELETE FROM issue_runs WHERE issue_id = ?").run(issue.id);
       const result = this.db.prepare("DELETE FROM issues WHERE id = ? AND version = ?").run(issue.id, version);
@@ -2112,6 +2156,44 @@ export class Store {
     if (!issue) throw new Error("issue_not_found");
     const rows = this.db.prepare("SELECT thread_id FROM issue_runs WHERE issue_id = ? AND thread_id IS NOT NULL UNION SELECT thread_id FROM issue_sessions WHERE issue_id = ? AND thread_id IS NOT NULL").all(id, id) as Array<{ thread_id: string }>;
     return [...new Set([issue.thread_id, ...rows.map(row => row.thread_id)].filter((value): value is string => typeof value === "string" && /^[a-f0-9-]{36}$/i.test(value)))];
+  }
+
+  listPendingThreadActions(limit = 16) {
+    return this.db.prepare("SELECT thread_id, issue_id, action, event_id, attempts, available_at FROM thread_action_queue WHERE attempts < 5 AND available_at <= ? ORDER BY available_at, created_at LIMIT ?")
+      .all(now(), limit) as PendingThreadAction[];
+  }
+
+  nextThreadActionAt() {
+    const row = this.db.prepare("SELECT MIN(available_at) AS available_at FROM thread_action_queue WHERE attempts < 5").get() as { available_at: string | null };
+    return row.available_at;
+  }
+
+  completeThreadAction(entry: PendingThreadAction) {
+    this.db.prepare("DELETE FROM thread_action_queue WHERE thread_id = ? AND event_id = ?").run(entry.thread_id, entry.event_id);
+  }
+
+  failThreadAction(entry: PendingThreadAction, error: string) {
+    const attempts = entry.attempts + 1;
+    const delays = [1000, 5000, 30000, 120000, 600000];
+    const availableAt = new Date(Date.now() + delays[Math.min(attempts - 1, delays.length - 1)]).toISOString();
+    this.db.prepare("UPDATE thread_action_queue SET attempts = ?, available_at = ?, last_error = ?, updated_at = ? WHERE thread_id = ? AND event_id = ?")
+      .run(attempts, availableAt, error.slice(0, 1000), now(), entry.thread_id, entry.event_id);
+  }
+
+  private enqueueThreadAction(issueId: string, action: IssueThreadAction, timestamp: string) {
+    const statement = this.db.prepare(`
+      INSERT INTO thread_action_queue (thread_id, issue_id, action, event_id, attempts, available_at, last_error, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 0, ?, NULL, ?, ?)
+      ON CONFLICT(thread_id) DO UPDATE SET
+        issue_id = excluded.issue_id,
+        action = excluded.action,
+        event_id = excluded.event_id,
+        attempts = 0,
+        available_at = excluded.available_at,
+        last_error = NULL,
+        updated_at = excluded.updated_at
+    `);
+    for (const threadId of this.listIssueThreadIds(issueId)) statement.run(threadId, issueId, action, randomUUID(), timestamp, timestamp, timestamp);
   }
 
   recoverInterruptedRuns() {

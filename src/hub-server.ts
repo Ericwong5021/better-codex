@@ -16,6 +16,7 @@ import { deviceAuthorizationPage } from "./device-authorization-page.js";
 import { controlCapabilities, controlProtocolVersion, decodeControlMessage, encodeControlMessage } from "./control-protocol.js";
 import { upgradeWebSocket, type WebSocketConnection } from "./websocket-server.js";
 import { HubUpdater } from "./hub-updater.js";
+import { featureManifest } from "./features.js";
 
 export type HubServerOptions = {
   host: string;
@@ -344,6 +345,7 @@ export function createHubServer(options: HubServerOptions) {
           schedulerModel: runtime?.scheduler_model || "",
           schedulerReasoningEffort: runtime?.scheduler_reasoning_effort || "",
           mockup: false,
+          featureManifest: featureManifest(),
           runtime: board.runtime,
           capabilities: { issues: "read-write", agents: "read-only", nativeThreads: false },
         });
