@@ -4,6 +4,26 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.9] - 2026-08-22
+
+### Added
+
+- Route the complete remote Web workspace through an authenticated outbound Relay tunnel while keeping local SQLite authoritative.
+- Persist supported Web commands across brief Runtime outages with Relay queuing, browser recovery, idempotent receipts, and durable thread effects.
+- Add Fast agent execution through supported Codex priority service tiers.
+- Remember Relay browser devices and manage active sessions locally.
+
+### Changed
+
+- Run linked Codex actions through one persistent Session Host and recover interrupted Issue turns after host replacement.
+- Simplify self-hosted remote access around the data-blind Relay architecture and signed exact-version upgrades.
+
+### Fixed
+
+- Preserve attachments, requests, reads, reconnects, and conversations across bounded Relay and Runtime interruptions.
+- Improve remote Issue workflows, dialogs, navigation, theme controls, usage visibility, and compact mobile layouts.
+- Keep folder selection, installation, injection, MCP registration, and Runtime process lifecycles reliable across supported platforms.
+
 ## [0.4.9-beta.34] - 2026-08-21
 
 - Add project planning sessions and an interactive planning workspace for tracked milestones and work items.
@@ -719,7 +739,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.34...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9...HEAD
+[0.4.9]: https://github.com/Ericwong5021/better-codex/compare/v0.4.8...v0.4.9
 [0.4.9-beta.34]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.33...v0.4.9-beta.34
 [0.4.9-beta.33]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.32...v0.4.9-beta.33
 [0.4.9-beta.32]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9-beta.31...v0.4.9-beta.32
