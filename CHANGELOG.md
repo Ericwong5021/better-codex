@@ -4,6 +4,14 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.10-beta.3] - 2026-08-22
+
+- Add recurring scheduled tasks with manual execution and delivery history.
+- Add Web collaboration controls for user roles, visibility, and ownership.
+- Add conversation attachment preview and download support.
+- Add Codex skills, file mentions, and semantic slash commands to Issue conversations.
+- Add an authenticated VPS upgrade action and refine project planning controls and draft recovery.
+
 ## [0.4.10-beta.2] - 2026-08-22
 
 - Align compact mobile Issue creation actions without wrapping the dialog footer.
@@ -748,7 +756,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.2...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.3...HEAD
+[0.4.10-beta.3]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.2...v0.4.10-beta.3
 [0.4.10-beta.2]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.1...v0.4.10-beta.2
 [0.4.10-beta.1]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9...v0.4.10-beta.1
 [0.4.9]: https://github.com/Ericwong5021/better-codex/compare/v0.4.8...v0.4.9
