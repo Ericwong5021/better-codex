@@ -4,6 +4,14 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.10-beta.11] - 2026-08-23
+
+- Queue follow-up replies while an Issue is running and show pending messages in the conversation.
+- Autosave agent configuration and preserve Issue drafts, planning drafts, timelines, and board position across navigation or refresh.
+- Keep Web updates and page injection stable while the Runtime or Codex target is being replaced.
+- Parse conversation attachments before removing internal metadata.
+- Make Preview VPS updates channel-aware, resumable, and explicit about failed state files.
+
 ## [0.4.10-beta.10] - 2026-08-22
 
 - Close the agent editor after saving changes to an existing agent.
@@ -786,7 +794,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.10...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.11...HEAD
+[0.4.10-beta.11]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.10...v0.4.10-beta.11
 [0.4.10-beta.10]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.9...v0.4.10-beta.10
 [0.4.10-beta.9]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.8...v0.4.10-beta.9
 [0.4.10-beta.8]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.7...v0.4.10-beta.8
