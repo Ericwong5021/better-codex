@@ -410,6 +410,11 @@ export type ConversationProjection = {
     started_at?: string;
     finished_at?: string;
   };
+  queued_replies?: Array<{
+    request_id: string;
+    message: string;
+    created_at: string;
+  }>;
   updated_at: string;
 };
 

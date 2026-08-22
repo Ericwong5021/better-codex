@@ -1852,6 +1852,7 @@ export function startServer() {
             ...conversation,
             issue_id: current.id,
             reply: store.getIssueReplyState(current.id),
+            queued_replies: store.listQueuedIssueReplies(current.id),
             user: readCodexUserProfile(),
             issue: store.getIssue(current.id),
           });
@@ -1889,6 +1890,7 @@ export function startServer() {
               if (existingInput ? existingInput !== requestInput : String(existingCommand.payload.request_message || "") !== message) throw new Error("request_id_conflict");
               filesCommitted = true;
               const reply = store.getIssueReplyState(issue.id);
+              if (existingCommand.payload.queued_reply === true) return sendJson(response, 202, { ...reply, queued: true, queued_replies: store.listQueuedIssueReplies(issue.id) });
               return sendJson(response, 202, existingCommand.kind === "steer"
                 ? { issue_id: issue.id, request_id: requestId, status: "running", message, steered: true }
                 : reply);
@@ -1912,6 +1914,7 @@ export function startServer() {
             const queued = worker.sendIssueMessage(issue.id, requestId, message, semanticReferences, semanticCommand);
             filesCommitted = true;
             const reply = store.getIssueReplyState(issue.id);
+            if (queued.queued) return sendJson(response, 202, { ...reply, queued: true, queued_replies: store.listQueuedIssueReplies(issue.id) });
             return sendJson(response, 202, queued.steered
               ? { issue_id: issue.id, request_id: requestId, status: "running", message, steered: true }
               : reply);

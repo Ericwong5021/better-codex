@@ -6451,6 +6451,39 @@ export function betterCodexDesignSystemCss() {
       padding: 0 0 2px;
     }
 
+    #better-codex-dialog .better-codex-composer-queue {
+      display: grid;
+      gap: 3px;
+      border-radius: var(--bc-radius-sm);
+      background: var(--bc-color-hover);
+      padding: 8px 10px;
+      color: var(--bc-color-text-muted);
+      font-size: var(--bc-text-caption);
+    }
+
+    #better-codex-dialog .better-codex-composer-queue[hidden] {
+      display: none;
+    }
+
+    #better-codex-dialog .better-codex-composer-queue strong {
+      color: var(--bc-color-text);
+      font-size: var(--bc-text-sm);
+      font-weight: 600;
+    }
+
+    #better-codex-dialog .better-codex-composer-queue ol {
+      display: grid;
+      gap: 2px;
+      margin: 3px 0 0;
+      padding-left: 18px;
+    }
+
+    #better-codex-dialog .better-codex-composer-queue li {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
     #better-codex-dialog .better-codex-conversation-feedback {
       display: flex;
       flex: 0 0 auto;
@@ -6519,7 +6552,14 @@ export function betterCodexDesignSystemCss() {
       justify-content: space-between;
     }
 
+    #better-codex-dialog .better-codex-composer-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
     #better-codex-dialog .better-codex-composer-attach,
+    #better-codex-dialog .better-codex-composer-stop,
     #better-codex-dialog .better-codex-composer-send {
       display: inline-flex;
       width: 30px;
@@ -6540,6 +6580,11 @@ export function betterCodexDesignSystemCss() {
       background: transparent;
     }
 
+    #better-codex-dialog .better-codex-composer-stop {
+      color: var(--bc-danger);
+      background: color-mix(in oklch, var(--bc-danger) 10%, transparent);
+    }
+
     #better-codex-dialog .better-codex-composer-send {
       color: var(--bc-primary-foreground);
       background: var(--bc-primary);
@@ -6550,18 +6595,17 @@ export function betterCodexDesignSystemCss() {
       height: 16px;
     }
 
-    #better-codex-dialog .better-codex-composer-send[data-composer-mode="stop"] svg,
-    #better-codex-dialog .better-codex-composer-send[data-composer-mode="stopping"] svg {
+    #better-codex-dialog .better-codex-composer-stop svg {
       width: 11px;
       height: 11px;
       fill: currentColor;
     }
 
-    #better-codex-dialog .better-codex-composer :is(.better-codex-composer-attach, .better-codex-composer-send):active:not(:disabled) {
+    #better-codex-dialog .better-codex-composer :is(.better-codex-composer-attach, .better-codex-composer-stop, .better-codex-composer-send):active:not(:disabled) {
       transform: scale(.92);
     }
 
-    #better-codex-dialog .better-codex-composer :is(.better-codex-composer-attach, .better-codex-composer-send):focus-visible {
+    #better-codex-dialog .better-codex-composer :is(.better-codex-composer-attach, .better-codex-composer-stop, .better-codex-composer-send):focus-visible {
       outline: 2px solid var(--bc-color-focus);
       outline-offset: 2px;
     }
@@ -6572,18 +6616,22 @@ export function betterCodexDesignSystemCss() {
         background: var(--bc-color-hover);
       }
 
+      #better-codex-dialog .better-codex-composer-stop:hover:not(:disabled) {
+        background: color-mix(in oklch, var(--bc-danger) 17%, transparent);
+      }
+
       #better-codex-dialog .better-codex-composer-send:hover:not(:disabled) {
         background: color-mix(in oklch, var(--bc-primary) 88%, var(--bc-color-input));
       }
     }
 
-    #better-codex-dialog .better-codex-composer :is(.better-codex-composer-attach, .better-codex-composer-send):disabled {
+    #better-codex-dialog .better-codex-composer :is(.better-codex-composer-attach, .better-codex-composer-stop, .better-codex-composer-send):disabled {
       cursor: default;
       opacity: .42;
     }
 
     @media (prefers-reduced-motion: reduce) {
-      #better-codex-dialog .better-codex-composer :is(.better-codex-composer-attach, .better-codex-composer-send) {
+      #better-codex-dialog .better-codex-composer :is(.better-codex-composer-attach, .better-codex-composer-stop, .better-codex-composer-send) {
         transition: none;
       }
     }

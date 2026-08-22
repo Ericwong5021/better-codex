@@ -800,7 +800,7 @@ export class IssueWorker {
       const existingInput = String(existingCommand.payload.request_input || "");
       if (existingInput ? existingInput !== requestInput : String(existingCommand.payload.request_message || "") !== message) throw new Error("request_id_conflict");
       if (existingCommand.status !== "failed" && existingCommand.status !== "cancelled") {
-        return { command: existingCommand, steered: existingCommand.kind === "steer", replayed: true };
+        return { command: existingCommand, steered: existingCommand.kind === "steer", queued: existingCommand.payload.queued_reply === true, replayed: true };
       }
       const currentConfig = this.sessionPayload(issue, issue.workspace_path || "", message).config_fingerprint;
       if (existingCommand.payload.config_fingerprint && existingCommand.payload.config_fingerprint !== currentConfig) throw new Error("request_id_conflict");
@@ -820,6 +820,7 @@ export class IssueWorker {
         if (existingCommand.turn_id || (existingCommand.thread_id && existingCommand.error === "session_outcome_unknown")) throw new Error("session_command_outcome_unknown");
         const retrySession = this.store.getIssueSession(issueId);
         const replaceSession = existingCommand.kind === "start" && Boolean(retrySession && !retrySession.active_turn_id);
+        const deferred = existingCommand.payload.queued_reply === true;
         const queued = this.store.enqueueSessionReply({
           issueId,
           requestId,
@@ -829,8 +830,9 @@ export class IssueWorker {
           message,
           hostId: existingCommand.host_id,
           replaceSession,
+          deferred,
         });
-        return { command: queued.command, steered: false, replayed: false };
+        return { command: queued.command, steered: false, queued: deferred, replayed: false };
       }
     }
     let session = this.store.getIssueSession(issueId);
@@ -844,7 +846,8 @@ export class IssueWorker {
     const commandSession = replaceSession ? undefined : session;
     const activeTurnId = commandSession?.active_turn_id || null;
     if (semanticCommand && activeTurnId) throw new Error("issue_execution_running");
-    if (!activeTurnId) {
+    const deferred = !semanticCommand && Boolean(activeTurnId || issue.active_run_status || this.store.getIssueReplyState(issueId).status === "running" || this.store.listQueuedIssueReplies(issueId).length);
+    if (!activeTurnId && !deferred) {
       const queued = this.store.enqueueSessionReply({
         issueId,
         requestId,
@@ -855,22 +858,22 @@ export class IssueWorker {
         hostId: commandSession?.host_id || "local",
         replaceSession,
       });
-      return { command: queued.command, steered: false, replayed: queued.replayed };
+      return { command: queued.command, steered: false, queued: false, replayed: queued.replayed };
     }
-    try {
-      const command = this.store.enqueueSessionCommand({
+    if (deferred) {
+      const queued = this.store.enqueueSessionReply({
         issueId,
         requestId,
-        kind: activeTurnId ? "steer" : "turn",
+        kind: "turn",
         threadId: session!.thread_id,
-        turnId: activeTurnId,
-        payload,
+        payload: { ...payload, queued_reply: true },
+        message,
         hostId: session!.host_id,
+        deferred: true,
       });
-      return { command, steered: Boolean(activeTurnId) };
-    } catch (error) {
-      throw error;
+      return { command: queued.command, steered: false, queued: true, replayed: queued.replayed };
     }
+    throw new Error("issue_execution_running");
   }
 
   pollSessionRelay(relayId: string, appSessionId: string, capability: "unknown" | "ready" | "failed", capabilityError?: string, busy = false) {
@@ -910,6 +913,7 @@ export class IssueWorker {
   }
 
   private handleSessionCommandFailure(command: SessionCommand, error: string) {
+    if (command.payload.queued_reply === true && !command.claimed_at) return;
     if (command.status === "pending" || command.kind === "steer" || command.kind === "interrupt" || command.turn_id || error === "session_outcome_unknown") return;
     if (command.run_id) {
       const claim = this.store.getRunClaim(command.run_id);

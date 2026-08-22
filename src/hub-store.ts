@@ -878,7 +878,6 @@ export class HubStore {
     const pendingReply = createOperation || settingOperation || projectOperation ? undefined : this.db.prepare("SELECT 1 AS value FROM remote_commands WHERE entity_id = ? AND operation = 'issue.reply' AND status IN ('pending', 'dispatched') LIMIT 1").get(entityId);
     const running = Boolean(currentProjection?.active_run_status || currentProjection?.reply_status === "running" || ["starting", "active", "stopping", "waiting_on_approval", "waiting_on_user"].includes(currentProjection?.session_status || "") || pendingReply);
     if (current && running && !["issue.reply", "issue.stop"].includes(operation)) throw new Error("issue_execution_running");
-    if (operation === "issue.reply" && pendingReply) throw new Error("reply_busy");
     if (operation === "issue.reply" && currentProjection?.archived_at) throw new Error("issue_archived");
     if (operation === "issue.reply" && !currentProjection?.has_conversation) throw new Error("session_required");
     if (operation === "issue.stop" && !running) throw new Error("issue_not_running");
@@ -1170,6 +1169,15 @@ export class HubStore {
     if (!replySource || typeof replySource !== "object" || Array.isArray(replySource)) throw new Error("invalid_conversation_projection");
     const reply = replySource as Record<string, unknown>;
     if (!["idle", "running", "succeeded", "failed", "interrupted"].includes(String(reply.status))) throw new Error("invalid_conversation_projection");
+    const queuedReplies = Array.isArray(source.queued_replies) ? source.queued_replies.map(value => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid_conversation_projection");
+      const queued = value as Record<string, unknown>;
+      return {
+        request_id: cleanString(queued.request_id, 200, false),
+        message: cleanString(queued.message, 100_000),
+        created_at: cleanString(queued.created_at, 64, false),
+      };
+    }).slice(0, 100) : [];
     const projection: ConversationProjection = {
       issue_id: issueId,
       found: source.found,
@@ -1182,6 +1190,7 @@ export class HubStore {
         ...(typeof reply.started_at === "string" ? { started_at: cleanString(reply.started_at, 64) } : {}),
         ...(typeof reply.finished_at === "string" ? { finished_at: cleanString(reply.finished_at, 64) } : {}),
       },
+      queued_replies: queuedReplies,
       updated_at: cleanString(source.updated_at, 64, false),
     };
     const payload = JSON.stringify(projection);

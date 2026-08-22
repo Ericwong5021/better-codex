@@ -565,7 +565,7 @@ export function createHubServer(options: HubServerOptions) {
             reply = { request_id: command.command_id, status: "failed", message: String(command.payload.message || ""), error: command.error || "command_rejected", started_at: command.requested_at, finished_at: command.finished_at || undefined };
           }
         }
-        return sendJson(response, 200, { issue_id: issue.id, found: messages.length > 0, messages: messages.map(message => ({ ...message, html: renderMarkdown(message.markdown) })), reply, updated_at: projection?.updated_at || issue.updated_at, issue: issueForWeb(store, issue) });
+        return sendJson(response, 200, { issue_id: issue.id, found: messages.length > 0, messages: messages.map(message => ({ ...message, html: renderMarkdown(message.markdown) })), reply, queued_replies: projection?.queued_replies || [], updated_at: projection?.updated_at || issue.updated_at, issue: issueForWeb(store, issue) });
       }
       const replyMatch = url.pathname.match(/^\/api\/issues\/([^/]+)\/reply$/);
       if (replyMatch && method === "POST") {

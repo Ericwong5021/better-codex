@@ -72,6 +72,12 @@ export type IssueReplyState = {
   finished_at?: string;
 };
 
+export type QueuedIssueReply = {
+  request_id: string;
+  message: string;
+  created_at: string;
+};
+
 export type IssueSessionStatus = "starting" | "active" | "stopping" | "waiting_on_approval" | "waiting_on_user" | "idle" | "interrupted" | "failed" | "disconnected";
 export type SessionCommandKind = "start" | "turn" | "review" | "compact" | "steer" | "interrupt";
 export type SessionCommandStatus = "pending" | "claimed" | "completed" | "failed" | "cancelled";
@@ -1059,6 +1065,9 @@ export class Store {
       DROP TRIGGER IF EXISTS sync_reply_insert;
       DROP TRIGGER IF EXISTS sync_reply_update;
       DROP TRIGGER IF EXISTS sync_reply_delete;
+      DROP TRIGGER IF EXISTS sync_session_command_insert;
+      DROP TRIGGER IF EXISTS sync_session_command_update;
+      DROP TRIGGER IF EXISTS sync_session_command_delete;
       CREATE TRIGGER sync_project_insert AFTER INSERT ON projects BEGIN ${dirty("project", "NEW.id")} END;
       CREATE TRIGGER sync_project_update AFTER UPDATE OF name, identifier_prefix, workspace_path, root_paths_json, description, overview_html, overview_status, overview_error, overview_updated_at, project_documents_json, document_agent_id, document_feedback ON projects BEGIN ${dirty("project", "NEW.id")} END;
       CREATE TRIGGER sync_project_delete AFTER DELETE ON projects BEGIN ${removed("project", "OLD.id")} END;
@@ -1074,6 +1083,9 @@ export class Store {
       CREATE TRIGGER sync_reply_insert AFTER INSERT ON issue_replies BEGIN ${dirty("issue", "NEW.issue_id")} END;
       CREATE TRIGGER sync_reply_update AFTER UPDATE OF status, message, error, started_at, finished_at ON issue_replies BEGIN ${dirty("issue", "NEW.issue_id")} END;
       CREATE TRIGGER sync_reply_delete AFTER DELETE ON issue_replies BEGIN ${dirty("issue", "OLD.issue_id")} END;
+      CREATE TRIGGER sync_session_command_insert AFTER INSERT ON session_commands BEGIN ${dirty("issue", "NEW.issue_id")} END;
+      CREATE TRIGGER sync_session_command_update AFTER UPDATE OF status, payload_json, error, claimed_at, finished_at ON session_commands BEGIN ${dirty("issue", "NEW.issue_id")} END;
+      CREATE TRIGGER sync_session_command_delete AFTER DELETE ON session_commands BEGIN ${dirty("issue", "OLD.issue_id")} END;
     `);
   }
 
@@ -3486,6 +3498,7 @@ export class Store {
     message: string;
     hostId?: string;
     replaceSession?: boolean;
+    deferred?: boolean;
   }) {
     const fingerprint = sessionCommandFingerprint(input);
     const timestamp = now();
@@ -3508,33 +3521,40 @@ export class Store {
         }
       }
       if (issue.session_handoff_at && !issue.session_owned) throw new Error("issue_session_handed_off");
-      if (issue.active_run_status) throw new Error("issue_execution_running");
       const reply = this.getIssueReplyState(input.issueId);
-      if (reply.status === "running" && reply.request_id !== input.requestId) throw new Error("reply_busy");
+      if (!input.deferred && issue.active_run_status) throw new Error("issue_execution_running");
+      if (!input.deferred && reply.status === "running" && reply.request_id !== input.requestId) throw new Error("reply_busy");
+      if (input.deferred) {
+        const session = this.getIssueSession(input.issueId);
+        if (!session || session.thread_id !== input.threadId) throw new Error("issue_session_mismatch");
+        if (input.kind !== "turn" || input.payload.queued_reply !== true) throw new Error("queued_reply_invalid");
+      }
       if (input.replaceSession) {
         const detached = this.db.prepare("DELETE FROM issue_sessions WHERE issue_id = ? AND active_turn_id IS NULL").run(input.issueId);
         if (detached.changes !== 1) throw new Error("issue_session_replace_conflict");
       }
-      this.db.prepare(`
-        UPDATE issues
-        SET status = 'in_progress',
-            needs_attention = 0,
-            pending_actor = 'agent',
-            version = version + 1,
-            updated_at = ?
-        WHERE id = ? AND archived_at IS NULL
-      `).run(timestamp, input.issueId);
-      this.db.prepare(`
-        INSERT INTO issue_replies (issue_id, request_id, status, message, error, started_at, finished_at)
-        VALUES (?, ?, 'running', ?, NULL, ?, NULL)
-        ON CONFLICT(issue_id) DO UPDATE SET
-          request_id = excluded.request_id,
-          status = 'running',
-          message = excluded.message,
-          error = NULL,
-          started_at = excluded.started_at,
-          finished_at = NULL
-      `).run(input.issueId, input.requestId, input.message, timestamp);
+      if (!input.deferred) {
+        this.db.prepare(`
+          UPDATE issues
+          SET status = 'in_progress',
+              needs_attention = 0,
+              pending_actor = 'agent',
+              version = version + 1,
+              updated_at = ?
+          WHERE id = ? AND archived_at IS NULL
+        `).run(timestamp, input.issueId);
+        this.db.prepare(`
+          INSERT INTO issue_replies (issue_id, request_id, status, message, error, started_at, finished_at)
+          VALUES (?, ?, 'running', ?, NULL, ?, NULL)
+          ON CONFLICT(issue_id) DO UPDATE SET
+            request_id = excluded.request_id,
+            status = 'running',
+            message = excluded.message,
+            error = NULL,
+            started_at = excluded.started_at,
+            finished_at = NULL
+        `).run(input.issueId, input.requestId, input.message, timestamp);
+      }
       if (commandId) {
         this.db.prepare(`
           UPDATE session_commands
@@ -3591,6 +3611,21 @@ export class Store {
       WHERE issue_id = ? AND status IN ('pending', 'claimed')
       ORDER BY CASE kind WHEN 'interrupt' THEN 0 ELSE 1 END, created_at, rowid
     `).all(issueId) as Record<string, unknown>[]).map(sessionCommandFromRow);
+  }
+
+  listQueuedIssueReplies(issueId: string): QueuedIssueReply[] {
+    return (this.db.prepare(`
+      SELECT * FROM session_commands
+      WHERE issue_id = ? AND status = 'pending' AND kind = 'turn'
+      ORDER BY created_at, rowid
+    `).all(issueId) as Record<string, unknown>[])
+      .map(sessionCommandFromRow)
+      .filter(command => command.payload.queued_reply === true)
+      .map(command => ({
+        request_id: command.request_id,
+        message: String(command.payload.request_message || command.payload.message || ""),
+        created_at: command.created_at,
+      }));
   }
 
   heartbeatSessionRelay(relayId: string, appSessionId: string, capabilityError?: string | null) {
@@ -3689,6 +3724,24 @@ export class Store {
       const row = this.db.prepare(`
         SELECT * FROM session_commands
         WHERE status = 'pending'
+          AND (
+            kind IN ('interrupt', 'steer')
+            OR (
+              NOT EXISTS (
+                SELECT 1 FROM issue_sessions
+                WHERE issue_sessions.issue_id = session_commands.issue_id
+                  AND issue_sessions.active_turn_id IS NOT NULL
+              )
+              AND (
+                run_id IS NOT NULL
+                OR NOT EXISTS (
+                  SELECT 1 FROM issue_runs
+                  WHERE issue_runs.issue_id = session_commands.issue_id
+                    AND issue_runs.status IN ('claimed', 'running', 'scheduling')
+                )
+              )
+            )
+          )
         ORDER BY CASE kind WHEN 'interrupt' THEN 0 ELSE 1 END, created_at, rowid
         LIMIT 1
       `).get() as Record<string, unknown> | undefined;
@@ -3703,6 +3756,27 @@ export class Store {
         WHERE id = ? AND status = 'pending'
       `).run(relayId, timestamp, String(row.id));
       if (result.changes !== 1) throw new Error("session_command_claim_conflict");
+      const command = sessionCommandFromRow(row);
+      if (command.payload.queued_reply === true) {
+        const message = String(command.payload.request_message || command.payload.message || "");
+        this.db.prepare(`
+          INSERT INTO issue_replies (issue_id, request_id, status, message, error, started_at, finished_at)
+          VALUES (?, ?, 'running', ?, NULL, ?, NULL)
+          ON CONFLICT(issue_id) DO UPDATE SET
+            request_id = excluded.request_id,
+            status = 'running',
+            message = excluded.message,
+            error = NULL,
+            started_at = excluded.started_at,
+            finished_at = NULL
+        `).run(command.issue_id, command.request_id, message, timestamp);
+        this.db.prepare(`
+          UPDATE issues
+          SET status = 'in_progress', needs_attention = 0, pending_actor = 'agent',
+              version = version + 1, updated_at = ?
+          WHERE id = ? AND archived_at IS NULL
+        `).run(timestamp, command.issue_id);
+      }
       this.db.exec("COMMIT");
       return this.getSessionCommand(String(row.id));
     } catch (error) {
@@ -4341,6 +4415,7 @@ export class Store {
       found: projected.length > 0,
       messages: projected.slice(-80),
       reply,
+      queued_replies: this.listQueuedIssueReplies(issueId),
       updated_at: [issue.updated_at, reply.finished_at || reply.started_at || "", ...projected.map(message => message.timestamp || "")].sort().at(-1) || issue.updated_at,
     };
   }
