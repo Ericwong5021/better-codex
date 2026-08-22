@@ -485,6 +485,7 @@ test("runtime relay client forwards concurrent HTTP requests with only the local
   await waitFor(() => sseClosed === 2);
   restarted.stop();
   await relay.close();
+  const localClosed = once(local, "close");
   local.close();
-  await once(local, "close");
+  await localClosed;
 });
