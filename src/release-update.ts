@@ -12,12 +12,15 @@ type StableManifest = {
   signature?: string;
 };
 
+export type ReleaseChannel = "stable" | "preview";
+
 export type ReleaseUpdateState = {
   status: "current" | "available" | "error";
   currentVersion: string;
   latestVersion: string | null;
   checkedAt: string;
   error: string | null;
+  channel: ReleaseChannel;
 };
 
 const updatePublicKey = `-----BEGIN PUBLIC KEY-----
@@ -30,10 +33,11 @@ function stableJson(value: unknown): string {
   return JSON.stringify(value);
 }
 
-export async function checkStableRelease(): Promise<ReleaseUpdateState> {
+export async function checkRelease(channel: ReleaseChannel): Promise<ReleaseUpdateState> {
   const checkedAt = new Date().toISOString();
   try {
-    const response = await fetch("https://github.com/Ericwong5021/better-codex/releases/latest/download/update-manifest.json", {
+    const release = channel === "stable" ? "latest/download" : "download/preview";
+    const response = await fetch(`https://github.com/Ericwong5021/better-codex/releases/${release}/update-manifest.json`, {
       headers: { "cache-control": "no-cache", pragma: "no-cache" },
       redirect: "follow",
       signal: AbortSignal.timeout(20_000),
@@ -41,7 +45,8 @@ export async function checkStableRelease(): Promise<ReleaseUpdateState> {
     if (!response.ok) throw new Error(`update_http_${response.status}`);
     const manifest = await response.json() as StableManifest;
     const payload = manifest.payload;
-    if (!payload || payload.schemaVersion !== 1 || payload.channel !== "stable" || !Number.isFinite(Date.parse(payload.generatedAt || "")) || typeof payload.core?.version !== "string" || !/^\d+\.\d+\.\d+$/.test(payload.core.version) || typeof manifest.signature !== "string") throw new Error("update_manifest_invalid");
+    const versionPattern = channel === "stable" ? /^\d+\.\d+\.\d+$/ : /^\d+\.\d+\.\d+-beta\.\d+$/;
+    if (!payload || payload.schemaVersion !== 1 || payload.channel !== channel || !Number.isFinite(Date.parse(payload.generatedAt || "")) || typeof payload.core?.version !== "string" || !versionPattern.test(payload.core.version) || typeof manifest.signature !== "string") throw new Error("update_manifest_invalid");
     if (!verify(null, Buffer.from(stableJson(payload)), updatePublicKey, Buffer.from(manifest.signature, "base64"))) throw new Error("update_signature_invalid");
     const latestVersion = payload.core.version;
     return {
@@ -50,6 +55,7 @@ export async function checkStableRelease(): Promise<ReleaseUpdateState> {
       latestVersion,
       checkedAt,
       error: null,
+      channel,
     };
   } catch (error) {
     return {
@@ -58,6 +64,7 @@ export async function checkStableRelease(): Promise<ReleaseUpdateState> {
       latestVersion: null,
       checkedAt,
       error: error instanceof Error ? error.message : "update_check_failed",
+      channel,
     };
   }
 }

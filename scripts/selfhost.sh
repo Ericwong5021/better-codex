@@ -168,8 +168,8 @@ configure_vps_updater() {
     rm -f /var/lib/better-codex-updater/ready
     return
   fi
-  printf '%s\n' '[Unit]' 'Description=Better Codex Relay online updater' 'After=docker.service network-online.target' '' '[Service]' 'Type=oneshot' 'ExecStart=/usr/local/libexec/better-codex-selfhost-updater' > /etc/systemd/system/better-codex-updater.service
-  printf '%s\n' '[Unit]' 'Description=Watch for Better Codex Relay online update requests' '' '[Path]' 'PathExists=/var/lib/better-codex-updater/request' 'Unit=better-codex-updater.service' '' '[Install]' 'WantedBy=multi-user.target' > /etc/systemd/system/better-codex-updater.path
+  printf '%s\n' '[Unit]' 'Description=Better Codex Relay online updater' 'After=docker.service network-online.target' '' '[Service]' 'Type=oneshot' 'ExecStart=/usr/local/libexec/better-codex-selfhost-updater' 'Restart=on-failure' 'RestartSec=5s' > /etc/systemd/system/better-codex-updater.service
+  printf '%s\n' '[Unit]' 'Description=Watch for Better Codex Relay online update requests' '' '[Path]' 'PathExists=/var/lib/better-codex-updater/request' 'PathExists=/var/lib/better-codex-updater/request.running' 'Unit=better-codex-updater.service' '' '[Install]' 'WantedBy=multi-user.target' > /etc/systemd/system/better-codex-updater.path
   chmod 644 /etc/systemd/system/better-codex-updater.service /etc/systemd/system/better-codex-updater.path
   systemctl daemon-reload
   systemctl enable --now better-codex-updater.path

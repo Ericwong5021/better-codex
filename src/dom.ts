@@ -3198,17 +3198,17 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     async function waitForUpdateCompletion(notice) {
-      const deadline = Date.now() + 10 * 60 * 1000;
+      const deadline = Date.now() + 30 * 60 * 1000;
       const title = notice.querySelector(".better-codex-update-title");
       const description = notice.querySelector(".better-codex-update-description");
       while (!destroyed && updateNotice === notice && Date.now() < deadline) {
         await new Promise(resolve => setTimeout(resolve, 500));
         let update;
         try {
-          update = await api("/api/update");
+          update = await api("/api/update", { passive: true });
         } catch (reason) {
           if (destroyed || updateNotice !== notice) return;
-          if (transientRuntimeTransportError(reason)) continue;
+          if (transientNetworkError(reason)) continue;
           throw reason;
         }
         if (updateNotice !== notice) return;
@@ -3217,6 +3217,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           notice.dataset.status = "current";
           title.textContent = t("Better Codex 已是最新版本");
           description.textContent = REMOTE ? t("远程服务升级完成。") : t("更新已完成。");
+          notice.querySelector(".better-codex-update-actions").remove();
           setTimeout(() => {
             if (updateNotice !== notice) return;
             notice.remove();

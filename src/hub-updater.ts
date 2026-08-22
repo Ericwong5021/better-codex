@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { checkStableRelease } from "./release-update.js";
+import { compareVersions } from "./compatibility.js";
+import { checkRelease, type ReleaseChannel } from "./release-update.js";
 import { coreVersion } from "./version.js";
 
 type HostUpdateState = {
@@ -19,6 +20,7 @@ export type HubUpdateState = {
   error: string | null;
   deployment: "vps";
   installSupported: boolean;
+  channel: ReleaseChannel;
 };
 
 const checkInterval = 60 * 60 * 1000;
@@ -27,9 +29,11 @@ export class HubUpdater {
   private state: HubUpdateState;
   private checkPromise: Promise<HubUpdateState> | null = null;
   private readonly directory: string;
+  private readonly channel: ReleaseChannel;
 
   constructor(directory = process.env.BETTER_CODEX_HUB_UPDATER_DIR || "") {
     this.directory = directory ? resolve(directory) : "";
+    this.channel = coreVersion.includes("-beta.") ? "preview" : "stable";
     this.state = {
       status: "current",
       currentVersion: coreVersion,
@@ -38,6 +42,7 @@ export class HubUpdater {
       error: null,
       deployment: "vps",
       installSupported: this.supported(),
+      channel: this.channel,
     };
   }
 
@@ -49,14 +54,16 @@ export class HubUpdater {
     if (!this.directory) return null;
     try {
       return JSON.parse(readFileSync(join(this.directory, "state.json"), "utf8")) as HostUpdateState;
-    } catch {
-      return null;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
     }
   }
 
   get() {
     const host = this.hostState();
     const installSupported = this.supported();
+    const hostTarget = host?.targetVersion?.replace(/^v/, "") || null;
     if (host?.status === "installing") {
       return {
         ...this.state,
@@ -66,15 +73,16 @@ export class HubUpdater {
         checkedAt: host.updatedAt || this.state.checkedAt,
         error: null,
         installSupported,
+        channel: this.channel,
       };
     }
-    if (host?.status === "error" && host.targetVersion?.replace(/^v/, "") === this.state.latestVersion) {
-      return { ...this.state, status: "error" as const, checkedAt: host.updatedAt || this.state.checkedAt, error: host.error || "update_install_failed", installSupported };
+    if (host?.status === "error" && (!hostTarget || compareVersions(hostTarget, coreVersion) > 0)) {
+      return { ...this.state, status: "error" as const, latestVersion: hostTarget || this.state.latestVersion, checkedAt: host.updatedAt || this.state.checkedAt, error: host.error || "update_install_failed", installSupported, channel: this.channel };
     }
     if (host?.status === "current" && host.currentVersion === coreVersion && this.state.latestVersion === coreVersion) {
-      return { ...this.state, status: "current" as const, currentVersion: coreVersion, latestVersion: coreVersion, checkedAt: host.updatedAt || this.state.checkedAt, error: null, installSupported };
+      return { ...this.state, status: "current" as const, currentVersion: coreVersion, latestVersion: coreVersion, checkedAt: host.updatedAt || this.state.checkedAt, error: null, installSupported, channel: this.channel };
     }
-    return { ...this.state, currentVersion: coreVersion, installSupported };
+    return { ...this.state, currentVersion: coreVersion, installSupported, channel: this.channel };
   }
 
   stale() {
@@ -85,7 +93,7 @@ export class HubUpdater {
   check() {
     if (this.checkPromise) return this.checkPromise;
     this.state = { ...this.get(), status: "current", error: null };
-    const promise = checkStableRelease().then(result => {
+    const promise = checkRelease(this.channel).then(result => {
       this.state = { ...result, deployment: "vps", installSupported: this.supported() };
       return this.get();
     }).finally(() => {
@@ -100,17 +108,22 @@ export class HubUpdater {
   }
 
   async install() {
-    const state = await this.check();
+    const request = join(this.directory, "request");
+    const running = join(this.directory, "request.running");
+    const lock = join(this.directory, "request.lock");
+    const host = this.hostState();
+    if (host?.status === "installing" || existsSync(request) || existsSync(running)) throw new Error("update_in_progress");
+    await this.check();
+    const state = this.state;
     if (!state.installSupported) throw new Error("hub_update_not_configured");
     if (state.status !== "available" || !state.latestVersion) throw new Error(state.error || "update_not_available");
     const target = `v${state.latestVersion}`;
-    if (!/^v\d+\.\d+\.\d+$/.test(target)) throw new Error("update_version_invalid");
+    const targetPattern = this.channel === "stable" ? /^v\d+\.\d+\.\d+$/ : /^v\d+\.\d+\.\d+-beta\.\d+$/;
+    if (!targetPattern.test(target)) throw new Error("update_version_invalid");
     const temporary = join(this.directory, `request.${process.pid}.${Date.now()}`);
-    const request = join(this.directory, "request");
-    const lock = join(this.directory, "request.lock");
-    if (existsSync(request) || this.hostState()?.status === "installing") throw new Error("update_in_progress");
     let locked = false;
     try {
+      if (this.hostState()?.status === "installing" || existsSync(request) || existsSync(running)) throw new Error("update_in_progress");
       writeFileSync(lock, `${process.pid}\n`, { mode: 0o600, flag: "wx" });
       locked = true;
       writeFileSync(temporary, `${target}\n`, { mode: 0o600, flag: "wx" });

@@ -9,25 +9,31 @@ lock="$state_directory/request.lock"
 state="$state_directory/state.json"
 
 [ -d "$directory/.git" ] || exit 1
-[ -f "$request" ] || exit 0
-mv "$request" "$running"
+if [ ! -f "$running" ]; then
+  [ -f "$request" ] || exit 0
+  mv "$request" "$running"
+fi
 target="$(tr -d '\r\n' < "$running")"
-rm -f "$running"
-[[ "$target" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
-  printf '{"status":"error","targetVersion":"","updatedAt":"%s","error":"update_version_invalid"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$state"
-  chmod 644 "$state"
-  rm -f "$lock"
+write_state() {
+  local temporary
+  temporary="$(mktemp "$state_directory/state.XXXXXX")"
+  printf '%s\n' "$1" > "$temporary"
+  chmod 644 "$temporary"
+  mv -f "$temporary" "$state"
+}
+[[ "$target" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?$ ]] || {
+  write_state "{\"status\":\"error\",\"targetVersion\":\"\",\"updatedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"error\":\"update_version_invalid\"}"
+  rm -f "$running" "$lock"
   exit 1
 }
 
-printf '{"status":"installing","targetVersion":"%s","updatedAt":"%s","error":null}\n' "$target" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$state"
-chmod 644 "$state"
+write_state "{\"status\":\"installing\",\"targetVersion\":\"$target\",\"updatedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"error\":null}"
 rm -f "$lock"
 if BETTER_CODEX_SELFHOST_DIR="$directory" bash /usr/local/libexec/better-codex-selfhost upgrade vps "$target"; then
-  printf '{"status":"current","targetVersion":"%s","currentVersion":"%s","updatedAt":"%s","error":null}\n' "$target" "${target#v}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$state"
-  chmod 644 "$state"
+  write_state "{\"status\":\"current\",\"targetVersion\":\"$target\",\"currentVersion\":\"${target#v}\",\"updatedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"error\":null}"
+  rm -f "$running"
   exit 0
 fi
-printf '{"status":"error","targetVersion":"%s","updatedAt":"%s","error":"update_install_failed"}\n' "$target" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$state"
-chmod 644 "$state"
+write_state "{\"status\":\"error\",\"targetVersion\":\"$target\",\"updatedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"error\":\"update_install_failed\"}"
+rm -f "$running" "$lock"
 exit 1
