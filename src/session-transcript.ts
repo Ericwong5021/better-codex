@@ -163,7 +163,7 @@ function attachmentName(value: string) {
 }
 
 export function conversationContent(value: string) {
-  const markdown = String(value || "").replace(/\r\n?/g, "\n").trim();
+  const markdown = stripMemoryCitation(String(value || "").replace(/\r\n?/g, "\n")).trim();
   const lines = markdown.split("\n");
   let marker = -1;
   for (let index = lines.length - 1; index >= 0; index -= 1) {
