@@ -725,11 +725,12 @@ test("issue details render the latest conversation result and reply composer", (
   assert.ok(source.includes("/reply"));
   assert.ok(source.includes("在此回复智能体"));
   assert.ok(source.includes("data-conversation-send"));
-  assert.ok(source.includes("data-conversation-stop"));
+  assert.ok(!source.includes("data-conversation-stop"));
   assert.ok(source.includes("data-conversation-queue"));
   assert.ok(source.includes("data-conversation-attach"));
   assert.ok(permissions.includes("[data-conversation-copy]"));
   assert.ok(source.includes('data-composer-mode="\' + mode + \'"'));
+  assert.ok(source.includes('button.dataset.composerMode === "stop"'));
   assert.ok(source.includes('["send", "queue"].includes(button.dataset.composerMode)'));
   assert.ok(source.includes("stopIssueFromDialog(button)"));
   assert.equal(permissions.match(/\[data-conversation-retry\]/g)?.length, 2);
@@ -743,7 +744,7 @@ test("issue details render the latest conversation result and reply composer", (
   assert.match(css, /\.better-codex-composer textarea\s*\{[^}]*resize:\s*none;/s);
   assert.match(css, /\.better-codex-composer-toolbar\s*\{[^}]*height:\s*30px;/s);
   assert.match(css, /\.better-codex-composer-attach,[\s\S]*?\.better-codex-composer-send\s*\{[^}]*width:\s*30px;[^}]*height:\s*30px;/s);
-  assert.match(css, /\.better-codex-composer-stop svg/s);
+  assert.match(css, /\.better-codex-composer-send\[data-composer-mode="stop"\] svg/s);
 });
 
 test("user-stopped sessions render a red-dot stopped state", () => {

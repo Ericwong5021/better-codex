@@ -7386,28 +7386,22 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
       function updateReplySendState(replyStatus = issue?.reply_status || "idle") {
         const send = dialog.querySelector("[data-conversation-send]");
-        const stop = dialog.querySelector("[data-conversation-stop]");
         const reply = dialog.querySelector('[name="reply"]');
         if (!send) return;
         const stopping = issue?.session_status === "stopping";
         const archived = Boolean(issue?.archived_at);
         const working = stopping || executionRunning || replyStatus === "running";
-        const mode = working ? "queue" : "send";
+        const hasContent = Boolean(String(reply?.value || "").trim() || draft.replyAttachments.length);
+        const mode = stopping ? "stopping" : working && !hasContent ? "stop" : working ? "queue" : "send";
         const composer = send.closest(".better-codex-composer");
         if (reply) reply.disabled = sessionHandoff || archived;
         if (composer) composer.dataset.state = mode;
         send.dataset.composerMode = mode;
-        send.setAttribute("aria-label", t(working ? "加入队列" : "发送"));
-        send.title = t(working ? "加入队列" : "发送");
-        send.innerHTML = icon("send", "", "2");
-        send.disabled = stopping || sessionHandoff || archived || (!String(reply?.value || "").trim() && !draft.replyAttachments.length);
-        if (stop) {
-          stop.hidden = !working;
-          stop.disabled = stopping || sessionHandoff || archived;
-          stop.dataset.composerMode = stopping ? "stopping" : "stop";
-          stop.setAttribute("aria-label", t(stopping ? "正在停止…" : "停止任务"));
-          stop.title = t(stopping ? "正在停止…" : "停止任务");
-        }
+        const actionLabel = t(stopping ? "正在停止…" : mode === "stop" ? "停止任务" : mode === "queue" ? "加入队列" : "发送");
+        send.setAttribute("aria-label", actionLabel);
+        send.title = actionLabel;
+        send.innerHTML = icon(mode === "stop" || mode === "stopping" ? "stop" : "send", "", mode === "stop" || mode === "stopping" ? "2.5" : "2");
+        send.disabled = stopping || sessionHandoff || archived || (mode !== "stop" && !hasContent);
         const attach = dialog.querySelector("[data-conversation-attach]");
         if (attach) attach.disabled = sessionHandoff || archived;
       }
@@ -7430,12 +7424,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             control.disabled = true;
             return;
           }
-          if (sessionHandoff && control.matches('[name="reply"], [data-conversation-send], [data-conversation-stop], [data-conversation-attach], [data-dialog-attachment-scope="reply"]')) {
+          if (sessionHandoff && control.matches('[name="reply"], [data-conversation-send], [data-conversation-attach], [data-dialog-attachment-scope="reply"]')) {
             control.disabled = true;
             return;
           }
           if (executionRunning) {
-            control.disabled = !control.matches('[name="reply"], [data-conversation-send], [data-conversation-stop], [data-conversation-attach], [data-conversation-retry], [data-dialog-attachment-scope="reply"]');
+            control.disabled = !control.matches('[name="reply"], [data-conversation-send], [data-conversation-attach], [data-conversation-retry], [data-dialog-attachment-scope="reply"]');
             return;
           }
           if (executionLocked) {
@@ -7728,14 +7722,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const stopping = issue.session_status === "stopping";
         const archived = Boolean(issue.archived_at);
         const working = stopping || executionRunning || issue.reply_status === "running";
-        const mode = working ? "queue" : "send";
+        const hasContent = Boolean(draft.reply.trim() || draft.replyAttachments.length);
+        const mode = stopping ? "stopping" : working && !hasContent ? "stop" : working ? "queue" : "send";
         const inputDisabled = sessionHandoff || archived ? " disabled" : "";
-        const actionDisabled = stopping || sessionHandoff || archived || (!draft.reply.trim() && !draft.replyAttachments.length) ? " disabled" : "";
-        const actionLabel = t(working ? "加入队列" : "发送");
+        const actionDisabled = stopping || sessionHandoff || archived || (mode !== "stop" && !hasContent) ? " disabled" : "";
+        const actionLabel = t(stopping ? "正在停止…" : mode === "stop" ? "停止任务" : mode === "queue" ? "加入队列" : "发送");
         const attachments = attachmentList(draft.replyAttachments, "reply");
         const attachButton = '<button class="better-codex-composer-attach" type="button" data-conversation-attach aria-label="' + te("添加附件") + '" title="' + te("添加附件") + '"' + inputDisabled + '>' + icon("plus", "", "1.9") + '</button>';
-        const stopButton = '<button class="better-codex-composer-stop" type="button" data-conversation-stop data-composer-mode="' + (stopping ? "stopping" : "stop") + '" aria-label="' + te(stopping ? "正在停止…" : "停止任务") + '" title="' + te(stopping ? "正在停止…" : "停止任务") + '"' + (working ? "" : " hidden") + (stopping || sessionHandoff || archived ? " disabled" : "") + '>' + icon("stop", "", "2.5") + '</button>';
-        return '<div class="better-codex-composer" data-state="' + mode + '">' + attachments + '<div class="better-codex-composer-queue" data-conversation-queue hidden></div><div class="better-codex-semantic-menu" id="better-codex-semantic-menu" data-semantic-menu role="listbox" hidden></div><textarea name="reply" rows="2" placeholder="' + te(archived ? "取消归档后继续对话" : sessionHandoff ? "请前往会话继续对话" : "输入下一步要求…") + '" aria-label="' + te("回复") + '" aria-autocomplete="list" aria-controls="better-codex-semantic-menu" aria-expanded="false"' + inputDisabled + '>' + escapeHtml(draft.reply) + '</textarea><div class="better-codex-composer-toolbar">' + attachButton + '<div class="better-codex-composer-actions">' + stopButton + '<button class="better-codex-composer-send" type="button" data-conversation-send data-composer-mode="' + mode + '" aria-label="' + escapeHtml(actionLabel) + '" title="' + escapeHtml(actionLabel) + '"' + actionDisabled + '>' + icon("send", "", "2") + '</button></div></div></div>';
+        return '<div class="better-codex-composer" data-state="' + mode + '">' + attachments + '<div class="better-codex-composer-queue" data-conversation-queue hidden></div><div class="better-codex-semantic-menu" id="better-codex-semantic-menu" data-semantic-menu role="listbox" hidden></div><textarea name="reply" rows="2" placeholder="' + te(archived ? "取消归档后继续对话" : sessionHandoff ? "请前往会话继续对话" : "输入下一步要求…") + '" aria-label="' + te("回复") + '" aria-autocomplete="list" aria-controls="better-codex-semantic-menu" aria-expanded="false"' + inputDisabled + '>' + escapeHtml(draft.reply) + '</textarea><div class="better-codex-composer-toolbar">' + attachButton + '<button class="better-codex-composer-send" type="button" data-conversation-send data-composer-mode="' + mode + '" aria-label="' + escapeHtml(actionLabel) + '" title="' + escapeHtml(actionLabel) + '"' + actionDisabled + '>' + icon(mode === "stop" || mode === "stopping" ? "stop" : "send", "", mode === "stop" || mode === "stopping" ? "2.5" : "2") + '</button></div></div>';
       }
 
       function syncQueuedReplyState() {
@@ -8443,9 +8437,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         });
         sendButton?.addEventListener("click", event => {
           const button = event.currentTarget;
-          if (["send", "queue"].includes(button.dataset.composerMode)) void sendReply();
+          if (button.dataset.composerMode === "stop") void stopIssueFromDialog(button);
+          else if (["send", "queue"].includes(button.dataset.composerMode)) void sendReply();
         });
-        dialog.querySelector("[data-conversation-stop]")?.addEventListener("click", event => void stopIssueFromDialog(event.currentTarget));
         dialog.querySelector("[data-conversation-body]")?.addEventListener("click", async event => {
           const attachmentButton = event.target.closest("[data-conversation-attachment]");
           if (attachmentButton) {
