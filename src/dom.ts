@@ -6771,10 +6771,15 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         try {
           const path = mode === "default" ? "/api/agents/default" : mode === "create" ? "/api/agents" : "/api/agents/" + encodeURIComponent(selected.id);
           const saved = await api(path, { method: mode === "create" ? "POST" : "PATCH", body: JSON.stringify(body) });
-          state.agentPane = "detail";
-          state.selectedAgentId = agentKey(saved);
-          state.agentDraft = null;
-          await loadAgents();
+          if (mode === "create") {
+            state.agentPane = "detail";
+            state.selectedAgentId = agentKey(saved);
+            state.agentDraft = null;
+            await loadAgents();
+          } else {
+            await loadAgents({ preserveInspector: true });
+            closeAgentInspector();
+          }
         } catch (caught) {
           reportGlobalError(caught, { source: "agent_save", mode });
           error.textContent = t(caught instanceof Error ? caught.message : "保存失败");
