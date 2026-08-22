@@ -80,12 +80,12 @@ test("remote shared Web UI shows pending, acknowledgement, conflict, and resubmi
     await (await chooser).setFiles({ name: "web-proof.txt", mimeType: "text/plain", buffer: Buffer.from("verified from WebUI") });
     await expect(dialog.locator("[data-reply-attachments]")).toContainText("web-proof.txt");
     await dialog.locator('[name="reply"]').fill("Continue from WebUI");
-    await dialog.locator("[data-conversation-stop]").click();
+    await dialog.locator("[data-conversation-send]").click();
     await expect.poll(() => hub.store.board().issues.find(item => item.id === conversationIssue.id)?.remote_state?.operation).toBe("issue.reply");
     const replyCommandId = hub.store.board().issues.find(item => item.id === conversationIssue.id)!.remote_state!.command_id;
     await expect(dialog.locator(".better-codex-bubble.is-user").last()).toContainText("Continue from WebUI");
     await expect(dialog.locator('[data-conversation-status] [data-run="running"]')).toBeVisible();
-    await dialog.locator("[data-conversation-send]").click();
+    await dialog.locator("[data-conversation-stop]").click();
     await expect.poll(() => hub.store.board().issues.find(item => item.id === conversationIssue.id)?.remote_state?.operation).toBe("issue.stop");
     await client.syncNow();
     const requestMessage = String(local.getSessionCommandByRequest(conversationIssue.id, replyCommandId)?.payload.request_message || "");
