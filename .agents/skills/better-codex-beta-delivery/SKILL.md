@@ -13,7 +13,7 @@ Require the current user request to authorize every requested mutation: committi
 
 Prefer `main` and do not create a branch unless the user explicitly asks. Read the applicable `AGENTS.md` before acting. Preserve unrelated work, secrets, databases, generated binaries, existing services, reverse proxies, volumes, and deployment configuration. Never reset the worktree, force-push, replace an existing tag, disable SSH host verification, or use `docker compose down -v`.
 
-Follow current repository instructions about comments, documentation, tests, and compilation. If local compilation is forbidden, do not run a release helper that implicitly builds or packages. Use the non-building beta source check and let Preview CI provide the compilation and packaging gate.
+Follow current repository instructions about comments, documentation, tests, and compilation. If local compilation is forbidden, do not run a release helper that implicitly builds or packages. Use the non-building beta source check and let Preview CI provide the compilation and packaging gate. Beta delivery does not require running or waiting for the full test suite unless the user explicitly requests it or the Preview workflow itself fails and diagnosis requires it.
 
 ## Establish live facts
 
@@ -48,7 +48,7 @@ Prepare only the required release metadata: package versions, core version, rele
 
 Recheck the clean worktree and remote main immediately before pushing the release commit. Push and verify the remote SHA. Create an annotated version tag that dereferences to the release commit, push only that tag, and verify the remote tag dereferences to the same SHA.
 
-Wait for the entire Preview workflow, including feed promotion. Track CI, CodeQL, and commit-quality runs separately; beta publication may complete without implying formal-release acceptance.
+Wait for the entire Preview workflow, including all platform packaging, versioned prerelease publication, and feed promotion. This Preview workflow is the Beta automation gate. Do not wait for or require the general CI, CodeQL, Commit Quality, Web UI, or self-host acceptance workflows before installing the Beta. If their current results are readily available, report them separately without delaying publication or installation.
 
 Do not install from a tag or partially populated Release. Require all current release assets named by the repository workflow, including platform packages, `checksums.txt`, `checksums.sig`, `update-public-key.pem`, the applicable installers, `selfhost.sh`, `SELF_HOSTING.md`, `source-commit.txt`, and `update-manifest.json`.
 
@@ -62,7 +62,7 @@ Download the versioned assets into a dedicated temporary directory and verify:
 - The versioned update manifest is signed for the Preview channel.
 - The published Preview feed is signed, points to the new version, and matches the promoted versioned manifest.
 
-Stop on any missing asset, failed workflow, signature error, digest mismatch, source mismatch, or stale feed. Do not install the new version until this gate passes.
+Stop on any missing asset, failed Preview workflow, signature error, digest mismatch, source mismatch, or stale feed. Do not install the new version until this gate passes. Failures in non-Preview workflows are evidence to report and follow up, but they do not block Beta installation unless they also invalidate the published package or the requested local or VPS installation.
 
 ## Install locally
 
@@ -85,12 +85,12 @@ Allow only bounded network retries already provided by the verified workflow. Do
 After both installations, verify all applicable layers:
 
 - Repository: clean local worktree; local HEAD, `origin/main`, remote main, tag, and release source SHA match.
-- Automation: Preview publication, packaging platforms, feed promotion, CI, CodeQL, and commit quality are reported independently.
+- Automation: Preview publication, all packaging platforms, and feed promotion must pass. CI, CodeQL, Commit Quality, Web UI, and self-host acceptance are optional non-blocking evidence and are reported only when observed.
 - Local: exact version, healthy Runtime and database, MCP and Launcher installed, Preview feed current, and Relay connected without error.
 - VPS: exact source and tag SHA, a recorded backup, preserved untracked deployment files, healthy container, internal health, valid public HTTPS health, exact version, and `relay/v1`.
 - Tunnel: local and public health report matching Runtime and Relay versions, `connected:true`, fresh heartbeat, and no reconnect error.
 - Public path: unauthenticated Runtime WebSocket upgrade is rejected, authenticated login reaches a real board/bootstrap request, and credentials are never printed.
-- Changed behavior: perform the least invasive live check that proves the release’s affected path. Prefer dedicated ephemeral sessions or records and remove only those artifacts. Never revoke an existing user session or mutate user Issues merely for acceptance.
+- Changed behavior: full automated or live feature regression is not required for Beta delivery. Perform only the least invasive check needed to show the installed local Runtime, VPS Relay, tunnel, and affected path are operational. Prefer dedicated ephemeral sessions or records and remove only those artifacts. Never revoke an existing user session or mutate user Issues merely for acceptance.
 
 Do not call the beta fully accepted from build, assets, container health, `/healthz`, or a login page alone. State any remaining real-browser, mobile-device, visual, or tester acceptance explicitly.
 
