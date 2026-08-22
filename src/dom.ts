@@ -2491,10 +2491,20 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       });
     }
 
-    async function resumePersistedThread(threadId) {
+    async function resumePersistedThread(threadId, payload = null) {
       const expected = normalizeSessionId(threadId);
       if (!expected) throw new Error("thread_id_invalid");
-      const resumed = await sendAppServerRequest("thread/resume", { threadId: expected, excludeTurns: true });
+      const params = { threadId: expected, excludeTurns: true };
+      if (payload) {
+        if (payload.workspace_path) params.cwd = String(payload.workspace_path);
+        if (payload.model) params.model = String(payload.model);
+        if (payload.service_tier) params.serviceTier = String(payload.service_tier);
+        params.approvalPolicy = String(payload.approval_policy || "on-request");
+        params.approvalsReviewer = String(payload.approvals_reviewer || "auto_review");
+        params.sandbox = String(payload.sandbox_mode || "workspace-write");
+        params.developerInstructions = String(payload.developer_instructions || "");
+      }
+      const resumed = await sendAppServerRequest("thread/resume", params);
       const resumedId = normalizeSessionId(resumed?.thread?.id);
       if (resumedId !== expected) throw new Error("desktop_thread_resume_invalid");
       relayThreads.add(expected);
@@ -2589,13 +2599,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         } else if (command.kind === "turn") {
           if (!threadId) throw new Error("session_thread_invalid");
           relayCurrentThreadId = threadId;
-          await resumePersistedThread(threadId);
+          await resumePersistedThread(threadId, payload);
           let turn;
           try {
             turn = await sendAppServerRequest("turn/start", turnStartParams(threadId, payload));
           } catch (error) {
             if (!isThreadNotFoundError(error)) throw error;
-            await resumePersistedThread(threadId);
+            await resumePersistedThread(threadId, payload);
             turn = await sendAppServerRequest("turn/start", turnStartParams(threadId, payload));
           }
           turnId = normalizeSessionId(turn?.turn?.id);
@@ -2607,7 +2617,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         } else if (command.kind === "review") {
           if (!threadId) throw new Error("session_thread_invalid");
           relayCurrentThreadId = threadId;
-          await resumePersistedThread(threadId);
+          await resumePersistedThread(threadId, payload);
           const review = await sendAppServerRequest("review/start", { threadId, target: { type: "uncommittedChanges" }, delivery: "inline" });
           turnId = normalizeSessionId(review?.turn?.id);
           if (!turnId) throw new Error("desktop_turn_start_invalid");
@@ -2618,7 +2628,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         } else if (command.kind === "compact") {
           if (!threadId) throw new Error("session_thread_invalid");
           relayCurrentThreadId = threadId;
-          await resumePersistedThread(threadId);
+          await resumePersistedThread(threadId, payload);
           await sendAppServerRequest("thread/compact/start", { threadId });
         } else if (command.kind === "steer") {
           if (!threadId || !turnId) throw new Error("session_turn_invalid");

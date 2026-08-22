@@ -394,13 +394,13 @@ export class RuntimeSessionRelay {
       } else if (command.kind === "turn") {
         if (!threadId) throw new Error("session_thread_invalid");
         this.currentThreadId = threadId;
-        await this.resume(threadId);
+        await this.resume(threadId, payload);
         let turn: Record<string, unknown>;
         try {
           turn = object(await this.request("turn/start", this.turnStartParams(threadId, payload)));
         } catch (error) {
           if (!this.isThreadNotFound(error)) throw error;
-          await this.resume(threadId);
+          await this.resume(threadId, payload);
           turn = object(await this.request("turn/start", this.turnStartParams(threadId, payload)));
         }
         turnId = sessionId(object(turn.turn).id);
@@ -409,7 +409,7 @@ export class RuntimeSessionRelay {
       } else if (command.kind === "review") {
         if (!threadId) throw new Error("session_thread_invalid");
         this.currentThreadId = threadId;
-        await this.resume(threadId);
+        await this.resume(threadId, payload);
         const review = object(await this.request("review/start", { threadId, target: { type: "uncommittedChanges" }, delivery: "inline" }));
         turnId = sessionId(object(review.turn).id);
         if (!turnId) throw new Error("desktop_turn_start_invalid");
@@ -417,7 +417,7 @@ export class RuntimeSessionRelay {
       } else if (command.kind === "compact") {
         if (!threadId) throw new Error("session_thread_invalid");
         this.currentThreadId = threadId;
-        await this.resume(threadId);
+        await this.resume(threadId, payload);
         await this.request("thread/compact/start", { threadId });
       } else if (command.kind === "steer") {
         if (!threadId || !turnId) throw new Error("session_turn_invalid");
@@ -477,8 +477,18 @@ export class RuntimeSessionRelay {
     return params;
   }
 
-  private async resume(threadId: string) {
-    const result = object(await this.request("thread/resume", { threadId, excludeTurns: true }));
+  private async resume(threadId: string, payload?: Record<string, unknown>) {
+    const params: Record<string, unknown> = { threadId, excludeTurns: true };
+    if (payload) {
+      if (payload.workspace_path) params.cwd = String(payload.workspace_path);
+      if (payload.model) params.model = String(payload.model);
+      if (payload.service_tier) params.serviceTier = String(payload.service_tier);
+      params.approvalPolicy = String(payload.approval_policy || "on-request");
+      params.approvalsReviewer = String(payload.approvals_reviewer || "auto_review");
+      params.sandbox = String(payload.sandbox_mode || "workspace-write");
+      params.developerInstructions = String(payload.developer_instructions || "");
+    }
+    const result = object(await this.request("thread/resume", params));
     if (sessionId(object(result.thread).id) !== threadId) throw new Error("desktop_thread_resume_invalid");
     this.threads.add(threadId);
   }

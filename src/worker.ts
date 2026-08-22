@@ -745,20 +745,17 @@ export class IssueWorker {
       return;
     }
     if (workspacePath !== claim.workspacePath) this.store.setRunWorkspace(claim.issue.id, workspacePath);
-    let session = this.store.getIssueSession(claim.issue.id);
+    const session = this.store.getIssueSession(claim.issue.id);
     const payload = this.sessionPayload(claim.issue, workspacePath, issuePrompt(claim));
-    const replaceSession = Boolean(session && !session.active_turn_id && session.config_fingerprint !== payload.config_fingerprint);
-    const commandSession = replaceSession ? undefined : session;
     try {
       this.store.enqueueSessionCommand({
         issueId: claim.issue.id,
         runId: claim.runId,
         requestId: `run:${claim.runId}`,
-        kind: commandSession ? "turn" : "start",
-        threadId: commandSession?.thread_id || null,
+        kind: session ? "turn" : "start",
+        threadId: session?.thread_id || null,
         payload,
-        hostId: commandSession?.host_id || "local",
-        replaceSession,
+        hostId: session?.host_id || "local",
       });
     } catch (error) {
       this.store.finishRun(claim.runId, claim.issue.id, false, error instanceof Error ? error.message : "session_command_failed");
@@ -835,28 +832,21 @@ export class IssueWorker {
         return { command: queued.command, steered: false, queued: deferred, replayed: false };
       }
     }
-    let session = this.store.getIssueSession(issueId);
+    const session = this.store.getIssueSession(issueId);
     if (!session) throw new Error("session_required");
-    let payload: Record<string, unknown> = this.sessionPayload(issue, issue.workspace_path || "", message, references, semanticCommand);
-    const replaceSession = Boolean(!semanticCommand && !session.active_turn_id && session.config_fingerprint !== payload.config_fingerprint);
-    if (replaceSession) {
-      payload = this.sessionPayload(issue, issue.workspace_path || "", [issue.description.trim(), message].filter(Boolean).join("\n\n"), references, semanticCommand);
-    }
-    payload = { ...payload, request_message: message, request_input: requestInput };
-    const commandSession = replaceSession ? undefined : session;
-    const activeTurnId = commandSession?.active_turn_id || null;
+    const payload: Record<string, unknown> = { ...this.sessionPayload(issue, issue.workspace_path || "", message, references, semanticCommand), request_message: message, request_input: requestInput };
+    const activeTurnId = session.active_turn_id || null;
     if (semanticCommand && activeTurnId) throw new Error("issue_execution_running");
     const deferred = !semanticCommand && Boolean(activeTurnId || issue.active_run_status || this.store.getIssueReplyState(issueId).status === "running" || this.store.listQueuedIssueReplies(issueId).length);
     if (!activeTurnId && !deferred) {
       const queued = this.store.enqueueSessionReply({
         issueId,
         requestId,
-        kind: semanticCommand || (commandSession ? "turn" : "start"),
-        threadId: commandSession?.thread_id || null,
+        kind: semanticCommand || "turn",
+        threadId: session.thread_id,
         payload,
         message,
-        hostId: commandSession?.host_id || "local",
-        replaceSession,
+        hostId: session.host_id,
       });
       return { command: queued.command, steered: false, queued: false, replayed: queued.replayed };
     }

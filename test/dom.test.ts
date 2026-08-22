@@ -694,7 +694,9 @@ test("open-in-conversation requires a valid session uuid", () => {
   assert.doesNotMatch(openHandler, /\/stop|session-handoff|终止并打开/);
   assert.ok(source.includes('type: "mcp-request"'));
   assert.ok(source.includes('sendAppServerRequest("thread/start"'));
-  assert.ok(source.includes('sendAppServerRequest("thread/resume", { threadId: expected, excludeTurns: true })'));
+  assert.ok(source.includes('sendAppServerRequest("thread/resume", params)'));
+  assert.ok(source.includes('params.sandbox = String(payload.sandbox_mode || "workspace-write")'));
+  assert.ok(source.includes('params.developerInstructions = String(payload.developer_instructions || "")'));
   assert.ok(source.includes('if (method === "thread/started") return false'));
   assert.ok(source.includes('sendAppServerRequest("turn/start"'));
   assert.ok(source.includes('sendAppServerRequest("turn/steer"'));
@@ -702,7 +704,7 @@ test("open-in-conversation requires a valid session uuid", () => {
   assert.ok(source.includes('data-context-action="stop"'));
   assert.ok(source.includes('data-dialog-stop'));
   assert.ok(source.includes('encodeURIComponent(issueId) + "/stop"'));
-  assert.ok(turnCommand.indexOf("resumePersistedThread(threadId)") < turnCommand.indexOf('sendAppServerRequest("turn/start"'));
+  assert.ok(turnCommand.indexOf("resumePersistedThread(threadId, payload)") < turnCommand.indexOf('sendAppServerRequest("turn/start"'));
   assert.ok(openThread.indexOf("resumePersistedThread(expected)") < openThread.indexOf("close()"));
   assert.ok(source.includes("openThread, close, destroy"));
 });

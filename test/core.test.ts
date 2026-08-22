@@ -1004,14 +1004,14 @@ test("ambiguous legacy thread associations are rejected", () => {
   }
 });
 
-test("changed security configuration replaces an idle native session", () => {
+test("changed agent configuration continues the existing native session", () => {
   const target = temporaryDatabase();
   try {
     const store = new Store(target.file);
     const worker = new IssueWorker(store);
-    const project = store.createProject({ name: "Config replacement", workspacePath: target.directory });
+    const project = store.createProject({ name: "Config continuation", workspacePath: target.directory });
     const profile = store.createAgentProfile({ name: "Restricted", description: "", instructions: "new instructions", model: "gpt-test", reasoning_effort: "medium", sandbox_mode: "read-only" });
-    const issue = store.createIssue({ projectId: project.id, title: "Replace thread", status: "todo", agentEnabled: true, agentId: profile.id, workspacePath: target.directory });
+    const issue = store.createIssue({ projectId: project.id, title: "Continue thread", status: "todo", agentEnabled: true, agentId: profile.id, workspacePath: target.directory });
     const timestamp = new Date().toISOString();
     const oldThreadId = "019fec06-788f-7af3-a031-76b546904f30";
     store.db.prepare(`
@@ -1021,39 +1021,42 @@ test("changed security configuration replaces an idle native session", () => {
     const claim = store.claimNextIssue(issue.id)!;
     (worker as unknown as { dispatch(value: typeof claim): void }).dispatch(claim);
     const command = store.getActiveSessionCommand(issue.id)!;
-    assert.equal(command.kind, "start");
-    assert.equal(command.thread_id, null);
+    assert.equal(command.kind, "turn");
+    assert.equal(command.thread_id, oldThreadId);
     assert.equal(command.payload.sandbox_mode, "read-only");
     assert.equal(command.payload.developer_instructions, "new instructions");
     assert.notEqual(command.payload.config_fingerprint, "old-config");
-    assert.equal(store.getIssueSession(issue.id), undefined);
+    assert.equal(store.getIssueSession(issue.id)?.thread_id, oldThreadId);
     assert.equal(store.hasActiveAgentSessionWork(profile.id), true);
     store.db.prepare("DELETE FROM session_commands WHERE issue_id = ?").run(issue.id);
     store.finishRun(claim.runId, issue.id, false, "test_cleanup");
     assert.equal(store.hasActiveAgentSessionWork(profile.id), false);
 
-    const replyIssue = store.createIssue({ projectId: project.id, title: "Replace reply thread", status: "in_review", agentEnabled: true, agentId: profile.id, workspacePath: target.directory });
+    const replyIssue = store.createIssue({ projectId: project.id, title: "Continue reply thread", status: "in_review", agentEnabled: true, agentId: profile.id, workspacePath: target.directory });
     const replyThreadId = "019fec06-788f-7af3-a031-76b546904f31";
     store.db.prepare(`
       INSERT INTO issue_sessions (issue_id, host_id, thread_id, status, config_fingerprint, last_agent_message, created_at, updated_at)
       VALUES (?, 'local', ?, 'idle', 'old-config', '', ?, ?)
     `).run(replyIssue.id, replyThreadId, timestamp, timestamp);
     const sent = worker.sendIssueMessage(replyIssue.id, "config-retry", "continue");
-    assert.equal(sent.command.kind, "start");
-    assert.equal(store.getIssueSession(replyIssue.id), undefined);
+    assert.equal(sent.command.kind, "turn");
+    assert.equal(sent.command.thread_id, replyThreadId);
+    assert.equal(sent.command.payload.message, "continue");
+    assert.equal(store.getIssueSession(replyIssue.id)?.thread_id, replyThreadId);
     const replay = worker.sendIssueMessage(replyIssue.id, "config-retry", "continue");
     assert.equal(replay.replayed, true);
     assert.equal(replay.command.id, sent.command.id);
     assert.throws(() => worker.sendIssueMessage(replyIssue.id, "config-retry", "different"), /request_id_conflict/);
     store.heartbeatSessionRelay("relay-config", "app-config", null);
     store.claimSessionCommand("relay-config");
-    worker.failSessionCommand(sent.command.id, "relay-config", "turn_start_failed", "019fec06-788f-7af3-a031-76b546904f32");
+    worker.failSessionCommand(sent.command.id, "relay-config", "turn_start_failed", replyThreadId);
     assert.equal(store.getIssueReplyState(replyIssue.id).status, "failed");
-    assert.equal(store.getIssueSession(replyIssue.id)?.status, "failed");
+    assert.equal(store.getIssueSession(replyIssue.id)?.status, "idle");
+    assert.equal(store.getIssueSession(replyIssue.id)?.last_error, "turn_start_failed");
     const retried = worker.sendIssueMessage(replyIssue.id, "config-retry", "continue");
     assert.equal(retried.command.status, "pending");
     assert.equal(store.getIssueReplyState(replyIssue.id).status, "running");
-    assert.equal(store.getIssueSession(replyIssue.id), undefined);
+    assert.equal(store.getIssueSession(replyIssue.id)?.thread_id, replyThreadId);
     store.close();
   } finally {
     rmSync(target.directory, { recursive: true, force: true });
