@@ -6561,6 +6561,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         requestAnimationFrame(syncBoardScrollControl);
         return;
       }
+      const columnScrollPositions = new Map(Array.from(board.querySelectorAll(".better-codex-column")).map(column => [column.dataset.status, column.querySelector(".better-codex-cards")?.scrollTop || 0]));
       const visibleStatuses = [...Object.entries(statusLabels), ["archive", "归档"]];
       board.innerHTML = visibleStatuses.map(([status, statusLabel]) => {
         const archiveColumn = status === "archive";
@@ -6608,6 +6609,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           : '<button class="better-codex-column-icon" type="button" data-add-status="' + status + '" aria-label="' + te("新建任务") + '">' + icon("plus") + '</button>';
         return '<section class="better-codex-column" data-status="' + status + '"><div class="better-codex-column-head"><span class="better-codex-column-title">' + statusIcon(status) + '<span>' + te(statusLabel) + '</span>' + (archiveColumn ? "" : '<span>' + issues.length + '</span>') + '</span><span class="better-codex-column-actions">' + columnButton + '</span></div><div class="better-codex-cards">' + (cards || (archiveColumn ? '<div class="better-codex-empty">' + te("拖到这里即可归档") + '</div>' : "")) + '</div></section>';
       }).join("");
+      board.querySelectorAll(".better-codex-column").forEach(column => {
+        const cards = column.querySelector(".better-codex-cards");
+        const scrollTop = columnScrollPositions.get(column.dataset.status);
+        if (cards && scrollTop !== undefined) cards.scrollTop = scrollTop;
+      });
       requestAnimationFrame(syncBoardScrollControl);
     }
 
