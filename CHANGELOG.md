@@ -4,6 +4,10 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.10-beta.9] - 2026-08-22
+
+- Close retained Relay test connections before waiting for the local server to stop.
+
 ## [0.4.10-beta.8] - 2026-08-22
 
 - Avoid a Windows Relay test shutdown race when the local server closes before its event listener is attached.
@@ -776,7 +780,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.8...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.9...HEAD
+[0.4.10-beta.9]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.8...v0.4.10-beta.9
 [0.4.10-beta.8]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.7...v0.4.10-beta.8
 [0.4.10-beta.7]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.6...v0.4.10-beta.7
 [0.4.10-beta.6]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.5...v0.4.10-beta.6
