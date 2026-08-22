@@ -308,6 +308,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     const ENTRY_ID = "better-codex-entry";
     const SCHEDULED_ENTRY_ID = "better-codex-scheduled-entry";
+    const SCHEDULED_MOBILE_ENTRY_ID = "better-codex-scheduled-mobile-entry";
     const AGENTS_ENTRY_ID = "better-codex-agents-entry";
     const PROJECTS_ENTRY_ID = "better-codex-projects-entry";
     const MORE_ENTRY_ID = "better-codex-more-entry";
@@ -951,6 +952,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     let errorDialog = null;
     let entry = null;
     let scheduledEntry = null;
+    let scheduledMobileEntry = null;
     let agentsEntry = null;
     let projectsEntry = null;
     let auxiliaryNavigation = null;
@@ -2054,6 +2056,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       auxiliaryMenu.className = "web-nav-more-menu";
       auxiliaryMenu.setAttribute(OWNED, "true");
       auxiliaryMenu.setAttribute("aria-label", t("更多功能"));
+      if (!REMOTE) {
+        scheduledMobileEntry = createEntry("定时任务", SCHEDULED_MOBILE_ENTRY_ID, "管理定时任务", "scheduled");
+        scheduledMobileEntry.classList.add("web-nav-mobile-action");
+      }
       usageEntry = nativeButton(t("Codex 额度"));
       usageEntry.id = "better-codex-usage-entry";
       usageEntry.classList.add("web-nav-mobile-action");
@@ -2087,7 +2093,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         };
         setTimeout(() => document.addEventListener("pointerdown", auxiliaryMenuDismiss, true), 0);
       });
-      auxiliaryMenu.append(usageEntry, themeEntry);
+      auxiliaryMenu.append(...(scheduledMobileEntry ? [scheduledMobileEntry] : []), usageEntry, themeEntry);
       navigation.append(moreEntry, auxiliaryMenu);
       return navigation;
     }
@@ -2120,6 +2126,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     function syncMobileActions() {
       if (!usageEntry || !themeEntry) return;
+      if (scheduledMobileEntry) {
+        syncEntryLabel(scheduledMobileEntry, "定时任务", "管理定时任务");
+        syncEntryIcon(scheduledMobileEntry, "scheduled");
+      }
       syncEntryLabel(usageEntry, "Codex 额度", "查看 Codex 额度");
       syncEntryIcon(usageEntry, "usage");
       const light = document.documentElement.dataset.theme === "dark";
@@ -2164,18 +2174,27 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         syncMobileActions();
         auxiliaryNavigation.hidden = false;
         if (auxiliaryNavigation.parentElement !== parent || auxiliaryNavigation.previousElementSibling !== agentsEntry) agentsEntry.after(auxiliaryNavigation);
-        if (projectsEntry.parentElement !== auxiliaryMenu || projectsEntry !== auxiliaryMenu.firstElementChild) auxiliaryMenu.prepend(projectsEntry);
+        if (scheduledMobileEntry && (scheduledMobileEntry.parentElement !== auxiliaryMenu || scheduledMobileEntry !== auxiliaryMenu.firstElementChild)) auxiliaryMenu.prepend(scheduledMobileEntry);
+        const projectReference = scheduledMobileEntry || null;
+        if (projectsEntry.parentElement !== auxiliaryMenu || projectsEntry.previousElementSibling !== projectReference) {
+          if (projectReference) projectReference.after(projectsEntry);
+          else auxiliaryMenu.prepend(projectsEntry);
+        }
       } else if (projectsEntry.parentElement !== parent || projectsEntry.previousElementSibling !== agentsEntry) agentsEntry.after(projectsEntry);
       const currentEntry = active && state.surface === "issues" ? entry : active && state.surface === "scheduled" ? scheduledEntry : active && state.surface === "agents" ? agentsEntry : active && state.surface === "projects" ? projectsEntry : null;
       for (const item of [entry, scheduledEntry, agentsEntry, projectsEntry].filter(Boolean)) {
         if (item === currentEntry && item.getAttribute("aria-current") !== "page") item.setAttribute("aria-current", "page");
         if (item !== currentEntry && item.hasAttribute("aria-current")) item.removeAttribute("aria-current");
       }
-      if (moreEntry) {
-        if (active && state.surface === "projects" && moreEntry.getAttribute("aria-current") !== "page") moreEntry.setAttribute("aria-current", "page");
-        if ((!active || state.surface !== "projects") && moreEntry.hasAttribute("aria-current")) moreEntry.removeAttribute("aria-current");
+      if (scheduledMobileEntry) {
+        if (active && state.surface === "scheduled" && scheduledMobileEntry.getAttribute("aria-current") !== "page") scheduledMobileEntry.setAttribute("aria-current", "page");
+        if ((!active || state.surface !== "scheduled") && scheduledMobileEntry.hasAttribute("aria-current")) scheduledMobileEntry.removeAttribute("aria-current");
       }
-      return entry.isConnected && (!scheduledEntry || scheduledEntry.isConnected) && agentsEntry.isConnected && projectsEntry.isConnected && (HOST_KIND !== "web" || auxiliaryNavigation?.isConnected);
+      if (moreEntry) {
+        if (active && ["scheduled", "projects"].includes(state.surface) && moreEntry.getAttribute("aria-current") !== "page") moreEntry.setAttribute("aria-current", "page");
+        if ((!active || !["scheduled", "projects"].includes(state.surface)) && moreEntry.hasAttribute("aria-current")) moreEntry.removeAttribute("aria-current");
+      }
+      return entry.isConnected && (!scheduledEntry || scheduledEntry.isConnected) && (!scheduledMobileEntry || scheduledMobileEntry.isConnected) && agentsEntry.isConnected && projectsEntry.isConnected && (HOST_KIND !== "web" || auxiliaryNavigation?.isConnected);
     }
 
     function findMount() {
@@ -9405,7 +9424,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     function onClick(event) {
       if (!active || suppressAgentOutside) return;
       const target = event.target?.closest?.("button,a,[role='button']," + SELECTORS.threadRow);
-      if (!target || target === entry || target === scheduledEntry || target === agentsEntry || target === projectsEntry || target === moreEntry || target === usageEntry || target === themeEntry || target.closest("#" + PANEL_ID) || target.closest("#better-codex-dialog") || target.closest("#better-codex-agent-dialog") || target.closest("#better-codex-scheduled-dialog") || target.closest("#better-codex-project-dialog") || target.closest("#better-codex-avatar-picker")) return;
+      if (!target || target === entry || target === scheduledEntry || target === scheduledMobileEntry || target === agentsEntry || target === projectsEntry || target === moreEntry || target === usageEntry || target === themeEntry || target.closest("#" + PANEL_ID) || target.closest("#better-codex-dialog") || target.closest("#better-codex-agent-dialog") || target.closest("#better-codex-scheduled-dialog") || target.closest("#better-codex-project-dialog") || target.closest("#better-codex-avatar-picker")) return;
       if (Date.now() < suppressSessionClickUntil && target.closest(SELECTORS.threadRow)) {
         suppressSessionClickUntil = 0;
         event.preventDefault();
