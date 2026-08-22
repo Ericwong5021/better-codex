@@ -398,6 +398,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const state = { projects: [], projectsLoaded: false, issues: [], issuesLoaded: false, scheduledTasks: [], scheduledTasksLoaded: false, projectIssues: [], projectIssuesProjectId: "", projectDetailId: initialProjectRoute?.projectId || "", projectPage: "overview", projectDocumentView: "charter", projectDocumentPending: null, projectDocumentError: null, projectPlanningPending: null, projectPlanningError: null, agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: initialProjectRoute ? "projects" : availableSurfaces.includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, autoDispatchPending: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", issueDescriptionLimit: 100000, mockup: false, keepCreate: rememberedKeepCreate, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], project: [], label: [] } };
     const pendingIssueRemovals = new Map();
     const projectPlanningDrafts = new Map();
+    let projectPlanningComposition = "";
+    let projectRenderDeferred = null;
     function webProjectRoute() {
       if (HOST_KIND !== "web") return null;
       const match = location.pathname.match(/^\\/web\\/projects(?:\\/([^/?#]+))?\\/?$/);
@@ -810,6 +812,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "规划对话": "Planning conversation",
       "与智能体对话，把目标、里程碑、风险和交付证据整理成可执行计划。": "Talk with an agent to turn goals, milestones, risks, and delivery evidence into an actionable plan.",
       "规划摘要": "Plan summary",
+      "里程碑时间线": "Milestone timeline",
+      "按目标日期排序": "Ordered by target date",
+      "日期待定": "Date pending",
+      "已排期": "scheduled",
       "预期成果": "Outcomes",
       "里程碑": "Milestones",
       "工作流": "Workstreams",
@@ -1619,6 +1625,27 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #\${PANEL_ID} .better-codex-project-plan-summary { padding: 22px 0 20px; border-bottom: 1px solid var(--bc-divider); }
         #\${PANEL_ID} .better-codex-project-plan-summary > span { color: var(--bc-faint); font-size: var(--bc-text-xs); font-weight: 650; letter-spacing: .04em; text-transform: uppercase; }
         #\${PANEL_ID} .better-codex-project-plan-summary p { max-width: 72ch; margin: 8px 0 0; color: var(--bc-foreground); font-size: var(--bc-text-md); line-height: 1.72; text-wrap: pretty; }
+        #\${PANEL_ID} .better-codex-project-plan-timeline { padding: 22px 0 4px; border-bottom: 1px solid var(--bc-divider); }
+        #\${PANEL_ID} .better-codex-project-plan-timeline > header { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; padding-bottom: 14px; }
+        #\${PANEL_ID} .better-codex-project-plan-timeline > header > div { display: grid; gap: 3px; }
+        #\${PANEL_ID} .better-codex-project-plan-timeline > header strong { font-size: var(--bc-text-md); font-weight: 680; }
+        #\${PANEL_ID} .better-codex-project-plan-timeline > header span { color: var(--bc-faint); font-size: var(--bc-text-xs); }
+        #\${PANEL_ID} .better-codex-project-plan-timeline > header > span { flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+        #\${PANEL_ID} .better-codex-project-plan-timeline ol { margin: 0; padding: 0; list-style: none; }
+        #\${PANEL_ID} .better-codex-project-plan-timeline li { display: grid; min-height: 78px; grid-template-columns: 88px 18px minmax(0,1fr); gap: 10px; }
+        #\${PANEL_ID} .better-codex-project-plan-timeline-date { padding-top: 2px; color: var(--bc-muted); font-family: var(--bc-font-mono,ui-monospace,monospace); font-size: var(--bc-text-xs); font-variant-numeric: tabular-nums; }
+        #\${PANEL_ID} .better-codex-project-plan-timeline-date[data-pending="true"] { color: var(--bc-faint); font-family: inherit; }
+        #\${PANEL_ID} .better-codex-project-plan-timeline-rail { position: relative; display: flex; justify-content: center; }
+        #\${PANEL_ID} .better-codex-project-plan-timeline-rail::before { z-index: 1; width: 10px; height: 10px; box-sizing: border-box; border: 2px solid var(--bc-muted); border-radius: 50%; background: var(--bc-surface); content: ""; }
+        #\${PANEL_ID} .better-codex-project-plan-timeline li:not(:last-child) .better-codex-project-plan-timeline-rail::after { position: absolute; top: 10px; bottom: 0; width: 1px; background: var(--bc-divider); content: ""; }
+        #\${PANEL_ID} .better-codex-project-plan-timeline li[data-plan-status="in_progress"] .better-codex-project-plan-timeline-rail::before { border-color: var(--bc-info); box-shadow: 0 0 0 3px color-mix(in oklch,var(--bc-info) 10%,transparent); }
+        #\${PANEL_ID} .better-codex-project-plan-timeline li[data-plan-status="blocked"] .better-codex-project-plan-timeline-rail::before { border-color: var(--bc-danger); }
+        #\${PANEL_ID} .better-codex-project-plan-timeline li[data-plan-status="done"] .better-codex-project-plan-timeline-rail::before, #\${PANEL_ID} .better-codex-project-plan-timeline li[data-plan-status="confirmed"] .better-codex-project-plan-timeline-rail::before { border-color: var(--bc-success); background: var(--bc-success); box-shadow: inset 0 0 0 2px var(--bc-surface); }
+        #\${PANEL_ID} .better-codex-project-plan-timeline-copy { min-width: 0; padding: 0 0 18px; }
+        #\${PANEL_ID} .better-codex-project-plan-timeline-copy header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+        #\${PANEL_ID} .better-codex-project-plan-timeline-copy header strong { font-size: var(--bc-text-sm); font-weight: 650; line-height: 1.45; }
+        #\${PANEL_ID} .better-codex-project-plan-timeline-copy p { margin: 5px 0 0; color: var(--bc-muted); font-size: var(--bc-text-caption); line-height: 1.62; text-wrap: pretty; }
+        #\${PANEL_ID} .better-codex-project-plan-timeline-copy footer { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; margin-top: 8px; color: var(--bc-faint); font-size: var(--bc-text-xs); }
         #\${PANEL_ID} .better-codex-project-plan-section { padding-top: 22px; }
         #\${PANEL_ID} .better-codex-project-plan-section > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 8px; }
         #\${PANEL_ID} .better-codex-project-plan-section > header strong { font-size: var(--bc-text-md); font-weight: 680; }
@@ -1682,6 +1709,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         @media (max-width: 1120px) { #\${PANEL_ID} .better-codex-project-dashboard-summary { grid-template-columns: repeat(2,minmax(0,1fr)); } #\${PANEL_ID} .better-codex-project-cycle { grid-column: 1 / -1; } }
         @media (max-width: 980px) { #\${PANEL_ID} .better-codex-project-summary, #\${PANEL_ID} .better-codex-project-columns, #\${PANEL_ID} .better-codex-project-dashboard-lists, #\${PANEL_ID} .better-codex-project-planning-layout { grid-template-columns: 1fr; } #\${PANEL_ID} .better-codex-project-columns { height: auto; } #\${PANEL_ID} .better-codex-project-panel:first-child { height: min(50dvh,480px); min-height: 320px; } #\${PANEL_ID} .better-codex-project-document-panel { height: min(86dvh,820px); min-height: 620px; } #\${PANEL_ID} .better-codex-project-planning-layout { min-height: 0; } #\${PANEL_ID} .better-codex-project-plan, #\${PANEL_ID} .better-codex-project-planning-chat { height: min(78dvh,760px); min-height: 560px; } }
         @media (max-width: 640px) { #\${PANEL_ID} .better-codex-projects { padding: 12px 12px 24px; } #\${PANEL_ID} .better-codex-project-list, #\${PANEL_ID} .better-codex-project-dashboard-summary, #\${PANEL_ID} .better-codex-project-overview-milestones > div { grid-template-columns: 1fr; } #\${PANEL_ID} .better-codex-project-summary { padding: 18px; } #\${PANEL_ID} .better-codex-project-columns { grid-template-columns: minmax(0,1fr); } #\${PANEL_ID} .better-codex-project-document-tab { padding-inline: 8px; } #\${PANEL_ID} .better-codex-project-document-tab svg { display: none; } #\${PANEL_ID} .better-codex-project-document-form > div { grid-template-columns: 1fr; } #\${PANEL_ID} .better-codex-project-dashboard-head { gap: 12px; } #\${PANEL_ID} .better-codex-project-dashboard-people { display: none; } #\${PANEL_ID} .better-codex-project-cycle { grid-column: auto; grid-template-columns: 100px minmax(0,1fr); } #\${PANEL_ID} .better-codex-project-timeline { padding-inline: 14px; } #\${PANEL_ID} .better-codex-project-timeline-legend { display: none; } #\${PANEL_ID} .better-codex-project-milestones { grid-template-columns: 1fr; } #\${PANEL_ID} .better-codex-project-work-row { grid-template-columns: 18px 62px minmax(0,1fr); } #\${PANEL_ID} .better-codex-project-work-state { display: none; } #\${PANEL_ID} .better-codex-project-collaborator-list { grid-template-columns: 1fr; } #\${PANEL_ID} .better-codex-project-collaborator { border-top: 1px solid var(--bc-divider); border-left: 0; padding: 10px 0; } #\${PANEL_ID} .better-codex-project-collaborator:first-child { border-top: 0; } #\${PANEL_ID} .better-codex-project-overview-milestones .better-codex-project-plan-item { border-top: 1px solid var(--bc-divider); border-left: 0; padding: 12px 0; } #\${PANEL_ID} .better-codex-project-planning-panel-head { padding-inline: 14px; } #\${PANEL_ID} .better-codex-project-plan-scroll { padding-inline: 14px; } #\${PANEL_ID} .better-codex-project-plan-item { grid-template-columns: 24px minmax(0,1fr); gap: 7px; } }
+        @media (max-width: 640px) { #\${PANEL_ID} .better-codex-project-plan-timeline > header { align-items: flex-start; } #\${PANEL_ID} .better-codex-project-plan-timeline > header > span { max-width: 15ch; text-align: right; } #\${PANEL_ID} .better-codex-project-plan-timeline li { grid-template-columns: 72px 16px minmax(0,1fr); gap: 7px; } }
         @media (prefers-reduced-motion:reduce) { #\${PANEL_ID} .better-codex-project-issues-loading > span, #\${PANEL_ID} .better-codex-project-document-progress svg, #\${PANEL_ID} .better-codex-project-document-segments i, #\${PANEL_ID} .better-codex-project-document-tab > i, #\${PANEL_ID} .better-codex-project-document-notice svg, #\${PANEL_ID} .better-codex-project-document-orbit, #\${PANEL_ID} .better-codex-project-document-skeleton i, #\${PANEL_ID} .better-codex-project-planning-running svg, #\${PANEL_ID} .better-codex-project-planning-form .better-codex-submit:disabled svg { animation: none; } }
         #\${PANEL_ID} .better-codex-agent-heading { display: none; min-width: 0; align-items: baseline; gap: 4px; }
         #\${PANEL_ID} .better-codex-agent-heading strong { color: #18181b; font-size: var(--bc-text-md); font-weight: 650; }
@@ -4433,6 +4461,16 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const projectId = event.target.closest("[data-project-planning-form]")?.dataset.projectPlanningForm;
         if (projectId) projectPlanningDrafts.set(projectId, event.target.value);
       });
+      projects.addEventListener("compositionstart", event => {
+        if (!event.target.matches("[data-project-planning-form] textarea[name=message]")) return;
+        projectPlanningComposition = event.target.closest("[data-project-planning-form]")?.dataset.projectPlanningForm || "";
+      });
+      projects.addEventListener("compositionend", event => {
+        if (!event.target.matches("[data-project-planning-form] textarea[name=message]")) return;
+        projectPlanningComposition = "";
+        const projectId = event.target.closest("[data-project-planning-form]")?.dataset.projectPlanningForm;
+        if (projectId) projectPlanningDrafts.set(projectId, event.target.value);
+      });
       projects.addEventListener("keydown", event => {
         if (event.key !== "Escape") return;
         const picker = projects.querySelector("[data-project-document-agent-picker].is-open");
@@ -5191,6 +5229,26 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       return '<article class="better-codex-project-plan-item" data-plan-status="' + escapeHtml(item.status || "proposed") + '"><span class="better-codex-project-plan-index">' + escapeHtml(String(index + 1).padStart(2, "0")) + '</span><div><header><strong>' + escapeHtml(item.title || t("待确认")) + '</strong><span class="better-codex-project-plan-status">' + escapeHtml(projectPlanningStatusLabel(item.status)) + '</span></header>' + (item.detail ? '<p>' + escapeHtml(item.detail) + '</p>' : "") + '<footer><span data-plan-source="' + escapeHtml(item.source || "inference") + '">' + escapeHtml(projectPlanningSourceLabel(item.source)) + '</span>' + date + dependencies + '</footer>' + evidence + '</div></article>';
     }
 
+    function projectPlanningTimelineMarkup(plan) {
+      const milestones = Array.isArray(plan?.milestones) ? plan.milestones.map((item, index) => ({ item, index })) : [];
+      if (!milestones.length) return "";
+      milestones.sort((left, right) => {
+        if (left.item.target_date && right.item.target_date) return left.item.target_date.localeCompare(right.item.target_date) || left.index - right.index;
+        if (left.item.target_date) return -1;
+        if (right.item.target_date) return 1;
+        return left.index - right.index;
+      });
+      const dated = milestones.filter(entry => entry.item.target_date).length;
+      const rows = milestones.map(({ item }) => {
+        const date = item.target_date
+          ? '<time class="better-codex-project-plan-timeline-date" datetime="' + escapeHtml(item.target_date) + '">' + escapeHtml(item.target_date) + '</time>'
+          : '<span class="better-codex-project-plan-timeline-date" data-pending="true">' + te("日期待定") + '</span>';
+        const dependencies = Array.isArray(item.dependencies) && item.dependencies.length ? '<span>' + te("依赖") + ' ' + escapeHtml(item.dependencies.join("、")) + '</span>' : "";
+        return '<li data-plan-status="' + escapeHtml(item.status || "proposed") + '">' + date + '<span class="better-codex-project-plan-timeline-rail" aria-hidden="true"></span><div class="better-codex-project-plan-timeline-copy"><header><strong>' + escapeHtml(item.title || t("待确认")) + '</strong><span class="better-codex-project-plan-status">' + escapeHtml(projectPlanningStatusLabel(item.status)) + '</span></header>' + (item.detail ? '<p>' + escapeHtml(item.detail) + '</p>' : "") + '<footer><span>' + escapeHtml(projectPlanningSourceLabel(item.source)) + '</span>' + dependencies + '</footer></div></li>';
+      }).join("");
+      return '<section class="better-codex-project-plan-timeline" aria-label="' + te("里程碑时间线") + '"><header><div><strong>' + te("里程碑时间线") + '</strong><span>' + te("按目标日期排序") + '</span></div><span>' + escapeHtml(dated + "/" + milestones.length + " " + t("已排期")) + '</span></header><ol>' + rows + '</ol></section>';
+    }
+
     function projectPlanningSection(plan, key, label) {
       const items = Array.isArray(plan?.[key]) ? plan[key] : [];
       if (!items.length) return "";
@@ -5220,8 +5278,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         ["delivery", "交付路径"],
         ["evidence", "证据"],
       ].map(([key, label]) => projectPlanningSection(plan, key, label)).join("") : "";
+      const timeline = projectPlanningTimelineMarkup(plan);
       const planBody = plan
-        ? '<div class="better-codex-project-plan-scroll"><section class="better-codex-project-plan-summary"><span>' + te("规划摘要") + '</span><p>' + escapeHtml(plan.summary || t("尚未生成项目计划")) + '</p></section>' + sections + '</div>'
+        ? '<div class="better-codex-project-plan-scroll"><section class="better-codex-project-plan-summary"><span>' + te("规划摘要") + '</span><p>' + escapeHtml(plan.summary || t("尚未生成项目计划")) + '</p></section>' + timeline + sections + '</div>'
         : '<div class="better-codex-project-plan-empty">' + icon("layout") + '<strong>' + te("尚未生成项目计划") + '</strong><p>' + te("从一个问题开始，智能体会读取代码、Issue 和关联会话。") + '</p></div>';
       const failure = planning.status === "failed" ? '<div class="better-codex-project-planning-alert">' + icon("shield") + '<span>' + te("计划生成失败，当前仍显示上一版本。") + '</span></div>' : "";
       const messages = [...planning.messages];
@@ -5275,6 +5334,24 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     function renderProjects() {
       const container = panel?.querySelector("#better-codex-projects");
       if (!container) return;
+      const focusedEditor = container.querySelector("textarea:focus");
+      const planningEditor = container.querySelector("[data-project-planning-form] textarea[name=message]");
+      const planningProjectId = planningEditor?.closest("[data-project-planning-form]")?.dataset.projectPlanningForm || "";
+      const focusedProjectId = focusedEditor?.closest("[data-project-planning-form]")?.dataset.projectPlanningForm || focusedEditor?.closest("[data-project-document-form]")?.dataset.projectDocumentForm || state.projectDetailId;
+      if (projectPlanningComposition && projectPlanningComposition !== state.projectDetailId) projectPlanningComposition = "";
+      const activePlanningEditor = planningEditor && planningProjectId === state.projectDetailId && (planningEditor === focusedEditor || projectPlanningComposition === planningProjectId) ? planningEditor : null;
+      const activeEditor = activePlanningEditor || (focusedEditor && focusedProjectId === state.projectDetailId ? focusedEditor : null);
+      if (activeEditor) {
+        const projectId = activePlanningEditor ? planningProjectId : focusedProjectId;
+        if (activePlanningEditor && projectId) projectPlanningDrafts.set(projectId, activePlanningEditor.value);
+        if (!projectRenderDeferred) appendDiagnostic("project_render_deferred", { project_id: projectId, editor: activePlanningEditor ? "planning" : "project", reason: projectPlanningComposition === projectId ? "composition" : "focus" });
+        projectRenderDeferred = { projectId, editor: activePlanningEditor ? "planning" : "project" };
+        return;
+      }
+      if (projectRenderDeferred) {
+        appendDiagnostic("project_render_resumed", { project_id: projectRenderDeferred.projectId, editor: projectRenderDeferred.editor });
+        projectRenderDeferred = null;
+      }
       const heading = panel.querySelector(".better-codex-project-heading");
       const createButton = panel.querySelector(".better-codex-project-actions .better-codex-button");
       if (createButton) {
@@ -5359,7 +5436,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           }
         }
       }
-      if (options.background && ((!projectsChanged && !projectIssuesChanged) || panel?.querySelector("#better-codex-projects textarea:focus"))) return;
+      if (options.background && !projectsChanged && !projectIssuesChanged) return;
       render();
     }
 
