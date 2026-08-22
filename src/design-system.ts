@@ -6303,7 +6303,7 @@ export function betterCodexDesignSystemCss() {
       right: 0;
       bottom: calc(100% + 8px);
       left: 0;
-      z-index: 8;
+      z-index: 30;
       max-height: min(320px, 42vh);
       overflow: auto;
       border: 1px solid var(--bc-color-hairline);
