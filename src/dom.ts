@@ -507,7 +507,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           title: String(draft.title || ""),
           description: String(draft.description || ""),
           prompt: String(draft.prompt || ""),
-          promptSemanticReferences: Array.isArray(draft.promptSemanticReferences) ? draft.promptSemanticReferences.filter(reference => reference && ["skill", "mention"].includes(reference.type) && typeof reference.name === "string" && typeof reference.ref === "string").slice(0, 32) : [],
+          promptSemanticReferences: Array.isArray(draft.promptSemanticReferences) ? draft.promptSemanticReferences.filter(reference => reference && ["skill", "app", "mention"].includes(reference.type) && typeof reference.name === "string" && typeof reference.ref === "string").slice(0, 32) : [],
           requestId: typeof draft.requestId === "string" && draft.requestId.length <= 200 ? draft.requestId : ""
         };
       } catch {
@@ -7272,8 +7272,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       let dialogBoundsObserver = null;
       let semanticCatalog = null;
       let semanticMenuState = null;
-      let semanticSearchSequence = 0;
-      let semanticSearchTimer = null;
       const clearIssueFullscreenBounds = () => {
         dialog.style.removeProperty("--bc-dialog-fullscreen-top");
         dialog.style.removeProperty("--bc-dialog-fullscreen-left");
@@ -7505,6 +7503,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         dialog.dataset.executionLocked = String(executionLocked);
         dialog.dataset.locked = String(editingLocked);
         dialog.querySelectorAll("input, textarea, select, button").forEach(control => {
+          if (control.matches('[data-semantic-option][aria-disabled="true"]')) {
+            control.disabled = true;
+            return;
+          }
           if (control.matches("[data-dialog-close], [data-dialog-expand], [data-dialog-open-thread], [data-dialog-stop], [data-dialog-restore], [data-description-toggle], [data-conversation-copy], [data-conversation-attachment]")) {
             control.disabled = false;
             return;
@@ -7522,11 +7524,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             return;
           }
           if (executionRunning) {
-            control.disabled = !control.matches('[name="reply"], [data-conversation-send], [data-conversation-attach], [data-conversation-retry], [data-dialog-attachment-scope="reply"], [data-queue-send-now], [data-queue-edit], [data-queue-edit-save], [data-queue-edit-cancel]');
+            control.disabled = !control.matches('[name="reply"], [data-conversation-send], [data-conversation-attach], [data-conversation-retry], [data-dialog-attachment-scope="reply"], [data-queue-send-now], [data-queue-edit], [data-queue-edit-save], [data-queue-edit-cancel], [data-semantic-option]');
             return;
           }
           if (executionLocked) {
-            control.disabled = !(control.matches('[name="reply"], [data-conversation-send], [data-conversation-attach], [data-conversation-retry], [data-dialog-attachment-scope="reply"]') || control.closest('[data-dialog-select="status"], [data-dialog-select="priority"], [data-dialog-select="assignee"]'));
+            control.disabled = !(control.matches('[name="reply"], [data-conversation-send], [data-conversation-attach], [data-conversation-retry], [data-dialog-attachment-scope="reply"], [data-semantic-option]') || control.closest('[data-dialog-select="status"], [data-dialog-select="priority"], [data-dialog-select="assignee"]'));
             return;
           }
           control.disabled = false;
@@ -7650,14 +7652,37 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
       function semanticCommands() {
         const zh = state.locale === "zh-CN";
-        const commands = [
-          { kind: "command", name: "review", label: "/review", description: zh ? "审查工作区中的未提交改动" : "Review uncommitted workspace changes", icon: "review" },
-          { kind: "command", name: "compact", label: "/compact", description: zh ? "压缩当前会话上下文" : "Compact the current conversation context", icon: "sparkles" },
-          { kind: "command", name: "status", label: "/status", description: zh ? "查看当前会话与智能体状态" : "Show the current session and agent status", icon: "usage" },
-          { kind: "command", name: "skills", label: "/skills", description: zh ? "浏览并调用 Codex Skills" : "Browse and invoke Codex Skills", icon: "wrench" },
-          { kind: "command", name: "mentions", label: "/mentions", description: zh ? "搜索工作区文件" : "Search workspace files", icon: "code" },
+        const sessionCommandAvailable = Boolean(issue && sessionId && !executionRunning);
+        return [
+          { kind: "command", name: "status", label: "/status", description: zh ? "查看当前会话与智能体状态" : "Show the current session and agent status", icon: "usage", available: true, scope: zh ? "可用" : "Available" },
+          { kind: "command", name: "skills", label: "/skills", description: zh ? "浏览并调用已启用的 Codex Skills" : "Browse and invoke enabled Codex Skills", icon: "wrench", available: true, scope: "$" },
+          { kind: "command", name: "apps", label: "/apps", description: zh ? "浏览并调用已安装的插件与连接器" : "Browse and invoke installed plugins and connectors", icon: "server", available: true, scope: "@" },
+          { kind: "command", name: "review", label: "/review", description: zh ? "审查工作区中的未提交改动" : "Review uncommitted workspace changes", icon: "review", available: sessionCommandAvailable, scope: sessionCommandAvailable ? (zh ? "可用" : "Available") : "Codex" },
+          { kind: "command", name: "compact", label: "/compact", description: zh ? "压缩当前会话上下文" : "Compact the current conversation context", icon: "sparkles", available: sessionCommandAvailable, scope: sessionCommandAvailable ? (zh ? "可用" : "Available") : "Codex" },
+          ...[
+            ["approve", zh ? "批准最近一次自动审查拒绝的重试" : "Approve one retry after an automatic-review denial"],
+            ["cloud", zh ? "在云端运行当前会话" : "Run the current chat in the cloud"],
+            ["cloud-environment", zh ? "选择云端环境" : "Choose the cloud environment"],
+            ["fast", zh ? "切换 Fast 服务层级" : "Toggle the Fast service tier"],
+            ["feedback", zh ? "提交反馈并可附带日志" : "Submit feedback with optional logs"],
+            ["fork", zh ? "复制为新的本地会话或工作树" : "Copy into a new local chat or worktree"],
+            ["goal", zh ? "设置持久目标" : "Set a persistent goal"],
+            ["ide-context", zh ? "切换 IDE 上下文共享" : "Toggle shared IDE context"],
+            ["init", zh ? "生成 AGENTS.md 初始文件" : "Generate an AGENTS.md scaffold"],
+            ["local", zh ? "在本地项目中运行会话" : "Run the chat in a local project"],
+            ["mcp", zh ? "查看 MCP 服务器状态" : "View MCP server status"],
+            ["memories", zh ? "配置会话记忆" : "Configure chat memories"],
+            ["model", zh ? "选择当前会话模型" : "Choose the current chat model"],
+            ["pet", zh ? "唤醒或收起桌面宠物" : "Wake or tuck away the desktop pet"],
+            ["personality", zh ? "选择 Codex 响应风格" : "Choose the Codex personality"],
+            ["plan", zh ? "切换规划模式" : "Toggle plan mode"],
+            ["project", zh ? "选择新会话项目" : "Choose a project for new chats"],
+            ["reasoning", zh ? "选择推理强度" : "Choose reasoning effort"],
+            ["side", zh ? "开始临时侧边会话" : "Start a temporary side chat"],
+            ["task", zh ? "开始不关联项目的会话" : "Start a chat without a project"],
+            ["worktree", zh ? "在新 Git 工作树中运行" : "Run in a new Git worktree"],
+          ].map(([name, description]) => ({ kind: "command", name, label: "/" + name, description, icon: "terminal", available: false, scope: zh ? "原生会话" : "Native chat" })),
         ];
-        return issue ? commands : commands.filter(item => item.name !== "compact");
       }
 
       function semanticStatusMarkup() {
@@ -7706,10 +7731,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const items = semanticMenuState.items || [];
         if (semanticMenuState.loading && !items.length) {
           menu.innerHTML = '<div class="better-codex-semantic-empty">' + icon("refresh", "better-codex-spin") + '<span>' + te(state.locale === "zh-CN" ? "正在读取 Codex 语义…" : "Loading Codex semantics…") + '</span></div>';
+        } else if (semanticMenuState.error && !items.length) {
+          menu.innerHTML = '<div class="better-codex-semantic-empty is-error">' + icon("permissionDanger") + '<span>' + escapeHtml(semanticMenuState.error) + '</span></div>';
         } else if (!items.length) {
           menu.innerHTML = '<div class="better-codex-semantic-empty">' + te(state.locale === "zh-CN" ? "没有匹配项" : "No matches") + '</div>';
         } else {
-          menu.innerHTML = items.map((item, index) => '<button type="button" role="option" aria-selected="' + (index === semanticMenuState.index) + '" data-semantic-option="' + index + '"><span class="better-codex-semantic-icon">' + icon(item.icon || (item.kind === "skill" ? "wrench" : item.kind === "mention" ? "code" : "terminal")) + '</span><span class="better-codex-semantic-copy"><strong>' + escapeHtml(item.label) + '</strong><small>' + escapeHtml(item.description || "") + '</small></span><kbd>' + escapeHtml(item.scope || "") + '</kbd></button>').join("");
+          menu.innerHTML = items.map((item, index) => '<button type="button" role="option" aria-selected="' + (index === semanticMenuState.index) + '" data-semantic-option="' + index + '"' + (item.available === false ? ' disabled aria-disabled="true"' : "") + '><span class="better-codex-semantic-icon">' + icon(item.icon || (item.kind === "skill" ? "wrench" : item.kind === "app" ? "server" : "terminal")) + '</span><span class="better-codex-semantic-copy"><strong>' + escapeHtml(item.label) + '</strong><small>' + escapeHtml(item.description || "") + '</small></span><kbd>' + escapeHtml(item.scope || "") + '</kbd></button>').join("");
         }
         menu.hidden = false;
         input.setAttribute("aria-expanded", "true");
@@ -7718,22 +7745,20 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
       function closeSemanticMenu() {
         semanticMenuState = null;
-        semanticSearchSequence += 1;
-        if (semanticSearchTimer !== null) clearTimeout(semanticSearchTimer);
-        semanticSearchTimer = null;
         renderSemanticMenu();
       }
 
       async function loadSemanticCatalog() {
         if (semanticCatalog) return semanticCatalog;
-        if (REMOTE) return semanticCatalog = { skills: [] };
+        if (REMOTE) return semanticCatalog = { skills: [], apps: [], errors: [{ source: "catalog", message: state.locale === "zh-CN" ? "远程投影视图暂不支持读取本机 Codex 功能" : "The remote projection cannot read local Codex capabilities" }] };
         try {
           const data = await api(issue
             ? "/api/issues/" + encodeURIComponent(issue.id) + "/semantics"
             : "/api/projects/" + encodeURIComponent(draft.projectId) + "/semantics");
-          semanticCatalog = { skills: Array.isArray(data?.skills) ? data.skills : [] };
-        } catch {
-          semanticCatalog = { skills: [] };
+          semanticCatalog = { skills: Array.isArray(data?.skills) ? data.skills : [], apps: Array.isArray(data?.apps) ? data.apps : [], errors: Array.isArray(data?.errors) ? data.errors : [] };
+        } catch (error) {
+          reportGlobalError(error, { source: "semantic_catalog", issue_id: issue?.id || "", project_id: draft.projectId || "" });
+          semanticCatalog = { skills: [], apps: [], errors: [{ source: "catalog", message: error instanceof Error ? error.message : "codex_semantics_unavailable" }] };
         }
         return semanticCatalog;
       }
@@ -7741,6 +7766,16 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       function semanticSkillItems(query) {
         const value = query.toLowerCase();
         return (semanticCatalog?.skills || []).filter(skill => !value || skill.name.toLowerCase().includes(value) || String(skill.description || "").toLowerCase().includes(value)).slice(0, 12).map(skill => ({ kind: "skill", name: skill.name, ref: skill.ref, label: "$" + skill.name, description: skill.description, scope: skill.scope, icon: "wrench" }));
+      }
+
+      function semanticAppItems(query) {
+        const value = query.toLowerCase();
+        return (semanticCatalog?.apps || []).filter(app => !value || app.name.toLowerCase().includes(value)).slice(0, 20).map(app => ({ kind: "app", name: app.name, ref: app.ref, label: "@" + app.name, description: app.callable ? (state.locale === "zh-CN" ? "已安装的插件或连接器" : "Installed plugin or connector") : (state.locale === "zh-CN" ? "当前配置不可调用" : "Unavailable with the current configuration"), scope: app.callable ? (state.locale === "zh-CN" ? "可用" : "Available") : (state.locale === "zh-CN" ? "不可用" : "Unavailable"), icon: "server", available: app.enabled && app.callable }));
+      }
+
+      function semanticCatalogError(source) {
+        const error = (semanticCatalog?.errors || []).find(item => item?.source === source || item?.source === "catalog");
+        return error ? String(error.message || "codex_semantics_unavailable") : "";
       }
 
       function syncSemanticMenu() {
@@ -7754,42 +7789,24 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           return renderSemanticMenu();
         }
         if (token.trigger === "$") {
-          semanticMenuState = { token, items: semanticSkillItems(token.query), index: 0, loading: !semanticCatalog };
+          semanticMenuState = { token, items: semanticSkillItems(token.query), index: 0, loading: !semanticCatalog, error: semanticCatalog ? semanticCatalogError("skills") : "" };
           renderSemanticMenu();
           if (!semanticCatalog) void loadSemanticCatalog().then(() => {
             const current = semanticToken(semanticEditor());
             if (!current || current.trigger !== "$" || current.query !== token.query) return;
-            semanticMenuState = { token: current, items: semanticSkillItems(current.query), index: 0 };
+            semanticMenuState = { token: current, items: semanticSkillItems(current.query), index: 0, error: semanticCatalogError("skills") };
             renderSemanticMenu();
           });
           return;
         }
-        if (REMOTE) {
-          semanticMenuState = { token, items: [], index: 0 };
-          return renderSemanticMenu();
-        }
-        const sequence = ++semanticSearchSequence;
-        semanticMenuState = { token, items: [], index: 0, loading: true };
+        semanticMenuState = { token, items: semanticAppItems(token.query), index: 0, loading: !semanticCatalog, error: semanticCatalog ? semanticCatalogError("apps") : "" };
         renderSemanticMenu();
-        if (semanticSearchTimer !== null) clearTimeout(semanticSearchTimer);
-        semanticSearchTimer = setTimeout(() => {
-          semanticSearchTimer = null;
-          const endpoint = issue
-            ? "/api/issues/" + encodeURIComponent(issue.id) + "/mentions?query="
-            : "/api/projects/" + encodeURIComponent(draft.projectId) + "/mentions?query=";
-          void api(endpoint + encodeURIComponent(token.query)).then(data => {
-            if (sequence !== semanticSearchSequence) return;
-            const current = semanticToken(semanticEditor());
-            if (!current || current.trigger !== "@" || current.query !== token.query) return;
-            const items = (Array.isArray(data?.files) ? data.files : []).slice(0, 12).map(file => ({ kind: "mention", name: file.displayPath || file.name, ref: file.ref, label: "@" + (file.displayPath || file.name), description: file.kind === "directory" ? (state.locale === "zh-CN" ? "目录" : "Directory") : (state.locale === "zh-CN" ? "工作区文件" : "Workspace file"), icon: "code" }));
-            semanticMenuState = { token: current, items, index: 0 };
-            renderSemanticMenu();
-          }).catch(() => {
-            if (sequence !== semanticSearchSequence) return;
-            semanticMenuState = { token, items: [], index: 0 };
-            renderSemanticMenu();
-          });
-        }, 120);
+        if (!semanticCatalog) void loadSemanticCatalog().then(() => {
+          const current = semanticToken(semanticEditor());
+          if (!current || current.trigger !== "@" || current.query !== token.query) return;
+          semanticMenuState = { token: current, items: semanticAppItems(current.query), index: 0, error: semanticCatalogError("apps") };
+          renderSemanticMenu();
+        });
       }
 
       function replaceSemanticToken(value) {
@@ -7812,9 +7829,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
       function selectSemanticOption(index = semanticMenuState?.index || 0) {
         const item = semanticMenuState?.items?.[index];
-        if (!item) return;
+        if (!item || item.available === false) return;
         if (item.kind === "command") {
-          if (!issue && item.name === "status") {
+          if (item.name === "status") {
             replaceSemanticToken("");
             semanticMenuState = { status: true };
             renderSemanticMenu();
@@ -7825,7 +7842,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             semanticMenuState = null;
             return syncSemanticMenu();
           }
-          if (item.name === "mentions") {
+          if (item.name === "apps") {
             replaceSemanticToken("@");
             semanticMenuState = null;
             return syncSemanticMenu();
@@ -8178,7 +8195,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const errorOutput = dialog.querySelector(".better-codex-dialog-error");
         const retrying = Boolean(retryMessage);
         const text = String(retryMessage || textarea?.value || "").trim();
-        const slashCommand = /^\\/(review|compact|status|skills|mentions)$/.exec(text)?.[1] || "";
+        const slashCommand = /^\\/(review|compact|status|skills|apps)$/.exec(text)?.[1] || "";
         const semanticCommand = retryCommand || (["review", "compact"].includes(slashCommand) ? slashCommand : "");
         const semanticReferences = retrying ? (retrySemanticReferences || []) : draft.replySemanticReferences.filter(reference => text.includes((reference.type === "skill" ? "$" : "@") + reference.name));
         const requestId = retryRequestId || (globalThis.crypto?.randomUUID?.() || VERSION + "-reply-" + Date.now() + "-" + Math.random().toString(36).slice(2));
@@ -8194,7 +8211,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           updateReplySendState();
           return;
         }
-        if (!retrying && (slashCommand === "skills" || slashCommand === "mentions")) {
+        if (!retrying && (slashCommand === "skills" || slashCommand === "apps")) {
           if (textarea) {
             textarea.value = slashCommand === "skills" ? "$" : "@";
             textarea.setSelectionRange(1, 1);

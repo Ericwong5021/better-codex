@@ -11,7 +11,7 @@ import { readCodexAppearance } from "./appearance.js";
 import { normalizeCodexLocale, readCodexLocale } from "./locale.js";
 import { readCodexUserProfile } from "./user-profile.js";
 import { readCodexUsage } from "./codex-usage.js";
-import { codexSemanticRequestFingerprint, normalizeCodexSemanticSelections, readCodexSkills, resolveCodexSemanticReferences, searchCodexFiles } from "./codex-semantics.js";
+import { codexSemanticRequestFingerprint, normalizeCodexSemanticSelections, readCodexSemanticCatalog, resolveCodexSemanticReferences, searchCodexFiles } from "./codex-semantics.js";
 import { readModelCatalog } from "./model-catalog.js";
 import { attachmentPath, databasePath, runPath, runtimePort, token, updateLogPath } from "./config.js";
 import { acquireRuntimeLock, clearRuntimeState, createRuntimeIdentity, publishRuntimeState } from "./runtime-state.js";
@@ -1585,8 +1585,12 @@ export function startServer() {
         const project = store.getProject(decodeURIComponent(path[2]));
         if (!project) return sendJson(response, 404, { error: "project_not_found" });
         if (!project.workspace_path) throw new Error("workspace_required");
-        const skills = (await readCodexSkills(project.workspace_path)).map(({ name, description, scope, ref }) => ({ name, description, scope, ref }));
-        return sendJson(response, 200, { skills });
+        const catalog = await readCodexSemanticCatalog(project.workspace_path);
+        return sendJson(response, 200, {
+          skills: catalog.skills.map(({ name, description, scope, ref }) => ({ name, description, scope, ref })),
+          apps: catalog.apps.map(({ name, ref, enabled, callable }) => ({ name, ref, enabled, callable })),
+          errors: catalog.errors,
+        });
       }
       if (path[0] === "api" && path[1] === "projects" && path[2] && path[3] === "mentions" && path.length === 4 && method === "GET") {
         const project = store.getProject(decodeURIComponent(path[2]));
@@ -1885,8 +1889,12 @@ export function startServer() {
         }
         if (method === "GET" && path[3] === "semantics" && path.length === 4) {
           if (!issue.workspace_path) throw new Error("workspace_required");
-          const skills = (await readCodexSkills(issue.workspace_path)).map(({ name, description, scope, ref }) => ({ name, description, scope, ref }));
-          return sendJson(response, 200, { skills });
+          const catalog = await readCodexSemanticCatalog(issue.workspace_path);
+          return sendJson(response, 200, {
+            skills: catalog.skills.map(({ name, description, scope, ref }) => ({ name, description, scope, ref })),
+            apps: catalog.apps.map(({ name, ref, enabled, callable }) => ({ name, ref, enabled, callable })),
+            errors: catalog.errors,
+          });
         }
         if (method === "GET" && path[3] === "mentions" && path.length === 4) {
           if (!issue.workspace_path) throw new Error("workspace_required");

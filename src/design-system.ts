@@ -6339,6 +6339,11 @@ export function betterCodexDesignSystemCss() {
       background: var(--bc-color-hover);
     }
 
+    #better-codex-dialog .better-codex-semantic-menu button:disabled {
+      opacity: .48;
+      cursor: default;
+    }
+
     #better-codex-dialog .better-codex-semantic-icon {
       display: inline-flex;
       width: 24px;
@@ -6407,6 +6412,10 @@ export function betterCodexDesignSystemCss() {
 
     #better-codex-dialog .better-codex-semantic-empty .better-codex-spin {
       animation: better-codex-spin .85s linear infinite;
+    }
+
+    #better-codex-dialog .better-codex-semantic-empty.is-error {
+      color: var(--bc-color-danger);
     }
 
     #better-codex-dialog .better-codex-semantic-status {

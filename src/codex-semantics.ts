@@ -12,7 +12,7 @@ export type CodexSemanticReference = {
 };
 
 export type CodexSemanticSelection = {
-  type: "skill" | "mention";
+  type: "skill" | "app" | "mention";
   name: string;
   ref: string;
 };
@@ -35,15 +35,24 @@ export type CodexFileMention = {
   kind: "file" | "directory";
 };
 
+export type CodexApp = {
+  id: string;
+  name: string;
+  ref: string;
+  enabled: boolean;
+  callable: boolean;
+};
+
 function object(value: unknown) {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
 function requestCodex(method: string, params: Record<string, unknown>, timeoutMs = 8000) {
   return new Promise<unknown>((resolveRequest, reject) => {
-    const child = spawn(codexExecutablePath(), ["app-server"], { stdio: ["pipe", "pipe", "ignore"], windowsHide: true });
+    const child = spawn(codexExecutablePath(), ["app-server"], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
     let output = "";
     let outputBytes = 0;
+    let errorOutput = "";
     let settled = false;
     const finish = (error?: Error, result?: unknown) => {
       if (settled) return;
@@ -58,6 +67,10 @@ function requestCodex(method: string, params: Record<string, unknown>, timeoutMs
     };
     const timer = setTimeout(() => finish(new Error("codex_semantics_timeout")), timeoutMs);
     child.on("error", error => finish(error));
+    child.on("close", code => finish(new Error(errorOutput.trim().slice(0, 1000) || `codex_semantics_closed:${code ?? "unknown"}`)));
+    child.stderr.on("data", chunk => {
+      if (Buffer.byteLength(errorOutput) < 65_536) errorOutput += String(chunk);
+    });
     child.stdout.on("data", chunk => {
       if (settled) return;
       outputBytes += Buffer.byteLength(chunk);
@@ -69,7 +82,10 @@ function requestCodex(method: string, params: Record<string, unknown>, timeoutMs
         try {
           const message = JSON.parse(line) as { id?: number; result?: unknown; error?: unknown };
           if (message.id !== 2) continue;
-          if (message.error) return finish(new Error("codex_semantics_request_failed"));
+          if (message.error) {
+            const detail = object(message.error);
+            return finish(new Error(String(detail.message || detail.code || "codex_semantics_request_failed").slice(0, 1000)));
+          }
           return finish(undefined, message.result);
         } catch {}
       }
@@ -80,7 +96,7 @@ function requestCodex(method: string, params: Record<string, unknown>, timeoutMs
   });
 }
 
-function semanticReferenceId(type: "skill" | "mention", value: string) {
+function semanticReferenceId(type: "skill" | "mention" | "app", value: string) {
   return createHash("sha256").update(type).update("\0").update(value).digest("base64url").slice(0, 24);
 }
 
@@ -89,7 +105,7 @@ export function normalizeCodexSemanticSelections(value: unknown): CodexSemanticS
   const seen = new Set<string>();
   return value.slice(0, 32).flatMap((item): CodexSemanticSelection[] => {
     const source = object(item);
-    const type = source.type === "skill" || source.type === "mention" ? source.type : null;
+    const type = source.type === "skill" || source.type === "app" || source.type === "mention" ? source.type : null;
     const name = String(source.name || "").trim().slice(0, 500);
     const ref = String(source.ref || "").trim().slice(0, 4096);
     const key = `${type}\0${name}\0${ref}`;
@@ -134,6 +150,11 @@ export function codexSemanticRequestFingerprint(message: string, references: unk
 
 function normalizeSkills(value: unknown): CodexSkill[] {
   const data = Array.isArray(object(value).data) ? object(value).data as unknown[] : [];
+  const errors = data.flatMap(entry => Array.isArray(object(entry).errors) ? object(entry).errors as unknown[] : []);
+  if (errors.length) {
+    const first = object(errors[0]);
+    throw new Error(String(first.message || first.error || errors[0] || "codex_skills_unavailable").slice(0, 1000));
+  }
   return data.flatMap(entry => {
     const skills = Array.isArray(object(entry).skills) ? object(entry).skills as unknown[] : [];
     return skills.flatMap((item): CodexSkill[] => {
@@ -154,6 +175,7 @@ function normalizeSkills(value: unknown): CodexSkill[] {
 }
 
 const skillCache = new Map<string, { expiresAt: number; value: CodexSkill[] }>();
+let appCache: { expiresAt: number; value: CodexApp[] } | null = null;
 
 export async function readCodexSkills(workspacePath: string) {
   const cwd = resolve(workspacePath);
@@ -164,16 +186,54 @@ export async function readCodexSkills(workspacePath: string) {
   return value;
 }
 
+export async function readCodexApps() {
+  if (appCache && appCache.expiresAt > Date.now()) return appCache.value;
+  const result = object(await requestCodex("app/installed", { forceRefresh: false }));
+  const apps = (Array.isArray(result.apps) ? result.apps : []).flatMap((item): CodexApp[] => {
+    const app = object(item);
+    const id = String(app.id || "").trim();
+    const name = String(app.runtimeName || "").trim();
+    if (!id || !name) return [];
+    return [{
+      id,
+      name,
+      ref: semanticReferenceId("app", id),
+      enabled: app.enabled === true,
+      callable: app.callable === true,
+    }];
+  }).sort((left, right) => left.name.localeCompare(right.name));
+  appCache = { expiresAt: Date.now() + 60_000, value: apps };
+  return apps;
+}
+
+export async function readCodexSemanticCatalog(workspacePath: string) {
+  const [skillsResult, appsResult] = await Promise.allSettled([readCodexSkills(workspacePath), readCodexApps()]);
+  return {
+    skills: skillsResult.status === "fulfilled" ? skillsResult.value : [],
+    apps: appsResult.status === "fulfilled" ? appsResult.value : [],
+    errors: [
+      ...(skillsResult.status === "rejected" ? [{ source: "skills", message: skillsResult.reason instanceof Error ? skillsResult.reason.message : "codex_skills_unavailable" }] : []),
+      ...(appsResult.status === "rejected" ? [{ source: "apps", message: appsResult.reason instanceof Error ? appsResult.reason.message : "codex_apps_unavailable" }] : []),
+    ],
+  };
+}
+
 export async function resolveCodexSemanticReferences(workspacePath: string, value: unknown) {
   const selections = normalizeCodexSemanticSelections(value);
   if (!selections.length) return [];
   const cwd = resolve(workspacePath);
   const skills = selections.some(selection => selection.type === "skill") ? await readCodexSkills(cwd) : [];
+  const apps = selections.some(selection => selection.type === "app") ? await readCodexApps() : [];
   return selections.map((selection): CodexSemanticReference => {
     if (selection.type === "skill") {
       const skill = skills.find(item => item.ref === selection.ref && item.name === selection.name);
       if (!skill) throw new Error("semantic_reference_invalid");
       return { type: "skill", name: skill.name, path: skill.path };
+    }
+    if (selection.type === "app") {
+      const app = apps.find(item => item.ref === selection.ref && item.name === selection.name);
+      if (!app || !app.enabled || !app.callable) throw new Error("semantic_app_unavailable");
+      return { type: "mention", name: app.name, path: `app://${app.id}` };
     }
     if (!selection.ref.startsWith("f_")) throw new Error("semantic_reference_invalid");
     const referencePath = Buffer.from(selection.ref.slice(2), "base64url").toString("utf8");

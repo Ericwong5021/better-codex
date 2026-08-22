@@ -78,7 +78,7 @@ test("leaving the app surface suspends the panel and restores its previous surfa
   assert.ok(source.includes('syncEntryIcon(entry, "issues")'));
   assert.ok(source.includes('"issues":{"name":"square-kanban"'));
   assert.ok(source.includes('"bot":{"name":"bot"'));
-  assert.ok(source.includes("return entry.isConnected && (!scheduledEntry || scheduledEntry.isConnected) && agentsEntry.isConnected && projectsEntry.isConnected"));
+  assert.ok(source.includes("return entry.isConnected && (!scheduledEntry || scheduledEntry.isConnected) && (!scheduledMobileEntry || scheduledMobileEntry.isConnected) && agentsEntry.isConnected && projectsEntry.isConnected"));
   assert.ok(source.includes("const entriesAvailable = ensureEntry()"));
   assert.ok(source.includes("if (active && !betterCodexRoute) close({ resume: true, suppressRoute: false })"));
   assert.ok(source.includes("routeSeen = false"));
