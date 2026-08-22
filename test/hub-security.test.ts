@@ -110,7 +110,7 @@ test("Hub Web login separates bootstrap credentials and enforces cookie, Origin,
     assert.equal(noCsrf.status, 403);
     assert.deepEqual(await noCsrf.json(), { error: "csrf_invalid" });
 
-    hub.store.setWebPasswordHash(passwordHash("rotated-password-" + "c".repeat(32)));
+    hub.store.setWebUserPassword(webUsername, passwordHash("rotated-password-" + "c".repeat(32)));
     const revoked = await fetch(`${base}/web/session`, { headers: { cookie } });
     assert.equal(revoked.status, 401);
   } finally {
@@ -160,7 +160,7 @@ test("Hub backup and restore preserve paired devices, password state, and pendin
   const restored = join(directory, "restored.db");
   const store = new HubStore(database);
   try {
-    store.setWebPasswordHash(passwordHash("backup-password-" + "d".repeat(32)));
+    store.createWebUser("backup-admin", passwordHash("backup-password-" + "d".repeat(32)));
     const code = store.createPairingCode();
     const device = store.pairDevice("backup runtime", code.pairing_code);
     const timestamp = new Date().toISOString();
@@ -189,7 +189,7 @@ test("Hub backup and restore preserve paired devices, password state, and pendin
   try {
     assert.equal(recovered.health().ok, true);
     assert.equal(recovered.devices().length, 1);
-    assert.match(recovered.webPasswordHash() || "", /^scrypt\$/);
+    assert.match(recovered.webUserCredentials("backup-admin")?.password_hash || "", /^scrypt\$/);
     assert.equal(recovered.remoteCommand("backup-command")?.status, "pending");
     assert.equal(recovered.board().issues.find(issue => issue.id === "issue-1")?.title, "Pending after restore");
   } finally {
@@ -245,7 +245,7 @@ test("Hub migration creates an integrity-checked backup before changing an older
   } finally {
     migrated.close();
   }
-  const backups = readdirSync(join(directory, "backups")).filter(name => name.startsWith("before-hub-v7-") && name.endsWith(".db"));
+  const backups = readdirSync(join(directory, "backups")).filter(name => name.startsWith("before-hub-v8-") && name.endsWith(".db"));
   assert.equal(backups.length, 1);
   const snapshot = new DatabaseSync(join(directory, "backups", backups[0]), { readOnly: true });
   try {
@@ -288,7 +288,7 @@ test("Hub migration archives legacy cancelled projections and rejects obsolete c
       .run(projection.id, device.device_id, JSON.stringify(projection), timestamp);
     store.db.prepare("INSERT INTO remote_commands (command_id, device_id, operation, entity_id, base_revision, payload_json, status, requested_at, expires_at) VALUES ('legacy-command', ?, 'issue.move', ?, 1, '{\"status\":\"cancelled\"}', 'pending', ?, ?)")
       .run(device.device_id, projection.id, timestamp, new Date(Date.now() + 60_000).toISOString());
-    store.db.prepare("DELETE FROM hub_migrations WHERE version IN (5, 6, 7)").run();
+    store.db.prepare("DELETE FROM hub_migrations WHERE version IN (5, 6, 7, 8)").run();
     store.close();
     store = undefined;
 
@@ -314,7 +314,7 @@ test("Hub rejects newer schemas before opening or restoring them", () => {
   current.close();
   copyFileSync(database, backup);
   const newer = new DatabaseSync(backup);
-  newer.prepare("INSERT INTO hub_migrations (version, applied_at) VALUES (8, ?)").run(new Date().toISOString());
+  newer.prepare("INSERT INTO hub_migrations (version, applied_at) VALUES (9, ?)").run(new Date().toISOString());
   newer.close();
   try {
     assert.throws(() => new HubStore(backup), /hub_database_schema_too_new/);

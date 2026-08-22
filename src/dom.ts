@@ -7742,7 +7742,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const errorOutput = dialog.querySelector(".better-codex-dialog-error");
         const retrying = Boolean(retryMessage);
         const text = String(retryMessage || textarea?.value || "").trim();
-        const slashCommand = /^\/(review|compact|status|skills|mentions)$/.exec(text)?.[1] || "";
+        const slashCommand = /^\\/(review|compact|status|skills|mentions)$/.exec(text)?.[1] || "";
         const semanticCommand = retryCommand || (["review", "compact"].includes(slashCommand) ? slashCommand : "");
         const semanticReferences = retrying ? (retrySemanticReferences || []) : draft.replySemanticReferences.filter(reference => text.includes((reference.type === "skill" ? "$" : "@") + reference.name));
         const requestId = retryRequestId || (globalThis.crypto?.randomUUID?.() || VERSION + "-reply-" + Date.now() + "-" + Math.random().toString(36).slice(2));

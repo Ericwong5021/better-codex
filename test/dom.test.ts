@@ -74,7 +74,7 @@ test("leaving the app surface suspends the panel and restores its previous surfa
   assert.ok(source.includes('syncEntryIcon(entry, "issues")'));
   assert.ok(source.includes('"issues":{"name":"square-kanban"'));
   assert.ok(source.includes('"bot":{"name":"bot"'));
-  assert.ok(source.includes("return entry.isConnected && agentsEntry.isConnected"));
+  assert.ok(source.includes("return entry.isConnected && (!scheduledEntry || scheduledEntry.isConnected) && agentsEntry.isConnected && projectsEntry.isConnected"));
   assert.ok(source.includes("const entriesAvailable = ensureEntry()"));
   assert.ok(source.includes("if (active && !betterCodexRoute) close({ resume: true, suppressRoute: false })"));
   assert.ok(source.includes("routeSeen = false"));
@@ -412,8 +412,9 @@ test("initial agent loading preserves an inspector opened while the request is p
 test("issue editor uses branded listboxes instead of native selects", () => {
   const source = injectionScript(4317, "test-token", "install");
   const css = betterCodexDesignSystemCss();
+  const editor = source.slice(source.indexOf("function openEditor("), source.indexOf("async function submitIssue()"));
 
-  assert.doesNotMatch(source, /<select[^>]+name="(?:status|priority|assignee|project_id)"/);
+  assert.doesNotMatch(editor, /<select[^>]+name="(?:status|priority|assignee|project_id)"/);
   assert.ok(source.includes('data-dialog-select-toggle="'));
   assert.ok(source.includes('data-dialog-select-option="'));
   assert.ok(source.includes('data-dialog-select-toggle="assignee"') || source.includes('dialogSelect("assignee"'));
@@ -589,7 +590,7 @@ test("issue context menu can assign the current user or an agent", () => {
   assert.ok(source.includes('data-assignee-kind="none"'));
   assert.ok(source.includes('contextAssigneeLabel(t("未指派"))'));
   assert.doesNotMatch(source, /取消分配/);
-  assert.ok(source.includes("better-codex-context-avatar is-user is-initials"));
+  assert.ok(source.includes('userAvatarMarkup(state.user, "better-codex-context-avatar")'));
   assert.ok(source.includes("better-codex-context-tag"));
   assert.ok(source.includes("user_assigned: true"));
   assert.ok(source.includes("const assigned = Boolean(issue.agent_enabled || issue.user_assigned)"));
@@ -725,7 +726,7 @@ test("issue details render the latest conversation result and reply composer", (
   assert.ok(source.includes("stopIssueFromDialog(button)"));
   assert.equal(permissions.match(/\[data-conversation-retry\]/g)?.length, 2);
   assert.ok(source.includes('const retryRequestId = lastReplyStatus === "interrupted" ? "" : lastReplyRequestId'));
-  assert.ok(source.includes("sendReply(lastReplyMessage, retryRequestId)"));
+  assert.ok(source.includes("sendReply(lastReplyMessage, retryRequestId, lastReplySemanticReferences, lastReplyCommand)"));
   assert.match(css, /\.better-codex-timeline\s*\{/s);
   assert.match(css, /\.better-codex-bubble\s*\{/s);
   assert.match(css, /\.better-codex-composer\s*\{[^}]*border-radius:\s*23px;[^}]*padding:\s*8px;/s);
@@ -799,7 +800,7 @@ test("every modal dialog closes only when its backdrop is clicked", () => {
 
   assert.ok(source.includes("function bindModalDismiss(dialog, dismiss)"));
   assert.ok(source.includes("event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom"));
-  assert.equal(bindings.length, 4);
+  assert.equal(bindings.length, 5);
 });
 
 test("Codex-native visual values live behind semantic design tokens", () => {
@@ -860,6 +861,6 @@ test("web injection shares the Codex user profile with the host shell", () => {
   const source = injectionScript(4317, "test-token", "install", "zh-CN", "web");
 
   assert.match(source, /new CustomEvent\("better-codex:bootstrap"/);
-  assert.equal(source.match(/new CustomEvent\("better-codex:bootstrap"/g)?.length, 2, "language changes should refresh the Web host profile");
+  assert.equal(source.match(/new CustomEvent\("better-codex:bootstrap"/g)?.length, 3, "bootstrap, profile, and language changes should refresh the Web host profile");
   assert.match(source, /detail: \{ user: state\.user, locale: state\.locale \}/);
 });
