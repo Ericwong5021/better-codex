@@ -4,6 +4,12 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.10-beta.13] - 2026-08-23
+
+- Match native Codex queue behavior and styling, including editing or sending queued replies immediately.
+- Expose Codex skills, apps, file mentions, and slash commands in Issue creation and detail dialogs with explicit lookup errors.
+- Keep mobile scheduled-task navigation, project planning scroll position, slash menus, and Agent editor dismissal stable across live updates.
+
 ## [0.4.10-beta.12] - 2026-08-23
 
 - Keep an Issue on its existing Codex thread when the assigned Agent configuration changes, while applying the current workspace, model, approval, sandbox, and developer instructions to resumed work.
@@ -800,7 +806,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.12...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.13...HEAD
+[0.4.10-beta.13]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.12...v0.4.10-beta.13
 [0.4.10-beta.12]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.11...v0.4.10-beta.12
 [0.4.10-beta.11]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.10...v0.4.10-beta.11
 [0.4.10-beta.10]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.9...v0.4.10-beta.10
