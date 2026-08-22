@@ -4,6 +4,12 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.10-beta.12] - 2026-08-23
+
+- Keep an Issue on its existing Codex thread when the assigned Agent configuration changes, while applying the current workspace, model, approval, sandbox, and developer instructions to resumed work.
+- Align remote Web acceptance with the separate conversation stop control.
+- Make full CI and regression suites non-blocking for signed Preview packaging and Beta installation.
+
 ## [0.4.10-beta.11] - 2026-08-23
 
 - Queue follow-up replies while an Issue is running and show pending messages in the conversation.
@@ -794,7 +800,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.11...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.12...HEAD
+[0.4.10-beta.12]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.11...v0.4.10-beta.12
 [0.4.10-beta.11]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.10...v0.4.10-beta.11
 [0.4.10-beta.10]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.9...v0.4.10-beta.10
 [0.4.10-beta.9]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.8...v0.4.10-beta.9
