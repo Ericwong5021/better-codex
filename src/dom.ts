@@ -38,6 +38,7 @@ import {
   Hand,
   Image,
   LayoutTemplate,
+  ListEnd,
   ListFilter,
   LoaderCircle,
   Maximize2,
@@ -106,6 +107,7 @@ const lucideIcons = Object.fromEntries(Object.entries({
   search: Search,
   review: SearchCode,
   layout: LayoutTemplate,
+  queue: ListEnd,
   bug: Bug,
   terminal: Terminal,
   wrench: Wrench,
@@ -686,7 +688,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     localeResources.en["停止任务"] = "Stop task";
     localeResources.en["加入队列"] = "Queue message";
     localeResources.en["队列中 {{count}} 条消息"] = "{{count}} queued messages";
-    localeResources.en["将在当前任务完成后依次发送"] = "Messages will be sent in order after the current task finishes";
     localeResources.en["正在停止…"] = "Stopping…";
     localeResources.en["未命名任务"] = "Untitled issue";
     localeResources.en["无法确定会话所属项目。请先把会话放入一个项目。"] = "We couldn't determine this conversation's project. Move it into a project first.";
@@ -7585,7 +7586,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const conversationState = issue.reply_status || "idle";
         const conversationStatus = conversationStatusMarkup(conversationState);
         const conversationBody = sessionId ? '<p class="better-codex-markdown-empty">' + te("加载对话…") + '</p>' : "";
-        return '<div class="better-codex-conversation-shell"><section class="better-codex-conversation"><div class="better-codex-conversation-head"><span>' + te("对话") + '</span><span class="better-codex-conversation-status" data-conversation-status data-state="' + escapeHtml(conversationState) + '"' + (conversationStatus ? "" : " hidden") + '>' + conversationStatus + '</span></div><div class="better-codex-timeline" data-conversation-body>' + conversationBody + '</div></section><div class="better-codex-conversation-feedback" data-conversation-feedback hidden></div>' + conversationComposer() + '</div>';
+        return '<div class="better-codex-conversation-shell"><section class="better-codex-conversation"><div class="better-codex-conversation-head"><span>' + te("对话") + '</span><span class="better-codex-conversation-status" data-conversation-status data-state="' + escapeHtml(conversationState) + '"' + (conversationStatus ? "" : " hidden") + '>' + conversationStatus + '</span></div><div class="better-codex-timeline" data-conversation-body>' + conversationBody + '</div></section><div class="better-codex-conversation-feedback" data-conversation-feedback hidden></div><div class="better-codex-composer-queue" data-conversation-queue role="list" hidden></div>' + conversationComposer() + '</div>';
       }
 
       function conversationStatusMarkup(replyStatus) {
@@ -7801,15 +7802,16 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const actionLabel = t(stopping ? "正在停止…" : mode === "stop" ? "停止任务" : mode === "queue" ? "加入队列" : "发送");
         const attachments = attachmentList(draft.replyAttachments, "reply");
         const attachButton = '<button class="better-codex-composer-attach" type="button" data-conversation-attach aria-label="' + te("添加附件") + '" title="' + te("添加附件") + '"' + inputDisabled + '>' + icon("plus", "", "1.9") + '</button>';
-        return '<div class="better-codex-composer" data-state="' + mode + '">' + attachments + '<div class="better-codex-composer-queue" data-conversation-queue hidden></div><div class="better-codex-semantic-menu" id="better-codex-semantic-menu" data-semantic-menu role="listbox" hidden></div><textarea name="reply" rows="2" placeholder="' + te(archived ? "取消归档后继续对话" : sessionHandoff ? "请前往会话继续对话" : "输入下一步要求…") + '" aria-label="' + te("回复") + '" aria-autocomplete="list" aria-controls="better-codex-semantic-menu" aria-expanded="false"' + inputDisabled + '>' + escapeHtml(draft.reply) + '</textarea><div class="better-codex-composer-toolbar">' + attachButton + '<button class="better-codex-composer-send" type="button" data-conversation-send data-composer-mode="' + mode + '" aria-label="' + escapeHtml(actionLabel) + '" title="' + escapeHtml(actionLabel) + '"' + actionDisabled + '>' + icon(mode === "stop" || mode === "stopping" ? "stop" : "send", "", mode === "stop" || mode === "stopping" ? "2.5" : "2") + '</button></div></div>';
+        return '<div class="better-codex-composer" data-state="' + mode + '">' + attachments + '<div class="better-codex-semantic-menu" id="better-codex-semantic-menu" data-semantic-menu role="listbox" hidden></div><textarea name="reply" rows="2" placeholder="' + te(archived ? "取消归档后继续对话" : sessionHandoff ? "请前往会话继续对话" : "输入下一步要求…") + '" aria-label="' + te("回复") + '" aria-autocomplete="list" aria-controls="better-codex-semantic-menu" aria-expanded="false"' + inputDisabled + '>' + escapeHtml(draft.reply) + '</textarea><div class="better-codex-composer-toolbar">' + attachButton + '<button class="better-codex-composer-send" type="button" data-conversation-send data-composer-mode="' + mode + '" aria-label="' + escapeHtml(actionLabel) + '" title="' + escapeHtml(actionLabel) + '"' + actionDisabled + '>' + icon(mode === "stop" || mode === "stopping" ? "stop" : "send", "", mode === "stop" || mode === "stopping" ? "2.5" : "2") + '</button></div></div>';
       }
 
       function syncQueuedReplyState() {
         const queue = dialog.querySelector("[data-conversation-queue]");
         if (!queue) return;
         queue.hidden = queuedReplies.length === 0;
+        queue.setAttribute("aria-label", t("队列中 {{count}} 条消息").replace("{{count}}", String(queuedReplies.length)));
         queue.innerHTML = queuedReplies.length
-          ? '<strong>' + escapeHtml(t("队列中 {{count}} 条消息").replace("{{count}}", String(queuedReplies.length))) + '</strong><span>' + te("将在当前任务完成后依次发送") + '</span><ol>' + queuedReplies.map(item => '<li>' + escapeHtml(item.message || "") + '</li>').join("") + '</ol>'
+          ? queuedReplies.map(item => '<div class="better-codex-composer-queue-row" role="listitem" title="' + escapeHtml(item.message || t("附件")) + '"><span class="better-codex-composer-queue-icon" aria-hidden="true">' + icon("queue") + '</span><span class="better-codex-composer-queue-message">' + escapeHtml(item.message || t("附件")) + '</span></div>').join("")
           : "";
       }
 
