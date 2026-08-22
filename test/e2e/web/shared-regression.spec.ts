@@ -1,4 +1,6 @@
 import { expect, test, type Browser, type Page } from "@playwright/test";
+import { randomUUID } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
 import { startRuntimeFixture, type RuntimeFixture } from "../fixtures/runtime.js";
 
 let runtime: RuntimeFixture;
@@ -106,6 +108,39 @@ test("supports English, dark theme, mobile viewport, and keyboard dismissal", as
   await expect(page.locator("#better-codex-dialog")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.locator("#better-codex-dialog")).toHaveCount(0);
+  await context.close();
+});
+
+test("preserves project planning scroll across live updates", async ({ browser }) => {
+  const { context, page } = await openAuthenticatedPage(browser, { viewport: { width: 390, height: 844 } });
+  const project = await page.evaluate(async workspacePath => await (window as any).betterCodexHost.request({
+    path: "/api/projects",
+    method: "POST",
+    body: JSON.stringify({ name: "Planning scroll project", workspace_path: workspacePath }),
+  }), runtime.workspacePath);
+  const timestamp = new Date().toISOString();
+  const item = (index: number) => ({ id: `milestone-${index}`, title: `里程碑 ${index}`, detail: "保持当前阅读位置", status: "confirmed", source: "user", target_date: null, dependencies: [], evidence: [] });
+  const plan = { summary: "规划滚动位置回归", outcomes: [], milestones: Array.from({ length: 16 }, (_, index) => item(index + 1)), workstreams: [], risks: [], decisions: [], open_questions: [], delivery: [], evidence: [] };
+  const database = new DatabaseSync(runtime.databasePath);
+  database.prepare("INSERT INTO project_planning_sessions (project_id, thread_id, agent_id, status, last_error, created_at, updated_at) VALUES (?, NULL, NULL, 'ready', NULL, ?, ?)").run(project.id, timestamp, timestamp);
+  database.prepare("INSERT INTO project_plan_revisions (id, project_id, revision, plan_json, source_message_id, created_at) VALUES (?, ?, 1, ?, ?, ?)").run(randomUUID(), project.id, JSON.stringify(plan), randomUUID(), timestamp);
+  database.close();
+  await page.goto(`${runtime.baseUrl}/web/projects/${encodeURIComponent(project.id)}#token=${encodeURIComponent(runtime.token)}`);
+  await page.locator('.better-codex-project-dashboard-tabs [data-project-dashboard-view="planning"]').click();
+  const planScroll = page.locator(".better-codex-project-plan-scroll");
+  await expect(planScroll).toBeVisible();
+  const previousScrollTop = await planScroll.evaluate(element => {
+    element.scrollTop = Math.min(420, element.scrollHeight - element.clientHeight);
+    return element.scrollTop;
+  });
+  expect(previousScrollTop).toBeGreaterThan(0);
+  await page.evaluate(async projectId => await (window as any).betterCodexHost.request({
+    path: "/api/issues",
+    method: "POST",
+    body: JSON.stringify({ project_id: projectId, title: "Trigger planning refresh", status: "blocked" }),
+  }), project.id);
+  await expect(page.locator(".better-codex-project-health")).toHaveAttribute("data-tone", "danger");
+  await expect.poll(() => planScroll.evaluate(element => element.scrollTop)).toBe(previousScrollTop);
   await context.close();
 });
 

@@ -401,6 +401,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const projectPlanningDrafts = new Map();
     let projectPlanningComposition = "";
     let projectRenderDeferred = null;
+    let projectRenderedMarkup = "";
     function webProjectRoute() {
       if (HOST_KIND !== "web") return null;
       const match = location.pathname.match(/^\\/web\\/projects(?:\\/([^/?#]+))?\\/?$/);
@@ -5364,6 +5365,57 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       return '<section class="better-codex-project-dashboard">' + header + '<section class="better-codex-project-dashboard-summary"><article class="better-codex-project-dashboard-card better-codex-project-dashboard-description"><strong>' + te("项目事实") + '</strong><p>' + escapeHtml(project.description || t("尚未生成项目介绍")) + '</p><div class="better-codex-project-dashboard-path" title="' + escapeHtml(path) + '">' + icon("folder") + '<span>' + escapeHtml(path) + '</span></div></article><article class="better-codex-project-dashboard-card"><strong>' + te("当前状态") + '</strong><div class="better-codex-project-metrics"><span class="better-codex-project-metric"><b>' + escapeHtml(String(running)) + '</b><span>' + te("进行中") + '</span></span><span class="better-codex-project-metric" data-tone="warning"><b>' + escapeHtml(String(review)) + '</b><span>' + te("待复核") + '</span></span><span class="better-codex-project-metric" data-tone="danger"><b>' + escapeHtml(String(blocked)) + '</b><span>' + te("阻塞") + '</span></span></div></article><article class="better-codex-project-dashboard-card better-codex-project-planning-overview"><header class="better-codex-project-section-head"><strong>' + te("项目规划") + '</strong><button type="button" data-project-dashboard-view="planning">' + te(planning.revision ? "计划版本" : "规划") + (planning.revision ? " " + escapeHtml(String(planning.revision)) : "") + icon("chevron") + '</button></header><p>' + escapeHtml(planning.plan?.summary || t("从一个问题开始，智能体会读取代码、Issue 和关联会话。")) + '</p></article></section><section class="better-codex-project-dashboard-card better-codex-project-overview-milestones"><header class="better-codex-project-section-head"><strong>' + te("里程碑") + '</strong><span>' + escapeHtml(String(milestoneItems.length)) + '</span></header><div>' + milestones + '</div></section><section class="better-codex-project-dashboard-lists"><article class="better-codex-project-dashboard-card"><header class="better-codex-project-section-head"><strong>' + te("当前工作") + '</strong><span>' + escapeHtml(String(work.length)) + '</span></header><div class="better-codex-project-work-list">' + workRows + '</div></article><article class="better-codex-project-dashboard-card"><header class="better-codex-project-section-head"><strong>' + te("等你处理") + '</strong><span>' + escapeHtml(String(attention.length)) + '</span></header><div class="better-codex-project-attention-list">' + attentionRows + '</div></article></section></section>';
     }
 
+    function projectRenderKey() {
+      return state.projectDetailId ? [state.projectDetailId, state.projectPage, state.projectDocumentView].join(":") : "projects";
+    }
+
+    function projectScrollState(container) {
+      const surfaces = [
+        ["page", ""],
+        ["issues", ".better-codex-project-issues"],
+        ["timeline", ".better-codex-project-timeline-scroll"],
+        ["document-tabs", ".better-codex-project-document-tabs"],
+        ["document", ".better-codex-project-document-scroll"],
+        ["plan", ".better-codex-project-plan-scroll"],
+        ["planning-messages", ".better-codex-project-planning-messages"],
+      ];
+      return surfaces.flatMap(([name, selector]) => {
+        const surface = selector ? container.querySelector(selector) : container;
+        if (!surface) return [];
+        return [{ name, selector, top: surface.scrollTop, left: surface.scrollLeft, stickToEnd: name === "planning-messages" && surface.scrollHeight - surface.scrollTop - surface.clientHeight < 48 }];
+      });
+    }
+
+    function restoreProjectScrollState(container, viewKey, positions) {
+      if (container.dataset.projectRenderKey !== viewKey) return;
+      for (const position of positions) {
+        const surface = position.selector ? container.querySelector(position.selector) : container;
+        if (!surface) continue;
+        surface.scrollLeft = position.left;
+        surface.scrollTop = position.stickToEnd ? surface.scrollHeight : position.top;
+      }
+    }
+
+    function renderProjectContent(container, markup) {
+      const viewKey = projectRenderKey();
+      const sameView = container.dataset.projectRenderKey === viewKey;
+      if (sameView && projectRenderedMarkup === markup) return;
+      const positions = sameView ? projectScrollState(container) : [];
+      container.innerHTML = markup;
+      container.dataset.projectRenderKey = viewKey;
+      projectRenderedMarkup = markup;
+      restoreProjectScrollState(container, viewKey, positions);
+      requestAnimationFrame(() => {
+        restoreProjectScrollState(container, viewKey, positions);
+        if (!positions.length) return;
+        appendDiagnostic("project_scroll_restored", {
+          project_id: state.projectDetailId,
+          page: state.projectPage,
+          surfaces: positions.filter(position => position.top || position.left || position.stickToEnd).map(position => position.name).join(",") || "zero",
+        });
+      });
+    }
+
     function renderProjects() {
       const container = panel?.querySelector("#better-codex-projects");
       if (!container) return;
@@ -5395,21 +5447,21 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (heading) heading.innerHTML = '<strong>' + te("项目管理") + '</strong><span>' + escapeHtml(state.projects.length + " " + t("个项目")) + '</span>';
         if (HOST_KIND === "web" && state.surface === "projects") document.title = t("项目管理") + " · Better Codex";
         if (!state.projects.length) {
-          container.innerHTML = '<section class="better-codex-project-empty"><strong>' + te("暂无项目") + '</strong><p>' + te("创建项目后，它会出现在 Codex 的项目列表中。") + '</p></section>';
+          renderProjectContent(container, '<section class="better-codex-project-empty"><strong>' + te("暂无项目") + '</strong><p>' + te("创建项目后，它会出现在 Codex 的项目列表中。") + '</p></section>');
           return;
         }
-        container.innerHTML = '<section class="better-codex-project-list">' + projectsByRecentActivity(state.projects).map(project => {
+        renderProjectContent(container, '<section class="better-codex-project-list">' + projectsByRecentActivity(state.projects).map(project => {
           const paths = projectRootPaths(project);
           const description = project.description || t("尚未生成项目介绍");
           return '<button class="better-codex-project-card" type="button" data-project-id="' + escapeHtml(project.id) + '"><span class="better-codex-project-card-head"><span class="better-codex-project-card-icon">' + icon("folder") + '</span><span class="better-codex-project-card-title"><strong>' + escapeHtml(projectLabel(project)) + '</strong><span>' + escapeHtml(paths.length + " " + t("个文件夹")) + '</span></span>' + icon("chevron") + '</span><span class="better-codex-project-card-description">' + escapeHtml(description) + '</span><span class="better-codex-project-card-path">' + icon("folder") + '<span>' + escapeHtml(paths[0] || t("未提供")) + '</span></span></button>';
-        }).join("") + '</section>';
+        }).join("") + '</section>');
         return;
       }
       const project = state.projects.find(item => item.id === state.projectDetailId);
       if (!project) {
         if (!state.projectsLoaded) {
           if (heading) heading.innerHTML = '<strong>' + te("项目管理") + '</strong>';
-          container.innerHTML = "";
+          renderProjectContent(container, "");
           return;
         }
         state.projectDetailId = "";
@@ -5424,7 +5476,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const projectName = projectLabel(project);
       if (heading) heading.innerHTML = '<button class="better-codex-project-back" type="button" data-project-back aria-label="' + te("返回项目列表") + '">' + icon("chevron") + '</button><nav class="better-codex-project-breadcrumb" aria-label="' + te("项目管理") + '"><button type="button" data-project-home>' + te("项目管理") + '</button><span aria-hidden="true">&gt;</span><strong title="' + escapeHtml(projectName) + '">' + escapeHtml(projectName) + '</strong></nav>';
       if (HOST_KIND === "web" && state.surface === "projects") document.title = t("项目管理") + " > " + projectName + " · Better Codex";
-      container.innerHTML = '<section class="better-codex-project-detail">' + projectDashboardMarkup(project, issues, issuesLoading, paths) + '</section>';
+      renderProjectContent(container, '<section class="better-codex-project-detail">' + projectDashboardMarkup(project, issues, issuesLoading, paths) + '</section>');
     }
 
     async function loadProjects(options = {}) {
@@ -5470,6 +5522,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         }
       }
       if (options.background && !projectsChanged && !projectIssuesChanged) return;
+      if (options.background) appendDiagnostic("project_background_update", { project_id: state.projectDetailId, projects_changed: projectsChanged, issues_changed: projectIssuesChanged });
       render();
     }
 

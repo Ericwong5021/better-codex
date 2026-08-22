@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 
 export type RuntimeFixture = {
   baseUrl: string;
+  databasePath: string;
   token: string;
   workspacePath: string;
   output: () => string;
@@ -55,6 +56,7 @@ async function stopProcess(child: ChildProcess) {
 
 export async function startRuntimeFixture(): Promise<RuntimeFixture> {
   const fixtureHome = mkdtempSync(join(tmpdir(), "better-codex-web-e2e-"));
+  const databasePath = join(fixtureHome, "better-codex.db");
   const codexHome = join(fixtureHome, "codex");
   mkdirSync(codexHome, { recursive: true });
   const port = await availablePort();
@@ -68,7 +70,7 @@ export async function startRuntimeFixture(): Promise<RuntimeFixture> {
       env: {
         ...process.env,
         BETTER_CODEX_HOME: fixtureHome,
-        BETTER_CODEX_DB: join(fixtureHome, "better-codex.db"),
+        BETTER_CODEX_DB: databasePath,
         BETTER_CODEX_PORT: String(port),
         BETTER_CODEX_TOKEN: token,
         BETTER_CODEX_DISABLE_RUNTIME_SESSION_RELAY: "1",
@@ -90,6 +92,7 @@ export async function startRuntimeFixture(): Promise<RuntimeFixture> {
   }
   return {
     baseUrl,
+    databasePath,
     token,
     workspacePath: fixtureHome,
     output,
