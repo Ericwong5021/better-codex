@@ -575,7 +575,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "通用任务处理": "General task handling", "代码实现": "Code implementation", "最大": "Maximum", "极致": "Ultra", "发送": "Send", "副本": "Copy", "复制卡片": "Copy card", "更多操作": "More actions", "本次启动关闭": "Disable for this launch", "正在重启 Better Codex": "Restarting Better Codex", "正在下载并校验新版本，请保持 Codex 打开。": "Downloading and verifying the update. Keep Codex open.", "正在重启 Better Codex Runtime，稍后会自动恢复。": "Restarting Better Codex Runtime. It will recover shortly.", "Better Codex 已恢复到上一版本。": "Better Codex has been restored to the previous version.",
       "展示模式": "Mockup mode", "导出展示数据": "Export mockup data", "导入展示数据": "Import mockup data", "重置展示数据": "Reset mockup data", "重置布局": "Reset layout", "重置": "Reset", "恢复默认展示卡片和布局吗？": "Restore the default mockup cards and layout?", "展示数据不能超过 16 MB": "Mockup data cannot exceed 16 MB", "展示数据格式无效": "The mockup data format is invalid", "展示卡片缺少标题": "A mockup card is missing a title", "展示模式不支持此操作": "This action is not supported in mockup mode", "展示模式不会运行真实任务": "Mockup mode does not run real tasks", "任务不存在": "Task not found",
       "修复任务卡片拖拽错位": "Fix task card drag misalignment", "复现缩放状态下的卡片拖拽偏移，并修正坐标计算与落点反馈。": "Reproduce card drag offset while zoomed, then correct the coordinate calculation and drop feedback.", "重写首页首屏价值主张": "Rewrite the homepage value proposition", "提炼 Better Codex 的核心价值，让新访客快速理解产品用途。": "Clarify Better Codex's core value so new visitors quickly understand what it does.", "调研独立开发者工作流": "Research indie developer workflows", "整理从想法到交付的常见流程、主要痛点和决策节点。": "Document common flows, key pain points, and decision points from idea to delivery.", "整理本地安装步骤": "Organize local installation steps", "核对安装、启动与常见异常处理步骤，统一文档表达。": "Verify installation, startup, and common troubleshooting steps, then unify the documentation.", "优化首次启动加载速度": "Improve first-launch loading speed", "定位启动阶段主要耗时，缩短进入任务看板前的等待时间。": "Identify the main startup costs and shorten the wait before the task board opens.", "整理功能亮点短文案": "Write concise feature highlights", "为任务分派、会话协作和代码审核分别撰写简洁说明。": "Write concise descriptions for task assignment, conversation collaboration, and code review.", "对比三款任务看板体验": "Compare three task board experiences", "对比 Linear、Notion 和 Trello 的卡片密度、拖拽与筛选体验。": "Compare card density, drag and drop, and filtering in Linear, Notion, and Trello.", "撰写产品发布介绍": "Write a product launch introduction", "围绕目标用户、核心问题和使用方式准备公开发布稿。": "Prepare launch copy around target users, the core problem, and how the product is used.", "完善会话回复失败提示": "Improve failed reply messages", "梳理超时、网络异常和权限问题的提示文案与重试入口。": "Refine messages and retry paths for timeouts, network failures, and permission issues.", "优化空状态引导语": "Improve empty-state guidance", "重写空看板与空会话的标题、说明和首个行动提示。": "Rewrite the title, explanation, and first action prompt for empty boards and conversations.", "收集首批用户常见问题": "Collect early user FAQs", "汇总安装、任务分派、运行状态和数据存储相关问题。": "Compile questions about installation, task assignment, runtime status, and data storage.", "准备更新日志发布稿": "Prepare release notes", "整理本次新增、修复和已知限制，形成可直接发布的更新日志。": "Organize this release's additions, fixes, and known limitations into publish-ready notes.", "统一看板筛选状态": "Unify task board filter state", "检查筛选逻辑与顶部计数，确保切换后卡片结果同步更新。": "Check filter logic and the top count so card results update together after a change.", "检查 Windows 安装流程": "Check the Windows installation flow", "核对安装、启动、权限与卸载流程，记录关键异常。": "Verify installation, startup, permissions, and uninstall flows, and record key issues.", "起草用户访谈邀请信": "Draft a user interview invitation", "说明访谈目的、所需时间和隐私边界，给出清晰回复方式。": "Explain the interview purpose, time needed, and privacy boundaries, with a clear way to reply.", "归档版本发布资料": "Archive release materials", "整理版本说明、截图、校验结果和发布链接，方便后续复盘。": "Organize release notes, screenshots, verification results, and launch links for later review.", "性能": "Performance", "文案": "Copywriting", "调研": "Research", "文档": "Documentation", "写作": "Writing",
-      "选择头像": "Choose avatar", "预设头像": "Preset avatars", "自定义": "Custom", "更换": "Change", "保存失败": "Save failed", "创建失败": "Creation failed", "加载失败": "Loading failed", "启动失败": "Start failed", "发送失败": "Send failed", "回复失败": "Reply failed", "回复": "Reply", "回复中": "Replying", "回复完成": "Reply completed", "回复进行中…": "Replying…", "回复已完成": "Reply completed", "等待对话": "Waiting for conversation", "加载中…": "Loading…", "正在加载任务看板": "Loading task board", "加载对话…": "Loading conversation…", "正在打开…": "Opening…", "在此回复智能体…": "Reply to the agent here…", "对话": "Conversation", "详情": "Details", "关闭详情": "Close details", "Issue 详情": "Issue details", "名称": "Name", "介绍": "Description", "智能体名称": "Agent name", "尚未添加介绍": "No description yet", "没有匹配的智能体": "No matching agents", "此分类暂无智能体": "No agents in this category",
+      "选择头像": "Choose avatar", "预设头像": "Preset avatars", "自定义": "Custom", "更换": "Change", "保存失败": "Save failed", "正在自动保存…": "Saving…", "已自动保存": "Saved automatically", "创建失败": "Creation failed", "加载失败": "Loading failed", "启动失败": "Start failed", "发送失败": "Send failed", "回复失败": "Reply failed", "回复": "Reply", "回复中": "Replying", "回复完成": "Reply completed", "回复进行中…": "Replying…", "回复已完成": "Reply completed", "等待对话": "Waiting for conversation", "加载中…": "Loading…", "正在加载任务看板": "Loading task board", "加载对话…": "Loading conversation…", "正在打开…": "Opening…", "在此回复智能体…": "Reply to the agent here…", "对话": "Conversation", "详情": "Details", "关闭详情": "Close details", "Issue 详情": "Issue details", "名称": "Name", "介绍": "Description", "智能体名称": "Agent name", "尚未添加介绍": "No description yet", "没有匹配的智能体": "No matching agents", "此分类暂无智能体": "No agents in this category",
       "裁剪头像": "Crop avatar", "拖动图片调整位置": "Drag the image to adjust its position", "正在更新": "Updating", "正在更新 Better Codex": "Updating Better Codex", "更新完成": "Update complete", "更新未完成": "Update incomplete", "稍后提醒": "Remind me later", "Better Codex 有新版本": "A new Better Codex version is available", "Better Codex 已是最新版本": "Better Codex is up to date", "Better Codex 保持当前版本运行。": "Better Codex will continue running on the current version.", "正在下载并校验新版本，请不要关闭 Codex。": "Downloading and verifying the update. Please do not close Codex.", "正在重启 Codex，稍后会自动恢复。": "Restarting Codex. It will resume shortly.", "刚刚完成检查，无需更新。": "Just checked. No update is needed.", "任务已完成": "Task completed", "知道了": "Got it", "关闭": "Close", "附带文件：": "Attached files:", "部分文件无法读取本地路径，已跳过": "Some files could not be read locally and were skipped", "当前环境无法读取本地文件路径": "The current environment cannot read local file paths", "无关联对话。": "No linked conversation.", "暂无对话，可在下方回复或打开完整对话。": "No conversation yet. Reply below or open the full conversation.", "图片不能超过 10 MB": "Images must be 10 MB or smaller", "请选择 PNG、JPEG 或 WebP 图片": "Choose a PNG, JPEG or WebP image", "无法读取这张图片": "Unable to read this image", "创建智能体 Issue 需要本地工作区：请先打开该项目下的一个 Codex 会话": "Creating an agent issue requires a local workspace. Open a Codex conversation in this project first.",
       "粘贴的图片": "Pasted image", "图片保存失败": "Unable to save the image",
       "创建任务": "Create task", "添加描述": "Add description", "展开描述": "Show more", "收起描述": "Show less", "新建 issue": "New issue", "项目": "Project", "状态": "Status", "优先级": "Priority", "选择项目": "Select project", "保存": "Save", "删除": "Delete",
@@ -4405,11 +4405,19 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         trigger?.focus();
       });
       agents.addEventListener("input", event => {
-        if (!event.target.matches("[data-agent-search]")) return;
-        state.agentSearch = event.target.value;
-        renderAgents();
-        const search = agents.querySelector("[data-agent-search]");
-        if (search) { search.focus(); search.setSelectionRange(search.value.length, search.value.length); }
+        if (event.target.matches("[data-agent-search]")) {
+          state.agentSearch = event.target.value;
+          renderAgents();
+          const search = agents.querySelector("[data-agent-search]");
+          if (search) { search.focus(); search.setSelectionRange(search.value.length, search.value.length); }
+          return;
+        }
+        const form = event.target.closest('[data-agent-form]:not([data-agent-form="create"])');
+        if (form && !event.isComposing) scheduleAgentAutosave(form, event.target.matches('input[type="checkbox"], input[type="number"]'));
+      });
+      agents.addEventListener("compositionend", event => {
+        const form = event.target.closest('[data-agent-form]:not([data-agent-form="create"])');
+        if (form) scheduleAgentAutosave(form);
       });
       agents.addEventListener("submit", onAgentSubmit);
       const scheduledTasks = document.createElement("main");
@@ -4792,6 +4800,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     let agentInspectorClosing = false;
     let agentCreateFullscreen = false;
     let agentWindowBoundsObserver = null;
+    let agentAutosaveTimer = null;
+    let agentAutosavePending = null;
+    let agentAutosaveRunning = null;
 
     function clearAgentCreateFullscreenBounds(inspector) {
       inspector?.style.removeProperty("--bc-agent-fullscreen-top");
@@ -4983,7 +4994,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const resizeHandle = creating ? "" : '<div class="better-codex-agent-inspector-resize" data-agent-inspector-resize role="separator" aria-orientation="vertical" aria-label="' + te("调整侧边栏宽度") + '" tabindex="0"></div>';
       const leading = creating ? '<div class="better-codex-agent-inspector-head-leading"><button class="better-codex-agent-window-back" type="button" data-agent-window-back aria-label="' + te("返回") + '">' + icon("back") + '</button><nav class="better-codex-agent-window-title" aria-label="' + te("智能体") + '"><span>' + te("智能体") + '</span><span aria-hidden="true">&gt;</span><strong>' + te("创建智能体") + '</strong></nav></div>' : '<span>' + heading + '</span>';
       const windowAction = creating ? '<button class="better-codex-agent-card-action" type="button" data-agent-window-expand aria-label="' + te(agentCreateFullscreen ? "退出全屏" : "全屏") + '">' + icon(agentCreateFullscreen ? "shrink" : "expand") + '</button>' : "";
-      return '<' + tag + ' class="better-codex-agent-inspector"' + animateAttr + windowAttr + '>' + resizeHandle + '<form data-agent-form="' + (creating ? "create" : isDefault ? "default" : "update") + '" data-agent-key="' + escapeHtml(creating ? "" : agentKey(draft)) + '"><header class="better-codex-agent-inspector-head">' + leading + '<div class="better-codex-agent-inspector-head-actions">' + windowAction + '<button class="better-codex-agent-card-action" type="button" data-agent-close-pane aria-label="' + te(creating ? "关闭" : "关闭详情") + '">' + icon("close") + '</button></div></header><div class="better-codex-agent-inspector-scroll">' + profileHead + identity + '<h3>' + te("详情") + '</h3><div class="better-codex-agent-inspector-group">' + agentPicker("model", t("模型"), model, modelOptions) + agentFastToggle(fast, fastEnabled) + agentPicker("reasoning_effort", t("推理"), effort, effortOptions) + agentPicker("sandbox_mode", t("权限"), sandboxMode, sandboxOptions) + agentNumberInput("max_concurrency", t("最大并发"), draft.max_concurrency, 1, 20) + '</div>' + instructionField + '<div class="better-codex-agent-inspector-error" hidden></div></div>' + (readOnly ? "" : '<footer class="better-codex-agent-inspector-footer">' + deleteButton + '<button class="better-codex-submit" type="submit">' + te(creating ? "创建" : "保存") + '</button></footer>') + '</form></' + tag + '>';
+      const footer = readOnly ? "" : creating ? '<footer class="better-codex-agent-inspector-footer"><button class="better-codex-submit" type="submit">' + te("创建") + '</button></footer>' : deleteButton ? '<footer class="better-codex-agent-inspector-footer">' + deleteButton + '</footer>' : "";
+      return '<' + tag + ' class="better-codex-agent-inspector"' + animateAttr + windowAttr + '>' + resizeHandle + '<form data-agent-form="' + (creating ? "create" : isDefault ? "default" : "update") + '" data-agent-key="' + escapeHtml(creating ? "" : agentKey(draft)) + '"><header class="better-codex-agent-inspector-head">' + leading + '<div class="better-codex-agent-inspector-head-actions">' + windowAction + '<button class="better-codex-agent-card-action" type="button" data-agent-close-pane aria-label="' + te(creating ? "关闭" : "关闭详情") + '">' + icon("close") + '</button></div></header><div class="better-codex-agent-inspector-scroll">' + profileHead + identity + '<h3>' + te("详情") + '</h3><div class="better-codex-agent-inspector-group">' + agentPicker("model", t("模型"), model, modelOptions) + agentFastToggle(fast, fastEnabled) + agentPicker("reasoning_effort", t("推理"), effort, effortOptions) + agentPicker("sandbox_mode", t("权限"), sandboxMode, sandboxOptions) + agentNumberInput("max_concurrency", t("最大并发"), draft.max_concurrency, 1, 20) + '</div>' + instructionField + '<output class="better-codex-agent-inspector-status" hidden></output><div class="better-codex-agent-inspector-error" role="alert" hidden></div></div>' + footer + '</form></' + tag + '>';
     }
 
     function renderAgents() {
@@ -6755,16 +6767,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       setTimeout(() => panel?.querySelector('[data-agent-form="create"] [data-agent-name]')?.focus(), 0);
     }
 
-    function onAgentSubmit(event) {
-      const form = event.target.closest("[data-agent-form]");
-      if (!form) return;
-      event.preventDefault();
-      if (AGENTS_READ_ONLY) return;
-      const mode = form.dataset.agentForm;
-      const selected = state.agents.find(agent => agentKey(agent) === form.dataset.agentKey);
-      const submit = form.querySelector('[type="submit"]');
-      const error = form.querySelector(".better-codex-agent-inspector-error");
-      const body = {
+    function agentFormBody(form, selected) {
+      return {
         name: form.elements.name?.value || selected?.name || state.agentDraft?.name || form.elements.name_en?.value || "Codex",
         name_en: form.elements.name_en?.value || selected?.name_en || state.agentDraft?.name_en || "",
         description: form.elements.description?.value || "",
@@ -6774,24 +6778,119 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         service_tier: form.elements.fast?.checked ? "fast" : "default",
         sandbox_mode: form.elements.sandbox_mode.value,
         max_concurrency: Number(form.elements.max_concurrency?.value || 5),
-        avatar: form.elements.avatar?.value || "",
-        ...(selected ? { version: selected.version } : {})
+        avatar: form.elements.avatar?.value || ""
       };
+    }
+
+    function setAgentAutosaveStatus(key, stateName, message) {
+      const form = panel?.querySelector('[data-agent-form][data-agent-key="' + CSS.escape(key) + '"]');
+      if (!form) return;
+      const status = form.querySelector(".better-codex-agent-inspector-status");
+      const error = form.querySelector(".better-codex-agent-inspector-error");
+      status.hidden = stateName === "error";
+      status.dataset.state = stateName;
+      status.textContent = stateName === "error" ? "" : t(message);
+      error.hidden = stateName !== "error";
+      error.textContent = stateName === "error" ? t(message) : "";
+    }
+
+    function scheduleAgentAutosave(form, immediate = false) {
+      const mode = form?.dataset.agentForm;
+      if (!form || mode === "create" || AGENTS_READ_ONLY) return;
+      if (!form.checkValidity()) {
+        agentAutosavePending = null;
+        clearTimeout(agentAutosaveTimer);
+        agentAutosaveTimer = null;
+        return;
+      }
+      const key = form.dataset.agentKey;
+      const selected = state.agents.find(agent => agentKey(agent) === key);
+      if (!selected) return;
+      agentAutosavePending = { key, mode, body: agentFormBody(form, selected) };
+      setAgentAutosaveStatus(key, "saving", "正在自动保存…");
+      clearTimeout(agentAutosaveTimer);
+      agentAutosaveTimer = null;
+      if (immediate) void flushAgentAutosave();
+      else agentAutosaveTimer = setTimeout(() => { agentAutosaveTimer = null; void flushAgentAutosave(); }, 250);
+    }
+
+    async function flushAgentAutosave() {
+      clearTimeout(agentAutosaveTimer);
+      agentAutosaveTimer = null;
+      if (agentAutosaveRunning) return agentAutosaveRunning;
+      if (!agentAutosavePending) return true;
+      agentAutosaveRunning = (async () => {
+        let latestSaved = true;
+        while (agentAutosavePending) {
+          const pending = agentAutosavePending;
+          agentAutosavePending = null;
+          const selected = state.agents.find(agent => agentKey(agent) === pending.key);
+          if (!selected) {
+            latestSaved = false;
+            setAgentAutosaveStatus(pending.key, "error", "保存失败");
+            appendDiagnostic("agent_autosave_failed", { agent_key: pending.key, mode: pending.mode, error: "agent_not_found" });
+            continue;
+          }
+          try {
+            appendDiagnostic("agent_autosave_started", { agent_key: pending.key, mode: pending.mode, version: selected.version });
+            const path = pending.mode === "default" ? "/api/agents/default" : "/api/agents/" + encodeURIComponent(selected.id);
+            const saved = await api(path, { method: "PATCH", body: JSON.stringify({ ...pending.body, version: selected.version }) });
+            state.agents = state.agents.map(agent => agentKey(agent) === pending.key ? saved : agent);
+            latestSaved = true;
+            setAgentAutosaveStatus(pending.key, "saved", "已自动保存");
+            appendDiagnostic("agent_autosave_completed", { agent_key: pending.key, mode: pending.mode, version: saved.version });
+          } catch (caught) {
+            latestSaved = false;
+            reportGlobalError(caught, { source: "agent_autosave", mode: pending.mode, agent_key: pending.key });
+            setAgentAutosaveStatus(pending.key, "error", caught instanceof Error ? caught.message : "保存失败");
+            appendDiagnostic("agent_autosave_failed", { agent_key: pending.key, mode: pending.mode, error: caught instanceof Error ? caught.message : "保存失败" });
+          }
+        }
+        return latestSaved;
+      })();
+      try {
+        return await agentAutosaveRunning;
+      } finally {
+        agentAutosaveRunning = null;
+      }
+    }
+
+    async function finishAgentAutosave() {
+      const form = panel?.querySelector('[data-agent-form]:not([data-agent-form="create"])');
+      if (form && !form.reportValidity()) return false;
+      if (form && !await flushAgentAutosave()) return false;
+      return true;
+    }
+
+    async function closeAgentInspectorAfterSave() {
+      if (!await finishAgentAutosave()) return;
+      closeAgentInspector();
+    }
+
+    function onAgentSubmit(event) {
+      const form = event.target.closest("[data-agent-form]");
+      if (!form) return;
+      event.preventDefault();
+      if (AGENTS_READ_ONLY) return;
+      const mode = form.dataset.agentForm;
+      if (mode !== "create") {
+        scheduleAgentAutosave(form, true);
+        return;
+      }
+      const selected = state.agents.find(agent => agentKey(agent) === form.dataset.agentKey);
+      const submit = form.querySelector('[type="submit"]');
+      const error = form.querySelector(".better-codex-agent-inspector-error");
+      const body = { ...agentFormBody(form, selected), ...(selected ? { version: selected.version } : {}) };
       void perform(async () => {
         submit.disabled = true;
         error.hidden = true;
         try {
           const path = mode === "default" ? "/api/agents/default" : mode === "create" ? "/api/agents" : "/api/agents/" + encodeURIComponent(selected.id);
           const saved = await api(path, { method: mode === "create" ? "POST" : "PATCH", body: JSON.stringify(body) });
-          if (mode === "create") {
-            state.agentPane = "detail";
-            state.selectedAgentId = agentKey(saved);
-            state.agentDraft = null;
-            await loadAgents();
-          } else {
-            await loadAgents({ preserveInspector: true });
-            closeAgentInspector();
-          }
+          state.agentPane = "detail";
+          state.selectedAgentId = agentKey(saved);
+          state.agentDraft = null;
+          await loadAgents();
         } catch (caught) {
           reportGlobalError(caught, { source: "agent_save", mode });
           error.textContent = t(caught instanceof Error ? caught.message : "保存失败");
@@ -6805,18 +6904,22 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (suppressAgentOutside) return;
       if (event.target.closest("[data-agent-window-back]")) return setAgentCreateFullscreen(false);
       if (event.target.closest("[data-agent-window-expand]")) return setAgentCreateFullscreen(!agentCreateFullscreen);
-      if (event.target.closest("[data-agent-close-pane]")) return closeAgentInspector();
+      if (event.target.closest("[data-agent-close-pane]")) return void closeAgentInspectorAfterSave();
       const row = event.target.closest(".better-codex-agent-directory [data-agent-key]");
       if (row) {
         const agent = state.agents.find(item => agentKey(item) === row.dataset.agentKey);
         if (!agent) return;
-        agentInspectorClosing = false;
-        state.selectedAgentId = agentKey(agent);
-        state.agentPane = "detail";
-        state.agentDraft = null;
-        return renderAgents();
+        void (async () => {
+          if (!await finishAgentAutosave()) return;
+          agentInspectorClosing = false;
+          state.selectedAgentId = agentKey(agent);
+          state.agentPane = "detail";
+          state.agentDraft = null;
+          renderAgents();
+        })();
+        return;
       }
-      if (state.agentPane !== "preview" && event.target.closest(".better-codex-agent-directory")) return closeAgentInspector();
+      if (state.agentPane !== "preview" && event.target.closest(".better-codex-agent-directory")) return void closeAgentInspectorAfterSave();
       if (AGENTS_READ_ONLY) return;
       const formAvatarButton = event.target.closest("[data-agent-avatar-form]");
       if (formAvatarButton) {
@@ -6835,6 +6938,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           const draft = { ...(selected || state.agentDraft || {}), avatar };
           if (form.dataset.agentForm === "create") state.agentDraft = draft;
           syncAgentAvatar(formAvatarButton.querySelector(".better-codex-agent-list-avatar"), draft);
+          if (form.dataset.agentForm !== "create") scheduleAgentAutosave(form, true);
         });
         return;
       }
@@ -6871,6 +6975,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             fastInput.closest(".better-codex-agent-fast-setting")?.classList.toggle("is-disabled", !enabled);
           }
         }
+        scheduleAgentAutosave(form, true);
         return;
       }
       const pickerToggle = event.target.closest("[data-agent-picker-toggle]");
@@ -6893,16 +6998,20 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (deleteButton) {
         const agent = state.agents.find(item => agentKey(item) === deleteButton.dataset.agentKey);
         if (!agent || agent.is_default) return;
-        void confirmAction("删除智能体", '确定删除智能体 “' + agentDisplayName(agent) + '” 吗？', "删除").then(confirmed => {
+        void (async () => {
+          if (!await finishAgentAutosave()) return;
+          const current = state.agents.find(item => agentKey(item) === deleteButton.dataset.agentKey);
+          if (!current) return;
+          const confirmed = await confirmAction("删除智能体", '确定删除智能体 “' + agentDisplayName(current) + '” 吗？', "删除");
           if (!confirmed) return;
-          return perform(async () => {
-            await api("/api/agents/" + encodeURIComponent(agent.id), { method: "DELETE", body: JSON.stringify({ version: agent.version }) });
+          await perform(async () => {
+            await api("/api/agents/" + encodeURIComponent(current.id), { method: "DELETE", body: JSON.stringify({ version: current.version }) });
             state.selectedAgentId = "";
             state.agentDraft = null;
             await loadAgents({ preserveInspector: true });
             closeAgentInspector();
           });
-        });
+        })();
         return;
       }
     }

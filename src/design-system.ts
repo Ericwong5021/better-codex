@@ -5131,6 +5131,21 @@ export function betterCodexDesignSystemCss() {
       font-size: var(--bc-text-sm);
     }
 
+    #better-codex-panel .better-codex-agent-inspector-status {
+      display: block;
+      min-height: 18px;
+      color: var(--bc-color-text-muted);
+      font-size: var(--bc-text-sm);
+    }
+
+    #better-codex-panel .better-codex-agent-inspector-status[hidden] {
+      display: none;
+    }
+
+    #better-codex-panel .better-codex-agent-inspector-status[data-state="saved"] {
+      color: var(--bc-success);
+    }
+
     #better-codex-panel .better-codex-agent-inspector-footer {
       display: flex;
       min-height: 72px;

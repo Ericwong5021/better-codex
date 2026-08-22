@@ -345,7 +345,7 @@ test("agent inspector slides open and closed with width animation", () => {
   assert.ok(source.includes('inspector.classList.add("is-closing")'));
   assert.ok(source.includes('data-animate="enter"'));
   assert.ok(source.includes('const animateEnter = previousPane === "preview" && state.agentPane !== "preview"'));
-  assert.ok(source.includes("return closeAgentInspector()"));
+  assert.ok(source.includes("return void closeAgentInspectorAfterSave()"));
   assert.match(css, /\.better-codex-agent-inspector\[data-animate="enter"\]\s*\{[^}]*animation:\s*better-codex-inspector-enter/s);
   assert.match(css, /\.better-codex-agent-inspector\.is-closing\s*\{[^}]*width:\s*0\s*!important;/s);
   assert.match(css, /@keyframes better-codex-inspector-enter/);
