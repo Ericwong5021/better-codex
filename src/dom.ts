@@ -7396,6 +7396,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
       async function loadSemanticCatalog() {
         if (semanticCatalog) return semanticCatalog;
+        if (REMOTE) return semanticCatalog = { skills: [] };
         try {
           const data = await api("/api/issues/" + encodeURIComponent(issue.id) + "/semantics");
           semanticCatalog = { skills: Array.isArray(data?.skills) ? data.skills : [] };
@@ -7430,6 +7431,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             renderSemanticMenu();
           });
           return;
+        }
+        if (REMOTE) {
+          semanticMenuState = { token, items: [], index: 0 };
+          return renderSemanticMenu();
         }
         const sequence = ++semanticSearchSequence;
         semanticMenuState = { token, items: [], index: 0, loading: true };
