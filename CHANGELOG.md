@@ -4,6 +4,10 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.10-beta.5] - 2026-08-22
+
+- Preserve semantic slash-command regex syntax through injection generation and align release acceptance with current schemas and UI contracts.
+
 ## [0.4.10-beta.4] - 2026-08-22
 
 - Validate nullable recurring-task intervals without blocking TypeScript builds.
@@ -760,7 +764,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.4...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.5...HEAD
+[0.4.10-beta.5]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.4...v0.4.10-beta.5
 [0.4.10-beta.4]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.3...v0.4.10-beta.4
 [0.4.10-beta.3]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.2...v0.4.10-beta.3
 [0.4.10-beta.2]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.1...v0.4.10-beta.2
