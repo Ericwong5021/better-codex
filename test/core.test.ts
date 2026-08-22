@@ -797,6 +797,25 @@ test("session reply idempotency is issue-scoped, fingerprinted, and atomic", () 
     const second = store.enqueueSessionReply({ issueId: secondIssue.id, requestId, kind: "turn", threadId: secondThread, payload: { message: "second" }, message: "second" });
     assert.notEqual(second.command.id, first.command.id);
     assert.equal(second.command.issue_id, secondIssue.id);
+    const activeTurnId = "019fec06-788f-7af3-a031-76b546904f12";
+    store.db.prepare("UPDATE issue_sessions SET status = 'active', active_turn_id = ? WHERE issue_id = ?").run(activeTurnId, firstIssue.id);
+    const queued = store.enqueueSessionReply({
+      issueId: firstIssue.id,
+      requestId: "queued-client-request",
+      kind: "turn",
+      threadId: firstThread,
+      payload: { message: "queued", input: [{ type: "text", text: "queued" }], request_message: "queued", request_input: JSON.stringify({ message: "queued", references: [], command: "" }), queued_reply: true },
+      message: "queued",
+      deferred: true,
+    });
+    assert.deepEqual(store.listQueuedIssueReplies(firstIssue.id).map(item => item.message), ["queued"]);
+    assert.deepEqual(store.updateQueuedIssueReply(firstIssue.id, queued.command.request_id, "edited queue").map(item => item.message), ["edited queue"]);
+    assert.equal((store.getSessionCommand(queued.command.id)?.payload.input as Array<{ text: string }>)[0].text, "edited queue");
+    const promoted = store.promoteQueuedIssueReply(firstIssue.id, queued.command.request_id);
+    assert.equal(promoted.command.kind, "steer");
+    assert.equal(promoted.command.turn_id, activeTurnId);
+    assert.equal(promoted.command.payload.queued_reply, undefined);
+    assert.deepEqual(promoted.queued_replies, []);
     store.close();
   } finally {
     rmSync(target.directory, { recursive: true, force: true });

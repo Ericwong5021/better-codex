@@ -688,6 +688,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     localeResources.en["停止任务"] = "Stop task";
     localeResources.en["加入队列"] = "Queue message";
     localeResources.en["队列中 {{count}} 条消息"] = "{{count}} queued messages";
+    localeResources.en["立即发送"] = "Send now";
+    localeResources.en["编辑队列消息"] = "Edit queued message";
+    localeResources.en["保存修改"] = "Save changes";
+    localeResources.en["取消编辑"] = "Cancel editing";
+    localeResources.en["当前任务已结束，消息会按队列顺序发送。"] = "The current task has finished. This message will be sent in queue order.";
+    localeResources.en["该队列消息已发生变化，请重新加载。"] = "This queued message has changed. Reload the conversation.";
+    localeResources.en["队列操作失败，请重试。"] = "The queue action failed. Try again.";
     localeResources.en["正在停止…"] = "Stopping…";
     localeResources.en["未命名任务"] = "Untitled issue";
     localeResources.en["无法确定会话所属项目。请先把会话放入一个项目。"] = "We couldn't determine this conversation's project. Move it into a project first.";
@@ -7232,6 +7239,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       let lastReplyRequestId = "";
       let lastReplyStatus = issue?.reply_status || "idle";
       let queuedReplies = [];
+      let queueEditingRequestId = "";
+      let queueEditDraft = "";
+      let queueActionRequestId = "";
+      let queueActionError = "";
       let replyRecoveryRequestId = "";
       let replyRecoveryTimer = null;
       let replyDraftTimer = null;
@@ -7502,7 +7513,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             return;
           }
           if (executionRunning) {
-            control.disabled = !control.matches('[name="reply"], [data-conversation-send], [data-conversation-attach], [data-conversation-retry], [data-dialog-attachment-scope="reply"]');
+            control.disabled = !control.matches('[name="reply"], [data-conversation-send], [data-conversation-attach], [data-conversation-retry], [data-dialog-attachment-scope="reply"], [data-queue-send-now], [data-queue-edit], [data-queue-edit-save], [data-queue-edit-cancel]');
             return;
           }
           if (executionLocked) {
@@ -7811,8 +7822,54 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         queue.hidden = queuedReplies.length === 0;
         queue.setAttribute("aria-label", t("队列中 {{count}} 条消息").replace("{{count}}", String(queuedReplies.length)));
         queue.innerHTML = queuedReplies.length
-          ? queuedReplies.map(item => '<div class="better-codex-composer-queue-row" role="listitem" title="' + escapeHtml(item.message || t("附件")) + '"><span class="better-codex-composer-queue-icon" aria-hidden="true">' + icon("queue") + '</span><span class="better-codex-composer-queue-message">' + escapeHtml(item.message || t("附件")) + '</span></div>').join("")
+          ? queuedReplies.map(item => {
+            const requestId = String(item.request_id || "");
+            const message = item.message || t("附件");
+            const busy = queueActionRequestId === requestId;
+            if (queueEditingRequestId === requestId) {
+              return '<div class="better-codex-composer-queue-row is-editing" role="listitem" data-queue-request="' + escapeHtml(requestId) + '"><span class="better-codex-composer-queue-icon" aria-hidden="true">' + icon("queue") + '</span><textarea class="better-codex-composer-queue-edit" data-queue-edit-input rows="2" aria-label="' + te("编辑队列消息") + '">' + escapeHtml(queueEditDraft) + '</textarea><span class="better-codex-composer-queue-actions"><button type="button" data-queue-edit-save="' + escapeHtml(requestId) + '" aria-label="' + te("保存修改") + '" title="' + te("保存修改") + '"' + (busy || !queueEditDraft.trim() ? " disabled" : "") + '>' + icon(busy ? "refresh" : "check", busy ? "better-codex-spin" : "") + '</button><button type="button" data-queue-edit-cancel aria-label="' + te("取消编辑") + '" title="' + te("取消编辑") + '"' + (busy ? " disabled" : "") + '>' + icon("close") + '</button></span></div>';
+            }
+            const disabled = busy || sessionHandoff || Boolean(issue?.archived_at);
+            return '<div class="better-codex-composer-queue-row" role="listitem" data-queue-request="' + escapeHtml(requestId) + '" title="' + escapeHtml(message) + '"><span class="better-codex-composer-queue-icon" aria-hidden="true">' + icon("queue") + '</span><span class="better-codex-composer-queue-message">' + escapeHtml(message) + '</span><span class="better-codex-composer-queue-actions"><button type="button" data-queue-send-now="' + escapeHtml(requestId) + '" aria-label="' + te("立即发送") + '" title="' + te("立即发送") + '"' + (disabled ? " disabled" : "") + '>' + icon(busy ? "refresh" : "send", busy ? "better-codex-spin" : "") + '</button><button type="button" data-queue-edit="' + escapeHtml(requestId) + '" aria-label="' + te("编辑队列消息") + '" title="' + te("编辑队列消息") + '"' + (disabled ? " disabled" : "") + '>' + icon("edit") + '</button></span></div>';
+          }).join("") + (queueActionError ? '<div class="better-codex-composer-queue-error" role="listitem">' + escapeHtml(queueActionError) + '</div>' : "")
           : "";
+      }
+
+      function queuedReplyError(error) {
+        const value = String(error instanceof Error ? error.message : error || "");
+        if (value === "issue_not_running") return t("当前任务已结束，消息会按队列顺序发送。");
+        if (["queued_reply_not_found", "queued_reply_not_pending", "queued_reply_update_conflict"].includes(value)) return t("该队列消息已发生变化，请重新加载。");
+        return t("队列操作失败，请重试。");
+      }
+
+      async function updateQueuedReply(action, requestId) {
+        if (!issue || !requestId || queueActionRequestId) return;
+        const message = queueEditDraft.trim();
+        if (action === "update" && !message) return;
+        queueActionRequestId = requestId;
+        queueActionError = "";
+        syncQueuedReplyState();
+        try {
+          const commandId = globalThis.crypto?.randomUUID?.() || VERSION + "-queue-" + Date.now() + "-" + Math.random().toString(36).slice(2);
+          const path = "/api/issues/" + encodeURIComponent(issue.id) + "/queue/" + encodeURIComponent(requestId) + (action === "send" ? "/send" : "");
+          const result = await api(path, { method: action === "send" ? "POST" : "PATCH", body: JSON.stringify(action === "send" ? { command_id: commandId } : { command_id: commandId, message }) });
+          if (result.command_id) {
+            const command = await waitForRemoteCommand(result.command_id);
+            if (command.status !== "applied") throw new Error(command.error || "command_rejected");
+          }
+          if (Array.isArray(result.queued_replies)) queuedReplies = result.queued_replies;
+          else if (action === "send") queuedReplies = queuedReplies.filter(item => item.request_id !== requestId);
+          else queuedReplies = queuedReplies.map(item => item.request_id === requestId ? { ...item, message } : item);
+          queueEditingRequestId = "";
+          queueEditDraft = "";
+          conversationTimer = setTimeout(() => void loadConversation({ quiet: true }), 1500);
+        } catch (error) {
+          reportGlobalError(error, { source: "conversation_queue", action, issue_id: issue.id, request_id: requestId });
+          queueActionError = queuedReplyError(error);
+        } finally {
+          queueActionRequestId = "";
+          syncQueuedReplyState();
+        }
       }
 
       function replyFailureMessage(error, action) {
@@ -7993,7 +8050,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (!body || !status) return;
         if (data?.user && typeof data.user === "object") state.user = { ...state.user, ...data.user };
         const nextQueuedReplies = Array.isArray(data?.queued_replies) ? data.queued_replies : Array.isArray(data?.reply?.queued_replies) ? data.reply.queued_replies : null;
-        if (nextQueuedReplies) queuedReplies = nextQueuedReplies;
+        if (nextQueuedReplies && !queueActionRequestId) queuedReplies = nextQueuedReplies;
         syncQueuedReplyState();
         const messages = Array.isArray(data?.messages) ? data.messages : [];
         const previousScrollTop = body.scrollTop;
@@ -8485,6 +8542,59 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         });
         const replyInput = dialog.querySelector('[name="reply"]');
         const sendButton = dialog.querySelector("[data-conversation-send]");
+        const queue = dialog.querySelector("[data-conversation-queue]");
+        queue?.addEventListener("input", event => {
+          if (!event.target.matches("[data-queue-edit-input]")) return;
+          queueEditDraft = event.target.value;
+          const save = queue.querySelector("[data-queue-edit-save]");
+          if (save) save.disabled = !queueEditDraft.trim() || Boolean(queueActionRequestId);
+        });
+        queue?.addEventListener("keydown", event => {
+          if (!event.target.matches("[data-queue-edit-input]")) return;
+          if (event.key === "Escape") {
+            event.preventDefault();
+            queueEditingRequestId = "";
+            queueEditDraft = "";
+            queueActionError = "";
+            syncQueuedReplyState();
+            return;
+          }
+          if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+            event.preventDefault();
+            void updateQueuedReply("update", queueEditingRequestId);
+          }
+        });
+        queue?.addEventListener("click", event => {
+          const sendNow = event.target.closest("[data-queue-send-now]");
+          if (sendNow) {
+            void updateQueuedReply("send", sendNow.dataset.queueSendNow);
+            return;
+          }
+          const edit = event.target.closest("[data-queue-edit]");
+          if (edit) {
+            const item = queuedReplies.find(entry => entry.request_id === edit.dataset.queueEdit);
+            if (!item) return;
+            queueEditingRequestId = item.request_id;
+            queueEditDraft = item.message || "";
+            queueActionError = "";
+            syncQueuedReplyState();
+            requestAnimationFrame(() => {
+              const input = queue.querySelector("[data-queue-edit-input]");
+              input?.focus();
+              input?.setSelectionRange?.(input.value.length, input.value.length);
+            });
+            return;
+          }
+          if (event.target.closest("[data-queue-edit-cancel]")) {
+            queueEditingRequestId = "";
+            queueEditDraft = "";
+            queueActionError = "";
+            syncQueuedReplyState();
+            return;
+          }
+          const save = event.target.closest("[data-queue-edit-save]");
+          if (save) void updateQueuedReply("update", save.dataset.queueEditSave);
+        });
         replyInput?.addEventListener("input", () => {
           draft.reply = replyInput.value;
           draft.replySemanticReferences = draft.replySemanticReferences.filter(reference => replyInput.value.includes((reference.type === "skill" ? "$" : "@") + reference.name));

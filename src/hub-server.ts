@@ -581,6 +581,25 @@ export function createHubServer(options: HubServerOptions) {
         const message = String(command.payload.message || "") || (names.length ? `附带文件：\n${names.map(name => `- ${name}`).join("\n")}` : "");
         return sendJson(response, 202, { issue_id: issue.id, request_id: command.command_id, status: "running", message });
       }
+      const queueMatch = url.pathname.match(/^\/api\/issues\/([^/]+)\/queue\/([^/]+)(\/send)?$/);
+      if (queueMatch && ((method === "PATCH" && !queueMatch[3]) || (method === "POST" && queueMatch[3] === "/send"))) {
+        if (!browser) return sendJson(response, 401, { error: "unauthorized" });
+        if (!trustedOrigin(request, true) || !csrfValid) return sendJson(response, 403, { error: "csrf_invalid" });
+        const body = await readBody(request);
+        const issueId = decodeURIComponent(queueMatch[1]);
+        const issue = store.board().issues.find(item => item.id === issueId || item.identifier === issueId);
+        if (!issue) return sendJson(response, 404, { error: "issue_not_found" });
+        const operation = method === "PATCH" ? "issue.queue.update" : "issue.queue.send";
+        const command = store.createRemoteCommand({
+          command_id: body.command_id ?? request.headers["x-better-codex-command-id"],
+          operation,
+          entity_id: issue.id,
+          base_revision: issue.local_revision,
+          payload: { request_id: decodeURIComponent(queueMatch[2]), ...(method === "PATCH" ? { message: body.message } : {}) },
+        });
+        notifyControl(command.device_id);
+        return sendJson(response, 202, { issue_id: issue.id, command_id: command.command_id, status: command.status });
+      }
       const issueAction = url.pathname.match(/^\/api\/issues\/([^/]+)\/(move|start|stop|archive|unarchive)$/);
       if (issueAction && method === "POST") {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" });

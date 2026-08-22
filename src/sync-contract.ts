@@ -1,9 +1,9 @@
 import type { IssuePriority, IssueReplyStatus, IssueSessionStatus, IssueStatus } from "./db.js";
 import type { ConversationMessage } from "./session-transcript.js";
 
-export const legacySyncProtocolVersion = "sync/v8" as const;
-export const previousSyncProtocolVersion = "sync/v9" as const;
-export const syncProtocolVersion = "sync/v10" as const;
+export const legacySyncProtocolVersion = "sync/v9" as const;
+export const previousSyncProtocolVersion = "sync/v10" as const;
+export const syncProtocolVersion = "sync/v11" as const;
 export const supportedSyncProtocolVersions = [syncProtocolVersion, previousSyncProtocolVersion, legacySyncProtocolVersion] as const;
 export type SyncProtocolVersion = typeof supportedSyncProtocolVersions[number];
 export const syncEntityTypes = ["project", "issue", "agent_directory"] as const;
@@ -350,7 +350,7 @@ export type DirectoryBrowserResult = {
   truncated: boolean;
 };
 
-export const remoteCommandOperations = ["project.pick_directory", "project.browse_directory", "project.create", "project.overview", "project.planning.reply", "project.planning.reset", "issue.create", "issue.update", "issue.move", "issue.start", "issue.stop", "issue.reply", "issue.archive", "issue.restore", "issue.delete", "settings.auto-dispatch"] as const;
+export const remoteCommandOperations = ["project.pick_directory", "project.browse_directory", "project.create", "project.overview", "project.planning.reply", "project.planning.reset", "issue.create", "issue.update", "issue.move", "issue.start", "issue.stop", "issue.reply", "issue.queue.update", "issue.queue.send", "issue.archive", "issue.restore", "issue.delete", "settings.auto-dispatch"] as const;
 export type RemoteCommandOperation = typeof remoteCommandOperations[number];
 export type RemoteCommandStatus = "pending" | "dispatched" | "applied" | "rejected" | "conflict" | "expired";
 

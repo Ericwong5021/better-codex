@@ -268,6 +268,8 @@ function cleanCommandPayload(operation: RemoteCommandOperation, value: unknown) 
       : operation === "issue.start"
         ? ["project_id", "title", "description", "status", "priority", "labels", "agent_id"]
       : operation === "issue.reply" ? ["message", "files"]
+      : operation === "issue.queue.update" ? ["request_id", "message"]
+      : operation === "issue.queue.send" ? ["request_id"]
       : operation === "issue.move" ? ["status", "before_id"]
       : operation === "project.browse_directory" ? ["path"]
       : operation === "project.create" ? ["name", "workspace_path"]
@@ -307,6 +309,7 @@ function cleanCommandPayload(operation: RemoteCommandOperation, value: unknown) 
   if (source.ai_enrich !== undefined) payload.ai_enrich = source.ai_enrich === true;
   if (source.enabled !== undefined) payload.enabled = source.enabled === true;
   if (source.before_id !== undefined) payload.before_id = cleanString(source.before_id, 200);
+  if (source.request_id !== undefined) payload.request_id = cleanString(source.request_id, 200, false);
   if (source.message !== undefined) payload.message = cleanString(source.message, operation === "project.planning.reply" ? 12_000 : 100_000, false).trim();
   if (source.feedback !== undefined) payload.feedback = cleanString(source.feedback, 4_000).trim();
   if (source.name !== undefined) payload.name = cleanString(source.name, 120, false).trim();
@@ -331,6 +334,8 @@ function cleanCommandPayload(operation: RemoteCommandOperation, value: unknown) 
   if (operation === "issue.move" && !payload.status) throw new Error("invalid_command_payload");
   if (operation === "issue.start" && !payload.title) throw new Error("invalid_command_payload");
   if (operation === "issue.reply" && !payload.message && !(payload.files as unknown[] | undefined)?.length) throw new Error("message_required");
+  if (operation === "issue.queue.update" && (!payload.request_id || !payload.message)) throw new Error("invalid_command_payload");
+  if (operation === "issue.queue.send" && !payload.request_id) throw new Error("invalid_command_payload");
   if (operation === "project.create" && (!payload.name || !payload.workspace_path)) throw new Error("invalid_command_payload");
   if (operation === "project.planning.reply" && !payload.message) throw new Error("message_required");
   if (operation === "project.browse_directory" && typeof payload.path !== "string") throw new Error("invalid_command_payload");
@@ -877,16 +882,18 @@ export class HubStore {
     const currentProjection = current && !projectOperation ? JSON.parse(current.payload_json) as IssueProjection : null;
     const pendingReply = createOperation || settingOperation || projectOperation ? undefined : this.db.prepare("SELECT 1 AS value FROM remote_commands WHERE entity_id = ? AND operation = 'issue.reply' AND status IN ('pending', 'dispatched') LIMIT 1").get(entityId);
     const running = Boolean(currentProjection?.active_run_status || currentProjection?.reply_status === "running" || ["starting", "active", "stopping", "waiting_on_approval", "waiting_on_user"].includes(currentProjection?.session_status || "") || pendingReply);
-    if (current && running && !["issue.reply", "issue.stop"].includes(operation)) throw new Error("issue_execution_running");
+    if (current && running && !["issue.reply", "issue.stop", "issue.queue.update", "issue.queue.send"].includes(operation)) throw new Error("issue_execution_running");
     if (operation === "issue.reply" && currentProjection?.archived_at) throw new Error("issue_archived");
     if (operation === "issue.reply" && !currentProjection?.has_conversation) throw new Error("session_required");
+    if (["issue.queue.update", "issue.queue.send"].includes(operation) && currentProjection?.archived_at) throw new Error("issue_archived");
+    if (["issue.queue.update", "issue.queue.send"].includes(operation) && !currentProjection?.has_conversation) throw new Error("session_required");
     if (operation === "issue.stop" && !running) throw new Error("issue_not_running");
     if (payload.agent_id && !this.board().agents.some(agent => agent.id === payload.agent_id)) throw new Error("agent_not_found");
     const deviceId = this.writerDeviceId(settingOperation || createOperation ? "" : entityId, entityType);
-    if (operation === "issue.delete" || operation === "project.browse_directory") {
+    if (operation === "issue.delete" || operation === "project.browse_directory" || operation === "issue.queue.update" || operation === "issue.queue.send") {
       const runtimeRow = this.db.prepare("SELECT payload_json FROM runtime_projection WHERE device_id = ?").get(deviceId) as { payload_json: string } | undefined;
       const protocolVersion = runtimeRow ? (JSON.parse(runtimeRow.payload_json) as RuntimeProjection).protocol_version : null;
-      const incompatible = operation === "project.browse_directory"
+      const incompatible = operation === "project.browse_directory" || operation === "issue.queue.update" || operation === "issue.queue.send"
         ? protocolVersion !== syncProtocolVersion
         : protocolVersion !== syncProtocolVersion && protocolVersion !== previousSyncProtocolVersion;
       if (incompatible) throw new Error("incompatible_protocol");

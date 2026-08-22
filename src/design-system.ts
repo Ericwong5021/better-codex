@@ -6486,6 +6486,7 @@ export function betterCodexDesignSystemCss() {
     }
 
     #better-codex-dialog .better-codex-composer-queue-row {
+      position: relative;
       display: flex;
       min-width: 0;
       min-height: 24px;
@@ -6516,6 +6517,101 @@ export function betterCodexDesignSystemCss() {
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+
+    #better-codex-dialog .better-codex-composer-queue-actions {
+      display: inline-flex;
+      flex: 0 0 auto;
+      align-items: center;
+      gap: 2px;
+      margin-left: auto;
+      opacity: 0;
+      transition: opacity var(--bc-motion-fast) var(--bc-ease-out);
+    }
+
+    #better-codex-dialog .better-codex-composer-queue-row:hover .better-codex-composer-queue-actions,
+    #better-codex-dialog .better-codex-composer-queue-row:focus-within .better-codex-composer-queue-actions,
+    #better-codex-dialog .better-codex-composer-queue-row.is-editing .better-codex-composer-queue-actions {
+      opacity: 1;
+    }
+
+    #better-codex-dialog .better-codex-composer-queue-actions button {
+      display: inline-flex;
+      width: 24px;
+      height: 24px;
+      align-items: center;
+      justify-content: center;
+      border: 0;
+      border-radius: var(--bc-radius-pill);
+      color: var(--bc-color-text-muted);
+      background: transparent;
+      padding: 0;
+      cursor: pointer;
+    }
+
+    #better-codex-dialog .better-codex-composer-queue-actions button svg {
+      width: 13px;
+      height: 13px;
+    }
+
+    #better-codex-dialog .better-codex-composer-queue-actions button:focus-visible {
+      outline: 2px solid var(--bc-color-focus);
+      outline-offset: 1px;
+    }
+
+    #better-codex-dialog .better-codex-composer-queue-actions button:disabled {
+      cursor: default;
+      opacity: .42;
+    }
+
+    #better-codex-dialog .better-codex-composer-queue-row.is-editing {
+      align-items: flex-start;
+      padding-block: 4px;
+    }
+
+    #better-codex-dialog .better-codex-composer-queue-row.is-editing .better-codex-composer-queue-icon,
+    #better-codex-dialog .better-codex-composer-queue-row.is-editing .better-codex-composer-queue-actions {
+      margin-top: 4px;
+    }
+
+    #better-codex-dialog .better-codex-composer-queue-edit {
+      box-sizing: border-box;
+      min-width: 0;
+      min-height: 44px;
+      flex: 1;
+      border: 1px solid var(--bc-color-hairline);
+      border-radius: var(--bc-radius-xs);
+      color: var(--bc-color-text);
+      background: var(--bc-color-input);
+      padding: 5px 7px;
+      font: inherit;
+      line-height: 18px;
+      outline: none;
+      resize: vertical;
+    }
+
+    #better-codex-dialog .better-codex-composer-queue-edit:focus {
+      border-color: var(--bc-color-focus);
+    }
+
+    #better-codex-dialog .better-codex-composer-queue-error {
+      padding: 3px 26px 2px;
+      color: var(--bc-danger);
+      font-size: var(--bc-text-caption);
+      line-height: 18px;
+    }
+
+    @media (hover: hover) {
+      #better-codex-dialog .better-codex-composer-queue-actions button:hover:not(:disabled) {
+        color: var(--bc-color-text);
+        background: var(--bc-color-hover);
+      }
+    }
+
+    @media (hover: none), (max-width: 640px) {
+      #better-codex-dialog .better-codex-composer-queue-actions {
+        opacity: 1;
+      }
     }
 
     #better-codex-dialog .better-codex-composer-queue:not([hidden]) + .better-codex-composer {

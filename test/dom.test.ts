@@ -730,6 +730,9 @@ test("issue details render the latest conversation result and reply composer", (
   assert.ok(source.includes("better-codex-composer-queue-row"));
   assert.ok(source.includes('icon("queue")'));
   assert.ok(!source.includes("将在当前任务完成后依次发送"));
+  assert.ok(source.includes("data-queue-send-now"));
+  assert.ok(source.includes("data-queue-edit-save"));
+  assert.ok(source.includes('updateQueuedReply("send"'));
   assert.ok(source.includes("data-conversation-attach"));
   assert.ok(permissions.includes("[data-conversation-copy]"));
   assert.ok(source.includes('data-composer-mode="\' + mode + \'"'));
@@ -750,6 +753,8 @@ test("issue details render the latest conversation result and reply composer", (
   assert.match(css, /\.better-codex-composer-send\[data-composer-mode="stop"\] svg/s);
   assert.match(css, /\.better-codex-composer-queue\s*\{[^}]*max-height:\s*min\(177px, 30dvh\);[^}]*border-bottom:\s*0;[^}]*border-radius:\s*23px 23px 0 0;/s);
   assert.match(css, /\.better-codex-composer-queue-row\s*\{[^}]*min-height:\s*24px;[^}]*gap:\s*6px;/s);
+  assert.match(css, /\.better-codex-composer-queue-actions\s*\{[^}]*opacity:\s*0;/s);
+  assert.match(css, /\.better-codex-composer-queue-edit\s*\{[^}]*min-height:\s*44px;/s);
 });
 
 test("user-stopped sessions render a red-dot stopped state", () => {

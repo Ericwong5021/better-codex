@@ -647,7 +647,7 @@ function errorCode(error: unknown) {
 
 function errorStatus(code: string) {
   if (code === "body_too_large") return 413;
-  if (code === "version_conflict" || code === "request_id_conflict" || code === "request_outcome_unknown" || code === "remote_mode_disabled" || code === "reply_busy" || code === "update_in_progress" || code === "issue_execution_locked" || code === "issue_execution_running" || code === "issue_session_handed_off" || code === "issue_session_starting" || code === "issue_session_already_bound" || code === "session_relay_not_leader" || code === "session_command_not_claimed" || code === "session_command_outcome_unknown" || code === "project_planning_busy" || code === "project_planning_agent_locked") return 409;
+  if (code === "version_conflict" || code === "request_id_conflict" || code === "request_outcome_unknown" || code === "remote_mode_disabled" || code === "reply_busy" || code === "update_in_progress" || code === "issue_execution_locked" || code === "issue_execution_running" || code === "issue_session_handed_off" || code === "issue_session_starting" || code === "issue_session_already_bound" || code === "session_relay_not_leader" || code === "session_command_not_claimed" || code === "session_command_outcome_unknown" || code === "queued_reply_not_pending" || code === "queued_reply_update_conflict" || code === "project_planning_busy" || code === "project_planning_agent_locked") return 409;
   if (code.endsWith("_not_found")) return 404;
   if (code === "database_unavailable" || code === "database_integrity_check_failed") return 503;
   return 400;
@@ -748,6 +748,14 @@ export function startServer() {
     },
     projectId => {
       worker.resetProjectPlanning(projectId);
+    },
+    (issueId, requestId, action, message) => {
+      if (action === "update") store.updateQueuedIssueReply(issueId, requestId, message || "");
+      else {
+        store.promoteQueuedIssueReply(issueId, requestId);
+        worker.wake();
+      }
+      publishChange();
     },
   );
   let activeRuntimePort = 0;
@@ -1866,6 +1874,20 @@ export function startServer() {
           if (!issue.workspace_path) throw new Error("workspace_required");
           const files = (await searchCodexFiles(issue.workspace_path, cleanString(url.searchParams.get("query"), 500))).map(({ name, displayPath, kind, ref }) => ({ name, displayPath, kind, ref }));
           return sendJson(response, 200, { files });
+        }
+        if (method === "PATCH" && path[3] === "queue" && path[4] && path.length === 5) {
+          if (updateInstallInProgress) throw new Error("update_in_progress");
+          const body = await readBody(request);
+          const queuedReplies = store.updateQueuedIssueReply(issue.id, decodeURIComponent(path[4]), cleanString(body.message, 100_000));
+          publishChange();
+          return sendJson(response, 200, { issue_id: issue.id, queued_replies: queuedReplies });
+        }
+        if (method === "POST" && path[3] === "queue" && path[4] && path[5] === "send" && path.length === 6) {
+          if (updateInstallInProgress) throw new Error("update_in_progress");
+          const promoted = store.promoteQueuedIssueReply(issue.id, decodeURIComponent(path[4]));
+          worker.wake();
+          publishChange();
+          return sendJson(response, 202, { issue_id: issue.id, request_id: promoted.command.request_id, steered: true, queued_replies: promoted.queued_replies });
         }
         if (method === "POST" && path[3] === "reply" && path.length === 4) {
           if (updateInstallInProgress) throw new Error("update_in_progress");
