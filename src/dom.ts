@@ -2958,6 +2958,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function reportGlobalError(error, context = {}) {
+      if (destroyed) return null;
       const value = error instanceof Error ? error : new Error(typeof error === "string" ? error : String(error?.message || error || "request_failed"));
       if (value.betterCodexReported) return null;
       installStyle();
@@ -3075,6 +3076,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function showError(error) {
+      if (destroyed) return;
       passiveNetworkErrorVisible = false;
       reportGlobalError(error, { source: "ui_action" });
       state.error = errorLabel(error);

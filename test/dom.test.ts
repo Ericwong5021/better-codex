@@ -56,6 +56,8 @@ test("board bridge retries timed out GET requests without repeating writes", () 
   assert.match(source, /await waitForUpdateCompletion\(notice\)/);
   assert.ok(source.includes('message.startsWith("runtime_fetch_failed:")'));
   assert.ok(source.includes("if (transientRuntimeTransportError(reason)) continue"));
+  assert.ok(source.includes("function reportGlobalError(error, context = {}) {\n      if (destroyed) return null;"));
+  assert.ok(source.includes("function showError(error) {\n      if (destroyed) return;"));
 });
 
 test("injected panel opts out of the native Electron drag region", () => {
