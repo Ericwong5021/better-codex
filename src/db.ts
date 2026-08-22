@@ -481,7 +481,7 @@ function cleanScheduledTaskInput(input: ScheduledTaskInput) {
   if (!workspacePath || workspacePath.length > 4096 || workspacePath.includes("\0")) throw new Error("workspace_required");
   if (agentId.length > 200 || agentId.includes("\0")) throw new Error("invalid_agent_id");
   if (!Number.isFinite(starts.getTime())) throw new Error("invalid_scheduled_task_time");
-  if (repeat && (!Number.isInteger(intervalValue) || intervalValue < 1 || intervalValue > 999 || !intervalUnit || !scheduledTaskIntervalUnits.includes(intervalUnit))) throw new Error("invalid_scheduled_task_interval");
+  if (repeat && (intervalValue === null || !Number.isInteger(intervalValue) || intervalValue < 1 || intervalValue > 999 || !intervalUnit || !scheduledTaskIntervalUnits.includes(intervalUnit))) throw new Error("invalid_scheduled_task_interval");
   return { name, prompt, projectId: input.projectId, workspacePath, agentId, startsAt: starts.toISOString(), repeat, intervalValue, intervalUnit, enabled: input.enabled !== false };
 }
 
