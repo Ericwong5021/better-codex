@@ -4,6 +4,10 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.10-beta.6] - 2026-08-22
+
+- Initialize scheduled-task locale resources before Web UI injection and resolve localized validation errors.
+
 ## [0.4.10-beta.5] - 2026-08-22
 
 - Preserve semantic slash-command regex syntax through injection generation and align release acceptance with current schemas and UI contracts.
@@ -764,7 +768,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.5...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.6...HEAD
+[0.4.10-beta.6]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.5...v0.4.10-beta.6
 [0.4.10-beta.5]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.4...v0.4.10-beta.5
 [0.4.10-beta.4]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.3...v0.4.10-beta.4
 [0.4.10-beta.3]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.2...v0.4.10-beta.3
