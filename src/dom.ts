@@ -559,7 +559,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     function moveMockupIssue(id, version, status, beforeId = "") {
       return api("/api/issues/" + encodeURIComponent(id) + "/move", { method: "POST", body: JSON.stringify({ version, status, before_id: beforeId }) });
     }
-    const localeResources = { en: {
+    const localeResources = { "zh-CN": {}, en: {
       "调度失败": "Scheduling failed",
       "重试回复": "Retry reply", "重新加载": "Reload", "回复等待超时。请检查模型服务连接后重试。": "The reply timed out. Check the model service connection and retry.", "网络连接异常，回复未完成。请检查网络和 Better Codex Runtime 后重试。": "The reply did not finish because of a network problem. Check your network and Better Codex Runtime, then retry.", "当前权限不足，无法完成回复。请调整智能体权限或允许所需操作后重试。": "The reply needs additional permission. Adjust the agent permission or allow the required action, then retry.", "Better Codex Runtime 已停止。请重新启动后重试。": "Better Codex Runtime stopped. Restart it and retry.", "上一条回复仍在进行中。请稍后重新加载。": "The previous reply is still running. Reload shortly.", "回复未完成。请打开完整会话查看详情，然后重试。": "The reply did not finish. Open the full conversation for details, then retry.", "会话加载超时。请确认 Better Codex Runtime 正在运行，然后重新加载。": "The conversation timed out while loading. Make sure Better Codex Runtime is running, then reload.", "无法加载会话。请检查网络和 Better Codex Runtime，然后重新加载。": "Unable to load the conversation. Check your network and Better Codex Runtime, then reload.", "没有权限加载会话。请调整权限后重新加载。": "You do not have permission to load the conversation. Adjust the permission, then reload.",
       "任务看板": "Task board", "打开任务看板": "Open task board", "智能体": "Agents", "管理智能体": "Manage agents", "创建和管理你的智能体": "Create and manage your agents",
@@ -1012,6 +1012,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     function t(value) {
       const source = String(value ?? "");
+      if (localeResources[state.locale]?.[source]) return localeResources[state.locale][source];
       if (state.locale === "zh-CN" || !/[\\p{Script=Han}]/u.test(source)) return source;
       const leading = source.match(/^\\s*/)?.[0] || "";
       const trailing = source.match(/\\s*$/)?.[0] || "";
