@@ -2177,10 +2177,15 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       };
     }
 
+    function transientRuntimeTransportError(error) {
+      const message = error instanceof Error ? error.message : String(error || "");
+      return ["runtime_offline", "runtime_unavailable", "runtime_bridge_timeout", "runtime_bridge_unavailable", "injection_destroyed"].includes(message) || message === "runtime_fetch_failed" || message.startsWith("runtime_fetch_failed:");
+    }
+
     function transientNetworkError(error) {
       const message = error instanceof Error ? error.message : String(error || "");
       const failureType = String(error?.betterCodexDiagnostics?.failure_type || "");
-      return failureType === "network_transport" || ["browser_transport_failed", "Failed to fetch", "NetworkError when attempting to fetch resource."].includes(message);
+      return transientRuntimeTransportError(error) || failureType === "network_transport" || ["browser_transport_failed", "Failed to fetch", "NetworkError when attempting to fetch resource."].includes(message);
     }
 
     function api(path, options = {}) {
@@ -3170,8 +3175,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           update = await api("/api/update");
         } catch (reason) {
           if (destroyed || updateNotice !== notice) return;
-          const message = String(reason instanceof Error ? reason.message : reason || "");
-          if (["runtime_bridge_timeout", "runtime_bridge_unavailable", "runtime_unavailable", "injection_destroyed"].includes(message)) continue;
+          if (transientRuntimeTransportError(reason)) continue;
           throw reason;
         }
         if (updateNotice !== notice) return;
