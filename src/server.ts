@@ -849,7 +849,7 @@ export function startServer() {
         const activePort = typeof address === "object" && address ? address.port : 0;
         return sendJson(response, database.ok ? 200 : 503, { ok: database.ok, name: "Better Codex Runtime", version: identity.version, pid: process.pid, port: activePort, instanceId: identity.instanceId, database, compatibility: readCompatibilityStatus() });
       }
-      if ((url.pathname === "/web" || url.pathname === "/web/projects" || url.pathname.startsWith("/web/projects/") || url.pathname.startsWith("/local/")) && method === "GET") {
+      if ((url.pathname === "/web" || url.pathname === "/web/projects" || url.pathname.startsWith("/web/projects/") || url.pathname === "/web/agents" || url.pathname.startsWith("/web/agents/") || url.pathname.startsWith("/local/")) && method === "GET") {
         return sendWeb(response, 200, betterCodexWebHostHtml(), "text/html; charset=utf-8", {
           "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; frame-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
         });

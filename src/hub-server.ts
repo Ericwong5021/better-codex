@@ -224,7 +224,7 @@ export function createHubServer(options: HubServerOptions) {
       }
       if (!trustedOrigin(request)) return sendJson(response, 403, { error: "forbidden" });
       if (url.pathname === "/healthz" && method === "GET") return sendJson(response, 200, store.health());
-      if ((["/", "/web", "/web/projects"].includes(url.pathname) || url.pathname.startsWith("/web/projects/")) && method === "GET") return sendText(response, 200, betterCodexWebHostHtml(true), "text/html; charset=utf-8", { "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'" });
+      if ((["/", "/web", "/web/projects", "/web/agents"].includes(url.pathname) || url.pathname.startsWith("/web/projects/") || url.pathname.startsWith("/web/agents/")) && method === "GET") return sendText(response, 200, betterCodexWebHostHtml(true), "text/html; charset=utf-8", { "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'" });
       if (url.pathname === "/web/host.css" && method === "GET") return sendText(response, 200, betterCodexWebHostCss(), "text/css; charset=utf-8");
       if (url.pathname === "/web/host.js" && method === "GET") return sendText(response, 200, betterCodexWebHostJavaScript(true), "text/javascript; charset=utf-8");
       if (url.pathname === "/web/manifest.webmanifest" && method === "GET") return sendText(response, 200, betterCodexWebManifest(), "application/manifest+json; charset=utf-8");

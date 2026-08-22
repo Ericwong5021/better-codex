@@ -1047,6 +1047,14 @@ function openCurrentRoute() {
     window.__betterCodexInjection__?.open?.("projects", { projectId, history: "none" });
     return;
   }
+  const agentMatch = location.pathname.match(/^\/web\/agents(?:\/([^/?#]+))?\/?$/);
+  if (agentMatch) {
+    let agentKey = "";
+    try { agentKey = agentMatch[1] ? decodeURIComponent(agentMatch[1]) : ""; }
+    catch {}
+    window.__betterCodexInjection__?.open?.("agents", { agentKey, history: "none" });
+    return;
+  }
   if (location.pathname === "/web" || location.pathname === "/") window.__betterCodexInjection__?.open?.("issues", { history: "none" });
   else window.__betterCodexInjection__?.refresh?.();
 }

@@ -4478,15 +4478,6 @@ export function betterCodexDesignSystemCss() {
       animation-name: better-codex-surface-enter;
     }
 
-    #better-codex-panel .better-codex-agent-inspector.is-closing {
-      width: 0 !important;
-      min-width: 0 !important;
-      opacity: 0;
-      transform: translateX(18px);
-      box-shadow: none;
-      pointer-events: none;
-    }
-
     #better-codex-panel .better-codex-agent-inspector form {
       display: flex;
       height: 100%;

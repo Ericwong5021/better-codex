@@ -338,16 +338,22 @@ test("opening an agent inspector hides the toolbar create action", () => {
   assert.match(betterCodexDesignSystemCss(), /\.better-codex-agent-actions\[hidden\]\s*\{[^}]*display:\s*none\s*!important/s);
 });
 
-test("agent inspector slides open and closed with width animation", () => {
+test("agent inspector opens with animation and closes immediately to its list route", () => {
   const source = injectionScript(4317, "test-token", "install");
   const css = betterCodexDesignSystemCss();
+  const closeInspector = source.slice(source.indexOf("function closeAgentInspector()"), source.indexOf("function agentInspector("));
   assert.ok(source.includes("function closeAgentInspector()"));
-  assert.ok(source.includes('inspector.classList.add("is-closing")'));
+  assert.ok(closeInspector.includes('state.agentPane = "preview"'));
+  assert.ok(closeInspector.includes("renderAgents()"));
+  assert.ok(closeInspector.includes("history.back()"));
+  assert.ok(closeInspector.includes('syncWebAgentRoute("", "replace")'));
+  assert.ok(!closeInspector.includes("transitionend"));
   assert.ok(source.includes('data-animate="enter"'));
   assert.ok(source.includes('const animateEnter = previousPane === "preview" && state.agentPane !== "preview"'));
   assert.ok(source.includes("return void closeAgentInspectorAfterSave()"));
+  assert.ok(source.includes('return "/web/agents"'));
   assert.match(css, /\.better-codex-agent-inspector\[data-animate="enter"\]\s*\{[^}]*animation:\s*better-codex-inspector-enter/s);
-  assert.match(css, /\.better-codex-agent-inspector\.is-closing\s*\{[^}]*width:\s*0\s*!important;/s);
+  assert.doesNotMatch(css, /\.better-codex-agent-inspector\.is-closing/);
   assert.match(css, /@keyframes better-codex-inspector-enter/);
 });
 

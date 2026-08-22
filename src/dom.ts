@@ -397,8 +397,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const hasFeature = feature => ENABLED_FEATURES.has(feature);
     const availableSurfaces = ["issues", ...(!REMOTE ? ["scheduled"] : []), "agents", ...(hasFeature("project-management") ? ["projects"] : [])];
     const initialProjectRoute = hasFeature("project-management") ? webProjectRoute() : null;
+    const initialAgentRoute = webAgentRoute();
     if (HOST_KIND === "web" && !hasFeature("project-management") && /^\\/web\\/projects(?:\\/|$)/.test(location.pathname)) history.replaceState({ betterCodex: true, betterCodexSurface: "issues" }, "", "/web");
-    const state = { projects: [], projectsLoaded: false, issues: [], issuesLoaded: false, scheduledTasks: [], scheduledTasksLoaded: false, projectIssues: [], projectIssuesProjectId: "", projectDetailId: initialProjectRoute?.projectId || "", projectPage: "overview", projectDocumentView: "charter", projectDocumentPending: null, projectDocumentError: null, projectPlanningPending: null, projectPlanningError: null, agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: "preview", selectedAgentId: "", agentDraft: null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: initialProjectRoute ? "projects" : availableSurfaces.includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, autoDispatchPending: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", issueDescriptionLimit: 100000, mockup: false, keepCreate: rememberedKeepCreate, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], project: [], label: [] } };
+    const initialAgentKey = initialAgentRoute?.agentKey || "";
+    const state = { projects: [], projectsLoaded: false, issues: [], issuesLoaded: false, scheduledTasks: [], scheduledTasksLoaded: false, projectIssues: [], projectIssuesProjectId: "", projectDetailId: initialProjectRoute?.projectId || "", projectPage: "overview", projectDocumentView: "charter", projectDocumentPending: null, projectDocumentError: null, projectPlanningPending: null, projectPlanningError: null, agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: initialAgentKey === "new" ? "create" : initialAgentKey ? "detail" : "preview", selectedAgentId: initialAgentKey && initialAgentKey !== "new" ? initialAgentKey : "", agentDraft: initialAgentKey === "new" ? { avatar: "icon:bot" } : null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: initialProjectRoute ? "projects" : initialAgentRoute ? "agents" : availableSurfaces.includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, autoDispatchPending: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", issueDescriptionLimit: 100000, mockup: false, keepCreate: rememberedKeepCreate, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], project: [], label: [] } };
     const pendingIssueRemovals = new Map();
     const projectPlanningDrafts = new Map();
     let projectPlanningComposition = "";
@@ -425,6 +427,30 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (location.pathname === path) return;
       const routeState = { betterCodex: true, betterCodexSurface: "projects", betterCodexProjectId: projectId || "" };
       if (projectId && location.pathname === projectRoutePath()) routeState.betterCodexProjectFromHome = true;
+      history[mode === "replace" ? "replaceState" : "pushState"](routeState, "", path);
+    }
+
+    function webAgentRoute() {
+      if (HOST_KIND !== "web") return null;
+      const match = location.pathname.match(/^\\/web\\/agents(?:\\/([^/?#]+))?\\/?$/);
+      if (!match) return null;
+      try {
+        return { agentKey: match[1] ? decodeURIComponent(match[1]) : "" };
+      } catch {
+        return { agentKey: "" };
+      }
+    }
+
+    function agentRoutePath(agentKey = "") {
+      return "/web/agents" + (agentKey ? "/" + encodeURIComponent(agentKey) : "");
+    }
+
+    function syncWebAgentRoute(agentKey = "", mode = "push") {
+      if (HOST_KIND !== "web" || mode === "none") return;
+      const path = agentRoutePath(agentKey);
+      if (location.pathname === path) return;
+      const routeState = { betterCodex: true, betterCodexSurface: "agents", betterCodexAgentKey: agentKey || "" };
+      if (agentKey && (location.pathname === agentRoutePath() || history.state?.betterCodexAgentFromList)) routeState.betterCodexAgentFromList = true;
       history[mode === "replace" ? "replaceState" : "pushState"](routeState, "", path);
     }
     function shortcutKeyFromCode(code, key) {
@@ -4877,7 +4903,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     const suggestedAgents = ${JSON.stringify(suggestedAgents)};
 
-    let agentInspectorClosing = false;
     let agentCreateFullscreen = false;
     let agentWindowBoundsObserver = null;
     let agentAutosaveTimer = null;
@@ -4991,42 +5016,16 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     function closeAgentInspector() {
       if (state.agentPane === "preview") return;
-      const inspector = panel?.querySelector(".better-codex-agent-inspector");
-      if (state.agentPane === "create" && inspector?.matches("dialog")) {
-        inspector.close();
-        return;
-      }
-      if (inspector?.classList.contains("is-closing")) return;
-      const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
-      if (!inspector || reduceMotion) {
-        agentInspectorClosing = false;
-        state.agentPane = "preview";
-        state.selectedAgentId = "";
-        state.agentDraft = null;
-        renderAgents();
-        return;
-      }
-      agentInspectorClosing = true;
-      inspector.classList.add("is-closing");
-      inspector.setAttribute("aria-hidden", "true");
-      let finished = false;
-      const finish = () => {
-        if (finished) return;
-        finished = true;
-        agentInspectorClosing = false;
-        inspector.removeEventListener("transitionend", onEnd);
-        state.agentPane = "preview";
-        state.selectedAgentId = "";
-        state.agentDraft = null;
-        renderAgents();
-      };
-      const onEnd = event => {
-        if (event.target !== inspector) return;
-        if (event.propertyName !== "width" && event.propertyName !== "min-width") return;
-        finish();
-      };
-      inspector.addEventListener("transitionend", onEnd);
-      setTimeout(finish, 400);
+      agentWindowBoundsObserver?.disconnect();
+      agentWindowBoundsObserver = null;
+      agentCreateFullscreen = false;
+      state.agentPane = "preview";
+      state.selectedAgentId = "";
+      state.agentDraft = null;
+      renderAgents();
+      if (HOST_KIND !== "web" || !webAgentRoute()?.agentKey) return;
+      if (history.state?.betterCodexAgentFromList) history.back();
+      else syncWebAgentRoute("", "replace");
     }
 
     function agentInspector(agent, options = {}) {
@@ -5119,10 +5118,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         agentWindowBoundsObserver = null;
         agentCreateFullscreen = false;
         if (state.agentPane !== "create") return;
-        state.agentPane = "preview";
-        state.selectedAgentId = "";
-        state.agentDraft = null;
-        renderAgents();
+        closeAgentInspector();
       }, { once: true });
       bindModalDismiss(inspector, closeAgentInspector);
       inspector.showModal();
@@ -6837,6 +6833,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const agents = await requestList("/api/agents", "agents", { passive: Boolean(options.background) });
       const changed = JSON.stringify(agents) !== JSON.stringify(state.agents);
       state.agents = agents;
+      if (state.surface === "agents" && state.agentPane === "detail" && !agents.some(agent => agentKey(agent) === state.selectedAgentId)) {
+        state.agentPane = "preview";
+        state.selectedAgentId = "";
+        state.agentDraft = null;
+        syncWebAgentRoute("", "replace");
+      }
       if (options.preserveInspector && panel?.dataset.surface === "agents" && state.agentPane !== "preview") return;
       if (options.background && (state.agentPane !== "preview" || !changed)) return;
       render();
@@ -6909,6 +6911,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           }
         }
         await loadSurface({ preserveInspector: true });
+        if (state.surface === "agents" && state.agentPane !== "preview") render();
         if (!state.mockup && HOST_KIND === "web") state.projectId = projectsByRecentActivity(state.projects)[0]?.id || "";
         if (state.projectId) localStorage.setItem(PROJECT_KEY, state.projectId);
         if (!completionNoticesRestored) {
@@ -6927,13 +6930,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     function startAgentCreate(draft = null) {
       if (AGENTS_READ_ONLY) return;
-      agentInspectorClosing = false;
       agentCreateFullscreen = false;
       state.agentPane = "create";
       state.selectedAgentId = "";
       state.agentDraft = draft
         ? { ...draft, avatar: draft.avatar || ("icon:" + draft.key) }
         : { avatar: "icon:bot" };
+      syncWebAgentRoute("new");
       renderAgents();
       setTimeout(() => panel?.querySelector('[data-agent-form="create"] [data-agent-name]')?.focus(), 0);
     }
@@ -7061,6 +7064,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           state.agentPane = "detail";
           state.selectedAgentId = agentKey(saved);
           state.agentDraft = null;
+          syncWebAgentRoute(state.selectedAgentId, "replace");
           await loadAgents();
         } catch (caught) {
           reportGlobalError(caught, { source: "agent_save", mode });
@@ -7073,7 +7077,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     function onAgentsClick(event) {
       if (suppressAgentOutside) return;
-      if (event.target.closest("[data-agent-window-back]")) return setAgentCreateFullscreen(false);
+      if (event.target.closest("[data-agent-window-back]")) return void closeAgentInspectorAfterSave();
       if (event.target.closest("[data-agent-window-expand]")) return setAgentCreateFullscreen(!agentCreateFullscreen);
       if (event.target.closest("[data-agent-close-pane]")) return void closeAgentInspectorAfterSave();
       const row = event.target.closest(".better-codex-agent-directory [data-agent-key]");
@@ -7082,10 +7086,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (!agent) return;
         void (async () => {
           if (!await finishAgentAutosave()) return;
-          agentInspectorClosing = false;
           state.selectedAgentId = agentKey(agent);
           state.agentPane = "detail";
           state.agentDraft = null;
+          syncWebAgentRoute(state.selectedAgentId, webAgentRoute()?.agentKey ? "replace" : "push");
           renderAgents();
         })();
         return;
@@ -9436,7 +9440,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function isBetterCodexRoute() {
-      if (HOST_KIND === "web") return location.pathname === "/web" || location.pathname === "/" || Boolean(webProjectRoute());
+      if (HOST_KIND === "web") return location.pathname === "/web" || location.pathname === "/" || Boolean(webProjectRoute()) || Boolean(webAgentRoute());
       if (Array.from(document.querySelectorAll("webview")).some(view => view.title === "Better Codex")) return true;
       return Array.from(document.querySelectorAll("main *")).some(node => ["找不到 MCP 应用视图", "MCP app view not found"].includes(node.textContent?.trim()));
     }
@@ -9455,6 +9459,24 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (HOST_KIND === "web") {
           const mode = options.history || (webProjectRoute() ? "replace" : "push");
           syncWebProjectRoute(state.projectDetailId, mode);
+        } else {
+          window.postMessage({ type: NAVIGATION.messageType, path: BETTER_CODEX_ROUTE }, window.location.origin);
+        }
+      } else if (surface === "agents") {
+        state.projectDetailId = "";
+        const agentKey = typeof options.agentKey === "string" ? options.agentKey : "";
+        agentCreateFullscreen = false;
+        state.agentPane = agentKey === "new" ? "create" : agentKey ? "detail" : "preview";
+        state.selectedAgentId = agentKey && agentKey !== "new" ? agentKey : "";
+        state.agentDraft = agentKey === "new" ? { avatar: "icon:bot" } : null;
+        if (HOST_KIND === "web") {
+          if (options.history === "none" && agentKey && !history.state?.betterCodexAgentFromList) {
+            syncWebAgentRoute("", "replace");
+            syncWebAgentRoute(agentKey);
+          } else {
+            const mode = options.history || (webAgentRoute() ? "replace" : "push");
+            syncWebAgentRoute(agentKey, mode);
+          }
         } else {
           window.postMessage({ type: NAVIGATION.messageType, path: BETTER_CODEX_ROUTE }, window.location.origin);
         }
