@@ -8261,6 +8261,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             const known = new Set(draft.replyAttachments.map(file => file.path || file.name + ":" + (file.file?.size || 0)));
             const next = result.files.filter(file => !known.has(file.path || file.name + ":" + (file.file?.size || 0)));
             if (next.length) {
+              syncDraft();
               draft.replyAttachments.push(...next);
               renderDialog();
             }
@@ -8403,6 +8404,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           }
           closeDialogSelects();
           if (name === "assignee" && draft.mode === "agent") {
+            syncDraft();
             renderDialog();
             return;
           }
@@ -8546,6 +8548,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             const known = new Set(draft.attachments.map(file => file.path || file.name + ":" + (file.file?.size || 0)));
             const next = result.files.filter(file => !known.has(file.path || file.name + ":" + (file.file?.size || 0)));
             if (next.length) {
+              syncDraft();
               draft.attachments.push(...next);
               renderDialog();
             }
@@ -8557,6 +8560,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           event.preventDefault();
           const index = Number(button.dataset.dialogDetach);
           if (!Number.isInteger(index) || index < 0) return;
+          syncDraft();
           const scope = button.dataset.dialogAttachmentScope;
           const attachments = scope === "reply" ? draft.replyAttachments : draft.attachments;
           const [removed] = attachments.splice(index, 1);
