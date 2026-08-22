@@ -267,6 +267,12 @@ type ImportedSessionInput = {
   completedAt?: string | null;
 };
 
+export type IssueSemanticReference = {
+  type: "skill" | "mention";
+  name: string;
+  path: string;
+};
+
 type IssueInput = {
   id?: string;
   projectId: string;
@@ -282,6 +288,7 @@ type IssueInput = {
   userAssigned?: boolean;
   assigneeUserId?: string;
   enrichmentStatus?: EnrichmentStatus;
+  semanticReferences?: IssueSemanticReference[];
   session?: ImportedSessionInput;
 };
 
@@ -300,7 +307,7 @@ export function cleanMaxConcurrency(value: number | undefined) {
   return value;
 }
 
-const latestSchemaVersion = 17;
+const latestSchemaVersion = 18;
 
 function now() {
   return new Date().toISOString();
@@ -331,6 +338,22 @@ function sessionCommandFingerprint(input: {
 
 function issueCreateFingerprint(input: IssueInput) {
   return createHash("sha256").update(canonicalJson(input)).digest("hex");
+}
+
+function cleanIssueSemanticReferences(value: unknown): IssueSemanticReference[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  return value.slice(0, 32).map(item => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("semantic_reference_invalid");
+    const source = item as Record<string, unknown>;
+    const type = source.type === "skill" || source.type === "mention" ? source.type : null;
+    const name = String(source.name || "").trim().slice(0, 500);
+    const path = String(source.path || "").trim().slice(0, 4096);
+    const key = `${type}\0${name}\0${path}`;
+    if (!type || !name || !path || seen.has(key)) throw new Error("semantic_reference_invalid");
+    seen.add(key);
+    return { type, name, path };
+  });
 }
 
 function createDevelopmentDatabaseSnapshot(file: string) {
@@ -999,6 +1022,23 @@ export class Store {
           CREATE INDEX IF NOT EXISTS scheduled_task_runs_pending ON scheduled_task_runs(status, available_at);
         `);
         this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (17, ?)").run(now());
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    }
+    if (fromVersion < 18) {
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS issue_initial_semantics (
+            issue_id TEXT PRIMARY KEY REFERENCES issues(id) ON DELETE CASCADE,
+            references_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+          );
+        `);
+        this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (18, ?)").run(now());
         this.db.exec("COMMIT");
       } catch (error) {
         this.db.exec("ROLLBACK");
@@ -2506,7 +2546,8 @@ export class Store {
     const project = this.getProject(input.projectId);
     if (!project) throw new Error("project_not_found");
     if (requestId.length > 200 || requestId.includes("\0")) throw new Error("invalid_request_id");
-    const requestFingerprint = requestId ? issueCreateFingerprint(input) : "";
+    const semanticReferences = cleanIssueSemanticReferences(input.semanticReferences);
+    const requestFingerprint = requestId ? issueCreateFingerprint({ ...input, semanticReferences }) : "";
     const enrichmentStatus = input.enrichmentStatus ?? null;
     const title = enrichmentStatus === "pending" ? "正在理解任务" : cleanTitle(input.title);
     if (input.status && !issueStatuses.includes(input.status)) throw new Error("invalid_status");
@@ -2577,6 +2618,10 @@ export class Store {
       );
       this.db.prepare("UPDATE projects SET next_issue_number = ?, updated_at = ? WHERE id = ?")
         .run(issueNumber + 1, timestamp, project.id);
+      if (semanticReferences.length) {
+        this.db.prepare("INSERT INTO issue_initial_semantics (issue_id, references_json, created_at) VALUES (?, ?, ?)")
+          .run(id, JSON.stringify(semanticReferences), timestamp);
+      }
       if (importedSession) this.writeImportedSession(id, importedSession, timestamp);
       if (requestId) {
         this.db.prepare("INSERT INTO issue_create_requests (request_id, request_fingerprint, issue_id, created_at) VALUES (?, ?, ?, ?)")
@@ -2696,6 +2741,15 @@ export class Store {
       this.db.exec("ROLLBACK");
       throw error;
     }
+  }
+
+  getInitialIssueSemanticReferences(issueId: string) {
+    const row = this.db.prepare("SELECT references_json FROM issue_initial_semantics WHERE issue_id = ?").get(issueId) as { references_json: string } | undefined;
+    return row ? cleanIssueSemanticReferences(JSON.parse(row.references_json)) : [];
+  }
+
+  clearInitialIssueSemanticReferences(issueId: string) {
+    this.db.prepare("DELETE FROM issue_initial_semantics WHERE issue_id = ?").run(issueId);
   }
 
   archiveIssue(id: string, version: number) {

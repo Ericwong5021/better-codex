@@ -746,7 +746,8 @@ export class IssueWorker {
     }
     if (workspacePath !== claim.workspacePath) this.store.setRunWorkspace(claim.issue.id, workspacePath);
     const session = this.store.getIssueSession(claim.issue.id);
-    const payload = this.sessionPayload(claim.issue, workspacePath, issuePrompt(claim));
+    const semanticReferences = this.store.getInitialIssueSemanticReferences(claim.issue.id);
+    const payload = this.sessionPayload(claim.issue, workspacePath, issuePrompt(claim), semanticReferences);
     try {
       this.store.enqueueSessionCommand({
         issueId: claim.issue.id,
@@ -757,6 +758,7 @@ export class IssueWorker {
         payload,
         hostId: session?.host_id || "local",
       });
+      if (semanticReferences.length) this.store.clearInitialIssueSemanticReferences(claim.issue.id);
     } catch (error) {
       this.store.finishRun(claim.runId, claim.issue.id, false, error instanceof Error ? error.message : "session_command_failed");
     }

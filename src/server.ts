@@ -1581,6 +1581,20 @@ export function startServer() {
         const project = store.getProject(decodeURIComponent(path[2]));
         return project ? sendJson(response, 200, project) : sendJson(response, 404, { error: "project_not_found" });
       }
+      if (path[0] === "api" && path[1] === "projects" && path[2] && path[3] === "semantics" && path.length === 4 && method === "GET") {
+        const project = store.getProject(decodeURIComponent(path[2]));
+        if (!project) return sendJson(response, 404, { error: "project_not_found" });
+        if (!project.workspace_path) throw new Error("workspace_required");
+        const skills = (await readCodexSkills(project.workspace_path)).map(({ name, description, scope, ref }) => ({ name, description, scope, ref }));
+        return sendJson(response, 200, { skills });
+      }
+      if (path[0] === "api" && path[1] === "projects" && path[2] && path[3] === "mentions" && path.length === 4 && method === "GET") {
+        const project = store.getProject(decodeURIComponent(path[2]));
+        if (!project) return sendJson(response, 404, { error: "project_not_found" });
+        if (!project.workspace_path) throw new Error("workspace_required");
+        const files = (await searchCodexFiles(project.workspace_path, cleanString(url.searchParams.get("query"), 500))).map(({ name, displayPath, kind, ref }) => ({ name, displayPath, kind, ref }));
+        return sendJson(response, 200, { files });
+      }
       if (path[0] === "api" && path[1] === "projects" && path[2] && path[3] === "overview" && path.length === 4 && method === "POST") {
         const projectId = decodeURIComponent(path[2]);
         const project = store.getProject(projectId);
@@ -1712,6 +1726,9 @@ export function startServer() {
         if (agentEnabled && !workspacePath) {
           throw new Error("workspace_required");
         }
+        const semanticSelections = normalizeCodexSemanticSelections(body.semantic_references);
+        if (semanticSelections.length && !agentEnabled) throw new Error("issue_agent_required");
+        const semanticReferences = await resolveCodexSemanticReferences(workspacePath, semanticSelections);
         const agentId = cleanString(body.agent_id, 200);
         if (aiEnrich && agentId && !store.getAgentProfile(agentId)) throw new Error("agent_not_found");
         const files = saveRemoteFiles(body.files, requestId || String(request.headers["x-better-codex-request-id"] || randomUUID()));
@@ -1730,6 +1747,7 @@ export function startServer() {
             agentId,
             userAssigned,
             enrichmentStatus: aiEnrich ? "pending" : null,
+            semanticReferences,
           }, requestId);
         } catch (error) {
           files.cleanup();

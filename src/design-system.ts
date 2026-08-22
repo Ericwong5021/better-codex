@@ -6278,6 +6278,26 @@ export function betterCodexDesignSystemCss() {
       box-shadow: var(--bc-inset-hairline);
     }
 
+    #better-codex-dialog .better-codex-create-semantic {
+      position: relative;
+      display: flex;
+      min-height: 0;
+      flex: 1;
+      margin: 0 var(--bc-space-4);
+    }
+
+    #better-codex-dialog .better-codex-create-semantic .better-codex-dialog-editor {
+      width: 100%;
+      margin: var(--bc-space-1) 0 0;
+    }
+
+    #better-codex-dialog .better-codex-create-semantic .better-codex-semantic-menu {
+      top: calc(var(--bc-text-md) * 1.55 + var(--bc-space-3));
+      right: 0;
+      bottom: auto;
+      left: 0;
+    }
+
     #better-codex-dialog .better-codex-semantic-menu {
       position: absolute;
       right: 0;

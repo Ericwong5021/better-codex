@@ -507,6 +507,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           title: String(draft.title || ""),
           description: String(draft.description || ""),
           prompt: String(draft.prompt || ""),
+          promptSemanticReferences: Array.isArray(draft.promptSemanticReferences) ? draft.promptSemanticReferences.filter(reference => reference && ["skill", "mention"].includes(reference.type) && typeof reference.name === "string" && typeof reference.ref === "string").slice(0, 32) : [],
           requestId: typeof draft.requestId === "string" && draft.requestId.length <= 200 ? draft.requestId : ""
         };
       } catch {
@@ -515,7 +516,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       }
     }
     function writeCreateDraft(draft, requestId) {
-      const cached = { mode: draft.mode, title: draft.title, description: draft.description, prompt: draft.prompt, requestId };
+      const cached = { mode: draft.mode, title: draft.title, description: draft.description, prompt: draft.prompt, promptSemanticReferences: draft.promptSemanticReferences, requestId };
       if (![cached.title, cached.description, cached.prompt].some(value => value.trim())) {
         sessionStorage.removeItem(CREATE_DRAFT_KEY);
         return;
@@ -1876,6 +1877,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #better-codex-dialog .better-codex-dialog-editor { box-sizing: border-box; width: auto; min-height: 0; flex: 1; margin: 0 20px; overflow-y: auto; border: 0; color: #3f3f46; background: transparent; padding: 2px 0; font: inherit; font-size: var(--bc-text-md); line-height: 1.55; outline: none; resize: none; }
         #better-codex-dialog .better-codex-dialog-editor::placeholder { color: #8b8b94; opacity: 1; }
         #better-codex-dialog[data-mode="agent"] .better-codex-dialog-editor { margin-top: 2px; min-height: 120px; }
+        #better-codex-dialog .better-codex-create-semantic { position: relative; display: flex; min-height: 0; flex: 1; margin: 0 20px; }
+        #better-codex-dialog .better-codex-create-semantic .better-codex-dialog-editor { width: 100%; margin: 2px 0 0; }
+        #better-codex-dialog .better-codex-create-semantic .better-codex-semantic-menu { top: calc(var(--bc-text-md) * 1.55 + 12px); right: 0; bottom: auto; left: 0; }
         #better-codex-dialog .better-codex-agent-picker { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; padding: 5px 20px 8px; color: #71717a; font-size: var(--bc-text-md); }
         #better-codex-dialog .better-codex-agent-assignee { display: flex; min-width: 0; align-items: center; gap: 6px; color: #3f3f46; font-weight: 550; }
         #better-codex-dialog .better-codex-agent-assignee select { max-width: 260px; border: 0; color: inherit; background: transparent; padding: 2px 20px 2px 0; font: inherit; font-weight: inherit; outline: none; cursor: pointer; }
@@ -7222,6 +7226,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         expanded: issue ? false : localStorage.getItem(CREATE_DIALOG_EXPANDED_KEY) === "true",
         descriptionExpanded: false,
         reply: issue?.reply_draft || "",
+        promptSemanticReferences: cachedCreateDraft?.promptSemanticReferences || [],
         replySemanticReferences: [],
         attachments: [],
         replyAttachments: []
@@ -7645,20 +7650,23 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
       function semanticCommands() {
         const zh = state.locale === "zh-CN";
-        return [
+        const commands = [
           { kind: "command", name: "review", label: "/review", description: zh ? "审查工作区中的未提交改动" : "Review uncommitted workspace changes", icon: "review" },
           { kind: "command", name: "compact", label: "/compact", description: zh ? "压缩当前会话上下文" : "Compact the current conversation context", icon: "sparkles" },
           { kind: "command", name: "status", label: "/status", description: zh ? "查看当前会话与智能体状态" : "Show the current session and agent status", icon: "usage" },
           { kind: "command", name: "skills", label: "/skills", description: zh ? "浏览并调用 Codex Skills" : "Browse and invoke Codex Skills", icon: "wrench" },
           { kind: "command", name: "mentions", label: "/mentions", description: zh ? "搜索工作区文件" : "Search workspace files", icon: "code" },
         ];
+        return issue ? commands : commands.filter(item => item.name !== "compact");
       }
 
       function semanticStatusMarkup() {
-        const agent = state.agents.find(item => item.id === issue?.agent_id);
+        const agent = issue
+          ? state.agents.find(item => item.id === issue.agent_id)
+          : state.agents.find(item => item.is_default ? draft.assignee === "codex" : item.id === draft.assignee);
         const zh = state.locale === "zh-CN";
         const rows = [
-          [zh ? "会话" : "Session", issue?.session_status || "idle"],
+          [zh ? "会话" : "Session", issue?.session_status || (zh ? "待创建" : "New")],
           [zh ? "智能体" : "Agent", agent?.name || "Codex"],
           [zh ? "模型" : "Model", agent?.model || (zh ? "默认模型" : "Default model")],
           [zh ? "推理" : "Reasoning", agent?.reasoning_effort || (zh ? "默认" : "Default")],
@@ -7666,9 +7674,22 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         return '<div class="better-codex-semantic-status"><div class="better-codex-semantic-status-title">' + icon("usage") + '<span>' + te(zh ? "当前会话" : "Current session") + '</span></div>' + rows.map(row => '<div><span>' + escapeHtml(row[0]) + '</span><strong>' + escapeHtml(row[1]) + '</strong></div>').join("") + '</div>';
       }
 
+      function semanticEditor() {
+        return dialog.querySelector(!issue && draft.mode === "agent" ? '[name="prompt"]' : '[name="reply"]');
+      }
+
+      function semanticDraftReferences() {
+        return !issue && draft.mode === "agent" ? draft.promptSemanticReferences : draft.replySemanticReferences;
+      }
+
+      function setSemanticDraftReferences(references) {
+        if (!issue && draft.mode === "agent") draft.promptSemanticReferences = references;
+        else draft.replySemanticReferences = references;
+      }
+
       function renderSemanticMenu() {
         const menu = dialog.querySelector("[data-semantic-menu]");
-        const input = dialog.querySelector('[name="reply"]');
+        const input = semanticEditor();
         if (!menu || !input) return;
         if (!semanticMenuState) {
           menu.hidden = true;
@@ -7707,7 +7728,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (semanticCatalog) return semanticCatalog;
         if (REMOTE) return semanticCatalog = { skills: [] };
         try {
-          const data = await api("/api/issues/" + encodeURIComponent(issue.id) + "/semantics");
+          const data = await api(issue
+            ? "/api/issues/" + encodeURIComponent(issue.id) + "/semantics"
+            : "/api/projects/" + encodeURIComponent(draft.projectId) + "/semantics");
           semanticCatalog = { skills: Array.isArray(data?.skills) ? data.skills : [] };
         } catch {
           semanticCatalog = { skills: [] };
@@ -7721,7 +7744,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       }
 
       function syncSemanticMenu() {
-        const input = dialog.querySelector('[name="reply"]');
+        const input = semanticEditor();
         const token = semanticToken(input);
         if (!token) return closeSemanticMenu();
         if (token.trigger === "/") {
@@ -7734,7 +7757,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           semanticMenuState = { token, items: semanticSkillItems(token.query), index: 0, loading: !semanticCatalog };
           renderSemanticMenu();
           if (!semanticCatalog) void loadSemanticCatalog().then(() => {
-            const current = semanticToken(dialog.querySelector('[name="reply"]'));
+            const current = semanticToken(semanticEditor());
             if (!current || current.trigger !== "$" || current.query !== token.query) return;
             semanticMenuState = { token: current, items: semanticSkillItems(current.query), index: 0 };
             renderSemanticMenu();
@@ -7751,9 +7774,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (semanticSearchTimer !== null) clearTimeout(semanticSearchTimer);
         semanticSearchTimer = setTimeout(() => {
           semanticSearchTimer = null;
-          void api("/api/issues/" + encodeURIComponent(issue.id) + "/mentions?query=" + encodeURIComponent(token.query)).then(data => {
+          const endpoint = issue
+            ? "/api/issues/" + encodeURIComponent(issue.id) + "/mentions?query="
+            : "/api/projects/" + encodeURIComponent(draft.projectId) + "/mentions?query=";
+          void api(endpoint + encodeURIComponent(token.query)).then(data => {
             if (sequence !== semanticSearchSequence) return;
-            const current = semanticToken(dialog.querySelector('[name="reply"]'));
+            const current = semanticToken(semanticEditor());
             if (!current || current.trigger !== "@" || current.query !== token.query) return;
             const items = (Array.isArray(data?.files) ? data.files : []).slice(0, 12).map(file => ({ kind: "mention", name: file.displayPath || file.name, ref: file.ref, label: "@" + (file.displayPath || file.name), description: file.kind === "directory" ? (state.locale === "zh-CN" ? "目录" : "Directory") : (state.locale === "zh-CN" ? "工作区文件" : "Workspace file"), icon: "code" }));
             semanticMenuState = { token: current, items, index: 0 };
@@ -7767,22 +7793,33 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       }
 
       function replaceSemanticToken(value) {
-        const input = dialog.querySelector('[name="reply"]');
+        const input = semanticEditor();
         const token = semanticMenuState?.token || semanticToken(input);
         if (!input || !token) return;
         input.value = input.value.slice(0, token.start) + value + input.value.slice(token.end);
         const cursor = token.start + value.length;
         input.setSelectionRange(cursor, cursor);
-        draft.reply = input.value;
-        latestReplyDraft = input.value;
-        scheduleReplyDraft(input.value);
-        updateReplySendState();
+        if (!issue && draft.mode === "agent") {
+          draft.prompt = input.value;
+          updateSubmitState();
+        } else {
+          draft.reply = input.value;
+          latestReplyDraft = input.value;
+          scheduleReplyDraft(input.value);
+          updateReplySendState();
+        }
       }
 
       function selectSemanticOption(index = semanticMenuState?.index || 0) {
         const item = semanticMenuState?.items?.[index];
         if (!item) return;
         if (item.kind === "command") {
+          if (!issue && item.name === "status") {
+            replaceSemanticToken("");
+            semanticMenuState = { status: true };
+            renderSemanticMenu();
+            return;
+          }
           if (item.name === "skills") {
             replaceSemanticToken("$");
             semanticMenuState = null;
@@ -7800,9 +7837,33 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const token = (item.kind === "skill" ? "$" : "@") + item.name;
         replaceSemanticToken(token + " ");
         const reference = { type: item.kind, name: item.name, ref: item.ref };
-        draft.replySemanticReferences = draft.replySemanticReferences.filter(value => !(value.type === reference.type && value.name === reference.name));
-        draft.replySemanticReferences.push(reference);
+        const references = semanticDraftReferences().filter(value => !(value.type === reference.type && value.name === reference.name));
+        references.push(reference);
+        setSemanticDraftReferences(references);
         closeSemanticMenu();
+      }
+
+      function handleSemanticMenuKeydown(event) {
+        if (!semanticMenuState) return false;
+        const items = semanticMenuState.items || [];
+        if (event.key === "Escape") {
+          event.preventDefault();
+          closeSemanticMenu();
+          return true;
+        }
+        if (items.length && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+          event.preventDefault();
+          const offset = event.key === "ArrowDown" ? 1 : -1;
+          semanticMenuState.index = (semanticMenuState.index + offset + items.length) % items.length;
+          renderSemanticMenu();
+          return true;
+        }
+        if (items.length && (event.key === "Enter" || event.key === "Tab")) {
+          event.preventDefault();
+          selectSemanticOption();
+          return true;
+        }
+        return false;
       }
 
       function conversationComposer() {
@@ -8494,7 +8555,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           const hint = humanAssigned
             ? state.locale === "zh-CN" ? "创建后由默认智能体生成标题，等待 " + (assignedUser?.name || t("你")) + " 处理。" : "The default agent will generate the title, then wait for " + (assignedUser?.name || t("你")) + "."
             : t("创建后先由 " + selectedName + " 整理卡片，再自动开始工作。");
-          dialog.innerHTML = '<form>' + header() + assigneePicker() + '<textarea class="better-codex-dialog-editor" name="prompt" placeholder="' + te("告诉智能体要做什么，例如：“修复项目里任务运行状态不可见的问题”") + '">' + escapeHtml(draft.prompt) + '</textarea>' + propertyRows() + attachmentList() + '<div class="better-codex-dialog-error" hidden></div>' + footer() + '</form>';
+          dialog.innerHTML = '<form>' + header() + assigneePicker() + '<div class="better-codex-create-semantic"><div class="better-codex-semantic-menu" id="better-codex-semantic-menu" data-semantic-menu role="listbox" hidden></div><textarea class="better-codex-dialog-editor" name="prompt" placeholder="' + te("告诉智能体要做什么，例如：“修复项目里任务运行状态不可见的问题”") + '" aria-label="' + te("任务要求") + '" aria-autocomplete="list" aria-controls="better-codex-semantic-menu" aria-expanded="false">' + escapeHtml(draft.prompt) + '</textarea></div>' + propertyRows() + attachmentList() + '<div class="better-codex-dialog-error" hidden></div>' + footer() + '</form>';
           dialog.querySelector(".better-codex-dialog-properties")?.insertAdjacentHTML("beforebegin", '<div class="better-codex-run-hint">' + agentAvatarMarkup(selectedAgent, "better-codex-agent-avatar") + '<span>' + escapeHtml(hint) + '</span></div>');
         } else if (issue) {
           const descriptionEditor = '<div class="better-codex-description-field"><textarea class="better-codex-dialog-editor" name="description" placeholder="' + te("添加描述...") + '" rows="3">' + escapeHtml(draft.description) + '</textarea><button class="better-codex-description-toggle" type="button" data-description-toggle hidden></button></div>';
@@ -8524,8 +8585,27 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         content?.addEventListener("input", () => {
           content.removeAttribute("aria-invalid");
           dirtyDraftFields.add(draft.mode === "agent" ? "prompt" : "title");
+          if (!issue && draft.mode === "agent") {
+            draft.prompt = content.value;
+            draft.promptSemanticReferences = draft.promptSemanticReferences.filter(reference => content.value.includes((reference.type === "skill" ? "$" : "@") + reference.name));
+            syncSemanticMenu();
+          }
           updateSubmitState();
         });
+        if (!issue && draft.mode === "agent") {
+          content?.addEventListener("focus", () => {
+            void loadSemanticCatalog();
+            syncSemanticMenu();
+          });
+          content?.addEventListener("blur", () => {
+            setTimeout(() => {
+              if (!dialog.querySelector("[data-semantic-menu]:hover")) closeSemanticMenu();
+            }, 120);
+          });
+          content?.addEventListener("keydown", event => {
+            if (handleSemanticMenuKeydown(event)) event.stopPropagation();
+          });
+        }
         dialog.querySelectorAll('[name="description"], [name="labels"]').forEach(control => control.addEventListener("input", () => {
           dirtyDraftFields.add(control.getAttribute("name"));
           if (control.matches('[name="labels"]')) {
@@ -8621,7 +8701,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           const option = event.target.closest("[data-semantic-option]");
           if (!option) return;
           selectSemanticOption(Number(option.dataset.semanticOption));
-          replyInput?.focus();
+          semanticEditor()?.focus();
         });
         sendButton?.addEventListener("click", event => {
           const button = event.currentTarget;
@@ -8676,26 +8756,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           });
         });
         replyInput?.addEventListener("keydown", event => {
-          if (semanticMenuState) {
-            const items = semanticMenuState.items || [];
-            if (event.key === "Escape") {
-              event.preventDefault();
-              closeSemanticMenu();
-              return;
-            }
-            if (items.length && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
-              event.preventDefault();
-              const offset = event.key === "ArrowDown" ? 1 : -1;
-              semanticMenuState.index = (semanticMenuState.index + offset + items.length) % items.length;
-              renderSemanticMenu();
-              return;
-            }
-            if (items.length && (event.key === "Enter" || event.key === "Tab")) {
-              event.preventDefault();
-              selectSemanticOption();
-              return;
-            }
-          }
+          if (handleSemanticMenuKeydown(event)) return;
           if (isSendKeyboardEvent(event)) {
             event.preventDefault();
             if (["send", "queue"].includes(sendButton?.dataset.composerMode || "")) void sendReply();
@@ -8866,6 +8927,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           event.stopPropagation();
           draft.projectId = option.dataset.dialogProjectOption;
           dirtyDraftFields.add("project_id");
+          semanticCatalog = null;
+          closeSemanticMenu();
           const selectedProject = state.projects.find(item => item.id === draft.projectId);
           dialog.querySelector("[data-project-label]").textContent = projectLabel(selectedProject) || t("选择项目");
           const breadcrumbProject = dialog.querySelector("[data-dialog-breadcrumb-project]");
@@ -9041,6 +9104,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             labels: draft.labels.split(/[,，]/).map(value => value.trim()).filter(Boolean),
             workspace_path: workspacePath,
             ai_enrich: draft.mode === "agent" && !issue,
+            semantic_references: !issue && draft.mode === "agent" ? draft.promptSemanticReferences.filter(reference => prompt.includes((reference.type === "skill" ? "$" : "@") + reference.name)) : [],
             files,
             ...(state.mockup ? { mockup_run_status: draft.runStatus } : {}),
             ...assignee,
@@ -9062,6 +9126,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             draft.title = "";
             draft.description = "";
             draft.prompt = "";
+            draft.promptSemanticReferences = [];
             draft.attachments.forEach(releaseAttachment);
             draft.attachments = [];
             renderDialog();
