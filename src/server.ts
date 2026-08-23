@@ -751,10 +751,10 @@ export function startServer() {
     },
     (issueId, requestId, action, message) => {
       if (action === "update") store.updateQueuedIssueReply(issueId, requestId, message || "");
-      else {
+      else if (action === "send") {
         store.promoteQueuedIssueReply(issueId, requestId);
         worker.wake();
-      }
+      } else store.deleteQueuedIssueReply(issueId, requestId);
       publishChange();
     },
     async issueId => {
@@ -1929,6 +1929,12 @@ export function startServer() {
           worker.wake();
           publishChange();
           return sendJson(response, 202, { issue_id: issue.id, request_id: promoted.command.request_id, steered: true, queued_replies: promoted.queued_replies });
+        }
+        if (method === "DELETE" && path[3] === "queue" && path[4] && path.length === 5) {
+          if (updateInstallInProgress) throw new Error("update_in_progress");
+          const queuedReplies = store.deleteQueuedIssueReply(issue.id, decodeURIComponent(path[4]));
+          publishChange();
+          return sendJson(response, 200, { issue_id: issue.id, queued_replies: queuedReplies });
         }
         if (method === "POST" && path[3] === "reply" && path.length === 4) {
           if (updateInstallInProgress) throw new Error("update_in_progress");

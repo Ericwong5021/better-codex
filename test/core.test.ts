@@ -811,7 +811,18 @@ test("session reply idempotency is issue-scoped, fingerprinted, and atomic", () 
     assert.deepEqual(store.listQueuedIssueReplies(firstIssue.id).map(item => item.message), ["queued"]);
     assert.deepEqual(store.updateQueuedIssueReply(firstIssue.id, queued.command.request_id, "edited queue").map(item => item.message), ["edited queue"]);
     assert.equal((store.getSessionCommand(queued.command.id)?.payload.input as Array<{ text: string }>)[0].text, "edited queue");
-    const promoted = store.promoteQueuedIssueReply(firstIssue.id, queued.command.request_id);
+    assert.deepEqual(store.deleteQueuedIssueReply(firstIssue.id, queued.command.request_id), []);
+    assert.throws(() => store.deleteQueuedIssueReply(firstIssue.id, queued.command.request_id), /queued_reply_not_found/);
+    const queuedForSend = store.enqueueSessionReply({
+      issueId: firstIssue.id,
+      requestId: "queued-send-request",
+      kind: "turn",
+      threadId: firstThread,
+      payload: { message: "send queued", input: [{ type: "text", text: "send queued" }], request_message: "send queued", request_input: JSON.stringify({ message: "send queued", references: [], command: "" }), queued_reply: true },
+      message: "send queued",
+      deferred: true,
+    });
+    const promoted = store.promoteQueuedIssueReply(firstIssue.id, queuedForSend.command.request_id);
     assert.equal(promoted.command.kind, "steer");
     assert.equal(promoted.command.turn_id, activeTurnId);
     assert.equal(promoted.command.payload.queued_reply, undefined);

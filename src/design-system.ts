@@ -6597,6 +6597,10 @@ export function betterCodexDesignSystemCss() {
       opacity: .42;
     }
 
+    #better-codex-dialog .better-codex-composer-queue-actions button.is-danger {
+      color: var(--bc-danger);
+    }
+
     #better-codex-dialog .better-codex-composer-queue-row.is-editing {
       align-items: flex-start;
       background: var(--bc-color-hover);

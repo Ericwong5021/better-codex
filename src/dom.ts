@@ -722,6 +722,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     localeResources.en["队列中 {{count}} 条消息"] = "{{count}} queued messages";
     localeResources.en["立即发送"] = "Send now";
     localeResources.en["编辑队列消息"] = "Edit queued message";
+    localeResources.en["删除队列消息"] = "Delete queued message";
     localeResources.en["保存修改"] = "Save changes";
     localeResources.en["取消编辑"] = "Cancel editing";
     localeResources.en["当前任务已结束，消息会按队列顺序发送。"] = "The current task has finished. This message will be sent in queue order.";
@@ -7585,7 +7586,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             return;
           }
           if (executionRunning) {
-            control.disabled = !control.matches('[name="reply"], [data-conversation-send], [data-conversation-attach], [data-conversation-retry], [data-dialog-attachment-scope="reply"], [data-queue-send-now], [data-queue-edit], [data-queue-edit-save], [data-queue-edit-cancel], [data-semantic-option]');
+            control.disabled = !control.matches('[name="reply"], [data-conversation-send], [data-conversation-attach], [data-conversation-retry], [data-dialog-attachment-scope="reply"], [data-queue-edit-input], [data-queue-send-now], [data-queue-edit], [data-queue-edit-save], [data-queue-edit-cancel], [data-semantic-option]');
             return;
           }
           if (executionLocked) {
@@ -7982,7 +7983,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
               return '<div class="better-codex-composer-queue-row is-editing" role="listitem" data-queue-request="' + escapeHtml(requestId) + '"><span class="better-codex-composer-queue-icon" aria-hidden="true">' + icon("queue") + '</span><textarea class="better-codex-composer-queue-edit" data-queue-edit-input rows="2" aria-label="' + te("编辑队列消息") + '">' + escapeHtml(queueEditDraft) + '</textarea><span class="better-codex-composer-queue-actions"><button type="button" data-queue-edit-save="' + escapeHtml(requestId) + '" aria-label="' + te("保存修改") + '" title="' + te("保存修改") + '"' + (busy || !queueEditDraft.trim() ? " disabled" : "") + '>' + icon(busy ? "refresh" : "check", busy ? "better-codex-spin" : "") + '</button><button type="button" data-queue-edit-cancel aria-label="' + te("取消编辑") + '" title="' + te("取消编辑") + '"' + (busy ? " disabled" : "") + '>' + icon("close") + '</button></span></div>';
             }
             const disabled = busy || sessionHandoff || Boolean(issue?.archived_at);
-            return '<div class="better-codex-composer-queue-row" role="listitem" data-queue-request="' + escapeHtml(requestId) + '" title="' + escapeHtml(message) + '"><span class="better-codex-composer-queue-icon" aria-hidden="true">' + icon("queue") + '</span><span class="better-codex-composer-queue-message">' + escapeHtml(message) + '</span><span class="better-codex-composer-queue-actions"><button type="button" data-queue-send-now="' + escapeHtml(requestId) + '" aria-label="' + te("立即发送") + '" title="' + te("立即发送") + '"' + (disabled ? " disabled" : "") + '>' + icon(busy ? "refresh" : "send", busy ? "better-codex-spin" : "") + '</button><button type="button" data-queue-edit="' + escapeHtml(requestId) + '" aria-label="' + te("编辑队列消息") + '" title="' + te("编辑队列消息") + '"' + (disabled ? " disabled" : "") + '>' + icon("edit") + '</button></span></div>';
+            return '<div class="better-codex-composer-queue-row" role="listitem" data-queue-request="' + escapeHtml(requestId) + '" title="' + escapeHtml(message) + '"><span class="better-codex-composer-queue-icon" aria-hidden="true">' + icon("queue") + '</span><span class="better-codex-composer-queue-message">' + escapeHtml(message) + '</span><span class="better-codex-composer-queue-actions"><button type="button" data-queue-send-now="' + escapeHtml(requestId) + '" aria-label="' + te("立即发送") + '" title="' + te("立即发送") + '"' + (disabled ? " disabled" : "") + '>' + icon(busy ? "refresh" : "send", busy ? "better-codex-spin" : "") + '</button><button type="button" data-queue-edit="' + escapeHtml(requestId) + '" aria-label="' + te("编辑队列消息") + '" title="' + te("编辑队列消息") + '"' + (disabled ? " disabled" : "") + '>' + icon("edit") + '</button><button class="is-danger" type="button" data-queue-delete="' + escapeHtml(requestId) + '" aria-label="' + te("删除队列消息") + '" title="' + te("删除队列消息") + '"' + (disabled ? " disabled" : "") + '>' + icon("trash") + '</button></span></div>';
           }).join("") + (queueActionError ? '<div class="better-codex-composer-queue-error" role="listitem">' + escapeHtml(queueActionError) + '</div>' : "")
           : "";
       }
@@ -8004,13 +8005,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         try {
           const commandId = globalThis.crypto?.randomUUID?.() || VERSION + "-queue-" + Date.now() + "-" + Math.random().toString(36).slice(2);
           const path = "/api/issues/" + encodeURIComponent(issue.id) + "/queue/" + encodeURIComponent(requestId) + (action === "send" ? "/send" : "");
-          const result = await api(path, { method: action === "send" ? "POST" : "PATCH", body: JSON.stringify(action === "send" ? { command_id: commandId } : { command_id: commandId, message }) });
+          const result = await api(path, { method: action === "send" ? "POST" : action === "delete" ? "DELETE" : "PATCH", body: JSON.stringify(action === "update" ? { command_id: commandId, message } : { command_id: commandId }) });
           if (result.command_id) {
             const command = await waitForRemoteCommand(result.command_id);
             if (command.status !== "applied") throw new Error(command.error || "command_rejected");
           }
           if (Array.isArray(result.queued_replies)) queuedReplies = result.queued_replies;
-          else if (action === "send") queuedReplies = queuedReplies.filter(item => item.request_id !== requestId);
+          else if (action === "send" || action === "delete") queuedReplies = queuedReplies.filter(item => item.request_id !== requestId);
           else queuedReplies = queuedReplies.map(item => item.request_id === requestId ? { ...item, message } : item);
           queueEditingRequestId = "";
           queueEditDraft = "";
@@ -8752,6 +8753,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
               input?.focus();
               input?.setSelectionRange?.(input.value.length, input.value.length);
             });
+            return;
+          }
+          const remove = event.target.closest("[data-queue-delete]");
+          if (remove) {
+            void updateQueuedReply("delete", remove.dataset.queueDelete);
             return;
           }
           if (event.target.closest("[data-queue-edit-cancel]")) {

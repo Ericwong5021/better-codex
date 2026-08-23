@@ -582,14 +582,14 @@ export function createHubServer(options: HubServerOptions) {
         return sendJson(response, 202, { issue_id: issue.id, request_id: command.command_id, status: "running", message });
       }
       const queueMatch = url.pathname.match(/^\/api\/issues\/([^/]+)\/queue\/([^/]+)(\/send)?$/);
-      if (queueMatch && ((method === "PATCH" && !queueMatch[3]) || (method === "POST" && queueMatch[3] === "/send"))) {
+      if (queueMatch && ((method === "PATCH" && !queueMatch[3]) || (method === "POST" && queueMatch[3] === "/send") || (method === "DELETE" && !queueMatch[3]))) {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" });
         if (!trustedOrigin(request, true) || !csrfValid) return sendJson(response, 403, { error: "csrf_invalid" });
         const body = await readBody(request);
         const issueId = decodeURIComponent(queueMatch[1]);
         const issue = store.board().issues.find(item => item.id === issueId || item.identifier === issueId);
         if (!issue) return sendJson(response, 404, { error: "issue_not_found" });
-        const operation = method === "PATCH" ? "issue.queue.update" : "issue.queue.send";
+        const operation = method === "PATCH" ? "issue.queue.update" : method === "POST" ? "issue.queue.send" : "issue.queue.delete";
         const command = store.createRemoteCommand({
           command_id: body.command_id ?? request.headers["x-better-codex-command-id"],
           operation,

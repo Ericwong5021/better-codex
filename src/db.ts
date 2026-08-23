@@ -1523,7 +1523,7 @@ export class Store {
     } satisfies IssueProjection;
   }
 
-  async applyRemoteCommand(command: RemoteCommand, handlers: { files?: (files: Array<{ name: string; type: string; data: string }>) => { paths: string[]; cleanup: () => void } | Promise<{ paths: string[]; cleanup: () => void }>; reply?: (issueId: string, requestId: string, message: string, files: Array<{ name: string; type: string; data: string }>) => void | Promise<void>; queue?: (issueId: string, requestId: string, action: "update" | "send", message?: string) => void | Promise<void>; stop?: (issueId: string) => void | Promise<void>; regenerateTitle?: (issueId: string) => void | Promise<void>; projectCreate?: (projectId: string, name: string, workspacePath: string) => void | Promise<void>; projectOverview?: (projectId: string, agentId: string, feedback: string) => void | Promise<void>; projectPlanningReply?: (projectId: string, agentId: string, message: string) => void | Promise<void>; projectPlanningReset?: (projectId: string) => void | Promise<void>; chooseDirectory?: () => string | Promise<string>; browseDirectory?: (path: string) => DirectoryBrowserResult | Promise<DirectoryBrowserResult>; threadAction?: (issueId: string, action: IssueThreadAction) => void | Promise<void> } = {}): Promise<RemoteCommandAck> {
+  async applyRemoteCommand(command: RemoteCommand, handlers: { files?: (files: Array<{ name: string; type: string; data: string }>) => { paths: string[]; cleanup: () => void } | Promise<{ paths: string[]; cleanup: () => void }>; reply?: (issueId: string, requestId: string, message: string, files: Array<{ name: string; type: string; data: string }>) => void | Promise<void>; queue?: (issueId: string, requestId: string, action: "update" | "send" | "delete", message?: string) => void | Promise<void>; stop?: (issueId: string) => void | Promise<void>; regenerateTitle?: (issueId: string) => void | Promise<void>; projectCreate?: (projectId: string, name: string, workspacePath: string) => void | Promise<void>; projectOverview?: (projectId: string, agentId: string, feedback: string) => void | Promise<void>; projectPlanningReply?: (projectId: string, agentId: string, message: string) => void | Promise<void>; projectPlanningReset?: (projectId: string) => void | Promise<void>; chooseDirectory?: () => string | Promise<string>; browseDirectory?: (path: string) => DirectoryBrowserResult | Promise<DirectoryBrowserResult>; threadAction?: (issueId: string, action: IssueThreadAction) => void | Promise<void> } = {}): Promise<RemoteCommandAck> {
     const receipt = this.db.prepare("SELECT result_json FROM sync_command_receipts WHERE command_id = ?").get(command.command_id) as { result_json: string } | undefined;
     if (receipt) return JSON.parse(receipt.result_json) as RemoteCommandAck;
     const result = await (async () => {
@@ -1607,8 +1607,8 @@ export class Store {
         } else {
           const current = this.getIssue(command.entity_id);
           if (!current) throw new Error("issue_not_found");
-          if (!["issue.reply", "issue.stop", "issue.queue.update", "issue.queue.send"].includes(command.operation) && current.version !== command.base_revision) throw new Error("version_conflict");
-          if (!["issue.reply", "issue.stop", "issue.queue.update", "issue.queue.send"].includes(command.operation) && (current.active_run_status || current.session_active_turn_id || this.getIssueReplyState(current.id).status === "running")) throw new Error("issue_execution_running");
+          if (!["issue.reply", "issue.stop", "issue.queue.update", "issue.queue.send", "issue.queue.delete"].includes(command.operation) && current.version !== command.base_revision) throw new Error("version_conflict");
+          if (!["issue.reply", "issue.stop", "issue.queue.update", "issue.queue.send", "issue.queue.delete"].includes(command.operation) && (current.active_run_status || current.session_active_turn_id || this.getIssueReplyState(current.id).status === "running")) throw new Error("issue_execution_running");
           if (["issue.archive", "issue.delete"].includes(command.operation) && this.isEnrichmentPending(current)) throw new Error("issue_enrichment_pending");
           if (command.operation === "issue.delete") {
             this.deleteArchivedIssue(current.id, current.version);
@@ -1627,10 +1627,10 @@ export class Store {
             if (!message && !files.length) throw new Error("message_required");
             await handlers.reply(current.id, command.command_id, message, files);
             issue = this.getIssue(current.id)!;
-          } else if (command.operation === "issue.queue.update" || command.operation === "issue.queue.send") {
+          } else if (command.operation === "issue.queue.update" || command.operation === "issue.queue.send" || command.operation === "issue.queue.delete") {
             if (current.archived_at) throw new Error("issue_archived");
             if (!handlers.queue) throw new Error("remote_queue_unavailable");
-            await handlers.queue(current.id, String(payload.request_id || ""), command.operation === "issue.queue.update" ? "update" : "send", command.operation === "issue.queue.update" ? String(payload.message || "") : undefined);
+            await handlers.queue(current.id, String(payload.request_id || ""), command.operation === "issue.queue.update" ? "update" : command.operation === "issue.queue.send" ? "send" : "delete", command.operation === "issue.queue.update" ? String(payload.message || "") : undefined);
             issue = this.getIssue(current.id)!;
           } else if (command.operation === "issue.stop") {
             if (!handlers.stop) throw new Error("remote_stop_unavailable");
@@ -3720,6 +3720,23 @@ export class Store {
       };
       const result = this.db.prepare("UPDATE session_commands SET payload_json = ?, request_fingerprint = ? WHERE id = ? AND status = 'pending'")
         .run(JSON.stringify(payload), sessionCommandFingerprint({ kind: "turn", payload }), command.id);
+      if (result.changes !== 1) throw new Error("queued_reply_update_conflict");
+      this.db.exec("COMMIT");
+      return this.listQueuedIssueReplies(issueId);
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  deleteQueuedIssueReply(issueId: string, requestId: string) {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const row = this.db.prepare("SELECT * FROM session_commands WHERE issue_id = ? AND request_id = ?").get(issueId, requestId) as Record<string, unknown> | undefined;
+      if (!row) throw new Error("queued_reply_not_found");
+      const command = sessionCommandFromRow(row);
+      if (command.status !== "pending" || command.kind !== "turn" || command.payload.queued_reply !== true) throw new Error("queued_reply_not_pending");
+      const result = this.db.prepare("DELETE FROM session_commands WHERE id = ? AND status = 'pending'").run(command.id);
       if (result.changes !== 1) throw new Error("queued_reply_update_conflict");
       this.db.exec("COMMIT");
       return this.listQueuedIssueReplies(issueId);

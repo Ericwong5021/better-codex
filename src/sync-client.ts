@@ -70,7 +70,7 @@ export class SyncClient {
     private readonly threadAction: (issueId: string, action: IssueThreadAction) => void | Promise<void> = () => { throw new Error("codex_thread_action_unavailable"); },
     private readonly projectPlanningReply: (projectId: string, agentId: string, message: string) => void | Promise<void> = () => { throw new Error("remote_project_planning_unavailable"); },
     private readonly projectPlanningReset: (projectId: string) => void | Promise<void> = () => { throw new Error("remote_project_planning_unavailable"); },
-    private readonly queue: (issueId: string, requestId: string, action: "update" | "send", message?: string) => void | Promise<void> = () => { throw new Error("remote_queue_unavailable"); },
+    private readonly queue: (issueId: string, requestId: string, action: "update" | "send" | "delete", message?: string) => void | Promise<void> = () => { throw new Error("remote_queue_unavailable"); },
     private readonly regenerateTitle: (issueId: string) => void | Promise<void> = () => { throw new Error("remote_title_regeneration_unavailable"); },
   ) {}
 
