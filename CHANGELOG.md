@@ -4,6 +4,10 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.10-beta.14] - 2026-08-23
+
+- Keep queued replies editable and focused while aligning the composer with native Codex behavior.
+- Keep scheduled-task and mobile Agent navigation stable, and regenerate Issue titles from conversation context.
 - Support multiple administrator-created Relay Web accounts with independent login sessions, profiles, task assignment identities, account management commands, and no public registration flow.
 
 ## [0.4.10-beta.13] - 2026-08-23
@@ -808,7 +812,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.13...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.14...HEAD
+[0.4.10-beta.14]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.13...v0.4.10-beta.14
 [0.4.10-beta.13]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.12...v0.4.10-beta.13
 [0.4.10-beta.12]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.11...v0.4.10-beta.12
 [0.4.10-beta.11]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.10...v0.4.10-beta.11
