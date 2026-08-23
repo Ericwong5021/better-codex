@@ -750,7 +750,7 @@ test("issue details render the latest conversation result and reply composer", (
   assert.ok(source.includes('updateQueuedReply("send"'));
   assert.ok(source.includes("data-conversation-attach"));
   assert.ok(permissions.includes("[data-conversation-copy]"));
-  assert.ok(permissions.includes("[data-queue-edit-input]"));
+  assert.match(permissions, /if \(executionRunning\) \{[\s\S]*?control\.disabled = !control\.matches\('[^']*\[data-queue-edit-input\][^']*'\)/);
   assert.ok(source.includes('data-composer-mode="\' + mode + \'"'));
   assert.ok(source.includes('button.dataset.composerMode === "stop"'));
   assert.ok(source.includes('["send", "queue"].includes(button.dataset.composerMode)'));
