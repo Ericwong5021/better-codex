@@ -25,6 +25,8 @@ Collect only the required values:
 - Browser password of at least 12 characters.
 - VPS SSH target when Codex is not running on the server.
 
+The first browser credential becomes the initial Web account. Additional Web accounts are created only through the administrator-authenticated Better Codex CLI. The Web UI has no registration endpoint.
+
 ## Verify the release
 
 Before executing repository code:
@@ -96,6 +98,22 @@ BETTER_CODEX_HUB_WEB_USERNAME=<USERNAME>
 ```
 
 Protect `.env` and secret files with mode `600` and the secrets directory with mode `700`.
+
+## Manage Web accounts
+
+Run account management from a trusted machine with the Relay URL and a local file containing the deployment bootstrap secret. Password files must contain only the new account password and should be mode `600`.
+
+```bash
+better-codex relay user-list --url "https://<PUBLIC_HOST>" --admin-token-file <ADMIN_TOKEN_FILE>
+better-codex relay user-add <USERNAME> --nickname "<DISPLAY_NAME>" --password-file <PASSWORD_FILE> --url "https://<PUBLIC_HOST>" --admin-token-file <ADMIN_TOKEN_FILE>
+better-codex relay user-disable <USERNAME> --url "https://<PUBLIC_HOST>" --admin-token-file <ADMIN_TOKEN_FILE>
+better-codex relay user-enable <USERNAME> --url "https://<PUBLIC_HOST>" --admin-token-file <ADMIN_TOKEN_FILE>
+better-codex relay user-password-set <USERNAME> --password-file <PASSWORD_FILE> --url "https://<PUBLIC_HOST>" --admin-token-file <ADMIN_TOKEN_FILE>
+```
+
+Disabling an account or changing its password revokes that account's active Web sessions. Existing tasks retain the account ID so historical assignments remain traceable, while disabled accounts cannot receive new assignments.
+
+The first upgrade from single-account Relay authentication migrates the existing browser credential into the initial account and revokes legacy browser sessions once. Users must sign in again after that upgrade.
 
 ### 3A. Standalone deployment
 

@@ -107,6 +107,8 @@ Better Codex 以轻量 Node.js bundle 运行，需要 Node.js 22.5 或更新版�
 
 需要从浏览器远程访问自己的看板时，可以部署独立的 Relay 和 Web UI。本机 Runtime 主动建立出站 WSS，Relay 只实时转发浏览器流量，不保存项目、任务、会话、智能体配置或附件。服务器准备、HTTPS、设备配对、备份恢复和升级方法见英文版 [Self-hosting runbook](SELF_HOSTING.md)。
 
+Relay 支持由系统管理员创建多个 Web 账户。每个账户使用独立身份登录，可把任务指派给任一启用账户；Web 端不提供注册入口，账户创建、禁用、启用和密码重置统一通过 `better-codex relay user-*` 管理命令完成。
+
 ## 常见问题
 
 **这是 OpenAI 官方产品吗？**<br>

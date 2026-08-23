@@ -10,6 +10,7 @@ import { deviceAuthorizationPage } from "./device-authorization-page.js";
 import { clearRelaySessionCookie, parseCookies, passwordHash, passwordMatches, readHubSecret, relaySessionCookie, validateWebPassword, validateWebUsername } from "./relay-auth.js";
 import { decodeRelayMessage, encodeRelayMessage, relayCapabilities, relayInitialWindowBytes, relayMaxChunkBytes, relayProtocolVersion, relayRuntimeReconnectCloseCode, relayRuntimeStoppedCloseCode, relayWebSocketProtocol, type RelayHello, type RelayMessage } from "./relay-protocol.js";
 import { RelayStore, type RelayCommand } from "./relay-store.js";
+import { avatarColor, avatarInitials } from "./user-profile.js";
 import { betterCodexWebManifest, betterCodexWebServiceWorker } from "./web-app.js";
 import { betterCodexWebHostCss, betterCodexWebHostHtml, betterCodexWebHostJavaScript } from "./web-host.js";
 import { upgradeWebSocket, type WebSocketConnection } from "./websocket-server.js";
@@ -250,11 +251,24 @@ function secretEqual(left: string, right: string) {
 function errorStatus(code: string) {
   if (code === "unauthorized") return 401;
   if (["forbidden", "csrf_invalid", "untrusted_host"].includes(code)) return 403;
-  if (["device_not_found", "device_authorization_not_found", "web_session_not_found"].includes(code)) return 404;
-  if (["relay_protocol_mismatch", "runtime_already_paired"].includes(code)) return 409;
+  if (["device_not_found", "device_authorization_not_found", "web_session_not_found", "web_user_not_found"].includes(code)) return 404;
+  if (["relay_protocol_mismatch", "runtime_already_paired", "web_user_exists"].includes(code)) return 409;
   if (code === "body_too_large") return 413;
   if (code === "login_rate_limited") return 429;
   return 400;
+}
+
+function userForWeb(user: NonNullable<ReturnType<RelayStore["webUser"]>>) {
+  return {
+    id: user.id,
+    name: user.nickname,
+    email: "",
+    handle: user.username,
+    initials: avatarInitials(user.nickname),
+    color: avatarColor(user.id),
+    avatar: user.avatar,
+    disabled: user.disabled,
+  };
 }
 
 function publicRuntime(runtime: ActiveRuntime | null, reconnecting: ReconnectingRuntime | null) {
@@ -601,6 +615,14 @@ export function createRelayServer(options: RelayServerOptions) {
     const path = `${url.pathname}${url.search}`;
     const command = createWebCommand(suppliedRequestId, method, path, body);
     if (!command) return sendJson(response, 400, { error: "command_not_supported" });
+    if (command.kind === "issue" && ((method === "POST" && url.pathname === "/api/issues") || method === "PATCH")) {
+      const payload = JSON.parse(body.toString("utf8")) as Record<string, unknown>;
+      if (payload.assignee_user_id !== undefined && payload.assignee_user_id !== null) {
+        const assignee = typeof payload.assignee_user_id === "string" ? store.webUser(payload.assignee_user_id) : null;
+        if (!assignee || assignee.disabled) throw new Error("web_user_not_found");
+      }
+      if (payload.user_assigned === true && typeof payload.assignee_user_id !== "string") throw new Error("web_user_not_found");
+    }
     const result = store.enqueueCommand(sessionId, command, forwardedRequestHeaders(request, command.command_id));
     if (result.kind === "conflict") return sendJson(response, 409, { error: "request_id_conflict", command_id: command.command_id });
     if (["applied", "rejected", "conflict", "expired"].includes(result.command.status)) return sendCommandResult(response, result.command);
@@ -736,17 +758,18 @@ export function createRelayServer(options: RelayServerOptions) {
         const attempt = loginAttempts.get(client);
         if (attempt && attempt.resetAt > Date.now() && attempt.count >= 5) return sendJson(response, 429, { error: "login_rate_limited" }, { "retry-after": String(Math.max(1, Math.ceil((attempt.resetAt - Date.now()) / 1000))) });
         const body = await readBody(request, 4096);
-        if (String(body.username || "") !== store.webUsername() || !passwordMatches(String(body.password || ""), store.webPasswordHash())) {
+        const user = store.webUserCredentials(String(body.username || "").trim());
+        if (!user || !passwordMatches(String(body.password || ""), user.password_hash)) {
           const current = attempt && attempt.resetAt > Date.now() ? attempt : { count: 0, resetAt: Date.now() + 15 * 60_000 };
           loginAttempts.set(client, { ...current, count: current.count + 1 });
           store.audit(client, "web_login_failed");
           return sendJson(response, 401, { error: "unauthorized" });
         }
         loginAttempts.delete(client);
-        const session = store.createWebSession({ remembered: body.remember === true, deviceName: body.device_name, userAgent: request.headers["user-agent"], clientIp: client });
-        store.audit(client, "web_login_succeeded");
+        const session = store.createWebSession(user.id, { remembered: body.remember === true, deviceName: body.device_name, userAgent: request.headers["user-agent"], clientIp: client });
+        store.audit(user.id, "web_login_succeeded", client);
         const cookieLifetime = session.remembered ? "persistent" : undefined;
-        return sendJson(response, 200, { csrf_token: session.csrf_token, expires_at: session.expires_at }, { "set-cookie": relaySessionCookie(session.token, secureCookies, cookieLifetime) });
+        return sendJson(response, 200, { csrf_token: session.csrf_token, expires_at: session.expires_at, user: userForWeb(session.user), users: store.listWebUsers().map(userForWeb) }, { "set-cookie": relaySessionCookie(session.token, secureCookies, cookieLifetime) });
       }
 
       const runtimeSessionDevice = url.pathname.startsWith("/api/v1/runtime/web-sessions") ? store.deviceForToken(bearer(request)) : null;
@@ -770,7 +793,7 @@ export function createRelayServer(options: RelayServerOptions) {
       const admin = secretEqual(bearer(request), options.adminToken);
       if (url.pathname === "/relay/session" && method === "GET") {
         if (!session) return sendJson(response, 401, { error: "unauthorized" });
-        return sendJson(response, 200, { csrf_token: session.csrf_token, expires_at: session.expires_at });
+        return sendJson(response, 200, { csrf_token: session.csrf_token, expires_at: session.expires_at, user: userForWeb(session.user), users: store.listWebUsers().map(userForWeb) });
       }
       if (url.pathname === "/relay/logout" && method === "DELETE") {
         if (!session) return sendJson(response, 401, { error: "unauthorized" }, { "set-cookie": clearRelaySessionCookie(secureCookies) });
@@ -785,6 +808,12 @@ export function createRelayServer(options: RelayServerOptions) {
       if (url.pathname === "/relay/device" && method === "GET") {
         if (!session) return sendJson(response, 401, { error: "unauthorized" });
         return sendJson(response, 200, { devices: store.devices(), active_device_id: runtime?.deviceId || null });
+      }
+      if (url.pathname === "/api/profile" && method === "PATCH") {
+        if (!session) return sendJson(response, 401, { error: "unauthorized" });
+        if (!trustedOrigin(request, true) || !csrfValid) return sendJson(response, 403, { error: "csrf_invalid" });
+        const body = await readBody(request, 600_000);
+        return sendJson(response, 200, { user: userForWeb(store.setWebUserProfile(session.user.id, body.nickname, body.avatar)) });
       }
       if (url.pathname === "/api/v1/device-authorizations" && method === "POST") {
         const body = await readBody(request, 4096);
@@ -856,6 +885,37 @@ export function createRelayServer(options: RelayServerOptions) {
       if (url.pathname === "/api/v1/admin/audit" && method === "GET") {
         if (!admin) return sendJson(response, 401, { error: "unauthorized" });
         return sendJson(response, 200, store.auditEvents(Number(url.searchParams.get("limit") || 100)));
+      }
+      if (url.pathname === "/api/v1/admin/users" && method === "GET") {
+        if (!admin) return sendJson(response, 401, { error: "unauthorized" });
+        return sendJson(response, 200, { users: store.listWebUsers().map(userForWeb) });
+      }
+      if (url.pathname === "/api/v1/admin/users" && method === "POST") {
+        if (!admin) return sendJson(response, 401, { error: "unauthorized" });
+        const body = await readBody(request, 8192);
+        const username = validateWebUsername(String(body.username || ""));
+        const password = validateWebPassword(String(body.password || ""));
+        return sendJson(response, 201, { user: userForWeb(store.createWebUser(username, passwordHash(password), body.nickname)) });
+      }
+      const userAdminMatch = url.pathname.match(/^\/api\/v1\/admin\/users\/([^/]+)\/(disable|enable|password)$/);
+      if (userAdminMatch && method === "POST") {
+        if (!admin) return sendJson(response, 401, { error: "unauthorized" });
+        const username = validateWebUsername(decodeURIComponent(userAdminMatch[1]));
+        const operation = userAdminMatch[2];
+        const existing = store.listWebUsers().find(user => user.username.toLowerCase() === username.toLowerCase());
+        if (!existing) throw new Error("web_user_not_found");
+        const sessionIds = store.webSessionIdsForUser(existing.id);
+        if (operation === "disable") {
+          const user = store.setWebUserDisabled(username, true);
+          sessionIds.forEach(revokeSessionChannels);
+          return sendJson(response, 200, { user: userForWeb(user) });
+        }
+        if (operation === "enable") return sendJson(response, 200, { user: userForWeb(store.setWebUserDisabled(username, false)) });
+        const body = await readBody(request, 4096);
+        const password = validateWebPassword(String(body.password || ""));
+        const user = store.setWebUserPassword(username, passwordHash(password));
+        sessionIds.forEach(revokeSessionChannels);
+        return sendJson(response, 200, { user: userForWeb(user) });
       }
       if (url.pathname === "/web/injection.js" && method === "GET") {
         if (!session) return sendJson(response, 401, { error: "unauthorized" });

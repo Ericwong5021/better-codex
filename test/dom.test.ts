@@ -598,17 +598,18 @@ test("issue submit buttons omit visual keyboard shortcut badges", () => {
   assert.ok(source.includes("isSendKeyboardEvent(event)"));
 });
 
-test("issue context menu can assign the current user or an agent", () => {
+test("issue context menu can assign a Web user or an agent", () => {
   const source = injectionScript(4317, "test-token", "install");
 
   assert.ok(source.includes("指定负责人"));
   assert.ok(source.includes('data-context-action="assign"'));
-  assert.ok(source.includes('data-assignee-kind="me"'));
+  assert.ok(source.includes('data-assignee-kind="user"'));
+  assert.ok(source.includes('data-context-user-id="'));
   assert.ok(source.includes('data-assignee-kind="agent"'));
   assert.ok(source.includes('data-assignee-kind="none"'));
   assert.ok(source.includes('contextAssigneeLabel(t("未指派"))'));
   assert.doesNotMatch(source, /取消分配/);
-  assert.ok(source.includes('userAvatarMarkup(state.user, "better-codex-context-avatar")'));
+  assert.ok(source.includes('userAvatarMarkup(user, "better-codex-context-avatar")'));
   assert.ok(source.includes("better-codex-context-tag"));
   assert.ok(source.includes("user_assigned: true"));
   assert.ok(source.includes("const assigned = Boolean(issue.agent_enabled || issue.user_assigned)"));

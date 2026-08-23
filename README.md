@@ -107,7 +107,9 @@ Restart Codex from the Better Codex launcher, and `Task board` and `Agents` appe
 
 ### Remote access
 
-Remote access is optional and keeps the local Runtime authoritative. Open `More` → `Remote access` and copy the VPS installation prompt into Codex:
+Remote access is optional and keeps the local Runtime authoritative. Open `More` → `Remote access` and copy the VPS installation prompt into Codex.
+
+The Relay supports multiple administrator-created Web accounts. Each account has an independent profile and can assign tasks to any enabled Web account. Self-registration is not available; use the `better-codex relay user-*` commands in the self-hosting runbook.
 
 The Relay runs in Docker on your Linux server and uses either the bundled Caddy HTTPS service or your existing reverse proxy. Your Runtime makes an outbound WSS connection; the Relay forwards live browser traffic and stores no projects, tasks, conversations, Agent configuration, or attachments.
 

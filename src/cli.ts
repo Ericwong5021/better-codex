@@ -85,6 +85,13 @@ function option(args: string[], name: string) {
   return index >= 0 ? args[index + 1] : undefined;
 }
 
+function secretOption(args: string[], name: string, fileName: string) {
+  const value = option(args, name);
+  if (value) return value;
+  const file = option(args, fileName);
+  return file ? readFileSync(resolve(file), "utf8").trim() : undefined;
+}
+
 function positionals(args: string[]) {
   const values: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
@@ -679,7 +686,7 @@ function print(value: unknown) {
 }
 
 function usage() {
-  console.log("better-codex version | web | relay connect <url> [--pairing-code CODE|--admin-token TOKEN] | relay status|disconnect|doctor | sync connect <url> [--pairing-code CODE|--admin-token TOKEN] [--transport auto|websocket|http] | sync migrate --to <url> --from-admin-token TOKEN | sync status|now|disconnect | update [check|compatibility|rollback|channel stable|preview] [--channel stable|preview] | setup [--yes] | launch [--restart] | launcher install|uninstall|status | mcp install|uninstall|status | doctor | enable | disable | start [--launch] | stop | status | uninstall | data delete [--yes] | inject [--launch] [--port N] | eject [--port N] | service install|uninstall|start|stop|restart|status|logs | project list|create | agent list | issue list|get|create|update|status|open");
+  console.log("better-codex version | web | relay connect <url> [--pairing-code CODE|--admin-token TOKEN] | relay status|disconnect|doctor | relay user-list|user-add|user-disable|user-enable|user-password-set [--url URL] --admin-token-file PATH | sync connect <url> [--pairing-code CODE|--admin-token TOKEN] [--transport auto|websocket|http] | sync migrate --to <url> --from-admin-token TOKEN | sync status|now|disconnect | update [check|compatibility|rollback|channel stable|preview] [--channel stable|preview] | setup [--yes] | launch [--restart] | launcher install|uninstall|status | mcp install|uninstall|status | doctor | enable | disable | start [--launch] | stop | status | uninstall | data delete [--yes] | inject [--launch] [--port N] | eject [--port N] | service install|uninstall|start|stop|restart|status|logs | project list|create | agent list | issue list|get|create|update|status|open");
 }
 
 function selfCommand() {
@@ -1073,13 +1080,51 @@ async function finishSyncConnect(base: string, deviceName: string, deviceId: str
   }
 
 async function relayCommand(action: string | undefined, args: string[]) {
+  if (["user-list", "user-add", "user-disable", "user-enable", "user-password-set"].includes(action || "")) {
+    const configuration = readRelayConfiguration();
+    const relayUrl = option(args, "--url") || configuration?.relay_url;
+    if (!relayUrl) throw new Error("relay_url_required");
+    const base = normalizeRelayUrl(relayUrl);
+    const adminToken = secretOption(args, "--admin-token", "--admin-token-file");
+    if (!adminToken) throw new Error("relay_admin_token_required");
+    const username = positionals(args)[0];
+    if (action !== "user-list" && !username) throw new Error("relay_username_required");
+    let path = "/api/v1/admin/users";
+    let method = "GET";
+    let body: Record<string, unknown> | undefined;
+    if (action === "user-add") {
+      const passwordFile = option(args, "--password-file");
+      if (!passwordFile) throw new Error("relay_password_file_required");
+      path = "/api/v1/admin/users";
+      method = "POST";
+      body = { username, password: readFileSync(resolve(passwordFile), "utf8").trim(), nickname: option(args, "--nickname") || username };
+    } else if (action === "user-disable" || action === "user-enable") {
+      path = `/api/v1/admin/users/${encodeURIComponent(username!)}/${action === "user-disable" ? "disable" : "enable"}`;
+      method = "POST";
+    } else if (action === "user-password-set") {
+      const passwordFile = option(args, "--password-file");
+      if (!passwordFile) throw new Error("relay_password_file_required");
+      path = `/api/v1/admin/users/${encodeURIComponent(username!)}/password`;
+      method = "POST";
+      body = { password: readFileSync(resolve(passwordFile), "utf8").trim() };
+    }
+    const response = await fetch(`${base}${path}`, {
+      method,
+      headers: { authorization: `Bearer ${adminToken}`, ...(body ? { "content-type": "application/json" } : {}) },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(15_000),
+    });
+    const value = await response.json().catch(() => ({})) as Record<string, unknown>;
+    if (!response.ok) throw new Error(String(value.error || `relay_http_${response.status}`));
+    return print(value);
+  }
   if (action === "connect") {
     const relayUrl = option(args, "--url") ?? positionals(args)[0];
     if (!relayUrl) throw new Error("relay_url_required");
     const base = normalizeRelayUrl(relayUrl);
     const deviceName = option(args, "--name") ?? hostname();
     const pairingCode = option(args, "--pairing-code");
-    const adminToken = option(args, "--admin-token");
+    const adminToken = secretOption(args, "--admin-token", "--admin-token-file");
     let credentials: { device_id: string; device_token: string };
     if (pairingCode) {
       const response = await fetch(`${base}/api/v1/devices/pair`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pairing_code: pairingCode, name: deviceName, replace_existing: true }), signal: AbortSignal.timeout(15_000) });

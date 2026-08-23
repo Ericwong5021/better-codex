@@ -402,7 +402,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const initialAgentRoute = webAgentRoute();
     if (HOST_KIND === "web" && !hasFeature("project-management") && /^\\/web\\/projects(?:\\/|$)/.test(location.pathname)) history.replaceState({ betterCodex: true, betterCodexSurface: "issues" }, "", "/web");
     const initialAgentKey = initialAgentRoute?.agentKey || "";
-    const state = { projects: [], projectsLoaded: false, issues: [], issuesLoaded: false, scheduledTasks: [], scheduledTasksLoaded: false, projectIssues: [], projectIssuesProjectId: "", projectDetailId: initialProjectRoute?.projectId || "", projectPage: "overview", projectDocumentView: "charter", projectDocumentPending: null, projectDocumentError: null, projectPlanningPending: null, projectPlanningError: null, agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: initialAgentKey === "new" ? "create" : initialAgentKey ? "detail" : "preview", selectedAgentId: initialAgentKey && initialAgentKey !== "new" ? initialAgentKey : "", agentDraft: initialAgentKey === "new" ? { avatar: "icon:bot" } : null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: initialProjectRoute ? "projects" : initialAgentRoute ? "agents" : availableSurfaces.includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, autoDispatchPending: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", issueDescriptionLimit: 100000, mockup: false, keepCreate: rememberedKeepCreate, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], project: [], label: [] } };
+    const state = { projects: [], projectsLoaded: false, issues: [], issuesLoaded: false, scheduledTasks: [], scheduledTasksLoaded: false, projectIssues: [], projectIssuesProjectId: "", projectDetailId: initialProjectRoute?.projectId || "", projectPage: "overview", projectDocumentView: "charter", projectDocumentPending: null, projectDocumentError: null, projectPlanningPending: null, projectPlanningError: null, agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, users: [], projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: initialAgentKey === "new" ? "create" : initialAgentKey ? "detail" : "preview", selectedAgentId: initialAgentKey && initialAgentKey !== "new" ? initialAgentKey : "", agentDraft: initialAgentKey === "new" ? { avatar: "icon:bot" } : null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: initialProjectRoute ? "projects" : initialAgentRoute ? "agents" : availableSurfaces.includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, autoDispatchPending: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", issueDescriptionLimit: 100000, mockup: false, keepCreate: rememberedKeepCreate, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], project: [], label: [] } };
     const pendingIssueRemovals = new Map();
     const projectPlanningDrafts = new Map();
     let projectPlanningComposition = "";
@@ -3888,7 +3888,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (filters.assignee.length) {
         const assignee = issue.agent_enabled
           ? issue.agent_id || "codex"
-          : issue.user_assigned ? "user" : "none";
+          : issue.user_assigned ? "user:" + String(issue.assignee_user_id || state.user.id || "default") : "none";
         if (!filters.assignee.includes(assignee)) return false;
       }
       if (filters.date.length) {
@@ -3954,7 +3954,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (key === "status") return Object.entries(statusLabels).map(([value, text]) => ({ value, text: t(text) }));
       if (key === "priority") return Object.entries(priorityLabels).map(([value, text]) => ({ value, text: t(value === "none" ? "无优先级" : text + "优先级") }));
       if (key === "date") return [{ value: "1", text: t("最近 24 小时") }, { value: "7", text: t("最近 7 天") }, { value: "30", text: t("最近 30 天") }];
-      if (key === "assignee") return [{ value: "user", text: state.user.name || t("我") }, { value: "codex", text: "Codex" }, ...state.agents.filter(agent => !agent.is_default).map(agent => ({ value: agent.id, text: agentDisplayName(agent) })), { value: "none", text: t("未分配") }];
+      if (key === "assignee") return [...state.users.filter(user => !user.disabled).map(user => ({ value: "user:" + user.id, text: user.name || user.handle })), { value: "codex", text: "Codex" }, ...state.agents.filter(agent => !agent.is_default).map(agent => ({ value: agent.id, text: agentDisplayName(agent) })), { value: "none", text: t("未分配") }];
       if (key === "project") return projectsByRecentActivity(state.projects).map(project => ({ value: project.id, text: projectLabel(project) }));
       if (key === "label") return [...new Set(state.issues.flatMap(issue => issue.labels || []))].map(value => ({ value, text: value }));
       return [];
@@ -3964,8 +3964,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (key === "status") return statusIcon(value);
       if (key === "priority") return priorityIcon(value);
       if (key === "assignee") {
-        if (value === "user") {
-          return '<span class="better-codex-filter-avatar is-user is-initials" style="background:' + escapeHtml(state.user.color || "#16a34a") + '">' + escapeHtml(state.user.initials || t("你")) + '</span>';
+        if (value.startsWith("user:")) {
+          const user = state.users.find(item => item.id === value.slice(5)) || state.user;
+          return '<span class="better-codex-filter-avatar is-user is-initials" style="background:' + escapeHtml(user.color || "#16a34a") + '">' + escapeHtml(user.initials || t("你")) + '</span>';
         }
         if (value === "none") return '<span class="better-codex-filter-avatar is-fallback">' + icon("user") + '</span>';
         const agent = value === "codex"
@@ -4112,16 +4113,16 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const statusItems = Object.entries(statusLabels).map(([value, text]) => '<button class="better-codex-context-item" type="button"' + contextLockAttrs + ' data-context-action="update" data-context-field="status" data-context-value="' + value + '"><span class="better-codex-context-check">' + (issue.status === value ? icon("check") : "") + '</span>' + statusIcon(value) + '<span>' + escapeHtml(t(text)) + "</span></button>").join("");
       const priorityItems = Object.entries(priorityLabels).map(([value, text]) => '<button class="better-codex-context-item" type="button"' + contextLockAttrs + ' data-context-action="update" data-context-field="priority" data-context-value="' + value + '"><span class="better-codex-context-check">' + (issue.priority === value ? icon("check") : "") + '</span>' + priorityIcon(value) + '<span>' + escapeHtml(t(value === "none" ? "无优先级" : text + "优先级")) + "</span></button>").join("");
       const assignedUser = issueUserProfile(issue);
-      const userSelected = Boolean(issue.user_assigned) && !issue.agent_enabled && String(assignedUser?.id || "") === String(state.user.id || "");
       const noneSelected = !issue.user_assigned && !issue.agent_enabled;
-      const userName = state.user.name || t("我");
-      const userAvatar = userAvatarMarkup(state.user, "better-codex-context-avatar");
       const contextAssigneeTags = agent => agentConfigTags(agent).map(tag => '<span class="better-codex-context-tag" data-tone="' + escapeHtml(tag.tone) + '">' + escapeHtml(tag.value) + (tag.fast ? fastMark() : "") + '</span>').join("");
       const contextAssigneeLabel = (name, tags = "") => '<span class="better-codex-context-assignee-label"><span class="better-codex-context-assignee-name">' + escapeHtml(name) + '</span>' + tags + '</span>';
       const unassignedAvatar = '<span class="better-codex-context-avatar is-fallback">' + icon("user") + '</span>';
       const assigneeItems = [
         '<button class="better-codex-context-item" type="button"' + contextLockAttrs + ' data-context-action="assign" data-assignee-kind="none"><span class="better-codex-context-check">' + (noneSelected ? icon("check") : "") + '</span>' + unassignedAvatar + contextAssigneeLabel(t("未指派")) + '</button>',
-        '<button class="better-codex-context-item" type="button"' + contextLockAttrs + ' data-context-action="assign" data-assignee-kind="me"><span class="better-codex-context-check">' + (userSelected ? icon("check") : "") + '</span>' + userAvatar + contextAssigneeLabel(userName) + '</button>',
+        ...state.users.filter(user => !user.disabled).map(user => {
+          const selected = Boolean(issue.user_assigned) && !issue.agent_enabled && String(assignedUser?.id || "") === String(user.id || "");
+          return '<button class="better-codex-context-item" type="button"' + contextLockAttrs + ' data-context-action="assign" data-assignee-kind="user" data-context-user-id="' + escapeHtml(user.id || "") + '"><span class="better-codex-context-check">' + (selected ? icon("check") : "") + '</span>' + userAvatarMarkup(user, "better-codex-context-avatar") + contextAssigneeLabel(user.name || user.handle || t("协作者")) + '</button>';
+        }),
         ...state.agents.map(agent => {
           const selected = Boolean(issue.agent_enabled) && (agent.is_default ? !issue.agent_id : issue.agent_id === agent.id);
           return '<button class="better-codex-context-item" type="button"' + contextLockAttrs + ' data-context-action="assign" data-assignee-kind="agent" data-context-agent-id="' + escapeHtml(agent.id || "") + '"><span class="better-codex-context-check">' + (selected ? icon("check") : "") + '</span>' + agentAvatarMarkup(agent, "better-codex-context-avatar") + contextAssigneeLabel(agentDisplayName(agent), contextAssigneeTags(agent)) + '</button>';
@@ -4138,16 +4139,16 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       menu.style.left = Math.max(8, Math.min(clientX, window.innerWidth - rect.width - 8)) + "px";
       menu.style.top = Math.max(8, Math.min(clientY, window.innerHeight - rect.height - 8)) + "px";
 
-      async function assignIssue(kind, agentId = "") {
+      async function assignIssue(kind, agentId = "", userId = "") {
         const current = state.issues.find(candidate => candidate.id === menu.dataset.issueId);
         if (!current) return closeIssueMenu();
-        const alreadyMe = kind === "me" && current.user_assigned && !current.agent_enabled && String(issueUserProfile(current)?.id || "") === String(state.user.id || "");
+        const alreadyUser = kind === "user" && current.user_assigned && !current.agent_enabled && String(issueUserProfile(current)?.id || "") === userId;
         const alreadyNone = kind === "none" && !current.user_assigned && !current.agent_enabled;
         const alreadyAgent = kind === "agent" && current.agent_enabled && (agentId ? current.agent_id === agentId : !current.agent_id);
-        if (alreadyMe || alreadyNone || alreadyAgent) return closeIssueMenu();
+        if (alreadyUser || alreadyNone || alreadyAgent) return closeIssueMenu();
         closeIssueMenu();
-        const body = kind === "me"
-          ? { version: current.version, user_assigned: true, assignee_user_id: REMOTE ? state.user.id || null : null, agent_enabled: false, agent_id: "" }
+        const body = kind === "user"
+          ? { version: current.version, user_assigned: true, assignee_user_id: REMOTE ? userId || null : null, agent_enabled: false, agent_id: "" }
           : kind === "agent"
             ? { version: current.version, user_assigned: false, assignee_user_id: null, agent_enabled: true, agent_id: agentId }
             : { version: current.version, user_assigned: false, assignee_user_id: null, agent_enabled: false, agent_id: "" };
@@ -4207,7 +4208,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (item.dataset.contextAction === "assign") {
           const kind = item.getAttribute("data-assignee-kind") || "";
           const agentId = item.getAttribute("data-context-agent-id") || "";
-          return void assignIssue(kind, agentId);
+          const userId = item.getAttribute("data-context-user-id") || "";
+          return void assignIssue(kind, agentId, userId);
         }
         const field = item.dataset.contextField;
         const value = item.dataset.contextValue;
@@ -4606,7 +4608,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function issueUserProfile(issue) {
-      return issue?.assignee_user?.name ? issue.assignee_user : state.user;
+      if (issue?.assignee_user?.name) return issue.assignee_user;
+      if (issue?.assignee_user_id) return state.users.find(user => user.id === issue.assignee_user_id) || { id: issue.assignee_user_id, name: t("已停用用户"), initials: "?", color: "#777773", disabled: true };
+      return state.user;
     }
 
     function issueAssigneeValue(issue) {
@@ -5906,7 +5910,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const createIssueShortcut = readCreateIssueShortcut();
       const sendMode = readSendMode();
       const modifiedEnterLabel = shortcutLabel("Mod+Enter");
-      const profileSetting = HOST_KIND === "remote-projection" ? '<div class="better-codex-help-setting-group"><h3>' + te("个人资料") + '</h3><div class="better-codex-help-setting-row is-profile"><span><strong>' + te("个人资料") + '</strong><small>' + te("昵称和头像只用于 WebUI 协作") + '</small></span><span class="better-codex-help-setting-controls better-codex-profile-controls"><button type="button" class="better-codex-profile-avatar-button" data-setting-profile-avatar aria-label="' + te("更换头像") + '">' + userAvatarMarkup(state.user, "better-codex-profile-avatar") + '</button><input class="better-codex-profile-name" data-setting-profile-name maxlength="80" aria-label="' + te("昵称") + '" value="' + escapeHtml(state.user?.name || "") + '"><button type="button" class="better-codex-profile-save" data-setting-profile-save>' + te("保存") + '</button></span><output class="better-codex-profile-status" data-setting-profile-status hidden></output></div></div>' : "";
+      const profileSetting = REMOTE ? '<div class="better-codex-help-setting-group"><h3>' + te("个人资料") + '</h3><div class="better-codex-help-setting-row is-profile"><span><strong>' + te("个人资料") + '</strong><small>' + te("昵称和头像只用于 WebUI 协作") + '</small></span><span class="better-codex-help-setting-controls better-codex-profile-controls"><button type="button" class="better-codex-profile-avatar-button" data-setting-profile-avatar aria-label="' + te("更换头像") + '">' + userAvatarMarkup(state.user, "better-codex-profile-avatar") + '</button><input class="better-codex-profile-name" data-setting-profile-name maxlength="80" aria-label="' + te("昵称") + '" value="' + escapeHtml(state.user?.name || "") + '"><button type="button" class="better-codex-profile-save" data-setting-profile-save>' + te("保存") + '</button></span><output class="better-codex-profile-status" data-setting-profile-status hidden></output></div></div>' : "";
       const settingsPage = [
         '<section class="better-codex-help-page" data-help-page="settings" hidden>',
         profileSetting,
@@ -6251,6 +6255,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         profileStatus.hidden = true;
         void api("/api/profile", { method: "PATCH", body: JSON.stringify({ nickname, avatar: profileAvatarValue }) }).then(result => {
           state.user = result.user;
+          state.users = state.users.map(user => user.id === state.user.id ? state.user : user);
           for (const issue of [...state.issues, ...state.projectIssues]) {
             if (issue.assignee_user_id === state.user.id) issue.assignee_user = state.user;
           }
@@ -6898,6 +6903,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         state.systemLocale = resolveSystemLocale(HOST_KIND === "web" ? INITIAL_LOCALE : bootstrap.locale);
         state.locale = state.languageSetting === "system" ? state.systemLocale : state.languageSetting;
         if (bootstrap.user && typeof bootstrap.user === "object") state.user = bootstrap.user;
+        if (RELAY) {
+          const relayUser = window.betterCodexHost?.user?.();
+          const relayUsers = window.betterCodexHost?.users?.();
+          if (relayUser?.id) state.user = relayUser;
+          if (Array.isArray(relayUsers)) state.users = relayUsers;
+        } else state.users = [state.user];
         if (HOST_KIND === "web") window.dispatchEvent(new CustomEvent("better-codex:bootstrap", { detail: { user: state.user, locale: state.locale } }));
         state.mockup = Boolean(bootstrap.mockup);
         try {
@@ -8189,7 +8200,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const status = dialog.querySelector("[data-conversation-status]");
         const send = dialog.querySelector("[data-conversation-send]");
         if (!body || !status) return;
-        if (data?.user && typeof data.user === "object") state.user = { ...state.user, ...data.user };
+        if (!RELAY && data?.user && typeof data.user === "object") state.user = { ...state.user, ...data.user };
         const nextQueuedReplies = Array.isArray(data?.queued_replies) ? data.queued_replies : Array.isArray(data?.reply?.queued_replies) ? data.reply.queued_replies : null;
         if (nextQueuedReplies && !queueActionRequestId) queuedReplies = nextQueuedReplies;
         syncQueuedReplyState();
@@ -8198,11 +8209,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const stickToBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 48;
         if (messages.length) {
           conversationMessages = messages;
-          body.innerHTML = conversationBubbles(messages, data.user);
+          body.innerHTML = conversationBubbles(messages, RELAY ? state.user : data.user);
           body.scrollTop = stickToBottom ? body.scrollHeight : previousScrollTop;
         } else if (data?.html) {
           conversationMessages = [{ role: "agent", html: data.html, markdown: data.markdown || "", timestamp: null }];
-          body.innerHTML = conversationBubbles(conversationMessages, data.user);
+          body.innerHTML = conversationBubbles(conversationMessages, RELAY ? state.user : data.user);
           body.scrollTop = stickToBottom ? body.scrollHeight : previousScrollTop;
         } else if (!options.preserveBody) {
           conversationMessages = [];
@@ -8432,11 +8443,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       function assigneePicker() {
         const defaultAgent = state.agents.find(agent => agent.is_default) || { name: "Codex", is_default: true, id: "" };
         const assignedUser = issue?.user_assigned ? issueUserProfile(issue) : null;
-        const currentUserValue = "user:" + String(state.user.id || "default");
         const assignedUserValue = assignedUser ? "user:" + String(assignedUser.id || "default") : "";
         const userOptions = [
-          { value: currentUserValue, label: state.user.name || t("我"), visual: () => userAvatarMarkup(state.user, "better-codex-agent-avatar") },
-          ...(assignedUserValue && assignedUserValue !== currentUserValue ? [{ value: assignedUserValue, label: assignedUser.name || t("协作者"), visual: () => userAvatarMarkup(assignedUser, "better-codex-agent-avatar") }] : [])
+          ...state.users.filter(user => !user.disabled).map(user => ({ value: "user:" + String(user.id), label: user.name || user.handle || t("协作者"), visual: () => userAvatarMarkup(user, "better-codex-agent-avatar") })),
+          ...(assignedUserValue && !state.users.some(user => "user:" + String(user.id) === assignedUserValue && !user.disabled) ? [{ value: assignedUserValue, label: assignedUser.name || t("已停用用户"), visual: () => userAvatarMarkup(assignedUser, "better-codex-agent-avatar") }] : [])
         ];
         const options = [
           { value: "none", label: t("未指派"), visual: () => icon("user") },
@@ -8626,7 +8636,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             ? state.agents.find(agent => agent.is_default)
             : state.agents.find(agent => agent.is_default ? draft.assignee === "codex" : agent.id === draft.assignee);
           const selectedName = selectedAgent?.name || "Codex";
-          const assignedUser = draft.assignee === issueAssigneeValue(issue) ? issueUserProfile(issue) : state.user;
+          const assignedUser = draft.assignee === issueAssigneeValue(issue) ? issueUserProfile(issue) : state.users.find(user => "user:" + user.id === draft.assignee) || state.user;
           const hint = humanAssigned
             ? state.locale === "zh-CN" ? "创建后由默认智能体生成标题，等待 " + (assignedUser?.name || t("你")) + " 处理。" : "The default agent will generate the title, then wait for " + (assignedUser?.name || t("你")) + "."
             : t("创建后先由 " + selectedName + " 整理卡片，再自动开始工作。");

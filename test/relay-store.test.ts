@@ -19,7 +19,7 @@ test("relay backups preserve devices without introducing business tables", () =>
     const check = new RelayStore(restored);
     try {
       assert.equal(check.devices()[0].id, device.device_id);
-      assert.deepEqual(check.tableNames(), ["relay_audit", "relay_commands", "relay_devices", "relay_settings", "relay_web_sessions", "sqlite_sequence"]);
+      assert.deepEqual(check.tableNames(), ["relay_audit", "relay_commands", "relay_devices", "relay_settings", "relay_web_sessions", "relay_web_users", "sqlite_sequence"]);
     } finally {
       check.close();
     }

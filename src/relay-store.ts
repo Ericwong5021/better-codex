@@ -25,8 +25,22 @@ function settingKey(value: string) {
   return value;
 }
 
+function cleanNickname(value: unknown) {
+  if (typeof value !== "string" || value.length > 80 || value.includes("\0")) throw new Error("relay_web_nickname_invalid");
+  const nickname = value.replace(/\s+/g, " ").trim();
+  if (!nickname) throw new Error("relay_web_nickname_invalid");
+  return nickname;
+}
+
+function cleanAvatar(value: unknown) {
+  if (typeof value !== "string" || value.length > 400_000 || value.includes("\0")) throw new Error("relay_web_avatar_invalid");
+  if (!value || /^icon:[a-z0-9_-]{1,32}$/i.test(value) || /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(value)) return value;
+  throw new Error("relay_web_avatar_invalid");
+}
+
 type SessionRow = {
   id: string;
+  user_id: string;
   csrf_token: string;
   created_at: string;
   expires_at: string;
@@ -35,6 +49,16 @@ type SessionRow = {
   device_name: string;
   user_agent: string;
   client_ip: string;
+};
+
+export type RelayWebUser = {
+  id: string;
+  username: string;
+  nickname: string;
+  avatar: string;
+  disabled: boolean;
+  created_at: string;
+  updated_at: string;
 };
 
 type DeviceRow = {
@@ -100,9 +124,20 @@ export class RelayStore {
         value TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS relay_web_users (
+        id TEXT PRIMARY KEY,
+        username TEXT NOT NULL COLLATE NOCASE UNIQUE,
+        password_hash TEXT NOT NULL,
+        nickname TEXT NOT NULL,
+        avatar TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        disabled_at TEXT
+      );
       CREATE TABLE IF NOT EXISTS relay_web_sessions (
         token_hash TEXT PRIMARY KEY,
         id TEXT NOT NULL UNIQUE,
+        user_id TEXT NOT NULL REFERENCES relay_web_users(id) ON DELETE CASCADE,
         csrf_token TEXT NOT NULL,
         created_at TEXT NOT NULL,
         expires_at TEXT NOT NULL,
@@ -155,6 +190,7 @@ export class RelayStore {
     `);
     const webSessionColumns = new Set((this.database.prepare("PRAGMA table_info(relay_web_sessions)").all() as Array<{ name: string }>).map(column => column.name));
     if (!webSessionColumns.has("id")) this.database.exec("ALTER TABLE relay_web_sessions ADD COLUMN id TEXT");
+    if (!webSessionColumns.has("user_id")) this.database.exec("ALTER TABLE relay_web_sessions ADD COLUMN user_id TEXT REFERENCES relay_web_users(id) ON DELETE CASCADE");
     if (!webSessionColumns.has("remembered")) this.database.exec("ALTER TABLE relay_web_sessions ADD COLUMN remembered INTEGER NOT NULL DEFAULT 0");
     if (!webSessionColumns.has("device_name")) this.database.exec("ALTER TABLE relay_web_sessions ADD COLUMN device_name TEXT NOT NULL DEFAULT '浏览器设备'");
     if (!webSessionColumns.has("user_agent")) this.database.exec("ALTER TABLE relay_web_sessions ADD COLUMN user_agent TEXT NOT NULL DEFAULT ''");
@@ -162,6 +198,15 @@ export class RelayStore {
     const sessionsWithoutId = this.database.prepare("SELECT token_hash FROM relay_web_sessions WHERE id IS NULL OR id = ''").all() as Array<{ token_hash: string }>;
     const assignSessionId = this.database.prepare("UPDATE relay_web_sessions SET id = ? WHERE token_hash = ?");
     for (const session of sessionsWithoutId) assignSessionId.run(randomUUID(), session.token_hash);
+    const userCount = Number((this.database.prepare("SELECT COUNT(*) AS value FROM relay_web_users").get() as { value: number }).value);
+    const legacyUsername = this.setting("web_username");
+    const legacyPasswordHash = this.setting("web_password_hash");
+    if (userCount === 0 && legacyUsername && legacyPasswordHash) {
+      const timestamp = now();
+      this.database.prepare("INSERT INTO relay_web_users (id, username, password_hash, nickname, avatar, created_at, updated_at) VALUES (?, ?, ?, ?, '', ?, ?)")
+        .run(randomUUID(), legacyUsername, legacyPasswordHash, legacyUsername, timestamp, timestamp);
+    }
+    this.database.exec("DELETE FROM relay_web_sessions WHERE user_id IS NULL OR user_id = ''");
     this.database.prepare("UPDATE relay_web_sessions SET expires_at = ? WHERE remembered = 1").run(rememberedWebSessionExpiresAt);
     this.database.exec("CREATE UNIQUE INDEX IF NOT EXISTS relay_web_sessions_id ON relay_web_sessions(id)");
   }
@@ -180,32 +225,108 @@ export class RelayStore {
   }
 
   ensureWebCredentials(username: string, hash: string) {
-    if (!this.setting("web_username")) this.setSetting("web_username", username);
-    if (!this.setting("web_password_hash")) this.setSetting("web_password_hash", hash);
+    const count = Number((this.database.prepare("SELECT COUNT(*) AS value FROM relay_web_users").get() as { value: number }).value);
+    if (count === 0) this.createWebUser(username, hash);
   }
 
   setWebCredentials(username: string, hash: string) {
+    const user = this.webUserCredentials(username) || this.listWebUsers().find(item => item.username.toLowerCase() === username.toLowerCase());
+    if (user) this.setWebUserPassword(username, hash);
+    else this.createWebUser(username, hash);
+  }
+
+  webUsername() {
+    return this.listWebUsers().find(user => !user.disabled)?.username || "admin";
+  }
+
+  webPasswordHash() {
+    const user = this.webUserCredentials(this.webUsername());
+    return user?.password_hash || "";
+  }
+
+  private webUserFromRow(row: Record<string, unknown>): RelayWebUser {
+    return {
+      id: String(row.id),
+      username: String(row.username),
+      nickname: String(row.nickname || row.username),
+      avatar: String(row.avatar || ""),
+      disabled: Boolean(row.disabled_at),
+      created_at: String(row.created_at),
+      updated_at: String(row.updated_at),
+    };
+  }
+
+  webUserCredentials(username: string) {
+    const row = this.database.prepare("SELECT * FROM relay_web_users WHERE username = ? COLLATE NOCASE AND disabled_at IS NULL").get(username) as Record<string, unknown> | undefined;
+    return row ? { ...this.webUserFromRow(row), password_hash: String(row.password_hash) } : null;
+  }
+
+  webUser(id: string) {
+    const row = this.database.prepare("SELECT * FROM relay_web_users WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+    return row ? this.webUserFromRow(row) : null;
+  }
+
+  listWebUsers() {
+    return (this.database.prepare("SELECT * FROM relay_web_users ORDER BY disabled_at IS NOT NULL, nickname COLLATE NOCASE, username COLLATE NOCASE").all() as Record<string, unknown>[]).map(row => this.webUserFromRow(row));
+  }
+
+  createWebUser(username: string, encoded: string, nicknameValue: unknown = username) {
+    if (!encoded.startsWith("scrypt$") || !username) throw new Error("relay_web_credentials_invalid");
+    if (this.listWebUsers().some(user => user.username.toLowerCase() === username.toLowerCase())) throw new Error("web_user_exists");
+    const nickname = cleanNickname(nicknameValue);
+    const id = randomUUID();
+    const timestamp = now();
+    this.database.prepare("INSERT INTO relay_web_users (id, username, password_hash, nickname, avatar, created_at, updated_at) VALUES (?, ?, ?, ?, '', ?, ?)")
+      .run(id, username, encoded, nickname, timestamp, timestamp);
+    this.audit(id, "web_user_created", username);
+    return this.webUser(id)!;
+  }
+
+  setWebUserPassword(username: string, encoded: string) {
+    if (!encoded.startsWith("scrypt$") || !username) throw new Error("relay_web_credentials_invalid");
+    const user = this.webUserCredentials(username) || this.listWebUsers().find(item => item.username.toLowerCase() === username.toLowerCase());
+    if (!user) throw new Error("web_user_not_found");
     this.database.exec("BEGIN IMMEDIATE");
     try {
-      this.setSetting("web_username", username);
-      this.setSetting("web_password_hash", hash);
-      this.database.exec("DELETE FROM relay_web_sessions");
+      this.database.prepare("UPDATE relay_web_users SET password_hash = ?, updated_at = ? WHERE id = ?").run(encoded, now(), user.id);
+      this.database.prepare("DELETE FROM relay_web_sessions WHERE user_id = ?").run(user.id);
       this.database.exec("COMMIT");
     } catch (error) {
       this.database.exec("ROLLBACK");
       throw error;
     }
+    this.audit(user.id, "web_password_rotated");
+    return this.webUser(user.id)!;
   }
 
-  webUsername() {
-    return this.setting("web_username") || "admin";
+  setWebUserDisabled(username: string, disabled: boolean) {
+    const user = this.listWebUsers().find(item => item.username.toLowerCase() === username.toLowerCase());
+    if (!user) throw new Error("web_user_not_found");
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      this.database.prepare("UPDATE relay_web_users SET disabled_at = ?, updated_at = ? WHERE id = ?").run(disabled ? now() : null, now(), user.id);
+      if (disabled) this.database.prepare("DELETE FROM relay_web_sessions WHERE user_id = ?").run(user.id);
+      this.database.exec("COMMIT");
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
+    }
+    this.audit(user.id, disabled ? "web_user_disabled" : "web_user_enabled");
+    return this.webUser(user.id)!;
   }
 
-  webPasswordHash() {
-    return this.setting("web_password_hash") || "";
+  setWebUserProfile(id: string, nicknameValue: unknown, avatarValue: unknown) {
+    const nickname = cleanNickname(nicknameValue);
+    const avatar = cleanAvatar(avatarValue);
+    const result = this.database.prepare("UPDATE relay_web_users SET nickname = ?, avatar = ?, updated_at = ? WHERE id = ? AND disabled_at IS NULL").run(nickname, avatar, now(), id);
+    if (result.changes !== 1) throw new Error("web_user_not_found");
+    this.audit(id, "web_profile_updated");
+    return this.webUser(id)!;
   }
 
-  createWebSession(input: { remembered?: boolean; deviceName?: unknown; userAgent?: unknown; clientIp?: unknown } = {}) {
+  createWebSession(userId: string, input: { remembered?: boolean; deviceName?: unknown; userAgent?: unknown; clientIp?: unknown } = {}) {
+    const user = this.webUser(userId);
+    if (!user || user.disabled) throw new Error("web_user_not_found");
     const token = randomBytes(32).toString("base64url");
     const id = randomUUID();
     const csrfToken = randomBytes(32).toString("base64url");
@@ -216,13 +337,13 @@ export class RelayStore {
     const userAgent = typeof input.userAgent === "string" ? input.userAgent.replace(/[\r\n\0]/g, " ").trim().slice(0, 500) : "";
     const clientIp = typeof input.clientIp === "string" ? input.clientIp.replace(/[\r\n\0]/g, " ").trim().slice(0, 120) : "";
     this.database.prepare("DELETE FROM relay_web_sessions WHERE expires_at <= ?").run(createdAt);
-    this.database.prepare("INSERT INTO relay_web_sessions (token_hash, id, csrf_token, created_at, expires_at, last_seen_at, remembered, device_name, user_agent, client_ip) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(tokenHash(token), id, csrfToken, createdAt, expiresAt, createdAt, remembered ? 1 : 0, deviceName, userAgent, clientIp);
-    return { token, id, csrf_token: csrfToken, created_at: createdAt, expires_at: expiresAt, remembered };
+    this.database.prepare("INSERT INTO relay_web_sessions (token_hash, id, user_id, csrf_token, created_at, expires_at, last_seen_at, remembered, device_name, user_agent, client_ip) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(tokenHash(token), id, userId, csrfToken, createdAt, expiresAt, createdAt, remembered ? 1 : 0, deviceName, userAgent, clientIp);
+    return { token, id, csrf_token: csrfToken, created_at: createdAt, expires_at: expiresAt, remembered, user };
   }
 
   webSession(token: string) {
     if (!token) return null;
-    const row = this.database.prepare("SELECT id, csrf_token, created_at, expires_at, last_seen_at, remembered, device_name, user_agent, client_ip FROM relay_web_sessions WHERE token_hash = ?").get(tokenHash(token)) as SessionRow | undefined;
+    const row = this.database.prepare("SELECT relay_web_sessions.id, relay_web_sessions.user_id, relay_web_sessions.csrf_token, relay_web_sessions.created_at, relay_web_sessions.expires_at, relay_web_sessions.last_seen_at, relay_web_sessions.remembered, relay_web_sessions.device_name, relay_web_sessions.user_agent, relay_web_sessions.client_ip FROM relay_web_sessions JOIN relay_web_users ON relay_web_users.id = relay_web_sessions.user_id WHERE relay_web_sessions.token_hash = ? AND relay_web_users.disabled_at IS NULL").get(tokenHash(token)) as SessionRow | undefined;
     if (!row) return null;
     if (row.remembered !== 1 && Date.parse(row.expires_at) <= Date.now()) {
       this.database.prepare("DELETE FROM relay_web_sessions WHERE token_hash = ?").run(tokenHash(token));
@@ -237,7 +358,8 @@ export class RelayStore {
     }
     const expiresAt = row.remembered === 1 ? rememberedWebSessionExpiresAt : new Date(expiresAtMilliseconds).toISOString();
     this.database.prepare("UPDATE relay_web_sessions SET expires_at = ?, last_seen_at = ? WHERE token_hash = ?").run(expiresAt, seenAt, tokenHash(token));
-    return { ...row, remembered: row.remembered === 1, expires_at: expiresAt, last_seen_at: seenAt };
+    const user = this.webUser(row.user_id);
+    return user ? { ...row, remembered: row.remembered === 1, expires_at: expiresAt, last_seen_at: seenAt, user } : null;
   }
 
   revokeWebSession(token: string) {
@@ -247,7 +369,11 @@ export class RelayStore {
   webSessions() {
     const timestamp = now();
     this.database.prepare("DELETE FROM relay_web_sessions WHERE remembered = 0 AND expires_at <= ?").run(timestamp);
-    return (this.database.prepare("SELECT id, device_name, created_at, expires_at, last_seen_at, remembered, client_ip FROM relay_web_sessions ORDER BY last_seen_at DESC").all() as Array<Omit<SessionRow, "csrf_token" | "user_agent">>).map(session => ({ ...session, remembered: session.remembered === 1 }));
+    return (this.database.prepare("SELECT relay_web_sessions.id, relay_web_sessions.user_id, relay_web_users.username, relay_web_users.nickname, relay_web_sessions.device_name, relay_web_sessions.created_at, relay_web_sessions.expires_at, relay_web_sessions.last_seen_at, relay_web_sessions.remembered, relay_web_sessions.client_ip FROM relay_web_sessions JOIN relay_web_users ON relay_web_users.id = relay_web_sessions.user_id ORDER BY relay_web_sessions.last_seen_at DESC").all() as Array<Omit<SessionRow, "csrf_token" | "user_agent"> & { username: string; nickname: string }>).map(session => ({ ...session, remembered: session.remembered === 1 }));
+  }
+
+  webSessionIdsForUser(userId: string) {
+    return (this.database.prepare("SELECT id FROM relay_web_sessions WHERE user_id = ?").all(userId) as Array<{ id: string }>).map(session => session.id);
   }
 
   revokeWebSessionById(idValue: unknown) {

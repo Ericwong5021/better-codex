@@ -4,6 +4,8 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+- Support multiple administrator-created Relay Web accounts with independent login sessions, profiles, task assignment identities, account management commands, and no public registration flow.
+
 ## [0.4.10-beta.13] - 2026-08-23
 
 - Match native Codex queue behavior and styling, including editing or sending queued replies immediately.

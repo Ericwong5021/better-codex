@@ -100,7 +100,7 @@ test("relay authenticates one runtime, replaces old connections, and stores no b
   const heartbeat = await message(second);
   assert.equal(heartbeat.type, "heartbeat_ack");
   assert.equal(relay.runtime()?.activeChannels, 0);
-  assert.deepEqual(relay.store.tableNames(), ["relay_audit", "relay_commands", "relay_devices", "relay_settings", "relay_web_sessions", "sqlite_sequence"]);
+  assert.deepEqual(relay.store.tableNames(), ["relay_audit", "relay_commands", "relay_devices", "relay_settings", "relay_web_sessions", "relay_web_users", "sqlite_sequence"]);
 
   const staleRejected = once(second, "close");
   second.send(encodeRelayMessage({ type: "heartbeat", protocol_version: relayProtocolVersion, device_id: device.device_id, runtime_instance_id: "runtime-2", connection_epoch: 1, active_channels: 0, timestamp: new Date().toISOString() }));

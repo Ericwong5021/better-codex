@@ -142,6 +142,18 @@ better-codex relay status
 better-codex relay doctor
 ```
 
+The Relay supports administrator-created Web accounts and has no Web registration flow. Use a protected password file and a local file containing the Relay bootstrap administrator token:
+
+```bash
+better-codex relay user-list --url "https://<PUBLIC_HOST>" --admin-token-file <ADMIN_TOKEN_FILE>
+better-codex relay user-add <USERNAME> --nickname "<DISPLAY_NAME>" --password-file <PASSWORD_FILE> --url "https://<PUBLIC_HOST>" --admin-token-file <ADMIN_TOKEN_FILE>
+better-codex relay user-disable <USERNAME> --url "https://<PUBLIC_HOST>" --admin-token-file <ADMIN_TOKEN_FILE>
+better-codex relay user-enable <USERNAME> --url "https://<PUBLIC_HOST>" --admin-token-file <ADMIN_TOKEN_FILE>
+better-codex relay user-password-set <USERNAME> --password-file <PASSWORD_FILE> --url "https://<PUBLIC_HOST>" --admin-token-file <ADMIN_TOKEN_FILE>
+```
+
+Disabling a user or changing a password revokes that user's active Web sessions. Do not pass passwords directly on the command line or expose the bootstrap administrator token in shell history.
+
 Do not treat container health alone as completion. Verify the public HTTPS certificate and `/healthz`, browser login, WebSocket forwarding, `connected: true`, matching `relay/v1` versions, a real authenticated board flow, Runtime-offline failure, and recovery after the Runtime restarts.
 
 ### Teach normal usage

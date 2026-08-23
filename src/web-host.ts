@@ -313,6 +313,8 @@ const RELAY = HOST_KIND === "relay";
 const SESSION_PATH = RELAY ? "/relay/session" : "/web/session";
 let sessionToken = REMOTE ? "" : sessionStorage.getItem("better-codex-web-session") || "";
 let csrfToken = REMOTE ? sessionStorage.getItem("better-codex-web-csrf") || "" : "";
+let webUser = null;
+let webUsers = [];
 const eventCursorKey = "better-codex-web-event-cursor";
 let profileLocale = "zh-CN";
 let usageLoadedAt = 0;
@@ -567,7 +569,13 @@ async function loadUsage() {
   }
 }
 
-window.addEventListener("better-codex:bootstrap", event => updateWebProfile(event.detail));
+window.addEventListener("better-codex:bootstrap", event => {
+  if (RELAY && event.detail?.user?.id) {
+    webUser = event.detail.user;
+    webUsers = webUsers.map(user => user.id === webUser.id ? webUser : user);
+  }
+  updateWebProfile(event.detail);
+});
 profileButton.addEventListener("click", () => {
   const expanded = profileButton.getAttribute("aria-expanded") !== "true";
   profileButton.setAttribute("aria-expanded", String(expanded));
@@ -593,6 +601,13 @@ function loginDeviceName() {
   return browser + " · " + platform;
 }
 
+function applySessionIdentity(session) {
+  if (!RELAY) return;
+  if (!session?.user?.id || !Array.isArray(session.users)) throw new Error("Relay 未返回有效的用户身份");
+  webUser = session.user;
+  webUsers = session.users.filter(user => user?.id && user?.name);
+}
+
 async function establishSession(token) {
   const response = await fetch(SESSION_PATH, {
     method: "POST",
@@ -601,6 +616,7 @@ async function establishSession(token) {
   });
   if (!response.ok) throw new Error(REMOTE ? "密码无效或登录请求过于频繁" : "令牌无效，请重新运行 better-codex web");
   const session = await response.json();
+  applySessionIdentity(session);
   if (REMOTE) {
     if (typeof session.csrf_token !== "string" || !session.csrf_token) throw new Error((RELAY ? "Relay" : "Hub") + " 未返回有效的 Web 会话");
     csrfToken = session.csrf_token;
@@ -616,6 +632,7 @@ async function restoreRemoteSession() {
   const response = await fetch(SESSION_PATH);
   if (!response.ok) throw new Error("Web 会话已失效，请重新登录");
   const session = await response.json();
+  applySessionIdentity(session);
   if (typeof session.csrf_token !== "string" || !session.csrf_token) throw new Error((RELAY ? "Relay" : "Hub") + " 未返回有效的 Web 会话");
   csrfToken = session.csrf_token;
   sessionStorage.setItem("better-codex-web-csrf", csrfToken);
@@ -624,6 +641,8 @@ async function restoreRemoteSession() {
 function expireSession() {
   sessionToken = "";
   csrfToken = "";
+  webUser = null;
+  webUsers = [];
   sessionStorage.removeItem("better-codex-web-session");
   sessionStorage.removeItem("better-codex-web-csrf");
   window.__betterCodexInjection__?.destroy?.();
@@ -973,6 +992,8 @@ window.betterCodexHost = Object.freeze({
   version: 1,
   kind: RELAY ? "web" : REMOTE ? "remote" : "web",
   capabilities: Object.freeze({ issues: "read-write", agents: REMOTE && !RELAY ? "read-only" : "read-write", liveUpdates: true, nativeThreads: false }),
+  user: () => webUser,
+  users: () => webUsers.slice(),
   request: requestRuntime,
   subscribe: subscribeRuntime,
 });
@@ -1010,7 +1031,7 @@ function loadInjection() {
 async function boot(token = "") {
   try {
     if (token) await establishSession(token);
-    if (REMOTE && !csrfToken) await restoreRemoteSession();
+    if (REMOTE && (!csrfToken || (RELAY && !webUser))) await restoreRemoteSession();
     if (!REMOTE && !sessionToken) throw new Error("请运行 better-codex web 获取本地访问令牌");
     if (RELAY && !await relayRuntimeOnline()) {
       showRelayOffline();
