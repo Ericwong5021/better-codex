@@ -7252,6 +7252,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       let queueEditDraft = "";
       let queueActionRequestId = "";
       let queueActionError = "";
+      let queueEditFocusPreserved = false;
       let replyRecoveryRequestId = "";
       let replyRecoveryTimer = null;
       let replyDraftTimer = null;
@@ -7345,9 +7346,36 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         replyRecoveryRequestId = "";
       }
 
-      function recoverReply(requestId, message, attempts = 0) {
+      function completeReplySubmission(submittedText, submittedAttachments = []) {
+        const textarea = dialog.querySelector('[name="reply"]');
+        const currentText = String(textarea?.value || "").trim();
+        const composerUnchanged = !textarea || currentText === submittedText;
+        const composerAlreadyCleared = currentText === "" && draft.reply === "";
+        if (composerUnchanged) {
+          if (textarea) textarea.value = "";
+          draft.reply = "";
+          latestReplyDraft = "";
+          draft.replySemanticReferences = [];
+          closeSemanticMenu();
+          flushReplyDraft();
+          persistReplyDraft("");
+        }
+        const submittedAttachmentSet = new Set(submittedAttachments);
+        draft.replyAttachments = draft.replyAttachments.filter(item => {
+          if (!submittedAttachmentSet.has(item)) return true;
+          releaseAttachment(item);
+          return false;
+        });
+        const attachments = dialog.querySelector("[data-reply-attachments]");
+        if (attachments) attachments.outerHTML = attachmentList(draft.replyAttachments, "reply");
+        updateReplySendState();
+        return composerUnchanged || composerAlreadyCleared;
+      }
+
+      function recoverReply(requestId, message, submittedText, submittedAttachments, attempts = 0) {
         if (!issue || !sessionId || !dialog.isConnected || requestId !== replyRecoveryRequestId) return;
         if (attempts >= 5) {
+          traceDialog("reply_recovery_unconfirmed", { request_id: requestId, attempts });
           stopReplyRecovery();
           showConversationFailure("reply_request_unconfirmed", "reply", message);
           return;
@@ -7360,18 +7388,22 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             const reply = data?.reply || {};
             if (reply.request_id === requestId) {
               stopReplyRecovery();
+              const composerCleared = completeReplySubmission(submittedText, submittedAttachments);
+              traceDialog("reply_recovery_confirmed", { request_id: requestId, reply_status: reply.status || "idle", composer_cleared: composerCleared });
               applyConversation(data, { preserveBody: true });
               return;
             }
-          } catch {}
-          recoverReply(requestId, message, attempts + 1);
+          } catch (error) {
+            traceDialog("reply_recovery_probe_failed", { request_id: requestId, attempt: attempts + 1, error: String(error instanceof Error ? error.message : "request_failed").slice(0, 200) });
+          }
+          recoverReply(requestId, message, submittedText, submittedAttachments, attempts + 1);
         }, attempts === 0 ? 1500 : 2000);
       }
 
-      function scheduleReplyRecovery(requestId, message) {
+      function scheduleReplyRecovery(requestId, message, submittedText, submittedAttachments) {
         stopReplyRecovery();
         replyRecoveryRequestId = requestId;
-        recoverReply(requestId, message);
+        recoverReply(requestId, message, submittedText, submittedAttachments);
       }
 
       function syncDraft() {
@@ -7901,6 +7933,15 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       function syncQueuedReplyState() {
         const queue = dialog.querySelector("[data-conversation-queue]");
         if (!queue) return;
+        const activeEditInput = queue.querySelector("[data-queue-edit-input]");
+        if (queueEditingRequestId && activeEditInput === document.activeElement && !queueActionRequestId) {
+          if (!queueEditFocusPreserved) {
+            queueEditFocusPreserved = true;
+            traceDialog("conversation_queue_edit_preserved", { request_id: queueEditingRequestId });
+          }
+          return;
+        }
+        queueEditFocusPreserved = false;
         queue.hidden = queuedReplies.length === 0;
         queue.setAttribute("aria-label", t("队列中 {{count}} 条消息").replace("{{count}}", String(queuedReplies.length)));
         queue.innerHTML = queuedReplies.length
@@ -8244,41 +8285,40 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             return;
           }
         }
+        const submittedAttachments = draft.replyAttachments.slice();
+        let reply;
         try {
           lastReplyStatus = "running";
           lastReplySemanticReferences = semanticReferences.map(reference => ({ ...reference }));
           lastReplyCommand = semanticCommand;
-          const reply = await api("/api/issues/" + encodeURIComponent(issue.id) + "/reply", { method: "POST", body: JSON.stringify({ message, request_id: requestId, files, semantic_references: semanticReferences, command: semanticCommand }), timeoutMs: files.length ? 120_000 : undefined });
-          if (reply.initial_run) {
-            await loadIssues();
-            dialog.close();
-            return;
-          }
-          lastReplyRequestId = reply.request_id || requestId;
-          stopReplyRecovery();
-          draft.reply = "";
-          latestReplyDraft = "";
-          draft.replySemanticReferences = [];
-          closeSemanticMenu();
-          draft.replyAttachments.forEach(releaseAttachment);
-          draft.replyAttachments = [];
-          if (textarea) textarea.value = "";
-          const attachments = dialog.querySelector("[data-reply-attachments]");
-          if (attachments) {
-            attachments.innerHTML = "";
-            attachments.hidden = true;
-          }
-          flushReplyDraft();
-          persistReplyDraft("");
-          await loadIssues().catch(() => {});
-          applyConversation({ found: true, reply }, { preserveBody: true });
-          conversationTimer = setTimeout(() => void loadConversation({ quiet: true }), 1500);
+          reply = await api("/api/issues/" + encodeURIComponent(issue.id) + "/reply", { method: "POST", body: JSON.stringify({ message, request_id: requestId, files, semantic_references: semanticReferences, command: semanticCommand }), timeoutMs: files.length ? 120_000 : undefined });
         } catch (error) {
           lastReplyRequestId = requestId;
+          const outcomeUncertain = !Number(error?.betterCodexDiagnostics?.http_status);
+          const composerCleared = outcomeUncertain ? completeReplySubmission(text, submittedAttachments) : false;
+          traceDialog("reply_submit_unconfirmed", { request_id: requestId, outcome_uncertain: outcomeUncertain, composer_cleared: composerCleared, error: String(error instanceof Error ? error.message : "request_failed").slice(0, 200) });
           showConversationFailure(error, "reply", message);
-          scheduleReplyRecovery(requestId, message);
+          scheduleReplyRecovery(requestId, message, text, submittedAttachments);
           send.disabled = false;
+          return;
         }
+        lastReplyRequestId = reply.request_id || requestId;
+        stopReplyRecovery();
+        const composerCleared = completeReplySubmission(text, submittedAttachments);
+        traceDialog("reply_submit_confirmed", { request_id: lastReplyRequestId, initial_run: Boolean(reply.initial_run), composer_cleared: composerCleared });
+        if (reply.initial_run) {
+          try {
+            await loadIssues();
+            dialog.close();
+          } catch (error) {
+            reportGlobalError(error, { source: "reply_refresh", action: "initial_run", request_id: lastReplyRequestId });
+            showError(error);
+          }
+          return;
+        }
+        await loadIssues().catch(error => reportGlobalError(error, { source: "reply_refresh", action: "conversation", request_id: lastReplyRequestId }));
+        applyConversation({ found: true, reply }, { preserveBody: true });
+        conversationTimer = setTimeout(() => void loadConversation({ quiet: true }), 1500);
       }
 
       async function stopIssueFromDialog(button) {
