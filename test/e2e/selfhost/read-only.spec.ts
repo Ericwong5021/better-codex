@@ -85,7 +85,7 @@ test("remote shared Web UI shows pending, acknowledgement, conflict, and resubmi
     const replyCommandId = hub.store.board().issues.find(item => item.id === conversationIssue.id)!.remote_state!.command_id;
     await expect(dialog.locator(".better-codex-bubble.is-user").last()).toContainText("Continue from WebUI");
     await expect(dialog.locator('[data-conversation-status] [data-run="running"]')).toBeVisible();
-    await dialog.locator("[data-conversation-stop]").click();
+    await dialog.locator('[data-conversation-send][data-composer-mode="stop"]').click();
     await expect.poll(() => hub.store.board().issues.find(item => item.id === conversationIssue.id)?.remote_state?.operation).toBe("issue.stop");
     await client.syncNow();
     const requestMessage = String(local.getSessionCommandByRequest(conversationIssue.id, replyCommandId)?.payload.request_message || "");
