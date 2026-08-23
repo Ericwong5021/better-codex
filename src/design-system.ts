@@ -9204,6 +9204,64 @@ export function betterCodexDesignSystemCss() {
       }
     }
 
+    @media (max-width: 720px) {
+      #better-codex-scheduled-dialog[data-host="web"] {
+        inset: var(--bc-mobile-viewport-top, 0) 0 auto;
+        width: 100vw;
+        max-width: none;
+        height: var(--bc-mobile-viewport-height, 100dvh);
+        max-height: none;
+        margin: 0;
+        border-radius: 0;
+        background: var(--bc-color-canvas);
+        box-shadow: none;
+      }
+
+      #better-codex-scheduled-dialog[data-host="web"]::backdrop {
+        background: var(--bc-color-canvas);
+      }
+
+      #better-codex-scheduled-dialog[data-host="web"] form {
+        box-sizing: border-box;
+        height: 100%;
+        max-height: none;
+        padding-top: env(safe-area-inset-top);
+        padding-bottom: env(safe-area-inset-bottom);
+      }
+
+      #better-codex-scheduled-dialog[data-host="web"] header {
+        box-sizing: border-box;
+        height: 52px;
+        min-height: 52px;
+        padding: 6px 8px 6px 12px;
+      }
+
+      #better-codex-scheduled-dialog[data-host="web"] .better-codex-scheduled-dialog-icon {
+        width: 36px;
+        height: 36px;
+        flex-basis: 36px;
+      }
+
+      #better-codex-scheduled-dialog[data-host="web"] .better-codex-scheduled-dialog-body {
+        min-height: 0;
+        flex: 1 1 auto;
+        grid-template-columns: minmax(0, 1fr);
+        padding: var(--bc-space-4);
+        -webkit-overflow-scrolling: touch;
+      }
+
+      #better-codex-scheduled-dialog[data-host="web"] footer {
+        min-height: 64px;
+        padding-inline: var(--bc-space-3);
+      }
+
+      #better-codex-scheduled-dialog[data-host="web"] label.is-wide,
+      #better-codex-scheduled-dialog[data-host="web"] .better-codex-scheduled-interval,
+      #better-codex-scheduled-dialog[data-host="web"] output {
+        grid-column: 1;
+      }
+    }
+
     @media (max-width: 430px) {
       #better-codex-panel .better-codex-scheduled-row-actions {
         grid-template-columns: repeat(2, 40px);

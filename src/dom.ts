@@ -6601,15 +6601,42 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     function openScheduledTaskDialog(task = null) {
       if (state.mockup || !SCHEDULED_AVAILABLE) return;
-      document.getElementById("better-codex-scheduled-dialog")?.remove();
+      const existingDialog = document.getElementById("better-codex-scheduled-dialog");
+      if (existingDialog?.open) existingDialog.close();
+      else existingDialog?.remove();
       const firstProject = state.projects.find(project => project.id === (task?.project_id || state.projectId) && project.workspace_path) || state.projects.find(project => project.workspace_path) || state.projects[0];
       const start = task?.starts_at || new Date(Math.ceil((Date.now() + 300_000) / 300_000) * 300_000).toISOString();
       const projectOptions = state.projects.map(project => '<option value="' + escapeHtml(project.id) + '"' + (project.id === firstProject?.id ? " selected" : "") + '>' + escapeHtml(projectLabel(project)) + '</option>').join("");
       const agentOptions = state.agents.filter(agent => !agent.is_default && agent.id).map(agent => '<option value="' + escapeHtml(agent.id) + '"' + (agent.id === task?.agent_id ? " selected" : "") + '>' + escapeHtml(agentDisplayName(agent)) + '</option>').join("");
       const dialog = document.createElement("dialog");
       dialog.id = "better-codex-scheduled-dialog";
+      dialog.dataset.host = HOST_KIND;
+      dialog.setAttribute(OWNED, "true");
       dialog.innerHTML = '<form method="dialog"><header><div><span class="better-codex-scheduled-dialog-icon">' + icon("calendar") + '</span><div><h2>' + te(task ? "编辑定时任务" : "新建定时任务") + '</h2><p>' + te("按计划创建独立任务并交给智能体执行") + '</p></div></div><button type="button" data-scheduled-dialog-close aria-label="' + te("关闭") + '">' + icon("close") + '</button></header><div class="better-codex-scheduled-dialog-body"><label class="is-wide"><span>' + te("名称") + '</span><input name="name" maxlength="120" value="' + escapeHtml(task?.name || "") + '" placeholder="' + te("例如：每天整理项目进展") + '" required></label><label class="is-wide"><span>' + te("任务内容") + '</span><textarea name="prompt" maxlength="100000" rows="7" placeholder="' + te("说明每次需要完成的具体任务") + '" required>' + escapeHtml(task?.prompt || "") + '</textarea></label><label><span>' + te("项目") + '</span><select name="project_id" required>' + projectOptions + '</select><small data-scheduled-project-path>' + escapeHtml(firstProject?.workspace_path || t("未提供项目文件夹")) + '</small></label><label><span>' + te("执行智能体") + '</span><select name="agent_id"><option value="">' + te("默认智能体") + '</option>' + agentOptions + '</select><small>' + te("使用智能体当前的模型、推理和权限设置") + '</small></label><label class="is-wide"><span>' + te("首次执行") + '</span><input name="starts_at" type="datetime-local" value="' + escapeHtml(scheduledTaskLocalValue(start)) + '" required></label><label class="better-codex-scheduled-switch is-wide"><span><strong>' + te("循环执行") + '</strong><small>' + te("按固定间隔持续执行这个任务") + '</small></span><input name="repeat" type="checkbox"' + (task?.repeat ? " checked" : "") + '></label><div class="better-codex-scheduled-interval is-wide"><label><span>' + te("每隔") + '</span><input name="interval_value" type="number" min="1" max="999" value="' + escapeHtml(String(task?.interval_value || 1)) + '"></label><label><span>' + te("单位") + '</span><select name="interval_unit"><option value="minute"' + (task?.interval_unit === "minute" ? " selected" : "") + '>' + te("分钟") + '</option><option value="hour"' + (!task || task.interval_unit === "hour" ? " selected" : "") + '>' + te("小时") + '</option><option value="day"' + (task?.interval_unit === "day" ? " selected" : "") + '>' + te("天") + '</option><option value="week"' + (task?.interval_unit === "week" ? " selected" : "") + '>' + te("周") + '</option></select></label></div><label class="better-codex-scheduled-switch is-wide"><span><strong>' + te("立即启用") + '</strong><small>' + te("关闭后会保存为已暂停状态") + '</small></span><input name="enabled" type="checkbox"' + (task?.enabled === false ? "" : " checked") + '></label><output hidden></output></div><footer><button type="button" data-scheduled-dialog-cancel>' + te("取消") + '</button><button class="better-codex-submit" type="submit">' + te(task ? "保存" : "创建") + '</button></footer></form>';
       const form = dialog.querySelector("form");
+      let scheduledInputFrame = null;
+      const scheduledDialogViewport = () => {
+        if (scheduledInputFrame !== null) {
+          cancelAnimationFrame(scheduledInputFrame);
+          scheduledInputFrame = null;
+        }
+        const compact = HOST_KIND === "web" && window.matchMedia("(max-width: 720px)").matches;
+        if (!compact) {
+          dialog.style.removeProperty("--bc-mobile-viewport-top");
+          dialog.style.removeProperty("--bc-mobile-viewport-height");
+          return;
+        }
+        const viewport = window.visualViewport;
+        const viewportTop = viewport?.offsetTop || 0;
+        dialog.style.setProperty("--bc-mobile-viewport-top", viewportTop + "px");
+        dialog.style.setProperty("--bc-mobile-viewport-height", (viewport?.height || window.innerHeight) + "px");
+        const active = document.activeElement;
+        scheduledInputFrame = requestAnimationFrame(() => {
+          scheduledInputFrame = null;
+          if (!(active instanceof HTMLElement) || !dialog.contains(active) || !active.matches("input, textarea, select")) return;
+          active.scrollIntoView({ block: "nearest", inline: "nearest" });
+        });
+      };
       const repeat = form.elements.repeat;
       const interval = dialog.querySelector(".better-codex-scheduled-interval");
       const syncRepeat = () => {
@@ -6658,11 +6685,21 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         });
       });
       dialog.addEventListener("cancel", event => { event.preventDefault(); dialog.close(); });
-      dialog.addEventListener("close", () => dialog.remove(), { once: true });
+      dialog.addEventListener("close", () => {
+        window.visualViewport?.removeEventListener("resize", scheduledDialogViewport);
+        window.visualViewport?.removeEventListener("scroll", scheduledDialogViewport);
+        window.removeEventListener("resize", scheduledDialogViewport);
+        if (scheduledInputFrame !== null) cancelAnimationFrame(scheduledInputFrame);
+        dialog.remove();
+      }, { once: true });
       bindModalDismiss(dialog, () => dialog.close());
       document.body.append(dialog);
       syncRepeat();
       dialog.showModal();
+      scheduledDialogViewport();
+      window.visualViewport?.addEventListener("resize", scheduledDialogViewport, { passive: true });
+      window.visualViewport?.addEventListener("scroll", scheduledDialogViewport, { passive: true });
+      window.addEventListener("resize", scheduledDialogViewport, { passive: true });
       form.elements.name.focus();
     }
 
@@ -9834,7 +9871,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       closeFilterMenu();
       closeIssueMenu();
       closeAuxiliaryMenu();
-      document.getElementById("better-codex-scheduled-dialog")?.remove();
+      const scheduledDialog = document.getElementById("better-codex-scheduled-dialog");
+      if (scheduledDialog?.open) scheduledDialog.close();
+      else scheduledDialog?.remove();
       observer?.disconnect();
       for (const pending of bridgeRequests.values()) {
         clearTimeout(pending.timer);
