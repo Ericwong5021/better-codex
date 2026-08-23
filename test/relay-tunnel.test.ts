@@ -78,6 +78,7 @@ test("relay authenticates one runtime, replaces old connections, and stores no b
   const host = await fetch(`${base}/web/host.js`).then(response => response.text());
   assert.match(host, /const SESSION_PATH = RELAY \? "\/relay\/session"/);
   assert.match(host, /agents: REMOTE && !RELAY \? "read-only" : "read-write"/);
+  assert.match(host, /codexSemantics: !REMOTE \|\| RELAY/);
   assert.match(host, /连接恢复后将自动重试/);
   assert.doesNotMatch(host, /Hub 管理命令/);
 

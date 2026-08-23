@@ -15,6 +15,9 @@ test("generated injection script is valid JavaScript", () => {
   assert.ok(source.includes("showAutoDispatchHelp(\"settings\")"));
   assert.ok(source.includes('HOST_KIND === "web" ? INITIAL_LOCALE : bootstrap.locale'));
   assert.ok(source.includes('const REMOTE = window.betterCodexHost?.kind === "remote" || RELAY'));
+  assert.ok(source.includes('const CODEX_SEMANTICS_AVAILABLE = HOST_CAPABILITIES.codexSemantics !== false'));
+  assert.ok(source.includes('if (!CODEX_SEMANTICS_AVAILABLE) return semanticCatalog'));
+  assert.doesNotMatch(source, /if \(REMOTE\) return semanticCatalog/);
   assert.ok(source.includes('value.replace(/\\s+/g, "")'));
   assert.ok(source.includes('mockupText(issue.description).replace(/[#*_\`~>\[\]()]/g, "").replace(/\\s+/g, " ").trim()'));
   assert.doesNotMatch(source, /\.replace\(\/s\+\/g,/);

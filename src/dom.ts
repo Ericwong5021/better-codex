@@ -298,6 +298,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const HOST_CAPABILITIES = window.betterCodexHost?.capabilities || {};
     const READ_ONLY = HOST_CAPABILITIES.issues === "read-only";
     const AGENTS_READ_ONLY = HOST_CAPABILITIES.agents === "read-only";
+    const CODEX_SEMANTICS_AVAILABLE = HOST_CAPABILITIES.codexSemantics !== false;
     const RELAY = document.documentElement.dataset.betterCodexHost === "relay";
     const REMOTE = window.betterCodexHost?.kind === "remote" || RELAY;
     const SCHEDULED_AVAILABLE = !REMOTE || RELAY;
@@ -7849,7 +7850,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
       async function loadSemanticCatalog() {
         if (semanticCatalog) return semanticCatalog;
-        if (REMOTE) return semanticCatalog = { skills: [], apps: [], errors: [{ source: "catalog", message: state.locale === "zh-CN" ? "远程投影视图暂不支持读取本机 Codex 功能" : "The remote projection cannot read local Codex capabilities" }] };
+        if (!CODEX_SEMANTICS_AVAILABLE) return semanticCatalog = { skills: [], apps: [], errors: [{ source: "catalog", message: state.locale === "zh-CN" ? "当前 Web 视图无法读取本机 Codex 功能" : "This web view cannot read local Codex capabilities" }] };
         try {
           const data = await api(issue
             ? "/api/issues/" + encodeURIComponent(issue.id) + "/semantics"

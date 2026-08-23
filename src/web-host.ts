@@ -991,7 +991,7 @@ function subscribeRuntime(listener) {
 window.betterCodexHost = Object.freeze({
   version: 1,
   kind: RELAY ? "web" : REMOTE ? "remote" : "web",
-  capabilities: Object.freeze({ issues: "read-write", agents: REMOTE && !RELAY ? "read-only" : "read-write", liveUpdates: true, nativeThreads: false }),
+  capabilities: Object.freeze({ issues: "read-write", agents: REMOTE && !RELAY ? "read-only" : "read-write", codexSemantics: !REMOTE || RELAY, liveUpdates: true, nativeThreads: false }),
   user: () => webUser,
   users: () => webUsers.slice(),
   request: requestRuntime,
@@ -1162,7 +1162,7 @@ export function betterCodexWebHostJavaScript(host: boolean | BetterCodexWebHostK
   if (kind === "local" || kind === "relay") return webHostJavaScript;
   return webHostJavaScript
     .replace('kind: "web",', 'kind: "remote",')
-    .replace('issues: "read-write", agents: "read-write", liveUpdates: true, nativeThreads: false', 'issues: "read-write", agents: "read-only", liveUpdates: true, nativeThreads: false')
+    .replace('issues: "read-write", agents: "read-write", codexSemantics: !REMOTE || RELAY, liveUpdates: true, nativeThreads: false', 'issues: "read-write", agents: "read-only", codexSemantics: !REMOTE || RELAY, liveUpdates: true, nativeThreads: false')
     .replaceAll("Runtime", "Hub")
     .replaceAll("better-codex web", "Hub 管理命令");
 }
