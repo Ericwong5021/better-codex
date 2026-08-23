@@ -7586,7 +7586,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             return;
           }
           if (executionRunning) {
-            control.disabled = !control.matches('[name="reply"], [data-conversation-send], [data-conversation-attach], [data-conversation-retry], [data-dialog-attachment-scope="reply"], [data-queue-edit-input], [data-queue-send-now], [data-queue-edit], [data-queue-edit-save], [data-queue-edit-cancel], [data-semantic-option]');
+            control.disabled = !control.matches('[name="reply"], [data-conversation-send], [data-conversation-attach], [data-conversation-retry], [data-dialog-attachment-scope="reply"], [data-queue-edit-input], [data-queue-send-now], [data-queue-edit], [data-queue-delete], [data-queue-edit-save], [data-queue-edit-cancel], [data-semantic-option]');
             return;
           }
           if (executionLocked) {
