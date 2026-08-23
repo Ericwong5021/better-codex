@@ -757,7 +757,7 @@ test("issue details render the latest conversation result and reply composer", (
   assert.match(css, /\.better-codex-composer-toolbar\s*\{[^}]*height:\s*30px;/s);
   assert.match(css, /\.better-codex-composer-attach,[\s\S]*?\.better-codex-composer-send\s*\{[^}]*width:\s*30px;[^}]*height:\s*30px;/s);
   assert.match(css, /\.better-codex-composer-send\[data-composer-mode="stop"\] svg/s);
-  assert.match(css, /\.better-codex-composer-queue\s*\{[^}]*max-height:\s*min\(177px, 30dvh\);[^}]*border-bottom:\s*0;[^}]*border-radius:\s*23px 23px 0 0;/s);
+  assert.match(css, /\.better-codex-composer-queue\s*\{[^}]*max-height:\s*min\(177px, 30dvh\);[^}]*border:\s*1px solid var\(--bc-color-hairline\);[^}]*border-bottom:\s*0;[^}]*border-radius:\s*23px 23px 0 0;/s);
   assert.match(css, /\.better-codex-composer-queue-row\s*\{[^}]*min-height:\s*24px;[^}]*gap:\s*6px;/s);
   assert.match(css, /\.better-codex-composer-queue-actions\s*\{[^}]*opacity:\s*0;/s);
   assert.match(css, /\.better-codex-composer-queue-edit\s*\{[^}]*min-height:\s*44px;/s);
