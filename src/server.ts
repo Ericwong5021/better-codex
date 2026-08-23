@@ -757,6 +757,11 @@ export function startServer() {
       }
       publishChange();
     },
+    async issueId => {
+      const issue = store.getIssue(issueId);
+      if (!issue) throw new Error("issue_not_found");
+      await worker.regenerateIssueTitle(issue);
+    },
   );
   let activeRuntimePort = 0;
   const relayClient = new RuntimeRelayClient({ runtimePort: () => activeRuntimePort, localToken: accessToken, runtimeInstanceId: identity.instanceId, coreVersion: identity.version });
@@ -1820,6 +1825,16 @@ export function startServer() {
           if (!accepted && (current?.active_run_status || current?.session_active_turn_id || store.getIssueReplyState(issue.id).status === "running")) throw new Error("issue_stop_timeout");
           return sendJson(response, current?.session_status === "stopping" ? 202 : 200, store.getIssue(issue.id));
         }
+        if (method === "POST" && path[3] === "regenerate-title" && path.length === 4) {
+          const body = await readBody(request);
+          const version = Number(body.version);
+          if (!Number.isInteger(version) || version < 1) throw new Error("invalid_version");
+          if (issue.version !== version) throw new Error("version_conflict");
+          if (issue.archived_at) throw new Error("issue_archived");
+          if (store.isEnrichmentPending(issue)) throw new Error("issue_enrichment_pending");
+          if (issue.active_run_status || issue.session_active_turn_id || store.getIssueReplyState(issue.id).status === "running") throw new Error("issue_execution_running");
+          return sendJson(response, 202, await worker.regenerateIssueTitle(issue));
+        }
         if (method === "POST" && path[3] === "session-handoff" && path.length === 4) {
           const body = await readBody(request);
           const threadId = normalizeSessionId(cleanString(body.thread_id, 200));
@@ -1835,7 +1850,7 @@ export function startServer() {
           const version = Number(body.version);
           if (!Number.isInteger(version) || version < 1) throw new Error("invalid_version");
           if (issue.version !== version) throw new Error("version_conflict");
-          if (issue.enrichment_status === "pending") throw new Error("issue_enrichment_pending");
+          if (store.isEnrichmentPending(issue)) throw new Error("issue_enrichment_pending");
           if (issue.session_active_turn_id || store.getIssueReplyState(issue.id).status === "running") throw new Error("issue_execution_running");
           if (issue.active_run_status) {
             await worker.stopIssue(issue.id);
@@ -1862,7 +1877,7 @@ export function startServer() {
           const version = Number(body.version);
           if (!Number.isInteger(version) || version < 1) throw new Error("invalid_version");
           if (issue.version !== version) throw new Error("version_conflict");
-          if (issue.enrichment_status === "pending") throw new Error("issue_enrichment_pending");
+          if (store.isEnrichmentPending(issue)) throw new Error("issue_enrichment_pending");
           if (issue.active_run_status || issue.session_active_turn_id || store.getIssueReplyState(issue.id).status === "running") throw new Error("issue_execution_running");
           store.deleteArchivedIssue(issue.id, version);
           worker.wake();

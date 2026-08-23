@@ -1,9 +1,9 @@
 import type { IssuePriority, IssueReplyStatus, IssueSessionStatus, IssueStatus } from "./db.js";
 import type { ConversationMessage } from "./session-transcript.js";
 
-export const legacySyncProtocolVersion = "sync/v9" as const;
-export const previousSyncProtocolVersion = "sync/v10" as const;
-export const syncProtocolVersion = "sync/v11" as const;
+export const legacySyncProtocolVersion = "sync/v10" as const;
+export const previousSyncProtocolVersion = "sync/v11" as const;
+export const syncProtocolVersion = "sync/v12" as const;
 export const supportedSyncProtocolVersions = [syncProtocolVersion, previousSyncProtocolVersion, legacySyncProtocolVersion] as const;
 export type SyncProtocolVersion = typeof supportedSyncProtocolVersions[number];
 export const syncEntityTypes = ["project", "issue", "agent_directory"] as const;
@@ -125,6 +125,7 @@ export type IssueProjection = {
   user_assigned: boolean;
   assignee_user_id: string | null;
   pending_actor: "user" | "agent";
+  enrichment_status: "pending" | "regenerating" | "failed" | null;
   active_run_status: "claimed" | "running" | "scheduling" | null;
   latest_run_status: "claimed" | "running" | "scheduling" | "completed" | "failed" | "interrupted" | null;
   latest_scheduler_status: "pending" | "running" | "completed" | "failed" | "interrupted" | null;
@@ -350,7 +351,7 @@ export type DirectoryBrowserResult = {
   truncated: boolean;
 };
 
-export const remoteCommandOperations = ["project.pick_directory", "project.browse_directory", "project.create", "project.overview", "project.planning.reply", "project.planning.reset", "issue.create", "issue.update", "issue.move", "issue.start", "issue.stop", "issue.reply", "issue.queue.update", "issue.queue.send", "issue.archive", "issue.restore", "issue.delete", "settings.auto-dispatch"] as const;
+export const remoteCommandOperations = ["project.pick_directory", "project.browse_directory", "project.create", "project.overview", "project.planning.reply", "project.planning.reset", "issue.create", "issue.update", "issue.move", "issue.start", "issue.stop", "issue.regenerate-title", "issue.reply", "issue.queue.update", "issue.queue.send", "issue.archive", "issue.restore", "issue.delete", "settings.auto-dispatch"] as const;
 export type RemoteCommandOperation = typeof remoteCommandOperations[number];
 export type RemoteCommandStatus = "pending" | "dispatched" | "applied" | "rejected" | "conflict" | "expired";
 

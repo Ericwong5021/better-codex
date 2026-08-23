@@ -71,6 +71,7 @@ export class SyncClient {
     private readonly projectPlanningReply: (projectId: string, agentId: string, message: string) => void | Promise<void> = () => { throw new Error("remote_project_planning_unavailable"); },
     private readonly projectPlanningReset: (projectId: string) => void | Promise<void> = () => { throw new Error("remote_project_planning_unavailable"); },
     private readonly queue: (issueId: string, requestId: string, action: "update" | "send", message?: string) => void | Promise<void> = () => { throw new Error("remote_queue_unavailable"); },
+    private readonly regenerateTitle: (issueId: string) => void | Promise<void> = () => { throw new Error("remote_title_regeneration_unavailable"); },
   ) {}
 
   start() {
@@ -384,7 +385,7 @@ export class SyncClient {
         : await hubRequest<{ commands: RemoteCommand[] }>(configuration, "/api/v1/sync/commands?limit=100");
       if (!Array.isArray(result.commands)) throw new Error("invalid_command_response");
       for (const command of result.commands) {
-        const ack = { ...(await this.store.applyRemoteCommand(command, { files: this.files, reply: this.reply, queue: this.queue, stop: this.stopIssue, projectCreate: this.projectCreate, projectOverview: this.projectOverview, projectPlanningReply: this.projectPlanningReply, projectPlanningReset: this.projectPlanningReset, chooseDirectory: this.chooseDirectory, browseDirectory: this.browseDirectory, threadAction: this.threadAction })), delivery_id: command.delivery_id ?? null };
+        const ack = { ...(await this.store.applyRemoteCommand(command, { files: this.files, reply: this.reply, queue: this.queue, stop: this.stopIssue, regenerateTitle: this.regenerateTitle, projectCreate: this.projectCreate, projectOverview: this.projectOverview, projectPlanningReply: this.projectPlanningReply, projectPlanningReset: this.projectPlanningReset, chooseDirectory: this.chooseDirectory, browseDirectory: this.browseDirectory, threadAction: this.threadAction })), delivery_id: command.delivery_id ?? null };
         if (claimed) await this.controlRpc("commands.ack", ack as unknown as Record<string, unknown>);
         else await hubRequest<RemoteCommandAck>(configuration, `/api/v1/sync/commands/${encodeURIComponent(command.command_id)}/ack`, { method: "POST", body: JSON.stringify(ack) });
         if (ack.status === "applied") this.commandApplied(command, ack);

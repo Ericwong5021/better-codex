@@ -172,6 +172,7 @@ function cleanProjection(type: SyncEntityType, id: string, value: unknown): Sync
   if (source.agent_id !== null && (typeof source.agent_id !== "string" || !/^[a-f0-9-]{36}$/i.test(source.agent_id))) throw new Error("invalid_projection");
   if (source.assignee_user_id !== undefined && source.assignee_user_id !== null && (typeof source.assignee_user_id !== "string" || source.assignee_user_id.length > 200)) throw new Error("invalid_projection");
   if (source.pending_actor !== "user" && source.pending_actor !== "agent") throw new Error("invalid_projection");
+  if (source.enrichment_status !== undefined && source.enrichment_status !== null && !["pending", "regenerating", "failed"].includes(String(source.enrichment_status))) throw new Error("invalid_projection");
   if (source.archived_at !== null && (typeof source.archived_at !== "string" || source.archived_at.length > 64)) throw new Error("invalid_projection");
   if (source.active_run_status !== null && !["claimed", "running", "scheduling"].includes(String(source.active_run_status))) throw new Error("invalid_projection");
   if (source.latest_run_status !== null && !["claimed", "running", "scheduling", "completed", "failed", "interrupted"].includes(String(source.latest_run_status))) throw new Error("invalid_projection");
@@ -196,6 +197,7 @@ function cleanProjection(type: SyncEntityType, id: string, value: unknown): Sync
     user_assigned: source.user_assigned as boolean,
     assignee_user_id: typeof source.assignee_user_id === "string" ? source.assignee_user_id : null,
     pending_actor: source.pending_actor,
+    enrichment_status: source.enrichment_status === "pending" || source.enrichment_status === "regenerating" || source.enrichment_status === "failed" ? source.enrichment_status : null,
     active_run_status: source.active_run_status as IssueProjection["active_run_status"],
     latest_run_status: source.latest_run_status as IssueProjection["latest_run_status"],
     latest_scheduler_status: source.latest_scheduler_status as IssueProjection["latest_scheduler_status"],
@@ -890,10 +892,10 @@ export class HubStore {
     if (operation === "issue.stop" && !running) throw new Error("issue_not_running");
     if (payload.agent_id && !this.board().agents.some(agent => agent.id === payload.agent_id)) throw new Error("agent_not_found");
     const deviceId = this.writerDeviceId(settingOperation || createOperation ? "" : entityId, entityType);
-    if (operation === "issue.delete" || operation === "project.browse_directory" || operation === "issue.queue.update" || operation === "issue.queue.send") {
+    if (operation === "issue.delete" || operation === "project.browse_directory" || operation === "issue.queue.update" || operation === "issue.queue.send" || operation === "issue.regenerate-title") {
       const runtimeRow = this.db.prepare("SELECT payload_json FROM runtime_projection WHERE device_id = ?").get(deviceId) as { payload_json: string } | undefined;
       const protocolVersion = runtimeRow ? (JSON.parse(runtimeRow.payload_json) as RuntimeProjection).protocol_version : null;
-      const incompatible = operation === "project.browse_directory" || operation === "issue.queue.update" || operation === "issue.queue.send"
+      const incompatible = operation === "project.browse_directory" || operation === "issue.queue.update" || operation === "issue.queue.send" || operation === "issue.regenerate-title"
         ? protocolVersion !== syncProtocolVersion
         : protocolVersion !== syncProtocolVersion && protocolVersion !== previousSyncProtocolVersion;
       if (incompatible) throw new Error("incompatible_protocol");
@@ -1117,6 +1119,7 @@ export class HubStore {
           user_assigned: command.payload.user_assigned === true,
           assignee_user_id: typeof command.payload.assignee_user_id === "string" && command.payload.assignee_user_id ? command.payload.assignee_user_id : null,
           pending_actor: command.payload.agent_enabled === true ? "agent" : "user",
+          enrichment_status: command.payload.ai_enrich === true ? "pending" : null,
           active_run_status: null,
           latest_run_status: null,
           latest_scheduler_status: null,
@@ -1132,9 +1135,10 @@ export class HubStore {
         issues.push(issue);
       }
       if (!issue) continue;
-      if (["pending", "dispatched"].includes(command.status) && ["issue.update", "issue.move", "issue.start"].includes(command.operation)) {
+      if (["pending", "dispatched"].includes(command.status) && ["issue.update", "issue.move", "issue.start", "issue.regenerate-title"].includes(command.operation)) {
         Object.assign(issue, command.payload, { updated_at: command.requested_at });
         if (command.operation === "issue.start") Object.assign(issue, { agent_enabled: true, user_assigned: false, assignee_user_id: null, pending_actor: "agent", assigned: true });
+        if (command.operation === "issue.regenerate-title") Object.assign(issue, { enrichment_status: "regenerating" });
       }
       Object.assign(issue, { remote_state: { command_id: command.command_id, status: command.status, operation: command.operation, error: command.error } });
     }

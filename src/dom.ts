@@ -715,6 +715,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     localeResources.en["Codex 会话连接失败"] = "Codex connection failed";
     localeResources.en["原生会话正在创建，请稍后重试。"] = "The native conversation is being created. Try again shortly.";
     localeResources.en["停止任务"] = "Stop task";
+    localeResources.en["重新生成标题"] = "Regenerate title";
+    localeResources.en["标题生成中"] = "Regenerating title";
+    localeResources.en["标题生成失败"] = "Title generation failed";
     localeResources.en["加入队列"] = "Queue message";
     localeResources.en["队列中 {{count}} 条消息"] = "{{count}} queued messages";
     localeResources.en["立即发送"] = "Send now";
@@ -1162,7 +1165,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function issuePermissions(issue) {
-      const enrichmentPending = issue?.enrichment_status === "pending";
+      const enrichmentPending = issue?.enrichment_status === "pending" || issue?.enrichment_status === "regenerating";
       const executionRunning = issueExecutionRunning(issue);
       const remotePending = issue?.remote_pending === true || issue?.remote_state?.status === "pending";
       const remoteConflict = issue?.remote_conflict === true || issue?.remote_state?.status === "conflict";
@@ -4105,6 +4108,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const archiveLockAttrs = permissions.archiveLocked ? ' disabled aria-disabled="true"' : "";
       const deleteLockAttrs = permissions.archiveLocked || permissions.executionRunning ? ' disabled aria-disabled="true"' : "";
       const stopItem = permissions.executionRunning ? '<div class="better-codex-context-divider"></div><button class="better-codex-context-item is-danger" type="button" data-context-action="stop">' + icon("stop") + '<span>' + escapeHtml(t("停止任务")) + '</span></button>' : "";
+      const regenerateTitleItem = state.mockup ? "" : '<div class="better-codex-context-divider"></div><button class="better-codex-context-item" type="button"' + contextLockAttrs + ' data-context-action="regenerate-title">' + icon("sparkles") + '<span>' + escapeHtml(t("重新生成标题")) + '</span></button>';
       const statusItems = Object.entries(statusLabels).map(([value, text]) => '<button class="better-codex-context-item" type="button"' + contextLockAttrs + ' data-context-action="update" data-context-field="status" data-context-value="' + value + '"><span class="better-codex-context-check">' + (issue.status === value ? icon("check") : "") + '</span>' + statusIcon(value) + '<span>' + escapeHtml(t(text)) + "</span></button>").join("");
       const priorityItems = Object.entries(priorityLabels).map(([value, text]) => '<button class="better-codex-context-item" type="button"' + contextLockAttrs + ' data-context-action="update" data-context-field="priority" data-context-value="' + value + '"><span class="better-codex-context-check">' + (issue.priority === value ? icon("check") : "") + '</span>' + priorityIcon(value) + '<span>' + escapeHtml(t(value === "none" ? "无优先级" : text + "优先级")) + "</span></button>").join("");
       const assignedUser = issueUserProfile(issue);
@@ -4128,7 +4132,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       menu.setAttribute(OWNED, "true");
       menu.dataset.issueId = issue.id;
       menu.dataset.align = clientX + 430 > window.innerWidth ? "left" : "right";
-      menu.innerHTML = '<div class="better-codex-context-item-wrap' + contextLockClass + '"><button class="better-codex-context-item" type="button"' + contextLockAttrs + '>' + statusIcon(issue.status) + '<span>' + escapeHtml(t("状态")) + '</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu">' + statusItems + '</div></div><div class="better-codex-context-item-wrap' + contextLockClass + '"><button class="better-codex-context-item" type="button"' + contextLockAttrs + '>' + priorityIcon(issue.priority) + '<span>' + escapeHtml(t("优先级")) + '</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu">' + priorityItems + '</div></div><div class="better-codex-context-item-wrap' + contextLockClass + '"><button class="better-codex-context-item" type="button"' + contextLockAttrs + '>' + icon("user") + '<span>' + escapeHtml(t("指定负责人")) + '</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu is-assignee">' + assigneeItems + '</div></div>' + stopItem + (workspacePath ? '<div class="better-codex-context-divider"></div><button class="better-codex-context-item" type="button" data-context-action="copy-workspace">' + icon("folder") + '<span>' + escapeHtml(t("复制本地 workdir 路径")) + '</span></button>' : "") + '<div class="better-codex-context-divider"></div><button class="better-codex-context-item" type="button"' + archiveLockAttrs + ' data-context-action="archive">' + icon("archive") + '<span>' + escapeHtml(t("归档")) + '</span></button>' + (state.mockup ? "" : '<button class="better-codex-context-item is-danger" type="button"' + deleteLockAttrs + ' data-context-action="delete">' + icon("trash") + '<span>' + escapeHtml(t("删除任务")) + '</span></button>');
+      menu.innerHTML = '<div class="better-codex-context-item-wrap' + contextLockClass + '"><button class="better-codex-context-item" type="button"' + contextLockAttrs + '>' + statusIcon(issue.status) + '<span>' + escapeHtml(t("状态")) + '</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu">' + statusItems + '</div></div><div class="better-codex-context-item-wrap' + contextLockClass + '"><button class="better-codex-context-item" type="button"' + contextLockAttrs + '>' + priorityIcon(issue.priority) + '<span>' + escapeHtml(t("优先级")) + '</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu">' + priorityItems + '</div></div><div class="better-codex-context-item-wrap' + contextLockClass + '"><button class="better-codex-context-item" type="button"' + contextLockAttrs + '>' + icon("user") + '<span>' + escapeHtml(t("指定负责人")) + '</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu is-assignee">' + assigneeItems + '</div></div>' + stopItem + (workspacePath ? '<div class="better-codex-context-divider"></div><button class="better-codex-context-item" type="button" data-context-action="copy-workspace">' + icon("folder") + '<span>' + escapeHtml(t("复制本地 workdir 路径")) + '</span></button>' : "") + regenerateTitleItem + '<div class="better-codex-context-divider"></div><button class="better-codex-context-item" type="button"' + archiveLockAttrs + ' data-context-action="archive">' + icon("archive") + '<span>' + escapeHtml(t("归档")) + '</span></button>' + (state.mockup ? "" : '<button class="better-codex-context-item is-danger" type="button"' + deleteLockAttrs + ' data-context-action="delete">' + icon("trash") + '<span>' + escapeHtml(t("删除任务")) + '</span></button>');
       document.body.appendChild(menu);
       const rect = menu.getBoundingClientRect();
       menu.style.left = Math.max(8, Math.min(clientX, window.innerWidth - rect.width - 8)) + "px";
@@ -4161,7 +4165,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const current = state.issues.find(candidate => candidate.id === menu.dataset.issueId);
         if (!current) return closeIssueMenu();
         const currentPermissions = issuePermissions(current);
-        if (currentPermissions.contextLocked && (item.dataset.contextAction === "update" || item.dataset.contextAction === "assign")) return closeIssueMenu();
+        if (currentPermissions.contextLocked && (item.dataset.contextAction === "update" || item.dataset.contextAction === "assign" || item.dataset.contextAction === "regenerate-title")) return closeIssueMenu();
         if (currentPermissions.archiveLocked && item.dataset.contextAction === "archive") return closeIssueMenu();
         if ((currentPermissions.archiveLocked || currentPermissions.executionRunning) && item.dataset.contextAction === "delete") return closeIssueMenu();
         if (item.dataset.contextAction === "copy-workspace") {
@@ -4171,6 +4175,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (item.dataset.contextAction === "stop") {
           closeIssueMenu();
           return void perform(() => stopIssueSession(current.id));
+        }
+        if (item.dataset.contextAction === "regenerate-title") {
+          closeIssueMenu();
+          return void perform(async () => {
+            await api("/api/issues/" + encodeURIComponent(current.id) + "/regenerate-title", { method: "POST", body: JSON.stringify({ version: current.version }) });
+            await loadIssues();
+          });
         }
         if (item.dataset.contextAction === "duplicate") {
           closeIssueMenu();
@@ -6773,9 +6784,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           const executionState = issue.status === "done" ? "completed" : issue.status === "cancelled" ? "interrupted" : issue.status === "blocked" ? "blocked" : issue.status === "in_review" ? ((issue.latest_scheduler_error || issue.latest_scheduler_status === "failed") ? "scheduler-failed" : "in_review") : replyResultState || (latestRunStatus === "failed" ? "failed" : latestRunStatus === "interrupted" ? "interrupted" : latestRunStatus === "scheduling" ? "scheduling" : latestRunStatus === "running" ? "running" : latestRunStatus === "claimed" ? "claimed" : issue.agent_enabled ? "not-started" : "");
           const sessionExecutionState = issue.session_status === "stopping" ? "stopping" : issue.session_status === "starting" ? "claimed" : ["active", "waiting_on_approval", "waiting_on_user"].includes(issue.session_status) ? "running" : "";
           const activeExecutionState = issue.active_run_status || (issue.reply_status === "running" ? "running" : sessionExecutionState);
-          const activityState = permissions.remotePending ? "remote-pending" : permissions.remoteConflict ? "remote-conflict" : enrichmentLocked ? "thinking" : issue.session_status === "stopping" ? "stopping" : activeExecutionState || executionState;
-          const activityLabel = t(activityState === "remote-pending" ? "同步中" : activityState === "remote-conflict" ? "同步冲突" : enrichmentLocked ? "理解中" : activityState === "stopping" ? "正在停止…" : activityState === "running" ? "工作中" : activityState === "scheduling" ? "调度中" : activityState === "scheduler-failed" ? "调度失败" : activityState === "claimed" ? "排队中" : activityState === "in_review" ? "待审核" : activityState === "completed" ? "已完成" : activityState === "blocked" ? "已阻塞" : activityState === "failed" ? "执行失败" : activityState === "interrupted" ? "已停止" : activityState === "not-started" ? "未开始" : "");
-          const activityIcon = activityState === "scheduling" ? '<span class="better-codex-activity-dot better-codex-scheduler-dot" aria-hidden="true"></span>' : activityState === "scheduler-failed" ? '<span class="better-codex-activity-dot better-codex-scheduler-failed-dot" aria-hidden="true"></span>' : ["completed", "interrupted", "not-started"].includes(activityState) ? '<span class="better-codex-activity-dot" aria-hidden="true"></span>' : ["failed", "blocked", "remote-conflict"].includes(activityState) ? icon("close") : agentAvatarMarkup(activityAgent, "better-codex-card-avatar");
+          const activityState = permissions.remotePending ? "remote-pending" : permissions.remoteConflict ? "remote-conflict" : enrichmentLocked ? "thinking" : issue.enrichment_status === "failed" ? "title-regeneration-failed" : issue.session_status === "stopping" ? "stopping" : activeExecutionState || executionState;
+          const activityLabel = t(activityState === "remote-pending" ? "同步中" : activityState === "remote-conflict" ? "同步冲突" : issue.enrichment_status === "regenerating" ? "标题生成中" : enrichmentLocked ? "理解中" : activityState === "title-regeneration-failed" ? "标题生成失败" : activityState === "stopping" ? "正在停止…" : activityState === "running" ? "工作中" : activityState === "scheduling" ? "调度中" : activityState === "scheduler-failed" ? "调度失败" : activityState === "claimed" ? "排队中" : activityState === "in_review" ? "待审核" : activityState === "completed" ? "已完成" : activityState === "blocked" ? "已阻塞" : activityState === "failed" ? "执行失败" : activityState === "interrupted" ? "已停止" : activityState === "not-started" ? "未开始" : "");
+          const activityIcon = activityState === "scheduling" ? '<span class="better-codex-activity-dot better-codex-scheduler-dot" aria-hidden="true"></span>' : activityState === "scheduler-failed" ? '<span class="better-codex-activity-dot better-codex-scheduler-failed-dot" aria-hidden="true"></span>' : ["completed", "interrupted", "not-started"].includes(activityState) ? '<span class="better-codex-activity-dot" aria-hidden="true"></span>' : ["failed", "blocked", "remote-conflict", "title-regeneration-failed"].includes(activityState) ? icon("close") : agentAvatarMarkup(activityAgent, "better-codex-card-avatar");
           const activity = activityState
             ? '<span class="better-codex-activity" data-run="' + escapeHtml(activityState) + '">' + activityIcon + '<span class="' + (enrichmentLocked || executionRunning || permissions.remotePending ? "better-codex-shimmer" : "") + '">' + activityLabel + '</span></span>'
             : "";
@@ -7509,7 +7520,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const content = dialog.querySelector(draft.mode === "agent" ? '[name="prompt"]' : '[name="title"]');
         const disabled = !String(content?.value || "").trim();
         const draftAgentDisabled = dirtyDraftFields.has("assignee") && (draft.assignee === "none" || draft.assignee.startsWith("user:"));
-        const startBlocked = !issue || Boolean(issue.archived_at) || !issue.agent_enabled || draftAgentDisabled || Boolean(issue.active_run_status) || Boolean(sessionId) || issue.enrichment_status === "pending" || issue.status === "done";
+        const startBlocked = !issue || Boolean(issue.archived_at) || !issue.agent_enabled || draftAgentDisabled || Boolean(issue.active_run_status) || Boolean(sessionId) || issuePermissions(issue).enrichmentPending || issue.status === "done";
         if (submit) submit.disabled = editingLocked || disabled;
         if (startNow) startNow.disabled = editingLocked || disabled || startBlocked;
       }
@@ -7658,9 +7669,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const activeExecutionState = issue?.active_run_status || (replyStatus === "running" ? "running" : sessionExecutionState);
         const replyResultState = replyStatus === "succeeded" ? "completed" : ["failed", "interrupted"].includes(replyStatus) ? replyStatus : conversationFailureState;
         const relayFailure = issue?.session_relay_error && !issue?.session_relay_connected && issue?.active_run_status === "claimed";
-        const activityState = enrichmentLocked ? "thinking" : issue?.session_status === "stopping" ? "stopping" : relayFailure ? "relay-failed" : activeExecutionState || replyResultState || executionState;
+        const activityState = enrichmentLocked ? "thinking" : issue?.enrichment_status === "failed" ? "title-regeneration-failed" : issue?.session_status === "stopping" ? "stopping" : relayFailure ? "relay-failed" : activeExecutionState || replyResultState || executionState;
         if (!activityState) return "";
-        const activityLabel = t(enrichmentLocked ? "理解中" : activityState === "stopping" ? "正在停止…" : activityState === "relay-failed" ? "Codex 会话连接失败" : activityState === "running" ? "工作中" : activityState === "scheduling" ? "调度中" : activityState === "scheduler-failed" ? "调度失败" : activityState === "claimed" ? "排队中" : activityState === "in_review" ? "待审核" : activityState === "completed" ? "已完成" : activityState === "blocked" ? "已阻塞" : activityState === "failed" ? "执行失败" : activityState === "interrupted" ? "已停止" : activityState === "not-started" ? "未开始" : "");
+        const activityLabel = t(issue?.enrichment_status === "regenerating" ? "标题生成中" : enrichmentLocked ? "理解中" : activityState === "title-regeneration-failed" ? "标题生成失败" : activityState === "stopping" ? "正在停止…" : activityState === "relay-failed" ? "Codex 会话连接失败" : activityState === "running" ? "工作中" : activityState === "scheduling" ? "调度中" : activityState === "scheduler-failed" ? "调度失败" : activityState === "claimed" ? "排队中" : activityState === "in_review" ? "待审核" : activityState === "completed" ? "已完成" : activityState === "blocked" ? "已阻塞" : activityState === "failed" ? "执行失败" : activityState === "interrupted" ? "已停止" : activityState === "not-started" ? "未开始" : "");
         const agent = state.agents.find(item => item.id === issue?.agent_id) || state.agents.find(item => item.is_default) || { name: "Codex", is_default: true };
         const activityIcon = activityState === "scheduling"
           ? '<span class="better-codex-activity-dot better-codex-scheduler-dot" aria-hidden="true"></span>'
@@ -9218,7 +9229,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         errorOutput.hidden = true;
         try {
           const current = await api("/api/issues/" + encodeURIComponent(issue.id));
-          if (current.archived_at || !current.agent_enabled || (dirtyDraftFields.has("assignee") && (draft.assignee === "none" || draft.assignee.startsWith("user:"))) || current.active_run_status || issueSessionId(current) || current.enrichment_status === "pending" || current.status === "done") {
+          if (current.archived_at || !current.agent_enabled || (dirtyDraftFields.has("assignee") && (draft.assignee === "none" || draft.assignee.startsWith("user:"))) || current.active_run_status || issueSessionId(current) || issuePermissions(current).enrichmentPending || current.status === "done") {
             refreshIssueState(current);
             throw new Error("issue_not_startable");
           }

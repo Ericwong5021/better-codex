@@ -178,7 +178,7 @@ function issueForWeb(store: HubStore, issue: ReturnType<HubStore["board"]>["issu
     assignee_user_id: issue.assignee_user_id,
     assignee_user: assigneeUser ? userForWeb(assigneeUser) : null,
     pending_actor: issue.pending_actor,
-    enrichment_status: null,
+    enrichment_status: issue.enrichment_status,
     reply_draft: "",
     reply_status: issue.reply_status,
     active_run_status: issue.active_run_status,
@@ -600,13 +600,15 @@ export function createHubServer(options: HubServerOptions) {
         notifyControl(command.device_id);
         return sendJson(response, 202, { issue_id: issue.id, command_id: command.command_id, status: command.status });
       }
-      const issueAction = url.pathname.match(/^\/api\/issues\/([^/]+)\/(move|start|stop|archive|unarchive)$/);
+      const issueAction = url.pathname.match(/^\/api\/issues\/([^/]+)\/(move|start|stop|regenerate-title|archive|unarchive)$/);
       if (issueAction && method === "POST") {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" });
         if (!trustedOrigin(request, true) || !csrfValid) return sendJson(response, 403, { error: "csrf_invalid" });
         const body = await readBody(request);
         const action = issueAction[2];
-        const operation = action === "archive" ? "issue.archive" : action === "unarchive" ? "issue.restore" : action === "start" ? "issue.start" : action === "stop" ? "issue.stop" : "issue.move";
+        const runtime = store.board().runtime;
+        if (action === "regenerate-title" && runtime?.protocol_version !== syncProtocolVersion) return sendJson(response, 409, { error: "incompatible_protocol" });
+        const operation = action === "archive" ? "issue.archive" : action === "unarchive" ? "issue.restore" : action === "start" ? "issue.start" : action === "stop" ? "issue.stop" : action === "regenerate-title" ? "issue.regenerate-title" : "issue.move";
         const payload = action === "move"
           ? { status: body.status, before_id: body.before_id }
           : action === "start"
