@@ -14,7 +14,7 @@ test("generated injection script is valid JavaScript", () => {
   assert.ok(source.includes("panel?.remove()"));
   assert.ok(source.includes("showAutoDispatchHelp(\"settings\")"));
   assert.ok(source.includes('HOST_KIND === "web" ? INITIAL_LOCALE : bootstrap.locale'));
-  assert.ok(source.includes('const REMOTE = window.betterCodexHost?.kind === "remote" || document.documentElement.dataset.betterCodexHost === "relay"'));
+  assert.ok(source.includes('const REMOTE = window.betterCodexHost?.kind === "remote" || RELAY'));
   assert.ok(source.includes('value.replace(/\\s+/g, "")'));
   assert.ok(source.includes('mockupText(issue.description).replace(/[#*_\`~>\[\]()]/g, "").replace(/\\s+/g, " ").trim()'));
   assert.doesNotMatch(source, /\.replace\(\/s\+\/g,/);

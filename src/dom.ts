@@ -298,7 +298,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const HOST_CAPABILITIES = window.betterCodexHost?.capabilities || {};
     const READ_ONLY = HOST_CAPABILITIES.issues === "read-only";
     const AGENTS_READ_ONLY = HOST_CAPABILITIES.agents === "read-only";
-    const REMOTE = window.betterCodexHost?.kind === "remote" || document.documentElement.dataset.betterCodexHost === "relay";
+    const RELAY = document.documentElement.dataset.betterCodexHost === "relay";
+    const REMOTE = window.betterCodexHost?.kind === "remote" || RELAY;
+    const SCHEDULED_AVAILABLE = !REMOTE || RELAY;
     if (READ_ONLY) document.documentElement.setAttribute("data-better-codex-read-only", "true");
     const HELP_MODE_MARKDOWN = ${helpModeMarkdown};
     const previous = window.__betterCodexInjection__;
@@ -395,7 +397,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const systemLocale = resolveSystemLocale(INITIAL_LOCALE);
     const MOCKUP_PROJECT_ID = "mockup-better-codex";
     const hasFeature = feature => ENABLED_FEATURES.has(feature);
-    const availableSurfaces = ["issues", ...(!REMOTE ? ["scheduled"] : []), "agents", ...(hasFeature("project-management") ? ["projects"] : [])];
+    const availableSurfaces = ["issues", ...(SCHEDULED_AVAILABLE ? ["scheduled"] : []), "agents", ...(hasFeature("project-management") ? ["projects"] : [])];
     const initialProjectRoute = hasFeature("project-management") ? webProjectRoute() : null;
     const initialAgentRoute = webAgentRoute();
     if (HOST_KIND === "web" && !hasFeature("project-management") && /^\\/web\\/projects(?:\\/|$)/.test(location.pathname)) history.replaceState({ betterCodex: true, betterCodexSurface: "issues" }, "", "/web");
@@ -2095,7 +2097,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       auxiliaryMenu.className = "web-nav-more-menu";
       auxiliaryMenu.setAttribute(OWNED, "true");
       auxiliaryMenu.setAttribute("aria-label", t("更多功能"));
-      if (!REMOTE) {
+      if (SCHEDULED_AVAILABLE) {
         scheduledMobileEntry = createEntry("定时任务", SCHEDULED_MOBILE_ENTRY_ID, "管理定时任务", "scheduled");
         scheduledMobileEntry.classList.add("web-nav-mobile-action");
       }
@@ -2191,7 +2193,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       } else if (entry.parentElement !== parent || entry !== parent.firstElementChild) {
         parent.prepend(entry);
       }
-      if (!scheduledEntry && !REMOTE) scheduledEntry = createEntry("定时任务", SCHEDULED_ENTRY_ID, "管理定时任务", "scheduled");
+      if (!scheduledEntry && SCHEDULED_AVAILABLE) scheduledEntry = createEntry("定时任务", SCHEDULED_ENTRY_ID, "管理定时任务", "scheduled");
       if (scheduledEntry) {
         syncEntryLabel(scheduledEntry, "定时任务", "管理定时任务");
         syncEntryIcon(scheduledEntry, "scheduled");
@@ -6576,7 +6578,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function openScheduledTaskDialog(task = null) {
-      if (state.mockup || REMOTE) return;
+      if (state.mockup || !SCHEDULED_AVAILABLE) return;
       document.getElementById("better-codex-scheduled-dialog")?.remove();
       const firstProject = state.projects.find(project => project.id === (task?.project_id || state.projectId) && project.workspace_path) || state.projects.find(project => project.workspace_path) || state.projects[0];
       const start = task?.starts_at || new Date(Math.ceil((Date.now() + 300_000) / 300_000) * 300_000).toISOString();
