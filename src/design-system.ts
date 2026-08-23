@@ -7799,21 +7799,6 @@ export function betterCodexDesignSystemCss() {
       }
     }
 
-    @keyframes better-codex-inspector-enter-mobile {
-      from {
-        width: 0;
-        min-width: 0;
-        opacity: 0;
-        transform: translateX(18px);
-      }
-      to {
-        width: 100%;
-        min-width: 0;
-        opacity: 1;
-        transform: translateX(0);
-      }
-    }
-
     @media (max-width: 720px) {
       #better-codex-panel[data-surface="agents"] {
         grid-template-rows: auto minmax(0, 1fr);
@@ -7870,15 +7855,14 @@ export function betterCodexDesignSystemCss() {
       #better-codex-panel .better-codex-agent-inspector,
       #better-codex-panel .better-codex-agent-inspector[data-resized="true"] { width: 100%; min-width: 0; }
       #better-codex-panel .better-codex-agent-inspector[data-agent-window="create"] {
-        width: calc(100vw - 24px);
-        height: min(88dvh, 820px);
-        max-height: calc(100dvh - 24px);
-      }
-      #better-codex-panel .better-codex-agent-inspector[data-agent-window="create"][data-fullscreen="true"] {
-        inset: 0;
-        width: 100vw;
-        height: 100dvh;
+        position: relative;
+        inset: auto;
+        width: 100%;
+        height: 100%;
         max-height: none;
+        margin: 0;
+        border-radius: 0;
+        box-shadow: none;
       }
       #better-codex-panel .better-codex-agent-inspector[data-agent-window="create"] .better-codex-agent-inspector-scroll {
         padding-inline: var(--bc-space-4);
@@ -7886,12 +7870,13 @@ export function betterCodexDesignSystemCss() {
       #better-codex-panel .better-codex-agent-inspector[data-agent-window="create"] .better-codex-agent-inspector-footer {
         padding-inline: var(--bc-space-4);
       }
+      #better-codex-panel .better-codex-agent-inspector [data-agent-window-expand] { display: none; }
       #better-codex-panel .better-codex-agent-inspector-resize { display: none; }
-      #better-codex-panel .better-codex-agent-inspector[data-animate="enter"] {
-        animation-name: better-codex-inspector-enter-mobile;
-      }
+      #better-codex-panel .better-codex-agent-inspector,
+      #better-codex-panel .better-codex-agent-inspector[data-animate="enter"],
       #better-codex-panel .better-codex-agent-inspector[data-agent-window="create"][data-animate="enter"] {
-        animation-name: better-codex-surface-enter;
+        animation: none;
+        transition: none;
       }
       #better-codex-panel .better-codex-agent-grid { grid-template-columns: 1fr; }
       #better-codex-dialog, #better-codex-agent-dialog, #better-codex-confirm, #better-codex-auto-dispatch-help-dialog, #better-codex-avatar-picker, #better-codex-avatar-cropper { width: calc(100vw - 24px); }

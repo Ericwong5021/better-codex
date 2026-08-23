@@ -338,10 +338,12 @@ test("opening an agent inspector hides the toolbar create action", () => {
   assert.match(betterCodexDesignSystemCss(), /\.better-codex-agent-actions\[hidden\]\s*\{[^}]*display:\s*none\s*!important/s);
 });
 
-test("agent inspector opens with animation and closes immediately to its list route", () => {
+test("agent inspector uses desktop entry motion and opens mobile pages fullscreen without motion", () => {
   const source = injectionScript(4317, "test-token", "install");
   const css = betterCodexDesignSystemCss();
   const closeInspector = source.slice(source.indexOf("function closeAgentInspector()"), source.indexOf("function agentInspector("));
+  const mobileStart = css.indexOf("@media (max-width: 720px)", css.indexOf("@keyframes better-codex-inspector-enter"));
+  const mobileCss = css.slice(mobileStart, css.indexOf("@media (hover: hover)", mobileStart));
   assert.ok(source.includes("function closeAgentInspector()"));
   assert.ok(closeInspector.includes('state.agentPane = "preview"'));
   assert.ok(closeInspector.includes("renderAgents()"));
@@ -350,9 +352,15 @@ test("agent inspector opens with animation and closes immediately to its list ro
   assert.ok(!closeInspector.includes("transitionend"));
   assert.ok(source.includes('data-animate="enter"'));
   assert.ok(source.includes('const animateEnter = previousPane === "preview" && state.agentPane !== "preview"'));
+  assert.ok(source.includes('const tag = creating && !mobilePage ? "dialog" : "aside"'));
+  assert.ok(source.includes('if (!inspector.matches("dialog"))'));
   assert.ok(source.includes("return void closeAgentInspectorAfterSave()"));
   assert.ok(source.includes('return "/web/agents"'));
   assert.match(css, /\.better-codex-agent-inspector\[data-animate="enter"\]\s*\{[^}]*animation:\s*better-codex-inspector-enter/s);
+  assert.match(mobileCss, /\.better-codex-agent-inspector\[data-agent-window="create"\]\s*\{[^}]*position:\s*relative;[^}]*width:\s*100%;[^}]*height:\s*100%;[^}]*border-radius:\s*0;/s);
+  assert.match(mobileCss, /\.better-codex-agent-inspector\[data-animate="enter"\],\s*#better-codex-panel \.better-codex-agent-inspector\[data-agent-window="create"\]\[data-animate="enter"\]\s*\{[^}]*animation:\s*none;[^}]*transition:\s*none;/s);
+  assert.match(mobileCss, /\[data-agent-window-expand\]\s*\{[^}]*display:\s*none;/s);
+  assert.doesNotMatch(mobileCss, /animation-name:/);
   assert.doesNotMatch(css, /\.better-codex-agent-inspector\.is-closing/);
   assert.match(css, /@keyframes better-codex-inspector-enter/);
 });

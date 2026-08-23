@@ -5074,7 +5074,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         { value: "danger-full-access", label: t("完全访问"), description: t("可不受限制地访问互联网和电脑上的任何文件"), icon: "permissionDanger", tone: "warning" },
       ];
       const animateAttr = options.animateEnter ? ' data-animate="enter"' : "";
-      const tag = creating ? "dialog" : "aside";
+      const mobilePage = HOST_KIND === "web" && window.matchMedia("(max-width: 720px)").matches;
+      const tag = creating && !mobilePage ? "dialog" : "aside";
       const windowAttr = creating ? ' data-agent-window="create" data-fullscreen="' + agentCreateFullscreen + '"' : "";
       const resizeHandle = creating ? "" : '<div class="better-codex-agent-inspector-resize" data-agent-inspector-resize role="separator" aria-orientation="vertical" aria-label="' + te("调整侧边栏宽度") + '" tabindex="0"></div>';
       const leading = creating ? '<div class="better-codex-agent-inspector-head-leading"><button class="better-codex-agent-window-back" type="button" data-agent-window-back aria-label="' + te("返回") + '">' + icon("back") + '</button><nav class="better-codex-agent-window-title" aria-label="' + te("智能体") + '"><span>' + te("智能体") + '</span><span aria-hidden="true">&gt;</span><strong>' + te("创建智能体") + '</strong></nav></div>' : '<span>' + heading + '</span>';
@@ -5115,6 +5116,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       container.innerHTML = '<div class="better-codex-agent-shell" data-pane="' + state.agentPane + '"><section class="better-codex-agent-directory"><header class="better-codex-agent-page-heading"><h1>' + te("智能体") + '</h1><p>' + te("创建和管理你的智能体") + '</p></header><div class="better-codex-agent-search-wrap">' + icon("search") + '<input class="better-codex-search" data-agent-search type="search" value="' + escapeHtml(state.agentSearch) + '" placeholder="' + te("搜索智能体") + '" aria-label="' + te("搜索智能体") + '"></div><div class="better-codex-agent-list">' + (rows || empty) + '</div>' + (state.agentView === "all" && !query ? '<div class="better-codex-agent-suggestions"><h3>' + te("建议") + '</h3>' + suggestions + '</div>' : "") + '</section>' + agentInspector(selected, { animateEnter }) + '</div>';
       const inspector = container.querySelector(".better-codex-agent-inspector");
       if (state.agentPane !== "create") return applyAgentInspectorWidth(inspector);
+      if (!inspector.matches("dialog")) {
+        agentCreateFullscreen = false;
+        return;
+      }
       inspector.addEventListener("cancel", event => {
         event.preventDefault();
         closeAgentInspector();
