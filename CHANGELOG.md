@@ -4,6 +4,12 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.10-beta.19] - 2026-08-24
+
+- Preserve native semantic and review commands, classify user-facing failures, and keep generated Issue titles outside persisted conversations.
+- Replay fragmented Relay responses safely, isolate protocol failures to their channels, and fence Session Host instances without mutating status checks.
+- Generate consistent PNG user avatars, remember fullscreen Issue preferences, refine scheduled-task controls, and separate process liveness from dependency readiness with storage diagnostics.
+
 ## [0.4.10-beta.18] - 2026-08-24
 
 - Preserve the board while polling, distinguish Relay and Runtime failures, and confirm updates that interrupt running work.
@@ -836,7 +842,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.18...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.19...HEAD
+[0.4.10-beta.19]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.18...v0.4.10-beta.19
 [0.4.10-beta.18]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.17...v0.4.10-beta.18
 [0.4.10-beta.17]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.16...v0.4.10-beta.17
 [0.4.10-beta.16]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.15...v0.4.10-beta.16
