@@ -6123,6 +6123,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           appendDiagnostic("remote_update_state", { status: update?.status || "", stage, progress: Math.round(progress), current_version: update?.currentVersion || "", target_version: update?.latestVersion || "", error: update?.error || "" });
         }
       };
+      const setRemoteText = (node, value) => {
+        if (node.textContent !== value) node.textContent = value;
+      };
       const renderRemoteStatus = (value, update = null) => {
         if (!remoteStatus) return;
         const remote = value?.remote;
@@ -6148,16 +6151,16 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         remoteUrlInput.value = String(remote.url || "");
         remoteConnectButton.disabled = !normalizedRemoteUrl();
         remoteStatus.dataset.remoteStatus = reachable ? "online" : "offline";
-        remoteStatusTitle.textContent = String(remote.name || "Better Codex Relay");
-        remoteStatusSubtitle.textContent = te("部署在 VPS") + " · " + String(remote.url || "");
-        remoteStatusBadge.textContent = te(reachable ? "服务在线" : "无法访问");
+        setRemoteText(remoteStatusTitle, String(remote.name || "Better Codex Relay"));
+        setRemoteText(remoteStatusSubtitle, te("部署在 VPS") + " · " + String(remote.url || ""));
+        setRemoteText(remoteStatusBadge, te(reachable ? "服务在线" : "无法访问"));
         remoteStatusDetails.hidden = false;
         renderRemoteUpgrade(update, true);
         remoteActions.hidden = false;
         remoteSessions.hidden = REMOTE || value.remote_mode !== "relay";
-        dialog.querySelector("[data-remote-version]").textContent = remote.version ? "v" + String(remote.version).replace(/^v/, "") : "--";
-        dialog.querySelector("[data-remote-protocol]").textContent = String(remote.protocol_version || "--");
-        dialog.querySelector("[data-remote-sync]").textContent = value.last_sync_at ? new Date(value.last_sync_at).toLocaleString(state.locale === "zh-CN" ? "zh-CN" : "en") : te("尚未同步");
+        setRemoteText(dialog.querySelector("[data-remote-version]"), remote.version ? "v" + String(remote.version).replace(/^v/, "") : "--");
+        setRemoteText(dialog.querySelector("[data-remote-protocol]"), String(remote.protocol_version || "--"));
+        setRemoteText(dialog.querySelector("[data-remote-sync]"), value.last_sync_at ? new Date(value.last_sync_at).toLocaleString(state.locale === "zh-CN" ? "zh-CN" : "en") : te("尚未同步"));
         remoteOpen.href = String(remote.url || "");
         if (!reachable && remote.error) {
           reportGlobalError(new Error(String(remote.error)), { source: "remote_status" });
@@ -6207,13 +6210,16 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           remoteSessionsList.innerHTML = "<p>" + te("设备读取失败") + ": " + escapeHtml(error instanceof Error ? error.message : String(error)) + "</p>";
         }
       };
-      loadRemoteStatus = async (force = false) => {
+      loadRemoteStatus = async (force = false, foreground = false) => {
         if (!remoteStatus || (remoteStatusLoaded && !force)) return;
+        const showLoading = foreground || !remoteStatusLoaded;
         remoteStatusLoaded = true;
-        remoteRefresh.disabled = true;
-        remoteRefresh.dataset.loading = "true";
-        remoteStatus.dataset.remoteStatus = "loading";
-        remoteStatusBadge.textContent = te("检测中");
+        if (showLoading) {
+          remoteRefresh.disabled = true;
+          remoteRefresh.dataset.loading = "true";
+          remoteStatus.dataset.remoteStatus = "loading";
+          remoteStatusBadge.textContent = te("检测中");
+        }
         try {
           const [status, update] = await Promise.all([
             api("/api/remote-access/status"),
@@ -6317,7 +6323,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           remoteError.hidden = false;
         }
       });
-      remoteRefresh?.addEventListener("click", () => void loadRemoteStatus(true));
+      remoteRefresh?.addEventListener("click", () => void loadRemoteStatus(true, true));
       remoteSessionsToggle?.addEventListener("click", () => {
         const expanded = remoteSessionsToggle.getAttribute("aria-expanded") !== "true";
         remoteSessionsToggle.setAttribute("aria-expanded", String(expanded));
@@ -6849,13 +6855,17 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const button = panel?.querySelector("#better-codex-auto-dispatch");
       if (!button) return;
       const label = state.autoDispatchPending ? "切换中…" : state.autoDispatch ? "自动运行" : "手动运行";
+      const markup = icon(state.autoDispatch || state.autoDispatchPending ? "refresh" : "user") + "<span>" + te(label) + "</span>";
       button.classList.toggle("is-on", state.autoDispatch);
       button.setAttribute("aria-pressed", String(state.autoDispatch));
       button.disabled = state.autoDispatchPending;
       button.setAttribute("aria-busy", String(state.autoDispatchPending));
       button.removeAttribute("title");
       button.setAttribute("aria-label", t(state.autoDispatch ? "切换为手动运行" : "切换为自动运行"));
-      button.innerHTML = icon(state.autoDispatch || state.autoDispatchPending ? "refresh" : "user") + "<span>" + te(label) + "</span>";
+      if (button.__betterCodexMarkup !== markup) {
+        button.innerHTML = markup;
+        button.__betterCodexMarkup = markup;
+      }
     }
 
     function syncMockupUi() {
@@ -6867,19 +6877,87 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (createToggle) createToggle.hidden = false;
     }
 
+    function syncBoardAttributes(current, next) {
+      Array.from(current.attributes).forEach(attribute => {
+        if (!next.hasAttribute(attribute.name)) current.removeAttribute(attribute.name);
+      });
+      Array.from(next.attributes).forEach(attribute => {
+        if (current.getAttribute(attribute.name) !== attribute.value) current.setAttribute(attribute.name, attribute.value);
+      });
+    }
+
+    function boardMarkupSignature(markup) {
+      return markup.replace(/better-codex-logo-gradient-\\d+/g, "better-codex-logo-gradient");
+    }
+
+    function syncBoardElement(current, next) {
+      const markup = next.innerHTML;
+      const signature = boardMarkupSignature(markup);
+      syncBoardAttributes(current, next);
+      if (current.__betterCodexMarkup === signature) return;
+      if (current.innerHTML !== markup) current.innerHTML = markup;
+      current.__betterCodexMarkup = signature;
+    }
+
+    function reconcileBoard(board, markup) {
+      const template = document.createElement("template");
+      template.innerHTML = markup;
+      const nextColumns = Array.from(template.content.children);
+      const currentColumns = new Map(Array.from(board.querySelectorAll(":scope > .better-codex-column")).map(column => [column.dataset.status, column]));
+      const currentCards = new Map(Array.from(board.querySelectorAll("[data-issue-id]")).map(card => [card.dataset.issueId, card]));
+      const retainedColumns = new Set();
+      nextColumns.forEach((nextColumn, columnIndex) => {
+        const status = nextColumn.dataset.status;
+        let currentColumn = currentColumns.get(status);
+        const nextHead = nextColumn.querySelector(":scope > .better-codex-column-head");
+        const nextCards = nextColumn.querySelector(":scope > .better-codex-cards");
+        const currentHead = currentColumn?.querySelector(":scope > .better-codex-column-head");
+        const currentCardsContainer = currentColumn?.querySelector(":scope > .better-codex-cards");
+        if (!currentColumn || !nextHead || !nextCards || !currentHead || !currentCardsContainer) {
+          currentColumn = nextColumn;
+          if (nextHead) nextHead.__betterCodexMarkup = boardMarkupSignature(nextHead.innerHTML);
+          Array.from(nextCards?.children || []).forEach(card => { card.__betterCodexMarkup = boardMarkupSignature(card.innerHTML); });
+        } else {
+          syncBoardAttributes(currentColumn, nextColumn);
+          syncBoardElement(currentHead, nextHead);
+          const retainedCards = new Set();
+          Array.from(nextCards.children).forEach((nextCard, cardIndex) => {
+            const issueId = nextCard.dataset.issueId;
+            let currentCard = issueId ? currentCards.get(issueId) : Array.from(currentCardsContainer.children).find(card => !card.dataset.issueId);
+            if (!currentCard || currentCard.tagName !== nextCard.tagName) {
+              currentCard = nextCard;
+              currentCard.__betterCodexMarkup = boardMarkupSignature(currentCard.innerHTML);
+            }
+            else syncBoardElement(currentCard, nextCard);
+            retainedCards.add(currentCard);
+            if (currentCardsContainer.children[cardIndex] !== currentCard) currentCardsContainer.insertBefore(currentCard, currentCardsContainer.children[cardIndex] || null);
+          });
+          Array.from(currentCardsContainer.children).forEach(card => {
+            if (!retainedCards.has(card)) card.remove();
+          });
+        }
+        retainedColumns.add(currentColumn);
+        if (board.children[columnIndex] !== currentColumn) board.insertBefore(currentColumn, board.children[columnIndex] || null);
+      });
+      Array.from(board.children).forEach(column => {
+        if (!retainedColumns.has(column)) column.remove();
+      });
+    }
+
     function render() {
       if (!panel) return;
       panel.dataset.surface = state.surface;
       if (HOST_KIND === "web" && state.surface !== "projects") document.title = t(state.surface === "agents" ? "智能体" : state.surface === "scheduled" ? "定时任务" : "任务看板") + " · Better Codex";
-      renderScheduledTasks();
-      renderAgents();
-      renderProjects();
       syncAutoDispatch();
       syncMockupUi();
+      if (state.surface === "scheduled") return renderScheduledTasks();
+      if (state.surface === "agents") return renderAgents();
+      if (state.surface === "projects") return renderProjects();
       const runningCount = state.issues.filter(issue => issueExecutionRunning(issue)).length;
       panel.querySelectorAll("[data-view]").forEach(button => button.classList.toggle("is-active", button.dataset.view === state.view));
       const working = panel.querySelector("#better-codex-working");
-      working.innerHTML = icon("bot") + '<span>' + te(runningCount + " 个智能体工作中") + "</span>";
+      const workingMarkup = icon("bot") + '<span>' + te(runningCount + " 个智能体工作中") + "</span>";
+      if (working.innerHTML !== workingMarkup) working.innerHTML = workingMarkup;
       working.dataset.runningCount = String(runningCount);
       working.setAttribute("aria-label", t(runningCount + " 个智能体工作中"));
       working.title = t(runningCount ? "查看运行中的任务" : "当前没有运行中的任务");
@@ -6888,7 +6966,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       working.hidden = false;
       const filterButton = panel.querySelector("#better-codex-filter");
       const filterCount = Object.values(state.filters).reduce((total, values) => total + values.length, 0);
-      filterButton.innerHTML = icon("filter") + "<span>" + te(filterCount ? filterCount + " 个筛选" : "筛选") + "</span>";
+      const filterMarkup = icon("filter") + "<span>" + te(filterCount ? filterCount + " 个筛选" : "筛选") + "</span>";
+      if (filterButton.innerHTML !== filterMarkup) filterButton.innerHTML = filterMarkup;
       filterButton.setAttribute("aria-label", t(filterCount ? filterCount + " 个筛选" : "筛选"));
       filterButton.classList.toggle("is-active", filterCount > 0);
       const visible = state.issues.filter(issue => {
@@ -6905,9 +6984,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         requestAnimationFrame(syncBoardScrollControl);
         return;
       }
-      const columnScrollPositions = new Map(Array.from(board.querySelectorAll(".better-codex-column")).map(column => [column.dataset.status, column.querySelector(".better-codex-cards")?.scrollTop || 0]));
       const visibleStatuses = [...Object.entries(statusLabels), ["archive", "归档"]];
-      board.innerHTML = visibleStatuses.map(([status, statusLabel]) => {
+      const boardMarkup = visibleStatuses.map(([status, statusLabel]) => {
         const archiveColumn = status === "archive";
         const issues = archiveColumn ? [] : visible.filter(issue => issue.status === status);
         const cards = issues.map(issue => {
@@ -6953,11 +7031,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           : '<button class="better-codex-column-icon" type="button" data-add-status="' + status + '" aria-label="' + te("新建任务") + '">' + icon("plus") + '</button>';
         return '<section class="better-codex-column" data-status="' + status + '"><div class="better-codex-column-head"><span class="better-codex-column-title">' + statusIcon(status) + '<span>' + te(statusLabel) + '</span>' + (archiveColumn ? "" : '<span>' + issues.length + '</span>') + '</span><span class="better-codex-column-actions">' + columnButton + '</span></div><div class="better-codex-cards">' + (cards || (archiveColumn ? '<div class="better-codex-empty">' + te("拖到这里即可归档") + '</div>' : "")) + '</div></section>';
       }).join("");
-      board.querySelectorAll(".better-codex-column").forEach(column => {
-        const cards = column.querySelector(".better-codex-cards");
-        const scrollTop = columnScrollPositions.get(column.dataset.status);
-        if (cards && scrollTop !== undefined) cards.scrollTop = scrollTop;
-      });
+      reconcileBoard(board, boardMarkup);
       requestAnimationFrame(syncBoardScrollControl);
     }
 
