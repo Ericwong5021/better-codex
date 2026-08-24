@@ -4,6 +4,12 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.10-beta.17] - 2026-08-24
+
+- Open the generic file picker for mobile Web attachments instead of limiting selection to images.
+- Recover the remote Web workspace after Runtime updates without requiring a manual refresh.
+- Run authenticated VPS upgrades from the Web workspace and report installation progress.
+
 ## [0.4.10-beta.16] - 2026-08-24
 
 - Expose local Codex skills, apps, file mentions, and slash commands through the authenticated Relay Web workspace.
@@ -821,7 +827,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.16...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.17...HEAD
+[0.4.10-beta.17]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.16...v0.4.10-beta.17
 [0.4.10-beta.16]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.15...v0.4.10-beta.16
 [0.4.10-beta.15]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.14...v0.4.10-beta.15
 [0.4.10-beta.14]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.13...v0.4.10-beta.14
