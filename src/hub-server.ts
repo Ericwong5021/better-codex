@@ -442,6 +442,16 @@ export function createHubServer(options: HubServerOptions) {
         notifyControl(command.device_id);
         return sendJson(response, 202, { command_id: command.command_id });
       }
+      const projectDelete = url.pathname.match(/^\/api\/projects\/([^/]+)$/);
+      if (projectDelete && method === "DELETE") {
+        if (!browser) return sendJson(response, 401, { error: "unauthorized" });
+        if (!trustedOrigin(request, true) || !csrfValid) return sendJson(response, 403, { error: "csrf_invalid" });
+        const project = store.board().projects.find(item => item.id === decodeURIComponent(projectDelete[1]));
+        if (!project) return sendJson(response, 404, { error: "project_not_found" });
+        const command = store.createRemoteCommand({ command_id: request.headers["x-better-codex-command-id"], operation: "project.delete", entity_id: project.id, base_revision: project.local_revision, payload: {} });
+        notifyControl(command.device_id);
+        return sendJson(response, 202, { command_id: command.command_id });
+      }
       if (url.pathname === "/api/system/directory" && method === "POST") {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" });
         if (!trustedOrigin(request, true) || !csrfValid) return sendJson(response, 403, { error: "csrf_invalid" });

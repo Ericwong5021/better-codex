@@ -894,10 +894,10 @@ export class HubStore {
     if (operation === "issue.stop" && !running) throw new Error("issue_not_running");
     if (payload.agent_id && !this.board().agents.some(agent => agent.id === payload.agent_id)) throw new Error("agent_not_found");
     const deviceId = this.writerDeviceId(settingOperation || createOperation ? "" : entityId, entityType);
-    if (operation === "issue.delete" || operation === "project.browse_directory" || operation === "issue.queue.update" || operation === "issue.queue.send" || operation === "issue.queue.delete" || operation === "issue.regenerate-title") {
+    if (operation === "issue.delete" || operation === "project.delete" || operation === "project.browse_directory" || operation === "issue.queue.update" || operation === "issue.queue.send" || operation === "issue.queue.delete" || operation === "issue.regenerate-title") {
       const runtimeRow = this.db.prepare("SELECT payload_json FROM runtime_projection WHERE device_id = ?").get(deviceId) as { payload_json: string } | undefined;
       const protocolVersion = runtimeRow ? (JSON.parse(runtimeRow.payload_json) as RuntimeProjection).protocol_version : null;
-      const incompatible = operation === "project.browse_directory" || operation === "issue.queue.update" || operation === "issue.queue.send" || operation === "issue.queue.delete" || operation === "issue.regenerate-title"
+      const incompatible = operation === "project.delete" || operation === "project.browse_directory" || operation === "issue.queue.update" || operation === "issue.queue.send" || operation === "issue.queue.delete" || operation === "issue.regenerate-title"
         ? protocolVersion !== syncProtocolVersion
         : protocolVersion !== syncProtocolVersion && protocolVersion !== previousSyncProtocolVersion;
       if (incompatible) throw new Error("incompatible_protocol");
@@ -1009,7 +1009,16 @@ export class HubStore {
         this.db.prepare("UPDATE entities SET deleted_at = ?, updated_at = ? WHERE entity_type = 'issue' AND entity_id = ? AND owner_device_id = ?").run(timestamp, timestamp, row.entity_id, deviceId);
         this.db.prepare("DELETE FROM conversations WHERE issue_id = ?").run(row.entity_id);
       }
-      if (ack.status === "applied" && row.operation !== "settings.auto-dispatch" && row.operation !== "project.pick_directory" && row.operation !== "project.browse_directory" && row.operation !== "issue.delete") {
+      if (ack.status === "applied" && row.operation === "project.delete") {
+        const timestamp = now();
+        this.db.prepare("UPDATE entities SET deleted_at = ?, updated_at = ? WHERE entity_type = 'project' AND entity_id = ? AND owner_device_id = ?").run(timestamp, timestamp, row.entity_id, deviceId);
+        const issues = this.db.prepare("SELECT entity_id FROM entities WHERE entity_type = 'issue' AND owner_device_id = ? AND deleted_at IS NULL AND json_extract(payload_json, '$.project_id') = ?").all(deviceId, row.entity_id) as Array<{ entity_id: string }>;
+        for (const issue of issues) {
+          this.db.prepare("UPDATE entities SET deleted_at = ?, updated_at = ? WHERE entity_type = 'issue' AND entity_id = ? AND owner_device_id = ?").run(timestamp, timestamp, issue.entity_id, deviceId);
+          this.db.prepare("DELETE FROM conversations WHERE issue_id = ?").run(issue.entity_id);
+        }
+      }
+      if (ack.status === "applied" && row.operation !== "settings.auto-dispatch" && row.operation !== "project.pick_directory" && row.operation !== "project.browse_directory" && row.operation !== "project.delete" && row.operation !== "issue.delete") {
         const entityType: SyncEntityType = row.operation.startsWith("project.") ? "project" : "issue";
         const projectionId = row.operation === "project.create" && ack.projection && "id" in ack.projection ? ack.projection.id : row.entity_id;
         const projection = cleanProjection(entityType, projectionId, ack.projection);

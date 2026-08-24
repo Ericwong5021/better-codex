@@ -1556,7 +1556,7 @@ export class Store {
     } satisfies IssueProjection;
   }
 
-  async applyRemoteCommand(command: RemoteCommand, handlers: { files?: (files: Array<{ name: string; type: string; data: string }>) => { paths: string[]; cleanup: () => void } | Promise<{ paths: string[]; cleanup: () => void }>; reply?: (issueId: string, requestId: string, message: string, files: Array<{ name: string; type: string; data: string }>) => void | Promise<void>; queue?: (issueId: string, requestId: string, action: "update" | "send" | "delete", message?: string) => void | Promise<void>; stop?: (issueId: string) => void | Promise<void>; regenerateTitle?: (issueId: string) => void | Promise<void>; projectCreate?: (projectId: string, name: string, workspacePath: string) => void | Promise<void>; projectOverview?: (projectId: string, agentId: string, feedback: string) => void | Promise<void>; projectPlanningReply?: (projectId: string, agentId: string, message: string) => void | Promise<void>; projectPlanningReset?: (projectId: string) => void | Promise<void>; chooseDirectory?: () => string | Promise<string>; browseDirectory?: (path: string) => DirectoryBrowserResult | Promise<DirectoryBrowserResult>; threadAction?: (issueId: string, action: IssueThreadAction) => void | Promise<void> } = {}): Promise<RemoteCommandAck> {
+  async applyRemoteCommand(command: RemoteCommand, handlers: { files?: (files: Array<{ name: string; type: string; data: string }>) => { paths: string[]; cleanup: () => void } | Promise<{ paths: string[]; cleanup: () => void }>; reply?: (issueId: string, requestId: string, message: string, files: Array<{ name: string; type: string; data: string }>) => void | Promise<void>; queue?: (issueId: string, requestId: string, action: "update" | "send" | "delete", message?: string) => void | Promise<void>; stop?: (issueId: string) => void | Promise<void>; regenerateTitle?: (issueId: string) => void | Promise<void>; projectCreate?: (projectId: string, name: string, workspacePath: string) => void | Promise<void>; projectDelete?: (projectId: string) => void | Promise<void>; projectOverview?: (projectId: string, agentId: string, feedback: string) => void | Promise<void>; projectPlanningReply?: (projectId: string, agentId: string, message: string) => void | Promise<void>; projectPlanningReset?: (projectId: string) => void | Promise<void>; chooseDirectory?: () => string | Promise<string>; browseDirectory?: (path: string) => DirectoryBrowserResult | Promise<DirectoryBrowserResult>; threadAction?: (issueId: string, action: IssueThreadAction) => void | Promise<void> } = {}): Promise<RemoteCommandAck> {
     const receipt = this.db.prepare("SELECT result_json FROM sync_command_receipts WHERE command_id = ?").get(command.command_id) as { result_json: string } | undefined;
     if (receipt) return JSON.parse(receipt.result_json) as RemoteCommandAck;
     const result = await (async () => {
@@ -1593,6 +1593,15 @@ export class Store {
           const project = this.getProject(command.entity_id);
           if (!project) throw new Error("project_create_failed");
           return { command_id: command.command_id, status: "applied", error: null, projection: this.syncProjection("project", project.id) as ProjectProjection } satisfies RemoteCommandAck;
+        }
+        if (command.operation === "project.delete") {
+          const project = this.getProject(command.entity_id);
+          if (!project) throw new Error("project_not_found");
+          if ((this.syncProjection("project", project.id) as ProjectProjection).local_revision !== command.base_revision) throw new Error("version_conflict");
+          if (!handlers.projectDelete) throw new Error("remote_project_delete_unavailable");
+          await handlers.projectDelete(project.id);
+          if (this.getProject(project.id)) throw new Error("project_delete_failed");
+          return { command_id: command.command_id, status: "applied", error: null, projection: null } satisfies RemoteCommandAck;
         }
         if (command.operation === "project.overview") {
           const project = this.getProject(command.entity_id);
@@ -2073,6 +2082,37 @@ export class Store {
   getProject(id: string) {
     const row = this.db.prepare("SELECT * FROM projects WHERE id = ?").get(id) as Record<string, unknown> | undefined;
     return row ? this.withProjectPlanning(projectFromRow(row)) : undefined;
+  }
+
+  projectRemoval(id: string) {
+    const project = this.getProject(id);
+    if (!project) throw new Error("project_not_found");
+    const issues = [...this.listIssues({ projectId: id }), ...this.listIssues({ projectId: id, archived: true })];
+    if (project.overview_status === "generating" || project.planning.status === "running") throw new Error("project_operation_running");
+    if (issues.some(issue => this.isEnrichmentPending(issue) || issue.active_run_status || issue.session_active_turn_id || ["starting", "active", "stopping", "waiting_on_approval", "waiting_on_user"].includes(issue.session_status || "") || this.getIssueReplyState(issue.id).status === "running")) throw new Error("project_operation_running");
+    return { project, issues };
+  }
+
+  deleteProject(id: string) {
+    const removal = this.projectRemoval(id);
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const timestamp = now();
+      for (const issue of removal.issues) {
+        this.enqueueThreadAction(issue.id, "delete", timestamp);
+        this.db.prepare("DELETE FROM issue_create_requests WHERE issue_id = ?").run(issue.id);
+        this.db.prepare("DELETE FROM issue_replies WHERE issue_id = ?").run(issue.id);
+        this.db.prepare("DELETE FROM issue_runs WHERE issue_id = ?").run(issue.id);
+        this.db.prepare("DELETE FROM issues WHERE id = ?").run(issue.id);
+      }
+      const result = this.db.prepare("DELETE FROM projects WHERE id = ?").run(id);
+      if (result.changes !== 1) throw new Error("project_not_found");
+      this.db.exec("COMMIT");
+      return { project: removal.project, issue_count: removal.issues.length };
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   startProjectPlanningTurn(id: string, agentId: string, message: string) {

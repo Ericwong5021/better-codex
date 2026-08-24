@@ -795,6 +795,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "切换为深色主题": "Switch to dark theme",
       "切换为浅色主题": "Switch to light theme",
       "创建项目": "Create project",
+      "删除项目": "Delete project",
+      "项目、任务与规划会从 Better Codex 和 Codex 清单移除，磁盘文件夹和文件会保留。": "The project, tasks, and planning will be removed from Better Codex and the Codex list. The folder and files on disk will remain.",
+      "项目正在运行或生成内容，请等待完成后再删除。": "The project has running work or generated content in progress. Wait for it to finish before deleting the project.",
+      "Codex 项目清单无法读取，未删除任何内容。": "The Codex project list could not be read. Nothing was deleted.",
+      "Codex 项目清单中找不到这个项目，未删除任何内容。": "This project was not found in the Codex project list. Nothing was deleted.",
+      "项目删除失败，Codex 项目清单也未能自动恢复，请立即检查 Codex 项目列表。": "Project deletion failed, and the Codex project list could not be restored automatically. Check the Codex project list now.",
       "项目名称": "Project name",
       "项目文件夹": "Project folder",
       "选择文件夹": "Choose folder",
@@ -1479,6 +1485,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #\${PANEL_ID} .better-codex-project-issue-toggle:hover > svg { transform: translateX(2px); }
         #\${PANEL_ID} .better-codex-project-dashboard { display: grid; gap: 14px; }
         #\${PANEL_ID} .better-codex-project-dashboard-head { display: flex; min-width: 0; align-items: flex-start; justify-content: space-between; gap: 24px; padding: 4px 2px 0; }
+        #\${PANEL_ID} .better-codex-project-dashboard-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 10px; }
+        #\${PANEL_ID} .better-codex-project-dashboard-delete { display: inline-flex; min-height: 32px; align-items: center; gap: 7px; border: 0; border-radius: var(--bc-radius-sm,10px); color: var(--bc-muted); background: transparent; padding: 0 10px; font: inherit; font-size: var(--bc-text-sm); cursor: pointer; }
+        #\${PANEL_ID} .better-codex-project-dashboard-delete:hover { color: var(--bc-danger); background: var(--bc-danger-soft); }
+        #\${PANEL_ID} .better-codex-project-dashboard-delete:focus-visible { color: var(--bc-danger); outline: 2px solid var(--bc-ring); outline-offset: 2px; }
+        #\${PANEL_ID} .better-codex-project-dashboard-delete:active { transform: scale(.96); }
         #\${PANEL_ID} .better-codex-project-dashboard-title { min-width: 0; }
         #\${PANEL_ID} .better-codex-project-dashboard-title > div { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; }
         #\${PANEL_ID} .better-codex-project-dashboard-title h1 { margin: 0; font-size: clamp(24px,2.2vw,34px); font-weight: 680; line-height: 1.2; letter-spacing: -.025em; }
@@ -1774,7 +1785,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         @media (hover:hover) { #\${PANEL_ID} .better-codex-project-document-tab:hover { color: var(--bc-foreground); background: var(--bc-hover); } }
         @media (max-width: 1120px) { #\${PANEL_ID} .better-codex-project-dashboard-summary { grid-template-columns: repeat(2,minmax(0,1fr)); } #\${PANEL_ID} .better-codex-project-cycle { grid-column: 1 / -1; } }
         @media (max-width: 980px) { #\${PANEL_ID} .better-codex-project-summary, #\${PANEL_ID} .better-codex-project-columns, #\${PANEL_ID} .better-codex-project-dashboard-lists, #\${PANEL_ID} .better-codex-project-planning-layout { grid-template-columns: 1fr; } #\${PANEL_ID} .better-codex-project-columns { height: auto; } #\${PANEL_ID} .better-codex-project-panel:first-child { height: min(50dvh,480px); min-height: 320px; } #\${PANEL_ID} .better-codex-project-document-panel { height: min(86dvh,820px); min-height: 620px; } #\${PANEL_ID} .better-codex-project-planning-layout { min-height: 0; } #\${PANEL_ID} .better-codex-project-plan, #\${PANEL_ID} .better-codex-project-planning-chat { height: min(78dvh,760px); min-height: 560px; } }
-        @media (max-width: 640px) { #\${PANEL_ID} .better-codex-projects { padding: 12px 12px 24px; } #\${PANEL_ID} .better-codex-project-list, #\${PANEL_ID} .better-codex-project-dashboard-summary, #\${PANEL_ID} .better-codex-project-overview-milestones > div { grid-template-columns: 1fr; } #\${PANEL_ID} .better-codex-project-summary { padding: 18px; } #\${PANEL_ID} .better-codex-project-columns { grid-template-columns: minmax(0,1fr); } #\${PANEL_ID} .better-codex-project-document-tab { padding-inline: 8px; } #\${PANEL_ID} .better-codex-project-document-tab svg { display: none; } #\${PANEL_ID} .better-codex-project-document-form > div { grid-template-columns: 1fr; } #\${PANEL_ID} .better-codex-project-dashboard-head { gap: 12px; } #\${PANEL_ID} .better-codex-project-dashboard-people { display: none; } #\${PANEL_ID} .better-codex-project-cycle { grid-column: auto; grid-template-columns: 100px minmax(0,1fr); } #\${PANEL_ID} .better-codex-project-timeline { padding-inline: 14px; } #\${PANEL_ID} .better-codex-project-timeline-legend { display: none; } #\${PANEL_ID} .better-codex-project-milestones { grid-template-columns: 1fr; } #\${PANEL_ID} .better-codex-project-work-row { grid-template-columns: 18px 62px minmax(0,1fr); } #\${PANEL_ID} .better-codex-project-work-state { display: none; } #\${PANEL_ID} .better-codex-project-collaborator-list { grid-template-columns: 1fr; } #\${PANEL_ID} .better-codex-project-collaborator { border-top: 1px solid var(--bc-divider); border-left: 0; padding: 10px 0; } #\${PANEL_ID} .better-codex-project-collaborator:first-child { border-top: 0; } #\${PANEL_ID} .better-codex-project-overview-milestones .better-codex-project-plan-item { border-top: 1px solid var(--bc-divider); border-left: 0; padding: 12px 0; } #\${PANEL_ID} .better-codex-project-planning-panel-head { padding-inline: 14px; } #\${PANEL_ID} .better-codex-project-plan-scroll { padding-inline: 14px; } #\${PANEL_ID} .better-codex-project-plan-item { grid-template-columns: 24px minmax(0,1fr); gap: 7px; } }
+        @media (max-width: 640px) { #\${PANEL_ID} .better-codex-projects { padding: 12px 12px 24px; } #\${PANEL_ID} .better-codex-project-list, #\${PANEL_ID} .better-codex-project-dashboard-summary, #\${PANEL_ID} .better-codex-project-overview-milestones > div { grid-template-columns: 1fr; } #\${PANEL_ID} .better-codex-project-summary { padding: 18px; } #\${PANEL_ID} .better-codex-project-columns { grid-template-columns: minmax(0,1fr); } #\${PANEL_ID} .better-codex-project-document-tab { padding-inline: 8px; } #\${PANEL_ID} .better-codex-project-document-tab svg { display: none; } #\${PANEL_ID} .better-codex-project-document-form > div { grid-template-columns: 1fr; } #\${PANEL_ID} .better-codex-project-dashboard-head { gap: 12px; } #\${PANEL_ID} .better-codex-project-dashboard-people, #\${PANEL_ID} .better-codex-project-dashboard-delete span { display: none; } #\${PANEL_ID} .better-codex-project-dashboard-delete { width: 32px; justify-content: center; padding: 0; } #\${PANEL_ID} .better-codex-project-cycle { grid-column: auto; grid-template-columns: 100px minmax(0,1fr); } #\${PANEL_ID} .better-codex-project-timeline { padding-inline: 14px; } #\${PANEL_ID} .better-codex-project-timeline-legend { display: none; } #\${PANEL_ID} .better-codex-project-milestones { grid-template-columns: 1fr; } #\${PANEL_ID} .better-codex-project-work-row { grid-template-columns: 18px 62px minmax(0,1fr); } #\${PANEL_ID} .better-codex-project-work-state { display: none; } #\${PANEL_ID} .better-codex-project-collaborator-list { grid-template-columns: 1fr; } #\${PANEL_ID} .better-codex-project-collaborator { border-top: 1px solid var(--bc-divider); border-left: 0; padding: 10px 0; } #\${PANEL_ID} .better-codex-project-collaborator:first-child { border-top: 0; } #\${PANEL_ID} .better-codex-project-overview-milestones .better-codex-project-plan-item { border-top: 1px solid var(--bc-divider); border-left: 0; padding: 12px 0; } #\${PANEL_ID} .better-codex-project-planning-panel-head { padding-inline: 14px; } #\${PANEL_ID} .better-codex-project-plan-scroll { padding-inline: 14px; } #\${PANEL_ID} .better-codex-project-plan-item { grid-template-columns: 24px minmax(0,1fr); gap: 7px; } }
         @media (max-width: 640px) { #\${PANEL_ID} .better-codex-project-plan-timeline > header { align-items: flex-start; } #\${PANEL_ID} .better-codex-project-plan-timeline > header > span { max-width: 15ch; text-align: right; } #\${PANEL_ID} .better-codex-project-plan-timeline li { grid-template-columns: 72px 16px minmax(0,1fr); gap: 7px; } }
         @media (prefers-reduced-motion:reduce) { #\${PANEL_ID} .better-codex-project-issues-loading > span, #\${PANEL_ID} .better-codex-project-document-progress svg, #\${PANEL_ID} .better-codex-project-document-segments i, #\${PANEL_ID} .better-codex-project-document-tab > i, #\${PANEL_ID} .better-codex-project-document-notice svg, #\${PANEL_ID} .better-codex-project-document-orbit, #\${PANEL_ID} .better-codex-project-document-skeleton i, #\${PANEL_ID} .better-codex-project-planning-running svg, #\${PANEL_ID} .better-codex-project-planning-form .better-codex-submit:disabled svg { animation: none; } }
         #\${PANEL_ID} .better-codex-agent-heading { display: none; min-width: 0; align-items: baseline; gap: 4px; }
@@ -3174,6 +3185,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (value === "manual_start_required") return t("当前为手动运行，请先点击“立即开始任务”。");
       if (value === "backlog_reply_blocked") return t("待规划中的 Issue 不会自动触发任务，请先移出待规划区。");
       if (value === "project_required") return t("无法确定会话所属项目。请先把会话放入一个项目。");
+      if (value === "project_operation_running") return t("项目正在运行或生成内容，请等待完成后再删除。");
+      if (["codex_state_invalid", "codex_projects_invalid"].includes(value)) return t("Codex 项目清单无法读取，未删除任何内容。");
+      if (["codex_project_not_found", "codex_project_ambiguous"].includes(value)) return t("Codex 项目清单中找不到这个项目，未删除任何内容。");
+      if (value === "project_delete_rollback_failed") return t("项目删除失败，Codex 项目清单也未能自动恢复，请立即检查 Codex 项目列表。");
       if (value === "issue_description_too_long") return t("任务内容超过长度限制，请缩短内容或作为附件上传。");
       if (value === "browser_transport_failed") return t("网络连接不稳定，正在等待恢复。");
       if (["runtime_response_invalid", "invalid_projects_response", "invalid_issues_response", "invalid_agents_response"].includes(value)) return t("列表数据暂时无法读取，请稍后重试。");
@@ -5418,10 +5433,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const healthLabel = blocked ? t("有风险") : attention.length ? t("需关注") : t("进展正常");
       const activeAgentIds = new Set(activeIssues.filter(issue => issue.agent_enabled && ["in_progress", "in_review", "blocked"].includes(issue.status)).map(issue => String(issue.agent_id || "default")));
       const projectAgentIds = new Set(activeIssues.filter(issue => issue.agent_enabled).map(issue => String(issue.agent_id || "default")));
-      const agents = state.agents.filter(agent => projectAgentIds.has(agentKey(agent))).sort((left, right) => Number(activeAgentIds.has(agentKey(right))) - Number(activeAgentIds.has(agentKey(left))).slice(0, 3);
+      const agents = state.agents.filter(agent => projectAgentIds.has(agentKey(agent))).sort((left, right) => Number(activeAgentIds.has(agentKey(right))) - Number(activeAgentIds.has(agentKey(left)))).slice(0, 3);
       const agentAvatars = agents.map(agent => agentAvatarMarkup(agent, "better-codex-project-dashboard-avatar")).join("");
       const page = state.projectPage === "planning" ? "planning" : "overview";
-      const header = '<header class="better-codex-project-dashboard-head"><div class="better-codex-project-dashboard-title"><div><h1>' + escapeHtml(projectLabel(project)) + '</h1><span class="better-codex-project-health" data-tone="' + healthTone + '">' + escapeHtml(healthLabel) + '</span></div><p>' + escapeHtml(project.description || t("尚未生成项目介绍")) + '</p></div>' + (agentAvatars ? '<div class="better-codex-project-dashboard-people" aria-label="' + te("项目智能体") + '">' + agentAvatars + '</div>' : "") + '</header><nav class="better-codex-project-dashboard-tabs" aria-label="' + te("项目页面") + '"><button type="button" data-project-dashboard-view="overview"' + (page === "overview" ? ' aria-current="page"' : "") + '>' + te("概览") + '</button><button type="button" data-project-dashboard-view="planning"' + (page === "planning" ? ' aria-current="page"' : "") + '>' + te("规划") + '</button><button type="button" data-project-dashboard-work>' + te("工作") + '</button></nav>';
+      const headerActions = '<div class="better-codex-project-dashboard-actions">' + (agentAvatars ? '<div class="better-codex-project-dashboard-people" aria-label="' + te("项目智能体") + '">' + agentAvatars + '</div>' : "") + '<button class="better-codex-project-dashboard-delete" type="button" data-project-delete="' + escapeHtml(project.id) + '" aria-label="' + te("删除项目") + '" title="' + te("删除项目") + '">' + icon("trash") + '<span>' + te("删除项目") + '</span></button></div>';
+      const header = '<header class="better-codex-project-dashboard-head"><div class="better-codex-project-dashboard-title"><div><h1>' + escapeHtml(projectLabel(project)) + '</h1><span class="better-codex-project-health" data-tone="' + healthTone + '">' + escapeHtml(healthLabel) + '</span></div><p>' + escapeHtml(project.description || t("尚未生成项目介绍")) + '</p></div>' + headerActions + '</header><nav class="better-codex-project-dashboard-tabs" aria-label="' + te("项目页面") + '"><button type="button" data-project-dashboard-view="overview"' + (page === "overview" ? ' aria-current="page"' : "") + '>' + te("概览") + '</button><button type="button" data-project-dashboard-view="planning"' + (page === "planning" ? ' aria-current="page"' : "") + '>' + te("规划") + '</button><button type="button" data-project-dashboard-work>' + te("工作") + '</button></nav>';
       if (page === "planning") return '<section class="better-codex-project-dashboard">' + header + projectPlanningMarkup(project) + '</section>';
       const priority = { blocked: 0, in_review: 1, in_progress: 2, todo: 3, backlog: 4, done: 5 };
       const work = [...activeIssues].filter(issue => ["blocked", "in_review", "in_progress", "todo"].includes(issue.status)).sort((left, right) => (priority[left.status] ?? 9) - (priority[right.status] ?? 9) || String(right.updated_at).localeCompare(String(left.updated_at))).slice(0, 5);
@@ -5646,6 +5662,31 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         syncWebProjectRoute("", "replace");
         renderProjects();
         return;
+      }
+      const projectDelete = event.target.closest("[data-project-delete]");
+      if (projectDelete) {
+        const projectId = projectDelete.dataset.projectDelete || "";
+        const project = state.projects.find(item => item.id === projectId);
+        if (!project) return;
+        appendDiagnostic("project_delete_requested", { project_id: projectId, workspace_path_present: Boolean(project.workspace_path) });
+        return void confirmAction("删除项目", "项目、任务与规划会从 Better Codex 和 Codex 清单移除，磁盘文件夹和文件会保留。", "删除项目").then(confirmed => confirmed && perform(async () => {
+          const result = await api("/api/projects/" + encodeURIComponent(projectId), { method: "DELETE", body: "{}" });
+          if (result.command_id) {
+            const command = await waitForRemoteCommand(result.command_id);
+            if (command.status !== "applied") throw new Error(command.error || "command_rejected");
+          }
+          projectPlanningDrafts.delete(projectId);
+          state.projects = state.projects.filter(item => item.id !== projectId);
+          state.issues = state.issues.filter(item => item.project_id !== projectId);
+          state.projectIssues = [];
+          state.projectIssuesProjectId = "";
+          state.projectDetailId = "";
+          state.projectId = "";
+          localStorage.removeItem(PROJECT_KEY);
+          syncWebProjectRoute("", "replace");
+          appendDiagnostic("project_delete_completed", { project_id: projectId, workspace_deleted: false });
+          await loadProjects();
+        }));
       }
       const dashboardView = event.target.closest("[data-project-dashboard-view]");
       if (dashboardView) {

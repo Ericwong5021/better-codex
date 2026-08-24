@@ -541,6 +541,45 @@ function createCodexProject(store: Store, nameValue: unknown, workspaceValue: un
   return projectId ? store.createProject({ ...input, id: projectId }) : store.ensureProject(input);
 }
 
+function writeCodexState(value: string) {
+  const temporary = join(dirname(codexStatePath), `.codex-global-state-${randomUUID()}.tmp`);
+  writeFileSync(temporary, value, { mode: 0o600 });
+  renameSync(temporary, codexStatePath);
+}
+
+function removeCodexProject(store: Store, projectId: string) {
+  const removal = store.projectRemoval(projectId);
+  const externalId = removal.project.external_id || removal.project.id;
+  let original: string;
+  let state: Record<string, unknown>;
+  try {
+    original = readFileSync(codexStatePath, "utf8");
+    state = JSON.parse(original) as Record<string, unknown>;
+  } catch {
+    throw new Error("codex_state_invalid");
+  }
+  const current = state["local-projects"];
+  if (!current || typeof current !== "object" || Array.isArray(current)) throw new Error("codex_projects_invalid");
+  const localProjects = { ...(current as Record<string, unknown>) };
+  const matches = Object.entries(localProjects).filter(([key, value]) => key === externalId || value && typeof value === "object" && !Array.isArray(value) && cleanString((value as Record<string, unknown>).id, 200) === externalId);
+  if (!matches.length) throw new Error("codex_project_not_found");
+  if (matches.length > 1) throw new Error("codex_project_ambiguous");
+  delete localProjects[matches[0][0]];
+  state["local-projects"] = localProjects;
+  writeCodexState(JSON.stringify(state));
+  try {
+    const deleted = store.deleteProject(projectId);
+    return { ok: true, project_id: projectId, issue_count: deleted.issue_count, workspace_deleted: false };
+  } catch (error) {
+    try {
+      writeCodexState(original);
+    } catch (rollbackError) {
+      throw new AggregateError([error, rollbackError], "project_delete_rollback_failed");
+    }
+    throw error;
+  }
+}
+
 function asLabels(value: unknown) {
   if (value === undefined) return [];
   if (!Array.isArray(value) || value.some(item => typeof item !== "string")) throw new Error("invalid_labels");
@@ -773,6 +812,11 @@ export function startServer() {
       const issue = store.getIssue(issueId);
       if (!issue) throw new Error("issue_not_found");
       await worker.regenerateIssueTitle(issue);
+    },
+    projectId => {
+      removeCodexProject(store, projectId);
+      worker.wake();
+      publishChange();
     },
   );
   let activeRuntimePort = 0;
@@ -1098,6 +1142,16 @@ export function startServer() {
           state.projects.push({ id: projectId, external_id: projectId, name: cleanString(body.name, 120), workspace_path: workspacePath, root_paths: workspacePath ? [workspacePath] : [], description: "", overview_html: "", overview_status: "idle", overview_error: null, overview_updated_at: null, planning: { status: "idle", error: null, agent_id: null, revision: 0, updated_at: null, messages: [], plan: null } });
         }).state;
         return sendJson(response, 201, updated.projects.find(project => project.id === projectId));
+      }
+      if (mockupEnabled && path[0] === "api" && path[1] === "projects" && path[2] && path.length === 3 && method === "DELETE") {
+        const projectId = decodeURIComponent(path[2]);
+        updateMockupState(mockupLocale, state => {
+          const index = state.projects.findIndex(project => project.id === projectId);
+          if (index < 0) throw new Error("project_not_found");
+          state.projects.splice(index, 1);
+          state.issues = state.issues.filter(issue => issue.project_id !== projectId);
+        });
+        return sendJson(response, 200, { ok: true, project_id: projectId, workspace_deleted: false });
       }
       if (mockupEnabled && url.pathname === "/api/agents" && method === "POST") {
         const body = await readBody(request);
@@ -1598,6 +1652,12 @@ export function startServer() {
       if (path[0] === "api" && path[1] === "projects" && path[2] && path.length === 3 && method === "GET") {
         const project = store.getProject(decodeURIComponent(path[2]));
         return project ? sendJson(response, 200, project) : sendJson(response, 404, { error: "project_not_found" });
+      }
+      if (path[0] === "api" && path[1] === "projects" && path[2] && path.length === 3 && method === "DELETE") {
+        const result = removeCodexProject(store, decodeURIComponent(path[2]));
+        worker.wake();
+        publishChange();
+        return sendJson(response, 200, result);
       }
       if (path[0] === "api" && path[1] === "projects" && path[2] && path[3] === "semantics" && path.length === 4 && method === "GET") {
         const project = store.getProject(decodeURIComponent(path[2]));
