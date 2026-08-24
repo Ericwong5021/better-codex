@@ -9177,13 +9177,11 @@ export function betterCodexDesignSystemCss() {
       flex: 0 0 auto;
       align-items: center;
       justify-content: space-between;
-      border-color: var(--bc-color-hairline);
-      background: var(--bc-color-surface);
+      background: var(--bc-color-canvas);
     }
 
     #better-codex-scheduled-dialog header {
       min-height: 68px;
-      border-bottom: 1px solid var(--bc-color-hairline);
       padding: 0 var(--bc-space-4) 0 var(--bc-space-5);
     }
 
@@ -9297,7 +9295,7 @@ export function betterCodexDesignSystemCss() {
       padding: 9px 11px;
       font: inherit;
       font-size: var(--bc-text-sm);
-      box-shadow: var(--bc-inset-hairline);
+      box-shadow: none;
     }
 
     #better-codex-scheduled-dialog textarea {
@@ -9321,9 +9319,8 @@ export function betterCodexDesignSystemCss() {
       flex-direction: row;
       gap: var(--bc-space-4);
       border-radius: var(--bc-radius-md);
-      background: var(--bc-color-surface);
+      background: transparent;
       padding: 9px 12px;
-      box-shadow: var(--bc-inset-hairline);
     }
 
     #better-codex-scheduled-dialog .better-codex-scheduled-switch span {
@@ -9346,11 +9343,45 @@ export function betterCodexDesignSystemCss() {
     }
 
     #better-codex-scheduled-dialog .better-codex-scheduled-switch input {
-      width: 18px;
-      min-height: 18px;
-      flex: 0 0 18px;
-      accent-color: var(--bc-color-primary);
+      position: relative;
+      width: 34px;
+      min-height: 20px;
+      height: 20px;
+      flex: 0 0 34px;
+      margin: 0;
+      appearance: none;
+      border-radius: var(--bc-radius-pill);
+      background: var(--bc-color-control);
       box-shadow: none;
+      cursor: pointer;
+      transition: background-color var(--bc-motion-fast) ease-out;
+    }
+
+    #better-codex-scheduled-dialog .better-codex-scheduled-switch input::after {
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 14px;
+      height: 14px;
+      border-radius: var(--bc-radius-pill);
+      background: var(--bc-color-surface-raised);
+      box-shadow: var(--bc-elevation-card);
+      content: "";
+      transition: transform var(--bc-motion-fast) var(--bc-ease-out), background-color var(--bc-motion-fast) ease-out;
+    }
+
+    #better-codex-scheduled-dialog .better-codex-scheduled-switch input:checked {
+      background: var(--bc-color-primary);
+    }
+
+    #better-codex-scheduled-dialog .better-codex-scheduled-switch input:checked::after {
+      transform: translateX(14px);
+      background: var(--bc-color-on-primary);
+    }
+
+    #better-codex-scheduled-dialog .better-codex-scheduled-switch input:disabled {
+      cursor: not-allowed;
+      opacity: .55;
     }
 
     #better-codex-scheduled-dialog .better-codex-scheduled-interval {
@@ -9380,7 +9411,6 @@ export function betterCodexDesignSystemCss() {
       min-height: 64px;
       justify-content: flex-end;
       gap: var(--bc-space-2);
-      border-top: 1px solid var(--bc-color-hairline);
       padding-inline: var(--bc-space-4);
     }
 
