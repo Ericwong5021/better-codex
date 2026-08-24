@@ -126,6 +126,11 @@ test("web host boots the shared DOM injection behind a local session", async () 
     assert.doesNotMatch(hostScript, /authorization: "Bearer " \+ request\.token/);
     assert.match(hostScript, /response\.status === 401/);
     assert.match(hostScript, /response\.status === 503 && value\.error === "runtime_offline"/);
+    assert.match(hostScript, /update_recovery_started/);
+    assert.match(hostScript, /update_recovery_connected/);
+    assert.match(hostScript, /location\.reload\(\)/);
+    assert.match(hostScript, /cancelUpdateRecovery: cancelRemoteUpdateRecovery/);
+    assert.match(hostScript, /reloadAfterUpdate: reloadAfterRemoteUpdate/);
     assert.match(hostScript, /if \(connectDialog\.open\) connectDialog\.close\(\)/);
     assert.match(hostScript, /远程连接暂时中断，连接恢复后将自动重试/);
     assert.match(hostScript, /window\.betterCodexHost = Object\.freeze/);

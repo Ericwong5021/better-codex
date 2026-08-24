@@ -21,7 +21,7 @@ test("generated injection script is valid JavaScript", () => {
   assert.ok(source.includes('value.replace(/\\s+/g, "")'));
   assert.ok(source.includes('mockupText(issue.description).replace(/[#*_\`~>\[\]()]/g, "").replace(/\\s+/g, " ").trim()'));
   assert.doesNotMatch(source, /\.replace\(\/s\+\/g,/);
-  assert.doesNotMatch(source, /window\.location\.reload\(\)/);
+  assert.ok(source.includes("window.betterCodexHost?.reloadAfterUpdate"));
   assert.doesNotMatch(source, /localizeOwnedTree|localizedText|translateText/);
 });
 

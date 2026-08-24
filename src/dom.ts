@@ -3293,6 +3293,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           title.textContent = t("Better Codex 已是最新版本");
           description.textContent = REMOTE ? t("远程服务升级完成。") : t("更新已完成。");
           notice.querySelector(".better-codex-update-actions").remove();
+          if (REMOTE && typeof window.betterCodexHost?.reloadAfterUpdate === "function") {
+            window.betterCodexHost.reloadAfterUpdate();
+            return;
+          }
           setTimeout(() => {
             if (updateNotice !== notice) return;
             notice.remove();
@@ -3404,6 +3408,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           await waitForUpdateCompletion(notice);
         } catch (reason) {
           if (updateNotice !== notice) return;
+          window.betterCodexHost?.cancelUpdateRecovery?.("update_install_failed");
           reportGlobalError(reason, { source: "update_install" });
           notice.dataset.status = "install-error";
           install.disabled = false;

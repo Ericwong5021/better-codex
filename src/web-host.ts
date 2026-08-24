@@ -323,6 +323,9 @@ let cachedUsage;
 let installPrompt;
 let relayRetryTimer;
 let relayOfflineReported = false;
+let remoteUpdateRecoveryDeadline = 0;
+let remoteUpdateTargetVersion = "";
+let remoteUpdateRecoveryReloading = false;
 const hostDiagnosticLog = [];
 const hostErrorQueue = [];
 let hostErrorIndex = 0;
@@ -639,6 +642,7 @@ async function restoreRemoteSession() {
 }
 
 function expireSession() {
+  cancelRemoteUpdateRecovery("session_expired");
   sessionToken = "";
   csrfToken = "";
   webUser = null;
@@ -652,15 +656,96 @@ function expireSession() {
   reportHostError(new Error(connectError.textContent), { source: "session_expired" }, false);
 }
 
-function scheduleRelayRecovery() {
-  if (!RELAY || relayRetryTimer) return;
+function remoteUpdateRecoveryActive() {
+  return REMOTE && remoteUpdateRecoveryDeadline > Date.now();
+}
+
+function beginRemoteUpdateRecovery(version) {
+  if (!REMOTE) return;
+  remoteUpdateRecoveryDeadline = Date.now() + 30 * 60 * 1000;
+  remoteUpdateTargetVersion = String(version || "");
+  remoteUpdateRecoveryReloading = false;
+  hostDiagnostic("update_recovery_started", { target_version: remoteUpdateTargetVersion });
+}
+
+function cancelRemoteUpdateRecovery(reason = "cancelled") {
+  if (remoteUpdateRecoveryDeadline) hostDiagnostic("update_recovery_cancelled", { reason });
+  remoteUpdateRecoveryDeadline = 0;
+  remoteUpdateTargetVersion = "";
+}
+
+function reloadAfterRemoteUpdate() {
+  if (!REMOTE || remoteUpdateRecoveryReloading) return;
+  remoteUpdateRecoveryReloading = true;
+  hostDiagnostic("update_recovery_reloading", { target_version: remoteUpdateTargetVersion });
+  location.reload();
+}
+
+function markRemoteUpdateDisconnected(reason) {
+  if (!remoteUpdateRecoveryActive()) return;
+  hostDiagnostic("update_recovery_disconnected", { reason });
+  scheduleRemoteRecovery();
+}
+
+function scheduleRemoteRecovery() {
+  if (!REMOTE || relayRetryTimer || remoteUpdateRecoveryReloading || (!RELAY && !remoteUpdateRecoveryActive())) return;
+  if (remoteUpdateRecoveryDeadline && !remoteUpdateRecoveryActive()) {
+    hostDiagnostic("update_recovery_timeout", { target_version: remoteUpdateTargetVersion });
+    cancelRemoteUpdateRecovery("timeout");
+    return;
+  }
   relayRetryTimer = setTimeout(async () => {
     relayRetryTimer = undefined;
     try {
-      const response = await fetch("/relay/status");
-      if (response.status === 401) return expireSession();
-      const status = await response.json();
-      if (response.ok && status?.runtime?.online) {
+      const sessionResponse = await fetch(SESSION_PATH);
+      if (sessionResponse.status === 401) {
+        hostDiagnostic("update_recovery_session_pending", { http_status: 401 });
+        if (!remoteUpdateRecoveryActive()) return expireSession();
+        scheduleRemoteRecovery();
+        return;
+      }
+      if (!sessionResponse.ok) throw new Error("remote_session_unavailable");
+      const session = await sessionResponse.json();
+      applySessionIdentity(session);
+      if (typeof session.csrf_token === "string" && session.csrf_token) {
+        csrfToken = session.csrf_token;
+        sessionStorage.setItem("better-codex-web-csrf", csrfToken);
+      }
+      if (RELAY) {
+        const response = await fetch("/relay/status");
+        if (response.status === 401) {
+          hostDiagnostic("update_recovery_status_pending", { http_status: 401 });
+          if (!remoteUpdateRecoveryActive()) return expireSession();
+          scheduleRemoteRecovery();
+          return;
+        }
+        const status = await response.json();
+        if (!response.ok || status?.runtime?.online !== true) {
+          scheduleRemoteRecovery();
+          return;
+        }
+      }
+      if (remoteUpdateRecoveryActive()) {
+        const updateResponse = await fetch("/api/update?locale=" + encodeURIComponent(profileLocale));
+        if (updateResponse.status === 401) {
+          scheduleRemoteRecovery();
+          return;
+        }
+        if (!updateResponse.ok) throw new Error("update_status_unavailable");
+        const update = await updateResponse.json();
+        if (update?.status === "error") {
+          cancelRemoteUpdateRecovery("update_error");
+          return;
+        }
+        if (update?.status !== "current") {
+          scheduleRemoteRecovery();
+          return;
+        }
+        hostDiagnostic("update_recovery_connected", { current_version: String(update.currentVersion || "") });
+        reloadAfterRemoteUpdate();
+        return;
+      }
+      if (RELAY) {
         relayOfflineReported = false;
         connectError.hidden = true;
         if (window.__betterCodexInjection__) {
@@ -669,13 +754,20 @@ function scheduleRelayRecovery() {
         } else loadInjection();
         return;
       }
-    } catch {}
-    scheduleRelayRecovery();
+      return;
+    } catch (error) {
+      hostDiagnostic("remote_recovery_retry", { error: error?.message || "remote_unavailable" });
+    }
+    scheduleRemoteRecovery();
   }, 2000);
 }
 
 function showRelayOffline() {
   if (!RELAY) return;
+  if (remoteUpdateRecoveryActive()) {
+    markRemoteUpdateDisconnected("runtime_offline");
+    return;
+  }
   connectError.textContent = "远程连接暂时中断，连接恢复后将自动重试";
   connectError.hidden = false;
   if (!connectDialog.open) connectDialog.showModal();
@@ -683,7 +775,7 @@ function showRelayOffline() {
     relayOfflineReported = true;
     reportHostError(new Error("runtime_offline"), { source: "relay_status" }, false);
   }
-  scheduleRelayRecovery();
+  scheduleRemoteRecovery();
 }
 
 async function relayRuntimeOnline() {
@@ -835,6 +927,7 @@ async function requestRuntime(request) {
   const requestBodyBytes = typeof request.body === "string" ? new TextEncoder().encode(request.body).byteLength : 0;
   let attemptCount = 0;
   const queued = queueableCommand(method, request.path, requestBodyBytes);
+  const updateInstallRequest = REMOTE && method === "POST" && new URL(request.path, location.origin).pathname === "/api/update/install";
   if (queued) await writeQueuedCommand({ commandId: request.commandId, traceId, method, path: request.path, body: request.body, createdAt: Date.now(), attempts: 0, nextAttemptAt: Date.now() });
   const diagnostics = extra => ({
     source: "web_host_request",
@@ -887,9 +980,12 @@ async function requestRuntime(request) {
     }
     hostDiagnostic("request_response", { trace_id: traceId, method, path: request.path, command_id: request.commandId || "", http_status: response.status, elapsed_ms: Date.now() - startedAt, attempt_count: attemptCount });
     if (queued && commandAcceptedOrTerminal(response.status, String(value?.error || ""))) await deleteQueuedCommand(request.commandId);
-    if (response.status === 401) setTimeout(expireSession, 0);
+    if (updateInstallRequest && response.ok && value?.accepted === true) beginRemoteUpdateRecovery(value?.state?.latestVersion);
+    const updateInterruption = remoteUpdateRecoveryActive() && (response.status === 401 || [408, 425, 429, 502, 503, 504].includes(response.status) || ["runtime_offline", "runtime_unavailable", "relay_stream_interrupted"].includes(String(value?.error || "")));
+    if (updateInterruption) markRemoteUpdateDisconnected(String(value?.error || "http_" + response.status));
+    else if (response.status === 401) setTimeout(expireSession, 0);
     if (RELAY && response.status === 503 && value.error === "runtime_offline") setTimeout(showRelayOffline, 0);
-    if (!response.ok) throw requestError(value.error || response.statusText || "request_failed", {
+    if (!response.ok) throw requestError(updateInterruption ? "runtime_unavailable" : value.error || response.statusText || "request_failed", {
       http_status: response.status,
       http_status_text: response.statusText,
       response_request_id: response.headers.get("x-better-codex-request-id") || value.request_id || "",
@@ -911,6 +1007,7 @@ async function requestRuntime(request) {
     return value;
   } catch (error) {
     hostDiagnostic("request_failure", { trace_id: traceId, method, path: request.path, command_id: request.commandId || "", elapsed_ms: Date.now() - startedAt, attempt_count: attemptCount, failure_type: error?.betterCodexDiagnostics?.failure_type || (error?.name === "AbortError" ? "timeout" : error?.name || "network_error"), error: error?.message || "runtime_unavailable" });
+    if (remoteUpdateRecoveryActive() && (error?.name === "AbortError" || !error?.betterCodexDiagnostics || error?.message === "runtime_unavailable")) markRemoteUpdateDisconnected(error?.message || "network_error");
     if (queued && (error?.name === "AbortError" || !error?.betterCodexDiagnostics)) {
       scheduleCommandQueueDrain(1000);
       return { command_id: request.commandId, status: "pending", queued: true };
@@ -953,6 +1050,10 @@ function subscribeRuntime(listener) {
         if (cursor) headers["last-event-id"] = cursor;
         const response = await fetch("/api/events", { headers, signal: controller.signal });
         if (response.status === 401) {
+          if (remoteUpdateRecoveryActive()) {
+            markRemoteUpdateDisconnected("runtime_events_unauthorized");
+            throw new Error("runtime_events_unavailable");
+          }
           expireSession();
           return;
         }
@@ -996,6 +1097,8 @@ window.betterCodexHost = Object.freeze({
   users: () => webUsers.slice(),
   request: requestRuntime,
   subscribe: subscribeRuntime,
+  cancelUpdateRecovery: cancelRemoteUpdateRecovery,
+  reloadAfterUpdate: reloadAfterRemoteUpdate,
 });
 
 window.betterCodexRequest = payload => {
