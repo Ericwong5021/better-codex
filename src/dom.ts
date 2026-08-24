@@ -8607,6 +8607,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         return new Promise(resolve => {
           const input = document.createElement("input");
           input.type = "file";
+          input.accept = "*/*";
           input.multiple = true;
           input.addEventListener("change", () => {
             const files = Array.from(input.files || []);
