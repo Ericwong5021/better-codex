@@ -80,6 +80,7 @@ test("relay authenticates one runtime, replaces old connections, and stores no b
   assert.match(host, /agents: REMOTE && !RELAY \? "read-only" : "read-write"/);
   assert.match(host, /codexSemantics: !REMOTE \|\| RELAY/);
   assert.match(host, /连接恢复后将自动重试/);
+  assert.match(host, /RELAY \? 45_000 : 10_000/);
   assert.doesNotMatch(host, /Hub 管理命令/);
 
   const first = new WebSocket(`${socketBase}/api/v1/runtime/connect`, relayWebSocketProtocol, { headers: { authorization: `Bearer ${device.device_token}` } });
@@ -97,9 +98,11 @@ test("relay authenticates one runtime, replaces old connections, and stores no b
   assert.equal(secondAck.connection_epoch, 2);
   await firstClosed;
 
+  second.send(encodeRelayMessage({ type: "response_chunk", protocol_version: relayProtocolVersion, device_id: device.device_id, runtime_instance_id: "runtime-2", connection_epoch: 2, channel_id: "completed-channel", sequence: 4, data: Buffer.from("late").toString("base64") }));
   second.send(encodeRelayMessage({ type: "heartbeat", protocol_version: relayProtocolVersion, device_id: device.device_id, runtime_instance_id: "runtime-2", connection_epoch: 2, active_channels: 3, timestamp: new Date().toISOString() }));
   const heartbeat = await message(second);
   assert.equal(heartbeat.type, "heartbeat_ack");
+  assert.ok((relay.store.auditEvents(100) as Array<{ event: string }>).some(event => event.event === "relay_late_response_chunk"));
   assert.equal(relay.runtime()?.activeChannels, 0);
   assert.deepEqual(relay.store.tableNames(), ["relay_audit", "relay_commands", "relay_devices", "relay_settings", "relay_web_sessions", "relay_web_users", "sqlite_sequence"]);
 
@@ -123,7 +126,7 @@ test("relay authenticates one runtime, replaces old connections, and stores no b
   await relay.close();
 });
 
-test("relay keeps safe reads pending during the Runtime reconnect grace period", { timeout: 5000 }, async () => {
+test("relay replays buffered JSON reads interrupted after the upstream response starts", { timeout: 5000 }, async () => {
   const relay = createRelayServer({ host: "127.0.0.1", port: 0, database: ":memory:", adminToken: "g".repeat(64), webUsername: "admin", webPassword: "relay-password-123", secureCookies: false, reconnectGraceMs: 1000, maxReplayAttempts: 2 });
   relay.server.listen(0, "127.0.0.1");
   await once(relay.server, "listening");
@@ -148,7 +151,11 @@ test("relay keeps safe reads pending during the Runtime reconnect grace period",
   const firstEnd = waitForMessage(first, value => value.type === "request_end");
   const pendingResponse = fetch(`${base}/api/issues`, { headers: { cookie } });
   await firstOpen;
-  await firstEnd;
+  const initialEnd = await firstEnd;
+  const initialChannelId = String(initialEnd.channel_id);
+  first.send(encodeRelayMessage({ type: "response_open", protocol_version: relayProtocolVersion, device_id: device.device_id, runtime_instance_id: "runtime-grace", connection_epoch: 1, channel_id: initialChannelId, status: 200, headers: { "content-type": "application/json" } }));
+  first.send(encodeRelayMessage({ type: "response_chunk", protocol_version: relayProtocolVersion, device_id: device.device_id, runtime_instance_id: "runtime-grace", connection_epoch: 1, channel_id: initialChannelId, sequence: 0, data: Buffer.from('{"issues":').toString("base64") }));
+  await new Promise(resolve => setTimeout(resolve, 20));
   const firstClosed = once(first, "close");
   first.terminate();
   await firstClosed;
@@ -176,6 +183,7 @@ test("relay keeps safe reads pending during the Runtime reconnect grace period",
   const events = relay.store.auditEvents(100) as Array<{ event: string }>;
   assert.ok(events.some(event => event.event === "runtime_reconnecting"));
   assert.ok(events.some(event => event.event === "runtime_reconnected"));
+  assert.ok(events.some(event => event.event === "relay_channel_replayed"));
   const stopped = once(second, "close");
   second.close(relayRuntimeStoppedCloseCode);
   await stopped;

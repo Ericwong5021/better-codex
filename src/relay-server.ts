@@ -28,6 +28,7 @@ export type RelayServerOptions = {
   heartbeatIntervalMs?: number;
   maxConcurrentChannels?: number;
   maxRequestBytes?: number;
+  maxBufferedResponseBytes?: number;
   reconnectGraceMs?: number;
   maxReplayAttempts?: number;
 };
@@ -97,7 +98,13 @@ type RelayChannel = {
   recoverable: boolean;
   requestSequence: number;
   responseSequence: number;
-  responseStarted: boolean;
+  upstreamResponseStarted: boolean;
+  downstreamResponseStarted: boolean;
+  bufferResponse: boolean;
+  responseStatus: number | null;
+  responseHeaders: Record<string, string>;
+  responseChunks: Buffer[];
+  responseBytes: number;
   completed: boolean;
   requestBytes: number;
   requestCredit: number;
@@ -317,6 +324,11 @@ function forwardedResponseHeaders(headers: Record<string, string>) {
   return Object.fromEntries(Object.entries(headers).filter(([name]) => !blocked.has(name.toLowerCase())));
 }
 
+function isJsonResponse(headers: Record<string, string>) {
+  const contentType = String(headers["content-type"] || "").split(";", 1)[0].trim().toLowerCase();
+  return contentType === "application/json" || contentType.endsWith("+json");
+}
+
 function relayErrorStatus(error: string) {
   if (error === "unauthorized") return 401;
   if (error === "request_cancelled" || error === "relay_request_timeout") return 504;
@@ -335,6 +347,7 @@ export function createRelayServer(options: RelayServerOptions) {
   const heartbeatIntervalMs = options.heartbeatIntervalMs || 20_000;
   const maxConcurrentChannels = options.maxConcurrentChannels || 32;
   const maxRequestBytes = options.maxRequestBytes || 50 * 1024 * 1024;
+  const maxBufferedResponseBytes = options.maxBufferedResponseBytes || 16 * 1024 * 1024;
   const reconnectGraceMs = options.reconnectGraceMs || 30_000;
   const maxReplayAttempts = options.maxReplayAttempts || 3;
   const authorizations = new Map<string, DeviceAuthorization>();
@@ -393,6 +406,16 @@ export function createRelayServer(options: RelayServerOptions) {
     }
     retryableChannels.delete(channel.id);
   };
+  const startDownstreamResponse = async (channel: RelayChannel) => {
+    if (channel.downstreamResponseStarted) return;
+    if (channel.responseStatus === null) throw new Error("relay_channel_invalid");
+    channel.downstreamResponseStarted = true;
+    clearTimeout(channel.timeout);
+    channel.response.writeHead(channel.responseStatus, { ...securityHeaders(), ...channel.responseHeaders });
+    for (const chunk of channel.responseChunks) if (!channel.response.write(chunk)) await once(channel.response, "drain");
+    channel.responseChunks = [];
+    channel.responseBytes = 0;
+  };
   const failChannel = (active: ActiveRuntime | null, channel: RelayChannel, error: string, detail = error) => {
     if (channel.completed) return;
     if (!channel.response.headersSent) sendJson(channel.response, relayErrorStatus(error), {
@@ -404,7 +427,9 @@ export function createRelayServer(options: RelayServerOptions) {
       method: channel.method,
       request_bytes: channel.requestBytes,
       request_ended: channel.requestEnded,
-      response_started: channel.responseStarted,
+      response_started: channel.downstreamResponseStarted,
+      upstream_response_started: channel.upstreamResponseStarted,
+      downstream_response_started: channel.downstreamResponseStarted,
       connection_epoch: channel.connectionEpoch,
       runtime_instance_id: channel.runtimeInstanceId,
       replay_attempts: channel.replayAttempts,
@@ -448,10 +473,11 @@ export function createRelayServer(options: RelayServerOptions) {
     channel.request.resume();
   };
   const queueChannel = (active: ActiveRuntime | null, channel: RelayChannel, detail: string) => {
-    if (!channel.recoverable || channel.responseStarted) {
+    if (!channel.recoverable || channel.downstreamResponseStarted) {
       failChannel(active, channel, "relay_stream_interrupted", detail);
       return;
     }
+    store.audit(channel.deviceId, "relay_channel_queued", `trace=${channel.traceId}:channel=${channel.id}:request=${channel.requestId}:attempt=${channel.replayAttempts}:upstream_response_started=${channel.upstreamResponseStarted}:detail=${detail}`);
     if (channel.replayAttempts >= maxReplayAttempts) {
       failChannel(active, channel, "relay_stream_interrupted", "relay_retries_exhausted");
       return;
@@ -480,12 +506,19 @@ export function createRelayServer(options: RelayServerOptions) {
     channel.replayAttempts += 1;
     channel.requestSequence = 0;
     channel.responseSequence = 0;
-    channel.responseStarted = false;
+    channel.upstreamResponseStarted = false;
+    channel.downstreamResponseStarted = false;
+    channel.bufferResponse = false;
+    channel.responseStatus = null;
+    channel.responseHeaders = {};
+    channel.responseChunks = [];
+    channel.responseBytes = 0;
     channel.requestCredit = relayInitialWindowBytes;
     channel.requestQueue = [...channel.requestChunks];
     channel.requestEndSent = false;
     active.channels.set(channel.id, channel);
     syncActiveChannels(active);
+    store.audit(active.deviceId, "relay_channel_replayed", `trace=${channel.traceId}:channel=${channel.id}:request=${channel.requestId}:attempt=${channel.replayAttempts}:epoch=${active.connectionEpoch}`);
     try {
       sendRequestOpen(active, channel);
       flushRequest(active, channel);
@@ -655,7 +688,7 @@ export function createRelayServer(options: RelayServerOptions) {
       }
     }, 120_000);
     timeout.unref();
-    const channel: RelayChannel = { id: channelId, sessionId, deviceId: presence?.deviceId || "", requestId, traceId, method, request, response, path: `${url.pathname}${url.search}`, headers: forwardedRequestHeaders(request, requestId), recoverable, requestSequence: 0, responseSequence: 0, responseStarted: false, completed: false, requestBytes: 0, requestCredit: relayInitialWindowBytes, requestQueue: [], requestChunks: [], requestEnded: false, requestEndSent: false, replayAttempts: 0, retryTimeout: null, connectionEpoch: presence?.connectionEpoch || 0, runtimeInstanceId: presence?.runtimeInstanceId || "", timeout };
+    const channel: RelayChannel = { id: channelId, sessionId, deviceId: presence?.deviceId || "", requestId, traceId, method, request, response, path: `${url.pathname}${url.search}`, headers: forwardedRequestHeaders(request, requestId), recoverable, requestSequence: 0, responseSequence: 0, upstreamResponseStarted: false, downstreamResponseStarted: false, bufferResponse: false, responseStatus: null, responseHeaders: {}, responseChunks: [], responseBytes: 0, completed: false, requestBytes: 0, requestCredit: relayInitialWindowBytes, requestQueue: [], requestChunks: [], requestEnded: false, requestEndSent: false, replayAttempts: 0, retryTimeout: null, connectionEpoch: presence?.connectionEpoch || 0, runtimeInstanceId: presence?.runtimeInstanceId || "", timeout };
     request.on("data", chunkValue => {
       if (channel.completed) return;
       request.pause();
@@ -1010,24 +1043,41 @@ export function createRelayServer(options: RelayServerOptions) {
                 commandChannel.responseHeaders = forwardedResponseHeaders(message.headers);
                 return;
               }
-              if (channel.responseStarted) throw new Error("relay_channel_invalid");
-              channel.responseStarted = true;
+              if (channel.upstreamResponseStarted) {
+                const detail = JSON.stringify({ trace_id: channel.traceId, channel_id: channel.id, request_id: channel.requestId, state: "duplicate_response_open", connection_epoch: active.connectionEpoch, runtime_instance_id: active.runtimeInstanceId });
+                store.audit(active.deviceId, "relay_channel_invalid", detail);
+                failChannel(active, channel, "relay_stream_interrupted", "relay_duplicate_response_open");
+                return;
+              }
+              channel.upstreamResponseStarted = true;
               if (channel.retryTimeout) clearTimeout(channel.retryTimeout);
               channel.retryTimeout = null;
-              clearTimeout(channel.timeout);
               const headers = forwardedResponseHeaders(message.headers);
               if (headers["content-type"]?.toLowerCase().includes("text/event-stream")) {
                 headers["cache-control"] = "no-cache";
                 headers["x-accel-buffering"] = "no";
               }
-              channel.response.writeHead(message.status, { ...securityHeaders(), ...headers });
+              channel.responseStatus = message.status;
+              channel.responseHeaders = headers;
+              const contentLength = Number(headers["content-length"] || 0);
+              channel.bufferResponse = channel.recoverable && isJsonResponse(headers) && (!Number.isFinite(contentLength) || contentLength <= 0 || contentLength <= maxBufferedResponseBytes);
+              if (!channel.bufferResponse) await startDownstreamResponse(channel);
               return;
             }
             if (message.type === "response_chunk") {
               const channel = active.channels.get(message.channel_id);
               if (!channel) {
                 const commandChannel = active.commandChannels.get(message.channel_id);
-                if (!commandChannel || commandChannel.responseStatus === null || message.sequence !== commandChannel.responseSequence) throw new Error("relay_chunk_sequence_invalid");
+                if (!commandChannel) {
+                  store.audit(active.deviceId, "relay_late_response_chunk", JSON.stringify({ channel_id: message.channel_id, sequence: message.sequence, connection_epoch: active.connectionEpoch, runtime_instance_id: active.runtimeInstanceId }));
+                  return;
+                }
+                if (commandChannel.responseStatus === null || message.sequence !== commandChannel.responseSequence) {
+                  store.audit(active.deviceId, "relay_command_chunk_sequence_invalid", JSON.stringify({ channel_id: commandChannel.id, command_id: commandChannel.commandId, expected_sequence: commandChannel.responseSequence, actual_sequence: message.sequence, response_started: commandChannel.responseStatus !== null, connection_epoch: active.connectionEpoch, runtime_instance_id: active.runtimeInstanceId }));
+                  retryCommandChannel(active, commandChannel, "relay_chunk_sequence_invalid");
+                  pumpCommands(active);
+                  return;
+                }
                 const bytes = Buffer.from(message.data, "base64");
                 commandChannel.responseSequence += 1;
                 commandChannel.responseBytes += bytes.length;
@@ -1039,10 +1089,23 @@ export function createRelayServer(options: RelayServerOptions) {
                 connection?.send(encodeRelayMessage({ type: "window_update", protocol_version: relayProtocolVersion, device_id: active.deviceId, runtime_instance_id: active.runtimeInstanceId, connection_epoch: active.connectionEpoch, channel_id: commandChannel.id, direction: "response", bytes: bytes.length }));
                 return;
               }
-              if (!channel.responseStarted || message.sequence !== channel.responseSequence) throw new Error("relay_chunk_sequence_invalid");
+              if (!channel.upstreamResponseStarted || message.sequence !== channel.responseSequence) {
+                const detail = JSON.stringify({ trace_id: channel.traceId, channel_id: channel.id, request_id: channel.requestId, expected_sequence: channel.responseSequence, actual_sequence: message.sequence, upstream_response_started: channel.upstreamResponseStarted, downstream_response_started: channel.downstreamResponseStarted, connection_epoch: active.connectionEpoch, runtime_instance_id: active.runtimeInstanceId });
+                store.audit(active.deviceId, "relay_channel_chunk_sequence_invalid", detail);
+                failChannel(active, channel, "relay_stream_interrupted", "relay_chunk_sequence_invalid");
+                return;
+              }
               channel.responseSequence += 1;
               const bytes = Buffer.from(message.data, "base64");
-              if (!channel.response.write(bytes)) await once(channel.response, "drain");
+              if (channel.bufferResponse) {
+                channel.responseChunks.push(bytes);
+                channel.responseBytes += bytes.length;
+                if (channel.responseBytes > maxBufferedResponseBytes) {
+                  channel.bufferResponse = false;
+                  store.audit(active.deviceId, "relay_channel_buffer_limit", `trace=${channel.traceId}:channel=${channel.id}:request=${channel.requestId}:bytes=${channel.responseBytes}`);
+                  await startDownstreamResponse(channel);
+                }
+              } else if (!channel.response.write(bytes)) await once(channel.response, "drain");
               if (!channel.completed) connection?.send(encodeRelayMessage({ type: "window_update", protocol_version: relayProtocolVersion, device_id: active.deviceId, runtime_instance_id: active.runtimeInstanceId, connection_epoch: active.connectionEpoch, channel_id: channel.id, direction: "response", bytes: bytes.length }));
               return;
             }
@@ -1050,13 +1113,25 @@ export function createRelayServer(options: RelayServerOptions) {
               const channel = active.channels.get(message.channel_id);
               if (!channel) {
                 const commandChannel = active.commandChannels.get(message.channel_id);
-                if (!commandChannel || commandChannel.responseStatus === null) return;
+                if (!commandChannel) return;
+                if (commandChannel.responseStatus === null) {
+                  store.audit(active.deviceId, "relay_command_response_end_invalid", JSON.stringify({ channel_id: commandChannel.id, command_id: commandChannel.commandId, response_started: false, connection_epoch: active.connectionEpoch, runtime_instance_id: active.runtimeInstanceId }));
+                  retryCommandChannel(active, commandChannel, "relay_channel_invalid");
+                  pumpCommands(active);
+                  return;
+                }
                 finishCommandChannel(active, commandChannel);
                 pumpCommands(active);
                 return;
               }
-              if (!channel.responseStarted) throw new Error("relay_channel_invalid");
+              if (!channel.upstreamResponseStarted) {
+                store.audit(active.deviceId, "relay_channel_response_end_invalid", JSON.stringify({ trace_id: channel.traceId, channel_id: channel.id, request_id: channel.requestId, upstream_response_started: false, connection_epoch: active.connectionEpoch, runtime_instance_id: active.runtimeInstanceId }));
+                failChannel(active, channel, "relay_stream_interrupted", "relay_response_end_before_open");
+                return;
+              }
+              if (!channel.downstreamResponseStarted) await startDownstreamResponse(channel);
               channel.response.end();
+              if (channel.replayAttempts > 0) store.audit(active.deviceId, "relay_channel_replay_completed", `trace=${channel.traceId}:channel=${channel.id}:request=${channel.requestId}:attempt=${channel.replayAttempts}:epoch=${active.connectionEpoch}`);
               finishChannel(active, channel);
               return;
             }

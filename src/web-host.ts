@@ -956,7 +956,7 @@ async function requestRuntime(request) {
   request.traceId = /^[A-Za-z0-9_-]{8,200}$/.test(String(request.traceId || "")) ? String(request.traceId) : crypto.randomUUID();
   const traceId = request.traceId;
   const startedAt = Date.now();
-  const timeoutMs = Math.min(Math.max(Number(request.timeoutMs) || (RELAY && method !== "GET" ? 45_000 : 10_000), 1_000), 300_000);
+  const timeoutMs = Math.min(Math.max(Number(request.timeoutMs) || (RELAY ? 45_000 : 10_000), 1_000), 300_000);
   const requestBodyBytes = typeof request.body === "string" ? new TextEncoder().encode(request.body).byteLength : 0;
   let attemptCount = 0;
   const queued = queueableCommand(method, request.path, requestBodyBytes);
