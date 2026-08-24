@@ -374,6 +374,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const SEND_MODE_KEY = "better-codex-send-mode";
     const AGENT_INSPECTOR_WIDTH_KEY = "better-codex-agent-inspector-width";
     const CREATE_DIALOG_EXPANDED_KEY = "better-codex-create-dialog-expanded";
+    const ISSUE_DIALOG_EXPANDED_KEY = "better-codex-issue-dialog-expanded";
     const AGENT_INSPECTOR_MIN_WIDTH = 320;
     const AGENT_DIRECTORY_MIN_WIDTH = 320;
     const THREAD_OPEN_TIMEOUT_MS = 10000;
@@ -7904,7 +7905,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         runStatus: issue?.mockup_run_status || "not-started",
         labels: (issue?.labels || []).join(", "),
         projectId: issue?.project_id || state.projectId,
-        expanded: issue ? false : localStorage.getItem(CREATE_DIALOG_EXPANDED_KEY) === "true",
+        expanded: localStorage.getItem(issue ? ISSUE_DIALOG_EXPANDED_KEY : CREATE_DIALOG_EXPANDED_KEY) === "true",
         descriptionExpanded: false,
         reply: issue?.reply_draft || "",
         promptSemanticReferences: cachedCreateDraft?.promptSemanticReferences || [],
@@ -8326,8 +8327,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const crumb = issue
           ? '<span class="better-codex-dialog-route-root">' + te("任务看板") + '</span><span class="better-codex-dialog-route-root-separator" aria-hidden="true">' + icon("chevron") + '</span><span data-dialog-breadcrumb-project>' + escapeHtml(projectLabel(breadcrumbProject) || t("未提供")) + '</span><span aria-hidden="true">' + icon("chevron") + '</span><strong>' + title + '</strong>'
           : '<strong>' + title + '</strong>';
-        const backButton = issue ? '<button class="better-codex-dialog-back" type="button" data-dialog-back aria-label="' + te("返回") + '">' + icon("back") + '</button>' : "";
-        return '<div class="better-codex-dialog-head"><div class="better-codex-dialog-head-leading">' + backButton + '<nav class="better-codex-dialog-breadcrumb" aria-label="' + te("任务看板") + '">' + crumb + '</nav></div><div class="better-codex-dialog-head-actions">' + restoreButton + openThreadButton + startNowButton + '<button class="better-codex-icon-button" type="button" data-dialog-expand aria-label="' + te(draft.expanded ? (issue ? "退出全屏" : "缩小") : "展开") + '">' + icon(draft.expanded ? "shrink" : "expand") + '</button><button class="better-codex-icon-button" type="button" data-dialog-close aria-label="' + te("关闭") + '">' + icon("close") + '</button></div></div>';
+        return '<div class="better-codex-dialog-head"><div class="better-codex-dialog-head-leading"><nav class="better-codex-dialog-breadcrumb" aria-label="' + te("任务看板") + '">' + crumb + '</nav></div><div class="better-codex-dialog-head-actions">' + restoreButton + openThreadButton + startNowButton + '<button class="better-codex-icon-button" type="button" data-dialog-expand aria-label="' + te(draft.expanded ? (issue ? "退出全屏" : "缩小") : "展开") + '">' + icon(draft.expanded ? "shrink" : "expand") + '</button><button class="better-codex-icon-button" type="button" data-dialog-close aria-label="' + te("关闭") + '">' + icon("close") + '</button></div></div>';
       }
 
       function conversationPanel() {
@@ -9853,7 +9853,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         });
         const setDialogExpanded = expanded => {
           draft.expanded = expanded;
-          if (!issue) localStorage.setItem(CREATE_DIALOG_EXPANDED_KEY, String(draft.expanded));
+          localStorage.setItem(issue ? ISSUE_DIALOG_EXPANDED_KEY : CREATE_DIALOG_EXPANDED_KEY, String(draft.expanded));
           if (issue && draft.expanded) syncIssueFullscreenBounds();
           dialog.dataset.expanded = String(draft.expanded);
           if (issue && !draft.expanded) clearIssueFullscreenBounds();
@@ -9861,7 +9861,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           button?.setAttribute("aria-label", t(draft.expanded ? (issue ? "退出全屏" : "缩小") : "展开"));
           if (button) button.innerHTML = icon(draft.expanded ? "shrink" : "expand");
         };
-        dialog.querySelector("[data-dialog-back]")?.addEventListener("click", () => dialog.close());
         dialog.querySelector("[data-dialog-expand]")?.addEventListener("click", () => {
           setDialogExpanded(!draft.expanded);
         });
