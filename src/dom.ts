@@ -7159,13 +7159,22 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       else existingDialog?.remove();
       const firstProject = state.projects.find(project => project.id === (task?.project_id || state.projectId) && project.workspace_path) || state.projects.find(project => project.workspace_path) || state.projects[0];
       const start = task?.starts_at || new Date(Math.ceil((Date.now() + 300_000) / 300_000) * 300_000).toISOString();
-      const projectOptions = state.projects.map(project => '<option value="' + escapeHtml(project.id) + '"' + (project.id === firstProject?.id ? " selected" : "") + '>' + escapeHtml(projectLabel(project)) + '</option>').join("");
-      const agentOptions = state.agents.filter(agent => !agent.is_default && agent.id).map(agent => '<option value="' + escapeHtml(agent.id) + '"' + (agent.id === task?.agent_id ? " selected" : "") + '>' + escapeHtml(agentDisplayName(agent)) + '</option>').join("");
+      const projectOptions = state.projects.map(project => ({ value: project.id, label: projectLabel(project), icon: "folder" }));
+      const agentOptions = [{ value: "", label: t("默认智能体"), icon: "bot" }, ...state.agents.filter(agent => !agent.is_default && agent.id).map(agent => ({ value: agent.id, label: agentDisplayName(agent), icon: "bot" }))];
+      const scheduledTaskPicker = (name, label, selected, options, meta = "") => {
+        const current = options.find(option => option.value === selected) || options[0] || { value: "", label: t("未提供"), icon: "" };
+        const optionCopy = option => '<span class="better-codex-scheduled-picker-option-copy">' + (option.icon ? icon(option.icon) : "") + '<span>' + escapeHtml(option.label) + '</span></span>';
+        const rows = options.map(option => '<button class="better-codex-scheduled-picker-option' + (option.value === current.value ? " is-selected" : "") + '" type="button" role="option" aria-selected="' + String(option.value === current.value) + '" data-scheduled-picker-option="' + escapeHtml(name) + '" data-scheduled-picker-value="' + escapeHtml(option.value) + '">' + optionCopy(option) + '<span class="better-codex-scheduled-picker-check">' + (option.value === current.value ? icon("check") : "") + '</span></button>').join("");
+        return '<div class="better-codex-scheduled-field better-codex-scheduled-picker" data-scheduled-picker="' + escapeHtml(name) + '"><span class="better-codex-scheduled-field-label">' + escapeHtml(label) + '</span><input type="hidden" name="' + escapeHtml(name) + '" value="' + escapeHtml(current.value) + '"><button class="better-codex-scheduled-picker-trigger" type="button" role="combobox" aria-label="' + escapeHtml(label) + '" aria-haspopup="listbox" aria-expanded="false" data-scheduled-picker-toggle="' + escapeHtml(name) + '"' + (options.length ? "" : " disabled") + '><span data-scheduled-picker-label>' + optionCopy(current) + '</span>' + icon("chevronDown") + '</button><span class="better-codex-scheduled-picker-menu" role="listbox" hidden>' + rows + '</span>' + (meta ? '<small class="better-codex-scheduled-project-path" data-scheduled-project-path>' + escapeHtml(meta) + '</small>' : "") + '</div>';
+      };
+      const intervalUnits = [["minute", "分钟"], ["hour", "小时"], ["day", "天"], ["week", "周"]];
+      const intervalUnit = task?.interval_unit || "hour";
+      const intervalUnitOptions = intervalUnits.map(([value, label]) => '<button type="button" role="radio" aria-checked="' + String(value === intervalUnit) + '" data-scheduled-interval-unit="' + value + '">' + te(label) + '</button>').join("");
       const dialog = document.createElement("dialog");
       dialog.id = "better-codex-scheduled-dialog";
       dialog.dataset.host = HOST_KIND;
       dialog.setAttribute(OWNED, "true");
-      dialog.innerHTML = '<form method="dialog"><header><div><span class="better-codex-scheduled-dialog-icon">' + icon("calendar") + '</span><div><h2>' + te(task ? "编辑定时任务" : "新建定时任务") + '</h2><p>' + te("按计划创建独立任务并交给智能体执行") + '</p></div></div><button type="button" data-scheduled-dialog-close aria-label="' + te("关闭") + '">' + icon("close") + '</button></header><div class="better-codex-scheduled-dialog-body"><label class="is-wide"><span>' + te("名称") + '</span><input name="name" maxlength="120" value="' + escapeHtml(task?.name || "") + '" placeholder="' + te("例如：每天整理项目进展") + '" required></label><label class="is-wide"><span>' + te("任务内容") + '</span><textarea name="prompt" maxlength="100000" rows="7" placeholder="' + te("说明每次需要完成的具体任务") + '" required>' + escapeHtml(task?.prompt || "") + '</textarea></label><label><span>' + te("项目") + '</span><select name="project_id" required>' + projectOptions + '</select><small data-scheduled-project-path>' + escapeHtml(firstProject?.workspace_path || t("未提供项目文件夹")) + '</small></label><label><span>' + te("执行智能体") + '</span><select name="agent_id"><option value="">' + te("默认智能体") + '</option>' + agentOptions + '</select><small>' + te("使用智能体当前的模型、推理和权限设置") + '</small></label><label class="is-wide"><span>' + te("首次执行") + '</span><input name="starts_at" type="datetime-local" value="' + escapeHtml(scheduledTaskLocalValue(start)) + '" required></label><label class="better-codex-scheduled-switch is-wide"><span><strong>' + te("循环执行") + '</strong><small>' + te("按固定间隔持续执行这个任务") + '</small></span><input name="repeat" type="checkbox"' + (task?.repeat ? " checked" : "") + '></label><div class="better-codex-scheduled-interval is-wide"><label><span>' + te("每隔") + '</span><input name="interval_value" type="number" min="1" max="999" value="' + escapeHtml(String(task?.interval_value || 1)) + '"></label><label><span>' + te("单位") + '</span><select name="interval_unit"><option value="minute"' + (task?.interval_unit === "minute" ? " selected" : "") + '>' + te("分钟") + '</option><option value="hour"' + (!task || task.interval_unit === "hour" ? " selected" : "") + '>' + te("小时") + '</option><option value="day"' + (task?.interval_unit === "day" ? " selected" : "") + '>' + te("天") + '</option><option value="week"' + (task?.interval_unit === "week" ? " selected" : "") + '>' + te("周") + '</option></select></label></div><label class="better-codex-scheduled-switch is-wide"><span><strong>' + te("立即启用") + '</strong><small>' + te("关闭后会保存为已暂停状态") + '</small></span><input name="enabled" type="checkbox"' + (task?.enabled === false ? "" : " checked") + '></label><output hidden></output></div><footer><button type="button" data-scheduled-dialog-cancel>' + te("取消") + '</button><button class="better-codex-submit" type="submit">' + te(task ? "保存" : "创建") + '</button></footer></form>';
+      dialog.innerHTML = '<form method="dialog"><header><div><span class="better-codex-scheduled-dialog-icon">' + icon("calendar") + '</span><h2>' + te(task ? "编辑定时任务" : "新建定时任务") + '</h2></div><button type="button" data-scheduled-dialog-close aria-label="' + te("关闭") + '">' + icon("close") + '</button></header><div class="better-codex-scheduled-dialog-body"><label class="is-wide"><span>' + te("名称") + '</span><input name="name" maxlength="120" value="' + escapeHtml(task?.name || "") + '" placeholder="' + te("例如：每天整理项目进展") + '" required></label><label class="is-wide"><span>' + te("任务内容") + '</span><textarea name="prompt" maxlength="100000" rows="6" placeholder="' + te("说明每次需要完成的具体任务") + '" required>' + escapeHtml(task?.prompt || "") + '</textarea></label>' + scheduledTaskPicker("project_id", t("项目"), firstProject?.id || "", projectOptions, firstProject?.workspace_path || t("未提供项目文件夹")) + scheduledTaskPicker("agent_id", t("执行智能体"), task?.agent_id || "", agentOptions) + '<label><span>' + te("首次执行") + '</span><input name="starts_at" type="datetime-local" value="' + escapeHtml(scheduledTaskLocalValue(start)) + '" required></label><label class="better-codex-scheduled-switch"><strong>' + te("循环执行") + '</strong><input name="repeat" type="checkbox"' + (task?.repeat ? " checked" : "") + '></label><div class="better-codex-scheduled-interval is-wide"><label><span>' + te("每隔") + '</span><input name="interval_value" type="number" min="1" max="999" value="' + escapeHtml(String(task?.interval_value || 1)) + '"></label><div class="better-codex-scheduled-field"><span class="better-codex-scheduled-field-label">' + te("单位") + '</span><input type="hidden" name="interval_unit" value="' + escapeHtml(intervalUnit) + '"><div class="better-codex-scheduled-unit-switch" role="radiogroup" aria-label="' + te("单位") + '">' + intervalUnitOptions + '</div></div></div><output hidden></output></div><footer><label class="better-codex-scheduled-enable"><input name="enabled" type="checkbox"' + (task?.enabled === false ? "" : " checked") + '><strong>' + te("立即启用") + '</strong></label><div><button type="button" data-scheduled-dialog-cancel>' + te("取消") + '</button><button class="better-codex-submit" type="submit">' + te(task ? "保存" : "创建") + '</button></div></footer></form>';
       const form = dialog.querySelector("form");
       let scheduledInputFrame = null;
       const scheduledDialogViewport = () => {
@@ -7201,8 +7210,55 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const project = state.projects.find(item => item.id === form.elements.project_id.value);
         dialog.querySelector("[data-scheduled-project-path]").textContent = project?.workspace_path || t("未提供项目文件夹");
       };
+      const closeScheduledPickers = except => {
+        dialog.querySelectorAll("[data-scheduled-picker]").forEach(picker => {
+          if (picker === except) return;
+          picker.classList.remove("is-open");
+          picker.querySelector("[data-scheduled-picker-toggle]").setAttribute("aria-expanded", "false");
+          picker.querySelector(".better-codex-scheduled-picker-menu").hidden = true;
+        });
+      };
       repeat.addEventListener("change", syncRepeat);
       form.elements.project_id.addEventListener("change", syncProjectPath);
+      dialog.addEventListener("click", event => {
+        const toggle = event.target.closest("[data-scheduled-picker-toggle]");
+        if (toggle) {
+          const picker = toggle.closest("[data-scheduled-picker]");
+          const menu = picker.querySelector(".better-codex-scheduled-picker-menu");
+          const opening = menu.hidden;
+          closeScheduledPickers(picker);
+          picker.classList.toggle("is-open", opening);
+          menu.hidden = !opening;
+          toggle.setAttribute("aria-expanded", String(opening));
+          return;
+        }
+        const option = event.target.closest("[data-scheduled-picker-option]");
+        if (option) {
+          const name = option.dataset.scheduledPickerOption;
+          const picker = option.closest("[data-scheduled-picker]");
+          const trigger = picker.querySelector("[data-scheduled-picker-toggle]");
+          const input = form.elements[name];
+          input.value = option.dataset.scheduledPickerValue;
+          trigger.querySelector("[data-scheduled-picker-label]").innerHTML = option.querySelector(".better-codex-scheduled-picker-option-copy").outerHTML;
+          picker.querySelectorAll("[data-scheduled-picker-option]").forEach(item => {
+            const selected = item === option;
+            item.classList.toggle("is-selected", selected);
+            item.setAttribute("aria-selected", String(selected));
+            item.querySelector(".better-codex-scheduled-picker-check").innerHTML = selected ? icon("check") : "";
+          });
+          input.dispatchEvent(new Event("change", { bubbles: true }));
+          closeScheduledPickers();
+          trigger.focus();
+          return;
+        }
+        const unit = event.target.closest("[data-scheduled-interval-unit]");
+        if (unit) {
+          form.elements.interval_unit.value = unit.dataset.scheduledIntervalUnit;
+          dialog.querySelectorAll("[data-scheduled-interval-unit]").forEach(button => button.setAttribute("aria-checked", String(button === unit)));
+          return;
+        }
+        closeScheduledPickers();
+      });
       dialog.querySelector("[data-scheduled-dialog-close]").addEventListener("click", () => dialog.close());
       dialog.querySelector("[data-scheduled-dialog-cancel]").addEventListener("click", () => dialog.close());
       form.addEventListener("submit", event => {
@@ -7235,7 +7291,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           }
         });
       });
-      dialog.addEventListener("cancel", event => { event.preventDefault(); dialog.close(); });
+      dialog.addEventListener("cancel", event => {
+        event.preventDefault();
+        if (dialog.querySelector("[data-scheduled-picker].is-open")) closeScheduledPickers();
+        else dialog.close();
+      });
       dialog.addEventListener("close", () => {
         window.visualViewport?.removeEventListener("resize", scheduledDialogViewport);
         window.visualViewport?.removeEventListener("scroll", scheduledDialogViewport);

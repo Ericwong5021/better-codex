@@ -131,6 +131,7 @@ export function betterCodexDesignSystemCss() {
     #better-codex-panel,
     #better-codex-archive-dialog,
     #better-codex-dialog,
+    #better-codex-scheduled-dialog,
     #better-codex-attachment-dialog,
     #better-codex-agent-dialog,
     #better-codex-confirm,
@@ -9148,6 +9149,7 @@ export function betterCodexDesignSystemCss() {
       position: fixed;
       inset: 0;
       width: min(680px, calc(100vw - 32px));
+      height: fit-content;
       max-height: min(820px, calc(100dvh - 32px));
       box-sizing: border-box;
       margin: auto;
@@ -9181,7 +9183,7 @@ export function betterCodexDesignSystemCss() {
     }
 
     #better-codex-scheduled-dialog header {
-      min-height: 68px;
+      min-height: 60px;
       padding: 0 var(--bc-space-4) 0 var(--bc-space-5);
     }
 
@@ -9192,20 +9194,11 @@ export function betterCodexDesignSystemCss() {
       gap: var(--bc-space-3);
     }
 
-    #better-codex-scheduled-dialog header h2,
-    #better-codex-scheduled-dialog header p {
-      margin: 0;
-    }
-
     #better-codex-scheduled-dialog header h2 {
+      margin: 0;
       font-size: var(--bc-text-lg);
       font-weight: 650;
-    }
-
-    #better-codex-scheduled-dialog header p {
-      margin-top: 3px;
-      color: var(--bc-color-text-muted);
-      font-size: var(--bc-text-caption);
+      line-height: 1.35;
     }
 
     #better-codex-scheduled-dialog .better-codex-scheduled-dialog-icon {
@@ -9262,87 +9255,201 @@ export function betterCodexDesignSystemCss() {
       min-height: 0;
       overflow-y: auto;
       grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: var(--bc-space-4);
-      padding: var(--bc-space-5);
+      align-content: start;
+      gap: var(--bc-space-3) var(--bc-space-4);
+      padding: var(--bc-space-4) var(--bc-space-5) var(--bc-space-5);
       overscroll-behavior: contain;
     }
 
-    #better-codex-scheduled-dialog label {
+    #better-codex-scheduled-dialog label,
+    #better-codex-scheduled-dialog .better-codex-scheduled-field {
       display: flex;
       min-width: 0;
       flex-direction: column;
-      gap: 7px;
+      gap: var(--bc-space-2);
       color: var(--bc-color-text-muted);
       font-size: var(--bc-text-caption);
     }
 
     #better-codex-scheduled-dialog label.is-wide,
     #better-codex-scheduled-dialog .better-codex-scheduled-interval,
+    #better-codex-scheduled-dialog .better-codex-scheduled-project-path,
     #better-codex-scheduled-dialog output {
       grid-column: 1 / -1;
     }
 
-    #better-codex-scheduled-dialog :is(input, textarea, select) {
+    #better-codex-scheduled-dialog :is(input:not([type="checkbox"]):not([type="hidden"]), textarea) {
       width: 100%;
       min-width: 0;
-      min-height: 40px;
+      min-height: var(--bc-control-height);
       box-sizing: border-box;
       border: 0;
       border-radius: var(--bc-radius-sm);
       outline: 0;
       color: var(--bc-color-text);
       background: var(--bc-color-control);
-      padding: 9px 11px;
+      padding: 0 var(--bc-control-padding);
       font: inherit;
-      font-size: var(--bc-text-sm);
+      font-size: var(--bc-text-md);
       box-shadow: none;
     }
 
     #better-codex-scheduled-dialog textarea {
-      min-height: 126px;
+      min-height: 112px;
+      padding-block: var(--bc-space-2);
       resize: vertical;
-      line-height: 1.6;
+      line-height: 1.7;
     }
 
-    #better-codex-scheduled-dialog label > small {
+    #better-codex-scheduled-dialog .better-codex-scheduled-project-path {
       overflow: hidden;
+      margin-top: calc(var(--bc-space-1) * -1);
       color: var(--bc-color-text-faint);
+      font-size: var(--bc-text-caption);
       text-overflow: ellipsis;
       white-space: nowrap;
     }
 
+    #better-codex-scheduled-dialog .better-codex-scheduled-picker {
+      position: relative;
+    }
+
+    #better-codex-scheduled-dialog .better-codex-scheduled-picker-trigger {
+      display: flex;
+      width: 100%;
+      min-width: 0;
+      min-height: var(--bc-control-height);
+      box-sizing: border-box;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--bc-space-2);
+      border: 0;
+      border-radius: var(--bc-radius-sm);
+      color: var(--bc-color-text);
+      background: var(--bc-color-control);
+      padding: 0 var(--bc-control-padding);
+      font: inherit;
+      font-size: var(--bc-text-md);
+      text-align: start;
+      cursor: pointer;
+      transition: background-color var(--bc-motion-fast) ease-out, box-shadow var(--bc-motion-fast) ease-out;
+    }
+
+    #better-codex-scheduled-dialog .better-codex-scheduled-picker-trigger > span {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #better-codex-scheduled-dialog .better-codex-scheduled-picker-trigger > svg {
+      width: var(--bc-icon-sm);
+      height: var(--bc-icon-sm);
+      flex: 0 0 var(--bc-icon-sm);
+      color: var(--bc-color-text-muted);
+      transition: transform var(--bc-motion-fast) var(--bc-ease-out);
+    }
+
+    #better-codex-scheduled-dialog .better-codex-scheduled-picker.is-open .better-codex-scheduled-picker-trigger > svg {
+      transform: rotate(180deg);
+    }
+
+    #better-codex-scheduled-dialog .better-codex-scheduled-picker-option-copy {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      gap: var(--bc-space-2);
+    }
+
+    #better-codex-scheduled-dialog .better-codex-scheduled-picker-option-copy > svg {
+      width: var(--bc-icon-sm);
+      height: var(--bc-icon-sm);
+      flex: 0 0 var(--bc-icon-sm);
+      color: var(--bc-color-text-muted);
+    }
+
+    #better-codex-scheduled-dialog .better-codex-scheduled-picker-option-copy > span {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #better-codex-scheduled-dialog .better-codex-scheduled-picker-menu {
+      position: absolute;
+      top: calc(100% + var(--bc-space-1));
+      right: 0;
+      left: 0;
+      z-index: 20;
+      box-sizing: border-box;
+      max-height: 224px;
+      overflow-y: auto;
+      border-radius: var(--bc-radius-md);
+      color: var(--bc-color-text);
+      background: var(--bc-color-surface-raised);
+      padding: var(--bc-space-1);
+      box-shadow: var(--bc-elevation-menu);
+    }
+
+    #better-codex-scheduled-dialog .better-codex-scheduled-picker-menu[hidden] {
+      display: none;
+    }
+
+    #better-codex-scheduled-dialog .better-codex-scheduled-picker-option {
+      display: flex;
+      width: 100%;
+      min-height: var(--bc-row-height);
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--bc-space-2);
+      border: 0;
+      border-radius: var(--bc-radius-sm);
+      color: var(--bc-color-text);
+      background: transparent;
+      padding: 0 var(--bc-space-2);
+      font: inherit;
+      font-size: var(--bc-text-sm);
+      text-align: start;
+      cursor: pointer;
+    }
+
+    #better-codex-scheduled-dialog .better-codex-scheduled-picker-option.is-selected {
+      background: var(--bc-color-hover);
+    }
+
+    #better-codex-scheduled-dialog .better-codex-scheduled-picker-check {
+      display: inline-flex;
+      width: var(--bc-icon-sm);
+      height: var(--bc-icon-sm);
+      flex: 0 0 var(--bc-icon-sm);
+    }
+
+    #better-codex-scheduled-dialog .better-codex-scheduled-picker-check svg {
+      width: 100%;
+      height: 100%;
+    }
+
     #better-codex-scheduled-dialog .better-codex-scheduled-switch {
-      min-height: 52px;
+      min-height: var(--bc-control-height);
       box-sizing: border-box;
       align-items: center;
       justify-content: space-between;
       flex-direction: row;
-      gap: var(--bc-space-4);
-      border-radius: var(--bc-radius-md);
-      background: transparent;
-      padding: 9px 12px;
-    }
-
-    #better-codex-scheduled-dialog .better-codex-scheduled-switch span {
-      min-width: 0;
+      align-self: end;
+      gap: var(--bc-space-3);
+      border-radius: var(--bc-radius-sm);
+      background: var(--bc-color-control);
+      padding: 0 var(--bc-control-padding);
     }
 
     #better-codex-scheduled-dialog .better-codex-scheduled-switch strong,
-    #better-codex-scheduled-dialog .better-codex-scheduled-switch small {
-      display: block;
-    }
-
-    #better-codex-scheduled-dialog .better-codex-scheduled-switch strong {
+    #better-codex-scheduled-dialog .better-codex-scheduled-enable strong {
       color: var(--bc-color-text);
-      font-size: var(--bc-text-sm);
+      font-size: var(--bc-text-md);
+      font-weight: 500;
     }
 
-    #better-codex-scheduled-dialog .better-codex-scheduled-switch small {
-      margin-top: 3px;
-      color: var(--bc-color-text-muted);
-    }
-
-    #better-codex-scheduled-dialog .better-codex-scheduled-switch input {
+    #better-codex-scheduled-dialog :is(.better-codex-scheduled-switch, .better-codex-scheduled-enable) input {
       position: relative;
       width: 34px;
       min-height: 20px;
@@ -9351,13 +9458,13 @@ export function betterCodexDesignSystemCss() {
       margin: 0;
       appearance: none;
       border-radius: var(--bc-radius-pill);
-      background: var(--bc-color-control);
+      background: var(--bc-color-surface-raised);
       box-shadow: none;
       cursor: pointer;
       transition: background-color var(--bc-motion-fast) ease-out;
     }
 
-    #better-codex-scheduled-dialog .better-codex-scheduled-switch input::after {
+    #better-codex-scheduled-dialog :is(.better-codex-scheduled-switch, .better-codex-scheduled-enable) input::after {
       position: absolute;
       top: 3px;
       left: 3px;
@@ -9370,28 +9477,57 @@ export function betterCodexDesignSystemCss() {
       transition: transform var(--bc-motion-fast) var(--bc-ease-out), background-color var(--bc-motion-fast) ease-out;
     }
 
-    #better-codex-scheduled-dialog .better-codex-scheduled-switch input:checked {
+    #better-codex-scheduled-dialog :is(.better-codex-scheduled-switch, .better-codex-scheduled-enable) input:checked {
       background: var(--bc-color-primary);
     }
 
-    #better-codex-scheduled-dialog .better-codex-scheduled-switch input:checked::after {
+    #better-codex-scheduled-dialog :is(.better-codex-scheduled-switch, .better-codex-scheduled-enable) input:checked::after {
       transform: translateX(14px);
       background: var(--bc-color-on-primary);
     }
 
-    #better-codex-scheduled-dialog .better-codex-scheduled-switch input:disabled {
+    #better-codex-scheduled-dialog :is(.better-codex-scheduled-switch, .better-codex-scheduled-enable) input:disabled {
       cursor: not-allowed;
       opacity: .55;
     }
 
     #better-codex-scheduled-dialog .better-codex-scheduled-interval {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      grid-template-columns: minmax(96px, .35fr) minmax(0, 1fr);
       gap: var(--bc-space-4);
     }
 
     #better-codex-scheduled-dialog .better-codex-scheduled-interval[hidden] {
       display: none;
+    }
+
+    #better-codex-scheduled-dialog .better-codex-scheduled-unit-switch {
+      display: grid;
+      min-height: var(--bc-control-height);
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 2px;
+      border-radius: var(--bc-radius-sm);
+      background: var(--bc-color-control);
+      padding: 2px;
+    }
+
+    #better-codex-scheduled-dialog .better-codex-scheduled-unit-switch button {
+      min-width: 0;
+      min-height: calc(var(--bc-control-height) - var(--bc-space-1));
+      border: 0;
+      border-radius: var(--bc-radius-xs);
+      color: var(--bc-color-text-muted);
+      background: transparent;
+      padding: 0 var(--bc-space-2);
+      font: inherit;
+      font-size: var(--bc-text-sm);
+      cursor: pointer;
+    }
+
+    #better-codex-scheduled-dialog .better-codex-scheduled-unit-switch button[aria-checked="true"] {
+      color: var(--bc-color-text);
+      background: var(--bc-color-surface-raised);
+      box-shadow: var(--bc-elevation-card);
     }
 
     #better-codex-scheduled-dialog output {
@@ -9409,9 +9545,25 @@ export function betterCodexDesignSystemCss() {
 
     #better-codex-scheduled-dialog footer {
       min-height: 64px;
-      justify-content: flex-end;
+      justify-content: space-between;
       gap: var(--bc-space-2);
       padding-inline: var(--bc-space-4);
+    }
+
+    #better-codex-scheduled-dialog footer > div,
+    #better-codex-scheduled-dialog .better-codex-scheduled-enable {
+      display: flex;
+      align-items: center;
+    }
+
+    #better-codex-scheduled-dialog footer > div {
+      gap: var(--bc-space-2);
+    }
+
+    #better-codex-scheduled-dialog .better-codex-scheduled-enable {
+      flex-direction: row;
+      gap: var(--bc-space-2);
+      cursor: pointer;
     }
 
     #better-codex-scheduled-dialog footer .better-codex-submit {
@@ -9429,7 +9581,13 @@ export function betterCodexDesignSystemCss() {
       #better-codex-panel .better-codex-scheduled-row-actions button:not(:disabled):hover,
       #better-codex-panel .better-codex-scheduled-runs button:hover,
       #better-codex-scheduled-dialog header > button:hover,
-      #better-codex-scheduled-dialog footer button:not(.better-codex-submit):hover {
+      #better-codex-scheduled-dialog footer button:not(.better-codex-submit):hover,
+      #better-codex-scheduled-dialog .better-codex-scheduled-picker-trigger:hover,
+      #better-codex-scheduled-dialog .better-codex-scheduled-picker.is-open .better-codex-scheduled-picker-trigger,
+      #better-codex-scheduled-dialog .better-codex-scheduled-picker-option:hover,
+      #better-codex-scheduled-dialog .better-codex-scheduled-picker-option:focus-visible,
+      #better-codex-scheduled-dialog .better-codex-scheduled-picker-option.is-selected,
+      #better-codex-scheduled-dialog .better-codex-scheduled-unit-switch button:not([aria-checked="true"]):hover {
         color: var(--bc-color-text);
         background: var(--bc-color-hover);
       }
@@ -9528,6 +9686,7 @@ export function betterCodexDesignSystemCss() {
 
       #better-codex-scheduled-dialog label.is-wide,
       #better-codex-scheduled-dialog .better-codex-scheduled-interval,
+      #better-codex-scheduled-dialog .better-codex-scheduled-project-path,
       #better-codex-scheduled-dialog output {
         grid-column: 1;
       }
@@ -9586,6 +9745,7 @@ export function betterCodexDesignSystemCss() {
 
       #better-codex-scheduled-dialog[data-host="web"] label.is-wide,
       #better-codex-scheduled-dialog[data-host="web"] .better-codex-scheduled-interval,
+      #better-codex-scheduled-dialog[data-host="web"] .better-codex-scheduled-project-path,
       #better-codex-scheduled-dialog[data-host="web"] output {
         grid-column: 1;
       }
@@ -9594,10 +9754,6 @@ export function betterCodexDesignSystemCss() {
     @media (max-width: 430px) {
       #better-codex-panel .better-codex-scheduled-row-actions {
         grid-template-columns: repeat(2, 40px);
-      }
-
-      #better-codex-scheduled-dialog header p {
-        display: none;
       }
     }
 
