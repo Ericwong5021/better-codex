@@ -79,7 +79,7 @@ export type QueuedIssueReply = {
 };
 
 export type IssueSessionStatus = "starting" | "active" | "stopping" | "waiting_on_approval" | "waiting_on_user" | "idle" | "interrupted" | "failed" | "disconnected";
-export type SessionCommandKind = "start" | "turn" | "review" | "compact" | "steer" | "interrupt";
+export type SessionCommandKind = "start" | "turn" | "review" | "compact" | "native" | "steer" | "interrupt";
 export type SessionCommandStatus = "pending" | "claimed" | "completed" | "failed" | "cancelled";
 export type IssueThreadAction = "archive" | "unarchive" | "delete";
 
@@ -119,6 +119,7 @@ export type SessionCommand = {
   thread_id: string | null;
   turn_id: string | null;
   payload: Record<string, unknown>;
+  result: Record<string, unknown> | null;
   relay_id: string | null;
   attempts: number;
   cancel_requested: boolean;
@@ -625,9 +626,14 @@ function projectFromRow(row: Record<string, unknown>): Project {
 
 function sessionCommandFromRow(row: Record<string, unknown>): SessionCommand {
   let payload: Record<string, unknown> = {};
+  let result: Record<string, unknown> | null = null;
   try {
     const parsed = JSON.parse(String(row.payload_json || "{}")) as unknown;
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) payload = parsed as Record<string, unknown>;
+  } catch {}
+  try {
+    const parsed = JSON.parse(String(row.result_json || "null")) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) result = parsed as Record<string, unknown>;
   } catch {}
   return {
     id: String(row.id),
@@ -641,6 +647,7 @@ function sessionCommandFromRow(row: Record<string, unknown>): SessionCommand {
     thread_id: row.thread_id ? String(row.thread_id) : null,
     turn_id: row.turn_id ? String(row.turn_id) : null,
     payload,
+    result,
     relay_id: row.relay_id ? String(row.relay_id) : null,
     attempts: Number(row.attempts || 0),
     cancel_requested: Boolean(row.cancel_requested),
@@ -3925,7 +3932,7 @@ export class Store {
         `).run(command.id);
         continue;
       }
-      const commandError = (["start", "turn", "review"] as SessionCommandKind[]).includes(command.kind) && command.thread_id
+      const commandError = (["start", "turn", "review", "native"] as SessionCommandKind[]).includes(command.kind) && command.thread_id
         ? "session_outcome_unknown"
         : relayId ? "relay_replaced" : "runtime_restarted";
       this.db.prepare(`
@@ -4127,6 +4134,18 @@ export class Store {
           .run(timestamp, command.issue_id);
         this.db.prepare("UPDATE issues SET status = CASE WHEN status = 'done' THEN status ELSE 'in_review' END, needs_attention = CASE WHEN status = 'done' THEN needs_attention ELSE 1 END, pending_actor = CASE WHEN status = 'done' THEN pending_actor ELSE 'user' END, version = version + 1, updated_at = ? WHERE id = ? AND archived_at IS NULL")
           .run(timestamp, command.issue_id);
+      } else if (command.kind === "native") {
+        const binding = this.db.prepare("SELECT thread_id FROM issue_sessions WHERE issue_id = ?").get(command.issue_id) as { thread_id: string } | undefined;
+        if (!binding || binding.thread_id !== command.thread_id) throw new Error("issue_session_mismatch");
+        if (result.rebind_thread === true) {
+          const owner = this.db.prepare("SELECT issue_id FROM issue_sessions WHERE thread_id = ?").get(threadId) as { issue_id: string } | undefined;
+          if (owner && owner.issue_id !== command.issue_id) throw new Error("issue_session_already_bound");
+          this.db.prepare("UPDATE issue_sessions SET thread_id = ?, status = 'idle', active_turn_id = NULL, active_command_id = NULL, last_turn_id = NULL, last_agent_message = '', last_error = NULL, updated_at = ? WHERE issue_id = ? AND thread_id = ?")
+            .run(threadId, timestamp, command.issue_id, command.thread_id);
+        } else if (turnId) {
+          this.db.prepare("UPDATE issue_sessions SET status = 'active', active_turn_id = ?, active_command_id = ?, last_agent_message = '', last_error = NULL, updated_at = ? WHERE issue_id = ? AND thread_id = ?")
+            .run(turnId, command.id, timestamp, command.issue_id, threadId);
+        }
       }
       if (command.run_id && threadId && turnId && command.kind !== "interrupt") {
         const run = this.db.prepare(`

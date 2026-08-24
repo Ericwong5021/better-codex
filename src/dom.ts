@@ -5,6 +5,7 @@ import { betterCodexDesignSystemCss } from "./design-system.js";
 import { renderMarkdown } from "./markdown.js";
 import { betterCodexMcpRoute } from "./mcp-app.js";
 import { featureManifest } from "./features.js";
+import { desktopNativeCommands, sessionNativeCommands } from "./native-commands.js";
 import {
   ArrowLeft,
   ArrowLeftRight,
@@ -295,6 +296,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const CORE_VERSION = ${JSON.stringify(coreVersion)};
     const PROFILE = ${JSON.stringify(betterCodexProfile)};
     const HOST_KIND = ${JSON.stringify(host)};
+    const SESSION_NATIVE_COMMANDS = ${JSON.stringify(sessionNativeCommands)};
+    const DESKTOP_NATIVE_COMMANDS = ${JSON.stringify(desktopNativeCommands)};
     const HOST_CAPABILITIES = window.betterCodexHost?.capabilities || {};
     const READ_ONLY = HOST_CAPABILITIES.issues === "read-only";
     const AGENTS_READ_ONLY = HOST_CAPABILITIES.agents === "read-only";
@@ -1046,6 +1049,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     let relayEventQueue = Promise.resolve();
     let relayCommandInFlight = false;
     let relayBufferedEvents = [];
+    const relayGuardianDenials = new Map();
     let updateNotice = null;
     let updateNoticeResizeObserver = null;
     let boardScrollResizeObserver = null;
@@ -2549,6 +2553,25 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (method === "thread/started") return false;
       const threadId = normalizeSessionId(params.threadId);
       if (!threadId || (!relayThreads.has(threadId) && threadId !== relayCurrentThreadId)) return false;
+      if (method === "item/autoApprovalReview/completed") {
+        if (params.review?.status === "denied") {
+          const denials = relayGuardianDenials.get(threadId) || [];
+          const source = params.action || {};
+          const commandSource = source.source === "unifiedExec" ? "unified_exec" : source.source;
+          const protocol = source.protocol === "socks5Tcp" ? "socks5_tcp" : source.protocol === "socks5Udp" ? "socks5_udp" : source.protocol;
+          const permissions = source.permissions || {};
+          const action = source.type === "command" ? { type: "command", source: commandSource, command: source.command, cwd: source.cwd }
+            : source.type === "execve" ? { type: "execve", source: commandSource, program: source.program, argv: source.argv, cwd: source.cwd }
+            : source.type === "applyPatch" ? { type: "apply_patch", cwd: source.cwd, files: source.files }
+            : source.type === "networkAccess" ? { type: "network_access", target: source.target, host: source.host, protocol, port: source.port }
+            : source.type === "mcpToolCall" ? { type: "mcp_tool_call", server: source.server, tool_name: source.toolName, connector_id: source.connectorId ?? null, connector_name: source.connectorName ?? null, tool_title: source.toolTitle ?? null }
+            : source.type === "requestPermissions" ? { type: "request_permissions", reason: source.reason ?? null, permissions: { network: permissions.network ?? null, file_system: permissions.fileSystem ?? null } }
+            : { type: source.type };
+          denials.push({ id: String(params.reviewId || ""), target_item_id: params.targetItemId ?? null, turn_id: String(params.turnId || ""), status: String(params.review.status || ""), risk_level: params.review.riskLevel ?? null, user_authorization: params.review.userAuthorization ?? null, rationale: params.review.rationale ?? null, decision_source: params.decisionSource ?? null, action });
+          relayGuardianDenials.set(threadId, denials.slice(-20));
+        }
+        return true;
+      }
       if (!["thread/status/changed", "turn/started", "turn/completed", "item/completed"].includes(method)) return false;
       let relayParams = params;
       if (method === "thread/status/changed") {
@@ -2621,7 +2644,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const resumedId = normalizeSessionId(resumed?.thread?.id);
       if (resumedId !== expected) throw new Error("desktop_thread_resume_invalid");
       relayThreads.add(expected);
-      return resumed.thread;
+      return resumed;
     }
 
     function isThreadNotFoundError(error) {
@@ -2673,6 +2696,105 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       });
     }
 
+    function nativeArgument(command, argument) {
+      if (!argument) throw new Error("native_command_argument_required:" + command);
+      return argument;
+    }
+
+    async function executeInjectedNativeCommand(threadId, payload) {
+      const command = String(payload.native_command || "");
+      const argument = String(payload.argument || "").trim();
+      const resumed = await resumePersistedThread(threadId, payload);
+      if (command === "approve") {
+        const denials = relayGuardianDenials.get(threadId) || [];
+        const event = denials.at(-1);
+        if (!event) throw new Error("native_approval_not_found");
+        const response = await sendAppServerRequest("thread/approveGuardianDeniedAction", { threadId, event });
+        denials.pop();
+        return { thread_id: threadId, command, approved: true, response };
+      }
+      if (command === "fast") {
+        const value = argument.toLowerCase();
+        if (value && !["on", "off", "fast", "default", "true", "false", "1", "0"].includes(value)) throw new Error("native_fast_value_invalid");
+        const enabled = value ? ["on", "fast", "true", "1"].includes(value) : String(resumed?.serviceTier || "default") !== "fast";
+        await sendAppServerRequest("thread/settings/update", { threadId, serviceTier: enabled ? "fast" : null });
+        return { thread_id: threadId, command, service_tier: enabled ? "fast" : "default" };
+      }
+      if (command === "feedback") {
+        const reason = nativeArgument(command, argument);
+        const response = await sendAppServerRequest("feedback/upload", { classification: "bug", reason, threadId, includeLogs: false });
+        return { thread_id: threadId, command, uploaded: true, response };
+      }
+      if (command === "fork") {
+        const response = await sendAppServerRequest("thread/fork", { threadId, cwd: String(payload.workspace_path || "") || null, excludeTurns: true });
+        const forkedThreadId = normalizeSessionId(response?.thread?.id);
+        if (!forkedThreadId) throw new Error("native_fork_invalid");
+        if (argument) await sendAppServerRequest("thread/name/set", { threadId: forkedThreadId, name: argument.slice(0, 200) });
+        relayThreads.add(forkedThreadId);
+        return { thread_id: forkedThreadId, source_thread_id: threadId, command, rebind_thread: true };
+      }
+      if (command === "goal") {
+        const value = argument.toLowerCase();
+        if (!argument) return { thread_id: threadId, command, ...(await sendAppServerRequest("thread/goal/get", { threadId })) };
+        if (["clear", "off", "none"].includes(value)) {
+          await sendAppServerRequest("thread/goal/clear", { threadId });
+          return { thread_id: threadId, command, goal: null };
+        }
+        return { thread_id: threadId, command, ...(await sendAppServerRequest("thread/goal/set", { threadId, objective: argument, status: "active" })) };
+      }
+      if (command === "init") {
+        const input = [{ type: "text", text: "Create an AGENTS.md file that serves as a concise contributor guide for this repository. Inspect the repository first. Include project structure, build and validation commands, coding conventions, and commit guidance that are actually supported by the repository. Do not overwrite an existing AGENTS.md; if one exists, report that clearly instead." }];
+        const turn = await sendAppServerRequest("turn/start", turnStartParams(threadId, { ...payload, input }));
+        const turnId = normalizeSessionId(turn?.turn?.id);
+        if (!turnId) throw new Error("desktop_turn_start_invalid");
+        return { thread_id: threadId, turn_id: turnId, command };
+      }
+      if (command === "mcp") {
+        const response = await sendAppServerRequest("mcpServerStatus/list", { threadId, cursor: null, limit: 100, detail: "toolsAndAuthOnly" });
+        const servers = (Array.isArray(response?.data) ? response.data : []).map(server => ({ name: String(server?.name || ""), auth_status: String(server?.authStatus || ""), tool_count: server?.tools && typeof server.tools === "object" ? Object.keys(server.tools).length : 0, resource_count: Array.isArray(server?.resources) ? server.resources.length : 0 }));
+        return { thread_id: threadId, command, servers, next_cursor: response?.nextCursor ?? null };
+      }
+      if (command === "memories") {
+        const value = nativeArgument(command, argument).toLowerCase();
+        if (!["on", "off", "enabled", "disabled"].includes(value)) throw new Error("native_memories_value_invalid");
+        const mode = ["on", "enabled"].includes(value) ? "enabled" : "disabled";
+        await sendAppServerRequest("thread/memoryMode/set", { threadId, mode });
+        return { thread_id: threadId, command, memory_mode: mode };
+      }
+      if (command === "model") {
+        const model = nativeArgument(command, argument);
+        await sendAppServerRequest("thread/settings/update", { threadId, model });
+        return { thread_id: threadId, command, model };
+      }
+      if (command === "personality") {
+        const personality = nativeArgument(command, argument).toLowerCase();
+        if (!["none", "friendly", "pragmatic"].includes(personality)) throw new Error("native_personality_value_invalid");
+        await sendAppServerRequest("thread/settings/update", { threadId, personality });
+        return { thread_id: threadId, command, personality };
+      }
+      if (command === "plan") {
+        const value = argument.toLowerCase();
+        if (value && !["on", "off", "plan", "default"].includes(value)) throw new Error("native_plan_value_invalid");
+        const mode = ["off", "default"].includes(value) ? "default" : "plan";
+        const presets = await sendAppServerRequest("collaborationMode/list", {});
+        const preset = (Array.isArray(presets?.data) ? presets.data : []).find(item => item?.mode === mode);
+        if (!preset) throw new Error("native_plan_preset_unavailable");
+        await sendAppServerRequest("thread/settings/update", { threadId, collaborationMode: { mode, settings: { model: preset.model || resumed?.model, reasoning_effort: preset.reasoning_effort ?? resumed?.reasoningEffort, developer_instructions: null } } });
+        return { thread_id: threadId, command, collaboration_mode: mode };
+      }
+      if (command === "project") {
+        const projectId = nativeArgument(command, argument);
+        await sendAppServerRequest("thread/metadata/update", { threadId, projectId: ["none", "clear"].includes(projectId) ? "" : projectId });
+        return { thread_id: threadId, command, project_id: ["none", "clear"].includes(projectId) ? null : projectId };
+      }
+      if (command === "reasoning") {
+        const effort = nativeArgument(command, argument);
+        await sendAppServerRequest("thread/settings/update", { threadId, effort });
+        return { thread_id: threadId, command, reasoning_effort: effort };
+      }
+      throw new Error("native_command_invalid");
+    }
+
     async function executeSessionCommand(command) {
       const payload = command?.payload && typeof command.payload === "object" ? command.payload : {};
       let threadId = normalizeSessionId(command?.thread_id);
@@ -2681,6 +2803,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       relayCommandInFlight = true;
       relayBufferedEvents = [];
       try {
+        let completion = {};
         if (command.kind === "start") {
           const params = {
             cwd: String(payload.workspace_path || ""),
@@ -2743,6 +2866,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           relayCurrentThreadId = threadId;
           await resumePersistedThread(threadId, payload);
           await sendAppServerRequest("thread/compact/start", { threadId });
+        } else if (command.kind === "native") {
+          if (!threadId) throw new Error("session_thread_invalid");
+          relayCurrentThreadId = threadId;
+          completion = await executeInjectedNativeCommand(threadId, payload);
+          threadId = normalizeSessionId(completion.thread_id) || threadId;
+          turnId = normalizeSessionId(completion.turn_id) || turnId;
         } else if (command.kind === "steer") {
           if (!threadId || !turnId) throw new Error("session_turn_invalid");
           relayCurrentThreadId = threadId;
@@ -2761,7 +2890,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         }
         await api("/api/session-relay/commands/" + encodeURIComponent(command.id) + "/complete", {
           method: "POST",
-          body: JSON.stringify({ relay_id: relayId, result: { thread_id: threadId, turn_id: turnId } })
+          body: JSON.stringify({ relay_id: relayId, result: { thread_id: threadId, turn_id: turnId, ...completion } })
         });
         relayCommandInFlight = false;
         flushRelayEvents(turnId, command.kind === "steer" || command.kind === "interrupt" || command.kind === "compact");
@@ -8132,6 +8261,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       function semanticCommands() {
         const zh = state.locale === "zh-CN";
         const sessionCommandAvailable = Boolean(issue && sessionId && !executionRunning);
+        const desktopCommandAvailable = sessionCommandAvailable && HOST_KIND !== "web";
         return [
           { kind: "command", name: "status", label: "/status", description: zh ? "查看当前会话与智能体状态" : "Show the current session and agent status", icon: "usage", available: true, scope: zh ? "可用" : "Available" },
           { kind: "command", name: "skills", label: "/skills", description: zh ? "浏览并调用已启用的 Codex Skills" : "Browse and invoke enabled Codex Skills", icon: "wrench", available: true, scope: "$" },
@@ -8143,24 +8273,28 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             ["cloud", zh ? "在云端运行当前会话" : "Run the current chat in the cloud"],
             ["cloud-environment", zh ? "选择云端环境" : "Choose the cloud environment"],
             ["fast", zh ? "切换 Fast 服务层级" : "Toggle the Fast service tier"],
-            ["feedback", zh ? "提交反馈并可附带日志" : "Submit feedback with optional logs"],
+            ["feedback", zh ? "提交反馈：/feedback 反馈内容" : "Submit feedback: /feedback message"],
             ["fork", zh ? "复制为新的本地会话或工作树" : "Copy into a new local chat or worktree"],
-            ["goal", zh ? "设置持久目标" : "Set a persistent goal"],
+            ["goal", zh ? "查看或设置持久目标：/goal [目标|clear]" : "Get or set a goal: /goal [objective|clear]"],
             ["ide-context", zh ? "切换 IDE 上下文共享" : "Toggle shared IDE context"],
             ["init", zh ? "生成 AGENTS.md 初始文件" : "Generate an AGENTS.md scaffold"],
             ["local", zh ? "在本地项目中运行会话" : "Run the chat in a local project"],
             ["mcp", zh ? "查看 MCP 服务器状态" : "View MCP server status"],
-            ["memories", zh ? "配置会话记忆" : "Configure chat memories"],
-            ["model", zh ? "选择当前会话模型" : "Choose the current chat model"],
+            ["memories", zh ? "配置会话记忆：/memories on|off" : "Configure memories: /memories on|off"],
+            ["model", zh ? "选择当前会话模型：/model 模型名" : "Choose model: /model model-name"],
             ["pet", zh ? "唤醒或收起桌面宠物" : "Wake or tuck away the desktop pet"],
-            ["personality", zh ? "选择 Codex 响应风格" : "Choose the Codex personality"],
+            ["personality", zh ? "响应风格：/personality friendly|pragmatic|none" : "Personality: friendly|pragmatic|none"],
             ["plan", zh ? "切换规划模式" : "Toggle plan mode"],
-            ["project", zh ? "选择新会话项目" : "Choose a project for new chats"],
-            ["reasoning", zh ? "选择推理强度" : "Choose reasoning effort"],
+            ["project", zh ? "设置原生项目：/project 项目ID" : "Set native project: /project project-id"],
+            ["reasoning", zh ? "推理强度：/reasoning high" : "Reasoning effort: /reasoning high"],
             ["side", zh ? "开始临时侧边会话" : "Start a temporary side chat"],
             ["task", zh ? "开始不关联项目的会话" : "Start a chat without a project"],
             ["worktree", zh ? "在新 Git 工作树中运行" : "Run in a new Git worktree"],
-          ].map(([name, description]) => ({ kind: "command", name, label: "/" + name, description, icon: "terminal", available: false, scope: zh ? "原生会话" : "Native chat" })),
+          ].map(([name, description]) => {
+            const desktop = DESKTOP_NATIVE_COMMANDS.includes(name);
+            const available = desktop ? desktopCommandAvailable : sessionCommandAvailable;
+            return { kind: "command", name, label: "/" + name, description, icon: "terminal", available, scope: available ? desktop ? (zh ? "桌面" : "Desktop") : (zh ? "可用" : "Available") : desktop ? (zh ? "需桌面" : "Desktop required") : "Codex" };
+          }),
         ];
       }
 
@@ -8176,6 +8310,16 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           [zh ? "推理" : "Reasoning", agent?.reasoning_effort || (zh ? "默认" : "Default")],
         ];
         return '<div class="better-codex-semantic-status"><div class="better-codex-semantic-status-title">' + icon("usage") + '<span>' + te(zh ? "当前会话" : "Current session") + '</span></div>' + rows.map(row => '<div><span>' + escapeHtml(row[0]) + '</span><strong>' + escapeHtml(row[1]) + '</strong></div>').join("") + '</div>';
+      }
+
+      function semanticNativeResultMarkup(command, result) {
+        const zh = state.locale === "zh-CN";
+        const servers = command === "mcp" && Array.isArray(result?.servers) ? result.servers.slice(0, 30) : [];
+        const values = Object.entries(result || {}).filter(([key, value]) => !["thread_id", "source_thread_id", "command", "response", "servers"].includes(key) && value !== undefined).slice(0, 12);
+        const rows = servers.length
+          ? servers.map(server => [String(server.name || "MCP"), [server.auth_status, String(server.tool_count || 0) + (zh ? " 个工具" : " tools")].filter(Boolean).join(" · ")])
+          : values.length ? values.map(([key, value]) => [key.replaceAll("_", " "), typeof value === "object" ? JSON.stringify(value) : String(value)]) : [[zh ? "状态" : "Status", zh ? "已完成" : "Completed"]];
+        return '<div class="better-codex-semantic-status"><div class="better-codex-semantic-status-title">' + icon("check") + '<span>' + escapeHtml("/" + command) + '</span></div>' + rows.map(row => '<div><span>' + escapeHtml(row[0]) + '</span><strong>' + escapeHtml(row[1]) + '</strong></div>').join("") + '</div>';
       }
 
       function semanticEditor() {
@@ -8203,6 +8347,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         }
         if (semanticMenuState.status) {
           menu.innerHTML = semanticStatusMarkup();
+          menu.hidden = false;
+          input.setAttribute("aria-expanded", "true");
+          return;
+        }
+        if (semanticMenuState.nativeResult) {
+          menu.innerHTML = semanticNativeResultMarkup(semanticMenuState.nativeResult.command, semanticMenuState.nativeResult.result);
           menu.hidden = false;
           input.setAttribute("aria-expanded", "true");
           return;
@@ -8326,7 +8476,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             semanticMenuState = null;
             return syncSemanticMenu();
           }
-          replaceSemanticToken(item.label);
+          const argumentCommand = ["feedback", "memories", "model", "personality", "project", "reasoning"].includes(item.name);
+          replaceSemanticToken(item.label + (argumentCommand ? " " : ""));
           closeSemanticMenu();
           return;
         }
@@ -8678,13 +8829,74 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         }
       }
 
+      async function waitForNativeCommand(requestId) {
+        const deadline = Date.now() + 30000;
+        while (Date.now() < deadline) {
+          const command = await api("/api/issues/" + encodeURIComponent(issue.id) + "/native-command/" + encodeURIComponent(requestId));
+          if (command.status === "completed") return command.result || {};
+          if (command.status === "failed" || command.status === "cancelled") throw new Error(command.error || "native_command_failed");
+          await new Promise(resolve => setTimeout(resolve, 300));
+        }
+        throw new Error("native_command_timeout");
+      }
+
+      async function executeSessionNativeCommand(command, argument, requestId) {
+        traceDialog("native_command_requested", { request_id: requestId, command, argument_length: argument.length });
+        const queued = await api("/api/issues/" + encodeURIComponent(issue.id) + "/native-command", { method: "POST", body: JSON.stringify({ request_id: requestId, command, argument }) });
+        const result = queued.status === "completed" ? queued.result || {} : await waitForNativeCommand(requestId);
+        traceDialog("native_command_completed", { request_id: requestId, command });
+        return result;
+      }
+
+      function visibleNativeComposer() {
+        const candidates = Array.from(document.querySelectorAll('textarea,[contenteditable="true"]'));
+        return candidates.find(element => {
+          if (element.closest("[" + OWNED + "]")) return false;
+          const rect = element.getBoundingClientRect();
+          return rect.width > 40 && rect.height > 20 && getComputedStyle(element).visibility !== "hidden";
+        }) || null;
+      }
+
+      async function executeDesktopNativeCommand(command) {
+        if (HOST_KIND === "web") throw new Error("native_desktop_command_unavailable");
+        const original = command;
+        const nativeCommand = command === "task" ? "chat" : command;
+        traceDialog("native_desktop_command_requested", { command: original, native_command: nativeCommand, thread_id: sessionId });
+        dialog.close();
+        await openThread(sessionId);
+        const deadline = Date.now() + 5000;
+        let composer = visibleNativeComposer();
+        while (!composer && Date.now() < deadline) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+          composer = visibleNativeComposer();
+        }
+        if (!composer) throw new Error("native_desktop_composer_not_found");
+        const value = "/" + nativeCommand;
+        composer.focus();
+        if (composer instanceof HTMLTextAreaElement) {
+          const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+          if (!setter) throw new Error("native_desktop_composer_invalid");
+          setter.call(composer, value);
+        } else {
+          composer.textContent = value;
+        }
+        composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: value }));
+        composer.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true, cancelable: true }));
+        composer.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", code: "Enter", bubbles: true, cancelable: true }));
+        await new Promise(resolve => setTimeout(resolve, 400));
+        const remaining = composer instanceof HTMLTextAreaElement ? composer.value : composer.textContent;
+        if (remaining === value) throw new Error("native_desktop_command_not_accepted");
+      }
+
       async function sendReply(retryMessage = "", retryRequestId = "", retrySemanticReferences = null, retryCommand = "") {
         const textarea = dialog.querySelector('[name="reply"]');
         const send = dialog.querySelector("[data-conversation-send]");
         const errorOutput = dialog.querySelector(".better-codex-dialog-error");
         const retrying = Boolean(retryMessage);
         const text = String(retryMessage || textarea?.value || "").trim();
-        const slashCommand = /^\\/(review|compact|status|skills|apps)$/.exec(text)?.[1] || "";
+        const slashMatch = /^\\/([a-z][a-z-]*)(?:\\s+([\\s\\S]*))?$/.exec(text);
+        const slashCommand = slashMatch?.[1] || "";
+        const slashArgument = String(slashMatch?.[2] || "").trim();
         const semanticCommand = retryCommand || (["review", "compact"].includes(slashCommand) ? slashCommand : "");
         const semanticReferences = retrying ? (retrySemanticReferences || []) : draft.replySemanticReferences.filter(reference => text.includes((reference.type === "skill" ? "$" : "@") + reference.name));
         const requestId = retryRequestId || (globalThis.crypto?.randomUUID?.() || VERSION + "-reply-" + Date.now() + "-" + Math.random().toString(36).slice(2));
@@ -8710,6 +8922,41 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           scheduleReplyDraft(draft.reply);
           syncSemanticMenu();
           updateReplySendState();
+          return;
+        }
+        if (!retrying && DESKTOP_NATIVE_COMMANDS.includes(slashCommand)) {
+          send.disabled = true;
+          errorOutput.hidden = true;
+          try {
+            await executeDesktopNativeCommand(slashCommand);
+          } catch (error) {
+            reportGlobalError(error, { source: "native_desktop_command", command: slashCommand });
+            if (dialog.isConnected) {
+              errorOutput.textContent = t(error instanceof Error ? error.message : "native_desktop_command_failed");
+              errorOutput.hidden = false;
+              send.disabled = false;
+            }
+          }
+          return;
+        }
+        if (!retrying && SESSION_NATIVE_COMMANDS.includes(slashCommand)) {
+          send.disabled = true;
+          errorOutput.hidden = true;
+          clearConversationFailure();
+          try {
+            const result = await executeSessionNativeCommand(slashCommand, slashArgument, requestId);
+            completeReplySubmission(text, []);
+            semanticMenuState = { nativeResult: { command: slashCommand, result } };
+            renderSemanticMenu();
+            await loadIssues({ background: true });
+            if (result.rebind_thread) await loadConversation({ quiet: true });
+          } catch (error) {
+            traceDialog("native_command_failed", { request_id: requestId, command: slashCommand, error: String(error instanceof Error ? error.message : "native_command_failed").slice(0, 200) });
+            reportGlobalError(error, { source: "native_command", command: slashCommand, request_id: requestId });
+            errorOutput.textContent = t(error instanceof Error ? error.message : "native_command_failed");
+            errorOutput.hidden = false;
+            send.disabled = false;
+          }
           return;
         }
         stopReplyRecovery();

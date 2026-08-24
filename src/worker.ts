@@ -13,6 +13,7 @@ import { readConversationActivity, readConversationResult } from "./session-tran
 import { SessionHostClient } from "./session-host-client.js";
 import { projectDocumentKeys, type ProjectDocumentDiagram, type ProjectDocumentKey, type ProjectPlanItem, type ProjectPlanSnapshot } from "./sync-contract.js";
 import { codexSemanticInput, codexSemanticRequestFingerprint, normalizeCodexSemanticReferences, type CodexSemanticReference } from "./codex-semantics.js";
+import { sessionNativeCommand } from "./native-commands.js";
 
 const interval = 60000;
 const schedulerTimeout = 180000;
@@ -934,6 +935,38 @@ export class IssueWorker {
       return { command: queued.command, steered: false, queued: true, replayed: queued.replayed };
     }
     throw new Error("issue_execution_running");
+  }
+
+  sendIssueNativeCommand(issueId: string, requestId: string, commandValue: unknown, argumentValue: unknown) {
+    const command = sessionNativeCommand(commandValue);
+    if (!command) throw new Error("native_command_invalid");
+    const argument = typeof argumentValue === "string" ? argumentValue.trim().slice(0, 10000) : "";
+    const issue = this.store.getIssue(issueId);
+    if (!issue) throw new Error("issue_not_found");
+    if (issue.archived_at) throw new Error("issue_archived");
+    if (issue.session_handoff_at && !issue.session_owned) throw new Error("issue_session_handed_off");
+    const session = this.store.getIssueSession(issueId);
+    if (!session) throw new Error("session_required");
+    if (session.active_turn_id || issue.active_run_status || this.store.getIssueReplyState(issueId).status === "running") throw new Error("issue_execution_running");
+    const payload = {
+      ...this.sessionPayload(issue, issue.workspace_path || "", `/${command}${argument ? ` ${argument}` : ""}`),
+      native_command: command,
+      argument,
+    };
+    const existing = this.store.getSessionCommandByRequest(issueId, requestId);
+    if (existing) {
+      if (existing.kind !== "native" || existing.payload.native_command !== command || existing.payload.argument !== argument) throw new Error("request_id_conflict");
+      if (existing.status !== "failed" && existing.status !== "cancelled") return existing;
+      if (existing.error === "session_outcome_unknown") throw new Error("session_command_outcome_unknown");
+    }
+    return this.store.enqueueSessionCommand({
+      issueId,
+      requestId,
+      kind: "native",
+      threadId: session.thread_id,
+      payload,
+      hostId: session.host_id,
+    });
   }
 
   pollSessionRelay(relayId: string, appSessionId: string, capability: "unknown" | "ready" | "failed", capabilityError?: string, busy = false) {

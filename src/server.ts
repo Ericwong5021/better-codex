@@ -1908,6 +1908,20 @@ export function startServer() {
           if (issue.active_run_status || issue.session_active_turn_id || store.getIssueReplyState(issue.id).status === "running") throw new Error("issue_execution_running");
           return sendJson(response, 202, await worker.regenerateIssueTitle(issue));
         }
+        if (method === "POST" && path[3] === "native-command" && path.length === 4) {
+          if (updateInstallInProgress) throw new Error("update_in_progress");
+          const body = await readBody(request);
+          const requestId = cleanString(body.request_id, 200) || randomUUID();
+          const command = worker.sendIssueNativeCommand(issue.id, requestId, body.command, body.argument);
+          console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "native_command", event: "queued", issue_id: issue.id, request_id: requestId, command: command.payload.native_command, status: command.status })}`);
+          return sendJson(response, 202, { request_id: requestId, status: command.status, result: command.result, error: command.error });
+        }
+        if (method === "GET" && path[3] === "native-command" && path.length === 5) {
+          const requestId = decodeURIComponent(path[4]);
+          const command = store.getSessionCommandByRequest(issue.id, requestId);
+          if (!command || command.kind !== "native") throw new Error("native_command_not_found");
+          return sendJson(response, 200, { request_id: requestId, status: command.status, result: command.result, error: command.error });
+        }
         if (method === "POST" && path[3] === "session-handoff" && path.length === 4) {
           const body = await readBody(request);
           const threadId = normalizeSessionId(cleanString(body.thread_id, 200));

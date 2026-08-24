@@ -85,6 +85,7 @@ export class RuntimeSessionRelay {
   private currentThreadId = "";
   private readonly threads = new Set<string>();
   private readonly pending = new Map<number, PendingRequest>();
+  private readonly guardianDenials = new Map<string, Array<Record<string, unknown>>>();
   private bufferedEvents: RelayEvent[] = [];
   private operationQueue: Promise<void> = Promise.resolve();
 
@@ -267,6 +268,15 @@ export class RuntimeSessionRelay {
     if (method === "thread/started") return;
     const threadId = sessionId(params.threadId);
     if (!threadId || (!this.threads.has(threadId) && threadId !== this.currentThreadId)) return;
+    if (method === "item/autoApprovalReview/completed") {
+      const review = object(params.review);
+      if (review.status === "denied") {
+        const denials = this.guardianDenials.get(threadId) || [];
+        denials.push(this.guardianEvent(params));
+        this.guardianDenials.set(threadId, denials.slice(-20));
+      }
+      return;
+    }
     if (!["thread/status/changed", "turn/started", "turn/completed", "item/completed"].includes(method)) return;
     let relayParams: Record<string, unknown> = params;
     if (method === "thread/status/changed") {
@@ -369,6 +379,7 @@ export class RuntimeSessionRelay {
     this.heartbeatTimer = setInterval(() => this.heartbeat(relayId), 2000);
     this.heartbeatTimer.unref();
     try {
+      let completion: Record<string, unknown> = {};
       if (command.kind === "start") {
         const params: Record<string, unknown> = {
           cwd: String(payload.workspace_path || ""),
@@ -419,6 +430,14 @@ export class RuntimeSessionRelay {
         this.currentThreadId = threadId;
         await this.resume(threadId, payload);
         await this.request("thread/compact/start", { threadId });
+      } else if (command.kind === "native") {
+        if (!threadId) throw new Error("session_thread_invalid");
+        this.currentThreadId = threadId;
+        completion = await this.executeNativeCommand(threadId, payload);
+        const completedThreadId = sessionId(completion.thread_id);
+        if (completedThreadId) threadId = completedThreadId;
+        const completedTurnId = sessionId(completion.turn_id);
+        if (completedTurnId) turnId = completedTurnId;
       } else if (command.kind === "steer") {
         if (!threadId || !turnId) throw new Error("session_turn_invalid");
         this.currentThreadId = threadId;
@@ -435,7 +454,7 @@ export class RuntimeSessionRelay {
       } else {
         throw new Error("session_command_invalid");
       }
-      this.host.complete(command.id, relayId, { thread_id: threadId, turn_id: turnId });
+      this.host.complete(command.id, relayId, { thread_id: threadId, turn_id: turnId, ...completion });
       this.commandInFlight = false;
       this.flush(turnId, command.kind === "steer" || command.kind === "interrupt" || command.kind === "compact");
       if (threadId) this.threads.add(threadId);
@@ -491,6 +510,144 @@ export class RuntimeSessionRelay {
     const result = object(await this.request("thread/resume", params));
     if (sessionId(object(result.thread).id) !== threadId) throw new Error("desktop_thread_resume_invalid");
     this.threads.add(threadId);
+    return result;
+  }
+
+  private requiredArgument(command: string, value: string) {
+    if (!value) throw new Error(`native_command_argument_required:${command}`);
+    return value;
+  }
+
+  private async executeNativeCommand(threadId: string, payload: Record<string, unknown>) {
+    const command = String(payload.native_command || "");
+    const argument = String(payload.argument || "").trim();
+    const resumed = await this.resume(threadId, payload);
+    if (command === "approve") {
+      const denials = this.guardianDenials.get(threadId) || [];
+      const event = denials.at(-1);
+      if (!event) throw new Error("native_approval_not_found");
+      const result = object(await this.request("thread/approveGuardianDeniedAction", { threadId, event }));
+      denials.pop();
+      return { thread_id: threadId, command, approved: true, response: result };
+    }
+    if (command === "fast") {
+      const current = String(resumed.serviceTier || "default");
+      const requested = argument.toLowerCase();
+      const enabled = requested ? ["on", "fast", "true", "1"].includes(requested) : current !== "fast";
+      if (requested && !["on", "off", "fast", "default", "true", "false", "1", "0"].includes(requested)) throw new Error("native_fast_value_invalid");
+      await this.request("thread/settings/update", { threadId, serviceTier: enabled ? "fast" : null });
+      return { thread_id: threadId, command, service_tier: enabled ? "fast" : "default" };
+    }
+    if (command === "feedback") {
+      const reason = this.requiredArgument(command, argument);
+      const response = object(await this.request("feedback/upload", { classification: "bug", reason, threadId, includeLogs: false }));
+      return { thread_id: threadId, command, uploaded: true, response };
+    }
+    if (command === "fork") {
+      const response = object(await this.request("thread/fork", { threadId, cwd: String(payload.workspace_path || "") || null, excludeTurns: true }));
+      const forkedThreadId = sessionId(object(response.thread).id);
+      if (!forkedThreadId) throw new Error("native_fork_invalid");
+      if (argument) await this.request("thread/name/set", { threadId: forkedThreadId, name: argument.slice(0, 200) });
+      this.threads.add(forkedThreadId);
+      return { thread_id: forkedThreadId, source_thread_id: threadId, command, rebind_thread: true };
+    }
+    if (command === "goal") {
+      const normalized = argument.toLowerCase();
+      if (!argument) return { thread_id: threadId, command, ...object(await this.request("thread/goal/get", { threadId })) };
+      if (["clear", "off", "none"].includes(normalized)) {
+        await this.request("thread/goal/clear", { threadId });
+        return { thread_id: threadId, command, goal: null };
+      }
+      const response = object(await this.request("thread/goal/set", { threadId, objective: argument, status: "active" }));
+      return { thread_id: threadId, command, ...response };
+    }
+    if (command === "init") {
+      const input = [{ type: "text", text: "Create an AGENTS.md file that serves as a concise contributor guide for this repository. Inspect the repository first. Include project structure, build and validation commands, coding conventions, and commit guidance that are actually supported by the repository. Do not overwrite an existing AGENTS.md; if one exists, report that clearly instead.", text_elements: [] }];
+      const turn = object(await this.request("turn/start", this.turnStartParams(threadId, { ...payload, input })));
+      const turnId = sessionId(object(turn.turn).id);
+      if (!turnId) throw new Error("desktop_turn_start_invalid");
+      return { thread_id: threadId, turn_id: turnId, command };
+    }
+    if (command === "mcp") {
+      const response = object(await this.request("mcpServerStatus/list", { threadId, cursor: null, limit: 100, detail: "toolsAndAuthOnly" }));
+      const servers = (Array.isArray(response.data) ? response.data : []).map(value => {
+        const server = object(value);
+        return { name: String(server.name || ""), auth_status: String(server.authStatus || ""), tool_count: Object.keys(object(server.tools)).length, resource_count: Array.isArray(server.resources) ? server.resources.length : 0 };
+      });
+      return { thread_id: threadId, command, servers, next_cursor: response.nextCursor ?? null };
+    }
+    if (command === "memories") {
+      const value = this.requiredArgument(command, argument).toLowerCase();
+      if (!["on", "off", "enabled", "disabled"].includes(value)) throw new Error("native_memories_value_invalid");
+      const mode = ["on", "enabled"].includes(value) ? "enabled" : "disabled";
+      await this.request("thread/memoryMode/set", { threadId, mode });
+      return { thread_id: threadId, command, memory_mode: mode };
+    }
+    if (command === "model") {
+      const model = this.requiredArgument(command, argument);
+      await this.request("thread/settings/update", { threadId, model });
+      return { thread_id: threadId, command, model };
+    }
+    if (command === "personality") {
+      const personality = this.requiredArgument(command, argument).toLowerCase();
+      if (!["none", "friendly", "pragmatic"].includes(personality)) throw new Error("native_personality_value_invalid");
+      await this.request("thread/settings/update", { threadId, personality });
+      return { thread_id: threadId, command, personality };
+    }
+    if (command === "plan") {
+      const value = argument.toLowerCase();
+      if (value && !["on", "off", "plan", "default"].includes(value)) throw new Error("native_plan_value_invalid");
+      const mode = ["off", "default"].includes(value) ? "default" : "plan";
+      const presets = object(await this.request("collaborationMode/list", {}));
+      const preset = (Array.isArray(presets.data) ? presets.data : []).map(object).find(item => item.mode === mode);
+      if (!preset) throw new Error("native_plan_preset_unavailable");
+      await this.request("thread/settings/update", { threadId, collaborationMode: { mode, settings: { model: preset.model || resumed.model, reasoning_effort: preset.reasoning_effort ?? resumed.reasoningEffort, developer_instructions: null } } });
+      return { thread_id: threadId, command, collaboration_mode: mode };
+    }
+    if (command === "project") {
+      const projectId = this.requiredArgument(command, argument);
+      await this.request("thread/metadata/update", { threadId, projectId: projectId === "none" || projectId === "clear" ? "" : projectId });
+      return { thread_id: threadId, command, project_id: projectId === "none" || projectId === "clear" ? null : projectId };
+    }
+    if (command === "reasoning") {
+      const effort = this.requiredArgument(command, argument);
+      await this.request("thread/settings/update", { threadId, effort });
+      return { thread_id: threadId, command, reasoning_effort: effort };
+    }
+    throw new Error("native_command_invalid");
+  }
+
+  private guardianEvent(params: Record<string, unknown>) {
+    const review = object(params.review);
+    const source = String(object(params.action).type || "");
+    const action = object(params.action);
+    const commandSource = action.source === "unifiedExec" ? "unified_exec" : action.source;
+    const protocol = action.protocol === "socks5Tcp" ? "socks5_tcp" : action.protocol === "socks5Udp" ? "socks5_udp" : action.protocol;
+    const permissionProfile = object(action.permissions);
+    const eventAction: Record<string, unknown> = source === "command"
+      ? { type: "command", source: commandSource, command: action.command, cwd: action.cwd }
+      : source === "execve"
+        ? { type: "execve", source: commandSource, program: action.program, argv: action.argv, cwd: action.cwd }
+        : source === "applyPatch"
+          ? { type: "apply_patch", cwd: action.cwd, files: action.files }
+          : source === "networkAccess"
+            ? { type: "network_access", target: action.target, host: action.host, protocol, port: action.port }
+            : source === "mcpToolCall"
+              ? { type: "mcp_tool_call", server: action.server, tool_name: action.toolName, connector_id: action.connectorId ?? null, connector_name: action.connectorName ?? null, tool_title: action.toolTitle ?? null }
+              : source === "requestPermissions"
+                ? { type: "request_permissions", reason: action.reason ?? null, permissions: { network: permissionProfile.network ?? null, file_system: permissionProfile.fileSystem ?? null } }
+                : { type: source };
+    return {
+      id: String(params.reviewId || ""),
+      target_item_id: params.targetItemId ?? null,
+      turn_id: String(params.turnId || ""),
+      status: String(review.status || ""),
+      risk_level: review.riskLevel ?? null,
+      user_authorization: review.userAuthorization ?? null,
+      rationale: review.rationale ?? null,
+      decision_source: params.decisionSource ?? null,
+      action: eventAction,
+    };
   }
 
   private isThreadNotFound(error: unknown) {

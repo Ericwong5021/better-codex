@@ -39,6 +39,7 @@
     "dist/launch-integration.js",
     "dist/mcp-app.js",
     "dist/model-catalog.js",
+    "dist/native-commands.js",
     "dist/mockup.js",
     "dist/runtime-state.js",
     "dist/release-update.js",
