@@ -406,6 +406,13 @@ export function createRelayServer(options: RelayServerOptions) {
     }
     retryableChannels.delete(channel.id);
   };
+  const cancelRuntimeChannel = (active: ActiveRuntime, channelId: string, reason: string) => {
+    try {
+      active.socket.send(encodeRelayMessage({ type: "request_cancel", protocol_version: relayProtocolVersion, device_id: active.deviceId, runtime_instance_id: active.runtimeInstanceId, connection_epoch: active.connectionEpoch, channel_id: channelId, reason }));
+    } catch (error) {
+      store.audit(active.deviceId, "relay_channel_cancel_failed", JSON.stringify({ channel_id: channelId, reason, connection_epoch: active.connectionEpoch, runtime_instance_id: active.runtimeInstanceId, error: error instanceof Error ? error.message : String(error) }));
+    }
+  };
   const startDownstreamResponse = async (channel: RelayChannel) => {
     if (channel.downstreamResponseStarted) return;
     if (channel.responseStatus === null) throw new Error("relay_channel_invalid");
@@ -579,6 +586,7 @@ export function createRelayServer(options: RelayServerOptions) {
   };
   let pumpCommands = (active: ActiveRuntime) => {};
   const retryCommandChannel = (active: ActiveRuntime, channel: RelayCommandChannel, error: string) => {
+    cancelRuntimeChannel(active, channel.id, error);
     clearTimeout(channel.timeout);
     active.commandChannels.delete(channel.id);
     syncActiveChannels(active);
@@ -1046,6 +1054,7 @@ export function createRelayServer(options: RelayServerOptions) {
               if (channel.upstreamResponseStarted) {
                 const detail = JSON.stringify({ trace_id: channel.traceId, channel_id: channel.id, request_id: channel.requestId, state: "duplicate_response_open", connection_epoch: active.connectionEpoch, runtime_instance_id: active.runtimeInstanceId });
                 store.audit(active.deviceId, "relay_channel_invalid", detail);
+                cancelRuntimeChannel(active, channel.id, "relay_duplicate_response_open");
                 failChannel(active, channel, "relay_stream_interrupted", "relay_duplicate_response_open");
                 return;
               }
@@ -1092,6 +1101,7 @@ export function createRelayServer(options: RelayServerOptions) {
               if (!channel.upstreamResponseStarted || message.sequence !== channel.responseSequence) {
                 const detail = JSON.stringify({ trace_id: channel.traceId, channel_id: channel.id, request_id: channel.requestId, expected_sequence: channel.responseSequence, actual_sequence: message.sequence, upstream_response_started: channel.upstreamResponseStarted, downstream_response_started: channel.downstreamResponseStarted, connection_epoch: active.connectionEpoch, runtime_instance_id: active.runtimeInstanceId });
                 store.audit(active.deviceId, "relay_channel_chunk_sequence_invalid", detail);
+                cancelRuntimeChannel(active, channel.id, "relay_chunk_sequence_invalid");
                 failChannel(active, channel, "relay_stream_interrupted", "relay_chunk_sequence_invalid");
                 return;
               }
@@ -1126,6 +1136,7 @@ export function createRelayServer(options: RelayServerOptions) {
               }
               if (!channel.upstreamResponseStarted) {
                 store.audit(active.deviceId, "relay_channel_response_end_invalid", JSON.stringify({ trace_id: channel.traceId, channel_id: channel.id, request_id: channel.requestId, upstream_response_started: false, connection_epoch: active.connectionEpoch, runtime_instance_id: active.runtimeInstanceId }));
+                cancelRuntimeChannel(active, channel.id, "relay_response_end_before_open");
                 failChannel(active, channel, "relay_stream_interrupted", "relay_response_end_before_open");
                 return;
               }
@@ -1149,7 +1160,16 @@ export function createRelayServer(options: RelayServerOptions) {
             }
             if (message.type === "window_update") {
               const channel = active.channels.get(message.channel_id);
-              if (message.direction !== "request") throw new Error("relay_channel_invalid");
+              if (message.direction !== "request") {
+                if (channel) {
+                  store.audit(active.deviceId, "relay_channel_window_invalid", JSON.stringify({ trace_id: channel.traceId, channel_id: channel.id, request_id: channel.requestId, direction: message.direction, connection_epoch: active.connectionEpoch, runtime_instance_id: active.runtimeInstanceId }));
+                  cancelRuntimeChannel(active, channel.id, "relay_window_direction_invalid");
+                  failChannel(active, channel, "relay_stream_interrupted", "relay_window_direction_invalid");
+                } else {
+                  store.audit(active.deviceId, "relay_late_window_update", JSON.stringify({ channel_id: message.channel_id, direction: message.direction, connection_epoch: active.connectionEpoch, runtime_instance_id: active.runtimeInstanceId }));
+                }
+                return;
+              }
               if (!channel) return;
               channel.requestCredit += message.bytes;
               flushRequest(active, channel);
@@ -1157,7 +1177,7 @@ export function createRelayServer(options: RelayServerOptions) {
             }
             throw new Error("unsupported_relay_message");
             } catch (error) {
-              store.audit(device.id, "relay_protocol_error", error instanceof Error ? error.message : "relay_protocol_error");
+              store.audit(device.id, "relay_protocol_error", JSON.stringify({ error: error instanceof Error ? error.message : "relay_protocol_error", connection_epoch: active?.connectionEpoch ?? null, runtime_instance_id: active?.runtimeInstanceId ?? null }));
               connection?.close(error instanceof Error && error.message === "relay_protocol_mismatch" ? 4002 : 1008);
             }
           });

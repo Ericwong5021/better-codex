@@ -59,6 +59,10 @@ function runtimeForwardError(error: unknown) {
   return code ? `runtime_fetch_failed:${code}` : "runtime_fetch_failed";
 }
 
+function relayDiagnostic(event: string, detail: Record<string, unknown>) {
+  console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "runtime_relay", event, ...detail })}`);
+}
+
 function relaySocketUrl(configuration: RelayConfiguration) {
   const url = new URL(configuration.relay_url);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
@@ -276,10 +280,16 @@ export class RuntimeRelayClient {
       return;
     }
     if (message.type === "request_open") {
-      if (this.channels.size >= this.hello.max_concurrent_channels) throw new Error("relay_channel_limit");
+      if (this.channels.size >= this.hello.max_concurrent_channels) {
+        this.rejectChannel(socket, message.channel_id, "relay_channel_limit", { request_id: message.request_id, path: message.path });
+        return;
+      }
       if (this.channels.has(message.channel_id)) throw new Error("relay_channel_conflict");
       const method = message.method.toUpperCase();
-      if (!/^(GET|HEAD|POST|PUT|PATCH|DELETE)$/.test(method)) throw new Error("method_not_allowed");
+      if (!/^(GET|HEAD|POST|PUT|PATCH|DELETE)$/.test(method)) {
+        this.rejectChannel(socket, message.channel_id, "method_not_allowed", { request_id: message.request_id, method });
+        return;
+      }
       const channel: RuntimeChannel = { open: message, body: ["GET", "HEAD"].includes(method) ? null : new PassThrough({ highWaterMark: relayMaxChunkBytes }), bytes: 0, nextSequence: 0, controller: new AbortController(), running: true, cancelled: false, responseCredit: relayInitialWindowBytes, responseCreditWaiters: [] };
       this.channels.set(message.channel_id, channel);
       void this.forward(socket, channel);
@@ -287,11 +297,20 @@ export class RuntimeRelayClient {
     }
     if (message.type === "request_chunk") {
       const channel = this.channels.get(message.channel_id);
-      if (!channel) return;
-      if (!channel.running || !channel.body || message.sequence !== channel.nextSequence) throw new Error("relay_chunk_sequence_invalid");
+      if (!channel) {
+        relayDiagnostic("late_request_chunk", { channel_id: message.channel_id, sequence: message.sequence, connection_epoch: this.hello.connection_epoch, runtime_instance_id: this.hello.runtime_instance_id });
+        return;
+      }
+      if (!channel.running || !channel.body || message.sequence !== channel.nextSequence) {
+        this.failChannel(socket, channel, "relay_chunk_sequence_invalid", { expected_sequence: channel.nextSequence, actual_sequence: message.sequence, running: channel.running, has_body: Boolean(channel.body) });
+        return;
+      }
       const bytes = Buffer.from(message.data, "base64");
       channel.bytes += bytes.length;
-      if (channel.bytes > 50 * 1024 * 1024) throw new Error("body_too_large");
+      if (channel.bytes > 50 * 1024 * 1024) {
+        this.failChannel(socket, channel, "body_too_large", { request_bytes: channel.bytes });
+        return;
+      }
       channel.nextSequence += 1;
       if (!channel.body.write(bytes)) await once(channel.body, "drain");
       if (!channel.cancelled) this.send(socket, { type: "window_update", ...this.identity(), channel_id: channel.open.channel_id, direction: "request", bytes: bytes.length });
@@ -299,8 +318,14 @@ export class RuntimeRelayClient {
     }
     if (message.type === "request_end") {
       const channel = this.channels.get(message.channel_id);
-      if (!channel) return;
-      if (!channel.running) throw new Error("relay_channel_invalid");
+      if (!channel) {
+        relayDiagnostic("late_request_end", { channel_id: message.channel_id, connection_epoch: this.hello.connection_epoch, runtime_instance_id: this.hello.runtime_instance_id });
+        return;
+      }
+      if (!channel.running) {
+        this.failChannel(socket, channel, "relay_channel_invalid", { state: "request_end_not_running" });
+        return;
+      }
       channel.body?.end();
       return;
     }
@@ -316,12 +341,31 @@ export class RuntimeRelayClient {
     }
     if (message.type === "window_update") {
       const channel = this.channels.get(message.channel_id);
-      if (message.direction !== "response") throw new Error("relay_channel_invalid");
+      if (message.direction !== "response") {
+        if (channel) this.failChannel(socket, channel, "relay_channel_invalid", { state: "window_update_direction", direction: message.direction });
+        else relayDiagnostic("late_window_update", { channel_id: message.channel_id, direction: message.direction, connection_epoch: this.hello.connection_epoch, runtime_instance_id: this.hello.runtime_instance_id });
+        return;
+      }
       if (!channel) return;
       this.releaseResponseCredit(channel, message.bytes);
       return;
     }
     throw new Error("unsupported_relay_message");
+  }
+
+  private rejectChannel(socket: WebSocket, channelId: string, error: string, detail: Record<string, unknown>) {
+    relayDiagnostic("channel_rejected", { channel_id: channelId, error, connection_epoch: this.hello?.connection_epoch ?? null, runtime_instance_id: this.hello?.runtime_instance_id ?? this.options.runtimeInstanceId, ...detail });
+    if (socket.readyState === WebSocket.OPEN && this.hello) this.send(socket, { type: "response_error", ...this.identity(), channel_id: channelId, error });
+  }
+
+  private failChannel(socket: WebSocket, channel: RuntimeChannel, error: string, detail: Record<string, unknown>) {
+    channel.cancelled = true;
+    channel.running = false;
+    channel.controller.abort();
+    channel.body?.destroy();
+    for (const resolve of channel.responseCreditWaiters.splice(0)) resolve();
+    if (this.channels.get(channel.open.channel_id) === channel) this.channels.delete(channel.open.channel_id);
+    this.rejectChannel(socket, channel.open.channel_id, error, { request_id: channel.open.request_id, path: channel.open.path, expected_sequence: channel.nextSequence, request_bytes: channel.bytes, ...detail });
   }
 
   private async forward(socket: WebSocket, channel: RuntimeChannel) {
@@ -360,7 +404,7 @@ export class RuntimeRelayClient {
       }
     } finally {
       clearTimeout(timer);
-      this.channels.delete(channel.open.channel_id);
+      if (this.channels.get(channel.open.channel_id) === channel) this.channels.delete(channel.open.channel_id);
     }
   }
 }
