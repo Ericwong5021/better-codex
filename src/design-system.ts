@@ -5432,8 +5432,9 @@ export function betterCodexDesignSystemCss() {
     }
 
     #better-codex-dialog[data-detail="true"][data-description-expanded="true"] .better-codex-description-field .better-codex-dialog-editor {
-      height: min(36vh, calc((var(--bc-text-md) * 1.55 * 12) + var(--bc-space-1)));
+      height: auto;
       max-height: min(36vh, calc((var(--bc-text-md) * 1.55 * 12) + var(--bc-space-1)));
+      field-sizing: content;
     }
 
     #better-codex-dialog form {
@@ -5486,8 +5487,9 @@ export function betterCodexDesignSystemCss() {
     }
 
     #better-codex-dialog[data-description-expanded="true"] .better-codex-description-field .better-codex-dialog-editor {
-      height: min(36vh, calc((var(--bc-text-md) * 1.55 * 12) + var(--bc-space-1)));
+      height: auto;
       max-height: min(36vh, calc((var(--bc-text-md) * 1.55 * 12) + var(--bc-space-1)));
+      field-sizing: content;
       overflow-y: auto;
     }
 
