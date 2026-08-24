@@ -573,7 +573,7 @@ test("agent issue creation reserves enough height for its scaled footer", () => 
   const css = betterCodexDesignSystemCss();
 
   assert.ok(css.includes("--bc-dialog-agent-height: 400px"));
-  assert.ok(source.includes("height: min(var(--bc-dialog-agent-height, 400px), calc(100vh - 48px))"));
+  assert.ok(source.includes("height: min(var(--bc-dialog-agent-height), calc(100vh - 48px))"));
   assert.doesNotMatch(source, /#better-codex-dialog\[data-mode="agent"\]\s*\{[^}]*height:\s*min\(368px/s);
 });
 
@@ -582,8 +582,8 @@ test("issue detail dialog separates compact and expanded sizes", () => {
 
   assert.match(css, /#better-codex-dialog\[data-detail="true"\]\[data-expanded="false"\]\s*\{[^}]*width:\s*min\(1200px,[^}]*height:\s*fit-content;/s);
   assert.match(css, /#better-codex-dialog\[data-detail="true"\]\[data-expanded="false"\]:has\(\.better-codex-conversation\)\s*\{[^}]*height:\s*min\(76vh,\s*780px\)/s);
-  assert.match(css, /#better-codex-dialog\[data-detail="true"\]\[data-expanded="true"\]\s*\{[^}]*inset:\s*var\(--bc-dialog-fullscreen-top,[^}]*width:\s*var\(--bc-dialog-fullscreen-width,[^}]*height:\s*var\(--bc-dialog-fullscreen-height,/s);
-  assert.match(css, /#better-codex-dialog\[data-detail="true"\]\[data-expanded="true"\]:has\(\.better-codex-conversation\)\s*\{[^}]*height:\s*var\(--bc-dialog-fullscreen-height,/s);
+  assert.match(css, /#better-codex-dialog\[data-detail="true"\]\[data-expanded="true"\]\s*\{[^}]*inset:\s*var\(--bc-dialog-fullscreen-top\)[^}]*width:\s*var\(--bc-dialog-fullscreen-width\)[^}]*height:\s*var\(--bc-dialog-fullscreen-height\)/s);
+  assert.match(css, /#better-codex-dialog\[data-detail="true"\]\[data-expanded="true"\]:has\(\.better-codex-conversation\)\s*\{[^}]*height:\s*var\(--bc-dialog-fullscreen-height\)/s);
   assert.match(css, /#better-codex-dialog\[data-detail="true"\]\[data-expanded="false"\],[\s\S]*?#better-codex-dialog\[data-detail="true"\]\[data-expanded="true"\]\s*\{\s*width:\s*calc\(100vw - 24px\);/s);
 });
 

@@ -1,5 +1,6 @@
 import { createInterface } from "node:readline";
 import { coreVersion } from "./compatibility.js";
+import { betterCodexDesignTokensCss } from "./design-system.js";
 
 export const betterCodexMcpName = "better-codex";
 export const betterCodexMcpTool = "board";
@@ -36,7 +37,8 @@ const html = `<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Better Codex</title>
 <style>
-:root{color-scheme:light dark;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}body{margin:0;min-height:100vh;display:grid;place-items:center;background:transparent;color:CanvasText}.state{display:flex;align-items:center;gap:10px;font-size:14px;opacity:.68}.dot{width:8px;height:8px;border-radius:999px;background:#16a34a;box-shadow:0 0 0 5px color-mix(in srgb,#16a34a 16%,transparent)}
+${betterCodexDesignTokensCss()}
+:root{font-family:var(--bc-font-ui)}body{margin:0;min-height:100vh;display:grid;place-items:center;background:transparent;color:var(--bc-color-text)}.state{display:flex;align-items:center;gap:var(--bc-space-3);font-size:var(--bc-text-base);opacity:.68}.dot{width:var(--bc-space-2);height:var(--bc-space-2);border-radius:var(--bc-radius-pill);background:var(--bc-color-success);box-shadow:0 0 0 5px color-mix(in srgb,var(--bc-color-success) 16%,transparent)}
 </style>
 </head>
 <body><div class="state"><span class="dot"></span><span>正在连接 Better Codex…</span></div></body>

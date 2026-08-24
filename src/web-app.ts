@@ -1,3 +1,5 @@
+import { betterCodexThemeColors } from "./design-system.js";
+
 const webAppIcons = [
   { src: "/better-codex-icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
   { src: "/better-codex-icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
@@ -13,8 +15,8 @@ export function betterCodexWebManifest() {
     start_url: "/web",
     scope: "/",
     display: "standalone",
-    background_color: "#ffffff",
-    theme_color: "#f7f7f6",
+    background_color: betterCodexThemeColors.light.canvas,
+    theme_color: betterCodexThemeColors.light.navigation,
     icons: webAppIcons,
   });
 }

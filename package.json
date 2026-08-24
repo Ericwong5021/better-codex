@@ -71,7 +71,7 @@
     "dist/worker.js"
   ],
   "scripts": {
-    "build": "tsc && node scripts/refresh-local-install.mjs && node scripts/refresh-injector.mjs",
+    "build": "npm run check:design-tokens && tsc && node scripts/refresh-local-install.mjs && node scripts/refresh-injector.mjs",
     "dev": "tsx src/cli.ts serve",
     "dev:install": "npm run build && node scripts/development-instance.mjs install",
     "dev:mockup": "node scripts/dev-mockup.mjs",
@@ -87,7 +87,8 @@
     "relay": "tsx src/relay-cli.ts",
     "relay:start": "node dist/relay-cli.js serve",
     "better-codex": "tsx src/cli.ts",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "npm run check:design-tokens && tsc --noEmit",
+    "check:design-tokens": "node scripts/check-design-tokens.mjs",
     "test": "tsx --test --test-force-exit --test-concurrency=2 test/*.test.ts",
     "test:web": "playwright test",
     "test:web:smoke": "playwright test test/e2e/web/local-smoke.spec.ts",

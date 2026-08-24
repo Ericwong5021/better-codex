@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { betterCodexThemeColors } from "./design-system.js";
 
 export type CodexAppearance = {
   theme: "system" | "light" | "dark";
@@ -74,7 +75,7 @@ export function readCodexAppearance(path = defaultConfigPath): CodexAppearance {
   const theme = configuredTheme === "light" || configuredTheme === "dark" ? configuredTheme : "system";
   return {
     theme,
-    light: chromeTheme(source, "desktop.appearanceLightChromeTheme", { accent: "#339cff", contrast: 45, ink: "#1a1c1f", surface: "#ffffff", uiFont: defaultUiFont }),
-    dark: chromeTheme(source, "desktop.appearanceDarkChromeTheme", { accent: "#007acc", contrast: 50, ink: "#d4d4d4", surface: "#1e1e1e", uiFont: defaultUiFont }),
+    light: chromeTheme(source, "desktop.appearanceLightChromeTheme", { accent: betterCodexThemeColors.light.accent, contrast: 45, ink: betterCodexThemeColors.light.ink, surface: betterCodexThemeColors.light.canvas, uiFont: defaultUiFont }),
+    dark: chromeTheme(source, "desktop.appearanceDarkChromeTheme", { accent: betterCodexThemeColors.dark.accent, contrast: 50, ink: betterCodexThemeColors.dark.ink, surface: betterCodexThemeColors.dark.canvas, uiFont: defaultUiFont }),
   };
 }

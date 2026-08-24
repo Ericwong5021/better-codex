@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { betterCodexAvatarColors } from "./design-system.js";
 
 export type CodexUserProfile = {
   id: string;
@@ -13,16 +14,7 @@ export type CodexUserProfile = {
 
 const defaultAuthPath = join(process.env.CODEX_HOME || join(homedir(), ".codex"), "auth.json");
 
-export const avatarColors = [
-  "#2563eb",
-  "#7c3aed",
-  "#0f766e",
-  "#15803d",
-  "#4d7c0f",
-  "#a16207",
-  "#c2410c",
-  "#be185d",
-] as const;
+export const avatarColors = betterCodexAvatarColors;
 
 function decodeJwtPayload(token: string) {
   const parts = token.split(".");
