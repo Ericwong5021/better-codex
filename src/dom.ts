@@ -8149,10 +8149,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       }
 
       function persistReplyDraft(value, items = draft.replyAttachments) {
-        if (!issue || REMOTE) return;
+        if (!issue || REMOTE && !RELAY) return;
         replyDraftUpdate = replyDraftUpdate.catch(() => {}).then(async () => {
+          const pendingFiles = RELAY ? items.filter(item => item.file && !item.path) : [];
+          let files = [];
           try {
-            await uploadPastedImages(items);
+            if (RELAY) files = await remoteFiles(pendingFiles);
+            else await uploadPastedImages(items);
           } catch (error) {
             showError(error);
             throw error;
@@ -8161,7 +8164,15 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           let current = issue;
           for (let attempt = 0; attempt < 2; attempt += 1) {
             try {
-              const updated = await api("/api/issues/" + encodeURIComponent(issue.id), { method: "PATCH", body: JSON.stringify({ version: current.version, reply_draft: value, reply_draft_attachments: attachments }) });
+              const body = { version: current.version, reply_draft: value, reply_draft_attachments: attachments };
+              if (files.length) body.files = files;
+              const updated = await api("/api/issues/" + encodeURIComponent(issue.id), { method: "PATCH", body: JSON.stringify(body) });
+              const savedAttachments = Array.isArray(updated.reply_draft_attachments) ? updated.reply_draft_attachments.slice(attachments.length) : [];
+              pendingFiles.forEach((item, index) => {
+                if (!savedAttachments[index]) return;
+                item.path = savedAttachments[index].path;
+                item.file = null;
+              });
               refreshIssueState(updated);
               return;
             } catch (error) {
@@ -9085,7 +9096,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         let files = [];
         if (REMOTE || !retrying) {
           try {
-            if (REMOTE) files = await remoteFiles(draft.replyAttachments);
+            if (REMOTE) {
+              files = await remoteFiles(draft.replyAttachments.filter(item => item.file));
+              message = withAttachments(text, draft.replyAttachments.filter(item => item.path));
+            }
             else {
               await uploadPastedImages(draft.replyAttachments);
               message = withAttachments(text, draft.replyAttachments);

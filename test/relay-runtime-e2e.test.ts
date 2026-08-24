@@ -140,13 +140,23 @@ test("public Relay drives the real Runtime and recovers without storing business
     const conflict = await fetch(`${base}/api/issues`, { method: "POST", headers: issueHeaders, body: JSON.stringify({ ...JSON.parse(issueBody), title: "Changed" }) });
     assert.equal(conflict.status, 409);
 
+    const draftAttachmentData = Buffer.from("relay reply draft attachment").toString("base64");
+    const draftResponse = await request(`/api/issues/${issue.id}`, { method: "PATCH", body: JSON.stringify({ version: issue.version, reply_draft: "Remote reply draft", reply_draft_attachments: [], files: [{ name: "reply-draft.txt", type: "text/plain", data: `data:text/plain;base64,${draftAttachmentData}` }] }) });
+    assert.equal(draftResponse.status, 200);
+    const draftedIssue = await draftResponse.json() as { version: number; reply_draft: string; reply_draft_attachments: Array<{ name: string; path: string; type: string }> };
+    assert.equal(draftedIssue.reply_draft, "Remote reply draft");
+    assert.equal(draftedIssue.reply_draft_attachments.length, 1);
+    assert.equal(draftedIssue.reply_draft_attachments[0].name, "reply-draft.txt");
+    assert.equal(draftedIssue.reply_draft_attachments[0].type, "text/plain");
+    assert.equal(readFileSync(draftedIssue.reply_draft_attachments[0].path, "utf8"), "relay reply draft attachment");
+
     const agentResponse = await request("/api/agents", { method: "POST", body: JSON.stringify({ name: "Relay Agent", description: "Publicly managed", instructions: "Keep changes scoped", model: "gpt-test", reasoning_effort: "medium", sandbox_mode: "workspace-write" }) });
     assert.equal(agentResponse.status, 201);
     const agent = await agentResponse.json() as { id: string; version: number };
     const updatedAgentResponse = await request(`/api/agents/${agent.id}`, { method: "PATCH", body: JSON.stringify({ version: agent.version, name: "Relay Agent Updated", description: "Publicly managed", instructions: "Keep changes scoped", model: "gpt-test", reasoning_effort: "medium", sandbox_mode: "workspace-write" }) });
     assert.equal(updatedAgentResponse.status, 200);
 
-    const updatedIssueResponse = await request(`/api/issues/${issue.id}`, { method: "PATCH", body: JSON.stringify({ version: issue.version, status: "in_progress", priority: "high" }) });
+    const updatedIssueResponse = await request(`/api/issues/${issue.id}`, { method: "PATCH", body: JSON.stringify({ version: draftedIssue.version, status: "in_progress", priority: "high" }) });
     assert.equal(updatedIssueResponse.status, 200);
     const updatedIssue = await updatedIssueResponse.json() as { version: number; status: string };
     assert.equal(updatedIssue.status, "in_progress");
@@ -173,7 +183,11 @@ test("public Relay drives the real Runtime and recovers without storing business
     await waitFor(() => relay.runtime() !== null, runtime);
     const recovered = await request(`/api/issues/${issue.id}`);
     assert.equal(recovered.status, 200);
-    assert.equal(((await recovered.json()) as { id: string }).id, issue.id);
+    const recoveredIssue = await recovered.json() as { id: string; reply_draft: string; reply_draft_attachments: Array<{ name: string; path: string }> };
+    assert.equal(recoveredIssue.id, issue.id);
+    assert.equal(recoveredIssue.reply_draft, "Remote reply draft");
+    assert.equal(recoveredIssue.reply_draft_attachments[0].name, "reply-draft.txt");
+    assert.equal(readFileSync(recoveredIssue.reply_draft_attachments[0].path, "utf8"), "relay reply draft attachment");
     assert.deepEqual(relay.store.tableNames(), ["relay_audit", "relay_commands", "relay_devices", "relay_settings", "relay_web_sessions", "relay_web_users", "sqlite_sequence"]);
   } finally {
     await stopRuntime(runtime).catch(() => {});

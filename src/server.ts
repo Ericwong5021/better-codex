@@ -1885,9 +1885,21 @@ export function startServer() {
           if (!Number.isInteger(version) || version < 1) throw new Error("invalid_version");
           const patch = parseIssuePatch(body);
           const files = saveRemoteFiles(body.files, String(request.headers["x-better-codex-request-id"] || randomUUID()));
-          if (files.paths.length) patch.description = withRemoteFilePaths(patch.description ?? issue.description, files.paths);
           let updated;
           try {
+            if (files.paths.length && "reply_draft_attachments" in body) {
+              const draftAttachments = patch.reply_draft_attachments as Array<{ name: string; path: string; type: string }>;
+              const incomingFiles = body.files as Array<{ name: string; type: string }>;
+              const savedAttachments = files.paths.map((filePath, index) => ({
+                name: cleanString(basename(incomingFiles[index].name), 255).trim() || basename(filePath),
+                path: filePath,
+                type: cleanString(incomingFiles[index].type, 200).trim().toLowerCase(),
+              }));
+              if (draftAttachments.length + savedAttachments.length > 16) throw new Error("invalid_reply_draft_attachments");
+              patch.reply_draft_attachments = [...draftAttachments, ...savedAttachments];
+            } else if (files.paths.length) {
+              patch.description = withRemoteFilePaths(patch.description ?? issue.description, files.paths);
+            }
             if ((issue.active_run_status || issue.session_active_turn_id || store.getIssueReplyState(issue.id).status === "running") && Object.keys(patch).some(key => !["reply_draft", "reply_draft_attachments"].includes(key))) throw new Error("issue_execution_running");
             updated = store.updateIssue(issue.id, version, patch);
           } catch (error) {

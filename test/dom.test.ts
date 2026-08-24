@@ -805,6 +805,11 @@ test("create dialog paperclip preserves local paths and transfers remote files",
   assert.ok(source.includes("attachments: []"));
   assert.ok(source.includes("function pickAttachments(existing = [])"));
   assert.ok(source.includes("async function remoteFiles(items)"));
+  assert.ok(source.includes("if (!issue || REMOTE && !RELAY) return;"));
+  assert.ok(source.includes("if (RELAY) files = await remoteFiles(pendingFiles);"));
+  assert.ok(source.includes("if (files.length) body.files = files;"));
+  assert.ok(source.includes("files = await remoteFiles(draft.replyAttachments.filter(item => item.file));"));
+  assert.ok(source.includes("message = withAttachments(text, draft.replyAttachments.filter(item => item.path));"));
   assert.ok(source.includes("function withAttachments(text, items = draft.attachments)"));
   assert.ok(source.includes('const path = String(file.path || "").trim()'));
   assert.ok(source.includes('const block = t("附带文件：") + "\\n"'));
