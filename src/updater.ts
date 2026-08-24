@@ -7,6 +7,7 @@ import { isSea } from "node:sea";
 import { packagedBuild } from "./build.js";
 import { activeCompatibility, bundledCompatibility, compareVersions, coreVersion, readCompatibilityPointer, rollbackCompatibility, validateCompatibility, writeCompatibilityPointer } from "./compatibility.js";
 import { compatibilityCurrentPath, compatibilityVersionsPath, ensureDirectories, runtimeCurrentPath, runtimeVersionsPath, updateActivationPath, updateChannelPath, updatePublicKeyPath, updateRollbackPath, updateStatePath } from "./config.js";
+import { requireStorageCapacity } from "./storage-health.js";
 
 export type UpdateChannel = "stable" | "preview";
 
@@ -691,6 +692,7 @@ async function updateCompatibilityUnlocked(payload?: UpdatePayload, channel: Upd
   const compatibility = validateCompatibility(JSON.parse(content.toString("utf8")), effectiveCoreVersion());
   if (compatibility.version !== asset.version || compatibility.minimumCoreVersion !== asset.minimumCoreVersion) throw new Error("compatibility_manifest_mismatch");
   ensureDirectories();
+  requireStorageCapacity(compatibilityVersionsPath, content.length * 2);
   const directory = join(compatibilityVersionsPath, compatibility.version);
   mkdirSync(directory, { recursive: true });
   const target = join(directory, "manifest.json");
@@ -737,6 +739,7 @@ async function updateCoreUnlocked(payload?: UpdatePayload, channel: UpdateChanne
   const content = await download(httpsUrl(asset.url));
   verifyDigest(content, asset.sha256);
   ensureDirectories();
+  requireStorageCapacity(runtimeVersionsPath, content.length * 3);
   const runtimeRoot = resolve(runtimeVersionsPath);
   const directory = resolve(runtimeRoot, manifest.core.version);
   const relation = relative(runtimeRoot, directory);

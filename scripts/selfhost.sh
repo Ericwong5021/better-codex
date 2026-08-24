@@ -230,8 +230,8 @@ install_vps() {
   write_secret "$directory/deploy/hub/.env" "BETTER_CODEX_HUB_DOMAIN=$domain
 BETTER_CODEX_HUB_WEB_USERNAME=$username
 "
-  docker compose -f "$directory/deploy/hub/compose.yaml" --env-file "$directory/deploy/hub/.env" up -d --build --wait
-  verify_vps_updater -f "$directory/deploy/hub/compose.yaml" --env-file "$directory/deploy/hub/.env" || fail "VPS online updater is unavailable"
+  docker compose -f "$directory/deploy/hub/compose.yaml" --env-file "$directory/deploy/hub/.env" --profile standalone up -d --build --wait
+  verify_vps_updater -f "$directory/deploy/hub/compose.yaml" --env-file "$directory/deploy/hub/.env" --profile standalone || fail "VPS online updater is unavailable"
   printf 'Better Codex Relay %s is starting at https://%s\n' "$target" "$domain"
 }
 
@@ -241,7 +241,7 @@ upgrade_vps() {
   need git
   need docker
   docker compose version >/dev/null 2>&1 || fail "Docker Compose is required"
-  local target directory compose proxy_compose environment backup_output backup backup_cli previous_service previous previous_version domain public_health
+  local target directory compose proxy_compose environment backup_output backup backup_cli previous_service previous previous_version domain public_health external_proxy
   local -a compose_args up_services
   target="$(version_tag)"
   directory="${BETTER_CODEX_SELFHOST_DIR:-/opt/better-codex}"
@@ -251,11 +251,18 @@ upgrade_vps() {
   [ -f "$compose" ] && [ -f "$environment" ] || fail "Better Codex Relay is not installed in $directory"
   compose_args=(-f "$compose" --env-file "$environment")
   up_services=()
+  external_proxy=0
   if [ -f "$proxy_compose" ]; then
     compose_args+=(-f "$proxy_compose")
     up_services=(hub)
+    external_proxy=1
+  else
+    compose_args+=(--profile standalone)
   fi
   docker compose "${compose_args[@]}" config --quiet
+  if [ "$external_proxy" -eq 1 ]; then
+    docker compose "${compose_args[@]}" stop caddy
+  fi
   previous="$(git -C "$directory" rev-parse HEAD)"
   previous_version="$(git -C "$directory" show "${previous}:package.json" | sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
   [ -n "$previous_version" ] || fail "unable to resolve the installed VPS version"

@@ -10,6 +10,7 @@ import { deviceAuthorizationPage } from "./device-authorization-page.js";
 import { clearRelaySessionCookie, parseCookies, passwordHash, passwordMatches, readHubSecret, relaySessionCookie, validateWebPassword, validateWebUsername } from "./relay-auth.js";
 import { decodeRelayMessage, encodeRelayMessage, relayCapabilities, relayInitialWindowBytes, relayMaxChunkBytes, relayProtocolVersion, relayRuntimeReconnectCloseCode, relayRuntimeStoppedCloseCode, relayWebSocketProtocol, type RelayHello, type RelayMessage } from "./relay-protocol.js";
 import { RelayStore, type RelayCommand } from "./relay-store.js";
+import { storageHealth } from "./storage-health.js";
 import { avatarInitials } from "./user-profile.js";
 import { betterCodexWebManifest, betterCodexWebServiceWorker } from "./web-app.js";
 import { betterCodexWebHostCss, betterCodexWebHostHtml, betterCodexWebHostJavaScript } from "./web-host.js";
@@ -287,8 +288,12 @@ function publicRuntime(runtime: ActiveRuntime | null, reconnecting: Reconnecting
       state: "reconnecting",
       device_name: reconnecting.deviceName,
       core_version: reconnecting.coreVersion,
+      protocol_version: reconnecting.protocolVersion,
+      runtime_instance_id: reconnecting.runtimeInstanceId,
+      connection_epoch: reconnecting.connectionEpoch,
       connected_at: reconnecting.connectedAt,
       last_heartbeat_at: reconnecting.lastHeartbeatAt,
+      heartbeat_age_ms: Math.max(0, Date.now() - Date.parse(reconnecting.lastHeartbeatAt)),
       disconnected_at: reconnecting.disconnectedAt,
       reconnect_deadline_at: reconnecting.reconnectDeadlineAt,
       active_channels: 0,
@@ -299,8 +304,12 @@ function publicRuntime(runtime: ActiveRuntime | null, reconnecting: Reconnecting
     state: "online",
     device_name: runtime.deviceName,
     core_version: runtime.coreVersion,
+    protocol_version: runtime.protocolVersion,
+    runtime_instance_id: runtime.runtimeInstanceId,
+    connection_epoch: runtime.connectionEpoch,
     connected_at: runtime.connectedAt,
     last_heartbeat_at: runtime.lastHeartbeatAt,
+    heartbeat_age_ms: Math.max(0, Date.now() - Date.parse(runtime.lastHeartbeatAt)),
     active_channels: runtime.activeChannels,
   };
 }
@@ -779,7 +788,22 @@ export function createRelayServer(options: RelayServerOptions) {
         return response.end();
       }
       if (!trustedOrigin(request)) return sendJson(response, 403, { error: "forbidden" });
-      if (url.pathname === "/healthz" && method === "GET") return sendJson(response, 200, { ok: true, name: "Better Codex Relay", version: coreVersion, protocol_version: relayProtocolVersion, runtime: publicRuntime(runtime, reconnectingRuntime), pending_commands: store.pendingCommandCount() });
+      if ((url.pathname === "/livez" || url.pathname === "/healthz") && method === "GET") return sendJson(response, 200, { ok: true, name: "Better Codex Relay", version: coreVersion, protocol_version: relayProtocolVersion, pid: process.pid, uptime_seconds: Math.floor(process.uptime()), runtime: publicRuntime(runtime, reconnectingRuntime), pending_commands: store.pendingCommandCount() });
+      if (url.pathname === "/readyz" && method === "GET") {
+        const database = store.health();
+        const storage = options.database === ":memory:" ? null : storageHealth(options.database);
+        const heartbeatAgeMs = runtime ? Math.max(0, Date.now() - Date.parse(runtime.lastHeartbeatAt)) : null;
+        const runtimeReady = Boolean(runtime && runtime.protocolVersion === relayProtocolVersion && heartbeatAgeMs !== null && heartbeatAgeMs <= heartbeatIntervalMs * 3);
+        const ok = database.ok && (storage?.ok ?? true) && runtimeReady;
+        return sendJson(response, ok ? 200 : 503, { ok, name: "Better Codex Relay", version: coreVersion, protocol_version: relayProtocolVersion, database, storage, runtime: publicRuntime(runtime, reconnectingRuntime), runtime_ready: runtimeReady, heartbeat_deadline_ms: heartbeatIntervalMs * 3, pending_commands: store.pendingCommandCount() });
+      }
+      if (options.database !== ":memory:" && !["GET", "HEAD", "OPTIONS"].includes(method)) {
+        const storage = storageHealth(options.database);
+        if (!storage.ok) {
+          console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "relay", event: "write_rejected_low_storage", method, path: url.pathname, free_bytes: storage.free_bytes, critical_reserve_bytes: storage.critical_reserve_bytes })}`);
+          return sendJson(response, 507, { error: "insufficient_disk_space", storage });
+        }
+      }
       if ((["/", "/web", "/web/projects", "/web/agents"].includes(url.pathname) || url.pathname.startsWith("/web/projects/") || url.pathname.startsWith("/web/agents/")) && method === "GET") return sendText(response, 200, betterCodexWebHostHtml("relay"), "text/html; charset=utf-8", { "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'" });
       if (url.pathname === "/web/host.css" && method === "GET") return sendText(response, 200, betterCodexWebHostCss(), "text/css; charset=utf-8");
       if (url.pathname === "/web/host.js" && method === "GET") return sendText(response, 200, betterCodexWebHostJavaScript("relay"), "text/javascript; charset=utf-8");

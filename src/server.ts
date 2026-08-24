@@ -35,6 +35,7 @@ import { disableProjectionSync, readRemoteMode } from "./remote-mode.js";
 import { browseDirectory } from "./directory-browser.js";
 import { featureManifest } from "./features.js";
 import { webCommandTarget } from "./command-contract.js";
+import { storageHealth } from "./storage-health.js";
 
 const accessToken = token();
 const mockupEnabled = !isSea() && !packagedBuild && process.argv.includes("--mockup");
@@ -692,12 +693,14 @@ function parseIssuePatch(body: Record<string, unknown>) {
 
 function errorCode(error: unknown) {
   const message = error instanceof Error ? error.message : "request_failed";
+  if (message.startsWith("insufficient_disk_space:")) return "insufficient_disk_space";
   if (message.startsWith("SQLITE_") || message.includes("database is")) return "database_unavailable";
   return message;
 }
 
 function errorStatus(code: string) {
   if (code === "body_too_large") return 413;
+  if (code === "insufficient_disk_space") return 507;
   if (code === "version_conflict" || code === "request_id_conflict" || code === "request_outcome_unknown" || code === "remote_mode_disabled" || code === "reply_busy" || code === "update_in_progress" || code === "issue_execution_locked" || code === "issue_execution_running" || code === "issue_session_handed_off" || code === "issue_session_starting" || code === "issue_session_already_bound" || code === "session_relay_not_leader" || code === "session_command_not_claimed" || code === "session_command_outcome_unknown" || code === "queued_reply_not_pending" || code === "queued_reply_update_conflict" || code === "project_planning_busy" || code === "project_planning_agent_locked") return 409;
   if (code.endsWith("_not_found")) return 404;
   if (code === "database_unavailable" || code === "database_integrity_check_failed") return 503;
@@ -885,6 +888,14 @@ export function startServer() {
       const browserCommandId = String(request.headers["x-better-codex-command-id"] || "");
       const localCommandRequest = !relayRequest && authorized(request, url, webSessions) && /^[A-Za-z0-9_-]{8,200}$/.test(browserCommandId) && Boolean(webCommandTarget(method, `${url.pathname}${url.search}`));
 
+      if (url.pathname.startsWith("/api/") && !["GET", "HEAD", "OPTIONS"].includes(method) && url.pathname !== "/api/shutdown") {
+        const storage = storageHealth(databasePath);
+        if (!storage.ok) {
+          console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "runtime", event: "write_rejected_low_storage", method, path: url.pathname, instance_id: identity.instanceId, free_bytes: storage.free_bytes, critical_reserve_bytes: storage.critical_reserve_bytes })}`);
+          return sendJson(response, 507, { error: "insufficient_disk_space", storage });
+        }
+      }
+
       if ((relayRequest || localCommandRequest) && url.pathname.startsWith("/api/") && !["GET", "HEAD", "OPTIONS"].includes(method)) {
         const requestId = relayRequest ? String(request.headers["x-better-codex-request-id"] || "") : browserCommandId;
         if (!/^[A-Za-z0-9_-]{8,200}$/.test(requestId)) throw new Error("invalid_request_id");
@@ -904,11 +915,27 @@ export function startServer() {
       }
 
       if (method === "OPTIONS") return sendPreflight(response);
-      if (url.pathname === "/health") {
-        const database = store.health();
+      if (url.pathname === "/livez" && method === "GET") {
         const address = server.address();
         const activePort = typeof address === "object" && address ? address.port : 0;
-        return sendJson(response, database.ok ? 200 : 503, { ok: database.ok, name: "Better Codex Runtime", version: identity.version, pid: process.pid, port: activePort, instanceId: identity.instanceId, database, compatibility: readCompatibilityStatus() });
+        return sendJson(response, 200, { ok: true, name: "Better Codex Runtime", version: identity.version, pid: process.pid, port: activePort, instanceId: identity.instanceId, uptime_seconds: Math.floor(process.uptime()) });
+      }
+      if (url.pathname === "/readyz" && method === "GET") {
+        const database = store.health();
+        const storage = storageHealth(databasePath);
+        const compatibility = readCompatibilityStatus();
+        const sessionHost = worker.sessionHostStatus();
+        const sessionHostRequired = process.env.BETTER_CODEX_DISABLE_RUNTIME_SESSION_RELAY !== "1" && process.env.BETTER_CODEX_DISABLE_DELEGATION !== "1" && !process.env.NODE_TEST_CONTEXT;
+        const compatibilityReady = compatibility?.compatible === true || compatibility === null && !packagedBuild;
+        const ok = database.ok && storage.ok && compatibilityReady && (!sessionHostRequired || sessionHost.connected);
+        return sendJson(response, ok ? 200 : 503, { ok, name: "Better Codex Runtime", version: identity.version, pid: process.pid, instanceId: identity.instanceId, database, storage, compatibility, compatibility_required: packagedBuild, session_host: { ...sessionHost, required: sessionHostRequired }, relay: relayClient.status() });
+      }
+      if (url.pathname === "/health") {
+        const database = store.health();
+        const storage = storageHealth(databasePath);
+        const address = server.address();
+        const activePort = typeof address === "object" && address ? address.port : 0;
+        return sendJson(response, database.ok && storage.ok ? 200 : 503, { ok: database.ok && storage.ok, name: "Better Codex Runtime", version: identity.version, pid: process.pid, port: activePort, instanceId: identity.instanceId, database, storage, compatibility: readCompatibilityStatus(), session_host: worker.sessionHostStatus() });
       }
       if ((url.pathname === "/web" || url.pathname === "/web/projects" || url.pathname.startsWith("/web/projects/") || url.pathname === "/web/agents" || url.pathname.startsWith("/web/agents/") || url.pathname.startsWith("/local/")) && method === "GET") {
         return sendWeb(response, 200, betterCodexWebHostHtml(), "text/html; charset=utf-8", {

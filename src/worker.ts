@@ -121,6 +121,10 @@ export class IssueWorker {
     });
   }
 
+  sessionHostStatus() {
+    return this.sessionRelay.status();
+  }
+
   start() {
     this.stopped = false;
     this.store.recoverInterruptedRuns();

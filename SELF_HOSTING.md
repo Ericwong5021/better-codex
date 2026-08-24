@@ -120,12 +120,12 @@ The first upgrade from single-account Relay authentication migrates the existing
 From `/opt/better-codex/deploy/hub`:
 
 ```bash
-docker compose --env-file .env config --quiet
-docker compose --env-file .env up -d --build --wait
-docker compose --env-file .env ps
+docker compose --env-file .env --profile standalone config --quiet
+docker compose --env-file .env --profile standalone up -d --build --wait
+docker compose --env-file .env --profile standalone ps
 ```
 
-The bundled Caddy service terminates HTTPS on ports 80 and 443.
+The `standalone` profile is the only mode that starts the bundled Caddy service on ports 80 and 443.
 
 ### 3B. Existing reverse proxy deployment
 
@@ -142,9 +142,12 @@ Start only the Relay. The Compose service remains named `hub` as a compatibility
 
 ```bash
 docker compose --env-file .env -f compose.yaml -f compose.proxy.yaml config --quiet
+docker compose --env-file .env -f compose.yaml -f compose.proxy.yaml stop caddy
 docker compose --env-file .env -f compose.yaml -f compose.proxy.yaml up -d --build --wait hub
-docker compose --env-file .env -f compose.yaml -f compose.proxy.yaml ps
+docker compose --env-file .env -f compose.yaml -f compose.proxy.yaml ps --all
 ```
+
+In `existing-proxy` mode, `hub` must be running and the bundled `caddy` service must be stopped. A stopped Caddy container is not a Relay failure; a running Caddy container in this mode is configuration drift.
 
 Inspect the existing gateway configuration and add the smallest isolated virtual host for the requested domain. Preserve unrelated configuration. For Nginx, the location must include:
 
@@ -170,12 +173,13 @@ Record the selected Compose files because every later status, backup, and upgrad
 
 Verify all of these:
 
-1. The Relay container is healthy.
+1. The Relay container is healthy through internal `/livez` process liveness.
 2. `https://<DOMAIN>/healthz` returns `ok: true`, `name: "Better Codex Relay"`, `protocol_version: "relay/v1"`, and the requested version.
-3. The certificate is valid for the requested domain.
-4. The browser login page loads and valid credentials open the task board.
-5. The public WebSocket endpoint `/api/v1/runtime/connect` upgrades through the proxy and rejects unauthenticated connections.
-6. The Relay SQLite database contains only settings, Web sessions, devices, and audit tables, with no Project, Issue, Agent, Conversation, attachment, Projection, or Remote Command data.
+3. `https://<DOMAIN>/readyz` returns `ok: true`, `runtime_ready: true`, a healthy Relay database, sufficient storage, and an online Runtime with a heartbeat newer than the reported deadline.
+4. The certificate is valid for the requested domain.
+5. The browser login page loads and valid credentials open the task board.
+6. The public WebSocket endpoint `/api/v1/runtime/connect` upgrades through the proxy and rejects unauthenticated connections.
+7. The Relay SQLite database contains only settings, Web sessions, devices, and audit tables, with no Project, Issue, Agent, Conversation, attachment, Projection, or Remote Command data.
 
 Do not treat a healthy internal container as deployment success when the public URL fails.
 
@@ -196,7 +200,7 @@ better-codex relay status
 better-codex relay doctor
 ```
 
-Acceptance requires `connected: true`, `last_error: null`, the correct Relay URL, `protocol_version: "relay/v1"`, and matching online Runtime details in public `/healthz`.
+Acceptance requires `connected: true`, `last_error: null`, the correct Relay URL, `protocol_version: "relay/v1"`, and matching Runtime instance, connection epoch, version, and fresh heartbeat details in public `/readyz`.
 
 ## End-to-end acceptance
 
@@ -218,6 +222,9 @@ Health, login, deployment output, or uploaded assets alone are insufficient.
 - Public `502`: verify the loopback listener, selected Compose files, gateway upstream, Host header, and container health.
 - `untrusted_host`: align the domain in `.env`, the public request Host, and the proxy Host header, then recreate the Relay container.
 - `runtime_offline`: verify the local service, `better-codex relay status`, outbound DNS/TLS, Device Token, and proxy WebSocket upgrade path. Relay does not queue requests while offline.
+- `/livez` succeeds but `/readyz` fails: inspect `database`, `storage`, `runtime_ready`, heartbeat age, Runtime instance, and connection epoch. Do not restart Relay until the failing readiness dependency is identified.
+- `507 insufficient_disk_space`: preserve the database and logs, identify the filesystem reported by `storage.path`, free space outside Better Codex or archive verified old artifacts, and retry only after `storage.ok` returns true. Do not delete SQLite WAL files or deployment volumes as cleanup.
+- Multiple Session Host processes: run `better-codex doctor`, compare `current`, `peer`, and `untracked` process identities, and stop only the exact stale PID after confirming it owns no active turn or current profile lock.
 - Version or protocol mismatch: install compatible `relay/v1` releases on the Runtime and Relay, then reconnect.
 - Browser shows an older shell after upgrade: reload `/web` with a version query once so the Service Worker activates the new assets.
 - Never use `docker compose down -v` as routine recovery.

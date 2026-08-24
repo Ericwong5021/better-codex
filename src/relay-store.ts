@@ -578,6 +578,11 @@ export class RelayStore {
     return Number(row.count);
   }
 
+  health() {
+    const integrity = this.database.prepare("PRAGMA quick_check").get() as { quick_check?: string } | undefined;
+    return { ok: integrity?.quick_check === "ok", path: this.file };
+  }
+
   audit(actorValue: unknown, eventValue: unknown, detailValue?: unknown) {
     const actor = typeof actorValue === "string" ? actorValue.slice(0, 200) : "unknown";
     const event = typeof eventValue === "string" ? eventValue.slice(0, 120) : "unknown";

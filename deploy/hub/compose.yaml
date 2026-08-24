@@ -23,12 +23,13 @@ services:
       - hub_bootstrap_secret
       - hub_web_password
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4318/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4318/livez').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 10s
       timeout: 3s
       retries: 5
 
   caddy:
+    profiles: ["standalone"]
     image: caddy:2.11.4-alpine
     restart: unless-stopped
     depends_on:

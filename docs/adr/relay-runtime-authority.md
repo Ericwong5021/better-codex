@@ -23,6 +23,7 @@ Runtime 在执行业务处理前将 Request ID、请求指纹和处理租约写�
 - 同一时刻只允许一个 Runtime 连接。
 - 每次 Runtime 进程启动生成新的实例 ID。
 - Relay 为连接分配递增 epoch，并拒绝旧 epoch 的迟到消息。
+- 认证、Runtime 身份、连接 epoch 或协议版本错误属于连接级故障；迟到 chunk、单 channel 顺序错误、窗口方向错误和请求限制只终止对应 channel，并记录 Runtime instance、connection epoch、channel、request 与 trace 标识。
 - 浏览器写请求携带稳定 Command ID；同一 ID 的方法、路径或正文指纹不一致时必须返回冲突。
 - Relay 命令使用派发租约。连接中断、租约超时、`408`、`425`、`429`、`5xx` 和 Runtime 结果未知可以重试；确定性 `4xx` 不重试。
 - Relay 重试采用有上限的指数退避，最多 20 次，命令最长保留 7 天；过期命令进入终态，不再补发。
@@ -31,6 +32,8 @@ Runtime 在执行业务处理前将 Request ID、请求指纹和处理租约写�
 - HTTP、SSE 和附件通过同一隧道协议流式转发。
 - Relay 审计日志只记录路由类别、命令状态、耗时和字节数；命令正文只存在 Relay SQLite 命令表，不写入日志。
 - 本机 WebUI 无需 Relay 即可独立运行。
+- Relay `/livez` 只表示进程存活，供容器编排使用；`/readyz` 同时要求 Relay SQLite、磁盘安全余量、Runtime 在线、协议匹配和心跳未过期，供公网流量验收与告警使用。兼容端点 `/healthz` 不得被解释为端到端可用性证明。
+- Docker Compose 的 bundled Caddy 只属于 `standalone` profile。existing-proxy 模式必须只运行 `hub`，并显式停止残留 Caddy 容器，避免端口所有权和部署模式漂移。
 
 ## 迁移
 
