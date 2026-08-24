@@ -106,6 +106,7 @@
   },
   "dependencies": {
     "lucide-static": "^1.28.0",
+    "markdown-it": "^15.0.0",
     "ws": "^8.21.0"
   }
 }

@@ -6277,6 +6277,34 @@ export function betterCodexDesignSystemCss() {
       padding-left: .75em;
     }
 
+    #better-codex-dialog .better-codex-table-wrap {
+      max-width: 100%;
+      overflow-x: auto;
+      margin: 0 0 .75em;
+    }
+
+    #better-codex-dialog .better-codex-table-wrap table {
+      width: max-content;
+      min-width: 100%;
+      border-collapse: collapse;
+      color: var(--bc-foreground);
+      font-size: .94em;
+    }
+
+    #better-codex-dialog .better-codex-table-wrap th,
+    #better-codex-dialog .better-codex-table-wrap td {
+      border: 1px solid var(--bc-color-hairline);
+      padding: .5em .65em;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    #better-codex-dialog .better-codex-table-wrap th {
+      background: color-mix(in oklch, var(--bc-hover) 75%, var(--bc-surface));
+      color: var(--bc-foreground);
+      font-weight: 650;
+    }
+
     #better-codex-dialog .better-codex-markdown-empty {
       margin: auto;
       padding: 18px 8px;

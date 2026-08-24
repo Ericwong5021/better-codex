@@ -18,6 +18,10 @@ test("renderMarkdown escapes HTML and renders common blocks", () => {
     "- one",
     "- two",
     "",
+    "| Field | Meaning |",
+    "| --- | --- |",
+    "| name | Display name |",
+    "",
     "```js",
     "const x = 1 < 2",
     "```",
@@ -31,8 +35,11 @@ test("renderMarkdown escapes HTML and renders common blocks", () => {
   assert.match(html, /<h1>Title<\/h1>/);
   assert.match(html, /<strong>bold<\/strong>/);
   assert.match(html, /<code>code<\/code>/);
-  assert.match(html, /<ul><li>one<\/li><li>two<\/li><\/ul>/);
-  assert.match(html, /<pre><code class="language-js">const x = 1 &lt; 2<\/code><\/pre>/);
+  assert.match(html, /<ul>\s*<li>one<\/li>\s*<li>two<\/li>\s*<\/ul>/);
+  assert.match(html, /<div class="better-codex-table-wrap"><table>/);
+  assert.match(html, /<th>Field<\/th>/);
+  assert.match(html, /<td>Display name<\/td>/);
+  assert.match(html, /<pre><code class="language-js">const x = 1 &lt; 2\s*<\/code><\/pre>/);
   assert.match(html, /href="https:\/\/example\.com"/);
   assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
   assert.match(html, /&lt;SCRIPT src=https:\/\/example\.invalid\/payload\.js&gt;&lt;\/SCRIPT&gt;/);
