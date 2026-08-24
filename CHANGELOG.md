@@ -4,6 +4,15 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.10-beta.18] - 2026-08-24
+
+- Preserve the board while polling, distinguish Relay and Runtime failures, and confirm updates that interrupt running work.
+- Keep reply image drafts and attachment controls stable, render conversation Markdown consistently, and refine responsive conversation layouts.
+- Remove projects without deleting their workspaces while safely cleaning up linked Issues and Codex threads.
+- Add editable Relay Web user profiles and keep profile settings in a single navigation surface.
+- Execute supported native Codex slash commands through the persistent Session Host with traceable results.
+- Restore and verify the authenticated VPS updater path during self-host installation and upgrades.
+
 ## [0.4.10-beta.17] - 2026-08-24
 
 - Open the generic file picker for mobile Web attachments instead of limiting selection to images.
@@ -827,7 +836,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.17...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.18...HEAD
+[0.4.10-beta.18]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.17...v0.4.10-beta.18
 [0.4.10-beta.17]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.16...v0.4.10-beta.17
 [0.4.10-beta.16]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.15...v0.4.10-beta.16
 [0.4.10-beta.15]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.14...v0.4.10-beta.15
