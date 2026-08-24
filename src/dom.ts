@@ -562,6 +562,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           pending_actor: "user",
           enrichment_status: null,
           reply_draft: "",
+          reply_draft_attachments: [],
           labels: Array.isArray(issue.labels) ? issue.labels.map(label => String(label)).filter(Boolean) : [],
           mockup_run_status: Object.hasOwn(mockupRunStatusLabels, issue.mockup_run_status) ? issue.mockup_run_status : "not-started",
         };
@@ -7489,7 +7490,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         promptSemanticReferences: cachedCreateDraft?.promptSemanticReferences || [],
         replySemanticReferences: [],
         attachments: [],
-        replyAttachments: []
+        replyAttachments: Array.isArray(issue?.reply_draft_attachments) ? issue.reply_draft_attachments.map(item => ({ name: item.name, path: item.path, type: item.type || "", file: null, previewUrl: "" })) : []
       };
       const dialog = document.createElement("dialog");
       dialog.id = "better-codex-dialog";
@@ -7617,8 +7618,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           latestReplyDraft = "";
           draft.replySemanticReferences = [];
           closeSemanticMenu();
-          flushReplyDraft();
-          persistReplyDraft("");
         }
         const submittedAttachmentSet = new Set(submittedAttachments);
         draft.replyAttachments = draft.replyAttachments.filter(item => {
@@ -7626,6 +7625,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           releaseAttachment(item);
           return false;
         });
+        if (replyDraftTimer !== null) {
+          clearTimeout(replyDraftTimer);
+          replyDraftTimer = null;
+        }
+        persistReplyDraft(draft.reply, draft.replyAttachments);
         const attachments = dialog.querySelector("[data-reply-attachments]");
         if (attachments) attachments.outerHTML = attachmentList(draft.replyAttachments, "reply");
         updateReplySendState();
@@ -7719,13 +7723,25 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         });
       }
 
-      function persistReplyDraft(value) {
+      function replyDraftAttachmentPayload(items = draft.replyAttachments) {
+        return items.filter(item => item.path).map(item => ({ name: item.name, path: item.path, type: item.type || item.file?.type || "" }));
+      }
+
+      function persistReplyDraft(value, items = draft.replyAttachments) {
         if (!issue || REMOTE) return;
         replyDraftUpdate = replyDraftUpdate.catch(() => {}).then(async () => {
+          try {
+            await uploadPastedImages(items);
+          } catch (error) {
+            reportGlobalError(error, { source: "reply_draft_attachment_persist", issue_id: issue.id });
+            showError(error);
+            throw error;
+          }
+          const attachments = replyDraftAttachmentPayload(items);
           let current = issue;
           for (let attempt = 0; attempt < 2; attempt += 1) {
             try {
-              const updated = await api("/api/issues/" + encodeURIComponent(issue.id), { method: "PATCH", body: JSON.stringify({ version: current.version, reply_draft: value }) });
+              const updated = await api("/api/issues/" + encodeURIComponent(issue.id), { method: "PATCH", body: JSON.stringify({ version: current.version, reply_draft: value, reply_draft_attachments: attachments }) });
               refreshIssueState(updated);
               return;
             } catch (error) {
@@ -8748,7 +8764,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       function attachmentList(items = draft.attachments, scope = "issue") {
         const marker = scope === "reply" ? " data-reply-attachments" : " data-dialog-attachments";
         if (!items.length) return '<div class="better-codex-dialog-attachments"' + marker + ' hidden></div>';
-        const chips = items.map((item, index) => '<span class="better-codex-attachment-chip' + (item.previewUrl ? ' is-image' : '') + '" title="' + escapeHtml(item.path || item.name) + '">' + (item.previewUrl ? '<img class="better-codex-attachment-preview" src="' + escapeHtml(item.previewUrl) + '" alt="" width="30" height="30">' : icon("paperclip")) + '<span>' + escapeHtml(item.name) + '</span><button type="button" data-dialog-detach="' + index + '" data-dialog-attachment-scope="' + scope + '" aria-label="' + te("移除附件") + '">' + icon("close") + '</button></span>').join("");
+        const chips = items.map((item, index) => {
+          const image = Boolean(item.previewUrl || String(item.type || item.file?.type || "").startsWith("image/"));
+          return '<span class="better-codex-attachment-chip' + (image ? ' is-image' : '') + '" title="' + escapeHtml(item.path || item.name) + '">' + (item.previewUrl ? '<img class="better-codex-attachment-preview" src="' + escapeHtml(item.previewUrl) + '" alt="" width="30" height="30">' : icon(image ? "image" : "paperclip")) + '<span>' + escapeHtml(item.name) + '</span><button type="button" data-dialog-detach="' + index + '" data-dialog-attachment-scope="' + scope + '" aria-label="' + te("移除附件") + '">' + icon("close") + '</button></span>';
+        }).join("");
         return '<div class="better-codex-dialog-attachments"' + marker + '>' + chips + '</div>';
       }
 
@@ -8787,8 +8806,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           name: file.name || t("粘贴的图片") + (accepted.length > 1 ? " " + (index + 1) : ""),
           path: "",
           file,
+          type: file.type,
           previewUrl: URL.createObjectURL(file)
         })));
+        if (replyPaste) scheduleReplyDraft(draft.reply);
         renderDialog();
         const active = activeName ? dialog.querySelector('[name="' + activeName + '"]') : null;
         active?.focus();
@@ -8820,7 +8841,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
                 skipped += 1;
                 continue;
               }
-              selected.push({ name: file.name || path.split(/[\\\\/]/).pop() || path || t("附件"), path, file: REMOTE ? file : null, previewUrl: REMOTE && file.type.startsWith("image/") ? URL.createObjectURL(file) : "" });
+              selected.push({ name: file.name || path.split(/[\\\\/]/).pop() || path || t("附件"), path, type: file.type || "", file: REMOTE ? file : null, previewUrl: REMOTE && file.type.startsWith("image/") ? URL.createObjectURL(file) : "" });
               totalSize += file.size;
             }
             resolve({ files: selected, skipped, picked: files.length });
@@ -9071,6 +9092,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             if (next.length) {
               syncDraft();
               draft.replyAttachments.push(...next);
+              scheduleReplyDraft(draft.reply);
               renderDialog();
             }
             if (result.skipped) showAttachError(REMOTE ? "部分文件超出传输限制，已跳过" : "部分文件无法读取本地路径，已跳过");
@@ -9356,6 +9378,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           const attachments = scope === "reply" ? draft.replyAttachments : draft.attachments;
           const [removed] = attachments.splice(index, 1);
           if (removed) releaseAttachment(removed);
+          if (scope === "reply") scheduleReplyDraft(draft.reply);
           renderDialog();
           dialog.querySelector(scope === "reply" ? '[name="reply"]' : draft.mode === "agent" ? '[name="prompt"]' : '[name="title"]')?.focus();
         }));

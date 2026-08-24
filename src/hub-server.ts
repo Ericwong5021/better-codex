@@ -180,6 +180,7 @@ function issueForWeb(store: HubStore, issue: ReturnType<HubStore["board"]>["issu
     pending_actor: issue.pending_actor,
     enrichment_status: issue.enrichment_status,
     reply_draft: "",
+    reply_draft_attachments: [],
     reply_status: issue.reply_status,
     active_run_status: issue.active_run_status,
     latest_run_status: issue.latest_run_status,

@@ -604,6 +604,18 @@ function parseIssuePatch(body: Record<string, unknown>) {
   if ("title" in body) patch.title = cleanString(body.title, 500);
   if ("description" in body) patch.description = issueDescription(body.description);
   if ("reply_draft" in body) patch.reply_draft = cleanString(body.reply_draft, 100000);
+  if ("reply_draft_attachments" in body) {
+    if (!Array.isArray(body.reply_draft_attachments) || body.reply_draft_attachments.length > 16) throw new Error("invalid_reply_draft_attachments");
+    patch.reply_draft_attachments = body.reply_draft_attachments.map(value => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid_reply_draft_attachments");
+      const attachment = value as Record<string, unknown>;
+      const name = cleanString(attachment.name, 255).trim();
+      const path = cleanString(attachment.path, 4096).trim();
+      const type = cleanString(attachment.type, 200).trim().toLowerCase();
+      if (!name || !path || path.includes("\0") || type.includes("\0")) throw new Error("invalid_reply_draft_attachments");
+      return { name, path, type };
+    });
+  }
   if ("status" in body) patch.status = asStatus(body.status);
   if ("priority" in body) patch.priority = asPriority(body.priority);
   if ("pinned" in body) {
@@ -1785,7 +1797,7 @@ export function startServer() {
           if (files.paths.length) patch.description = withRemoteFilePaths(patch.description ?? issue.description, files.paths);
           let updated;
           try {
-            if ((issue.active_run_status || issue.session_active_turn_id || store.getIssueReplyState(issue.id).status === "running") && Object.keys(patch).some(key => key !== "reply_draft")) throw new Error("issue_execution_running");
+            if ((issue.active_run_status || issue.session_active_turn_id || store.getIssueReplyState(issue.id).status === "running") && Object.keys(patch).some(key => !["reply_draft", "reply_draft_attachments"].includes(key))) throw new Error("issue_execution_running");
             updated = store.updateIssue(issue.id, version, patch);
           } catch (error) {
             files.cleanup();

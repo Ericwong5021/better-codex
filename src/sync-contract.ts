@@ -445,6 +445,7 @@ export const forbiddenProjectionKeys = [
   "session_thread_id",
   "run_thread_id",
   "reply_draft",
+  "reply_draft_attachments",
   "instructions",
   "sandbox_mode",
   "prompt",

@@ -150,6 +150,7 @@ export type Issue = {
   pending_actor: PendingActor;
   enrichment_status: EnrichmentStatus;
   reply_draft: string;
+  reply_draft_attachments: ReplyDraftAttachment[];
   session_handoff_at: string | null;
   version: number;
   created_at: string;
@@ -169,6 +170,12 @@ export type Issue = {
   session_owned?: boolean;
   session_relay_connected?: boolean;
   session_relay_error?: string | null;
+};
+
+export type ReplyDraftAttachment = {
+  name: string;
+  path: string;
+  type: string;
 };
 
 export type ClaimedIssue = {
@@ -292,7 +299,7 @@ type IssueInput = {
   session?: ImportedSessionInput;
 };
 
-export type IssuePatch = Partial<Pick<Issue, "project_id" | "title" | "description" | "status" | "priority" | "labels" | "sort_order" | "pinned" | "thread_id" | "workspace_path" | "agent_enabled" | "agent_id" | "user_assigned" | "assignee_user_id" | "needs_attention" | "pending_actor" | "enrichment_status" | "reply_draft">>;
+export type IssuePatch = Partial<Pick<Issue, "project_id" | "title" | "description" | "status" | "priority" | "labels" | "sort_order" | "pinned" | "thread_id" | "workspace_path" | "agent_enabled" | "agent_id" | "user_assigned" | "assignee_user_id" | "needs_attention" | "pending_actor" | "enrichment_status" | "reply_draft" | "reply_draft_attachments">>;
 
 type AgentProfileInput = Pick<AgentProfile, "name" | "name_en" | "description" | "instructions" | "model" | "reasoning_effort"> & { service_tier?: AgentServiceTier; sandbox_mode?: AgentSandboxMode; max_concurrency?: number };
 type AgentProfilePatch = Partial<AgentProfileInput>;
@@ -307,7 +314,7 @@ export function cleanMaxConcurrency(value: number | undefined) {
   return value;
 }
 
-const latestSchemaVersion = 18;
+const latestSchemaVersion = 19;
 
 function now() {
   return new Date().toISOString();
@@ -428,11 +435,24 @@ function cleanLabels(values: string[]) {
   return [...new Set(values.map(value => value.trim()).filter(Boolean))].slice(0, 20);
 }
 
+function cleanReplyDraftAttachments(values: ReplyDraftAttachment[]) {
+  if (!Array.isArray(values) || values.length > 16) throw new Error("invalid_reply_draft_attachments");
+  return values.map(value => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid_reply_draft_attachments");
+    const name = typeof value.name === "string" ? value.name.trim() : "";
+    const path = typeof value.path === "string" ? value.path.trim() : "";
+    const type = typeof value.type === "string" ? value.type.trim().toLowerCase() : "";
+    if (!name || name.length > 255 || !path || path.length > 4096 || path.includes("\0") || type.length > 200 || type.includes("\0")) throw new Error("invalid_reply_draft_attachments");
+    return { name, path, type };
+  });
+}
+
 function issueFromRow(row: Record<string, unknown>): Issue {
-  const { labels_json, ...values } = row;
+  const { labels_json, reply_draft_attachments_json, ...values } = row;
   return {
     ...values,
     labels: JSON.parse(String(labels_json ?? "[]")),
+    reply_draft_attachments: cleanReplyDraftAttachments(JSON.parse(String(reply_draft_attachments_json ?? "[]"))),
     pinned: Boolean(row.pinned),
     agent_enabled: Boolean(row.agent_enabled),
     user_assigned: Boolean(row.user_assigned),
@@ -659,7 +679,7 @@ export class Store {
     this.ensureSettingsTable();
     this.ensureDispatchColumns();
     this.ensureEnrichmentColumn();
-    this.ensureReplyDraftColumn();
+    this.ensureReplyDraftColumns();
     this.ensureSessionHandoffColumn();
     this.ensureProjectColumns();
     this.recoverProjectPlanning();
@@ -1045,6 +1065,18 @@ export class Store {
         throw error;
       }
     }
+    if (fromVersion < 19) {
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        const columns = new Set((this.db.prepare("PRAGMA table_info(issues)").all() as Array<{ name: string }>).map(item => item.name));
+        if (!columns.has("reply_draft_attachments_json")) this.db.exec("ALTER TABLE issues ADD COLUMN reply_draft_attachments_json TEXT NOT NULL DEFAULT '[]'");
+        this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (19, ?)").run(now());
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    }
   }
 
   private ensureProjectColumns() {
@@ -1172,9 +1204,10 @@ export class Store {
     this.db.exec("CREATE INDEX IF NOT EXISTS issues_enrichment_status ON issues(enrichment_status)");
   }
 
-  private ensureReplyDraftColumn() {
+  private ensureReplyDraftColumns() {
     const columns = new Set((this.db.prepare("PRAGMA table_info(issues)").all() as Array<{ name: string }>).map(item => item.name));
     if (!columns.has("reply_draft")) this.db.exec("ALTER TABLE issues ADD COLUMN reply_draft TEXT NOT NULL DEFAULT ''");
+    if (!columns.has("reply_draft_attachments_json")) this.db.exec("ALTER TABLE issues ADD COLUMN reply_draft_attachments_json TEXT NOT NULL DEFAULT '[]'");
   }
 
   private ensureSessionHandoffColumn() {
@@ -2652,6 +2685,7 @@ export class Store {
     if (patch.pending_actor !== undefined) patch.pending_actor = asPendingActor(patch.pending_actor);
     if (patch.assignee_user_id !== undefined && patch.assignee_user_id !== null && (patch.assignee_user_id.length > 200 || patch.assignee_user_id.includes("\0"))) throw new Error("invalid_assignee_user_id");
     if (patch.needs_attention !== undefined) patch.needs_attention = Boolean(patch.needs_attention);
+    if (patch.reply_draft_attachments !== undefined) patch.reply_draft_attachments = cleanReplyDraftAttachments(patch.reply_draft_attachments);
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const issue = this.getIssue(id);
@@ -2718,6 +2752,7 @@ export class Store {
         pending_actor: "pending_actor",
         enrichment_status: "enrichment_status",
         reply_draft: "reply_draft",
+        reply_draft_attachments: "reply_draft_attachments_json",
       };
       const assignments: string[] = [];
       const values: unknown[] = [];
@@ -2725,7 +2760,7 @@ export class Store {
         if (value === undefined) continue;
         assignments.push(`${columns[key]} = ?`);
         values.push(
-          key === "labels" ? JSON.stringify(value)
+          key === "labels" || key === "reply_draft_attachments" ? JSON.stringify(value)
             : key === "pinned" || key === "agent_enabled" || key === "user_assigned" || key === "needs_attention" ? Number(value)
               : key === "thread_id" || key === "workspace_path" || key === "agent_id" || key === "assignee_user_id" || key === "enrichment_status" ? value || null
                 : value,

@@ -171,6 +171,7 @@ function defaultIssues(agents: MockupRecord[], locale: MockupLocale) {
     pending_actor: "user",
     enrichment_status: null,
     reply_draft: "",
+    reply_draft_attachments: [],
     session_handoff_at: null,
     labels: [...spec[6]],
     mockup_run_status: spec[7],
@@ -238,6 +239,7 @@ function normalizeIssue(value: unknown, index: number): MockupRecord {
   const title = String(source.title || "").trim();
   const description = String(source.description || "");
   const replyDraft = String(source.reply_draft || "");
+  const replyDraftAttachments = Array.isArray(source.reply_draft_attachments) ? source.reply_draft_attachments : [];
   const labels = Array.isArray(source.labels) ? source.labels.map(String).filter(Boolean) : [];
   if (!title || title.length > 500 || description.length > 100000 || replyDraft.length > 100000) throw new Error("invalid_mockup_issue");
   if (labels.length > 50 || labels.some(label => label.length > 100)) throw new Error("invalid_mockup_issue");
@@ -270,6 +272,7 @@ function normalizeIssue(value: unknown, index: number): MockupRecord {
     pending_actor: legacyCancelled ? "user" : source.pending_actor === "agent" ? "agent" : "user",
     enrichment_status: source.enrichment_status === "pending" ? "pending" : null,
     reply_draft: replyDraft,
+    reply_draft_attachments: replyDraftAttachments,
     session_handoff_at: source.session_handoff_at ? String(source.session_handoff_at) : null,
     labels,
     mockup_run_status: mockupRunStatus,
