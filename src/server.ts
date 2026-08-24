@@ -1517,6 +1517,21 @@ export function startServer() {
         worker.wake();
         return sendJson(response, 201, task);
       }
+      if (url.pathname === "/api/scheduled-tasks/agent-create" && method === "POST") {
+        const body = await readBody(request);
+        const projectId = cleanString(body.project_id, 200);
+        const project = store.getProject(projectId);
+        if (!project) throw new Error("project_not_found");
+        const agentId = cleanString(body.agent_id, 200);
+        if (agentId && !store.getAgentProfile(agentId)) throw new Error("agent_not_found");
+        const prompt = cleanString(body.prompt, 100000);
+        if (!prompt) throw new Error("invalid_scheduled_task_prompt");
+        const result = await worker.createScheduledTaskFromPrompt(project, prompt, agentId);
+        if ("question" in result) return sendJson(response, 200, { created: false, question: result.question });
+        const task = store.createScheduledTask(result);
+        worker.wake();
+        return sendJson(response, 201, { created: true, task });
+      }
       if (path[0] === "api" && path[1] === "scheduled-tasks" && path[2]) {
         const taskId = decodeURIComponent(path[2]);
         const task = store.getScheduledTask(taskId);

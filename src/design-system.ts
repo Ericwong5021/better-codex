@@ -9261,6 +9261,40 @@ export function betterCodexDesignSystemCss() {
       overscroll-behavior: contain;
     }
 
+    #better-codex-scheduled-dialog .better-codex-scheduled-agent-create {
+      display: grid;
+      min-width: 0;
+      grid-column: 1 / -1;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: var(--bc-space-3) var(--bc-space-4);
+    }
+
+    #better-codex-scheduled-dialog .better-codex-scheduled-agent-create > .is-wide,
+    #better-codex-scheduled-dialog .better-codex-scheduled-agent-hint,
+    #better-codex-scheduled-dialog .better-codex-scheduled-agent-create > output {
+      grid-column: 1 / -1;
+    }
+
+    #better-codex-scheduled-dialog[data-mode="agent"] textarea {
+      min-height: 176px;
+    }
+
+    #better-codex-scheduled-dialog .better-codex-scheduled-agent-hint {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      gap: var(--bc-space-2);
+      color: var(--bc-color-text-muted);
+      font-size: var(--bc-text-sm);
+      line-height: 1.5;
+    }
+
+    #better-codex-scheduled-dialog .better-codex-scheduled-agent-hint .better-codex-agent-avatar {
+      width: 28px;
+      height: 28px;
+      flex: 0 0 28px;
+    }
+
     #better-codex-scheduled-dialog label,
     #better-codex-scheduled-dialog .better-codex-scheduled-field {
       display: flex;
@@ -9560,6 +9594,17 @@ export function betterCodexDesignSystemCss() {
       gap: var(--bc-space-2);
     }
 
+    #better-codex-scheduled-dialog footer .better-codex-scheduled-mode-switch {
+      display: inline-flex;
+      align-items: center;
+      gap: var(--bc-space-2);
+    }
+
+    #better-codex-scheduled-dialog footer .better-codex-scheduled-mode-switch svg {
+      width: var(--bc-icon-sm);
+      height: var(--bc-icon-sm);
+    }
+
     #better-codex-scheduled-dialog .better-codex-scheduled-enable {
       flex-direction: row;
       gap: var(--bc-space-2);
@@ -9684,6 +9729,10 @@ export function betterCodexDesignSystemCss() {
         padding: var(--bc-space-4);
       }
 
+      #better-codex-scheduled-dialog .better-codex-scheduled-agent-create {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
       #better-codex-scheduled-dialog label.is-wide,
       #better-codex-scheduled-dialog .better-codex-scheduled-interval,
       #better-codex-scheduled-dialog .better-codex-scheduled-project-path,
@@ -9736,6 +9785,10 @@ export function betterCodexDesignSystemCss() {
         grid-template-columns: minmax(0, 1fr);
         padding: var(--bc-space-4);
         -webkit-overflow-scrolling: touch;
+      }
+
+      #better-codex-scheduled-dialog[data-host="web"] .better-codex-scheduled-agent-create {
+        grid-template-columns: minmax(0, 1fr);
       }
 
       #better-codex-scheduled-dialog[data-host="web"] footer {

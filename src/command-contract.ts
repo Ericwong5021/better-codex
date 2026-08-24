@@ -24,6 +24,7 @@ const agentCollection = /^\/api\/agents$/;
 const agentItem = /^\/api\/agents\/([^/]+)$/;
 const settingItem = /^\/api\/settings\/(auto-dispatch|scheduler-model|scheduler-reasoning-effort)$/;
 const scheduledCollection = /^\/api\/scheduled-tasks$/;
+const scheduledAgentCreate = /^\/api\/scheduled-tasks\/agent-create$/;
 const scheduledItem = /^\/api\/scheduled-tasks\/([^/]+)$/;
 const scheduledAction = /^\/api\/scheduled-tasks\/([^/]+)\/run$/;
 
@@ -51,6 +52,7 @@ export function webCommandTarget(methodValue: string, pathValue: string) {
   if (agentCollection.test(pathname) && method === "POST") return { kind: "agent" as const, entity_id: null };
   match = pathname.match(settingItem);
   if (match && method === "PATCH") return { kind: "setting" as const, entity_id: match[1] };
+  if (scheduledAgentCreate.test(pathname) && method === "POST") return { kind: "scheduled" as const, entity_id: null };
   match = pathname.match(scheduledItem);
   if (match && ["PATCH", "DELETE"].includes(method)) return { kind: "scheduled" as const, entity_id: decoded(match[1]) };
   match = pathname.match(scheduledAction);

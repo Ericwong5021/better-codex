@@ -136,5 +136,5 @@ test("all background Codex launches use the shared executable resolver", () => {
     assert.match(source, /codexExecutablePath/);
     assert.doesNotMatch(source, /function codexPath\(/);
   }
-  assert.equal((worker.match(/spawn\(codexExecutablePath\(\)/g) || []).length, 4);
+  assert.equal((worker.match(/spawn\(codexExecutablePath\(\)/g) || []).length, 5);
 });
