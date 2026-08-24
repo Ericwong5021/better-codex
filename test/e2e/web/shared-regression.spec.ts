@@ -111,6 +111,34 @@ test("supports English, dark theme, mobile viewport, and keyboard dismissal", as
   await context.close();
 });
 
+test("renders Codex turn failures as inline warnings without a Better Codex error report", async ({ browser }) => {
+  const { context, page } = await openAuthenticatedPage(browser, { locale: "zh-CN" });
+  const title = `模型调用失败 ${Date.now()}`;
+  const project = await page.evaluate(async workspacePath => await (window as any).betterCodexHost.request({
+    path: "/api/projects",
+    method: "POST",
+    body: JSON.stringify({ name: "Conversation warning project", workspace_path: workspacePath }),
+  }), runtime.workspacePath);
+  const issue = await page.evaluate(async input => await (window as any).betterCodexHost.request({
+    path: "/api/issues",
+    method: "POST",
+    body: JSON.stringify({ project_id: input.projectId, title: input.title, status: "todo" }),
+  }), { projectId: project.id, title });
+  const timestamp = new Date().toISOString();
+  const database = new DatabaseSync(runtime.databasePath);
+  database.prepare("INSERT INTO issue_sessions (issue_id, host_id, thread_id, status, config_fingerprint, last_agent_message, created_at, updated_at) VALUES (?, 'local', ?, 'idle', '', '', ?, ?)").run(issue.id, randomUUID(), timestamp, timestamp);
+  database.prepare("INSERT INTO issue_replies (issue_id, request_id, status, message, error, started_at, finished_at) VALUES (?, ?, 'failed', ?, ?, ?, ?)").run(issue.id, randomUUID(), "请继续完成任务", "Selected model is at capacity. Please try a different model.", timestamp, timestamp);
+  database.close();
+  await page.reload();
+  await page.locator(`[data-issue-id]:has(.better-codex-card-title:text-is("${title}"))`).click();
+  const feedback = page.locator("[data-conversation-feedback]");
+  await expect(feedback).toBeVisible();
+  await expect(feedback).toHaveAttribute("data-tone", "warning");
+  await expect(feedback).toContainText("回复未完成");
+  await expect(page.locator("#better-codex-error-dialog")).toHaveCount(0);
+  await context.close();
+});
+
 test("preserves project planning scroll across live updates", async ({ browser }) => {
   const { context, page } = await openAuthenticatedPage(browser, { viewport: { width: 390, height: 844 } });
   const project = await page.evaluate(async workspacePath => await (window as any).betterCodexHost.request({

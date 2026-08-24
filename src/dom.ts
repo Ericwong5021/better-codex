@@ -3432,10 +3432,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "update_hash_invalid", "update_hash_mismatch", "update_https_required", "update_public_key_unavailable", "update_signature_invalid"
     ]);
 
-    function errorPresentation(error) {
+    function errorPresentation(error, context = {}) {
       const code = String(error instanceof Error ? error.message : error || "request_failed");
       const lowered = code.toLowerCase();
       const status = Number(error?.betterCodexDiagnostics?.http_status || 0);
+      if (context.source === "conversation" && context.origin === "turn") return { category: "conversation", tone: "warning", report: false };
       if (availabilityErrorCodes.has(code) || transientNetworkError(error) || ["runtime_fetch_failed", "relay_stream_interrupted"].includes(code) || code.startsWith("runtime_fetch_failed:") || code.startsWith("update_http_") || ["network", "econn", "enotfound", "dns", "socket"].some(marker => lowered.includes(marker))) return { category: "availability", tone: "warning", report: false };
       if (securityErrorCodes.has(code)) return { category: "security", tone: "danger", report: true };
       if (integrityErrorCodes.has(code) || code.startsWith("update_activation_failed:")) return { category: "integrity", tone: "danger", report: true };
@@ -3454,12 +3455,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
 
     function reportUnexpectedError(error, context = {}) {
-      const presentation = errorPresentation(error);
+      const presentation = errorPresentation(error, context);
       const allowReport = context.report !== false;
       const reportContext = { ...context };
       delete reportContext.report;
       if (allowReport && presentation.report) reportGlobalError(error, reportContext);
-      else appendDiagnostic("user_feedback", { category: presentation.category, tone: presentation.tone, message: error instanceof Error ? error.message : String(error || "request_failed"), source: reportContext.source || "ui_action" });
+      else appendDiagnostic("user_feedback", { category: presentation.category, tone: presentation.tone, message: error instanceof Error ? error.message : String(error || "request_failed"), source: reportContext.source || "ui_action", action: reportContext.action || "", origin: reportContext.origin || "" });
       return { ...presentation, report: allowReport && presentation.report };
     }
 
@@ -8742,13 +8743,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         return "回复未完成。请打开完整会话查看详情，然后重试。";
       }
 
-      function showConversationFailure(error, action = "reply", message = "") {
+      function showConversationFailure(error, action = "reply", message = "", context = {}) {
         const feedback = dialog.querySelector("[data-conversation-feedback]");
         if (!feedback) return;
         const failure = error instanceof Error ? error : new Error(String(error || "request_failed"));
-        const failureKey = action + ":" + failure.message;
-        const presentation = errorPresentation(failure);
-        if (failureKey !== conversationFailureKey) reportUnexpectedError(failure, { source: "conversation", action });
+        const reportContext = { source: "conversation", action, ...context };
+        const failureKey = action + ":" + String(reportContext.origin || "") + ":" + failure.message;
+        const presentation = errorPresentation(failure, reportContext);
+        if (failureKey !== conversationFailureKey) reportUnexpectedError(failure, reportContext);
         conversationFailureKey = failureKey;
         conversationFailureState = "failed";
         if (message) lastReplyMessage = message;
@@ -8934,7 +8936,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const stateName = reply.status || "idle";
         lastReplyStatus = stateName;
         const expectedInterruption = stateName === "interrupted" && ["user_stopped", "session_interrupted"].includes(String(reply.error || ""));
-        if (!sessionHandoff && (stateName === "failed" || (stateName === "interrupted" && !expectedInterruption))) showConversationFailure(reply.error, "reply", reply.message);
+        if (!sessionHandoff && (stateName === "failed" || (stateName === "interrupted" && !expectedInterruption))) showConversationFailure(reply.error, "reply", reply.message, { origin: "turn" });
         else {
           clearConversationFailure();
           syncConversationStatus(stateName);
