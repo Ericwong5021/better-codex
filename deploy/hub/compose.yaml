@@ -13,6 +13,7 @@ services:
       BETTER_CODEX_RELAY_WEB_USERNAME: ${BETTER_CODEX_HUB_WEB_USERNAME:-admin}
       BETTER_CODEX_RELAY_ALLOWED_HOSTS: ${BETTER_CODEX_HUB_DOMAIN:-aionui.talktodo.cn}
       BETTER_CODEX_RELAY_TRUST_PROXY: "1"
+      BETTER_CODEX_HUB_UPDATER_DIR: /run/better-codex-updater
     expose:
       - 4318
     volumes:

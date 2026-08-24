@@ -196,6 +196,10 @@ configure_vps_updater() {
   chmod 640 /var/lib/better-codex-updater/ready
 }
 
+verify_vps_updater() {
+  docker compose "$@" exec -T hub node -e 'const { existsSync } = require("node:fs"); const { join } = require("node:path"); const directory = process.env.BETTER_CODEX_HUB_UPDATER_DIR; if (!directory || !existsSync(join(directory, "ready"))) process.exit(1)'
+}
+
 install_vps() {
   [ "$(id -u)" -eq 0 ] || fail "VPS installation must run with sudo"
   need curl
@@ -227,6 +231,7 @@ install_vps() {
 BETTER_CODEX_HUB_WEB_USERNAME=$username
 "
   docker compose -f "$directory/deploy/hub/compose.yaml" --env-file "$directory/deploy/hub/.env" up -d --build --wait
+  verify_vps_updater -f "$directory/deploy/hub/compose.yaml" --env-file "$directory/deploy/hub/.env" || fail "VPS online updater is unavailable"
   printf 'Better Codex Relay %s is starting at https://%s\n' "$target" "$domain"
 }
 
@@ -284,6 +289,10 @@ upgrade_vps() {
   if ! docker compose "${compose_args[@]}" up -d --build --wait "${up_services[@]}"; then
     rollback_vps
     fail "VPS upgrade failed and the previous version was restored"
+  fi
+  if ! verify_vps_updater "${compose_args[@]}"; then
+    rollback_vps
+    fail "VPS online updater verification failed and the previous version was restored"
   fi
   write_upgrade_progress health_check 90
   if ! docker compose "${compose_args[@]}" exec -T -e TARGET_VERSION="${target#v}" hub node -e 'fetch("http://127.0.0.1:4318/healthz").then(response=>response.json()).then(value=>{if(value.ok!==true||value.version!==process.env.TARGET_VERSION)process.exit(1)})'; then
