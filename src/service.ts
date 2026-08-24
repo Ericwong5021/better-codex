@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { isSea } from "node:sea";
+import { isDeepStrictEqual } from "node:util";
 import { betterCodexHome, betterCodexProfile, cdpPort, ensureDirectories, logPath, runPath, runtimeLogPath, sourceProcessArguments } from "./config.js";
 
 const label = "com.better-codex.runtime";
@@ -54,30 +55,56 @@ function windowsRuntime() {
 }
 
 export function servicePlist() {
-  const argumentsXml = command().map(value => `<string>${xml(value)}</string>`).join("");
+  const definition = serviceDefinition();
+  const argumentsXml = definition.ProgramArguments.map(value => `<string>${xml(value)}</string>`).join("");
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-<key>Label</key><string>${label}</string>
+<key>Label</key><string>${definition.Label}</string>
 <key>ProgramArguments</key><array>${argumentsXml}</array>
 <key>EnvironmentVariables</key><dict>
-<key>BETTER_CODEX_HOME</key><string>${xml(betterCodexHome)}</string>
-<key>BETTER_CODEX_CDP_PORT</key><string>${cdpPort}</string>
+<key>BETTER_CODEX_HOME</key><string>${xml(definition.EnvironmentVariables.BETTER_CODEX_HOME)}</string>
+<key>BETTER_CODEX_CDP_PORT</key><string>${definition.EnvironmentVariables.BETTER_CODEX_CDP_PORT}</string>
 </dict>
-<key>WorkingDirectory</key><string>${xml(betterCodexHome)}</string>
+<key>WorkingDirectory</key><string>${xml(definition.WorkingDirectory)}</string>
 <key>RunAtLoad</key><true/>
 <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
-<key>ThrottleInterval</key><integer>5</integer>
-<key>ProcessType</key><string>Background</string>
-<key>StandardOutPath</key><string>${xml(runtimeLogPath)}</string>
-<key>StandardErrorPath</key><string>${xml(join(logPath, "runtime.error.log"))}</string>
+<key>ThrottleInterval</key><integer>${definition.ThrottleInterval}</integer>
+<key>ProcessType</key><string>${definition.ProcessType}</string>
+<key>StandardOutPath</key><string>${xml(definition.StandardOutPath)}</string>
+<key>StandardErrorPath</key><string>${xml(definition.StandardErrorPath)}</string>
 </dict></plist>
 `;
 }
 
+function serviceDefinition() {
+  return {
+    Label: label,
+    ProgramArguments: command(),
+    EnvironmentVariables: { BETTER_CODEX_HOME: betterCodexHome, BETTER_CODEX_CDP_PORT: String(cdpPort) },
+    WorkingDirectory: betterCodexHome,
+    RunAtLoad: true,
+    KeepAlive: { SuccessfulExit: false },
+    ThrottleInterval: 5,
+    ProcessType: "Background",
+    StandardOutPath: runtimeLogPath,
+    StandardErrorPath: join(logPath, "runtime.error.log"),
+  };
+}
+
+function serviceConfigurationMatches() {
+  if (process.platform !== "darwin" || !existsSync(launchAgentPath)) return false;
+  try {
+    const installed = JSON.parse(execFileSync("/usr/bin/plutil", ["-convert", "json", "-o", "-", launchAgentPath], { encoding: "utf8" })) as Record<string, unknown>;
+    return isDeepStrictEqual(installed, serviceDefinition());
+  } catch {
+    return false;
+  }
+}
+
 export function repairServiceConfiguration() {
   if (betterCodexProfile === "development" || process.platform !== "darwin" || !existsSync(launchAgentPath)) return false;
-  if (readFileSync(launchAgentPath, "utf8") === servicePlist()) return false;
+  if (serviceConfigurationMatches()) return false;
   installService();
   return true;
 }
@@ -121,6 +148,7 @@ export function installService() {
   launchctl(["bootout", domain(), legacyLaunchAgentPath], true);
   if (existsSync(legacyLaunchAgentPath)) unlinkSync(legacyLaunchAgentPath);
   writeFileSync(launchAgentPath, servicePlist(), { mode: 0o644 });
+  if (!serviceConfigurationMatches()) throw new Error("service_configuration_write_failed");
   launchctl(["bootout", domain(), launchAgentPath], true);
   launchctl(["bootstrap", domain(), launchAgentPath]);
   launchctl(["kickstart", "-k", `${domain()}/${label}`]);
@@ -144,7 +172,6 @@ export function uninstallService() {
 
 export function startService() {
   if (betterCodexProfile === "development") throw new Error("development_runtime_unmanaged");
-  if (process.platform === "darwin" && repairServiceConfiguration()) return { started: true, label, repaired: true };
   if (process.platform === "win32") {
     if (!serviceStatus().installed) throw new Error("service_not_installed");
     if (!windowsRuntime()) {
@@ -155,6 +182,7 @@ export function startService() {
     return { started: true, label: windowsTask };
   }
   if (!existsSync(launchAgentPath)) throw new Error("service_not_installed");
+  if (!serviceConfigurationMatches()) throw new Error("service_configuration_mismatch");
   launchctl(["bootstrap", domain(), launchAgentPath], true);
   launchctl(["kickstart", "-k", `${domain()}/${label}`]);
   return { started: true, label };
@@ -190,7 +218,7 @@ export function serviceStatus() {
   const installed = existsSync(launchAgentPath);
   const output = installed ? launchctl(["print", `${domain()}/${label}`], true) : "";
   const pid = output.match(/\bpid = (\d+)/)?.[1];
-  return { installed, running: Boolean(pid), pid: pid ? Number(pid) : null, label, path: launchAgentPath };
+  return { installed, running: Boolean(pid), pid: pid ? Number(pid) : null, label, path: launchAgentPath, configurationMatches: installed && serviceConfigurationMatches() };
 }
 
 export function serviceLogs(lines = 50) {

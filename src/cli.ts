@@ -149,7 +149,6 @@ function spawnSelf(args: string[], logFile: string, detached = true) {
 
 async function ensureRuntime() {
   await stopLegacyRuntime();
-  repairServiceConfiguration();
   try {
     return await health();
   } catch {
@@ -686,7 +685,7 @@ function print(value: unknown) {
 }
 
 function usage() {
-  console.log("better-codex version | web | relay connect <url> [--pairing-code CODE|--admin-token TOKEN] | relay status|disconnect|doctor | relay user-list|user-add|user-disable|user-enable|user-password-set [--url URL] --admin-token-file PATH | sync connect <url> [--pairing-code CODE|--admin-token TOKEN] [--transport auto|websocket|http] | sync migrate --to <url> --from-admin-token TOKEN | sync status|now|disconnect | update [check|compatibility|rollback|channel stable|preview] [--channel stable|preview] | setup [--yes] | launch [--restart] | launcher install|uninstall|status | mcp install|uninstall|status | doctor | enable | disable | start [--launch] | stop | status | uninstall | data delete [--yes] | inject [--launch] [--port N] | eject [--port N] | service install|uninstall|start|stop|restart|status|logs | project list|create | agent list | issue list|get|create|update|status|open");
+  console.log("better-codex version | web | relay connect <url> [--pairing-code CODE|--admin-token TOKEN] | relay status|disconnect|doctor | relay user-list|user-add|user-disable|user-enable|user-password-set [--url URL] --admin-token-file PATH | sync connect <url> [--pairing-code CODE|--admin-token TOKEN] [--transport auto|websocket|http] | sync migrate --to <url> --from-admin-token TOKEN | sync status|now|disconnect | update [check|compatibility|rollback|channel stable|preview] [--channel stable|preview] | setup [--yes] | launch [--restart] | launcher install|uninstall|status | mcp install|uninstall|status | doctor | enable | disable | start [--launch] | stop | status | uninstall | data delete [--yes] | inject [--launch] [--port N] | eject [--port N] | service install|repair|uninstall|start|stop|restart|status|logs | project list|create | agent list | issue list|get|create|update|status|open");
 }
 
 function selfCommand() {
@@ -1043,7 +1042,7 @@ async function syncCommand(action: string | undefined, args: string[]) {
     const configuration = readSyncConfiguration();
     if (!configuration) return print({ connected: false });
     try {
-      await ensureRuntime();
+      await health();
       return print(await request("/api/sync/status"));
     } catch {
       return print({ connected: true, runtime: false, hub_url: configuration.hub_url, device_name: configuration.device_name });
@@ -1164,7 +1163,7 @@ async function relayCommand(action: string | undefined, args: string[]) {
     const configuration = readRelayConfiguration();
     if (!configuration) return print({ connected: false });
     try {
-      await ensureRuntime();
+      await health();
       return print(await request("/api/relay/status"));
     } catch {
       return print({ connected: false, runtime: false, relay_url: configuration.relay_url, device_name: configuration.device_name });
@@ -1184,7 +1183,7 @@ async function relayCommand(action: string | undefined, args: string[]) {
     if (!configuration) return print({ ok: false, connected: false, error: "relay_not_connected" });
     const [local, remote] = await Promise.all([
       (async () => {
-        try { await ensureRuntime(); return await request("/api/relay/status"); } catch (error) { return { connected: false, error: error instanceof Error ? error.message : "runtime_unavailable" }; }
+        try { await health(); return await request("/api/relay/status"); } catch (error) { return { connected: false, error: error instanceof Error ? error.message : "runtime_unavailable" }; }
       })(),
       fetch(`${configuration.relay_url}/healthz`, { signal: AbortSignal.timeout(15_000) }).then(async response => ({ status: response.status, body: await response.json().catch(() => ({})) })).catch(error => ({ status: 0, body: { error: error instanceof Error ? error.message : "relay_unavailable" } })),
     ]);
@@ -1483,6 +1482,7 @@ async function main() {
       await stopSessionHostProcess();
       return print(installService());
     }
+    if (action === "repair") return print(repairServiceConfiguration());
     if (action === "uninstall") return print(uninstallService());
     if (action === "start") return print(startService());
     if (action === "stop") {
