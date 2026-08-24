@@ -6255,10 +6255,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const createIssueShortcut = readCreateIssueShortcut();
       const sendMode = readSendMode();
       const modifiedEnterLabel = shortcutLabel("Mod+Enter");
-      const profileSetting = REMOTE ? '<div class="better-codex-help-setting-group"><h3>' + te("个人资料") + '</h3><div class="better-codex-help-setting-row is-profile"><span><strong>' + te("个人资料") + '</strong><small>' + te("昵称和头像只用于 WebUI 协作") + '</small></span><span class="better-codex-help-setting-controls better-codex-profile-controls"><button type="button" class="better-codex-profile-avatar-button" data-setting-profile-avatar aria-label="' + te("更换头像") + '">' + userAvatarMarkup(state.user, "better-codex-profile-avatar") + '</button><input class="better-codex-profile-name" data-setting-profile-name maxlength="80" aria-label="' + te("昵称") + '" value="' + escapeHtml(state.user?.name || "") + '"><button type="button" class="better-codex-profile-save" data-setting-profile-save>' + te("保存") + '</button></span><output class="better-codex-profile-status" data-setting-profile-status hidden></output></div></div>' : "";
       const settingsPage = [
         '<section class="better-codex-help-page" data-help-page="settings" hidden>',
-        profileSetting,
         '<div class="better-codex-help-setting-group"><h3>' + te("语言") + '</h3><div class="better-codex-help-setting-row is-language"><span><strong>' + te("界面语言") + '</strong><small>' + te("选择 Better Codex 的界面语言") + '</small></span><div class="better-codex-language-switch" role="radiogroup" aria-label="' + te("界面语言") + '" data-language-value="' + state.languageSetting + '"><button type="button" role="radio" data-language="system" aria-checked="' + String(state.languageSetting === "system") + '">' + te("跟随系统") + '</button><button type="button" role="radio" data-language="zh-CN" aria-checked="' + String(state.languageSetting === "zh-CN") + '">' + te("中文") + '</button><button type="button" role="radio" data-language="en" aria-checked="' + String(state.languageSetting === "en") + '">English</button></div></div></div>',
         '<div class="better-codex-help-setting-group"><h3>' + te("通知") + '</h3><div class="better-codex-help-setting-row is-notification"><span><strong>' + te("会话结束提醒") + '</strong><small>' + te("Issue 会话结束后在当前窗口显示提醒") + '</small></span><span class="better-codex-help-setting-controls"><span class="better-codex-help-duration' + (completionEnabled ? "" : " is-disabled") + '" data-setting-completion-picker><button type="button" class="better-codex-help-duration-toggle" data-setting-completion-duration aria-haspopup="listbox" aria-expanded="false" aria-label="' + te("弹窗持续时间") + '"' + (completionEnabled ? "" : " disabled") + '>' + te(completionDuration === 1000 ? "1 秒" : completionDuration === 10000 ? "10 秒" : completionDuration === 0 ? "永久" : "5 秒") + icon("chevronDown") + '</button><span class="better-codex-help-duration-menu" role="listbox" hidden>' + [[1000, "1 秒"], [5000, "5 秒"], [10000, "10 秒"], [0, "永久"]].map(([value, label]) => '<button type="button" role="option" data-setting-completion-option="' + value + '" aria-selected="' + String(completionDuration === value) + '" class="' + (completionDuration === value ? "is-selected" : "") + '">' + te(label) + (completionDuration === value ? icon("check") : "") + '</button>').join("") + '</span></span><input type="checkbox" data-setting-completion aria-label="' + te("会话结束提醒") + '"' + (completionEnabled ? " checked" : "") + '></span></div></div>',
         '<div class="better-codex-help-setting-group"><h3>' + te("调度") + '</h3><div class="better-codex-help-setting-row is-model"><span><strong>' + te("调度器模型") + '</strong><small>' + te("这个模型用于 Issue 状态调度") + '</small></span><span class="better-codex-help-setting-controls better-codex-help-scheduler-controls"><span class="better-codex-help-model" data-setting-scheduler-model-picker><button type="button" class="better-codex-help-model-toggle" data-setting-scheduler-model aria-haspopup="listbox" aria-expanded="false" aria-label="' + te("调度器模型") + '"><span data-setting-scheduler-model-label>' + escapeHtml(schedulerModelLabel) + '</span>' + icon("chevronDown") + '</button><span class="better-codex-help-model-menu" role="listbox" hidden><span class="better-codex-help-model-title">' + te("模型") + '</span>' + schedulerModelOptions + '</span></span><span class="better-codex-help-model" data-setting-scheduler-reasoning-picker><button type="button" class="better-codex-help-model-toggle" data-setting-scheduler-reasoning aria-haspopup="listbox" aria-expanded="false" aria-label="' + te("调度器思考强度") + '"><span data-setting-scheduler-reasoning-label>' + escapeHtml(schedulerReasoningEffortLabel) + '</span>' + icon("chevronDown") + '</button><span class="better-codex-help-model-menu" role="listbox" hidden><span class="better-codex-help-model-title">' + te("调度器思考强度") + '</span>' + schedulerReasoningEffortOptions + '</span></span></span></div></div>',
@@ -6664,40 +6662,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           remoteSessionsLoaded = false;
           await loadRemoteSessions(true);
         }));
-      });
-      let profileAvatarValue = String(state.user?.avatar || "");
-      const profileAvatarButton = dialog.querySelector("[data-setting-profile-avatar]");
-      const profileNameInput = dialog.querySelector("[data-setting-profile-name]");
-      const profileSaveButton = dialog.querySelector("[data-setting-profile-save]");
-      const profileStatus = dialog.querySelector("[data-setting-profile-status]");
-      profileAvatarButton?.addEventListener("click", () => {
-        void pickAgentAvatar().then(value => {
-          if (!value) return;
-          profileAvatarValue = value;
-          profileAvatarButton.innerHTML = userAvatarMarkup({ ...state.user, avatar: value }, "better-codex-profile-avatar");
-        }).catch(error => reportGlobalError(error, { source: "profile_avatar" }));
-      });
-      profileSaveButton?.addEventListener("click", () => {
-        const nickname = String(profileNameInput?.value || "").trim();
-        if (!nickname) {
-          profileNameInput?.focus();
-          return;
-        }
-        profileSaveButton.disabled = true;
-        profileStatus.hidden = true;
-        void api("/api/profile", { method: "PATCH", body: JSON.stringify({ nickname, avatar: profileAvatarValue }) }).then(result => {
-          if (!result?.user?.id) throw new Error("invalid_profile_response");
-          applyUserProfile(result.user);
-          profileAvatarValue = String(state.user?.avatar || "");
-          profileAvatarButton.innerHTML = userAvatarMarkup(state.user, "better-codex-profile-avatar");
-          profileNameInput.value = state.user.name;
-          profileStatus.textContent = t("资料已保存");
-          profileStatus.hidden = false;
-        }).catch(error => {
-          reportGlobalError(error, { source: "profile_save" });
-          profileStatus.textContent = error instanceof Error ? error.message : String(error);
-          profileStatus.hidden = false;
-        }).finally(() => { profileSaveButton.disabled = false; });
       });
       const languageSwitch = dialog.querySelector("[data-language-value]");
       languageSwitch.querySelectorAll("[data-language]").forEach(button => button.addEventListener("click", () => {

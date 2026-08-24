@@ -45,6 +45,7 @@ export function betterCodexDesignSystemCss() {
       --bc-color-focus: var(--bc-host-light-accent, #339cff);
       --bc-color-primary: var(--bc-color-text);
       --bc-color-on-primary: var(--bc-color-canvas);
+      --bc-color-on-avatar: #ffffff;
       --bc-color-danger: oklch(.59 .2 27);
       --bc-color-danger-soft: color-mix(in oklch, var(--bc-color-danger) 12%, var(--bc-color-surface));
       --bc-success: oklch(.55 .16 145);
@@ -1190,10 +1191,10 @@ export function betterCodexDesignSystemCss() {
       place-items: center;
       overflow: hidden;
       border-radius: 999px;
-      color: #fff;
+      color: var(--bc-color-on-avatar);
       font-size: calc(var(--bc-text-base) + 4px);
       font-weight: 700;
-      box-shadow: inset 0 0 0 1px rgb(255 255 255 / .14);
+      box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bc-color-on-avatar) 14%, transparent);
     }
 
     #better-codex-profile-dialog .better-codex-profile-dialog-avatar img {
@@ -2333,94 +2334,6 @@ export function betterCodexDesignSystemCss() {
       gap: 12px;
     }
 
-    #better-codex-auto-dispatch-help-dialog .better-codex-help-setting-row.is-profile {
-      position: relative;
-      min-height: 66px;
-      padding-bottom: 16px;
-    }
-
-    #better-codex-auto-dispatch-help-dialog .better-codex-profile-controls {
-      width: 330px;
-      flex-basis: 330px;
-      gap: 8px;
-    }
-
-    #better-codex-auto-dispatch-help-dialog .better-codex-profile-avatar-button {
-      display: grid;
-      width: 34px;
-      height: 34px;
-      flex: 0 0 34px;
-      place-items: center;
-      border: 0;
-      border-radius: 50%;
-      background: transparent;
-      padding: 0;
-      cursor: pointer;
-    }
-
-    #better-codex-auto-dispatch-help-dialog .better-codex-profile-avatar {
-      display: grid;
-      width: 34px;
-      height: 34px;
-      place-items: center;
-      overflow: hidden;
-      border-radius: 50%;
-      color: white;
-      font-size: 11px;
-      font-weight: 700;
-    }
-
-    #better-codex-auto-dispatch-help-dialog .better-codex-profile-avatar img {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-    }
-
-    #better-codex-auto-dispatch-help-dialog .better-codex-help-setting-row input.better-codex-profile-name {
-      width: min(180px, 100%);
-      height: 34px;
-      min-width: 0;
-      flex: 1 1 auto;
-      appearance: auto;
-      border: 1px solid var(--bc-color-hairline);
-      border-radius: 8px;
-      color: var(--bc-color-text);
-      background: var(--bc-color-control);
-      padding: 0 10px;
-      font: inherit;
-      cursor: text;
-    }
-
-    #better-codex-auto-dispatch-help-dialog .better-codex-help-setting-row input.better-codex-profile-name::after {
-      content: none;
-    }
-
-    #better-codex-auto-dispatch-help-dialog .better-codex-profile-save {
-      height: 34px;
-      flex: 0 0 auto;
-      border: 0;
-      border-radius: 8px;
-      color: white;
-      background: var(--bc-color-primary);
-      padding: 0 12px;
-      font: inherit;
-      font-weight: 650;
-      cursor: pointer;
-    }
-
-    #better-codex-auto-dispatch-help-dialog .better-codex-profile-save:disabled {
-      cursor: wait;
-      opacity: .6;
-    }
-
-    #better-codex-auto-dispatch-help-dialog .better-codex-profile-status {
-      position: absolute;
-      right: 0;
-      bottom: 0;
-      color: var(--bc-color-text-muted);
-      font-size: var(--bc-text-sm);
-    }
-
     #better-codex-auto-dispatch-help-dialog .better-codex-help-scheduler-controls {
       width: 300px;
       flex-basis: 300px;
@@ -3008,7 +2921,6 @@ export function betterCodexDesignSystemCss() {
       #better-codex-auto-dispatch-help-dialog .better-codex-help-setting-row.is-send-mode,
       #better-codex-auto-dispatch-help-dialog .better-codex-help-setting-row.is-notification,
       #better-codex-auto-dispatch-help-dialog .better-codex-help-setting-row.is-model,
-      #better-codex-auto-dispatch-help-dialog .better-codex-help-setting-row.is-profile,
       #better-codex-auto-dispatch-help-dialog .better-codex-help-setting-row.is-shortcut {
         align-items: stretch;
         flex-direction: column;
