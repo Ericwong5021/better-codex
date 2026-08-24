@@ -1454,7 +1454,8 @@ export function startServer() {
       if (url.pathname === "/api/update/check" && method === "POST") return sendJson(response, 200, await checkGatewayUpdate());
       if (url.pathname === "/api/update/install" && method === "POST") {
         if (updateInstallInProgress) throw new Error("update_in_progress");
-        if (!worker.pauseForUpdate()) throw new Error("issue_execution_running");
+        const body = await readBody(request, 1024);
+        if (!await worker.pauseForUpdate(body.interrupt_running === true)) throw new Error("issue_execution_running");
         updateInstallInProgress = true;
         const installation = installGatewayUpdate();
         sendJson(response, 202, { accepted: true, state: getGatewayUpdateState() });

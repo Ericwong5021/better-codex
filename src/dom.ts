@@ -621,7 +621,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "工作中": "Working", "排队中": "Queued", "理解中": "Thinking", "执行失败": "Execution failed", "已停止": "Stopped", "未开始": "Not started", "无法连接 Better Codex Runtime": "Unable to connect to Better Codex Runtime",
       "在会话中打开": "Open in conversation", "前往会话": "Open conversation", "请前往会话继续对话": "Continue in the conversation", "任务正在进行中": "Task is running", "立即开始任务": "Start task now", "切换到手动": "Switch to manual", "继续创建": "Keep creating", "指派给": "Assign to", "可选": "Optional", "建议": "Suggestions", "开始对话": "Start the conversation", "补充下一步要求，智能体会继续处理。": "Add your next request and the agent will continue.", "在下方输入消息并发送": "Type a message below and send it", "正在处理任务": "Working on the task", "智能体回复产生后会显示在这里。": "The agent's response will appear here when available.", "请稍候": "Please wait", "输入下一步要求…": "Enter your next request…", "调整侧边栏宽度": "Resize sidebar",
       "头像": "Avatar", "上传图片": "Upload image", "使用此头像": "Use this avatar", "点击选择预设图标，或上传图片": "Choose a preset icon or upload an image", "从预设图标中选择，也可以上传图片": "Choose a preset icon or upload an image", "创建智能体": "Create agent", "Codex 默认智能体": "Default Codex agent", "说明这个智能体适合承担什么工作": "Describe what this agent is good at", "定义职责、工作方式和输出要求": "Define responsibilities, workflow, and output requirements", "权限": "Permissions", "只读": "Read-only", "工作区可写": "Workspace write access", "完全访问": "Full access", "仅可读取工作区文件，不能修改": "Can read workspace files but cannot modify them", "可修改当前工作区内的文件": "Can modify files in the current workspace", "可不受限制地访问互联网和电脑上的任何文件": "Unrestricted access to the internet and files on this computer",
-      "已经执行过对话的 Issue 只能修改状态、优先级和指派人。": "Issues with an executed conversation can only change status, priority, and assignee.", "终止任务后才能打开对话，是否终止任务？": "The task must be stopped before opening the conversation. Stop it now?", "终止并打开": "Stop and open", "正在终止…": "Stopping…", "忽略当前版本": "Ignore this version", "立即更新": "Update now", "暂无项目": "No projects", "告诉智能体要做什么，例如：“修复项目里任务运行状态不可见的问题”": "Tell the agent what to do, for example: “Fix the invisible task run status in the project”"
+      "已经执行过对话的 Issue 只能修改状态、优先级和指派人。": "Issues with an executed conversation can only change status, priority, and assignee.", "终止任务后才能打开对话，是否终止任务？": "The task must be stopped before opening the conversation. Stop it now?", "终止并打开": "Stop and open", "正在终止…": "Stopping…", "升级会中断正在执行的任务": "Updating will interrupt running tasks", "仍要升级吗？正在执行的任务会被立即中断，未完成的工作可能丢失。": "Update anyway? Running tasks will be interrupted immediately, and unfinished work may be lost.", "仍要升级": "Update anyway", "忽略当前版本": "Ignore this version", "立即更新": "Update now", "暂无项目": "No projects", "告诉智能体要做什么，例如：“修复项目里任务运行状态不可见的问题”": "Tell the agent what to do, for example: “Fix the invisible task run status in the project”"
     } };
     localeResources.en["创建新项目"] = "Create new project";
     localeResources.en["浏览本机文件夹"] = "Browse folders on this device";
@@ -2362,7 +2362,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           }
         }
         appendDiagnostic("api_failure", { trace_id: traceId, method, path: requestPath, command_id: commandId, request_body_bytes: bodyBytes, elapsed_ms: Date.now() - startedAt, error: error instanceof Error ? error.message : String(error || "request_failed") });
-        if (!options.passive || !transientNetworkError(error)) reportGlobalError(error, { source: "api", trace_id: traceId, method, path: requestPath, command_id: commandId, request_body_bytes: bodyBytes, elapsed_ms: Date.now() - startedAt });
+        if (options.reportError !== false && (!options.passive || !transientNetworkError(error))) reportGlobalError(error, { source: "api", trace_id: traceId, method, path: requestPath, command_id: commandId, request_body_bytes: bodyBytes, elapsed_ms: Date.now() - startedAt });
         throw error;
       });
     }
@@ -3415,7 +3415,26 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         description.textContent = REMOTE ? t("正在备份并升级远程服务，请不要关闭页面。") : t("正在下载并校验新版本，请不要关闭 Codex。");
         error.hidden = true;
         try {
-          const result = await api("/api/update/install", { method: "POST" });
+          let result;
+          try {
+            result = await api("/api/update/install", { method: "POST", reportError: false });
+          } catch (reason) {
+            if (!(reason instanceof Error) || reason.message !== "issue_execution_running") throw reason;
+            const confirmed = await confirmAction("升级会中断正在执行的任务", "仍要升级吗？正在执行的任务会被立即中断，未完成的工作可能丢失。", "仍要升级");
+            if (!confirmed) {
+              notice.dataset.status = activationError ? "error" : "available";
+              install.disabled = false;
+              menuToggle.disabled = false;
+              close.disabled = false;
+              ignore.disabled = false;
+              later.disabled = false;
+              install.textContent = t(activationError ? "重试" : "立即更新");
+              title.textContent = t(activationError ? "更新未完成" : "Better Codex 有新版本");
+              description.textContent = t(activationError ? "Better Codex 已恢复到上一版本。" : updateDescription);
+              return;
+            }
+            result = await api("/api/update/install", { method: "POST", body: JSON.stringify({ interrupt_running: true }), timeoutMs: 45000, reportError: false });
+          }
           if (updateNotice !== notice) return;
           if (result?.accepted !== true) throw new Error("update_not_accepted");
           await waitForUpdateCompletion(notice);

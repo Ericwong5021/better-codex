@@ -150,8 +150,24 @@ export class IssueWorker {
     return this.sessionRelay.threadAction(this.store.listIssueThreadIds(issueId), action);
   }
 
-  pauseForUpdate() {
-    if (this.store.hasActiveIssueRuns() || this.schedulers.size || this.enrichments.size || this.projectOverviews.size || this.projectPlannings.size) return false;
+  async pauseForUpdate(interruptRunning = false) {
+    const issueIds = this.store.listActiveIssueIds();
+    const active = Boolean(issueIds.length || this.schedulers.size || this.enrichments.size || this.projectOverviews.size || this.projectPlannings.size);
+    workerDebug("update_pause_requested", {
+      interrupt_running: interruptRunning,
+      active_issue_ids: issueIds,
+      schedulers: this.schedulers.size,
+      enrichments: this.enrichments.size,
+      project_overviews: this.projectOverviews.size,
+      project_plannings: this.projectPlannings.size,
+    });
+    if (active && !interruptRunning) return false;
+    if (interruptRunning) await Promise.all(issueIds.map(issueId => this.stopIssue(issueId)));
+    if (interruptRunning && active) {
+      this.stop();
+      workerDebug("update_pause_accepted", { interrupt_running: true, interrupted_issue_ids: issueIds });
+      return true;
+    }
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
     if (this.threadActionTimer) clearTimeout(this.threadActionTimer);
@@ -159,6 +175,7 @@ export class IssueWorker {
     this.threadActionTimer = null;
     this.manualQueue.clear();
     this.sessionRelay.stop();
+    workerDebug("update_pause_accepted", { interrupt_running: false, interrupted_issue_ids: [] });
     return true;
   }
 

@@ -3433,6 +3433,19 @@ export class Store {
     return Boolean(run || command || turn || reply);
   }
 
+  listActiveIssueIds() {
+    return (this.db.prepare(`
+      SELECT issue_id FROM issue_runs WHERE status IN ('claimed', 'running', 'scheduling')
+      UNION
+      SELECT issue_id FROM session_commands WHERE status IN ('pending', 'claimed')
+      UNION
+      SELECT issue_id FROM issue_sessions WHERE active_turn_id IS NOT NULL OR active_command_id IS NOT NULL
+      UNION
+      SELECT issue_id FROM issue_replies WHERE status = 'running'
+      ORDER BY issue_id
+    `).all() as Array<{ issue_id: string }>).map(row => row.issue_id);
+  }
+
   getIssueSession(issueId: string): IssueSession | undefined {
     const row = this.db.prepare("SELECT * FROM issue_sessions WHERE issue_id = ?").get(issueId) as Record<string, unknown> | undefined;
     if (!row) return undefined;
