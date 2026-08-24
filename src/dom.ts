@@ -8217,7 +8217,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const cursor = Number(input?.selectionStart);
         if (!input || !Number.isInteger(cursor)) return null;
         const before = input.value.slice(0, cursor);
-        const match = before.match(/(^|\s)([/@$])([^\s]*)$/);
+        const match = before.match(/(^|\\s)([/@$])([^\\s]*)$/);
         if (!match) return null;
         return { trigger: match[2], query: match[3], start: cursor - match[2].length - match[3].length, end: cursor };
       }
