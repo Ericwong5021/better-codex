@@ -134,6 +134,7 @@ export function betterCodexDesignSystemCss() {
     #better-codex-agent-dialog,
     #better-codex-confirm,
     #better-codex-auto-dispatch-help-dialog,
+    #better-codex-profile-dialog,
     #better-codex-context-menu,
     #better-codex-update-notice,
     .better-codex-completion-notice,
@@ -1093,6 +1094,221 @@ export function betterCodexDesignSystemCss() {
 
     #better-codex-auto-dispatch-help-dialog::backdrop {
       background: var(--bc-color-scrim);
+    }
+
+    #better-codex-profile-dialog {
+      position: fixed;
+      inset: 0;
+      z-index: 145;
+      width: min(420px, calc(100vw - 32px));
+      max-height: calc(100vh - 32px);
+      margin: auto;
+      overflow: hidden;
+      border: 0;
+      border-radius: var(--bc-radius-lg);
+      color: var(--bc-color-text);
+      background: var(--bc-color-surface-raised);
+      padding: 0;
+      box-shadow: var(--bc-elevation-float);
+    }
+
+    #better-codex-profile-dialog::backdrop {
+      background: var(--bc-color-scrim);
+    }
+
+    #better-codex-profile-dialog form {
+      display: flex;
+      min-height: 0;
+      flex-direction: column;
+    }
+
+    #better-codex-profile-dialog header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: var(--bc-space-4);
+      padding: 18px 20px 16px;
+      box-shadow: inset 0 -1px 0 var(--bc-color-hairline);
+    }
+
+    #better-codex-profile-dialog h2 {
+      margin: 0;
+      font-size: calc(var(--bc-text-base) + 3px);
+      font-weight: 650;
+      letter-spacing: -.01em;
+    }
+
+    #better-codex-profile-dialog header p {
+      margin: 4px 0 0;
+      color: var(--bc-color-text-muted);
+      font-size: var(--bc-text-sm);
+      line-height: 1.5;
+    }
+
+    #better-codex-profile-dialog header > button {
+      display: grid;
+      width: var(--bc-control-height);
+      height: var(--bc-control-height);
+      flex: 0 0 var(--bc-control-height);
+      border: 0;
+      border-radius: var(--bc-radius-sm);
+      place-items: center;
+      color: var(--bc-color-text-muted);
+      background: transparent;
+      padding: 0;
+      cursor: pointer;
+    }
+
+    #better-codex-profile-dialog header > button svg {
+      width: var(--bc-icon-md);
+      height: var(--bc-icon-md);
+    }
+
+    #better-codex-profile-dialog .better-codex-profile-dialog-body {
+      display: grid;
+      grid-template-columns: 72px minmax(0, 1fr);
+      align-items: center;
+      gap: 18px;
+      padding: 24px 20px;
+    }
+
+    #better-codex-profile-dialog .better-codex-profile-dialog-avatar-button {
+      position: relative;
+      width: 72px;
+      height: 72px;
+      border: 0;
+      border-radius: 999px;
+      background: transparent;
+      padding: 0;
+      cursor: pointer;
+    }
+
+    #better-codex-profile-dialog .better-codex-profile-dialog-avatar {
+      display: grid;
+      width: 72px;
+      height: 72px;
+      place-items: center;
+      overflow: hidden;
+      border-radius: 999px;
+      color: #fff;
+      font-size: calc(var(--bc-text-base) + 4px);
+      font-weight: 700;
+      box-shadow: inset 0 0 0 1px rgb(255 255 255 / .14);
+    }
+
+    #better-codex-profile-dialog .better-codex-profile-dialog-avatar img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    #better-codex-profile-dialog .better-codex-profile-dialog-avatar-button > span:last-child {
+      position: absolute;
+      right: -2px;
+      bottom: -2px;
+      display: grid;
+      width: 26px;
+      height: 26px;
+      place-items: center;
+      border: 3px solid var(--bc-color-surface-raised);
+      border-radius: 999px;
+      color: var(--bc-color-text);
+      background: var(--bc-color-control);
+      box-shadow: var(--bc-elevation-card);
+    }
+
+    #better-codex-profile-dialog .better-codex-profile-dialog-avatar-button > span:last-child svg {
+      width: 12px;
+      height: 12px;
+    }
+
+    #better-codex-profile-dialog label {
+      display: grid;
+      gap: 7px;
+      color: var(--bc-color-text-muted);
+      font-size: var(--bc-text-sm);
+      font-weight: 600;
+    }
+
+    #better-codex-profile-dialog input {
+      box-sizing: border-box;
+      width: 100%;
+      height: calc(var(--bc-control-height) + 6px);
+      border: 0;
+      border-radius: var(--bc-radius-sm);
+      color: var(--bc-color-text);
+      background: var(--bc-color-input);
+      padding: 0 var(--bc-space-3);
+      font: inherit;
+      font-size: var(--bc-text-md);
+      font-weight: 500;
+      outline: 0;
+      box-shadow: var(--bc-inset-hairline);
+    }
+
+    #better-codex-profile-dialog output {
+      grid-column: 1 / -1;
+      color: var(--bc-color-danger);
+      font-size: var(--bc-text-sm);
+      line-height: 1.5;
+    }
+
+    #better-codex-profile-dialog output[hidden] {
+      display: none;
+    }
+
+    #better-codex-profile-dialog footer {
+      display: flex;
+      justify-content: flex-end;
+      gap: var(--bc-space-2);
+      padding: 14px 20px 18px;
+      box-shadow: inset 0 1px 0 var(--bc-color-hairline);
+    }
+
+    #better-codex-profile-dialog footer button {
+      min-height: var(--bc-control-height);
+      border: 0;
+      border-radius: var(--bc-radius-sm);
+      color: var(--bc-color-text);
+      background: var(--bc-color-control);
+      padding: 0 var(--bc-control-padding);
+      font: inherit;
+      font-size: var(--bc-text-sm);
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    #better-codex-profile-dialog footer button.is-primary {
+      color: var(--bc-color-on-primary);
+      background: var(--bc-color-primary);
+    }
+
+    #better-codex-profile-dialog button:focus-visible,
+    #better-codex-profile-dialog input:focus {
+      outline: 0;
+      box-shadow: var(--bc-focus-ring);
+    }
+
+    #better-codex-profile-dialog button:active {
+      transform: scale(.96);
+    }
+
+    #better-codex-profile-dialog button:disabled {
+      cursor: wait;
+      opacity: .56;
+    }
+
+    @media (hover: hover) {
+      #better-codex-profile-dialog header > button:hover,
+      #better-codex-profile-dialog footer button:hover,
+      #better-codex-profile-dialog .better-codex-profile-dialog-avatar-button:hover > span:last-child {
+        background: var(--bc-color-hover);
+      }
+
+      #better-codex-profile-dialog footer button.is-primary:hover {
+        background: color-mix(in oklch, var(--bc-color-primary) 88%, var(--bc-color-canvas));
+      }
     }
 
     #better-codex-auto-dispatch-help-dialog .better-codex-auto-dispatch-help-shell {
@@ -7942,7 +8158,7 @@ export function betterCodexDesignSystemCss() {
         transition: none;
       }
       #better-codex-panel .better-codex-agent-grid { grid-template-columns: 1fr; }
-      #better-codex-dialog, #better-codex-agent-dialog, #better-codex-confirm, #better-codex-auto-dispatch-help-dialog, #better-codex-avatar-picker, #better-codex-avatar-cropper { width: calc(100vw - 24px); }
+      #better-codex-dialog, #better-codex-agent-dialog, #better-codex-confirm, #better-codex-auto-dispatch-help-dialog, #better-codex-profile-dialog, #better-codex-avatar-picker, #better-codex-avatar-cropper { width: calc(100vw - 24px); }
       #better-codex-dialog[data-detail="true"][data-expanded="false"],
       #better-codex-dialog[data-detail="true"][data-expanded="true"] {
         width: calc(100vw - 24px);
@@ -9361,6 +9577,7 @@ export function betterCodexDesignSystemCss() {
       #better-codex-scheduled-dialog,
       #better-codex-agent-dialog,
       #better-codex-confirm,
+      #better-codex-profile-dialog,
       #better-codex-avatar-picker,
       #better-codex-avatar-cropper,
       #better-codex-update-notice,
@@ -9379,6 +9596,7 @@ export function betterCodexDesignSystemCss() {
       #better-codex-scheduled-dialog button,
       #better-codex-agent-dialog button,
       #better-codex-confirm button,
+      #better-codex-profile-dialog button,
       #better-codex-context-menu button,
       #better-codex-avatar-picker button,
       #better-codex-avatar-cropper button,

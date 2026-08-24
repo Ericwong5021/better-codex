@@ -139,7 +139,7 @@ test("web host boots the shared DOM injection behind a local session", async () 
     assert.match(hostScript, /better-codex:bootstrap/);
     assert.match(hostScript, /if \(usageLoadedAt\) renderUsage\(cachedUsage\)/);
     assert.match(hostScript, /\/api\/account\/usage/);
-    assert.match(hostScript, /profileButton\.setAttribute\("aria-expanded"/);
+    assert.match(hostScript, /usageToggleButton\.setAttribute\("aria-expanded"/);
 
     const hostCss = await (await fetch(`${base}/web/host.css`)).text();
     assert.doesNotMatch(hostCss, /^\s*\*\s*\{/m);

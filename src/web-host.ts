@@ -48,13 +48,15 @@ const webHostHtml = String.raw`<!doctype html>
         </div>
       </nav>
       <footer class="web-account">
-        <button id="web-profile" class="web-profile" type="button" aria-expanded="false" aria-controls="web-usage">
+        <button id="web-profile" class="web-profile" type="button">
           <span id="web-avatar" class="web-avatar"><span id="web-avatar-initials">你</span><i class="web-online" aria-hidden="true"></i></span>
           <span><strong id="web-profile-name">你</strong><small id="web-profile-kind">Codex 账户</small></span>
-          <svg class="web-profile-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg>
         </button>
         <button id="web-theme" class="web-icon-button web-account-theme" type="button" aria-label="切换深色模式">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.66 6.34l1.41-1.41"></path></svg>
+        </button>
+        <button id="web-usage-toggle" class="web-icon-button web-account-usage" type="button" aria-expanded="false" aria-controls="web-usage" aria-label="查看 Codex 额度">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg>
         </button>
         <section id="web-usage" class="web-usage" aria-live="polite" hidden>
           <div class="web-usage-heading">
@@ -166,17 +168,18 @@ body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; 
 .web-nav-mobile-action { display: none; }
 .text-fade-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .web-account { position: relative; border-radius: 12px; background: transparent; }
-.web-account:has(.web-profile[aria-expanded="true"]) { background: var(--web-hover); }
+.web-account:has(.web-account-usage[aria-expanded="true"]) { background: var(--web-hover); }
 .web-profile { position: relative; z-index: 1; display: grid; grid-template-columns: 30px minmax(0, 1fr); width: 100%; min-height: 48px; align-items: center; gap: 9px; border: 0; border-radius: 10px; padding: 6px 70px 6px 6px; background: transparent; text-align: left; cursor: pointer; }
 .web-account-theme { position: absolute; z-index: 2; top: 7px; right: 27px; }
+.web-account-usage { position: absolute; z-index: 2; top: 7px; right: 0; color: var(--web-muted); }
 .web-avatar { position: relative; display: grid; width: 28px; height: 28px; place-items: center; border-radius: 50%; color: #fff; background: #2fa15f center / cover no-repeat; font-size: 9px; font-weight: 700; }
 .web-profile > span:nth-child(2) { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
 .web-profile strong, .web-profile small { overflow: hidden; white-space: nowrap; }
 .web-profile strong { font-size: 11px; font-weight: 620; }
 .web-profile small { color: var(--web-muted); font-size: 9px; }
 .web-online { position: absolute; right: -1px; bottom: -1px; width: 7px; height: 7px; border: 2px solid var(--web-sidebar); border-radius: 50%; background: #2fa15f; }
-.web-profile-chevron { position: absolute; top: 17px; right: 6px; width: 14px; height: 14px; color: var(--web-muted); }
-.web-profile[aria-expanded="true"] .web-profile-chevron { transform: rotate(90deg); }
+.web-account-usage svg { width: 14px; height: 14px; transition: transform 120ms cubic-bezier(.16,1,.3,1); }
+.web-account-usage[aria-expanded="true"] svg { transform: rotate(90deg); }
 .web-usage { margin: 0 6px; border-top: 1px solid var(--web-line); padding: 9px 4px 10px; }
 .web-usage[hidden] { display: none; }
 .web-usage-heading { display: grid; grid-template-columns: 13px minmax(0, 1fr); align-items: center; gap: 6px; color: var(--web-muted); font-size: 10px; }
@@ -260,12 +263,20 @@ body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; 
   .web-nav-more-menu[data-open="true"] { display: grid; }
   .web-nav-more-menu .web-nav-button { display: grid; width: 100%; min-height: 44px; grid-template-columns: 20px minmax(0, 1fr); justify-content: start; padding: 0 12px; text-align: left; }
   .web-nav-more-menu .web-nav-button[hidden] { display: none; }
-  .web-account:has(.web-profile[aria-expanded="true"]) { position: fixed; z-index: 60; right: max(10px, env(safe-area-inset-right)); bottom: calc(68px + env(safe-area-inset-bottom)); display: block; width: min(280px, calc(100vw - 20px)); border: 1px solid var(--web-line); border-radius: 14px; padding: 6px; background: var(--web-raised); box-shadow: 0 12px 32px rgb(0 0 0 / .14), 0 2px 8px rgb(0 0 0 / .08); }
-  .web-account:has(.web-profile[aria-expanded="true"]) .web-profile, .web-account:has(.web-profile[aria-expanded="true"]) .web-account-theme { display: none; }
-  .web-account:has(.web-profile[aria-expanded="true"]) .web-usage { margin: 0; border: 0; padding: 10px; }
-  .web-account:has(.web-profile[aria-expanded="true"]) .web-usage-heading { grid-template-columns: 13px minmax(0, 1fr) 28px; }
-  .web-account:has(.web-profile[aria-expanded="true"]) .web-usage-close { display: grid; width: 28px; height: 28px; border: 0; border-radius: 8px; padding: 0; place-items: center; color: var(--web-muted); background: transparent; cursor: pointer; }
-  .web-account:has(.web-profile[aria-expanded="true"]) .web-usage-close svg { width: 15px; height: 15px; }
+  .web-nav-more-menu .web-nav-profile-entry { min-height: 58px; grid-template-columns: 32px minmax(0, 1fr) 16px; gap: 10px; padding: 0 10px; }
+  .web-nav-profile-avatar { display: grid; width: 30px; height: 30px; place-items: center; overflow: hidden; border-radius: 50%; color: #fff; background: #2fa15f center / cover no-repeat; font-size: 9px; font-weight: 700; }
+  .web-nav-profile-avatar img { display: block; width: 100%; height: 100%; object-fit: cover; }
+  .web-nav-profile-meta { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+  .web-nav-profile-meta strong, .web-nav-profile-meta small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .web-nav-profile-meta strong { font-size: 12px; font-weight: 620; }
+  .web-nav-profile-meta small { color: var(--web-muted); font-size: 10px; }
+  .web-nav-profile-entry > svg { width: 14px; height: 14px; color: var(--web-muted); }
+  .web-account:has(.web-account-usage[aria-expanded="true"]) { position: fixed; z-index: 60; right: max(10px, env(safe-area-inset-right)); bottom: calc(68px + env(safe-area-inset-bottom)); display: block; width: min(280px, calc(100vw - 20px)); border: 1px solid var(--web-line); border-radius: 14px; padding: 6px; background: var(--web-raised); box-shadow: 0 12px 32px rgb(0 0 0 / .14), 0 2px 8px rgb(0 0 0 / .08); }
+  .web-account:has(.web-account-usage[aria-expanded="true"]) .web-profile, .web-account:has(.web-account-usage[aria-expanded="true"]) .web-account-theme, .web-account:has(.web-account-usage[aria-expanded="true"]) .web-account-usage { display: none; }
+  .web-account:has(.web-account-usage[aria-expanded="true"]) .web-usage { margin: 0; border: 0; padding: 10px; }
+  .web-account:has(.web-account-usage[aria-expanded="true"]) .web-usage-heading { grid-template-columns: 13px minmax(0, 1fr) 28px; }
+  .web-account:has(.web-account-usage[aria-expanded="true"]) .web-usage-close { display: grid; width: 28px; height: 28px; border: 0; border-radius: 8px; padding: 0; place-items: center; color: var(--web-muted); background: transparent; cursor: pointer; }
+  .web-account:has(.web-account-usage[aria-expanded="true"]) .web-usage-close svg { width: 15px; height: 15px; }
   .web-nav-button .text-fade-truncate { display: block; }
   #better-codex-more-entry .text-fade-truncate { display: none; }
   .web-error-report { width: calc(100vw - 20px); height: min(90dvh, 760px); max-height: calc(100dvh - 20px); }
@@ -302,6 +313,7 @@ const profileName = document.getElementById("web-profile-name");
 const profileKind = document.getElementById("web-profile-kind");
 const profileAvatar = document.getElementById("web-avatar");
 const profileAvatarInitials = document.getElementById("web-avatar-initials");
+const usageToggleButton = document.getElementById("web-usage-toggle");
 const usagePanel = document.getElementById("web-usage");
 const usageCloseButton = document.getElementById("web-usage-close");
 const usageTitle = document.getElementById("web-usage-title");
@@ -485,7 +497,8 @@ function updateWebProfile(detail) {
   installButton.setAttribute("aria-label", profileText("安装 Better Codex", "Install Better Codex"));
   usageTitle.textContent = profileText("剩余用量", "Usage remaining");
   usageCloseButton.setAttribute("aria-label", profileText("关闭额度", "Close usage"));
-  profileButton.setAttribute("aria-label", profileText("查看 Codex 额度", "View Codex usage"));
+  profileButton.setAttribute("aria-label", REMOTE ? profileText("编辑个人资料", "Edit profile") : profileText("查看 Codex 额度", "View Codex usage"));
+  usageToggleButton.setAttribute("aria-label", profileText("查看 Codex 额度", "View Codex usage"));
   if (usageLoadedAt) renderUsage(cachedUsage);
 }
 
@@ -580,13 +593,20 @@ window.addEventListener("better-codex:bootstrap", event => {
   updateWebProfile(event.detail);
 });
 profileButton.addEventListener("click", () => {
-  const expanded = profileButton.getAttribute("aria-expanded") !== "true";
-  profileButton.setAttribute("aria-expanded", String(expanded));
+  if (REMOTE) {
+    window.dispatchEvent(new CustomEvent("better-codex:profile-open"));
+    return;
+  }
+  usageToggleButton.click();
+});
+usageToggleButton.addEventListener("click", () => {
+  const expanded = usageToggleButton.getAttribute("aria-expanded") !== "true";
+  usageToggleButton.setAttribute("aria-expanded", String(expanded));
   usagePanel.hidden = !expanded;
   if (expanded) void loadUsage();
 });
 usageCloseButton.addEventListener("click", () => {
-  profileButton.setAttribute("aria-expanded", "false");
+  usageToggleButton.setAttribute("aria-expanded", "false");
   usagePanel.hidden = true;
 });
 
