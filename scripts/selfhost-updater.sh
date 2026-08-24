@@ -27,13 +27,13 @@ write_state() {
   exit 1
 }
 
-write_state "{\"status\":\"installing\",\"targetVersion\":\"$target\",\"updatedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"error\":null}"
+write_state "{\"status\":\"installing\",\"targetVersion\":\"$target\",\"stage\":\"preparing\",\"progress\":10,\"updatedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"error\":null}"
 rm -f "$lock"
-if BETTER_CODEX_SELFHOST_DIR="$directory" bash /usr/local/libexec/better-codex-selfhost upgrade vps "$target"; then
-  write_state "{\"status\":\"current\",\"targetVersion\":\"$target\",\"currentVersion\":\"${target#v}\",\"updatedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"error\":null}"
+if BETTER_CODEX_SELFHOST_DIR="$directory" BETTER_CODEX_UPDATER_STATE_FILE="$state" BETTER_CODEX_UPDATER_TARGET_VERSION="$target" bash /usr/local/libexec/better-codex-selfhost upgrade vps "$target"; then
+  write_state "{\"status\":\"current\",\"targetVersion\":\"$target\",\"currentVersion\":\"${target#v}\",\"stage\":\"complete\",\"progress\":100,\"updatedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"error\":null}"
   rm -f "$running"
   exit 0
 fi
-write_state "{\"status\":\"error\",\"targetVersion\":\"$target\",\"updatedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"error\":\"update_install_failed\"}"
+write_state "{\"status\":\"error\",\"targetVersion\":\"$target\",\"stage\":\"error\",\"updatedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"error\":\"update_install_failed\"}"
 rm -f "$running" "$lock"
 exit 1

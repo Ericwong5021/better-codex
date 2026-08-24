@@ -27,6 +27,24 @@ retry() {
   done
 }
 
+write_upgrade_progress() {
+  [ -n "${BETTER_CODEX_UPDATER_STATE_FILE:-}" ] || return 0
+  [ "$BETTER_CODEX_UPDATER_STATE_FILE" = "/var/lib/better-codex-updater/state.json" ] || fail "invalid updater state file"
+  [[ "${BETTER_CODEX_UPDATER_TARGET_VERSION:-}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?$ ]] || fail "invalid updater target version"
+  local stage="$1"
+  local progress="$2"
+  local temporary
+  case "$stage" in
+    verifying|backing_up|downloading|rebuilding|restarting|health_check) ;;
+    *) fail "invalid updater progress stage" ;;
+  esac
+  [[ "$progress" =~ ^[0-9]+$ ]] && [ "$progress" -le 100 ] || fail "invalid updater progress"
+  temporary="$(mktemp "/var/lib/better-codex-updater/state.XXXXXX")"
+  printf '{"status":"installing","targetVersion":"%s","stage":"%s","progress":%s,"updatedAt":"%s","error":null}\n' "$BETTER_CODEX_UPDATER_TARGET_VERSION" "$stage" "$progress" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$temporary"
+  chmod 644 "$temporary"
+  mv -f "$temporary" "$BETTER_CODEX_UPDATER_STATE_FILE"
+}
+
 version_tag() {
   if [ -n "$requested_version" ]; then
     [[ "$requested_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?$ ]] || fail "invalid version"
@@ -236,6 +254,7 @@ upgrade_vps() {
   previous="$(git -C "$directory" rev-parse HEAD)"
   previous_version="$(git -C "$directory" show "${previous}:package.json" | sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
   [ -n "$previous_version" ] || fail "unable to resolve the installed VPS version"
+  write_upgrade_progress verifying 20
   verify_tag_commit "$directory" "$target"
   previous_service="$(docker compose "${compose_args[@]}" exec -T hub node -e 'fetch("http://127.0.0.1:4318/healthz").then(response=>response.json()).then(value=>process.stdout.write(String(value.name||"")))')"
   case "$previous_service" in
@@ -243,6 +262,7 @@ upgrade_vps() {
     'Better Codex Hub') backup_cli=dist/hub-cli.js ;;
     *) fail "unable to identify the installed remote service" ;;
   esac
+  write_upgrade_progress backing_up 35
   backup_output="$(docker compose "${compose_args[@]}" exec -T --user node hub node "$backup_cli" backup)"
   backup="$(printf '%s\n' "$backup_output" | sed -n 's/^[[:space:]]*"backup":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
   [[ "$backup" == /data/backups/*.db ]] || fail "VPS backup path is invalid"
@@ -254,15 +274,18 @@ upgrade_vps() {
     docker compose "${compose_args[@]}" up -d --wait "${up_services[@]}"
     docker compose "${compose_args[@]}" exec -T -e TARGET_VERSION="$previous_version" hub node -e 'fetch("http://127.0.0.1:4318/healthz").then(response=>response.json()).then(value=>{if(value.ok!==true||value.version!==process.env.TARGET_VERSION)process.exit(1)})'
   }
+  write_upgrade_progress downloading 50
   checkout_source "$directory" "$target"
   if ! configure_vps_updater "$directory"; then
     git -C "$directory" checkout --detach "$previous"
     fail "VPS online updater configuration failed"
   fi
+  write_upgrade_progress rebuilding 65
   if ! docker compose "${compose_args[@]}" up -d --build --wait "${up_services[@]}"; then
     rollback_vps
     fail "VPS upgrade failed and the previous version was restored"
   fi
+  write_upgrade_progress health_check 90
   if ! docker compose "${compose_args[@]}" exec -T -e TARGET_VERSION="${target#v}" hub node -e 'fetch("http://127.0.0.1:4318/healthz").then(response=>response.json()).then(value=>{if(value.ok!==true||value.version!==process.env.TARGET_VERSION)process.exit(1)})'; then
     rollback_vps
     fail "VPS upgrade health check failed and the previous version was restored"

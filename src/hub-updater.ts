@@ -8,6 +8,8 @@ type HostUpdateState = {
   status?: "installing" | "current" | "error";
   targetVersion?: string;
   currentVersion?: string;
+  stage?: string | null;
+  progress?: number | null;
   updatedAt?: string;
   error?: string | null;
 };
@@ -18,6 +20,8 @@ export type HubUpdateState = {
   latestVersion: string | null;
   checkedAt: string;
   error: string | null;
+  stage: string | null;
+  progress: number | null;
   deployment: "vps";
   installSupported: boolean;
   channel: ReleaseChannel;
@@ -40,6 +44,8 @@ export class HubUpdater {
       latestVersion: coreVersion,
       checkedAt: "",
       error: null,
+      stage: null,
+      progress: null,
       deployment: "vps",
       installSupported: this.supported(),
       channel: this.channel,
@@ -72,15 +78,17 @@ export class HubUpdater {
         latestVersion: host.targetVersion?.replace(/^v/, "") || this.state.latestVersion,
         checkedAt: host.updatedAt || this.state.checkedAt,
         error: null,
+        stage: host.stage || this.state.stage || "installing",
+        progress: Number.isFinite(host.progress) ? Math.max(0, Math.min(100, Number(host.progress))) : this.state.progress,
         installSupported,
         channel: this.channel,
       };
     }
     if (host?.status === "error" && (!hostTarget || compareVersions(hostTarget, coreVersion) > 0)) {
-      return { ...this.state, status: "error" as const, latestVersion: hostTarget || this.state.latestVersion, checkedAt: host.updatedAt || this.state.checkedAt, error: host.error || "update_install_failed", installSupported, channel: this.channel };
+      return { ...this.state, status: "error" as const, latestVersion: hostTarget || this.state.latestVersion, checkedAt: host.updatedAt || this.state.checkedAt, error: host.error || "update_install_failed", stage: host.stage || "error", progress: Number.isFinite(host.progress) ? Math.max(0, Math.min(100, Number(host.progress))) : this.state.progress, installSupported, channel: this.channel };
     }
     if (host?.status === "current" && host.currentVersion === coreVersion && this.state.latestVersion === coreVersion) {
-      return { ...this.state, status: "current" as const, currentVersion: coreVersion, latestVersion: coreVersion, checkedAt: host.updatedAt || this.state.checkedAt, error: null, installSupported, channel: this.channel };
+      return { ...this.state, status: "current" as const, currentVersion: coreVersion, latestVersion: coreVersion, checkedAt: host.updatedAt || this.state.checkedAt, error: null, stage: host.stage || this.state.stage, progress: Number.isFinite(host.progress) ? Math.max(0, Math.min(100, Number(host.progress))) : this.state.progress, installSupported, channel: this.channel };
     }
     return { ...this.state, currentVersion: coreVersion, installSupported, channel: this.channel };
   }
@@ -92,9 +100,9 @@ export class HubUpdater {
 
   check() {
     if (this.checkPromise) return this.checkPromise;
-    this.state = { ...this.get(), status: "current", error: null };
+    this.state = { ...this.get(), status: "current", error: null, stage: null, progress: null };
     const promise = checkRelease(this.channel).then(result => {
-      this.state = { ...result, deployment: "vps", installSupported: this.supported() };
+      this.state = { ...result, stage: null, progress: null, deployment: "vps", installSupported: this.supported() };
       return this.get();
     }).finally(() => {
       if (this.checkPromise === promise) this.checkPromise = null;
@@ -133,7 +141,7 @@ export class HubUpdater {
       try { if (locked && existsSync(lock)) unlinkSync(lock); } catch {}
       throw (error as NodeJS.ErrnoException).code === "EEXIST" ? new Error("update_in_progress") : error;
     }
-    this.state = { ...state, status: "installing", error: null };
+    this.state = { ...state, status: "installing", error: null, stage: "queued", progress: 5 };
     return { accepted: true, state: this.get() };
   }
 }

@@ -696,6 +696,19 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "此设备需要重新输入账户密码才能访问。": "This device will need the account password to sign in again.",
       "设备读取失败": "Unable to load devices",
       "台设备": " devices",
+      "升级状态": "Update status",
+      "正在检查更新": "Checking for updates",
+      "升级请求已提交": "Update request submitted",
+      "正在准备升级": "Preparing update",
+      "正在验证发布版本": "Verifying release",
+      "正在备份服务数据": "Backing up service data",
+      "正在下载升级版本": "Downloading update",
+      "正在重新构建服务": "Rebuilding service",
+      "正在重启远程服务": "Restarting remote service",
+      "正在验证服务状态": "Verifying service health",
+      "远程服务升级完成": "Remote service updated",
+      "发现可用升级": "Update available",
+      "正在升级": "Updating",
     });
     localeResources.en["有任务正在运行，请等待任务结束后再更新。"] = "A task is running. Wait for it to finish before updating.";
     localeResources.en["更新正在进行中，请稍候。"] = "An update is already in progress. Please wait.";
@@ -5937,7 +5950,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         '<section class="better-codex-remote-step"><div><h3>' + te("部署 Hub") + '</h3><p>' + te("复制提示词，交给能访问 VPS 的 Codex") + '</p></div><button type="button" class="better-codex-remote-install" data-remote-copy-install>' + icon("copy") + '<span>' + te("复制安装提示词") + '</span></button></section>',
         '<section class="better-codex-remote-step"><div><h3>' + te("连接 Hub") + '</h3><p>' + te("输入 VPS 部署后的 HTTPS 地址") + '</p></div><div class="better-codex-remote-url"><input type="url" data-remote-url inputmode="url" autocomplete="url" placeholder="https://codex.example.com" aria-label="' + te("访问地址") + '"><button type="button" data-remote-copy-connect disabled>' + icon("copy") + '<span>' + te("复制连接指令") + '</span></button></div></section>',
         '</div>',
-        '<section class="better-codex-remote-status" data-remote-status="loading" hidden><div class="better-codex-remote-status-head"><span class="better-codex-remote-status-icon">' + icon("server") + '</span><div><strong data-remote-status-title>' + te("检测中") + '</strong><small data-remote-status-subtitle>' + te("正在检查") + '</small></div><span class="better-codex-remote-status-badge" data-remote-status-badge>' + te("检测中") + '</span></div><dl data-remote-status-details hidden><div><dt class="better-codex-remote-version-label"><span>' + te("服务版本") + '</span><button type="button" class="better-codex-remote-upgrade" data-remote-upgrade aria-label="' + te("检查升级") + '" hidden>' + icon("refresh") + '<span data-remote-upgrade-label>' + te("升级") + '</span></button></dt><dd data-remote-version>--</dd></div><div><dt>' + te("同步协议") + '</dt><dd data-remote-protocol>--</dd></div><div><dt>' + te("最后同步") + '</dt><dd data-remote-sync>--</dd></div></dl><div class="better-codex-remote-actions" data-remote-actions hidden><a data-remote-open target="_blank" rel="noreferrer">' + icon("external") + '<span>' + te("访问网站") + '</span></a></div></section>',
+        '<section class="better-codex-remote-status" data-remote-status="loading" hidden><div class="better-codex-remote-status-head"><span class="better-codex-remote-status-icon">' + icon("server") + '</span><div><strong data-remote-status-title>' + te("检测中") + '</strong><small data-remote-status-subtitle>' + te("正在检查") + '</small></div><span class="better-codex-remote-status-badge" data-remote-status-badge>' + te("检测中") + '</span></div><dl data-remote-status-details hidden><div><dt class="better-codex-remote-version-label"><span>' + te("服务版本") + '</span><button type="button" class="better-codex-remote-upgrade" data-remote-upgrade aria-label="' + te("检查升级") + '" hidden>' + icon("refresh") + '<span data-remote-upgrade-label>' + te("升级") + '</span></button></dt><dd data-remote-version>--</dd></div><div><dt>' + te("同步协议") + '</dt><dd data-remote-protocol>--</dd></div><div><dt>' + te("最后同步") + '</dt><dd data-remote-sync>--</dd></div><div class="better-codex-remote-update" data-remote-update hidden><dt>' + te("升级状态") + '</dt><dd><span data-remote-update-state>--</span><span data-remote-update-progress>0%</span></dd><div class="better-codex-remote-update-track"><i data-remote-update-bar></i></div></div></dl><div class="better-codex-remote-actions" data-remote-actions hidden><a data-remote-open target="_blank" rel="noreferrer">' + icon("external") + '<span>' + te("访问网站") + '</span></a></div></section>',
         '<section class="better-codex-remote-sessions" data-remote-sessions hidden><button type="button" class="better-codex-remote-sessions-toggle" data-remote-sessions-toggle aria-expanded="false"><span class="better-codex-remote-sessions-icon">' + icon("userCheck") + '</span><span class="better-codex-remote-sessions-heading"><strong>' + te("登录设备") + '</strong><small>' + te("管理已登录 Better Codex Relay 的浏览器") + '</small></span><span class="better-codex-remote-sessions-count" data-remote-sessions-count hidden></span><span class="better-codex-remote-sessions-chevron">' + icon("chevronDown") + '</span></button><div class="better-codex-remote-sessions-panel" data-remote-sessions-panel hidden><div class="better-codex-remote-sessions-list" data-remote-sessions-list><p>' + te("正在读取登录设备…") + '</p></div></div></section>',
         '<p class="better-codex-help-error" data-remote-error hidden></p>',
         '</section>',
@@ -6028,6 +6041,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const remoteStatusDetails = dialog.querySelector("[data-remote-status-details]");
       const remoteUpgrade = dialog.querySelector("[data-remote-upgrade]");
       const remoteUpgradeLabel = dialog.querySelector("[data-remote-upgrade-label]");
+      const remoteUpdate = dialog.querySelector("[data-remote-update]");
+      const remoteUpdateState = dialog.querySelector("[data-remote-update-state]");
+      const remoteUpdateProgress = dialog.querySelector("[data-remote-update-progress]");
+      const remoteUpdateBar = dialog.querySelector("[data-remote-update-bar]");
       const remoteActions = dialog.querySelector("[data-remote-actions]");
       const remoteOpen = dialog.querySelector("[data-remote-open]");
       const remoteError = dialog.querySelector("[data-remote-error]");
@@ -6039,6 +6056,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const remoteSessionsCount = dialog.querySelector("[data-remote-sessions-count]");
       let remoteStatusLoaded = false;
       let remoteSessionsLoaded = false;
+      let remoteUpdateActive = false;
+      let remoteUpdateSignature = "";
       const normalizedRemoteUrl = () => {
         try {
           const url = new URL(remoteUrlInput.value.trim());
@@ -6069,16 +6088,46 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         remoteUpgrade.hidden = !REMOTE || !visible;
         if (remoteUpgrade.hidden) return;
         const installing = update?.status === "installing" || update?.status === "restarting";
-        remoteUpgrade.disabled = installing;
-        remoteUpgrade.dataset.loading = String(installing);
-        remoteUpgradeLabel.textContent = t(installing ? "正在更新" : update?.status === "error" ? "重试" : "升级");
+        const progress = Number.isFinite(Number(update?.progress)) ? Math.max(0, Math.min(100, Number(update.progress))) : installing ? 10 : update?.status === "current" && update?.stage ? 100 : 0;
+        const stageLabels = {
+          checking: "正在检查更新",
+          queued: "升级请求已提交",
+          preparing: "正在准备升级",
+          verifying: "正在验证发布版本",
+          backing_up: "正在备份服务数据",
+          downloading: "正在下载升级版本",
+          rebuilding: "正在重新构建服务",
+          restarting: "正在重启远程服务",
+          health_check: "正在验证服务状态",
+          complete: "远程服务升级完成",
+          current: "已是最新版本",
+          error: "更新未完成",
+        };
+        const stage = String(update?.stage || (installing ? "preparing" : remoteUpdateActive ? "checking" : update?.status === "available" ? "available" : update?.status === "error" ? "error" : ""));
+        const label = stage === "available" ? t("发现可用升级") + (update?.latestVersion ? " v" + String(update.latestVersion).replace(/^v/, "") : "") : t(stageLabels[stage] || "正在准备升级");
+        const showProgress = remoteUpdateActive || installing || update?.status === "available" || update?.status === "error" || Boolean(update?.stage);
+        remoteUpgrade.disabled = installing || remoteUpdateActive;
+        remoteUpgrade.dataset.loading = String(installing || remoteUpdateActive);
+        remoteUpgradeLabel.textContent = t(stage === "checking" ? "检查中…" : installing || remoteUpdateActive ? "正在更新" : update?.status === "available" ? "升级" : update?.status === "error" ? "重试" : "检查升级");
         remoteUpgrade.title = update?.status === "available" && update.latestVersion ? t("升级") + " v" + String(update.latestVersion).replace(/^v/, "") : t("检查升级");
+        remoteUpdate.hidden = !showProgress;
+        if (showProgress) {
+          remoteUpdate.dataset.status = String(update?.status || "");
+          remoteUpdateState.textContent = label;
+          remoteUpdateProgress.textContent = Math.round(progress) + "%";
+          remoteUpdateBar.style.width = progress + "%";
+        }
+        const signature = [update?.status || "", stage, Math.round(progress), update?.currentVersion || "", update?.latestVersion || "", update?.error || ""].join(":");
+        if (signature !== remoteUpdateSignature) {
+          remoteUpdateSignature = signature;
+          appendDiagnostic("remote_update_state", { status: update?.status || "", stage, progress: Math.round(progress), current_version: update?.currentVersion || "", target_version: update?.latestVersion || "", error: update?.error || "" });
+        }
       };
       const renderRemoteStatus = (value, update = null) => {
         if (!remoteStatus) return;
         const remote = value?.remote;
         const reachable = remote?.reachable === true;
-        remoteRefresh.disabled = false;
+        remoteRefresh.disabled = remoteUpdateActive;
         remoteRefresh.dataset.loading = "false";
         remoteError.hidden = true;
         if (!remote) {
@@ -6186,7 +6235,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         }
       };
       remoteStatusTimer = setInterval(() => {
-        if (!document.hidden && dialog.open && dialog.querySelector(".better-codex-auto-dispatch-help-shell")?.dataset.helpView === "remote") void loadRemoteStatus(true);
+        if (!remoteUpdateActive && !document.hidden && dialog.open && dialog.querySelector(".better-codex-auto-dispatch-help-shell")?.dataset.helpView === "remote") void loadRemoteStatus(true);
       }, 5000);
       dialog.querySelector("[data-remote-copy-install]")?.addEventListener("click", async event => {
         const button = event.currentTarget;
@@ -6201,24 +6250,69 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         await copyText('better-codex relay connect --url "' + url + '"');
         await copiedFeedback(button);
       });
-      remoteUpgrade?.addEventListener("click", async () => {
-        remoteUpgrade.disabled = true;
-        remoteUpgrade.dataset.loading = "true";
-        remoteUpgradeLabel.textContent = t("检查中…");
-        remoteError.hidden = true;
-        try {
-          const update = await api("/api/update/check", { method: "POST" });
-          if (update?.status === "available") {
-            if (update.installSupported === false) throw new Error("hub_update_not_configured");
-            finish();
-            renderUpdateNotice(update, true);
+      const waitForRemoteUpdateCompletion = async targetVersion => {
+        const deadline = Date.now() + 30 * 60 * 1000;
+        while (!destroyed && dialog.isConnected && Date.now() < deadline) {
+          await new Promise(resolve => setTimeout(resolve, 700));
+          let update;
+          try {
+            update = await api("/api/update", { passive: true });
+          } catch (error) {
+            if (transientNetworkError(error)) {
+              renderRemoteUpgrade({ status: "installing", stage: "restarting", progress: 82, latestVersion: targetVersion }, true);
+              continue;
+            }
+            throw error;
+          }
+          renderRemoteUpgrade(update, true);
+          if (update?.status === "error") throw new Error(String(update.error || "update_install_failed"));
+          if (update?.status === "current" && String(update.currentVersion || "").replace(/^v/, "") === targetVersion) {
+            renderRemoteUpgrade({ ...update, stage: "complete", progress: 100 }, true);
+            dialog.querySelector("[data-remote-version]").textContent = "v" + targetVersion;
+            remoteStatusBadge.textContent = t("服务在线");
+            window.setTimeout(() => {
+              if (typeof window.betterCodexHost?.reloadAfterUpdate === "function") window.betterCodexHost.reloadAfterUpdate();
+              else location.reload();
+            }, 1200);
             return;
           }
+        }
+        throw new Error("runtime_bridge_timeout");
+      };
+      remoteUpgrade?.addEventListener("click", async () => {
+        remoteUpdateActive = true;
+        remoteRefresh.disabled = true;
+        remoteError.hidden = true;
+        renderRemoteUpgrade({ status: "current", stage: "checking", progress: 2 }, true);
+        try {
+          const update = await api("/api/update/check", { method: "POST" });
           if (update?.status === "error") throw new Error(String(update.error || "update_check_failed"));
-          renderRemoteUpgrade(update, true);
-          if (update?.status === "current") remoteUpgradeLabel.textContent = t("最新");
+          if (update?.status === "current") {
+            remoteUpdateActive = false;
+            remoteRefresh.disabled = false;
+            renderRemoteUpgrade({ ...update, stage: "current", progress: 100 }, true);
+            remoteUpgradeLabel.textContent = t("最新");
+            return;
+          }
+          if (update?.status === "installing" && update.latestVersion) {
+            const targetVersion = String(update.latestVersion).replace(/^v/, "");
+            renderRemoteUpgrade(update, true);
+            await waitForRemoteUpdateCompletion(targetVersion);
+            return;
+          }
+          if (update?.status !== "available" || !update.latestVersion) throw new Error("update_not_available");
+          if (update.installSupported === false) throw new Error("hub_update_not_configured");
+          const targetVersion = String(update.latestVersion).replace(/^v/, "");
+          renderRemoteUpgrade({ ...update, stage: "queued", progress: 5 }, true);
+          const result = await api("/api/update/install", { method: "POST" });
+          if (result?.accepted !== true) throw new Error("update_not_accepted");
+          renderRemoteUpgrade(result.state || { status: "installing", stage: "queued", progress: 5, latestVersion: targetVersion }, true);
+          await waitForRemoteUpdateCompletion(targetVersion);
         } catch (error) {
-          renderRemoteUpgrade({ status: "error" }, true);
+          remoteUpdateActive = false;
+          remoteRefresh.disabled = false;
+          reportGlobalError(error, { source: "remote_update_install" });
+          renderRemoteUpgrade({ status: "error", stage: "error", error: error instanceof Error ? error.message : String(error) }, true);
           remoteError.textContent = updateErrorLabel(error);
           remoteError.hidden = false;
         }
