@@ -1255,6 +1255,14 @@ export function betterCodexDesignSystemCss() {
       line-height: 1.5;
     }
 
+    #better-codex-profile-dialog output[data-tone="warning"] {
+      color: var(--bc-warning);
+    }
+
+    #better-codex-profile-dialog output[data-tone="info"] {
+      color: var(--bc-info);
+    }
+
     #better-codex-profile-dialog output[hidden] {
       display: none;
     }
@@ -2713,6 +2721,14 @@ export function betterCodexDesignSystemCss() {
       margin-top: 12px;
       color: var(--bc-color-danger);
       font-size: var(--bc-text-caption);
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-help-error[data-tone="warning"] {
+      color: var(--bc-warning);
+    }
+
+    #better-codex-auto-dispatch-help-dialog .better-codex-help-error[data-tone="info"] {
+      color: var(--bc-info);
     }
 
     #better-codex-auto-dispatch-help-dialog .better-codex-help-about {
@@ -5283,6 +5299,14 @@ export function betterCodexDesignSystemCss() {
       font-size: var(--bc-text-sm);
     }
 
+    #better-codex-panel .better-codex-agent-inspector-error[data-tone="warning"] {
+      color: var(--bc-warning);
+    }
+
+    #better-codex-panel .better-codex-agent-inspector-error[data-tone="info"] {
+      color: var(--bc-info);
+    }
+
     #better-codex-panel .better-codex-agent-inspector-status {
       display: block;
       min-height: 18px;
@@ -6821,9 +6845,9 @@ export function betterCodexDesignSystemCss() {
 
     #better-codex-dialog .better-codex-composer-queue-error {
       margin: 0 4px;
-      border-top: 1px solid color-mix(in oklch, var(--bc-danger) 28%, var(--bc-color-hairline));
+      border-top: 1px solid color-mix(in oklch, var(--bc-warning) 28%, var(--bc-color-hairline));
       padding: var(--bc-space-2) 22px 0;
-      color: var(--bc-danger);
+      color: var(--bc-warning);
       font-size: var(--bc-text-caption);
       line-height: 18px;
     }
@@ -6864,6 +6888,28 @@ export function betterCodexDesignSystemCss() {
       padding: 8px 10px;
       font-size: var(--bc-text-md);
       line-height: 1.45;
+    }
+
+    #better-codex-dialog .better-codex-conversation-feedback[data-tone="warning"] {
+      border-color: color-mix(in oklch, var(--bc-warning) 32%, var(--bc-border));
+      color: var(--bc-warning);
+      background: color-mix(in oklch, var(--bc-warning) 7%, var(--bc-surface));
+    }
+
+    #better-codex-dialog .better-codex-conversation-feedback[data-tone="warning"] button {
+      border-color: color-mix(in oklch, var(--bc-warning) 36%, var(--bc-border));
+      color: var(--bc-warning);
+    }
+
+    #better-codex-dialog .better-codex-conversation-feedback[data-tone="info"] {
+      border-color: color-mix(in oklch, var(--bc-info) 32%, var(--bc-border));
+      color: var(--bc-info);
+      background: color-mix(in oklch, var(--bc-info) 7%, var(--bc-surface));
+    }
+
+    #better-codex-dialog .better-codex-conversation-feedback[data-tone="info"] button {
+      border-color: color-mix(in oklch, var(--bc-info) 36%, var(--bc-border));
+      color: var(--bc-info);
     }
 
     #better-codex-dialog[data-detail="true"] .better-codex-conversation-feedback {
@@ -9262,6 +9308,14 @@ export function betterCodexDesignSystemCss() {
     #better-codex-scheduled-dialog output {
       color: var(--bc-color-danger);
       font-size: var(--bc-text-caption);
+    }
+
+    #better-codex-scheduled-dialog output[data-tone="warning"] {
+      color: var(--bc-warning);
+    }
+
+    #better-codex-scheduled-dialog output[data-tone="info"] {
+      color: var(--bc-info);
     }
 
     #better-codex-scheduled-dialog footer {

@@ -355,13 +355,22 @@ function hostTraceTimeline(traceId) {
   return traceId ? hostDiagnosticLog.filter(log => log.trace_id === traceId).slice(-8) : [];
 }
 
+function hostErrorCategory(error) {
+  const code = String(error?.message || error || "request_failed");
+  const status = Number(error?.betterCodexDiagnostics?.http_status || 0);
+  if (["injection_load_failed", "runtime_response_invalid"].includes(code)) return "protocol";
+  if (code.includes("signature") || code.includes("hash_mismatch")) return "security";
+  if (status >= 500) return "service";
+  return "unexpected";
+}
+
 function hostErrorReport(records) {
   return JSON.stringify({
     report: "Better Codex error report",
     exported_at: new Date().toISOString(),
     errors: records.map(record => ({
       time: record.time,
-      error: { code: record.message, type: record.name },
+      error: { code: record.message, type: record.name, category: record.category },
       source: record.context?.source || "web_host",
       trace_id: record.context?.trace_id || record.diagnostics?.trace_id || "",
       request: record.diagnostics ? Object.fromEntries(Object.entries(record.diagnostics).filter(([key, value]) => !["source", "trace_id", "trace_timeline"].includes(key) && value !== "" && value !== null && value !== undefined)) : {},
@@ -412,7 +421,8 @@ function reportHostError(error, context = {}, present = true) {
     return;
   }
   try { Object.defineProperty(value, "betterCodexReported", { value: true, configurable: true }); } catch {}
-  hostDiagnostic("error_reported", { trace_id: traceId, message: value.message, source: context.source || "web_host" });
+  const category = hostErrorCategory(value);
+  hostDiagnostic("error_reported", { trace_id: traceId, message: value.message, category, source: context.source || "web_host" });
   const fingerprint = [value.message || "request_failed", context.source || "web_host", context.path || ""].join("|");
   const repeatedIndex = hostErrorQueue.findIndex(item => item.fingerprint === fingerprint);
   if (repeatedIndex >= 0) {
@@ -423,6 +433,7 @@ function reportHostError(error, context = {}, present = true) {
     repeated.time = new Date().toISOString();
     repeated.context = context;
     repeated.diagnostics = value.betterCodexDiagnostics || {};
+    repeated.category = category;
     repeated.related_logs = hostTraceTimeline(traceId);
     hostErrorIndex = repeatedIndex;
     renderHostError();
@@ -435,6 +446,7 @@ function reportHostError(error, context = {}, present = true) {
     time: new Date().toISOString(),
     name: value.name || "Error",
     message: value.message || "request_failed",
+    category,
     stack: String(value.stack || "").slice(0, 12000),
     context,
     diagnostics: value.betterCodexDiagnostics || {},
@@ -579,7 +591,7 @@ async function loadUsage() {
   } catch (error) {
     cachedUsage = null;
     renderUsage(null);
-    reportHostError(error, { source: "usage_request" });
+    hostDiagnostic("usage_request_unavailable", { error: error?.message || "request_failed" });
   } finally {
     usageLoading = false;
   }
@@ -673,7 +685,7 @@ function expireSession() {
   connectError.textContent = REMOTE ? "Web 会话已失效，请重新登录" : "Web 会话已失效，请重新运行 better-codex web";
   connectError.hidden = false;
   if (!connectDialog.open) connectDialog.showModal();
-  reportHostError(new Error(connectError.textContent), { source: "session_expired" }, false);
+  hostDiagnostic("session_expired", { host_kind: HOST_KIND });
 }
 
 function remoteUpdateRecoveryActive() {
@@ -793,7 +805,7 @@ function showRelayOffline() {
   if (!connectDialog.open) connectDialog.showModal();
   if (!window.__betterCodexInjection__ && !relayOfflineReported) {
     relayOfflineReported = true;
-    reportHostError(new Error("runtime_offline"), { source: "relay_status" }, false);
+    hostDiagnostic("relay_offline", { host_kind: HOST_KIND });
   }
   scheduleRemoteRecovery();
 }

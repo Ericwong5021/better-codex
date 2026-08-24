@@ -583,7 +583,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
     async function importMockupIssues(file) {
       if (file.size > 16 * 1024 * 1024) throw new Error("展示数据不能超过 16 MB");
-      const imported = JSON.parse(await file.text());
+      let imported;
+      try {
+        imported = JSON.parse(await file.text());
+      } catch {
+        throw new Error("展示数据格式无效");
+      }
       const data = Array.isArray(imported) || !Array.isArray(imported?.agents)
         ? { ...await api("/api/mockup/state"), version: 1, issues: normalizeMockupIssues(imported) }
         : imported;
@@ -602,6 +607,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const localeResources = { "zh-CN": {}, en: {
       "调度失败": "Scheduling failed",
       "重试回复": "Retry reply", "重新加载": "Reload", "回复等待超时。请检查模型服务连接后重试。": "The reply timed out. Check the model service connection and retry.", "网络连接异常，回复未完成。请检查网络和 Better Codex Runtime 后重试。": "The reply did not finish because of a network problem. Check your network and Better Codex Runtime, then retry.", "当前权限不足，无法完成回复。请调整智能体权限或允许所需操作后重试。": "The reply needs additional permission. Adjust the agent permission or allow the required action, then retry.", "Better Codex Runtime 已停止。请重新启动后重试。": "Better Codex Runtime stopped. Restart it and retry.", "上一条回复仍在进行中。请稍后重新加载。": "The previous reply is still running. Reload shortly.", "回复未完成。请打开完整会话查看详情，然后重试。": "The reply did not finish. Open the full conversation for details, then retry.", "会话加载超时。请确认 Better Codex Runtime 正在运行，然后重新加载。": "The conversation timed out while loading. Make sure Better Codex Runtime is running, then reload.", "无法加载会话。请检查网络和 Better Codex Runtime，然后重新加载。": "Unable to load the conversation. Check your network and Better Codex Runtime, then reload.", "没有权限加载会话。请调整权限后重新加载。": "You do not have permission to load the conversation. Adjust the permission, then reload.", "VPS 入口返回了 404；这表示路径或资源不存在，不能据此判断本机 Runtime 已停止。": "The VPS endpoint returned 404. The path or resource does not exist; this does not show that the local Runtime stopped.", "浏览器无法连接 VPS Relay 入口。请检查域名、网络、反向代理和 Relay 服务；本机 Runtime 状态未知。": "The browser cannot reach the VPS Relay endpoint. Check DNS, network, reverse proxy, and the Relay service. The local Runtime state is unknown.", "VPS 入口无法连接 Relay 服务。本机 Runtime 状态未知。": "The VPS endpoint cannot reach the Relay service. The local Runtime state is unknown.", "VPS Relay 当前没有连接到本机 Runtime。可能是 Runtime 停止、正在重启或网络中断。": "The VPS Relay is not connected to the local Runtime. The Runtime may be stopped or restarting, or the network may be interrupted.", "本机 Runtime 已主动断开与 VPS Relay 的连接，可能正在重启或已停止。": "The local Runtime actively disconnected from the VPS Relay. It may be restarting or stopped.", "VPS Relay 与本机 Runtime 的请求通道已中断，请等待重连后重试。": "The request channel between the VPS Relay and local Runtime was interrupted. Wait for reconnection, then retry.",
+      "内容已在其他窗口更新，请重新加载后再试。": "This content changed in another window. Reload and try again.", "相关内容不存在或已被移除。": "The requested content does not exist or was removed.", "当前账号没有执行此操作的权限。": "Your account does not have permission to perform this action.", "输入内容不符合要求，请检查后重试。": "Check the entered values and try again.", "当前状态无法完成此操作，请刷新后重试。": "This action is not available in the current state. Refresh and try again.", "服务暂时不可用，请稍后重试。": "The service is temporarily unavailable. Try again shortly.", "服务返回的数据格式异常，请稍后重试。": "The service returned an invalid response. Try again shortly.", "数据完整性检查失败，操作已停止。": "The integrity check failed, so the operation was stopped.", "安全校验失败，操作已停止。": "The security check failed, so the operation was stopped.", "服务发生异常，请稍后重试。": "The service encountered an error. Try again shortly.",
       "任务看板": "Task board", "打开任务看板": "Open task board", "智能体": "Agents", "管理智能体": "Manage agents", "创建和管理你的智能体": "Create and manage your agents",
       "Better Codex 服务需要重启": "Better Codex needs to restart", "当前页面与后台服务的连接已失效。请在终端运行下面的命令，完成后重新连接。": "The connection between this page and the background service has expired. Run the command below in your terminal, then reconnect.", "复制重启命令": "Copy restart command", "复制消息": "Copy message", "已复制": "Copied", "重新连接": "Reconnect", "正在连接…": "Connecting…", "错误详情": "Error details",
       "全部": "All", "已分配": "Assigned", "未分配": "Unassigned", "待规划": "Backlog", "待办": "Todo", "进行中": "In progress", "待审核": "In review", "调度中": "Scheduling", "已完成": "Done", "已阻塞": "Blocked", "归档": "Archive", "拖到这里即可归档": "Drop here to archive", "查看已归档卡片": "View archived cards", "已归档任务": "Archived tasks", "搜索已归档任务": "Search archived tasks", "所有项目": "All projects", "全部删除": "Delete all", "删除已归档聊天": "Delete archived chat", "删除项目中的全部内容": "Delete all project content", "确定删除项目中的全部已归档任务吗？": "Delete all archived tasks in this project?", "取消归档": "Unarchive", "已归档卡片": "Archived cards", "暂无已归档卡片": "No archived cards", "归档列表加载失败": "Unable to load archived cards",
@@ -1307,6 +1313,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         @media (prefers-reduced-motion: reduce) { .better-codex-completion-notice { animation: none; } }
         #\${PANEL_ID} { font-family: var(--bc-font-ui); background: var(--bc-page); }
         #\${PANEL_ID} .better-codex-error { margin-left: auto; color: var(--bc-danger); font-size: var(--bc-text-sm); }
+        #\${PANEL_ID} .better-codex-error[data-tone="warning"] { color: var(--bc-warning); }
+        #\${PANEL_ID} .better-codex-error[data-tone="info"] { color: var(--bc-info); }
         #\${PANEL_ID} .better-codex-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 50px; padding: 0 18px; background: #fcfcfc; }
         #\${PANEL_ID} .better-codex-tabs, #\${PANEL_ID} .better-codex-actions { display: flex; align-items: center; gap: 4px; }
         #\${PANEL_ID} .better-codex-button, #better-codex-dialog .better-codex-button { display: inline-flex; flex: 0 0 auto; width: auto; min-height: var(--bc-control-height, 32px); align-items: center; justify-content: center; gap: 6px; border: 1px solid transparent; border-radius: 7px; color: #52525b; background: transparent; padding: 0 9px; font: inherit; font-size: var(--bc-text-md); cursor: pointer; }
@@ -1680,6 +1688,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #\${PANEL_ID} .better-codex-project-document-agent-avatar { display: inline-flex; width: 18px; height: 18px; flex: 0 0 18px; align-items: center; justify-content: center; overflow: hidden; border-radius: 999px; }
         #\${PANEL_ID} .better-codex-project-document-agent-avatar img, #\${PANEL_ID} .better-codex-project-document-agent-avatar svg { display: block; width: 100%; height: 100%; object-fit: cover; }
         #\${PANEL_ID} .better-codex-project-document-form output { color: var(--bc-danger); font-size: var(--bc-text-caption); line-height: 1.45; }
+        #\${PANEL_ID} .better-codex-project-document-form output[data-tone="warning"] { color: var(--bc-warning); }
+        #\${PANEL_ID} .better-codex-project-document-form output[data-tone="info"] { color: var(--bc-info); }
         #\${PANEL_ID} .better-codex-project-document-form .better-codex-submit { display: inline-flex; min-height: 36px; align-items: center; justify-content: center; gap: 7px; padding-inline: 13px; }
         #\${PANEL_ID} .better-codex-project-document-form .better-codex-submit svg { width: 14px; height: 14px; }
         #\${PANEL_ID} .better-codex-project-dashboard-tabs button:active, #\${PANEL_ID} .better-codex-project-planning-overview button:active, #\${PANEL_ID} .better-codex-project-planning-starters button:active, #\${PANEL_ID} .better-codex-project-planning-panel-head > button:active, #\${PANEL_ID} .better-codex-project-planning-form .better-codex-submit:active { transform: scale(.97); }
@@ -1780,6 +1790,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #\${PANEL_ID} .better-codex-project-planning-form .better-codex-submit { display: inline-flex; min-height: 36px; align-items: center; justify-content: center; gap: 7px; padding-inline: 13px; }
         #\${PANEL_ID} .better-codex-project-planning-form .better-codex-submit svg { width: 14px; height: 14px; }
         #\${PANEL_ID} .better-codex-project-planning-form output { grid-column: 1 / -1; color: var(--bc-danger); font-size: var(--bc-text-caption); }
+        #\${PANEL_ID} .better-codex-project-planning-form output[data-tone="warning"] { color: var(--bc-warning); }
+        #\${PANEL_ID} .better-codex-project-planning-form output[data-tone="info"] { color: var(--bc-info); }
         #\${PANEL_ID} .better-codex-project-planning-form button:focus-visible, #\${PANEL_ID} .better-codex-project-planning-starters button:focus-visible, #\${PANEL_ID} .better-codex-project-planning-panel-head > button:focus-visible, #\${PANEL_ID} .better-codex-project-planning-overview button:focus-visible { outline: 2px solid var(--bc-ring); outline-offset: 1px; }
         @keyframes better-codex-project-document-pulse { 0%,100% { opacity: .45; transform: scale(.94); } 50% { opacity: 1; transform: scale(1); } }
         @keyframes better-codex-project-document-segment { 0%,100% { opacity: .4; } 50% { opacity: 1; } }
@@ -1868,6 +1880,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #better-codex-project-dialog .better-codex-project-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px; }
         #better-codex-project-dialog .better-codex-project-dialog-actions button[type="submit"] { color: var(--bc-primary-foreground); background: var(--bc-primary); }
         #better-codex-project-dialog output { display: block; margin-top: 10px; color: var(--bc-danger); font-size: var(--bc-text-sm); }
+        #better-codex-project-dialog output[data-tone="warning"] { color: var(--bc-warning); }
+        #better-codex-project-dialog output[data-tone="info"] { color: var(--bc-info); }
         #better-codex-project-dialog output[hidden] { display: none; }
         #better-codex-project-dialog button:active { transform: scale(.96); }
         #better-codex-project-dialog[data-directory-browser="true"] { width: min(640px,calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow-y: auto; overscroll-behavior: contain; }
@@ -2051,6 +2065,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #better-codex-dialog .better-codex-toggle::after { background: var(--bc-primary-foreground); }
         #better-codex-dialog .better-codex-toggle:checked { background: var(--bc-primary); }
         #better-codex-dialog .better-codex-dialog-error, #better-codex-agent-dialog .better-codex-agent-dialog-error { color: var(--bc-danger); }
+        #better-codex-dialog .better-codex-dialog-error[data-tone="warning"], #better-codex-agent-dialog .better-codex-agent-dialog-error[data-tone="warning"] { color: var(--bc-warning); }
+        #better-codex-dialog .better-codex-dialog-error[data-tone="info"], #better-codex-agent-dialog .better-codex-agent-dialog-error[data-tone="info"] { color: var(--bc-info); }
         ${betterCodexDesignSystemCss()}
       \`;
       (document.head || document.documentElement).appendChild(style);
@@ -2354,7 +2370,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       appendDiagnostic("api_request", { trace_id: traceId, method, path: requestPath, command_id: commandId, request_body_bytes: bodyBytes });
       if (READ_ONLY && method !== "GET") {
         const error = new Error("remote_read_only");
-        reportGlobalError(error, { source: "api", trace_id: traceId, method, path: requestPath, command_id: commandId, request_body_bytes: bodyBytes });
+        appendDiagnostic("api_failure", { trace_id: traceId, method, path: requestPath, command_id: commandId, request_body_bytes: bodyBytes, elapsed_ms: Date.now() - startedAt, error: error.message });
         return Promise.reject(error);
       }
       const attempt = (retriesLeft) => {
@@ -2401,7 +2417,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           }
         }
         appendDiagnostic("api_failure", { trace_id: traceId, method, path: requestPath, command_id: commandId, request_body_bytes: bodyBytes, elapsed_ms: Date.now() - startedAt, error: error instanceof Error ? error.message : String(error || "request_failed") });
-        if (options.reportError !== false && (!options.passive || !transientNetworkError(error))) reportGlobalError(error, { source: "api", trace_id: traceId, method, path: requestPath, command_id: commandId, request_body_bytes: bodyBytes, elapsed_ms: Date.now() - startedAt });
         throw error;
       });
     }
@@ -3204,8 +3219,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const lastCheckpoint = timeline.filter(entry => entry.event !== "error_reported").at(-1)?.event || "";
       const report = {
         time: record.time,
-        error: compactFields({ code: record.message, message: record.display_message, type: record.name }),
-        diagnosis: compactFields({ boundary, stage, outcome, last_checkpoint: lastCheckpoint, next_check: checks[record.message] || "matching_trace_timeline" }),
+        error: compactFields({ code: record.message, message: record.display_message, type: record.name, category: record.category }),
+        diagnosis: compactFields({ category: record.category, boundary, stage, outcome, last_checkpoint: lastCheckpoint, next_check: checks[record.message] || "matching_trace_timeline" }),
         trace: compactFields({ trace_id: traceId, command_id: context.command_id || diagnostics.command_id, request_id: diagnostics.response_request_id || context.request_id, channel_id: diagnostics.relay_channel_id, connection_epoch: diagnostics.relay_connection_epoch, runtime_instance_id: diagnostics.relay_runtime_instance_id }),
         request: compactFields({ method: context.method || diagnostics.method, path: context.path || diagnostics.path, http_status: diagnostics.http_status, elapsed_ms: context.elapsed_ms || diagnostics.elapsed_ms, attempt_count: diagnostics.attempt_count, request_ended: diagnostics.relay_request_ended, response_started: diagnostics.relay_response_started, replay_attempts: diagnostics.relay_replay_attempts }),
         timeline,
@@ -3284,6 +3299,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         display_message: errorLabel(value),
         name: value.name || "Error",
         message: value.message || "request_failed",
+        category: errorPresentation(value).category,
         stack: String(value.stack || "").slice(0, 12000),
         causes: errorCause(value),
         context: diagnosticValue({
@@ -3314,6 +3330,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         repeated.time = record.time;
         repeated.context = record.context;
         repeated.diagnostics = record.diagnostics;
+        repeated.category = record.category;
         repeated.occurrences += 1;
         repeated.occurrence_times.push(record.time);
         if (repeated.occurrence_times.length > 20) repeated.occurrence_times.shift();
@@ -3325,7 +3342,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         return repeated.id;
       }
       record.fingerprint = fingerprint;
-      appendDiagnostic("error_reported", { id: record.id, trace_id: record.context.trace_id || record.diagnostics.trace_id || "", message: record.message, source: record.context.source });
+      appendDiagnostic("error_reported", { id: record.id, trace_id: record.context.trace_id || record.diagnostics.trace_id || "", message: record.message, category: record.category, source: record.context.source });
       record.related_logs = relatedDiagnosticLogs(record);
       errorQueue.push(record);
       if (errorQueue.length > 50) errorQueue.shift();
@@ -3376,7 +3393,80 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (value === "issue_archived") return t("该会话对应的 Issue 已归档，请先取消归档。");
       if (["project_planning_busy", "project_planning_agent_locked", "project_planning_unavailable", "project_planning_invalid_output", "project_planning_session_missing"].includes(value)) return projectPlanningErrorLabel(value);
       if (["project_overview_timeout", "project_overview_unavailable", "project_document_invalid_output", "remote_command_timeout", "workspace_missing"].includes(value)) return projectDocumentErrorLabel(value);
+      if (value === "version_conflict" || value === "queued_reply_update_conflict") return t("内容已在其他窗口更新，请重新加载后再试。");
+      const presentation = errorPresentation(error);
+      if (presentation.category === "not_found") return t("相关内容不存在或已被移除。");
+      if (presentation.category === "authorization") return t("当前账号没有执行此操作的权限。");
+      if (presentation.category === "validation") return t("输入内容不符合要求，请检查后重试。");
+      if (presentation.category === "conflict" || presentation.category === "state") return t("当前状态无法完成此操作，请刷新后重试。");
+      if (presentation.category === "availability") return t("服务暂时不可用，请稍后重试。");
+      if (presentation.category === "protocol") return t("服务返回的数据格式异常，请稍后重试。");
+      if (presentation.category === "integrity") return t("数据完整性检查失败，操作已停止。");
+      if (presentation.category === "security") return t("安全校验失败，操作已停止。");
+      if (presentation.category === "service") return t("服务发生异常，请稍后重试。");
       return t(value);
+    }
+
+    const availabilityErrorCodes = new Set([
+      "browser_transport_failed", "project_overview_timeout", "project_overview_unavailable", "project_planning_unavailable", "remote_command_timeout", "reply_network_error", "runtime_bridge_timeout", "runtime_bridge_unavailable", "runtime_offline", "runtime_stopped", "runtime_unavailable", "thread_open_timeout", "thread_open_unconfirmed", "update_check_failed"
+    ]);
+    const stateErrorCodes = new Set([
+      "backlog_reply_blocked", "command_rejected", "issue_archived", "issue_enrichment_pending", "issue_not_startable", "issue_session_handed_off", "issue_session_starting", "manual_start_required", "project_document_invalid_output", "project_operation_running", "project_planning_invalid_output", "project_planning_session_missing", "project_required", "remote_mode_disabled", "session_relay_not_leader", "thread_id_invalid", "workspace_missing"
+    ]);
+    const validationErrorCodes = new Set([
+      "body_too_large"
+    ]);
+    const informationalErrorCodes = new Set([
+      "hub_update_not_configured", "issue_not_running", "remote_read_only", "update_not_available"
+    ]);
+    const protocolErrorCodes = new Set([
+      "invalid_agents_response", "invalid_directory_response", "invalid_issues_response", "invalid_profile_response", "invalid_projects_response", "runtime_response_invalid", "update_not_accepted"
+    ]);
+    const integrityErrorCodes = new Set([
+      "compatibility_activation_version_mismatch", "compatibility_manifest_mismatch", "core_activation_version_mismatch", "core_health_validation_failed", "core_validation_failed", "core_version_mismatch", "database_integrity_check_failed", "project_delete_rollback_failed", "runtime_restart_timeout", "update_activation_interrupted", "update_asset_invalid", "update_compatibility_invalid", "update_core_invalid", "update_manifest_invalid", "update_runtime_stop_timeout"
+    ]);
+    const securityErrorCodes = new Set([
+      "update_hash_invalid", "update_hash_mismatch", "update_https_required", "update_public_key_unavailable", "update_signature_invalid"
+    ]);
+
+    function errorPresentation(error) {
+      const code = String(error instanceof Error ? error.message : error || "request_failed");
+      const lowered = code.toLowerCase();
+      const status = Number(error?.betterCodexDiagnostics?.http_status || 0);
+      if (availabilityErrorCodes.has(code) || transientNetworkError(error) || ["runtime_fetch_failed", "relay_stream_interrupted"].includes(code) || code.startsWith("runtime_fetch_failed:") || code.startsWith("update_http_") || ["network", "econn", "enotfound", "dns", "socket"].some(marker => lowered.includes(marker))) return { category: "availability", tone: "warning", report: false };
+      if (securityErrorCodes.has(code)) return { category: "security", tone: "danger", report: true };
+      if (integrityErrorCodes.has(code) || code.startsWith("update_activation_failed:")) return { category: "integrity", tone: "danger", report: true };
+      if (protocolErrorCodes.has(code)) return { category: "protocol", tone: "danger", report: true };
+      if (code === "database_unavailable") return { category: "service", tone: "danger", report: true };
+      if (validationErrorCodes.has(code) || code.startsWith("native_command_argument_required:") || code.endsWith("_value_invalid") || code === "native_command_invalid" || code.startsWith("请选择") || code.startsWith("图片") || code.startsWith("最多传输") || code.startsWith("当前环境无法") || code.startsWith("创建智能体 Issue 需要本地工作区") || code.startsWith("展示")) return { category: "validation", tone: "danger", report: false };
+      if (informationalErrorCodes.has(code)) return { category: "state", tone: "info", report: false };
+      if (code.endsWith("_not_found") || status === 404) return { category: "not_found", tone: "info", report: false };
+      if (code === "unauthorized" || code === "forbidden" || status === 401 || status === 403) return { category: "authorization", tone: "warning", report: false };
+      if (code.endsWith("_conflict") || code.endsWith("_busy") || code.endsWith("_locked") || code.endsWith("_running") || code.endsWith("_in_progress") || status === 409) return { category: "conflict", tone: "warning", report: false };
+      if (stateErrorCodes.has(code) || code.endsWith("_pending") || code.endsWith("_starting") || code.endsWith("_handed_off")) return { category: "state", tone: "warning", report: false };
+      if (status === 400 || status === 413 || status === 422) return { category: "validation", tone: "danger", report: false };
+      if (status >= 400 && status < 500) return { category: "state", tone: "warning", report: false };
+      if (status >= 500) return { category: "service", tone: "danger", report: true };
+      return { category: "unexpected", tone: "danger", report: true };
+    }
+
+    function reportUnexpectedError(error, context = {}) {
+      const presentation = errorPresentation(error);
+      const allowReport = context.report !== false;
+      const reportContext = { ...context };
+      delete reportContext.report;
+      if (allowReport && presentation.report) reportGlobalError(error, reportContext);
+      else appendDiagnostic("user_feedback", { category: presentation.category, tone: presentation.tone, message: error instanceof Error ? error.message : String(error || "request_failed"), source: reportContext.source || "ui_action" });
+      return { ...presentation, report: allowReport && presentation.report };
+    }
+
+    function presentInlineError(output, error, message, context = {}) {
+      const presentation = reportUnexpectedError(error, context);
+      if (!output) return presentation;
+      output.dataset.tone = presentation.tone;
+      output.textContent = message || errorLabel(error);
+      output.hidden = false;
+      return presentation;
     }
 
     function updateErrorLabel(error) {
@@ -3398,10 +3488,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     function showError(error) {
       if (destroyed) return;
       passiveNetworkErrorVisible = false;
-      reportGlobalError(error, { source: "ui_action" });
+      const presentation = reportUnexpectedError(error, { source: "ui_action" });
       state.error = errorLabel(error);
       const output = panel?.querySelector("#better-codex-error");
       if (output) {
+        output.dataset.tone = presentation.tone;
         output.textContent = state.error;
         output.hidden = false;
       }
@@ -3413,6 +3504,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       state.error = t("网络连接不稳定，正在等待恢复。");
       const output = panel?.querySelector("#better-codex-error");
       if (output) {
+        output.dataset.tone = "warning";
         output.textContent = state.error;
         output.hidden = false;
       }
@@ -3428,6 +3520,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       state.error = "";
       const output = panel?.querySelector("#better-codex-error");
       if (output) {
+        delete output.dataset.tone;
         output.textContent = "";
         output.hidden = true;
       }
@@ -3618,7 +3711,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         try {
           let result;
           try {
-            result = await api("/api/update/install", { method: "POST", reportError: false });
+            result = await api("/api/update/install", { method: "POST" });
           } catch (reason) {
             if (!(reason instanceof Error) || reason.message !== "issue_execution_running") throw reason;
             const confirmed = await confirmAction("升级会中断正在执行的任务", "仍要升级吗？正在执行的任务会被立即中断，未完成的工作可能丢失。", "仍要升级");
@@ -3634,7 +3727,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
               description.textContent = t(activationError ? "Better Codex 已恢复到上一版本。" : updateDescription);
               return;
             }
-            result = await api("/api/update/install", { method: "POST", body: JSON.stringify({ interrupt_running: true }), timeoutMs: 45000, reportError: false });
+            result = await api("/api/update/install", { method: "POST", body: JSON.stringify({ interrupt_running: true }), timeoutMs: 45000 });
           }
           if (updateNotice !== notice) return;
           if (result?.accepted !== true) throw new Error("update_not_accepted");
@@ -3642,7 +3735,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         } catch (reason) {
           if (updateNotice !== notice) return;
           window.betterCodexHost?.cancelUpdateRecovery?.("update_install_failed");
-          reportGlobalError(reason, { source: "update_install" });
+          reportUnexpectedError(reason, { source: "update_install" });
           notice.dataset.status = "install-error";
           install.disabled = false;
           menuToggle.disabled = false;
@@ -5090,9 +5183,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           avatarButton.querySelector(".better-codex-profile-dialog-avatar")?.remove();
           avatarButton.insertAdjacentHTML("afterbegin", userAvatarMarkup({ ...state.user, avatar }, "better-codex-profile-dialog-avatar"));
         }).catch(error => {
-          output.textContent = error instanceof Error ? t(error.message) : String(error);
-          output.hidden = false;
-          reportGlobalError(error, { source: "profile_avatar" });
+          presentInlineError(output, error, error instanceof Error ? t(error.message) : String(error), { source: "profile_avatar", report: false });
         });
       });
       form.addEventListener("submit", event => {
@@ -5112,9 +5203,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           finish();
         }).catch(error => {
           appendDiagnostic("profile_update_failed", { error: error instanceof Error ? error.message : String(error) });
-          output.textContent = error instanceof Error ? t(error.message) : String(error);
-          output.hidden = false;
-          reportGlobalError(error, { source: "profile_save" });
+          presentInlineError(output, error, errorLabel(error), { source: "profile_save" });
         }).finally(() => { submit.disabled = false; });
       });
       dialog.querySelectorAll("[data-profile-dialog-close], [data-profile-dialog-cancel]").forEach(button => button.addEventListener("click", finish));
@@ -5580,7 +5669,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const content = active.html ? stale + failed + projectDocumentDiagramMarkup(active.diagram) + '<article class="better-codex-project-document-content">' + active.html + '</article>' : projectDocumentLoading(active, overallError);
       const agentId = pending?.agentId ?? project.document_agent_id ?? "";
       const feedback = pending?.feedback ?? project.document_feedback ?? "";
-      const inlineError = state.projectDocumentError?.projectId === project.id ? '<output>' + escapeHtml(state.projectDocumentError.message) + '</output>' : "";
+      const inlineError = state.projectDocumentError?.projectId === project.id ? '<output data-tone="' + escapeHtml(state.projectDocumentError.tone || "danger") + '">' + escapeHtml(state.projectDocumentError.message) + '</output>' : "";
       const form = state.mockup ? "" : '<form class="better-codex-project-document-form" data-project-document-form="' + escapeHtml(project.id) + '"><label><span>' + te("修改意见") + '</span><textarea name="feedback" maxlength="4000" placeholder="' + te("告诉智能体哪些内容需要修正、补充或重新组织") + '">' + escapeHtml(feedback) + '</textarea></label><div>' + projectDocumentAgentPicker(agentId) + '<button class="better-codex-submit" type="submit"' + (generating ? " disabled" : "") + '>' + icon(generating ? "refresh" : "sparkles") + '<span>' + te(pending ? "生成中…" : views.some(view => view.html) ? "重新生成全部" : "生成完整文档") + '</span></button></div>' + inlineError + '</form>';
       return '<section class="better-codex-project-panel better-codex-project-document-panel"><header class="better-codex-project-panel-head"><strong>' + te("项目文档") + '</strong><span>' + escapeHtml(done + "/7") + '</span></header>' + progress + '<nav class="better-codex-project-document-tabs" role="tablist" aria-label="' + te("项目文档") + '">' + tabs + '</nav><div class="better-codex-project-document-scroll">' + content + '</div>' + form + '</section>';
     }
@@ -5676,7 +5765,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const agentControl = planning.messages.length || planning.agent_id
         ? '<input type="hidden" name="agent_id" value="' + escapeHtml(planning.agent_id || "") + '"><span class="better-codex-project-planning-agent">' + (selectedAgent ? agentAvatarMarkup(selectedAgent, "better-codex-project-document-agent-avatar") + '<span>' + escapeHtml(agentDisplayName(selectedAgent)) + '</span>' : icon("bot") + '<span>' + te("使用默认智能体") + '</span>') + '</span>'
         : projectDocumentAgentPicker("");
-      const inlineError = state.projectPlanningError?.projectId === project.id ? '<output>' + escapeHtml(state.projectPlanningError.message) + '</output>' : "";
+      const inlineError = state.projectPlanningError?.projectId === project.id ? '<output data-tone="' + escapeHtml(state.projectPlanningError.tone || "danger") + '">' + escapeHtml(state.projectPlanningError.message) + '</output>' : "";
       const draft = projectPlanningDrafts.get(project.id) || "";
       const form = state.mockup ? "" : '<form class="better-codex-project-planning-form" data-project-planning-form="' + escapeHtml(project.id) + '"><textarea name="message" maxlength="12000" rows="3" placeholder="' + te("询问项目规划…") + '"' + (running ? " disabled" : "") + '>' + escapeHtml(draft) + '</textarea><div>' + agentControl + '<button class="better-codex-submit" type="submit"' + (running ? " disabled" : "") + '>' + icon(running ? "refresh" : "send") + '<span>' + te(running ? "规划中…" : "发送") + '</span></button></div>' + inlineError + '</form>';
       const reset = planning.messages.length && !state.mockup ? '<button type="button" data-project-planning-reset="' + escapeHtml(project.id) + '"' + (running ? " disabled" : "") + '>' + icon("refresh") + '<span>' + te("新对话") + '</span></button>' : "";
@@ -6034,8 +6123,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           await loadProjects();
         } catch (error) {
           state.projectDocumentPending = null;
-          state.projectDocumentError = { projectId, message: projectDocumentErrorLabel(error instanceof Error ? error.message : error) };
-          showError(error);
+          const presentation = reportUnexpectedError(error, { source: "project_document" });
+          state.projectDocumentError = { projectId, message: projectDocumentErrorLabel(error instanceof Error ? error.message : error), tone: presentation.tone };
           renderProjects();
         }
       })();
@@ -6068,8 +6157,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         } catch (error) {
           state.projectPlanningPending = null;
           projectPlanningDrafts.set(projectId, message);
-          state.projectPlanningError = { projectId, message: projectPlanningErrorLabel(error instanceof Error ? error.message : error) };
-          showError(error);
+          const presentation = reportUnexpectedError(error, { source: "project_planning" });
+          state.projectPlanningError = { projectId, message: projectPlanningErrorLabel(error instanceof Error ? error.message : error), tone: presentation.tone };
           renderProjects();
         }
       })();
@@ -6146,7 +6235,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           renderDirectory(directory);
         } catch (error) {
           if (request !== directoryRequest || !dialog.isConnected) return;
-          reportGlobalError(error, { source: "directory_browser" });
+          reportUnexpectedError(error, { source: "directory_browser" });
           currentDirectory = null;
           directoryList.innerHTML = '<span class="better-codex-directory-state">' + escapeHtml(directoryErrorLabel(error)) + '</span>';
           directoryStatus.textContent = directoryErrorLabel(error);
@@ -6168,9 +6257,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           if (!workspacePath) return;
           applyWorkspacePath(workspacePath);
         } catch (error) {
-          reportGlobalError(error, { source: "directory_picker" });
-          output.textContent = error instanceof Error ? error.message : t("无法选择文件夹");
-          output.hidden = false;
+          presentInlineError(output, error, directoryErrorLabel(error), { source: "directory_picker" });
         } finally {
           chooseButton.disabled = false;
           chooseButton.textContent = workspaceInput.value ? t("更改文件夹") : t("选择文件夹");
@@ -6214,9 +6301,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           await loadProjects();
           await openProjectDetail(project.id);
         }).catch(error => {
-          reportGlobalError(error, { source: "project_create" });
-          output.textContent = error instanceof Error ? error.message : t("创建失败");
-          output.hidden = false;
+          presentInlineError(output, error, errorLabel(error), { source: "project_create" });
           submit.disabled = false;
         });
       });
@@ -6488,7 +6573,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         setRemoteText(dialog.querySelector("[data-remote-sync]"), value.last_sync_at ? new Date(value.last_sync_at).toLocaleString(state.locale === "zh-CN" ? "zh-CN" : "en") : te("尚未同步"));
         remoteOpen.href = String(remote.url || "");
         if (!reachable && remote.error) {
-          reportGlobalError(new Error(String(remote.error)), { source: "remote_status" });
+          appendDiagnostic("remote_status_unreachable", { error: String(remote.error), url: String(remote.url || "") });
+          remoteError.dataset.tone = "warning";
           remoteError.textContent = te("状态检查失败") + ": " + String(remote.error);
           remoteError.hidden = false;
         }
@@ -6561,6 +6647,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           remoteStatusTitle.textContent = te("状态检查失败");
           remoteStatusSubtitle.textContent = error instanceof Error ? error.message : String(error);
           remoteStatusBadge.textContent = te("无法访问");
+          remoteError.dataset.tone = "warning";
           remoteError.textContent = te("状态检查失败");
           remoteError.hidden = false;
         }
@@ -6642,8 +6729,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         } catch (error) {
           remoteUpdateActive = false;
           remoteRefresh.disabled = false;
-          reportGlobalError(error, { source: "remote_update_install" });
+          const presentation = reportUnexpectedError(error, { source: "remote_update_install" });
           renderRemoteUpgrade({ status: "error", stage: "error", error: error instanceof Error ? error.message : String(error) }, true);
+          remoteError.dataset.tone = presentation.tone;
           remoteError.textContent = updateErrorLabel(error);
           remoteError.hidden = false;
         }
@@ -7069,9 +7157,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             await loadScheduledTasks();
             dialog.close();
           } catch (caught) {
-            reportGlobalError(caught, { source: "scheduled_task_save" });
-            error.textContent = t(caught instanceof Error ? caught.message : "保存失败");
-            error.hidden = false;
+            presentInlineError(error, caught, errorLabel(caught), { source: "scheduled_task_save" });
             submit.disabled = false;
           }
         });
@@ -7546,7 +7632,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             appendDiagnostic("agent_autosave_completed", { agent_key: pending.key, mode: pending.mode, version: saved.version });
           } catch (caught) {
             latestSaved = false;
-            reportGlobalError(caught, { source: "agent_autosave", mode: pending.mode, agent_key: pending.key });
             setAgentAutosaveStatus(pending.key, "error", caught instanceof Error ? caught.message : "保存失败");
             appendDiagnostic("agent_autosave_failed", { agent_key: pending.key, mode: pending.mode, error: caught instanceof Error ? caught.message : "保存失败" });
           }
@@ -7598,9 +7683,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           syncWebAgentRoute(state.selectedAgentId, "replace");
           await loadAgents();
         } catch (caught) {
-          reportGlobalError(caught, { source: "agent_save", mode });
-          error.textContent = t(caught instanceof Error ? caught.message : "保存失败");
-          error.hidden = false;
+          presentInlineError(error, caught, errorLabel(caught), { source: "agent_save", mode });
           submit.disabled = false;
         }
       });
@@ -7999,7 +8082,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           try {
             await uploadPastedImages(items);
           } catch (error) {
-            reportGlobalError(error, { source: "reply_draft_attachment_persist", issue_id: issue.id });
             showError(error);
             throw error;
           }
@@ -8355,7 +8437,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             : "/api/projects/" + encodeURIComponent(draft.projectId) + "/semantics");
           semanticCatalog = { skills: Array.isArray(data?.skills) ? data.skills : [], apps: Array.isArray(data?.apps) ? data.apps : [], errors: Array.isArray(data?.errors) ? data.errors : [] };
         } catch (error) {
-          reportGlobalError(error, { source: "semantic_catalog", issue_id: issue?.id || "", project_id: draft.projectId || "" });
+          appendDiagnostic("semantic_catalog_unavailable", { issue_id: issue?.id || "", project_id: draft.projectId || "", error: error instanceof Error ? error.message : String(error) });
           semanticCatalog = { skills: [], apps: [], errors: [{ source: "catalog", message: error instanceof Error ? error.message : "codex_semantics_unavailable" }] };
         }
         return semanticCatalog;
@@ -8554,7 +8636,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           queueEditDraft = "";
           conversationTimer = setTimeout(() => void loadConversation({ quiet: true }), 1500);
         } catch (error) {
-          reportGlobalError(error, { source: "conversation_queue", action, issue_id: issue.id, request_id: requestId });
+          reportUnexpectedError(error, { source: "conversation_queue", action, issue_id: issue.id, request_id: requestId });
           queueActionError = queuedReplyError(error);
         } finally {
           queueActionRequestId = "";
@@ -8583,10 +8665,12 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (!feedback) return;
         const failure = error instanceof Error ? error : new Error(String(error || "request_failed"));
         const failureKey = action + ":" + failure.message;
-        if (failureKey !== conversationFailureKey) reportGlobalError(failure, { source: "conversation", action });
+        const presentation = errorPresentation(failure);
+        if (failureKey !== conversationFailureKey) reportUnexpectedError(failure, { source: "conversation", action });
         conversationFailureKey = failureKey;
         conversationFailureState = "failed";
         if (message) lastReplyMessage = message;
+        feedback.dataset.tone = presentation.tone;
         feedback.innerHTML = '<span>' + te(replyFailureMessage(failure, action)) + '</span><button type="button" data-conversation-retry="' + action + '">' + te(action === "load" ? "重新加载" : "重试回复") + '</button>';
         feedback.hidden = false;
         syncConversationStatus("failed");
@@ -8707,7 +8791,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           meta.textContent = attachmentTypeLabel(result) + " · " + attachmentSize(result.size);
           await render(objectUrl, result);
         } catch (error) {
-          reportGlobalError(error, { source: "attachment_preview", issue_id: issue.id, message_id: message.id, attachment_index: attachmentIndex });
+          appendDiagnostic("attachment_preview_failed", { issue_id: issue.id, message_id: message.id, attachment_index: attachmentIndex, error: error instanceof Error ? error.message : String(error) });
           body.innerHTML = '<div class="better-codex-attachment-file is-error">' + icon("paperclip") + '<strong>' + te("无法打开附件") + '</strong><span>' + escapeHtml(error instanceof Error ? t(error.message) : t("无法读取文件")) + '</span></div>';
           download.hidden = true;
         }
@@ -8899,10 +8983,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           try {
             await executeDesktopNativeCommand(slashCommand);
           } catch (error) {
-            reportGlobalError(error, { source: "native_desktop_command", command: slashCommand });
             if (dialog.isConnected) {
-              errorOutput.textContent = t(error instanceof Error ? error.message : "native_desktop_command_failed");
-              errorOutput.hidden = false;
+              presentInlineError(errorOutput, error, errorLabel(error), { source: "native_desktop_command", command: slashCommand });
               send.disabled = false;
             }
           }
@@ -8921,9 +9003,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             if (result.rebind_thread) await loadConversation({ quiet: true });
           } catch (error) {
             traceDialog("native_command_failed", { request_id: requestId, command: slashCommand, error: String(error instanceof Error ? error.message : "native_command_failed").slice(0, 200) });
-            reportGlobalError(error, { source: "native_command", command: slashCommand, request_id: requestId });
-            errorOutput.textContent = t(error instanceof Error ? error.message : "native_command_failed");
-            errorOutput.hidden = false;
+            presentInlineError(errorOutput, error, errorLabel(error), { source: "native_command", command: slashCommand, request_id: requestId });
             send.disabled = false;
           }
           return;
@@ -8942,9 +9022,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
               message = withAttachments(text, draft.replyAttachments);
             }
           } catch (error) {
-            reportGlobalError(error, { source: "attachment_prepare", action: "reply" });
-            errorOutput.textContent = t(error instanceof Error ? error.message : "图片保存失败");
-            errorOutput.hidden = false;
+            presentInlineError(errorOutput, error, t(error instanceof Error ? error.message : "图片保存失败"), { source: "attachment_prepare", action: "reply", report: false });
             send.disabled = false;
             return;
           }
@@ -8998,10 +9076,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           const updated = await stopIssueSession(issue.id);
           refreshIssueState(updated);
         } catch (error) {
-          reportGlobalError(error, { source: "issue_stop" });
           if (errorOutput) {
-            errorOutput.textContent = errorLabel(error);
-            errorOutput.hidden = false;
+            presentInlineError(errorOutput, error, errorLabel(error), { source: "issue_stop" });
+          } else {
+            reportUnexpectedError(error, { source: "issue_stop" });
           }
           if (button.isConnected) {
             button.disabled = false;
@@ -9041,10 +9119,10 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             }
           }
         } catch (error) {
-          reportGlobalError(error, { source: "issue_restore" });
           if (errorOutput) {
-            errorOutput.textContent = errorLabel(error);
-            errorOutput.hidden = false;
+            presentInlineError(errorOutput, error, errorLabel(error), { source: "issue_restore" });
+          } else {
+            reportUnexpectedError(error, { source: "issue_restore" });
           }
           if (button.isConnected) {
             button.disabled = false;
@@ -9183,9 +9261,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           const errorOutput = dialog.querySelector(".better-codex-dialog-error");
           if (errorOutput) {
             const message = REMOTE && attachments.length >= 4 ? "最多传输 4 个文件且总大小不能超过 20 MB" : files.some(file => file.size > 10 * 1024 * 1024) ? "图片不能超过 10 MB" : "请选择 PNG、JPEG 或 WebP 图片";
-            reportGlobalError(new Error(message), { source: "attachment_paste", action: replyPaste ? "reply" : issue ? "edit" : "create", file_count: files.length, total_bytes: files.reduce((sum, file) => sum + file.size, 0) });
-            errorOutput.textContent = t(message);
-            errorOutput.hidden = false;
+            presentInlineError(errorOutput, new Error(message), t(message), { source: "attachment_paste", action: replyPaste ? "reply" : issue ? "edit" : "create", report: false });
           }
           return;
         }
@@ -9469,9 +9545,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             const errorOutput = dialog.querySelector(".better-codex-dialog-error");
             const showAttachError = message => {
               if (!errorOutput) return;
-              reportGlobalError(new Error(message), { source: "attachment_picker", action: "reply" });
-              errorOutput.textContent = t(message);
-              errorOutput.hidden = false;
+              presentInlineError(errorOutput, new Error(message), t(message), { source: "attachment_picker", action: "reply", report: false });
             };
             if (!result.picked) return;
             if (!result.files.length) return showAttachError(REMOTE ? "最多传输 4 个文件且总大小不能超过 20 MB" : "当前环境无法读取本地文件路径");
@@ -9740,9 +9814,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             const showAttachError = message => {
               const errorOutput = dialog.querySelector(".better-codex-dialog-error");
               if (!errorOutput) return;
-              reportGlobalError(new Error(message), { source: "attachment_picker", action: issue ? "edit" : "create" });
-              errorOutput.textContent = t(message);
-              errorOutput.hidden = false;
+              presentInlineError(errorOutput, new Error(message), t(message), { source: "attachment_picker", action: issue ? "edit" : "create", report: false });
             };
             if (!result.picked) return;
             if (!result.files.length) return showAttachError(REMOTE ? "最多传输 4 个文件且总大小不能超过 20 MB" : "当前环境无法读取本地文件路径");
@@ -9872,9 +9944,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           }
         } catch (error) {
           traceDialog("dialog_submit_error", { action: issue ? "update_issue" : "create_issue", error: String(error instanceof Error ? error.message : "create_failed").slice(0, 200) });
-          reportGlobalError(error, { source: "issue_dialog_submit", action: issue ? "update" : "create" });
-          errorOutput.textContent = t(error instanceof Error ? error.message : "创建失败");
-          errorOutput.hidden = false;
+          presentInlineError(errorOutput, error, errorLabel(error), { source: "issue_dialog_submit", action: issue ? "update" : "create" });
           submitInFlight = false;
           submit.disabled = false;
         }
@@ -9914,9 +9984,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           await loadIssues();
           dialog.close();
         } catch (error) {
-          reportGlobalError(error, { source: "issue_start" });
-          errorOutput.textContent = t(error instanceof Error ? error.message : "启动失败");
-          errorOutput.hidden = false;
+          presentInlineError(errorOutput, error, errorLabel(error), { source: "issue_start" });
           button.disabled = false;
         }
       }
