@@ -1810,6 +1810,9 @@ export function startServer() {
         }
         const semanticSelections = normalizeCodexSemanticSelections(body.semantic_references);
         if (semanticSelections.length && !agentEnabled) throw new Error("issue_agent_required");
+        if ("semantic_command" in body && body.semantic_command !== "" && body.semantic_command !== "review") throw new Error("semantic_command_invalid");
+        const semanticCommand = body.semantic_command === "review" ? "review" : undefined;
+        if (semanticCommand && !agentEnabled) throw new Error("issue_agent_required");
         const semanticReferences = await resolveCodexSemanticReferences(workspacePath, semanticSelections);
         const agentId = cleanString(body.agent_id, 200);
         if (aiEnrich && agentId && !store.getAgentProfile(agentId)) throw new Error("agent_not_found");
@@ -1830,6 +1833,7 @@ export function startServer() {
             userAssigned,
             enrichmentStatus: aiEnrich ? "pending" : null,
             semanticReferences,
+            semanticCommand,
           }, requestId);
         } catch (error) {
           files.cleanup();

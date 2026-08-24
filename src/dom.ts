@@ -2825,7 +2825,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           try {
             await sendAppServerRequest("thread/name/set", { threadId, name: String(payload.title || "Better Codex") });
           } catch {}
-          const turn = await sendAppServerRequest("turn/start", turnStartParams(threadId, payload));
+          const turn = payload.semantic_command === "review"
+            ? await sendAppServerRequest("review/start", { threadId, target: { type: "uncommittedChanges" }, delivery: "inline" })
+            : await sendAppServerRequest("turn/start", turnStartParams(threadId, payload));
           turnId = normalizeSessionId(turn?.turn?.id);
           if (!turnId) throw new Error("desktop_turn_start_invalid");
           await api("/api/session-relay/commands/" + encodeURIComponent(command.id) + "/checkpoint", {
@@ -8225,13 +8227,16 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       function semanticCommands() {
         const zh = state.locale === "zh-CN";
         const sessionCommandAvailable = Boolean(issue && sessionId && !executionRunning);
+        const initialReviewAvailable = Boolean(!issue && draft.mode === "agent");
         const desktopCommandAvailable = sessionCommandAvailable && HOST_KIND !== "web";
+        const sessionRequired = zh ? "需已有会话" : "Existing chat required";
+        const desktopSessionRequired = zh ? "需桌面已有会话" : "Existing desktop chat required";
         return [
           { kind: "command", name: "status", label: "/status", description: zh ? "查看当前会话与智能体状态" : "Show the current session and agent status", icon: "usage", available: true, scope: zh ? "可用" : "Available" },
           { kind: "command", name: "skills", label: "/skills", description: zh ? "浏览并调用已启用的 Codex Skills" : "Browse and invoke enabled Codex Skills", icon: "wrench", available: true, scope: "$" },
           { kind: "command", name: "apps", label: "/apps", description: zh ? "浏览并调用已安装的插件与连接器" : "Browse and invoke installed plugins and connectors", icon: "server", available: true, scope: "@" },
-          { kind: "command", name: "review", label: "/review", description: zh ? "审查工作区中的未提交改动" : "Review uncommitted workspace changes", icon: "review", available: sessionCommandAvailable, scope: sessionCommandAvailable ? (zh ? "可用" : "Available") : "Codex" },
-          { kind: "command", name: "compact", label: "/compact", description: zh ? "压缩当前会话上下文" : "Compact the current conversation context", icon: "sparkles", available: sessionCommandAvailable, scope: sessionCommandAvailable ? (zh ? "可用" : "Available") : "Codex" },
+          { kind: "command", name: "review", label: "/review", description: zh ? "审查工作区中的未提交改动" : "Review uncommitted workspace changes", icon: "review", available: initialReviewAvailable || sessionCommandAvailable, scope: initialReviewAvailable || sessionCommandAvailable ? (zh ? "可用" : "Available") : sessionRequired },
+          { kind: "command", name: "compact", label: "/compact", description: zh ? "压缩当前会话上下文" : "Compact the current conversation context", icon: "sparkles", available: sessionCommandAvailable, scope: sessionCommandAvailable ? (zh ? "可用" : "Available") : sessionRequired },
           ...[
             ["approve", zh ? "批准最近一次自动审查拒绝的重试" : "Approve one retry after an automatic-review denial"],
             ["cloud", zh ? "在云端运行当前会话" : "Run the current chat in the cloud"],
@@ -8257,7 +8262,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           ].map(([name, description]) => {
             const desktop = DESKTOP_NATIVE_COMMANDS.includes(name);
             const available = desktop ? desktopCommandAvailable : sessionCommandAvailable;
-            return { kind: "command", name, label: "/" + name, description, icon: "terminal", available, scope: available ? desktop ? (zh ? "桌面" : "Desktop") : (zh ? "可用" : "Available") : desktop ? (zh ? "需桌面" : "Desktop required") : "Codex" };
+            return { kind: "command", name, label: "/" + name, description, icon: "terminal", available, scope: available ? desktop ? (zh ? "桌面" : "Desktop") : (zh ? "可用" : "Available") : desktop ? desktopSessionRequired : sessionRequired };
           }),
         ];
       }
@@ -9823,6 +9828,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           let files = [];
           if (REMOTE) files = await remoteFiles(draft.attachments);
           else await uploadPastedImages();
+          const semanticCommand = !issue && draft.mode === "agent" && /^\\/review$/.test(prompt) ? "review" : "";
           const body = {
             project_id: draft.projectId,
             title,
@@ -9833,6 +9839,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
             workspace_path: workspacePath,
             ai_enrich: draft.mode === "agent" && !issue,
             semantic_references: !issue && draft.mode === "agent" ? draft.promptSemanticReferences.filter(reference => prompt.includes((reference.type === "skill" ? "$" : "@") + reference.name)) : [],
+            ...(!issue && draft.mode === "agent" ? { semantic_command: semanticCommand } : {}),
             files,
             ...(state.mockup ? { mockup_run_status: draft.runStatus } : {}),
             ...assignee,

@@ -297,6 +297,7 @@ type IssueInput = {
   assigneeUserId?: string;
   enrichmentStatus?: EnrichmentStatus;
   semanticReferences?: IssueSemanticReference[];
+  semanticCommand?: "review";
   session?: ImportedSessionInput;
 };
 
@@ -362,6 +363,16 @@ function cleanIssueSemanticReferences(value: unknown): IssueSemanticReference[] 
     seen.add(key);
     return { type, name, path };
   });
+}
+
+function cleanInitialIssueSemantics(value: unknown) {
+  if (Array.isArray(value)) return { references: cleanIssueSemanticReferences(value), command: "" as const };
+  if (!value || typeof value !== "object") return { references: [], command: "" as const };
+  const source = value as Record<string, unknown>;
+  return {
+    references: cleanIssueSemanticReferences(source.references),
+    command: source.command === "review" ? "review" as const : "" as const,
+  };
 }
 
 function createDevelopmentDatabaseSnapshot(file: string) {
@@ -2632,7 +2643,11 @@ export class Store {
     if (!project) throw new Error("project_not_found");
     if (requestId.length > 200 || requestId.includes("\0")) throw new Error("invalid_request_id");
     const semanticReferences = cleanIssueSemanticReferences(input.semanticReferences);
-    const requestFingerprint = requestId ? issueCreateFingerprint({ ...input, semanticReferences }) : "";
+    const semanticCommand = input.semanticCommand === "review" ? "review" : undefined;
+    const fingerprintInput = { ...input, semanticReferences };
+    if (semanticCommand) fingerprintInput.semanticCommand = semanticCommand;
+    else delete fingerprintInput.semanticCommand;
+    const requestFingerprint = requestId ? issueCreateFingerprint(fingerprintInput) : "";
     const enrichmentStatus = input.enrichmentStatus ?? null;
     const title = enrichmentStatus === "pending" ? "正在理解任务" : cleanTitle(input.title);
     if (input.status && !issueStatuses.includes(input.status)) throw new Error("invalid_status");
@@ -2703,9 +2718,9 @@ export class Store {
       );
       this.db.prepare("UPDATE projects SET next_issue_number = ?, updated_at = ? WHERE id = ?")
         .run(issueNumber + 1, timestamp, project.id);
-      if (semanticReferences.length) {
+      if (semanticReferences.length || semanticCommand) {
         this.db.prepare("INSERT INTO issue_initial_semantics (issue_id, references_json, created_at) VALUES (?, ?, ?)")
-          .run(id, JSON.stringify(semanticReferences), timestamp);
+          .run(id, JSON.stringify({ references: semanticReferences, command: semanticCommand || "" }), timestamp);
       }
       if (importedSession) this.writeImportedSession(id, importedSession, timestamp);
       if (requestId) {
@@ -2830,12 +2845,12 @@ export class Store {
     }
   }
 
-  getInitialIssueSemanticReferences(issueId: string) {
+  getInitialIssueSemantics(issueId: string) {
     const row = this.db.prepare("SELECT references_json FROM issue_initial_semantics WHERE issue_id = ?").get(issueId) as { references_json: string } | undefined;
-    return row ? cleanIssueSemanticReferences(JSON.parse(row.references_json)) : [];
+    return row ? cleanInitialIssueSemantics(JSON.parse(row.references_json)) : { references: [], command: "" as const };
   }
 
-  clearInitialIssueSemanticReferences(issueId: string) {
+  clearInitialIssueSemantics(issueId: string) {
     this.db.prepare("DELETE FROM issue_initial_semantics WHERE issue_id = ?").run(issueId);
   }
 

@@ -398,7 +398,9 @@ export class RuntimeSessionRelay {
         try {
           await this.request("thread/name/set", { threadId, name: String(payload.title || "Better Codex") });
         } catch {}
-        const turn = object(await this.request("turn/start", this.turnStartParams(threadId, payload)));
+        const turn = payload.semantic_command === "review"
+          ? object(await this.request("review/start", { threadId, target: { type: "uncommittedChanges" }, delivery: "inline" }))
+          : object(await this.request("turn/start", this.turnStartParams(threadId, payload)));
         turnId = sessionId(object(turn.turn).id);
         if (!turnId) throw new Error("desktop_turn_start_invalid");
         this.host.checkpoint(command.id, relayId, { thread_id: threadId, turn_id: turnId });
