@@ -598,7 +598,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     }
     const localeResources = { "zh-CN": {}, en: {
       "调度失败": "Scheduling failed",
-      "重试回复": "Retry reply", "重新加载": "Reload", "回复等待超时。请检查模型服务连接后重试。": "The reply timed out. Check the model service connection and retry.", "网络连接异常，回复未完成。请检查网络和 Better Codex Runtime 后重试。": "The reply did not finish because of a network problem. Check your network and Better Codex Runtime, then retry.", "当前权限不足，无法完成回复。请调整智能体权限或允许所需操作后重试。": "The reply needs additional permission. Adjust the agent permission or allow the required action, then retry.", "Better Codex Runtime 已停止。请重新启动后重试。": "Better Codex Runtime stopped. Restart it and retry.", "上一条回复仍在进行中。请稍后重新加载。": "The previous reply is still running. Reload shortly.", "回复未完成。请打开完整会话查看详情，然后重试。": "The reply did not finish. Open the full conversation for details, then retry.", "会话加载超时。请确认 Better Codex Runtime 正在运行，然后重新加载。": "The conversation timed out while loading. Make sure Better Codex Runtime is running, then reload.", "无法加载会话。请检查网络和 Better Codex Runtime，然后重新加载。": "Unable to load the conversation. Check your network and Better Codex Runtime, then reload.", "没有权限加载会话。请调整权限后重新加载。": "You do not have permission to load the conversation. Adjust the permission, then reload.",
+      "重试回复": "Retry reply", "重新加载": "Reload", "回复等待超时。请检查模型服务连接后重试。": "The reply timed out. Check the model service connection and retry.", "网络连接异常，回复未完成。请检查网络和 Better Codex Runtime 后重试。": "The reply did not finish because of a network problem. Check your network and Better Codex Runtime, then retry.", "当前权限不足，无法完成回复。请调整智能体权限或允许所需操作后重试。": "The reply needs additional permission. Adjust the agent permission or allow the required action, then retry.", "Better Codex Runtime 已停止。请重新启动后重试。": "Better Codex Runtime stopped. Restart it and retry.", "上一条回复仍在进行中。请稍后重新加载。": "The previous reply is still running. Reload shortly.", "回复未完成。请打开完整会话查看详情，然后重试。": "The reply did not finish. Open the full conversation for details, then retry.", "会话加载超时。请确认 Better Codex Runtime 正在运行，然后重新加载。": "The conversation timed out while loading. Make sure Better Codex Runtime is running, then reload.", "无法加载会话。请检查网络和 Better Codex Runtime，然后重新加载。": "Unable to load the conversation. Check your network and Better Codex Runtime, then reload.", "没有权限加载会话。请调整权限后重新加载。": "You do not have permission to load the conversation. Adjust the permission, then reload.", "VPS 入口返回了 404；这表示路径或资源不存在，不能据此判断本机 Runtime 已停止。": "The VPS endpoint returned 404. The path or resource does not exist; this does not show that the local Runtime stopped.", "浏览器无法连接 VPS Relay 入口。请检查域名、网络、反向代理和 Relay 服务；本机 Runtime 状态未知。": "The browser cannot reach the VPS Relay endpoint. Check DNS, network, reverse proxy, and the Relay service. The local Runtime state is unknown.", "VPS 入口无法连接 Relay 服务。本机 Runtime 状态未知。": "The VPS endpoint cannot reach the Relay service. The local Runtime state is unknown.", "VPS Relay 当前没有连接到本机 Runtime。可能是 Runtime 停止、正在重启或网络中断。": "The VPS Relay is not connected to the local Runtime. The Runtime may be stopped or restarting, or the network may be interrupted.", "本机 Runtime 已主动断开与 VPS Relay 的连接，可能正在重启或已停止。": "The local Runtime actively disconnected from the VPS Relay. It may be restarting or stopped.", "VPS Relay 与本机 Runtime 的请求通道已中断，请等待重连后重试。": "The request channel between the VPS Relay and local Runtime was interrupted. Wait for reconnection, then retry.",
       "任务看板": "Task board", "打开任务看板": "Open task board", "智能体": "Agents", "管理智能体": "Manage agents", "创建和管理你的智能体": "Create and manage your agents",
       "Better Codex 服务需要重启": "Better Codex needs to restart", "当前页面与后台服务的连接已失效。请在终端运行下面的命令，完成后重新连接。": "The connection between this page and the background service has expired. Run the command below in your terminal, then reconnect.", "复制重启命令": "Copy restart command", "复制消息": "Copy message", "已复制": "Copied", "重新连接": "Reconnect", "正在连接…": "Connecting…", "错误详情": "Error details",
       "全部": "All", "已分配": "Assigned", "未分配": "Unassigned", "待规划": "Backlog", "待办": "Todo", "进行中": "In progress", "待审核": "In review", "调度中": "Scheduling", "已完成": "Done", "已阻塞": "Blocked", "归档": "Archive", "拖到这里即可归档": "Drop here to archive", "查看已归档卡片": "View archived cards", "已归档任务": "Archived tasks", "搜索已归档任务": "Search archived tasks", "所有项目": "All projects", "全部删除": "Delete all", "删除已归档聊天": "Delete archived chat", "删除项目中的全部内容": "Delete all project content", "确定删除项目中的全部已归档任务吗？": "Delete all archived tasks in this project?", "取消归档": "Unarchive", "已归档卡片": "Archived cards", "暂无已归档卡片": "No archived cards", "归档列表加载失败": "Unable to load archived cards",
@@ -3007,13 +3007,42 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       return Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== "" && value !== null && value !== undefined));
     }
 
+    function serviceFailureKind(message, diagnostics = {}) {
+      const value = String(message || "request_failed").toLowerCase();
+      const detail = String(diagnostics.response_detail || "").toLowerCase();
+      const status = Number(diagnostics.http_status) || 0;
+      if (HOST_KIND === "web" && status === 404) return "vps_http_not_found";
+      if (HOST_KIND === "web" && value === "browser_transport_failed") return "vps_relay_unreachable";
+      if (HOST_KIND === "web" && [502, 503, 504].includes(status) && !diagnostics.relay_channel_id && !["runtime_offline", "runtime_unavailable"].includes(value)) return "vps_relay_unreachable";
+      if (HOST_KIND === "web" && ["runtime_stopped", "runtime_unavailable"].includes(value) && (value === "runtime_stopped" || detail.includes("runtime_stopped"))) return "local_runtime_stopped";
+      if (HOST_KIND === "web" && ["runtime_offline", "runtime_unavailable"].includes(value)) return "local_runtime_disconnected";
+      if (HOST_KIND === "web" && value === "relay_stream_interrupted") return "relay_runtime_interrupted";
+      if (value.includes("runtime_stopped")) return "local_runtime_stopped";
+      return "";
+    }
+
+    function serviceFailureLabel(error) {
+      const value = error instanceof Error ? error.message : String(error || "request_failed");
+      const diagnostics = error?.betterCodexDiagnostics || {};
+      const kind = serviceFailureKind(value, diagnostics);
+      if (kind === "vps_http_not_found") return t("VPS 入口返回了 404；这表示路径或资源不存在，不能据此判断本机 Runtime 已停止。");
+      if (kind === "vps_relay_unreachable" && Number(diagnostics.http_status)) return t("VPS 入口无法连接 Relay 服务。本机 Runtime 状态未知。");
+      if (kind === "vps_relay_unreachable") return t("浏览器无法连接 VPS Relay 入口。请检查域名、网络、反向代理和 Relay 服务；本机 Runtime 状态未知。");
+      if (kind === "local_runtime_disconnected") return t("VPS Relay 当前没有连接到本机 Runtime。可能是 Runtime 停止、正在重启或网络中断。");
+      if (kind === "local_runtime_stopped" && HOST_KIND === "web") return t("本机 Runtime 已主动断开与 VPS Relay 的连接，可能正在重启或已停止。");
+      if (kind === "local_runtime_stopped") return t("Better Codex Runtime 已停止。请重新启动后重试。");
+      if (kind === "relay_runtime_interrupted") return t("VPS Relay 与本机 Runtime 的请求通道已中断，请等待重连后重试。");
+      return "";
+    }
+
     function compactErrorRecord(record) {
       const context = record.context || {};
       const diagnostics = record.diagnostics || {};
       const traceId = String(context.trace_id || diagnostics.trace_id || "");
       const source = String(context.source || diagnostics.source || "application");
+      const boundary = serviceFailureKind(record.message, diagnostics);
       const stage = record.message === "browser_transport_failed" ? "browser_transport" : diagnostics.relay_channel_id ? "relay_runtime_transport" : source === "api" || diagnostics.source === "web_host_request" ? "runtime_request" : source;
-      const outcome = diagnostics.relay_request_ended === true && diagnostics.relay_response_started !== true ? "request_sent_result_unknown" : diagnostics.relay_response_started === true ? "response_started" : record.message === "runtime_offline" ? "request_not_forwarded" : "request_failed";
+      const outcome = boundary === "vps_http_not_found" ? "resource_not_found" : boundary === "vps_relay_unreachable" ? "relay_unreachable" : boundary === "local_runtime_disconnected" ? "runtime_not_connected" : boundary === "local_runtime_stopped" ? "runtime_disconnected_intentionally" : diagnostics.relay_request_ended === true && diagnostics.relay_response_started !== true ? "request_sent_result_unknown" : diagnostics.relay_response_started === true ? "response_started" : record.message === "runtime_offline" ? "request_not_forwarded" : "request_failed";
       const checks = {
         browser_transport_failed: "browser_network_and_relay_health",
         relay_stream_interrupted: "request_receipt_and_relay_connection",
@@ -3026,7 +3055,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const report = {
         time: record.time,
         error: compactFields({ code: record.message, message: record.display_message, type: record.name }),
-        diagnosis: compactFields({ stage, outcome, last_checkpoint: lastCheckpoint, next_check: checks[record.message] || "matching_trace_timeline" }),
+        diagnosis: compactFields({ boundary, stage, outcome, last_checkpoint: lastCheckpoint, next_check: checks[record.message] || "matching_trace_timeline" }),
         trace: compactFields({ trace_id: traceId, command_id: context.command_id || diagnostics.command_id, request_id: diagnostics.response_request_id || context.request_id, channel_id: diagnostics.relay_channel_id, connection_epoch: diagnostics.relay_connection_epoch, runtime_instance_id: diagnostics.relay_runtime_instance_id }),
         request: compactFields({ method: context.method || diagnostics.method, path: context.path || diagnostics.path, http_status: diagnostics.http_status, elapsed_ms: context.elapsed_ms || diagnostics.elapsed_ms, attempt_count: diagnostics.attempt_count, request_ended: diagnostics.relay_request_ended, response_started: diagnostics.relay_response_started, replay_attempts: diagnostics.relay_replay_attempts }),
         timeline,
@@ -3175,6 +3204,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
 
     function errorLabel(error) {
       const value = error instanceof Error ? error.message : String(error || "request_failed");
+      const serviceLabel = serviceFailureLabel(error);
+      if (serviceLabel) return serviceLabel;
       if (value === "thread_open_timeout" || value === "thread_open_unconfirmed") return t("对话仍在加载，请稍后重试。");
       if (value === "thread_id_invalid") return t("对话链接无效。");
       if (value === "issue_execution_running") return t("任务正在执行，请先等待完成。");
@@ -8318,7 +8349,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       }
 
       function replyFailureMessage(error, action) {
-        const value = String(error || "request_failed").toLowerCase();
+        const value = String(error instanceof Error ? error.message : error || "request_failed").toLowerCase();
+        const serviceLabel = serviceFailureLabel(error);
+        if (serviceLabel) return serviceLabel;
         if (action === "load") {
           if (value.includes("timeout") || value.includes("timed out") || value.includes("deadline")) return "会话加载超时。请确认 Better Codex Runtime 正在运行，然后重新加载。";
           if (["permission", "eacces", "eperm", "forbidden", "unauthorized", "401", "403", "approval"].some(marker => value.includes(marker))) return "没有权限加载会话。请调整权限后重新加载。";
@@ -8327,7 +8360,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         if (value.includes("timeout") || value.includes("timed out") || value.includes("deadline")) return "回复等待超时。请检查模型服务连接后重试。";
         if (["reply_network_error", "apiconnectionerror", "network", "fetch", "econn", "enotfound", "dns", "socket", "relay_stream", "runtime_bridge_unavailable"].some(marker => value.includes(marker))) return "网络连接异常，回复未完成。请检查网络和 Better Codex Runtime 后重试。";
         if (["reply_permission_denied", "permission", "eacces", "eperm", "forbidden", "unauthorized", "401", "403", "approval"].some(marker => value.includes(marker))) return "当前权限不足，无法完成回复。请调整智能体权限或允许所需操作后重试。";
-        if (value.includes("runtime_stopped")) return "Better Codex Runtime 已停止。请重新启动后重试。";
         if (value.includes("reply_busy")) return "上一条回复仍在进行中。请稍后重新加载。";
         return "回复未完成。请打开完整会话查看详情，然后重试。";
       }
@@ -8341,7 +8373,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         conversationFailureKey = failureKey;
         conversationFailureState = "failed";
         if (message) lastReplyMessage = message;
-        feedback.innerHTML = '<span>' + te(replyFailureMessage(failure.message, action)) + '</span><button type="button" data-conversation-retry="' + action + '">' + te(action === "load" ? "重新加载" : "重试回复") + '</button>';
+        feedback.innerHTML = '<span>' + te(replyFailureMessage(failure, action)) + '</span><button type="button" data-conversation-retry="' + action + '">' + te(action === "load" ? "重新加载" : "重试回复") + '</button>';
         feedback.hidden = false;
         syncConversationStatus("failed");
         feedback.querySelector("[data-conversation-retry]")?.addEventListener("click", event => {
