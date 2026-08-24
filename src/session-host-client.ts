@@ -1,15 +1,19 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { closeSync, openSync, readFileSync, unlinkSync } from "node:fs";
 import { isSea } from "node:sea";
 import { createConnection, type Socket } from "node:net";
-import { sessionHostLogPath, sessionHostPidPath, sessionHostSocketPath, betterCodexHome, ensureDirectories, sourceProcessArguments, token } from "./config.js";
-import { sessionHostProtocolVersion, type SessionHostDelivery, type SessionHostMessage, type SessionHostPollRequest, type SessionHostServerMessage, type SessionHostThreadAction } from "./session-host-protocol.js";
+import { sessionHostLogPath, sessionHostPidPath, sessionHostSocketPath, sessionHostStatusPath, betterCodexHome, betterCodexProfile, peerBetterCodexHome, ensureDirectories, sourceProcessArguments, token } from "./config.js";
+import { sessionHostProtocolVersion, type SessionHostDelivery, type SessionHostMessage, type SessionHostPollRequest, type SessionHostServerMessage, type SessionHostStatus, type SessionHostThreadAction } from "./session-host-protocol.js";
 import type { SessionRelayHost } from "./session-relay.js";
 
 function hostArguments() {
   if (isSea()) return ["session-host"];
   return sourceProcessArguments(["session-host"]);
+}
+
+function diagnostic(event: string, detail: Record<string, unknown> = {}) {
+  console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "session_host_client", event, runtime_pid: process.pid, ...detail })}`);
 }
 
 function processAlive(pid: number) {
@@ -18,6 +22,18 @@ function processAlive(pid: number) {
     return true;
   } catch {
     return false;
+  }
+}
+
+function processStartTime(pid: number) {
+  try {
+    const value = process.platform === "win32"
+      ? execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `$process = Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}"; if ($process) { $process.CreationDate.ToUniversalTime().ToString('o') }`], { encoding: "utf8", windowsHide: true }).trim()
+      : execFileSync("ps", ["-p", String(pid), "-o", "lstart="], { encoding: "utf8" }).trim();
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  } catch {
+    return null;
   }
 }
 
@@ -32,7 +48,7 @@ function hostPid() {
 
 function spawnHost() {
   const args = hostArguments();
-  if (!args) return;
+  if (!args) throw new Error("session_host_source_unavailable");
   ensureDirectories();
   const descriptor = openSync(sessionHostLogPath, "a");
   const child = spawn(process.execPath, args, {
@@ -44,6 +60,62 @@ function spawnHost() {
   });
   child.unref();
   closeSync(descriptor);
+}
+
+function readHostStatus(home: string, profile: string) {
+  const statusPath = home === betterCodexHome ? sessionHostStatusPath : `${home}/run/session-host-status.json`;
+  const pidPath = home === betterCodexHome ? sessionHostPidPath : `${home}/run/session-host.pid`;
+  let status: SessionHostStatus | null = null;
+  let recordedPid: number | null = null;
+  let error: string | null = null;
+  try { status = JSON.parse(readFileSync(statusPath, "utf8")) as SessionHostStatus; } catch (cause) { error = (cause as NodeJS.ErrnoException).code === "ENOENT" ? "session_host_status_missing" : "session_host_status_invalid"; }
+  try {
+    const value = Number(readFileSync(pidPath, "utf8"));
+    recordedPid = Number.isInteger(value) && value > 0 ? value : null;
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code !== "ENOENT") error ||= "session_host_pid_invalid";
+  }
+  const pid = status?.host_pid ?? recordedPid;
+  const alive = Boolean(pid && processAlive(pid));
+  const fresh = Boolean(status?.updated_at && Date.now() - Date.parse(status.updated_at) <= 30_000);
+  const pidMatches = Boolean(status && recordedPid && status.host_pid === recordedPid);
+  const observedStart = pid ? processStartTime(pid) : null;
+  const expectedStart = status?.started_at ? Date.parse(status.started_at) : NaN;
+  const startedAtMatches = Number.isFinite(expectedStart) && observedStart !== null && Math.abs(expectedStart - observedStart) <= 1500;
+  return { profile, home, status_path: statusPath, pid_path: pidPath, recorded_pid: recordedPid, alive, fresh, pid_matches: pidMatches, started_at_matches: startedAtMatches, ok: Boolean(status?.running && alive && fresh && pidMatches && startedAtMatches), error, status };
+}
+
+function discoverHostProcesses() {
+  try {
+    if (process.platform === "win32") {
+      const source = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'session-host' -and $_.CommandLine -match 'better-codex|cli\\.(js|ts)' } | Select-Object ProcessId,ParentProcessId,CreationDate,CommandLine | ConvertTo-Json -Compress"], { encoding: "utf8", windowsHide: true }).trim();
+      const parsed = source ? JSON.parse(source) : [];
+      const rows = Array.isArray(parsed) ? parsed : [parsed];
+      const matches = rows.map(row => ({ pid: Number(row.ProcessId), ppid: Number(row.ParentProcessId), started_at: row.CreationDate || null, command: String(row.CommandLine || "") })).filter(row => row.pid > 0);
+      const parents = new Set(matches.map(row => row.ppid));
+      return { processes: matches.filter(row => !parents.has(row.pid)).map(({ ppid: _ppid, ...row }) => row), error: null };
+    }
+    const output = execFileSync("ps", ["-axo", "pid=,ppid=,lstart=,command="], { encoding: "utf8" });
+    const matches = output.split(/\r?\n/).flatMap(line => {
+      const match = line.match(/^\s*(\d+)\s+(\d+)\s+(.{24})\s+(.+)$/);
+      if (!match || !/(?:better-codex\S*|cli\.(?:js|ts))\s+session-host(?:\s|$)/i.test(match[4])) return [];
+      return [{ pid: Number(match[1]), ppid: Number(match[2]), started_at: new Date(match[3]).toISOString(), command: match[4] }];
+    });
+    const parents = new Set(matches.map(row => row.ppid));
+    const processes = matches.filter(row => !parents.has(row.pid)).map(({ ppid: _ppid, ...row }) => row);
+    return { processes, error: null };
+  } catch (error) {
+    return { processes: [], error: error instanceof Error ? error.message : "session_host_process_discovery_failed" };
+  }
+}
+
+export function sessionHostStatus() {
+  const current = readHostStatus(betterCodexHome, betterCodexProfile);
+  const peer = readHostStatus(peerBetterCodexHome, betterCodexProfile === "development" ? "stable" : "development");
+  const discovery = discoverHostProcesses();
+  const tracked = new Set([current.status?.host_pid, peer.status?.host_pid].filter((value): value is number => Boolean(value)));
+  const untracked = discovery.processes.filter(process => !tracked.has(process.pid));
+  return { ok: current.ok && !untracked.length && !discovery.error, current, peer, processes: discovery.processes, untracked, discovery_error: discovery.error };
 }
 
 function writeMessage(socket: Socket, message: SessionHostMessage) {
@@ -71,13 +143,24 @@ export class SessionHostClient implements SessionRelayHost {
   private connecting = false;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private stopped = true;
-  private output = "";
+  private readonly outputs = new WeakMap<Socket, string>();
   private acknowledged = false;
   private threadActionsSupported = false;
+  private readonly runtimeInstanceId = `${process.pid}:${randomUUID()}`;
+  private hostIdentity: { pid: number; instanceId: string | null; connectionEpoch: number | null; startedAt: string | null } | null = null;
   private readonly readyWaiters = new Set<ReadyWaiter>();
   private readonly threadActionRequests = new Map<string, ThreadActionRequest>();
 
   constructor(private readonly host: SessionRelayHost) {}
+
+  status() {
+    return {
+      connected: Boolean(this.socket && this.acknowledged),
+      runtime_instance_id: this.runtimeInstanceId,
+      host: this.hostIdentity,
+      reconnecting: Boolean(this.connecting || this.reconnectTimer),
+    };
+  }
 
   start() {
     if (!this.stopped || process.env.BETTER_CODEX_DISABLE_RUNTIME_SESSION_RELAY === "1" || process.env.BETTER_CODEX_DISABLE_DELEGATION === "1" || process.env.NODE_TEST_CONTEXT) return;
@@ -93,6 +176,7 @@ export class SessionHostClient implements SessionRelayHost {
     this.socket = null;
     this.acknowledged = false;
     this.threadActionsSupported = false;
+    this.hostIdentity = null;
     this.rejectReadyWaiters("session_host_unavailable");
     this.rejectThreadActions("session_host_unavailable");
     socket?.destroy();
@@ -146,20 +230,22 @@ export class SessionHostClient implements SessionRelayHost {
     try {
       let socket = await this.openSocket();
       this.socket = socket;
-      this.output = "";
+      this.outputs.set(socket, "");
       this.acknowledged = false;
       this.threadActionsSupported = false;
-      socket.on("data", chunk => this.read(chunk));
-      socket.once("error", () => {});
+      this.hostIdentity = null;
+      socket.on("data", chunk => this.read(socket, chunk));
+      socket.once("error", error => diagnostic("socket_error", { error: error.message }));
       socket.once("close", () => this.disconnected(socket));
       writeMessage(socket, {
         type: "hello",
         protocol_version: sessionHostProtocolVersion,
         token: token(),
-        runtime_instance_id: `${process.pid}:${Date.now()}`,
+        runtime_instance_id: this.runtimeInstanceId,
       });
-    } catch {
-      try { spawnHost(); } catch {}
+    } catch (error) {
+      diagnostic("connect_failed", { error: error instanceof Error ? error.message : String(error) });
+      try { spawnHost(); } catch (spawnError) { diagnostic("spawn_failed", { error: spawnError instanceof Error ? spawnError.message : String(spawnError) }); }
       this.scheduleReconnect();
     } finally {
       this.connecting = false;
@@ -199,28 +285,54 @@ export class SessionHostClient implements SessionRelayHost {
     this.socket = null;
     this.acknowledged = false;
     this.threadActionsSupported = false;
+    this.hostIdentity = null;
     this.rejectThreadActions("session_host_disconnected");
     this.scheduleReconnect();
   }
 
-  private read(chunk: Buffer) {
-    this.output += String(chunk);
-    if (Buffer.byteLength(this.output) > 8_388_608) {
-      this.socket?.destroy();
+  private read(socket: Socket, chunk: Buffer) {
+    if (this.socket !== socket) {
+      diagnostic("fenced_host_data");
       return;
     }
-    const lines = this.output.split(/\r?\n/);
-    this.output = lines.pop() || "";
+    const output = (this.outputs.get(socket) || "") + String(chunk);
+    if (Buffer.byteLength(output) > 8_388_608) {
+      diagnostic("host_message_buffer_exceeded", { bytes: Buffer.byteLength(output) });
+      socket.destroy();
+      return;
+    }
+    const lines = output.split(/\r?\n/);
+    this.outputs.set(socket, lines.pop() || "");
     for (const line of lines) {
-      try { this.handle(JSON.parse(line) as SessionHostServerMessage); } catch {}
+      try { this.handle(socket, JSON.parse(line) as SessionHostServerMessage); }
+      catch (error) {
+        diagnostic("message_decode_failed", { error: error instanceof Error ? error.message : String(error) });
+        socket.destroy();
+      }
     }
   }
 
-  private handle(message: SessionHostServerMessage) {
+  private handle(socket: Socket, message: SessionHostServerMessage) {
+    if (this.socket !== socket) {
+      diagnostic("fenced_host_message", { message_type: message.type });
+      return;
+    }
     if (message.type === "hello_ack") {
+      if (this.acknowledged || message.protocol_version !== sessionHostProtocolVersion || message.runtime_instance_id && message.runtime_instance_id !== this.runtimeInstanceId) {
+        diagnostic("host_ack_identity_mismatch", { expected_runtime_instance_id: this.runtimeInstanceId, actual_runtime_instance_id: message.runtime_instance_id, host_pid: message.host_pid });
+        socket.destroy();
+        return;
+      }
       this.acknowledged = true;
       this.threadActionsSupported = message.capabilities?.thread_actions === true;
+      this.hostIdentity = { pid: message.host_pid, instanceId: message.host_instance_id || null, connectionEpoch: message.connection_epoch ?? null, startedAt: message.started_at || null };
+      diagnostic("connected", { runtime_instance_id: this.runtimeInstanceId, host_pid: message.host_pid, host_instance_id: message.host_instance_id || null, connection_epoch: message.connection_epoch ?? null });
       this.resolveReadyWaiters();
+      return;
+    }
+    if (!this.acknowledged) {
+      diagnostic("host_message_before_ack", { message_type: message.type });
+      socket.destroy();
       return;
     }
     if (message.type === "thread_action_response") {
@@ -232,8 +344,11 @@ export class SessionHostClient implements SessionRelayHost {
       else request.reject(new Error(message.error || "codex_thread_action_failed"));
       return;
     }
-    if (message.type === "poll_request") return void this.handlePoll(message);
-    if (message.type === "delivery") return void this.handleDelivery(message);
+    if (message.type === "poll_request") return void this.handlePoll(socket, message);
+    if (message.type === "delivery") return void this.handleDelivery(socket, message).catch(error => {
+      diagnostic("delivery_apply_failed", { delivery_id: message.delivery_id, kind: message.kind, error: error instanceof Error ? error.message : String(error) });
+      socket.destroy();
+    });
   }
 
   private waitUntilReady() {
@@ -305,16 +420,18 @@ export class SessionHostClient implements SessionRelayHost {
     this.threadActionRequests.clear();
   }
 
-  private async handlePoll(message: SessionHostPollRequest) {
+  private async handlePoll(socket: Socket, message: SessionHostPollRequest) {
     try {
       const result = await this.host.poll(message.relay_id, message.busy);
-      if (this.socket) writeMessage(this.socket, { type: "poll_response", request_id: message.request_id, result });
-    } catch {
+      if (this.socket === socket) writeMessage(socket, { type: "poll_response", request_id: message.request_id, result });
+    } catch (error) {
+      diagnostic("poll_failed", { request_id: message.request_id, relay_id: message.relay_id, error: error instanceof Error ? error.message : String(error) });
+      socket.destroy();
       this.scheduleReconnect();
     }
   }
 
-  private async handleDelivery(message: SessionHostDelivery) {
+  private async handleDelivery(socket: Socket, message: SessionHostDelivery) {
     const payload = message.payload;
     try {
       if (message.kind === "release") await this.host.release(String(payload.relay_id || ""), String(payload.error || "session_host_released"));
@@ -323,7 +440,7 @@ export class SessionHostClient implements SessionRelayHost {
       if (message.kind === "fail") await this.host.fail(String(payload.command_id || ""), String(payload.relay_id || ""), String(payload.error || "session_host_failed"), typeof payload.thread_id === "string" ? payload.thread_id : undefined, typeof payload.turn_id === "string" ? payload.turn_id : undefined);
       if (message.kind === "event") await this.host.event(String(payload.method || ""), payload.params && typeof payload.params === "object" ? payload.params as Record<string, unknown> : {});
     } finally {
-      if (this.socket) writeMessage(this.socket, { type: "delivery_ack", delivery_id: message.delivery_id });
+      if (this.socket === socket) writeMessage(socket, { type: "delivery_ack", delivery_id: message.delivery_id });
     }
   }
 }
@@ -344,8 +461,13 @@ export async function stopSessionHostProcess() {
     });
     writeMessage(socket, { type: "shutdown", token: token() });
     socket.end();
-  } catch {
-    try { process.kill(pid, "SIGTERM"); } catch {}
+  } catch (error) {
+    diagnostic("graceful_stop_failed", { host_pid: pid, error: error instanceof Error ? error.message : String(error) });
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch (killError) {
+      if (processAlive(pid)) throw new Error("session_host_stop_failed", { cause: killError });
+    }
   }
   return { stopped: true, pid };
 }

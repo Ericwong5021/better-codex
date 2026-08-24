@@ -45,7 +45,7 @@ import { requireCodexExecutablePath } from "./codex-cli.js";
 import { normalizeHubUrl, readSyncConfiguration, removeSyncConfiguration, writeSyncConfiguration } from "./sync-config.js";
 import { normalizeRelayUrl, readRelayConfiguration, removeRelayConfiguration, writeRelayConfiguration } from "./relay-config.js";
 import { startSessionHost } from "./session-host.js";
-import { stopSessionHostProcess } from "./session-host-client.js";
+import { sessionHostStatus, stopSessionHostProcess } from "./session-host-client.js";
 
 function accessToken() {
   return token();
@@ -854,6 +854,8 @@ async function doctor(allowPendingInjection = false) {
     betterCodex: existsSync(join(codexHome, "skills", "better-codex", "SKILL.md")),
   };
   const mcp = mcpStatus();
+  const sessionHost = sessionHostStatus();
+  const sessionHostRequired = process.env.BETTER_CODEX_DISABLE_RUNTIME_SESSION_RELAY !== "1" && process.env.BETTER_CODEX_DISABLE_DELEGATION !== "1" && !process.env.NODE_TEST_CONTEXT;
   const updateKey = (!isSea() && !packagedBuild) || existsSync(updatePublicKeyPath);
   const injectedTarget = injection.targets.some(target => Boolean((target as { entry?: boolean }).entry) && Boolean((target as { panel?: boolean }).panel));
   const activeInjectorPid = injectorPid();
@@ -869,9 +871,10 @@ async function doctor(allowPendingInjection = false) {
     injection: { ...injection, enabled: injectionEnabled(), injectorPid: activeInjectorPid, ready: injectionReady, pending: pendingInjection },
     skills,
     mcp,
+    sessionHost: { ...sessionHost, required: sessionHostRequired },
     updateKey,
   };
-  return { ok: Boolean(runtime.ok) && Boolean((database as { ok?: boolean }).ok) && codex.installed && Boolean((compatibility as { compatible?: boolean } | null)?.compatible) && (injectionReady || pendingInjection) && skills.betterCodex && mcp.installed && mcp.configured && updateKey, checks };
+  return { ok: Boolean(runtime.ok) && Boolean((database as { ok?: boolean }).ok) && codex.installed && Boolean((compatibility as { compatible?: boolean } | null)?.compatible) && (injectionReady || pendingInjection) && skills.betterCodex && mcp.installed && mcp.configured && (!sessionHostRequired || sessionHost.ok) && updateKey, checks };
 }
 
 async function uninstall() {

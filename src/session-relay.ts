@@ -91,6 +91,19 @@ export class RuntimeSessionRelay {
 
   constructor(private readonly host: SessionRelayHost) {}
 
+  status() {
+    return {
+      app_server_pid: this.child?.pid ?? null,
+      app_server_connected: Boolean(this.child),
+      command_in_flight: this.commandInFlight,
+      pending_requests: this.pending.size,
+    };
+  }
+
+  idle() {
+    return !this.commandInFlight && this.pending.size === 0 && !this.pollBusy;
+  }
+
   start() {
     if (!this.stopped || process.env.BETTER_CODEX_DISABLE_RUNTIME_SESSION_RELAY === "1") return;
     this.stopped = false;

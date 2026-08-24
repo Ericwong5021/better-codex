@@ -23,10 +23,35 @@ export type SessionHostHelloAck = {
   type: "hello_ack";
   protocol_version: typeof sessionHostProtocolVersion;
   host_pid: number;
+  host_instance_id?: string;
+  connection_epoch?: number;
+  runtime_instance_id?: string;
+  started_at?: string;
   relay_id: string;
   capabilities?: {
     thread_actions?: boolean;
   };
+};
+
+export type SessionHostStatus = {
+  protocol_version: typeof sessionHostProtocolVersion;
+  profile: string;
+  home: string;
+  host_pid: number;
+  host_instance_id: string;
+  started_at: string;
+  running: boolean;
+  connection_epoch: number;
+  runtime_instance_id: string | null;
+  runtime_connected: boolean;
+  runtime_connected_at: string | null;
+  runtime_disconnected_at: string | null;
+  app_server_pid: number | null;
+  app_server_connected: boolean;
+  command_in_flight: boolean;
+  pending_requests: number;
+  queued_deliveries: number;
+  updated_at: string;
 };
 
 export type SessionHostPollRequest = {
