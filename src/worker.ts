@@ -553,6 +553,7 @@ export class IssueWorker {
     });
     const args = [
       "exec",
+      "--ephemeral",
       ...(agentId ? ["--profile", agentConfigProfileName(agentId)] : []),
       "--json",
       "--color",
