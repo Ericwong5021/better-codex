@@ -6,6 +6,7 @@ import { renderMarkdown } from "./markdown.js";
 import { betterCodexMcpRoute } from "./mcp-app.js";
 import { featureManifest } from "./features.js";
 import { desktopNativeCommands, sessionNativeCommands } from "./native-commands.js";
+import { avatarColors } from "./user-profile.js";
 import {
   ArrowLeft,
   ArrowLeftRight,
@@ -360,6 +361,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const SIDEBAR_NAVIGATION_ITEM = SELECTORS.sidebarNavigationItem || ".sidebar-item";
     const LUCIDE_ICONS = ${JSON.stringify(lucideIcons)};
     const AGENT_AVATAR_PRESETS = ${JSON.stringify(agentAvatarPresets)};
+    const USER_AVATAR_COLORS = ${JSON.stringify(avatarColors)};
     const RESUME_SURFACE_KEY = "better-codex-resume-surface";
     const PROJECT_KEY = "better-codex-project-id";
     const LANGUAGE_KEY = "better-codex-language";
@@ -406,7 +408,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     const initialAgentRoute = webAgentRoute();
     if (HOST_KIND === "web" && !hasFeature("project-management") && /^\\/web\\/projects(?:\\/|$)/.test(location.pathname)) history.replaceState({ betterCodex: true, betterCodexSurface: "issues" }, "", "/web");
     const initialAgentKey = initialAgentRoute?.agentKey || "";
-    const state = { projects: [], projectsLoaded: false, issues: [], issuesLoaded: false, scheduledTasks: [], scheduledTasksLoaded: false, projectIssues: [], projectIssuesProjectId: "", projectDetailId: initialProjectRoute?.projectId || "", projectPage: "overview", projectDocumentView: "charter", projectDocumentPending: null, projectDocumentError: null, projectPlanningPending: null, projectPlanningError: null, agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: "#16a34a" }, users: [], projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: initialAgentKey === "new" ? "create" : initialAgentKey ? "detail" : "preview", selectedAgentId: initialAgentKey && initialAgentKey !== "new" ? initialAgentKey : "", agentDraft: initialAgentKey === "new" ? { avatar: "icon:bot" } : null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: initialProjectRoute ? "projects" : initialAgentRoute ? "agents" : availableSurfaces.includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, autoDispatchPending: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", issueDescriptionLimit: 100000, mockup: false, keepCreate: rememberedKeepCreate, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], project: [], label: [] } };
+    const state = { projects: [], projectsLoaded: false, issues: [], issuesLoaded: false, scheduledTasks: [], scheduledTasksLoaded: false, projectIssues: [], projectIssuesProjectId: "", projectDetailId: initialProjectRoute?.projectId || "", projectPage: "overview", projectDocumentView: "charter", projectDocumentPending: null, projectDocumentError: null, projectPlanningPending: null, projectPlanningError: null, agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: USER_AVATAR_COLORS[0], avatar: "", avatar_generated: true }, users: [], projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: initialAgentKey === "new" ? "create" : initialAgentKey ? "detail" : "preview", selectedAgentId: initialAgentKey && initialAgentKey !== "new" ? initialAgentKey : "", agentDraft: initialAgentKey === "new" ? { avatar: "icon:bot" } : null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: initialProjectRoute ? "projects" : initialAgentRoute ? "agents" : availableSurfaces.includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, autoDispatchPending: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", issueDescriptionLimit: 100000, mockup: false, keepCreate: rememberedKeepCreate, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], project: [], label: [] } };
     const pendingIssueRemovals = new Map();
     const projectPlanningDrafts = new Map();
     let projectPlanningComposition = "";
@@ -615,7 +617,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       "新建": "New", "新建 issue": "New issue", "新建任务": "New task", "新建智能体": "New agent", "创建": "Create", "创建任务": "Create task", "删除": "Delete", "删除任务": "Delete task", "删除智能体": "Delete agent", "保存": "Save", "确认": "Confirm", "取消": "Cancel", "关闭": "Close", "返回": "Back", "重试": "Retry", "稍后": "Later", "展开": "Expand", "全屏": "Full screen", "缩小": "Minimize", "退出全屏": "Exit full screen", "缩放头像": "Zoom avatar",
       "项目": "Project", "无项目": "No project", "选择项目": "Select project", "选择责任人": "Select owner", "选择执行智能体": "Select agent", "更多创建选项": "More creation options", "任务标题": "Task title", "添加描述...": "Add description...", "添加标签": "Add label", "添加附件": "Add attachment", "移除附件": "Remove attachment", "搜索任务": "Search tasks", "搜索项目": "Search projects", "搜索项目...": "Search projects...", "搜索智能体": "Search agents",
       "负责人": "Owner", "创建者": "Creator", "指定负责人": "Assign owner", "由我创建": "Created by me", "由我": "By me", "我": "Me", "你": "You", "未指派": "Not assigned", "未提供": "Not provided", "已同步": "Synced",
-      "自动运行": "Auto-run", "手动运行": "Manual run", "切换为自动运行": "Switch to auto-run", "切换为手动运行": "Switch to manual run", "切换到智能体": "Switch to agents", "手动创建": "Manual creation", "通过智能体创建": "Create with agent", "运行模式说明": "Run mode", "帮助与设置": "Help and settings", "设置": "Settings", "快捷键": "Shortcuts", "快捷键设置": "Keyboard shortcuts", "为常用操作设置键盘快捷键。": "Set keyboard shortcuts for common actions.", "创建 Issue": "Create Issue", "打开创建 Issue 窗口": "Open the Create Issue window", "设置快捷键": "Set shortcut", "点击录入": "Click to record", "按下新的快捷键": "Press a new shortcut", "未设置": "Not set", "清除快捷键": "Clear shortcut", "关于": "About", "会话结束提醒": "Session completion alerts", "Issue 会话结束后在当前窗口显示提醒": "Show an alert in the current window when an issue session ends", "弹窗持续时间": "Popup duration", "1 秒": "1 second", "5 秒": "5 seconds", "10 秒": "10 seconds", "永久": "Permanent", "会话已结束": "Session ended", "通知": "Notifications", "个人资料": "Profile", "编辑个人资料": "Edit profile", "昵称和头像只用于 WebUI 协作": "Your name and avatar are used for WebUI collaboration", "昵称": "Display name", "更换头像": "Change avatar", "资料已保存": "Profile saved", "语言": "Language", "界面语言": "Interface language", "选择 Better Codex 的界面语言": "Choose the language used by Better Codex", "调度": "Scheduling", "调度器模型": "Scheduler model", "这个模型用于 Issue 状态调度": "This model is used for Issue status routing", "调度器思考强度": "Scheduler reasoning effort", "这个强度用于 Issue 状态调度": "This level is used for Issue status routing", "跟随系统": "System", "中文": "Chinese", "软件更新": "Software updates", "更新状态": "Update status", "检查新版本": "Check for updates", "检查中…": "Checking…", "发现新版本": "Update available", "无法检查更新": "Unable to check", "版本信息": "Version info", "兼容版本": "Compatibility version", "运行状态": "Runtime status", "运行正常": "Running", "正在检查": "Checking", "已是最新版本": "Up to date", "从开始到完成，让 Codex 里的工作清晰可见。": "From start to finish, keep your work in Codex clear and visible.", "如果你喜欢 Better Codex，欢迎给我们一个 Star。": "If you like Better Codex, please give us a Star.", "最大并发": "Max concurrency", "模型": "Model", "推理": "Reasoning", "Fast": "Fast", "更快响应，增加用量": "Faster responses with increased usage", "指令": "Instructions", "默认": "Default", "自定义": "Custom",
+      "自动运行": "Auto-run", "手动运行": "Manual run", "切换为自动运行": "Switch to auto-run", "切换为手动运行": "Switch to manual run", "切换到智能体": "Switch to agents", "手动创建": "Manual creation", "通过智能体创建": "Create with agent", "运行模式说明": "Run mode", "帮助与设置": "Help and settings", "设置": "Settings", "快捷键": "Shortcuts", "快捷键设置": "Keyboard shortcuts", "为常用操作设置键盘快捷键。": "Set keyboard shortcuts for common actions.", "创建 Issue": "Create Issue", "打开创建 Issue 窗口": "Open the Create Issue window", "设置快捷键": "Set shortcut", "点击录入": "Click to record", "按下新的快捷键": "Press a new shortcut", "未设置": "Not set", "清除快捷键": "Clear shortcut", "关于": "About", "会话结束提醒": "Session completion alerts", "Issue 会话结束后在当前窗口显示提醒": "Show an alert in the current window when an issue session ends", "弹窗持续时间": "Popup duration", "1 秒": "1 second", "5 秒": "5 seconds", "10 秒": "10 seconds", "永久": "Permanent", "会话已结束": "Session ended", "通知": "Notifications", "个人资料": "Profile", "编辑个人资料": "Edit profile", "昵称和头像只用于 WebUI 协作": "Your name and avatar are used for WebUI collaboration", "昵称": "Display name", "更换头像": "Change avatar", "选择颜色": "Choose color", "蓝色": "Blue", "紫色": "Purple", "青色": "Teal", "绿色": "Green", "青柠色": "Lime", "琥珀色": "Amber", "橙色": "Orange", "粉色": "Pink", "资料已保存": "Profile saved", "语言": "Language", "界面语言": "Interface language", "选择 Better Codex 的界面语言": "Choose the language used by Better Codex", "调度": "Scheduling", "调度器模型": "Scheduler model", "这个模型用于 Issue 状态调度": "This model is used for Issue status routing", "调度器思考强度": "Scheduler reasoning effort", "这个强度用于 Issue 状态调度": "This level is used for Issue status routing", "跟随系统": "System", "中文": "Chinese", "软件更新": "Software updates", "更新状态": "Update status", "检查新版本": "Check for updates", "检查中…": "Checking…", "发现新版本": "Update available", "无法检查更新": "Unable to check", "版本信息": "Version info", "兼容版本": "Compatibility version", "运行状态": "Runtime status", "运行正常": "Running", "正在检查": "Checking", "已是最新版本": "Up to date", "从开始到完成，让 Codex 里的工作清晰可见。": "From start to finish, keep your work in Codex clear and visible.", "如果你喜欢 Better Codex，欢迎给我们一个 Star。": "If you like Better Codex, please give us a Star.", "最大并发": "Max concurrency", "模型": "Model", "推理": "Reasoning", "Fast": "Fast", "更快响应，增加用量": "Faster responses with increased usage", "指令": "Instructions", "默认": "Default", "自定义": "Custom",
       "点击": "Click", "，或者在已完成的会话卡片中": ", or use", "新消息，智能体才会执行任务。": "to post a new message in a completed conversation card. Only then will the agent run the task.", "会主动执行分配给自己的任务，但是不会执行": "automatically runs tasks assigned to it, but does not run", "区域的任务。": "tasks.",
       "代码审查": "Code review", "问题排查": "Troubleshooting", "前端实现": "Frontend implementation", "文档写作": "Documentation", "创意探索": "Creative exploration", "终端工程": "Terminal engineering", "通用助手": "General assistant", "修复工具": "Fixer", "安全审查": "Security review", "测试验证": "Test verification", "插件": "Plugins", "数据与存储": "Data and storage", "检查改动的正确性、回归风险和可维护性": "Review changes for correctness, regression risk, and maintainability", "负责 Codex 原生风格的界面实现与视觉验证": "Build and visually verify interfaces in the native Codex style", "定位崩溃、回归和异常行为的根因": "Find the root cause of crashes, regressions, and unexpected behavior",
       "通用任务处理": "General task handling", "代码实现": "Code implementation", "最大": "Maximum", "极致": "Ultra", "发送": "Send", "副本": "Copy", "复制卡片": "Copy card", "更多操作": "More actions", "本次启动关闭": "Disable for this launch", "正在重启 Better Codex": "Restarting Better Codex", "正在下载并校验新版本，请保持 Codex 打开。": "Downloading and verifying the update. Keep Codex open.", "正在重启 Better Codex Runtime，稍后会自动恢复。": "Restarting Better Codex Runtime. It will recover shortly.", "Better Codex 已恢复到上一版本。": "Better Codex has been restored to the previous version.",
@@ -4299,7 +4301,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       if (key === "assignee") {
         if (value.startsWith("user:")) {
           const user = state.users.find(item => item.id === value.slice(5)) || state.user;
-          return '<span class="better-codex-filter-avatar is-user is-initials" style="background:' + escapeHtml(user.color || "#16a34a") + '">' + escapeHtml(user.initials || t("你")) + '</span>';
+          return userAvatarMarkup(user, "better-codex-filter-avatar");
         }
         if (value === "none") return '<span class="better-codex-filter-avatar is-fallback">' + icon("user") + '</span>';
         const agent = value === "codex"
@@ -4952,11 +4954,54 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       return "none";
     }
 
+    function userAvatarInitials(name) {
+      const source = String(name || "").trim();
+      if (!source) return "?";
+      const latin = source.match(/[A-Za-z]+/g);
+      if (latin && latin.length >= 2) return (latin[0][0] + latin[1][0]).toUpperCase();
+      if (latin && latin[0].length >= 2) return latin[0].slice(0, 2).toUpperCase();
+      if (latin) return latin[0][0].toUpperCase();
+      return Array.from(source.replace(/\\s+/g, "")).slice(0, 2).join("") || "?";
+    }
+
+    const generatedUserAvatarCache = new Map();
+
+    function generatedUserAvatar(name, color) {
+      const initials = userAvatarInitials(name);
+      const background = USER_AVATAR_COLORS.includes(color) ? color : USER_AVATAR_COLORS[0];
+      const key = initials + ":" + background;
+      const cached = generatedUserAvatarCache.get(key);
+      if (cached) return cached;
+      const canvas = document.createElement("canvas");
+      canvas.width = 256;
+      canvas.height = 256;
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("avatar_canvas_unavailable");
+      context.fillStyle = background;
+      context.fillRect(0, 0, 256, 256);
+      context.fillStyle = "#ffffff";
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      const family = getComputedStyle(document.documentElement).getPropertyValue("--bc-font-ui").trim() || "system-ui, sans-serif";
+      let fontSize = initials.length > 1 ? 92 : 116;
+      context.font = "700 " + fontSize + "px " + family;
+      while (context.measureText(initials).width > 176 && fontSize > 54) {
+        fontSize -= 2;
+        context.font = "700 " + fontSize + "px " + family;
+      }
+      context.fillText(initials, 128, 132);
+      const result = canvas.toDataURL("image/png");
+      if (generatedUserAvatarCache.size >= 128) generatedUserAvatarCache.clear();
+      generatedUserAvatarCache.set(key, result);
+      return result;
+    }
+
     function userAvatarMarkup(user, className) {
       const profile = user || state.user;
-      const image = String(profile?.avatar || "");
-      const content = image ? '<img src="' + escapeHtml(image) + '" alt="">' : escapeHtml(profile?.initials || t("你"));
-      return '<span class="' + className + ' is-user' + (image ? " has-image" : " is-initials") + '" style="background:' + escapeHtml(profile?.color || "#16a34a") + '">' + content + '</span>';
+      const color = USER_AVATAR_COLORS.includes(profile?.color) ? profile.color : USER_AVATAR_COLORS[0];
+      const image = String(profile?.avatar || generatedUserAvatar(profile?.name || profile?.initials || t("你"), color));
+      const title = profile?.handle ? "@" + profile.handle : profile?.name || "";
+      return '<span class="' + className + ' is-user has-image" style="background:' + escapeHtml(color) + '" title="' + escapeHtml(title) + '" aria-hidden="true"><img src="' + escapeHtml(image) + '" alt=""></span>';
     }
 
     function syncAgentAvatar(node, agent) {
@@ -5161,30 +5206,55 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         existing.querySelector("input")?.focus();
         return;
       }
-      let avatar = String(state.user?.avatar || "");
+      const colorLabels = ["蓝色", "紫色", "青色", "绿色", "青柠色", "琥珀色", "橙色", "粉色"];
+      let color = USER_AVATAR_COLORS.includes(state.user?.color) ? state.user.color : USER_AVATAR_COLORS[0];
+      let avatarGenerated = state.user?.avatar_generated !== false || !state.user?.avatar;
+      let avatar = avatarGenerated ? generatedUserAvatar(state.user?.name || t("你"), color) : String(state.user?.avatar || "");
+      const colors = USER_AVATAR_COLORS.map((value, index) => '<button class="better-codex-profile-avatar-color' + (value === color ? " is-selected" : "") + '" type="button" data-profile-avatar-color="' + escapeHtml(value) + '" style="--profile-avatar-color:' + escapeHtml(value) + '" aria-label="' + te(colorLabels[index]) + '" title="' + te(colorLabels[index]) + '" aria-pressed="' + (value === color) + '">' + icon("check") + '</button>').join("");
       const dialog = document.createElement("dialog");
       dialog.id = "better-codex-profile-dialog";
       dialog.setAttribute(OWNED, "true");
       dialog.setAttribute("aria-labelledby", "better-codex-profile-dialog-title");
-      dialog.innerHTML = '<form><header><div><h2 id="better-codex-profile-dialog-title">' + te("个人资料") + '</h2><p>' + te("昵称和头像只用于 WebUI 协作") + '</p></div><button type="button" data-profile-dialog-close aria-label="' + te("关闭") + '">' + icon("close") + '</button></header><div class="better-codex-profile-dialog-body"><button class="better-codex-profile-dialog-avatar-button" type="button" data-profile-dialog-avatar aria-label="' + te("更换头像") + '">' + userAvatarMarkup(state.user, "better-codex-profile-dialog-avatar") + '<span aria-hidden="true">' + icon("image") + '</span></button><label><span>' + te("昵称") + '</span><input name="nickname" maxlength="80" autocomplete="name" value="' + escapeHtml(state.user?.name || "") + '" required></label><output hidden></output></div><footer><button type="button" data-profile-dialog-cancel>' + te("取消") + '</button><button class="is-primary" type="submit">' + te("保存") + '</button></footer></form>';
+      dialog.innerHTML = '<form><header><div><h2 id="better-codex-profile-dialog-title">' + te("个人资料") + '</h2><p>' + te("昵称和头像只用于 WebUI 协作") + '</p></div><button type="button" data-profile-dialog-close aria-label="' + te("关闭") + '">' + icon("close") + '</button></header><div class="better-codex-profile-dialog-body"><button class="better-codex-profile-dialog-avatar-button" type="button" data-profile-dialog-avatar aria-label="' + te("更换头像") + '">' + userAvatarMarkup({ ...state.user, avatar, color }, "better-codex-profile-dialog-avatar") + '<span aria-hidden="true">' + icon("image") + '</span></button><label><span>' + te("昵称") + '</span><input name="nickname" maxlength="80" autocomplete="name" value="' + escapeHtml(state.user?.name || "") + '" required></label><fieldset><legend>' + te("选择颜色") + '</legend><div class="better-codex-profile-avatar-colors">' + colors + '</div></fieldset><output hidden></output></div><footer><button type="button" data-profile-dialog-cancel>' + te("取消") + '</button><button class="is-primary" type="submit">' + te("保存") + '</button></footer></form>';
       const form = dialog.querySelector("form");
       const avatarButton = dialog.querySelector("[data-profile-dialog-avatar]");
       const input = dialog.querySelector('input[name="nickname"]');
       const output = dialog.querySelector("output");
       const submit = dialog.querySelector('button[type="submit"]');
+      const colorButtons = [...dialog.querySelectorAll("[data-profile-avatar-color]")];
       const finish = () => {
         dialog.close();
         dialog.remove();
+      };
+      const syncPreview = () => {
+        avatarButton.querySelector(".better-codex-profile-dialog-avatar")?.remove();
+        avatarButton.insertAdjacentHTML("afterbegin", userAvatarMarkup({ ...state.user, name: input.value, avatar, color }, "better-codex-profile-dialog-avatar"));
+        for (const button of colorButtons) {
+          const selected = button.dataset.profileAvatarColor === color;
+          button.classList.toggle("is-selected", selected);
+          button.setAttribute("aria-pressed", String(selected));
+        }
       };
       avatarButton.addEventListener("click", () => {
         void pickAgentAvatar().then(value => {
           if (!value) return;
           avatar = value;
-          avatarButton.querySelector(".better-codex-profile-dialog-avatar")?.remove();
-          avatarButton.insertAdjacentHTML("afterbegin", userAvatarMarkup({ ...state.user, avatar }, "better-codex-profile-dialog-avatar"));
+          avatarGenerated = false;
+          syncPreview();
         }).catch(error => {
           presentInlineError(output, error, error instanceof Error ? t(error.message) : String(error), { source: "profile_avatar", report: false });
         });
+      });
+      input.addEventListener("input", () => {
+        if (!avatarGenerated) return;
+        avatar = generatedUserAvatar(input.value || t("你"), color);
+        syncPreview();
+      });
+      for (const button of colorButtons) button.addEventListener("click", () => {
+        color = button.dataset.profileAvatarColor;
+        avatarGenerated = true;
+        avatar = generatedUserAvatar(input.value || t("你"), color);
+        syncPreview();
       });
       form.addEventListener("submit", event => {
         event.preventDefault();
@@ -5193,10 +5263,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           input.focus();
           return;
         }
+        if (avatarGenerated) avatar = generatedUserAvatar(nickname, color);
         submit.disabled = true;
         output.hidden = true;
-        appendDiagnostic("profile_update_requested", { avatar_changed: avatar !== String(state.user?.avatar || ""), nickname_changed: nickname !== String(state.user?.name || "") });
-        void api("/api/profile", { method: "PATCH", body: JSON.stringify({ nickname, avatar }) }).then(result => {
+        appendDiagnostic("profile_update_requested", { avatar_changed: avatar !== String(state.user?.avatar || ""), avatar_generated: avatarGenerated, color_changed: color !== String(state.user?.color || ""), nickname_changed: nickname !== String(state.user?.name || "") });
+        void api("/api/profile", { method: "PATCH", body: JSON.stringify({ nickname, avatar, avatar_color: color, avatar_generated: avatarGenerated }) }).then(result => {
           if (!result?.user?.id) throw new Error("invalid_profile_response");
           appendDiagnostic("profile_update_completed", { user_id: result.user.id });
           applyUserProfile(result.user);
@@ -8800,13 +8871,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       function conversationBubbles(messages, profile = null) {
         const agent = state.agents.find(item => item.id === issue?.agent_id) || state.agents.find(item => item.is_default) || null;
         const agentName = agent ? agentDisplayName(agent) : (issue?.agent_enabled ? "Codex" : t("智能体"));
-        const user = profile && profile.name ? profile : state.user || { name: t("你"), initials: t("你"), color: "#16a34a" };
+        const user = profile && profile.name ? profile : state.user || { name: t("你"), initials: t("你"), color: USER_AVATAR_COLORS[0] };
         if (profile && profile.name) state.user = { ...state.user, ...profile };
         return (messages || []).map((message, index) => {
           const isUser = message.role === "user";
-          const avatar = isUser
-            ? '<span class="better-codex-bubble-avatar is-user is-initials" style="background:' + escapeHtml(user.color || "#16a34a") + '" title="' + escapeHtml(user.handle ? "@" + user.handle : user.name || "") + '" aria-hidden="true">' + escapeHtml(user.initials || t("你")) + '</span>'
-            : agentAvatarMarkup(agent, "better-codex-bubble-avatar");
+          const avatar = isUser ? userAvatarMarkup(user, "better-codex-bubble-avatar") : agentAvatarMarkup(agent, "better-codex-bubble-avatar");
           const name = isUser ? (user.name || t("你")) : agentName;
           const time = relativeTime(message.timestamp);
           const content = message.html || (message.attachments?.length ? "" : renderPlainBubble(message.markdown || ""));

@@ -10,7 +10,7 @@ import { deviceAuthorizationPage } from "./device-authorization-page.js";
 import { clearRelaySessionCookie, parseCookies, passwordHash, passwordMatches, readHubSecret, relaySessionCookie, validateWebPassword, validateWebUsername } from "./relay-auth.js";
 import { decodeRelayMessage, encodeRelayMessage, relayCapabilities, relayInitialWindowBytes, relayMaxChunkBytes, relayProtocolVersion, relayRuntimeReconnectCloseCode, relayRuntimeStoppedCloseCode, relayWebSocketProtocol, type RelayHello, type RelayMessage } from "./relay-protocol.js";
 import { RelayStore, type RelayCommand } from "./relay-store.js";
-import { avatarColor, avatarInitials } from "./user-profile.js";
+import { avatarInitials } from "./user-profile.js";
 import { betterCodexWebManifest, betterCodexWebServiceWorker } from "./web-app.js";
 import { betterCodexWebHostCss, betterCodexWebHostHtml, betterCodexWebHostJavaScript } from "./web-host.js";
 import { upgradeWebSocket, type WebSocketConnection } from "./websocket-server.js";
@@ -265,8 +265,9 @@ function userForWeb(user: NonNullable<ReturnType<RelayStore["webUser"]>>) {
     email: "",
     handle: user.username,
     initials: avatarInitials(user.nickname),
-    color: avatarColor(user.id),
+    color: user.avatar_color,
     avatar: user.avatar,
+    avatar_generated: user.avatar_generated,
     disabled: user.disabled,
   };
 }
@@ -813,7 +814,7 @@ export function createRelayServer(options: RelayServerOptions) {
         if (!session) return sendJson(response, 401, { error: "unauthorized" });
         if (!trustedOrigin(request, true) || !csrfValid) return sendJson(response, 403, { error: "csrf_invalid" });
         const body = await readBody(request, 600_000);
-        return sendJson(response, 200, { user: userForWeb(store.setWebUserProfile(session.user.id, body.nickname, body.avatar)) });
+        return sendJson(response, 200, { user: userForWeb(store.setWebUserProfile(session.user.id, body.nickname, body.avatar, body.avatar_color, body.avatar_generated)) });
       }
       if (url.pathname === "/api/v1/device-authorizations" && method === "POST") {
         const body = await readBody(request, 4096);

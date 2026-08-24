@@ -3,6 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, renameSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { WebCommandEnvelope } from "./command-contract.js";
+import { avatarColor, avatarColors } from "./user-profile.js";
 
 function now() {
   return new Date().toISOString();
@@ -38,6 +39,13 @@ function cleanAvatar(value: unknown) {
   throw new Error("relay_web_avatar_invalid");
 }
 
+function cleanAvatarColor(value: unknown) {
+  if (typeof value !== "string") throw new Error("relay_web_avatar_color_invalid");
+  const color = value.toLowerCase();
+  if (!(avatarColors as readonly string[]).includes(color)) throw new Error("relay_web_avatar_color_invalid");
+  return color;
+}
+
 type SessionRow = {
   id: string;
   user_id: string;
@@ -56,6 +64,8 @@ export type RelayWebUser = {
   username: string;
   nickname: string;
   avatar: string;
+  avatar_color: string;
+  avatar_generated: boolean;
   disabled: boolean;
   created_at: string;
   updated_at: string;
@@ -130,6 +140,8 @@ export class RelayStore {
         password_hash TEXT NOT NULL,
         nickname TEXT NOT NULL,
         avatar TEXT NOT NULL DEFAULT '',
+        avatar_color TEXT NOT NULL DEFAULT '',
+        avatar_generated INTEGER NOT NULL DEFAULT 1,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         disabled_at TEXT
@@ -188,6 +200,12 @@ export class RelayStore {
       CREATE INDEX IF NOT EXISTS relay_commands_delivery ON relay_commands(status, available_at, dispatch_expires_at, created_at);
       CREATE INDEX IF NOT EXISTS relay_commands_session ON relay_commands(session_id, created_at);
     `);
+    const webUserColumns = new Set((this.database.prepare("PRAGMA table_info(relay_web_users)").all() as Array<{ name: string }>).map(column => column.name));
+    if (!webUserColumns.has("avatar_color")) this.database.exec("ALTER TABLE relay_web_users ADD COLUMN avatar_color TEXT NOT NULL DEFAULT ''");
+    if (!webUserColumns.has("avatar_generated")) {
+      this.database.exec("ALTER TABLE relay_web_users ADD COLUMN avatar_generated INTEGER NOT NULL DEFAULT 1");
+      this.database.exec("UPDATE relay_web_users SET avatar_generated = 0 WHERE avatar <> ''");
+    }
     const webSessionColumns = new Set((this.database.prepare("PRAGMA table_info(relay_web_sessions)").all() as Array<{ name: string }>).map(column => column.name));
     if (!webSessionColumns.has("id")) this.database.exec("ALTER TABLE relay_web_sessions ADD COLUMN id TEXT");
     if (!webSessionColumns.has("user_id")) this.database.exec("ALTER TABLE relay_web_sessions ADD COLUMN user_id TEXT REFERENCES relay_web_users(id) ON DELETE CASCADE");
@@ -245,11 +263,15 @@ export class RelayStore {
   }
 
   private webUserFromRow(row: Record<string, unknown>): RelayWebUser {
+    const id = String(row.id);
+    const storedColor = String(row.avatar_color || "").toLowerCase();
     return {
-      id: String(row.id),
+      id,
       username: String(row.username),
       nickname: String(row.nickname || row.username),
       avatar: String(row.avatar || ""),
+      avatar_color: (avatarColors as readonly string[]).includes(storedColor) ? storedColor : avatarColor(id),
+      avatar_generated: Number(row.avatar_generated) !== 0,
       disabled: Boolean(row.disabled_at),
       created_at: String(row.created_at),
       updated_at: String(row.updated_at),
@@ -315,10 +337,16 @@ export class RelayStore {
     return this.webUser(user.id)!;
   }
 
-  setWebUserProfile(id: string, nicknameValue: unknown, avatarValue: unknown) {
+  setWebUserProfile(id: string, nicknameValue: unknown, avatarValue: unknown, avatarColorValue?: unknown, avatarGeneratedValue?: unknown) {
+    const current = this.webUser(id);
+    if (!current || current.disabled) throw new Error("web_user_not_found");
     const nickname = cleanNickname(nicknameValue);
     const avatar = cleanAvatar(avatarValue);
-    const result = this.database.prepare("UPDATE relay_web_users SET nickname = ?, avatar = ?, updated_at = ? WHERE id = ? AND disabled_at IS NULL").run(nickname, avatar, now(), id);
+    const color = avatarColorValue === undefined ? current.avatar_color : cleanAvatarColor(avatarColorValue);
+    const avatarGenerated = avatarGeneratedValue === undefined ? avatar === current.avatar ? current.avatar_generated : false : avatarGeneratedValue;
+    if (typeof avatarGenerated !== "boolean") throw new Error("relay_web_avatar_generated_invalid");
+    if (avatarGenerated && avatar && !avatar.startsWith("data:image/png;base64,")) throw new Error("relay_web_avatar_generated_invalid");
+    const result = this.database.prepare("UPDATE relay_web_users SET nickname = ?, avatar = ?, avatar_color = ?, avatar_generated = ?, updated_at = ? WHERE id = ? AND disabled_at IS NULL").run(nickname, avatar, color, avatarGenerated ? 1 : 0, now(), id);
     if (result.changes !== 1) throw new Error("web_user_not_found");
     this.audit(id, "web_profile_updated");
     return this.webUser(id)!;

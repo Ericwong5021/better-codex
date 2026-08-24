@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { issuePriorities, issueStatuses } from "./db.js";
 import { forbiddenProjectionKeys, normalizeAgentDirectoryProjection, normalizeAgentModelCatalogProjection, normalizeCodexUsageProjection, previousSyncProtocolVersion, projectDocumentKeys, remoteCommandOperations, runtimeProjectionSignature, supportedSyncProtocolVersions, syncEntityTypes, syncProtocolVersion, type AgentDirectoryProjection, type ConversationProjection, type DirectoryBrowserResult, type HubBoard, type IssueProjection, type ProjectDocumentView, type ProjectPlanItem, type ProjectProjection, type RemoteCommand, type RemoteCommandAck, type RemoteCommandOperation, type RemoteCommandStatus, type RuntimeProjection, type SyncChange, type SyncEntityType, type SyncProjection, type SyncPushRequest } from "./sync-contract.js";
+import { avatarColor, avatarColors } from "./user-profile.js";
 import { coreVersion } from "./version.js";
 
 function now() {
@@ -18,7 +19,7 @@ function tokenHash(value: string) {
   return createHash("sha256").update(value).digest("hex");
 }
 
-const hubSchemaVersion = 8;
+const hubSchemaVersion = 9;
 const webSessionIdleLifetimeMilliseconds = 12 * 60 * 60_000;
 const webSessionMaximumLifetimeMilliseconds = 30 * 24 * 60 * 60_000;
 
@@ -50,6 +51,13 @@ function cleanAvatar(value: unknown) {
   const avatar = cleanString(value, 400_000);
   if (!avatar || /^icon:[a-z0-9_-]{1,32}$/i.test(avatar) || /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(avatar)) return avatar;
   throw new Error("invalid_projection");
+}
+
+function cleanAvatarColor(value: unknown) {
+  if (typeof value !== "string") throw new Error("invalid_projection");
+  const color = value.toLowerCase();
+  if (!(avatarColors as readonly string[]).includes(color)) throw new Error("invalid_projection");
+  return color;
 }
 
 function cleanProjectDocumentViews(value: unknown): ProjectDocumentView[] {
@@ -434,6 +442,8 @@ export class HubStore {
         password_hash TEXT NOT NULL,
         nickname TEXT NOT NULL,
         avatar TEXT NOT NULL DEFAULT '',
+        avatar_color TEXT NOT NULL DEFAULT '',
+        avatar_generated INTEGER NOT NULL DEFAULT 1,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         disabled_at TEXT
@@ -557,6 +567,21 @@ export class HubStore {
         throw error;
       }
     }
+    const avatarVersion = Number((this.db.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM hub_migrations").get() as { version: number }).version);
+    if (avatarVersion < 9) {
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        const columns = new Set((this.db.prepare("PRAGMA table_info(web_users)").all() as Array<{ name: string }>).map(column => column.name));
+        if (!columns.has("avatar_color")) this.db.exec("ALTER TABLE web_users ADD COLUMN avatar_color TEXT NOT NULL DEFAULT ''");
+        if (!columns.has("avatar_generated")) this.db.exec("ALTER TABLE web_users ADD COLUMN avatar_generated INTEGER NOT NULL DEFAULT 1");
+        this.db.exec("UPDATE web_users SET avatar_generated = 0 WHERE avatar <> '' AND avatar_generated = 1");
+        this.db.prepare("INSERT INTO hub_migrations (version, applied_at) VALUES (9, ?)").run(now());
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    }
   }
 
   close() {
@@ -579,11 +604,15 @@ export class HubStore {
 
   private webUserFromRow(row: Record<string, unknown>) {
     const nickname = String(row.nickname || row.username || "");
+    const id = String(row.id);
+    const storedColor = String(row.avatar_color || "").toLowerCase();
     return {
-      id: String(row.id),
+      id,
       username: String(row.username),
       nickname,
       avatar: String(row.avatar || ""),
+      avatar_color: (avatarColors as readonly string[]).includes(storedColor) ? storedColor : avatarColor(id),
+      avatar_generated: Number(row.avatar_generated) !== 0,
       initials: Array.from(nickname.replace(/\s+/g, "")).slice(0, 2).join("") || "?",
       disabled: Boolean(row.disabled_at),
       created_at: String(row.created_at),
@@ -644,10 +673,16 @@ export class HubStore {
     return this.webUser(row.id)!;
   }
 
-  setWebUserProfile(id: string, nicknameValue: unknown, avatarValue: unknown) {
+  setWebUserProfile(id: string, nicknameValue: unknown, avatarValue: unknown, avatarColorValue?: unknown, avatarGeneratedValue?: unknown) {
+    const current = this.webUser(id);
+    if (!current || current.disabled) throw new Error("web_user_not_found");
     const nickname = cleanString(nicknameValue, 80, false).replace(/\s+/g, " ").trim();
     const avatar = cleanAvatar(avatarValue);
-    const result = this.db.prepare("UPDATE web_users SET nickname = ?, avatar = ?, updated_at = ? WHERE id = ? AND disabled_at IS NULL").run(nickname, avatar, now(), id);
+    const color = avatarColorValue === undefined ? current.avatar_color : cleanAvatarColor(avatarColorValue);
+    const avatarGenerated = avatarGeneratedValue === undefined ? avatar === current.avatar ? current.avatar_generated : false : avatarGeneratedValue;
+    if (typeof avatarGenerated !== "boolean") throw new Error("invalid_projection");
+    if (avatarGenerated && avatar && !avatar.startsWith("data:image/png;base64,")) throw new Error("invalid_projection");
+    const result = this.db.prepare("UPDATE web_users SET nickname = ?, avatar = ?, avatar_color = ?, avatar_generated = ?, updated_at = ? WHERE id = ? AND disabled_at IS NULL").run(nickname, avatar, color, avatarGenerated ? 1 : 0, now(), id);
     if (Number(result.changes) !== 1) throw new Error("web_user_not_found");
     this.audit(id, "web_profile_updated");
     return this.webUser(id)!;

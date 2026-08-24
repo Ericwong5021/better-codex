@@ -10,7 +10,7 @@ import { legacySyncProtocolVersion, supportedSyncProtocolVersions, syncProtocolV
 import { betterCodexWebHostCss, betterCodexWebHostHtml, betterCodexWebHostJavaScript } from "./web-host.js";
 import { betterCodexWebIconPng } from "./brand-assets.js";
 import { betterCodexWebManifest, betterCodexWebServiceWorker } from "./web-app.js";
-import { avatarColor, avatarInitials } from "./user-profile.js";
+import { avatarInitials } from "./user-profile.js";
 import { renderMarkdown } from "./markdown.js";
 import { deviceAuthorizationPage } from "./device-authorization-page.js";
 import { controlCapabilities, controlProtocolVersion, decodeControlMessage, encodeControlMessage } from "./control-protocol.js";
@@ -157,8 +157,9 @@ function userForWeb(user: NonNullable<ReturnType<HubStore["webUser"]>>) {
     email: "",
     handle: user.username,
     initials: avatarInitials(user.nickname),
-    color: avatarColor(user.id),
+    color: user.avatar_color,
     avatar: user.avatar,
+    avatar_generated: user.avatar_generated,
   };
 }
 
@@ -279,7 +280,7 @@ export function createHubServer(options: HubServerOptions) {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" });
         if (!trustedOrigin(request, true) || !csrfValid) return sendJson(response, 403, { error: "csrf_invalid" });
         const body = await readBody(request, 600_000);
-        return sendJson(response, 200, { user: userForWeb(store.setWebUserProfile(browser.user.id, body.nickname, body.avatar)) });
+        return sendJson(response, 200, { user: userForWeb(store.setWebUserProfile(browser.user.id, body.nickname, body.avatar, body.avatar_color, body.avatar_generated)) });
       }
       const deviceAuthorization = url.pathname.match(/^\/web\/device-authorizations\/([^/]+)$/);
       if (deviceAuthorization && method === "GET") {

@@ -13,16 +13,16 @@ export type CodexUserProfile = {
 
 const defaultAuthPath = join(process.env.CODEX_HOME || join(homedir(), ".codex"), "auth.json");
 
-const AVATAR_COLORS = [
-  "#16a34a",
+export const avatarColors = [
   "#2563eb",
-  "#db2777",
-  "#ea580c",
   "#7c3aed",
-  "#0d9488",
-  "#ca8a04",
-  "#dc2626",
-];
+  "#0f766e",
+  "#15803d",
+  "#4d7c0f",
+  "#a16207",
+  "#c2410c",
+  "#be185d",
+] as const;
 
 function decodeJwtPayload(token: string) {
   const parts = token.split(".");
@@ -67,7 +67,7 @@ export function avatarInitials(name: string) {
 export function avatarColor(seed: string) {
   let hash = 13;
   for (const character of seed) hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
-  return AVATAR_COLORS[hash % AVATAR_COLORS.length] || AVATAR_COLORS[0];
+  return avatarColors[hash % avatarColors.length] || avatarColors[0];
 }
 
 export function readCodexUserProfile(path = defaultAuthPath): CodexUserProfile {
@@ -77,7 +77,7 @@ export function readCodexUserProfile(path = defaultAuthPath): CodexUserProfile {
     email: "",
     handle: "",
     initials: "你",
-    color: AVATAR_COLORS[0],
+    color: avatarColors[0],
   };
   if (!existsSync(path)) return fallback;
   try {

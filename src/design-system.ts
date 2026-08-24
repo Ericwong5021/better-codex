@@ -1232,6 +1232,60 @@ export function betterCodexDesignSystemCss() {
       font-weight: 600;
     }
 
+    #better-codex-profile-dialog fieldset {
+      display: grid;
+      grid-column: 2;
+      gap: 9px;
+      min-width: 0;
+      margin: 0;
+      border: 0;
+      padding: 0;
+    }
+
+    #better-codex-profile-dialog legend {
+      color: var(--bc-color-text-muted);
+      padding: 0;
+      font-size: var(--bc-text-sm);
+      font-weight: 600;
+    }
+
+    #better-codex-profile-dialog .better-codex-profile-avatar-colors {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    #better-codex-profile-dialog .better-codex-profile-avatar-color {
+      display: grid;
+      width: 28px;
+      height: 28px;
+      flex: 0 0 28px;
+      border: 0;
+      border-radius: 999px;
+      place-items: center;
+      color: #fff;
+      background: var(--profile-avatar-color);
+      padding: 0;
+      cursor: pointer;
+      box-shadow: 0 0 0 1px color-mix(in srgb, var(--profile-avatar-color) 76%, var(--bc-color-text));
+      transition: box-shadow var(--bc-motion-fast) ease-out, transform var(--bc-motion-fast) var(--bc-ease-out);
+    }
+
+    #better-codex-profile-dialog .better-codex-profile-avatar-color svg {
+      width: 14px;
+      height: 14px;
+      opacity: 0;
+      stroke-width: 3;
+    }
+
+    #better-codex-profile-dialog .better-codex-profile-avatar-color.is-selected {
+      box-shadow: 0 0 0 2px var(--bc-color-surface-raised), 0 0 0 4px var(--profile-avatar-color);
+    }
+
+    #better-codex-profile-dialog .better-codex-profile-avatar-color.is-selected svg {
+      opacity: 1;
+    }
+
     #better-codex-profile-dialog input {
       box-sizing: border-box;
       width: 100%;
@@ -1317,6 +1371,10 @@ export function betterCodexDesignSystemCss() {
 
       #better-codex-profile-dialog footer button.is-primary:hover {
         background: color-mix(in oklch, var(--bc-color-primary) 88%, var(--bc-color-canvas));
+      }
+
+      #better-codex-profile-dialog .better-codex-profile-avatar-color:hover {
+        transform: scale(1.08);
       }
     }
 
