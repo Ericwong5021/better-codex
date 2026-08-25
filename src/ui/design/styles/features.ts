@@ -8348,12 +8348,14 @@ export function betterCodexFeatureStylesCss() {
       }
 
       #better-codex-panel[data-host="web"][data-surface="issues"] :is(.better-codex-tabs, .better-codex-actions) {
-        display: flex;
+        display: grid;
         width: 100%;
         flex: 1 1 auto;
+        grid-template-columns: minmax(0, 1fr) 40px 40px auto 40px;
+        grid-template-areas: none;
         align-items: center;
-        justify-content: flex-end;
-        gap: 4px;
+        justify-content: stretch;
+        gap: var(--bc-space-1);
         overflow: visible;
         padding: 0;
       }
@@ -8363,7 +8365,16 @@ export function betterCodexFeatureStylesCss() {
       }
 
       #better-codex-panel[data-host="web"][data-surface="issues"] .better-codex-actions > * {
-        min-width: auto;
+        min-width: 0;
+        margin: 0;
+      }
+
+      #better-codex-panel[data-host="web"][data-surface="issues"] .better-codex-actions > #better-codex-working,
+      #better-codex-panel[data-host="web"][data-surface="issues"] .better-codex-actions > .better-codex-search-wrap,
+      #better-codex-panel[data-host="web"][data-surface="issues"] .better-codex-actions > .better-codex-filter-wrap,
+      #better-codex-panel[data-host="web"][data-surface="issues"] .better-codex-actions > .better-codex-auto-dispatch-wrap,
+      #better-codex-panel[data-host="web"][data-surface="issues"] .better-codex-actions > .better-codex-create-split {
+        grid-area: auto;
       }
 
       #better-codex-panel[data-host="web"][data-surface="issues"] :is(.better-codex-tabs .better-codex-button, #better-codex-working, #better-codex-filter, #better-codex-auto-dispatch) {
@@ -8375,11 +8386,11 @@ export function betterCodexFeatureStylesCss() {
       }
 
       #better-codex-panel[data-host="web"][data-surface="issues"] #better-codex-working {
-        width: auto;
+        width: 100%;
         min-width: 44px;
-        flex: 1 1 auto;
-        justify-content: flex-start;
+        justify-content: center;
         padding-inline: 12px;
+        text-align: center;
       }
 
       #better-codex-panel[data-host="web"][data-surface="issues"] #better-codex-working::after {
@@ -8448,7 +8459,14 @@ export function betterCodexFeatureStylesCss() {
       #better-codex-panel[data-host="web"][data-surface="issues"] :is(.better-codex-filter-wrap, .better-codex-auto-dispatch-wrap) {
         width: auto;
         min-width: 0;
-        justify-content: flex-start;
+        align-items: center;
+        justify-content: center;
+        gap: var(--bc-space-1);
+      }
+
+      #better-codex-panel[data-host="web"][data-surface="issues"] .better-codex-filter-wrap {
+        width: 40px;
+        height: 40px;
       }
 
       #better-codex-panel[data-host="web"][data-surface="issues"] .better-codex-filter-menu {
@@ -8461,6 +8479,16 @@ export function betterCodexFeatureStylesCss() {
         width: 40px;
         height: 40px;
         flex-basis: 40px;
+      }
+
+      #better-codex-panel[data-host="web"][data-surface="issues"] :is(.better-codex-search-wrap, #better-codex-filter, #better-codex-auto-dispatch, .better-codex-auto-dispatch-help, .better-codex-create-primary) {
+        align-items: center;
+        justify-content: center;
+      }
+
+      #better-codex-panel[data-host="web"][data-surface="issues"] :is(.better-codex-search-wrap, #better-codex-filter, #better-codex-auto-dispatch, .better-codex-auto-dispatch-help, .better-codex-create-primary) > svg {
+        display: block;
+        margin: auto;
       }
 
       #better-codex-panel[data-host="web"][data-surface="issues"] .better-codex-create-split {
