@@ -558,8 +558,9 @@ test("session host keeps an active App Server turn alive across Runtime handoff"
   const turnId = "019fec06-788f-7af3-a031-76b546904f82";
   writeFileSync(fakeCodexScript, `#!/usr/bin/env node
 const readline = require("node:readline");
+const { basename } = require("node:path");
 if (process.argv.includes("--version")) { console.log("codex-fake 1.0.0"); process.exit(0); }
-if (!process.argv.some(value => /(^|[\\/])app-server$/.test(value))) process.exit(2);
+if (!process.argv.some(value => basename(value) === "app-server")) process.exit(2);
 const send = value => process.stdout.write(JSON.stringify(value) + "\\n");
 const input = readline.createInterface({ input: process.stdin });
 input.on("line", line => {
