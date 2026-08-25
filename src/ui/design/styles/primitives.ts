@@ -39,6 +39,10 @@ export function betterCodexPrimitiveStylesCss() {
       display: none !important;
     }
 
+    [data-bc-component][hidden] {
+      display: none !important;
+    }
+
     [data-bc-component="icon"] {
       display: inline-flex;
       width: var(--bc-icon-md);

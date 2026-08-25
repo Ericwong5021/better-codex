@@ -18,7 +18,7 @@ export interface ButtonProps {
 function button(initial: ButtonProps, context: ComponentContext, iconOnly: boolean, existing?: HTMLButtonElement) {
   const root = existing || document.createElement("button");
   const preserveContent = Boolean(existing);
-  root.type = "button";
+  if (!existing) root.type = "button";
   const stateObserver = new MutationObserver(() => {
     if (root.disabled && root.dataset.bcState !== "loading") root.dataset.bcState = "disabled";
     else if (!root.disabled && root.dataset.bcState === "disabled") root.dataset.bcState = "default";
