@@ -59,4 +59,7 @@ export const foundationTokens = [
   { name: "--bc-elevation-card", layer: "foundation", light: "0 1px 2px rgb(15 15 18 / .04), 0 2px 6px rgb(15 15 18 / .05)", dark: "0 1px 2px rgb(0 0 0 / .2), 0 2px 8px rgb(0 0 0 / .22)", hostOverridable: false, order: 88 },
   { name: "--bc-elevation-control", layer: "foundation", light: "0 1px 3px rgb(15 15 18 / .12)", dark: "0 1px 3px rgb(0 0 0 / .22)", hostOverridable: false, order: 89 },
   { name: "--bc-elevation-thumb", layer: "foundation", light: "0 1px 3px rgb(15 15 18 / .16)", dark: "0 1px 3px rgb(0 0 0 / .3)", hostOverridable: false, order: 90 },
+  { name: "--bc-leading-tight", layer: "foundation", light: "1", hostOverridable: false, order: 120 },
+  { name: "--bc-leading-body", layer: "foundation", light: "1.5", hostOverridable: false, order: 121 },
+  { name: "--bc-leading-relaxed", layer: "foundation", light: "1.7", hostOverridable: false, order: 122 },
 ] as const satisfies readonly DesignTokenDefinition[];

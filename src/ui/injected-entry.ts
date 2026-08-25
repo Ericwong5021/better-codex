@@ -1,6 +1,9 @@
 import { createHostAdapter } from "./hosts/index.js";
 import { applyHostTheme } from "./theme/apply.js";
 import { themeIsDegraded } from "./theme/diagnostics.js";
+import { createEmptyState } from "./components/empty-state.js";
+import { createIconButton } from "./primitives/button.js";
+import { createStatusBadge } from "./primitives/badge.js";
 
 export function install(config: Record<string, any>) {
   if (!config || config.schemaVersion !== 1) throw new Error("injected_ui_schema_mismatch");
@@ -770,6 +773,10 @@ export function install(config: Record<string, any>) {
     let themeEntry = null;
     let auxiliaryMenuDismiss = null;
     let panel = null;
+    let projectRefreshButton = null;
+    let projectEmptyState = null;
+    let projectHealthBadge = null;
+    let projectRefreshLoading = false;
     let observer = null;
     let refreshPending = false;
     let refreshTimer = null;
@@ -818,6 +825,40 @@ export function install(config: Record<string, any>) {
     let codexLogoSequence = 0;
     let active = false;
     let bootstrapReady = false;
+
+    function componentContext(feature, mountId) {
+      return {
+        feature,
+        host: HOST_ADAPTER.kind + (HOST_ADAPTER.remote ? ":remote" : ""),
+        mountId,
+        themeSource: window.__betterCodexThemeDiagnostics__?.themeSource || "fallback",
+      };
+    }
+
+    function projectRefreshProps() {
+      return {
+        accessibleName: t(projectRefreshLoading ? "正在刷新项目" : "刷新项目"),
+        disabled: state.mockup,
+        icon: LUCIDE_ICONS.refresh,
+        label: t(projectRefreshLoading ? "正在刷新项目" : "刷新项目"),
+        loading: projectRefreshLoading,
+        onPress: async () => {
+          projectRefreshLoading = true;
+          syncProjectRefreshButton();
+          try {
+            await perform(() => loadProjects());
+          } finally {
+            projectRefreshLoading = false;
+            syncProjectRefreshButton();
+          }
+        },
+        variant: "ghost",
+      };
+    }
+
+    function syncProjectRefreshButton() {
+      projectRefreshButton?.update(projectRefreshProps());
+    }
     let routeSeen = false;
     let routeSuppressed = false;
     let destroyed = false;
@@ -1198,9 +1239,6 @@ export function install(config: Record<string, any>) {
         #${PANEL_ID} .better-codex-project-card-path { display: flex; min-width: 0; align-items: center; gap: 6px; margin-top: auto; padding-top: 16px; color: var(--bc-faint); font-size: var(--bc-text-caption); }
         #${PANEL_ID} .better-codex-project-card-path svg { width: 13px; height: 13px; flex: 0 0 auto; }
         #${PANEL_ID} .better-codex-project-card-path span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        #${PANEL_ID} .better-codex-project-empty { width: min(520px,100%); margin: 16vh auto 0; text-align: center; }
-        #${PANEL_ID} .better-codex-project-empty strong { display: block; font-size: var(--bc-text-md); }
-        #${PANEL_ID} .better-codex-project-empty p { margin: 7px 0 0; color: var(--bc-muted); font-size: var(--bc-text-sm); line-height: 1.7; }
         #${PANEL_ID} .better-codex-project-detail { width: min(1440px,100%); margin: 0 auto; }
         #${PANEL_ID} .better-codex-project-back { display: inline-flex; min-height: 36px; align-items: center; gap: 7px; border: 0; border-radius: var(--bc-radius-sm); color: var(--bc-muted); background: transparent; padding: 0 9px; font: inherit; font-size: var(--bc-text-sm); cursor: pointer; }
         #${PANEL_ID} .better-codex-project-back svg { width: 15px; height: 15px; transform: rotate(180deg); }
@@ -1240,10 +1278,6 @@ export function install(config: Record<string, any>) {
         #${PANEL_ID} .better-codex-project-dashboard-title > div { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; }
         #${PANEL_ID} .better-codex-project-dashboard-title h1 { margin: 0; font-size: clamp(24px,2.2vw,34px); font-weight: 680; line-height: 1.2; letter-spacing: -.025em; }
         #${PANEL_ID} .better-codex-project-dashboard-title p { max-width: 74ch; margin: 8px 0 0; color: var(--bc-muted); font-size: var(--bc-text-sm); line-height: 1.65; }
-        #${PANEL_ID} .better-codex-project-health { display: inline-flex; min-height: 26px; align-items: center; gap: 6px; border-radius: 999px; padding: 0 10px; color: var(--bc-success); background: color-mix(in oklch,var(--bc-success) 11%,transparent); font-size: var(--bc-text-caption); font-weight: 650; }
-        #${PANEL_ID} .better-codex-project-health::before { width: 6px; height: 6px; border-radius: 50%; background: currentColor; content: ""; }
-        #${PANEL_ID} .better-codex-project-health[data-tone="warning"] { color: var(--bc-warning); background: color-mix(in oklch,var(--bc-warning) 12%,transparent); }
-        #${PANEL_ID} .better-codex-project-health[data-tone="danger"] { color: var(--bc-danger); background: color-mix(in oklch,var(--bc-danger) 11%,transparent); }
         #${PANEL_ID} .better-codex-project-dashboard-people { display: flex; flex: 0 0 auto; align-items: center; }
         #${PANEL_ID} .better-codex-project-dashboard-avatar { display: inline-flex; width: 32px; height: 32px; box-sizing: border-box; align-items: center; justify-content: center; overflow: hidden; margin-left: -7px; border: 2px solid var(--bc-page); border-radius: 999px; color: var(--bc-muted); background: var(--bc-control); font-size: 11px; font-weight: 700; }
         #${PANEL_ID} .better-codex-project-dashboard-avatar:first-child { margin-left: 0; }
@@ -4524,11 +4558,13 @@ export function install(config: Record<string, any>) {
       projectHeading.addEventListener("click", onProjectsClick);
       const projectActions = document.createElement("div");
       projectActions.className = "better-codex-project-actions";
+      projectRefreshButton = createIconButton(projectRefreshProps(), componentContext("projects", "projects-toolbar-refresh"));
+      projectRefreshButton.element.classList.add("better-codex-project-refresh");
       const addProject = actionButton("创建项目");
       addProject.classList.add("is-bordered");
       addProject.insertAdjacentHTML("afterbegin", icon("plus"));
       addProject.addEventListener("click", () => state.projectDetailId ? openEditor() : openCreateProjectDialog());
-      projectActions.append(addProject);
+      projectActions.append(projectRefreshButton.element, addProject);
       toolbar.append(tabs, scheduledHeading, agentHeading, projectHeading, error, actions, scheduledActions, agentActions, projectActions);
       const board = document.createElement("main");
       board.id = "better-codex-board";
@@ -5592,7 +5628,7 @@ export function install(config: Record<string, any>) {
       const agentAvatars = agents.map(agent => agentAvatarMarkup(agent, "better-codex-project-dashboard-avatar")).join("");
       const page = state.projectPage === "planning" ? "planning" : "overview";
       const headerActions = '<div class="better-codex-project-dashboard-actions">' + (agentAvatars ? '<div class="better-codex-project-dashboard-people" aria-label="' + te("项目智能体") + '">' + agentAvatars + '</div>' : "") + '<button class="better-codex-project-dashboard-delete" type="button" data-project-delete="' + escapeHtml(project.id) + '" aria-label="' + te("删除项目") + '" title="' + te("删除项目") + '">' + icon("trash") + '<span>' + te("删除项目") + '</span></button></div>';
-      const header = '<header class="better-codex-project-dashboard-head"><div class="better-codex-project-dashboard-title"><div><h1>' + escapeHtml(projectLabel(project)) + '</h1><span class="better-codex-project-health" data-tone="' + healthTone + '">' + escapeHtml(healthLabel) + '</span></div><p>' + escapeHtml(project.description || t("尚未生成项目介绍")) + '</p></div>' + headerActions + '</header><nav class="better-codex-project-dashboard-tabs" aria-label="' + te("项目页面") + '"><button type="button" data-project-dashboard-view="overview"' + (page === "overview" ? ' aria-current="page"' : "") + '>' + te("概览") + '</button><button type="button" data-project-dashboard-view="planning"' + (page === "planning" ? ' aria-current="page"' : "") + '>' + te("规划") + '</button><button type="button" data-project-dashboard-work>' + te("工作") + '</button></nav>';
+      const header = '<header class="better-codex-project-dashboard-head"><div class="better-codex-project-dashboard-title"><div><h1>' + escapeHtml(projectLabel(project)) + '</h1><span data-project-health-badge data-tone="' + healthTone + '">' + escapeHtml(healthLabel) + '</span></div><p>' + escapeHtml(project.description || t("尚未生成项目介绍")) + '</p></div>' + headerActions + '</header><nav class="better-codex-project-dashboard-tabs" aria-label="' + te("项目页面") + '"><button type="button" data-project-dashboard-view="overview"' + (page === "overview" ? ' aria-current="page"' : "") + '>' + te("概览") + '</button><button type="button" data-project-dashboard-view="planning"' + (page === "planning" ? ' aria-current="page"' : "") + '>' + te("规划") + '</button><button type="button" data-project-dashboard-work>' + te("工作") + '</button></nav>';
       if (page === "planning") return '<section class="better-codex-project-dashboard">' + header + projectPlanningMarkup(project) + '</section>';
       const priority = { blocked: 0, in_review: 1, in_progress: 2, todo: 3, backlog: 4, done: 5 };
       const work = [...activeIssues].filter(issue => ["blocked", "in_review", "in_progress", "todo"].includes(issue.status)).sort((left, right) => (priority[left.status] ?? 9) - (priority[right.status] ?? 9) || String(right.updated_at).localeCompare(String(left.updated_at))).slice(0, 5);
@@ -5642,11 +5678,19 @@ export function install(config: Record<string, any>) {
       }
     }
 
+    function destroyProjectRenderComponents() {
+      projectEmptyState?.destroy();
+      projectEmptyState = null;
+      projectHealthBadge?.destroy();
+      projectHealthBadge = null;
+    }
+
     function renderProjectContent(container, markup) {
       const viewKey = projectRenderKey();
       const sameView = container.dataset.projectRenderKey === viewKey;
       if (sameView && projectRenderedMarkup === markup) return;
       const positions = sameView ? projectScrollState(container) : [];
+      destroyProjectRenderComponents();
       container.innerHTML = markup;
       container.dataset.projectRenderKey = viewKey;
       projectRenderedMarkup = markup;
@@ -5660,6 +5704,41 @@ export function install(config: Record<string, any>) {
           surfaces: positions.filter(position => position.top || position.left || position.stickToEnd).map(position => position.name).join(",") || "zero",
         });
       });
+    }
+
+    function renderProjectEmptyState(container) {
+      const markup = '<span data-project-empty-state></span>';
+      renderProjectContent(container, markup);
+      const props = {
+        action: state.mockup ? undefined : {
+          icon: LUCIDE_ICONS.plus,
+          label: t("创建项目"),
+          onPress: () => openCreateProjectDialog(),
+          variant: "primary",
+        },
+        description: t("创建项目后，它会出现在 Codex 的项目列表中。"),
+        icon: LUCIDE_ICONS.folder,
+        title: t("暂无项目"),
+      };
+      if (projectEmptyState) {
+        projectEmptyState.update(props);
+        return;
+      }
+      const placeholder = container.querySelector("[data-project-empty-state]");
+      if (!placeholder) throw new Error("project_empty_state_mount_missing");
+      projectEmptyState = createEmptyState(props, componentContext("projects", "projects-empty-state"));
+      placeholder.replaceWith(projectEmptyState.element);
+    }
+
+    function mountProjectHealthBadge(container, projectId) {
+      const placeholder = container.querySelector("[data-project-health-badge]");
+      if (!placeholder) throw new Error("project_health_badge_mount_missing");
+      projectHealthBadge = createStatusBadge({
+        label: placeholder.textContent || "",
+        variant: placeholder.dataset.tone || "success",
+      }, componentContext("projects", "project-health:" + projectId));
+      projectHealthBadge.element.classList.add("better-codex-project-health");
+      placeholder.replaceWith(projectHealthBadge.element);
     }
 
     function renderProjects() {
@@ -5684,6 +5763,7 @@ export function install(config: Record<string, any>) {
         projectRenderDeferred = null;
       }
       const heading = panel.querySelector(".better-codex-project-heading");
+      syncProjectRefreshButton();
       const createButton = panel.querySelector(".better-codex-project-actions .better-codex-button");
       if (createButton) {
         createButton.hidden = false;
@@ -5693,7 +5773,7 @@ export function install(config: Record<string, any>) {
         if (heading) heading.innerHTML = '<strong>' + te("项目管理") + '</strong><span>' + escapeHtml(state.projects.length + " " + t("个项目")) + '</span>';
         if (HOST_KIND === "web" && state.surface === "projects") document.title = t("项目管理") + " · Better Codex";
         if (!state.projects.length) {
-          renderProjectContent(container, '<section class="better-codex-project-empty"><strong>' + te("暂无项目") + '</strong><p>' + te("创建项目后，它会出现在 Codex 的项目列表中。") + '</p></section>');
+          renderProjectEmptyState(container);
           return;
         }
         renderProjectContent(container, '<section class="better-codex-project-list">' + projectsByRecentActivity(state.projects).map(project => {
@@ -5723,6 +5803,7 @@ export function install(config: Record<string, any>) {
       if (heading) heading.innerHTML = '<button class="better-codex-project-back" type="button" data-project-back aria-label="' + te("返回项目列表") + '">' + icon("chevron") + '</button><nav class="better-codex-project-breadcrumb" aria-label="' + te("项目管理") + '"><button type="button" data-project-home>' + te("项目管理") + '</button><span aria-hidden="true">&gt;</span><strong title="' + escapeHtml(projectName) + '">' + escapeHtml(projectName) + '</strong></nav>';
       if (HOST_KIND === "web" && state.surface === "projects") document.title = t("项目管理") + " > " + projectName + " · Better Codex";
       renderProjectContent(container, '<section class="better-codex-project-detail">' + projectDashboardMarkup(project, issues, issuesLoading, paths) + '</section>');
+      if (!projectHealthBadge) mountProjectHealthBadge(container, project.id);
     }
 
     async function loadProjects(options = {}) {
@@ -10606,6 +10687,9 @@ export function install(config: Record<string, any>) {
       appServerRequests.clear();
       liveUnsubscribe?.();
       liveUnsubscribe = null;
+      projectRefreshButton?.destroy();
+      projectRefreshButton = null;
+      destroyProjectRenderComponents();
       document.removeEventListener("DOMContentLoaded", mount);
       document.removeEventListener("click", onClick, true);
       document.removeEventListener("pointerdown", onSessionPointerDown, true);

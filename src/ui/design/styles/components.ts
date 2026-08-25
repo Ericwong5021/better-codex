@@ -1,5 +1,70 @@
 export function betterCodexComponentStylesCss() {
   return String.raw`
+    [data-bc-component="empty-state"] {
+      display: flex;
+      width: min(520px, 100%);
+      box-sizing: border-box;
+      flex-direction: column;
+      align-items: center;
+      margin: 16vh auto 0;
+      padding: var(--bc-space-4);
+      text-align: center;
+    }
+
+    [data-bc-component="empty-state"] > svg {
+      width: calc(var(--bc-icon-md) * 2);
+      height: calc(var(--bc-icon-md) * 2);
+      margin-bottom: var(--bc-space-3);
+      color: var(--bc-color-text-faint);
+    }
+
+    [data-bc-component="empty-state"] > strong {
+      font-size: var(--bc-text-md);
+    }
+
+    [data-bc-component="empty-state"] > p {
+      max-width: 44ch;
+      margin: var(--bc-space-2) 0 0;
+      color: var(--bc-color-text-muted);
+      font-size: var(--bc-text-sm);
+      line-height: var(--bc-leading-relaxed);
+    }
+
+    [data-bc-component="empty-state"] > [data-bc-component="button"] {
+      margin-top: var(--bc-space-4);
+    }
+
+    [data-bc-component="empty-state"][data-bc-size="narrow"] {
+      margin-top: var(--bc-space-7);
+      padding-inline: var(--bc-space-3);
+    }
+
+    [data-bc-component="inline-feedback"] {
+      display: block;
+      box-sizing: border-box;
+      border-radius: var(--bc-radius-sm);
+      padding: var(--bc-space-2) var(--bc-space-3);
+      color: var(--bc-color-info);
+      background: color-mix(in oklch, var(--bc-color-info) 10%, var(--bc-color-surface));
+      font-size: var(--bc-text-sm);
+      line-height: var(--bc-leading-body);
+    }
+
+    [data-bc-component="inline-feedback"][data-bc-variant="success"] {
+      color: var(--bc-color-success);
+      background: color-mix(in oklch, var(--bc-color-success) 10%, var(--bc-color-surface));
+    }
+
+    [data-bc-component="inline-feedback"][data-bc-variant="warning"] {
+      color: var(--bc-color-warning);
+      background: color-mix(in oklch, var(--bc-color-warning) 10%, var(--bc-color-surface));
+    }
+
+    [data-bc-component="inline-feedback"][data-bc-variant="error"] {
+      color: var(--bc-color-danger);
+      background: var(--bc-color-danger-soft);
+    }
+
     #better-codex-archive-dialog {
       width: min(1120px, calc(100vw - 48px), calc((100vh - 48px) * 1.5));
       height: min(746.667px, calc(100vh - 48px), calc((100vw - 48px) * .666667));

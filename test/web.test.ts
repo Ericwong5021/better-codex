@@ -199,8 +199,8 @@ test("web host boots the shared DOM injection behind a local session", async () 
     assert.match(source, /"initialLocale":"zh-CN"/);
     assert.match(source, /HOST_KIND === "web" \? INITIAL_LOCALE : bootstrap\.locale/);
     assert.match(source, /data-better-codex-web-surface/);
-    assert.match(source, /button\.className = "web-nav-button"/);
-    assert.match(source, /parent\.prepend\(entry\)/);
+    assert.match(source, /className = "web-nav-button"/);
+    assert.match(source, /\.prepend\(entry\)/);
     assert.match(source, /document\.documentElement\.dataset\.theme = resolvedTheme/);
     assert.match(source, /name\.endsWith\("font-ui"\)/);
     assert.doesNotThrow(() => new Function(source));
