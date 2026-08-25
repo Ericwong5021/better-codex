@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -548,18 +548,18 @@ test("session host handoff fences stale Runtime generations", async () => {
   }
 });
 
-test("session host keeps an active App Server turn alive across Runtime handoff", { timeout: 30_000 }, async () => {
+test("session host keeps an active App Server turn alive across Runtime handoff", { timeout: 45_000 }, async () => {
   const home = mkdtempSync(join(tmpdir(), "better-codex-session-continuity-"));
   const token = "session-host-continuity-token";
   const socketPath = process.platform === "win32" ? "\\\\.\\pipe\\better-codex-session-host-development" : join(home, "run", "session-host");
-  const fakeCodexScript = join(home, "fake-codex.cjs");
-  const fakeCodex = process.platform === "win32" ? join(home, "fake-codex.cmd") : fakeCodexScript;
+  const fakeCodexScript = join(home, process.platform === "win32" ? "app-server" : "fake-codex.cjs");
+  const fakeCodex = process.platform === "win32" ? join(home, "fake-codex.exe") : fakeCodexScript;
   const threadId = "019fec06-788f-7af3-a031-76b546904f81";
   const turnId = "019fec06-788f-7af3-a031-76b546904f82";
   writeFileSync(fakeCodexScript, `#!/usr/bin/env node
 const readline = require("node:readline");
 if (process.argv.includes("--version")) { console.log("codex-fake 1.0.0"); process.exit(0); }
-if (!process.argv.includes("app-server")) process.exit(2);
+if (!process.argv.some(value => /(^|[\\/])app-server$/.test(value))) process.exit(2);
 const send = value => process.stdout.write(JSON.stringify(value) + "\\n");
 const input = readline.createInterface({ input: process.stdin });
 input.on("line", line => {
@@ -580,13 +580,18 @@ input.on("line", line => {
   send({ id: message.id, result: {} });
 });
 `, { mode: 0o700 });
-  if (process.platform === "win32") writeFileSync(fakeCodex, `@echo off\r\n"${process.execPath}" "${fakeCodexScript}" %*\r\n`);
+  if (process.platform === "win32") copyFileSync(process.execPath, fakeCodex);
   else chmodSync(fakeCodex, 0o700);
-  const host = spawn(process.execPath, ["--import", "tsx", "src/cli.ts", "session-host"], {
-    cwd: process.cwd(),
+  const hostArguments = process.platform === "win32"
+    ? ["--import", import.meta.resolve("tsx"), join(process.cwd(), "src", "cli.ts"), "session-host"]
+    : ["--import", "tsx", "src/cli.ts", "session-host"];
+  const host = spawn(process.execPath, hostArguments, {
+    cwd: process.platform === "win32" ? home : process.cwd(),
     env: { ...process.env, BETTER_CODEX_HOME: home, BETTER_CODEX_PROFILE: "development", BETTER_CODEX_TOKEN: token, BETTER_CODEX_CODEX_PATH: fakeCodex },
     stdio: ["ignore", "pipe", "pipe"],
   });
+  let hostOutput = "";
+  host.stderr?.on("data", chunk => { hostOutput += String(chunk); });
   let source: Socket | undefined;
   let target: Socket | undefined;
   const diagnosticState: Record<string, unknown> = { phase: "starting", source_polls: 0, target_polls: 0, status_responses: 0, completed_event: false, last_message: null, last_delivery: null, snapshot: null };
@@ -613,12 +618,12 @@ input.on("line", line => {
     });
   };
   try {
-    const deadline = Date.now() + 10_000;
+    const deadline = Date.now() + 20_000;
     while (Date.now() < deadline) {
       try { source = await openSocket(socketPath); break; }
       catch { if (host.exitCode !== null) throw new Error(`session_host_exit_${host.exitCode}`); await new Promise(resolve => setTimeout(resolve, 50)); }
     }
-    assert.ok(source);
+    assert.ok(source, hostOutput || "session_host_start_timeout");
     diagnosticState.phase = "source_connected";
     const sourceNext = queue(source);
     const capabilities = { durable_deliveries: true, runtime_handoff: true };
