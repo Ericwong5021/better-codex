@@ -18,6 +18,10 @@ export interface ButtonProps {
 function button(initial: ButtonProps, context: ComponentContext, iconOnly: boolean) {
   const root = document.createElement("button");
   root.type = "button";
+  const stateObserver = new MutationObserver(() => {
+    if (root.disabled && root.dataset.bcState !== "loading") root.dataset.bcState = "disabled";
+    else if (!root.disabled && root.dataset.bcState === "disabled") root.dataset.bcState = "default";
+  });
   const lifecycle = createComponentLifecycle(iconOnly ? "icon-button" : "button", context, root, initial, props => {
     const variant = props.variant || "secondary";
     const disabled = Boolean(props.disabled || props.loading);
@@ -39,7 +43,8 @@ function button(initial: ButtonProps, context: ComponentContext, iconOnly: boole
       children.push(label);
     }
     root.replaceChildren(...children);
-  });
+  }, () => stateObserver.disconnect());
+  stateObserver.observe(root, { attributes: true, attributeFilter: ["disabled"] });
   listen(root, "click", event => {
     const props = lifecycle.props();
     if (props.disabled || props.loading || !props.onPress) return;

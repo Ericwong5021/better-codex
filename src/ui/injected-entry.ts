@@ -2,7 +2,7 @@ import { createHostAdapter } from "./hosts/index.js";
 import { applyHostTheme } from "./theme/apply.js";
 import { themeIsDegraded } from "./theme/diagnostics.js";
 import { createEmptyState } from "./components/empty-state.js";
-import { createIconButton } from "./primitives/button.js";
+import { createButton, createIconButton } from "./primitives/button.js";
 import { createStatusBadge } from "./primitives/badge.js";
 
 export function install(config: Record<string, any>) {
@@ -777,6 +777,8 @@ export function install(config: Record<string, any>) {
     let projectEmptyState = null;
     let projectHealthBadge = null;
     let projectRefreshLoading = false;
+    let managedButtonSequence = 0;
+    const managedButtons = new Set();
     let observer = null;
     let refreshPending = false;
     let refreshTimer = null;
@@ -1077,11 +1079,10 @@ export function install(config: Record<string, any>) {
     }
 
     function actionButton(text) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "better-codex-button";
-      button.textContent = t(text);
-      return button;
+      const handle = createButton({ label: t(text), variant: "ghost" }, componentContext("global-toolbar", "action-button:" + (++managedButtonSequence)));
+      handle.element.classList.add("better-codex-button");
+      managedButtons.add(handle);
+      return handle.element;
     }
 
     function createEntry(text, id, title, surface) {
@@ -9884,6 +9885,8 @@ export function install(config: Record<string, any>) {
       projectRefreshButton?.destroy();
       projectRefreshButton = null;
       destroyProjectRenderComponents();
+      managedButtons.forEach(handle => handle.destroy());
+      managedButtons.clear();
       document.removeEventListener("DOMContentLoaded", mount);
       document.removeEventListener("click", onClick, true);
       document.removeEventListener("pointerdown", onSessionPointerDown, true);
