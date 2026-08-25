@@ -75,6 +75,7 @@ test("synchronizes two browser contexts and rejects a stale write", async ({ bro
 });
 
 test("supports English, dark theme, mobile viewport, and keyboard dismissal", async ({ browser }) => {
+  test.setTimeout(60_000);
   const { context, page } = await openAuthenticatedPage(browser, {
     locale: "en-US",
     colorScheme: "dark",
@@ -106,8 +107,83 @@ test("supports English, dark theme, mobile viewport, and keyboard dismissal", as
   await expect(page.locator("#better-codex-board")).toBeVisible();
   await page.locator(".better-codex-create-primary").click();
   await expect(page.locator("#better-codex-dialog")).toBeVisible();
+  const issueDialogStructure = await page.locator("#better-codex-dialog").evaluate(dialog => {
+    const editor = dialog.querySelector<HTMLElement>(".better-codex-dialog-editor");
+    const properties = dialog.querySelector<HTMLElement>(".better-codex-dialog-properties");
+    if (!editor || !properties) throw new Error("issue_dialog_structure_missing");
+    const dialogStyle = getComputedStyle(dialog);
+    const editorStyle = getComputedStyle(editor);
+    const propertiesStyle = getComputedStyle(properties);
+    return {
+      editorBorder: editorStyle.borderTopWidth,
+      editorFont: editorStyle.fontFamily,
+      editorResize: editorStyle.resize,
+      propertiesDisplay: propertiesStyle.display,
+      dialogFont: dialogStyle.fontFamily,
+    };
+  });
+  expect(issueDialogStructure).toEqual({
+    editorBorder: "0px",
+    editorFont: issueDialogStructure.dialogFont,
+    editorResize: "none",
+    propertiesDisplay: "flex",
+    dialogFont: issueDialogStructure.dialogFont,
+  });
+  await page.getByRole("button", { name: "Switch to manual" }).click();
+  await expect(page.locator(".better-codex-manual-title")).toBeVisible();
+  const manualDialogStructure = await page.locator("#better-codex-dialog").evaluate(dialog => {
+    const title = dialog.querySelector<HTMLElement>(".better-codex-manual-title");
+    const editor = dialog.querySelector<HTMLElement>(".better-codex-dialog-editor");
+    if (!title || !editor) throw new Error("manual_dialog_structure_missing");
+    const dialogStyle = getComputedStyle(dialog);
+    const titleStyle = getComputedStyle(title);
+    const editorStyle = getComputedStyle(editor);
+    return {
+      dialogFont: dialogStyle.fontFamily,
+      editorBorder: editorStyle.borderTopWidth,
+      editorFont: editorStyle.fontFamily,
+      titleBorder: titleStyle.borderTopWidth,
+      titleFont: titleStyle.fontFamily,
+    };
+  });
+  expect(manualDialogStructure).toEqual({
+    dialogFont: manualDialogStructure.dialogFont,
+    editorBorder: "0px",
+    editorFont: manualDialogStructure.dialogFont,
+    titleBorder: "0px",
+    titleFont: manualDialogStructure.dialogFont,
+  });
   await page.keyboard.press("Escape");
   await expect(page.locator("#better-codex-dialog")).toHaveCount(0);
+  await page.locator("#better-codex-more-entry").click();
+  await page.locator("#better-codex-projects-entry").click();
+  await expect(page.locator("#better-codex-panel")).toHaveAttribute("data-surface", "projects");
+  await page.locator(".better-codex-project-actions .better-codex-button").click();
+  await expect(page.locator("#better-codex-project-dialog")).toBeVisible();
+  const projectDialogStructure = await page.locator("#better-codex-project-dialog").evaluate(dialog => {
+    const form = dialog.querySelector("form");
+    const input = dialog.querySelector("input");
+    if (!form || !input) throw new Error("project_dialog_structure_missing");
+    const dialogStyle = getComputedStyle(dialog);
+    const formStyle = getComputedStyle(form);
+    const inputStyle = getComputedStyle(input);
+    return {
+      border: dialogStyle.borderTopWidth,
+      dialogFont: dialogStyle.fontFamily,
+      formPadding: formStyle.paddingTop,
+      inputBorder: inputStyle.borderTopWidth,
+      inputFont: inputStyle.fontFamily,
+    };
+  });
+  expect(projectDialogStructure).toEqual({
+    border: "0px",
+    dialogFont: projectDialogStructure.dialogFont,
+    formPadding: "24px",
+    inputBorder: "0px",
+    inputFont: projectDialogStructure.dialogFont,
+  });
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#better-codex-project-dialog")).toHaveCount(0);
   await context.close();
 });
 
