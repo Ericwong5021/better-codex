@@ -9653,8 +9653,8 @@ export function install(config: Record<string, any>) {
       }, { once: true });
       bindModalDismiss(dialog, () => dialog.close());
       renderDialog();
-      dialog.showModal();
       mobileDialogViewport();
+      dialog.showModal();
       if (issue && panel && typeof ResizeObserver === "function") {
         dialogBoundsObserver = new ResizeObserver(syncIssueFullscreenBounds);
         dialogBoundsObserver.observe(panel);
