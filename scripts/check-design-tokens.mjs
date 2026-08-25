@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { isAbsolute, join, relative, sep } from "node:path";
 
 const root = process.cwd();
 const sourceRoot = join(root, "src");
@@ -38,6 +38,11 @@ function lineNumber(source, index) {
   return source.slice(0, index).split("\n").length;
 }
 
+function isWithin(path, directory) {
+  const candidate = relative(directory, path);
+  return candidate === "" || (!isAbsolute(candidate) && candidate !== ".." && !candidate.startsWith(`..${sep}`));
+}
+
 function normalized(value) {
   return value.trim().replace(/\s+/g, " ");
 }
@@ -72,7 +77,7 @@ for (const file of sourceFiles) {
     if (!colorPrimitiveFiles.has(file)) errors.push(`${relative(root, file)}:${lineNumber(source, match.index)} hardcoded_color ${match[0]}`);
   }
   for (const match of source.matchAll(/(--bc-[a-z0-9-]+)\s*:/gi)) {
-    if (!file.startsWith(`${designRoot}/`)) {
+    if (!isWithin(file, designRoot)) {
       errors.push(`${relative(root, file)}:${lineNumber(source, match.index)} token_definition_outside_design_registry ${match[1]}`);
     } else if (!definitions.has(match[1])) {
       errors.push(`${relative(root, file)}:${lineNumber(source, match.index)} unregistered_design_token ${match[1]}`);
