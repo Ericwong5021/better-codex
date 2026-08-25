@@ -1151,7 +1151,18 @@ export function startServer() {
         return;
       }
       if (url.pathname === "/api/issues/attachments" && method === "POST") {
-        const body = await readBody(request, maxPastedImageBodyBytes);
+        const body = await readBody(request, maxRemoteFileBodyBytes);
+        if (Array.isArray(body.files)) {
+          const incomingFiles = body.files as Array<{ name: string; type: string }>;
+          const saved = saveRemoteFiles(body.files, String(request.headers["x-better-codex-request-id"] || randomUUID()));
+          return sendJson(response, 201, {
+            attachments: saved.paths.map((path, index) => ({
+              name: cleanString(basename(incomingFiles[index].name), 255).trim() || basename(path),
+              path,
+              type: cleanString(incomingFiles[index].type, 200).trim().toLowerCase(),
+            })),
+          });
+        }
         return sendJson(response, 201, savePastedImage(body.data));
       }
       if (url.pathname === "/api/bootstrap" && method === "GET") {

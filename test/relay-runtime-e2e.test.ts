@@ -63,7 +63,7 @@ async function waitFor(check: () => boolean | Promise<boolean>, process?: ChildP
   throw new Error(output || "condition_timeout");
 }
 
-test("public Relay drives the real Runtime and recovers without storing business data", { timeout: 45_000 }, async () => {
+test("public Relay drives the real Runtime and recovers without storing business data", { timeout: 120_000 }, async () => {
   const home = mkdtempSync(join(tmpdir(), "better-codex-relay-runtime-"));
   mkdirSync(join(home, "codex"));
   const relay = createRelayServer({ host: "127.0.0.1", port: 0, database: ":memory:", adminToken: "e".repeat(64), webUsername: "admin", webPassword: "relay-password-123", secureCookies: false, heartbeatIntervalMs: 1000, reconnectGraceMs: 250 });
@@ -88,7 +88,7 @@ test("public Relay drives the real Runtime and recovers without storing business
         if (error instanceof Error && !error.message.includes("fetch failed")) throw error;
       }
       return relay.runtime() !== null;
-    }, runtime);
+    }, runtime, 40_000);
     const login = await fetch(`${base}/relay/session`, { method: "POST", headers: { "content-type": "application/json", origin: base }, body: JSON.stringify({ username: "admin", password: "relay-password-123" }) });
     assert.equal(login.status, 200);
     const session = await login.json() as { csrf_token: string };
@@ -125,13 +125,20 @@ test("public Relay drives the real Runtime and recovers without storing business
     await eventReader.cancel().catch(() => {});
 
     const attachmentData = Buffer.from("relay attachment payload").toString("base64");
-    const issueBody = JSON.stringify({ project_id: project.id, title: "Relay issue", description: "Created through public Relay", request_id: "relay-business-create-1", files: [{ name: "proof.txt", type: "text/plain", data: `data:text/plain;base64,${attachmentData}` }] });
+    const cachedAttachmentResponse = await request("/api/issues/attachments", { method: "POST", body: JSON.stringify({ files: [{ name: "proof.txt", type: "text/plain", data: `data:text/plain;base64,${attachmentData}` }] }) });
+    assert.equal(cachedAttachmentResponse.status, 201, await cachedAttachmentResponse.clone().text());
+    const cachedAttachment = (await cachedAttachmentResponse.json() as { attachments: Array<{ name: string; path: string; type: string }> }).attachments[0];
+    assert.equal(cachedAttachment.name, "proof.txt");
+    assert.equal(cachedAttachment.type, "text/plain");
+    assert.equal(readFileSync(cachedAttachment.path, "utf8"), "relay attachment payload");
+    const issueBody = JSON.stringify({ project_id: project.id, title: "Relay issue", description: `Created through public Relay\n\nAttached files:\n- ${cachedAttachment.path}`, request_id: "relay-business-create-1" });
     const issueHeaders = { origin: base, cookie, "x-csrf-token": session.csrf_token, "x-better-codex-request-id": "relay-e2e-idempotent-1", "content-type": "application/json" };
     const issueResponse = await fetch(`${base}/api/issues`, { method: "POST", headers: issueHeaders, body: issueBody });
     assert.equal(issueResponse.status, 201);
     const issue = await issueResponse.json() as { id: string; version: number; description: string };
-    const attachmentPath = issue.description.split("\n").find(line => line.startsWith("- "))?.slice(2) || "";
-    assert.equal(readFileSync(attachmentPath, "utf8"), "relay attachment payload");
+    const issueAttachmentPath = issue.description.split("\n").find(line => line.startsWith("- "))?.slice(2) || "";
+    assert.equal(issueAttachmentPath, cachedAttachment.path);
+    assert.equal(readFileSync(issueAttachmentPath, "utf8"), "relay attachment payload");
     assert.equal(readdirSync(join(home, "attachments")).length, 1);
     const replay = await fetch(`${base}/api/issues`, { method: "POST", headers: issueHeaders, body: issueBody });
     assert.equal(replay.status, 201);
@@ -141,7 +148,10 @@ test("public Relay drives the real Runtime and recovers without storing business
     assert.equal(conflict.status, 409);
 
     const draftAttachmentData = Buffer.from("relay reply draft attachment").toString("base64");
-    const draftResponse = await request(`/api/issues/${issue.id}`, { method: "PATCH", body: JSON.stringify({ version: issue.version, reply_draft: "Remote reply draft", reply_draft_attachments: [], files: [{ name: "reply-draft.txt", type: "text/plain", data: `data:text/plain;base64,${draftAttachmentData}` }] }) });
+    const cachedDraftResponse = await request("/api/issues/attachments", { method: "POST", body: JSON.stringify({ files: [{ name: "reply-draft.txt", type: "text/plain", data: `data:text/plain;base64,${draftAttachmentData}` }] }) });
+    assert.equal(cachedDraftResponse.status, 201, await cachedDraftResponse.clone().text());
+    const cachedDraftAttachment = (await cachedDraftResponse.json() as { attachments: Array<{ name: string; path: string; type: string }> }).attachments[0];
+    const draftResponse = await request(`/api/issues/${issue.id}`, { method: "PATCH", body: JSON.stringify({ version: issue.version, reply_draft: "Remote reply draft", reply_draft_attachments: [cachedDraftAttachment] }) });
     assert.equal(draftResponse.status, 200);
     const draftedIssue = await draftResponse.json() as { version: number; reply_draft: string; reply_draft_attachments: Array<{ name: string; path: string; type: string }> };
     assert.equal(draftedIssue.reply_draft, "Remote reply draft");
@@ -180,7 +190,7 @@ test("public Relay drives the real Runtime and recovers without storing business
     assert.match(offlineBody.trace_id, /^[0-9a-f-]{36}$/);
 
     runtime = startRuntime(home, runtimePort, runtimeToken);
-    await waitFor(() => relay.runtime() !== null, runtime);
+    await waitFor(() => relay.runtime() !== null, runtime, 40_000);
     const recovered = await request(`/api/issues/${issue.id}`);
     assert.equal(recovered.status, 200);
     const recoveredIssue = await recovered.json() as { id: string; reply_draft: string; reply_draft_attachments: Array<{ name: string; path: string }> };

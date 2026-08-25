@@ -805,22 +805,26 @@ test("issue keep-open toggle keeps a visible track in light mode", () => {
   assert.match(toggleRule, /box-shadow:\s*var\(--bc-inset-hairline\)/);
 });
 
-test("create dialog paperclip preserves local paths and transfers remote files", () => {
+test("create and reply dialogs persist cached attachment references", () => {
   const source = injectionSource(4317, "test-token", "install");
 
   assert.ok(source.includes('data-dialog-attach aria-label="\' + te("添加附件")'));
-  assert.ok(source.includes("attachments: []"));
+  assert.ok(source.includes("attachments: cachedCreateDraft?.attachments?.map"));
+  assert.ok(source.includes("attachments: Array.isArray(draft.attachments)"));
+  assert.ok(source.includes("attachments: draft.attachments.filter(item => item.path)"));
   assert.ok(source.includes("function pickAttachments(existing = [])"));
   assert.ok(source.includes("async function remoteFiles(items)"));
+  assert.ok(source.includes("async function cacheRemoteAttachments(items)"));
+  assert.ok(source.includes('api("/api/issues/attachments", { method: "POST", body: JSON.stringify({ files })'));
   assert.ok(source.includes("if (!issue || REMOTE && !RELAY) return;"));
-  assert.ok(source.includes("if (RELAY) files = await remoteFiles(pendingFiles);"));
-  assert.ok(source.includes("if (files.length) body.files = files;"));
+  assert.ok(source.includes("if (RELAY) await cacheRemoteAttachments(items);"));
+  assert.ok(source.includes("if (RELAY) await cacheRemoteAttachments(next);"));
   assert.ok(source.includes("files = await remoteFiles(draft.replyAttachments.filter(item => item.file));"));
   assert.ok(source.includes("message = withAttachments(text, draft.replyAttachments.filter(item => item.path));"));
   assert.ok(source.includes("function withAttachments(text, items = draft.attachments)"));
   assert.ok(source.includes('const path = String(file.path || "").trim()'));
   assert.ok(source.includes('const block = t("附带文件：") + "\\n"'));
-  assert.ok(source.includes("const submittedDescription = REMOTE ? (draft.mode === \"agent\" ? prompt : draft.description) : withAttachments(draft.mode === \"agent\" ? prompt : draft.description)"));
+  assert.ok(source.includes("const submittedDescription = withAttachments(draft.mode === \"agent\" ? prompt : draft.description)"));
   assert.ok(source.includes("description: submittedDescription"));
   assert.ok(source.includes("reconcileSemanticText(draft.promptSemanticDocument, submittedDescription)"));
   assert.ok(source.includes("data-dialog-detach"));

@@ -252,6 +252,7 @@ export function install(config: Record<string, any>) {
           prompt: String(draft.prompt || ""),
           promptSemanticReferences: Array.isArray(draft.promptSemanticReferences) ? draft.promptSemanticReferences.filter(reference => reference && ["skill", "app", "mention"].includes(reference.type) && typeof reference.name === "string" && typeof reference.ref === "string").slice(0, 32) : [],
           promptSemanticDocument: draft.promptSemanticDocument && typeof draft.promptSemanticDocument === "object" ? draft.promptSemanticDocument : undefined,
+          attachments: Array.isArray(draft.attachments) ? draft.attachments.filter(item => item && typeof item.name === "string" && typeof item.path === "string" && item.path).slice(0, 4).map(item => ({ name: item.name, path: item.path, type: typeof item.type === "string" ? item.type : "" })) : [],
           requestId: typeof draft.requestId === "string" && draft.requestId.length <= 200 ? draft.requestId : ""
         };
       } catch {
@@ -260,8 +261,8 @@ export function install(config: Record<string, any>) {
       }
     }
     function writeCreateDraft(draft, requestId) {
-      const cached = { mode: draft.mode, title: draft.title, description: draft.description, prompt: draft.prompt, promptSemanticReferences: draft.promptSemanticReferences, promptSemanticDocument: serializeSemanticDraft(draft.promptSemanticDocument), requestId };
-      if (![cached.title, cached.description, cached.prompt].some(value => value.trim())) {
+      const cached = { mode: draft.mode, title: draft.title, description: draft.description, prompt: draft.prompt, promptSemanticReferences: draft.promptSemanticReferences, promptSemanticDocument: serializeSemanticDraft(draft.promptSemanticDocument), attachments: draft.attachments.filter(item => item.path).map(item => ({ name: item.name, path: item.path, type: item.type || "" })), requestId };
+      if (![cached.title, cached.description, cached.prompt].some(value => value.trim()) && !cached.attachments.length) {
         sessionStorage.removeItem(CREATE_DRAFT_KEY);
         return;
       }
@@ -7367,7 +7368,7 @@ export function install(config: Record<string, any>) {
         replySemanticReferences: [],
         promptSemanticDocument: createSemanticDraft(issue?.description || cachedPrompt, cachedCreateDraft?.promptSemanticDocument),
         replySemanticDocument: createSemanticDraft(issue?.reply_draft || ""),
-        attachments: [],
+        attachments: cachedCreateDraft?.attachments?.map(item => ({ ...item, file: null, previewUrl: "" })) || [],
         replyAttachments: Array.isArray(issue?.reply_draft_attachments) ? issue.reply_draft_attachments.map(item => ({ name: item.name, path: item.path, type: item.type || "", file: null, previewUrl: "" })) : []
       };
       const dialog = document.createElement("dialog");
@@ -7615,10 +7616,8 @@ export function install(config: Record<string, any>) {
       function persistReplyDraft(value, items = draft.replyAttachments) {
         if (!issue || REMOTE && !RELAY) return;
         replyDraftUpdate = replyDraftUpdate.catch(() => {}).then(async () => {
-          const pendingFiles = RELAY ? items.filter(item => item.file && !item.path) : [];
-          let files = [];
           try {
-            if (RELAY) files = await remoteFiles(pendingFiles);
+            if (RELAY) await cacheRemoteAttachments(items);
             else await uploadPastedImages(items);
           } catch (error) {
             showError(error);
@@ -7629,14 +7628,7 @@ export function install(config: Record<string, any>) {
           for (let attempt = 0; attempt < 2; attempt += 1) {
             try {
               const body = { version: current.version, reply_draft: value, reply_draft_attachments: attachments };
-              if (files.length) body.files = files;
               const updated = await api("/api/issues/" + encodeURIComponent(issue.id), { method: "PATCH", body: JSON.stringify(body) });
-              const savedAttachments = Array.isArray(updated.reply_draft_attachments) ? updated.reply_draft_attachments.slice(attachments.length) : [];
-              pendingFiles.forEach((item, index) => {
-                if (!savedAttachments[index]) return;
-                item.path = savedAttachments[index].path;
-                item.file = null;
-              });
               refreshIssueState(updated);
               return;
             } catch (error) {
@@ -8784,6 +8776,22 @@ export function install(config: Record<string, any>) {
         return Promise.all(items.map(async item => ({ name: item.name, type: item.file.type || "application/octet-stream", data: await fileDataUrl(item.file) })));
       }
 
+      async function cacheRemoteAttachments(items) {
+        const pending = items.filter(item => item.file && !item.path);
+        if (!pending.length) return;
+        const files = await remoteFiles(pending);
+        const result = await api("/api/issues/attachments", { method: "POST", body: JSON.stringify({ files }), timeoutMs: 120_000 });
+        if (!Array.isArray(result.attachments) || result.attachments.length !== pending.length) throw new Error("attachment_cache_invalid");
+        pending.forEach((item, index) => {
+          const saved = result.attachments[index];
+          if (!saved || typeof saved.path !== "string" || !saved.path) throw new Error("attachment_cache_invalid");
+          item.name = saved.name || item.name;
+          item.path = saved.path;
+          item.type = saved.type || item.type || item.file?.type || "";
+          item.file = null;
+        });
+      }
+
       async function uploadPastedImages(items = draft.attachments) {
         for (const item of items) {
           if (!item.file || item.path) continue;
@@ -8817,7 +8825,7 @@ export function install(config: Record<string, any>) {
         return '<div class="better-codex-dialog-attachments"' + marker + '>' + chips + '</div>';
       }
 
-      function pasteImages(event) {
+      async function pasteImages(event) {
         const replyPaste = event.target?.matches?.('[name="reply"]');
         if (editingLocked && !replyPaste) return;
         const files = Array.from(event.clipboardData?.items || []).flatMap(item => item.kind === "file" && item.type.startsWith("image/") ? [item.getAsFile()].filter(Boolean) : []);
@@ -8846,14 +8854,25 @@ export function install(config: Record<string, any>) {
           return;
         }
         syncDraft();
-        attachments.push(...accepted.map((file, index) => ({
+        const next = accepted.map((file, index) => ({
           name: file.name || t("粘贴的图片") + (accepted.length > 1 ? " " + (index + 1) : ""),
           path: "",
           file,
           type: file.type,
           previewUrl: URL.createObjectURL(file)
-        })));
+        }));
+        try {
+          if (RELAY) await cacheRemoteAttachments(next);
+          else if (!REMOTE) await uploadPastedImages(next);
+        } catch (error) {
+          next.forEach(releaseAttachment);
+          const errorOutput = dialog.querySelector(".better-codex-dialog-error");
+          if (errorOutput) presentInlineError(errorOutput, error, t(error instanceof Error ? error.message : "图片保存失败"), { source: "attachment_cache", action: replyPaste ? "reply" : issue ? "edit" : "create", report: false });
+          return;
+        }
+        attachments.push(...next);
         if (replyPaste) scheduleReplyDraft(draft.reply);
+        else if (!issue) writeCreateDraft(draft, createRequestId);
         renderDialog();
         const active = activeName ? dialog.querySelector('[name="' + activeName + '"]') : null;
         active?.focus();
@@ -9131,7 +9150,7 @@ export function install(config: Record<string, any>) {
           }, 1600);
         });
         dialog.querySelector("[data-conversation-attach]")?.addEventListener("click", () => {
-          void pickAttachments(draft.replyAttachments).then(result => {
+          void pickAttachments(draft.replyAttachments).then(async result => {
             const errorOutput = dialog.querySelector(".better-codex-dialog-error");
             const showAttachError = message => {
               if (!errorOutput) return;
@@ -9142,10 +9161,17 @@ export function install(config: Record<string, any>) {
             const known = new Set(draft.replyAttachments.map(file => file.path || file.name + ":" + (file.file?.size || 0)));
             const next = result.files.filter(file => !known.has(file.path || file.name + ":" + (file.file?.size || 0)));
             if (next.length) {
-              syncDraft();
-              draft.replyAttachments.push(...next);
-              scheduleReplyDraft(draft.reply);
-              renderDialog();
+              try {
+                if (RELAY) await cacheRemoteAttachments(next);
+                else if (!REMOTE) await uploadPastedImages(next);
+                syncDraft();
+                draft.replyAttachments.push(...next);
+                scheduleReplyDraft(draft.reply);
+                renderDialog();
+              } catch (error) {
+                next.forEach(releaseAttachment);
+                return showAttachError(error instanceof Error ? error.message : "附件缓存失败");
+              }
             }
             if (result.skipped) showAttachError(REMOTE ? "部分文件超出传输限制，已跳过" : "部分文件无法读取本地路径，已跳过");
             dialog.querySelector('[name="reply"]')?.focus();
@@ -9399,7 +9425,7 @@ export function install(config: Record<string, any>) {
           dialog.querySelector(draft.mode === "agent" ? '[name="prompt"]' : '[name="title"]')?.focus();
         });
         dialog.querySelector("[data-dialog-attach]")?.addEventListener("click", () => {
-          void pickAttachments(draft.attachments).then(result => {
+          void pickAttachments(draft.attachments).then(async result => {
             const showAttachError = message => {
               const errorOutput = dialog.querySelector(".better-codex-dialog-error");
               if (!errorOutput) return;
@@ -9410,9 +9436,17 @@ export function install(config: Record<string, any>) {
             const known = new Set(draft.attachments.map(file => file.path || file.name + ":" + (file.file?.size || 0)));
             const next = result.files.filter(file => !known.has(file.path || file.name + ":" + (file.file?.size || 0)));
             if (next.length) {
-              syncDraft();
-              draft.attachments.push(...next);
-              renderDialog();
+              try {
+                if (RELAY) await cacheRemoteAttachments(next);
+                else if (!REMOTE) await uploadPastedImages(next);
+                syncDraft();
+                draft.attachments.push(...next);
+                if (!issue) writeCreateDraft(draft, createRequestId);
+                renderDialog();
+              } catch (error) {
+                next.forEach(releaseAttachment);
+                return showAttachError(error instanceof Error ? error.message : "附件缓存失败");
+              }
             }
             if (result.skipped) showAttachError(REMOTE ? "部分文件超出传输限制，已跳过" : "部分文件无法读取本地路径，已跳过");
             dialog.querySelector(draft.mode === "agent" ? '[name="prompt"]' : '[name="title"]')?.focus();
@@ -9428,6 +9462,7 @@ export function install(config: Record<string, any>) {
           const [removed] = attachments.splice(index, 1);
           if (removed) releaseAttachment(removed);
           if (scope === "reply") scheduleReplyDraft(draft.reply);
+          else if (!issue) writeCreateDraft(draft, createRequestId);
           renderDialog();
           dialog.querySelector(scope === "reply" ? '[name="reply"]' : draft.mode === "agent" ? '[name="prompt"]' : '[name="title"]')?.focus();
         }));
@@ -9487,10 +9522,11 @@ export function install(config: Record<string, any>) {
             throw new Error("创建智能体 Issue 需要本地工作区：请先打开该项目下的一个 Codex 会话");
           }
           let files = [];
-          if (REMOTE) files = await remoteFiles(draft.attachments);
+          if (RELAY) await cacheRemoteAttachments(draft.attachments);
+          else if (REMOTE) files = await remoteFiles(draft.attachments);
           else await uploadPastedImages();
           const semanticCommand = !issue && draft.mode === "agent" && /^\/review$/.test(prompt) ? "review" : "";
-          const submittedDescription = REMOTE ? (draft.mode === "agent" ? prompt : draft.description) : withAttachments(draft.mode === "agent" ? prompt : draft.description);
+          const submittedDescription = withAttachments(draft.mode === "agent" ? prompt : draft.description);
           const body = {
             project_id: draft.projectId,
             title,
