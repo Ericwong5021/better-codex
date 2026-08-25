@@ -3121,7 +3121,7 @@ export function install(config: Record<string, any>) {
       });
     }
 
-    function openArchiveDialog() {
+    function openArchiveDialog(scopeProjectId = "") {
       document.getElementById("better-codex-archive-dialog")?.remove();
       const dialog = document.createElement("dialog");
       dialog.id = "better-codex-archive-dialog";
@@ -3138,7 +3138,7 @@ export function install(config: Record<string, any>) {
       const search = dialog.querySelector("[data-archive-search]");
       const projectSelect = dialog.querySelector("[data-archive-project]");
       const projectLabelOutput = dialog.querySelector("[data-archive-project-label]");
-      let projectId = "";
+      let projectId = scopeProjectId;
       let projectOptions = [];
       let archivedIssues = [];
       const collapsedProjects = new Set();
@@ -3177,9 +3177,13 @@ export function install(config: Record<string, any>) {
       };
       const load = async () => {
         try {
-          archivedIssues = await requestList("/api/issues?archived=1", "issues");
+          archivedIssues = await requestList("/api/issues?archived=1" + (scopeProjectId ? "&project_id=" + encodeURIComponent(scopeProjectId) : ""), "issues");
           const projects = projectsByRecentActivity(state.projects.filter(project => archivedIssues.some(issue => issue.project_id === project.id)), archivedIssues);
           projectOptions = projects;
+          if (scopeProjectId) {
+            projectSelect.hidden = true;
+            projectLabelOutput.textContent = projectLabel(state.projects.find(project => project.id === scopeProjectId)) || t("当前项目");
+          }
           render();
         } catch {
           const list = dialog.querySelector("[data-archive-list]");
@@ -4009,6 +4013,20 @@ export function install(config: Record<string, any>) {
       projects.id = "better-codex-projects";
       projects.className = "better-codex-projects";
       projects.addEventListener("click", onProjectsClick);
+      projects.addEventListener("click", onBoardClick);
+      projects.addEventListener("contextmenu", openIssueMenu);
+      projects.addEventListener("pointerdown", onIssueLongPressStart);
+      projects.addEventListener("pointermove", onIssueLongPressMove);
+      projects.addEventListener("pointerup", onIssueLongPressEnd);
+      projects.addEventListener("pointercancel", onIssueLongPressEnd);
+      projects.addEventListener("dragstart", onCardDragStart);
+      projects.addEventListener("dragend", onCardDragEnd);
+      projects.addEventListener("dragover", event => {
+        if (event.target.closest("[data-project-board]")) event.preventDefault();
+      });
+      projects.addEventListener("drop", event => {
+        if (event.target.closest("[data-project-board]")) onDrop(event);
+      });
       projects.addEventListener("input", event => {
         if (!event.target.matches("[data-project-planning-form] textarea[name=message]")) return;
         const projectId = event.target.closest("[data-project-planning-form]")?.dataset.projectPlanningForm;
@@ -4982,10 +5000,11 @@ export function install(config: Record<string, any>) {
       const projectAgentIds = new Set(activeIssues.filter(issue => issue.agent_enabled).map(issue => String(issue.agent_id || "default")));
       const agents = state.agents.filter(agent => projectAgentIds.has(agentKey(agent))).sort((left, right) => Number(activeAgentIds.has(agentKey(right))) - Number(activeAgentIds.has(agentKey(left)))).slice(0, 3);
       const agentAvatars = agents.map(agent => agentAvatarMarkup(agent, "better-codex-project-dashboard-avatar")).join("");
-      const page = state.projectPage === "planning" ? "planning" : "overview";
+      const page = ["overview", "planning", "work"].includes(state.projectPage) ? state.projectPage : "overview";
       const headerActions = '<div class="better-codex-project-dashboard-actions">' + (agentAvatars ? '<div class="better-codex-project-dashboard-people" aria-label="' + te("项目智能体") + '">' + agentAvatars + '</div>' : "") + '<button class="better-codex-project-dashboard-delete" type="button" data-project-delete="' + escapeHtml(project.id) + '" aria-label="' + te("删除项目") + '" title="' + te("删除项目") + '">' + icon("trash") + '<span>' + te("删除项目") + '</span></button></div>';
-      const header = '<header class="better-codex-project-dashboard-head"><div class="better-codex-project-dashboard-title"><div><h1>' + escapeHtml(projectLabel(project)) + '</h1><span data-project-health-badge data-tone="' + healthTone + '">' + escapeHtml(healthLabel) + '</span></div><p>' + escapeHtml(project.description || t("尚未生成项目介绍")) + '</p></div>' + headerActions + '</header><nav class="better-codex-project-dashboard-tabs" aria-label="' + te("项目页面") + '"><button type="button" data-project-dashboard-view="overview"' + (page === "overview" ? ' aria-current="page"' : "") + '>' + te("概览") + '</button><button type="button" data-project-dashboard-view="planning"' + (page === "planning" ? ' aria-current="page"' : "") + '>' + te("规划") + '</button><button type="button" data-project-dashboard-work>' + te("工作") + '</button></nav>';
+      const header = '<header class="better-codex-project-dashboard-head"><div class="better-codex-project-dashboard-title"><div><h1>' + escapeHtml(projectLabel(project)) + '</h1><span data-project-health-badge data-tone="' + healthTone + '">' + escapeHtml(healthLabel) + '</span></div><p>' + escapeHtml(project.description || t("尚未生成项目介绍")) + '</p></div>' + headerActions + '</header><nav class="better-codex-project-dashboard-tabs" aria-label="' + te("项目页面") + '"><button type="button" data-project-dashboard-view="overview"' + (page === "overview" ? ' aria-current="page"' : "") + '>' + te("概览") + '</button><button type="button" data-project-dashboard-view="planning"' + (page === "planning" ? ' aria-current="page"' : "") + '>' + te("规划") + '</button><button type="button" data-project-dashboard-view="work"' + (page === "work" ? ' aria-current="page"' : "") + '>' + te("工作") + '</button></nav>';
       if (page === "planning") return '<section class="better-codex-project-dashboard">' + header + projectPlanningMarkup(project) + '</section>';
+      if (page === "work") return '<section class="better-codex-project-dashboard">' + header + '<main class="better-codex-board better-codex-project-work-board" data-project-board></main></section>';
       const priority = { blocked: 0, in_review: 1, in_progress: 2, todo: 3, backlog: 4, done: 5 };
       const work = [...activeIssues].filter(issue => ["blocked", "in_review", "in_progress", "todo"].includes(issue.status)).sort((left, right) => (priority[left.status] ?? 9) - (priority[right.status] ?? 9) || String(right.updated_at).localeCompare(String(left.updated_at))).slice(0, 5);
       const issueAssignee = issue => {
@@ -5016,6 +5035,7 @@ export function install(config: Record<string, any>) {
         ["document", ".better-codex-project-document-scroll"],
         ["plan", ".better-codex-project-plan-scroll"],
         ["planning-messages", ".better-codex-project-planning-messages"],
+        ["board", "[data-project-board]"],
       ];
       return surfaces.flatMap(([name, selector]) => {
         const surface = selector ? container.querySelector(selector) : container;
@@ -5160,6 +5180,11 @@ export function install(config: Record<string, any>) {
       if (HOST_KIND === "web" && state.surface === "projects") document.title = t("项目管理") + " > " + projectName + " · Better Codex";
       renderProjectContent(container, '<section class="better-codex-project-detail">' + projectDashboardMarkup(project, issues, issuesLoading, paths) + '</section>');
       if (!projectHealthBadge) mountProjectHealthBadge(container, project.id);
+      if (state.projectPage === "work") {
+        const board = container.querySelector("[data-project-board]");
+        if (!board) throw new Error("project_board_mount_missing");
+        renderBoard({ board, issues: state.issues.filter(issue => issue.project_id === project.id), loaded: state.issuesLoaded, projectId: project.id });
+      }
     }
 
     async function loadProjects(options = {}) {
@@ -5282,12 +5307,14 @@ export function install(config: Record<string, any>) {
       }
       const dashboardView = event.target.closest("[data-project-dashboard-view]");
       if (dashboardView) {
-        state.projectPage = dashboardView.dataset.projectDashboardView === "planning" ? "planning" : "overview";
+        const page = dashboardView.dataset.projectDashboardView;
+        state.projectPage = ["overview", "planning", "work"].includes(page) ? page : "overview";
         renderProjects();
         if (state.projectPage === "planning") requestAnimationFrame(() => {
           const messages = panel.querySelector(".better-codex-project-planning-messages");
           if (messages) messages.scrollTop = messages.scrollHeight;
         });
+        if (state.projectPage === "work" && !state.issuesLoaded) void perform(() => loadIssues());
         return;
       }
       const planningPrompt = event.target.closest("[data-project-planning-prompt]");
@@ -5314,13 +5341,6 @@ export function install(config: Record<string, any>) {
           state.projectPlanningError = null;
           await loadProjects();
         }));
-      }
-      const work = event.target.closest("[data-project-dashboard-work]");
-      if (work) {
-        state.projectId = state.projectDetailId;
-        state.filters.project = state.projectDetailId ? [state.projectDetailId] : [];
-        open("issues");
-        return;
       }
       const documentView = event.target.closest("[data-project-document-view]");
       if (documentView) {
@@ -6816,36 +6836,41 @@ export function install(config: Record<string, any>) {
       activateFeature("board");
     }
 
-    function renderBoard() {
-      const runningCount = state.issues.filter(issue => issueExecutionRunning(issue)).length;
-      panel.querySelectorAll("[data-view]").forEach(button => button.classList.toggle("is-active", button.dataset.view === state.view));
-      const working = panel.querySelector("#better-codex-working");
-      const workingMarkup = icon("bot") + '<span>' + te(runningCount + " 个智能体工作中") + "</span>";
-      if (working.innerHTML !== workingMarkup) working.innerHTML = workingMarkup;
-      working.dataset.runningCount = String(runningCount);
-      working.setAttribute("aria-label", t(runningCount + " 个智能体工作中"));
-      working.title = t(runningCount ? "查看运行中的任务" : "当前没有运行中的任务");
-      working.classList.toggle("has-work", runningCount > 0);
-      working.classList.toggle("is-active", state.view === "working");
-      working.hidden = false;
-      const filterButton = panel.querySelector("#better-codex-filter");
-      const filterCount = Object.values(state.filters).reduce((total, values) => total + values.length, 0);
-      const filterMarkup = icon("filter") + "<span>" + te(filterCount ? filterCount + " 个筛选" : "筛选") + "</span>";
-      if (filterButton.innerHTML !== filterMarkup) filterButton.innerHTML = filterMarkup;
-      filterButton.setAttribute("aria-label", t(filterCount ? filterCount + " 个筛选" : "筛选"));
-      filterButton.classList.toggle("is-active", filterCount > 0);
-      const visible = state.issues.filter(issue => {
+    function renderBoard(options = {}) {
+      const projectBoard = Boolean(options.projectId);
+      const sourceIssues = options.issues || state.issues;
+      if (!projectBoard) {
+        const runningCount = state.issues.filter(issue => issueExecutionRunning(issue)).length;
+        panel.querySelectorAll("[data-view]").forEach(button => button.classList.toggle("is-active", button.dataset.view === state.view));
+        const working = panel.querySelector("#better-codex-working");
+        const workingMarkup = icon("bot") + '<span>' + te(runningCount + " 个智能体工作中") + "</span>";
+        if (working.innerHTML !== workingMarkup) working.innerHTML = workingMarkup;
+        working.dataset.runningCount = String(runningCount);
+        working.setAttribute("aria-label", t(runningCount + " 个智能体工作中"));
+        working.title = t(runningCount ? "查看运行中的任务" : "当前没有运行中的任务");
+        working.classList.toggle("has-work", runningCount > 0);
+        working.classList.toggle("is-active", state.view === "working");
+        working.hidden = false;
+        const filterButton = panel.querySelector("#better-codex-filter");
+        const filterCount = Object.values(state.filters).reduce((total, values) => total + values.length, 0);
+        const filterMarkup = icon("filter") + "<span>" + te(filterCount ? filterCount + " 个筛选" : "筛选") + "</span>";
+        if (filterButton.innerHTML !== filterMarkup) filterButton.innerHTML = filterMarkup;
+        filterButton.setAttribute("aria-label", t(filterCount ? filterCount + " 个筛选" : "筛选"));
+        filterButton.classList.toggle("is-active", filterCount > 0);
+      }
+      const visible = sourceIssues.filter(issue => {
         const assigned = Boolean(issue.agent_enabled || issue.user_assigned);
-        const matchesView = state.view === "all"
+        const matchesView = projectBoard || state.view === "all"
           || (state.view === "assigned" && assigned)
           || (state.view === "unassigned" && !assigned)
           || (state.view === "working" && issueExecutionRunning(issue));
-        return matchesView && issueMatchesFilters(issue);
+        return matchesView && (projectBoard || issueMatchesFilters(issue));
       });
-      const board = panel.querySelector("#better-codex-board");
-      if (!state.issuesLoaded) {
+      const board = options.board || panel.querySelector("#better-codex-board");
+      if (!board) throw new Error(projectBoard ? "project_board_mount_missing" : "board_mount_missing");
+      if (!(options.loaded ?? state.issuesLoaded)) {
         board.innerHTML = '<section class="better-codex-board-loading" role="status" aria-live="polite"><span aria-hidden="true"></span><strong>' + te("正在加载任务看板") + '</strong></section>';
-        requestAnimationFrame(syncBoardScrollControl);
+        if (!projectBoard) requestAnimationFrame(syncBoardScrollControl);
         return;
       }
       const visibleStatuses = [...Object.entries(statusLabels), ["archive", "归档"]];
@@ -6896,8 +6921,8 @@ export function install(config: Record<string, any>) {
         return '<section class="better-codex-column" data-status="' + status + '"><div class="better-codex-column-head"><span class="better-codex-column-title">' + statusIcon(status) + '<span>' + te(statusLabel) + '</span>' + (archiveColumn ? "" : '<span>' + issues.length + '</span>') + '</span><span class="better-codex-column-actions">' + columnButton + '</span></div><div class="better-codex-cards">' + (cards || (archiveColumn ? '<div class="better-codex-empty">' + te("拖到这里即可归档") + '</div>' : "")) + '</div></section>';
       }).join("");
       reconcileBoard(board, boardMarkup);
-      hydrateSharedControls(panel, "board");
-      requestAnimationFrame(syncBoardScrollControl);
+      hydrateSharedControls(board, projectBoard ? "projects" : "board");
+      if (!projectBoard) requestAnimationFrame(syncBoardScrollControl);
     }
 
     async function loadIssues(options = {}) {
@@ -6968,7 +6993,10 @@ export function install(config: Record<string, any>) {
     async function loadSurface(options = {}) {
       if (state.surface === "scheduled") await loadScheduledTasks(options);
       else if (state.surface === "agents") await loadAgents(options);
-      else if (state.surface === "projects") await loadProjects(options);
+      else if (state.surface === "projects") {
+        if (state.projectDetailId && state.projectPage === "work") await Promise.all([loadProjects(options), loadIssues(options)]);
+        else await loadProjects(options);
+      }
       else await loadIssues(options);
     }
 
@@ -9646,7 +9674,7 @@ export function install(config: Record<string, any>) {
         return;
       }
       const archiveOpen = event.target.closest("[data-archive-open]");
-      if (archiveOpen) return void openArchiveDialog();
+      if (archiveOpen) return void openArchiveDialog(event.target.closest("[data-project-board]") ? state.projectDetailId : "");
       const add = event.target.closest("[data-add-status]");
       if (add) return void perform(() => openEditor(null, add.dataset.addStatus));
       const thread = event.target.closest("[data-thread]");

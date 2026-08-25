@@ -124,7 +124,7 @@ export function betterCodexPatternStylesCss() {
       padding: var(--bc-space-3);
     }
 
-    #better-codex-panel[data-bc-size="narrow"] .better-codex-actions {
+    #better-codex-panel[data-bc-size="narrow"][data-surface="issues"] .better-codex-actions {
       display: grid;
       width: 100%;
       grid-template-columns: minmax(0, 1fr) auto;
