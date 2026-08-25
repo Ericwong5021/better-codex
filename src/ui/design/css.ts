@@ -11,6 +11,7 @@ export function betterCodexDesignTokensCss() {
   return String.raw`
     :root {
 ${declarations("light")}
+      -webkit-tap-highlight-color: transparent;
     }
 
     html.electron-dark, html.dark, html[data-theme="dark"] {
