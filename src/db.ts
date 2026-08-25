@@ -3,6 +3,7 @@ import { existsSync, linkSync, mkdirSync, unlinkSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { databasePath, developmentDatabaseSnapshotSourcePath } from "./config.js";
+import { compileInputDocument, inputDocumentFingerprint, inputDocumentText, legacyInputDocument, normalizeInputDocument, type InputDocumentV2 } from "./codex-input-document.js";
 import { renderMarkdown } from "./markdown.js";
 import { syncProtocolVersion } from "./sync-contract.js";
 import { projectDocumentKeys, type ConversationProjection, type DirectoryBrowserResult, type IssueProjection, type ProjectDocumentKey, type ProjectDocumentView, type ProjectPlanningState, type ProjectPlanSnapshot, type ProjectProjection, type RemoteCommand, type RemoteCommandAck, type SyncEntityType, type SyncProjection } from "./sync-contract.js";
@@ -76,6 +77,10 @@ export type QueuedIssueReply = {
   request_id: string;
   message: string;
   created_at: string;
+  input_document?: {
+    schema_version: 2;
+    parts: Array<{ type: "text"; text: string } | { type: "reference"; reference_id: string; display: string }>;
+  };
 };
 
 export type IssueSessionStatus = "starting" | "active" | "stopping" | "waiting_on_approval" | "waiting_on_user" | "idle" | "interrupted" | "failed" | "disconnected";
@@ -323,6 +328,7 @@ type IssueInput = {
   assigneeUserId?: string;
   enrichmentStatus?: EnrichmentStatus;
   semanticReferences?: IssueSemanticReference[];
+  semanticDocument?: InputDocumentV2;
   semanticCommand?: "review";
   session?: ImportedSessionInput;
 };
@@ -392,11 +398,12 @@ function cleanIssueSemanticReferences(value: unknown): IssueSemanticReference[] 
 }
 
 function cleanInitialIssueSemantics(value: unknown) {
-  if (Array.isArray(value)) return { references: cleanIssueSemanticReferences(value), command: "" as const };
-  if (!value || typeof value !== "object") return { references: [], command: "" as const };
+  if (Array.isArray(value)) return { references: cleanIssueSemanticReferences(value), document: undefined, command: "" as const };
+  if (!value || typeof value !== "object") return { references: [], document: undefined, command: "" as const };
   const source = value as Record<string, unknown>;
   return {
     references: cleanIssueSemanticReferences(source.references),
+    document: source.document === undefined ? undefined : normalizeInputDocument(source.document),
     command: source.command === "review" ? "review" as const : "" as const,
   };
 }
@@ -2750,8 +2757,9 @@ export class Store {
     if (!project) throw new Error("project_not_found");
     if (requestId.length > 200 || requestId.includes("\0")) throw new Error("invalid_request_id");
     const semanticReferences = cleanIssueSemanticReferences(input.semanticReferences);
+    const semanticDocument = input.semanticDocument === undefined ? undefined : normalizeInputDocument(input.semanticDocument);
     const semanticCommand = input.semanticCommand === "review" ? "review" : undefined;
-    const fingerprintInput = { ...input, semanticReferences };
+    const fingerprintInput = { ...input, semanticReferences, semanticDocument };
     if (semanticCommand) fingerprintInput.semanticCommand = semanticCommand;
     else delete fingerprintInput.semanticCommand;
     const requestFingerprint = requestId ? issueCreateFingerprint(fingerprintInput) : "";
@@ -2825,9 +2833,9 @@ export class Store {
       );
       this.db.prepare("UPDATE projects SET next_issue_number = ?, updated_at = ? WHERE id = ?")
         .run(issueNumber + 1, timestamp, project.id);
-      if (semanticReferences.length || semanticCommand) {
+      if (semanticReferences.length || semanticDocument || semanticCommand) {
         this.db.prepare("INSERT INTO issue_initial_semantics (issue_id, references_json, created_at) VALUES (?, ?, ?)")
-          .run(id, JSON.stringify({ references: semanticReferences, command: semanticCommand || "" }), timestamp);
+          .run(id, JSON.stringify({ references: semanticReferences, document: semanticDocument, command: semanticCommand || "" }), timestamp);
       }
       if (importedSession) this.writeImportedSession(id, importedSession, timestamp);
       if (requestId) {
@@ -2954,7 +2962,7 @@ export class Store {
 
   getInitialIssueSemantics(issueId: string) {
     const row = this.db.prepare("SELECT references_json FROM issue_initial_semantics WHERE issue_id = ?").get(issueId) as { references_json: string } | undefined;
-    return row ? cleanInitialIssueSemantics(JSON.parse(row.references_json)) : { references: [], command: "" as const };
+    return row ? cleanInitialIssueSemantics(JSON.parse(row.references_json)) : { references: [], document: undefined, command: "" as const };
   }
 
   clearInitialIssueSemantics(issueId: string) {
@@ -3902,38 +3910,41 @@ export class Store {
     `).all(issueId) as Record<string, unknown>[])
       .map(sessionCommandFromRow)
       .filter(command => command.payload.queued_reply === true)
-      .map(command => ({
-        request_id: command.request_id,
-        message: String(command.payload.request_message || command.payload.message || ""),
-        created_at: command.created_at,
-      }));
+      .map(command => {
+        const document = command.payload.input_document === undefined ? undefined : normalizeInputDocument(command.payload.input_document);
+        return {
+          request_id: command.request_id,
+          message: String(command.payload.request_message || command.payload.message || ""),
+          created_at: command.created_at,
+          ...(document ? { input_document: { schema_version: 2 as const, parts: document.parts.map(part => part.type === "text" ? part : { ...part, display: document.references[part.reference_id].display }) } } : {}),
+        };
+      });
   }
 
-  updateQueuedIssueReply(issueId: string, requestId: string, message: string) {
-    const nextMessage = message.trim();
-    if (!nextMessage) throw new Error("message_required");
+  updateQueuedIssueReply(issueId: string, requestId: string, message: string, documentValue?: unknown) {
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const row = this.db.prepare("SELECT * FROM session_commands WHERE issue_id = ? AND request_id = ?").get(issueId, requestId) as Record<string, unknown> | undefined;
       if (!row) throw new Error("queued_reply_not_found");
       const command = sessionCommandFromRow(row);
       if (command.status !== "pending" || command.kind !== "turn" || command.payload.queued_reply !== true) throw new Error("queued_reply_not_pending");
-      const input = Array.isArray(command.payload.input) ? command.payload.input.map(item => item && typeof item === "object" ? { ...item } : item) : [];
-      const textIndex = input.findIndex(item => item && typeof item === "object" && (item as Record<string, unknown>).type === "text");
-      if (textIndex >= 0) input[textIndex] = { ...(input[textIndex] as Record<string, unknown>), text: nextMessage };
-      else input.unshift({ type: "text", text: nextMessage });
-      let requestInput: Record<string, unknown> = { message: nextMessage, references: [], command: "" };
-      if (command.payload.request_input) {
-        const parsed = JSON.parse(String(command.payload.request_input)) as unknown;
-        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("queued_reply_invalid");
-        requestInput = { ...(parsed as Record<string, unknown>), message: nextMessage };
-      }
+      const existingDocument = command.payload.input_document === undefined ? undefined : normalizeInputDocument(command.payload.input_document);
+      const hasReferences = Boolean(existingDocument?.parts.some(part => part.type === "reference"));
+      if (documentValue === undefined && hasReferences) throw new Error("QUEUED_REPLY_DOCUMENT_REQUIRED");
+      const nextMessage = String(message || "").trim();
+      const inputDocument = documentValue === undefined ? legacyInputDocument(nextMessage, []) : normalizeInputDocument(documentValue);
+      const documentMessage = inputDocumentText(inputDocument).trim();
+      if (!documentMessage) throw new Error("message_required");
+      if (nextMessage && nextMessage !== documentMessage) throw new Error("SEMANTIC_INPUT_CONFLICT");
+      const input = compileInputDocument(inputDocument, String(command.payload.workspace_path || ""));
+      const requestInput = inputDocumentFingerprint(inputDocument, command.payload.semantic_command);
       const payload = {
         ...command.payload,
-        message: nextMessage,
+        message: documentMessage,
         input,
-        request_message: nextMessage,
-        request_input: JSON.stringify(requestInput),
+        input_document: inputDocument,
+        request_message: documentMessage,
+        request_input: requestInput,
       };
       const result = this.db.prepare("UPDATE session_commands SET payload_json = ?, request_fingerprint = ? WHERE id = ? AND status = 'pending'")
         .run(JSON.stringify(payload), sessionCommandFingerprint({ kind: "turn", payload }), command.id);

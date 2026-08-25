@@ -12,8 +12,10 @@ import { renderMarkdown } from "./markdown.js";
 import { readConversationActivity, readConversationResult } from "./session-transcript.js";
 import { SessionHostClient } from "./session-host-client.js";
 import type { SessionHostDelivery } from "./session-host-protocol.js";
+import type { SessionHostSemanticMethod } from "./session-host-protocol.js";
 import { projectDocumentKeys, type ProjectDocumentDiagram, type ProjectDocumentKey, type ProjectPlanItem, type ProjectPlanSnapshot } from "./sync-contract.js";
-import { codexSemanticInput, codexSemanticRequestFingerprint, normalizeCodexSemanticReferences, type CodexSemanticReference } from "./codex-semantics.js";
+import { compileInputDocument, type InputDocumentV2 } from "./codex-input-document.js";
+import { codexSemanticDocument, codexSemanticRequestFingerprint, normalizeCodexSemanticDocument, normalizeCodexSemanticReferences, type CodexSemanticReference } from "./codex-semantics.js";
 import { sessionNativeCommand } from "./native-commands.js";
 import type { RuntimeState } from "./runtime-state.js";
 
@@ -156,6 +158,10 @@ export class IssueWorker {
 
   sessionHostStatus() {
     return this.sessionRelay.status();
+  }
+
+  semanticRequest(method: SessionHostSemanticMethod, params: Record<string, unknown>, timeout?: number) {
+    return this.sessionRelay.semanticRequest(method, params, timeout);
   }
 
   beginSessionHandoff(updateId: string, targetRuntimeGeneration: number, targetVersion: string | null, deadlineAt: string) {
@@ -998,7 +1004,7 @@ export class IssueWorker {
     if (workspacePath !== claim.workspacePath) this.store.setRunWorkspace(claim.issue.id, workspacePath);
     const session = this.store.getIssueSession(claim.issue.id);
     const semantics = this.store.getInitialIssueSemantics(claim.issue.id);
-    const payload = this.sessionPayload(claim.issue, workspacePath, issuePrompt(claim), semantics.references, semantics.command);
+    const payload = this.sessionPayload(claim.issue, workspacePath, issuePrompt(claim), semantics.references, semantics.command, semantics.document);
     try {
       this.store.enqueueSessionCommand({
         issueId: claim.issue.id,
@@ -1009,13 +1015,13 @@ export class IssueWorker {
         payload,
         hostId: session?.host_id || "local",
       });
-      if (semantics.references.length || semantics.command) this.store.clearInitialIssueSemantics(claim.issue.id);
+      if (semantics.references.length || semantics.document || semantics.command) this.store.clearInitialIssueSemantics(claim.issue.id);
     } catch (error) {
       this.store.finishRun(claim.runId, claim.issue.id, false, error instanceof Error ? error.message : "session_command_failed");
     }
   }
 
-  private sessionPayload(issue: Issue, workspacePath: string, message: string, semanticReferences: CodexSemanticReference[] = [], semanticCommand: "review" | "compact" | "" = "") {
+  private sessionPayload(issue: Issue, workspacePath: string, message: string, semanticReferences: CodexSemanticReference[] = [], semanticCommand: "review" | "compact" | "" = "", semanticDocument?: InputDocumentV2) {
     const profile = issue.agent_id ? this.store.getAgentProfile(issue.agent_id) : defaultAgentProfile();
     const model = profile?.model && profile.model !== "默认模型" ? profile.model : "";
     const effort = profile?.reasoning_effort && profile.reasoning_effort !== "默认推理等级" ? profile.reasoning_effort : "";
@@ -1023,11 +1029,13 @@ export class IssueWorker {
     const sandboxMode = this.sandboxMode(issue.agent_id);
     const developerInstructions = issue.agent_id ? profile?.instructions || "" : "";
     const configFingerprint = this.sessionConfigFingerprint(issue.agent_id);
+    const document = normalizeCodexSemanticDocument(semanticDocument, message, semanticReferences);
     return {
       workspace_path: workspacePath,
       title: `${issue.identifier} ${issue.title}`.trim().slice(0, 200),
       message,
-      input: codexSemanticInput(message, semanticReferences),
+      input: compileInputDocument(document, workspacePath),
+      input_document: document,
       semantic_command: semanticCommand,
       model,
       effort,
@@ -1040,11 +1048,12 @@ export class IssueWorker {
     };
   }
 
-  sendIssueMessage(issueId: string, requestId: string, message: string, semanticReferences: unknown = [], semanticCommand: "review" | "compact" | "" = "") {
+  sendIssueMessage(issueId: string, requestId: string, message: string, semanticReferences: unknown = [], semanticCommand: "review" | "compact" | "" = "", semanticDocument?: unknown) {
     const issue = this.store.getIssue(issueId);
     if (!issue) throw new Error("issue_not_found");
     const references = normalizeCodexSemanticReferences(semanticReferences);
-    const requestInput = codexSemanticRequestFingerprint(message, references, semanticCommand);
+    const document = normalizeCodexSemanticDocument(semanticDocument, message, references);
+    const requestInput = codexSemanticRequestFingerprint(message, references, semanticCommand, document);
     const existingCommand = this.store.getSessionCommandByRequest(issueId, requestId);
     if (existingCommand) {
       const existingInput = String(existingCommand.payload.request_input || "");
@@ -1087,7 +1096,7 @@ export class IssueWorker {
     }
     const session = this.store.getIssueSession(issueId);
     if (!session) throw new Error("session_required");
-    const payload: Record<string, unknown> = { ...this.sessionPayload(issue, issue.workspace_path || "", message, references, semanticCommand), request_message: message, request_input: requestInput };
+    const payload: Record<string, unknown> = { ...this.sessionPayload(issue, issue.workspace_path || "", message, references, semanticCommand, document), request_message: message, request_input: requestInput };
     const activeTurnId = session.active_turn_id || null;
     if (semanticCommand && activeTurnId) throw new Error("issue_execution_running");
     const deferred = !semanticCommand && Boolean(activeTurnId || issue.active_run_status || this.store.getIssueReplyState(issueId).status === "running" || this.store.listQueuedIssueReplies(issueId).length);

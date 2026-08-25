@@ -4,7 +4,7 @@ import { closeSync, openSync, readFileSync, unlinkSync } from "node:fs";
 import { isSea } from "node:sea";
 import { createConnection, type Socket } from "node:net";
 import { sessionHostLogPath, sessionHostPidPath, sessionHostSocketPath, sessionHostStatusPath, betterCodexHome, betterCodexProfile, peerBetterCodexHome, ensureDirectories, sourceProcessArguments, token } from "./config.js";
-import { sessionHostProtocolVersion, type SessionHostDelivery, type SessionHostHandoffSnapshot, type SessionHostMessage, type SessionHostPollRequest, type SessionHostServerMessage, type SessionHostStatus, type SessionHostThreadAction } from "./session-host-protocol.js";
+import { sessionHostProtocolVersion, type SessionHostDelivery, type SessionHostHandoffSnapshot, type SessionHostMessage, type SessionHostPollRequest, type SessionHostSemanticMethod, type SessionHostSemanticResponse, type SessionHostServerMessage, type SessionHostStatus, type SessionHostThreadAction } from "./session-host-protocol.js";
 import { sessionHostDeliveryHash } from "./session-host-transport.js";
 import type { SessionRelayHost } from "./session-relay.js";
 import { coreVersion } from "./compatibility.js";
@@ -143,6 +143,12 @@ type HandoffRequest = {
   timer: NodeJS.Timeout;
 };
 
+type SemanticRequest = {
+  resolve: (result: { result: unknown; identity: SessionHostSemanticResponse["identity"] }) => void;
+  reject: (error: Error) => void;
+  timer: NodeJS.Timeout;
+};
+
 function transientThreadActionError(error: unknown) {
   return ["session_host_disconnected", "session_host_timeout", "session_host_unavailable", "app_server_unavailable", "app_server_timeout", "app_server_closed"].includes(error instanceof Error ? error.message : "");
 }
@@ -155,12 +161,14 @@ export class SessionHostClient implements SessionRelayHost {
   private readonly outputs = new WeakMap<Socket, string>();
   private acknowledged = false;
   private threadActionsSupported = false;
+  private semanticRequestsSupported = false;
   private readonly runtimeIdentity: Pick<RuntimeState, "instanceId" | "generation" | "version" | "handoffUpdateId">;
   private hostIdentity: { pid: number; instanceId: string | null; connectionEpoch: number | null; startedAt: string | null; runtimeGeneration: number | null } | null = null;
   private handoff: SessionHostStatus["handoff"] = null;
   private readonly readyWaiters = new Set<ReadyWaiter>();
   private readonly threadActionRequests = new Map<string, ThreadActionRequest>();
   private readonly handoffRequests = new Map<string, HandoffRequest>();
+  private readonly semanticRequests = new Map<string, SemanticRequest>();
   private deliveryQueue: Promise<void> = Promise.resolve();
 
   constructor(private readonly host: SessionRelayHost & { delivery?: (message: SessionHostDelivery) => void | Promise<void> }, runtimeIdentity?: Pick<RuntimeState, "instanceId" | "generation" | "version" | "handoffUpdateId">) {
@@ -192,11 +200,13 @@ export class SessionHostClient implements SessionRelayHost {
     this.socket = null;
     this.acknowledged = false;
     this.threadActionsSupported = false;
+    this.semanticRequestsSupported = false;
     this.hostIdentity = null;
     this.handoff = null;
     this.rejectReadyWaiters("session_host_unavailable");
     this.rejectThreadActions("session_host_unavailable");
     this.rejectHandoffRequests("session_host_unavailable");
+    this.rejectSemanticRequests("session_host_unavailable");
     socket?.destroy();
   }
 
@@ -216,6 +226,33 @@ export class SessionHostClient implements SessionRelayHost {
       }
     }
     throw lastError instanceof Error ? lastError : new Error("codex_thread_action_failed");
+  }
+
+  async semanticRequest(method: SessionHostSemanticMethod, params: Record<string, unknown>, timeout = 8000) {
+    await this.waitUntilReady();
+    if (!this.semanticRequestsSupported) throw new Error("SEMANTIC_HOST_UNAVAILABLE");
+    const socket = this.socket;
+    if (!socket) throw new Error("SEMANTIC_HOST_UNAVAILABLE");
+    const requestId = randomUUID();
+    return new Promise<{ result: unknown; identity: SessionHostSemanticResponse["identity"] }>((resolve, reject) => {
+      const request: SemanticRequest = {
+        resolve,
+        reject,
+        timer: setTimeout(() => {
+          this.semanticRequests.delete(requestId);
+          reject(new Error("semantic_host_timeout"));
+        }, timeout),
+      };
+      request.timer.unref();
+      this.semanticRequests.set(requestId, request);
+      try {
+        writeMessage(socket, { type: "semantic_request", request_id: requestId, method, params, deadline_at: new Date(Date.now() + timeout).toISOString() });
+      } catch (error) {
+        this.semanticRequests.delete(requestId);
+        clearTimeout(request.timer);
+        reject(error instanceof Error ? error : new Error("SEMANTIC_HOST_UNAVAILABLE"));
+      }
+    });
   }
 
   async beginHandoff(updateId: string, targetRuntimeGeneration: number, targetVersion: string | null, deadlineAt: string) {
@@ -294,7 +331,7 @@ export class SessionHostClient implements SessionRelayHost {
         runtime_version: this.runtimeIdentity.version,
         profile: betterCodexProfile,
         handoff_update_id: this.runtimeIdentity.handoffUpdateId,
-        capabilities: { durable_deliveries: true, runtime_handoff: true },
+        capabilities: { durable_deliveries: true, runtime_handoff: true, semantic_requests: true },
       });
     } catch (error) {
       diagnostic("connect_failed", { error: error instanceof Error ? error.message : String(error) });
@@ -338,10 +375,12 @@ export class SessionHostClient implements SessionRelayHost {
     this.socket = null;
     this.acknowledged = false;
     this.threadActionsSupported = false;
+    this.semanticRequestsSupported = false;
     this.hostIdentity = null;
     this.handoff = null;
     this.rejectThreadActions("session_host_disconnected");
     this.rejectHandoffRequests("session_host_disconnected");
+    this.rejectSemanticRequests("session_host_disconnected");
     this.scheduleReconnect();
   }
 
@@ -380,6 +419,7 @@ export class SessionHostClient implements SessionRelayHost {
       }
       this.acknowledged = true;
       this.threadActionsSupported = message.capabilities?.thread_actions === true;
+      this.semanticRequestsSupported = message.capabilities?.semantic_requests === true;
       this.hostIdentity = { pid: message.host_pid, instanceId: message.host_instance_id || null, connectionEpoch: message.connection_epoch ?? null, startedAt: message.started_at || null, runtimeGeneration: message.runtime_generation ?? null };
       diagnostic("connected", { runtime_instance_id: this.runtimeIdentity.instanceId, runtime_generation: this.runtimeIdentity.generation, host_pid: message.host_pid, host_instance_id: message.host_instance_id || null, connection_epoch: message.connection_epoch ?? null });
       this.resolveReadyWaiters();
@@ -407,6 +447,15 @@ export class SessionHostClient implements SessionRelayHost {
       this.handoff = message.handoff;
       if (message.ok) request.resolve({ handoff: message.handoff, snapshot: message.snapshot });
       else request.reject(new Error(message.error || "session_host_handoff_failed"));
+      return;
+    }
+    if (message.type === "semantic_response") {
+      const request = this.semanticRequests.get(message.request_id);
+      if (!request) return;
+      this.semanticRequests.delete(message.request_id);
+      clearTimeout(request.timer);
+      if (message.ok) request.resolve({ result: message.result, identity: message.identity });
+      else request.reject(new Error(message.error || "semantic_request_failed"));
       return;
     }
     if (message.type === "poll_request") return void this.handlePoll(socket, message);
@@ -521,6 +570,14 @@ export class SessionHostClient implements SessionRelayHost {
       request.reject(new Error(error));
     }
     this.handoffRequests.clear();
+  }
+
+  private rejectSemanticRequests(error: string) {
+    for (const request of this.semanticRequests.values()) {
+      clearTimeout(request.timer);
+      request.reject(new Error(error));
+    }
+    this.semanticRequests.clear();
   }
 
   private async handlePoll(socket: Socket, message: SessionHostPollRequest) {

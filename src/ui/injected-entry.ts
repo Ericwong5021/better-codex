@@ -16,6 +16,9 @@ import { adoptListRow } from "./patterns/list-row.js";
 import { adoptToolbar } from "./patterns/toolbar.js";
 import { createAgentsController } from "./features/agents/controller.js";
 import { createBoardController } from "./features/board/controller.js";
+import { createSemanticController } from "./features/board/semantic-controller.js";
+import { createSemanticDraft, insertSemanticReference, reconcileSemanticText, serializeSemanticDraft } from "./features/board/semantic-model.js";
+import { semanticCandidateGroup, semanticCandidateIcon } from "./features/board/semantic-view.js";
 import { createProjectsController } from "./features/projects/controller.js";
 import { createScheduledController } from "./features/scheduled/controller.js";
 import { createSettingsController } from "./features/settings/controller.js";
@@ -248,6 +251,7 @@ export function install(config: Record<string, any>) {
           description: String(draft.description || ""),
           prompt: String(draft.prompt || ""),
           promptSemanticReferences: Array.isArray(draft.promptSemanticReferences) ? draft.promptSemanticReferences.filter(reference => reference && ["skill", "app", "mention"].includes(reference.type) && typeof reference.name === "string" && typeof reference.ref === "string").slice(0, 32) : [],
+          promptSemanticDocument: draft.promptSemanticDocument && typeof draft.promptSemanticDocument === "object" ? draft.promptSemanticDocument : undefined,
           requestId: typeof draft.requestId === "string" && draft.requestId.length <= 200 ? draft.requestId : ""
         };
       } catch {
@@ -256,7 +260,7 @@ export function install(config: Record<string, any>) {
       }
     }
     function writeCreateDraft(draft, requestId) {
-      const cached = { mode: draft.mode, title: draft.title, description: draft.description, prompt: draft.prompt, promptSemanticReferences: draft.promptSemanticReferences, requestId };
+      const cached = { mode: draft.mode, title: draft.title, description: draft.description, prompt: draft.prompt, promptSemanticReferences: draft.promptSemanticReferences, promptSemanticDocument: serializeSemanticDraft(draft.promptSemanticDocument), requestId };
       if (![cached.title, cached.description, cached.prompt].some(value => value.trim())) {
         sessionStorage.removeItem(CREATE_DRAFT_KEY);
         return;
@@ -7327,6 +7331,8 @@ export function install(config: Record<string, any>) {
         reply: issue?.reply_draft || "",
         promptSemanticReferences: cachedCreateDraft?.promptSemanticReferences || [],
         replySemanticReferences: [],
+        promptSemanticDocument: createSemanticDraft(issue?.description || cachedPrompt, cachedCreateDraft?.promptSemanticDocument),
+        replySemanticDocument: createSemanticDraft(issue?.reply_draft || ""),
         attachments: [],
         replyAttachments: Array.isArray(issue?.reply_draft_attachments) ? issue.reply_draft_attachments.map(item => ({ name: item.name, path: item.path, type: item.type || "", file: null, previewUrl: "" })) : []
       };
@@ -7343,12 +7349,14 @@ export function install(config: Record<string, any>) {
       let conversationMessages = [];
       let lastReplyMessage = "";
       let lastReplySemanticReferences = [];
+      let lastReplySemanticDocument = null;
       let lastReplyCommand = "";
       let lastReplyRequestId = "";
       let lastReplyStatus = issue?.reply_status || "idle";
       let queuedReplies = [];
       let queueEditingRequestId = "";
       let queueEditDraft = "";
+      let queueEditSemanticDocument = null;
       let queueActionRequestId = "";
       let queueActionError = "";
       let queueEditFocusPreserved = false;
@@ -7372,6 +7380,10 @@ export function install(config: Record<string, any>) {
       let dialogBoundsObserver = null;
       let semanticCatalog = null;
       let semanticMenuState = null;
+      const semanticController = createSemanticController({
+        request: path => api(path),
+        endpoint: () => issue ? "/api/issues/" + encodeURIComponent(issue.id) + "/semantics" : "/api/projects/" + encodeURIComponent(draft.projectId) + "/semantics",
+      });
       const clearIssueFullscreenBounds = () => {
         dialog.style.removeProperty("--bc-dialog-fullscreen-top");
         dialog.style.removeProperty("--bc-dialog-fullscreen-left");
@@ -7455,6 +7467,7 @@ export function install(config: Record<string, any>) {
           draft.reply = "";
           latestReplyDraft = "";
           draft.replySemanticReferences = [];
+          draft.replySemanticDocument = createSemanticDraft("");
           closeSemanticMenu();
         }
         const submittedAttachmentSet = new Set(submittedAttachments);
@@ -7885,6 +7898,28 @@ export function install(config: Record<string, any>) {
         else draft.replySemanticReferences = references;
       }
 
+      function semanticDraftDocument() {
+        return !issue && draft.mode === "agent" ? draft.promptSemanticDocument : draft.replySemanticDocument;
+      }
+
+      function setSemanticDraftDocument(document) {
+        if (!issue && draft.mode === "agent") draft.promptSemanticDocument = document;
+        else draft.replySemanticDocument = document;
+      }
+
+      function semanticWarningText() {
+        return state.locale === "zh-CN" ? "引用已变成普通文本，请重新选择" : "The reference became plain text. Select it again.";
+      }
+
+      function semanticWarningMarkup(document) {
+        return '<div class="better-codex-semantic-warning" data-semantic-warning role="status"' + (document?.degraded ? "" : " hidden") + '>' + icon("permissionDanger") + '<span>' + escapeHtml(semanticWarningText()) + '</span></div>';
+      }
+
+      function syncSemanticWarning() {
+        const warning = dialog.querySelector("[data-semantic-warning]");
+        if (warning) warning.hidden = !semanticDraftDocument()?.degraded;
+      }
+
       function renderSemanticMenu() {
         const menu = dialog.querySelector("[data-semantic-menu]");
         const input = semanticEditor();
@@ -7915,7 +7950,13 @@ export function install(config: Record<string, any>) {
         } else if (!items.length) {
           menu.innerHTML = '<div class="better-codex-semantic-empty">' + te(state.locale === "zh-CN" ? "没有匹配项" : "No matches") + '</div>';
         } else {
-          menu.innerHTML = items.map((item, index) => '<button type="button" role="option" aria-selected="' + (index === semanticMenuState.index) + '" data-semantic-option="' + index + '"' + (item.available === false ? ' disabled aria-disabled="true"' : "") + '><span class="better-codex-semantic-icon">' + icon(item.icon || (item.kind === "skill" ? "wrench" : item.kind === "app" ? "server" : "terminal")) + '</span><span class="better-codex-semantic-copy"><strong>' + escapeHtml(item.label) + '</strong><small>' + escapeHtml(item.description || "") + '</small></span><kbd>' + escapeHtml(item.scope || "") + '</kbd></button>').join("");
+          let currentGroup = "";
+          menu.innerHTML = items.map((item, index) => {
+            const group = item.group || "";
+            const heading = group && group !== currentGroup ? '<div class="better-codex-semantic-group" role="presentation">' + escapeHtml(group) + '</div>' : "";
+            currentGroup = group;
+            return heading + '<button type="button" role="option" aria-selected="' + (index === semanticMenuState.index) + '" data-semantic-option="' + index + '"' + (item.available === false ? ' disabled aria-disabled="true"' : "") + '><span class="better-codex-semantic-icon">' + icon(item.icon || semanticCandidateIcon(item.kind)) + '</span><span class="better-codex-semantic-copy"><strong>' + escapeHtml(item.label) + '</strong><small>' + escapeHtml(item.description || "") + '</small></span><kbd>' + escapeHtml(item.scope || "") + '</kbd></button>';
+          }).join("");
         }
         menu.hidden = false;
         input.setAttribute("aria-expanded", "true");
@@ -7927,33 +7968,25 @@ export function install(config: Record<string, any>) {
         renderSemanticMenu();
       }
 
-      async function loadSemanticCatalog() {
-        if (semanticCatalog) return semanticCatalog;
-        if (!CODEX_SEMANTICS_AVAILABLE) return semanticCatalog = { skills: [], apps: [], errors: [{ source: "catalog", message: state.locale === "zh-CN" ? "当前 Web 视图无法读取本机 Codex 功能" : "This web view cannot read local Codex capabilities" }] };
+      async function loadSemanticCatalog(query = "", kinds = []) {
+        if (!CODEX_SEMANTICS_AVAILABLE) return semanticCatalog = { schema_version: 2, results: [], provider_errors: [{ source: "catalog", message: state.locale === "zh-CN" ? "当前 Web 视图无法读取本机 Codex 功能" : "This web view cannot read local Codex capabilities" }] };
         try {
-          const data = await api(issue
-            ? "/api/issues/" + encodeURIComponent(issue.id) + "/semantics"
-            : "/api/projects/" + encodeURIComponent(draft.projectId) + "/semantics");
-          semanticCatalog = { skills: Array.isArray(data?.skills) ? data.skills : [], apps: Array.isArray(data?.apps) ? data.apps : [], errors: Array.isArray(data?.errors) ? data.errors : [] };
+          const data = await semanticController.search(query, kinds);
+          semanticCatalog = { schema_version: 2, results: Array.isArray(data?.results) ? data.results : [], provider_errors: Array.isArray(data?.provider_errors) ? data.provider_errors : [] };
         } catch (error) {
+          if (error instanceof Error && error.message === "semantic_search_cancelled") throw error;
           appendDiagnostic("semantic_catalog_unavailable", { issue_id: issue?.id || "", project_id: draft.projectId || "", error: error instanceof Error ? error.message : String(error) });
-          semanticCatalog = { skills: [], apps: [], errors: [{ source: "catalog", message: error instanceof Error ? error.message : "codex_semantics_unavailable" }] };
+          semanticCatalog = { schema_version: 2, results: [], provider_errors: [{ source: "catalog", message: error instanceof Error ? error.message : "codex_semantics_unavailable" }] };
         }
         return semanticCatalog;
       }
 
-      function semanticSkillItems(query) {
-        const value = query.toLowerCase();
-        return (semanticCatalog?.skills || []).filter(skill => !value || skill.name.toLowerCase().includes(value) || String(skill.description || "").toLowerCase().includes(value)).slice(0, 12).map(skill => ({ kind: "skill", name: skill.name, ref: skill.ref, label: "$" + skill.name, description: skill.description, scope: skill.scope, icon: "wrench" }));
-      }
-
-      function semanticAppItems(query) {
-        const value = query.toLowerCase();
-        return (semanticCatalog?.apps || []).filter(app => !value || app.name.toLowerCase().includes(value)).slice(0, 20).map(app => ({ kind: "app", name: app.name, ref: app.ref, label: "@" + app.name, description: app.callable ? (state.locale === "zh-CN" ? "已安装的插件或连接器" : "Installed plugin or connector") : (state.locale === "zh-CN" ? "当前配置不可调用" : "Unavailable with the current configuration"), scope: app.callable ? (state.locale === "zh-CN" ? "可用" : "Available") : (state.locale === "zh-CN" ? "不可用" : "Unavailable"), icon: "server", available: app.enabled && app.callable }));
+      function semanticCandidateItems(trigger) {
+        return (semanticCatalog?.results || []).map(candidate => ({ kind: candidate.kind, name: candidate.label, handle: candidate.handle, display: (trigger === "$" && candidate.kind === "skill" ? "$" : "@") + (candidate.display_path || candidate.label), label: candidate.label, description: candidate.detail, scope: candidate.source + (candidate.availability === "available" ? "" : " · " + candidate.availability), group: semanticCandidateGroup(candidate.kind), icon: semanticCandidateIcon(candidate.kind), available: candidate.availability === "available" && candidate.addressability === "direct" }));
       }
 
       function semanticCatalogError(source) {
-        const error = (semanticCatalog?.errors || []).find(item => item?.source === source || item?.source === "catalog");
+        const error = (semanticCatalog?.provider_errors || []).find(item => item?.source === source || item?.source === "catalog");
         return error ? String(error.message || "codex_semantics_unavailable") : "";
       }
 
@@ -7968,24 +8001,24 @@ export function install(config: Record<string, any>) {
           return renderSemanticMenu();
         }
         if (token.trigger === "$") {
-          semanticMenuState = { token, items: semanticSkillItems(token.query), index: 0, loading: !semanticCatalog, error: semanticCatalog ? semanticCatalogError("skills") : "" };
+          semanticMenuState = { token, items: [], index: 0, loading: true, error: "" };
           renderSemanticMenu();
-          if (!semanticCatalog) void loadSemanticCatalog().then(() => {
+          void loadSemanticCatalog(token.query, ["skill"]).then(() => {
             const current = semanticToken(semanticEditor());
             if (!current || current.trigger !== "$" || current.query !== token.query) return;
-            semanticMenuState = { token: current, items: semanticSkillItems(current.query), index: 0, error: semanticCatalogError("skills") };
+            semanticMenuState = { token: current, items: semanticCandidateItems("$"), index: 0, error: semanticCatalogError("skills") };
             renderSemanticMenu();
-          });
+          }).catch(() => {});
           return;
         }
-        semanticMenuState = { token, items: semanticAppItems(token.query), index: 0, loading: !semanticCatalog, error: semanticCatalog ? semanticCatalogError("apps") : "" };
+        semanticMenuState = { token, items: [], index: 0, loading: true, error: "" };
         renderSemanticMenu();
-        if (!semanticCatalog) void loadSemanticCatalog().then(() => {
+        void loadSemanticCatalog(token.query).then(() => {
           const current = semanticToken(semanticEditor());
           if (!current || current.trigger !== "@" || current.query !== token.query) return;
-          semanticMenuState = { token: current, items: semanticAppItems(current.query), index: 0, error: semanticCatalogError("apps") };
+          semanticMenuState = { token: current, items: semanticCandidateItems("@"), index: 0, error: semanticCatalogError("catalog") };
           renderSemanticMenu();
-        });
+        }).catch(() => {});
       }
 
       function replaceSemanticToken(value) {
@@ -8031,12 +8064,20 @@ export function install(config: Record<string, any>) {
           closeSemanticMenu();
           return;
         }
-        const token = (item.kind === "skill" ? "$" : "@") + item.name;
-        replaceSemanticToken(token + " ");
-        const reference = { type: item.kind, name: item.name, ref: item.ref };
-        const references = semanticDraftReferences().filter(value => !(value.type === reference.type && value.name === reference.name));
-        references.push(reference);
-        setSemanticDraftReferences(references);
+        const input = semanticEditor();
+        const activeToken = semanticMenuState?.token || semanticToken(input);
+        if (!input || !activeToken || !item.handle) return;
+        const document = insertSemanticReference(semanticDraftDocument(), activeToken.start, activeToken.end, item.handle, item.display);
+        setSemanticDraftDocument(document);
+        input.value = document.text;
+        const cursor = activeToken.start + item.display.length + 1;
+        input.setSelectionRange(cursor, cursor);
+        if (!issue && draft.mode === "agent") draft.prompt = input.value;
+        else {
+          draft.reply = input.value;
+          latestReplyDraft = input.value;
+          scheduleReplyDraft(input.value);
+        }
         closeSemanticMenu();
       }
 
@@ -8075,7 +8116,7 @@ export function install(config: Record<string, any>) {
         const actionLabel = t(stopping ? "正在停止…" : mode === "stop" ? "停止任务" : mode === "queue" ? "加入队列" : "发送");
         const attachments = attachmentList(draft.replyAttachments, "reply");
         const attachButton = '<button class="better-codex-composer-attach" type="button" data-conversation-attach aria-label="' + te("添加附件") + '" title="' + te("添加附件") + '"' + inputDisabled + '>' + icon("plus", "", "1.9") + '</button>';
-        return '<div class="better-codex-composer" data-state="' + mode + '">' + attachments + '<div class="better-codex-semantic-menu" id="better-codex-semantic-menu" data-semantic-menu role="listbox" hidden></div><textarea name="reply" rows="2" placeholder="' + te(archived ? "取消归档后继续对话" : sessionHandoff ? "请前往会话继续对话" : "输入下一步要求…") + '" aria-label="' + te("回复") + '" aria-autocomplete="list" aria-controls="better-codex-semantic-menu" aria-expanded="false"' + inputDisabled + '>' + escapeHtml(draft.reply) + '</textarea><div class="better-codex-composer-toolbar">' + attachButton + '<button class="better-codex-composer-send" type="button" data-conversation-send data-composer-mode="' + mode + '" aria-label="' + escapeHtml(actionLabel) + '" title="' + escapeHtml(actionLabel) + '"' + actionDisabled + '>' + icon(mode === "stop" || mode === "stopping" ? "stop" : "send", "", mode === "stop" || mode === "stopping" ? "2.5" : "2") + '</button></div></div>';
+        return '<div class="better-codex-composer" data-state="' + mode + '">' + attachments + '<div class="better-codex-semantic-menu" id="better-codex-semantic-menu" data-semantic-menu role="listbox" hidden></div><textarea name="reply" rows="2" placeholder="' + te(archived ? "取消归档后继续对话" : sessionHandoff ? "请前往会话继续对话" : "输入下一步要求…") + '" aria-label="' + te("回复") + '" aria-autocomplete="list" aria-controls="better-codex-semantic-menu" aria-expanded="false"' + inputDisabled + '>' + escapeHtml(draft.reply) + '</textarea>' + semanticWarningMarkup(draft.replySemanticDocument) + '<div class="better-codex-composer-toolbar">' + attachButton + '<button class="better-codex-composer-send" type="button" data-conversation-send data-composer-mode="' + mode + '" aria-label="' + escapeHtml(actionLabel) + '" title="' + escapeHtml(actionLabel) + '"' + actionDisabled + '>' + icon(mode === "stop" || mode === "stopping" ? "stop" : "send", "", mode === "stop" || mode === "stopping" ? "2.5" : "2") + '</button></div></div>';
       }
 
       function syncQueuedReplyState() {
@@ -8098,7 +8139,7 @@ export function install(config: Record<string, any>) {
             const message = item.message || t("附件");
             const busy = queueActionRequestId === requestId;
             if (queueEditingRequestId === requestId) {
-              return '<div class="better-codex-composer-queue-row is-editing" role="listitem" data-queue-request="' + escapeHtml(requestId) + '"><span class="better-codex-composer-queue-icon" aria-hidden="true">' + icon("queue") + '</span><textarea class="better-codex-composer-queue-edit" data-queue-edit-input rows="2" aria-label="' + te("编辑队列消息") + '">' + escapeHtml(queueEditDraft) + '</textarea><span class="better-codex-composer-queue-actions"><button type="button" data-queue-edit-save="' + escapeHtml(requestId) + '" aria-label="' + te("保存修改") + '" title="' + te("保存修改") + '"' + (busy || !queueEditDraft.trim() ? " disabled" : "") + '>' + icon(busy ? "refresh" : "check", busy ? "better-codex-spin" : "") + '</button><button type="button" data-queue-edit-cancel aria-label="' + te("取消编辑") + '" title="' + te("取消编辑") + '"' + (busy ? " disabled" : "") + '>' + icon("close") + '</button></span></div>';
+              return '<div class="better-codex-composer-queue-row is-editing" role="listitem" data-queue-request="' + escapeHtml(requestId) + '"><span class="better-codex-composer-queue-icon" aria-hidden="true">' + icon("queue") + '</span><span class="better-codex-composer-queue-edit-field"><textarea class="better-codex-composer-queue-edit" data-queue-edit-input rows="2" aria-label="' + te("编辑队列消息") + '">' + escapeHtml(queueEditDraft) + '</textarea><span class="better-codex-semantic-warning" data-queue-edit-warning role="status"' + (queueEditSemanticDocument?.degraded ? "" : " hidden") + '>' + icon("permissionDanger") + '<span>' + escapeHtml(semanticWarningText()) + '</span></span></span><span class="better-codex-composer-queue-actions"><button type="button" data-queue-edit-save="' + escapeHtml(requestId) + '" aria-label="' + te("保存修改") + '" title="' + te("保存修改") + '"' + (busy || !queueEditDraft.trim() ? " disabled" : "") + '>' + icon(busy ? "refresh" : "check", busy ? "better-codex-spin" : "") + '</button><button type="button" data-queue-edit-cancel aria-label="' + te("取消编辑") + '" title="' + te("取消编辑") + '"' + (busy ? " disabled" : "") + '>' + icon("close") + '</button></span></div>';
             }
             const disabled = busy || sessionHandoff || Boolean(issue?.archived_at);
             return '<div class="better-codex-composer-queue-row" role="listitem" data-queue-request="' + escapeHtml(requestId) + '" title="' + escapeHtml(message) + '"><span class="better-codex-composer-queue-icon" aria-hidden="true">' + icon("queue") + '</span><span class="better-codex-composer-queue-message">' + escapeHtml(message) + '</span><span class="better-codex-composer-queue-actions"><button type="button" data-queue-send-now="' + escapeHtml(requestId) + '" aria-label="' + te("立即发送") + '" title="' + te("立即发送") + '"' + (disabled ? " disabled" : "") + '>' + icon(busy ? "refresh" : "send", busy ? "better-codex-spin" : "") + '</button><button type="button" data-queue-edit="' + escapeHtml(requestId) + '" aria-label="' + te("编辑队列消息") + '" title="' + te("编辑队列消息") + '"' + (disabled ? " disabled" : "") + '>' + icon("edit") + '</button><button type="button" data-queue-delete="' + escapeHtml(requestId) + '" aria-label="' + te("删除队列消息") + '" title="' + te("删除队列消息") + '"' + (disabled ? " disabled" : "") + '>' + icon("trash") + '</button></span></div>';
@@ -8123,7 +8164,7 @@ export function install(config: Record<string, any>) {
         try {
           const commandId = globalThis.crypto?.randomUUID?.() || VERSION + "-queue-" + Date.now() + "-" + Math.random().toString(36).slice(2);
           const path = "/api/issues/" + encodeURIComponent(issue.id) + "/queue/" + encodeURIComponent(requestId) + (action === "send" ? "/send" : "");
-          const result = await api(path, { method: action === "send" ? "POST" : action === "delete" ? "DELETE" : "PATCH", body: JSON.stringify(action === "update" ? { command_id: commandId, message } : { command_id: commandId }) });
+          const result = await api(path, { method: action === "send" ? "POST" : action === "delete" ? "DELETE" : "PATCH", body: JSON.stringify(action === "update" ? { command_id: commandId, message, input_document: serializeSemanticDraft(reconcileSemanticText(queueEditSemanticDocument || createSemanticDraft(message), message)) } : { command_id: commandId }) });
           if (result.command_id) {
             const command = await waitForRemoteCommand(result.command_id);
             if (command.status !== "applied") throw new Error(command.error || "command_rejected");
@@ -8133,6 +8174,7 @@ export function install(config: Record<string, any>) {
           else queuedReplies = queuedReplies.map(item => item.request_id === requestId ? { ...item, message } : item);
           queueEditingRequestId = "";
           queueEditDraft = "";
+          queueEditSemanticDocument = null;
           conversationTimer = setTimeout(() => void loadConversation({ quiet: true }), 1500);
         } catch (error) {
           reportUnexpectedError(error, { source: "conversation_queue", action, issue_id: issue.id, request_id: requestId });
@@ -8439,7 +8481,7 @@ export function install(config: Record<string, any>) {
         if (remaining === value) throw new Error("native_desktop_command_not_accepted");
       }
 
-      async function sendReply(retryMessage = "", retryRequestId = "", retrySemanticReferences = null, retryCommand = "") {
+      async function sendReply(retryMessage = "", retryRequestId = "", retrySemanticReferences = null, retryCommand = "", retrySemanticDocument = lastReplySemanticDocument) {
         const textarea = dialog.querySelector('[name="reply"]');
         const send = dialog.querySelector("[data-conversation-send]");
         const errorOutput = dialog.querySelector(".better-codex-dialog-error");
@@ -8450,6 +8492,7 @@ export function install(config: Record<string, any>) {
         const slashArgument = String(slashMatch?.[2] || "").trim();
         const semanticCommand = retryCommand || (["review", "compact"].includes(slashCommand) ? slashCommand : "");
         const semanticReferences = retrying ? (retrySemanticReferences || []) : draft.replySemanticReferences.filter(reference => text.includes((reference.type === "skill" ? "$" : "@") + reference.name));
+        const semanticDocument = retrySemanticDocument || reconcileSemanticText(draft.replySemanticDocument, text);
         const requestId = retryRequestId || (globalThis.crypto?.randomUUID?.() || VERSION + "-reply-" + Date.now() + "-" + Math.random().toString(36).slice(2));
         if (sessionHandoff || !issue || !sessionId || (!text && !draft.replyAttachments.length) || !send || !errorOutput) return;
         if (!retrying && slashCommand === "status") {
@@ -8529,12 +8572,14 @@ export function install(config: Record<string, any>) {
           }
         }
         const submittedAttachments = draft.replyAttachments.slice();
+        const submittedSemanticDocument = reconcileSemanticText(semanticDocument, message);
         let reply;
         try {
           lastReplyStatus = "running";
           lastReplySemanticReferences = semanticReferences.map(reference => ({ ...reference }));
+          lastReplySemanticDocument = submittedSemanticDocument;
           lastReplyCommand = semanticCommand;
-          reply = await api("/api/issues/" + encodeURIComponent(issue.id) + "/reply", { method: "POST", body: JSON.stringify({ message, request_id: requestId, files, semantic_references: semanticReferences, command: semanticCommand }), timeoutMs: files.length ? 120_000 : undefined });
+          reply = await api("/api/issues/" + encodeURIComponent(issue.id) + "/reply", { method: "POST", body: JSON.stringify({ message, input_document: serializeSemanticDraft(submittedSemanticDocument), request_id: requestId, files, command: semanticCommand }), timeoutMs: files.length ? 120_000 : undefined });
         } catch (error) {
           lastReplyRequestId = requestId;
           const outcomeUncertain = !Number(error?.betterCodexDiagnostics?.http_status);
@@ -8858,7 +8903,7 @@ export function install(config: Record<string, any>) {
           const hint = humanAssigned
             ? state.locale === "zh-CN" ? "创建后由默认智能体生成标题，等待 " + (assignedUser?.name || t("你")) + " 处理。" : "The default agent will generate the title, then wait for " + (assignedUser?.name || t("你")) + "."
             : t("创建后先由 " + selectedName + " 整理卡片，再自动开始工作。");
-          dialog.innerHTML = '<form>' + header() + assigneePicker() + '<div class="better-codex-create-semantic"><div class="better-codex-semantic-menu" id="better-codex-semantic-menu" data-semantic-menu role="listbox" hidden></div><textarea class="better-codex-dialog-editor" name="prompt" placeholder="' + te("告诉智能体要做什么，例如：“修复项目里任务运行状态不可见的问题”") + '" aria-label="' + te("任务要求") + '" aria-autocomplete="list" aria-controls="better-codex-semantic-menu" aria-expanded="false">' + escapeHtml(draft.prompt) + '</textarea></div>' + propertyRows() + attachmentList() + '<div class="better-codex-dialog-error" hidden></div>' + footer() + '</form>';
+          dialog.innerHTML = '<form>' + header() + assigneePicker() + '<div class="better-codex-create-semantic"><div class="better-codex-semantic-menu" id="better-codex-semantic-menu" data-semantic-menu role="listbox" hidden></div><textarea class="better-codex-dialog-editor" name="prompt" placeholder="' + te("告诉智能体要做什么，例如：“修复项目里任务运行状态不可见的问题”") + '" aria-label="' + te("任务要求") + '" aria-autocomplete="list" aria-controls="better-codex-semantic-menu" aria-expanded="false">' + escapeHtml(draft.prompt) + '</textarea>' + semanticWarningMarkup(draft.promptSemanticDocument) + '</div>' + propertyRows() + attachmentList() + '<div class="better-codex-dialog-error" hidden></div>' + footer() + '</form>';
           dialog.querySelector(".better-codex-dialog-properties")?.insertAdjacentHTML("beforebegin", '<div class="better-codex-run-hint">' + agentAvatarMarkup(selectedAgent, "better-codex-agent-avatar") + '<span>' + escapeHtml(hint) + '</span></div>');
         } else if (issue) {
           const descriptionEditor = '<div class="better-codex-description-field"><textarea class="better-codex-dialog-editor" name="description" placeholder="' + te("添加描述...") + '" rows="3">' + escapeHtml(draft.description) + '</textarea><button class="better-codex-description-toggle" type="button" data-description-toggle hidden></button></div>';
@@ -8890,14 +8935,16 @@ export function install(config: Record<string, any>) {
           dirtyDraftFields.add(draft.mode === "agent" ? "prompt" : "title");
           if (!issue && draft.mode === "agent") {
             draft.prompt = content.value;
-            draft.promptSemanticReferences = draft.promptSemanticReferences.filter(reference => content.value.includes((reference.type === "skill" ? "$" : "@") + reference.name));
+            const previous = draft.promptSemanticDocument;
+            draft.promptSemanticDocument = reconcileSemanticText(previous, content.value);
+            if (!previous.degraded && draft.promptSemanticDocument.degraded) appendDiagnostic("semantic_reference_degraded", { editor: "prompt", project_id: draft.projectId || "" });
+            syncSemanticWarning();
             syncSemanticMenu();
           }
           updateSubmitState();
         });
         if (!issue && draft.mode === "agent") {
           content?.addEventListener("focus", () => {
-            void loadSemanticCatalog();
             syncSemanticMenu();
           });
           content?.addEventListener("blur", () => {
@@ -8933,6 +8980,9 @@ export function install(config: Record<string, any>) {
         queue?.addEventListener("input", event => {
           if (!event.target.matches("[data-queue-edit-input]")) return;
           queueEditDraft = event.target.value;
+          queueEditSemanticDocument = reconcileSemanticText(queueEditSemanticDocument || createSemanticDraft(queueEditDraft), queueEditDraft);
+          const warning = queue.querySelector("[data-queue-edit-warning]");
+          if (warning) warning.hidden = !queueEditSemanticDocument.degraded;
           const save = queue.querySelector("[data-queue-edit-save]");
           if (save) save.disabled = !queueEditDraft.trim() || Boolean(queueActionRequestId);
         });
@@ -8942,6 +8992,7 @@ export function install(config: Record<string, any>) {
             event.preventDefault();
             queueEditingRequestId = "";
             queueEditDraft = "";
+            queueEditSemanticDocument = null;
             queueActionError = "";
             syncQueuedReplyState();
             return;
@@ -8963,6 +9014,7 @@ export function install(config: Record<string, any>) {
             if (!item) return;
             queueEditingRequestId = item.request_id;
             queueEditDraft = item.message || "";
+            queueEditSemanticDocument = createSemanticDraft(queueEditDraft, item.input_document);
             queueActionError = "";
             syncQueuedReplyState();
             requestAnimationFrame(() => {
@@ -8980,6 +9032,7 @@ export function install(config: Record<string, any>) {
           if (event.target.closest("[data-queue-edit-cancel]")) {
             queueEditingRequestId = "";
             queueEditDraft = "";
+            queueEditSemanticDocument = null;
             queueActionError = "";
             syncQueuedReplyState();
             return;
@@ -8989,13 +9042,15 @@ export function install(config: Record<string, any>) {
         });
         replyInput?.addEventListener("input", () => {
           draft.reply = replyInput.value;
-          draft.replySemanticReferences = draft.replySemanticReferences.filter(reference => replyInput.value.includes((reference.type === "skill" ? "$" : "@") + reference.name));
+          const previous = draft.replySemanticDocument;
+          draft.replySemanticDocument = reconcileSemanticText(previous, replyInput.value);
+          if (!previous.degraded && draft.replySemanticDocument.degraded) appendDiagnostic("semantic_reference_degraded", { editor: "reply", issue_id: issue?.id || "" });
+          syncSemanticWarning();
           scheduleReplyDraft(replyInput.value);
           updateReplySendState();
           syncSemanticMenu();
         });
         replyInput?.addEventListener("focus", () => {
-          void loadSemanticCatalog();
           syncSemanticMenu();
         });
         replyInput?.addEventListener("blur", () => {
@@ -9401,16 +9456,17 @@ export function install(config: Record<string, any>) {
           if (REMOTE) files = await remoteFiles(draft.attachments);
           else await uploadPastedImages();
           const semanticCommand = !issue && draft.mode === "agent" && /^\/review$/.test(prompt) ? "review" : "";
+          const submittedDescription = REMOTE ? (draft.mode === "agent" ? prompt : draft.description) : withAttachments(draft.mode === "agent" ? prompt : draft.description);
           const body = {
             project_id: draft.projectId,
             title,
-            description: REMOTE ? (draft.mode === "agent" ? prompt : draft.description) : withAttachments(draft.mode === "agent" ? prompt : draft.description),
+            description: submittedDescription,
             status: draft.mode === "agent" && !issue ? "todo" : draft.status,
             priority: draft.priority,
             labels: draft.labels.split(/[,，]/).map(value => value.trim()).filter(Boolean),
             workspace_path: workspacePath,
             ai_enrich: draft.mode === "agent" && !issue,
-            semantic_references: !issue && draft.mode === "agent" ? draft.promptSemanticReferences.filter(reference => prompt.includes((reference.type === "skill" ? "$" : "@") + reference.name)) : [],
+            ...(!issue && draft.mode === "agent" ? { input_document: serializeSemanticDraft(reconcileSemanticText(draft.promptSemanticDocument, submittedDescription)) } : {}),
             ...(!issue && draft.mode === "agent" ? { semantic_command: semanticCommand } : {}),
             files,
             ...(state.mockup ? { mockup_run_status: draft.runStatus } : {}),
@@ -9434,6 +9490,7 @@ export function install(config: Record<string, any>) {
             draft.description = "";
             draft.prompt = "";
             draft.promptSemanticReferences = [];
+            draft.promptSemanticDocument = createSemanticDraft("");
             draft.attachments.forEach(releaseAttachment);
             draft.attachments = [];
             renderDialog();

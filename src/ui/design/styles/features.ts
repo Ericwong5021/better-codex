@@ -6396,6 +6396,7 @@ export function betterCodexFeatureStylesCss() {
       display: flex;
       min-height: 0;
       flex: 1;
+      flex-direction: column;
       margin: 0 var(--bc-space-4);
     }
 
@@ -6429,6 +6430,15 @@ export function betterCodexFeatureStylesCss() {
 
     #better-codex-dialog .better-codex-semantic-menu[hidden] {
       display: none;
+    }
+
+    #better-codex-dialog .better-codex-semantic-group {
+      padding: var(--bc-space-2) var(--bc-space-2) var(--bc-space-1);
+      color: var(--bc-color-text-faint);
+      font-size: var(--bc-text-xs);
+      font-weight: 650;
+      letter-spacing: .04em;
+      text-transform: uppercase;
     }
 
     #better-codex-dialog .better-codex-semantic-menu button {
@@ -6529,6 +6539,24 @@ export function betterCodexFeatureStylesCss() {
 
     #better-codex-dialog .better-codex-semantic-empty.is-error {
       color: var(--bc-color-danger);
+    }
+
+    #better-codex-dialog .better-codex-semantic-warning {
+      display: flex;
+      align-items: center;
+      gap: var(--bc-space-1);
+      color: color-mix(in oklch, var(--bc-color-warning) 80%, var(--bc-color-text));
+      font-size: var(--bc-text-caption);
+    }
+
+    #better-codex-dialog .better-codex-semantic-warning[hidden] {
+      display: none;
+    }
+
+    #better-codex-dialog .better-codex-semantic-warning svg {
+      width: 13px;
+      height: 13px;
+      flex: 0 0 auto;
     }
 
     #better-codex-dialog .better-codex-semantic-status {
@@ -6721,11 +6749,19 @@ export function betterCodexFeatureStylesCss() {
       margin-top: 4px;
     }
 
+    #better-codex-dialog .better-codex-composer-queue-edit-field {
+      display: flex;
+      min-width: 0;
+      flex: 1;
+      flex-direction: column;
+      gap: var(--bc-space-1);
+    }
+
     #better-codex-dialog .better-codex-composer-queue-edit {
       box-sizing: border-box;
+      width: 100%;
       min-width: 0;
       min-height: 44px;
-      flex: 1;
       border: 1px solid var(--bc-color-hairline);
       border-radius: var(--bc-radius-xs);
       color: var(--bc-color-text);

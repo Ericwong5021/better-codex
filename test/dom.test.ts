@@ -820,7 +820,9 @@ test("create dialog paperclip preserves local paths and transfers remote files",
   assert.ok(source.includes("function withAttachments(text, items = draft.attachments)"));
   assert.ok(source.includes('const path = String(file.path || "").trim()'));
   assert.ok(source.includes('const block = t("附带文件：") + "\\n"'));
-  assert.ok(source.includes("description: REMOTE ? (draft.mode === \"agent\" ? prompt : draft.description) : withAttachments(draft.mode === \"agent\" ? prompt : draft.description)"));
+  assert.ok(source.includes("const submittedDescription = REMOTE ? (draft.mode === \"agent\" ? prompt : draft.description) : withAttachments(draft.mode === \"agent\" ? prompt : draft.description)"));
+  assert.ok(source.includes("description: submittedDescription"));
+  assert.ok(source.includes("reconcileSemanticText(draft.promptSemanticDocument, submittedDescription)"));
   assert.ok(source.includes("data-dialog-detach"));
   assert.ok(source.includes("当前环境无法读取本地文件路径"));
 });

@@ -4,7 +4,7 @@ import { createServer, type Socket } from "node:net";
 import { chmodSync, closeSync, linkSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync, type Stats } from "node:fs";
 import { betterCodexHome, betterCodexProfile, ensureDirectories, sessionHostLockPath, sessionHostPidPath, sessionHostSocketPath, sessionHostStatusPath, sessionHostTransportPath, token } from "./config.js";
 import { RuntimeSessionRelay, type RelayPoll, type SessionRelayHost } from "./session-relay.js";
-import { sessionHostProtocolVersion, type SessionHostDelivery, type SessionHostMessage, type SessionHostServerMessage, type SessionHostStatus, type SessionHostThreadAction } from "./session-host-protocol.js";
+import { sessionHostProtocolVersion, type SessionHostDelivery, type SessionHostMessage, type SessionHostSemanticMethod, type SessionHostServerMessage, type SessionHostStatus, type SessionHostThreadAction } from "./session-host-protocol.js";
 import { SessionHostTransport } from "./session-host-transport.js";
 
 type RuntimeConnection = {
@@ -22,6 +22,14 @@ type RuntimeConnection = {
 
 function diagnostic(event: string, detail: Record<string, unknown> = {}) {
   console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "session_host", event, host_pid: process.pid, ...detail })}`);
+}
+
+function semanticResponseError(error: unknown) {
+  const value = error instanceof Error ? error.message : String(error || "");
+  const status = value.match(/(?:http|status(?: code)?)[^0-9]{0,12}([45][0-9]{2})/i)?.[1];
+  if (status) return `UPSTREAM_HTTP_${status}`;
+  if (["semantic_method_not_allowed", "app_server_unavailable", "app_server_timeout", "app_server_closed", "app_server_request_failed"].includes(value)) return value;
+  return "app_server_request_failed";
 }
 
 function writeMessage(socket: Socket, message: SessionHostServerMessage) {
@@ -140,7 +148,7 @@ class SessionHostServer {
   private handoff: SessionHostStatus["handoff"] = null;
   private orphanTimer: NodeJS.Timeout | null = null;
   private statusTimer: NodeJS.Timeout | null = null;
-  private readonly relay = new RuntimeSessionRelay(this.proxyHost());
+  private readonly relay = new RuntimeSessionRelay(this.proxyHost(), this.hostInstanceId);
 
   start() {
     ensureDirectories();
@@ -355,7 +363,7 @@ class SessionHostServer {
       this.runtimeDisconnectedAt = null;
       if (this.orphanTimer) clearTimeout(this.orphanTimer);
       this.orphanTimer = null;
-      writeMessage(connection.socket, { type: "hello_ack", protocol_version: sessionHostProtocolVersion, host_pid: process.pid, host_instance_id: this.hostInstanceId, connection_epoch: connection.epoch, runtime_instance_id: message.runtime_instance_id, runtime_generation: message.runtime_generation, started_at: this.startedAt, relay_id: `session-host:${process.pid}`, capabilities: { thread_actions: true, durable_deliveries: true, runtime_handoff: true } });
+      writeMessage(connection.socket, { type: "hello_ack", protocol_version: sessionHostProtocolVersion, host_pid: process.pid, host_instance_id: this.hostInstanceId, connection_epoch: connection.epoch, runtime_instance_id: message.runtime_instance_id, runtime_generation: message.runtime_generation, started_at: this.startedAt, relay_id: `session-host:${process.pid}`, capabilities: { thread_actions: true, durable_deliveries: true, runtime_handoff: true, semantic_requests: true } });
       this.writeStatus();
       diagnostic("runtime_connected", { connection_epoch: connection.epoch, runtime_instance_id: message.runtime_instance_id, runtime_generation: message.runtime_generation, runtime_version: message.runtime_version, handoff_update_id: message.handoff_update_id });
       this.flushDeliveries();
@@ -391,6 +399,26 @@ class SessionHostServer {
         if (this.connection === connection) writeMessage(connection.socket, { type: "thread_action_response", request_id: message.request_id, ok: true });
       } catch (error) {
         if (this.connection === connection) writeMessage(connection.socket, { type: "thread_action_response", request_id: message.request_id, ok: false, error: error instanceof Error ? error.message : "codex_thread_action_failed" });
+      }
+      return;
+    }
+    if (message.type === "semantic_request") {
+      const methods: SessionHostSemanticMethod[] = ["skills/list", "app/installed", "app/list", "plugin/installed", "mcpServerStatus/list", "fuzzyFileSearch"];
+      const deadline = Date.parse(message.deadline_at);
+      const validParams = message.params && typeof message.params === "object" && !Array.isArray(message.params) && Buffer.byteLength(JSON.stringify(message.params)) <= 131_072;
+      const identity = () => {
+        const status = this.relay.status();
+        return { host_instance_id: this.hostInstanceId, app_server_pid: status.app_server_pid, app_server_started_at: status.app_server_started_at, app_server_version: status.app_server_version, catalog_generation: `${this.hostInstanceId}:${status.app_server_pid || 0}:${status.app_server_started_at || ""}` };
+      };
+      if (!connection.authenticated || !methods.includes(message.method) || !validParams || !Number.isFinite(deadline) || deadline <= Date.now()) {
+        writeMessage(connection.socket, { type: "semantic_response", request_id: String(message.request_id || ""), ok: false, error: "semantic_request_invalid", identity: identity() });
+        return;
+      }
+      try {
+        const response = await this.relay.semanticRequest(message.method, message.params, Math.min(30_000, Math.max(1, deadline - Date.now())));
+        if (this.connection === connection) writeMessage(connection.socket, { type: "semantic_response", request_id: message.request_id, ok: true, result: response.result, identity: { host_instance_id: this.hostInstanceId, ...response.identity, catalog_generation: `${this.hostInstanceId}:${response.identity.catalog_generation}` } });
+      } catch (error) {
+        if (this.connection === connection) writeMessage(connection.socket, { type: "semantic_response", request_id: message.request_id, ok: false, error: semanticResponseError(error), identity: identity() });
       }
       return;
     }

@@ -1,8 +1,10 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { coreVersion } from "./compatibility.js";
 import { codexExecutablePath } from "./codex-cli.js";
 import type { IssueThreadAction, SessionCommand } from "./db.js";
+import { compileInputDocument, normalizeInputDocument } from "./codex-input-document.js";
 import { normalizeCodexSemanticInput } from "./codex-semantics.js";
+import type { SessionHostSemanticMethod } from "./session-host-protocol.js";
 
 export type RelayPoll = {
   leader: boolean;
@@ -36,6 +38,18 @@ type RelayEvent = {
 
 function object(value: unknown) {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function semanticDiagnostic(event: string, detail: Record<string, unknown>) {
+  console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "semantic_compiler", event, host_instance_id: detail.host_instance_id || null, app_server_pid: detail.app_server_pid || null, app_server_started_at: detail.app_server_started_at || null, app_server_version: detail.app_server_version || null, ...detail })}`);
+}
+
+function codexVersion(executable: string) {
+  try {
+    return execFileSync(executable, ["--version"], { encoding: "utf8", windowsHide: true, timeout: 5000 }).trim().match(/\b(\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?)\b/)?.[1] || "unknown";
+  } catch {
+    return "unknown";
+  }
 }
 
 function sessionId(value: unknown) {
@@ -90,13 +104,16 @@ export class RuntimeSessionRelay {
   private bufferedEvents: RelayEvent[] = [];
   private operationQueue: Promise<void> = Promise.resolve();
   private appServerStartedAt: string | null = null;
+  private appServerVersion = "";
+  private appServerReady = false;
 
-  constructor(private readonly host: SessionRelayHost) {}
+  constructor(private readonly host: SessionRelayHost, private readonly hostInstanceId = "") {}
 
   status() {
     return {
       app_server_pid: this.child?.pid ?? null,
       app_server_started_at: this.appServerStartedAt,
+      app_server_version: this.appServerVersion,
       app_server_connected: Boolean(this.child),
       command_in_flight: this.commandInFlight,
       pending_requests: this.pending.size,
@@ -126,6 +143,8 @@ export class RuntimeSessionRelay {
     const child = this.child;
     this.child = null;
     this.appServerStartedAt = null;
+    this.appServerVersion = "";
+    this.appServerReady = false;
     this.activeTurns.clear();
     this.rejectPending("runtime_stopped");
     if (this.relayId) this.host.release(this.relayId, "runtime_stopped");
@@ -145,6 +164,23 @@ export class RuntimeSessionRelay {
         if (action !== "unarchive") this.threads.delete(threadId);
       }
     });
+  }
+
+  async semanticRequest(method: SessionHostSemanticMethod, params: Record<string, unknown>, timeout = 8000) {
+    const methods: SessionHostSemanticMethod[] = ["skills/list", "app/installed", "app/list", "plugin/installed", "mcpServerStatus/list", "fuzzyFileSearch"];
+    if (!methods.includes(method)) throw new Error("semantic_method_not_allowed");
+    if (!this.child || !this.appServerReady) throw new Error("app_server_unavailable");
+    const result = await this.request(method, params, timeout);
+    if (!this.child || !this.appServerReady) throw new Error("app_server_unavailable");
+    return {
+      result,
+      identity: {
+        app_server_pid: this.child.pid ?? null,
+        app_server_started_at: this.appServerStartedAt,
+        app_server_version: this.appServerVersion,
+        catalog_generation: `${this.generation}:${this.child.pid ?? 0}:${this.appServerStartedAt || ""}`,
+      },
+    };
   }
 
   private serialize<T>(operation: () => Promise<T>) {
@@ -170,11 +206,13 @@ export class RuntimeSessionRelay {
 
   private async initialize(child: ChildProcessWithoutNullStreams) {
     try {
-      await this.request("initialize", {
+      const initialized = object(await this.request("initialize", {
         clientInfo: { name: "better-codex", title: "Better Codex", version: coreVersion },
         capabilities: { experimentalApi: true },
-      }, 10000);
+      }, 10000));
       if (this.child !== child || this.stopped) return;
+      this.appServerVersion = String(object(initialized.serverInfo).version || initialized.version || codexVersion(codexExecutablePath()));
+      this.appServerReady = true;
       this.notify("initialized", {});
       await this.poll();
       if (this.child !== child || this.stopped) return;
@@ -189,6 +227,8 @@ export class RuntimeSessionRelay {
     if (this.child !== child) return;
     this.child = null;
     this.appServerStartedAt = null;
+    this.appServerVersion = "";
+    this.appServerReady = false;
     this.activeTurns.clear();
     if (this.pollTimer) clearInterval(this.pollTimer);
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
@@ -426,7 +466,7 @@ export class RuntimeSessionRelay {
         } catch {}
         const turn = payload.semantic_command === "review"
           ? object(await this.request("review/start", { threadId, target: { type: "uncommittedChanges" }, delivery: "inline" }))
-          : object(await this.request("turn/start", this.turnStartParams(threadId, payload)));
+          : object(await this.request("turn/start", await this.turnStartParams(threadId, payload)));
         turnId = sessionId(object(turn.turn).id);
         if (!turnId) throw new Error("desktop_turn_start_invalid");
         this.activeTurns.set(threadId, turnId);
@@ -437,11 +477,11 @@ export class RuntimeSessionRelay {
         await this.resume(threadId, payload);
         let turn: Record<string, unknown>;
         try {
-          turn = object(await this.request("turn/start", this.turnStartParams(threadId, payload)));
+          turn = object(await this.request("turn/start", await this.turnStartParams(threadId, payload)));
         } catch (error) {
           if (!this.isThreadNotFound(error)) throw error;
           await this.resume(threadId, payload);
-          turn = object(await this.request("turn/start", this.turnStartParams(threadId, payload)));
+          turn = object(await this.request("turn/start", await this.turnStartParams(threadId, payload)));
         }
         turnId = sessionId(object(turn.turn).id);
         if (!turnId) throw new Error("desktop_turn_start_invalid");
@@ -475,7 +515,7 @@ export class RuntimeSessionRelay {
         const steered = object(await this.request("turn/steer", {
           threadId,
           expectedTurnId: turnId,
-          input: normalizeCodexSemanticInput(payload.input, String(payload.message || "")),
+          input: await this.semanticInput(payload),
         }));
         turnId = sessionId(steered.turnId) || turnId;
       } else if (command.kind === "interrupt") {
@@ -513,10 +553,10 @@ export class RuntimeSessionRelay {
     }
   }
 
-  private turnStartParams(threadId: string, payload: Record<string, unknown>) {
+  private async turnStartParams(threadId: string, payload: Record<string, unknown>) {
     const params: Record<string, unknown> = {
       threadId,
-      input: normalizeCodexSemanticInput(payload.input, String(payload.message || "")),
+      input: await this.semanticInput(payload),
       approvalPolicy: String(payload.approval_policy || "on-request"),
       approvalsReviewer: String(payload.approvals_reviewer || "auto_review"),
     };
@@ -525,6 +565,44 @@ export class RuntimeSessionRelay {
     if (payload.effort) params.effort = String(payload.effort);
     if (payload.service_tier) params.serviceTier = String(payload.service_tier);
     return params;
+  }
+
+  private async semanticInput(payload: Record<string, unknown>) {
+    if (payload.input_document && typeof payload.input_document === "object" && !Array.isArray(payload.input_document)) {
+      const document = normalizeInputDocument(payload.input_document);
+      const expectedGeneration = `${this.hostInstanceId}:${this.generation}:${this.child?.pid ?? 0}:${this.appServerStartedAt || ""}`;
+      const references = Object.values(document.references);
+      semanticDiagnostic("compile_started", { host_instance_id: this.hostInstanceId, app_server_pid: this.child?.pid ?? null, app_server_started_at: this.appServerStartedAt, app_server_version: this.appServerVersion, reference_count: references.length, reference_kinds: references.map(reference => reference.kind), part_count: document.parts.length });
+      for (const reference of references) {
+        if (reference.provenance?.host_instance_id && reference.provenance.host_instance_id !== this.hostInstanceId) throw new Error("REFERENCE_HOST_MISMATCH");
+        if (reference.provenance?.catalog_generation && reference.provenance.catalog_generation !== expectedGeneration) throw new Error("REFERENCE_STALE");
+        if (reference.provenance?.app_server_version && reference.provenance.app_server_version !== this.appServerVersion) throw new Error("APP_SERVER_VERSION_UNSUPPORTED");
+        if (reference.mapping && reference.mapping.verified_version !== this.appServerVersion) throw new Error("REFERENCE_MAPPING_UNVERIFIED");
+      }
+      const skillReferences = references.filter(reference => reference.kind === "skill");
+      if (skillReferences.length) {
+        const result = object(await this.request("skills/list", { cwds: [String(payload.workspace_path || "")], forceReload: false }));
+        const skills = (Array.isArray(result.data) ? result.data : []).flatMap(entry => Array.isArray(object(entry).skills) ? object(entry).skills as unknown[] : []).map(object);
+        for (const reference of skillReferences) {
+          const locator = object(reference.locator);
+          if (!skills.some(skill => skill.enabled !== false && skill.name === locator.name && skill.path === locator.path)) throw new Error("REFERENCE_NOT_FOUND");
+        }
+      }
+      const appReferences = references.filter(reference => reference.kind === "app" || reference.kind === "desktop_app");
+      if (appReferences.length) {
+        const result = object(await this.request("app/installed", { forceRefresh: false }));
+        const apps = (Array.isArray(result.apps) ? result.apps : []).map(object);
+        for (const reference of appReferences) {
+          const locator = object(reference.locator);
+          const id = String(locator.path || "").replace(/^app:\/\//, "");
+          if (!apps.some(app => app.id === id && app.enabled === true && app.callable === true)) throw new Error("REFERENCE_DISABLED");
+        }
+      }
+      const input = compileInputDocument(document, String(payload.workspace_path || ""));
+      semanticDiagnostic("compile_completed", { host_instance_id: this.hostInstanceId, app_server_pid: this.child?.pid ?? null, app_server_started_at: this.appServerStartedAt, app_server_version: this.appServerVersion, input_types: input.map(item => item.type), input_count: input.length });
+      return input;
+    }
+    return normalizeCodexSemanticInput(payload.input, String(payload.message || ""));
   }
 
   private async resume(threadId: string, payload?: Record<string, unknown>) {
@@ -594,7 +672,7 @@ export class RuntimeSessionRelay {
     }
     if (command === "init") {
       const input = [{ type: "text", text: "Create an AGENTS.md file that serves as a concise contributor guide for this repository. Inspect the repository first. Include project structure, build and validation commands, coding conventions, and commit guidance that are actually supported by the repository. Do not overwrite an existing AGENTS.md; if one exists, report that clearly instead.", text_elements: [] }];
-      const turn = object(await this.request("turn/start", this.turnStartParams(threadId, { ...payload, input })));
+      const turn = object(await this.request("turn/start", await this.turnStartParams(threadId, { ...payload, input })));
       const turnId = sessionId(object(turn.turn).id);
       if (!turnId) throw new Error("desktop_turn_start_invalid");
       this.activeTurns.set(threadId, turnId);

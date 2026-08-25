@@ -1,6 +1,7 @@
 export const sessionHostProtocolVersion = "session-host/v2" as const;
 
 export type SessionHostThreadAction = "archive" | "unarchive" | "delete";
+export type SessionHostSemanticMethod = "skills/list" | "app/installed" | "app/list" | "plugin/installed" | "mcpServerStatus/list" | "fuzzyFileSearch";
 
 export type SessionHostPoll = {
   leader: boolean;
@@ -24,6 +25,7 @@ export type SessionHostHello = {
   capabilities: {
     durable_deliveries: boolean;
     runtime_handoff: boolean;
+    semantic_requests?: boolean;
   };
 };
 
@@ -41,6 +43,7 @@ export type SessionHostHelloAck = {
     thread_actions?: boolean;
     durable_deliveries?: boolean;
     runtime_handoff?: boolean;
+    semantic_requests?: boolean;
   };
 };
 
@@ -176,5 +179,28 @@ export type SessionHostThreadActionResponse = {
   error?: string;
 };
 
-export type SessionHostMessage = SessionHostHello | SessionHostPollResponse | SessionHostDeliveryAck | SessionHostShutdown | SessionHostThreadActionRequest | SessionHostBeginHandoff | SessionHostCompleteHandoff | SessionHostCancelHandoff | SessionHostHandoffStatusRequest;
-export type SessionHostServerMessage = SessionHostHelloAck | SessionHostPollRequest | SessionHostDelivery | SessionHostThreadActionResponse | SessionHostHandoffResponse;
+export type SessionHostSemanticRequest = {
+  type: "semantic_request";
+  request_id: string;
+  method: SessionHostSemanticMethod;
+  params: Record<string, unknown>;
+  deadline_at: string;
+};
+
+export type SessionHostSemanticResponse = {
+  type: "semantic_response";
+  request_id: string;
+  ok: boolean;
+  error?: string;
+  result?: unknown;
+  identity: {
+    host_instance_id: string;
+    app_server_pid: number | null;
+    app_server_started_at: string | null;
+    app_server_version: string;
+    catalog_generation: string;
+  };
+};
+
+export type SessionHostMessage = SessionHostHello | SessionHostPollResponse | SessionHostDeliveryAck | SessionHostShutdown | SessionHostThreadActionRequest | SessionHostSemanticRequest | SessionHostBeginHandoff | SessionHostCompleteHandoff | SessionHostCancelHandoff | SessionHostHandoffStatusRequest;
+export type SessionHostServerMessage = SessionHostHelloAck | SessionHostPollRequest | SessionHostDelivery | SessionHostThreadActionResponse | SessionHostSemanticResponse | SessionHostHandoffResponse;

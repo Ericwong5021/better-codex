@@ -11,7 +11,8 @@ import { readCodexAppearance, readHostThemeInput } from "./appearance.js";
 import { normalizeCodexLocale, readCodexLocale } from "./locale.js";
 import { readCodexUserProfile } from "./user-profile.js";
 import { readCodexUsage } from "./codex-usage.js";
-import { codexSemanticRequestFingerprint, normalizeCodexSemanticSelections, readCodexSemanticCatalog, resolveCodexSemanticReferences, searchCodexFiles } from "./codex-semantics.js";
+import { MentionCatalogService, codexSemanticRequestFingerprint, normalizeCodexSemanticSelections, readCodexSemanticCatalog, resolveCodexSemanticReferences, searchCodexFiles } from "./codex-semantics.js";
+import { appendInputDocumentText, compileInputDocument, inputDocumentLegacyReferences, inputDocumentText, legacyInputDocument, type SemanticKindV2 } from "./codex-input-document.js";
 import { readModelCatalog } from "./model-catalog.js";
 import { attachmentPath, databasePath, runPath, runtimePort, token, updateLogPath } from "./config.js";
 import { acquireRuntimeLock, cancelRuntimeAuthorityReservation, claimRuntimeAuthority, clearRuntimeState, completeRuntimeAuthorityHandoff, createRuntimeIdentity, publishRuntimeState, reserveRuntimeAuthority } from "./runtime-state.js";
@@ -795,6 +796,13 @@ export function startServer() {
   let eventRevision = 0;
   let publishChange = () => {};
   const worker = new IssueWorker(store, () => publishChange(), identity);
+  const semanticRequest = worker.semanticRequest.bind(worker);
+  const mentionCatalog = new MentionCatalogService(identity.instanceId, semanticRequest);
+  const queuedReplies = (issue: Issue, audience: string) => store.listQueuedIssueReplies(issue.id).map(reply => {
+    const command = store.getSessionCommandByRequest(issue.id, reply.request_id);
+    const document = command?.payload.input_document;
+    return document === undefined ? reply : { ...reply, input_document: mentionCatalog.restoreDraft(document, { workspaceId: issue.project_id, workspacePath: issue.workspace_path || "", audience }) };
+  });
   const syncClient = new SyncClient(
     store,
     5_000,
@@ -1815,7 +1823,11 @@ export function startServer() {
         const project = store.getProject(decodeURIComponent(path[2]));
         if (!project) return sendJson(response, 404, { error: "project_not_found" });
         if (!project.workspace_path) throw new Error("workspace_required");
-        const catalog = await readCodexSemanticCatalog(project.workspace_path);
+        if (url.searchParams.get("schema_version") === "2") {
+          const kinds = cleanString(url.searchParams.get("kinds"), 500).split(",").filter(Boolean) as SemanticKindV2[];
+          return sendJson(response, 200, await mentionCatalog.catalog({ workspaceId: project.id, workspacePath: project.workspace_path, audience: relayRequest ? "relay" : "local", query: cleanString(url.searchParams.get("query"), 500), kinds }));
+        }
+        const catalog = await readCodexSemanticCatalog(project.workspace_path, semanticRequest);
         return sendJson(response, 200, {
           skills: catalog.skills.map(({ name, description, scope, ref }) => ({ name, description, scope, ref })),
           apps: catalog.apps.map(({ name, ref, enabled, callable }) => ({ name, ref, enabled, callable })),
@@ -1826,7 +1838,7 @@ export function startServer() {
         const project = store.getProject(decodeURIComponent(path[2]));
         if (!project) return sendJson(response, 404, { error: "project_not_found" });
         if (!project.workspace_path) throw new Error("workspace_required");
-        const files = (await searchCodexFiles(project.workspace_path, cleanString(url.searchParams.get("query"), 500))).map(({ name, displayPath, kind, ref }) => ({ name, displayPath, kind, ref }));
+        const files = (await searchCodexFiles(project.workspace_path, cleanString(url.searchParams.get("query"), 500), semanticRequest)).map(({ name, displayPath, kind, ref }) => ({ name, displayPath, kind, ref }));
         return sendJson(response, 200, { files });
       }
       if (path[0] === "api" && path[1] === "projects" && path[2] && path[3] === "overview" && path.length === 4 && method === "POST") {
@@ -1961,20 +1973,34 @@ export function startServer() {
           throw new Error("workspace_required");
         }
         const semanticSelections = normalizeCodexSemanticSelections(body.semantic_references);
-        if (semanticSelections.length && !agentEnabled) throw new Error("issue_agent_required");
+        if ((semanticSelections.length || body.input_document !== undefined) && !agentEnabled) throw new Error("issue_agent_required");
         if ("semantic_command" in body && body.semantic_command !== "" && body.semantic_command !== "review") throw new Error("semantic_command_invalid");
         const semanticCommand = body.semantic_command === "review" ? "review" : undefined;
         if (semanticCommand && !agentEnabled) throw new Error("issue_agent_required");
-        const semanticReferences = await resolveCodexSemanticReferences(workspacePath, semanticSelections);
+        let semanticReferences = await resolveCodexSemanticReferences(workspacePath, semanticSelections, semanticRequest);
+        const legacyMessage = cleanString(body.description, 100_000);
+        let semanticDocument = body.input_document === undefined ? undefined : await mentionCatalog.resolveDocument(body.input_document, { workspaceId: project.id, workspacePath, audience: relayRequest ? "relay" : "local" });
+        if (semanticDocument && body.description !== undefined && inputDocumentText(semanticDocument) !== legacyMessage) throw new Error("SEMANTIC_INPUT_CONFLICT");
+        if (semanticDocument && semanticSelections.length) {
+          const legacyDocument = legacyInputDocument(legacyMessage, semanticReferences);
+          if (JSON.stringify(compileInputDocument(legacyDocument, workspacePath)) !== JSON.stringify(compileInputDocument(semanticDocument, workspacePath))) throw new Error("SEMANTIC_INPUT_CONFLICT");
+        }
+        if (semanticDocument) semanticReferences = inputDocumentLegacyReferences(semanticDocument);
         const agentId = cleanString(body.agent_id, 200);
         if (aiEnrich && agentId && !store.getAgentProfile(agentId)) throw new Error("agent_not_found");
         const files = saveRemoteFiles(body.files, requestId || String(request.headers["x-better-codex-request-id"] || randomUUID()));
+        if (semanticDocument && files.paths.length) {
+          const text = inputDocumentText(semanticDocument);
+          const withFiles = withRemoteFilePaths(text, files.paths, "issue_description_too_long");
+          semanticDocument = appendInputDocumentText(semanticDocument, withFiles.slice(text.length));
+          semanticReferences = inputDocumentLegacyReferences(semanticDocument);
+        }
         let created;
         try {
           created = store.createIssueRequest({
             projectId,
             title: cleanString(body.title, 500),
-            description: withRemoteFilePaths(body.description, files.paths, "issue_description_too_long"),
+            description: semanticDocument ? inputDocumentText(semanticDocument) : withRemoteFilePaths(body.description, files.paths, "issue_description_too_long"),
             status: aiEnrich ? "backlog" : "status" in body ? asStatus(body.status) : undefined,
             priority: "priority" in body ? asPriority(body.priority) : undefined,
             labels: asLabels(body.labels),
@@ -1985,6 +2011,7 @@ export function startServer() {
             userAssigned,
             enrichmentStatus: aiEnrich ? "pending" : null,
             semanticReferences,
+            semanticDocument,
             semanticCommand,
           }, requestId);
         } catch (error) {
@@ -2152,14 +2179,18 @@ export function startServer() {
             ...conversation,
             issue_id: current.id,
             reply: store.getIssueReplyState(current.id),
-            queued_replies: store.listQueuedIssueReplies(current.id),
+            queued_replies: queuedReplies(current, relayRequest ? "relay" : "local"),
             user: readCodexUserProfile(),
             issue: store.getIssue(current.id),
           });
         }
         if (method === "GET" && path[3] === "semantics" && path.length === 4) {
           if (!issue.workspace_path) throw new Error("workspace_required");
-          const catalog = await readCodexSemanticCatalog(issue.workspace_path);
+          if (url.searchParams.get("schema_version") === "2") {
+            const kinds = cleanString(url.searchParams.get("kinds"), 500).split(",").filter(Boolean) as SemanticKindV2[];
+            return sendJson(response, 200, await mentionCatalog.catalog({ workspaceId: issue.project_id, workspacePath: issue.workspace_path, audience: relayRequest ? "relay" : "local", query: cleanString(url.searchParams.get("query"), 500), kinds, threadId: issue.session_thread_id || undefined }));
+          }
+          const catalog = await readCodexSemanticCatalog(issue.workspace_path, semanticRequest);
           return sendJson(response, 200, {
             skills: catalog.skills.map(({ name, description, scope, ref }) => ({ name, description, scope, ref })),
             apps: catalog.apps.map(({ name, ref, enabled, callable }) => ({ name, ref, enabled, callable })),
@@ -2168,28 +2199,29 @@ export function startServer() {
         }
         if (method === "GET" && path[3] === "mentions" && path.length === 4) {
           if (!issue.workspace_path) throw new Error("workspace_required");
-          const files = (await searchCodexFiles(issue.workspace_path, cleanString(url.searchParams.get("query"), 500))).map(({ name, displayPath, kind, ref }) => ({ name, displayPath, kind, ref }));
+          const files = (await searchCodexFiles(issue.workspace_path, cleanString(url.searchParams.get("query"), 500), semanticRequest)).map(({ name, displayPath, kind, ref }) => ({ name, displayPath, kind, ref }));
           return sendJson(response, 200, { files });
         }
         if (method === "PATCH" && path[3] === "queue" && path[4] && path.length === 5) {
           if (updateInstallInProgress) throw new Error("update_in_progress");
           const body = await readBody(request);
-          const queuedReplies = store.updateQueuedIssueReply(issue.id, decodeURIComponent(path[4]), cleanString(body.message, 100_000));
+          const semanticDocument = body.input_document === undefined ? undefined : await mentionCatalog.resolveDocument(body.input_document, { workspaceId: issue.project_id, workspacePath: issue.workspace_path || "", audience: relayRequest ? "relay" : "local" });
+          store.updateQueuedIssueReply(issue.id, decodeURIComponent(path[4]), cleanString(body.message, 100_000), semanticDocument);
           publishChange();
-          return sendJson(response, 200, { issue_id: issue.id, queued_replies: queuedReplies });
+          return sendJson(response, 200, { issue_id: issue.id, queued_replies: queuedReplies(issue, relayRequest ? "relay" : "local") });
         }
         if (method === "POST" && path[3] === "queue" && path[4] && path[5] === "send" && path.length === 6) {
           if (updateInstallInProgress) throw new Error("update_in_progress");
           const promoted = store.promoteQueuedIssueReply(issue.id, decodeURIComponent(path[4]));
           worker.wake();
           publishChange();
-          return sendJson(response, 202, { issue_id: issue.id, request_id: promoted.command.request_id, steered: true, queued_replies: promoted.queued_replies });
+          return sendJson(response, 202, { issue_id: issue.id, request_id: promoted.command.request_id, steered: true, queued_replies: queuedReplies(issue, relayRequest ? "relay" : "local") });
         }
         if (method === "DELETE" && path[3] === "queue" && path[4] && path.length === 5) {
           if (updateInstallInProgress) throw new Error("update_in_progress");
-          const queuedReplies = store.deleteQueuedIssueReply(issue.id, decodeURIComponent(path[4]));
+          store.deleteQueuedIssueReply(issue.id, decodeURIComponent(path[4]));
           publishChange();
-          return sendJson(response, 200, { issue_id: issue.id, queued_replies: queuedReplies });
+          return sendJson(response, 200, { issue_id: issue.id, queued_replies: queuedReplies(issue, relayRequest ? "relay" : "local") });
         }
         if (method === "POST" && path[3] === "reply" && path.length === 4) {
           if (updateInstallInProgress) throw new Error("update_in_progress");
@@ -2200,21 +2232,30 @@ export function startServer() {
           const files = saveRemoteFiles(body.files, requestId);
           let filesCommitted = false;
           try {
-            const message = withRemoteFilePaths(body.message, files.paths).trim();
+            let semanticDocument = body.input_document === undefined ? undefined : await mentionCatalog.resolveDocument(body.input_document, { workspaceId: issue.project_id, workspacePath: issue.workspace_path || "", audience: relayRequest ? "relay" : "local" });
+            const baseMessage = semanticDocument ? inputDocumentText(semanticDocument) : cleanString(body.message, 100_000);
+            if (semanticDocument && body.message !== undefined && cleanString(body.message, 100_000) !== baseMessage) throw new Error("SEMANTIC_INPUT_CONFLICT");
+            const message = withRemoteFilePaths(baseMessage, files.paths).trim();
+            if (semanticDocument && message !== baseMessage) semanticDocument = appendInputDocumentText(semanticDocument, message.slice(baseMessage.length));
             if (!message) throw new Error("message_required");
             const messageCommand = /^\/(review|compact)$/.exec(message)?.[1] || "";
             const semanticCommand = ["review", "compact"].includes(String(body.command || messageCommand)) ? String(body.command || messageCommand) as "review" | "compact" : "";
             const semanticSelections = normalizeCodexSemanticSelections(body.semantic_references);
-            if (!issue.session_thread_id && (semanticCommand || semanticSelections.length)) throw new Error("session_required");
-            const semanticReferences = await resolveCodexSemanticReferences(issue.workspace_path || "", semanticSelections);
+            let semanticReferences = await resolveCodexSemanticReferences(issue.workspace_path || "", semanticSelections, semanticRequest);
+            if (semanticDocument && semanticSelections.length) {
+              const legacyDocument = legacyInputDocument(message, semanticReferences);
+              if (JSON.stringify(compileInputDocument(legacyDocument, issue.workspace_path || "")) !== JSON.stringify(compileInputDocument(semanticDocument, issue.workspace_path || ""))) throw new Error("SEMANTIC_INPUT_CONFLICT");
+            }
+            if (semanticDocument) semanticReferences = inputDocumentLegacyReferences(semanticDocument);
+            if (!issue.session_thread_id && (semanticCommand || semanticReferences.length)) throw new Error("session_required");
             const existingCommand = store.getSessionCommandByRequest(issue.id, requestId);
             if (existingCommand && existingCommand.status !== "failed" && existingCommand.status !== "cancelled") {
-              const requestInput = codexSemanticRequestFingerprint(message, semanticReferences, semanticCommand);
+              const requestInput = codexSemanticRequestFingerprint(message, semanticReferences, semanticCommand, semanticDocument);
               const existingInput = String(existingCommand.payload.request_input || "");
               if (existingInput ? existingInput !== requestInput : String(existingCommand.payload.request_message || "") !== message) throw new Error("request_id_conflict");
               filesCommitted = true;
               const reply = store.getIssueReplyState(issue.id);
-              if (existingCommand.payload.queued_reply === true) return sendJson(response, 202, { ...reply, queued: true, queued_replies: store.listQueuedIssueReplies(issue.id) });
+              if (existingCommand.payload.queued_reply === true) return sendJson(response, 202, { ...reply, queued: true, queued_replies: queuedReplies(issue, relayRequest ? "relay" : "local") });
               return sendJson(response, 202, existingCommand.kind === "steer"
                 ? { issue_id: issue.id, request_id: requestId, status: "running", message, steered: true }
                 : reply);
@@ -2235,10 +2276,10 @@ export function startServer() {
               if (!worker.startIssue(updated.id)) throw new Error("issue_not_started");
               return sendJson(response, 202, { issue_id: issue.id, request_id: requestId, status: "running", message, initial_run: true });
             }
-            const queued = worker.sendIssueMessage(issue.id, requestId, message, semanticReferences, semanticCommand);
+            const queued = worker.sendIssueMessage(issue.id, requestId, message, semanticReferences, semanticCommand, semanticDocument);
             filesCommitted = true;
             const reply = store.getIssueReplyState(issue.id);
-            if (queued.queued) return sendJson(response, 202, { ...reply, queued: true, queued_replies: store.listQueuedIssueReplies(issue.id) });
+            if (queued.queued) return sendJson(response, 202, { ...reply, queued: true, queued_replies: queuedReplies(issue, relayRequest ? "relay" : "local") });
             return sendJson(response, 202, queued.steered
               ? { issue_id: issue.id, request_id: requestId, status: "running", message, steered: true }
               : reply);
