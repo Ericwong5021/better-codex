@@ -21,8 +21,22 @@ export function betterCodexPrimitiveStylesCss() {
     }
 
     #better-codex-panel {
+      position: absolute;
+      inset: 0;
+      z-index: 2;
+      display: flex;
+      min-width: 0;
+      min-height: 0;
+      flex-direction: column;
+      overflow: hidden;
       color: var(--bc-color-text);
       background: var(--bc-color-canvas);
+      pointer-events: auto;
+      -webkit-app-region: no-drag !important;
+    }
+
+    #better-codex-panel[hidden] {
+      display: none !important;
     }
 
     [data-bc-component="icon"] {

@@ -75,7 +75,7 @@ test("injected panel opts out of the native Electron drag region", () => {
   const source = injectionSource(4317, "test-token", "install");
   const css = betterCodexDesignSystemCss();
 
-  assert.match(source, /#\$\{PANEL_ID\}[^}]*-webkit-app-region:\s*no-drag\s*!important/);
+  assert.match(css, /#better-codex-panel\s*\{[^}]*-webkit-app-region:\s*no-drag\s*!important/s);
   assert.match(css, /\.better-codex-toolbar\s*\{[^}]*-webkit-app-region:\s*drag;/s);
   assert.match(css, /\.better-codex-agent-inspector-head\s*\{[^}]*-webkit-app-region:\s*drag;/s);
   assert.match(css, /\.better-codex-toolbar :is\(button, input, a, select, textarea, label\)[^}]*-webkit-app-region:\s*no-drag;/s);
@@ -161,7 +161,6 @@ test("status and priority menus keep their Lucide icons visible", () => {
   assert.ok(source.includes('icon(names[status] || "statusTodo", "better-codex-status-icon", "2.35")'));
   assert.ok(source.includes('icon(names[priority] || "priorityNone", "better-codex-priority", "2.35")'));
   assert.ok(source.includes("escapeHtml(status)") && source.includes("data-status="));
-  assert.match(source, /#better-codex-filter > svg \{ color: var\(--bc-info\); \}/);
   assert.match(css, /#better-codex-panel #better-codex-filter > svg\s*\{[^}]*color:\s*var\(--bc-info\);/s);
   assert.match(css, /\.better-codex-status-icon\[data-status="in_progress"\]/);
   assert.match(css, /\.better-codex-priority\[data-priority="urgent"\]/);
@@ -568,22 +567,21 @@ test("every rendered Codex logo receives an independent SVG gradient id", () => 
 });
 
 test("issue agent avatars use the same fallback material as the agent directory", () => {
-  const source = injectionSource(4317, "test-token", "install");
-  const fallbackRule = source.match(/#better-codex-dialog \.better-codex-agent-avatar\.is-fallback\s*\{([^}]*)\}/)?.[1] || "";
+  const css = betterCodexDesignSystemCss();
+  const fallbackRule = css.match(/#better-codex-dialog \.better-codex-agent-avatar\.is-fallback\s*\{([^}]*)\}/)?.[1] || "";
 
   assert.match(fallbackRule, /color:\s*var\(--bc-color-text-muted\)/);
   assert.match(fallbackRule, /background:\s*var\(--bc-color-control\)/);
   assert.match(fallbackRule, /border-radius:\s*var\(--bc-radius-xs\)/);
-  assert.match(source, /#better-codex-dialog \.better-codex-agent-avatar\.is-fallback svg\s*\{[^}]*width:\s*12px;[^}]*height:\s*12px;/s);
+  assert.match(css, /#better-codex-dialog \.better-codex-agent-avatar\.is-fallback svg\s*\{[^}]*width:\s*12px;[^}]*height:\s*12px;/s);
 });
 
 test("agent issue creation reserves enough height for its scaled footer", () => {
-  const source = injectionSource(4317, "test-token", "install");
   const css = betterCodexDesignSystemCss();
 
   assert.ok(css.includes("--bc-dialog-agent-height: 400px"));
-  assert.ok(source.includes("height: min(var(--bc-dialog-agent-height), calc(100vh - 48px))"));
-  assert.doesNotMatch(source, /#better-codex-dialog\[data-mode="agent"\]\s*\{[^}]*height:\s*min\(368px/s);
+  assert.ok(css.includes("height: min(var(--bc-dialog-agent-height), calc(100vh - 48px))"));
+  assert.doesNotMatch(css, /#better-codex-dialog\[data-mode="agent"\]\s*\{[^}]*height:\s*min\(368px/s);
 });
 
 test("issue detail dialog separates compact and expanded sizes", () => {
@@ -795,7 +793,6 @@ test("user-stopped sessions render a red-dot stopped state", () => {
   assert.ok(source.includes('replyStatus === "succeeded" ? "completed"'));
   assert.ok(source.includes('activeExecutionState || replyResultState || executionState'));
   assert.ok(source.includes('["completed", "interrupted", "not-started"].includes(activityState)'));
-  assert.match(source, /\.better-codex-activity\[data-run="interrupted"\]\s*\{\s*color:\s*var\(--bc-danger\);/s);
   assert.match(css, /\.better-codex-conversation-status \.better-codex-activity\[data-run="interrupted"\]\s*\{[^}]*color:\s*var\(--bc-danger\);/s);
 });
 

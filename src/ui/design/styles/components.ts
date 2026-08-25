@@ -65,6 +65,22 @@ export function betterCodexComponentStylesCss() {
       background: var(--bc-color-danger-soft);
     }
 
+    #better-codex-dialog[data-mode="agent"] {
+      width: min(691px, calc(100vw - 48px));
+      height: min(var(--bc-dialog-agent-height), calc(100vh - 48px));
+    }
+
+    #better-codex-dialog .better-codex-agent-avatar.is-fallback {
+      border-radius: var(--bc-radius-xs);
+      color: var(--bc-color-text-muted);
+      background: var(--bc-color-control);
+    }
+
+    #better-codex-dialog .better-codex-agent-avatar.is-fallback svg {
+      width: 12px;
+      height: 12px;
+    }
+
     #better-codex-archive-dialog {
       width: min(1120px, calc(100vw - 48px), calc((100vh - 48px) * 1.5));
       height: min(746.667px, calc(100vh - 48px), calc((100vw - 48px) * .666667));
