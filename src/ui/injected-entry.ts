@@ -3540,6 +3540,38 @@ export function install(config: Record<string, any>) {
       issueMenuDismiss = null;
     }
 
+    function positionIssueSubmenus(menu) {
+      const inset = 8;
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+      menu.querySelectorAll(".better-codex-context-submenu").forEach(submenu => {
+        const wrap = submenu.parentElement;
+        if (!wrap) return;
+        submenu.style.display = "block";
+        submenu.style.visibility = "hidden";
+        submenu.style.pointerEvents = "none";
+        submenu.style.top = "0px";
+        submenu.style.right = "auto";
+        submenu.style.left = "0px";
+        const wrapRect = wrap.getBoundingClientRect();
+        const submenuRect = submenu.getBoundingClientRect();
+        const rightLeft = wrapRect.right;
+        const leftLeft = wrapRect.left - submenuRect.width;
+        const canOpenRight = rightLeft + submenuRect.width <= viewportWidth - inset;
+        const canOpenLeft = leftLeft >= inset;
+        const preferredLeft = canOpenRight || !canOpenLeft ? rightLeft : leftLeft;
+        const maximumLeft = Math.max(inset, viewportWidth - submenuRect.width - inset);
+        const left = Math.max(inset, Math.min(preferredLeft, maximumLeft));
+        const maximumTop = Math.max(inset, viewportHeight - submenuRect.height - inset);
+        const top = Math.max(inset, Math.min(wrapRect.top - 5, maximumTop));
+        submenu.style.left = left - wrapRect.left + "px";
+        submenu.style.top = top - wrapRect.top + "px";
+        submenu.style.removeProperty("display");
+        submenu.style.removeProperty("visibility");
+        submenu.style.removeProperty("pointer-events");
+      });
+    }
+
     async function copyText(value) {
       try {
         if (navigator.clipboard?.writeText) {
@@ -3601,12 +3633,12 @@ export function install(config: Record<string, any>) {
       menu.id = "better-codex-context-menu";
       menu.setAttribute(OWNED, "true");
       menu.dataset.issueId = issue.id;
-      menu.dataset.align = clientX + 430 > window.innerWidth ? "left" : "right";
       menu.innerHTML = '<div class="better-codex-context-item-wrap' + contextLockClass + '"><button class="better-codex-context-item" type="button"' + contextLockAttrs + '>' + statusIcon(issue.status) + '<span>' + escapeHtml(t("状态")) + '</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu">' + statusItems + '</div></div><div class="better-codex-context-item-wrap' + contextLockClass + '"><button class="better-codex-context-item" type="button"' + contextLockAttrs + '>' + priorityIcon(issue.priority) + '<span>' + escapeHtml(t("优先级")) + '</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu">' + priorityItems + '</div></div><div class="better-codex-context-item-wrap' + contextLockClass + '"><button class="better-codex-context-item" type="button"' + contextLockAttrs + '>' + icon("user") + '<span>' + escapeHtml(t("指定负责人")) + '</span>' + icon("chevron") + '</button><div class="better-codex-context-submenu is-assignee">' + assigneeItems + '</div></div>' + stopItem + (workspacePath ? '<div class="better-codex-context-divider"></div><button class="better-codex-context-item" type="button" data-context-action="copy-workspace">' + icon("folder") + '<span>' + escapeHtml(t("复制本地 workdir 路径")) + '</span></button>' : "") + regenerateTitleItem + '<div class="better-codex-context-divider"></div><button class="better-codex-context-item" type="button"' + archiveLockAttrs + ' data-context-action="archive">' + icon("archive") + '<span>' + escapeHtml(t("归档")) + '</span></button>' + (state.mockup ? "" : '<button class="better-codex-context-item is-danger" type="button"' + deleteLockAttrs + ' data-context-action="delete">' + icon("trash") + '<span>' + escapeHtml(t("删除任务")) + '</span></button>');
       document.body.appendChild(menu);
       const rect = menu.getBoundingClientRect();
       menu.style.left = Math.max(8, Math.min(clientX, window.innerWidth - rect.width - 8)) + "px";
       menu.style.top = Math.max(8, Math.min(clientY, window.innerHeight - rect.height - 8)) + "px";
+      positionIssueSubmenus(menu);
 
       async function assignIssue(kind, agentId = "", userId = "") {
         const current = state.issues.find(candidate => candidate.id === menu.dataset.issueId);

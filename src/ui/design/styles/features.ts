@@ -36,7 +36,6 @@ export function betterCodexFeatureStructureStylesCss() {
     #better-codex-context-menu .better-codex-context-divider { height: 1px; margin: 5px 3px; background: var(--bc-color-hairline); }
     #better-codex-context-menu .better-codex-context-submenu { position: absolute; top: -5px; left: 100%; display: none; min-width: 148px; max-width: min(240px, calc(100vw - 24px)); max-height: min(320px, calc(100vh - 24px)); overflow-y: auto; }
     #better-codex-context-menu .better-codex-context-submenu.is-assignee { min-width: 214px; }
-    #better-codex-context-menu[data-align="left"] .better-codex-context-submenu { right: 100%; left: auto; }
     #better-codex-context-menu .better-codex-context-item-wrap:hover > .better-codex-context-submenu, #better-codex-context-menu .better-codex-context-item-wrap:focus-within > .better-codex-context-submenu { display: block; }
     #better-codex-context-menu .better-codex-context-check { display: inline-flex; width: 14px; flex: 0 0 14px; align-items: center; justify-content: center; color: var(--bc-color-text); }
     #better-codex-context-menu .better-codex-context-avatar { display: inline-flex; width: 16px; height: 16px; flex: 0 0 16px; align-items: center; justify-content: center; overflow: hidden; border-radius: var(--bc-radius-pill); color: var(--bc-color-on-primary); background: var(--bc-color-primary); }
@@ -3128,11 +3127,6 @@ export function betterCodexFeatureStylesCss() {
 
     #better-codex-context-menu .better-codex-context-submenu.is-assignee {
       min-width: 214px;
-    }
-
-    #better-codex-context-menu[data-align="left"] .better-codex-context-submenu {
-      right: 100%;
-      left: auto;
     }
 
     #better-codex-panel .better-codex-filter-row,
