@@ -589,6 +589,8 @@ input.on("line", line => {
   });
   let source: Socket | undefined;
   let target: Socket | undefined;
+  const diagnosticState: Record<string, unknown> = { phase: "starting", source_polls: 0, target_polls: 0, status_responses: 0, completed_event: false, last_message: null, last_delivery: null, snapshot: null };
+  const diagnosticTimer = setTimeout(() => process.stderr.write(`SESSION_HANDOFF_TEST_DIAGNOSTIC ${JSON.stringify(diagnosticState)}\n`), 25_000);
   const queue = (socket: Socket) => {
     const values: SessionHostServerMessage[] = [];
     const waiters: Array<(value: SessionHostServerMessage) => void> = [];
@@ -617,61 +619,86 @@ input.on("line", line => {
       catch { if (host.exitCode !== null) throw new Error(`session_host_exit_${host.exitCode}`); await new Promise(resolve => setTimeout(resolve, 50)); }
     }
     assert.ok(source);
+    diagnosticState.phase = "source_connected";
     const sourceNext = queue(source);
     const capabilities = { durable_deliveries: true, runtime_handoff: true };
     source.write(`${JSON.stringify({ type: "hello", protocol_version: sessionHostProtocolVersion, token, runtime_instance_id: "runtime-source", runtime_generation: 1, runtime_version: "1.0.0", profile: "development", handoff_update_id: null, capabilities })}\n`);
     assert.equal((await sourceNext()).type, "hello_ack");
+    diagnosticState.phase = "source_authenticated";
     let dispatched = false;
     let sourceSnapshot: Extract<SessionHostServerMessage, { type: "handoff_response" }>["snapshot"] | null = null;
     const updateId = "019fec06-788f-7af3-a031-76b546904f83";
     while (!sourceSnapshot) {
       const message = await sourceNext();
+      diagnosticState.last_message = message.type;
       if (message.type === "poll_request") {
+        diagnosticState.source_polls = Number(diagnosticState.source_polls) + 1;
         const command = dispatched ? null : { id: "command-long-turn", kind: "start", thread_id: null, turn_id: null, payload: { workspace_path: home, input: [{ type: "text", text: "run long turn" }] } };
         dispatched = true;
         source.write(`${JSON.stringify({ type: "poll_response", request_id: message.request_id, result: { leader: true, acquired: true, expires_at: new Date(Date.now() + 10_000).toISOString(), previous_relay_id: null, command, thread_ids: command ? [] : [threadId], active_turns: [] } })}\n`);
       }
       if (message.type === "delivery") {
+        diagnosticState.last_delivery = message.kind;
         source.write(`${JSON.stringify({ type: "delivery_ack", delivery_id: message.delivery_id, host_instance_id: message.host_instance_id, sequence: message.sequence, payload_hash: message.payload_hash })}\n`);
         if (message.kind === "fail") throw new Error(`session_host_command_failed:${JSON.stringify(message.payload)}`);
         if (message.kind === "event" && message.payload.method === "turn/started") source.write(`${JSON.stringify({ type: "begin_handoff", request_id: "continuity-handoff", update_id: updateId, target_runtime_generation: 2, target_version: "1.1.0", deadline_at: new Date(Date.now() + 60_000).toISOString() })}\n`);
       }
       if (message.type === "handoff_response" && message.request_id === "continuity-handoff") sourceSnapshot = message.snapshot;
     }
+    diagnosticState.phase = "source_handoff_ready";
     assert.equal(sourceSnapshot.active_turns.length, 1);
     assert.ok(sourceSnapshot.app_server_pid);
     source.destroy();
 
     target = await openSocket(socketPath);
+    diagnosticState.phase = "target_connected";
     const targetNext = queue(target);
     target.write(`${JSON.stringify({ type: "hello", protocol_version: sessionHostProtocolVersion, token, runtime_instance_id: "runtime-target", runtime_generation: 2, runtime_version: "1.1.0", profile: "development", handoff_update_id: updateId, capabilities })}\n`);
     assert.equal((await targetNext()).type, "hello_ack");
+    diagnosticState.phase = "target_authenticated";
     let targetSnapshot = sourceSnapshot;
     let completedEvent = false;
     let statusSequence = 0;
     const statusTimer = setInterval(() => target?.write(`${JSON.stringify({ type: "handoff_status_request", request_id: `continuity-status-${++statusSequence}` })}\n`), 100);
     while (!completedEvent || targetSnapshot.active_turns.length || targetSnapshot.queued_deliveries) {
       const message = await targetNext();
-      if (message.type === "poll_request") target.write(`${JSON.stringify({ type: "poll_response", request_id: message.request_id, result: { leader: true, acquired: true, expires_at: new Date(Date.now() + 10_000).toISOString(), previous_relay_id: null, command: null, thread_ids: [threadId], active_turns: completedEvent ? [] : [{ thread_id: threadId, turn_id: turnId }] } })}\n`);
+      diagnosticState.phase = "target_draining";
+      diagnosticState.last_message = message.type;
+      if (message.type === "poll_request") {
+        diagnosticState.target_polls = Number(diagnosticState.target_polls) + 1;
+        target.write(`${JSON.stringify({ type: "poll_response", request_id: message.request_id, result: { leader: true, acquired: true, expires_at: new Date(Date.now() + 10_000).toISOString(), previous_relay_id: null, command: null, thread_ids: [threadId], active_turns: completedEvent ? [] : [{ thread_id: threadId, turn_id: turnId }] } })}\n`);
+      }
       if (message.type === "delivery") {
         if (message.kind === "event" && message.payload.method === "turn/completed") completedEvent = true;
+        diagnosticState.completed_event = completedEvent;
+        diagnosticState.last_delivery = message.kind === "event" ? `${message.kind}:${String(message.payload.method || "")}` : message.kind;
         target.write(`${JSON.stringify({ type: "delivery_ack", delivery_id: message.delivery_id, host_instance_id: message.host_instance_id, sequence: message.sequence, payload_hash: message.payload_hash })}\n`);
       }
-      if (message.type === "handoff_response" && message.request_id.startsWith("continuity-status-")) targetSnapshot = message.snapshot;
+      if (message.type === "handoff_response" && message.request_id.startsWith("continuity-status-")) {
+        targetSnapshot = message.snapshot;
+        diagnosticState.status_responses = Number(diagnosticState.status_responses) + 1;
+        diagnosticState.snapshot = targetSnapshot;
+      }
     }
     clearInterval(statusTimer);
+    diagnosticState.phase = "target_drained";
     assert.equal(targetSnapshot.host_instance_id, sourceSnapshot.host_instance_id);
     assert.equal(targetSnapshot.app_server_pid, sourceSnapshot.app_server_pid);
     assert.equal(targetSnapshot.app_server_started_at, sourceSnapshot.app_server_started_at);
     target.write(`${JSON.stringify({ type: "complete_handoff", request_id: "continuity-complete", update_id: updateId })}\n`);
+    diagnosticState.phase = "handoff_completing";
     while (true) {
       const message = await targetNext();
+      diagnosticState.last_message = message.type;
       if (message.type === "handoff_response" && message.request_id === "continuity-complete") { assert.equal(message.ok, true); break; }
       if (message.type === "poll_request") target.write(`${JSON.stringify({ type: "poll_response", request_id: message.request_id, result: { leader: true, acquired: true, expires_at: new Date(Date.now() + 10_000).toISOString(), previous_relay_id: null, command: null, thread_ids: [threadId], active_turns: [] } })}\n`);
     }
     target.write(`${JSON.stringify({ type: "shutdown", token })}\n`);
+    diagnosticState.phase = "host_stopping";
     await Promise.race([once(host, "exit"), new Promise((_, reject) => setTimeout(() => reject(new Error("session_host_stop_timeout")), 5000))]);
+    diagnosticState.phase = "complete";
   } finally {
+    clearTimeout(diagnosticTimer);
     source?.destroy();
     target?.destroy();
     if (host.exitCode === null) host.kill("SIGTERM");
