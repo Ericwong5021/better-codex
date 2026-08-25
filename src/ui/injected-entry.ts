@@ -13,6 +13,11 @@ import { adoptBadge, adoptStatusBadge, createStatusBadge } from "./primitives/ba
 import { adoptFormRow } from "./patterns/form-row.js";
 import { adoptListRow } from "./patterns/list-row.js";
 import { adoptToolbar } from "./patterns/toolbar.js";
+import { createAgentsController } from "./features/agents/controller.js";
+import { createBoardController } from "./features/board/controller.js";
+import { createProjectsController } from "./features/projects/controller.js";
+import { createScheduledController } from "./features/scheduled/controller.js";
+import { createSettingsController } from "./features/settings/controller.js";
 
 export function install(config: Record<string, any>) {
   if (!config || config.schemaVersion !== 1) throw new Error("injected_ui_schema_mismatch");
@@ -793,6 +798,7 @@ export function install(config: Record<string, any>) {
     let adoptedBadgeSequence = 0;
     let adoptedFeedbackSequence = 0;
     let adoptedPatternSequence = 0;
+    let featureControllers = null;
     let observer = null;
     let refreshPending = false;
     let refreshTimer = null;
@@ -849,6 +855,26 @@ export function install(config: Record<string, any>) {
         mountId,
         themeSource: window.__betterCodexThemeDiagnostics__?.themeSource || "fallback",
       };
+    }
+
+    function controllers() {
+      if (featureControllers) return featureControllers;
+      featureControllers = {
+        agents: createAgentsController({ render: () => renderAgents() }),
+        board: createBoardController({ render: () => renderBoard() }),
+        projects: createProjectsController({ render: () => renderProjects() }),
+        scheduled: createScheduledController({ render: () => renderScheduledTasks() }),
+        settings: createSettingsController({ open: initialView => renderSettingsOverlay(initialView) }),
+      };
+      return featureControllers;
+    }
+
+    function activateFeature(name) {
+      const activeControllers = controllers();
+      ["agents", "board", "projects", "scheduled"].forEach(feature => {
+        if (feature !== name) activeControllers[feature].deactivate();
+      });
+      activeControllers[name].render();
     }
 
     function projectRefreshProps() {
@@ -5605,6 +5631,10 @@ export function install(config: Record<string, any>) {
     }
 
     function showAutoDispatchHelp(initialView = "mode") {
+      controllers().settings.open(initialView);
+    }
+
+    function renderSettingsOverlay(initialView = "mode") {
       document.getElementById("better-codex-auto-dispatch-help-dialog")?.remove();
       const dialog = document.createElement("dialog");
       dialog.id = "better-codex-auto-dispatch-help-dialog";
@@ -6761,20 +6791,24 @@ export function install(config: Record<string, any>) {
       syncAutoDispatch();
       syncMockupUi();
       if (state.surface === "scheduled") {
-        renderScheduledTasks();
+        activateFeature("scheduled");
         hydrateSharedControls(panel, "scheduled");
         return;
       }
       if (state.surface === "agents") {
-        renderAgents();
+        activateFeature("agents");
         hydrateSharedControls(panel, "agents");
         return;
       }
       if (state.surface === "projects") {
-        renderProjects();
+        activateFeature("projects");
         hydrateSharedControls(panel, "projects");
         return;
       }
+      activateFeature("board");
+    }
+
+    function renderBoard() {
       const runningCount = state.issues.filter(issue => issueExecutionRunning(issue)).length;
       panel.querySelectorAll("[data-view]").forEach(button => button.classList.toggle("is-active", button.dataset.view === state.view));
       const working = panel.querySelector("#better-codex-working");
@@ -10027,6 +10061,14 @@ export function install(config: Record<string, any>) {
       projectRefreshButton?.destroy();
       projectRefreshButton = null;
       destroyProjectRenderComponents();
+      if (featureControllers) {
+        featureControllers.agents.destroy();
+        featureControllers.board.destroy();
+        featureControllers.projects.destroy();
+        featureControllers.scheduled.destroy();
+        featureControllers.settings.destroy();
+        featureControllers = null;
+      }
       managedButtons.forEach(handle => handle.destroy());
       managedButtons.clear();
       document.removeEventListener("DOMContentLoaded", mount);
