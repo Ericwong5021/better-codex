@@ -143,7 +143,7 @@ class SessionHostServer {
   private retriedStaleSocket = false;
   private readonly hostInstanceId = randomUUID();
   private readonly transport = new SessionHostTransport(sessionHostTransportPath, this.hostInstanceId);
-  private readonly startedAt = new Date().toISOString();
+  private readonly startedAt = new Date(processStartTime(process.pid) ?? Date.now()).toISOString();
   private runtimeDisconnectedAt: string | null = null;
   private handoff: SessionHostStatus["handoff"] = null;
   private orphanTimer: NodeJS.Timeout | null = null;

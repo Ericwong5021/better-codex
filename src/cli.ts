@@ -130,6 +130,32 @@ async function health() {
   return value;
 }
 
+async function readiness() {
+  const runtime = readRuntimeState();
+  if (!runtime) throw new Error("runtime_unavailable");
+  const response = await fetch(`http://127.0.0.1:${runtime.port}/readyz`);
+  const value = await response.json() as Record<string, unknown>;
+  if (value.instanceId !== runtime.instanceId || value.pid !== runtime.pid) throw new Error("runtime_identity_mismatch");
+  if (!response.ok || value.ok !== true) {
+    throw new Error(`runtime_not_ready:${JSON.stringify({ status: response.status, database: value.database ?? null, storage: value.storage ?? null, compatibility: value.compatibility ?? null, session_host: value.session_host ?? null })}`);
+  }
+  return value;
+}
+
+async function waitForRuntimeReady(timeoutMs = 60_000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError: unknown = new Error("runtime_not_ready");
+  while (Date.now() < deadline) {
+    try {
+      return await readiness();
+    } catch (error) {
+      lastError = error;
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+  }
+  throw lastError;
+}
+
 function spawnSelf(args: string[], logFile: string, detached = true) {
   const ownArgs = isSea() ? args : sourceProcessArguments(args);
   if (!ownArgs) throw new Error("self_requires_file_entrypoint");
@@ -1454,6 +1480,7 @@ async function main() {
       installService();
       progress("starting_runtime", json);
       const runtime = await ensureRuntime();
+      await waitForRuntimeReady();
       progress("waiting_for_codex", json);
       if (!codexInstallationStatus().installed) throw new Error("codex_not_found");
       progress("injecting", json);

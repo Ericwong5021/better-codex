@@ -63,6 +63,18 @@ function spawnHost() {
   });
   child.unref();
   closeSync(descriptor);
+  if (!child.pid) throw new Error("session_host_pid_unavailable");
+  return {
+    pid: child.pid,
+    processStartedAt: new Date(processStartTime(child.pid) ?? Date.now()).toISOString(),
+  };
+}
+
+function spawnedHostAlive(host: { pid: number; processStartedAt: string }) {
+  if (!processAlive(host.pid)) return false;
+  const expected = Date.parse(host.processStartedAt);
+  const observed = processStartTime(host.pid);
+  return !Number.isFinite(expected) || observed === null || Math.abs(expected - observed) <= 1500;
 }
 
 function readHostStatus(home: string, profile: string) {
@@ -162,6 +174,8 @@ export class SessionHostClient implements SessionRelayHost {
   private acknowledged = false;
   private threadActionsSupported = false;
   private semanticRequestsSupported = false;
+  private pendingHostSpawn: { pid: number; processStartedAt: string } | null = null;
+  private pendingHostSpawnReported = false;
   private readonly runtimeIdentity: Pick<RuntimeState, "instanceId" | "generation" | "version" | "handoffUpdateId">;
   private hostIdentity: { pid: number; instanceId: string | null; connectionEpoch: number | null; startedAt: string | null; runtimeGeneration: number | null } | null = null;
   private handoff: SessionHostStatus["handoff"] = null;
@@ -201,6 +215,8 @@ export class SessionHostClient implements SessionRelayHost {
     this.acknowledged = false;
     this.threadActionsSupported = false;
     this.semanticRequestsSupported = false;
+    this.pendingHostSpawn = null;
+    this.pendingHostSpawnReported = false;
     this.hostIdentity = null;
     this.handoff = null;
     this.rejectReadyWaiters("session_host_unavailable");
@@ -335,7 +351,22 @@ export class SessionHostClient implements SessionRelayHost {
       });
     } catch (error) {
       diagnostic("connect_failed", { error: error instanceof Error ? error.message : String(error) });
-      try { spawnHost(); } catch (spawnError) { diagnostic("spawn_failed", { error: spawnError instanceof Error ? spawnError.message : String(spawnError) }); }
+      if (this.pendingHostSpawn && spawnedHostAlive(this.pendingHostSpawn)) {
+        if (!this.pendingHostSpawnReported) {
+          diagnostic("spawn_pending", { host_pid: this.pendingHostSpawn.pid, host_process_started_at: this.pendingHostSpawn.processStartedAt });
+          this.pendingHostSpawnReported = true;
+        }
+      } else {
+        if (this.pendingHostSpawn) diagnostic("spawn_exited_before_connect", { host_pid: this.pendingHostSpawn.pid, host_process_started_at: this.pendingHostSpawn.processStartedAt });
+        try {
+          this.pendingHostSpawn = spawnHost();
+          this.pendingHostSpawnReported = false;
+          diagnostic("spawn_started", { host_pid: this.pendingHostSpawn.pid, host_process_started_at: this.pendingHostSpawn.processStartedAt });
+        } catch (spawnError) {
+          this.pendingHostSpawn = null;
+          diagnostic("spawn_failed", { error: spawnError instanceof Error ? spawnError.message : String(spawnError) });
+        }
+      }
       this.scheduleReconnect();
     } finally {
       this.connecting = false;
@@ -418,6 +449,8 @@ export class SessionHostClient implements SessionRelayHost {
         return;
       }
       this.acknowledged = true;
+      this.pendingHostSpawn = null;
+      this.pendingHostSpawnReported = false;
       this.threadActionsSupported = message.capabilities?.thread_actions === true;
       this.semanticRequestsSupported = message.capabilities?.semantic_requests === true;
       this.hostIdentity = { pid: message.host_pid, instanceId: message.host_instance_id || null, connectionEpoch: message.connection_epoch ?? null, startedAt: message.started_at || null, runtimeGeneration: message.runtime_generation ?? null };
