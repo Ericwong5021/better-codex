@@ -162,7 +162,7 @@ test("status and priority menus keep their Lucide icons visible", () => {
   assert.ok(source.includes('icon(names[status] || "statusTodo", "better-codex-status-icon", "2.35")'));
   assert.ok(source.includes('icon(names[priority] || "priorityNone", "better-codex-priority", "2.35")'));
   assert.ok(source.includes("escapeHtml(status)") && source.includes("data-status="));
-  assert.match(css, /#better-codex-panel #better-codex-filter > svg\s*\{[^}]*color:\s*var\(--bc-info\);/s);
+  assert.match(css, /#better-codex-panel #better-codex-filter > svg\s*\{[^}]*color:\s*var\(--bc-color-info\);/s);
   assert.match(css, /\.better-codex-status-icon\[data-status="in_progress"\]/);
   assert.match(css, /\.better-codex-priority\[data-priority="urgent"\]/);
   assert.match(css, /\.better-codex-priority\[data-priority="high"\][^{]*\{[^}]*--bc-priority-high/);
@@ -230,7 +230,7 @@ test("issues toolbar has a toggleable auto-dispatch icon between filter and crea
   assert.ok(source.includes('icon("user") + "<h3>" + te("手动运行") + "</h3></div>"'));
   assert.ok(source.includes('icon("refresh") + "<h3>" + te("自动运行") + "</h3></div>"'));
   assert.ok(!source.includes('button.title = state.autoDispatch'));
-  assert.match(css, /\.better-codex-auto-dispatch\.is-on\s*\{[^}]*color:\s*var\(--bc-success\)/s);
+  assert.match(css, /\.better-codex-auto-dispatch\.is-on\s*\{[^}]*color:\s*var\(--bc-color-success\)/s);
   assert.doesNotMatch(css, /better-codex-auto-dispatch-spin/);
   assert.match(css, /\.better-codex-auto-dispatch-help\s*\{/s);
   assert.match(css, /#better-codex-auto-dispatch-help-dialog \.better-codex-auto-dispatch-help-heading\s*\{[^}]*align-items:\s*center/s);
@@ -410,9 +410,9 @@ test("agent suggestion icons use thicker strokes and semantic tones", () => {
   assert.ok(source.includes('"name":"问题排查"'));
   assert.ok(source.includes('icon(item.icon, "", "2.4")'));
   assert.ok(source.includes("data-tone=") && source.includes("escapeHtml(item.tone)"));
-  assert.match(css, /\.better-codex-agent-suggestion-icon\[data-tone="info"\]\s*\{[^}]*color:\s*var\(--bc-info\)/s);
-  assert.match(css, /\.better-codex-agent-suggestion-icon\[data-tone="success"\]\s*\{[^}]*color:\s*var\(--bc-success\)/s);
-  assert.match(css, /\.better-codex-agent-suggestion-icon\[data-tone="warning"\]\s*\{[^}]*color:\s*var\(--bc-warning\)/s);
+  assert.match(css, /\.better-codex-agent-suggestion-icon\[data-tone="info"\]\s*\{[^}]*color:\s*var\(--bc-color-info\)/s);
+  assert.match(css, /\.better-codex-agent-suggestion-icon\[data-tone="success"\]\s*\{[^}]*color:\s*var\(--bc-color-success\)/s);
+  assert.match(css, /\.better-codex-agent-suggestion-icon\[data-tone="warning"\]\s*\{[^}]*color:\s*var\(--bc-color-warning\)/s);
 });
 
 test("agent toolbar and inspector occupy separate Codex-style grid regions", () => {
@@ -794,7 +794,7 @@ test("user-stopped sessions render a red-dot stopped state", () => {
   assert.ok(source.includes('replyStatus === "succeeded" ? "completed"'));
   assert.ok(source.includes('activeExecutionState || replyResultState || executionState'));
   assert.ok(source.includes('["completed", "interrupted", "not-started"].includes(activityState)'));
-  assert.match(css, /\.better-codex-conversation-status \.better-codex-activity\[data-run="interrupted"\]\s*\{[^}]*color:\s*var\(--bc-danger\);/s);
+  assert.match(css, /\.better-codex-conversation-status \.better-codex-activity\[data-run="interrupted"\]\s*\{[^}]*color:\s*var\(--bc-color-danger\);/s);
 });
 
 test("issue keep-open toggle keeps a visible track in light mode", () => {
@@ -861,7 +861,7 @@ test("Codex-native visual values live behind semantic design tokens", () => {
   assert.ok(css.includes("--bc-color-canvas:"));
   assert.ok(css.includes("--bc-radius-xl:"));
   assert.ok(css.includes("--bc-motion-fast:"));
-  assert.match(css, /\.better-codex-card\s*\{[^}]*border:\s*1px solid var\(--bc-color-hairline\);[^}]*background:\s*var\(--bc-color-canvas\);[^}]*box-shadow:\s*var\(--bc-card-shadow\);/s);
+  assert.match(css, /\.better-codex-card\s*\{[^}]*border:\s*1px solid var\(--bc-color-hairline\);[^}]*background:\s*var\(--bc-color-canvas\);[^}]*box-shadow:\s*var\(--bc-elevation-card\);/s);
   assert.match(css, /\.better-codex-card\.is-dragging\s*\{[^}]*opacity:\s*\.42;/s);
   assert.match(css, /\.better-codex-card\.is-dragging:active\s*\{[^}]*transform:\s*none;/s);
   assert.ok(source.includes("function onCardDragStart(event)"));

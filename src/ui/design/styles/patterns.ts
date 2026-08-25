@@ -76,7 +76,7 @@ export function betterCodexPatternStylesCss() {
     #better-codex-panel .better-codex-working-chip.has-work .better-codex-working-dot {
       border-color: currentColor;
       background: currentColor;
-      box-shadow: 0 0 0 3px color-mix(in oklch, var(--bc-warning) 12%, transparent);
+      box-shadow: 0 0 0 3px color-mix(in oklch, var(--bc-color-warning) 12%, transparent);
     }
 
     #better-codex-panel .better-codex-agent-actions[hidden] {
