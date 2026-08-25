@@ -7,6 +7,8 @@ import { sessionHostLogPath, sessionHostPidPath, sessionHostSocketPath, sessionH
 import { sessionHostProtocolVersion, type SessionHostDelivery, type SessionHostMessage, type SessionHostPollRequest, type SessionHostServerMessage, type SessionHostStatus, type SessionHostThreadAction } from "./session-host-protocol.js";
 import { sessionHostDeliveryHash } from "./session-host-transport.js";
 import type { SessionRelayHost } from "./session-relay.js";
+import { coreVersion } from "./compatibility.js";
+import type { RuntimeState } from "./runtime-state.js";
 
 function hostArguments() {
   if (isSea()) return ["session-host"];
@@ -135,6 +137,12 @@ type ThreadActionRequest = {
   timer: NodeJS.Timeout;
 };
 
+type HandoffRequest = {
+  resolve: (handoff: SessionHostStatus["handoff"]) => void;
+  reject: (error: Error) => void;
+  timer: NodeJS.Timeout;
+};
+
 function transientThreadActionError(error: unknown) {
   return ["session_host_disconnected", "session_host_timeout", "session_host_unavailable", "app_server_unavailable", "app_server_timeout", "app_server_closed"].includes(error instanceof Error ? error.message : "");
 }
@@ -147,19 +155,25 @@ export class SessionHostClient implements SessionRelayHost {
   private readonly outputs = new WeakMap<Socket, string>();
   private acknowledged = false;
   private threadActionsSupported = false;
-  private readonly runtimeInstanceId = `${process.pid}:${randomUUID()}`;
-  private hostIdentity: { pid: number; instanceId: string | null; connectionEpoch: number | null; startedAt: string | null } | null = null;
+  private readonly runtimeIdentity: Pick<RuntimeState, "instanceId" | "generation" | "version" | "handoffUpdateId">;
+  private hostIdentity: { pid: number; instanceId: string | null; connectionEpoch: number | null; startedAt: string | null; runtimeGeneration: number | null } | null = null;
+  private handoff: SessionHostStatus["handoff"] = null;
   private readonly readyWaiters = new Set<ReadyWaiter>();
   private readonly threadActionRequests = new Map<string, ThreadActionRequest>();
+  private readonly handoffRequests = new Map<string, HandoffRequest>();
   private deliveryQueue: Promise<void> = Promise.resolve();
 
-  constructor(private readonly host: SessionRelayHost & { delivery?: (message: SessionHostDelivery) => void | Promise<void> }) {}
+  constructor(private readonly host: SessionRelayHost & { delivery?: (message: SessionHostDelivery) => void | Promise<void> }, runtimeIdentity?: Pick<RuntimeState, "instanceId" | "generation" | "version" | "handoffUpdateId">) {
+    this.runtimeIdentity = runtimeIdentity || { instanceId: `${process.pid}:${randomUUID()}`, generation: 1, version: coreVersion, handoffUpdateId: null };
+  }
 
   status() {
     return {
       connected: Boolean(this.socket && this.acknowledged),
-      runtime_instance_id: this.runtimeInstanceId,
+      runtime_instance_id: this.runtimeIdentity.instanceId,
+      runtime_generation: this.runtimeIdentity.generation,
       host: this.hostIdentity,
+      handoff: this.handoff,
       reconnecting: Boolean(this.connecting || this.reconnectTimer),
     };
   }
@@ -179,8 +193,10 @@ export class SessionHostClient implements SessionRelayHost {
     this.acknowledged = false;
     this.threadActionsSupported = false;
     this.hostIdentity = null;
+    this.handoff = null;
     this.rejectReadyWaiters("session_host_unavailable");
     this.rejectThreadActions("session_host_unavailable");
+    this.rejectHandoffRequests("session_host_unavailable");
     socket?.destroy();
   }
 
@@ -200,6 +216,18 @@ export class SessionHostClient implements SessionRelayHost {
       }
     }
     throw lastError instanceof Error ? lastError : new Error("codex_thread_action_failed");
+  }
+
+  async beginHandoff(updateId: string, targetRuntimeGeneration: number, targetVersion: string | null, deadlineAt: string) {
+    return this.requestHandoff({ type: "begin_handoff", request_id: randomUUID(), update_id: updateId, target_runtime_generation: targetRuntimeGeneration, target_version: targetVersion, deadline_at: deadlineAt });
+  }
+
+  async completeHandoff(updateId: string) {
+    return this.requestHandoff({ type: "complete_handoff", request_id: randomUUID(), update_id: updateId });
+  }
+
+  async handoffStatus() {
+    return this.requestHandoff({ type: "handoff_status_request", request_id: randomUUID() });
   }
 
   poll(relayId: string, busy: boolean) {
@@ -236,6 +264,7 @@ export class SessionHostClient implements SessionRelayHost {
       this.acknowledged = false;
       this.threadActionsSupported = false;
       this.hostIdentity = null;
+      this.handoff = null;
       socket.on("data", chunk => this.read(socket, chunk));
       socket.once("error", error => diagnostic("socket_error", { error: error.message }));
       socket.once("close", () => this.disconnected(socket));
@@ -243,7 +272,12 @@ export class SessionHostClient implements SessionRelayHost {
         type: "hello",
         protocol_version: sessionHostProtocolVersion,
         token: token(),
-        runtime_instance_id: this.runtimeInstanceId,
+        runtime_instance_id: this.runtimeIdentity.instanceId,
+        runtime_generation: this.runtimeIdentity.generation,
+        runtime_version: this.runtimeIdentity.version,
+        profile: betterCodexProfile,
+        handoff_update_id: this.runtimeIdentity.handoffUpdateId,
+        capabilities: { durable_deliveries: true, runtime_handoff: true },
       });
     } catch (error) {
       diagnostic("connect_failed", { error: error instanceof Error ? error.message : String(error) });
@@ -288,7 +322,9 @@ export class SessionHostClient implements SessionRelayHost {
     this.acknowledged = false;
     this.threadActionsSupported = false;
     this.hostIdentity = null;
+    this.handoff = null;
     this.rejectThreadActions("session_host_disconnected");
+    this.rejectHandoffRequests("session_host_disconnected");
     this.scheduleReconnect();
   }
 
@@ -320,15 +356,15 @@ export class SessionHostClient implements SessionRelayHost {
       return;
     }
     if (message.type === "hello_ack") {
-      if (this.acknowledged || message.protocol_version !== sessionHostProtocolVersion || message.runtime_instance_id && message.runtime_instance_id !== this.runtimeInstanceId) {
-        diagnostic("host_ack_identity_mismatch", { expected_runtime_instance_id: this.runtimeInstanceId, actual_runtime_instance_id: message.runtime_instance_id, host_pid: message.host_pid });
+      if (this.acknowledged || message.protocol_version !== sessionHostProtocolVersion || message.runtime_instance_id && message.runtime_instance_id !== this.runtimeIdentity.instanceId || message.runtime_generation !== this.runtimeIdentity.generation || message.capabilities?.durable_deliveries !== true || message.capabilities?.runtime_handoff !== true) {
+        diagnostic("host_ack_identity_mismatch", { expected_runtime_instance_id: this.runtimeIdentity.instanceId, actual_runtime_instance_id: message.runtime_instance_id, expected_runtime_generation: this.runtimeIdentity.generation, actual_runtime_generation: message.runtime_generation, host_pid: message.host_pid });
         socket.destroy();
         return;
       }
       this.acknowledged = true;
       this.threadActionsSupported = message.capabilities?.thread_actions === true;
-      this.hostIdentity = { pid: message.host_pid, instanceId: message.host_instance_id || null, connectionEpoch: message.connection_epoch ?? null, startedAt: message.started_at || null };
-      diagnostic("connected", { runtime_instance_id: this.runtimeInstanceId, host_pid: message.host_pid, host_instance_id: message.host_instance_id || null, connection_epoch: message.connection_epoch ?? null });
+      this.hostIdentity = { pid: message.host_pid, instanceId: message.host_instance_id || null, connectionEpoch: message.connection_epoch ?? null, startedAt: message.started_at || null, runtimeGeneration: message.runtime_generation ?? null };
+      diagnostic("connected", { runtime_instance_id: this.runtimeIdentity.instanceId, runtime_generation: this.runtimeIdentity.generation, host_pid: message.host_pid, host_instance_id: message.host_instance_id || null, connection_epoch: message.connection_epoch ?? null });
       this.resolveReadyWaiters();
       return;
     }
@@ -344,6 +380,16 @@ export class SessionHostClient implements SessionRelayHost {
       clearTimeout(request.timer);
       if (message.ok) request.resolve();
       else request.reject(new Error(message.error || "codex_thread_action_failed"));
+      return;
+    }
+    if (message.type === "handoff_response") {
+      const request = this.handoffRequests.get(message.request_id);
+      if (!request) return;
+      this.handoffRequests.delete(message.request_id);
+      clearTimeout(request.timer);
+      this.handoff = message.handoff;
+      if (message.ok) request.resolve(message.handoff);
+      else request.reject(new Error(message.error || "session_host_handoff_failed"));
       return;
     }
     if (message.type === "poll_request") return void this.handlePoll(socket, message);
@@ -403,6 +449,31 @@ export class SessionHostClient implements SessionRelayHost {
     });
   }
 
+  private async requestHandoff(message: Extract<SessionHostMessage, { type: "begin_handoff" | "complete_handoff" | "handoff_status_request" }>) {
+    await this.waitUntilReady();
+    const socket = this.socket;
+    if (!socket) throw new Error("session_host_unavailable");
+    return new Promise<SessionHostStatus["handoff"]>((resolve, reject) => {
+      const request: HandoffRequest = {
+        resolve,
+        reject,
+        timer: setTimeout(() => {
+          this.handoffRequests.delete(message.request_id);
+          reject(new Error("session_host_timeout"));
+        }, 5000),
+      };
+      request.timer.unref();
+      this.handoffRequests.set(message.request_id, request);
+      try {
+        writeMessage(socket, message);
+      } catch (error) {
+        this.handoffRequests.delete(message.request_id);
+        clearTimeout(request.timer);
+        reject(error instanceof Error ? error : new Error("session_host_unavailable"));
+      }
+    });
+  }
+
   private resolveReadyWaiters() {
     for (const waiter of this.readyWaiters) {
       clearTimeout(waiter.timer);
@@ -425,6 +496,14 @@ export class SessionHostClient implements SessionRelayHost {
       request.reject(new Error(error));
     }
     this.threadActionRequests.clear();
+  }
+
+  private rejectHandoffRequests(error: string) {
+    for (const request of this.handoffRequests.values()) {
+      clearTimeout(request.timer);
+      request.reject(new Error(error));
+    }
+    this.handoffRequests.clear();
   }
 
   private async handlePoll(socket: Socket, message: SessionHostPollRequest) {

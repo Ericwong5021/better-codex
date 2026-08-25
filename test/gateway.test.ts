@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
+import { once } from "node:events";
+import { createConnection, type Socket } from "node:net";
 import test from "node:test";
 import { Store } from "../src/db.js";
+import { sessionHostProtocolVersion, type SessionHostServerMessage } from "../src/session-host-protocol.js";
 
 async function availablePort() {
   return new Promise<number>((resolve, reject) => {
@@ -56,6 +59,38 @@ async function stopGateway(process: ChildProcess) {
   await new Promise<void>(resolve => process.once("exit", () => resolve()));
 }
 
+function openSocket(path: string) {
+  return new Promise<Socket>((resolve, reject) => {
+    const socket = createConnection(path);
+    socket.once("connect", () => resolve(socket));
+    socket.once("error", reject);
+  });
+}
+
+function readSocketMessage(socket: Socket) {
+  return new Promise<SessionHostServerMessage>((resolve, reject) => {
+    let output = "";
+    const data = (chunk: Buffer) => {
+      output += String(chunk);
+      const newline = output.indexOf("\n");
+      if (newline < 0) return;
+      cleanup();
+      try { resolve(JSON.parse(output.slice(0, newline)) as SessionHostServerMessage); }
+      catch (error) { reject(error); }
+    };
+    const error = (cause: Error) => { cleanup(); reject(cause); };
+    const close = () => { cleanup(); reject(new Error("session_host_socket_closed")); };
+    const cleanup = () => {
+      socket.off("data", data);
+      socket.off("error", error);
+      socket.off("close", close);
+    };
+    socket.on("data", data);
+    socket.once("error", error);
+    socket.once("close", close);
+  });
+}
+
 test("gateway completes the issue workflow and survives restart", async () => {
   const home = mkdtempSync(join(tmpdir(), "better-codex-gateway-test-"));
   const port = await availablePort();
@@ -89,8 +124,13 @@ test("gateway completes the issue workflow and survives restart", async () => {
 
   try {
     await waitForGateway(port, gateway);
-    const health = await (await fetch(`http://127.0.0.1:${port}/health`)).json() as { database: { schemaVersion: number } };
+    const health = await (await fetch(`http://127.0.0.1:${port}/health`)).json() as { generation: number; database: { schemaVersion: number } };
     assert.equal(health.database.schemaVersion, 20);
+    assert.equal(health.generation, 1);
+    const firstRuntime = JSON.parse(readFileSync(join(home, "run", "runtime.json"), "utf8")) as { generation: number; instanceId: string };
+    const firstAuthority = JSON.parse(readFileSync(join(home, "run", "runtime-authority.json"), "utf8")) as { generation: number; runtimeInstanceId: string; status: string };
+    assert.equal(firstRuntime.generation, 1);
+    assert.deepEqual(firstAuthority, { ...firstAuthority, generation: 1, runtimeInstanceId: firstRuntime.instanceId, status: "claimed" });
 
     const bootstrap = await (await request("/api/bootstrap")).json() as { projects: Array<{ external_id: string | null; created_at: string }>; agents: Array<{ id: string; name: string; is_default?: boolean }>; appearance: unknown };
     assert.equal(
@@ -415,6 +455,9 @@ test("gateway completes the issue workflow and survives restart", async () => {
     await stopGateway(gateway);
     gateway = startGateway(home, port, token);
     await waitForGateway(port, gateway);
+    const secondHealth = await (await fetch(`http://127.0.0.1:${port}/health`)).json() as { generation: number; instanceId: string };
+    assert.equal(secondHealth.generation, 2);
+    assert.notEqual(secondHealth.instanceId, firstRuntime.instanceId);
     const restoredResponse = await request(`/api/issues/${issue.id}`);
     assert.equal(restoredResponse.status, 200);
     const restored = await restoredResponse.json() as { status: string; project_id: string; thread_id: string | null };
@@ -428,6 +471,79 @@ test("gateway completes the issue workflow and survives restart", async () => {
     assert.equal(restoredAgents.find(agent => agent.id === optionalAgent.id)?.avatar, "icon:reviewer");
   } finally {
     await stopGateway(gateway);
+    rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+});
+
+test("session host handoff fences stale Runtime generations", { skip: process.platform === "win32" }, async () => {
+  const home = mkdtempSync(join(tmpdir(), "better-codex-session-handoff-"));
+  const token = "session-host-handoff-token";
+  const socketPath = join(home, "run", "session-host");
+  const host = spawn(process.execPath, ["--import", "tsx", "src/cli.ts", "session-host"], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      BETTER_CODEX_HOME: home,
+      BETTER_CODEX_PROFILE: "development",
+      BETTER_CODEX_TOKEN: token,
+      BETTER_CODEX_DISABLE_RUNTIME_SESSION_RELAY: "1",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let source: Socket | undefined;
+  let target: Socket | undefined;
+  try {
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      try {
+        source = await openSocket(socketPath);
+        break;
+      } catch {
+        if (host.exitCode !== null) throw new Error(`session_host_exit_${host.exitCode}`);
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+    }
+    assert.ok(source);
+    const capabilities = { durable_deliveries: true, runtime_handoff: true };
+    const sourceAckPromise = readSocketMessage(source);
+    source.write(`${JSON.stringify({ type: "hello", protocol_version: sessionHostProtocolVersion, token, runtime_instance_id: "runtime-source", runtime_generation: 1, runtime_version: "1.0.0", profile: "development", handoff_update_id: null, capabilities })}\n`);
+    const sourceAck = await sourceAckPromise;
+    assert.equal(sourceAck.type, "hello_ack");
+    const updateId = "019fec06-788f-7af3-a031-76b546904fb0";
+    const startedPromise = readSocketMessage(source);
+    source.write(`${JSON.stringify({ type: "begin_handoff", request_id: "handoff-start", update_id: updateId, target_runtime_generation: 2, target_version: "1.1.0", deadline_at: new Date(Date.now() + 60_000).toISOString() })}\n`);
+    const started = await startedPromise;
+    assert.equal(started.type, "handoff_response");
+    if (started.type === "handoff_response") {
+      assert.equal(started.ok, true);
+      assert.equal(started.handoff?.target_runtime_generation, 2);
+    }
+
+    const stale = await openSocket(socketPath);
+    stale.on("error", () => {});
+    const staleClosed = once(stale, "close");
+    stale.write(`${JSON.stringify({ type: "hello", protocol_version: sessionHostProtocolVersion, token, runtime_instance_id: "runtime-stale", runtime_generation: 1, runtime_version: "1.0.0", profile: "development", handoff_update_id: null, capabilities })}\n`);
+    await staleClosed;
+
+    target = await openSocket(socketPath);
+    const targetAckPromise = readSocketMessage(target);
+    target.write(`${JSON.stringify({ type: "hello", protocol_version: sessionHostProtocolVersion, token, runtime_instance_id: "runtime-target", runtime_generation: 2, runtime_version: "1.1.0", profile: "development", handoff_update_id: updateId, capabilities })}\n`);
+    const targetAck = await targetAckPromise;
+    assert.equal(targetAck.type, "hello_ack");
+    const completedPromise = readSocketMessage(target);
+    target.write(`${JSON.stringify({ type: "complete_handoff", request_id: "handoff-complete", update_id: updateId })}\n`);
+    const completed = await completedPromise;
+    assert.equal(completed.type, "handoff_response");
+    if (completed.type === "handoff_response") {
+      assert.equal(completed.ok, true);
+      assert.equal(completed.handoff, null);
+    }
+    target.write(`${JSON.stringify({ type: "shutdown", token })}\n`);
+    await Promise.race([once(host, "exit"), new Promise((_, reject) => setTimeout(() => reject(new Error("session_host_stop_timeout")), 5000))]);
+  } finally {
+    source?.destroy();
+    target?.destroy();
+    if (host.exitCode === null) host.kill("SIGTERM");
     rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });

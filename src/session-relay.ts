@@ -84,24 +84,28 @@ export class RuntimeSessionRelay {
   private lastTurnProbe = 0;
   private currentThreadId = "";
   private readonly threads = new Set<string>();
+  private readonly activeTurns = new Map<string, string>();
   private readonly pending = new Map<number, PendingRequest>();
   private readonly guardianDenials = new Map<string, Array<Record<string, unknown>>>();
   private bufferedEvents: RelayEvent[] = [];
   private operationQueue: Promise<void> = Promise.resolve();
+  private appServerStartedAt: string | null = null;
 
   constructor(private readonly host: SessionRelayHost) {}
 
   status() {
     return {
       app_server_pid: this.child?.pid ?? null,
+      app_server_started_at: this.appServerStartedAt,
       app_server_connected: Boolean(this.child),
       command_in_flight: this.commandInFlight,
       pending_requests: this.pending.size,
+      active_turns: [...this.activeTurns].map(([thread_id, turn_id]) => ({ thread_id, turn_id })).sort((left, right) => left.thread_id.localeCompare(right.thread_id)),
     };
   }
 
   idle() {
-    return !this.commandInFlight && this.pending.size === 0 && !this.pollBusy;
+    return !this.commandInFlight && this.pending.size === 0 && !this.pollBusy && this.activeTurns.size === 0;
   }
 
   start() {
@@ -121,6 +125,8 @@ export class RuntimeSessionRelay {
     this.heartbeatTimer = null;
     const child = this.child;
     this.child = null;
+    this.appServerStartedAt = null;
+    this.activeTurns.clear();
     this.rejectPending("runtime_stopped");
     if (this.relayId) this.host.release(this.relayId, "runtime_stopped");
     child?.kill("SIGTERM");
@@ -154,6 +160,7 @@ export class RuntimeSessionRelay {
     this.output = "";
     const child = spawn(codexExecutablePath(), ["app-server"], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
     this.child = child;
+    this.appServerStartedAt = new Date().toISOString();
     child.stdout.on("data", chunk => this.read(chunk));
     child.stderr.resume();
     child.once("error", error => this.disconnect(child, error.message || "app_server_unavailable"));
@@ -181,6 +188,8 @@ export class RuntimeSessionRelay {
   private disconnect(child: ChildProcessWithoutNullStreams, error: string) {
     if (this.child !== child) return;
     this.child = null;
+    this.appServerStartedAt = null;
+    this.activeTurns.clear();
     if (this.pollTimer) clearInterval(this.pollTimer);
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     this.pollTimer = null;
@@ -304,6 +313,8 @@ export class RuntimeSessionRelay {
     }
     if (method === "turn/started") {
       const turn = object(params.turn);
+      const turnId = sessionId(turn.id);
+      if (turnId) this.activeTurns.set(threadId, turnId);
       relayParams = { threadId, turn: { id: String(turn.id || ""), status: String(turn.status || "") } };
     }
     if (method === "item/completed") {
@@ -313,6 +324,8 @@ export class RuntimeSessionRelay {
     }
     if (method === "turn/completed") {
       const turn = object(params.turn);
+      const turnId = sessionId(turn.id);
+      if (turnId && this.activeTurns.get(threadId) === turnId) this.activeTurns.delete(threadId);
       const turnError = object(turn.error);
       const items = Array.isArray(turn.items) ? turn.items.flatMap(value => {
         const item = object(value);
@@ -416,6 +429,7 @@ export class RuntimeSessionRelay {
           : object(await this.request("turn/start", this.turnStartParams(threadId, payload)));
         turnId = sessionId(object(turn.turn).id);
         if (!turnId) throw new Error("desktop_turn_start_invalid");
+        this.activeTurns.set(threadId, turnId);
         this.host.checkpoint(command.id, relayId, { thread_id: threadId, turn_id: turnId });
       } else if (command.kind === "turn") {
         if (!threadId) throw new Error("session_thread_invalid");
@@ -431,6 +445,7 @@ export class RuntimeSessionRelay {
         }
         turnId = sessionId(object(turn.turn).id);
         if (!turnId) throw new Error("desktop_turn_start_invalid");
+        this.activeTurns.set(threadId, turnId);
         this.host.checkpoint(command.id, relayId, { thread_id: threadId, turn_id: turnId });
       } else if (command.kind === "review") {
         if (!threadId) throw new Error("session_thread_invalid");
@@ -439,6 +454,7 @@ export class RuntimeSessionRelay {
         const review = object(await this.request("review/start", { threadId, target: { type: "uncommittedChanges" }, delivery: "inline" }));
         turnId = sessionId(object(review.turn).id);
         if (!turnId) throw new Error("desktop_turn_start_invalid");
+        this.activeTurns.set(threadId, turnId);
         this.host.checkpoint(command.id, relayId, { thread_id: threadId, turn_id: turnId });
       } else if (command.kind === "compact") {
         if (!threadId) throw new Error("session_thread_invalid");
@@ -581,6 +597,7 @@ export class RuntimeSessionRelay {
       const turn = object(await this.request("turn/start", this.turnStartParams(threadId, { ...payload, input })));
       const turnId = sessionId(object(turn.turn).id);
       if (!turnId) throw new Error("desktop_turn_start_invalid");
+      this.activeTurns.set(threadId, turnId);
       return { thread_id: threadId, turn_id: turnId, command };
     }
     if (command === "mcp") {
@@ -688,6 +705,7 @@ export class RuntimeSessionRelay {
           statusType = String(status.type || "");
         }
         if (statusType === "active") {
+          this.activeTurns.set(threadId, turnId);
           this.emit({
             method: "thread/status/changed",
             params: {
@@ -705,6 +723,7 @@ export class RuntimeSessionRelay {
         const turns = Array.isArray(object(detail.thread).turns) ? object(detail.thread).turns as unknown[] : [];
         const turn = turns.map(object).find(item => sessionId(item.id) === turnId);
         if (!turn || !["completed", "interrupted", "failed"].includes(String(turn.status || ""))) continue;
+        if (this.activeTurns.get(threadId) === turnId) this.activeTurns.delete(threadId);
         const items = Array.isArray(turn.items) ? turn.items.flatMap(value => {
           const item = object(value);
           return item.type === "agentMessage" && typeof item.text === "string" ? [{ type: "agentMessage", text: item.text }] : [];

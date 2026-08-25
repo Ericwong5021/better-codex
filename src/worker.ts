@@ -15,6 +15,7 @@ import type { SessionHostDelivery } from "./session-host-protocol.js";
 import { projectDocumentKeys, type ProjectDocumentDiagram, type ProjectDocumentKey, type ProjectPlanItem, type ProjectPlanSnapshot } from "./sync-contract.js";
 import { codexSemanticInput, codexSemanticRequestFingerprint, normalizeCodexSemanticReferences, type CodexSemanticReference } from "./codex-semantics.js";
 import { sessionNativeCommand } from "./native-commands.js";
+import type { RuntimeState } from "./runtime-state.js";
 
 const interval = 60000;
 const schedulerTimeout = 180000;
@@ -127,7 +128,7 @@ export class IssueWorker {
   private drainingThreadActions = false;
   private stopped = true;
 
-  constructor(private readonly store: Store, private readonly onChange: () => void = () => {}) {
+  constructor(private readonly store: Store, private readonly onChange: () => void = () => {}, runtimeIdentity?: Pick<RuntimeState, "instanceId" | "generation" | "version" | "handoffUpdateId">) {
     this.sessionRelay = new SessionHostClient({
       poll: (relayId, busy) => this.pollSessionRelay(relayId, `runtime:${process.pid}`, "ready", undefined, busy),
       release: (relayId, error) => {
@@ -150,11 +151,23 @@ export class IssueWorker {
         if (this.handleSessionEvent(method, params)) this.onChange();
       },
       delivery: message => this.applySessionHostDelivery(message),
-    });
+    }, runtimeIdentity);
   }
 
   sessionHostStatus() {
     return this.sessionRelay.status();
+  }
+
+  beginSessionHandoff(updateId: string, targetRuntimeGeneration: number, targetVersion: string | null, deadlineAt: string) {
+    return this.sessionRelay.beginHandoff(updateId, targetRuntimeGeneration, targetVersion, deadlineAt);
+  }
+
+  completeSessionHandoff(updateId: string) {
+    return this.sessionRelay.completeHandoff(updateId);
+  }
+
+  sessionHandoffStatus() {
+    return this.sessionRelay.handoffStatus();
   }
 
   start() {

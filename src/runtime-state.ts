@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { closeSync, existsSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
-import { ensureDirectories, runtimeLockPath, runtimeStatePath } from "./config.js";
+import { ensureDirectories, runtimeAuthorityPath, runtimeLockPath, runtimeStatePath } from "./config.js";
 import { coreVersion } from "./compatibility.js";
 
 export type RuntimeState = {
@@ -11,6 +11,19 @@ export type RuntimeState = {
   version: string;
   startedAt: string;
   processStartedAt: string;
+  generation: number;
+  handoffUpdateId: string | null;
+};
+
+type RuntimeAuthority = {
+  generation: number;
+  status: "claimed" | "reserved";
+  runtimeInstanceId: string;
+  runtimePid: number;
+  processStartedAt: string;
+  updateId: string | null;
+  targetVersion: string | null;
+  updatedAt: string;
 };
 
 function processAlive(pid: number) {
@@ -42,11 +55,27 @@ function parse(path: string) {
   }
 }
 
+function readAuthority() {
+  try {
+    const value = JSON.parse(readFileSync(runtimeAuthorityPath, "utf8")) as Partial<RuntimeAuthority>;
+    if (!Number.isSafeInteger(value.generation) || value.generation! < 1 || !["claimed", "reserved"].includes(String(value.status))) return null;
+    return value as RuntimeAuthority;
+  } catch {
+    return null;
+  }
+}
+
+function writeAuthority(authority: RuntimeAuthority) {
+  const temporary = `${runtimeAuthorityPath}.${process.pid}.tmp`;
+  writeFileSync(temporary, JSON.stringify(authority), { mode: 0o600 });
+  renameSync(temporary, runtimeAuthorityPath);
+}
+
 export function readRuntimeState() {
   const value = parse(runtimeStatePath);
   if (!value || !Number.isInteger(value.pid) || value.pid! < 1 || !Number.isInteger(value.port) || value.port! < 1 || value.port! > 65535 || typeof value.instanceId !== "string" || !value.instanceId) return null;
   if (!processAlive(value.pid!)) return null;
-  return value as RuntimeState;
+  return { ...value, generation: Number.isSafeInteger(value.generation) ? Number(value.generation) : 0, handoffUpdateId: typeof value.handoffUpdateId === "string" ? value.handoffUpdateId : null } as RuntimeState;
 }
 
 export function createRuntimeIdentity() {
@@ -56,7 +85,43 @@ export function createRuntimeIdentity() {
     version: coreVersion,
     startedAt: new Date().toISOString(),
     processStartedAt: new Date(processStartTime(process.pid) ?? Date.now()).toISOString(),
+    generation: 0,
+    handoffUpdateId: null,
   };
+}
+
+export function claimRuntimeAuthority<T extends ReturnType<typeof createRuntimeIdentity>>(identity: T) {
+  const lock = parse(runtimeLockPath);
+  if (lock?.instanceId !== identity.instanceId || lock.pid !== process.pid) throw new Error("runtime_authority_lock_mismatch");
+  const current = readAuthority();
+  const reserved = current?.status === "reserved";
+  const generation = reserved ? current.generation : Math.max(current?.generation || 0, identity.generation) + 1;
+  const handoffUpdateId = reserved ? current.updateId : null;
+  writeAuthority({
+    generation,
+    status: "claimed",
+    runtimeInstanceId: identity.instanceId,
+    runtimePid: process.pid,
+    processStartedAt: identity.processStartedAt,
+    updateId: handoffUpdateId,
+    targetVersion: reserved ? current.targetVersion : identity.version,
+    updatedAt: new Date().toISOString(),
+  });
+  return { ...identity, generation, handoffUpdateId };
+}
+
+export function reserveRuntimeAuthority(identity: Pick<RuntimeState, "instanceId" | "generation" | "processStartedAt">, updateId: string, targetVersion: string | null) {
+  const current = readAuthority();
+  if (!current || current.status !== "claimed" || current.runtimeInstanceId !== identity.instanceId || current.runtimePid !== process.pid || current.generation !== identity.generation || current.processStartedAt !== identity.processStartedAt) throw new Error("runtime_authority_owner_mismatch");
+  const generation = current.generation + 1;
+  writeAuthority({ ...current, generation, status: "reserved", updateId, targetVersion, updatedAt: new Date().toISOString() });
+  return generation;
+}
+
+export function completeRuntimeAuthorityHandoff(identity: Pick<RuntimeState, "instanceId" | "generation" | "processStartedAt">, updateId: string) {
+  const current = readAuthority();
+  if (!current || current.status !== "claimed" || current.runtimeInstanceId !== identity.instanceId || current.runtimePid !== process.pid || current.generation !== identity.generation || current.processStartedAt !== identity.processStartedAt || current.updateId !== updateId) throw new Error("runtime_authority_handoff_mismatch");
+  writeAuthority({ ...current, updateId: null, targetVersion: null, updatedAt: new Date().toISOString() });
 }
 
 export function acquireRuntimeLock(identity: Pick<RuntimeState, "instanceId" | "startedAt" | "processStartedAt">) {

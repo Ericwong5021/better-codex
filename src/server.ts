@@ -14,7 +14,7 @@ import { readCodexUsage } from "./codex-usage.js";
 import { codexSemanticRequestFingerprint, normalizeCodexSemanticSelections, readCodexSemanticCatalog, resolveCodexSemanticReferences, searchCodexFiles } from "./codex-semantics.js";
 import { readModelCatalog } from "./model-catalog.js";
 import { attachmentPath, databasePath, runPath, runtimePort, token, updateLogPath } from "./config.js";
-import { acquireRuntimeLock, clearRuntimeState, createRuntimeIdentity, publishRuntimeState } from "./runtime-state.js";
+import { acquireRuntimeLock, claimRuntimeAuthority, clearRuntimeState, createRuntimeIdentity, publishRuntimeState } from "./runtime-state.js";
 import { activeCoreCommand, checkGatewayUpdate, getGatewayUpdateState, installGatewayUpdate, recordGatewayUpdateActivation, startGatewayUpdateChecks } from "./updater.js";
 import { packagedBuild } from "./build.js";
 import { basename, dirname, extname, join, resolve } from "node:path";
@@ -722,8 +722,15 @@ function spawnUpdateRelaunch(runtimePid: number, updates: { core: string | null;
 export function startServer() {
   if (!Number.isInteger(runtimePort) || runtimePort < 0 || runtimePort > 65535) throw new Error("invalid_runtime_port");
   const remoteMode = readRemoteMode();
-  const identity = createRuntimeIdentity();
-  acquireRuntimeLock(identity);
+  const initialIdentity = createRuntimeIdentity();
+  acquireRuntimeLock(initialIdentity);
+  let identity: ReturnType<typeof claimRuntimeAuthority>;
+  try {
+    identity = claimRuntimeAuthority(initialIdentity);
+  } catch (error) {
+    clearRuntimeState(initialIdentity.instanceId);
+    throw error;
+  }
   let store: Store;
   try {
     store = new Store();
@@ -749,7 +756,7 @@ export function startServer() {
   const eventHistory: number[] = [];
   let eventRevision = 0;
   let publishChange = () => {};
-  const worker = new IssueWorker(store, () => publishChange());
+  const worker = new IssueWorker(store, () => publishChange(), identity);
   const syncClient = new SyncClient(
     store,
     5_000,
@@ -919,7 +926,7 @@ export function startServer() {
       if (url.pathname === "/livez" && method === "GET") {
         const address = server.address();
         const activePort = typeof address === "object" && address ? address.port : 0;
-        return sendJson(response, 200, { ok: true, name: "Better Codex Runtime", version: identity.version, pid: process.pid, port: activePort, instanceId: identity.instanceId, uptime_seconds: Math.floor(process.uptime()) });
+        return sendJson(response, 200, { ok: true, name: "Better Codex Runtime", version: identity.version, pid: process.pid, port: activePort, instanceId: identity.instanceId, generation: identity.generation, handoffUpdateId: identity.handoffUpdateId, uptime_seconds: Math.floor(process.uptime()) });
       }
       if (url.pathname === "/readyz" && method === "GET") {
         const database = store.health();
@@ -929,14 +936,14 @@ export function startServer() {
         const sessionHostRequired = process.env.BETTER_CODEX_DISABLE_RUNTIME_SESSION_RELAY !== "1" && process.env.BETTER_CODEX_DISABLE_DELEGATION !== "1" && !process.env.NODE_TEST_CONTEXT;
         const compatibilityReady = compatibility?.compatible === true || compatibility === null && !packagedBuild;
         const ok = database.ok && storage.ok && compatibilityReady && (!sessionHostRequired || sessionHost.connected);
-        return sendJson(response, ok ? 200 : 503, { ok, name: "Better Codex Runtime", version: identity.version, pid: process.pid, instanceId: identity.instanceId, database, storage, compatibility, compatibility_required: packagedBuild, session_host: { ...sessionHost, required: sessionHostRequired }, relay: relayClient.status() });
+        return sendJson(response, ok ? 200 : 503, { ok, name: "Better Codex Runtime", version: identity.version, pid: process.pid, instanceId: identity.instanceId, generation: identity.generation, handoffUpdateId: identity.handoffUpdateId, database, storage, compatibility, compatibility_required: packagedBuild, session_host: { ...sessionHost, required: sessionHostRequired }, relay: relayClient.status() });
       }
       if (url.pathname === "/health") {
         const database = store.health();
         const storage = storageHealth(databasePath);
         const address = server.address();
         const activePort = typeof address === "object" && address ? address.port : 0;
-        return sendJson(response, database.ok && storage.ok ? 200 : 503, { ok: database.ok && storage.ok, name: "Better Codex Runtime", version: identity.version, pid: process.pid, port: activePort, instanceId: identity.instanceId, database, storage, compatibility: readCompatibilityStatus(), session_host: worker.sessionHostStatus() });
+        return sendJson(response, database.ok && storage.ok ? 200 : 503, { ok: database.ok && storage.ok, name: "Better Codex Runtime", version: identity.version, pid: process.pid, port: activePort, instanceId: identity.instanceId, generation: identity.generation, handoffUpdateId: identity.handoffUpdateId, database, storage, compatibility: readCompatibilityStatus(), session_host: worker.sessionHostStatus() });
       }
       if ((url.pathname === "/web" || url.pathname === "/web/projects" || url.pathname.startsWith("/web/projects/") || url.pathname === "/web/agents" || url.pathname.startsWith("/web/agents/") || url.pathname.startsWith("/local/")) && method === "GET") {
         return sendWeb(response, 200, betterCodexWebHostHtml(), "text/html; charset=utf-8", {

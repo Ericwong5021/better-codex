@@ -13,6 +13,9 @@ type RuntimeConnection = {
   output: string;
   authenticated: boolean;
   runtimeInstanceId: string | null;
+  runtimeGeneration: number | null;
+  runtimeVersion: string | null;
+  handoffUpdateId: string | null;
   connectedAt: string;
   authTimer: NodeJS.Timeout;
 };
@@ -124,6 +127,7 @@ class SessionHostServer {
   private readonly sentDeliveries = new Set<string>();
   private connection: RuntimeConnection | null = null;
   private connectionEpoch = 0;
+  private highestRuntimeGeneration = 0;
   private shuttingDown = false;
   private lockToken: string | null = null;
   private recoveredOwner: Partial<SessionHostLock> | null = null;
@@ -133,6 +137,7 @@ class SessionHostServer {
   private readonly transport = new SessionHostTransport(sessionHostTransportPath, this.hostInstanceId);
   private readonly startedAt = new Date().toISOString();
   private runtimeDisconnectedAt: string | null = null;
+  private handoff: SessionHostStatus["handoff"] = null;
   private orphanTimer: NodeJS.Timeout | null = null;
   private statusTimer: NodeJS.Timeout | null = null;
   private readonly relay = new RuntimeSessionRelay(this.proxyHost());
@@ -216,11 +221,14 @@ class SessionHostServer {
       running,
       connection_epoch: this.connectionEpoch,
       runtime_instance_id: connection?.runtimeInstanceId ?? null,
+      runtime_generation: connection?.runtimeGeneration ?? null,
+      runtime_version: connection?.runtimeVersion ?? null,
       runtime_connected: Boolean(connection),
       runtime_connected_at: connection?.connectedAt ?? null,
       runtime_disconnected_at: this.runtimeDisconnectedAt,
       ...relay,
       ...transport,
+      handoff: this.handoff,
       updated_at: new Date().toISOString(),
     } satisfies SessionHostStatus;
     const temporary = `${sessionHostStatusPath}.${process.pid}.tmp`;
@@ -256,7 +264,7 @@ class SessionHostServer {
       socket.destroy();
     }, 2000);
     authTimer.unref();
-    const connection = { socket, epoch: 0, output: "", authenticated: false, runtimeInstanceId: null, connectedAt: new Date().toISOString(), authTimer } satisfies RuntimeConnection;
+    const connection = { socket, epoch: 0, output: "", authenticated: false, runtimeInstanceId: null, runtimeGeneration: null, runtimeVersion: null, handoffUpdateId: null, connectedAt: new Date().toISOString(), authTimer } satisfies RuntimeConnection;
     this.connections.add(connection);
     socket.on("data", chunk => this.read(connection, chunk));
     socket.once("close", () => {
@@ -303,8 +311,13 @@ class SessionHostServer {
 
   private async handle(connection: RuntimeConnection, message: SessionHostMessage) {
     if (message.type === "hello") {
-      if (connection.authenticated || message.protocol_version !== sessionHostProtocolVersion || message.token !== token()) {
-        diagnostic("runtime_authentication_failed", { connection_epoch: connection.epoch, runtime_instance_id: message.runtime_instance_id, protocol_version: message.protocol_version });
+      const validGeneration = Number.isSafeInteger(message.runtime_generation) && message.runtime_generation > 0;
+      const validCapabilities = message.capabilities?.durable_deliveries === true && message.capabilities?.runtime_handoff === true;
+      const staleGeneration = validGeneration && message.runtime_generation < this.highestRuntimeGeneration;
+      const handoffMismatch = this.handoff && (message.runtime_generation < this.handoff.target_runtime_generation || message.handoff_update_id !== this.handoff.update_id);
+      if (connection.authenticated || message.protocol_version !== sessionHostProtocolVersion || message.token !== token() || message.profile !== betterCodexProfile || !message.runtime_version || !validGeneration || !validCapabilities || staleGeneration || handoffMismatch) {
+        const error = staleGeneration || handoffMismatch ? "stale_runtime_generation" : "runtime_authentication_failed";
+        diagnostic(error, { connection_epoch: connection.epoch, runtime_instance_id: message.runtime_instance_id, runtime_generation: message.runtime_generation, highest_runtime_generation: this.highestRuntimeGeneration, handoff_update_id: message.handoff_update_id, protocol_version: message.protocol_version, profile: message.profile });
         connection.socket.destroy();
         return;
       }
@@ -320,14 +333,18 @@ class SessionHostServer {
       connection.authenticated = true;
       clearTimeout(connection.authTimer);
       connection.runtimeInstanceId = message.runtime_instance_id;
+      connection.runtimeGeneration = message.runtime_generation;
+      connection.runtimeVersion = message.runtime_version;
+      connection.handoffUpdateId = message.handoff_update_id;
       connection.connectedAt = new Date().toISOString();
       this.connection = connection;
+      this.highestRuntimeGeneration = Math.max(this.highestRuntimeGeneration, message.runtime_generation);
       this.runtimeDisconnectedAt = null;
       if (this.orphanTimer) clearTimeout(this.orphanTimer);
       this.orphanTimer = null;
-      writeMessage(connection.socket, { type: "hello_ack", protocol_version: sessionHostProtocolVersion, host_pid: process.pid, host_instance_id: this.hostInstanceId, connection_epoch: connection.epoch, runtime_instance_id: message.runtime_instance_id, started_at: this.startedAt, relay_id: `session-host:${process.pid}`, capabilities: { thread_actions: true } });
+      writeMessage(connection.socket, { type: "hello_ack", protocol_version: sessionHostProtocolVersion, host_pid: process.pid, host_instance_id: this.hostInstanceId, connection_epoch: connection.epoch, runtime_instance_id: message.runtime_instance_id, runtime_generation: message.runtime_generation, started_at: this.startedAt, relay_id: `session-host:${process.pid}`, capabilities: { thread_actions: true, durable_deliveries: true, runtime_handoff: true } });
       this.writeStatus();
-      diagnostic("runtime_connected", { connection_epoch: connection.epoch, runtime_instance_id: message.runtime_instance_id });
+      diagnostic("runtime_connected", { connection_epoch: connection.epoch, runtime_instance_id: message.runtime_instance_id, runtime_generation: message.runtime_generation, runtime_version: message.runtime_version, handoff_update_id: message.handoff_update_id });
       this.flushDeliveries();
       return;
     }
@@ -362,6 +379,50 @@ class SessionHostServer {
       } catch (error) {
         if (this.connection === connection) writeMessage(connection.socket, { type: "thread_action_response", request_id: message.request_id, ok: false, error: error instanceof Error ? error.message : "codex_thread_action_failed" });
       }
+      return;
+    }
+    if (message.type === "begin_handoff") {
+      const validUpdateId = /^[a-f0-9-]{36}$/i.test(message.update_id);
+      const validGeneration = Number.isSafeInteger(message.target_runtime_generation) && message.target_runtime_generation > (connection.runtimeGeneration || 0);
+      const deadline = Date.parse(message.deadline_at);
+      if (!validUpdateId || !validGeneration || !Number.isFinite(deadline) || deadline <= Date.now()) {
+        writeMessage(connection.socket, { type: "handoff_response", request_id: message.request_id, ok: false, error: "session_host_handoff_invalid", handoff: this.handoff });
+        return;
+      }
+      if (this.handoff && (this.handoff.update_id !== message.update_id || this.handoff.target_runtime_generation !== message.target_runtime_generation)) {
+        writeMessage(connection.socket, { type: "handoff_response", request_id: message.request_id, ok: false, error: "session_host_handoff_conflict", handoff: this.handoff });
+        return;
+      }
+      this.handoff ||= {
+        update_id: message.update_id,
+        source_runtime_instance_id: connection.runtimeInstanceId || "",
+        source_runtime_generation: connection.runtimeGeneration || 0,
+        target_runtime_generation: message.target_runtime_generation,
+        target_version: message.target_version,
+        started_at: new Date().toISOString(),
+        deadline_at: message.deadline_at,
+      };
+      this.highestRuntimeGeneration = Math.max(this.highestRuntimeGeneration, message.target_runtime_generation);
+      this.writeStatus();
+      diagnostic("runtime_handoff_started", { ...this.handoff, active_turns: this.relay.status().active_turns, ...this.transport.stats() });
+      writeMessage(connection.socket, { type: "handoff_response", request_id: message.request_id, ok: true, handoff: this.handoff });
+      return;
+    }
+    if (message.type === "complete_handoff") {
+      const valid = this.handoff && this.handoff.update_id === message.update_id && connection.handoffUpdateId === message.update_id && (connection.runtimeGeneration || 0) >= this.handoff.target_runtime_generation;
+      if (!valid) {
+        writeMessage(connection.socket, { type: "handoff_response", request_id: message.request_id, ok: false, error: "session_host_handoff_mismatch", handoff: this.handoff });
+        return;
+      }
+      const completed = this.handoff!;
+      this.handoff = null;
+      this.writeStatus();
+      diagnostic("runtime_handoff_completed", { update_id: message.update_id, source_runtime_instance_id: completed.source_runtime_instance_id, runtime_instance_id: connection.runtimeInstanceId, runtime_generation: connection.runtimeGeneration, active_turns: this.relay.status().active_turns, ...this.transport.stats() });
+      writeMessage(connection.socket, { type: "handoff_response", request_id: message.request_id, ok: true, handoff: null });
+      return;
+    }
+    if (message.type === "handoff_status_request") {
+      writeMessage(connection.socket, { type: "handoff_response", request_id: message.request_id, ok: true, handoff: this.handoff });
       return;
     }
     if (!connection.authenticated) {
@@ -401,7 +462,7 @@ class SessionHostServer {
     return new Promise<RelayPoll>(resolve => {
       this.pendingPolls.set(requestId, resolve);
       try {
-        writeMessage(connection.socket, { type: "poll_request", request_id: requestId, relay_id: relayId, busy });
+        writeMessage(connection.socket, { type: "poll_request", request_id: requestId, relay_id: relayId, busy: busy || Boolean(this.handoff) });
       } catch (error) {
         this.pendingPolls.delete(requestId);
         diagnostic("poll_delivery_failed", { connection_epoch: connection.epoch, runtime_instance_id: connection.runtimeInstanceId, request_id: requestId, error: error instanceof Error ? error.message : String(error) });
@@ -446,11 +507,11 @@ class SessionHostServer {
     this.orphanTimer = null;
     this.statusTimer = null;
     this.relay.stop();
-    this.transport.close();
     for (const connection of this.connections) connection.socket.destroy();
     this.connections.clear();
     this.connection = null;
     try { this.writeStatus(false); } catch (error) { diagnostic("final_status_write_failed", { error: error instanceof Error ? error.message : String(error) }); }
+    this.transport.close();
     const finish = () => {
       if (this.ownsLock()) {
         try {

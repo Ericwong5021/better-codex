@@ -17,6 +17,14 @@ export type SessionHostHello = {
   protocol_version: typeof sessionHostProtocolVersion;
   token: string;
   runtime_instance_id: string;
+  runtime_generation: number;
+  runtime_version: string;
+  profile: string;
+  handoff_update_id: string | null;
+  capabilities: {
+    durable_deliveries: boolean;
+    runtime_handoff: boolean;
+  };
 };
 
 export type SessionHostHelloAck = {
@@ -26,10 +34,13 @@ export type SessionHostHelloAck = {
   host_instance_id?: string;
   connection_epoch?: number;
   runtime_instance_id?: string;
+  runtime_generation?: number;
   started_at?: string;
   relay_id: string;
   capabilities?: {
     thread_actions?: boolean;
+    durable_deliveries?: boolean;
+    runtime_handoff?: boolean;
   };
 };
 
@@ -43,17 +54,58 @@ export type SessionHostStatus = {
   running: boolean;
   connection_epoch: number;
   runtime_instance_id: string | null;
+  runtime_generation: number | null;
+  runtime_version: string | null;
   runtime_connected: boolean;
   runtime_connected_at: string | null;
   runtime_disconnected_at: string | null;
   app_server_pid: number | null;
+  app_server_started_at: string | null;
   app_server_connected: boolean;
   command_in_flight: boolean;
   pending_requests: number;
+  active_turns: Array<{ thread_id: string; turn_id: string }>;
   queued_deliveries: number;
   last_delivery_sequence: number;
   last_acked_sequence: number;
+  handoff: {
+    update_id: string;
+    source_runtime_instance_id: string;
+    source_runtime_generation: number;
+    target_runtime_generation: number;
+    target_version: string | null;
+    started_at: string;
+    deadline_at: string;
+  } | null;
   updated_at: string;
+};
+
+export type SessionHostBeginHandoff = {
+  type: "begin_handoff";
+  request_id: string;
+  update_id: string;
+  target_runtime_generation: number;
+  target_version: string | null;
+  deadline_at: string;
+};
+
+export type SessionHostCompleteHandoff = {
+  type: "complete_handoff";
+  request_id: string;
+  update_id: string;
+};
+
+export type SessionHostHandoffStatusRequest = {
+  type: "handoff_status_request";
+  request_id: string;
+};
+
+export type SessionHostHandoffResponse = {
+  type: "handoff_response";
+  request_id: string;
+  ok: boolean;
+  error?: string;
+  handoff: SessionHostStatus["handoff"];
 };
 
 export type SessionHostPollRequest = {
@@ -106,5 +158,5 @@ export type SessionHostThreadActionResponse = {
   error?: string;
 };
 
-export type SessionHostMessage = SessionHostHello | SessionHostPollResponse | SessionHostDeliveryAck | SessionHostShutdown | SessionHostThreadActionRequest;
-export type SessionHostServerMessage = SessionHostHelloAck | SessionHostPollRequest | SessionHostDelivery | SessionHostThreadActionResponse;
+export type SessionHostMessage = SessionHostHello | SessionHostPollResponse | SessionHostDeliveryAck | SessionHostShutdown | SessionHostThreadActionRequest | SessionHostBeginHandoff | SessionHostCompleteHandoff | SessionHostHandoffStatusRequest;
+export type SessionHostServerMessage = SessionHostHelloAck | SessionHostPollRequest | SessionHostDelivery | SessionHostThreadActionResponse | SessionHostHandoffResponse;
