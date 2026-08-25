@@ -15,8 +15,9 @@ export interface ButtonProps {
   variant?: ButtonVariant;
 }
 
-function button(initial: ButtonProps, context: ComponentContext, iconOnly: boolean) {
-  const root = document.createElement("button");
+function button(initial: ButtonProps, context: ComponentContext, iconOnly: boolean, existing?: HTMLButtonElement) {
+  const root = existing || document.createElement("button");
+  const preserveContent = Boolean(existing);
   root.type = "button";
   const stateObserver = new MutationObserver(() => {
     if (root.disabled && root.dataset.bcState !== "loading") root.dataset.bcState = "disabled";
@@ -31,6 +32,7 @@ function button(initial: ButtonProps, context: ComponentContext, iconOnly: boole
     root.toggleAttribute("aria-busy", Boolean(props.loading));
     if (iconOnly || props.accessibleName) root.setAttribute("aria-label", props.accessibleName || props.label);
     else root.removeAttribute("aria-label");
+    if (preserveContent) return;
     const children: Node[] = [];
     if (props.icon) {
       const icon = iconElement({ definition: props.icon });
@@ -64,4 +66,8 @@ export function createButton(initial: ButtonProps, context: ComponentContext) {
 
 export function createIconButton(initial: ButtonProps & { accessibleName: string; icon: IconDefinition }, context: ComponentContext) {
   return button(initial, context, true);
+}
+
+export function adoptIconButton(element: HTMLButtonElement, initial: ButtonProps & { accessibleName: string }, context: ComponentContext) {
+  return button(initial, context, true, element);
 }

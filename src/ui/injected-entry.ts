@@ -2,7 +2,8 @@ import { createHostAdapter } from "./hosts/index.js";
 import { applyHostTheme } from "./theme/apply.js";
 import { themeIsDegraded } from "./theme/diagnostics.js";
 import { createEmptyState } from "./components/empty-state.js";
-import { createButton, createIconButton } from "./primitives/button.js";
+import { destroyRemovedComponents, registerOwnedComponent } from "./core/ownership.js";
+import { adoptIconButton, createButton, createIconButton } from "./primitives/button.js";
 import { createStatusBadge } from "./primitives/badge.js";
 
 export function install(config: Record<string, any>) {
@@ -779,6 +780,7 @@ export function install(config: Record<string, any>) {
     let projectRefreshLoading = false;
     let managedButtonSequence = 0;
     const managedButtons = new Set();
+    let adoptedIconButtonSequence = 0;
     let observer = null;
     let refreshPending = false;
     let refreshTimer = null;
@@ -1083,6 +1085,37 @@ export function install(config: Record<string, any>) {
       handle.element.classList.add("better-codex-button");
       managedButtons.add(handle);
       return handle.element;
+    }
+
+    function hydrateIconButtons(root, feature) {
+      if (!root) return;
+      const candidates = root instanceof HTMLButtonElement && root.matches("button[aria-label]")
+        ? [root, ...root.querySelectorAll("button[aria-label]")]
+        : [...root.querySelectorAll("button[aria-label]")];
+      candidates.forEach(button => {
+        if (!(button instanceof HTMLButtonElement) || button.dataset.bcComponent) return;
+        if (button.children.length !== 1 || button.firstElementChild?.tagName.toLowerCase() !== "svg") return;
+        const accessibleName = button.getAttribute("aria-label")?.trim();
+        if (!accessibleName) return;
+        const handle = adoptIconButton(button, {
+          accessibleName,
+          disabled: button.disabled,
+          label: accessibleName,
+          variant: button.classList.contains("is-danger") ? "danger" : "ghost",
+        }, componentContext(feature, "adopted-icon-button:" + (++adoptedIconButtonSequence)));
+        registerOwnedComponent(button, handle);
+      });
+    }
+
+    function hydrateAddedIconButtons(records) {
+      records.forEach(record => record.addedNodes.forEach(node => {
+        if (!(node instanceof HTMLElement)) return;
+        const scope = node.matches('#better-codex-panel, [id^="better-codex"], [class*="better-codex"]')
+          ? node
+          : node.querySelector('#better-codex-panel, [id^="better-codex"], [class*="better-codex"]');
+        if (!scope) return;
+        hydrateIconButtons(scope, scope.closest("#better-codex-panel")?.dataset.surface || "global-overlay");
+      }));
     }
 
     function createEntry(text, id, title, surface) {
@@ -6631,9 +6664,21 @@ export function install(config: Record<string, any>) {
       if (HOST_KIND === "web" && state.surface !== "projects") document.title = t(state.surface === "agents" ? "智能体" : state.surface === "scheduled" ? "定时任务" : "任务看板") + " · Better Codex";
       syncAutoDispatch();
       syncMockupUi();
-      if (state.surface === "scheduled") return renderScheduledTasks();
-      if (state.surface === "agents") return renderAgents();
-      if (state.surface === "projects") return renderProjects();
+      if (state.surface === "scheduled") {
+        renderScheduledTasks();
+        hydrateIconButtons(panel, "scheduled");
+        return;
+      }
+      if (state.surface === "agents") {
+        renderAgents();
+        hydrateIconButtons(panel, "agents");
+        return;
+      }
+      if (state.surface === "projects") {
+        renderProjects();
+        hydrateIconButtons(panel, "projects");
+        return;
+      }
       const runningCount = state.issues.filter(issue => issueExecutionRunning(issue)).length;
       panel.querySelectorAll("[data-view]").forEach(button => button.classList.toggle("is-active", button.dataset.view === state.view));
       const working = panel.querySelector("#better-codex-working");
@@ -6713,6 +6758,7 @@ export function install(config: Record<string, any>) {
         return '<section class="better-codex-column" data-status="' + status + '"><div class="better-codex-column-head"><span class="better-codex-column-title">' + statusIcon(status) + '<span>' + te(statusLabel) + '</span>' + (archiveColumn ? "" : '<span>' + issues.length + '</span>') + '</span><span class="better-codex-column-actions">' + columnButton + '</span></div><div class="better-codex-cards">' + (cards || (archiveColumn ? '<div class="better-codex-empty">' + te("拖到这里即可归档") + '</div>' : "")) + '</div></section>';
       }).join("");
       reconcileBoard(board, boardMarkup);
+      hydrateIconButtons(panel, "board");
       requestAnimationFrame(syncBoardScrollControl);
     }
 
@@ -9913,7 +9959,11 @@ export function install(config: Record<string, any>) {
     function mount() {
       document.removeEventListener("DOMContentLoaded", mount);
       if (destroyed || observer || !document.documentElement) return;
-      observer = new MutationObserver(scheduleRefresh);
+      observer = new MutationObserver(records => {
+        destroyRemovedComponents(records);
+        hydrateAddedIconButtons(records);
+        scheduleRefresh();
+      });
       observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-theme", "aria-current", ATTRIBUTES.threadActive] });
       startLiveUpdates();
       refresh();
