@@ -4,6 +4,10 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.10-beta.22] - 2026-08-25
+
+- Restore update, completion, Agent, project, label, and profile overlay layouts after extracting shared UI styles.
+
 ## [0.4.10-beta.21] - 2026-08-25
 
 - Enforce design-token source boundaries consistently on Windows, macOS, and Linux.
@@ -852,7 +856,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.21...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.22...HEAD
+[0.4.10-beta.22]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.21...v0.4.10-beta.22
 [0.4.10-beta.21]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.20...v0.4.10-beta.21
 [0.4.10-beta.20]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.19...v0.4.10-beta.20
 [0.4.10-beta.19]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.18...v0.4.10-beta.19
