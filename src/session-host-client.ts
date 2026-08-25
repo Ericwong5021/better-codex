@@ -4,7 +4,7 @@ import { closeSync, openSync, readFileSync, unlinkSync } from "node:fs";
 import { isSea } from "node:sea";
 import { createConnection, type Socket } from "node:net";
 import { sessionHostLogPath, sessionHostPidPath, sessionHostSocketPath, sessionHostStatusPath, betterCodexHome, betterCodexProfile, peerBetterCodexHome, ensureDirectories, sourceProcessArguments, token } from "./config.js";
-import { sessionHostProtocolVersion, type SessionHostDelivery, type SessionHostMessage, type SessionHostPollRequest, type SessionHostServerMessage, type SessionHostStatus, type SessionHostThreadAction } from "./session-host-protocol.js";
+import { sessionHostProtocolVersion, type SessionHostDelivery, type SessionHostHandoffSnapshot, type SessionHostMessage, type SessionHostPollRequest, type SessionHostServerMessage, type SessionHostStatus, type SessionHostThreadAction } from "./session-host-protocol.js";
 import { sessionHostDeliveryHash } from "./session-host-transport.js";
 import type { SessionRelayHost } from "./session-relay.js";
 import { coreVersion } from "./compatibility.js";
@@ -138,7 +138,7 @@ type ThreadActionRequest = {
 };
 
 type HandoffRequest = {
-  resolve: (handoff: SessionHostStatus["handoff"]) => void;
+  resolve: (result: { handoff: SessionHostStatus["handoff"]; snapshot: SessionHostHandoffSnapshot }) => void;
   reject: (error: Error) => void;
   timer: NodeJS.Timeout;
 };
@@ -226,8 +226,25 @@ export class SessionHostClient implements SessionRelayHost {
     return this.requestHandoff({ type: "complete_handoff", request_id: randomUUID(), update_id: updateId });
   }
 
+  async cancelHandoff(updateId: string) {
+    return this.requestHandoff({ type: "cancel_handoff", request_id: randomUUID(), update_id: updateId });
+  }
+
   async handoffStatus() {
     return this.requestHandoff({ type: "handoff_status_request", request_id: randomUUID() });
+  }
+
+  async waitForHandoffReplay(timeout = 30_000) {
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      await this.handoffStatus();
+      await this.deliveryQueue;
+      const result = await this.handoffStatus();
+      await this.deliveryQueue;
+      if (!result.snapshot.command_in_flight && result.snapshot.queued_deliveries === 0) return result.snapshot;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    throw new Error("session_host_handoff_not_drained");
   }
 
   poll(relayId: string, busy: boolean) {
@@ -388,7 +405,7 @@ export class SessionHostClient implements SessionRelayHost {
       this.handoffRequests.delete(message.request_id);
       clearTimeout(request.timer);
       this.handoff = message.handoff;
-      if (message.ok) request.resolve(message.handoff);
+      if (message.ok) request.resolve({ handoff: message.handoff, snapshot: message.snapshot });
       else request.reject(new Error(message.error || "session_host_handoff_failed"));
       return;
     }
@@ -449,11 +466,11 @@ export class SessionHostClient implements SessionRelayHost {
     });
   }
 
-  private async requestHandoff(message: Extract<SessionHostMessage, { type: "begin_handoff" | "complete_handoff" | "handoff_status_request" }>) {
+  private async requestHandoff(message: Extract<SessionHostMessage, { type: "begin_handoff" | "complete_handoff" | "cancel_handoff" | "handoff_status_request" }>) {
     await this.waitUntilReady();
     const socket = this.socket;
     if (!socket) throw new Error("session_host_unavailable");
-    return new Promise<SessionHostStatus["handoff"]>((resolve, reject) => {
+    return new Promise<{ handoff: SessionHostStatus["handoff"]; snapshot: SessionHostHandoffSnapshot }>((resolve, reject) => {
       const request: HandoffRequest = {
         resolve,
         reject,

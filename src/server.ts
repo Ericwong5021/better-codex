@@ -14,8 +14,8 @@ import { readCodexUsage } from "./codex-usage.js";
 import { codexSemanticRequestFingerprint, normalizeCodexSemanticSelections, readCodexSemanticCatalog, resolveCodexSemanticReferences, searchCodexFiles } from "./codex-semantics.js";
 import { readModelCatalog } from "./model-catalog.js";
 import { attachmentPath, databasePath, runPath, runtimePort, token, updateLogPath } from "./config.js";
-import { acquireRuntimeLock, claimRuntimeAuthority, clearRuntimeState, createRuntimeIdentity, publishRuntimeState } from "./runtime-state.js";
-import { activeCoreCommand, checkGatewayUpdate, getGatewayUpdateState, installGatewayUpdate, recordGatewayUpdateActivation, startGatewayUpdateChecks } from "./updater.js";
+import { acquireRuntimeLock, cancelRuntimeAuthorityReservation, claimRuntimeAuthority, clearRuntimeState, completeRuntimeAuthorityHandoff, createRuntimeIdentity, publishRuntimeState, reserveRuntimeAuthority } from "./runtime-state.js";
+import { activeCoreCommand, checkGatewayUpdate, getGatewayUpdateState, installGatewayUpdate, readGatewayUpdateActivationState, recordGatewayUpdateActivation, rollbackAbandonedUpdate, rollbackActivatedUpdate, startGatewayUpdateChecks } from "./updater.js";
 import { packagedBuild } from "./build.js";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { normalizeSessionId, readConversationActivity, readConversationAttachment, readConversationResult, sessionWorkspace } from "./session-transcript.js";
@@ -36,6 +36,8 @@ import { browseDirectory, createDirectory } from "./directory-browser.js";
 import { featureManifest } from "./features.js";
 import { webCommandTarget } from "./command-contract.js";
 import { storageHealth } from "./storage-health.js";
+import { stopSessionHostProcess } from "./session-host-client.js";
+import { sessionHostProtocolVersion } from "./session-host-protocol.js";
 
 const accessToken = token();
 const mockupEnabled = !isSea() && !packagedBuild && process.argv.includes("--mockup");
@@ -703,20 +705,42 @@ function errorStatus(code: string) {
   if (code === "insufficient_disk_space") return 507;
   if (code === "version_conflict" || code === "request_id_conflict" || code === "request_outcome_unknown" || code === "remote_mode_disabled" || code === "reply_busy" || code === "update_in_progress" || code === "issue_execution_locked" || code === "issue_execution_running" || code === "issue_session_handed_off" || code === "issue_session_starting" || code === "issue_session_already_bound" || code === "session_relay_not_leader" || code === "session_command_not_claimed" || code === "session_command_outcome_unknown" || code === "queued_reply_not_pending" || code === "queued_reply_update_conflict" || code === "project_planning_busy" || code === "project_planning_agent_locked") return 409;
   if (code.endsWith("_not_found")) return 404;
-  if (code === "database_unavailable" || code === "database_integrity_check_failed") return 503;
+  if (code === "database_unavailable" || code === "database_integrity_check_failed" || code === "runtime_reconciling") return 503;
   return 400;
 }
 
-function spawnUpdateRelaunch(runtimePid: number, updates: { core: string | null; compatibility: string | null }, drainPath: string) {
+function spawnUpdateRelaunch(runtimePid: number, updates: { core: string | null; compatibility: string | null }, drainPath: string, updateId: string, sourceCoreVersion: string, targetGeneration: number) {
   const descriptor = openSync(updateLogPath, "a");
-  const updateArgs = ["apply-update", String(runtimePid), "--drain-path", drainPath, ...(updates.core ? ["--expected-core", updates.core] : []), ...(updates.compatibility ? ["--expected-compatibility", updates.compatibility] : [])];
+  const updateArgs = ["apply-update", String(runtimePid), "--drain-path", drainPath, "--update-id", updateId, "--source-core", sourceCoreVersion, "--target-generation", String(targetGeneration), ...(updates.core ? ["--expected-core", updates.core] : []), ...(updates.compatibility ? ["--expected-compatibility", updates.compatibility] : [])];
   const invocation = activeCoreCommand(updateArgs);
   const environment = { ...process.env };
   if (isSea()) environment.BETTER_CODEX_LAUNCHER_PATH = process.env.BETTER_CODEX_LAUNCHER_PATH ?? process.execPath;
-  const child = spawn(invocation.command, invocation.args, { cwd: process.cwd(), detached: true, env: environment, stdio: ["ignore", descriptor, descriptor], windowsHide: true });
-  child.unref();
-  closeSync(descriptor);
-  return child.pid ?? null;
+  try {
+    const child = spawn(invocation.command, invocation.args, { cwd: process.cwd(), detached: true, env: environment, stdio: ["ignore", descriptor, descriptor], windowsHide: true });
+    child.once("error", error => console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "update", event: "update_relauncher_failed", update_id: updateId, command: invocation.command, error: error.message })}`));
+    if (!child.pid) throw new Error("update_relauncher_spawn_failed");
+    child.unref();
+    return child.pid;
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+function spawnAbandonedUpdateRecovery() {
+  const descriptor = openSync(updateLogPath, "a");
+  const invocation = isSea() && process.env.BETTER_CODEX_LAUNCHER_PATH
+    ? { command: process.env.BETTER_CODEX_LAUNCHER_PATH, args: ["runtime"] }
+    : packagedBuild && process.env.BETTER_CODEX_BASE_ENTRYPOINT
+      ? { command: process.execPath, args: [process.env.BETTER_CODEX_BASE_ENTRYPOINT, "runtime"] }
+      : activeCoreCommand(["runtime"]);
+  try {
+    const child = spawn(invocation.command, invocation.args, { cwd: process.cwd(), detached: true, env: { ...process.env }, stdio: ["ignore", descriptor, descriptor], windowsHide: true });
+    child.once("error", error => console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "update", event: "abandoned_update_relauncher_failed", command: invocation.command, error: error.message })}`));
+    if (!child.pid) throw new Error("abandoned_update_relauncher_spawn_failed");
+    child.unref();
+  } finally {
+    closeSync(descriptor);
+  }
 }
 
 export function startServer() {
@@ -751,6 +775,20 @@ export function startServer() {
   }
   let updateRelaunchScheduled = false;
   let updateInstallInProgress = false;
+  let runtimeServingReady = identity.handoffUpdateId === null;
+  let restartAfterAbandonedUpdate = false;
+  if (!identity.handoffUpdateId) {
+    const abandoned = store.getActiveUpdateOperation();
+    if (abandoned) {
+      if (!["ACCEPTED", "STAGING", "DRAINING_DISPATCH", "WAITING_FOR_HOST_DRAIN"].includes(abandoned.status) || abandoned.target_runtime_generation !== null) throw new Error("update_operation_orphaned");
+      rollbackAbandonedUpdate(abandoned.target_core_version);
+      store.transitionUpdateOperation(abandoned.id, "FAILED", { errorCode: "update_source_runtime_restarted" });
+      recordGatewayUpdateActivation("error", "update_source_runtime_restarted", { core: abandoned.target_core_version, compatibility: null }, null, abandoned.id);
+      restartAfterAbandonedUpdate = identity.version !== abandoned.source_core_version;
+      runtimeServingReady = !restartAfterAbandonedUpdate;
+      console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "update", event: "abandoned_update_recovered", update_id: abandoned.id, source_core_version: abandoned.source_core_version, runtime_version: identity.version, restart_required: restartAfterAbandonedUpdate })}`);
+    }
+  }
   const webSessions = new Map<string, number>();
   const eventClients = new Map<ServerResponse, ReturnType<typeof setInterval>>();
   const eventHistory: number[] = [];
@@ -896,6 +934,8 @@ export function startServer() {
       const browserCommandId = String(request.headers["x-better-codex-command-id"] || "");
       const localCommandRequest = !relayRequest && authorized(request, url, webSessions) && /^[A-Za-z0-9_-]{8,200}$/.test(browserCommandId) && Boolean(webCommandTarget(method, `${url.pathname}${url.search}`));
 
+      if (!runtimeServingReady && url.pathname.startsWith("/api/") && !["GET", "HEAD", "OPTIONS"].includes(method) && url.pathname !== "/api/shutdown") throw new Error("runtime_reconciling");
+
       if (url.pathname.startsWith("/api/") && !["GET", "HEAD", "OPTIONS"].includes(method) && url.pathname !== "/api/shutdown") {
         const storage = storageHealth(databasePath);
         if (!storage.ok) {
@@ -926,7 +966,7 @@ export function startServer() {
       if (url.pathname === "/livez" && method === "GET") {
         const address = server.address();
         const activePort = typeof address === "object" && address ? address.port : 0;
-        return sendJson(response, 200, { ok: true, name: "Better Codex Runtime", version: identity.version, pid: process.pid, port: activePort, instanceId: identity.instanceId, generation: identity.generation, handoffUpdateId: identity.handoffUpdateId, uptime_seconds: Math.floor(process.uptime()) });
+        return sendJson(response, 200, { ok: true, name: "Better Codex Runtime", version: identity.version, pid: process.pid, port: activePort, instanceId: identity.instanceId, generation: identity.generation, handoffUpdateId: identity.handoffUpdateId, handoffRecovery: identity.handoffRecovery, handoffHostReplacement: identity.handoffHostReplacement, uptime_seconds: Math.floor(process.uptime()) });
       }
       if (url.pathname === "/readyz" && method === "GET") {
         const database = store.health();
@@ -935,15 +975,16 @@ export function startServer() {
         const sessionHost = worker.sessionHostStatus();
         const sessionHostRequired = process.env.BETTER_CODEX_DISABLE_RUNTIME_SESSION_RELAY !== "1" && process.env.BETTER_CODEX_DISABLE_DELEGATION !== "1" && !process.env.NODE_TEST_CONTEXT;
         const compatibilityReady = compatibility?.compatible === true || compatibility === null && !packagedBuild;
-        const ok = database.ok && storage.ok && compatibilityReady && (!sessionHostRequired || sessionHost.connected);
-        return sendJson(response, ok ? 200 : 503, { ok, name: "Better Codex Runtime", version: identity.version, pid: process.pid, instanceId: identity.instanceId, generation: identity.generation, handoffUpdateId: identity.handoffUpdateId, database, storage, compatibility, compatibility_required: packagedBuild, session_host: { ...sessionHost, required: sessionHostRequired }, relay: relayClient.status() });
+        const ok = runtimeServingReady && database.ok && storage.ok && compatibilityReady && (!sessionHostRequired || sessionHost.connected);
+        return sendJson(response, ok ? 200 : 503, { ok, name: "Better Codex Runtime", version: identity.version, pid: process.pid, instanceId: identity.instanceId, generation: identity.generation, handoffUpdateId: identity.handoffUpdateId, handoffRecovery: identity.handoffRecovery, handoffHostReplacement: identity.handoffHostReplacement, database, storage, compatibility, compatibility_required: packagedBuild, session_host: { ...sessionHost, required: sessionHostRequired }, relay: relayClient.status() });
       }
       if (url.pathname === "/health") {
         const database = store.health();
         const storage = storageHealth(databasePath);
         const address = server.address();
         const activePort = typeof address === "object" && address ? address.port : 0;
-        return sendJson(response, database.ok && storage.ok ? 200 : 503, { ok: database.ok && storage.ok, name: "Better Codex Runtime", version: identity.version, pid: process.pid, port: activePort, instanceId: identity.instanceId, generation: identity.generation, handoffUpdateId: identity.handoffUpdateId, database, storage, compatibility: readCompatibilityStatus(), session_host: worker.sessionHostStatus() });
+        const ok = runtimeServingReady && database.ok && storage.ok;
+        return sendJson(response, ok ? 200 : 503, { ok, serving_ready: runtimeServingReady, name: "Better Codex Runtime", version: identity.version, pid: process.pid, port: activePort, instanceId: identity.instanceId, generation: identity.generation, handoffUpdateId: identity.handoffUpdateId, handoffRecovery: identity.handoffRecovery, handoffHostReplacement: identity.handoffHostReplacement, database, storage, compatibility: readCompatibilityStatus(), session_host: worker.sessionHostStatus() });
       }
       if ((url.pathname === "/web" || url.pathname === "/web/projects" || url.pathname.startsWith("/web/projects/") || url.pathname === "/web/agents" || url.pathname.startsWith("/web/agents/") || url.pathname.startsWith("/local/")) && method === "GET") {
         return sendWeb(response, 200, betterCodexWebHostHtml(), "text/html; charset=utf-8", {
@@ -1566,49 +1607,106 @@ export function startServer() {
           return sendJson(response, 202, store.getScheduledTask(task.id));
         }
       }
-      if (url.pathname === "/api/update" && method === "GET") return sendJson(response, 200, getGatewayUpdateState());
+      if (url.pathname === "/api/update" && method === "GET") {
+        const requestedUpdateId = url.searchParams.get("update_id");
+        const operation = requestedUpdateId ? store.getUpdateOperation(requestedUpdateId) : store.getActiveUpdateOperation();
+        return sendJson(response, 200, { ...getGatewayUpdateState(), operation: operation || null, accepting_new_tasks: runtimeServingReady && (!operation || ["ACCEPTED", "STAGING", "COMPLETED", "ROLLED_BACK", "FAILED"].includes(operation.status)) });
+      }
       if (url.pathname === "/api/update/check" && method === "POST") return sendJson(response, 200, await checkGatewayUpdate());
       if (url.pathname === "/api/update/install" && method === "POST") {
-        if (updateInstallInProgress) throw new Error("update_in_progress");
         const body = await readBody(request, 1024);
-        if (!await worker.pauseForUpdate(body.interrupt_running === true)) throw new Error("issue_execution_running");
+        const requestedKey = typeof body.idempotency_key === "string" ? body.idempotency_key : "";
+        if (requestedKey && !/^[A-Za-z0-9_-]{8,200}$/.test(requestedKey)) throw new Error("invalid_idempotency_key");
+        const host = worker.sessionHostStatus().host;
+        const operation = store.createUpdateOperation({
+          idempotencyKey: requestedKey || randomUUID(),
+          sourceCoreVersion: coreVersion,
+          sourceRuntimeInstanceId: identity.instanceId,
+          sourceRuntimeGeneration: identity.generation,
+          hostInstanceId: host?.instanceId || null,
+        });
+        if (updateInstallInProgress || operation.status !== "ACCEPTED") return sendJson(response, 202, { accepted: true, update_id: operation.id, state: operation.status, operation });
         updateInstallInProgress = true;
-        const installation = installGatewayUpdate();
-        sendJson(response, 202, { accepted: true, state: getGatewayUpdateState() });
-        void installation.then(result => {
-          const updated = result.core.updated || result.compatibility.updated;
-          const updates = { core: result.core.updated ? result.core.version : null, compatibility: result.compatibility.updated ? result.compatibility.version : null };
-          const shouldRelaunch = updated && !updateRelaunchScheduled;
-          if (shouldRelaunch) {
-            updateRelaunchScheduled = true;
-            recordGatewayUpdateActivation("activating", null, updates);
-          }
-          if (!shouldRelaunch) {
-            updateInstallInProgress = false;
-            worker.resumeAfterUpdate();
-            return;
-          }
-          const drainPath = join(runPath, `update-drain-${randomUUID()}`);
-          setTimeout(() => {
-            try {
-              const ownerPid = spawnUpdateRelaunch(process.pid, updates, drainPath);
-              recordGatewayUpdateActivation("activating", null, updates, ownerPid);
-              server.close(() => {
-                cleanup();
-                writeFileSync(drainPath, String(process.pid), { mode: 0o600 });
-                process.exit(0);
-              });
-              setTimeout(() => server.closeAllConnections(), 5000).unref();
-            } catch (error) {
+        store.transitionUpdateOperation(operation.id, "STAGING");
+        sendJson(response, 202, { accepted: true, update_id: operation.id, state: "STAGING", operation: store.getUpdateOperation(operation.id) });
+        void (async () => {
+          let updates: { core: string | null; compatibility: string | null } = { core: null, compatibility: null };
+          let authorityReserved = false;
+          let handoffStarted = false;
+          let hostStopped = false;
+          try {
+            const result = await installGatewayUpdate();
+            const updated = result.core.updated || result.compatibility.updated;
+            updates = { core: result.core.updated ? result.core.version : null, compatibility: result.compatibility.updated ? result.compatibility.version : null };
+            if (!updated) {
+              store.transitionUpdateOperation(operation.id, "COMPLETED", { targetCoreVersion: coreVersion });
               updateInstallInProgress = false;
-              updateRelaunchScheduled = false;
-              worker.resumeAfterUpdate();
-              recordGatewayUpdateActivation("error", error instanceof Error ? error.message : "update_activation_failed");
+              return;
             }
-          }, 250);
-        }).catch(error => {
+            if (updateRelaunchScheduled) throw new Error("update_in_progress");
+            updateRelaunchScheduled = true;
+            const targetVersion = updates.core || coreVersion;
+            const handoffRequirement = result.runtimeSessionHandoff;
+            const hostCompatible = handoffRequirement?.protocol === sessionHostProtocolVersion && handoffRequirement.requiredCapabilities.every(capability => ["durable_deliveries", "runtime_handoff"].includes(capability));
+            store.transitionUpdateOperation(operation.id, "DRAINING_DISPATCH", { targetCoreVersion: targetVersion });
+            runtimeServingReady = false;
+            worker.beginUpdateDrain();
+            await worker.waitForUpdateDrain();
+            let targetGeneration: number;
+            let snapshot;
+            if (hostCompatible) {
+              targetGeneration = reserveRuntimeAuthority(identity, operation.id, targetVersion);
+              authorityReserved = true;
+              const handoff = await worker.beginSessionHandoff(operation.id, targetGeneration, targetVersion, new Date(Date.now() + 5 * 60 * 1000).toISOString());
+              handoffStarted = true;
+              store.transitionUpdateOperation(operation.id, "WAITING_FOR_HOST_DRAIN", { targetRuntimeGeneration: targetGeneration, hostInstanceId: handoff.snapshot.host_instance_id });
+              snapshot = await worker.waitForSessionHandoffReplay();
+              if (handoff.snapshot.host_instance_id !== snapshot.host_instance_id) throw new Error("session_host_identity_mismatch");
+            } else {
+              store.transitionUpdateOperation(operation.id, "WAITING_FOR_HOST_DRAIN");
+              snapshot = await worker.waitForSessionHostIdle();
+              worker.stopSessionHostClient();
+              await stopSessionHostProcess();
+              hostStopped = true;
+              targetGeneration = reserveRuntimeAuthority(identity, operation.id, targetVersion, true);
+              authorityReserved = true;
+            }
+            store.transitionUpdateOperation(operation.id, "HANDOFF_READY", { targetRuntimeGeneration: targetGeneration, hostInstanceId: snapshot.host_instance_id });
+            store.transitionUpdateOperation(operation.id, "RESTARTING_RUNTIME");
+            recordGatewayUpdateActivation("activating", null, updates, null, operation.id, targetGeneration);
+            const drainPath = join(runPath, `update-drain-${randomUUID()}`);
+            const ownerPid = spawnUpdateRelaunch(process.pid, updates, drainPath, operation.id, operation.source_core_version, targetGeneration);
+            recordGatewayUpdateActivation("activating", null, updates, ownerPid, operation.id, targetGeneration);
+            server.close(() => {
+              cleanup();
+              writeFileSync(drainPath, String(process.pid), { mode: 0o600 });
+              process.exit(0);
+            });
+            setTimeout(() => server.closeAllConnections(), 5000).unref();
+          } catch (error) {
+            const code = error instanceof Error ? error.message : "update_activation_failed";
+            if (handoffStarted) {
+              try { await worker.cancelSessionHandoff(operation.id); } catch (handoffError) { console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "update", event: "handoff_cancel_failed", update_id: operation.id, error: handoffError instanceof Error ? handoffError.message : String(handoffError) })}`); }
+            }
+            if (authorityReserved) {
+              try { cancelRuntimeAuthorityReservation(identity, operation.id); } catch (authorityError) { console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "update", event: "authority_cancel_failed", update_id: operation.id, error: authorityError instanceof Error ? authorityError.message : String(authorityError) })}`); }
+            }
+            if (hostStopped) worker.resumeAfterUpdate();
+            if (updates.core || updates.compatibility) {
+              try { rollbackActivatedUpdate(updates); } catch (rollbackError) { console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "update", event: "pre_activation_rollback_failed", update_id: operation.id, error: rollbackError instanceof Error ? rollbackError.message : String(rollbackError) })}`); }
+            }
+            const current = store.getUpdateOperation(operation.id);
+            if (current && !["COMPLETED", "ROLLED_BACK", "FAILED"].includes(current.status)) store.transitionUpdateOperation(operation.id, "FAILED", { errorCode: code });
+            updateInstallInProgress = false;
+            updateRelaunchScheduled = false;
+            runtimeServingReady = true;
+            worker.resumeAfterUpdate();
+            recordGatewayUpdateActivation("error", code, updates, null, operation.id);
+          }
+        })().catch(error => {
           updateInstallInProgress = false;
           updateRelaunchScheduled = false;
+          runtimeServingReady = true;
           worker.resumeAfterUpdate();
           if (getGatewayUpdateState().status !== "error") recordGatewayUpdateActivation("error", error instanceof Error ? error.message : "update_activation_failed");
         });
@@ -2172,9 +2270,76 @@ export function startServer() {
     if (typeof address !== "object" || !address) throw new Error("runtime_address_unavailable");
     activeRuntimePort = address.port;
     publishRuntimeState({ ...identity, port: address.port });
-    if (!mockupEnabled) worker.start();
-    if (!mockupEnabled && remoteMode === "projection") syncClient.start();
-    if (!mockupEnabled && remoteMode === "relay") relayClient.start();
+    const startRuntimeServices = () => {
+      if (!mockupEnabled) worker.start();
+      if (!mockupEnabled && remoteMode === "projection") syncClient.start();
+      if (!mockupEnabled && remoteMode === "relay") relayClient.start();
+    };
+    if (restartAfterAbandonedUpdate) {
+      setImmediate(() => server.close(() => {
+        cleanup();
+        try {
+          spawnAbandonedUpdateRecovery();
+          process.exit(0);
+        } catch (error) {
+          console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "update", event: "abandoned_update_recovery_failed", error: error instanceof Error ? error.message : String(error) })}`);
+          process.exit(1);
+        }
+      }));
+    } else if (!identity.handoffUpdateId) {
+      runtimeServingReady = true;
+      startRuntimeServices();
+    } else {
+      const updateId = identity.handoffUpdateId;
+      void (async () => {
+        let operation = store.getUpdateOperation(updateId);
+        if (!operation) throw new Error("update_operation_not_found");
+        const rollingBack = identity.handoffRecovery;
+        const activation = readGatewayUpdateActivationState();
+        if (activation?.status !== "activating" || activation.updateId !== updateId) throw new Error("update_activation_state_mismatch");
+        if (!rollingBack && (typeof activation.targetRuntimeGeneration !== "number" || activation.targetRuntimeGeneration > identity.generation || activation.coreVersion && activation.coreVersion !== identity.version)) throw new Error("update_activation_identity_mismatch");
+        if (operation.status === "COMPLETED" || operation.status === "ROLLED_BACK") {
+          completeRuntimeAuthorityHandoff(identity, updateId);
+          runtimeServingReady = true;
+          startRuntimeServices();
+          return;
+        }
+        if (rollingBack && operation.status === "RESTARTING_RUNTIME") store.transitionUpdateOperation(updateId, "ROLLING_BACK");
+        if (rollingBack && operation.status !== "RESTARTING_RUNTIME" && operation.status !== "ROLLING_BACK") throw new Error("update_rollback_state_invalid");
+        if (!rollingBack && !["RESTARTING_RUNTIME", "REPLAYING", "RECONCILING", "SERVING_READY"].includes(operation.status)) throw new Error("update_activation_state_invalid");
+        if (!rollingBack && operation.status === "RESTARTING_RUNTIME") store.transitionUpdateOperation(updateId, "REPLAYING", { targetRuntimeGeneration: identity.generation });
+        const snapshot = await worker.waitForSessionHandoffReplay();
+        if (!identity.handoffHostReplacement && snapshot.host_instance_id !== operation.host_instance_id) throw new Error("session_host_identity_mismatch");
+        if (identity.handoffHostReplacement && (snapshot.active_turns.length || snapshot.command_in_flight || snapshot.queued_deliveries)) throw new Error("replacement_session_host_not_idle");
+        if (identity.handoffHostReplacement) store.transitionUpdateOperation(updateId, store.getUpdateOperation(updateId)!.status, { hostInstanceId: snapshot.host_instance_id });
+        operation = store.getUpdateOperation(updateId)!;
+        if (!rollingBack && operation.status === "REPLAYING") store.transitionUpdateOperation(updateId, "RECONCILING");
+        await worker.reconcileSessionHandoff(snapshot);
+        operation = store.getUpdateOperation(updateId)!;
+        if (!rollingBack && operation.status === "RECONCILING") store.transitionUpdateOperation(updateId, "SERVING_READY");
+        if (!identity.handoffHostReplacement) await worker.completeSessionHandoff(updateId);
+        if (rollingBack) store.transitionUpdateOperation(updateId, "ROLLED_BACK");
+        else store.transitionUpdateOperation(updateId, "COMPLETED");
+        completeRuntimeAuthorityHandoff(identity, updateId);
+        runtimeServingReady = true;
+        startRuntimeServices();
+        console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "runtime", event: rollingBack ? "update_rollback_ready" : "update_serving_ready", update_id: updateId, runtime_instance_id: identity.instanceId, runtime_generation: identity.generation, host_instance_id: snapshot.host_instance_id, app_server_pid: snapshot.app_server_pid, app_server_started_at: snapshot.app_server_started_at, active_turns: snapshot.active_turns, queued_deliveries: snapshot.queued_deliveries })}`);
+      })().catch(error => {
+        const code = error instanceof Error ? error.message : "runtime_handoff_reconciliation_failed";
+        const operation = store.getUpdateOperation(updateId);
+        try {
+          if (operation?.status === "ROLLING_BACK") store.transitionUpdateOperation(updateId, "FAILED", { errorCode: code });
+          else if (operation && !["COMPLETED", "ROLLED_BACK", "FAILED"].includes(operation.status)) store.transitionUpdateOperation(updateId, "ROLLING_BACK", { errorCode: code });
+        } catch (transitionError) {
+          console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "runtime", event: "update_failure_transition_failed", update_id: updateId, error: transitionError instanceof Error ? transitionError.message : String(transitionError) })}`);
+        }
+        console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "runtime", event: "runtime_handoff_reconciliation_failed", update_id: updateId, runtime_instance_id: identity.instanceId, runtime_generation: identity.generation, error: code })}`);
+        setImmediate(() => server.close(() => {
+          cleanup();
+          process.exit(1);
+        }));
+      });
+    }
     console.log(`Better Codex Runtime ${coreVersion} listening on http://127.0.0.1:${address.port}`);
   });
   const stop = () => {

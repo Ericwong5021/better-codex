@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -125,7 +125,7 @@ test("gateway completes the issue workflow and survives restart", async () => {
   try {
     await waitForGateway(port, gateway);
     const health = await (await fetch(`http://127.0.0.1:${port}/health`)).json() as { generation: number; database: { schemaVersion: number } };
-    assert.equal(health.database.schemaVersion, 20);
+    assert.equal(health.database.schemaVersion, 21);
     assert.equal(health.generation, 1);
     const firstRuntime = JSON.parse(readFileSync(join(home, "run", "runtime.json"), "utf8")) as { generation: number; instanceId: string };
     const firstAuthority = JSON.parse(readFileSync(join(home, "run", "runtime-authority.json"), "utf8")) as { generation: number; runtimeInstanceId: string; status: string };
@@ -475,10 +475,10 @@ test("gateway completes the issue workflow and survives restart", async () => {
   }
 });
 
-test("session host handoff fences stale Runtime generations", { skip: process.platform === "win32" }, async () => {
+test("session host handoff fences stale Runtime generations", async () => {
   const home = mkdtempSync(join(tmpdir(), "better-codex-session-handoff-"));
   const token = "session-host-handoff-token";
-  const socketPath = join(home, "run", "session-host");
+  const socketPath = process.platform === "win32" ? "\\\\.\\pipe\\better-codex-session-host-development" : join(home, "run", "session-host");
   const host = spawn(process.execPath, ["--import", "tsx", "src/cli.ts", "session-host"], {
     cwd: process.cwd(),
     env: {
@@ -537,6 +537,136 @@ test("session host handoff fences stale Runtime generations", { skip: process.pl
     if (completed.type === "handoff_response") {
       assert.equal(completed.ok, true);
       assert.equal(completed.handoff, null);
+    }
+    target.write(`${JSON.stringify({ type: "shutdown", token })}\n`);
+    await Promise.race([once(host, "exit"), new Promise((_, reject) => setTimeout(() => reject(new Error("session_host_stop_timeout")), 5000))]);
+  } finally {
+    source?.destroy();
+    target?.destroy();
+    if (host.exitCode === null) host.kill("SIGTERM");
+    rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+});
+
+test("session host keeps an active App Server turn alive across Runtime handoff", { timeout: 30_000 }, async () => {
+  const home = mkdtempSync(join(tmpdir(), "better-codex-session-continuity-"));
+  const token = "session-host-continuity-token";
+  const socketPath = process.platform === "win32" ? "\\\\.\\pipe\\better-codex-session-host-development" : join(home, "run", "session-host");
+  const fakeCodexScript = join(home, "fake-codex.cjs");
+  const fakeCodex = process.platform === "win32" ? join(home, "fake-codex.cmd") : fakeCodexScript;
+  const threadId = "019fec06-788f-7af3-a031-76b546904f81";
+  const turnId = "019fec06-788f-7af3-a031-76b546904f82";
+  writeFileSync(fakeCodexScript, `#!/usr/bin/env node
+const readline = require("node:readline");
+if (process.argv.includes("--version")) { console.log("codex-fake 1.0.0"); process.exit(0); }
+if (!process.argv.includes("app-server")) process.exit(2);
+const send = value => process.stdout.write(JSON.stringify(value) + "\\n");
+const input = readline.createInterface({ input: process.stdin });
+input.on("line", line => {
+  const message = JSON.parse(line);
+  if (message.id === undefined) return;
+  if (message.method === "initialize") return send({ id: message.id, result: {} });
+  if (message.method === "thread/start") return send({ id: message.id, result: { thread: { id: "${threadId}" } } });
+  if (message.method === "thread/name/set") return send({ id: message.id, result: {} });
+  if (message.method === "turn/start") {
+    send({ id: message.id, result: { turn: { id: "${turnId}", status: "inProgress" } } });
+    send({ method: "turn/started", params: { threadId: "${threadId}", turn: { id: "${turnId}", status: "inProgress" } } });
+    setTimeout(() => {
+      send({ method: "item/completed", params: { threadId: "${threadId}", turnId: "${turnId}", item: { type: "agentMessage", text: "continued after Runtime restart" } } });
+      send({ method: "turn/completed", params: { threadId: "${threadId}", turn: { id: "${turnId}", status: "completed", items: [{ type: "agentMessage", text: "continued after Runtime restart" }] } } });
+    }, 1800);
+    return;
+  }
+  send({ id: message.id, result: {} });
+});
+`, { mode: 0o700 });
+  if (process.platform === "win32") writeFileSync(fakeCodex, `@echo off\r\n"${process.execPath}" "${fakeCodexScript}" %*\r\n`);
+  else chmodSync(fakeCodex, 0o700);
+  const host = spawn(process.execPath, ["--import", "tsx", "src/cli.ts", "session-host"], {
+    cwd: process.cwd(),
+    env: { ...process.env, BETTER_CODEX_HOME: home, BETTER_CODEX_PROFILE: "development", BETTER_CODEX_TOKEN: token, BETTER_CODEX_CODEX_PATH: fakeCodex },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let source: Socket | undefined;
+  let target: Socket | undefined;
+  const queue = (socket: Socket) => {
+    const values: SessionHostServerMessage[] = [];
+    const waiters: Array<(value: SessionHostServerMessage) => void> = [];
+    let output = "";
+    socket.on("data", chunk => {
+      output += String(chunk);
+      const lines = output.split(/\r?\n/);
+      output = lines.pop() || "";
+      for (const line of lines) {
+        const value = JSON.parse(line) as SessionHostServerMessage;
+        const waiter = waiters.shift();
+        if (waiter) waiter(value); else values.push(value);
+      }
+    });
+    return () => new Promise<SessionHostServerMessage>((resolve, reject) => {
+      const value = values.shift();
+      if (value) return resolve(value);
+      const timer = setTimeout(() => reject(new Error("session_host_message_timeout")), 10_000);
+      waiters.push(message => { clearTimeout(timer); resolve(message); });
+    });
+  };
+  try {
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      try { source = await openSocket(socketPath); break; }
+      catch { if (host.exitCode !== null) throw new Error(`session_host_exit_${host.exitCode}`); await new Promise(resolve => setTimeout(resolve, 50)); }
+    }
+    assert.ok(source);
+    const sourceNext = queue(source);
+    const capabilities = { durable_deliveries: true, runtime_handoff: true };
+    source.write(`${JSON.stringify({ type: "hello", protocol_version: sessionHostProtocolVersion, token, runtime_instance_id: "runtime-source", runtime_generation: 1, runtime_version: "1.0.0", profile: "development", handoff_update_id: null, capabilities })}\n`);
+    assert.equal((await sourceNext()).type, "hello_ack");
+    let dispatched = false;
+    let sourceSnapshot: Extract<SessionHostServerMessage, { type: "handoff_response" }>["snapshot"] | null = null;
+    const updateId = "019fec06-788f-7af3-a031-76b546904f83";
+    while (!sourceSnapshot) {
+      const message = await sourceNext();
+      if (message.type === "poll_request") {
+        const command = dispatched ? null : { id: "command-long-turn", kind: "start", thread_id: null, turn_id: null, payload: { workspace_path: home, input: [{ type: "text", text: "run long turn" }] } };
+        dispatched = true;
+        source.write(`${JSON.stringify({ type: "poll_response", request_id: message.request_id, result: { leader: true, acquired: true, expires_at: new Date(Date.now() + 10_000).toISOString(), previous_relay_id: null, command, thread_ids: command ? [] : [threadId], active_turns: [] } })}\n`);
+      }
+      if (message.type === "delivery") {
+        source.write(`${JSON.stringify({ type: "delivery_ack", delivery_id: message.delivery_id, host_instance_id: message.host_instance_id, sequence: message.sequence, payload_hash: message.payload_hash })}\n`);
+        if (message.kind === "event" && message.payload.method === "turn/started") source.write(`${JSON.stringify({ type: "begin_handoff", request_id: "continuity-handoff", update_id: updateId, target_runtime_generation: 2, target_version: "1.1.0", deadline_at: new Date(Date.now() + 60_000).toISOString() })}\n`);
+      }
+      if (message.type === "handoff_response" && message.request_id === "continuity-handoff") sourceSnapshot = message.snapshot;
+    }
+    assert.equal(sourceSnapshot.active_turns.length, 1);
+    assert.ok(sourceSnapshot.app_server_pid);
+    source.destroy();
+
+    target = await openSocket(socketPath);
+    const targetNext = queue(target);
+    target.write(`${JSON.stringify({ type: "hello", protocol_version: sessionHostProtocolVersion, token, runtime_instance_id: "runtime-target", runtime_generation: 2, runtime_version: "1.1.0", profile: "development", handoff_update_id: updateId, capabilities })}\n`);
+    assert.equal((await targetNext()).type, "hello_ack");
+    let targetSnapshot = sourceSnapshot;
+    let completedEvent = false;
+    let statusSequence = 0;
+    const statusTimer = setInterval(() => target?.write(`${JSON.stringify({ type: "handoff_status_request", request_id: `continuity-status-${++statusSequence}` })}\n`), 100);
+    while (!completedEvent || targetSnapshot.active_turns.length || targetSnapshot.queued_deliveries) {
+      const message = await targetNext();
+      if (message.type === "poll_request") target.write(`${JSON.stringify({ type: "poll_response", request_id: message.request_id, result: { leader: true, acquired: true, expires_at: new Date(Date.now() + 10_000).toISOString(), previous_relay_id: null, command: null, thread_ids: [threadId], active_turns: [{ thread_id: threadId, turn_id: turnId }] } })}\n`);
+      if (message.type === "delivery") {
+        if (message.kind === "event" && message.payload.method === "turn/completed") completedEvent = true;
+        target.write(`${JSON.stringify({ type: "delivery_ack", delivery_id: message.delivery_id, host_instance_id: message.host_instance_id, sequence: message.sequence, payload_hash: message.payload_hash })}\n`);
+      }
+      if (message.type === "handoff_response" && message.request_id.startsWith("continuity-status-")) targetSnapshot = message.snapshot;
+    }
+    clearInterval(statusTimer);
+    assert.equal(targetSnapshot.host_instance_id, sourceSnapshot.host_instance_id);
+    assert.equal(targetSnapshot.app_server_pid, sourceSnapshot.app_server_pid);
+    assert.equal(targetSnapshot.app_server_started_at, sourceSnapshot.app_server_started_at);
+    target.write(`${JSON.stringify({ type: "complete_handoff", request_id: "continuity-complete", update_id: updateId })}\n`);
+    while (true) {
+      const message = await targetNext();
+      if (message.type === "handoff_response" && message.request_id === "continuity-complete") { assert.equal(message.ok, true); break; }
+      if (message.type === "poll_request") target.write(`${JSON.stringify({ type: "poll_response", request_id: message.request_id, result: { leader: true, acquired: true, expires_at: new Date(Date.now() + 10_000).toISOString(), previous_relay_id: null, command: null, thread_ids: [threadId], active_turns: [] } })}\n`);
     }
     target.write(`${JSON.stringify({ type: "shutdown", token })}\n`);
     await Promise.race([once(host, "exit"), new Promise((_, reject) => setTimeout(() => reject(new Error("session_host_stop_timeout")), 5000))]);

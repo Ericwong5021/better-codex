@@ -19,6 +19,7 @@ function xml(value: string) {
 
 function command() {
   if (isSea()) return [process.env.BETTER_CODEX_LAUNCHER_PATH || process.execPath, "runtime"];
+  if (process.env.BETTER_CODEX_BASE_ENTRYPOINT) return [process.execPath, resolve(process.env.BETTER_CODEX_BASE_ENTRYPOINT), "runtime"];
   const args = sourceProcessArguments(["runtime"]);
   if (!args) throw new Error("service_requires_file_entrypoint");
   return [process.execPath, ...args];

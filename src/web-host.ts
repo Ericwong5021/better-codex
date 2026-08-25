@@ -327,6 +327,7 @@ let relayRetryTimer;
 let relayOfflineReported = false;
 let remoteUpdateRecoveryDeadline = 0;
 let remoteUpdateTargetVersion = "";
+let remoteUpdateId = "";
 let remoteUpdateRecoveryReloading = false;
 const hostDiagnosticLog = [];
 const hostErrorQueue = [];
@@ -682,18 +683,20 @@ function remoteUpdateRecoveryActive() {
   return REMOTE && remoteUpdateRecoveryDeadline > Date.now();
 }
 
-function beginRemoteUpdateRecovery(version) {
+function beginRemoteUpdateRecovery(version, updateId) {
   if (!REMOTE) return;
   remoteUpdateRecoveryDeadline = Date.now() + 30 * 60 * 1000;
   remoteUpdateTargetVersion = String(version || "");
+  remoteUpdateId = String(updateId || "");
   remoteUpdateRecoveryReloading = false;
-  hostDiagnostic("update_recovery_started", { target_version: remoteUpdateTargetVersion });
+  hostDiagnostic("update_recovery_started", { target_version: remoteUpdateTargetVersion, update_id: remoteUpdateId });
 }
 
 function cancelRemoteUpdateRecovery(reason = "cancelled") {
   if (remoteUpdateRecoveryDeadline) hostDiagnostic("update_recovery_cancelled", { reason });
   remoteUpdateRecoveryDeadline = 0;
   remoteUpdateTargetVersion = "";
+  remoteUpdateId = "";
 }
 
 function reloadAfterRemoteUpdate() {
@@ -748,18 +751,18 @@ function scheduleRemoteRecovery() {
         }
       }
       if (remoteUpdateRecoveryActive()) {
-        const updateResponse = await fetch("/api/update?locale=" + encodeURIComponent(profileLocale));
+        const updateResponse = await fetch("/api/update?locale=" + encodeURIComponent(profileLocale) + (remoteUpdateId ? "&update_id=" + encodeURIComponent(remoteUpdateId) : ""));
         if (updateResponse.status === 401) {
           scheduleRemoteRecovery();
           return;
         }
         if (!updateResponse.ok) throw new Error("update_status_unavailable");
         const update = await updateResponse.json();
-        if (update?.status === "error") {
+        if (update?.operation?.status === "FAILED" || update?.operation?.status === "ROLLED_BACK" || update?.status === "error") {
           cancelRemoteUpdateRecovery("update_error");
           return;
         }
-        if (update?.status !== "current") {
+        if (update?.operation?.status !== "COMPLETED") {
           scheduleRemoteRecovery();
           return;
         }
@@ -1003,7 +1006,7 @@ async function requestRuntime(request) {
     }
     hostDiagnostic("request_response", { trace_id: traceId, method, path: request.path, command_id: request.commandId || "", http_status: response.status, elapsed_ms: Date.now() - startedAt, attempt_count: attemptCount });
     if (queued && commandAcceptedOrTerminal(response.status, String(value?.error || ""))) await deleteQueuedCommand(request.commandId);
-    if (updateInstallRequest && response.ok && value?.accepted === true) beginRemoteUpdateRecovery(value?.state?.latestVersion);
+    if (updateInstallRequest && response.ok && value?.accepted === true) beginRemoteUpdateRecovery(value?.operation?.target_core_version, value?.update_id);
     const updateInterruption = remoteUpdateRecoveryActive() && (response.status === 401 || [408, 425, 429, 502, 503, 504].includes(response.status) || ["runtime_offline", "runtime_unavailable", "relay_stream_interrupted"].includes(String(value?.error || "")));
     if (updateInterruption) markRemoteUpdateDisconnected(String(value?.error || "http_" + response.status));
     else if (response.status === 401) setTimeout(expireSession, 0);

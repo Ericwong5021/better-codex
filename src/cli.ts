@@ -32,7 +32,7 @@ import {
   sourceProcessArguments,
   syncConfigPath,
 } from "./config.js";
-import { readRuntimeState } from "./runtime-state.js";
+import { readRuntimeState, reserveRuntimeAuthorityRecovery } from "./runtime-state.js";
 import { injectionEnabled, setInjectionEnabled } from "./injection-state.js";
 import { installLaunchIntegration, launchIntegrationStatus, uninstallLaunchIntegration } from "./launch-integration.js";
 import { readCodexLocale } from "./locale.js";
@@ -147,14 +147,15 @@ function spawnSelf(args: string[], logFile: string, detached = true) {
   return child;
 }
 
-async function ensureRuntime() {
+async function ensureRuntime(timeoutMs = 12_000) {
   await stopLegacyRuntime();
   try {
     return await health();
   } catch {
     if (betterCodexProfile === "stable" && serviceStatus().installed) startService();
     else spawnSelf(["runtime"], runtimeLogPath);
-    for (let attempt = 0; attempt < 60; attempt += 1) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
       try {
         return await health();
       } catch {
@@ -332,9 +333,31 @@ async function runRuntime() {
   return server;
 }
 
-async function applyUpdate(previousRuntimePid: number, updates: { core: string | null; compatibility: string | null }, drainPath?: string) {
+async function stopFailedUpdateRuntime(updateId: string) {
+  stopService();
+  const current = readRuntimeState();
+  if (!current) return;
+  if (current.handoffUpdateId !== updateId) throw new Error("update_rollback_runtime_identity_mismatch");
   try {
-    recordGatewayUpdateActivation("activating", null, updates, process.pid);
+    await request("/api/shutdown", { method: "POST" });
+  } catch (error) {
+    console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "update", event: "failed_runtime_shutdown_request_failed", update_id: updateId, runtime_instance_id: current.instanceId, runtime_pid: current.pid, error: error instanceof Error ? error.message : String(error) })}`);
+  }
+  const deadline = Date.now() + 10_000;
+  while (processAlive(current.pid) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 100));
+  if (processAlive(current.pid)) {
+    const observed = readRuntimeState();
+    if (!observed || observed.pid !== current.pid || observed.instanceId !== current.instanceId || observed.processStartedAt !== current.processStartedAt) throw new Error("update_rollback_runtime_identity_changed");
+    process.kill(current.pid, "SIGTERM");
+  }
+  const killedDeadline = Date.now() + 10_000;
+  while (processAlive(current.pid) && Date.now() < killedDeadline) await new Promise(resolve => setTimeout(resolve, 100));
+  if (processAlive(current.pid)) throw new Error("update_rollback_runtime_stop_timeout");
+}
+
+async function applyUpdate(previousRuntimePid: number, updates: { core: string | null; compatibility: string | null }, updateId: string, sourceCoreVersion: string, targetGeneration: number, drainPath?: string) {
+  try {
+    recordGatewayUpdateActivation("activating", null, updates, process.pid, updateId, targetGeneration);
     const stopDeadline = Date.now() + updateRuntimeStopTimeout;
     while (processAlive(previousRuntimePid) && (!drainPath || !existsSync(drainPath))) {
       if (Date.now() >= stopDeadline) throw new Error("update_runtime_stop_timeout");
@@ -342,10 +365,9 @@ async function applyUpdate(previousRuntimePid: number, updates: { core: string |
     }
     if (drainPath && existsSync(drainPath)) unlinkSync(drainPath);
     setInjectionEnabled(false);
-    await stopSessionHostProcess();
     const mcp = installMcp();
     installService();
-    await ensureRuntime();
+    await ensureRuntime(120_000);
     let injection: unknown = { refreshed: false, pending: true, reason: "codex_not_connected" };
     try {
       injection = { refreshed: true, targets: await cdpRefreshAndInject(cdpPort, activeRuntimePort(), accessToken()) };
@@ -356,15 +378,23 @@ async function applyUpdate(previousRuntimePid: number, updates: { core: string |
     const runtime = await health();
     if (updates.core && runtime.version !== updates.core) throw new Error("core_activation_version_mismatch");
     if (updates.compatibility && activeVersions().compatibility !== updates.compatibility) throw new Error("compatibility_activation_version_mismatch");
-    recordGatewayUpdateActivation("success");
+    recordGatewayUpdateActivation("success", null, updates, null, updateId);
     return { updated: true, runtime, injection, launchIntegration, mcp };
   } catch (error) {
-    rollbackActivatedUpdate(updates);
+    const activationError = error instanceof Error ? error.message : "update_activation_failed";
     try {
+      await stopFailedUpdateRuntime(updateId);
+      const rollback = rollbackActivatedUpdate(updates);
+      if ("reason" in rollback && rollback.reason === "update_superseded") throw new Error("update_superseded");
+      reserveRuntimeAuthorityRecovery(updateId, sourceCoreVersion);
       installService();
-      await ensureRuntime();
-    } catch {}
-    recordGatewayUpdateActivation("error", error instanceof Error ? error.message : "update_activation_failed");
+      await ensureRuntime(120_000);
+    } catch (rollbackError) {
+      const rollbackCode = rollbackError instanceof Error ? rollbackError.message : "update_rollback_failed";
+      recordGatewayUpdateActivation("error", `${activationError}:${rollbackCode}`, updates, null, updateId);
+      throw new AggregateError([error, rollbackError], "update_activation_and_rollback_failed");
+    }
+    recordGatewayUpdateActivation("error", activationError, updates, null, updateId);
     throw error;
   } finally {
     setInjectionEnabled(true);
@@ -1261,10 +1291,16 @@ async function main() {
   if (packagedBuild) installBundledSkills();
   if (command === "apply-update") {
     const versions = activeVersions();
+    const updateId = option(args, "--update-id");
+    if (!updateId) throw new Error("update_id_required");
+    const sourceCoreVersion = option(args, "--source-core");
+    if (!sourceCoreVersion) throw new Error("update_source_core_required");
+    const targetGeneration = Number(option(args, "--target-generation"));
+    if (!Number.isSafeInteger(targetGeneration) || targetGeneration < 1) throw new Error("update_target_generation_required");
     return print(await applyUpdate(Number(action), {
       core: option(args, "--expected-core") ?? (args.includes("--core-updated") ? versions.core : null),
       compatibility: option(args, "--expected-compatibility") ?? (args.includes("--compatibility-updated") ? versions.compatibility : null),
-    }, option(args, "--drain-path")));
+    }, updateId, sourceCoreVersion, targetGeneration, option(args, "--drain-path")));
   }
   if (command === "version" || command === "--version" || command === "-v") {
     const versions = activeVersions();

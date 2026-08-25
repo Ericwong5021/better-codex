@@ -133,7 +133,7 @@ The app entry and route are registered through the local MCP server. The page in
 `better-codex eject` disables the page integration but keeps your task data and installed components. `better-codex uninstall` removes the MCP server, background service, launcher, Skill, Agent profiles, local data, and CLI bundle.
 
 **How do updates work?**<br>
-Better Codex checks a signed update manifest in the background and shows a notice inside Codex when a new version is available. You can also rerun the install command at any time. It upgrades in place when possible.
+Better Codex checks a signed update manifest in the background and shows a notice inside Codex when a new version is available. You can also rerun the install command at any time. Runtime updates pause new dispatch while active conversations continue in the independent Session Host and Codex App Server. The new Runtime replays committed Host deliveries and reconciles active turns before becoming ready; failed activation restores the previous Runtime against the same Host. A protocol-incompatible Host update waits for active turns and unacknowledged deliveries to drain before replacing the Host.
 
 **Which platforms are supported?**<br>
 Codex Desktop on macOS (Apple Silicon and Intel) and the Microsoft Store version of Codex on Windows x64. Release packages and CI cover all three. Codex compatibility is capability-based rather than pinned to a permanent version list; if required page capabilities are unavailable, Better Codex stops the page integration and reports the incompatibility without modifying board data.

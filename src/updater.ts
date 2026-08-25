@@ -28,6 +28,10 @@ type UpdatePayload = {
     assets: Record<string, Omit<UpdateAsset, "version">>;
   } | null;
   installers?: Record<string, Omit<UpdateAsset, "version">>;
+  runtimeSessionHandoff?: {
+    protocol: string;
+    requiredCapabilities: string[];
+  };
 };
 
 type SignedUpdateManifest = {
@@ -61,7 +65,7 @@ type UpdateRollbackState = {
   updatedAt: string;
 };
 
-type ActivationState = {
+export type ActivationState = {
   status?: string;
   error?: string | null;
   updatedAt?: string;
@@ -70,7 +74,18 @@ type ActivationState = {
   core?: boolean;
   compatibility?: boolean;
   ownerPid?: number | null;
+  updateId?: string | null;
+  targetRuntimeGeneration?: number | null;
 };
+
+export function readGatewayUpdateActivationState() {
+  try {
+    const value = JSON.parse(readFileSync(updateActivationPath, "utf8")) as ActivationState;
+    return value && typeof value === "object" ? value : null;
+  } catch {
+    return null;
+  }
+}
 
 const activationRecoveryTimeout = 120_000;
 const coreUpdatesSupported = isSea() || packagedBuild;
@@ -129,8 +144,8 @@ function persistedActivationState(): GatewayUpdateState {
     const value = JSON.parse(readFileSync(updateActivationPath, "utf8")) as ActivationState;
     if (value.status === "activating") {
       const startedAt = Date.parse(value.updatedAt || "");
+      if (Number.isInteger(value.ownerPid) && value.ownerPid && processAlive(value.ownerPid)) return { status: "restarting", currentVersion: coreVersion, latestVersion: null, checkedAt: value.updatedAt ?? null, error: null, channel: selectedUpdateChannel() };
       if (Number.isFinite(startedAt) && Date.now() - startedAt <= activationRecoveryTimeout) return { status: "restarting", currentVersion: coreVersion, latestVersion: null, checkedAt: value.updatedAt ?? null, error: null, channel: selectedUpdateChannel() };
-      if (!Number.isFinite(startedAt) && Number.isInteger(value.ownerPid) && value.ownerPid && processAlive(value.ownerPid)) return { status: "restarting", currentVersion: coreVersion, latestVersion: null, checkedAt: value.updatedAt ?? null, error: null, channel: selectedUpdateChannel() };
       const lock = acquireActivationRecoveryLock();
       if (!lock) return { status: "restarting", currentVersion: coreVersion, latestVersion: null, checkedAt: value.updatedAt ?? null, error: null, channel: selectedUpdateChannel() };
       try {
@@ -292,6 +307,9 @@ function validatePayload(value: unknown, channel: UpdateChannel) {
     if (typeof payload.installers !== "object" || Array.isArray(payload.installers)) throw new Error("update_installers_invalid");
     Object.values(payload.installers).forEach(validateUpdateAsset);
   }
+  if (payload.runtimeSessionHandoff) {
+    if (typeof payload.runtimeSessionHandoff.protocol !== "string" || !payload.runtimeSessionHandoff.protocol || !Array.isArray(payload.runtimeSessionHandoff.requiredCapabilities) || payload.runtimeSessionHandoff.requiredCapabilities.some(capability => typeof capability !== "string" || !capability)) throw new Error("update_session_handoff_invalid");
+  }
   return payload;
 }
 
@@ -450,8 +468,8 @@ export function getGatewayUpdateState() {
   return { ...gatewayUpdateState, currentVersion: effectiveCoreVersion(), coreUpdateSupported: coreUpdatesSupported };
 }
 
-export function recordGatewayUpdateActivation(status: "activating" | "success" | "error", error: string | null = null, updates: { core: string | null; compatibility: string | null } = { core: null, compatibility: null }, ownerPid: number | null = null) {
-  writeJsonAtomic(updateActivationPath, { status, error, coreVersion: updates.core, compatibilityVersion: updates.compatibility, ownerPid, updatedAt: new Date().toISOString() });
+export function recordGatewayUpdateActivation(status: "activating" | "success" | "error", error: string | null = null, updates: { core: string | null; compatibility: string | null } = { core: null, compatibility: null }, ownerPid: number | null = null, updateId: string | null = null, targetRuntimeGeneration: number | null = null) {
+  writeJsonAtomic(updateActivationPath, { status, error, coreVersion: updates.core, compatibilityVersion: updates.compatibility, ownerPid, updateId, targetRuntimeGeneration, updatedAt: new Date().toISOString() });
   gatewayUpdateState = status === "error"
     ? { ...getGatewayUpdateState(), status: "error", error: `update_activation_failed:${error || "unknown"}` }
     : { ...getGatewayUpdateState(), status: status === "activating" ? "restarting" : "current", error: null };
@@ -509,6 +527,7 @@ export function installGatewayUpdate() {
         channel,
         core: { updated: false, reason: "core_current", version: state.currentVersion },
         compatibility: { updated: false, reason: "compatibility_current", version: activeCompatibility().version },
+        runtimeSessionHandoff: null,
       };
     }
     if (state.status !== "available") throw new Error(state.error || "update_not_available");
@@ -646,6 +665,25 @@ export function rollbackActivatedUpdate(expected: { core: string | null; compati
       return { rolledBack: false, reason: "update_superseded", core: { rolledBack: false }, compatibility: { rolledBack: false }, pendingRestart: false };
     }
     return rollbackAllUpdatesUnlocked();
+  } finally {
+    releaseUpdateOperationLock(lock);
+  }
+}
+
+export function rollbackAbandonedUpdate(expectedCore: string | null) {
+  const lock = acquireUpdateOperationLock();
+  try {
+    const transaction = readRollbackState();
+    if (!transaction) {
+      if (expectedCore) throw new Error("update_rollback_state_missing");
+      return { rolledBack: false, core: { rolledBack: false }, compatibility: { rolledBack: false }, pendingRestart: false };
+    }
+    if (expectedCore && transaction.after.core !== expectedCore) throw new Error("update_superseded");
+    if (transaction.phase === "applying") {
+      settleInterruptedUpdateTransaction();
+      return { rolledBack: false, core: { rolledBack: false }, compatibility: { rolledBack: false }, pendingRestart: false };
+    }
+    return completeRollback(transaction);
   } finally {
     releaseUpdateOperationLock(lock);
   }
@@ -805,6 +843,7 @@ export async function updateAll(channel: UpdateChannel = selectedUpdateChannel()
         channel,
         core: { updated: false, reason: "core_current", version: effectiveCoreVersion() },
         compatibility: { updated: false, reason: "compatibility_current", version: activeCompatibility().version },
+        runtimeSessionHandoff: null,
       };
     }
     const manifest = await fetchUpdateManifest(channel);
@@ -824,7 +863,7 @@ export async function updateAll(channel: UpdateChannel = selectedUpdateChannel()
       if (actualAfter.core !== plannedAfter.core || actualAfter.compatibility !== plannedAfter.compatibility) throw new Error("update_transaction_version_mismatch");
       if (core.updated || compatibility.updated) writeRollbackState(before, actualAfter, "ready");
       else if (existsSync(updateRollbackPath)) unlinkSync(updateRollbackPath);
-      return { channel, core, compatibility };
+      return { channel, core, compatibility, runtimeSessionHandoff: manifest.runtimeSessionHandoff || null };
     } catch (error) {
       restorePointerPair(before);
       if (existsSync(updateRollbackPath)) unlinkSync(updateRollbackPath);

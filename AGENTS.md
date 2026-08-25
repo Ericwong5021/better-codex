@@ -8,3 +8,4 @@
 - Standalone VPS mode activates the Compose `standalone` profile and bundled Caddy. Existing-proxy mode starts only `hub` and requires bundled Caddy to be stopped.
 - Storage below the critical reserve makes Runtime or Relay not ready and blocks updates before staging. Storage below the warning reserve is reported as degraded and requires cleanup before routine upgrades.
 - Errors on Runtime, Session Host, Relay, update, database, and deployment paths must include structured identity and state fields. Do not convert a failed dependency into a successful health response.
+- Runtime updates must drain new dispatch without interrupting active turns. A compatible Session Host and Codex App Server remain alive across Runtime generations, deliveries are acknowledged only after the business transaction commits, and update success or rollback is terminal only after handoff replay, reconciliation, and `/readyz` recovery.

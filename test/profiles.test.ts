@@ -13,6 +13,7 @@ const codexCliSource = readFileSync(new URL("../src/codex-cli.ts", import.meta.u
 const updaterSource = readFileSync(new URL("../src/updater.ts", import.meta.url), "utf8");
 const cdpSource = readFileSync(new URL("../src/cdp.ts", import.meta.url), "utf8");
 const domSource = readFileSync(new URL("../src/dom.ts", import.meta.url), "utf8");
+const injectedUiSource = readFileSync(new URL("../src/ui/injected-entry.ts", import.meta.url), "utf8");
 const serviceSource = readFileSync(new URL("../src/service.ts", import.meta.url), "utf8");
 const launchIntegrationSource = readFileSync(new URL("../src/launch-integration.ts", import.meta.url), "utf8");
 const refreshSource = readFileSync(new URL("../scripts/refresh-local-install.mjs", import.meta.url), "utf8");
@@ -143,7 +144,7 @@ test("profile switching disables and stops the peer before injecting", () => {
   assert.doesNotMatch(cliSource, /setImmediate\(\(\) => process\.exit/);
   assert.match(cliSource, /processStartTime/);
   assert.match(cliSource, /injector_stop_failed/);
-  const ensureRuntimeStart = cliSource.indexOf("async function ensureRuntime()");
+  const ensureRuntimeStart = cliSource.indexOf("async function ensureRuntime(");
   const openWebAppStart = cliSource.indexOf("async function openWebApp()");
   assert.ok(ensureRuntimeStart >= 0 && openWebAppStart > ensureRuntimeStart);
   assert.doesNotMatch(cliSource.slice(ensureRuntimeStart, openWebAppStart), /repairServiceConfiguration\(\)/);
@@ -159,6 +160,7 @@ test("profile switching disables and stops the peer before injecting", () => {
   assert.match(runtimeStateSource, /processStartTime\(current\.pid\)/);
   assert.match(serviceSource, /betterCodexProfile === "development"/);
   assert.match(serviceSource, /development_runtime_unmanaged/);
+  assert.match(serviceSource, /BETTER_CODEX_BASE_ENTRYPOINT/);
 });
 
 test("source builds refresh only the development instance", () => {
@@ -187,9 +189,9 @@ test("source mode does not advertise an unsupported core update", () => {
   assert.match(updaterSource, /const coreUpdatesSupported = isSea\(\) \|\| packagedBuild/);
   assert.match(updaterSource, /coreUpdateSupported: coreUpdatesSupported/);
   assert.match(updaterSource, /const coreAvailable = Boolean\(coreUpdatesSupported && result\.core\?\.available\)/);
-  assert.match(domSource, /update\?\.coreUpdateSupported === false/);
-  assert.match(domSource, /源码开发版仅检查兼容层更新/);
-  assert.match(domSource, /profile: PROFILE/);
+  assert.match(injectedUiSource, /update\?\.coreUpdateSupported === false/);
+  assert.match(injectedUiSource, /源码开发版仅检查兼容层更新/);
+  assert.match(injectedUiSource, /profile: PROFILE/);
 });
 
 test("Windows shortcut status expands JSON arrays on Windows PowerShell 5.1", () => {

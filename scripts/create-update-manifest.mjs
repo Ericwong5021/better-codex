@@ -59,6 +59,10 @@ const payload = {
   },
   core: { version: coreVersion, assets },
   installers,
+  runtimeSessionHandoff: {
+    protocol: "session-host/v2",
+    requiredCapabilities: ["durable_deliveries", "runtime_handoff"],
+  },
 };
 const key = createPrivateKey(privatePem);
 const publicKey = createPublicKey(key).export({ type: "spki", format: "pem" });

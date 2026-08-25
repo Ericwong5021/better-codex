@@ -236,6 +236,19 @@ class SessionHostServer {
     renameSync(temporary, sessionHostStatusPath);
   }
 
+  private handoffSnapshot() {
+    const relay = this.relay.status();
+    const transport = this.transport.stats();
+    return {
+      host_instance_id: this.hostInstanceId,
+      app_server_pid: relay.app_server_pid,
+      app_server_started_at: relay.app_server_started_at,
+      command_in_flight: relay.command_in_flight,
+      active_turns: relay.active_turns,
+      ...transport,
+    };
+  }
+
   private scheduleOrphanShutdown(delay = 300_000) {
     if (this.orphanTimer) clearTimeout(this.orphanTimer);
     this.orphanTimer = setTimeout(() => {
@@ -386,11 +399,11 @@ class SessionHostServer {
       const validGeneration = Number.isSafeInteger(message.target_runtime_generation) && message.target_runtime_generation > (connection.runtimeGeneration || 0);
       const deadline = Date.parse(message.deadline_at);
       if (!validUpdateId || !validGeneration || !Number.isFinite(deadline) || deadline <= Date.now()) {
-        writeMessage(connection.socket, { type: "handoff_response", request_id: message.request_id, ok: false, error: "session_host_handoff_invalid", handoff: this.handoff });
+        writeMessage(connection.socket, { type: "handoff_response", request_id: message.request_id, ok: false, error: "session_host_handoff_invalid", handoff: this.handoff, snapshot: this.handoffSnapshot() });
         return;
       }
       if (this.handoff && (this.handoff.update_id !== message.update_id || this.handoff.target_runtime_generation !== message.target_runtime_generation)) {
-        writeMessage(connection.socket, { type: "handoff_response", request_id: message.request_id, ok: false, error: "session_host_handoff_conflict", handoff: this.handoff });
+        writeMessage(connection.socket, { type: "handoff_response", request_id: message.request_id, ok: false, error: "session_host_handoff_conflict", handoff: this.handoff, snapshot: this.handoffSnapshot() });
         return;
       }
       this.handoff ||= {
@@ -405,24 +418,39 @@ class SessionHostServer {
       this.highestRuntimeGeneration = Math.max(this.highestRuntimeGeneration, message.target_runtime_generation);
       this.writeStatus();
       diagnostic("runtime_handoff_started", { ...this.handoff, active_turns: this.relay.status().active_turns, ...this.transport.stats() });
-      writeMessage(connection.socket, { type: "handoff_response", request_id: message.request_id, ok: true, handoff: this.handoff });
+      writeMessage(connection.socket, { type: "handoff_response", request_id: message.request_id, ok: true, handoff: this.handoff, snapshot: this.handoffSnapshot() });
       return;
     }
     if (message.type === "complete_handoff") {
-      const valid = this.handoff && this.handoff.update_id === message.update_id && connection.handoffUpdateId === message.update_id && (connection.runtimeGeneration || 0) >= this.handoff.target_runtime_generation;
+      const valid = this.handoff
+        ? this.handoff.update_id === message.update_id && connection.handoffUpdateId === message.update_id && (connection.runtimeGeneration || 0) >= this.handoff.target_runtime_generation
+        : connection.handoffUpdateId === message.update_id;
       if (!valid) {
-        writeMessage(connection.socket, { type: "handoff_response", request_id: message.request_id, ok: false, error: "session_host_handoff_mismatch", handoff: this.handoff });
+        writeMessage(connection.socket, { type: "handoff_response", request_id: message.request_id, ok: false, error: "session_host_handoff_mismatch", handoff: this.handoff, snapshot: this.handoffSnapshot() });
         return;
       }
-      const completed = this.handoff!;
+      const completed = this.handoff;
       this.handoff = null;
       this.writeStatus();
-      diagnostic("runtime_handoff_completed", { update_id: message.update_id, source_runtime_instance_id: completed.source_runtime_instance_id, runtime_instance_id: connection.runtimeInstanceId, runtime_generation: connection.runtimeGeneration, active_turns: this.relay.status().active_turns, ...this.transport.stats() });
-      writeMessage(connection.socket, { type: "handoff_response", request_id: message.request_id, ok: true, handoff: null });
+      diagnostic("runtime_handoff_completed", { update_id: message.update_id, source_runtime_instance_id: completed?.source_runtime_instance_id || null, runtime_instance_id: connection.runtimeInstanceId, runtime_generation: connection.runtimeGeneration, active_turns: this.relay.status().active_turns, ...this.transport.stats() });
+      writeMessage(connection.socket, { type: "handoff_response", request_id: message.request_id, ok: true, handoff: null, snapshot: this.handoffSnapshot() });
+      return;
+    }
+    if (message.type === "cancel_handoff") {
+      const valid = this.handoff && this.handoff.update_id === message.update_id && connection.runtimeInstanceId === this.handoff.source_runtime_instance_id && connection.runtimeGeneration === this.handoff.source_runtime_generation;
+      if (!valid) {
+        writeMessage(connection.socket, { type: "handoff_response", request_id: message.request_id, ok: false, error: "session_host_handoff_mismatch", handoff: this.handoff, snapshot: this.handoffSnapshot() });
+        return;
+      }
+      this.handoff = null;
+      this.highestRuntimeGeneration = connection.runtimeGeneration || this.highestRuntimeGeneration;
+      this.writeStatus();
+      diagnostic("runtime_handoff_cancelled", { update_id: message.update_id, runtime_instance_id: connection.runtimeInstanceId, runtime_generation: connection.runtimeGeneration });
+      writeMessage(connection.socket, { type: "handoff_response", request_id: message.request_id, ok: true, handoff: null, snapshot: this.handoffSnapshot() });
       return;
     }
     if (message.type === "handoff_status_request") {
-      writeMessage(connection.socket, { type: "handoff_response", request_id: message.request_id, ok: true, handoff: this.handoff });
+      writeMessage(connection.socket, { type: "handoff_response", request_id: message.request_id, ok: true, handoff: this.handoff, snapshot: this.handoffSnapshot() });
       return;
     }
     if (!connection.authenticated) {

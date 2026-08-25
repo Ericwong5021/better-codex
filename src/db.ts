@@ -90,6 +90,25 @@ export type SessionDeliveryReceipt = {
   payload_hash: string;
 };
 
+export const updateOperationStatuses = ["ACCEPTED", "STAGING", "DRAINING_DISPATCH", "WAITING_FOR_HOST_DRAIN", "HANDOFF_READY", "RESTARTING_RUNTIME", "REPLAYING", "RECONCILING", "SERVING_READY", "COMPLETED", "ROLLING_BACK", "ROLLED_BACK", "FAILED"] as const;
+export type UpdateOperationStatus = typeof updateOperationStatuses[number];
+
+export type UpdateOperation = {
+  id: string;
+  idempotency_key: string;
+  status: UpdateOperationStatus;
+  source_core_version: string;
+  target_core_version: string | null;
+  source_runtime_instance_id: string;
+  source_runtime_generation: number;
+  target_runtime_generation: number | null;
+  host_instance_id: string | null;
+  error_code: string | null;
+  error_details: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type PendingThreadAction = {
   thread_id: string;
   issue_id: string;
@@ -323,7 +342,7 @@ export function cleanMaxConcurrency(value: number | undefined) {
   return value;
 }
 
-const latestSchemaVersion = 20;
+const latestSchemaVersion = 21;
 
 function now() {
   return new Date().toISOString();
@@ -673,6 +692,24 @@ function sessionCommandFromRow(row: Record<string, unknown>): SessionCommand {
     created_at: String(row.created_at),
     claimed_at: row.claimed_at ? String(row.claimed_at) : null,
     finished_at: row.finished_at ? String(row.finished_at) : null,
+  };
+}
+
+function updateOperationFromRow(row: Record<string, unknown>): UpdateOperation {
+  return {
+    id: String(row.id),
+    idempotency_key: String(row.idempotency_key),
+    status: String(row.status) as UpdateOperationStatus,
+    source_core_version: String(row.source_core_version),
+    target_core_version: row.target_core_version ? String(row.target_core_version) : null,
+    source_runtime_instance_id: String(row.source_runtime_instance_id),
+    source_runtime_generation: Number(row.source_runtime_generation),
+    target_runtime_generation: row.target_runtime_generation === null || row.target_runtime_generation === undefined ? null : Number(row.target_runtime_generation),
+    host_instance_id: row.host_instance_id ? String(row.host_instance_id) : null,
+    error_code: row.error_code ? String(row.error_code) : null,
+    error_details: row.error_details ? String(row.error_details) : null,
+    created_at: String(row.created_at),
+    updated_at: String(row.updated_at),
   };
 }
 
@@ -1135,6 +1172,29 @@ export class Store {
           );
         `);
         this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (20, ?)").run(now());
+      });
+    }
+    if (fromVersion < 21) {
+      this.transaction(() => {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS update_operations (
+            id TEXT PRIMARY KEY,
+            idempotency_key TEXT NOT NULL UNIQUE,
+            status TEXT NOT NULL,
+            source_core_version TEXT NOT NULL,
+            target_core_version TEXT,
+            source_runtime_instance_id TEXT NOT NULL,
+            source_runtime_generation INTEGER NOT NULL,
+            target_runtime_generation INTEGER,
+            host_instance_id TEXT,
+            error_code TEXT,
+            error_details TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS update_operations_status ON update_operations(status, updated_at);
+        `);
+        this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (21, ?)").run(now());
       });
     }
   }
@@ -3987,6 +4047,100 @@ export class Store {
     });
   }
 
+  createUpdateOperation(input: {
+    idempotencyKey: string;
+    sourceCoreVersion: string;
+    sourceRuntimeInstanceId: string;
+    sourceRuntimeGeneration: number;
+    hostInstanceId?: string | null;
+  }) {
+    return this.transaction(() => {
+      const existing = this.db.prepare("SELECT * FROM update_operations WHERE idempotency_key = ?").get(input.idempotencyKey) as Record<string, unknown> | undefined;
+      if (existing) return updateOperationFromRow(existing);
+      const active = this.db.prepare(`
+        SELECT * FROM update_operations
+        WHERE status NOT IN ('COMPLETED', 'ROLLED_BACK', 'FAILED')
+        ORDER BY created_at DESC, rowid DESC
+        LIMIT 1
+      `).get() as Record<string, unknown> | undefined;
+      if (active) return updateOperationFromRow(active);
+      const id = randomUUID();
+      const timestamp = now();
+      this.db.prepare(`
+        INSERT INTO update_operations (
+          id, idempotency_key, status, source_core_version, target_core_version,
+          source_runtime_instance_id, source_runtime_generation, target_runtime_generation,
+          host_instance_id, error_code, error_details, created_at, updated_at
+        ) VALUES (?, ?, 'ACCEPTED', ?, NULL, ?, ?, NULL, ?, NULL, NULL, ?, ?)
+      `).run(id, input.idempotencyKey, input.sourceCoreVersion, input.sourceRuntimeInstanceId, input.sourceRuntimeGeneration, input.hostInstanceId || null, timestamp, timestamp);
+      return this.getUpdateOperation(id)!;
+    });
+  }
+
+  getUpdateOperation(id: string) {
+    const row = this.db.prepare("SELECT * FROM update_operations WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+    return row ? updateOperationFromRow(row) : undefined;
+  }
+
+  getActiveUpdateOperation() {
+    const row = this.db.prepare(`
+      SELECT * FROM update_operations
+      WHERE status NOT IN ('COMPLETED', 'ROLLED_BACK', 'FAILED')
+      ORDER BY created_at DESC, rowid DESC
+      LIMIT 1
+    `).get() as Record<string, unknown> | undefined;
+    return row ? updateOperationFromRow(row) : undefined;
+  }
+
+  transitionUpdateOperation(id: string, status: UpdateOperationStatus, patch: {
+    targetCoreVersion?: string | null;
+    targetRuntimeGeneration?: number | null;
+    hostInstanceId?: string | null;
+    errorCode?: string | null;
+    errorDetails?: string | null;
+  } = {}) {
+    const transitions: Record<UpdateOperationStatus, UpdateOperationStatus[]> = {
+      ACCEPTED: ["STAGING", "FAILED"],
+      STAGING: ["DRAINING_DISPATCH", "COMPLETED", "FAILED"],
+      DRAINING_DISPATCH: ["WAITING_FOR_HOST_DRAIN", "HANDOFF_READY", "FAILED"],
+      WAITING_FOR_HOST_DRAIN: ["HANDOFF_READY", "FAILED"],
+      HANDOFF_READY: ["RESTARTING_RUNTIME", "FAILED"],
+      RESTARTING_RUNTIME: ["REPLAYING", "ROLLING_BACK", "FAILED"],
+      REPLAYING: ["RECONCILING", "ROLLING_BACK", "FAILED"],
+      RECONCILING: ["SERVING_READY", "ROLLING_BACK", "FAILED"],
+      SERVING_READY: ["COMPLETED", "ROLLING_BACK", "FAILED"],
+      COMPLETED: [],
+      ROLLING_BACK: ["ROLLED_BACK", "FAILED"],
+      ROLLED_BACK: [],
+      FAILED: [],
+    };
+    return this.transaction(() => {
+      const current = this.getUpdateOperation(id);
+      if (!current) throw new Error("update_operation_not_found");
+      if (current.status !== status && !transitions[current.status].includes(status)) throw new Error("update_operation_transition_invalid");
+      this.db.prepare(`
+        UPDATE update_operations
+        SET status = ?,
+            target_core_version = CASE WHEN ? THEN ? ELSE target_core_version END,
+            target_runtime_generation = CASE WHEN ? THEN ? ELSE target_runtime_generation END,
+            host_instance_id = CASE WHEN ? THEN ? ELSE host_instance_id END,
+            error_code = CASE WHEN ? THEN ? ELSE error_code END,
+            error_details = CASE WHEN ? THEN ? ELSE error_details END,
+            updated_at = ?
+        WHERE id = ?
+      `).run(
+        status,
+        Number(Object.hasOwn(patch, "targetCoreVersion")), patch.targetCoreVersion ?? null,
+        Number(Object.hasOwn(patch, "targetRuntimeGeneration")), patch.targetRuntimeGeneration ?? null,
+        Number(Object.hasOwn(patch, "hostInstanceId")), patch.hostInstanceId ?? null,
+        Number(Object.hasOwn(patch, "errorCode")), patch.errorCode ?? null,
+        Number(Object.hasOwn(patch, "errorDetails")), patch.errorDetails ?? null,
+        now(), id,
+      );
+      return this.getUpdateOperation(id)!;
+    });
+  }
+
   sessionRelayIsLeader(relayId: string) {
     const row = this.db.prepare("SELECT relay_id, expires_at FROM session_relay WHERE singleton = 1").get() as { relay_id: string; expires_at: string } | undefined;
     return Boolean(row && row.relay_id === relayId && Date.parse(row.expires_at) > Date.now());
@@ -4031,6 +4185,30 @@ export class Store {
       failed.push({ ...command, status: "failed", error: commandError, finished_at: timestamp });
     }
     return failed;
+  }
+
+  reconcileClaimedSessionCommandsForHandoff(activeTurns: Array<{ thread_id: string; turn_id: string }>) {
+    const active = new Set(activeTurns.map(value => `${value.thread_id}:${value.turn_id}`));
+    return this.transaction(() => {
+      const rows = this.db.prepare("SELECT * FROM session_commands WHERE status = 'claimed' ORDER BY created_at, rowid").all() as Record<string, unknown>[];
+      const unresolved: SessionCommand[] = [];
+      const reconciled: SessionCommand[] = [];
+      for (const row of rows) {
+        const command = sessionCommandFromRow(row);
+        if (!command.thread_id || !command.turn_id || !active.has(`${command.thread_id}:${command.turn_id}`)) {
+          unresolved.push(command);
+          continue;
+        }
+        const timestamp = now();
+        this.db.prepare(`
+          UPDATE session_commands
+          SET status = 'completed', result_json = ?, error = NULL, finished_at = ?
+          WHERE id = ? AND status = 'claimed'
+        `).run(JSON.stringify({ thread_id: command.thread_id, turn_id: command.turn_id, handoff_reconciled: true }), timestamp, command.id);
+        reconciled.push({ ...command, status: "completed", error: null, finished_at: timestamp, result: { thread_id: command.thread_id, turn_id: command.turn_id, handoff_reconciled: true } });
+      }
+      return { reconciled, unresolved };
+    });
   }
 
   claimSessionCommand(relayId: string) {

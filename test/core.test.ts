@@ -182,7 +182,7 @@ test("core workflow persists, orders status moves, and rejects stale writes", ()
     const restored = store.getIssue(first.id);
     assert.equal(restored?.status, "in_progress");
     assert.equal(restored?.thread_id, "local:thread-1");
-    assert.equal(store.health().schemaVersion, 20);
+    assert.equal(store.health().schemaVersion, 21);
     store.close();
   } finally {
     rmSync(target.directory, { recursive: true, force: true });
@@ -1225,7 +1225,7 @@ test("legacy cancelled issues migrate to archived backlog issues", () => {
     const restored = store.unarchiveIssue(issue.id, migrated.version);
     const moved = store.updateIssue(issue.id, restored.version, { status: "todo" });
     assert.equal(store.isDispatchable(moved), false);
-    assert.equal(store.health().schemaVersion, 20);
+    assert.equal(store.health().schemaVersion, 21);
   } finally {
     store?.close();
     rmSync(target.directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
@@ -1260,11 +1260,36 @@ test("remote replies reject archived issues before invoking attachment handlers"
   }
 });
 
+test("update operations are idempotent and enforce lifecycle transitions", () => {
+  const store = new Store(":memory:");
+  try {
+    const source = { idempotencyKey: "update-request-0001", sourceCoreVersion: "1.4.0", sourceRuntimeInstanceId: "runtime-source", sourceRuntimeGeneration: 7, hostInstanceId: "host-source" };
+    const operation = store.createUpdateOperation(source);
+    assert.equal(store.createUpdateOperation(source).id, operation.id);
+    assert.equal(store.createUpdateOperation({ ...source, idempotencyKey: "update-request-0002" }).id, operation.id);
+    store.transitionUpdateOperation(operation.id, "STAGING");
+    store.transitionUpdateOperation(operation.id, "DRAINING_DISPATCH", { targetCoreVersion: "1.5.0" });
+    store.transitionUpdateOperation(operation.id, "WAITING_FOR_HOST_DRAIN", { targetRuntimeGeneration: 8 });
+    store.transitionUpdateOperation(operation.id, "HANDOFF_READY");
+    store.transitionUpdateOperation(operation.id, "RESTARTING_RUNTIME");
+    store.transitionUpdateOperation(operation.id, "REPLAYING");
+    store.transitionUpdateOperation(operation.id, "RECONCILING");
+    store.transitionUpdateOperation(operation.id, "SERVING_READY");
+    const completed = store.transitionUpdateOperation(operation.id, "COMPLETED");
+    assert.equal(completed.target_core_version, "1.5.0");
+    assert.equal(completed.target_runtime_generation, 8);
+    assert.equal(store.getActiveUpdateOperation(), undefined);
+    assert.throws(() => store.transitionUpdateOperation(operation.id, "ROLLING_BACK"), /update_operation_transition_invalid/);
+  } finally {
+    store.close();
+  }
+});
+
 test("newer database schema is rejected without migration", () => {
   const target = temporaryDatabase();
   try {
     const future = new DatabaseSync(target.file);
-    future.exec("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL); INSERT INTO schema_migrations VALUES (21, '2026-01-01T00:00:00.000Z')");
+    future.exec("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL); INSERT INTO schema_migrations VALUES (22, '2026-01-01T00:00:00.000Z')");
     future.close();
     assert.throws(() => new Store(target.file), /database_schema_too_new/);
   } finally {
@@ -1308,7 +1333,7 @@ test("legacy database is backed up before migration", () => {
     legacy.close();
 
     const store = new Store(target.file);
-    assert.equal(store.health().schemaVersion, 20);
+    assert.equal(store.health().schemaVersion, 21);
     assert.ok(store.lastBackupPath);
     assert.ok(existsSync(store.lastBackupPath!));
     assert.equal(store.getProject("legacy")?.name, "Legacy");

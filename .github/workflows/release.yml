@@ -68,6 +68,26 @@ jobs:
             exit 1
           fi
 
+  runtime-session-continuity:
+    needs: validate-release
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - ubuntu-latest
+          - macos-15
+          - windows-2025
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.0
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npx tsx --test --test-force-exit --test-concurrency=1 test/core.test.ts test/gateway.test.ts test/update-channel.test.ts test/updater-security.test.ts
+
   acceptance:
     needs: validate-release
     runs-on: ubuntu-latest
@@ -155,6 +175,7 @@ jobs:
       - acceptance
       - web-ui
       - node-24-lifecycle
+      - runtime-session-continuity
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

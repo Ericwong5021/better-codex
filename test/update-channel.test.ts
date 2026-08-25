@@ -260,10 +260,13 @@ test("standalone core and compatibility updates enter the WAL before pointer mut
   const server = readFileSync(join(root, "src", "server.ts"), "utf8");
   const compatibility = source.slice(source.indexOf("export async function updateCompatibility"), source.indexOf("async function updateCoreUnlocked"));
   const core = source.slice(source.indexOf("export async function updateCore"), source.indexOf("export async function updateAll"));
+  const cli = readFileSync(join(root, "src", "cli.ts"), "utf8");
+  const applyUpdate = cli.slice(cli.indexOf("async function applyUpdate"), cli.indexOf("async function withLaunchLock"));
   assert.match(compatibility, /writeRollbackState\(before, plannedAfter, "applying"\)[\s\S]*updateCompatibilityUnlocked/);
   assert.match(core, /writeRollbackState\(before, plannedAfter, "applying"\)[\s\S]*updateCoreUnlocked/);
-  assert.match(server, /const installation = installGatewayUpdate\(\);\s*sendJson\(response, 202, \{ accepted: true, state: getGatewayUpdateState\(\) \}\);\s*void installation\.then/);
-  assert.doesNotMatch(server, /const result = await installGatewayUpdate\(\)/);
+  assert.match(server, /sendJson\(response, 202, \{ accepted: true, update_id: operation\.id, state: "STAGING"[\s\S]*void \(async \(\) => \{[\s\S]*const result = await installGatewayUpdate\(\)/);
+  assert.doesNotMatch(server, /interrupt_running/);
+  assert.doesNotMatch(applyUpdate, /stopSessionHostProcess\(\)/);
 });
 
 test("update and rollback operations refuse a live cross-process lock", () => {

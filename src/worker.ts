@@ -166,8 +166,38 @@ export class IssueWorker {
     return this.sessionRelay.completeHandoff(updateId);
   }
 
+  cancelSessionHandoff(updateId: string) {
+    return this.sessionRelay.cancelHandoff(updateId);
+  }
+
   sessionHandoffStatus() {
     return this.sessionRelay.handoffStatus();
+  }
+
+  waitForSessionHandoffReplay() {
+    this.sessionRelay.start();
+    return this.sessionRelay.waitForHandoffReplay();
+  }
+
+  async waitForSessionHostIdle(timeout = 15 * 60 * 1000) {
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      const result = await this.sessionRelay.handoffStatus();
+      if (!result.snapshot.command_in_flight && result.snapshot.active_turns.length === 0 && result.snapshot.queued_deliveries === 0) return result.snapshot;
+      await new Promise(resolve => setTimeout(resolve, 250));
+    }
+    throw new Error("session_host_idle_timeout");
+  }
+
+  stopSessionHostClient() {
+    this.sessionRelay.stop();
+  }
+
+  async reconcileSessionHandoff(snapshot: Awaited<ReturnType<SessionHostClient["waitForHandoffReplay"]>>) {
+    const commands = this.store.reconcileClaimedSessionCommandsForHandoff(snapshot.active_turns);
+    if (commands.unresolved.length) throw new Error("session_handoff_unresolved_commands");
+    await this.reconcileDesktopRuns(true);
+    return commands;
   }
 
   start() {
@@ -200,34 +230,44 @@ export class IssueWorker {
     return this.sessionRelay.threadAction(this.store.listIssueThreadIds(issueId), action);
   }
 
-  async pauseForUpdate(interruptRunning = false) {
-    const issueIds = this.store.listActiveIssueIds();
-    const active = Boolean(issueIds.length || this.schedulers.size || this.enrichments.size || this.scheduledTaskCreations.size || this.projectOverviews.size || this.projectPlannings.size);
-    workerDebug("update_pause_requested", {
-      interrupt_running: interruptRunning,
-      active_issue_ids: issueIds,
-      schedulers: this.schedulers.size,
-      enrichments: this.enrichments.size,
-      scheduled_task_creations: this.scheduledTaskCreations.size,
-      project_overviews: this.projectOverviews.size,
-      project_plannings: this.projectPlannings.size,
-    });
-    if (active && !interruptRunning) return false;
-    if (interruptRunning) await Promise.all(issueIds.map(issueId => this.stopIssue(issueId)));
-    if (interruptRunning && active) {
-      this.stop();
-      workerDebug("update_pause_accepted", { interrupt_running: true, interrupted_issue_ids: issueIds });
-      return true;
-    }
+  beginUpdateDrain() {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
     if (this.threadActionTimer) clearTimeout(this.threadActionTimer);
     this.timer = null;
     this.threadActionTimer = null;
     this.manualQueue.clear();
-    this.sessionRelay.stop();
-    workerDebug("update_pause_accepted", { interrupt_running: false, interrupted_issue_ids: [] });
-    return true;
+    const status = this.updateDrainStatus();
+    workerDebug("update_drain_started", {
+      active_issue_ids: this.store.listActiveIssueIds(),
+      schedulers: this.schedulers.size,
+      enrichments: this.enrichments.size,
+      scheduled_task_creations: this.scheduledTaskCreations.size,
+      project_overviews: this.projectOverviews.size,
+      project_plannings: this.projectPlannings.size,
+    });
+    return status;
+  }
+
+  updateDrainStatus() {
+    const blocking = {
+      schedulers: this.schedulers.size,
+      enrichments: this.enrichments.size,
+      scheduled_task_creations: this.scheduledTaskCreations.size,
+      project_overviews: this.projectOverviews.size,
+      project_plannings: this.projectPlannings.size,
+    };
+    return { ready: Object.values(blocking).every(value => value === 0), blocking, active_issue_ids: this.store.listActiveIssueIds() };
+  }
+
+  async waitForUpdateDrain(timeout = 15 * 60 * 1000) {
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      const status = this.updateDrainStatus();
+      if (status.ready) return status;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    throw new Error("update_dispatch_drain_timeout");
   }
 
   resumeAfterUpdate() {
@@ -1117,7 +1157,7 @@ export class IssueWorker {
       return { leader: false, acquired: false, expires_at: new Date().toISOString(), previous_relay_id: null, command: null, thread_ids: [] as string[], active_turns: [] as Array<{ thread_id: string; turn_id: string }> };
     }
     const lease = this.store.heartbeatSessionRelay(relayId, appSessionId, null);
-    if (lease.acquired) {
+    if (lease.acquired && !busy) {
       for (const command of this.store.failClaimedSessionCommands(relayId)) this.handleSessionCommandFailure(command, command.error || "relay_replaced");
     }
     const command = lease.leader && capability === "ready" && !busy ? this.store.claimSessionCommand(relayId) : undefined;
@@ -1254,8 +1294,8 @@ export class IssueWorker {
     if (!this.stopped) this.scheduler(claim, executionSuccess, executionError, completion.message.trim());
   }
 
-  private async reconcileDesktopRuns() {
-    if (this.reconcilingSessions || this.stopped) return;
+  private async reconcileDesktopRuns(allowStopped = false) {
+    if (this.reconcilingSessions || this.stopped && !allowStopped) return;
     this.reconcilingSessions = true;
     try {
       for (const session of this.store.listActiveIssueSessions()) {
