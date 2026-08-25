@@ -4,6 +4,12 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.10-beta.25] - 2026-08-26
+
+- Keep active Issues running when macOS and Windows installers upgrade a live Runtime, and reject release artifacts that do not match the requested version.
+- Preserve draft image attachments and refine mobile toolbar, profile, context-menu, and tap interactions.
+- Stabilize the Windows Session Host handoff fixture and serialize commit-quality checks.
+
 ## [0.4.10-beta.24] - 2026-08-25
 
 - Embed the project task board and refine responsive fullscreen, scrolling, context-menu, slider, scrollbar, and profile-color interactions.
@@ -866,7 +872,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.24...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.25...HEAD
+[0.4.10-beta.25]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.24...v0.4.10-beta.25
 [0.4.10-beta.24]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.23...v0.4.10-beta.24
 [0.4.10-beta.23]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.22...v0.4.10-beta.23
 [0.4.10-beta.22]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.21...v0.4.10-beta.22
