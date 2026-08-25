@@ -6,7 +6,6 @@ import { dirname, join } from "node:path";
 import { agentConfigProfileName, defaultAgentProfile } from "./agent-profiles.js";
 import { debugLoggingEnabled, schedulerRuntimePath, schedulerSchemaPath, runLogPath, workerLogPath } from "./config.js";
 import { agentSandboxModes, Store, type AgentSandboxMode, type ClaimedIssue, type Issue, type IssueThreadAction, type PendingThreadAction, type Project, type ScheduledTaskInput, type SchedulerDecision, type SessionCommand } from "./db.js";
-import { mockupSessionActive } from "./injection-state.js";
 import { codexExecutablePath } from "./codex-cli.js";
 import { renderMarkdown } from "./markdown.js";
 import { readConversationActivity, readConversationResult } from "./session-transcript.js";
@@ -281,7 +280,7 @@ export class IssueWorker {
   }
 
   startIssue(issueId: string) {
-    if (this.stopped || mockupSessionActive()) return false;
+    if (this.stopped) return false;
     if (this.store.getActiveSessionCommand(issueId)) return false;
     const claim = this.store.claimNextIssue(issueId);
     if (!claim) {
@@ -946,7 +945,6 @@ export class IssueWorker {
 
   private async tick() {
     try {
-      if (mockupSessionActive()) return;
       this.store.claimDueScheduledTasks();
       this.dispatchPendingScheduledTasks();
       await this.reconcileDesktopRuns();

@@ -18,7 +18,7 @@ function writeInjectionState(state: InjectionState) {
   renameSync(temporary, injectionStatePath);
 }
 
-export function mockupSessionActive() {
+function localMockupInjectionLeaseActive() {
   if (!existsSync(mockupSessionPath)) return false;
   try {
     const value = JSON.parse(readFileSync(mockupSessionPath, "utf8")) as { pid?: number; restore_injection?: boolean };
@@ -35,7 +35,7 @@ export function mockupSessionActive() {
 }
 
 export function injectionEnabled() {
-  mockupSessionActive();
+  localMockupInjectionLeaseActive();
   return readInjectionState().enabled !== false;
 }
 

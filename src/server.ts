@@ -51,6 +51,14 @@ const maxIssueDescriptionLength = 100000;
 const codexStatePath = join(process.env.CODEX_HOME || join(homedir(), ".codex"), ".codex-global-state.json");
 const preloadedRequestBodies = new WeakMap<IncomingMessage, Buffer>();
 
+function mockupLocalOnlyPath(pathname: string) {
+  return pathname === "/web"
+    || pathname.startsWith("/web/")
+    || pathname.startsWith("/local/")
+    || /^\/api\/(?:account|relay|remote-access|session-relay|sessions|sync|system|update)(?:\/|$)/.test(pathname)
+    || /^\/api\/projects\/[^/]+\/(?:mentions|overview|planning|semantics)(?:\/|$)/.test(pathname);
+}
+
 function savePastedImage(value: unknown) {
   const data = cleanString(value, maxPastedImageBodyBytes);
   const match = data.match(/^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/);
@@ -994,6 +1002,7 @@ export function startServer() {
         const ok = runtimeServingReady && database.ok && storage.ok;
         return sendJson(response, ok ? 200 : 503, { ok, serving_ready: runtimeServingReady, name: "Better Codex Runtime", version: identity.version, pid: process.pid, port: activePort, instanceId: identity.instanceId, generation: identity.generation, handoffUpdateId: identity.handoffUpdateId, handoffRecovery: identity.handoffRecovery, handoffHostReplacement: identity.handoffHostReplacement, database, storage, compatibility: readCompatibilityStatus(), session_host: worker.sessionHostStatus() });
       }
+      if (mockupEnabled && mockupLocalOnlyPath(url.pathname)) return sendJson(response, 400, { error: "mockup_action_not_supported" });
       if ((url.pathname === "/web" || url.pathname === "/web/projects" || url.pathname.startsWith("/web/projects/") || url.pathname === "/web/agents" || url.pathname.startsWith("/web/agents/") || url.pathname.startsWith("/local/")) && method === "GET") {
         return sendWeb(response, 200, betterCodexWebHostHtml(), "text/html; charset=utf-8", {
           "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; frame-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",

@@ -12,6 +12,7 @@ const productionHome = resolve(process.env.BETTER_CODEX_HOME || join(homedir(), 
 if (mockupHome === productionHome) throw new Error("mockup_home_conflicts_with_production");
 const sessionPath = join(productionHome, "run", "mockup-session.json");
 const sessionToken = randomUUID();
+const mockupToken = randomUUID();
 let restoreInjection = false;
 
 function alive(pid) {
@@ -68,7 +69,6 @@ function restoreInjectionState() {
 
 acquireSession();
 const installedTokenPath = join(productionHome, "run", "token");
-const installedToken = process.env.BETTER_CODEX_TOKEN || (existsSync(installedTokenPath) ? readFileSync(installedTokenPath, "utf8").trim() : "");
 const injectionStatePath = join(productionHome, "run", "injection.json");
 restoreInjection = existsSync(installedTokenPath);
 try {
@@ -89,15 +89,16 @@ const environment = {
   BETTER_CODEX_HOME: mockupHome,
   BETTER_CODEX_DB: join(mockupHome, "better-codex.db"),
   BETTER_CODEX_RUNTIME_PORT: "0",
+  BETTER_CODEX_TOKEN: mockupToken,
   BETTER_CODEX_DISABLE_DELEGATION: "1",
+  BETTER_CODEX_DISABLE_RUNTIME_SESSION_RELAY: "1",
   CODEX_HOME: join(mockupHome, "codex"),
-  ...(installedToken ? { BETTER_CODEX_TOKEN: installedToken } : {}),
 };
 const cdpPort = String(process.env.BETTER_CODEX_CDP_PORT || 9229);
 
 const server = spawn(executable, [...sourceCli, "serve", "--mockup"], { cwd: root, env: environment, stdio: "inherit" });
 const watcher = spawn(executable, [...sourceCli, "watch-inject", cdpPort], { cwd: root, env: environment, stdio: "inherit" });
-const guardian = spawn(process.execPath, [join(root, "scripts", "dev-mockup-restore.mjs"), String(process.pid), root, productionHome, mockupHome, cdpPort, String(restoreInjection), sessionPath, sessionToken, String(server.pid || 0), String(watcher.pid || 0)], { cwd: root, env: { ...process.env, ...(installedToken ? { BETTER_CODEX_TOKEN: installedToken } : {}) }, detached: true, stdio: "ignore" });
+const guardian = spawn(process.execPath, [join(root, "scripts", "dev-mockup-restore.mjs"), String(process.pid), root, productionHome, mockupHome, cdpPort, String(restoreInjection), sessionPath, sessionToken, String(server.pid || 0), String(watcher.pid || 0)], { cwd: root, env: { ...process.env, BETTER_CODEX_TOKEN: mockupToken }, detached: true, stdio: "ignore" });
 if (!guardian.pid) {
   server.kill("SIGTERM");
   watcher.kill("SIGTERM");

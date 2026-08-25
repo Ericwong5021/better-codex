@@ -727,6 +727,11 @@ test("mockup thread imports stay inside mockup issue routing", async () => {
   });
   try {
     await waitForGateway(port, gateway);
+    for (const path of ["/web", "/api/relay/status", "/api/remote-access/status", "/api/session-relay/poll", "/api/sync/status", "/api/update"]) {
+      const response = await request(path, path.endsWith("/poll") ? { method: "POST", body: "{}" } : {});
+      assert.equal(response.status, 400);
+      assert.deepEqual(await response.json(), { error: "mockup_action_not_supported" });
+    }
     const bootstrap = await (await request("/api/bootstrap")).json() as { projects: Array<{ id: string }> };
     const missing = await request(`/api/issues/from-thread?thread_id=${threadId}`);
     assert.equal(missing.status, 404);
@@ -744,6 +749,52 @@ test("mockup thread imports stay inside mockup issue routing", async () => {
     assert.equal(((await resolved.json()) as { id: string }).id, created.id);
     const opened = await request(`/api/issues/${created.id}`);
     assert.equal(opened.status, 200);
+  } finally {
+    await stopGateway(gateway);
+    rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+});
+
+test("active mockup injection lease does not pause production issue dispatch", async () => {
+  const home = mkdtempSync(join(tmpdir(), "better-codex-mockup-isolation-test-"));
+  const port = await availablePort();
+  const token = "mockup-isolation-test-token";
+  const gateway = startGateway(home, port, token);
+  const request = async (path: string, options: RequestInit = {}) => fetch(`http://127.0.0.1:${port}${path}`, {
+    ...options,
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json",
+      ...(options.headers ?? {}),
+    },
+  });
+  try {
+    await waitForGateway(port, gateway);
+    const runtimeBefore = JSON.parse(readFileSync(join(home, "run", "runtime.json"), "utf8")) as { instanceId: string; generation: number; pid: number };
+    writeFileSync(join(home, "run", "mockup-session.json"), JSON.stringify({ pid: process.pid, token: "active-mockup", mockup_home: join(home, "mockup"), restore_injection: true, started_at: new Date().toISOString() }));
+    const projectResponse = await request("/api/projects", { method: "POST", body: JSON.stringify({ name: "Production while mockup runs", workspace_path: home }) });
+    assert.equal(projectResponse.status, 201);
+    const project = await projectResponse.json() as { id: string };
+    const issueResponse = await request("/api/issues", {
+      method: "POST",
+      body: JSON.stringify({ project_id: project.id, title: "Production dispatch", description: "Keep production dispatch active", status: "todo", agent_enabled: true, workspace_path: home }),
+    });
+    assert.equal(issueResponse.status, 201);
+    const issue = await issueResponse.json() as { id: string; version: number };
+    const startResponse = await request(`/api/issues/${issue.id}/start`, { method: "POST", body: JSON.stringify({ version: issue.version }) });
+    assert.equal(startResponse.status, 202);
+    const started = await startResponse.json() as { active_run_status: string };
+    assert.equal(started.active_run_status, "claimed");
+    const store = new Store(join(home, "better-codex.db"));
+    try {
+      const command = store.getActiveSessionCommand(issue.id);
+      assert.equal(command?.kind, "start");
+      assert.equal(command?.status, "pending");
+    } finally {
+      store.close();
+    }
+    const runtimeAfter = JSON.parse(readFileSync(join(home, "run", "runtime.json"), "utf8")) as { instanceId: string; generation: number; pid: number };
+    assert.deepEqual(runtimeAfter, runtimeBefore);
   } finally {
     await stopGateway(gateway);
     rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
