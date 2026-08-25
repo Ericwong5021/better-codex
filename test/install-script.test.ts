@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import test from "node:test";
 
 const installerPath = new URL("../scripts/install.ps1", import.meta.url);
@@ -10,6 +13,64 @@ const betaSource = existsSync(betaInstallerPath) ? readFileSync(betaInstallerPat
 const shellSource = readFileSync(new URL("../scripts/install.sh", import.meta.url), "utf8");
 const betaShellSource = readFileSync(new URL("../scripts/install-beta.sh", import.meta.url), "utf8");
 const previewPromotionSource = readFileSync(new URL("../scripts/promote-preview-feed.sh", import.meta.url), "utf8");
+const root = resolve(new URL("..", import.meta.url).pathname.replace(/^\/(.:)/, "$1"));
+
+test("CLI installation enters the Runtime update transaction and waits for its exact target", async () => {
+  const home = mkdtempSync(join(tmpdir(), "better-codex-runtime-update-"));
+  const targetVersion = "99.99.99-beta.1";
+  const requests: Array<{ method?: string; url?: string; body?: string }> = [];
+  const server = createServer((request, response) => {
+    let body = "";
+    request.on("data", chunk => { body += String(chunk); });
+    request.on("end", () => {
+      requests.push({ method: request.method, url: request.url, body });
+      response.setHeader("content-type", "application/json");
+      if (request.url === "/api/update/install" && request.method === "POST") return void response.writeHead(202).end(JSON.stringify({ accepted: true, update_id: "update-runtime-0001" }));
+      if (request.url === "/api/update?update_id=update-runtime-0001") return void response.end(JSON.stringify({ currentVersion: targetVersion, operation: { id: "update-runtime-0001", status: "COMPLETED", error_code: null } }));
+      response.writeHead(404).end(JSON.stringify({ error: "not_found" }));
+    });
+  });
+  try {
+    await new Promise<void>((resolveListen, reject) => server.listen(0, "127.0.0.1", resolveListen).once("error", reject));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("test_server_address_missing");
+    mkdirSync(join(home, "run"), { recursive: true });
+    writeFileSync(join(home, "run", "token"), "test-token");
+    writeFileSync(join(home, "run", "runtime.json"), JSON.stringify({ port: address.port, pid: process.pid, instanceId: "runtime-test" }));
+    const child = spawn(process.execPath, ["--import", "tsx", "src/cli.ts", "update", "install", "--target-version", targetVersion, "--channel", "preview"], {
+      cwd: root,
+      env: { ...process.env, BETTER_CODEX_HOME: home, BETTER_CODEX_DISABLE_DELEGATION: "1" },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", chunk => { stdout += String(chunk); });
+    child.stderr.on("data", chunk => { stderr += String(chunk); });
+    const exitCode = await new Promise<number | null>((resolveExit, reject) => child.once("error", reject).once("exit", resolveExit));
+    assert.equal(exitCode, 0, `${stdout}\n${stderr}`);
+    const result = JSON.parse(stdout) as { updated?: boolean; currentVersion?: string };
+    assert.equal(result.updated, true);
+    assert.equal(result.currentVersion, targetVersion);
+    const install = requests.find(item => item.url === "/api/update/install");
+    assert.equal(JSON.parse(install?.body || "{}").target_version, targetVersion);
+    assert.ok(requests.some(item => item.url === "/api/update?update_id=update-runtime-0001"));
+  } finally {
+    await new Promise<void>(resolveClose => server.close(() => resolveClose()));
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("live installers route exact upgrades through the Runtime transaction", () => {
+  const cli = readFileSync(new URL("../src/cli.ts", import.meta.url), "utf8");
+  const runtime = readFileSync(new URL("../src/server.ts", import.meta.url), "utf8");
+  assert.match(cli, /request\("\/api\/update\/install"[\s\S]*update\?update_id=/);
+  assert.match(runtime, /requestedTargetVersion[\s\S]*update_target_version_mismatch/);
+  assert.match(shellSource, /"\$WORK_DIR\/better-codex" update install --target-version "\$TARGET_VERSION" --channel "\$DESIRED_CHANNEL"/);
+  assert.match(source, /\$packagedExecutable @\("update", "install", "--target-version", \$targetVersion, "--channel", \$desiredChannel\)/);
+  assert.match(source, /if \(\(Test-Path \$executable\) -and -not \$NoService -and -not \$liveUpgradeCompleted\) \{[\s\S]*Stopping the existing Better Codex helpers/);
+  assert.doesNotMatch(shellSource, /"\$EXISTING_BINARY" service restart/);
+  assert.doesNotMatch(source, /Invoke-BetterCodexCapture \$Executable @\("service", "restart"\)/);
+});
 
 test("Windows installer captures native stderr without turning progress into a terminating error", {
   skip: process.platform !== "win32" ? "requires Windows PowerShell 5.1" : false,
@@ -442,8 +503,8 @@ try {
 
 test("Windows installer opts persistent runtime commands out of success-time job cleanup", () => {
   assert.match(source, /Invoke-BetterCodexCapture \$executable \$setupArguments 120000 \$true/);
-  assert.match(source, /Invoke-BetterCodexCapture \$Executable @\("service", "restart"\) 30000 \$true/);
-  assert.match(source, /Invoke-BetterCodexCapture \$Executable @\("inject", "--launch"\) 60000 \$true/);
+  assert.match(source, /Invoke-BetterCodexCapture \$packagedExecutable @\("update", "install"[\s\S]*660000 \$true/);
+  assert.match(source, /Invoke-BetterCodexCapture \$executable @\("inject", "--launch"\) 60000 \$true/);
   assert.match(source, /Invoke-BetterCodexCapture \$executable @\("service", "install"\) 10000 \$true/);
   assert.match(source, /Invoke-BetterCodexCapture \$executable @\("service", "start"\) 10000 \$true/);
   assert.match(source, /Invoke-BetterCodexCapture \$executable @\("enable"\) 30000 \$true/);

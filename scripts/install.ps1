@@ -437,24 +437,12 @@ function Set-InstalledUpdateChannel([string]$Executable, [string]$Channel) {
 
 function Invoke-ExistingUpgrade([string]$Executable, [string]$TargetVersion, [string]$DesiredChannel, [string]$Operation = "upgrade") {
   try {
+    if (-not $NoService) { return $false }
     Set-InstalledUpdateChannel $Executable $desiredChannel
     $updateResult = Invoke-BetterCodexCapture $Executable @("update") 600000
     if ($updateResult.ExitCode -ne 0) { return $false }
     $updatedVersion = Get-InstalledVersion $Executable
     if (-not (Test-VersionAtLeast $updatedVersion $TargetVersion)) { return $false }
-    if (-not $NoService) {
-      $restartResult = Invoke-BetterCodexCapture $Executable @("service", "restart") 30000 $true
-      if ($restartResult.ExitCode -ne 0) { return $false }
-      Start-Sleep -Milliseconds 800
-      $injectResult = Invoke-BetterCodexCapture $Executable @("inject", "--launch") 60000 $true
-      if ($injectResult.ExitCode -ne 0) { return $false }
-      $launcherResult = Invoke-BetterCodexCapture $Executable @("launcher", "install") 15000
-      if ($launcherResult.ExitCode -ne 0) { return $false }
-      $doctorResult = Invoke-BetterCodexCapture $Executable @("doctor") 20000
-      if ($doctorResult.ExitCode -ne 0) { return $false }
-      $doctor = $doctorResult.Stdout | ConvertFrom-Json
-      if (-not $doctor.ok) { return $false }
-    }
     Set-InstalledUpdateChannel $Executable $desiredChannel
     if ($Operation -eq "repair") {
       Write-Ok "Better Codex v$updatedVersion is ready"
@@ -564,7 +552,7 @@ if ($installAction -eq "current") {
   return
 }
 
-if (-not $localArchive -and $installedVersion) {
+if ($NoService -and -not $localArchive -and $installedVersion) {
   if ($installAction -eq "update") {
     Write-Step "Applying available updates to Better Codex v$installedVersion..."
   } elseif ($installAction -eq "repair") {
@@ -637,6 +625,7 @@ try {
   if ($targetVersion -and $packagedVersion -ne $targetVersion) { throw "Package version $packagedVersion does not match target v$targetVersion. Installation cancelled." }
   if (-not $targetVersion) { $targetVersion = $packagedVersion }
   $desiredChannel = Get-DesiredUpdateChannel $targetVersion $preservePreviewLane
+  $liveUpgradeCompleted = $false
   $backupDirectory = Join-Path $workDirectory "previous"
   New-Item -ItemType Directory -Force -Path $backupDirectory | Out-Null
   $backupExecutable = Join-Path $backupDirectory "better-codex-entrypoint"
@@ -669,11 +658,32 @@ try {
   if ($hadIssueSkill) { Copy-Item -Recurse -Force $issueSkillDirectory $backupIssueSkill }
   if ($hadUpdateKey) { Copy-Item -Force $updatePublicKeyPath $backupUpdateKey }
   if ($hadChannel) { Copy-Item -Force $channelPath $backupChannel }
+  if ($installedVersion -and -not $NoService) {
+    $runtimeWasLive = $false
+    try {
+      $runtimeStatusResult = Invoke-BetterCodexCapture $executable @("status") 15000
+      if ($runtimeStatusResult.ExitCode -eq 0) {
+        $runtimeStatus = $runtimeStatusResult.Stdout | ConvertFrom-Json
+        $runtimeWasLive = $runtimeStatus.runtime.ok -eq $true
+      }
+    } catch {}
+    Write-Step "Applying v$targetVersion through the live Runtime update transaction..."
+    $liveUpdateResult = Invoke-BetterCodexCapture $packagedExecutable @("update", "install", "--target-version", $targetVersion, "--channel", $desiredChannel) 660000 $true
+    if ($liveUpdateResult.ExitCode -eq 0) {
+      $liveUpgradeCompleted = $true
+    } elseif ($previousService.running -or $runtimeWasLive) {
+      if ($hadChannel) { Copy-Item -Force $backupChannel $channelPath } else { Remove-Item -LiteralPath $channelPath -Force -ErrorAction SilentlyContinue }
+      Write-Host ($liveUpdateResult.Output.TrimEnd())
+      throw "Live Runtime update failed; the running installation was left in place."
+    } else {
+      Write-Step "No live Runtime accepted the update; continuing with installation."
+    }
+  }
   try {
   $codexProcesses = if ($NoService) { @() } else { @(Get-CodexProcesses) }
   $preserveCodex = @($codexProcesses).Count -gt 0
   if ($preserveCodex) { Write-Step "Codex will remain open while Better Codex is upgraded..." }
-  if ((Test-Path $executable) -and -not $NoService) {
+  if ((Test-Path $executable) -and -not $NoService -and -not $liveUpgradeCompleted) {
     Write-Step "Stopping the existing Better Codex helpers..."
     $disableResult = Invoke-BetterCodexCapture $executable @("disable") 10000
     if ($disableResult.TimedOut) { Write-Step "The existing injection did not respond; continuing with process cleanup..." }
@@ -682,7 +692,7 @@ try {
   }
   Write-Step "Installing Node.js bundle to $BinDirectory..."
   New-Item -ItemType Directory -Force -Path $BinDirectory | Out-Null
-  if ($hadExecutable -and -not $NoService) { Start-Sleep -Milliseconds 800 }
+  if ($hadExecutable -and -not $NoService -and -not $liveUpgradeCompleted) { Start-Sleep -Milliseconds 800 }
   if ($hadExecutable -and ([IO.Path]::GetFullPath($previousExecutablePath) -eq [IO.Path]::GetFullPath($bundlePath))) { $previousExecutableChanged = $true }
   Copy-Item -Force $packagedExecutable $bundlePath
   Copy-Item -Force $packagedLauncher $launcherPath
@@ -702,12 +712,20 @@ try {
   if ($versionResult.Output) { Write-Host ($versionResult.Output.TrimEnd()) }
   if ($versionResult.ExitCode -ne 0) { throw "Better Codex executable verification failed." }
   if (-not $NoService) {
-    Write-Step "Registering runtime and refreshing Better Codex..."
-    $setupArguments = if ($preserveCodex) { @("setup", "--yes", "--preserve-codex") } else { @("setup", "--yes") }
-    $setupResult = Invoke-BetterCodexCapture $executable $setupArguments 120000 $true
-    if ($setupResult.ExitCode -ne 0) {
-      Write-Host ($setupResult.Output.TrimEnd())
-      throw "Better Codex setup failed with exit code $($setupResult.ExitCode)."
+    if ($liveUpgradeCompleted) {
+      Write-Step "Refreshing launcher and injection after the live Runtime handoff..."
+      $launcherResult = Invoke-BetterCodexCapture $executable @("launcher", "install") 15000
+      if ($launcherResult.ExitCode -ne 0) { throw "Better Codex launcher refresh failed." }
+      $injectResult = Invoke-BetterCodexCapture $executable @("inject", "--launch") 60000 $true
+      if ($injectResult.ExitCode -ne 0) { throw "Better Codex injection refresh failed." }
+    } else {
+      Write-Step "Registering runtime and refreshing Better Codex..."
+      $setupArguments = if ($preserveCodex) { @("setup", "--yes", "--preserve-codex") } else { @("setup", "--yes") }
+      $setupResult = Invoke-BetterCodexCapture $executable $setupArguments 120000 $true
+      if ($setupResult.ExitCode -ne 0) {
+        Write-Host ($setupResult.Output.TrimEnd())
+        throw "Better Codex setup failed with exit code $($setupResult.ExitCode)."
+      }
     }
     Write-Step "Running installation diagnostics..."
     $doctor = $null
@@ -734,10 +752,10 @@ try {
       Write-Host ($doctorOutput.TrimEnd())
       throw "Better Codex installation verification failed."
     }
-    if ($preserveCodex) { Write-Step "Codex remained open. Core, Runtime, Skill, and MCP are upgraded. Reopen Codex from the Better Codex launcher only if the page did not refresh." }
+    if ($preserveCodex -or $liveUpgradeCompleted) { Write-Step "Codex remained open. Core, Runtime, Skill, and MCP are upgraded. Reopen Codex from the Better Codex launcher only if the page did not refresh." }
   }
   $readyVersion = Get-InstalledVersion $executable
-  if (-not $readyVersion -or -not (Test-VersionAtLeast $readyVersion $targetVersion)) {
+  if (-not $readyVersion -or $readyVersion -ne $targetVersion) {
     $displayVersion = if ($readyVersion) { $readyVersion } else { "unknown" }
     throw "Installed Better Codex version $displayVersion does not match target v$targetVersion."
   }
@@ -756,7 +774,7 @@ try {
   }
   Write-Ok "Better Codex v$targetVersion is ready"
   } catch {
-    if ((Test-Path $executable) -and -not $NoService) {
+    if ((Test-Path $executable) -and -not $NoService -and -not $liveUpgradeCompleted) {
       $null = Invoke-BetterCodexCapture $executable @("disable") 10000
       $null = Invoke-BetterCodexCapture $executable @("service", "stop") 10000
       if (-not $hadExecutable) {
@@ -781,7 +799,7 @@ try {
     } else {
       Remove-Item -LiteralPath $channelPath -Force -ErrorAction SilentlyContinue
     }
-    if ($hadExecutable -and -not $NoService) {
+    if ($hadExecutable -and -not $NoService -and -not $liveUpgradeCompleted) {
       if ($previousService.installed) {
         $null = Invoke-BetterCodexCapture $executable @("service", "install") 10000 $true
         if ($previousService.running) { $null = Invoke-BetterCodexCapture $executable @("service", "start") 10000 $true } else { $null = Invoke-BetterCodexCapture $executable @("service", "stop") 10000 }

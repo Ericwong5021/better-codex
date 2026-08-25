@@ -120,6 +120,40 @@ async function request(path: string, options: RequestInit = {}) {
   return value;
 }
 
+async function installRuntimeUpdate(targetVersion: string | undefined, channel: UpdateChannel) {
+  if (targetVersion && !/^\d+\.\d+\.\d+(?:-[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*)?$/.test(targetVersion)) throw new Error("update_target_version_invalid");
+  setUpdateChannel(channel);
+  const idempotencyKey = `cli-${randomUUID()}`;
+  const accepted = await request("/api/update/install", {
+    method: "POST",
+    body: JSON.stringify({ idempotency_key: idempotencyKey, ...(targetVersion ? { target_version: targetVersion } : {}) }),
+    signal: AbortSignal.timeout(30_000),
+  });
+  const updateId = String(accepted.update_id || "");
+  if (!updateId) throw new Error("update_operation_missing");
+  const deadline = Date.now() + 10 * 60 * 1000;
+  let lastError = "update_install_timeout";
+  while (Date.now() < deadline) {
+    try {
+      const state = await request(`/api/update?update_id=${encodeURIComponent(updateId)}`, { signal: AbortSignal.timeout(15_000) });
+      const operation = state.operation as { id?: string; status?: string; error_code?: string | null } | null;
+      if (!operation || operation.id !== updateId) throw new Error("update_operation_missing");
+      if (operation.status === "FAILED" || operation.status === "ROLLED_BACK") throw new Error(`update_terminal:${operation.error_code || operation.status.toLowerCase()}`);
+      if (operation.status === "COMPLETED") {
+        const currentVersion = String(state.currentVersion || "");
+        if (targetVersion && currentVersion !== targetVersion) throw new Error(`update_target_version_mismatch:${targetVersion}:${currentVersion || "unknown"}`);
+        return { updated: true, update_id: updateId, currentVersion, operation };
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "update_install_failed";
+      if (message.startsWith("update_target_version_mismatch:") || message === "update_operation_missing" || message.startsWith("update_terminal:")) throw error;
+      lastError = message;
+    }
+    await new Promise(resolve => setTimeout(resolve, 250));
+  }
+  throw new Error(`update_install_timeout:${lastError}`);
+}
+
 async function health() {
   const runtime = readRuntimeState();
   if (!runtime) throw new Error("runtime_unavailable");
@@ -741,7 +775,7 @@ function print(value: unknown) {
 }
 
 function usage() {
-  console.log("better-codex version | web | relay connect <url> [--pairing-code CODE|--admin-token TOKEN] | relay status|disconnect|doctor | relay user-list|user-add|user-disable|user-enable|user-password-set [--url URL] --admin-token-file PATH | sync connect <url> [--pairing-code CODE|--admin-token TOKEN] [--transport auto|websocket|http] | sync migrate --to <url> --from-admin-token TOKEN | sync status|now|disconnect | update [check|compatibility|rollback|channel stable|preview] [--channel stable|preview] | setup [--yes] | launch [--restart] | launcher install|uninstall|status | mcp install|uninstall|status | doctor | enable | disable | start [--launch] | stop | status | uninstall | data delete [--yes] | inject [--launch] [--port N] | eject [--port N] | service install|repair|uninstall|start|stop|restart|status|logs | project list|create | agent list | issue list|get|create|update|status|open");
+  console.log("better-codex version | web | relay connect <url> [--pairing-code CODE|--admin-token TOKEN] | relay status|disconnect|doctor | relay user-list|user-add|user-disable|user-enable|user-password-set [--url URL] --admin-token-file PATH | sync connect <url> [--pairing-code CODE|--admin-token TOKEN] [--transport auto|websocket|http] | sync migrate --to <url> --from-admin-token TOKEN | sync status|now|disconnect | update [install --target-version VERSION|check|compatibility|rollback|channel stable|preview] [--channel stable|preview] | setup [--yes] | launch [--restart] | launcher install|uninstall|status | mcp install|uninstall|status | doctor | enable | disable | start [--launch] | stop | status | uninstall | data delete [--yes] | inject [--launch] [--port N] | eject [--port N] | service install|repair|uninstall|start|stop|restart|status|logs | project list|create | agent list | issue list|get|create|update|status|open");
 }
 
 function selfCommand() {
@@ -1314,6 +1348,11 @@ async function main() {
   const [command, action, ...args] = commandArguments();
   const delegated = maybeDelegateToActiveCore();
   if (delegated !== null) process.exit(delegated);
+  if (command === "update" && action === "install") {
+    const selected = option(args, "--channel") ?? selectedUpdateChannel();
+    if (!["stable", "preview"].includes(selected)) throw new Error("update_channel_invalid");
+    return print(await installRuntimeUpdate(option(args, "--target-version"), selected as UpdateChannel));
+  }
   if (packagedBuild) installBundledSkills();
   if (command === "apply-update") {
     const versions = activeVersions();

@@ -355,7 +355,7 @@ if [ -n "$CURRENT_VERSION" ] && [ -n "$TARGET_VERSION" ] && version_at_least "$C
   fi
 fi
 
-if [ -n "$CURRENT_VERSION" ] && [ -n "$TARGET_VERSION" ]; then
+if [ "$WITH_SERVICE" != "1" ] && [ -n "$CURRENT_VERSION" ] && [ -n "$TARGET_VERSION" ]; then
   printf '[Better Codex] Better Codex v%s is installed; upgrading to v%s...\n' "$CURRENT_VERSION" "$TARGET_VERSION"
   UPDATE_CHECK=""
   if UPDATE_CHECK="$(run_with_timeout 20 "$EXISTING_BINARY" update check 2>/dev/null)" && printf '%s' "$UPDATE_CHECK" | grep -q '"checked":true'; then
@@ -374,14 +374,6 @@ if [ -n "$CURRENT_VERSION" ] && [ -n "$TARGET_VERSION" ]; then
       UPGRADE_READY=1
       if [ ! -f "$SKILL_DIR/SKILL.md" ] || [ ! -f "$UPDATE_KEY_PATH" ]; then
         UPGRADE_READY=0
-      elif [ "$WITH_SERVICE" = "1" ]; then
-        run_with_timeout 30 "$EXISTING_BINARY" service restart >/dev/null 2>&1 || UPGRADE_READY=0
-        if [ "$UPGRADE_READY" = "1" ]; then
-          sleep 0.8
-          run_with_timeout 60 "$EXISTING_BINARY" inject --launch >/dev/null 2>&1 || UPGRADE_READY=0
-          run_with_timeout 15 "$EXISTING_BINARY" launcher install >/dev/null 2>&1 || UPGRADE_READY=0
-          installation_ready "$EXISTING_BINARY" || UPGRADE_READY=0
-        fi
       fi
       if [ "$UPGRADE_READY" = "1" ]; then
         set_installed_channel "$EXISTING_BINARY" "$DESIRED_CHANNEL"
@@ -416,6 +408,7 @@ HAD_CHANNEL=0
 PREVIOUS_SERVICE_INSTALLED=0
 PREVIOUS_SERVICE_RUNNING=0
 PREVIOUS_INJECTION_ENABLED=1
+LIVE_UPGRADE_COMPLETED=0
 [ -e "$BIN_DIR/better-codex" ] && { cp -p "$BIN_DIR/better-codex" "$BACKUP_DIR/better-codex"; HAD_BINARY=1; }
 [ -e "$BIN_DIR/better-codex.cjs" ] && { cp -p "$BIN_DIR/better-codex.cjs" "$BACKUP_DIR/better-codex.cjs"; HAD_BUNDLE=1; }
 [ -e "$SKILL_DIR" ] && { cp -R "$SKILL_DIR" "$BACKUP_DIR/better-codex-skill"; HAD_SKILL=1; }
@@ -453,7 +446,7 @@ finish_install() {
     [ "$HAD_ISSUE_SKILL" = "1" ] && cp -R "$BACKUP_DIR/better-codex-issue-skill" "$ISSUE_SKILL_DIR"
     if [ "$HAD_UPDATE_KEY" = "1" ]; then cp -p "$BACKUP_DIR/update-public-key.pem" "$UPDATE_KEY_PATH"; else rm -f "$UPDATE_KEY_PATH"; fi
     if [ "$HAD_CHANNEL" = "1" ]; then mkdir -p "$(dirname "$CHANNEL_PATH")"; cp -p "$BACKUP_DIR/channel.json" "$CHANNEL_PATH"; else rm -f "$CHANNEL_PATH"; fi
-    if [ "$WITH_SERVICE" = "1" ] && [ "$HAD_BINARY" = "1" ]; then
+    if [ "$WITH_SERVICE" = "1" ] && [ "$HAD_BINARY" = "1" ] && [ "$LIVE_UPGRADE_COMPLETED" != "1" ]; then
       if [ "$PREVIOUS_SERVICE_INSTALLED" = "1" ]; then
         run_with_timeout 10 "$BIN_DIR/better-codex" service install >/dev/null 2>&1
         if [ "$PREVIOUS_SERVICE_RUNNING" = "1" ]; then run_with_timeout 10 "$BIN_DIR/better-codex" service start >/dev/null 2>&1; else run_with_timeout 10 "$BIN_DIR/better-codex" service stop >/dev/null 2>&1; fi
@@ -544,6 +537,24 @@ if [ -n "$TARGET_VERSION" ] && [ "$PACKAGED_VERSION" != "$TARGET_VERSION" ]; the
   printf '[Better Codex] Package version %s does not match target v%s. Installation cancelled.\n' "$PACKAGED_VERSION" "$TARGET_VERSION" >&2
   exit 1
 fi
+if [ -z "$TARGET_VERSION" ]; then TARGET_VERSION="$PACKAGED_VERSION"; fi
+DESIRED_CHANNEL="$(desired_update_channel "$TARGET_VERSION" "$PRESERVE_PREVIEW_LANE")"
+if [ "$WITH_SERVICE" = "1" ] && [ -n "$CURRENT_VERSION" ]; then
+  RUNTIME_WAS_LIVE=0
+  if RUNTIME_STATUS="$(run_with_timeout 15 "$EXISTING_BINARY" status 2>/dev/null)" && printf '%s' "$RUNTIME_STATUS" | grep -Eq '"ok"[[:space:]]*:[[:space:]]*true'; then RUNTIME_WAS_LIVE=1; fi
+  printf '[Better Codex] Applying v%s through the live Runtime update transaction...\n' "$TARGET_VERSION"
+  LIVE_UPDATE_LOG="$WORK_DIR/live-update.log"
+  if run_with_timeout 660 "$WORK_DIR/better-codex" update install --target-version "$TARGET_VERSION" --channel "$DESIRED_CHANNEL" >"$LIVE_UPDATE_LOG" 2>&1; then
+    LIVE_UPGRADE_COMPLETED=1
+  elif [ "$PREVIOUS_SERVICE_RUNNING" = "1" ] || [ "$RUNTIME_WAS_LIVE" = "1" ]; then
+    if [ "$HAD_CHANNEL" = "1" ]; then mkdir -p "$(dirname "$CHANNEL_PATH")"; cp -p "$BACKUP_DIR/channel.json" "$CHANNEL_PATH"; else rm -f "$CHANNEL_PATH"; fi
+    cat "$LIVE_UPDATE_LOG" >&2
+    echo "Live Runtime update failed; the running installation was left in place." >&2
+    exit 1
+  else
+    printf '[Better Codex] No live Runtime accepted the update; continuing with installation.\n'
+  fi
+fi
 PRESERVE_CODEX=0
 if [ "$WITH_SERVICE" = "1" ] && codex_running; then
   PRESERVE_CODEX=1
@@ -565,20 +576,26 @@ fi
 
 run_with_timeout 10 "$BIN_DIR/better-codex" version
 if [ "$WITH_SERVICE" = "1" ]; then
-  printf '[Better Codex] Registering runtime and refreshing Better Codex...\n'
-  SETUP_LOG="$WORK_DIR/setup.log"
-  if [ "$PRESERVE_CODEX" = "1" ]; then
-    SETUP_ARGUMENTS="--yes --preserve-codex"
+  if [ "$LIVE_UPGRADE_COMPLETED" = "1" ]; then
+    printf '[Better Codex] Refreshing launcher and injection after the live Runtime handoff...\n'
+    run_with_timeout 15 "$BIN_DIR/better-codex" launcher install >/dev/null
+    run_with_timeout 60 "$BIN_DIR/better-codex" inject --launch >/dev/null
   else
-    SETUP_ARGUMENTS="--yes"
-  fi
-  if ! run_with_timeout 120 "$BIN_DIR/better-codex" setup $SETUP_ARGUMENTS >"$SETUP_LOG" 2>&1; then
-    cat "$SETUP_LOG" >&2
-    exit 1
+    printf '[Better Codex] Registering runtime and refreshing Better Codex...\n'
+    SETUP_LOG="$WORK_DIR/setup.log"
+    if [ "$PRESERVE_CODEX" = "1" ]; then
+      SETUP_ARGUMENTS="--yes --preserve-codex"
+    else
+      SETUP_ARGUMENTS="--yes"
+    fi
+    if ! run_with_timeout 120 "$BIN_DIR/better-codex" setup $SETUP_ARGUMENTS >"$SETUP_LOG" 2>&1; then
+      cat "$SETUP_LOG" >&2
+      exit 1
+    fi
   fi
   printf '[Better Codex] Running installation diagnostics...\n'
   DOCTOR_LOG="$WORK_DIR/doctor.log"
-  if [ "$PRESERVE_CODEX" = "1" ]; then
+  if [ "$PRESERVE_CODEX" = "1" ] || [ "$LIVE_UPGRADE_COMPLETED" = "1" ]; then
     DOCTOR_ARGUMENTS="--allow-pending-injection"
   else
     DOCTOR_ARGUMENTS=""
@@ -591,16 +608,15 @@ if [ "$WITH_SERVICE" = "1" ]; then
     cat "$DOCTOR_LOG" >&2
     exit 1
   fi
-  if [ "$PRESERVE_CODEX" = "1" ]; then
+  if [ "$PRESERVE_CODEX" = "1" ] || [ "$LIVE_UPGRADE_COMPLETED" = "1" ]; then
     printf '[Better Codex] Codex remained open. Core, Runtime, Skill, and MCP are upgraded. Reopen Codex from the Better Codex launcher only if the page did not refresh.\n'
   fi
 fi
 READY_VERSION="$(installed_version "$BIN_DIR/better-codex" || true)"
-if [ -n "$TARGET_VERSION" ] && { [ -z "$READY_VERSION" ] || ! version_at_least "$READY_VERSION" "$TARGET_VERSION"; }; then
+if [ -n "$TARGET_VERSION" ] && [ "$READY_VERSION" != "$TARGET_VERSION" ]; then
   printf '[Better Codex] Installed version %s does not match target v%s. Installation failed.\n' "${READY_VERSION:-unknown}" "$TARGET_VERSION" >&2
   exit 1
 fi
-if [ -z "$TARGET_VERSION" ]; then TARGET_VERSION="$PACKAGED_VERSION"; fi
 DESIRED_CHANNEL="$(desired_update_channel "$TARGET_VERSION" "$PRESERVE_PREVIEW_LANE")"
 set_installed_channel "$BIN_DIR/better-codex" "$DESIRED_CHANNEL"
 if [ "${BETTER_CODEX_SKIP_PATH_UPDATE:-0}" != "1" ] && ! printf '%s' ":$PATH:" | grep -q ":$BIN_DIR:"; then

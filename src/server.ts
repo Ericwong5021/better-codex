@@ -1644,7 +1644,9 @@ export function startServer() {
       if (url.pathname === "/api/update/install" && method === "POST") {
         const body = await readBody(request, 1024);
         const requestedKey = typeof body.idempotency_key === "string" ? body.idempotency_key : "";
+        const requestedTargetVersion = typeof body.target_version === "string" ? body.target_version : "";
         if (requestedKey && !/^[A-Za-z0-9_-]{8,200}$/.test(requestedKey)) throw new Error("invalid_idempotency_key");
+        if (requestedTargetVersion && !/^\d+\.\d+\.\d+(?:-[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*)?$/.test(requestedTargetVersion)) throw new Error("update_target_version_invalid");
         const host = worker.sessionHostStatus().host;
         const operation = store.createUpdateOperation({
           idempotencyKey: requestedKey || randomUUID(),
@@ -1666,8 +1668,10 @@ export function startServer() {
             const result = await installGatewayUpdate();
             const updated = result.core.updated || result.compatibility.updated;
             updates = { core: result.core.updated ? result.core.version : null, compatibility: result.compatibility.updated ? result.compatibility.version : null };
+            const installedCoreVersion = result.core.updated ? result.core.version : getGatewayUpdateState().currentVersion;
+            if (requestedTargetVersion && installedCoreVersion !== requestedTargetVersion) throw new Error(`update_target_version_mismatch:${requestedTargetVersion}:${installedCoreVersion}`);
             if (!updated) {
-              store.transitionUpdateOperation(operation.id, "COMPLETED", { targetCoreVersion: coreVersion });
+              store.transitionUpdateOperation(operation.id, "COMPLETED", { targetCoreVersion: installedCoreVersion });
               updateInstallInProgress = false;
               return;
             }
