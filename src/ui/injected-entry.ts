@@ -4067,6 +4067,12 @@ export function install(config: Record<string, any>) {
       control.hidden = state.surface !== "issues" || max < 2;
       range.max = String(max);
       range.value = String(Math.min(max, Math.max(0, Math.round(board.scrollLeft))));
+      if (control.hidden) return;
+      const trackWidth = range.clientWidth;
+      const minimumThumbWidth = Math.min(48, trackWidth);
+      const proportionalThumbWidth = trackWidth * Math.min(1, board.clientWidth / board.scrollWidth);
+      const thumbWidth = max <= trackWidth - minimumThumbWidth ? trackWidth - max : proportionalThumbWidth;
+      range.style.setProperty("--bc-board-scroll-thumb-width", Math.max(minimumThumbWidth, Math.min(trackWidth, thumbWidth)) + "px");
     }
 
     function agentKey(agent) {

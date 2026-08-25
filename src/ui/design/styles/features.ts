@@ -3418,7 +3418,7 @@ export function betterCodexFeatureStylesCss() {
     }
 
     #better-codex-panel .better-codex-board-scroll input::-webkit-slider-thumb {
-      width: 48px;
+      width: var(--bc-board-scroll-thumb-width);
       height: 13px;
       margin-top: -4px;
       appearance: none;
@@ -3438,7 +3438,7 @@ export function betterCodexFeatureStylesCss() {
     }
 
     #better-codex-panel .better-codex-board-scroll input::-moz-range-thumb {
-      width: 48px;
+      width: var(--bc-board-scroll-thumb-width);
       height: 13px;
       border: 1px solid var(--bc-color-hairline);
       border-radius: 999px;
