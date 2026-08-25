@@ -633,6 +633,7 @@ input.on("line", line => {
       }
       if (message.type === "delivery") {
         source.write(`${JSON.stringify({ type: "delivery_ack", delivery_id: message.delivery_id, host_instance_id: message.host_instance_id, sequence: message.sequence, payload_hash: message.payload_hash })}\n`);
+        if (message.kind === "fail") throw new Error(`session_host_command_failed:${JSON.stringify(message.payload)}`);
         if (message.kind === "event" && message.payload.method === "turn/started") source.write(`${JSON.stringify({ type: "begin_handoff", request_id: "continuity-handoff", update_id: updateId, target_runtime_generation: 2, target_version: "1.1.0", deadline_at: new Date(Date.now() + 60_000).toISOString() })}\n`);
       }
       if (message.type === "handoff_response" && message.request_id === "continuity-handoff") sourceSnapshot = message.snapshot;
