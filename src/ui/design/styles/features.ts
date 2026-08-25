@@ -1269,9 +1269,7 @@ export function betterCodexFeatureStylesCss() {
     }
 
     #better-codex-profile-dialog fieldset {
-      display: grid;
       grid-column: 2;
-      gap: 9px;
       min-width: 0;
       margin: 0;
       border: 0;
@@ -1279,6 +1277,7 @@ export function betterCodexFeatureStylesCss() {
     }
 
     #better-codex-profile-dialog legend {
+      margin-bottom: var(--bc-space-3);
       color: var(--bc-color-text-muted);
       padding: 0;
       font-size: var(--bc-text-sm);
@@ -1293,11 +1292,17 @@ export function betterCodexFeatureStylesCss() {
 
     #better-codex-profile-dialog .better-codex-profile-avatar-color {
       display: grid;
+      box-sizing: border-box;
       width: 28px;
       height: 28px;
-      flex: 0 0 28px;
+      min-width: 28px;
+      min-height: 28px;
+      max-width: 28px;
+      max-height: 28px;
+      flex: none;
+      aspect-ratio: 1;
       border: 0;
-      border-radius: 999px;
+      border-radius: 50%;
       place-items: center;
       color: var(--bc-color-on-avatar);
       background: var(--profile-avatar-color);
