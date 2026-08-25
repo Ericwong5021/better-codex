@@ -1,4 +1,4 @@
-import { readdir, realpath, stat } from "node:fs/promises";
+import { mkdir, readdir, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, parse } from "node:path";
 import type { DirectoryBrowserResult } from "./sync-contract.js";
@@ -52,5 +52,23 @@ export async function browseDirectory(value: unknown): Promise<DirectoryBrowserR
   } catch (error) {
     if (error instanceof Error && error.message === "invalid_directory_path") throw error;
     throw new Error("directory_unavailable");
+  }
+}
+
+export async function createDirectory(parentValue: unknown, nameValue: unknown) {
+  if (typeof nameValue !== "string" || nameValue.length > 120 || nameValue.includes("\0")) throw new Error("invalid_directory_name");
+  const name = nameValue.trim();
+  if (!name || name === "." || name === ".." || name.includes("/") || name.includes("\\")) throw new Error("invalid_directory_name");
+  try {
+    const parentPath = await realpath(requestedDirectory(parentValue));
+    if (!(await stat(parentPath)).isDirectory()) throw new Error("directory_unavailable");
+    const path = join(parentPath, name);
+    await mkdir(path);
+    return await realpath(path);
+  } catch (error) {
+    if (error instanceof Error && ["invalid_directory_path", "invalid_directory_name", "directory_unavailable"].includes(error.message)) throw error;
+    const code = error && typeof error === "object" && "code" in error ? String(error.code) : "UNKNOWN";
+    if (code === "EEXIST") throw new Error("directory_already_exists");
+    throw new Error(`directory_creation_failed:${code}`);
   }
 }

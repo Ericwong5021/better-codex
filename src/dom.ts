@@ -643,9 +643,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     localeResources.en["上一级"] = "Up one level";
     localeResources.en["主目录"] = "Home";
     localeResources.en["文件系统"] = "File system";
-    localeResources.en["前往"] = "Go";
     localeResources.en["打开文件夹"] = "Open folder";
-    localeResources.en["选择当前文件夹"] = "Choose this folder";
+    localeResources.en["新建文件夹"] = "New folder";
+    localeResources.en["文件夹名称"] = "Folder name";
+    localeResources.en["请输入文件夹名称"] = "Enter a folder name";
+    localeResources.en["正在创建…"] = "Creating…";
+    localeResources.en["文件夹已存在"] = "A folder with this name already exists";
+    localeResources.en["文件夹名称无效"] = "The folder name is invalid";
+    localeResources.en["无法创建文件夹"] = "Unable to create the folder";
     localeResources.en["正在读取文件夹…"] = "Loading folders…";
     localeResources.en["这个文件夹中没有子文件夹"] = "This folder has no subfolders";
     localeResources.en["仅显示前 500 个文件夹"] = "Showing the first 500 folders";
@@ -1907,22 +1912,26 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #better-codex-project-dialog[data-directory-browser="true"] { width: min(640px,calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow-y: auto; overscroll-behavior: contain; }
         #better-codex-project-dialog .better-codex-directory-browser { display: flex; min-height: 0; flex-direction: column; margin-top: 14px; overflow: hidden; border: 1px solid var(--bc-border); border-radius: var(--bc-radius-md); background: var(--bc-surface); }
         #better-codex-project-dialog .better-codex-directory-browser[hidden] { display: none; }
-        #better-codex-project-dialog .better-codex-directory-toolbar { display: grid; grid-template-columns: 40px minmax(0,1fr) auto; gap: 6px; align-items: center; padding: 8px; border-bottom: 1px solid var(--bc-divider); background: var(--bc-raised); }
+        #better-codex-project-dialog .better-codex-directory-toolbar { display: grid; grid-template-columns: 40px minmax(0,1fr); gap: 6px; align-items: center; padding: 8px; border-bottom: 1px solid var(--bc-divider); background: var(--bc-raised); }
         #better-codex-project-dialog .better-codex-directory-toolbar input { min-width: 0; min-height: 40px; background: var(--bc-control); }
-        #better-codex-project-dialog .better-codex-directory-toolbar button, #better-codex-project-dialog .better-codex-directory-shortcuts button, #better-codex-project-dialog .better-codex-directory-select { display: inline-flex; min-width: 40px; min-height: 40px; align-items: center; justify-content: center; gap: 6px; border: 0; border-radius: var(--bc-radius-sm); color: var(--bc-foreground); background: var(--bc-control); padding: 0 11px; font: inherit; cursor: pointer; }
-        #better-codex-project-dialog .better-codex-directory-toolbar button:disabled, #better-codex-project-dialog .better-codex-directory-shortcuts button:disabled, #better-codex-project-dialog .better-codex-directory-select:disabled { opacity: .45; cursor: not-allowed; }
+        #better-codex-project-dialog .better-codex-directory-toolbar button, #better-codex-project-dialog .better-codex-directory-shortcuts button, #better-codex-project-dialog .better-codex-directory-create button { display: inline-flex; min-width: 40px; min-height: 40px; align-items: center; justify-content: center; gap: 6px; border: 0; border-radius: var(--bc-radius-sm); color: var(--bc-foreground); background: var(--bc-control); padding: 0 11px; font: inherit; cursor: pointer; }
+        #better-codex-project-dialog .better-codex-directory-toolbar button:disabled, #better-codex-project-dialog .better-codex-directory-shortcuts button:disabled, #better-codex-project-dialog .better-codex-directory-create button:disabled { opacity: .45; cursor: not-allowed; }
         #better-codex-project-dialog .better-codex-directory-shortcuts { display: flex; gap: 6px; padding: 7px 8px; border-bottom: 1px solid var(--bc-divider); }
         #better-codex-project-dialog .better-codex-directory-shortcuts button { min-height: 32px; padding: 0 10px; color: var(--bc-muted); background: transparent; font-size: var(--bc-text-sm); }
+        #better-codex-project-dialog .better-codex-directory-shortcuts [data-directory-create] { margin-left: auto; color: var(--bc-foreground); }
+        #better-codex-project-dialog .better-codex-directory-create { display: grid; grid-template-columns: minmax(0,1fr) auto auto; gap: 6px; padding: 8px; border-bottom: 1px solid var(--bc-divider); background: var(--bc-raised); }
+        #better-codex-project-dialog .better-codex-directory-create[hidden] { display: none; }
+        #better-codex-project-dialog .better-codex-directory-create input { min-width: 0; }
+        #better-codex-project-dialog .better-codex-directory-create [data-directory-create-confirm] { color: var(--bc-primary-foreground); background: var(--bc-primary); }
         #better-codex-project-dialog .better-codex-directory-list { height: min(300px,34dvh); min-height: 160px; overflow-y: auto; overscroll-behavior: contain; padding: 6px; }
         #better-codex-project-dialog .better-codex-directory-row { display: grid; grid-template-columns: 20px minmax(0,1fr) 16px; width: 100%; min-height: 40px; align-items: center; gap: 8px; border: 0; border-radius: var(--bc-radius-sm); color: var(--bc-foreground); background: transparent; padding: 0 10px; font: inherit; text-align: left; cursor: pointer; }
         #better-codex-project-dialog .better-codex-directory-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         #better-codex-project-dialog .better-codex-directory-row > svg:last-child { color: var(--bc-muted); }
         #better-codex-project-dialog .better-codex-directory-state { display: flex; height: 100%; min-height: 148px; align-items: center; justify-content: center; color: var(--bc-muted); padding: 0 18px; font-size: var(--bc-text-sm); text-align: center; }
-        #better-codex-project-dialog .better-codex-directory-footer { display: flex; min-height: 56px; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid var(--bc-divider); padding: 8px; }
-        #better-codex-project-dialog .better-codex-directory-footer [data-directory-status] { min-width: 0; overflow-wrap: anywhere; color: var(--bc-muted); font-size: var(--bc-text-sm); font-weight: 400; }
-        #better-codex-project-dialog .better-codex-directory-select { flex: 0 0 auto; color: var(--bc-primary-foreground); background: var(--bc-primary); }
-        @media (hover:hover) { #better-codex-project-dialog .better-codex-directory-row:hover, #better-codex-project-dialog .better-codex-directory-toolbar button:hover, #better-codex-project-dialog .better-codex-directory-shortcuts button:hover { background: var(--bc-hover); } }
-        @media (max-width: 480px) { #better-codex-project-dialog[data-directory-browser="true"] { width: calc(100vw - 20px); max-height: calc(100dvh - 20px); } #better-codex-project-dialog[data-directory-browser="true"] form { padding: 18px; } #better-codex-project-dialog .better-codex-directory-toolbar { grid-template-columns: 40px minmax(0,1fr); } #better-codex-project-dialog .better-codex-directory-toolbar [data-directory-go] { grid-column: 1 / -1; } #better-codex-project-dialog .better-codex-directory-footer { align-items: stretch; flex-direction: column; } #better-codex-project-dialog .better-codex-directory-select { width: 100%; } }
+        #better-codex-project-dialog [data-directory-status] { display: block; border-top: 1px solid var(--bc-divider); padding: 7px 10px; overflow-wrap: anywhere; color: var(--bc-muted); font-size: var(--bc-text-sm); font-weight: 400; }
+        #better-codex-project-dialog [data-directory-status]:empty { display: none; }
+        @media (hover:hover) { #better-codex-project-dialog .better-codex-directory-row:hover, #better-codex-project-dialog .better-codex-directory-toolbar button:hover, #better-codex-project-dialog .better-codex-directory-shortcuts button:hover, #better-codex-project-dialog .better-codex-directory-create button:not([data-directory-create-confirm]):hover { background: var(--bc-hover); } }
+        @media (max-width: 480px) { #better-codex-project-dialog[data-directory-browser="true"] { width: calc(100vw - 20px); max-height: calc(100dvh - 20px); } #better-codex-project-dialog[data-directory-browser="true"] form { padding: 18px; } }
         #better-codex-confirm { position: fixed; inset: 0; box-sizing: border-box; width: min(420px,calc(100vw - 40px)); margin: auto; overflow: hidden; border: 1px solid var(--bc-border); border-radius: 13px; color: var(--bc-foreground); background: var(--bc-raised); padding: 0; box-shadow: var(--bc-floating-shadow); font-family: var(--bc-font-ui); }
         #better-codex-confirm::backdrop { background: var(--bc-scrim); backdrop-filter: blur(4px); }
         #better-codex-confirm .better-codex-confirm-body { padding: 20px 20px 17px; }
@@ -6266,7 +6275,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       dialog.id = "better-codex-project-dialog";
       dialog.setAttribute(OWNED, "true");
       dialog.dataset.directoryBrowser = REMOTE ? "true" : "false";
-      const directoryBrowser = REMOTE ? '<section class="better-codex-directory-browser" aria-label="' + te("浏览本机文件夹") + '"><div class="better-codex-directory-toolbar"><button type="button" data-directory-up aria-label="' + te("上一级") + '" disabled>' + icon("send") + '</button><input data-directory-path maxlength="4096" aria-label="' + te("目录路径") + '" autocomplete="off" spellcheck="false"><button type="button" data-directory-go>' + te("前往") + '</button></div><div class="better-codex-directory-shortcuts"><button type="button" data-directory-home>' + icon("folder") + '<span>' + te("主目录") + '</span></button><button type="button" data-directory-root>' + icon("folder") + '<span>' + te("文件系统") + '</span></button></div><div class="better-codex-directory-list" aria-label="' + te("浏览本机文件夹") + '"></div><div class="better-codex-directory-footer"><span data-directory-status aria-live="polite"></span><button class="better-codex-directory-select" type="button" data-directory-select disabled>' + te("选择当前文件夹") + '</button></div></section>' : "";
+      const directoryBrowser = REMOTE ? '<section class="better-codex-directory-browser" aria-label="' + te("浏览本机文件夹") + '"><div class="better-codex-directory-toolbar"><button type="button" data-directory-up aria-label="' + te("上一级") + '" disabled>' + icon("send") + '</button><input data-directory-path maxlength="4096" aria-label="' + te("目录路径") + '" autocomplete="off" spellcheck="false"></div><div class="better-codex-directory-shortcuts"><button type="button" data-directory-home>' + icon("folder") + '<span>' + te("主目录") + '</span></button><button type="button" data-directory-root>' + icon("folder") + '<span>' + te("文件系统") + '</span></button><button type="button" data-directory-create disabled>' + icon("plus") + '<span>' + te("新建文件夹") + '</span></button></div><div class="better-codex-directory-create" hidden><input data-directory-create-name maxlength="120" aria-label="' + te("文件夹名称") + '" placeholder="' + te("文件夹名称") + '" autocomplete="off" spellcheck="false"><button type="button" data-directory-create-cancel>' + te("取消") + '</button><button type="button" data-directory-create-confirm>' + te("创建") + '</button></div><div class="better-codex-directory-list" aria-label="' + te("浏览本机文件夹") + '"></div><span data-directory-status aria-live="polite"></span></section>' : "";
       dialog.innerHTML = '<form><h2>' + te("创建 Codex 项目") + '</h2><p>' + te("创建后会加入 Codex 的项目列表。") + '</p><label><span>' + te("项目名称") + '</span><input name="name" maxlength="120" autocomplete="off" required></label><label><span>' + te("项目文件夹") + '</span><span class="better-codex-project-folder-field"><input name="workspace_path" maxlength="4096" placeholder="' + te("选择本地项目文件夹") + '" autocomplete="off" spellcheck="false" readonly required><button type="button" data-project-choose-folder>' + te("选择文件夹") + '</button></span></label>' + directoryBrowser + '<output hidden></output><div class="better-codex-project-dialog-actions"><button type="button" data-project-create-cancel>' + te("取消") + '</button><button type="submit" disabled>' + te("创建项目") + '</button></div></form>';
       let directoryRequest = 0;
       let currentDirectory = null;
@@ -6279,10 +6288,14 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const directoryPath = dialog.querySelector("[data-directory-path]");
       const directoryList = dialog.querySelector(".better-codex-directory-list");
       const directoryStatus = dialog.querySelector("[data-directory-status]");
-      const directorySelect = dialog.querySelector("[data-directory-select]");
       const directoryUp = dialog.querySelector("[data-directory-up]");
       const directoryHome = dialog.querySelector("[data-directory-home]");
       const directoryRoot = dialog.querySelector("[data-directory-root]");
+      const directoryCreate = dialog.querySelector("[data-directory-create]");
+      const directoryCreateForm = dialog.querySelector(".better-codex-directory-create");
+      const directoryCreateName = dialog.querySelector("[data-directory-create-name]");
+      const directoryCreateCancel = dialog.querySelector("[data-directory-create-cancel]");
+      const directoryCreateConfirm = dialog.querySelector("[data-directory-create-confirm]");
       const finish = () => { directoryRequest += 1; dialog.close(); dialog.remove(); };
       dialog.querySelector("[data-project-create-cancel]").addEventListener("click", finish);
       const applyWorkspacePath = workspacePath => {
@@ -6308,7 +6321,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         directoryHome.dataset.path = directory.home_path;
         directoryRoot.disabled = directory.root_path === directory.path;
         directoryRoot.dataset.path = directory.root_path;
-        directorySelect.disabled = false;
+        directoryCreate.disabled = false;
         directoryStatus.textContent = directory.truncated ? t("仅显示前 500 个文件夹") : "";
         directoryList.innerHTML = directory.directories.length
           ? directory.directories.map(entry => '<button class="better-codex-directory-row" type="button" data-directory-entry="' + escapeHtml(entry.path) + '" title="' + escapeHtml(entry.path) + '" aria-label="' + te("打开文件夹") + ': ' + escapeHtml(entry.name) + '">' + icon("folder") + '<span>' + escapeHtml(entry.name) + '</span>' + icon("chevron") + '</button>').join("")
@@ -6318,7 +6331,9 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const request = ++directoryRequest;
         directoryPanel.hidden = false;
         directoryPanel.setAttribute("aria-busy", "true");
-        directorySelect.disabled = true;
+        directoryCreate.disabled = true;
+        directoryCreateForm.hidden = true;
+        directoryCreateName.value = "";
         directoryStatus.textContent = "";
         directoryList.innerHTML = '<span class="better-codex-directory-state">' + te("正在读取文件夹…") + '</span>';
         try {
@@ -6335,7 +6350,6 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           currentDirectory = null;
           directoryList.innerHTML = '<span class="better-codex-directory-state">' + escapeHtml(directoryErrorLabel(error)) + '</span>';
           directoryStatus.textContent = directoryErrorLabel(error);
-          directorySelect.disabled = true;
         } finally {
           if (request === directoryRequest && dialog.isConnected) directoryPanel.removeAttribute("aria-busy");
         }
@@ -6361,6 +6375,43 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       };
       dialog.querySelector("[data-project-choose-folder]").addEventListener("click", () => { void chooseFolder(); });
       if (REMOTE) {
+        const directoryCreationErrorLabel = error => {
+          const value = error instanceof Error ? error.message : "";
+          if (value === "directory_already_exists") return t("文件夹已存在");
+          if (value === "invalid_directory_name") return t("文件夹名称无效");
+          if (value === "incompatible_protocol") return t("本机 Runtime 版本不支持远程文件夹浏览");
+          return t("无法创建文件夹");
+        };
+        const createNewDirectory = async () => {
+          const parentPath = currentDirectory?.path || "";
+          const name = directoryCreateName.value.trim();
+          if (!name) {
+            directoryStatus.textContent = t("请输入文件夹名称");
+            directoryCreateName.focus();
+            return;
+          }
+          directoryCreateName.disabled = true;
+          directoryCreateCancel.disabled = true;
+          directoryCreateConfirm.disabled = true;
+          directoryCreateConfirm.textContent = t("正在创建…");
+          directoryStatus.textContent = "";
+          try {
+            const result = await api("/api/system/directories/create", { method: "POST", body: JSON.stringify({ parent_path: parentPath, name }), timeoutMs: 30000 });
+            const command = result.command_id ? await waitForRemoteCommand(result.command_id, 30000) : null;
+            if (command && command.status !== "applied") throw new Error(command.error || "command_rejected");
+            const workspacePath = String(command?.payload?.workspace_path || result.workspace_path || "");
+            if (!workspacePath) throw new Error("invalid_directory_response");
+            applyWorkspacePath(workspacePath);
+          } catch (error) {
+            reportUnexpectedError(error, { source: "directory_create", parent_path: parentPath, directory_name: name });
+            directoryStatus.textContent = directoryCreationErrorLabel(error);
+          } finally {
+            directoryCreateName.disabled = false;
+            directoryCreateCancel.disabled = false;
+            directoryCreateConfirm.disabled = false;
+            directoryCreateConfirm.textContent = t("创建");
+          }
+        };
         directoryList.addEventListener("click", event => {
           const row = event.target.closest("[data-directory-entry]");
           if (row) void loadRemoteDirectory(row.dataset.directoryEntry);
@@ -6368,13 +6419,29 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         directoryUp.addEventListener("click", () => { if (directoryUp.dataset.path) void loadRemoteDirectory(directoryUp.dataset.path); });
         directoryHome.addEventListener("click", () => { if (directoryHome.dataset.path) void loadRemoteDirectory(directoryHome.dataset.path); });
         directoryRoot.addEventListener("click", () => { if (directoryRoot.dataset.path) void loadRemoteDirectory(directoryRoot.dataset.path); });
-        dialog.querySelector("[data-directory-go]").addEventListener("click", () => { void loadRemoteDirectory(directoryPath.value); });
         directoryPath.addEventListener("keydown", event => {
           if (event.key !== "Enter") return;
           event.preventDefault();
           void loadRemoteDirectory(directoryPath.value);
         });
-        directorySelect.addEventListener("click", () => { if (currentDirectory?.path) applyWorkspacePath(currentDirectory.path); });
+        directoryCreate.addEventListener("click", () => {
+          directoryCreateForm.hidden = false;
+          directoryStatus.textContent = "";
+          directoryCreateName.focus();
+        });
+        directoryCreateCancel.addEventListener("click", () => {
+          directoryCreateForm.hidden = true;
+          directoryCreateName.value = "";
+          directoryStatus.textContent = "";
+          directoryCreate.focus();
+        });
+        directoryCreateConfirm.addEventListener("click", () => { void createNewDirectory(); });
+        directoryCreateName.addEventListener("keydown", event => {
+          if (event.key === "Escape") return void directoryCreateCancel.click();
+          if (event.key !== "Enter") return;
+          event.preventDefault();
+          void createNewDirectory();
+        });
       }
       dialog.querySelector("form").addEventListener("submit", event => {
         event.preventDefault();

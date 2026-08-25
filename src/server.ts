@@ -32,7 +32,7 @@ import { RuntimeRelayClient } from "./runtime-relay-client.js";
 import { readRelayConfiguration, removeRelayConfiguration, type RelayConfiguration } from "./relay-config.js";
 import { requestFingerprint, RequestReceiptStore, type RequestReceiptResponse } from "./request-receipts.js";
 import { disableProjectionSync, readRemoteMode } from "./remote-mode.js";
-import { browseDirectory } from "./directory-browser.js";
+import { browseDirectory, createDirectory } from "./directory-browser.js";
 import { featureManifest } from "./features.js";
 import { webCommandTarget } from "./command-contract.js";
 import { storageHealth } from "./storage-health.js";
@@ -796,6 +796,7 @@ export function startServer() {
     },
     chooseNativeDirectory,
     browseDirectory,
+    createDirectory,
     (issueId, action) => worker.applyThreadAction(issueId, action),
     (projectId, agentId, message) => {
       if (!worker.sendProjectPlanningMessage(projectId, agentId, message)) throw new Error("project_planning_unavailable");
@@ -1690,6 +1691,10 @@ export function startServer() {
       if (url.pathname === "/api/system/directories" && method === "POST") {
         const body = await readBody(request, 8192);
         return sendJson(response, 200, await browseDirectory(body.path));
+      }
+      if (url.pathname === "/api/system/directories/create" && method === "POST") {
+        const body = await readBody(request, 8192);
+        return sendJson(response, 200, { workspace_path: await createDirectory(body.parent_path, body.name) });
       }
       if (path[0] === "api" && path[1] === "projects" && path[2] && path.length === 3 && method === "GET") {
         const project = store.getProject(decodeURIComponent(path[2]));

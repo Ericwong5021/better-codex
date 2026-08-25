@@ -283,6 +283,7 @@ function cleanCommandPayload(operation: RemoteCommandOperation, value: unknown) 
       : operation === "issue.queue.delete" ? ["request_id"]
       : operation === "issue.move" ? ["status", "before_id"]
       : operation === "project.browse_directory" ? ["path"]
+      : operation === "project.create_directory" ? ["parent_path", "name"]
       : operation === "project.create" ? ["name", "workspace_path"]
       : operation === "project.overview" ? ["agent_id", "feedback"]
       : operation === "project.planning.reply" ? ["agent_id", "message"]
@@ -325,6 +326,7 @@ function cleanCommandPayload(operation: RemoteCommandOperation, value: unknown) 
   if (source.feedback !== undefined) payload.feedback = cleanString(source.feedback, 4_000).trim();
   if (source.name !== undefined) payload.name = cleanString(source.name, 120, false).trim();
   if (source.path !== undefined) payload.path = cleanString(source.path, 4096).trim();
+  if (source.parent_path !== undefined) payload.parent_path = cleanString(source.parent_path, 4096, false).trim();
   if (source.workspace_path !== undefined) payload.workspace_path = cleanString(source.workspace_path, 4096, false).trim();
   if (source.files !== undefined) {
     if (!Array.isArray(source.files) || source.files.length > 4) throw new Error("invalid_files");
@@ -351,6 +353,7 @@ function cleanCommandPayload(operation: RemoteCommandOperation, value: unknown) 
   if (operation === "project.create" && (!payload.name || !payload.workspace_path)) throw new Error("invalid_command_payload");
   if (operation === "project.planning.reply" && !payload.message) throw new Error("message_required");
   if (operation === "project.browse_directory" && typeof payload.path !== "string") throw new Error("invalid_command_payload");
+  if (operation === "project.create_directory" && (!payload.parent_path || !payload.name)) throw new Error("invalid_command_payload");
   if (operation === "settings.auto-dispatch" && typeof source.enabled !== "boolean") throw new Error("invalid_auto_dispatch");
   return payload;
 }
@@ -892,7 +895,7 @@ export class HubStore {
     if (!remoteCommandOperations.includes(input.operation as never)) throw new Error("invalid_command_operation");
     const operation = input.operation as RemoteCommandOperation;
     const settingOperation = operation === "settings.auto-dispatch";
-    const directoryOperation = operation === "project.pick_directory" || operation === "project.browse_directory";
+    const directoryOperation = operation === "project.pick_directory" || operation === "project.browse_directory" || operation === "project.create_directory";
     const projectOperation = operation.startsWith("project.");
     const createOperation = operation === "issue.create" || operation === "project.create" || directoryOperation;
     const commandId = input.command_id === undefined ? randomUUID() : cleanString(input.command_id, 200, false);
@@ -929,10 +932,10 @@ export class HubStore {
     if (operation === "issue.stop" && !running) throw new Error("issue_not_running");
     if (payload.agent_id && !this.board().agents.some(agent => agent.id === payload.agent_id)) throw new Error("agent_not_found");
     const deviceId = this.writerDeviceId(settingOperation || createOperation ? "" : entityId, entityType);
-    if (operation === "issue.delete" || operation === "project.delete" || operation === "project.browse_directory" || operation === "issue.queue.update" || operation === "issue.queue.send" || operation === "issue.queue.delete" || operation === "issue.regenerate-title") {
+    if (operation === "issue.delete" || operation === "project.delete" || operation === "project.browse_directory" || operation === "project.create_directory" || operation === "issue.queue.update" || operation === "issue.queue.send" || operation === "issue.queue.delete" || operation === "issue.regenerate-title") {
       const runtimeRow = this.db.prepare("SELECT payload_json FROM runtime_projection WHERE device_id = ?").get(deviceId) as { payload_json: string } | undefined;
       const protocolVersion = runtimeRow ? (JSON.parse(runtimeRow.payload_json) as RuntimeProjection).protocol_version : null;
-      const incompatible = operation === "project.delete" || operation === "project.browse_directory" || operation === "issue.queue.update" || operation === "issue.queue.send" || operation === "issue.queue.delete" || operation === "issue.regenerate-title"
+      const incompatible = operation === "project.delete" || operation === "project.browse_directory" || operation === "project.create_directory" || operation === "issue.queue.update" || operation === "issue.queue.send" || operation === "issue.queue.delete" || operation === "issue.regenerate-title"
         ? protocolVersion !== syncProtocolVersion
         : protocolVersion !== syncProtocolVersion && protocolVersion !== previousSyncProtocolVersion;
       if (incompatible) throw new Error("incompatible_protocol");
@@ -978,7 +981,7 @@ export class HubStore {
         const deliveryId = randomUUID();
         const dispatchedAt = now();
         const operation = this.db.prepare("SELECT operation FROM remote_commands WHERE command_id = ?").get(row.command_id) as { operation: RemoteCommandOperation } | undefined;
-        const dispatchExpiresAt = after(operation?.operation === "project.pick_directory" || operation?.operation === "project.browse_directory" ? 300_000 : 90_000);
+        const dispatchExpiresAt = after(operation?.operation === "project.pick_directory" || operation?.operation === "project.browse_directory" || operation?.operation === "project.create_directory" ? 300_000 : 90_000);
         const result = this.db.prepare("UPDATE remote_commands SET status = 'dispatched', delivery_id = ?, dispatched_at = ?, dispatch_expires_at = ?, attempt_count = COALESCE(attempt_count, 0) + 1 WHERE command_id = ? AND device_id = ? AND status = 'pending'").run(deliveryId, dispatchedAt, dispatchExpiresAt, row.command_id, deviceId);
         if (result.changes !== 1) continue;
         this.recordCommandChange(row.command_id, "dispatched", deliveryId);
@@ -1030,7 +1033,7 @@ export class HubStore {
     if (!(["applied", "rejected", "conflict"] as const).includes(ack.status)) throw new Error("invalid_command_status");
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      if (ack.status === "applied" && row.operation === "project.pick_directory") {
+      if (ack.status === "applied" && (row.operation === "project.pick_directory" || row.operation === "project.create_directory")) {
         const result = ack.result;
         if (!result || typeof result !== "object" || Array.isArray(result) || Object.keys(result).some(key => key !== "workspace_path")) throw new Error("invalid_command_result");
         const workspacePath = cleanString("workspace_path" in result ? result.workspace_path ?? "" : "", 4096).trim();
@@ -1053,7 +1056,7 @@ export class HubStore {
           this.db.prepare("DELETE FROM conversations WHERE issue_id = ?").run(issue.entity_id);
         }
       }
-      if (ack.status === "applied" && row.operation !== "settings.auto-dispatch" && row.operation !== "project.pick_directory" && row.operation !== "project.browse_directory" && row.operation !== "project.delete" && row.operation !== "issue.delete") {
+      if (ack.status === "applied" && row.operation !== "settings.auto-dispatch" && row.operation !== "project.pick_directory" && row.operation !== "project.browse_directory" && row.operation !== "project.create_directory" && row.operation !== "project.delete" && row.operation !== "issue.delete") {
         const entityType: SyncEntityType = row.operation.startsWith("project.") ? "project" : "issue";
         const projectionId = row.operation === "project.create" && ack.projection && "id" in ack.projection ? ack.projection.id : row.entity_id;
         const projection = cleanProjection(entityType, projectionId, ack.projection);
