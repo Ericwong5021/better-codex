@@ -32,6 +32,8 @@ import {
   Database,
   Download,
   Ellipsis,
+  Eye,
+  EyeOff,
   ExternalLink,
   FileCode2,
   FlaskConical,
@@ -88,6 +90,8 @@ const lucideIcons = Object.fromEntries(Object.entries({
   plus: Plus,
   send: ArrowUp,
   more: Ellipsis,
+  eye: Eye,
+  eyeOff: EyeOff,
   filter: ListFilter,
   display: SlidersHorizontal,
   board: Columns3,
@@ -644,6 +648,8 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     localeResources.en["主目录"] = "Home";
     localeResources.en["文件系统"] = "File system";
     localeResources.en["打开文件夹"] = "Open folder";
+    localeResources.en["显示隐藏目录"] = "Show hidden folders";
+    localeResources.en["不显示隐藏目录"] = "Hide hidden folders";
     localeResources.en["新建文件夹"] = "New folder";
     localeResources.en["文件夹名称"] = "Folder name";
     localeResources.en["请输入文件夹名称"] = "Enter a folder name";
@@ -653,6 +659,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     localeResources.en["无法创建文件夹"] = "Unable to create the folder";
     localeResources.en["正在读取文件夹…"] = "Loading folders…";
     localeResources.en["这个文件夹中没有子文件夹"] = "This folder has no subfolders";
+    localeResources.en["隐藏目录已屏蔽"] = "Hidden folders are hidden";
     localeResources.en["仅显示前 500 个文件夹"] = "Showing the first 500 folders";
     localeResources.en["无法读取文件夹"] = "Unable to read this folder";
     localeResources.en["本机 Runtime 版本不支持远程文件夹浏览"] = "The local Runtime does not support remote folder browsing";
@@ -1918,6 +1925,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #better-codex-project-dialog .better-codex-directory-toolbar button:disabled, #better-codex-project-dialog .better-codex-directory-shortcuts button:disabled, #better-codex-project-dialog .better-codex-directory-create button:disabled { opacity: .45; cursor: not-allowed; }
         #better-codex-project-dialog .better-codex-directory-shortcuts { display: flex; gap: 6px; padding: 7px 8px; border-bottom: 1px solid var(--bc-divider); }
         #better-codex-project-dialog .better-codex-directory-shortcuts button { min-height: 32px; padding: 0 10px; color: var(--bc-muted); background: transparent; font-size: var(--bc-text-sm); }
+        #better-codex-project-dialog .better-codex-directory-shortcuts [data-directory-hidden][aria-pressed="true"] { color: var(--bc-foreground); background: var(--bc-selected); }
         #better-codex-project-dialog .better-codex-directory-shortcuts [data-directory-create] { margin-left: auto; color: var(--bc-foreground); }
         #better-codex-project-dialog .better-codex-directory-create { display: grid; grid-template-columns: minmax(0,1fr) auto auto; gap: 6px; padding: 8px; border-bottom: 1px solid var(--bc-divider); background: var(--bc-raised); }
         #better-codex-project-dialog .better-codex-directory-create[hidden] { display: none; }
@@ -1931,7 +1939,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         #better-codex-project-dialog [data-directory-status] { display: block; border-top: 1px solid var(--bc-divider); padding: 7px 10px; overflow-wrap: anywhere; color: var(--bc-muted); font-size: var(--bc-text-sm); font-weight: 400; }
         #better-codex-project-dialog [data-directory-status]:empty { display: none; }
         @media (hover:hover) { #better-codex-project-dialog .better-codex-directory-row:hover, #better-codex-project-dialog .better-codex-directory-toolbar button:hover, #better-codex-project-dialog .better-codex-directory-shortcuts button:hover, #better-codex-project-dialog .better-codex-directory-create button:not([data-directory-create-confirm]):hover { background: var(--bc-hover); } }
-        @media (max-width: 480px) { #better-codex-project-dialog[data-directory-browser="true"] { width: calc(100vw - 20px); max-height: calc(100dvh - 20px); } #better-codex-project-dialog[data-directory-browser="true"] form { padding: 18px; } }
+        @media (max-width: 480px) { #better-codex-project-dialog[data-directory-browser="true"] { width: calc(100vw - 20px); max-height: calc(100dvh - 20px); } #better-codex-project-dialog[data-directory-browser="true"] form { padding: 18px; } #better-codex-project-dialog .better-codex-directory-shortcuts { gap: 4px; padding-inline: 6px; } #better-codex-project-dialog .better-codex-directory-shortcuts button span { white-space: nowrap; } #better-codex-project-dialog .better-codex-directory-shortcuts [data-directory-home] svg, #better-codex-project-dialog .better-codex-directory-shortcuts [data-directory-root] svg { display: none; } #better-codex-project-dialog .better-codex-directory-shortcuts [data-directory-hidden] { width: 32px; min-width: 32px; padding: 0; } #better-codex-project-dialog .better-codex-directory-shortcuts [data-directory-hidden] span { display: none; } }
         #better-codex-confirm { position: fixed; inset: 0; box-sizing: border-box; width: min(420px,calc(100vw - 40px)); margin: auto; overflow: hidden; border: 1px solid var(--bc-border); border-radius: 13px; color: var(--bc-foreground); background: var(--bc-raised); padding: 0; box-shadow: var(--bc-floating-shadow); font-family: var(--bc-font-ui); }
         #better-codex-confirm::backdrop { background: var(--bc-scrim); backdrop-filter: blur(4px); }
         #better-codex-confirm .better-codex-confirm-body { padding: 20px 20px 17px; }
@@ -6275,10 +6283,11 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       dialog.id = "better-codex-project-dialog";
       dialog.setAttribute(OWNED, "true");
       dialog.dataset.directoryBrowser = REMOTE ? "true" : "false";
-      const directoryBrowser = REMOTE ? '<section class="better-codex-directory-browser" aria-label="' + te("浏览本机文件夹") + '"><div class="better-codex-directory-toolbar"><button type="button" data-directory-up aria-label="' + te("上一级") + '" disabled>' + icon("send") + '</button><input data-directory-path maxlength="4096" aria-label="' + te("目录路径") + '" autocomplete="off" spellcheck="false"></div><div class="better-codex-directory-shortcuts"><button type="button" data-directory-home>' + icon("folder") + '<span>' + te("主目录") + '</span></button><button type="button" data-directory-root>' + icon("folder") + '<span>' + te("文件系统") + '</span></button><button type="button" data-directory-create disabled>' + icon("plus") + '<span>' + te("新建文件夹") + '</span></button></div><div class="better-codex-directory-create" hidden><input data-directory-create-name maxlength="120" aria-label="' + te("文件夹名称") + '" placeholder="' + te("文件夹名称") + '" autocomplete="off" spellcheck="false"><button type="button" data-directory-create-cancel>' + te("取消") + '</button><button type="button" data-directory-create-confirm>' + te("创建") + '</button></div><div class="better-codex-directory-list" aria-label="' + te("浏览本机文件夹") + '"></div><span data-directory-status aria-live="polite"></span></section>' : "";
+      const directoryBrowser = REMOTE ? '<section class="better-codex-directory-browser" aria-label="' + te("浏览本机文件夹") + '"><div class="better-codex-directory-toolbar"><button type="button" data-directory-up aria-label="' + te("上一级") + '" disabled>' + icon("send") + '</button><input data-directory-path maxlength="4096" aria-label="' + te("目录路径") + '" autocomplete="off" spellcheck="false"></div><div class="better-codex-directory-shortcuts"><button type="button" data-directory-home>' + icon("folder") + '<span>' + te("主目录") + '</span></button><button type="button" data-directory-root>' + icon("folder") + '<span>' + te("文件系统") + '</span></button><button type="button" data-directory-hidden aria-pressed="false" aria-label="' + te("显示隐藏目录") + '" title="' + te("显示隐藏目录") + '" disabled>' + icon("eyeOff") + '<span>' + te("显示隐藏目录") + '</span></button><button type="button" data-directory-create disabled>' + icon("plus") + '<span>' + te("新建文件夹") + '</span></button></div><div class="better-codex-directory-create" hidden><input data-directory-create-name maxlength="120" aria-label="' + te("文件夹名称") + '" placeholder="' + te("文件夹名称") + '" autocomplete="off" spellcheck="false"><button type="button" data-directory-create-cancel>' + te("取消") + '</button><button type="button" data-directory-create-confirm>' + te("创建") + '</button></div><div class="better-codex-directory-list" aria-label="' + te("浏览本机文件夹") + '"></div><span data-directory-status aria-live="polite"></span></section>' : "";
       dialog.innerHTML = '<form><h2>' + te("创建 Codex 项目") + '</h2><p>' + te("创建后会加入 Codex 的项目列表。") + '</p><label><span>' + te("项目名称") + '</span><input name="name" maxlength="120" autocomplete="off" required></label><label><span>' + te("项目文件夹") + '</span><span class="better-codex-project-folder-field"><input name="workspace_path" maxlength="4096" placeholder="' + te("选择本地项目文件夹") + '" autocomplete="off" spellcheck="false" readonly required><button type="button" data-project-choose-folder>' + te("选择文件夹") + '</button></span></label>' + directoryBrowser + '<output hidden></output><div class="better-codex-project-dialog-actions"><button type="button" data-project-create-cancel>' + te("取消") + '</button><button type="submit" disabled>' + te("创建项目") + '</button></div></form>';
       let directoryRequest = 0;
       let currentDirectory = null;
+      let showHiddenDirectories = false;
       const workspaceInput = dialog.querySelector('[name="workspace_path"]');
       const nameInput = dialog.querySelector('[name="name"]');
       const submit = dialog.querySelector('button[type="submit"]');
@@ -6291,6 +6300,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       const directoryUp = dialog.querySelector("[data-directory-up]");
       const directoryHome = dialog.querySelector("[data-directory-home]");
       const directoryRoot = dialog.querySelector("[data-directory-root]");
+      const directoryHidden = dialog.querySelector("[data-directory-hidden]");
       const directoryCreate = dialog.querySelector("[data-directory-create]");
       const directoryCreateForm = dialog.querySelector(".better-codex-directory-create");
       const directoryCreateName = dialog.querySelector("[data-directory-create-name]");
@@ -6312,6 +6322,13 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         const value = error instanceof Error ? error.message : "";
         return value === "incompatible_protocol" ? t("本机 Runtime 版本不支持远程文件夹浏览") : t("无法读取文件夹");
       };
+      const renderDirectoryEntries = () => {
+        if (!currentDirectory) return;
+        const visibleDirectories = showHiddenDirectories ? currentDirectory.directories : currentDirectory.directories.filter(entry => !entry.name.startsWith("."));
+        directoryList.innerHTML = visibleDirectories.length
+          ? visibleDirectories.map(entry => '<button class="better-codex-directory-row" type="button" data-directory-entry="' + escapeHtml(entry.path) + '" title="' + escapeHtml(entry.path) + '" aria-label="' + te("打开文件夹") + ': ' + escapeHtml(entry.name) + '">' + icon("folder") + '<span>' + escapeHtml(entry.name) + '</span>' + icon("chevron") + '</button>').join("")
+          : '<span class="better-codex-directory-state">' + (currentDirectory.directories.length ? te("隐藏目录已屏蔽") : te("这个文件夹中没有子文件夹")) + '</span>';
+      };
       const renderDirectory = directory => {
         currentDirectory = directory;
         directoryPath.value = directory.path;
@@ -6321,16 +6338,16 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         directoryHome.dataset.path = directory.home_path;
         directoryRoot.disabled = directory.root_path === directory.path;
         directoryRoot.dataset.path = directory.root_path;
+        directoryHidden.disabled = false;
         directoryCreate.disabled = false;
         directoryStatus.textContent = directory.truncated ? t("仅显示前 500 个文件夹") : "";
-        directoryList.innerHTML = directory.directories.length
-          ? directory.directories.map(entry => '<button class="better-codex-directory-row" type="button" data-directory-entry="' + escapeHtml(entry.path) + '" title="' + escapeHtml(entry.path) + '" aria-label="' + te("打开文件夹") + ': ' + escapeHtml(entry.name) + '">' + icon("folder") + '<span>' + escapeHtml(entry.name) + '</span>' + icon("chevron") + '</button>').join("")
-          : '<span class="better-codex-directory-state">' + te("这个文件夹中没有子文件夹") + '</span>';
+        renderDirectoryEntries();
       };
       const loadRemoteDirectory = async path => {
         const request = ++directoryRequest;
         directoryPanel.hidden = false;
         directoryPanel.setAttribute("aria-busy", "true");
+        directoryHidden.disabled = true;
         directoryCreate.disabled = true;
         directoryCreateForm.hidden = true;
         directoryCreateName.value = "";
@@ -6348,6 +6365,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
           if (request !== directoryRequest || !dialog.isConnected) return;
           reportUnexpectedError(error, { source: "directory_browser" });
           currentDirectory = null;
+          directoryHidden.disabled = true;
           directoryList.innerHTML = '<span class="better-codex-directory-state">' + escapeHtml(directoryErrorLabel(error)) + '</span>';
           directoryStatus.textContent = directoryErrorLabel(error);
         } finally {
@@ -6419,6 +6437,15 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         directoryUp.addEventListener("click", () => { if (directoryUp.dataset.path) void loadRemoteDirectory(directoryUp.dataset.path); });
         directoryHome.addEventListener("click", () => { if (directoryHome.dataset.path) void loadRemoteDirectory(directoryHome.dataset.path); });
         directoryRoot.addEventListener("click", () => { if (directoryRoot.dataset.path) void loadRemoteDirectory(directoryRoot.dataset.path); });
+        directoryHidden.addEventListener("click", () => {
+          showHiddenDirectories = !showHiddenDirectories;
+          const label = showHiddenDirectories ? t("不显示隐藏目录") : t("显示隐藏目录");
+          directoryHidden.setAttribute("aria-pressed", String(showHiddenDirectories));
+          directoryHidden.setAttribute("aria-label", label);
+          directoryHidden.title = label;
+          directoryHidden.innerHTML = icon(showHiddenDirectories ? "eye" : "eyeOff") + '<span>' + escapeHtml(label) + '</span>';
+          renderDirectoryEntries();
+        });
         directoryPath.addEventListener("keydown", event => {
           if (event.key !== "Enter") return;
           event.preventDefault();
