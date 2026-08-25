@@ -4,6 +4,12 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.10-beta.20] - 2026-08-25
+
+- Preserve active App Server turns and durable deliveries across fenced Runtime handoffs with traceable update state.
+- Share one generated browser UI across injection and Web hosts with canonical design tokens, reusable component lifecycles, and explicit feature boundaries.
+- Persist ordered structured composer input and resolve Codex semantic mentions through the active Session Host with opaque Relay-safe candidates.
+
 ## [0.4.10-beta.19] - 2026-08-24
 
 - Preserve native semantic and review commands, classify user-facing failures, and keep generated Issue titles outside persisted conversations.
@@ -842,7 +848,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.19...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.20...HEAD
+[0.4.10-beta.20]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.19...v0.4.10-beta.20
 [0.4.10-beta.19]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.18...v0.4.10-beta.19
 [0.4.10-beta.18]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.17...v0.4.10-beta.18
 [0.4.10-beta.17]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.16...v0.4.10-beta.17
