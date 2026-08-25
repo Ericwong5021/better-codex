@@ -7736,7 +7736,7 @@ export function install(config: Record<string, any>) {
             control.disabled = true;
             return;
           }
-          if (control.matches("[data-dialog-close], [data-dialog-expand], [data-dialog-open-thread], [data-dialog-stop], [data-dialog-restore], [data-description-toggle], [data-conversation-copy], [data-conversation-attachment]")) {
+          if (control.matches("[data-dialog-close], [data-dialog-expand], [data-dialog-open-thread], [data-dialog-stop], [data-dialog-restore], [data-description-toggle], [data-conversation-copy], [data-conversation-attachment], [data-dialog-preview]")) {
             control.disabled = false;
             return;
           }
@@ -8340,10 +8340,7 @@ export function install(config: Record<string, any>) {
         return new Blob([bytes], { type: type || "application/octet-stream" });
       }
 
-      async function openConversationAttachment(messageIndex, attachmentIndex) {
-        const message = conversationMessages[messageIndex];
-        const attachment = message?.attachments?.[attachmentIndex];
-        if (!attachment) return;
+      async function openAttachmentPreview(attachment, load, diagnostics = {}) {
         document.getElementById("better-codex-attachment-dialog")?.remove();
         const preview = document.createElement("dialog");
         preview.id = "better-codex-attachment-dialog";
@@ -8353,7 +8350,7 @@ export function install(config: Record<string, any>) {
         document.body.appendChild(preview);
         let objectUrl = "";
         const finish = () => {
-          preview.close();
+          if (preview.open) preview.close();
           if (objectUrl) URL.revokeObjectURL(objectUrl);
           preview.remove();
         };
@@ -8376,27 +8373,48 @@ export function install(config: Record<string, any>) {
           } else body.innerHTML = '<div class="better-codex-attachment-file">' + icon("paperclip") + '<strong>' + escapeHtml(data.name || t("附件")) + '</strong><span>' + te("不支持预览此文件，可下载后查看。") + '</span></div>';
         };
         try {
-          if (attachment.source === "url" && attachment.url) {
-            download.href = attachment.url;
-            download.target = "_blank";
-            download.rel = "noreferrer noopener";
-            original.href = attachment.url;
-            original.hidden = false;
-            await render(attachment.url);
+          const loaded = await load();
+          if (!preview.isConnected) {
+            if (loaded.objectUrl) URL.revokeObjectURL(loaded.objectUrl);
             return;
           }
-          const result = await api("/api/issues/" + encodeURIComponent(issue.id) + "/attachments/" + encodeURIComponent(message.id) + "/" + attachmentIndex, { timeoutMs: 120_000 });
-          const blob = attachmentBlob(result.data, result.type);
-          objectUrl = URL.createObjectURL(blob);
-          download.href = objectUrl;
-          download.download = result.name || attachment.name || t("附件");
-          meta.textContent = attachmentTypeLabel(result) + " · " + attachmentSize(result.size);
-          await render(objectUrl, result);
+          const data = loaded.attachment || attachment;
+          objectUrl = loaded.objectUrl || "";
+          download.href = loaded.source;
+          download.download = data.name || attachment.name || t("附件");
+          meta.textContent = attachmentTypeLabel(data) + (data.size ? " · " + attachmentSize(data.size) : "");
+          if (loaded.originalUrl) {
+            download.target = "_blank";
+            download.rel = "noreferrer noopener";
+            original.href = loaded.originalUrl;
+            original.hidden = false;
+          }
+          await render(loaded.source, data);
         } catch (error) {
-          appendDiagnostic("attachment_preview_failed", { issue_id: issue.id, message_id: message.id, attachment_index: attachmentIndex, error: error instanceof Error ? error.message : String(error) });
+          appendDiagnostic("attachment_preview_failed", { ...diagnostics, error: error instanceof Error ? error.message : String(error) });
           body.innerHTML = '<div class="better-codex-attachment-file is-error">' + icon("paperclip") + '<strong>' + te("无法打开附件") + '</strong><span>' + escapeHtml(error instanceof Error ? t(error.message) : t("无法读取文件")) + '</span></div>';
           download.hidden = true;
         }
+      }
+
+      async function openConversationAttachment(messageIndex, attachmentIndex) {
+        const message = conversationMessages[messageIndex];
+        const attachment = message?.attachments?.[attachmentIndex];
+        if (!attachment) return;
+        await openAttachmentPreview(attachment, async () => {
+          if (attachment.source === "url" && attachment.url) return { source: attachment.url, attachment, originalUrl: attachment.url };
+          const result = await api("/api/issues/" + encodeURIComponent(issue.id) + "/attachments/" + encodeURIComponent(message.id) + "/" + attachmentIndex, { timeoutMs: 120_000 });
+          const source = URL.createObjectURL(attachmentBlob(result.data, result.type));
+          return { source, attachment: result, objectUrl: source };
+        }, { issue_id: issue.id, message_id: message.id, attachment_index: attachmentIndex });
+      }
+
+      async function openDraftAttachment(scope, attachmentIndex) {
+        const attachments = scope === "reply" ? draft.replyAttachments : draft.attachments;
+        const attachment = attachments[attachmentIndex];
+        if (!attachment?.previewUrl) return;
+        const data = { name: attachment.name, type: attachment.type || attachment.file?.type || "image/png", kind: "image", size: attachment.file?.size || 0 };
+        await openAttachmentPreview(data, async () => ({ source: attachment.previewUrl, attachment: data }), { issue_id: issue?.id || "", attachment_scope: scope, attachment_index: attachmentIndex });
       }
 
       function conversationBubbles(messages, profile = null) {
@@ -8854,7 +8872,8 @@ export function install(config: Record<string, any>) {
         if (!items.length) return '<div class="better-codex-dialog-attachments"' + marker + ' hidden></div>';
         const chips = items.map((item, index) => {
           const image = Boolean(item.previewUrl || String(item.type || item.file?.type || "").startsWith("image/"));
-          return '<span class="better-codex-attachment-chip' + (image ? ' is-image' : '') + '" title="' + escapeHtml(item.path || item.name) + '">' + (item.previewUrl ? '<img class="better-codex-attachment-preview" src="' + escapeHtml(item.previewUrl) + '" alt="" width="30" height="30">' : icon(image ? "image" : "paperclip")) + '<span>' + escapeHtml(item.name) + '</span><button type="button" data-dialog-detach="' + index + '" data-dialog-attachment-scope="' + scope + '" aria-label="' + te("移除附件") + '">' + icon("close") + '</button></span>';
+          const preview = item.previewUrl ? '<button class="better-codex-attachment-preview-button" type="button" data-dialog-preview="' + index + '" data-dialog-attachment-scope="' + scope + '" aria-label="' + te("预览附件") + ' ' + escapeHtml(item.name) + '"><img class="better-codex-attachment-preview" src="' + escapeHtml(item.previewUrl) + '" alt="" width="30" height="30"></button>' : icon(image ? "image" : "paperclip");
+          return '<span class="better-codex-attachment-chip' + (image ? ' is-image' : '') + '" title="' + escapeHtml(item.path || item.name) + '">' + preview + '<span>' + escapeHtml(item.name) + '</span><button type="button" data-dialog-detach="' + index + '" data-dialog-attachment-scope="' + scope + '" aria-label="' + te("移除附件") + '">' + icon("close") + '</button></span>';
         }).join("");
         return '<div class="better-codex-dialog-attachments"' + marker + '>' + chips + '</div>';
       }
@@ -8938,7 +8957,8 @@ export function install(config: Record<string, any>) {
                 skipped += 1;
                 continue;
               }
-              selected.push({ name: file.name || path.split(/[\\/]/).pop() || path || t("附件"), path, type: file.type || "", file: REMOTE ? file : null, previewUrl: REMOTE && file.type.startsWith("image/") ? URL.createObjectURL(file) : "" });
+              const image = file.type.startsWith("image/");
+              selected.push({ name: file.name || path.split(/[\\/]/).pop() || path || t("附件"), path, type: file.type || "", file: REMOTE || image ? file : null, previewUrl: image ? URL.createObjectURL(file) : "" });
               totalSize += file.size;
             }
             resolve({ files: selected, skipped, picked: files.length });
@@ -9499,6 +9519,11 @@ export function install(config: Record<string, any>) {
           else if (!issue) writeCreateDraft(draft, createRequestId);
           renderDialog();
           dialog.querySelector(scope === "reply" ? '[name="reply"]' : draft.mode === "agent" ? '[name="prompt"]' : '[name="title"]')?.focus();
+        }));
+        dialog.querySelectorAll("[data-dialog-preview]").forEach(button => button.addEventListener("click", () => {
+          const index = Number(button.dataset.dialogPreview);
+          if (!Number.isInteger(index) || index < 0) return;
+          void openDraftAttachment(button.dataset.dialogAttachmentScope, index);
         }));
         dialog.querySelector("form")?.addEventListener("paste", pasteImages);
         dialog.querySelector("form")?.addEventListener("keydown", event => {

@@ -706,6 +706,8 @@ export function betterCodexFeatureStructureStylesCss() {
     #better-codex-dialog .better-codex-attachment-preview { width: 30px; height: 30px; flex: 0 0 auto; border-radius: var(--bc-radius-xs); object-fit: cover; outline: 1px solid var(--bc-color-hairline); outline-offset: -1px; }
     #better-codex-dialog .better-codex-attachment-chip > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     #better-codex-dialog .better-codex-attachment-chip button { display: inline-flex; width: 22px; height: 22px; flex: 0 0 auto; align-items: center; justify-content: center; border: 0; border-radius: var(--bc-radius-pill); color: var(--bc-color-text-muted); background: transparent; padding: 0; cursor: pointer; }
+    #better-codex-dialog .better-codex-attachment-chip .better-codex-attachment-preview-button { width: 30px; height: 30px; overflow: hidden; border-radius: var(--bc-radius-xs); }
+    #better-codex-dialog .better-codex-attachment-preview-button:focus-visible { outline: none; box-shadow: var(--bc-focus-ring); }
     #better-codex-dialog .better-codex-attachment-chip button:hover { color: var(--bc-color-text); background: var(--bc-color-hover); }
     #better-codex-dialog .better-codex-dialog-footer { display: flex; min-height: 48px; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 10px; border-top: 1px solid var(--bc-color-hairline); padding: 0 14px 0 18px; }
     #better-codex-dialog .better-codex-dialog-footer-right { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
