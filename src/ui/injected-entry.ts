@@ -3,7 +3,7 @@ import { applyHostTheme } from "./theme/apply.js";
 import { themeIsDegraded } from "./theme/diagnostics.js";
 import { createEmptyState } from "./components/empty-state.js";
 import { destroyRemovedComponents, registerOwnedComponent } from "./core/ownership.js";
-import { adoptIconButton, createButton, createIconButton } from "./primitives/button.js";
+import { adoptButton, adoptIconButton, createButton, createIconButton } from "./primitives/button.js";
 import { createStatusBadge } from "./primitives/badge.js";
 
 export function install(config: Record<string, any>) {
@@ -781,6 +781,7 @@ export function install(config: Record<string, any>) {
     let managedButtonSequence = 0;
     const managedButtons = new Set();
     let adoptedIconButtonSequence = 0;
+    let adoptedButtonSequence = 0;
     let observer = null;
     let refreshPending = false;
     let refreshTimer = null;
@@ -1107,6 +1108,39 @@ export function install(config: Record<string, any>) {
       });
     }
 
+    function hydrateActionButtons(root, feature) {
+      if (!root) return;
+      const selector = [
+        ".better-codex-submit",
+        ".better-codex-update-button",
+        ".better-codex-confirm-actions > button",
+        ".better-codex-error-report-actions > button",
+        ".better-codex-error-report-navigation > button",
+        ".better-codex-scheduled-empty > button",
+        ".better-codex-recovery-command > button",
+        ".better-codex-recovery-retry",
+        "dialog footer > button:not([aria-label])",
+      ].join(",");
+      root.querySelectorAll(selector).forEach(button => {
+        if (!(button instanceof HTMLButtonElement) || button.dataset.bcComponent) return;
+        const label = button.textContent?.trim() || button.getAttribute("aria-label")?.trim();
+        if (!label) return;
+        const primary = button.classList.contains("is-primary") || button.classList.contains("better-codex-submit") || button.classList.contains("better-codex-confirm-primary");
+        const danger = button.classList.contains("is-danger") || button.matches("[data-agent-delete], [data-scheduled-delete], [data-confirm-danger]");
+        const handle = adoptButton(button, {
+          disabled: button.disabled,
+          label,
+          variant: danger ? "danger" : primary ? "primary" : "secondary",
+        }, componentContext(feature, "adopted-button:" + (++adoptedButtonSequence)));
+        registerOwnedComponent(button, handle);
+      });
+    }
+
+    function hydrateSharedControls(root, feature) {
+      hydrateIconButtons(root, feature);
+      hydrateActionButtons(root, feature);
+    }
+
     function hydrateAddedIconButtons(records) {
       records.forEach(record => record.addedNodes.forEach(node => {
         if (!(node instanceof HTMLElement)) return;
@@ -1114,7 +1148,7 @@ export function install(config: Record<string, any>) {
           ? node
           : node.querySelector('#better-codex-panel, [id^="better-codex"], [class*="better-codex"]');
         if (!scope) return;
-        hydrateIconButtons(scope, scope.closest("#better-codex-panel")?.dataset.surface || "global-overlay");
+        hydrateSharedControls(scope, scope.closest("#better-codex-panel")?.dataset.surface || "global-overlay");
       }));
     }
 
@@ -6666,17 +6700,17 @@ export function install(config: Record<string, any>) {
       syncMockupUi();
       if (state.surface === "scheduled") {
         renderScheduledTasks();
-        hydrateIconButtons(panel, "scheduled");
+        hydrateSharedControls(panel, "scheduled");
         return;
       }
       if (state.surface === "agents") {
         renderAgents();
-        hydrateIconButtons(panel, "agents");
+        hydrateSharedControls(panel, "agents");
         return;
       }
       if (state.surface === "projects") {
         renderProjects();
-        hydrateIconButtons(panel, "projects");
+        hydrateSharedControls(panel, "projects");
         return;
       }
       const runningCount = state.issues.filter(issue => issueExecutionRunning(issue)).length;
@@ -6758,7 +6792,7 @@ export function install(config: Record<string, any>) {
         return '<section class="better-codex-column" data-status="' + status + '"><div class="better-codex-column-head"><span class="better-codex-column-title">' + statusIcon(status) + '<span>' + te(statusLabel) + '</span>' + (archiveColumn ? "" : '<span>' + issues.length + '</span>') + '</span><span class="better-codex-column-actions">' + columnButton + '</span></div><div class="better-codex-cards">' + (cards || (archiveColumn ? '<div class="better-codex-empty">' + te("拖到这里即可归档") + '</div>' : "")) + '</div></section>';
       }).join("");
       reconcileBoard(board, boardMarkup);
-      hydrateIconButtons(panel, "board");
+      hydrateSharedControls(panel, "board");
       requestAnimationFrame(syncBoardScrollControl);
     }
 

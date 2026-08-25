@@ -64,6 +64,10 @@ export function createButton(initial: ButtonProps, context: ComponentContext) {
   return button(initial, context, false);
 }
 
+export function adoptButton(element: HTMLButtonElement, initial: ButtonProps, context: ComponentContext) {
+  return button(initial, context, false, element);
+}
+
 export function createIconButton(initial: ButtonProps & { accessibleName: string; icon: IconDefinition }, context: ComponentContext) {
   return button(initial, context, true);
 }
