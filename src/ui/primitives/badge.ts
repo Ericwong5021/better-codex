@@ -12,7 +12,10 @@ function badge(initial: BadgeProps, context: ComponentContext, component: "badge
   const root = existing || document.createElement("span");
   const preserveContent = Boolean(existing);
   const lifecycle = createComponentLifecycle("badge", context, root, initial, props => {
-    root.dataset.bcVariant = props.variant || "neutral";
+    const variant = props.variant || "neutral";
+    root.dataset.bcVariant = variant;
+    if (component === "status-badge") root.dataset.tone = variant;
+    else delete root.dataset.tone;
     root.dataset.bcState = "default";
     if (!preserveContent) root.textContent = props.label;
   });

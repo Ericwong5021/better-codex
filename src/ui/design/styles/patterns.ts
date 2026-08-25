@@ -111,6 +111,43 @@ export function betterCodexPatternStylesCss() {
       grid-row: 1 / 3;
     }
 
+    #better-codex-panel[data-bc-size="narrow"][data-surface="agents"] {
+      grid-template-rows: auto minmax(0, 1fr);
+    }
+
+    #better-codex-panel[data-bc-size="narrow"] .better-codex-toolbar {
+      height: auto;
+      min-height: auto;
+      flex: 0 0 auto;
+      align-items: stretch;
+      flex-direction: column;
+      padding: var(--bc-space-3);
+    }
+
+    #better-codex-panel[data-bc-size="narrow"] .better-codex-actions {
+      display: grid;
+      width: 100%;
+      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-areas:
+        "error error"
+        "working search"
+        "filter auto"
+        "create create";
+      align-items: center;
+      gap: var(--bc-space-2);
+      overflow: visible;
+      padding-bottom: 0;
+    }
+
+    #better-codex-panel[data-bc-size="narrow"] .better-codex-actions > .better-codex-error { grid-area: error; max-width: 100%; margin: 0; overflow-wrap: anywhere; }
+    #better-codex-panel[data-bc-size="narrow"] .better-codex-actions > #better-codex-working { grid-area: working; min-width: 0; justify-content: flex-start; }
+    #better-codex-panel[data-bc-size="narrow"] .better-codex-actions > .better-codex-search-wrap { grid-area: search; width: auto; min-width: 0; }
+    #better-codex-panel[data-bc-size="narrow"] .better-codex-actions > .better-codex-filter-wrap { grid-area: filter; min-width: 0; }
+    #better-codex-panel[data-bc-size="narrow"] .better-codex-actions > .better-codex-auto-dispatch-wrap { grid-area: auto; min-width: 0; justify-content: flex-end; }
+    #better-codex-panel[data-bc-size="narrow"] .better-codex-actions > .better-codex-create-split { grid-area: create; justify-self: start; max-width: 100%; }
+    #better-codex-panel[data-bc-size="narrow"] .better-codex-board,
+    #better-codex-panel[data-bc-size="narrow"] .better-codex-agents { padding-inline: var(--bc-space-3); }
+
     #better-codex-panel .better-codex-button,
     #better-codex-agent-dialog .better-codex-button,
     #better-codex-dialog .better-codex-button,

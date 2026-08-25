@@ -7,6 +7,7 @@ import { createDialog } from "./components/dialog.js";
 import { adoptFieldShell } from "./components/field-shell.js";
 import { adoptMenu } from "./components/menu.js";
 import { adoptNotice } from "./components/notice.js";
+import { observeComponentSize } from "./core/lifecycle.js";
 import { destroyRemovedComponents, registerOwnedComponent } from "./core/ownership.js";
 import { adoptButton, adoptIconButton, createButton, createIconButton } from "./primitives/button.js";
 import { adoptBadge, adoptStatusBadge, createStatusBadge } from "./primitives/badge.js";
@@ -787,6 +788,7 @@ export function install(config: Record<string, any>) {
     let themeEntry = null;
     let auxiliaryMenuDismiss = null;
     let panel = null;
+    let panelSizeCleanup = null;
     let projectRefreshButton = null;
     let projectEmptyState = null;
     let projectHealthBadge = null;
@@ -6082,6 +6084,8 @@ export function install(config: Record<string, any>) {
         state.locale = setting === "system" ? state.systemLocale : setting;
         if (HOST_KIND === "web") window.dispatchEvent(new CustomEvent("better-codex:bootstrap", { detail: { user: state.user, locale: state.locale } }));
         finish();
+        panelSizeCleanup?.();
+        panelSizeCleanup = null;
         panel?.remove();
         panel = null;
         ensureEntry();
@@ -9787,7 +9791,10 @@ export function install(config: Record<string, any>) {
       if (!active) return;
       const surface = findMount();
       if (!surface) return;
-      if (!panel) panel = createPanel();
+      if (!panel) {
+        panel = createPanel();
+        panelSizeCleanup = observeComponentSize(panel, componentContext("host", "panel-layout"));
+      }
       if (panel.parentElement !== surface) surface.appendChild(panel);
       surface.setAttribute(HOST, "true");
       Array.from(surface.children).forEach(child => {
@@ -10029,6 +10036,8 @@ export function install(config: Record<string, any>) {
       updateNoticeResizeObserver = null;
       boardScrollResizeObserver?.disconnect();
       boardScrollResizeObserver = null;
+      panelSizeCleanup?.();
+      panelSizeCleanup = null;
       agentWindowBoundsObserver?.disconnect();
       agentWindowBoundsObserver = null;
       Array.from(completionNoticeDismissals.values()).forEach(dismissNotice => dismissNotice(false));
