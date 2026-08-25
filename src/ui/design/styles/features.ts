@@ -34,7 +34,7 @@ export function betterCodexFeatureStructureStylesCss() {
     #better-codex-context-menu .better-codex-status-icon, #better-codex-context-menu .better-codex-priority { width: 16px; height: 16px; flex: 0 0 auto; }
     #better-codex-context-menu .better-codex-context-item.is-danger { color: var(--bc-color-danger); }
     #better-codex-context-menu .better-codex-context-divider { height: 1px; margin: 5px 3px; background: var(--bc-color-hairline); }
-    #better-codex-context-menu .better-codex-context-submenu { position: absolute; top: -5px; left: 100%; display: none; min-width: 148px; max-width: min(240px, calc(100vw - 24px)); max-height: min(320px, calc(100vh - 24px)); overflow-y: auto; }
+    #better-codex-context-menu .better-codex-context-submenu { position: absolute; top: -5px; left: 100%; z-index: var(--bc-z-menu); display: none; min-width: 148px; max-width: min(240px, calc(100vw - 24px)); max-height: min(320px, calc(100vh - 24px)); overflow-y: auto; }
     #better-codex-context-menu .better-codex-context-submenu.is-assignee { min-width: 214px; }
     #better-codex-context-menu .better-codex-context-item-wrap:hover > .better-codex-context-submenu, #better-codex-context-menu .better-codex-context-item-wrap:focus-within > .better-codex-context-submenu { display: block; }
     #better-codex-context-menu .better-codex-context-check { display: inline-flex; width: 14px; flex: 0 0 14px; align-items: center; justify-content: center; color: var(--bc-color-text); }
@@ -3117,6 +3117,7 @@ export function betterCodexFeatureStylesCss() {
       position: absolute;
       top: -5px;
       left: 100%;
+      z-index: var(--bc-z-menu);
       display: none;
       width: max-content;
       min-width: 148px;
