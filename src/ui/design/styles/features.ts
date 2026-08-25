@@ -3396,8 +3396,48 @@ export function betterCodexFeatureStylesCss() {
     #better-codex-panel .better-codex-board-scroll input {
       width: 100%;
       min-width: 0;
-      --bc-slider-thumb-inline-size: var(--bc-board-scroll-thumb-width, var(--bc-slider-thumb-size));
+      height: 22px;
+      margin: 0;
+      appearance: none;
+      -webkit-appearance: none;
+      background: transparent;
       cursor: ew-resize;
+    }
+
+    #better-codex-panel .better-codex-board-scroll input::-webkit-slider-runnable-track {
+      height: 5px;
+      border-radius: 999px;
+      background: var(--bc-color-control);
+      box-shadow: inset 0 0 0 1px var(--bc-color-hairline);
+    }
+
+    #better-codex-panel .better-codex-board-scroll input::-webkit-slider-thumb {
+      width: var(--bc-board-scroll-thumb-width);
+      height: 13px;
+      margin-top: -4px;
+      appearance: none;
+      -webkit-appearance: none;
+      border: 1px solid var(--bc-color-hairline);
+      border-radius: 999px;
+      background: var(--bc-color-surface-raised);
+      box-shadow: var(--bc-elevation-thumb);
+    }
+
+    #better-codex-panel .better-codex-board-scroll input::-moz-range-track {
+      height: 5px;
+      border: 0;
+      border-radius: 999px;
+      background: var(--bc-color-control);
+      box-shadow: inset 0 0 0 1px var(--bc-color-hairline);
+    }
+
+    #better-codex-panel .better-codex-board-scroll input::-moz-range-thumb {
+      width: var(--bc-board-scroll-thumb-width);
+      height: 13px;
+      border: 1px solid var(--bc-color-hairline);
+      border-radius: 999px;
+      background: var(--bc-color-surface-raised);
+      box-shadow: var(--bc-elevation-thumb);
     }
 
     #better-codex-dialog .better-codex-conversation-empty h3 {
@@ -8018,6 +8058,7 @@ export function betterCodexFeatureStylesCss() {
     #better-codex-avatar-cropper input[type="range"] {
       min-width: 0;
       flex: 1;
+      accent-color: var(--bc-color-primary);
     }
 
     #better-codex-avatar-cropper footer {

@@ -1,5 +1,5 @@
 import { betterCodexLogoPng } from "./brand-assets.js";
-import { betterCodexDesignTokensCss, betterCodexSliderStylesCss, betterCodexThemeColors } from "./design-system.js";
+import { betterCodexDesignTokensCss, betterCodexThemeColors } from "./design-system.js";
 import { betterCodexWebAppRegistrationJavaScript } from "./web-app.js";
 
 const betterCodexLogoUrl = `data:image/png;base64,${betterCodexLogoPng().toString("base64")}`;
@@ -110,7 +110,6 @@ const webHostHtml = String.raw`<!doctype html>
 
 const webHostCss = String.raw`
 ${betterCodexDesignTokensCss()}
-${betterCodexSliderStylesCss(["html"])}
 :root {
   --color-background-surface: var(--bc-color-canvas);
   --color-text-foreground: var(--bc-color-text);
