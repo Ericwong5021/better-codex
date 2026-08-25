@@ -1256,6 +1256,13 @@ export function install(config: Record<string, any>) {
       auxiliaryMenuDismiss = null;
     }
 
+    function syncAuxiliaryMenuOrder() {
+      if (!auxiliaryMenu) return;
+      for (const item of [scheduledMobileEntry, projectsEntry, usageEntry, themeEntry, profileEntry]) {
+        if (item) auxiliaryMenu.append(item);
+      }
+    }
+
     function createAuxiliaryNavigation() {
       const navigation = document.createElement("div");
       navigation.className = "web-nav-auxiliary";
@@ -1324,7 +1331,7 @@ export function install(config: Record<string, any>) {
         };
         setTimeout(() => document.addEventListener("pointerdown", auxiliaryMenuDismiss, true), 0);
       });
-      auxiliaryMenu.append(...(profileEntry ? [profileEntry] : []), ...(scheduledMobileEntry ? [scheduledMobileEntry] : []), usageEntry, themeEntry);
+      syncAuxiliaryMenuOrder();
       navigation.append(moreEntry, auxiliaryMenu);
       return navigation;
     }
@@ -1411,12 +1418,7 @@ export function install(config: Record<string, any>) {
         syncMobileActions();
         auxiliaryNavigation.hidden = false;
         if (auxiliaryNavigation.parentElement !== parent || auxiliaryNavigation.previousElementSibling !== agentsEntry) agentsEntry.after(auxiliaryNavigation);
-        if (scheduledMobileEntry && (scheduledMobileEntry.parentElement !== auxiliaryMenu || scheduledMobileEntry !== auxiliaryMenu.firstElementChild)) auxiliaryMenu.prepend(scheduledMobileEntry);
-        const projectReference = scheduledMobileEntry || null;
-        if (projectsEntry.parentElement !== auxiliaryMenu || projectsEntry.previousElementSibling !== projectReference) {
-          if (projectReference) projectReference.after(projectsEntry);
-          else auxiliaryMenu.prepend(projectsEntry);
-        }
+        syncAuxiliaryMenuOrder();
       } else if (projectsEntry.parentElement !== parent || projectsEntry.previousElementSibling !== agentsEntry) agentsEntry.after(projectsEntry);
       const currentEntry = active && state.surface === "issues" ? entry : active && state.surface === "scheduled" ? scheduledEntry : active && state.surface === "agents" ? agentsEntry : active && state.surface === "projects" ? projectsEntry : null;
       for (const item of [entry, scheduledEntry, agentsEntry, projectsEntry].filter(Boolean)) {
