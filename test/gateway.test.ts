@@ -651,7 +651,7 @@ input.on("line", line => {
     const statusTimer = setInterval(() => target?.write(`${JSON.stringify({ type: "handoff_status_request", request_id: `continuity-status-${++statusSequence}` })}\n`), 100);
     while (!completedEvent || targetSnapshot.active_turns.length || targetSnapshot.queued_deliveries) {
       const message = await targetNext();
-      if (message.type === "poll_request") target.write(`${JSON.stringify({ type: "poll_response", request_id: message.request_id, result: { leader: true, acquired: true, expires_at: new Date(Date.now() + 10_000).toISOString(), previous_relay_id: null, command: null, thread_ids: [threadId], active_turns: [{ thread_id: threadId, turn_id: turnId }] } })}\n`);
+      if (message.type === "poll_request") target.write(`${JSON.stringify({ type: "poll_response", request_id: message.request_id, result: { leader: true, acquired: true, expires_at: new Date(Date.now() + 10_000).toISOString(), previous_relay_id: null, command: null, thread_ids: [threadId], active_turns: completedEvent ? [] : [{ thread_id: threadId, turn_id: turnId }] } })}\n`);
       if (message.type === "delivery") {
         if (message.kind === "event" && message.payload.method === "turn/completed") completedEvent = true;
         target.write(`${JSON.stringify({ type: "delivery_ack", delivery_id: message.delivery_id, host_instance_id: message.host_instance_id, sequence: message.sequence, payload_hash: message.payload_hash })}\n`);

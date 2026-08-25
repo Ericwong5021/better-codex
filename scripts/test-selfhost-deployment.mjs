@@ -22,13 +22,13 @@ writeFileSync(passwordFile, webPassword, { mode: 0o600 });
 writeFileSync(caddyFile, "localhost {\n\ttls internal\n\tencode zstd gzip\n\treverse_proxy hub:4318\n}\n");
 
 function compose(args, environment, quiet = false) {
-  const result = spawnSync("docker", ["compose", "-p", project, "-f", composeFile, ...args], { cwd: root, env: environment, encoding: "utf8", stdio: quiet ? "pipe" : "inherit" });
+  const result = spawnSync("docker", ["compose", "-p", project, "-f", composeFile, "--profile", "standalone", ...args], { cwd: root, env: environment, encoding: "utf8", stdio: quiet ? "pipe" : "inherit" });
   if (result.status !== 0 && quiet) throw new Error(`${result.stderr || result.stdout || "docker_compose_failed"}`.trim());
   if (result.status !== 0) throw new Error(`docker_compose_${args[0]}_failed`);
 }
 
 function composeOutput(args, environment) {
-  const result = spawnSync("docker", ["compose", "-p", project, "-f", composeFile, ...args], { cwd: root, env: environment, encoding: "utf8" });
+  const result = spawnSync("docker", ["compose", "-p", project, "-f", composeFile, "--profile", "standalone", ...args], { cwd: root, env: environment, encoding: "utf8" });
   if (result.status !== 0) throw new Error(`${result.stderr || result.stdout || "docker_compose_failed"}`.trim());
   return result.stdout.trim();
 }

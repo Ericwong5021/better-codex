@@ -19,7 +19,7 @@ jobs:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
           set -euo pipefail
-          pattern='^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([[:alnum:]./_-]+\))?!?: .{1,72}$'
+          pattern='^(build|chore|ci|docs|feat|fix|perf|refactor|release|revert|style|test)(\([[:alnum:]./_-]+\))?!?: .{1,72}$'
           printf '%s\n' "$PR_TITLE" | grep -Eq "$pattern" || {
             printf 'Invalid PR title: %s\n' "$PR_TITLE" >&2
             exit 1
@@ -45,7 +45,7 @@ jobs:
             commits=$(git rev-list "$BEFORE_SHA..$AFTER_SHA")
           fi
           violations=""
-          format_pattern='^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([[:alnum:]./_-]+\))?!?: .{1,72}$'
+          format_pattern='^(build|chore|ci|docs|feat|fix|perf|refactor|release|revert|style|test)(\([[:alnum:]./_-]+\))?!?: .{1,72}$'
           while IFS= read -r commit; do
             subject=$(git log -1 --format=%s "$commit")
             message=$(git log -1 --format=%B "$commit")

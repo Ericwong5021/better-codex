@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   runtime-session-continuity:
     strategy:
@@ -74,6 +78,7 @@ jobs:
 
   verify:
     strategy:
+      fail-fast: false
       matrix:
         runner:
           - macos-26

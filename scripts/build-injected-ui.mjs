@@ -19,6 +19,7 @@ const result = await build({
   write: false,
 });
 const browserBundle = result.outputFiles[0].text
+  .replace(/\r\n?/g, "\n")
   .replace(/^\s*\/\/.*$/gm, "")
   .replace(/\n{3,}/g, "\n\n")
   .trim();
@@ -32,7 +33,8 @@ const generated = [
 ].join("\n");
 
 if (process.argv.includes("--check")) {
-  if (!existsSync(outputFile) || readFileSync(outputFile, "utf8") !== generated) throw new Error("injected_ui_bundle_stale");
+  const current = existsSync(outputFile) ? readFileSync(outputFile, "utf8").replace(/\r\n?/g, "\n") : "";
+  if (current !== generated) throw new Error(`injected_ui_bundle_stale:${JSON.stringify({ platform: process.platform, output_file: outputFile, expected_checksum: checksum })}`);
 } else {
   mkdirSync(dirname(outputFile), { recursive: true });
   writeFileSync(outputFile, generated);
