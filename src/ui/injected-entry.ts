@@ -3,9 +3,16 @@ import { applyHostTheme } from "./theme/apply.js";
 import { themeIsDegraded } from "./theme/diagnostics.js";
 import { createEmptyState } from "./components/empty-state.js";
 import { adoptInlineFeedback } from "./components/inline-feedback.js";
+import { createDialog } from "./components/dialog.js";
+import { adoptFieldShell } from "./components/field-shell.js";
+import { adoptMenu } from "./components/menu.js";
+import { adoptNotice } from "./components/notice.js";
 import { destroyRemovedComponents, registerOwnedComponent } from "./core/ownership.js";
 import { adoptButton, adoptIconButton, createButton, createIconButton } from "./primitives/button.js";
 import { adoptBadge, adoptStatusBadge, createStatusBadge } from "./primitives/badge.js";
+import { adoptFormRow } from "./patterns/form-row.js";
+import { adoptListRow } from "./patterns/list-row.js";
+import { adoptToolbar } from "./patterns/toolbar.js";
 
 export function install(config: Record<string, any>) {
   if (!config || config.schemaVersion !== 1) throw new Error("injected_ui_schema_mismatch");
@@ -785,6 +792,7 @@ export function install(config: Record<string, any>) {
     let adoptedButtonSequence = 0;
     let adoptedBadgeSequence = 0;
     let adoptedFeedbackSequence = 0;
+    let adoptedPatternSequence = 0;
     let observer = null;
     let refreshPending = false;
     let refreshTimer = null;
@@ -1157,6 +1165,26 @@ export function install(config: Record<string, any>) {
       root.querySelectorAll(".better-codex-dialog-error, .better-codex-agent-inspector-error, .better-codex-update-error, .better-codex-help-error, .better-codex-composer-queue-error, .better-codex-project-document-notice.is-error").forEach(element => {
         if (!(element instanceof HTMLElement) || element.dataset.bcComponent) return;
         const handle = adoptInlineFeedback(element, { message: element.textContent?.trim() || "", tone: "error" }, componentContext(feature, "adopted-inline-feedback:" + (++adoptedFeedbackSequence)));
+        registerOwnedComponent(element, handle);
+      });
+      root.querySelectorAll(".better-codex-help-setting-row").forEach(element => {
+        if (!(element instanceof HTMLElement) || element.dataset.bcComponent) return;
+        const handle = adoptFieldShell(element, componentContext(feature, "adopted-field-shell:" + (++adoptedPatternSequence)));
+        registerOwnedComponent(element, handle);
+      });
+      root.querySelectorAll(".better-codex-toolbar").forEach(element => {
+        if (!(element instanceof HTMLElement) || element.dataset.bcComponent) return;
+        const handle = adoptToolbar(element, componentContext(feature, "adopted-toolbar:" + (++adoptedPatternSequence)));
+        registerOwnedComponent(element, handle);
+      });
+      root.querySelectorAll(".better-codex-project-document-form > label").forEach(element => {
+        if (!(element instanceof HTMLElement) || element.dataset.bcComponent) return;
+        const handle = adoptFormRow(element, componentContext(feature, "adopted-form-row:" + (++adoptedPatternSequence)));
+        registerOwnedComponent(element, handle);
+      });
+      root.querySelectorAll(".better-codex-scheduled-row").forEach(element => {
+        if (!(element instanceof HTMLElement) || element.dataset.bcComponent) return;
+        const handle = adoptListRow(element, componentContext(feature, "adopted-list-row:" + (++adoptedPatternSequence)));
         registerOwnedComponent(element, handle);
       });
     }
@@ -2739,14 +2767,17 @@ export function install(config: Record<string, any>) {
       const notice = updateNotice;
       const menuToggle = notice.querySelector("[data-update-menu-toggle]");
       const menu = notice.querySelector("[data-update-menu]");
+      let menuHandle;
       const closeMenu = () => {
-        menu.hidden = true;
-        menuToggle.setAttribute("aria-expanded", "false");
+        menuHandle.update({ onClose: closeMenu, open: false, trigger: menuToggle });
       };
+      menuHandle = adoptMenu(menu, { onClose: closeMenu, open: false, trigger: menuToggle }, componentContext("update-notice", "update-menu:" + noticeVersion));
+      registerOwnedComponent(menu, menuHandle);
+      const noticeHandle = adoptNotice(notice, { dismissible: true, message: updateDescription, onDismiss: () => dismissUpdate(noticeVersion), tone: activationError ? "error" : "info" }, componentContext("update-notice", "update-notice:" + noticeVersion));
+      registerOwnedComponent(notice, noticeHandle);
       menuToggle.addEventListener("click", event => {
         event.stopPropagation();
-        menu.hidden = !menu.hidden;
-        menuToggle.setAttribute("aria-expanded", String(!menu.hidden));
+        menuHandle.update({ onClose: closeMenu, open: menu.hidden, trigger: menuToggle });
       });
       menu.querySelector("[data-update-ignore]").addEventListener("click", () => {
         closeMenu();
@@ -3022,28 +3053,39 @@ export function install(config: Record<string, any>) {
     function confirmAction(title, message, confirmLabel = "确认") {
       document.getElementById("better-codex-confirm")?.remove();
       return new Promise(resolve => {
-        const dialog = document.createElement("dialog");
-        dialog.id = "better-codex-confirm";
-        dialog.setAttribute(OWNED, "true");
-        dialog.innerHTML = '<div class="better-codex-confirm-body"><h2 class="better-codex-confirm-title">' + escapeHtml(t(title)) + '</h2><p class="better-codex-confirm-message">' + escapeHtml(t(message)) + '</p></div><div class="better-codex-confirm-actions"><button type="button" data-confirm-cancel>' + escapeHtml(t("取消")) + '</button><button class="better-codex-confirm-primary" type="button" data-confirm-accept>' + escapeHtml(t(confirmLabel)) + '</button></div>';
-        document.body.appendChild(dialog);
+        const content = document.createElement("div");
+        const body = document.createElement("div");
+        body.className = "better-codex-confirm-body";
+        const heading = document.createElement("h2");
+        heading.className = "better-codex-confirm-title";
+        heading.textContent = t(title);
+        const copy = document.createElement("p");
+        copy.className = "better-codex-confirm-message";
+        copy.textContent = t(message);
+        body.append(heading, copy);
+        const actions = document.createElement("div");
+        actions.className = "better-codex-confirm-actions";
         let settled = false;
+        let dialogHandle;
         const finish = value => {
           if (settled) return;
           settled = true;
-          dialog.close();
+          dialogHandle.destroy();
           resolve(value);
         };
-        dialog.querySelector("[data-confirm-cancel]").addEventListener("click", () => finish(false));
-        dialog.querySelector("[data-confirm-accept]").addEventListener("click", () => finish(true));
-        dialog.addEventListener("cancel", event => { event.preventDefault(); finish(false); });
-        bindModalDismiss(dialog, () => finish(false));
-        dialog.addEventListener("close", () => {
-          if (!settled) resolve(false);
-          dialog.remove();
-        }, { once: true });
-        dialog.showModal();
-        dialog.querySelector("[data-confirm-cancel]").focus();
+        const cancel = createButton({ label: t("取消"), onPress: () => finish(false), variant: "secondary" }, componentContext("confirmation", "confirm-cancel:" + (++managedButtonSequence)));
+        cancel.element.dataset.confirmCancel = "true";
+        const accept = createButton({ label: t(confirmLabel), onPress: () => finish(true), variant: "danger" }, componentContext("confirmation", "confirm-accept:" + (++managedButtonSequence)));
+        accept.element.classList.add("better-codex-confirm-primary");
+        accept.element.dataset.confirmAccept = "true";
+        actions.append(cancel.element, accept.element);
+        content.append(body, actions);
+        dialogHandle = createDialog({ accessibleName: t(title), content, initialFocus: cancel.element, onRequestClose: () => finish(false) }, componentContext("confirmation", "confirm-dialog:" + (++managedButtonSequence)));
+        dialogHandle.element.id = "better-codex-confirm";
+        dialogHandle.element.setAttribute(OWNED, "true");
+        registerOwnedComponent(cancel.element, cancel);
+        registerOwnedComponent(accept.element, accept);
+        registerOwnedComponent(dialogHandle.element, dialogHandle);
       });
     }
 

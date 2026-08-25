@@ -62,4 +62,5 @@ export const foundationTokens = [
   { name: "--bc-leading-tight", layer: "foundation", light: "1", hostOverridable: false, order: 120 },
   { name: "--bc-leading-body", layer: "foundation", light: "1.5", hostOverridable: false, order: 121 },
   { name: "--bc-leading-relaxed", layer: "foundation", light: "1.7", hostOverridable: false, order: 122 },
+  { name: "--bc-z-menu", layer: "foundation", light: "120", hostOverridable: false, order: 123 },
 ] as const satisfies readonly DesignTokenDefinition[];

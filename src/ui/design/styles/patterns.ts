@@ -1,5 +1,24 @@
 export function betterCodexPatternStylesCss() {
   return String.raw`
+    [data-bc-component="toolbar"] {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      gap: var(--bc-space-2);
+    }
+
+    [data-bc-component="form-row"] {
+      display: grid;
+      min-width: 0;
+      gap: var(--bc-space-2);
+    }
+
+    [data-bc-component="list-row"] {
+      min-width: 0;
+      color: var(--bc-color-text);
+      background: var(--bc-color-surface);
+    }
+
     #better-codex-panel .better-codex-toolbar {
       box-sizing: border-box;
       height: var(--bc-page-toolbar-height);

@@ -5,6 +5,7 @@ import { betterCodexDesignSystemCss } from "../src/design-system.js";
 import { injectionScript } from "../src/dom.js";
 
 const injectedEntrySource = readFileSync(new URL("../src/ui/injected-entry.ts", import.meta.url), "utf8");
+const sharedDialogSource = readFileSync(new URL("../src/ui/components/dialog.ts", import.meta.url), "utf8");
 
 function injectionSource(...parameters: Parameters<typeof injectionScript>) {
   return `${injectionScript(...parameters)}\n${injectedEntrySource}`;
@@ -827,7 +828,8 @@ test("create dialog paperclip preserves local paths and transfers remote files",
 test("destructive actions use the branded confirmation dialog", () => {
   const source = injectionSource(4317, "test-token", "install");
 
-  assert.ok(source.includes('dialog.id = "better-codex-confirm"'));
+  assert.ok(source.includes('dialogHandle.element.id = "better-codex-confirm"'));
+  assert.ok(source.includes("createDialog({ accessibleName: t(title)"));
   assert.ok(source.includes('confirmAction("删除任务"'));
   assert.ok(source.includes('confirmAction("删除智能体"'));
   assert.doesNotMatch(source, /\b(?:window\.)?confirm\s*\(/);
@@ -848,8 +850,8 @@ test("every modal dialog closes only when its backdrop is clicked", () => {
   const bindings = source.match(/bindModalDismiss\(dialog, \(\) =>/g) || [];
 
   assert.ok(source.includes("function bindModalDismiss(dialog, dismiss)"));
-  assert.ok(source.includes("event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom"));
-  assert.equal(bindings.length, 5);
+  assert.ok(sharedDialogSource.includes("pointer.clientX < bounds.left || pointer.clientX > bounds.right || pointer.clientY < bounds.top || pointer.clientY > bounds.bottom"));
+  assert.equal(bindings.length, 4);
 });
 
 test("Codex-native visual values live behind semantic design tokens", () => {

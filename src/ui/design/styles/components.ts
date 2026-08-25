@@ -65,6 +65,75 @@ export function betterCodexComponentStylesCss() {
       background: var(--bc-color-danger-soft);
     }
 
+    [data-bc-component="field-shell"] {
+      display: grid;
+      min-width: 0;
+      gap: var(--bc-space-1);
+      color: var(--bc-color-text);
+    }
+
+    [data-bc-component="field-shell"] [data-bc-field-label],
+    [data-bc-component="field-shell"] > span:first-child > strong {
+      font-size: var(--bc-text-sm);
+      font-weight: 600;
+    }
+
+    [data-bc-component="field-shell"] [data-bc-field-label][data-required="true"]::after {
+      margin-left: var(--bc-space-1);
+      color: var(--bc-color-danger);
+      content: "*";
+    }
+
+    [data-bc-component="field-shell"] [data-bc-field-message="description"],
+    [data-bc-component="field-shell"] > span:first-child > small {
+      color: var(--bc-color-text-muted);
+      font-size: var(--bc-text-caption);
+    }
+
+    [data-bc-component="field-shell"] [data-bc-field-message="error"] {
+      color: var(--bc-color-danger);
+    }
+
+    [data-bc-component="field-shell"][data-bc-state="disabled"] {
+      color: var(--bc-color-text-faint);
+    }
+
+    [data-bc-component="dialog"] {
+      color: var(--bc-color-text);
+      background: var(--bc-color-surface-raised);
+    }
+
+    [data-bc-component="dialog"]::backdrop {
+      background: var(--bc-color-scrim);
+    }
+
+    [data-bc-component="menu"] {
+      z-index: var(--bc-z-menu);
+      color: var(--bc-color-text);
+      background: var(--bc-color-surface-raised);
+      box-shadow: var(--bc-elevation-menu);
+    }
+
+    [data-bc-component="notice"] {
+      display: flex;
+      align-items: flex-start;
+      gap: var(--bc-space-3);
+      border-radius: var(--bc-radius-md);
+      padding: var(--bc-space-3);
+      color: var(--bc-color-text);
+      background: var(--bc-color-surface-raised);
+      box-shadow: var(--bc-elevation-float);
+    }
+
+    [data-bc-component="notice"] > p {
+      flex: 1;
+      margin: 0;
+    }
+
+    [data-bc-component="notice"][data-bc-variant="error"] {
+      color: var(--bc-color-danger);
+    }
+
     #better-codex-dialog[data-mode="agent"] {
       width: min(691px, calc(100vw - 48px));
       height: min(var(--bc-dialog-agent-height), calc(100vh - 48px));
