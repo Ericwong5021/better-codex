@@ -11,6 +11,7 @@ import { codexExecutablePath } from "./codex-cli.js";
 import { renderMarkdown } from "./markdown.js";
 import { readConversationActivity, readConversationResult } from "./session-transcript.js";
 import { SessionHostClient } from "./session-host-client.js";
+import type { SessionHostDelivery } from "./session-host-protocol.js";
 import { projectDocumentKeys, type ProjectDocumentDiagram, type ProjectDocumentKey, type ProjectPlanItem, type ProjectPlanSnapshot } from "./sync-contract.js";
 import { codexSemanticInput, codexSemanticRequestFingerprint, normalizeCodexSemanticReferences, type CodexSemanticReference } from "./codex-semantics.js";
 import { sessionNativeCommand } from "./native-commands.js";
@@ -83,6 +84,17 @@ const schedulerSchema = {
   },
 };
 
+type SessionTurnCompletion = {
+  issue_id: string;
+  run_id: string | null;
+  thread_id: string;
+  turn_id: string;
+  status: "completed" | "interrupted" | "failed";
+  error: string | null;
+  message: string;
+  should_schedule: boolean;
+};
+
 function workerDebug(event: string, fields: Record<string, unknown> = {}) {
   if (!debugLoggingEnabled) return;
   try {
@@ -137,6 +149,7 @@ export class IssueWorker {
       event: (method, params) => {
         if (this.handleSessionEvent(method, params)) this.onChange();
       },
+      delivery: message => this.applySessionHostDelivery(message),
     });
   }
 
@@ -1137,23 +1150,66 @@ export class IssueWorker {
     }
   }
 
+  private applySessionHostDelivery(message: SessionHostDelivery) {
+    let afterCommit: (() => void) | undefined;
+    const result = this.store.applySessionHostDelivery({
+      delivery_id: message.delivery_id,
+      host_instance_id: message.host_instance_id,
+      sequence: message.sequence,
+      payload_hash: message.payload_hash,
+    }, () => {
+      const payload = message.payload;
+      if (message.kind === "release") {
+        this.store.releaseSessionRelay(String(payload.relay_id || ""), String(payload.error || "session_host_released"));
+        return true;
+      }
+      if (message.kind === "checkpoint") {
+        this.store.checkpointSessionCommand(String(payload.command_id || ""), String(payload.relay_id || ""), payload.result && typeof payload.result === "object" ? payload.result as Record<string, unknown> : {});
+        return true;
+      }
+      if (message.kind === "complete") {
+        const command = this.store.completeSessionCommand(String(payload.command_id || ""), String(payload.relay_id || ""), payload.result && typeof payload.result === "object" ? payload.result as Record<string, unknown> : {});
+        if (command.cancel_requested) afterCommit = () => this.store.enqueueSessionInterrupt(command.issue_id);
+        return true;
+      }
+      if (message.kind === "fail") {
+        const error = String(payload.error || "session_host_failed");
+        const command = this.store.failSessionCommand(String(payload.command_id || ""), String(payload.relay_id || ""), error, typeof payload.thread_id === "string" ? payload.thread_id : undefined, typeof payload.turn_id === "string" ? payload.turn_id : undefined);
+        afterCommit = () => this.handleSessionCommandFailure(command, command.error || error);
+        return true;
+      }
+      const event = this.applySessionEvent(String(payload.method || ""), payload.params && typeof payload.params === "object" ? payload.params as Record<string, unknown> : {});
+      if (event.completion) afterCommit = () => this.finishSessionTurn(event.completion!);
+      return event.changed;
+    });
+    if (result.duplicate) return;
+    afterCommit?.();
+    if (result.value) this.onChange();
+  }
+
   handleSessionEvent(method: string, params: Record<string, unknown>) {
+    const result = this.applySessionEvent(method, params);
+    if (result.completion) this.finishSessionTurn(result.completion);
+    return result.changed;
+  }
+
+  private applySessionEvent(method: string, params: Record<string, unknown>): { changed: boolean; completion?: SessionTurnCompletion } {
     const threadId = typeof params.threadId === "string" ? params.threadId : "";
-    if (!threadId) return false;
+    if (!threadId) return { changed: false };
     if (method === "thread/status/changed") {
       const status = params.status && typeof params.status === "object" ? params.status as Record<string, unknown> : {};
       const activeFlags = Array.isArray(status.activeFlags) ? status.activeFlags.filter((value): value is string => typeof value === "string") : [];
-      return this.store.syncSessionThreadStatus(threadId, String(status.type || ""), activeFlags);
+      return { changed: this.store.syncSessionThreadStatus(threadId, String(status.type || ""), activeFlags) };
     }
     if (method === "turn/started") {
       const turn = params.turn && typeof params.turn === "object" ? params.turn as Record<string, unknown> : {};
       const turnId = typeof turn.id === "string" ? turn.id : "";
-      return Boolean(turnId && this.store.sessionTurnStarted(threadId, turnId));
+      return { changed: Boolean(turnId && this.store.sessionTurnStarted(threadId, turnId)) };
     }
     if (method === "item/completed") {
       const turnId = typeof params.turnId === "string" ? params.turnId : "";
       const item = params.item && typeof params.item === "object" ? params.item as Record<string, unknown> : {};
-      return item.type === "agentMessage" && typeof item.text === "string" && Boolean(turnId) ? this.store.recordSessionAgentMessage(threadId, turnId, item.text) : false;
+      return { changed: item.type === "agentMessage" && typeof item.text === "string" && Boolean(turnId) ? this.store.recordSessionAgentMessage(threadId, turnId, item.text) : false };
     }
     if (method === "turn/completed") {
       const turn = params.turn && typeof params.turn === "object" ? params.turn as Record<string, unknown> : {};
@@ -1165,22 +1221,12 @@ export class IssueWorker {
       const turnError = turn.error && typeof turn.error === "object" ? turn.error as Record<string, unknown> : {};
       const error = typeof turnError.message === "string" ? turnError.message : status === "failed" ? "session_turn_failed" : undefined;
       const completion = turnId ? this.store.completeSessionTurn(threadId, turnId, status, error) : undefined;
-      if (completion) this.finishSessionTurn(completion);
-      return Boolean(completion);
+      return { changed: Boolean(completion), completion };
     }
-    return false;
+    return { changed: false };
   }
 
-  private finishSessionTurn(completion: {
-    issue_id: string;
-    run_id: string | null;
-    thread_id: string;
-    turn_id: string;
-    status: "completed" | "interrupted" | "failed";
-    error: string | null;
-    message: string;
-    should_schedule: boolean;
-  }) {
+  private finishSessionTurn(completion: SessionTurnCompletion) {
     if (!completion.run_id || !completion.should_schedule) return;
     const claim = this.store.getRunClaim(completion.run_id);
     if (!claim) return;

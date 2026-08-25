@@ -55,6 +55,7 @@
     "dist/session-host.js",
     "dist/session-host-client.js",
     "dist/session-host-protocol.js",
+    "dist/session-host-transport.js",
     "dist/server.js",
     "dist/sync-client.js",
     "dist/sync-config.js",

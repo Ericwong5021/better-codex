@@ -47,6 +47,7 @@ export const sessionHostLockPath = join(runPath, "session-host.lock");
 export const sessionHostPidPath = join(runPath, "session-host.pid");
 export const sessionHostStatusPath = join(runPath, "session-host-status.json");
 export const sessionHostLogPath = join(logPath, "session-host.log");
+export const sessionHostTransportPath = join(runPath, "session-host-transport.db");
 export const sessionHostSocketPath = process.platform === "win32"
   ? `\\\\.\\pipe\\better-codex-session-host-${betterCodexProfile}`
   : join(runPath, "session-host");

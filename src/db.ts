@@ -83,6 +83,13 @@ export type SessionCommandKind = "start" | "turn" | "review" | "compact" | "nati
 export type SessionCommandStatus = "pending" | "claimed" | "completed" | "failed" | "cancelled";
 export type IssueThreadAction = "archive" | "unarchive" | "delete";
 
+export type SessionDeliveryReceipt = {
+  delivery_id: string;
+  host_instance_id: string;
+  sequence: number;
+  payload_hash: string;
+};
+
 export type PendingThreadAction = {
   thread_id: string;
   issue_id: string;
@@ -316,7 +323,7 @@ export function cleanMaxConcurrency(value: number | undefined) {
   return value;
 }
 
-const latestSchemaVersion = 19;
+const latestSchemaVersion = 20;
 
 function now() {
   return new Date().toISOString();
@@ -673,6 +680,7 @@ export class Store {
   readonly db: DatabaseSync;
   readonly file: string;
   lastBackupPath: string | null = null;
+  private transactionCounter = 0;
 
   constructor(file = databasePath) {
     this.file = file;
@@ -726,6 +734,25 @@ export class Store {
     const target = join(directory, `better-codex-before-v${latestSchemaVersion}-${stamp}.db`);
     this.db.prepare("VACUUM INTO ?").run(target);
     return target;
+  }
+
+  private transaction<T>(operation: () => T) {
+    const nested = this.db.isTransaction;
+    const savepoint = `better_codex_${++this.transactionCounter}`;
+    this.db.exec(nested ? `SAVEPOINT ${savepoint}` : "BEGIN IMMEDIATE");
+    try {
+      const result = operation();
+      this.db.exec(nested ? `RELEASE SAVEPOINT ${savepoint}` : "COMMIT");
+      return result;
+    } catch (error) {
+      if (nested) {
+        this.db.exec(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+        this.db.exec(`RELEASE SAVEPOINT ${savepoint}`);
+      } else {
+        this.db.exec("ROLLBACK");
+      }
+      throw error;
+    }
   }
 
   private migrate(fromVersion: number) {
@@ -1094,6 +1121,21 @@ export class Store {
         this.db.exec("ROLLBACK");
         throw error;
       }
+    }
+    if (fromVersion < 20) {
+      this.transaction(() => {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS session_delivery_receipts (
+            delivery_id TEXT PRIMARY KEY,
+            host_instance_id TEXT NOT NULL,
+            sequence INTEGER NOT NULL,
+            payload_hash TEXT NOT NULL,
+            applied_at TEXT NOT NULL,
+            UNIQUE(host_instance_id, sequence)
+          );
+        `);
+        this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (20, ?)").run(now());
+      });
     }
   }
 
@@ -3927,6 +3969,24 @@ export class Store {
     `).run(timestamp, error, timestamp, relayId);
   }
 
+  applySessionHostDelivery<T>(receipt: SessionDeliveryReceipt, apply: () => T) {
+    return this.transaction(() => {
+      const existing = this.db.prepare("SELECT host_instance_id, sequence, payload_hash FROM session_delivery_receipts WHERE delivery_id = ?").get(receipt.delivery_id) as { host_instance_id: string; sequence: number; payload_hash: string } | undefined;
+      if (existing) {
+        if (existing.host_instance_id !== receipt.host_instance_id || Number(existing.sequence) !== receipt.sequence || existing.payload_hash !== receipt.payload_hash) throw new Error("delivery_id_conflict");
+        return { duplicate: true as const, value: undefined };
+      }
+      const sequence = this.db.prepare("SELECT delivery_id, payload_hash FROM session_delivery_receipts WHERE host_instance_id = ? AND sequence = ?").get(receipt.host_instance_id, receipt.sequence) as { delivery_id: string; payload_hash: string } | undefined;
+      if (sequence) throw new Error("delivery_sequence_conflict");
+      const value = apply();
+      this.db.prepare(`
+        INSERT INTO session_delivery_receipts (delivery_id, host_instance_id, sequence, payload_hash, applied_at)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(receipt.delivery_id, receipt.host_instance_id, receipt.sequence, receipt.payload_hash, now());
+      return { duplicate: false as const, value };
+    });
+  }
+
   sessionRelayIsLeader(relayId: string) {
     const row = this.db.prepare("SELECT relay_id, expires_at FROM session_relay WHERE singleton = 1").get() as { relay_id: string; expires_at: string } | undefined;
     return Boolean(row && row.relay_id === relayId && Date.parse(row.expires_at) > Date.now());
@@ -4043,8 +4103,7 @@ export class Store {
 
   checkpointSessionCommand(commandId: string, relayId: string, result: Record<string, unknown>) {
     const timestamp = now();
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
+    return this.transaction(() => {
       const row = this.db.prepare("SELECT * FROM session_commands WHERE id = ? AND status = 'claimed' AND relay_id = ?").get(commandId, relayId) as Record<string, unknown> | undefined;
       if (!row) throw new Error("session_command_not_claimed");
       const command = sessionCommandFromRow(row);
@@ -4094,17 +4153,12 @@ export class Store {
           WHERE id = ? AND issue_id = ? AND status IN ('claimed', 'running') AND execution_mode = 'desktop'
         `).run(threadId, turnId || null, turnId || null, command.run_id, command.issue_id);
       }
-      this.db.exec("COMMIT");
       return this.getSessionCommand(commandId)!;
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
+    });
   }
 
   completeSessionCommand(commandId: string, relayId: string, result: Record<string, unknown>) {
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
+    return this.transaction(() => {
       const row = this.db.prepare("SELECT * FROM session_commands WHERE id = ? AND status = 'claimed' AND relay_id = ?").get(commandId, relayId) as Record<string, unknown> | undefined;
       if (!row) throw new Error("session_command_not_claimed");
       const command = sessionCommandFromRow(row);
@@ -4180,18 +4234,13 @@ export class Store {
         SET status = 'completed', thread_id = ?, turn_id = ?, result_json = ?, error = NULL, finished_at = ?
         WHERE id = ? AND status = 'claimed' AND relay_id = ?
       `).run(threadId || null, turnId || null, JSON.stringify(result), timestamp, commandId, relayId);
-      this.db.exec("COMMIT");
       return this.getSessionCommand(commandId)!;
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
+    });
   }
 
   failSessionCommand(commandId: string, relayId: string, error: string, partialThreadId?: string | null, partialTurnId?: string | null) {
     const timestamp = now();
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
+    return this.transaction(() => {
       const row = this.db.prepare("SELECT * FROM session_commands WHERE id = ? AND status = 'claimed' AND relay_id = ?").get(commandId, relayId) as Record<string, unknown> | undefined;
       if (!row) throw new Error("session_command_not_claimed");
       const command = sessionCommandFromRow(row);
@@ -4205,7 +4254,6 @@ export class Store {
             SET status = 'pending', relay_id = NULL, claimed_at = NULL, error = ?, finished_at = NULL
             WHERE id = ? AND status = 'claimed' AND relay_id = ?
           `).run(error, commandId, relayId);
-          this.db.exec("COMMIT");
           return { ...command, status: "pending" as const, error, relay_id: null, claimed_at: null, finished_at: null };
         }
       }
@@ -4280,12 +4328,8 @@ export class Store {
           WHERE id = ? AND status != 'done' AND archived_at IS NULL
         `).run(timestamp, command.issue_id);
       }
-      this.db.exec("COMMIT");
       return { ...command, status: "failed" as const, thread_id: boundThreadId || null, turn_id: boundTurnId || null, error: commandError, finished_at: timestamp };
-    } catch (caught) {
-      this.db.exec("ROLLBACK");
-      throw caught;
-    }
+    });
   }
 
   requestSessionCommandCancellation(commandId: string) {
@@ -4362,11 +4406,9 @@ export class Store {
 
   sessionTurnStarted(threadId: string, turnId: string) {
     const timestamp = now();
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
+    return this.transaction(() => {
       const session = this.db.prepare("SELECT issue_id, active_turn_id, active_command_id FROM issue_sessions WHERE thread_id = ?").get(threadId) as { issue_id: string; active_turn_id: string | null; active_command_id: string | null } | undefined;
       if (!session) {
-        this.db.exec("COMMIT");
         return undefined;
       }
       if (session.active_turn_id && session.active_turn_id !== turnId) {
@@ -4382,7 +4424,6 @@ export class Store {
         if (!command || command.status !== "claimed" || command.cancel_requested) {
           this.db.prepare("UPDATE issue_sessions SET active_command_id = NULL, updated_at = ? WHERE issue_id = ? AND active_command_id = ? AND active_turn_id IS NULL")
             .run(timestamp, session.issue_id, commandId);
-          this.db.exec("COMMIT");
           return undefined;
         }
         if (command) {
@@ -4423,12 +4464,8 @@ export class Store {
           WHERE id = ? AND archived_at IS NULL
         `).run(timestamp, session.issue_id);
       }
-      this.db.exec("COMMIT");
       return { issue_id: session.issue_id, thread_id: threadId, turn_id: turnId };
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
+    });
   }
 
   recordSessionAgentMessage(threadId: string, turnId: string, message: string) {
@@ -4457,8 +4494,7 @@ export class Store {
           : "idle";
     if (nextStatus === "idle" && session.active_turn_id) return false;
     const timestamp = now();
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
+    return this.transaction(() => {
       this.db.prepare("UPDATE issue_sessions SET status = ?, updated_at = ? WHERE issue_id = ?").run(nextStatus, timestamp, session.issue_id);
       if (["active", "waiting_on_approval", "waiting_on_user", "failed"].includes(nextStatus)) {
         const issueStatus = nextStatus === "failed" ? "blocked" : "in_progress";
@@ -4472,21 +4508,15 @@ export class Store {
             AND (status != ? OR needs_attention != ? OR pending_actor != ?)
         `).run(issueStatus, needsAttention, pendingActor, timestamp, session.issue_id, issueStatus, issueStatus, needsAttention, pendingActor);
       }
-      this.db.exec("COMMIT");
       return true;
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
+    });
   }
 
   completeSessionTurn(threadId: string, turnId: string, status: "completed" | "interrupted" | "failed", error?: string) {
     const timestamp = now();
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
+    return this.transaction(() => {
       const session = this.db.prepare("SELECT * FROM issue_sessions WHERE thread_id = ?").get(threadId) as Record<string, unknown> | undefined;
       if (!session || String(session.active_turn_id || "") !== turnId) {
-        this.db.exec("COMMIT");
         return undefined;
       }
       const commandId = session.active_command_id ? String(session.active_command_id) : "";
@@ -4556,7 +4586,6 @@ export class Store {
           `).run(status === "completed" ? "in_review" : "blocked", timestamp, String(session.issue_id));
         }
       }
-      this.db.exec("COMMIT");
       return {
         issue_id: String(session.issue_id),
         run_id: run?.id || null,
@@ -4567,10 +4596,7 @@ export class Store {
         message,
         should_schedule: Boolean(run && status !== "interrupted"),
       };
-    } catch (caught) {
-      this.db.exec("ROLLBACK");
-      throw caught;
-    }
+    });
   }
 
   finishSessionReply(issueId: string, status: "completed" | "interrupted" | "failed", error?: string) {

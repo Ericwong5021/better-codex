@@ -1,4 +1,4 @@
-export const sessionHostProtocolVersion = "session-host/v1" as const;
+export const sessionHostProtocolVersion = "session-host/v2" as const;
 
 export type SessionHostThreadAction = "archive" | "unarchive" | "delete";
 
@@ -51,6 +51,8 @@ export type SessionHostStatus = {
   command_in_flight: boolean;
   pending_requests: number;
   queued_deliveries: number;
+  last_delivery_sequence: number;
+  last_acked_sequence: number;
   updated_at: string;
 };
 
@@ -70,6 +72,9 @@ export type SessionHostPollResponse = {
 export type SessionHostDelivery = {
   type: "delivery";
   delivery_id: string;
+  host_instance_id: string;
+  sequence: number;
+  payload_hash: string;
   kind: "release" | "checkpoint" | "complete" | "fail" | "event";
   payload: Record<string, unknown>;
 };
@@ -77,6 +82,9 @@ export type SessionHostDelivery = {
 export type SessionHostDeliveryAck = {
   type: "delivery_ack";
   delivery_id: string;
+  host_instance_id: string;
+  sequence: number;
+  payload_hash: string;
 };
 
 export type SessionHostShutdown = {

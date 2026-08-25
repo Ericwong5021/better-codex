@@ -8,6 +8,7 @@ import { issueStatuses, Store } from "../src/db.js";
 import { IssueWorker } from "../src/worker.js";
 import { defaultAgentProfile, updateDefaultAgentProfile } from "../src/agent-profiles.js";
 import { readCodexAppearance } from "../src/appearance.js";
+import { SessionHostTransport, sessionHostDeliveryHash } from "../src/session-host-transport.js";
 
 function temporaryDatabase() {
   const directory = mkdtempSync(join(tmpdir(), "better-codex-test-"));
@@ -181,7 +182,7 @@ test("core workflow persists, orders status moves, and rejects stale writes", ()
     const restored = store.getIssue(first.id);
     assert.equal(restored?.status, "in_progress");
     assert.equal(restored?.thread_id, "local:thread-1");
-    assert.equal(store.health().schemaVersion, 19);
+    assert.equal(store.health().schemaVersion, 20);
     store.close();
   } finally {
     rmSync(target.directory, { recursive: true, force: true });
@@ -972,6 +973,58 @@ test("session relay checkpoints recover a turn whose final command acknowledgeme
   }
 });
 
+test("session host deliveries persist until identity-matched acknowledgement", () => {
+  const directory = mkdtempSync(join(tmpdir(), "better-codex-session-host-transport-"));
+  const file = join(directory, "transport.db");
+  try {
+    const first = new SessionHostTransport(file, "host-a");
+    const queued = first.enqueue("event", { method: "turn/completed", params: { threadId: "thread-a" } });
+    assert.equal(queued.sequence, 1);
+    assert.equal(queued.payload_hash, sessionHostDeliveryHash(queued.kind, queued.payload));
+    first.close();
+
+    const reopened = new SessionHostTransport(file, "host-b");
+    assert.deepEqual(reopened.pending(), [queued]);
+    assert.throws(() => reopened.acknowledge({ ...queued, payload_hash: "0".repeat(64) }), /session_host_delivery_ack_mismatch/);
+    reopened.acknowledge(queued);
+    assert.equal(reopened.stats().queued_deliveries, 0);
+    reopened.close();
+  } finally {
+    rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  }
+});
+
+test("session delivery receipt commits atomically with its business mutation", () => {
+  const target = temporaryDatabase();
+  try {
+    const store = new Store(target.file);
+    store.db.exec("CREATE TABLE delivery_application_test (value TEXT NOT NULL)");
+    const receipt = { delivery_id: "delivery-1", host_instance_id: "host-1", sequence: 1, payload_hash: "a".repeat(64) };
+    const applied = store.applySessionHostDelivery(receipt, () => {
+      store.db.prepare("INSERT INTO delivery_application_test (value) VALUES ('applied')").run();
+      return "applied";
+    });
+    assert.deepEqual(applied, { duplicate: false, value: "applied" });
+    const replay = store.applySessionHostDelivery(receipt, () => {
+      throw new Error("duplicate_callback_executed");
+    });
+    assert.deepEqual(replay, { duplicate: true, value: undefined });
+    assert.equal((store.db.prepare("SELECT COUNT(*) AS count FROM delivery_application_test").get() as { count: number }).count, 1);
+    assert.throws(() => store.applySessionHostDelivery({ ...receipt, payload_hash: "b".repeat(64) }, () => undefined), /delivery_id_conflict/);
+
+    const failedReceipt = { delivery_id: "delivery-2", host_instance_id: "host-1", sequence: 2, payload_hash: "c".repeat(64) };
+    assert.throws(() => store.applySessionHostDelivery(failedReceipt, () => {
+      store.db.prepare("INSERT INTO delivery_application_test (value) VALUES ('rolled-back')").run();
+      throw new Error("business_write_failed");
+    }), /business_write_failed/);
+    assert.equal((store.db.prepare("SELECT COUNT(*) AS count FROM delivery_application_test").get() as { count: number }).count, 1);
+    assert.equal((store.db.prepare("SELECT COUNT(*) AS count FROM session_delivery_receipts WHERE delivery_id = ?").get(failedReceipt.delivery_id) as { count: number }).count, 0);
+    store.close();
+  } finally {
+    rmSync(target.directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  }
+});
+
 test("legacy imported issues attach resumable completed sessions without changing assignment", () => {
   const target = temporaryDatabase();
   try {
@@ -1172,7 +1225,7 @@ test("legacy cancelled issues migrate to archived backlog issues", () => {
     const restored = store.unarchiveIssue(issue.id, migrated.version);
     const moved = store.updateIssue(issue.id, restored.version, { status: "todo" });
     assert.equal(store.isDispatchable(moved), false);
-    assert.equal(store.health().schemaVersion, 19);
+    assert.equal(store.health().schemaVersion, 20);
   } finally {
     store?.close();
     rmSync(target.directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
@@ -1211,7 +1264,7 @@ test("newer database schema is rejected without migration", () => {
   const target = temporaryDatabase();
   try {
     const future = new DatabaseSync(target.file);
-    future.exec("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL); INSERT INTO schema_migrations VALUES (20, '2026-01-01T00:00:00.000Z')");
+    future.exec("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL); INSERT INTO schema_migrations VALUES (21, '2026-01-01T00:00:00.000Z')");
     future.close();
     assert.throws(() => new Store(target.file), /database_schema_too_new/);
   } finally {
@@ -1255,7 +1308,7 @@ test("legacy database is backed up before migration", () => {
     legacy.close();
 
     const store = new Store(target.file);
-    assert.equal(store.health().schemaVersion, 19);
+    assert.equal(store.health().schemaVersion, 20);
     assert.ok(store.lastBackupPath);
     assert.ok(existsSync(store.lastBackupPath!));
     assert.equal(store.getProject("legacy")?.name, "Legacy");

@@ -2,14 +2,10 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createServer, type Socket } from "node:net";
 import { chmodSync, closeSync, linkSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync, type Stats } from "node:fs";
-import { betterCodexHome, betterCodexProfile, ensureDirectories, sessionHostLockPath, sessionHostPidPath, sessionHostSocketPath, sessionHostStatusPath, token } from "./config.js";
+import { betterCodexHome, betterCodexProfile, ensureDirectories, sessionHostLockPath, sessionHostPidPath, sessionHostSocketPath, sessionHostStatusPath, sessionHostTransportPath, token } from "./config.js";
 import { RuntimeSessionRelay, type RelayPoll, type SessionRelayHost } from "./session-relay.js";
 import { sessionHostProtocolVersion, type SessionHostDelivery, type SessionHostMessage, type SessionHostServerMessage, type SessionHostStatus, type SessionHostThreadAction } from "./session-host-protocol.js";
-
-type QueuedDelivery = {
-  message: SessionHostDelivery;
-  sent: boolean;
-};
+import { SessionHostTransport } from "./session-host-transport.js";
 
 type RuntimeConnection = {
   socket: Socket;
@@ -123,9 +119,9 @@ function acquireLock() {
 
 class SessionHostServer {
   private readonly server = createServer(socket => this.accept(socket));
-  private readonly deliveries: QueuedDelivery[] = [];
   private readonly pendingPolls = new Map<string, (result: RelayPoll) => void>();
   private readonly connections = new Set<RuntimeConnection>();
+  private readonly sentDeliveries = new Set<string>();
   private connection: RuntimeConnection | null = null;
   private connectionEpoch = 0;
   private shuttingDown = false;
@@ -134,6 +130,7 @@ class SessionHostServer {
   private ownsEndpoint = false;
   private retriedStaleSocket = false;
   private readonly hostInstanceId = randomUUID();
+  private readonly transport = new SessionHostTransport(sessionHostTransportPath, this.hostInstanceId);
   private readonly startedAt = new Date().toISOString();
   private runtimeDisconnectedAt: string | null = null;
   private orphanTimer: NodeJS.Timeout | null = null;
@@ -207,6 +204,7 @@ class SessionHostServer {
 
   private writeStatus(running = true) {
     const relay = this.relay.status();
+    const transport = this.transport.stats();
     const connection = this.connection?.authenticated ? this.connection : null;
     const status = {
       protocol_version: sessionHostProtocolVersion,
@@ -222,7 +220,7 @@ class SessionHostServer {
       runtime_connected_at: connection?.connectedAt ?? null,
       runtime_disconnected_at: this.runtimeDisconnectedAt,
       ...relay,
-      queued_deliveries: this.deliveries.length,
+      ...transport,
       updated_at: new Date().toISOString(),
     } satisfies SessionHostStatus;
     const temporary = `${sessionHostStatusPath}.${process.pid}.tmp`;
@@ -235,12 +233,13 @@ class SessionHostServer {
     this.orphanTimer = setTimeout(() => {
       this.orphanTimer = null;
       if (this.connection?.authenticated) return;
-      if (!this.relay.idle()) {
-        diagnostic("orphan_shutdown_deferred", { ...this.relay.status(), queued_deliveries: this.deliveries.length });
+      const transport = this.transport.stats();
+      if (!this.relay.idle() || transport.queued_deliveries > 0) {
+        diagnostic("orphan_shutdown_deferred", { ...this.relay.status(), ...transport });
         this.scheduleOrphanShutdown(60_000);
         return;
       }
-      diagnostic("orphan_shutdown", { disconnected_at: this.runtimeDisconnectedAt, queued_deliveries: this.deliveries.length });
+      diagnostic("orphan_shutdown", { disconnected_at: this.runtimeDisconnectedAt, ...transport });
       this.shutdown();
     }, delay);
     this.orphanTimer.unref();
@@ -266,7 +265,7 @@ class SessionHostServer {
       if (this.connection !== connection) return;
       this.connection = null;
       this.runtimeDisconnectedAt = new Date().toISOString();
-      for (const delivery of this.deliveries) delivery.sent = false;
+      this.sentDeliveries.clear();
       for (const resolve of this.pendingPolls.values()) resolve(this.offlinePoll());
       this.pendingPolls.clear();
       this.writeStatus();
@@ -313,7 +312,7 @@ class SessionHostServer {
       if (previous && previous !== connection) {
         diagnostic("runtime_connection_replaced", { previous_epoch: previous.epoch, previous_runtime_instance_id: previous.runtimeInstanceId, next_runtime_instance_id: message.runtime_instance_id });
         previous.socket.destroy();
-        for (const delivery of this.deliveries) delivery.sent = false;
+        this.sentDeliveries.clear();
         for (const resolve of this.pendingPolls.values()) resolve(this.offlinePoll());
         this.pendingPolls.clear();
       }
@@ -377,8 +376,9 @@ class SessionHostServer {
       return;
     }
     if (message.type === "delivery_ack") {
-      const index = this.deliveries.findIndex(delivery => delivery.message.delivery_id === message.delivery_id);
-      if (index >= 0) this.deliveries.splice(index, 1);
+      this.transport.acknowledge(message);
+      this.sentDeliveries.delete(message.delivery_id);
+      this.writeStatus();
       return;
     }
   }
@@ -416,22 +416,22 @@ class SessionHostServer {
   }
 
   private deliver(kind: SessionHostDelivery["kind"], payload: Record<string, unknown>) {
-    const message = { type: "delivery", delivery_id: randomUUID(), kind, payload } satisfies SessionHostDelivery;
-    this.deliveries.push({ message, sent: false });
-    if (this.deliveries.length > 4096) this.deliveries.splice(0, this.deliveries.length - 4096);
+    const message = this.transport.enqueue(kind, payload);
+    diagnostic("delivery_queued", { delivery_id: message.delivery_id, host_instance_id: message.host_instance_id, sequence: message.sequence, kind: message.kind, queued_deliveries: this.transport.stats().queued_deliveries });
+    this.writeStatus();
     this.flushDeliveries();
   }
 
   private flushDeliveries() {
     const connection = this.connection?.authenticated ? this.connection : null;
     if (!connection) return;
-    for (const delivery of this.deliveries) {
-      if (delivery.sent) continue;
+    for (const delivery of this.transport.pending()) {
+      if (this.sentDeliveries.has(delivery.delivery_id)) continue;
       try {
-        writeMessage(connection.socket, delivery.message);
-        delivery.sent = true;
+        writeMessage(connection.socket, delivery);
+        this.sentDeliveries.add(delivery.delivery_id);
       } catch (error) {
-        diagnostic("delivery_failed", { connection_epoch: connection.epoch, runtime_instance_id: connection.runtimeInstanceId, delivery_id: delivery.message.delivery_id, kind: delivery.message.kind, error: error instanceof Error ? error.message : String(error) });
+        diagnostic("delivery_failed", { connection_epoch: connection.epoch, runtime_instance_id: connection.runtimeInstanceId, delivery_id: delivery.delivery_id, host_instance_id: delivery.host_instance_id, sequence: delivery.sequence, kind: delivery.kind, error: error instanceof Error ? error.message : String(error) });
         connection.socket.destroy();
         return;
       }
@@ -446,6 +446,7 @@ class SessionHostServer {
     this.orphanTimer = null;
     this.statusTimer = null;
     this.relay.stop();
+    this.transport.close();
     for (const connection of this.connections) connection.socket.destroy();
     this.connections.clear();
     this.connection = null;

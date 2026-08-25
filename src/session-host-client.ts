@@ -5,6 +5,7 @@ import { isSea } from "node:sea";
 import { createConnection, type Socket } from "node:net";
 import { sessionHostLogPath, sessionHostPidPath, sessionHostSocketPath, sessionHostStatusPath, betterCodexHome, betterCodexProfile, peerBetterCodexHome, ensureDirectories, sourceProcessArguments, token } from "./config.js";
 import { sessionHostProtocolVersion, type SessionHostDelivery, type SessionHostMessage, type SessionHostPollRequest, type SessionHostServerMessage, type SessionHostStatus, type SessionHostThreadAction } from "./session-host-protocol.js";
+import { sessionHostDeliveryHash } from "./session-host-transport.js";
 import type { SessionRelayHost } from "./session-relay.js";
 
 function hostArguments() {
@@ -150,8 +151,9 @@ export class SessionHostClient implements SessionRelayHost {
   private hostIdentity: { pid: number; instanceId: string | null; connectionEpoch: number | null; startedAt: string | null } | null = null;
   private readonly readyWaiters = new Set<ReadyWaiter>();
   private readonly threadActionRequests = new Map<string, ThreadActionRequest>();
+  private deliveryQueue: Promise<void> = Promise.resolve();
 
-  constructor(private readonly host: SessionRelayHost) {}
+  constructor(private readonly host: SessionRelayHost & { delivery?: (message: SessionHostDelivery) => void | Promise<void> }) {}
 
   status() {
     return {
@@ -345,10 +347,15 @@ export class SessionHostClient implements SessionRelayHost {
       return;
     }
     if (message.type === "poll_request") return void this.handlePoll(socket, message);
-    if (message.type === "delivery") return void this.handleDelivery(socket, message).catch(error => {
-      diagnostic("delivery_apply_failed", { delivery_id: message.delivery_id, kind: message.kind, error: error instanceof Error ? error.message : String(error) });
-      socket.destroy();
-    });
+    if (message.type === "delivery") {
+      this.deliveryQueue = this.deliveryQueue.then(async () => {
+        if (this.socket !== socket) return;
+        await this.handleDelivery(socket, message);
+      }).catch(error => {
+        diagnostic("delivery_apply_failed", { delivery_id: message.delivery_id, host_instance_id: message.host_instance_id, sequence: message.sequence, kind: message.kind, error: error instanceof Error ? error.message : String(error) });
+        socket.destroy();
+      });
+    }
   }
 
   private waitUntilReady() {
@@ -432,16 +439,18 @@ export class SessionHostClient implements SessionRelayHost {
   }
 
   private async handleDelivery(socket: Socket, message: SessionHostDelivery) {
+    if (!Number.isSafeInteger(message.sequence) || message.sequence < 1 || !message.host_instance_id || sessionHostDeliveryHash(message.kind, message.payload) !== message.payload_hash) throw new Error("session_host_delivery_invalid");
     const payload = message.payload;
-    try {
+    if (this.host.delivery) {
+      await this.host.delivery(message);
+    } else {
       if (message.kind === "release") await this.host.release(String(payload.relay_id || ""), String(payload.error || "session_host_released"));
       if (message.kind === "checkpoint") await this.host.checkpoint(String(payload.command_id || ""), String(payload.relay_id || ""), payload.result && typeof payload.result === "object" ? payload.result as Record<string, unknown> : {});
       if (message.kind === "complete") await this.host.complete(String(payload.command_id || ""), String(payload.relay_id || ""), payload.result && typeof payload.result === "object" ? payload.result as Record<string, unknown> : {});
       if (message.kind === "fail") await this.host.fail(String(payload.command_id || ""), String(payload.relay_id || ""), String(payload.error || "session_host_failed"), typeof payload.thread_id === "string" ? payload.thread_id : undefined, typeof payload.turn_id === "string" ? payload.turn_id : undefined);
       if (message.kind === "event") await this.host.event(String(payload.method || ""), payload.params && typeof payload.params === "object" ? payload.params as Record<string, unknown> : {});
-    } finally {
-      if (this.socket === socket) writeMessage(socket, { type: "delivery_ack", delivery_id: message.delivery_id });
     }
+    if (this.socket === socket) writeMessage(socket, { type: "delivery_ack", delivery_id: message.delivery_id, host_instance_id: message.host_instance_id, sequence: message.sequence, payload_hash: message.payload_hash });
   }
 }
 
