@@ -2,9 +2,10 @@ import { createHostAdapter } from "./hosts/index.js";
 import { applyHostTheme } from "./theme/apply.js";
 import { themeIsDegraded } from "./theme/diagnostics.js";
 import { createEmptyState } from "./components/empty-state.js";
+import { adoptInlineFeedback } from "./components/inline-feedback.js";
 import { destroyRemovedComponents, registerOwnedComponent } from "./core/ownership.js";
 import { adoptButton, adoptIconButton, createButton, createIconButton } from "./primitives/button.js";
-import { createStatusBadge } from "./primitives/badge.js";
+import { adoptBadge, adoptStatusBadge, createStatusBadge } from "./primitives/badge.js";
 
 export function install(config: Record<string, any>) {
   if (!config || config.schemaVersion !== 1) throw new Error("injected_ui_schema_mismatch");
@@ -782,6 +783,8 @@ export function install(config: Record<string, any>) {
     const managedButtons = new Set();
     let adoptedIconButtonSequence = 0;
     let adoptedButtonSequence = 0;
+    let adoptedBadgeSequence = 0;
+    let adoptedFeedbackSequence = 0;
     let observer = null;
     let refreshPending = false;
     let refreshTimer = null;
@@ -1139,6 +1142,23 @@ export function install(config: Record<string, any>) {
     function hydrateSharedControls(root, feature) {
       hydrateIconButtons(root, feature);
       hydrateActionButtons(root, feature);
+      root.querySelectorAll(".better-codex-scheduled-status, .better-codex-remote-status-badge, .better-codex-completion-status").forEach(element => {
+        if (!(element instanceof HTMLElement) || element.dataset.bcComponent) return;
+        const stateValue = element.dataset.state || element.closest("[data-remote-status]")?.getAttribute("data-remote-status") || "";
+        const variant = ["running", "enabled", "online", "completed"].includes(stateValue) ? "success" : ["offline", "failed", "blocked"].includes(stateValue) ? "danger" : "neutral";
+        const handle = adoptStatusBadge(element, { label: element.textContent?.trim() || "", variant }, componentContext(feature, "adopted-status-badge:" + (++adoptedBadgeSequence)));
+        registerOwnedComponent(element, handle);
+      });
+      root.querySelectorAll(".better-codex-column-title > span:last-child, .better-codex-archive-project-count").forEach(element => {
+        if (!(element instanceof HTMLElement) || element.dataset.bcComponent) return;
+        const handle = adoptBadge(element, { label: element.textContent?.trim() || "" }, componentContext(feature, "adopted-count-badge:" + (++adoptedBadgeSequence)));
+        registerOwnedComponent(element, handle);
+      });
+      root.querySelectorAll(".better-codex-dialog-error, .better-codex-agent-inspector-error, .better-codex-update-error, .better-codex-help-error, .better-codex-composer-queue-error, .better-codex-project-document-notice.is-error").forEach(element => {
+        if (!(element instanceof HTMLElement) || element.dataset.bcComponent) return;
+        const handle = adoptInlineFeedback(element, { message: element.textContent?.trim() || "", tone: "error" }, componentContext(feature, "adopted-inline-feedback:" + (++adoptedFeedbackSequence)));
+        registerOwnedComponent(element, handle);
+      });
     }
 
     function hydrateAddedIconButtons(records) {

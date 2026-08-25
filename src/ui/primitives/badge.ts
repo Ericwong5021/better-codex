@@ -8,24 +8,34 @@ export interface BadgeProps {
   variant?: BadgeVariant;
 }
 
-export function createBadge(initial: BadgeProps, context: ComponentContext) {
-  const root = document.createElement("span");
+function badge(initial: BadgeProps, context: ComponentContext, component: "badge" | "status-badge" | "priority-badge", existing?: HTMLElement) {
+  const root = existing || document.createElement("span");
+  const preserveContent = Boolean(existing);
   const lifecycle = createComponentLifecycle("badge", context, root, initial, props => {
     root.dataset.bcVariant = props.variant || "neutral";
     root.dataset.bcState = "default";
-    root.textContent = props.label;
+    if (!preserveContent) root.textContent = props.label;
   });
+  lifecycle.handle.element.dataset.bcComponent = component;
   return lifecycle.handle;
 }
 
+export function createBadge(initial: BadgeProps, context: ComponentContext) {
+  return badge(initial, context, "badge");
+}
+
 export function createStatusBadge(initial: BadgeProps, context: ComponentContext) {
-  const handle = createBadge(initial, context);
-  handle.element.dataset.bcComponent = "status-badge";
-  return handle;
+  return badge(initial, context, "status-badge");
 }
 
 export function createPriorityBadge(initial: BadgeProps, context: ComponentContext) {
-  const handle = createBadge({ ...initial, variant: initial.variant || "priority" }, context);
-  handle.element.dataset.bcComponent = "priority-badge";
-  return handle;
+  return badge({ ...initial, variant: initial.variant || "priority" }, context, "priority-badge");
+}
+
+export function adoptBadge(element: HTMLElement, initial: BadgeProps, context: ComponentContext) {
+  return badge(initial, context, "badge", element);
+}
+
+export function adoptStatusBadge(element: HTMLElement, initial: BadgeProps, context: ComponentContext) {
+  return badge(initial, context, "status-badge", element);
 }
