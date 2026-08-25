@@ -139,7 +139,7 @@ export function betterCodexFeatureStructureStylesCss() {
     #better-codex-panel .better-codex-scheduled { display: none; min-height: 0; flex: 1; overflow-y: auto; padding: 18px 22px 32px; }
     #better-codex-panel[data-surface="scheduled"] .better-codex-scheduled { display: block; }
     #better-codex-panel .better-codex-project-list { display: grid; width: min(1120px,100%); margin: 0 auto; grid-template-columns: repeat(auto-fill,minmax(300px,1fr)); gap: 12px; }
-    #better-codex-panel .better-codex-project-card { display: flex; min-height: 152px; box-sizing: border-box; flex-direction: column; border: 0; border-radius: var(--bc-radius-lg); color: var(--bc-color-text); background: var(--bc-color-surface); padding: 16px; text-align: left; cursor: pointer; transition: transform .15s cubic-bezier(.16,1,.3,1), background-color .15s cubic-bezier(.16,1,.3,1); }
+    #better-codex-panel .better-codex-project-card { display: flex; min-width: 0; min-height: 152px; box-sizing: border-box; flex-direction: column; border: 0; border-radius: var(--bc-radius-lg); color: var(--bc-color-text); background: var(--bc-color-surface); padding: 16px; text-align: left; cursor: pointer; transition: transform .15s cubic-bezier(.16,1,.3,1), background-color .15s cubic-bezier(.16,1,.3,1); }
     #better-codex-panel .better-codex-project-card:active { transform: scale(.98); }
     #better-codex-panel .better-codex-project-card:focus-visible { outline: 2px solid var(--bc-color-focus); outline-offset: 2px; }
     #better-codex-panel .better-codex-project-card-head { display: flex; align-items: flex-start; gap: 11px; }
