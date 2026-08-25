@@ -195,14 +195,14 @@ test("web host boots the shared DOM injection behind a local session", async () 
     const source = await injection.text();
     assert.doesNotMatch(source, new RegExp(token));
     assert.match(source, new RegExp(sessionToken));
-    assert.match(source, /const HOST_KIND = "web"/);
-    assert.match(source, /const INITIAL_LOCALE = "zh-CN"/);
+    assert.match(source, /"host":"web"/);
+    assert.match(source, /"initialLocale":"zh-CN"/);
     assert.match(source, /HOST_KIND === "web" \? INITIAL_LOCALE : bootstrap\.locale/);
     assert.match(source, /data-better-codex-web-surface/);
     assert.match(source, /button\.className = "web-nav-button"/);
     assert.match(source, /parent\.prepend\(entry\)/);
     assert.match(source, /document\.documentElement\.dataset\.theme = resolvedTheme/);
-    assert.match(source, /--bc-host-" \+ mode \+ "-font-ui/);
+    assert.match(source, /name\.endsWith\("font-ui"\)/);
     assert.doesNotThrow(() => new Function(source));
 
     const relayInjection = await fetch(`${base}/web/injection.js?locale=en-US`, {
@@ -212,8 +212,8 @@ test("web host boots the shared DOM injection behind a local session", async () 
     const relaySource = await relayInjection.text();
     assert.doesNotMatch(relaySource, new RegExp(token));
     assert.doesNotMatch(relaySource, new RegExp(sessionToken));
-    assert.match(relaySource, /const HOST_KIND = "web"/);
-    assert.match(relaySource, /const INITIAL_LOCALE = "en"/);
+    assert.match(relaySource, /"host":"web"/);
+    assert.match(relaySource, /"initialLocale":"en"/);
     assert.doesNotThrow(() => new Function(relaySource));
 
     const webBootstrap = await fetch(`${base}/api/bootstrap`, { headers: { authorization: `Bearer ${sessionToken}` } });
@@ -293,7 +293,7 @@ test("web host boots the shared DOM injection behind a local session", async () 
 
     const englishInjection = await fetch(`${base}/web/injection.js?locale=en-US&session=${sessionToken}`);
     assert.equal(englishInjection.status, 200);
-    assert.match(await englishInjection.text(), /const INITIAL_LOCALE = "en"/);
+    assert.match(await englishInjection.text(), /"initialLocale":"en"/);
 
     let newestSessionToken = "";
     for (let index = 0; index < 32; index++) {

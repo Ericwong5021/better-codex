@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { betterCodexThemeColors } from "./design-system.js";
+import { betterCodexDefaultUiFont, type HostThemeInput } from "./ui/theme/contract.js";
 
 export type CodexAppearance = {
   theme: "system" | "light" | "dark";
@@ -17,7 +18,7 @@ export type CodexChromeTheme = {
   uiFont: string;
 };
 
-const defaultUiFont = 'ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif';
+const defaultUiFont = betterCodexDefaultUiFont;
 
 const defaultConfigPath = join(process.env.CODEX_HOME || join(homedir(), ".codex"), "config.toml");
 
@@ -77,5 +78,45 @@ export function readCodexAppearance(path = defaultConfigPath): CodexAppearance {
     theme,
     light: chromeTheme(source, "desktop.appearanceLightChromeTheme", { accent: betterCodexThemeColors.light.accent, contrast: 45, ink: betterCodexThemeColors.light.ink, surface: betterCodexThemeColors.light.canvas, uiFont: defaultUiFont }),
     dark: chromeTheme(source, "desktop.appearanceDarkChromeTheme", { accent: betterCodexThemeColors.dark.accent, contrast: 50, ink: betterCodexThemeColors.dark.ink, surface: betterCodexThemeColors.dark.canvas, uiFont: defaultUiFont }),
+  };
+}
+
+export function readHostThemeInput(path = defaultConfigPath): HostThemeInput {
+  const exists = existsSync(path);
+  const source = exists ? readFileSync(path, "utf8") : "";
+  const appearance = readCodexAppearance(path);
+  const missingTokens: string[] = [];
+  const invalidTokens: string[] = [];
+  const fallbackTokens: string[] = [];
+  const inspect = (mode: "light" | "dark", section: string) => {
+    for (const key of ["accent", "ink", "surface"] as const) {
+      const value = sectionString(source, section, key);
+      if (!value) missingTokens.push(`${mode}.${key}`);
+      else if (!/^#[0-9a-f]{6}$/i.test(value)) invalidTokens.push(`${mode}.${key}`);
+    }
+    const contrast = sectionString(source, section, "contrast");
+    const numericContrast = Number(contrast);
+    if (!contrast) missingTokens.push(`${mode}.contrast`);
+    else if (!Number.isFinite(numericContrast) || numericContrast < 0 || numericContrast > 100) invalidTokens.push(`${mode}.contrast`);
+    if (!sectionString(source, `${section}.fonts`, "ui")) missingTokens.push(`${mode}.uiFont`);
+  };
+  inspect("light", "desktop.appearanceLightChromeTheme");
+  inspect("dark", "desktop.appearanceDarkChromeTheme");
+  const configuredTheme = sectionString(source, "desktop", "appearanceTheme");
+  if (!configuredTheme) missingTokens.push("theme");
+  else if (configuredTheme !== "system" && configuredTheme !== "light" && configuredTheme !== "dark") invalidTokens.push("theme");
+  fallbackTokens.push(...missingTokens, ...invalidTokens);
+  return {
+    schemaVersion: 1,
+    source: exists && (configuredTheme || missingTokens.length < 11) ? "codex-config" : "fallback",
+    theme: appearance.theme,
+    light: appearance.light,
+    dark: appearance.dark,
+    capabilities: ["light", "dark", "font-family", "contrast"],
+    diagnostics: {
+      missingTokens: [...new Set(missingTokens)].sort(),
+      invalidTokens: [...new Set(invalidTokens)].sort(),
+      fallbackTokens: [...new Set(fallbackTokens)].sort(),
+    },
   };
 }

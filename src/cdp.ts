@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { activeCompatibility, capabilityExpression, clearCompatibilityStatus, missingCapabilities, navigationExpression, readCompatibilityStatus, targetAllowed, type RendererCapabilities, writeCompatibilityStatus } from "./compatibility.js";
 import { betterCodexProfile } from "./config.js";
-import { injectionScript, injectionVersion } from "./dom.js";
+import { injectionBundleChecksum, injectionScript, injectionVersion } from "./dom.js";
 import { recordInjectionOwnership, setInjectionEnabled } from "./injection-state.js";
 import { readCodexLocale } from "./locale.js";
 import { showNativeChoiceDialog } from "./native-dialog.js";
@@ -29,6 +29,18 @@ const cdpWebSocketOpenTimeoutMs = 2000;
 const cdpCommandTimeoutMs = 8000;
 const cdpTargetScanTimeoutMs = 30_000;
 const cdpTargetCandidateLimit = 32;
+
+type InjectionIdentity = { version?: string; bundleChecksum?: string; profile?: string; endpoint?: string; pulse?: boolean };
+
+const injectionIdentityExpression = "({ version: window.__betterCodexInjection__?.version || null, bundleChecksum: window.__betterCodexInjection__?.bundleChecksum || null, profile: window.__betterCodexInjection__?.profile || null, endpoint: window.__betterCodexInjection__?.endpoint || null, pulse: typeof window.__betterCodexInjection__?.pulse === 'function' })";
+
+function currentInjectionMatches(existing: InjectionIdentity, endpoint: string) {
+  return existing.version === injectionVersion()
+    && existing.bundleChecksum === injectionBundleChecksum()
+    && existing.profile === betterCodexProfile
+    && existing.endpoint === endpoint
+    && existing.pulse;
+}
 
 class Connection {
   private sequence = 0;
@@ -590,13 +602,13 @@ async function installTarget(target: Target, runtimePort: number, accessToken: s
     await connection.send("Page.setBypassCSP", { enabled: true });
     await connection.send("Runtime.enable");
     try { await connection.send("Runtime.addBinding", { name: "betterCodexRequest" }); } catch {}
-    const existing = await evaluate(connection, "({ version: window.__betterCodexInjection__?.version || null, profile: window.__betterCodexInjection__?.profile || null, endpoint: window.__betterCodexInjection__?.endpoint || null, pulse: typeof window.__betterCodexInjection__?.pulse === 'function' })") as { version?: string; profile?: string; endpoint?: string; pulse?: boolean };
+    const existing = await evaluate(connection, injectionIdentityExpression) as InjectionIdentity;
     const expectedEndpoint = `http://127.0.0.1:${runtimePort}`;
     const foreignDevelopmentInjection = betterCodexProfile === "development"
       && ((existing.profile && existing.profile !== betterCodexProfile) || (!existing.profile && existing.endpoint && existing.endpoint !== expectedEndpoint));
     if (foreignDevelopmentInjection) throw new Error("profile_not_active");
     const storedIdentifier = await evaluate(connection, "window.__betterCodexNewDocumentScriptId || null");
-    if (existing.version === injectionVersion() && existing.profile === betterCodexProfile && existing.endpoint === expectedEndpoint && existing.pulse) {
+    if (currentInjectionMatches(existing, expectedEndpoint)) {
       await evaluate(connection, "window.__betterCodexInjection__.refresh()");
       const current = readCompatibilityStatus();
       writeCompatibilityStatus({ codexVersion: current?.codexVersion ?? desktopVersion(), compatible: true, reason: null, targetId: target.id, capabilities: current?.capabilities ?? null }, true);
@@ -699,6 +711,7 @@ export async function cdpStatus(port: number) {
         await connection.open();
         const value = await evaluate(connection, `({
           version: window.__betterCodexInjection__?.version || null,
+          bundleChecksum: window.__betterCodexInjection__?.bundleChecksum || null,
           profile: window.__betterCodexInjection__?.profile || null,
           endpoint: window.__betterCodexInjection__?.endpoint || null,
           entry: Boolean(document.getElementById('better-codex-entry')),
@@ -821,7 +834,7 @@ export async function watchInjection(port: number, accessToken: string) {
           connection.on("Runtime.bindingCalled", params => {
             if (params.name === "betterCodexRequest") void bridgeRequest(connection, activeRuntimePort, accessToken, params.payload);
           });
-          const existing = await evaluate(connection, "({ version: window.__betterCodexInjection__?.version || null, profile: window.__betterCodexInjection__?.profile || null, endpoint: window.__betterCodexInjection__?.endpoint || null, pulse: typeof window.__betterCodexInjection__?.pulse === 'function' })") as { version?: string; profile?: string; endpoint?: string; pulse?: boolean };
+          const existing = await evaluate(connection, injectionIdentityExpression) as InjectionIdentity;
           const expectedEndpoint = `http://127.0.0.1:${activeRuntimePort}`;
           if (betterCodexProfile === "development" && (existing.profile ? existing.profile !== betterCodexProfile : Boolean(existing.endpoint && existing.endpoint !== expectedEndpoint))) {
             setInjectionEnabled(false);
@@ -830,7 +843,7 @@ export async function watchInjection(port: number, accessToken: string) {
             break;
           }
           let identifier: string | undefined;
-          if (existing.version === injectionVersion() && existing.profile === betterCodexProfile && existing.endpoint === expectedEndpoint && existing.pulse) {
+          if (currentInjectionMatches(existing, expectedEndpoint)) {
             const stored = await evaluate(connection, "window.__betterCodexNewDocumentScriptId || null");
             identifier = typeof stored === "string" ? stored : undefined;
             await evaluate(connection, "window.__betterCodexInjection__.refresh()");
@@ -854,14 +867,14 @@ export async function watchInjection(port: number, accessToken: string) {
       // Health-check attached sessions without opening a second debugger to the same target.
       for (const [id, current] of attached) {
         try {
-          const existing = await evaluate(current.connection, "({ version: window.__betterCodexInjection__?.version || null, profile: window.__betterCodexInjection__?.profile || null, endpoint: window.__betterCodexInjection__?.endpoint || null, pulse: typeof window.__betterCodexInjection__?.pulse === 'function' })") as { version?: string; profile?: string; endpoint?: string; pulse?: boolean };
+          const existing = await evaluate(current.connection, injectionIdentityExpression) as InjectionIdentity;
           if (betterCodexProfile === "development" && (existing.profile ? existing.profile !== betterCodexProfile : Boolean(existing.endpoint && existing.endpoint !== `http://127.0.0.1:${activeRuntimePort}`))) {
             setInjectionEnabled(false);
             stopping = true;
             yieldedToPeer = true;
             break;
           }
-          if (existing.version !== injectionVersion() || existing.profile !== betterCodexProfile || existing.endpoint !== `http://127.0.0.1:${activeRuntimePort}` || !existing.pulse) {
+          if (!currentInjectionMatches(existing, `http://127.0.0.1:${activeRuntimePort}`)) {
             if (current.identifier) {
               try { await current.connection.send("Page.removeScriptToEvaluateOnNewDocument", { identifier: current.identifier }); } catch {}
             }

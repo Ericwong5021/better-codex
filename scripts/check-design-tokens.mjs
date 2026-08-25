@@ -28,7 +28,7 @@ const debtRules = {
 function files(path) {
   return readdirSync(path).flatMap(name => {
     const target = join(path, name);
-    if (statSync(target).isDirectory()) return files(target);
+    if (statSync(target).isDirectory()) return name === "generated" ? [] : files(target);
     const extension = name.slice(name.lastIndexOf("."));
     return extensions.has(extension) ? [target] : [];
   });

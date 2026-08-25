@@ -22,6 +22,7 @@
     "dist/codex-usage.js",
     "dist/codex-semantics.js",
     "dist/design-system.js",
+    "dist/generated/injected-ui.js",
     "dist/appearance.js",
     "dist/agent-profiles.js",
     "dist/compatibility.js",
@@ -69,10 +70,12 @@
     "dist/version.js",
     "dist/web-host.js",
     "dist/web-app.js",
-    "dist/worker.js"
+    "dist/worker.js",
+    "dist/ui/**/*.js"
   ],
   "scripts": {
-    "build": "npm run check:design-tokens && tsc && node scripts/refresh-local-install.mjs && node scripts/refresh-injector.mjs",
+    "build": "npm run build:injected-ui && npm run check:design-tokens && tsc && node scripts/refresh-local-install.mjs && node scripts/refresh-injector.mjs",
+    "build:injected-ui": "node scripts/build-injected-ui.mjs",
     "dev": "tsx src/cli.ts serve",
     "dev:install": "npm run build && node scripts/development-instance.mjs install",
     "dev:mockup": "node scripts/dev-mockup.mjs",
@@ -88,7 +91,8 @@
     "relay": "tsx src/relay-cli.ts",
     "relay:start": "node dist/relay-cli.js serve",
     "better-codex": "tsx src/cli.ts",
-    "typecheck": "npm run check:design-tokens && tsc --noEmit",
+    "typecheck": "npm run check:injected-ui && npm run check:design-tokens && tsc --noEmit",
+    "check:injected-ui": "node scripts/build-injected-ui.mjs --check",
     "check:design-tokens": "node scripts/check-design-tokens.mjs",
     "test": "tsx --test --test-force-exit --test-concurrency=2 test/*.test.ts",
     "test:web": "playwright test",
