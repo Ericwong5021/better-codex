@@ -156,7 +156,7 @@ async function bridgeRequest(connection: Connection, runtimePort: number, access
     path = typeof request.path === "string" ? request.path : "";
     method = typeof request.method === "string" ? request.method : "GET";
     traceId = typeof request.traceId === "string" && /^[A-Za-z0-9_-]{8,200}$/.test(request.traceId) ? request.traceId : randomUUID();
-    if (!requestId || request.token !== accessToken || !/^\/api\/(?:bootstrap(?:[?]|$)|update(?:\/(?:install|check))?(?:[?]|$)|remote-access\/(?:status|sessions(?:\/[^/?]+)?)(?:[?]|$)|projects(?:\/ensure)?(?:[?]|$)|issues(?:[/?]|$)|session-relay(?:[/?]|$)|agents(?:[/?]|$)|mockup\/(?:state|reset)(?:[?]|$)|settings\/auto-dispatch(?:[?]|$)|settings\/scheduler-model(?:[?]|$)|settings\/scheduler-reasoning-effort(?:[?]|$))/.test(path) || !["GET", "POST", "PUT", "PATCH", "DELETE"].includes(method)) throw new Error("invalid_bridge_request");
+    if (!requestId || request.token !== accessToken || !/^\/api\/(?:bootstrap(?:[?]|$)|commands(?:[/?]|$)|profile(?:[?]|$)|scheduled-tasks(?:[/?]|$)|sessions(?:[/?]|$)|system\/(?:directories(?:\/create)?|directory)(?:[?]|$)|update(?:\/(?:install|check))?(?:[?]|$)|remote-access\/(?:status|sessions(?:\/[^/?]+)?)(?:[?]|$)|projects(?:\/ensure)?(?:[?]|$)|issues(?:[/?]|$)|session-relay(?:[/?]|$)|agents(?:[/?]|$)|mockup\/(?:state|reset)(?:[?]|$)|settings\/auto-dispatch(?:[?]|$)|settings\/scheduler-model(?:[?]|$)|settings\/scheduler-reasoning-effort(?:[?]|$))/.test(path) || !["GET", "POST", "PUT", "PATCH", "DELETE"].includes(method)) throw new Error("invalid_bridge_request");
     const response = await fetch(`http://127.0.0.1:${runtimePort}${path}`, {
       method,
       signal: AbortSignal.timeout(cdpCommandTimeoutMs),
