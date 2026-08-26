@@ -5604,7 +5604,8 @@ export function betterCodexFeatureStylesCss() {
       overflow: hidden;
     }
 
-    #better-codex-dialog form:has(.better-codex-project-menu:not([hidden])) {
+    #better-codex-dialog form:has(.better-codex-project-menu:not([hidden])),
+    #better-codex-dialog form:has(.better-codex-semantic-menu:not([hidden])) {
       overflow: visible;
     }
 
