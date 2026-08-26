@@ -6,6 +6,7 @@ import { createConnection, type Socket } from "node:net";
 import { sessionHostLogPath, sessionHostPidPath, sessionHostSocketPath, sessionHostStatusPath, betterCodexHome, betterCodexProfile, peerBetterCodexHome, ensureDirectories, sourceProcessArguments, token } from "./config.js";
 import { sessionHostProtocolVersion, type SessionHostDelivery, type SessionHostHandoffSnapshot, type SessionHostMessage, type SessionHostPollRequest, type SessionHostSemanticMethod, type SessionHostSemanticResponse, type SessionHostServerMessage, type SessionHostStatus, type SessionHostThreadAction } from "./session-host-protocol.js";
 import { sessionHostDeliveryHash } from "./session-host-transport.js";
+import { SessionHostLineDecoder } from "./session-host-stream.js";
 import type { SessionRelayHost } from "./session-relay.js";
 import { coreVersion } from "./compatibility.js";
 import type { RuntimeState } from "./runtime-state.js";
@@ -170,7 +171,7 @@ export class SessionHostClient implements SessionRelayHost {
   private connecting = false;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private stopped = true;
-  private readonly outputs = new WeakMap<Socket, string>();
+  private readonly decoders = new WeakMap<Socket, SessionHostLineDecoder>();
   private acknowledged = false;
   private threadActionsSupported = false;
   private semanticRequestsSupported = false;
@@ -330,7 +331,7 @@ export class SessionHostClient implements SessionRelayHost {
     try {
       let socket = await this.openSocket();
       this.socket = socket;
-      this.outputs.set(socket, "");
+      this.decoders.set(socket, new SessionHostLineDecoder());
       this.acknowledged = false;
       this.threadActionsSupported = false;
       this.hostIdentity = null;
@@ -420,14 +421,18 @@ export class SessionHostClient implements SessionRelayHost {
       diagnostic("fenced_host_data");
       return;
     }
-    const output = (this.outputs.get(socket) || "") + String(chunk);
-    if (Buffer.byteLength(output) > 8_388_608) {
-      diagnostic("host_message_buffer_exceeded", { bytes: Buffer.byteLength(output) });
+    const decoder = this.decoders.get(socket);
+    if (!decoder) {
+      diagnostic("host_message_decoder_missing");
       socket.destroy();
       return;
     }
-    const lines = output.split(/\r?\n/);
-    this.outputs.set(socket, lines.pop() || "");
+    const { bytes, lines } = decoder.push(chunk);
+    if (bytes > 8_388_608) {
+      diagnostic("host_message_buffer_exceeded", { bytes });
+      socket.destroy();
+      return;
+    }
     for (const line of lines) {
       try { this.handle(socket, JSON.parse(line) as SessionHostServerMessage); }
       catch (error) {
@@ -625,7 +630,26 @@ export class SessionHostClient implements SessionRelayHost {
   }
 
   private async handleDelivery(socket: Socket, message: SessionHostDelivery) {
-    if (!Number.isSafeInteger(message.sequence) || message.sequence < 1 || !message.host_instance_id || sessionHostDeliveryHash(message.kind, message.payload) !== message.payload_hash) throw new Error("session_host_delivery_invalid");
+    const sequenceValid = Number.isSafeInteger(message.sequence) && message.sequence > 0;
+    const hostInstanceValid = typeof message.host_instance_id === "string" && Boolean(message.host_instance_id);
+    const payloadValid = Boolean(message.payload && typeof message.payload === "object" && !Array.isArray(message.payload));
+    const computedHash = payloadValid ? sessionHostDeliveryHash(message.kind, message.payload) : "";
+    const payloadHashValid = computedHash === message.payload_hash;
+    if (!sequenceValid || !hostInstanceValid || !payloadValid || !payloadHashValid) {
+      diagnostic("delivery_invalid", {
+        delivery_id: message.delivery_id,
+        host_instance_id: message.host_instance_id,
+        sequence: message.sequence,
+        kind: message.kind,
+        sequence_valid: sequenceValid,
+        host_instance_valid: hostInstanceValid,
+        payload_valid: payloadValid,
+        payload_hash_valid: payloadHashValid,
+        payload_bytes: payloadValid ? Buffer.byteLength(JSON.stringify(message.payload)) : null,
+        payload_method: payloadValid && typeof message.payload.method === "string" ? message.payload.method : null,
+      });
+      throw new Error("session_host_delivery_invalid");
+    }
     const payload = message.payload;
     if (this.host.delivery) {
       await this.host.delivery(message);

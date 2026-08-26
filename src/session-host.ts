@@ -6,11 +6,12 @@ import { betterCodexHome, betterCodexProfile, ensureDirectories, sessionHostLock
 import { RuntimeSessionRelay, type RelayPoll, type SessionRelayHost } from "./session-relay.js";
 import { sessionHostProtocolVersion, type SessionHostDelivery, type SessionHostMessage, type SessionHostSemanticMethod, type SessionHostServerMessage, type SessionHostStatus, type SessionHostThreadAction } from "./session-host-protocol.js";
 import { SessionHostTransport } from "./session-host-transport.js";
+import { SessionHostLineDecoder } from "./session-host-stream.js";
 
 type RuntimeConnection = {
   socket: Socket;
   epoch: number;
-  output: string;
+  decoder: SessionHostLineDecoder;
   authenticated: boolean;
   runtimeInstanceId: string | null;
   runtimeGeneration: number | null;
@@ -285,7 +286,7 @@ class SessionHostServer {
       socket.destroy();
     }, 2000);
     authTimer.unref();
-    const connection = { socket, epoch: 0, output: "", authenticated: false, runtimeInstanceId: null, runtimeGeneration: null, runtimeVersion: null, handoffUpdateId: null, connectedAt: new Date().toISOString(), authTimer } satisfies RuntimeConnection;
+    const connection = { socket, epoch: 0, decoder: new SessionHostLineDecoder(), authenticated: false, runtimeInstanceId: null, runtimeGeneration: null, runtimeVersion: null, handoffUpdateId: null, connectedAt: new Date().toISOString(), authTimer } satisfies RuntimeConnection;
     this.connections.add(connection);
     socket.on("data", chunk => this.read(connection, chunk));
     socket.once("close", () => {
@@ -309,14 +310,12 @@ class SessionHostServer {
       diagnostic("fenced_runtime_data", { connection_epoch: connection.epoch, runtime_instance_id: connection.runtimeInstanceId });
       return;
     }
-    connection.output += String(chunk);
-    if (Buffer.byteLength(connection.output) > 8_388_608) {
-      diagnostic("runtime_message_buffer_exceeded", { connection_epoch: connection.epoch, bytes: Buffer.byteLength(connection.output) });
+    const { bytes, lines } = connection.decoder.push(chunk);
+    if (bytes > 8_388_608) {
+      diagnostic("runtime_message_buffer_exceeded", { connection_epoch: connection.epoch, bytes });
       connection.socket.destroy();
       return;
     }
-    const lines = connection.output.split(/\r?\n/);
-    connection.output = lines.pop() || "";
     for (const line of lines) {
       try {
         void this.handle(connection, JSON.parse(line) as SessionHostMessage).catch(error => {

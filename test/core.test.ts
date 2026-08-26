@@ -9,6 +9,7 @@ import { IssueWorker } from "../src/worker.js";
 import { defaultAgentProfile, updateDefaultAgentProfile } from "../src/agent-profiles.js";
 import { readCodexAppearance } from "../src/appearance.js";
 import { SessionHostTransport, sessionHostDeliveryHash } from "../src/session-host-transport.js";
+import { SessionHostLineDecoder } from "../src/session-host-stream.js";
 
 function temporaryDatabase() {
   const directory = mkdtempSync(join(tmpdir(), "better-codex-test-"));
@@ -978,9 +979,18 @@ test("session host deliveries persist until identity-matched acknowledgement", (
   const file = join(directory, "transport.db");
   try {
     const first = new SessionHostTransport(file, "host-a");
-    const queued = first.enqueue("event", { method: "turn/completed", params: { threadId: "thread-a" } });
+    const queued = first.enqueue("event", { method: "turn/completed", params: { threadId: "thread-a", message: "项目管理页面恢复稳定" } });
     assert.equal(queued.sequence, 1);
     assert.equal(queued.payload_hash, sessionHostDeliveryHash(queued.kind, queued.payload));
+    const wire = Buffer.from(`${JSON.stringify(queued)}\n`);
+    const marker = Buffer.from("项");
+    const boundary = wire.indexOf(marker) + 1;
+    const decoder = new SessionHostLineDecoder();
+    assert.deepEqual(decoder.push(wire.subarray(0, boundary)).lines, []);
+    const [line] = decoder.push(wire.subarray(boundary)).lines;
+    const decoded = JSON.parse(line);
+    assert.equal(decoded.payload.params.message, "项目管理页面恢复稳定");
+    assert.equal(decoded.payload_hash, sessionHostDeliveryHash(decoded.kind, decoded.payload));
     first.close();
 
     const reopened = new SessionHostTransport(file, "host-b");
