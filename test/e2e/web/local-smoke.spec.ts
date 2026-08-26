@@ -51,6 +51,25 @@ test("creates, edits, moves, archives, and restores an issue", async ({ page }) 
   await page.locator(".better-codex-create-primary").click();
   const editor = page.locator("#better-codex-dialog");
   await expect(editor).toBeVisible();
+  await editor.locator('[name="prompt"]').fill("/");
+  const semanticMenu = editor.locator("[data-semantic-menu]");
+  await expect(semanticMenu).toBeVisible();
+  const semanticMenuGeometry = await editor.evaluate(dialog => {
+    const menu = dialog.querySelector<HTMLElement>("[data-semantic-menu]");
+    const form = dialog.querySelector("form");
+    if (!menu || !form) throw new Error("semantic_menu_geometry_missing");
+    return {
+      dialogBottom: dialog.getBoundingClientRect().bottom,
+      dialogOverflow: getComputedStyle(dialog).overflow,
+      formOverflow: getComputedStyle(form).overflow,
+      menuBottom: menu.getBoundingClientRect().bottom,
+    };
+  });
+  expect(semanticMenuGeometry.dialogOverflow).toBe("visible");
+  expect(semanticMenuGeometry.formOverflow).toBe("visible");
+  expect(semanticMenuGeometry.menuBottom).toBeGreaterThan(semanticMenuGeometry.dialogBottom);
+  await editor.locator('[name="prompt"]').fill("");
+  await expect(semanticMenu).toBeHidden();
   await editor.locator("[data-dialog-switch]").click();
   await editor.locator('[name="title"]').fill(originalTitle);
   await editor.locator('[name="description"]').fill("通过 Playwright 在独立临时数据库中创建");

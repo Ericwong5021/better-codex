@@ -7234,6 +7234,11 @@ export function betterCodexFeatureStylesCss() {
       animation: better-codex-surface-enter var(--bc-motion-normal) var(--bc-ease-out);
     }
 
+    #better-codex-dialog:has(.better-codex-project-menu:not([hidden])),
+    #better-codex-dialog:has(.better-codex-semantic-menu:not([hidden])) {
+      overflow: visible;
+    }
+
     #better-codex-error-dialog::backdrop {
       background: var(--bc-color-scrim);
     }
