@@ -1946,7 +1946,7 @@ export function startServer() {
         const eventMethod = cleanString(body.method, 100);
         const params = body.params && typeof body.params === "object" && !Array.isArray(body.params) ? body.params as Record<string, unknown> : {};
         if (!relayId || !store.sessionRelayIsLeader(relayId)) throw new Error("session_relay_not_leader");
-        if (!["thread/status/changed", "turn/started", "turn/completed", "item/completed"].includes(eventMethod)) throw new Error("session_event_invalid");
+        if (!["thread/status/changed", "turn/started", "turn/completed", "error", "item/started", "item/completed"].includes(eventMethod)) throw new Error("session_event_invalid");
         return sendJson(response, 200, { accepted: worker.handleSessionEvent(eventMethod, params) });
       }
       if (url.pathname === "/api/issues" && method === "GET") {

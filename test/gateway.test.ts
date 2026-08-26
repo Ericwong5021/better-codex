@@ -125,7 +125,7 @@ test("gateway completes the issue workflow and survives restart", async () => {
   try {
     await waitForGateway(port, gateway);
     const health = await (await fetch(`http://127.0.0.1:${port}/health`)).json() as { generation: number; database: { schemaVersion: number } };
-    assert.equal(health.database.schemaVersion, 21);
+    assert.equal(health.database.schemaVersion, 22);
     assert.equal(health.generation, 1);
     const firstRuntime = JSON.parse(readFileSync(join(home, "run", "runtime.json"), "utf8")) as { generation: number; instanceId: string };
     const firstAuthority = JSON.parse(readFileSync(join(home, "run", "runtime-authority.json"), "utf8")) as { generation: number; runtimeInstanceId: string; status: string };
@@ -407,6 +407,20 @@ test("gateway completes the issue workflow and survives restart", async () => {
     assert.equal(linkedIssue.session_owned, true);
     assert.equal(linkedIssue.session_thread_id, nativeThreadId);
     assert.equal(linkedIssue.session_active_turn_id, nativeTurnId);
+    const retryEvent = await request("/api/session-relay/events", {
+      method: "POST",
+      body: JSON.stringify({ relay_id: "relay-test", method: "error", params: { threadId: nativeThreadId, turnId: nativeTurnId, willRetry: true, error: { kind: "stream", code: "responseStreamDisconnected", httpStatusCode: 502, message: "stream disconnected" } } }),
+    });
+    assert.equal(retryEvent.status, 200);
+    const retryingIssue = await (await request(`/api/issues/${nativeIssue.id}`)).json() as { status: string; session_retry: { kind: string; count: number; http_status: number } };
+    assert.equal(retryingIssue.status, "in_progress");
+    assert.deepEqual({ kind: retryingIssue.session_retry.kind, count: retryingIssue.session_retry.count, http_status: retryingIssue.session_retry.http_status }, { kind: "stream", count: 1, http_status: 502 });
+    const progressEvent = await request("/api/session-relay/events", {
+      method: "POST",
+      body: JSON.stringify({ relay_id: "relay-test", method: "item/started", params: { threadId: nativeThreadId, turnId: nativeTurnId, item: { type: "commandExecution" } } }),
+    });
+    assert.equal(progressEvent.status, 200);
+    assert.equal(((await (await request(`/api/issues/${nativeIssue.id}`)).json()) as { session_retry: unknown }).session_retry, null);
     const relayEvent = await request("/api/session-relay/events", {
       method: "POST",
       body: JSON.stringify({ relay_id: "relay-test", method: "turn/completed", params: { threadId: nativeThreadId, turn: { id: nativeTurnId, status: "interrupted", items: [] } } }),

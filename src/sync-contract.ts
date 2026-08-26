@@ -1,4 +1,4 @@
-import type { IssuePriority, IssueReplyStatus, IssueSessionStatus, IssueStatus } from "./db.js";
+import type { IssuePriority, IssueReplyStatus, IssueSessionRetry, IssueSessionStatus, IssueStatus } from "./db.js";
 import type { ConversationMessage } from "./session-transcript.js";
 
 export const legacySyncProtocolVersion = "sync/v11" as const;
@@ -131,6 +131,7 @@ export type IssueProjection = {
   latest_run_status: "claimed" | "running" | "scheduling" | "completed" | "failed" | "interrupted" | null;
   latest_scheduler_status: "pending" | "running" | "completed" | "failed" | "interrupted" | null;
   session_status: IssueSessionStatus | null;
+  session_retry?: IssueSessionRetry | null;
   reply_status: IssueReplyStatus;
   has_conversation: boolean;
   last_activity_finished_at: string | null;

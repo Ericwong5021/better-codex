@@ -488,6 +488,8 @@ export function install(config: Record<string, any>) {
     localeResources.en["Codex 会话连接失败"] = "Codex connection failed";
     localeResources.en["原生会话正在创建，请稍后重试。"] = "The native conversation is being created. Try again shortly.";
     localeResources.en["停止任务"] = "Stop task";
+    localeResources.en["停止等待"] = "Stop waiting";
+    localeResources.en["打开完整会话"] = "Open full conversation";
     localeResources.en["重新生成标题"] = "Regenerate title";
     localeResources.en["标题生成中"] = "Regenerating title";
     localeResources.en["标题生成失败"] = "Title generation failed";
@@ -816,6 +818,7 @@ export function install(config: Record<string, any>) {
     let liveDirty = false;
     let passiveNetworkErrorVisible = false;
     let updateTimer = null;
+    let retryClockTimer = null;
     let relayTimer = null;
     let relayBusy = false;
     let relayHeartbeatBusy = false;
@@ -1015,6 +1018,39 @@ export function install(config: Record<string, any>) {
 
     function linkedIssueThreadId(issue) {
       return issueSessionId(issue) || normalizeSessionId(issue?.thread_id) || "";
+    }
+
+    function sessionRetryElapsed(retry) {
+      const startedAt = Date.parse(retry?.started_at || "");
+      return Number.isFinite(startedAt) ? Math.max(0, Date.now() - startedAt) : 0;
+    }
+
+    function sessionRetryDuration(retry) {
+      const seconds = Math.max(1, Math.floor(sessionRetryElapsed(retry) / 1000));
+      if (seconds < 60) return state.locale === "zh-CN" ? seconds + " 秒" : seconds + "s";
+      const minutes = Math.floor(seconds / 60);
+      if (minutes < 60) return state.locale === "zh-CN" ? minutes + " 分钟" : minutes + "m";
+      const hours = Math.floor(minutes / 60);
+      return state.locale === "zh-CN" ? hours + " 小时 " + minutes % 60 + " 分钟" : hours + "h " + minutes % 60 + "m";
+    }
+
+    function sessionRetryReason(retry) {
+      const labels = state.locale === "zh-CN"
+        ? { network: "网络异常", stream: "响应流中断", overloaded: "服务繁忙", rate_limit: "请求受限", service: "模型服务异常" }
+        : { network: "Network problem", stream: "Response stream interrupted", overloaded: "Service overloaded", rate_limit: "Request limited", service: "Model service problem" };
+      return labels[retry?.kind] || labels.service;
+    }
+
+    function sessionRetryCardLabel(retry) {
+      return state.locale === "zh-CN"
+        ? sessionRetryReason(retry) + "，重试 " + retry.count + " 次 · " + sessionRetryDuration(retry)
+        : sessionRetryReason(retry) + ", retry " + retry.count + " · " + sessionRetryDuration(retry);
+    }
+
+    function sessionRetryDetail(retry) {
+      const longRunning = sessionRetryElapsed(retry) >= 10 * 60 * 1000;
+      if (state.locale === "zh-CN") return sessionRetryReason(retry) + "，正在重试 · 第 " + retry.count + " 次 · 已等待 " + sessionRetryDuration(retry) + (longRunning ? " · 重试持续较久" : "");
+      return sessionRetryReason(retry) + ", retrying · attempt " + retry.count + " · waiting " + sessionRetryDuration(retry) + (longRunning ? " · Taking longer than expected" : "");
     }
 
     function issueExecutionRunning(issue) {
@@ -1664,8 +1700,26 @@ export function install(config: Record<string, any>) {
       return "desktop_bridge_request_failed";
     }
 
+    function codexError(value) {
+      const error = value && typeof value === "object" ? value : {};
+      const info = error.codexErrorInfo;
+      if (typeof info === "string") return { code: info, httpStatusCode: null };
+      const structured = info && typeof info === "object" ? info : {};
+      const code = Object.keys(structured)[0] || "other";
+      const detail = structured[code] && typeof structured[code] === "object" ? structured[code] : {};
+      return { code, httpStatusCode: Number.isInteger(detail.httpStatusCode) ? detail.httpStatusCode : null };
+    }
+
+    function retryKind(code) {
+      if (code === "httpConnectionFailed") return "network";
+      if (["responseStreamConnectionFailed", "responseStreamDisconnected", "responseTooManyFailedAttempts"].includes(code)) return "stream";
+      if (code === "serverOverloaded") return "overloaded";
+      if (code === "usageLimitExceeded") return "rate_limit";
+      return "service";
+    }
+
     function relayEventTurnId(method, params) {
-      if (method === "item/completed") return normalizeSessionId(params?.turnId);
+      if (["error", "item/started", "item/completed"].includes(method)) return normalizeSessionId(params?.turnId);
       if (method === "turn/started" || method === "turn/completed") return normalizeSessionId(params?.turn?.id);
       return "";
     }
@@ -1738,7 +1792,7 @@ export function install(config: Record<string, any>) {
         }
         return true;
       }
-      if (!["thread/status/changed", "turn/started", "turn/completed", "item/completed"].includes(method)) return false;
+      if (!["thread/status/changed", "turn/started", "turn/completed", "error", "item/started", "item/completed"].includes(method)) return false;
       let relayParams = params;
       if (method === "thread/status/changed") {
         const status = params.status && typeof params.status === "object" ? params.status : {};
@@ -1747,6 +1801,19 @@ export function install(config: Record<string, any>) {
       if (method === "turn/started") {
         const turn = params.turn && typeof params.turn === "object" ? params.turn : {};
         relayParams = { threadId, turn: { id: String(turn.id || ""), status: String(turn.status || "") } };
+      }
+      if (method === "error") {
+        const turnId = normalizeSessionId(params.turnId);
+        if (!turnId) return false;
+        const error = params.error && typeof params.error === "object" ? params.error : {};
+        const detail = codexError(error);
+        relayParams = { threadId, turnId, willRetry: params.willRetry === true, error: { kind: retryKind(detail.code), code: detail.code, httpStatusCode: detail.httpStatusCode, message: String(error.message || "provider_request_failed").slice(0, 2000) } };
+      }
+      if (method === "item/started") {
+        const turnId = normalizeSessionId(params.turnId);
+        if (!turnId) return false;
+        const item = params.item && typeof params.item === "object" ? params.item : {};
+        relayParams = { threadId, turnId, item: { type: String(item.type || "").slice(0, 100) } };
       }
       if (method === "item/completed") {
         const item = params.item && typeof params.item === "object" ? params.item : {};
@@ -6988,11 +7055,11 @@ export function install(config: Record<string, any>) {
           const executionState = issue.status === "done" ? "completed" : issue.status === "cancelled" ? "interrupted" : issue.status === "blocked" ? "blocked" : issue.status === "in_review" ? ((issue.latest_scheduler_error || issue.latest_scheduler_status === "failed") ? "scheduler-failed" : "in_review") : replyResultState || (latestRunStatus === "failed" ? "failed" : latestRunStatus === "interrupted" ? "interrupted" : latestRunStatus === "scheduling" ? "scheduling" : latestRunStatus === "running" ? "running" : latestRunStatus === "claimed" ? "claimed" : issue.agent_enabled ? "not-started" : "");
           const sessionExecutionState = issue.session_status === "stopping" ? "stopping" : issue.session_status === "starting" ? "claimed" : ["active", "waiting_on_approval", "waiting_on_user"].includes(issue.session_status) ? "running" : "";
           const activeExecutionState = issue.active_run_status || (issue.reply_status === "running" ? "running" : sessionExecutionState);
-          const activityState = permissions.remotePending ? "remote-pending" : permissions.remoteConflict ? "remote-conflict" : enrichmentLocked ? "thinking" : issue.enrichment_status === "failed" ? "title-regeneration-failed" : issue.session_status === "stopping" ? "stopping" : activeExecutionState || executionState;
-          const activityLabel = t(activityState === "remote-pending" ? "同步中" : activityState === "remote-conflict" ? "同步冲突" : issue.enrichment_status === "regenerating" ? "标题生成中" : enrichmentLocked ? "理解中" : activityState === "title-regeneration-failed" ? "标题生成失败" : activityState === "stopping" ? "正在停止…" : activityState === "running" ? "工作中" : activityState === "scheduling" ? "调度中" : activityState === "scheduler-failed" ? "调度失败" : activityState === "claimed" ? "排队中" : activityState === "in_review" ? "待审核" : activityState === "completed" ? "已完成" : activityState === "blocked" ? "已阻塞" : activityState === "failed" ? "执行失败" : activityState === "interrupted" ? "已停止" : activityState === "not-started" ? "未开始" : "");
-          const activityIcon = activityState === "scheduling" ? '<span class="better-codex-activity-dot better-codex-scheduler-dot" aria-hidden="true"></span>' : activityState === "scheduler-failed" ? '<span class="better-codex-activity-dot better-codex-scheduler-failed-dot" aria-hidden="true"></span>' : ["completed", "interrupted", "not-started"].includes(activityState) ? '<span class="better-codex-activity-dot" aria-hidden="true"></span>' : ["failed", "blocked", "remote-conflict", "title-regeneration-failed"].includes(activityState) ? icon("close") : agentAvatarMarkup(activityAgent, "better-codex-card-avatar");
+          const activityState = permissions.remotePending ? "remote-pending" : permissions.remoteConflict ? "remote-conflict" : enrichmentLocked ? "thinking" : issue.enrichment_status === "failed" ? "title-regeneration-failed" : issue.session_status === "stopping" ? "stopping" : issue.session_retry ? "retrying" : activeExecutionState || executionState;
+          const activityLabel = activityState === "retrying" ? escapeHtml(sessionRetryCardLabel(issue.session_retry)) : t(activityState === "remote-pending" ? "同步中" : activityState === "remote-conflict" ? "同步冲突" : issue.enrichment_status === "regenerating" ? "标题生成中" : enrichmentLocked ? "理解中" : activityState === "title-regeneration-failed" ? "标题生成失败" : activityState === "stopping" ? "正在停止…" : activityState === "running" ? "工作中" : activityState === "scheduling" ? "调度中" : activityState === "scheduler-failed" ? "调度失败" : activityState === "claimed" ? "排队中" : activityState === "in_review" ? "待审核" : activityState === "completed" ? "已完成" : activityState === "blocked" ? "已阻塞" : activityState === "failed" ? "执行失败" : activityState === "interrupted" ? "已停止" : activityState === "not-started" ? "未开始" : "");
+          const activityIcon = activityState === "retrying" ? '<span class="better-codex-activity-dot" aria-hidden="true"></span>' : activityState === "scheduling" ? '<span class="better-codex-activity-dot better-codex-scheduler-dot" aria-hidden="true"></span>' : activityState === "scheduler-failed" ? '<span class="better-codex-activity-dot better-codex-scheduler-failed-dot" aria-hidden="true"></span>' : ["completed", "interrupted", "not-started"].includes(activityState) ? '<span class="better-codex-activity-dot" aria-hidden="true"></span>' : ["failed", "blocked", "remote-conflict", "title-regeneration-failed"].includes(activityState) ? icon("close") : agentAvatarMarkup(activityAgent, "better-codex-card-avatar");
           const activity = activityState
-            ? '<span class="better-codex-activity" data-run="' + escapeHtml(activityState) + '">' + activityIcon + '<span class="' + (enrichmentLocked || executionRunning || permissions.remotePending ? "better-codex-shimmer" : "") + '">' + activityLabel + '</span></span>'
+            ? '<span class="better-codex-activity" data-run="' + escapeHtml(activityState) + '" title="' + (activityState === "retrying" ? escapeHtml(sessionRetryDetail(issue.session_retry)) : activityLabel) + '">' + activityIcon + '<span class="' + ((enrichmentLocked || executionRunning || permissions.remotePending) && activityState !== "retrying" ? "better-codex-shimmer" : "") + '">' + activityLabel + '</span></span>'
             : "";
           const description = mockupText(issue.description).replace(/[#*_`~>[]()]/g, "").replace(/\s+/g, " ").trim();
           const issueProject = state.projects.find(item => item.id === issue.project_id);
@@ -7487,6 +7554,7 @@ export function install(config: Record<string, any>) {
       let projectDismiss = null;
       let selectDismiss = null;
       let conversationTimer = null;
+      let retryPresentationTimer = null;
       let conversationLoadFailures = 0;
       let conversationFailureState = "";
       let conversationFailureKey = "";
@@ -7869,6 +7937,7 @@ export function install(config: Record<string, any>) {
         const previousLabels = JSON.stringify(issue.labels || []);
         const previousAssignee = [issue.agent_enabled, issue.agent_id || "", issue.user_assigned, issue.assignee_user_id || ""].join(":");
         const previousProjectId = issue.project_id;
+        const previousRetry = JSON.stringify(issue.session_retry || null);
         Object.assign(issue, next);
         const permissions = issuePermissions(issue);
         sessionId = issueSessionId(issue);
@@ -7890,7 +7959,7 @@ export function install(config: Record<string, any>) {
           || previousLabels !== JSON.stringify(issue.labels || [])
           || previousAssignee !== [issue.agent_enabled, issue.agent_id || "", issue.user_assigned, issue.assignee_user_id || ""].join(":")
           || previousProjectId !== issue.project_id;
-        if (previousSessionId !== sessionId || previousEnrichmentLocked !== enrichmentLocked || previousExecutionRunning !== executionRunning || previousSessionHandoff !== sessionHandoff || previousArchivedAt !== issue.archived_at || footerPresent !== !executionLocked || draftSourceChanged) {
+        if (previousSessionId !== sessionId || previousEnrichmentLocked !== enrichmentLocked || previousExecutionRunning !== executionRunning || previousSessionHandoff !== sessionHandoff || previousArchivedAt !== issue.archived_at || previousRetry !== JSON.stringify(issue.session_retry || null) || footerPresent !== !executionLocked || draftSourceChanged) {
           syncDraft();
           syncDraftFromIssue();
           renderDialog();
@@ -7925,7 +7994,14 @@ export function install(config: Record<string, any>) {
         const conversationState = issue.reply_status || "idle";
         const conversationStatus = conversationStatusMarkup(conversationState);
         const conversationBody = sessionId ? '<p class="better-codex-markdown-empty">' + te("加载对话…") + '</p>' : "";
-        return '<div class="better-codex-conversation-shell"><section class="better-codex-conversation"><div class="better-codex-conversation-head"><span>' + te("对话") + '</span><span class="better-codex-conversation-status" data-conversation-status data-state="' + escapeHtml(conversationState) + '"' + (conversationStatus ? "" : " hidden") + '>' + conversationStatus + '</span></div><div class="better-codex-timeline" data-conversation-body>' + conversationBody + '</div></section><div class="better-codex-conversation-feedback" data-conversation-feedback hidden></div><div class="better-codex-composer-queue" data-conversation-queue role="list" hidden></div>' + conversationComposer() + '</div>';
+        return '<div class="better-codex-conversation-shell"><section class="better-codex-conversation"><div class="better-codex-conversation-head"><span>' + te("对话") + '</span><span class="better-codex-conversation-status" data-conversation-status data-state="' + escapeHtml(conversationState) + '"' + (conversationStatus ? "" : " hidden") + '>' + conversationStatus + '</span></div><div class="better-codex-timeline" data-conversation-body>' + conversationBody + '</div></section>' + sessionRetryBannerMarkup() + '<div class="better-codex-conversation-feedback" data-conversation-feedback hidden></div><div class="better-codex-composer-queue" data-conversation-queue role="list" hidden></div>' + conversationComposer() + '</div>';
+      }
+
+      function sessionRetryBannerMarkup() {
+        if (!issue?.session_retry) return "";
+        const detail = sessionRetryDetail(issue.session_retry);
+        const openThreadButton = sessionId && HOST_CAPABILITIES.nativeThreads !== false ? '<button type="button" data-dialog-open-thread="' + escapeHtml(sessionId) + '">' + te("打开完整会话") + '</button>' : "";
+        return '<div class="better-codex-session-retry" data-session-retry role="status"><span class="better-codex-session-retry-icon" aria-hidden="true">' + icon("refresh", "better-codex-spin") + '</span><div><strong>' + escapeHtml(state.locale === "zh-CN" ? "模型连接正在恢复" : "Reconnecting to the model") + '</strong><span data-session-retry-detail>' + escapeHtml(detail) + '</span></div><div class="better-codex-session-retry-actions">' + openThreadButton + '<button type="button" data-dialog-stop>' + te("停止等待") + '</button></div></div>';
       }
 
       function conversationStatusMarkup(replyStatus) {
@@ -7936,9 +8012,9 @@ export function install(config: Record<string, any>) {
         const activeExecutionState = issue?.active_run_status || (replyStatus === "running" ? "running" : sessionExecutionState);
         const replyResultState = replyStatus === "succeeded" ? "completed" : ["failed", "interrupted"].includes(replyStatus) ? replyStatus : conversationFailureState;
         const relayFailure = issue?.session_relay_error && !issue?.session_relay_connected && issue?.active_run_status === "claimed";
-        const activityState = enrichmentLocked ? "thinking" : issue?.enrichment_status === "failed" ? "title-regeneration-failed" : issue?.session_status === "stopping" ? "stopping" : relayFailure ? "relay-failed" : activeExecutionState || replyResultState || executionState;
+        const activityState = enrichmentLocked ? "thinking" : issue?.enrichment_status === "failed" ? "title-regeneration-failed" : issue?.session_status === "stopping" ? "stopping" : issue?.session_retry ? "retrying" : relayFailure ? "relay-failed" : activeExecutionState || replyResultState || executionState;
         if (!activityState) return "";
-        const activityLabel = t(issue?.enrichment_status === "regenerating" ? "标题生成中" : enrichmentLocked ? "理解中" : activityState === "title-regeneration-failed" ? "标题生成失败" : activityState === "stopping" ? "正在停止…" : activityState === "relay-failed" ? "Codex 会话连接失败" : activityState === "running" ? "工作中" : activityState === "scheduling" ? "调度中" : activityState === "scheduler-failed" ? "调度失败" : activityState === "claimed" ? "排队中" : activityState === "in_review" ? "待审核" : activityState === "completed" ? "已完成" : activityState === "blocked" ? "已阻塞" : activityState === "failed" ? "执行失败" : activityState === "interrupted" ? "已停止" : activityState === "not-started" ? "未开始" : "");
+        const activityLabel = activityState === "retrying" ? sessionRetryCardLabel(issue.session_retry) : t(issue?.enrichment_status === "regenerating" ? "标题生成中" : enrichmentLocked ? "理解中" : activityState === "title-regeneration-failed" ? "标题生成失败" : activityState === "stopping" ? "正在停止…" : activityState === "relay-failed" ? "Codex 会话连接失败" : activityState === "running" ? "工作中" : activityState === "scheduling" ? "调度中" : activityState === "scheduler-failed" ? "调度失败" : activityState === "claimed" ? "排队中" : activityState === "in_review" ? "待审核" : activityState === "completed" ? "已完成" : activityState === "blocked" ? "已阻塞" : activityState === "failed" ? "执行失败" : activityState === "interrupted" ? "已停止" : activityState === "not-started" ? "未开始" : "");
         const agent = state.agents.find(item => item.id === issue?.agent_id) || state.agents.find(item => item.is_default) || { name: "Codex", is_default: true };
         const activityIcon = activityState === "scheduling"
           ? '<span class="better-codex-activity-dot better-codex-scheduler-dot" aria-hidden="true"></span>'
@@ -7946,8 +8022,9 @@ export function install(config: Record<string, any>) {
             ? '<span class="better-codex-activity-dot better-codex-scheduler-failed-dot" aria-hidden="true"></span>'
           : ["completed", "interrupted", "not-started"].includes(activityState)
           ? '<span class="better-codex-activity-dot" aria-hidden="true"></span>'
+          : activityState === "retrying" ? '<span class="better-codex-activity-dot" aria-hidden="true"></span>'
           : ["failed", "blocked", "relay-failed"].includes(activityState) ? icon("close") : agentAvatarMarkup(agent, "better-codex-bubble-avatar better-codex-conversation-status-avatar");
-        return '<span class="better-codex-activity" data-run="' + activityState + '">' + activityIcon + '<span class="' + (enrichmentLocked || issueExecutionRunning(issue) ? "better-codex-shimmer" : "") + '">' + activityLabel + '</span></span>';
+        return '<span class="better-codex-activity" data-run="' + activityState + '">' + activityIcon + '<span class="' + ((enrichmentLocked || issueExecutionRunning(issue)) && activityState !== "retrying" ? "better-codex-shimmer" : "") + '">' + escapeHtml(activityLabel) + '</span></span>';
       }
 
       function syncConversationStatus(replyStatus) {
@@ -7956,6 +8033,12 @@ export function install(config: Record<string, any>) {
         status.dataset.state = replyStatus;
         status.innerHTML = conversationStatusMarkup(replyStatus);
         status.hidden = !status.innerHTML;
+      }
+
+      function syncRetryPresentation() {
+        syncConversationStatus(issue?.reply_status || "idle");
+        const detail = dialog.querySelector("[data-session-retry-detail]");
+        if (detail && issue?.session_retry) detail.textContent = sessionRetryDetail(issue.session_retry);
       }
 
       function semanticToken(input) {
@@ -9594,7 +9677,7 @@ export function install(config: Record<string, any>) {
           projectDismiss = null;
         }));
         dialog.querySelector("[data-dialog-close]")?.addEventListener("click", () => dialog.close());
-        dialog.querySelector("[data-dialog-open-thread]")?.addEventListener("click", event => {
+        const handleDialogOpenThread = event => {
           const button = event.currentTarget;
           const threadId = normalizeSessionId(event.currentTarget.dataset.dialogOpenThread);
           if (!threadId || button.disabled) return;
@@ -9623,8 +9706,9 @@ export function install(config: Record<string, any>) {
               }
             }
           })();
-        });
-        dialog.querySelector("[data-dialog-stop]")?.addEventListener("click", event => void stopIssueFromDialog(event.currentTarget));
+        };
+        dialog.querySelectorAll("[data-dialog-open-thread]").forEach(button => button.addEventListener("click", handleDialogOpenThread));
+        dialog.querySelectorAll("[data-dialog-stop]").forEach(button => button.addEventListener("click", event => void stopIssueFromDialog(event.currentTarget)));
         dialog.querySelector("[data-dialog-restore]")?.addEventListener("click", event => void restoreIssueFromDialog(event.currentTarget));
         const startNow = dialog.querySelector("[data-dialog-start-now]");
         startNow?.addEventListener("click", () => {
@@ -9951,6 +10035,8 @@ export function install(config: Record<string, any>) {
         draft.replyAttachments.forEach(releaseAttachment);
         stopConversationPoll();
         stopReplyRecovery();
+        if (retryPresentationTimer !== null) clearInterval(retryPresentationTimer);
+        retryPresentationTimer = null;
         flushReplyDraft();
         if (projectDismiss) document.removeEventListener("pointerdown", projectDismiss, true);
         if (selectDismiss) document.removeEventListener("pointerdown", selectDismiss, true);
@@ -9965,6 +10051,7 @@ export function install(config: Record<string, any>) {
       renderDialog();
       mobileDialogViewport();
       dialog.showModal();
+      if (issue) retryPresentationTimer = setInterval(syncRetryPresentation, 30000);
       if (issue && panel && typeof ResizeObserver === "function") {
         dialogBoundsObserver = new ResizeObserver(syncIssueFullscreenBounds);
         dialogBoundsObserver.observe(panel);
@@ -10267,6 +10354,7 @@ export function install(config: Record<string, any>) {
       render();
       void (ready ? loadSurface({ preserveInspector: true }) : load());
       if (!startLiveUpdates() && pollTimer === null) pollTimer = setInterval(() => { if (!document.hidden && active && !panel?.dataset.recovery) void perform(() => loadSurface({ background: true }), { background: true }); }, 3000);
+      if (retryClockTimer === null) retryClockTimer = setInterval(() => { if (active && state.issues.some(issue => issue.session_retry)) render(); }, 30000);
     }
 
     function close(options = {}) {
@@ -10283,6 +10371,10 @@ export function install(config: Record<string, any>) {
       if (pollTimer !== null) {
         clearInterval(pollTimer);
         pollTimer = null;
+      }
+      if (retryClockTimer !== null) {
+        clearInterval(retryClockTimer);
+        retryClockTimer = null;
       }
       if (panel) panel.hidden = true;
       restoreNative();
@@ -10426,6 +10518,7 @@ export function install(config: Record<string, any>) {
       refreshTimer = null;
       if (pollTimer !== null) clearInterval(pollTimer);
       if (updateTimer !== null) clearInterval(updateTimer);
+      if (retryClockTimer !== null) clearInterval(retryClockTimer);
       if (relayTimer !== null) clearInterval(relayTimer);
       relayTimer = null;
       updateNoticeResizeObserver?.disconnect();

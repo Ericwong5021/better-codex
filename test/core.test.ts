@@ -183,7 +183,7 @@ test("core workflow persists, orders status moves, and rejects stale writes", ()
     const restored = store.getIssue(first.id);
     assert.equal(restored?.status, "in_progress");
     assert.equal(restored?.thread_id, "local:thread-1");
-    assert.equal(store.health().schemaVersion, 21);
+    assert.equal(store.health().schemaVersion, 22);
     store.close();
   } finally {
     rmSync(target.directory, { recursive: true, force: true });
@@ -704,6 +704,19 @@ test("desktop session relay binds one native thread and tracks its turn", () => 
     assert.equal(store.getIssue(issue.id)?.pending_actor, "user");
     assert.equal(store.syncSessionThreadStatus(threadId, "active"), true);
     assert.equal(store.getIssue(issue.id)?.pending_actor, "agent");
+    assert.equal(worker.handleSessionEvent("error", { threadId, turnId, willRetry: true, error: { kind: "network", code: "httpConnectionFailed", httpStatusCode: null, message: "connection lost" } }), true);
+    assert.equal(worker.handleSessionEvent("error", { threadId, turnId, willRetry: true, error: { kind: "network", code: "httpConnectionFailed", httpStatusCode: null, message: "connection lost" } }), true);
+    assert.equal(store.getIssue(issue.id)?.status, "in_progress");
+    assert.deepEqual(store.getIssue(issue.id)?.session_retry, {
+      kind: "network",
+      count: 2,
+      started_at: store.getIssue(issue.id)?.session_retry?.started_at,
+      updated_at: store.getIssue(issue.id)?.session_retry?.updated_at,
+      http_status: null,
+    });
+    assert.equal((store.syncProjection("issue", issue.id) as { session_retry?: { count: number } }).session_retry?.count, 2);
+    assert.equal(worker.handleSessionEvent("item/started", { threadId, turnId, item: { type: "commandExecution" } }), true);
+    assert.equal(store.getIssue(issue.id)?.session_retry, null);
     assert.equal(store.recordSessionAgentMessage(threadId, turnId, "Finished"), true);
     const completion = store.completeSessionTurn(threadId, turnId, "completed")!;
     assert.equal(completion.run_id, claim.runId);
@@ -1251,7 +1264,7 @@ test("legacy cancelled issues migrate to archived backlog issues", () => {
     const restored = store.unarchiveIssue(issue.id, migrated.version);
     const moved = store.updateIssue(issue.id, restored.version, { status: "todo" });
     assert.equal(store.isDispatchable(moved), false);
-    assert.equal(store.health().schemaVersion, 21);
+    assert.equal(store.health().schemaVersion, 22);
   } finally {
     store?.close();
     rmSync(target.directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
@@ -1315,7 +1328,7 @@ test("newer database schema is rejected without migration", () => {
   const target = temporaryDatabase();
   try {
     const future = new DatabaseSync(target.file);
-    future.exec("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL); INSERT INTO schema_migrations VALUES (22, '2026-01-01T00:00:00.000Z')");
+    future.exec("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL); INSERT INTO schema_migrations VALUES (23, '2026-01-01T00:00:00.000Z')");
     future.close();
     assert.throws(() => new Store(target.file), /database_schema_too_new/);
   } finally {
@@ -1359,7 +1372,7 @@ test("legacy database is backed up before migration", () => {
     legacy.close();
 
     const store = new Store(target.file);
-    assert.equal(store.health().schemaVersion, 21);
+    assert.equal(store.health().schemaVersion, 22);
     assert.ok(store.lastBackupPath);
     assert.ok(existsSync(store.lastBackupPath!));
     assert.equal(store.getProject("legacy")?.name, "Legacy");

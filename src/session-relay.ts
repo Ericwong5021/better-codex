@@ -65,6 +65,25 @@ function appServerError(value: unknown) {
   return "app_server_request_failed";
 }
 
+function codexError(value: unknown) {
+  const error = object(value);
+  const info = error.codexErrorInfo;
+  if (typeof info === "string") return { code: info, httpStatusCode: null };
+  const structured = object(info);
+  const code = Object.keys(structured)[0] || "other";
+  const detail = object(structured[code]);
+  const httpStatusCode = Number.isInteger(detail.httpStatusCode) ? Number(detail.httpStatusCode) : null;
+  return { code, httpStatusCode };
+}
+
+function retryKind(code: string) {
+  if (code === "httpConnectionFailed") return "network";
+  if (["responseStreamConnectionFailed", "responseStreamDisconnected", "responseTooManyFailedAttempts"].includes(code)) return "stream";
+  if (code === "serverOverloaded") return "overloaded";
+  if (code === "usageLimitExceeded") return "rate_limit";
+  return "service";
+}
+
 function missingThread(error: unknown) {
   const value = String(error instanceof Error ? error.message : error || "").toLowerCase();
   return value.includes("thread not found") || value.includes("thread_not_found") || value.includes("rollout not found");
@@ -78,7 +97,7 @@ function actionAlreadyApplied(action: IssueThreadAction, error: unknown) {
 }
 
 function eventTurnId(event: RelayEvent) {
-  if (event.method === "item/completed") return sessionId(event.params.turnId);
+  if (["error", "item/started", "item/completed"].includes(event.method)) return sessionId(event.params.turnId);
   if (event.method === "turn/started" || event.method === "turn/completed") return sessionId(object(event.params.turn).id);
   return "";
 }
@@ -198,7 +217,10 @@ export class RuntimeSessionRelay {
     this.child = child;
     this.appServerStartedAt = new Date().toISOString();
     child.stdout.on("data", chunk => this.read(chunk));
-    child.stderr.resume();
+    child.stderr.on("data", chunk => {
+      const message = String(chunk).trim().slice(0, 2000);
+      if (message) console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "session_relay", event: "app_server_stderr", host_instance_id: this.hostInstanceId || null, app_server_pid: child.pid || null, message })}`);
+    });
     child.once("error", error => this.disconnect(child, error.message || "app_server_unavailable"));
     child.once("close", () => this.disconnect(child, "app_server_closed"));
     void this.initialize(child);
@@ -339,7 +361,7 @@ export class RuntimeSessionRelay {
       }
       return;
     }
-    if (!["thread/status/changed", "turn/started", "turn/completed", "item/completed"].includes(method)) return;
+    if (!["thread/status/changed", "turn/started", "turn/completed", "error", "item/started", "item/completed"].includes(method)) return;
     let relayParams: Record<string, unknown> = params;
     if (method === "thread/status/changed") {
       const status = object(params.status);
@@ -356,6 +378,31 @@ export class RuntimeSessionRelay {
       const turnId = sessionId(turn.id);
       if (turnId) this.activeTurns.set(threadId, turnId);
       relayParams = { threadId, turn: { id: String(turn.id || ""), status: String(turn.status || "") } };
+    }
+    if (method === "error") {
+      const turnId = sessionId(params.turnId);
+      if (!turnId) return;
+      const error = object(params.error);
+      const detail = codexError(error);
+      relayParams = {
+        threadId,
+        turnId,
+        willRetry: params.willRetry === true,
+        error: {
+          kind: retryKind(detail.code),
+          code: detail.code,
+          httpStatusCode: detail.httpStatusCode,
+          message: String(error.message || "provider_request_failed").slice(0, 2000),
+        },
+        hostInstanceId: this.hostInstanceId || null,
+        appServerPid: this.child?.pid || null,
+      };
+    }
+    if (method === "item/started") {
+      const item = object(params.item);
+      const turnId = sessionId(params.turnId);
+      if (!turnId) return;
+      relayParams = { threadId, turnId, item: { type: String(item.type || "").slice(0, 100) } };
     }
     if (method === "item/completed") {
       const item = object(params.item);

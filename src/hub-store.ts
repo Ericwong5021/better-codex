@@ -150,6 +150,23 @@ function containsForbiddenKey(value: unknown): boolean {
   return Object.entries(value as Record<string, unknown>).some(([key, item]) => forbiddenProjectionKeys.some(blocked => key.toLowerCase().includes(blocked)) || containsForbiddenKey(item));
 }
 
+function cleanSessionRetry(value: unknown): IssueProjection["session_retry"] {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "object" || Array.isArray(value)) throw new Error("invalid_projection");
+  const source = value as Record<string, unknown>;
+  if (!["network", "stream", "overloaded", "rate_limit", "service"].includes(String(source.kind))) throw new Error("invalid_projection");
+  if (!Number.isInteger(source.count) || Number(source.count) < 1) throw new Error("invalid_projection");
+  if (typeof source.started_at !== "string" || source.started_at.length > 64 || typeof source.updated_at !== "string" || source.updated_at.length > 64) throw new Error("invalid_projection");
+  if (source.http_status !== null && (!Number.isInteger(source.http_status) || Number(source.http_status) < 100 || Number(source.http_status) > 599)) throw new Error("invalid_projection");
+  return {
+    kind: source.kind as NonNullable<IssueProjection["session_retry"]>["kind"],
+    count: Number(source.count),
+    started_at: source.started_at,
+    updated_at: source.updated_at,
+    http_status: source.http_status === null ? null : Number(source.http_status),
+  };
+}
+
 function cleanProjection(type: SyncEntityType, id: string, value: unknown): SyncProjection {
   if (!value || typeof value !== "object" || Array.isArray(value) || containsForbiddenKey(value)) throw new Error("forbidden_projection_field");
   const source = value as Record<string, unknown>;
@@ -210,6 +227,7 @@ function cleanProjection(type: SyncEntityType, id: string, value: unknown): Sync
     latest_run_status: source.latest_run_status as IssueProjection["latest_run_status"],
     latest_scheduler_status: source.latest_scheduler_status as IssueProjection["latest_scheduler_status"],
     session_status: source.session_status as IssueProjection["session_status"],
+    session_retry: cleanSessionRetry(source.session_retry),
     reply_status: source.reply_status as IssueProjection["reply_status"],
     has_conversation: source.has_conversation as boolean,
     last_activity_finished_at: source.last_activity_finished_at === null ? null : cleanString(source.last_activity_finished_at, 64, false),

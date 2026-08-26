@@ -634,10 +634,16 @@ test("issue working activity uses the agent avatar instead of initials", () => {
   assert.ok(source.includes('sendAppServerRequest("thread/read", { threadId, includeTurns: false })'));
   assert.ok(source.includes('sendAppServerRequest("thread/read", { threadId, includeTurns: true })'));
   assert.ok(source.includes('queueRelayEvent("turn/completed"'));
+  assert.ok(source.includes('["thread/status/changed", "turn/started", "turn/completed", "error", "item/started", "item/completed"]'));
+  assert.ok(source.includes("sessionRetryDetail(issue.session_retry)"));
+  assert.ok(source.includes('data-session-retry role="status"'));
+  assert.ok(source.includes('data-dialog-stop'));
+  assert.ok(source.includes("10 * 60 * 1000"));
   assert.ok(source.includes("result?.active_turns"));
   assert.ok(source.includes('agentAvatarMarkup(activityAgent, "better-codex-card-avatar")'));
   assert.ok(source.includes('"工作中"'));
   assert.ok(source.includes('"排队中"'));
+  assert.ok(betterCodexDesignSystemCss().includes('.better-codex-activity[data-run="retrying"]'));
   assert.ok(!source.includes('class="better-codex-avatar">\' + escapeHtml(agentInitial)'));
 });
 
@@ -682,7 +688,7 @@ test("issue cards show project icon and assignee instead of session entry", () =
   const headerSource = source.slice(headerStart, footerStart);
   assert.ok(headerSource.includes('data-dialog-start-now aria-label="\' + te("立即开始任务")'));
   assert.equal(source.slice(footerStart, source.indexOf("function renderDialog()", footerStart)).includes("data-dialog-start-now"), false);
-  assert.ok(source.includes('if (issue && !issuePermissions(issue).enrichmentPending) return void perform(() => openEditor(issue))'));
+  assert.ok(source.includes('if (issue && !permissions.enrichmentPending && !permissions.remotePending) return void perform(() => openEditor(issue))'));
   assert.ok(source.includes('draggable="\' + String(!issueLocked && supportsIssueDrag()) + \'"'));
   assert.ok(source.includes('board.addEventListener("pointerdown", onIssueLongPressStart)'));
   assert.ok(source.includes("openIssueMenuAt(card, press.startX, press.startY)"));

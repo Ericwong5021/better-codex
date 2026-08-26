@@ -84,6 +84,14 @@ export type QueuedIssueReply = {
 };
 
 export type IssueSessionStatus = "starting" | "active" | "stopping" | "waiting_on_approval" | "waiting_on_user" | "idle" | "interrupted" | "failed" | "disconnected";
+export type IssueSessionRetryKind = "network" | "stream" | "overloaded" | "rate_limit" | "service";
+export type IssueSessionRetry = {
+  kind: IssueSessionRetryKind;
+  count: number;
+  started_at: string;
+  updated_at: string;
+  http_status: number | null;
+};
 export type SessionCommandKind = "start" | "turn" | "review" | "compact" | "native" | "steer" | "interrupt";
 export type SessionCommandStatus = "pending" | "claimed" | "completed" | "failed" | "cancelled";
 export type IssueThreadAction = "archive" | "unarchive" | "delete";
@@ -134,6 +142,7 @@ export type IssueSession = {
   config_fingerprint: string;
   last_agent_message: string;
   last_error: string | null;
+  retry: IssueSessionRetry | null;
   created_at: string;
   updated_at: string;
 };
@@ -198,6 +207,7 @@ export type Issue = {
   session_status?: IssueSessionStatus | null;
   session_active_turn_id?: string | null;
   session_last_error?: string | null;
+  session_retry?: IssueSessionRetry | null;
   session_updated_at?: string | null;
   session_owned?: boolean;
   session_relay_connected?: boolean;
@@ -348,7 +358,7 @@ export function cleanMaxConcurrency(value: number | undefined) {
   return value;
 }
 
-const latestSchemaVersion = 21;
+const latestSchemaVersion = 22;
 
 function now() {
   return new Date().toISOString();
@@ -493,7 +503,7 @@ function cleanReplyDraftAttachments(values: ReplyDraftAttachment[]) {
 }
 
 function issueFromRow(row: Record<string, unknown>): Issue {
-  const { labels_json, reply_draft_attachments_json, ...values } = row;
+  const { labels_json, reply_draft_attachments_json, session_retry_json, ...values } = row;
   return {
     ...values,
     labels: JSON.parse(String(labels_json ?? "[]")),
@@ -504,8 +514,22 @@ function issueFromRow(row: Record<string, unknown>): Issue {
     needs_attention: Boolean(row.needs_attention),
     session_owned: Boolean(row.session_owned),
     session_relay_connected: Boolean(row.session_relay_connected),
+    session_retry: sessionRetryFromJson(session_retry_json),
     pending_actor: row.pending_actor === "agent" ? "agent" : "user",
   } as Issue;
+}
+
+function sessionRetryFromJson(value: unknown): IssueSessionRetry | null {
+  if (typeof value !== "string" || !value) return null;
+  const parsed = JSON.parse(value) as Record<string, unknown>;
+  const kind = parsed.kind;
+  if (!kind || !["network", "stream", "overloaded", "rate_limit", "service"].includes(String(kind))) throw new Error("invalid_session_retry");
+  const count = Number(parsed.count);
+  const startedAt = String(parsed.started_at || "");
+  const updatedAt = String(parsed.updated_at || "");
+  const httpStatus = parsed.http_status === null || parsed.http_status === undefined ? null : Number(parsed.http_status);
+  if (!Number.isInteger(count) || count < 1 || !startedAt || !updatedAt || (httpStatus !== null && (!Number.isInteger(httpStatus) || httpStatus < 100 || httpStatus > 599))) throw new Error("invalid_session_retry");
+  return { kind: kind as IssueSessionRetryKind, count, started_at: startedAt, updated_at: updatedAt, http_status: httpStatus };
 }
 
 function scheduledTaskRunFromRow(row: Record<string, unknown>): ScheduledTaskRun {
@@ -884,6 +908,7 @@ export class Store {
             config_fingerprint TEXT NOT NULL DEFAULT '',
             last_agent_message TEXT NOT NULL DEFAULT '',
             last_error TEXT,
+            retry_json TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
           );
@@ -1204,6 +1229,13 @@ export class Store {
         this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (21, ?)").run(now());
       });
     }
+    if (fromVersion < 22) {
+      this.transaction(() => {
+        const columns = new Set((this.db.prepare("PRAGMA table_info(issue_sessions)").all() as Array<{ name: string }>).map(item => item.name));
+        if (!columns.has("retry_json")) this.db.exec("ALTER TABLE issue_sessions ADD COLUMN retry_json TEXT");
+        this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (22, ?)").run(now());
+      });
+    }
   }
 
   private ensureProjectColumns() {
@@ -1277,7 +1309,7 @@ export class Store {
       CREATE TRIGGER sync_run_update AFTER UPDATE OF status, scheduler_status, thread_id ON issue_runs BEGIN ${dirty("issue", "NEW.issue_id")} END;
       CREATE TRIGGER sync_run_delete AFTER DELETE ON issue_runs BEGIN ${dirty("issue", "OLD.issue_id")} END;
       CREATE TRIGGER sync_session_insert AFTER INSERT ON issue_sessions BEGIN ${dirty("issue", "NEW.issue_id")} END;
-      CREATE TRIGGER sync_session_update AFTER UPDATE OF status, active_turn_id, last_turn_id, last_agent_message, last_error ON issue_sessions BEGIN ${dirty("issue", "NEW.issue_id")} END;
+      CREATE TRIGGER sync_session_update AFTER UPDATE OF status, active_turn_id, last_turn_id, last_agent_message, last_error, retry_json ON issue_sessions BEGIN ${dirty("issue", "NEW.issue_id")} END;
       CREATE TRIGGER sync_session_delete AFTER DELETE ON issue_sessions BEGIN ${dirty("issue", "OLD.issue_id")} END;
       CREATE TRIGGER sync_reply_insert AFTER INSERT ON issue_replies BEGIN ${dirty("issue", "NEW.issue_id")} END;
       CREATE TRIGGER sync_reply_update AFTER UPDATE OF status, message, error, started_at, finished_at ON issue_replies BEGIN ${dirty("issue", "NEW.issue_id")} END;
@@ -1445,6 +1477,7 @@ export class Store {
         config_fingerprint TEXT NOT NULL DEFAULT '',
         last_agent_message TEXT NOT NULL DEFAULT '',
         last_error TEXT,
+        retry_json TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -1673,6 +1706,7 @@ export class Store {
       latest_run_status: issue.latest_run_status ?? null,
       latest_scheduler_status: issue.latest_scheduler_status ?? null,
       session_status: issue.session_status ?? null,
+      session_retry: issue.session_retry ?? null,
       reply_status: reply.status,
       has_conversation: Boolean(issue.run_thread_id),
       last_activity_finished_at: lastActivityFinishedAt,
@@ -2523,7 +2557,7 @@ export class Store {
         issue_sessions.thread_id AS session_thread_id,
         issue_sessions.status AS session_status,
         issue_sessions.active_turn_id AS session_active_turn_id,
-        issue_sessions.last_error AS session_last_error, issue_sessions.updated_at AS session_updated_at,
+        issue_sessions.last_error AS session_last_error, issue_sessions.retry_json AS session_retry_json, issue_sessions.updated_at AS session_updated_at,
         CASE WHEN issue_sessions.issue_id IS NULL THEN 0 ELSE 1 END AS session_owned,
         COALESCE((SELECT CASE WHEN session_relay.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now') THEN 1 ELSE 0 END FROM session_relay WHERE singleton = 1), 0) AS session_relay_connected,
         (SELECT error FROM session_relay WHERE singleton = 1) AS session_relay_error
@@ -2734,6 +2768,11 @@ export class Store {
           FROM issue_sessions
           WHERE issue_sessions.issue_id = issues.id
         ) AS session_last_error,
+        (
+          SELECT issue_sessions.retry_json
+          FROM issue_sessions
+          WHERE issue_sessions.issue_id = issues.id
+        ) AS session_retry_json,
         (
           SELECT issue_sessions.updated_at
           FROM issue_sessions
@@ -3712,6 +3751,7 @@ export class Store {
       config_fingerprint: String(row.config_fingerprint || ""),
       last_agent_message: String(row.last_agent_message || ""),
       last_error: row.last_error ? String(row.last_error) : null,
+      retry: sessionRetryFromJson(row.retry_json),
       created_at: String(row.created_at),
       updated_at: String(row.updated_at),
     };
@@ -4669,7 +4709,7 @@ export class Store {
         UPDATE issue_sessions
         SET status = 'active', active_turn_id = ?, active_command_id = ?,
             last_agent_message = CASE WHEN active_turn_id = ? THEN last_agent_message ELSE '' END,
-            last_error = NULL, updated_at = ?
+            last_error = NULL, retry_json = NULL, updated_at = ?
         WHERE issue_id = ?
       `).run(turnId, session.active_turn_id === turnId ? session.active_command_id : commandId, turnId, timestamp, session.issue_id);
       if (session.active_turn_id !== turnId) {
@@ -4701,9 +4741,41 @@ export class Store {
     const timestamp = now();
     const session = this.db.prepare("SELECT issue_id, active_turn_id, last_turn_id FROM issue_sessions WHERE thread_id = ?").get(threadId) as { issue_id: string; active_turn_id: string | null; last_turn_id: string | null } | undefined;
     if (!session || (session.active_turn_id !== turnId && !(session.active_turn_id === null && session.last_turn_id === turnId))) return false;
-    this.db.prepare("UPDATE issue_sessions SET last_agent_message = ?, updated_at = ? WHERE issue_id = ?").run(message, timestamp, session.issue_id);
+    this.db.prepare("UPDATE issue_sessions SET last_agent_message = ?, retry_json = NULL, updated_at = ? WHERE issue_id = ?").run(message, timestamp, session.issue_id);
     this.db.prepare("UPDATE issue_runs SET execution_result = ? WHERE issue_id = ? AND turn_id = ? AND status IN ('claimed', 'running')").run(message, session.issue_id, turnId);
     return true;
+  }
+
+  recordSessionRetry(threadId: string, turnId: string, input: { kind: IssueSessionRetryKind; httpStatus: number | null }) {
+    const timestamp = now();
+    return this.transaction(() => {
+      const session = this.db.prepare("SELECT issue_id, active_turn_id, retry_json FROM issue_sessions WHERE thread_id = ?").get(threadId) as { issue_id: string; active_turn_id: string | null; retry_json: string | null } | undefined;
+      if (!session || session.active_turn_id !== turnId) return undefined;
+      const previous = sessionRetryFromJson(session.retry_json);
+      const retry: IssueSessionRetry = {
+        kind: input.kind,
+        count: (previous?.count || 0) + 1,
+        started_at: previous?.started_at || timestamp,
+        updated_at: timestamp,
+        http_status: input.httpStatus,
+      };
+      this.db.prepare("UPDATE issue_sessions SET retry_json = ?, updated_at = ? WHERE issue_id = ? AND active_turn_id = ?")
+        .run(JSON.stringify(retry), timestamp, session.issue_id, turnId);
+      return { issue_id: session.issue_id, retry, elapsed_ms: Math.max(0, Date.parse(timestamp) - Date.parse(retry.started_at)) };
+    });
+  }
+
+  clearSessionRetry(threadId: string, turnId: string, error?: string) {
+    const timestamp = now();
+    return this.transaction(() => {
+      const session = this.db.prepare("SELECT issue_id, active_turn_id, last_turn_id, retry_json FROM issue_sessions WHERE thread_id = ?").get(threadId) as { issue_id: string; active_turn_id: string | null; last_turn_id: string | null; retry_json: string | null } | undefined;
+      if (!session || (session.active_turn_id !== turnId && !(session.active_turn_id === null && session.last_turn_id === turnId))) return undefined;
+      const retry = sessionRetryFromJson(session.retry_json);
+      if (!retry) return undefined;
+      this.db.prepare("UPDATE issue_sessions SET retry_json = NULL, last_error = COALESCE(?, last_error), updated_at = ? WHERE issue_id = ?")
+        .run(error || null, timestamp, session.issue_id);
+      return { issue_id: session.issue_id, retry, elapsed_ms: Math.max(0, Date.parse(timestamp) - Date.parse(retry.started_at)) };
+    });
   }
 
   syncSessionThreadStatus(threadId: string, status: string, activeFlags: string[] = []) {
@@ -4725,7 +4797,7 @@ export class Store {
     if (nextStatus === "idle" && session.active_turn_id) return false;
     const timestamp = now();
     return this.transaction(() => {
-      this.db.prepare("UPDATE issue_sessions SET status = ?, updated_at = ? WHERE issue_id = ?").run(nextStatus, timestamp, session.issue_id);
+      this.db.prepare("UPDATE issue_sessions SET status = ?, retry_json = CASE WHEN ? IN ('active', 'waiting_on_approval', 'waiting_on_user') THEN retry_json ELSE NULL END, updated_at = ? WHERE issue_id = ?").run(nextStatus, nextStatus, timestamp, session.issue_id);
       if (["active", "waiting_on_approval", "waiting_on_user", "failed"].includes(nextStatus)) {
         const issueStatus = nextStatus === "failed" ? "blocked" : "in_progress";
         const pendingActor = nextStatus === "active" ? "agent" : "user";
@@ -4764,7 +4836,7 @@ export class Store {
       const nextStatus: IssueSessionStatus = status === "completed" ? "idle" : status === "interrupted" ? "interrupted" : "failed";
       this.db.prepare(`
         UPDATE issue_sessions
-        SET status = ?, active_turn_id = NULL, active_command_id = NULL, last_turn_id = ?, last_error = ?, updated_at = ?
+        SET status = ?, active_turn_id = NULL, active_command_id = NULL, last_turn_id = ?, last_error = ?, retry_json = NULL, updated_at = ?
         WHERE issue_id = ? AND active_turn_id = ?
       `).run(nextStatus, turnId, error || null, timestamp, String(session.issue_id), turnId);
       const message = String(session.last_agent_message || "").trim();

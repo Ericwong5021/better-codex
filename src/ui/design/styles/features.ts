@@ -109,6 +109,8 @@ export function betterCodexFeatureStructureStylesCss() {
     #better-codex-panel .better-codex-activity-dot { width: 6px; height: 6px; flex: 0 0 auto; border-radius: 999px; background: currentColor; }
     #better-codex-panel .better-codex-avatar { display: inline-flex; width: 16px; height: 16px; align-items: center; justify-content: center; border: 1.5px solid var(--bc-color-canvas); border-radius: var(--bc-radius-pill); color: var(--bc-color-on-primary); background: var(--bc-color-primary); font-size: var(--bc-text-avatar); }
     #better-codex-panel .better-codex-activity[data-run="running"], #better-codex-panel .better-codex-activity[data-run="scheduling"], #better-codex-panel .better-codex-activity[data-run="thinking"] { color: var(--bc-color-text-muted); }
+    #better-codex-panel .better-codex-activity[data-run="retrying"] { max-width: 72%; color: color-mix(in oklch, var(--bc-color-warning) 82%, var(--bc-color-text)); }
+    #better-codex-panel .better-codex-activity[data-run="retrying"] > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     #better-codex-panel .better-codex-activity[data-run="scheduler-failed"] { color: var(--bc-color-danger); }
     #better-codex-panel .better-codex-activity[data-run="completed"] { color: var(--bc-color-success); }
     #better-codex-panel .better-codex-activity[data-run="failed"] { color: var(--bc-color-danger); }
@@ -5747,6 +5749,10 @@ export function betterCodexFeatureStylesCss() {
       color: var(--bc-color-text);
     }
 
+    #better-codex-dialog .better-codex-conversation-status .better-codex-activity[data-run="retrying"] {
+      color: color-mix(in oklch, var(--bc-color-warning) 82%, var(--bc-color-text));
+    }
+
     #better-codex-dialog .better-codex-conversation-status .better-codex-activity[data-run="completed"] {
       color: var(--bc-color-success);
     }
@@ -6939,6 +6945,78 @@ export function betterCodexFeatureStylesCss() {
       padding: 8px 10px;
       font-size: var(--bc-text-md);
       line-height: 1.45;
+    }
+
+    #better-codex-dialog .better-codex-session-retry {
+      display: flex;
+      flex: 0 0 auto;
+      align-items: center;
+      gap: var(--bc-space-3);
+      margin: var(--bc-space-2) var(--bc-dialog-content-gutter) 0;
+      border: 1px solid color-mix(in oklch, var(--bc-color-warning) 32%, transparent);
+      border-radius: var(--bc-radius-sm);
+      color: color-mix(in oklch, var(--bc-color-warning) 82%, var(--bc-color-text));
+      background: color-mix(in oklch, var(--bc-color-warning) 7%, var(--bc-color-surface));
+      padding: var(--bc-space-2) var(--bc-space-3);
+    }
+
+    #better-codex-dialog .better-codex-session-retry-icon {
+      display: inline-flex;
+      width: 24px;
+      height: 24px;
+      flex: 0 0 24px;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #better-codex-dialog .better-codex-session-retry-icon svg {
+      width: 16px;
+      height: 16px;
+    }
+
+    #better-codex-dialog .better-codex-session-retry > div:not(.better-codex-session-retry-actions) {
+      display: flex;
+      min-width: 0;
+      flex: 1;
+      flex-direction: column;
+      gap: calc(var(--bc-space-1) / 2);
+      font-size: var(--bc-text-sm);
+      line-height: normal;
+    }
+
+    #better-codex-dialog .better-codex-session-retry strong {
+      color: var(--bc-color-text);
+      font-size: var(--bc-text-md);
+      font-weight: 650;
+    }
+
+    #better-codex-dialog .better-codex-session-retry-actions {
+      display: flex;
+      flex: 0 0 auto;
+      gap: var(--bc-space-2);
+    }
+
+    #better-codex-dialog .better-codex-session-retry-actions button {
+      border: 1px solid color-mix(in oklch, var(--bc-color-warning) 36%, transparent);
+      border-radius: var(--bc-radius-xs);
+      color: inherit;
+      background: transparent;
+      padding: var(--bc-space-1) var(--bc-space-2);
+      font: inherit;
+      cursor: pointer;
+    }
+
+    @media (max-width: 640px) {
+      #better-codex-dialog .better-codex-session-retry {
+        align-items: flex-start;
+        flex-wrap: wrap;
+      }
+
+      #better-codex-dialog .better-codex-session-retry-actions {
+        width: 100%;
+        box-sizing: border-box;
+        padding-left: calc(var(--bc-space-7) + var(--bc-space-2));
+      }
     }
 
     #better-codex-dialog .better-codex-conversation-feedback[data-tone="warning"] {

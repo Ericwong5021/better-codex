@@ -5,7 +5,7 @@ import { createInterface } from "node:readline";
 import { dirname, join } from "node:path";
 import { agentConfigProfileName, defaultAgentProfile } from "./agent-profiles.js";
 import { debugLoggingEnabled, schedulerRuntimePath, schedulerSchemaPath, runLogPath, workerLogPath } from "./config.js";
-import { agentSandboxModes, Store, type AgentSandboxMode, type ClaimedIssue, type Issue, type IssueThreadAction, type PendingThreadAction, type Project, type ScheduledTaskInput, type SchedulerDecision, type SessionCommand } from "./db.js";
+import { agentSandboxModes, Store, type AgentSandboxMode, type ClaimedIssue, type Issue, type IssueSessionRetryKind, type IssueThreadAction, type PendingThreadAction, type Project, type ScheduledTaskInput, type SchedulerDecision, type SessionCommand } from "./db.js";
 import { codexExecutablePath } from "./codex-cli.js";
 import { renderMarkdown } from "./markdown.js";
 import { readConversationActivity, readConversationResult } from "./session-transcript.js";
@@ -110,6 +110,15 @@ function workerDebug(event: string, fields: Record<string, unknown> = {}) {
   } catch {}
 }
 
+function workerDiagnostic(event: string, fields: Record<string, unknown> = {}) {
+  const record = { timestamp: new Date().toISOString(), scope: "worker", event, ...fields };
+  console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify(record)}`);
+  try {
+    mkdirSync(dirname(workerLogPath), { recursive: true });
+    appendFileSync(workerLogPath, JSON.stringify(record) + "\n");
+  } catch {}
+}
+
 export function issuePrompt(claim: ClaimedIssue) {
   return claim.issue.description.trim();
 }
@@ -129,7 +138,7 @@ export class IssueWorker {
   private drainingThreadActions = false;
   private stopped = true;
 
-  constructor(private readonly store: Store, private readonly onChange: () => void = () => {}, runtimeIdentity?: Pick<RuntimeState, "instanceId" | "generation" | "version" | "handoffUpdateId">) {
+  constructor(private readonly store: Store, private readonly onChange: () => void = () => {}, private readonly runtimeIdentity?: Pick<RuntimeState, "instanceId" | "generation" | "version" | "handoffUpdateId">) {
     this.sessionRelay = new SessionHostClient({
       poll: (relayId, busy) => this.pollSessionRelay(relayId, `runtime:${process.pid}`, "ready", undefined, busy),
       release: (relayId, error) => {
@@ -1280,10 +1289,38 @@ export class IssueWorker {
       const turnId = typeof turn.id === "string" ? turn.id : "";
       return { changed: Boolean(turnId && this.store.sessionTurnStarted(threadId, turnId)) };
     }
+    if (method === "error") {
+      const turnId = typeof params.turnId === "string" ? params.turnId : "";
+      const error = params.error && typeof params.error === "object" ? params.error as Record<string, unknown> : {};
+      const kind = ["network", "stream", "overloaded", "rate_limit", "service"].includes(String(error.kind)) ? error.kind as IssueSessionRetryKind : "service";
+      const code = typeof error.code === "string" ? error.code.slice(0, 100) : "other";
+      const httpStatus = Number.isInteger(error.httpStatusCode) ? Number(error.httpStatusCode) : null;
+      const message = typeof error.message === "string" ? error.message.slice(0, 2000) : "provider_request_failed";
+      if (!turnId) return { changed: false };
+      if (params.willRetry === true) {
+        const result = this.store.recordSessionRetry(threadId, turnId, { kind, httpStatus });
+        if (!result) return { changed: false };
+        this.providerDiagnostic("provider_retrying", result.issue_id, threadId, turnId, result.retry.count, result.elapsed_ms, kind, code, httpStatus, params);
+        return { changed: true };
+      }
+      const result = this.store.clearSessionRetry(threadId, turnId, message);
+      const session = this.store.getIssueSessionByThread(threadId);
+      if (session?.active_turn_id === turnId) this.providerDiagnostic("provider_retry_exhausted", session.issue_id, threadId, turnId, result?.retry.count || 0, result?.elapsed_ms || 0, kind, code, httpStatus, params);
+      return { changed: Boolean(result) };
+    }
+    if (method === "item/started") {
+      const turnId = typeof params.turnId === "string" ? params.turnId : "";
+      const result = turnId ? this.store.clearSessionRetry(threadId, turnId) : undefined;
+      if (result) this.providerDiagnostic("provider_retry_recovered", result.issue_id, threadId, turnId, result.retry.count, result.elapsed_ms, result.retry.kind, "progress", result.retry.http_status, params);
+      return { changed: Boolean(result) };
+    }
     if (method === "item/completed") {
       const turnId = typeof params.turnId === "string" ? params.turnId : "";
       const item = params.item && typeof params.item === "object" ? params.item as Record<string, unknown> : {};
-      return { changed: item.type === "agentMessage" && typeof item.text === "string" && Boolean(turnId) ? this.store.recordSessionAgentMessage(threadId, turnId, item.text) : false };
+      const recovered = turnId ? this.store.clearSessionRetry(threadId, turnId) : undefined;
+      if (recovered) this.providerDiagnostic("provider_retry_recovered", recovered.issue_id, threadId, turnId, recovered.retry.count, recovered.elapsed_ms, recovered.retry.kind, "agent_message", recovered.retry.http_status, params);
+      const changed = item.type === "agentMessage" && typeof item.text === "string" && Boolean(turnId) ? this.store.recordSessionAgentMessage(threadId, turnId, item.text) : false;
+      return { changed: Boolean(recovered || changed) };
     }
     if (method === "turn/completed") {
       const turn = params.turn && typeof params.turn === "object" ? params.turn as Record<string, unknown> : {};
@@ -1294,10 +1331,31 @@ export class IssueWorker {
       if (turnId && lastAgent) this.store.recordSessionAgentMessage(threadId, turnId, lastAgent);
       const turnError = turn.error && typeof turn.error === "object" ? turn.error as Record<string, unknown> : {};
       const error = typeof turnError.message === "string" ? turnError.message : status === "failed" ? "session_turn_failed" : undefined;
+      const retry = this.store.getIssueSessionByThread(threadId)?.retry;
       const completion = turnId ? this.store.completeSessionTurn(threadId, turnId, status, error) : undefined;
+      if (completion && retry) this.providerDiagnostic(status === "failed" ? "provider_retry_exhausted" : "provider_retry_recovered", completion.issue_id, threadId, turnId, retry.count, Math.max(0, Date.now() - Date.parse(retry.started_at)), retry.kind, status, retry.http_status, params);
       return { changed: Boolean(completion), completion };
     }
     return { changed: false };
+  }
+
+  private providerDiagnostic(event: string, issueId: string, threadId: string, turnId: string, retryCount: number, elapsedMs: number, kind: string, code: string, httpStatus: number | null, params: Record<string, unknown>) {
+    workerDiagnostic(event, {
+      issue_id: issueId,
+      thread_id: threadId,
+      turn_id: turnId,
+      retry_count: retryCount,
+      elapsed_ms: elapsedMs,
+      error_kind: kind,
+      error_code: code,
+      http_status: httpStatus,
+      runtime_pid: process.pid,
+      runtime_instance_id: this.runtimeIdentity?.instanceId || null,
+      runtime_generation: this.runtimeIdentity?.generation ?? null,
+      runtime_version: this.runtimeIdentity?.version || null,
+      host_instance_id: typeof params.hostInstanceId === "string" ? params.hostInstanceId : null,
+      app_server_pid: Number.isInteger(params.appServerPid) ? params.appServerPid : null,
+    });
   }
 
   private finishSessionTurn(completion: SessionTurnCompletion) {

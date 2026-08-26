@@ -134,8 +134,16 @@ test("public Relay drives the real Runtime and recovers without storing business
     const issueBody = JSON.stringify({ project_id: project.id, title: "Relay issue", description: `Created through public Relay\n\nAttached files:\n- ${cachedAttachment.path}`, request_id: "relay-business-create-1" });
     const issueHeaders = { origin: base, cookie, "x-csrf-token": session.csrf_token, "x-better-codex-request-id": "relay-e2e-idempotent-1", "content-type": "application/json" };
     const issueResponse = await fetch(`${base}/api/issues`, { method: "POST", headers: issueHeaders, body: issueBody });
-    assert.equal(issueResponse.status, 201);
-    const issue = await issueResponse.json() as { id: string; version: number; description: string };
+    assert.equal(issueResponse.status, 202);
+    assert.equal((await issueResponse.json() as { queued: boolean }).queued, true);
+    let issue: { id: string; version: number; description: string } | undefined;
+    await waitFor(async () => {
+      const response = await request("/api/issues");
+      if (response.status !== 200) return false;
+      issue = (await response.json() as Array<{ id: string; version: number; title: string; description: string }>).find(item => item.title === "Relay issue");
+      return Boolean(issue);
+    }, runtime);
+    assert.ok(issue);
     const issueAttachmentPath = issue.description.split("\n").find(line => line.startsWith("- "))?.slice(2) || "";
     assert.equal(issueAttachmentPath, cachedAttachment.path);
     assert.equal(readFileSync(issueAttachmentPath, "utf8"), "relay attachment payload");
