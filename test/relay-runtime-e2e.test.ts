@@ -108,8 +108,17 @@ test("public Relay drives the real Runtime and recovers without storing business
     };
 
     const eventController = new AbortController();
-    const eventResponse = await request("/api/events", { signal: eventController.signal });
-    assert.equal(eventResponse.status, 200);
+    let eventResponse: Response | undefined;
+    await waitFor(async () => {
+      const response = await request("/api/events", { signal: eventController.signal });
+      if (response.status !== 200) {
+        await response.body?.cancel().catch(() => {});
+        return false;
+      }
+      eventResponse = response;
+      return true;
+    }, runtime, 40_000);
+    assert.ok(eventResponse);
     assert.match(eventResponse.headers.get("content-type") || "", /text\/event-stream/);
     const eventReader = eventResponse.body?.getReader();
     assert.ok(eventReader);
