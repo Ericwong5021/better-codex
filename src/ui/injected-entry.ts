@@ -8402,9 +8402,14 @@ export function install(config: Record<string, any>) {
       async function openDraftAttachment(scope, attachmentIndex) {
         const attachments = scope === "reply" ? draft.replyAttachments : draft.attachments;
         const attachment = attachments[attachmentIndex];
-        if (!attachment?.previewUrl) return;
+        if (!attachment || (!attachment.previewUrl && !attachment.path)) return;
         const data = { name: attachment.name, type: attachment.type || attachment.file?.type || "image/png", kind: "image", size: attachment.file?.size || 0 };
-        await openAttachmentPreview(data, async () => ({ source: attachment.previewUrl, attachment: data }), { issue_id: issue?.id || "", attachment_scope: scope, attachment_index: attachmentIndex });
+        await openAttachmentPreview(data, async () => {
+          if (attachment.previewUrl) return { source: attachment.previewUrl, attachment: data };
+          const result = await api("/api/issues/attachments/preview", { method: "POST", body: JSON.stringify({ path: attachment.path }), timeoutMs: 120_000 });
+          const source = URL.createObjectURL(attachmentBlob(result.data, result.type));
+          return { source, attachment: { ...result, name: attachment.name || result.name }, objectUrl: source };
+        }, { issue_id: issue?.id || "", attachment_scope: scope, attachment_index: attachmentIndex });
       }
 
       function conversationBubbles(messages, profile = null) {
@@ -8836,7 +8841,7 @@ export function install(config: Record<string, any>) {
 
       async function uploadPastedImages(items = draft.attachments) {
         for (const item of items) {
-          if (!item.file || item.path) continue;
+          if (!item.file) continue;
           const data = await fileDataUrl(item.file);
           let saved;
           try {
@@ -8862,7 +8867,8 @@ export function install(config: Record<string, any>) {
         if (!items.length) return '<div class="better-codex-dialog-attachments"' + marker + ' hidden></div>';
         const chips = items.map((item, index) => {
           const image = Boolean(item.previewUrl || String(item.type || item.file?.type || "").startsWith("image/"));
-          const preview = item.previewUrl ? '<button class="better-codex-attachment-preview-button" type="button" data-dialog-preview="' + index + '" data-dialog-attachment-scope="' + scope + '" aria-label="' + te("预览附件") + ' ' + escapeHtml(item.name) + '"><img class="better-codex-attachment-preview" src="' + escapeHtml(item.previewUrl) + '" alt="" width="30" height="30"></button>' : icon(image ? "image" : "paperclip");
+          const previewContent = item.previewUrl ? '<img class="better-codex-attachment-preview" src="' + escapeHtml(item.previewUrl) + '" alt="" width="30" height="30">' : icon("image");
+          const preview = image && (item.previewUrl || item.path) ? '<button class="better-codex-attachment-preview-button" type="button" data-dialog-preview="' + index + '" data-dialog-attachment-scope="' + scope + '" aria-label="' + te("预览附件") + ' ' + escapeHtml(item.name) + '">' + previewContent + '</button>' : icon(image ? "image" : "paperclip");
           return '<span class="better-codex-attachment-chip' + (image ? ' is-image' : '') + '" title="' + escapeHtml(item.path || item.name) + '">' + preview + '<span>' + escapeHtml(item.name) + '</span><button type="button" data-dialog-detach="' + index + '" data-dialog-attachment-scope="' + scope + '" aria-label="' + te("移除附件") + '">' + icon("close") + '</button></span>';
         }).join("");
         return '<div class="better-codex-dialog-attachments"' + marker + '>' + chips + '</div>';

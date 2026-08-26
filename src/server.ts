@@ -14,7 +14,7 @@ import { readCodexUsage } from "./codex-usage.js";
 import { MentionCatalogService, codexSemanticRequestFingerprint, normalizeCodexSemanticSelections, readCodexSemanticCatalog, resolveCodexSemanticReferences, searchCodexFiles } from "./codex-semantics.js";
 import { appendInputDocumentText, compileInputDocument, inputDocumentLegacyReferences, inputDocumentText, legacyInputDocument, type SemanticKindV2 } from "./codex-input-document.js";
 import { readModelCatalog } from "./model-catalog.js";
-import { attachmentPath, databasePath, runPath, runtimePort, token, updateLogPath } from "./config.js";
+import { attachmentPath, canonicalPath, databasePath, runPath, runtimePort, token, updateLogPath } from "./config.js";
 import { acquireRuntimeLock, cancelRuntimeAuthorityReservation, claimRuntimeAuthority, clearRuntimeState, completeRuntimeAuthorityHandoff, createRuntimeIdentity, publishRuntimeState, reserveRuntimeAuthority } from "./runtime-state.js";
 import { activeCoreCommand, checkGatewayUpdate, getGatewayUpdateState, installGatewayUpdate, readGatewayUpdateActivationState, recordGatewayUpdateActivation, rollbackAbandonedUpdate, rollbackActivatedUpdate, startGatewayUpdateChecks } from "./updater.js";
 import { packagedBuild } from "./build.js";
@@ -77,6 +77,26 @@ function savePastedImage(value: unknown) {
   const path = join(attachmentPath, name);
   writeFileSync(path, bytes, { flag: "wx", mode: 0o600 });
   return { name, path };
+}
+
+function readCachedImageAttachment(value: unknown) {
+  const path = cleanString(value, 4096).trim();
+  if (!path) throw new Error("attachment_not_found");
+  const root = canonicalPath(attachmentPath);
+  const resolved = canonicalPath(path);
+  if (dirname(resolved) !== root || !existsSync(resolved)) throw new Error("attachment_not_found");
+  const stats = statSync(resolved);
+  if (!stats.isFile() || !stats.size || stats.size > maxPastedImageBytes) throw new Error("invalid_image_attachment");
+  const bytes = readFileSync(resolved);
+  const type = bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+    ? "image/png"
+    : bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
+      ? "image/jpeg"
+      : bytes.subarray(0, 4).toString("ascii") === "RIFF" && bytes.subarray(8, 12).toString("ascii") === "WEBP"
+        ? "image/webp"
+        : "";
+  if (!type) throw new Error("invalid_image_attachment");
+  return { name: basename(resolved), type, kind: "image", size: stats.size, data: `data:${type};base64,${bytes.toString("base64")}` };
 }
 
 function saveRemoteFile(value: { name: string; type: string; data: string }, requestId: string, index: number) {
@@ -1173,6 +1193,10 @@ export function startServer() {
           });
         }
         return sendJson(response, 201, savePastedImage(body.data));
+      }
+      if (url.pathname === "/api/issues/attachments/preview" && method === "POST") {
+        const body = await readBody(request);
+        return sendJson(response, 200, readCachedImageAttachment(body.path));
       }
       if (url.pathname === "/api/bootstrap" && method === "GET") {
         const agentModelCatalog = await readModelCatalog();
