@@ -4,6 +4,13 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.10-beta.26] - 2026-08-26
+
+- Preserve UTF-8 messages across fragmented Session Host streams and emit structured diagnostics for invalid deliveries.
+- Keep scheduled tasks on the Preview channel while promoting project management to the Release feature set.
+- Refine narrow mobile project cards, side menus, semantic menus, and native horizontal board scrolling.
+- Require live Runtime handoff acceptance across an active Issue turn during Beta delivery.
+
 ## [0.4.10-beta.25] - 2026-08-26
 
 - Keep active Issues running when macOS and Windows installers upgrade a live Runtime, and reject release artifacts that do not match the requested version.
@@ -872,7 +879,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.25...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.26...HEAD
+[0.4.10-beta.26]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.25...v0.4.10-beta.26
 [0.4.10-beta.25]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.24...v0.4.10-beta.25
 [0.4.10-beta.24]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.23...v0.4.10-beta.24
 [0.4.10-beta.23]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.22...v0.4.10-beta.23
