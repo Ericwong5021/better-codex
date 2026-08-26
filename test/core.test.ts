@@ -900,6 +900,19 @@ test("manual native turns reopen completed issues and return them for review", (
     assert.equal(reviewed.pending_actor, "user");
     assert.equal(reviewed.session_active_turn_id, null);
     assert.equal(store.getIssueReplyState(issue.id).status, "succeeded");
+    assert.equal(store.syncSessionThreadStatus(threadId, "active"), false);
+    const afterStaleActive = store.getIssue(issue.id)!;
+    assert.equal(afterStaleActive.status, "in_review");
+    assert.equal(afterStaleActive.session_status, "idle");
+    assert.equal(afterStaleActive.session_active_turn_id, null);
+    store.db.prepare("UPDATE issue_sessions SET status = 'active' WHERE issue_id = ?").run(issue.id);
+    store.db.prepare("UPDATE issues SET status = 'in_progress', needs_attention = 0, pending_actor = 'agent' WHERE id = ?").run(issue.id);
+    assert.equal(store.recoverStaleSessionStatuses(), 1);
+    const recovered = store.getIssue(issue.id)!;
+    assert.equal(recovered.status, "in_review");
+    assert.equal(recovered.needs_attention, true);
+    assert.equal(recovered.pending_actor, "user");
+    assert.equal(recovered.session_status, "idle");
 
     const staleTurnId = "019fec06-788f-7af3-a031-76b546904f26";
     const replacementTurnId = "019fec06-788f-7af3-a031-76b546904f27";
@@ -922,7 +935,10 @@ test("manual native turns reopen completed issues and return them for review", (
       INSERT INTO issue_sessions (issue_id, host_id, thread_id, status, config_fingerprint, last_agent_message, created_at, updated_at)
       VALUES (?, 'local', ?, 'idle', 'config', '', ?, ?)
     `).run(statusIssue.id, statusThreadId, timestamp, timestamp);
-    assert.equal(store.syncSessionThreadStatus(statusThreadId, "active"), true);
+    assert.equal(store.syncSessionThreadStatus(statusThreadId, "active"), false);
+    assert.equal(store.getIssue(statusIssue.id)?.status, "done");
+    const statusTurnId = "019fec06-788f-7af3-a031-76b546904f29";
+    assert.equal(store.sessionTurnStarted(statusThreadId, statusTurnId)?.turn_id, statusTurnId);
     assert.equal(store.getIssue(statusIssue.id)?.status, "in_progress");
 
     const disconnectedIssue = store.createIssue({ projectId: project.id, title: "Ignore idle thread failure", status: "done", agentEnabled: true, workspacePath: target.directory });

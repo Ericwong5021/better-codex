@@ -3105,6 +3105,46 @@ export class Store {
     }
   }
 
+  recoverStaleSessionStatuses() {
+    const timestamp = now();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const rows = this.db.prepare(`
+        SELECT issue_id FROM issue_sessions
+        WHERE active_turn_id IS NULL
+          AND active_command_id IS NULL
+          AND status IN ('active', 'waiting_on_approval', 'waiting_on_user')
+      `).all() as Array<{ issue_id: string }>;
+      for (const row of rows) {
+        this.db.prepare("UPDATE issue_sessions SET status = 'idle', updated_at = ? WHERE issue_id = ? AND active_turn_id IS NULL AND active_command_id IS NULL")
+          .run(timestamp, row.issue_id);
+        this.db.prepare(`
+          UPDATE issues
+          SET status = CASE
+                WHEN (SELECT status FROM issue_replies WHERE issue_id = issues.id) = 'succeeded' THEN 'in_review'
+                WHEN (SELECT status FROM issue_replies WHERE issue_id = issues.id) = 'failed' THEN 'blocked'
+                ELSE status
+              END,
+              needs_attention = 1,
+              pending_actor = 'user',
+              version = version + 1,
+              updated_at = ?
+          WHERE id = ?
+            AND status = 'in_progress'
+            AND archived_at IS NULL
+            AND NOT EXISTS (SELECT 1 FROM issue_runs WHERE issue_id = issues.id AND status IN ('claimed', 'running', 'scheduling'))
+            AND NOT EXISTS (SELECT 1 FROM session_commands WHERE issue_id = issues.id AND status IN ('pending', 'claimed'))
+            AND NOT EXISTS (SELECT 1 FROM issue_replies WHERE issue_id = issues.id AND status = 'running')
+        `).run(timestamp, row.issue_id);
+      }
+      this.db.exec("COMMIT");
+      return rows.length;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   claimNextIssue(issueId?: string): ClaimedIssue | null {
     this.db.exec("BEGIN IMMEDIATE");
     try {
@@ -4670,6 +4710,7 @@ export class Store {
     const session = this.getIssueSessionByThread(threadId);
     if (!session) return false;
     if (session.status === "stopping" && session.active_turn_id && status !== "systemError") return false;
+    if (status === "active" && !session.active_turn_id) return false;
     const nextStatus: IssueSessionStatus = status === "active"
       ? activeFlags.includes("waitingOnApproval")
         ? "waiting_on_approval"

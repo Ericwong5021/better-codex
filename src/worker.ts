@@ -208,6 +208,8 @@ export class IssueWorker {
   start() {
     this.stopped = false;
     this.store.recoverInterruptedRuns();
+    const recoveredStaleSessions = this.store.recoverStaleSessionStatuses();
+    if (recoveredStaleSessions) workerDebug("stale_session_statuses_recovered", { recovered_sessions: recoveredStaleSessions });
     for (const issueId of this.store.listManualStartQueue()) this.manualQueue.add(issueId);
     for (const pending of this.store.listPendingSchedulerRuns()) {
       const executionResultPath = join(runLogPath, `${pending.claim.runId}-result.txt`);
@@ -1259,7 +1261,19 @@ export class IssueWorker {
     if (method === "thread/status/changed") {
       const status = params.status && typeof params.status === "object" ? params.status as Record<string, unknown> : {};
       const activeFlags = Array.isArray(status.activeFlags) ? status.activeFlags.filter((value): value is string => typeof value === "string") : [];
-      return { changed: this.store.syncSessionThreadStatus(threadId, String(status.type || ""), activeFlags) };
+      const statusType = String(status.type || "");
+      const changed = this.store.syncSessionThreadStatus(threadId, statusType, activeFlags);
+      if (!changed && statusType === "active") {
+        const session = this.store.getIssueSessionByThread(threadId);
+        if (session && !session.active_turn_id) workerDebug("stale_thread_active_ignored", {
+          issue_id: session.issue_id,
+          thread_id: threadId,
+          session_status: session.status,
+          active_command_id: session.active_command_id,
+          last_turn_id: session.last_turn_id,
+        });
+      }
+      return { changed };
     }
     if (method === "turn/started") {
       const turn = params.turn && typeof params.turn === "object" ? params.turn as Record<string, unknown> : {};
