@@ -507,6 +507,7 @@ export function install(config: Record<string, any>) {
     localeResources.en["发送方式"] = "Send with";
     localeResources.en["发送消息"] = "Send messages";
     localeResources.en["选择消息输入框的发送按键"] = "Choose the key used to send from message fields";
+    localeResources.en["横向滚动任务看板"] = "Scroll the task board horizontally";
     Object.assign(localeResources.en, {
       "项目文档": "Project documentation",
       "项目章程": "Charter",
@@ -829,6 +830,7 @@ export function install(config: Record<string, any>) {
     const relayGuardianDenials = new Map();
     let updateNotice = null;
     let updateNoticeResizeObserver = null;
+    let boardScrollResizeObserver = null;
     let issueSessionSnapshot = new Map();
     let completionNoticesRestored = false;
     let completionNoticeStack = null;
@@ -3999,6 +4001,21 @@ export function install(config: Record<string, any>) {
       board.addEventListener("dragend", onCardDragEnd);
       board.addEventListener("dragover", event => event.preventDefault());
       board.addEventListener("drop", onDrop);
+      let boardScrollControl = null;
+      if (HOST_KIND === "web") {
+        boardScrollControl = document.createElement("div");
+        boardScrollControl.className = "better-codex-board-scroll better-codex-issue-only";
+        boardScrollControl.hidden = true;
+        boardScrollControl.innerHTML = '<span class="is-start" aria-hidden="true">' + icon("chevron") + '</span><input type="range" min="0" max="0" value="0" step="1" aria-label="' + te("横向滚动任务看板") + '"><span aria-hidden="true">' + icon("chevron") + "</span>";
+        const range = boardScrollControl.querySelector("input");
+        range.addEventListener("input", () => {
+          board.scrollLeft = Number(range.value);
+        });
+        board.addEventListener("scroll", syncBoardScrollControl, { passive: true });
+        boardScrollResizeObserver?.disconnect();
+        boardScrollResizeObserver = new ResizeObserver(syncBoardScrollControl);
+        boardScrollResizeObserver.observe(board);
+      }
       const recovery = document.createElement("main");
       recovery.id = "better-codex-recovery";
       recovery.className = "better-codex-recovery";
@@ -4098,8 +4115,27 @@ export function install(config: Record<string, any>) {
       });
       projects.addEventListener("submit", onProjectDocumentSubmit);
       projects.addEventListener("submit", onProjectPlanningSubmit);
-      section.append(toolbar, board, scheduledTasks, agents, projects, recovery);
+      section.append(toolbar, board, ...(boardScrollControl ? [boardScrollControl] : []), scheduledTasks, agents, projects, recovery);
       return section;
+    }
+
+    function syncBoardScrollControl() {
+      if (HOST_KIND !== "web" || !panel) return;
+      const board = panel.querySelector("#better-codex-board");
+      const control = panel.querySelector(".better-codex-board-scroll");
+      const range = control?.querySelector("input");
+      if (!board || !control || !range) return;
+      const compact = window.matchMedia("(max-width: 720px)").matches;
+      const max = Math.max(0, Math.ceil(board.scrollWidth - board.clientWidth));
+      control.hidden = !compact || state.surface !== "issues" || max < 2;
+      range.max = String(max);
+      range.value = String(Math.min(max, Math.max(0, Math.round(board.scrollLeft))));
+      if (control.hidden) return;
+      const trackWidth = range.clientWidth;
+      const minimumThumbWidth = Math.min(48, trackWidth);
+      const proportionalThumbWidth = trackWidth * Math.min(1, board.clientWidth / board.scrollWidth);
+      const thumbWidth = max <= trackWidth - minimumThumbWidth ? trackWidth - max : proportionalThumbWidth;
+      range.style.setProperty("--bc-board-scroll-thumb-width", Math.max(minimumThumbWidth, Math.min(trackWidth, thumbWidth)) + "px");
     }
 
     function agentKey(agent) {
@@ -6903,6 +6939,7 @@ export function install(config: Record<string, any>) {
       if (!board) throw new Error(projectBoard ? "project_board_mount_missing" : "board_mount_missing");
       if (!(options.loaded ?? state.issuesLoaded)) {
         board.innerHTML = '<section class="better-codex-board-loading" role="status" aria-live="polite"><span aria-hidden="true"></span><strong>' + te("正在加载任务看板") + '</strong></section>';
+        if (!projectBoard) requestAnimationFrame(syncBoardScrollControl);
         return;
       }
       const visibleStatuses = [...Object.entries(statusLabels), ["archive", "归档"]];
@@ -6954,6 +6991,7 @@ export function install(config: Record<string, any>) {
       }).join("");
       reconcileBoard(board, boardMarkup);
       hydrateSharedControls(board, projectBoard ? "projects" : "board");
+      if (!projectBoard) requestAnimationFrame(syncBoardScrollControl);
     }
 
     async function loadIssues(options = {}) {
@@ -10216,6 +10254,8 @@ export function install(config: Record<string, any>) {
       relayTimer = null;
       updateNoticeResizeObserver?.disconnect();
       updateNoticeResizeObserver = null;
+      boardScrollResizeObserver?.disconnect();
+      boardScrollResizeObserver = null;
       panelSizeCleanup?.();
       panelSizeCleanup = null;
       agentWindowBoundsObserver?.disconnect();

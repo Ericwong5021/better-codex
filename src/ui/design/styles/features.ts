@@ -3357,6 +3357,10 @@ export function betterCodexFeatureStylesCss() {
       box-shadow: inset 0 0 0 2px color-mix(in oklch, var(--bc-color-focus) 46%, transparent);
     }
 
+    #better-codex-panel .better-codex-board-scroll {
+      display: none;
+    }
+
     #better-codex-dialog .better-codex-conversation-empty h3 {
       margin: 0;
       color: var(--bc-color-text);
@@ -8089,6 +8093,110 @@ export function betterCodexFeatureStylesCss() {
     }
 
     @media (max-width: 720px) {
+      #better-codex-panel[data-host="web"] .better-codex-board {
+        padding-bottom: var(--bc-space-2);
+        scrollbar-width: none;
+      }
+
+      #better-codex-panel[data-host="web"] .better-codex-board::-webkit-scrollbar {
+        display: none;
+      }
+
+      #better-codex-panel[data-host="web"] .better-codex-board-scroll {
+        box-sizing: border-box;
+        display: flex;
+        min-height: 40px;
+        flex: 0 0 40px;
+        align-items: center;
+        gap: var(--bc-space-2);
+        padding: 0 var(--bc-space-3) var(--bc-space-2);
+        color: var(--bc-color-text-faint);
+        background: var(--bc-color-canvas);
+      }
+
+      #better-codex-panel[data-host="web"] .better-codex-board-scroll[hidden] {
+        display: none;
+      }
+
+      #better-codex-panel[data-host="web"] .better-codex-board-scroll > span {
+        display: inline-flex;
+        width: var(--bc-icon-sm);
+        height: var(--bc-icon-sm);
+        flex: 0 0 var(--bc-icon-sm);
+        align-items: center;
+        justify-content: center;
+      }
+
+      #better-codex-panel[data-host="web"] .better-codex-board-scroll > span.is-start {
+        transform: rotate(180deg);
+      }
+
+      #better-codex-panel[data-host="web"] .better-codex-board-scroll svg {
+        width: 100%;
+        height: 100%;
+      }
+
+      #better-codex-panel[data-host="web"] .better-codex-board-scroll input {
+        width: 100%;
+        min-width: 0;
+        height: 32px;
+        margin: 0;
+        appearance: none;
+        -webkit-appearance: none;
+        background: transparent;
+        cursor: ew-resize;
+        touch-action: none;
+      }
+
+      #better-codex-panel[data-host="web"] .better-codex-board-scroll input:focus {
+        outline: none;
+        box-shadow: none;
+      }
+
+      #better-codex-panel[data-host="web"] .better-codex-board-scroll input::-webkit-slider-runnable-track {
+        height: var(--bc-board-scroll-track-size);
+        border-radius: var(--bc-radius-pill);
+        background: var(--bc-color-control);
+        box-shadow: var(--bc-inset-hairline);
+      }
+
+      #better-codex-panel[data-host="web"] .better-codex-board-scroll input::-webkit-slider-thumb {
+        width: var(--bc-board-scroll-thumb-width);
+        height: var(--bc-board-scroll-thumb-size);
+        margin-top: calc((var(--bc-board-scroll-track-size) - var(--bc-board-scroll-thumb-size)) / 2);
+        appearance: none;
+        -webkit-appearance: none;
+        border: 1px solid var(--bc-color-hairline);
+        border-radius: var(--bc-radius-pill);
+        background: var(--bc-color-surface-raised);
+        box-shadow: var(--bc-elevation-thumb);
+      }
+
+      #better-codex-panel[data-host="web"] .better-codex-board-scroll input::-moz-range-track {
+        height: var(--bc-board-scroll-track-size);
+        border: 0;
+        border-radius: var(--bc-radius-pill);
+        background: var(--bc-color-control);
+        box-shadow: var(--bc-inset-hairline);
+      }
+
+      #better-codex-panel[data-host="web"] .better-codex-board-scroll input::-moz-range-thumb {
+        width: var(--bc-board-scroll-thumb-width);
+        height: var(--bc-board-scroll-thumb-size);
+        border: 1px solid var(--bc-color-hairline);
+        border-radius: var(--bc-radius-pill);
+        background: var(--bc-color-surface-raised);
+        box-shadow: var(--bc-elevation-thumb);
+      }
+
+      #better-codex-panel[data-host="web"] .better-codex-board-scroll input:focus-visible::-webkit-slider-thumb {
+        box-shadow: var(--bc-board-scroll-focus-shadow);
+      }
+
+      #better-codex-panel[data-host="web"] .better-codex-board-scroll input:focus-visible::-moz-range-thumb {
+        box-shadow: var(--bc-board-scroll-focus-shadow);
+      }
+
       #better-codex-panel[data-surface="agents"] {
         grid-template-rows: auto minmax(0, 1fr);
       }
