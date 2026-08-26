@@ -3132,6 +3132,10 @@ export function betterCodexFeatureStylesCss() {
       min-width: 214px;
     }
 
+    #better-codex-context-menu .better-codex-context-submenu.is-assignee[data-constrained="true"] .better-codex-context-tag {
+      display: none;
+    }
+
     #better-codex-panel .better-codex-filter-row,
     #better-codex-context-menu .better-codex-context-item,
     #better-codex-dialog .better-codex-project-option,

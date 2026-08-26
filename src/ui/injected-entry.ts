@@ -3449,6 +3449,21 @@ export function install(config: Record<string, any>) {
       return icon(names[key] || "circle");
     }
 
+    function sideMenuPlacement(parentRect, naturalWidth) {
+      const inset = 8;
+      const gap = 4;
+      const availableRight = Math.max(0, window.innerWidth - inset - parentRect.right - gap);
+      const availableLeft = Math.max(0, parentRect.left - inset - gap);
+      const openRight = naturalWidth <= availableRight || naturalWidth > availableLeft && availableRight >= availableLeft;
+      const availableWidth = openRight ? availableRight : availableLeft;
+      const width = Math.min(naturalWidth, availableWidth);
+      return {
+        constrained: naturalWidth > availableWidth,
+        left: openRight ? parentRect.right + gap : parentRect.left - gap - width,
+        width,
+      };
+    }
+
     function openFilterMenu(trigger) {
       if (panel?.querySelector(".better-codex-filter-menu")) return closeFilterMenu();
       closeFilterMenu();
@@ -3473,9 +3488,6 @@ export function install(config: Record<string, any>) {
         const options = filterOptions(key);
         submenu.innerHTML = "";
         submenu.style.top = row.offsetTop + "px";
-        const openLeft = menu.getBoundingClientRect().left >= 194;
-        submenu.style.right = openLeft ? "calc(100% + 4px)" : "auto";
-        submenu.style.left = openLeft ? "auto" : "calc(100% + 4px)";
         if (!options.length) {
           submenu.innerHTML = '<div class="better-codex-filter-row"><span class="better-codex-filter-label">' + escapeHtml(t("暂无可选项")) + '</span></div>';
         } else {
@@ -3496,6 +3508,17 @@ export function install(config: Record<string, any>) {
           }
         }
         submenu.hidden = false;
+        submenu.style.right = "auto";
+        submenu.style.left = "0px";
+        submenu.style.removeProperty("width");
+        submenu.style.removeProperty("min-width");
+        const menuRect = menu.getBoundingClientRect();
+        const placement = sideMenuPlacement(menuRect, submenu.getBoundingClientRect().width);
+        if (placement.constrained) {
+          submenu.style.minWidth = "0px";
+          submenu.style.width = placement.width + "px";
+        }
+        submenu.style.left = placement.left - menuRect.left + "px";
       }
 
       for (const category of categories) {
@@ -3544,8 +3567,8 @@ export function install(config: Record<string, any>) {
 
     function positionIssueSubmenus(menu) {
       const inset = 8;
-      const viewportWidth = window.innerWidth;
       const viewportHeight = window.innerHeight;
+      const menuRect = menu.getBoundingClientRect();
       menu.querySelectorAll(".better-codex-context-submenu").forEach(submenu => {
         const wrap = submenu.parentElement;
         if (!wrap) return;
@@ -3555,18 +3578,21 @@ export function install(config: Record<string, any>) {
         submenu.style.top = "0px";
         submenu.style.right = "auto";
         submenu.style.left = "0px";
+        submenu.style.removeProperty("width");
+        submenu.style.removeProperty("min-width");
+        submenu.removeAttribute("data-constrained");
         const wrapRect = wrap.getBoundingClientRect();
+        const naturalWidth = submenu.getBoundingClientRect().width;
+        const placement = sideMenuPlacement(menuRect, naturalWidth);
+        if (placement.constrained) {
+          submenu.style.minWidth = "0px";
+          submenu.style.width = placement.width + "px";
+          submenu.dataset.constrained = "true";
+        }
         const submenuRect = submenu.getBoundingClientRect();
-        const rightLeft = wrapRect.right;
-        const leftLeft = wrapRect.left - submenuRect.width;
-        const canOpenRight = rightLeft + submenuRect.width <= viewportWidth - inset;
-        const canOpenLeft = leftLeft >= inset;
-        const preferredLeft = canOpenRight || !canOpenLeft ? rightLeft : leftLeft;
-        const maximumLeft = Math.max(inset, viewportWidth - submenuRect.width - inset);
-        const left = Math.max(inset, Math.min(preferredLeft, maximumLeft));
         const maximumTop = Math.max(inset, viewportHeight - submenuRect.height - inset);
         const top = Math.max(inset, Math.min(wrapRect.top - 5, maximumTop));
-        submenu.style.left = left - wrapRect.left + "px";
+        submenu.style.left = placement.left - wrapRect.left + "px";
         submenu.style.top = top - wrapRect.top + "px";
         submenu.style.removeProperty("display");
         submenu.style.removeProperty("visibility");
