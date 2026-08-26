@@ -146,6 +146,7 @@ export function install(config: Record<string, any>) {
     const initialAgentKey = initialAgentRoute?.agentKey || "";
     const state = { projects: [], projectsLoaded: false, issues: [], issuesLoaded: false, scheduledTasks: [], scheduledTasksLoaded: false, projectIssues: [], projectIssuesProjectId: "", projectDetailId: initialProjectRoute?.projectId || "", projectPage: "overview", projectDocumentView: "charter", projectDocumentPending: null, projectDocumentError: null, projectPlanningPending: null, projectPlanningError: null, agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: USER_AVATAR_COLORS[0], avatar: "", avatar_generated: true }, users: [], projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: initialAgentKey === "new" ? "create" : initialAgentKey ? "detail" : "preview", selectedAgentId: initialAgentKey && initialAgentKey !== "new" ? initialAgentKey : "", agentDraft: initialAgentKey === "new" ? { avatar: "icon:bot" } : null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: initialProjectRoute ? "projects" : initialAgentRoute ? "agents" : availableSurfaces.includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, autoDispatchPending: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", issueDescriptionLimit: 100000, mockup: false, keepCreate: rememberedKeepCreate, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], project: [], label: [] } };
     const pendingIssueRemovals = new Map();
+    const pendingIssueCreates = new Map();
     const projectPlanningDrafts = new Map();
     let projectPlanningComposition = "";
     let projectRenderDeferred = null;
@@ -1046,6 +1047,30 @@ export function install(config: Record<string, any>) {
       };
     }
 
+    function queuedIssuePlaceholder(commandId, body) {
+      const timestamp = new Date().toISOString();
+      return {
+        id: "queued:" + commandId,
+        identifier: "…",
+        project_id: body.project_id,
+        title: body.title,
+        description: body.description || "",
+        status: body.status || "todo",
+        priority: body.priority || "none",
+        labels: body.labels || [],
+        workspace_path: body.workspace_path || "",
+        agent_enabled: body.agent_enabled === true,
+        agent_id: body.agent_id || "",
+        user_assigned: body.user_assigned === true,
+        assignee_user_id: body.assignee_user_id || null,
+        version: 1,
+        reply_status: "idle",
+        remote_state: { command_id: commandId, status: "pending", operation: "issue.create", error: null },
+        created_at: timestamp,
+        updated_at: timestamp,
+      };
+    }
+
     async function resolveWorkspacePath(context) {
       const fromUrl = String(context?.workspacePath || "").trim();
       const threadId = normalizeSessionId(context?.threadId);
@@ -1481,7 +1506,7 @@ export function install(config: Record<string, any>) {
     function api(path, options = {}) {
       const method = String(options.method || "GET").toUpperCase();
       const requestPath = path + (path.includes("?") ? "&" : "?") + "locale=" + encodeURIComponent(state.locale);
-      const commandId = method === "GET" ? "" : globalThis.crypto?.randomUUID?.() || VERSION + "-command-" + Date.now() + "-" + Math.random().toString(36).slice(2);
+      const commandId = method === "GET" ? "" : options.commandId || globalThis.crypto?.randomUUID?.() || VERSION + "-command-" + Date.now() + "-" + Math.random().toString(36).slice(2);
       const traceId = globalThis.crypto?.randomUUID?.() || VERSION + "-trace-" + Date.now() + "-" + Math.random().toString(36).slice(2);
       const removalMatch = path.match(/^\/api\/issues\/([^\/?]+)(?:\/(archive))?(?:\?.*)?$/);
       const removalId = removalMatch && (method === "DELETE" || method === "POST" && removalMatch[2] === "archive") ? decodeURIComponent(removalMatch[1]) : "";
@@ -1501,7 +1526,7 @@ export function install(config: Record<string, any>) {
       }
       const attempt = (retriesLeft) => {
         if (typeof window.betterCodexHost?.request === "function") {
-          return Promise.resolve(window.betterCodexHost.request({ path: requestPath, method: options.method || "GET", body: options.body, timeoutMs: options.timeoutMs, commandId, traceId })).catch(error => {
+          return Promise.resolve(window.betterCodexHost.request({ path: requestPath, method: options.method || "GET", body: options.body, timeoutMs: options.timeoutMs, commandId, traceId, enqueue: options.enqueue === true })).catch(error => {
             if (retriesLeft > 0 && error instanceof Error && ["runtime_bridge_timeout", "runtime_response_invalid"].includes(error.message)) return attempt(retriesLeft - 1);
             throw error;
           });
@@ -1515,7 +1540,7 @@ export function install(config: Record<string, any>) {
           }, Number(options.timeoutMs) || 10000);
           bridgeRequests.set(id, { resolve, reject, timer });
           try {
-            window.betterCodexRequest(JSON.stringify({ id, token: BRIDGE_TOKEN, path: requestPath, method: options.method || "GET", body: options.body, timeoutMs: options.timeoutMs, commandId, traceId }));
+            window.betterCodexRequest(JSON.stringify({ id, token: BRIDGE_TOKEN, path: requestPath, method: options.method || "GET", body: options.body, timeoutMs: options.timeoutMs, commandId, traceId, enqueue: options.enqueue === true }));
           } catch (error) {
             bridgeRequests.delete(id);
             clearTimeout(timer);
@@ -7007,6 +7032,9 @@ export function install(config: Record<string, any>) {
         throw error;
       }
       issues = issues.filter(issue => !pendingIssueRemovals.has(issue.id));
+      for (const pending of pendingIssueCreates.values()) {
+        if (!issues.some(issue => issue.id === pending.issue.id)) issues.push(pending.issue);
+      }
       const changed = JSON.stringify(issues) !== JSON.stringify(state.issues);
       if (issueSessionSnapshot.size) {
         const ended = issues.filter(issue => {
@@ -7057,6 +7085,25 @@ export function install(config: Record<string, any>) {
         await new Promise(resolve => setTimeout(resolve, 500));
       }
       throw new Error("remote_command_timeout");
+    }
+
+    function watchQueuedCommand(commandId, handlers, attempt = 0) {
+      const delays = [300, 700, 1500, 3000, 5000, 10000, 30000, 120000, 600000];
+      setTimeout(async () => {
+        try {
+          const command = await api((HOST_KIND === "remote-projection" ? "/api/v1/commands/" : "/api/commands/") + encodeURIComponent(commandId));
+          if (["pending", "dispatched", "processing"].includes(command.status) || command.queued === true) return watchQueuedCommand(commandId, handlers, attempt + 1);
+          if (command.status !== "applied") throw new Error(command.error || "command_rejected");
+          appendDiagnostic("queued_command_applied", { command_id: commandId, attempt_count: attempt + 1 });
+          await handlers.applied?.(command.payload, command);
+        } catch (error) {
+          if (transientNetworkError(error) || error instanceof Error && ["command_not_found", "runtime_offline", "runtime_unavailable", "relay_stream_interrupted", "request_outcome_unknown"].includes(error.message)) {
+            return watchQueuedCommand(commandId, handlers, attempt + 1);
+          }
+          appendDiagnostic("queued_command_failed", { command_id: commandId, attempt_count: attempt + 1, error: error instanceof Error ? error.message : String(error || "command_rejected") });
+          await handlers.failed?.(error);
+        }
+      }, delays[Math.min(attempt, delays.length - 1)]);
     }
 
     async function loadSurface(options = {}) {
@@ -7457,6 +7504,8 @@ export function install(config: Record<string, any>) {
       let queueActionRequestId = "";
       let queueActionError = "";
       let queueEditFocusPreserved = false;
+      const pendingQueueCommands = new Map();
+      const optimisticReplies = new Map();
       let replyRecoveryRequestId = "";
       let replyRecoveryTimer = null;
       let replyDraftTimer = null;
@@ -7554,7 +7603,7 @@ export function install(config: Record<string, any>) {
         replyRecoveryRequestId = "";
       }
 
-      function completeReplySubmission(submittedText, submittedAttachments = []) {
+      function completeReplySubmission(submittedText, submittedAttachments = [], options = {}) {
         const textarea = dialog.querySelector('[name="reply"]');
         const currentText = String(textarea?.value || "").trim();
         const composerUnchanged = !textarea || currentText === submittedText;
@@ -7577,7 +7626,7 @@ export function install(config: Record<string, any>) {
           clearTimeout(replyDraftTimer);
           replyDraftTimer = null;
         }
-        persistReplyDraft(draft.reply, draft.replyAttachments);
+        persistReplyDraft(draft.reply, draft.replyAttachments, { enqueue: options.enqueueDraftClear === true });
         const attachments = dialog.querySelector("[data-reply-attachments]");
         if (attachments) attachments.outerHTML = attachmentList(draft.replyAttachments, "reply");
         updateReplySendState();
@@ -7675,7 +7724,7 @@ export function install(config: Record<string, any>) {
         return items.filter(item => item.path).map(item => ({ name: item.name, path: item.path, type: item.type || item.file?.type || "" }));
       }
 
-      function persistReplyDraft(value, items = draft.replyAttachments) {
+      function persistReplyDraft(value, items = draft.replyAttachments, options = {}) {
         if (!issue || REMOTE && !RELAY) return;
         replyDraftUpdate = replyDraftUpdate.catch(() => {}).then(async () => {
           try {
@@ -7690,7 +7739,19 @@ export function install(config: Record<string, any>) {
           for (let attempt = 0; attempt < 2; attempt += 1) {
             try {
               const body = { version: current.version, reply_draft: value, reply_draft_attachments: attachments };
-              const updated = await api("/api/issues/" + encodeURIComponent(issue.id), { method: "PATCH", body: JSON.stringify(body) });
+              const updated = await api("/api/issues/" + encodeURIComponent(issue.id), { method: "PATCH", body: JSON.stringify(body), enqueue: options.enqueue === true });
+              if (updated?.queued === true) {
+                watchQueuedCommand(updated.command_id, {
+                  applied: payload => {
+                    if (payload?.id && dialog.isConnected) refreshIssueState(payload);
+                  },
+                  failed: error => {
+                    reportUnexpectedError(error, { source: "reply_draft_queue", issue_id: issue.id, command_id: updated.command_id });
+                    if (dialog.isConnected) showError(error);
+                  },
+                });
+                return;
+              }
               refreshIssueState(updated);
               return;
             } catch (error) {
@@ -8252,18 +8313,53 @@ export function install(config: Record<string, any>) {
         try {
           const commandId = globalThis.crypto?.randomUUID?.() || VERSION + "-queue-" + Date.now() + "-" + Math.random().toString(36).slice(2);
           const path = "/api/issues/" + encodeURIComponent(issue.id) + "/queue/" + encodeURIComponent(requestId) + (action === "send" ? "/send" : "");
-          const result = await api(path, { method: action === "send" ? "POST" : action === "delete" ? "DELETE" : "PATCH", body: JSON.stringify(action === "update" ? { command_id: commandId, message, input_document: serializeSemanticDraft(reconcileSemanticText(queueEditSemanticDocument || createSemanticDraft(message), message)) } : { command_id: commandId }) });
-          if (result.command_id) {
+          const result = await api(path, { method: action === "send" ? "POST" : action === "delete" ? "DELETE" : "PATCH", body: JSON.stringify(action === "update" ? { command_id: commandId, message, input_document: serializeSemanticDraft(reconcileSemanticText(queueEditSemanticDocument || createSemanticDraft(message), message)) } : { command_id: commandId }), commandId, enqueue: true });
+          if (result.queued === true) {
+            pendingQueueCommands.set(commandId, { action, requestId });
+            if (action === "send" || action === "delete") queuedReplies = queuedReplies.filter(item => item.request_id !== requestId);
+            else queuedReplies = queuedReplies.map(item => item.request_id === requestId ? { ...item, message } : item);
+            queueEditingRequestId = "";
+            queueEditDraft = "";
+            queueEditSemanticDocument = null;
+            traceDialog("conversation_queue_command_queued", { command_id: commandId, request_id: requestId, action });
+            watchQueuedCommand(commandId, {
+              applied: async payload => {
+                pendingQueueCommands.delete(commandId);
+                if (!pendingQueueCommands.size && Array.isArray(payload?.queued_replies)) queuedReplies = payload.queued_replies;
+                queueActionError = "";
+                if (dialog.isConnected) {
+                  syncQueuedReplyState();
+                  if (!pendingQueueCommands.size) await loadConversation({ quiet: true });
+                }
+              },
+              failed: async error => {
+                pendingQueueCommands.delete(commandId);
+                queueActionError = queuedReplyError(error);
+                reportUnexpectedError(error, { source: "conversation_queue_settle", action, issue_id: issue.id, request_id: requestId, command_id: commandId });
+                if (dialog.isConnected) {
+                  syncQueuedReplyState();
+                  if (!pendingQueueCommands.size) await loadConversation({ quiet: true });
+                }
+              },
+            });
+          } else if (result.command_id) {
             const command = await waitForRemoteCommand(result.command_id);
             if (command.status !== "applied") throw new Error(command.error || "command_rejected");
+            if (Array.isArray(command.payload?.queued_replies)) queuedReplies = command.payload.queued_replies;
+            else if (action === "send" || action === "delete") queuedReplies = queuedReplies.filter(item => item.request_id !== requestId);
+            else queuedReplies = queuedReplies.map(item => item.request_id === requestId ? { ...item, message } : item);
+            queueEditingRequestId = "";
+            queueEditDraft = "";
+            queueEditSemanticDocument = null;
+          } else {
+            if (Array.isArray(result.queued_replies)) queuedReplies = result.queued_replies;
+            else if (action === "send" || action === "delete") queuedReplies = queuedReplies.filter(item => item.request_id !== requestId);
+            else queuedReplies = queuedReplies.map(item => item.request_id === requestId ? { ...item, message } : item);
+            queueEditingRequestId = "";
+            queueEditDraft = "";
+            queueEditSemanticDocument = null;
+            conversationTimer = setTimeout(() => void loadConversation({ quiet: true }), 1500);
           }
-          if (Array.isArray(result.queued_replies)) queuedReplies = result.queued_replies;
-          else if (action === "send" || action === "delete") queuedReplies = queuedReplies.filter(item => item.request_id !== requestId);
-          else queuedReplies = queuedReplies.map(item => item.request_id === requestId ? { ...item, message } : item);
-          queueEditingRequestId = "";
-          queueEditDraft = "";
-          queueEditSemanticDocument = null;
-          conversationTimer = setTimeout(() => void loadConversation({ quiet: true }), 1500);
         } catch (error) {
           reportUnexpectedError(error, { source: "conversation_queue", action, issue_id: issue.id, request_id: requestId });
           queueActionError = queuedReplyError(error);
@@ -8465,6 +8561,15 @@ export function install(config: Record<string, any>) {
         }).join("");
       }
 
+      function syncOptimisticReplies() {
+        const body = dialog.querySelector("[data-conversation-body]");
+        if (!body) return;
+        const confirmed = conversationMessages.filter(message => !message.optimistic_request_id);
+        conversationMessages = [...confirmed, ...optimisticReplies.values()];
+        body.innerHTML = conversationBubbles(conversationMessages, RELAY ? state.user : null);
+        body.scrollTop = body.scrollHeight;
+      }
+
       function renderPlainBubble(value) {
         return '<p>' + escapeHtml(value).replace(/\n/g, "<br>") + '</p>';
       }
@@ -8476,18 +8581,19 @@ export function install(config: Record<string, any>) {
         if (!body || !status) return;
         if (!RELAY && data?.user && typeof data.user === "object") state.user = { ...state.user, ...data.user };
         const nextQueuedReplies = Array.isArray(data?.queued_replies) ? data.queued_replies : Array.isArray(data?.reply?.queued_replies) ? data.reply.queued_replies : null;
-        if (nextQueuedReplies && !queueActionRequestId) queuedReplies = nextQueuedReplies;
+        if (nextQueuedReplies && !queueActionRequestId && !pendingQueueCommands.size) queuedReplies = nextQueuedReplies;
         syncQueuedReplyState();
-        const messages = Array.isArray(data?.messages) ? data.messages : [];
+        const confirmedMessages = Array.isArray(data?.messages)
+          ? data.messages
+          : data?.html
+            ? [{ role: "agent", html: data.html, markdown: data.markdown || "", timestamp: null }]
+            : [];
+        const messages = [...confirmedMessages, ...optimisticReplies.values()];
         const previousScrollTop = body.scrollTop;
         const stickToBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 48;
         if (messages.length) {
           conversationMessages = messages;
           body.innerHTML = conversationBubbles(messages, RELAY ? state.user : data.user);
-          body.scrollTop = stickToBottom ? body.scrollHeight : previousScrollTop;
-        } else if (data?.html) {
-          conversationMessages = [{ role: "agent", html: data.html, markdown: data.markdown || "", timestamp: null }];
-          body.innerHTML = conversationBubbles(conversationMessages, RELAY ? state.user : data.user);
           body.scrollTop = stickToBottom ? body.scrollHeight : previousScrollTop;
         } else if (!options.preserveBody) {
           conversationMessages = [];
@@ -8502,7 +8608,7 @@ export function install(config: Record<string, any>) {
         const reply = data?.reply || { status: "idle" };
         if (reply.message) lastReplyMessage = reply.message;
         if (reply.request_id) lastReplyRequestId = reply.request_id;
-        const stateName = reply.status || "idle";
+        const stateName = optimisticReplies.size ? "running" : reply.status || "idle";
         lastReplyStatus = stateName;
         const expectedInterruption = stateName === "interrupted" && ["user_stopped", "session_interrupted"].includes(String(reply.error || ""));
         if (!sessionHandoff && (stateName === "failed" || (stateName === "interrupted" && !expectedInterruption))) showConversationFailure(reply.error, "reply", reply.message, { origin: "turn" });
@@ -8684,13 +8790,15 @@ export function install(config: Record<string, any>) {
         }
         const submittedAttachments = draft.replyAttachments.slice();
         const submittedSemanticDocument = reconcileSemanticText(semanticDocument, message);
+        const submissionCommandId = globalThis.crypto?.randomUUID?.() || VERSION + "-reply-command-" + Date.now() + "-" + Math.random().toString(36).slice(2);
+        const queueMode = send.dataset.composerMode === "queue" || executionRunning;
         let reply;
         try {
           lastReplyStatus = "running";
           lastReplySemanticReferences = semanticReferences.map(reference => ({ ...reference }));
           lastReplySemanticDocument = submittedSemanticDocument;
           lastReplyCommand = semanticCommand;
-          reply = await api("/api/issues/" + encodeURIComponent(issue.id) + "/reply", { method: "POST", body: JSON.stringify({ message, input_document: serializeSemanticDraft(submittedSemanticDocument), request_id: requestId, files, command: semanticCommand }), timeoutMs: files.length ? 120_000 : undefined });
+          reply = await api("/api/issues/" + encodeURIComponent(issue.id) + "/reply", { method: "POST", body: JSON.stringify({ message, input_document: serializeSemanticDraft(submittedSemanticDocument), request_id: requestId, files, command: semanticCommand }), timeoutMs: files.length ? 120_000 : undefined, commandId: submissionCommandId, enqueue: true });
         } catch (error) {
           lastReplyRequestId = requestId;
           const outcomeUncertain = !Number(error?.betterCodexDiagnostics?.http_status);
@@ -8703,7 +8811,43 @@ export function install(config: Record<string, any>) {
         }
         lastReplyRequestId = reply.request_id || requestId;
         stopReplyRecovery();
-        const composerCleared = completeReplySubmission(text, submittedAttachments);
+        const composerCleared = completeReplySubmission(text, submittedAttachments, { enqueueDraftClear: reply.queued === true });
+        if (reply.queued === true) {
+          pendingQueueCommands.set(submissionCommandId, { action: "reply", requestId });
+          if (queueMode) {
+            if (!queuedReplies.some(item => item.request_id === requestId)) queuedReplies.push({ request_id: requestId, message, created_at: new Date().toISOString(), input_document: serializeSemanticDraft(submittedSemanticDocument) });
+            syncQueuedReplyState();
+          } else {
+            optimisticReplies.set(requestId, { role: "user", markdown: message, timestamp: new Date().toISOString(), optimistic_request_id: requestId });
+            syncOptimisticReplies();
+            syncConversationStatus("running");
+          }
+          traceDialog("reply_command_queued", { command_id: submissionCommandId, request_id: requestId, queue_mode: queueMode, composer_cleared: composerCleared });
+          watchQueuedCommand(submissionCommandId, {
+            applied: async payload => {
+              pendingQueueCommands.delete(submissionCommandId);
+              optimisticReplies.delete(requestId);
+              if (!pendingQueueCommands.size && Array.isArray(payload?.queued_replies)) queuedReplies = payload.queued_replies;
+              if (!dialog.isConnected) return;
+              syncOptimisticReplies();
+              syncQueuedReplyState();
+              await loadIssues({ background: true });
+              if (payload?.initial_run) dialog.close();
+              else await loadConversation({ quiet: true });
+            },
+            failed: async error => {
+              pendingQueueCommands.delete(submissionCommandId);
+              optimisticReplies.delete(requestId);
+              queuedReplies = queuedReplies.filter(item => item.request_id !== requestId);
+              reportUnexpectedError(error, { source: "reply_queue_settle", issue_id: issue.id, request_id: requestId, command_id: submissionCommandId });
+              if (!dialog.isConnected) return;
+              syncOptimisticReplies();
+              syncQueuedReplyState();
+              showConversationFailure(error, "reply", message, { origin: "command_queue", command_id: submissionCommandId });
+            },
+          });
+          return;
+        }
         traceDialog("reply_submit_confirmed", { request_id: lastReplyRequestId, initial_run: Boolean(reply.initial_run), composer_cleared: composerCleared });
         if (reply.initial_run) {
           try {
@@ -9637,15 +9781,45 @@ export function install(config: Record<string, any>) {
             ...(!issue ? { request_id: createRequestId } : {})
           };
           const transferTimeoutMs = files.length ? 120_000 : undefined;
+          let queuedCreate = false;
           if (issue) await api("/api/issues/" + encodeURIComponent(issue.id), { method: "PATCH", body: JSON.stringify({ ...body, version: issue.version }), timeoutMs: transferTimeoutMs });
           else {
             writeCreateDraft(draft, createRequestId);
-            await api("/api/issues", { method: "POST", body: JSON.stringify({ ...body, project_id: draft.projectId }), timeoutMs: transferTimeoutMs });
+            const commandId = globalThis.crypto?.randomUUID?.() || VERSION + "-create-command-" + Date.now() + "-" + Math.random().toString(36).slice(2);
+            const submittedDraft = { ...draft, attachments: draft.attachments.map(item => ({ ...item })), promptSemanticReferences: draft.promptSemanticReferences.map(reference => ({ ...reference })) };
+            const result = await api("/api/issues", { method: "POST", body: JSON.stringify({ ...body, project_id: draft.projectId }), timeoutMs: transferTimeoutMs, commandId, enqueue: true });
             state.projectId = draft.projectId;
+            if (result?.queued === true) {
+              queuedCreate = true;
+              const placeholder = queuedIssuePlaceholder(commandId, body);
+              pendingIssueCreates.set(commandId, { issue: placeholder, requestId: createRequestId });
+              state.issues.push(placeholder);
+              state.issuesLoaded = true;
+              render();
+              traceDialog("issue_create_queued", { command_id: commandId, request_id: createRequestId });
+              watchQueuedCommand(commandId, {
+                applied: async payload => {
+                  const pending = pendingIssueCreates.get(commandId);
+                  pendingIssueCreates.delete(commandId);
+                  state.issues = state.issues.filter(item => item.id !== pending?.issue.id);
+                  if (payload?.id) state.issues.push({ ...payload, reply_status: payload.reply_status || "idle" });
+                  await loadIssues({ background: true });
+                },
+                failed: async error => {
+                  const pending = pendingIssueCreates.get(commandId);
+                  pendingIssueCreates.delete(commandId);
+                  state.issues = state.issues.filter(item => item.id !== pending?.issue.id);
+                  if (!state.keepCreate && !sessionStorage.getItem(CREATE_DRAFT_KEY)) writeCreateDraft(submittedDraft, createRequestId);
+                  render();
+                  reportGlobalError(error, { source: "issue_create_queue", command_id: commandId, request_id: createRequestId });
+                  showError(error);
+                },
+              });
+            }
           }
           traceDialog("dialog_submit_success", { action: issue ? "update_issue" : "create_issue" });
           if (!issue) sessionStorage.removeItem(CREATE_DRAFT_KEY);
-          await loadIssues();
+          if (!queuedCreate) await loadIssues();
           if (!issue && state.keepCreate) {
             createRequestId = globalThis.crypto?.randomUUID?.() || VERSION + "-create-" + Date.now() + "-" + Math.random().toString(36).slice(2);
             submitInFlight = false;
@@ -9828,7 +10002,8 @@ export function install(config: Record<string, any>) {
       }
       const card = event.target.closest("[data-issue-id]");
       const issue = state.issues.find(item => item.id === card?.dataset.issueId);
-      if (issue && !issuePermissions(issue).enrichmentPending) return void perform(() => openEditor(issue));
+      const permissions = issuePermissions(issue);
+      if (issue && !permissions.enrichmentPending && !permissions.remotePending) return void perform(() => openEditor(issue));
     }
 
     function sessionThreadTitle(row) {

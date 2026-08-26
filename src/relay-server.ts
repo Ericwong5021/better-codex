@@ -4,7 +4,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { isIP } from "node:net";
 import { resolve } from "node:path";
 import { betterCodexWebIconPng } from "./brand-assets.js";
-import { createWebCommand, webCommandTarget } from "./command-contract.js";
+import { createWebCommand, webCommandAcknowledgesQueue, webCommandTarget } from "./command-contract.js";
 import { coreVersion } from "./compatibility.js";
 import { deviceAuthorizationPage } from "./device-authorization-page.js";
 import { clearRelaySessionCookie, parseCookies, passwordHash, passwordMatches, readHubSecret, relaySessionCookie, validateWebPassword, validateWebUsername } from "./relay-auth.js";
@@ -677,7 +677,11 @@ export function createRelayServer(options: RelayServerOptions) {
     const result = store.enqueueCommand(sessionId, command, forwardedRequestHeaders(request, command.command_id));
     if (result.kind === "conflict") return sendJson(response, 409, { error: "request_id_conflict", command_id: command.command_id });
     if (["applied", "rejected", "conflict", "expired"].includes(result.command.status)) return sendCommandResult(response, result.command);
-    if (!runtime) return queuedCommandResponse(response, result.command);
+    if (!runtime || webCommandAcknowledgesQueue(method, path)) {
+      queuedCommandResponse(response, result.command);
+      if (runtime) pumpCommands(runtime);
+      return;
+    }
     waitForCommand(response, result.command);
     pumpCommands(runtime);
   };

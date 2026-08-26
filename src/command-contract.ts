@@ -16,6 +16,8 @@ const issueCollection = /^\/api\/issues$/;
 const issueFromThread = /^\/api\/issues\/from-thread$/;
 const issueItem = /^\/api\/issues\/([^/]+)$/;
 const issueAction = /^\/api\/issues\/([^/]+)\/(start|stop|move|archive|unarchive|reply|session-handoff)$/;
+const issueQueueItem = /^\/api\/issues\/([^/]+)\/queue\/([^/]+)$/;
+const issueQueueSend = /^\/api\/issues\/([^/]+)\/queue\/([^/]+)\/send$/;
 const projectCollection = /^\/api\/projects$/;
 const projectEnsure = /^\/api\/projects\/ensure$/;
 const projectOverview = /^\/api\/projects\/([^/]+)\/overview$/;
@@ -39,6 +41,10 @@ export function webCommandTarget(methodValue: string, pathValue: string) {
   if (match && ["PATCH", "DELETE"].includes(method)) return { kind: "issue" as const, entity_id: decoded(match[1]) };
   match = pathname.match(issueAction);
   if (match && method === "POST") return { kind: "issue" as const, entity_id: decoded(match[1]) };
+  match = pathname.match(issueQueueItem);
+  if (match && ["PATCH", "DELETE"].includes(method)) return { kind: "issue" as const, entity_id: decoded(match[1]) };
+  match = pathname.match(issueQueueSend);
+  if (match && method === "POST") return { kind: "issue" as const, entity_id: decoded(match[1]) };
   if (issueCollection.test(pathname) && method === "POST") return { kind: "issue" as const, entity_id: null };
   if (issueFromThread.test(pathname) && method === "POST") return { kind: "issue" as const, entity_id: null };
   match = pathname.match(projectOverview);
@@ -59,6 +65,14 @@ export function webCommandTarget(methodValue: string, pathValue: string) {
   if (match && method === "POST") return { kind: "scheduled" as const, entity_id: decoded(match[1]) };
   if (scheduledCollection.test(pathname) && method === "POST") return { kind: "scheduled" as const, entity_id: null };
   return null;
+}
+
+export function webCommandAcknowledgesQueue(methodValue: string, pathValue: string) {
+  const method = methodValue.toUpperCase();
+  const pathname = new URL(pathValue, "http://runtime.local").pathname;
+  const action = pathname.match(issueAction)?.[2];
+  return (method === "POST" && (issueCollection.test(pathname) || action === "reply" || issueQueueSend.test(pathname)))
+    || (["PATCH", "DELETE"].includes(method) && issueQueueItem.test(pathname));
 }
 
 export function createWebCommand(commandId: string, methodValue: string, path: string, body: Buffer): WebCommandEnvelope | null {

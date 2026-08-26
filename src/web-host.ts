@@ -813,6 +813,8 @@ function queueableCommand(method, path, bodyBytes) {
   if (["PATCH", "DELETE"].includes(method) && /^\/api\/issues\/[^/]+$/.test(pathname)) return true;
   if (method === "DELETE" && /^\/api\/projects\/[^/]+$/.test(pathname)) return true;
   if (method === "POST" && /^\/api\/issues\/[^/]+\/(start|stop|move|archive|unarchive|reply|session-handoff)$/.test(pathname)) return true;
+  if (["PATCH", "DELETE"].includes(method) && /^\/api\/issues\/[^/]+\/queue\/[^/]+$/.test(pathname)) return true;
+  if (method === "POST" && /^\/api\/issues\/[^/]+\/queue\/[^/]+\/send$/.test(pathname)) return true;
   if (method === "POST" && (/^\/api\/projects$/.test(pathname) || /^\/api\/projects\/ensure$/.test(pathname) || /^\/api\/projects\/[^/]+\/(overview|planning\/(messages|reset))$/.test(pathname))) return true;
   if (method === "POST" && /^\/api\/agents$/.test(pathname)) return true;
   if (["PATCH", "DELETE"].includes(method) && /^\/api\/agents\/[^/]+$/.test(pathname)) return true;
@@ -830,13 +832,16 @@ function openCommandQueue() {
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error || new Error("command_queue_unavailable"));
-  }).catch(() => null);
+  }).catch(error => {
+    hostDiagnostic("command_queue_unavailable", { error: error?.message || "indexeddb_unavailable" });
+    return null;
+  });
   return commandQueueDatabase;
 }
 
 async function writeQueuedCommand(command) {
   const database = await openCommandQueue();
-  if (!database) return;
+  if (!database) return false;
   await new Promise((resolve, reject) => {
     const transaction = database.transaction("commands", "readwrite");
     transaction.objectStore("commands").put(command);
@@ -844,6 +849,7 @@ async function writeQueuedCommand(command) {
     transaction.onerror = () => reject(transaction.error);
     transaction.onabort = () => reject(transaction.error);
   });
+  return true;
 }
 
 async function deleteQueuedCommand(commandId) {
@@ -912,11 +918,15 @@ async function drainCommandQueue() {
       let responseError = "";
       try { responseError = String((await response.clone().json())?.error || ""); } catch {}
       if (commandAcceptedOrTerminal(response.status, responseError)) {
+        hostDiagnostic("command_queue_delivered", { command_id: command.commandId, method: command.method, path: command.path, http_status: response.status, attempts: Number(command.attempts || 0) + 1 });
         clearTimeout(timeout);
         await deleteQueuedCommand(command.commandId);
         continue;
       }
-    } catch {}
+      hostDiagnostic("command_queue_retry", { command_id: command.commandId, method: command.method, path: command.path, http_status: response.status, error: responseError || response.statusText || "request_failed", attempts: Number(command.attempts || 0) + 1 });
+    } catch (error) {
+      hostDiagnostic("command_queue_retry", { command_id: command.commandId, method: command.method, path: command.path, error: error?.message || "network_error", attempts: Number(command.attempts || 0) + 1 });
+    }
     const attempts = Number(command.attempts || 0) + 1;
     const delays = [1000, 5000, 30000, 120000, 600000, 1800000];
     await writeQueuedCommand({ ...command, attempts, nextAttemptAt: Date.now() + delays[Math.min(attempts - 1, delays.length - 1)] });
@@ -943,7 +953,7 @@ async function requestRuntime(request) {
   let attemptCount = 0;
   const queued = queueableCommand(method, request.path, requestBodyBytes);
   const updateInstallRequest = REMOTE && method === "POST" && new URL(request.path, location.origin).pathname === "/api/update/install";
-  if (queued) await writeQueuedCommand({ commandId: request.commandId, traceId, method, path: request.path, body: request.body, createdAt: Date.now(), attempts: 0, nextAttemptAt: Date.now() });
+  const queuedLocally = queued && await writeQueuedCommand({ commandId: request.commandId, traceId, method, path: request.path, body: request.body, createdAt: Date.now(), attempts: 0, nextAttemptAt: Date.now() });
   const diagnostics = extra => ({
     source: "web_host_request",
     trace_id: traceId,
@@ -964,6 +974,11 @@ async function requestRuntime(request) {
     return error;
   };
   hostDiagnostic("request_start", { trace_id: traceId, method, path: request.path, command_id: request.commandId || "", request_body_bytes: requestBodyBytes, timeout_ms: timeoutMs });
+  if (request.enqueue === true && queuedLocally) {
+    hostDiagnostic("command_queued", { trace_id: traceId, method, path: request.path, command_id: request.commandId });
+    scheduleCommandQueueDrain(0);
+    return { command_id: request.commandId, status: "pending", queued: true };
+  }
   const headers = commandHeaders(request);
   if (REMOTE && method === "GET") delete headers["x-csrf-token"];
   const controller = new AbortController();
