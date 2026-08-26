@@ -84,12 +84,18 @@ test("supports English, dark theme, mobile viewport, and keyboard dismissal", as
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await expect(page.locator("#better-codex-entry")).toContainText("Task board");
   await expect(page.locator("#better-codex-scheduled-entry")).toBeHidden();
-  await page.locator("#better-codex-more-entry").click();
-  await expect(page.locator("#better-codex-scheduled-mobile-entry")).toContainText("Scheduled");
-  await page.locator("#better-codex-scheduled-mobile-entry").click();
-  await expect(page.locator("#better-codex-panel")).toHaveAttribute("data-surface", "scheduled");
-  await expect(page.locator("#better-codex-more-entry")).toHaveAttribute("aria-current", "page");
-  await page.locator("#better-codex-entry").click();
+  const manifest = await page.evaluate(async () => await (window as any).betterCodexHost.request({ path: "/api/bootstrap" }));
+  const scheduledEnabled = manifest.featureManifest.features.some((feature: { id: string; enabled: boolean }) => feature.id === "scheduled-tasks" && feature.enabled);
+  if (scheduledEnabled) {
+    await page.locator("#better-codex-more-entry").click();
+    await expect(page.locator("#better-codex-scheduled-mobile-entry")).toContainText("Scheduled");
+    await page.locator("#better-codex-scheduled-mobile-entry").click();
+    await expect(page.locator("#better-codex-panel")).toHaveAttribute("data-surface", "scheduled");
+    await expect(page.locator("#better-codex-more-entry")).toHaveAttribute("aria-current", "page");
+    await page.locator("#better-codex-entry").click();
+  } else {
+    await expect(page.locator("#better-codex-scheduled-mobile-entry")).toHaveCount(0);
+  }
   await page.locator("#better-codex-more-entry").click();
   await expect(page.locator("#better-codex-theme-entry")).toContainText("Switch to light theme");
   await page.locator("#better-codex-theme-entry").click();

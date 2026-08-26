@@ -39,7 +39,7 @@ export function install(config: Record<string, any>) {
     const AGENTS_READ_ONLY = HOST_CAPABILITIES.agents === "read-only";
     const CODEX_SEMANTICS_AVAILABLE = HOST_CAPABILITIES.codexSemantics !== false;
     const REMOTE = HOST_ADAPTER.remote;
-    const SCHEDULED_AVAILABLE = !REMOTE || RELAY;
+    const SCHEDULED_HOST_AVAILABLE = !REMOTE || RELAY;
     if (READ_ONLY) document.documentElement.setAttribute("data-better-codex-read-only", "true");
     const HELP_MODE_MARKDOWN = config.helpModeMarkdown;
     const previous = window.__betterCodexInjection__;
@@ -138,6 +138,7 @@ export function install(config: Record<string, any>) {
     const systemLocale = resolveSystemLocale(INITIAL_LOCALE);
     const MOCKUP_PROJECT_ID = "mockup-better-codex";
     const hasFeature = feature => ENABLED_FEATURES.has(feature);
+    const SCHEDULED_AVAILABLE = SCHEDULED_HOST_AVAILABLE && hasFeature("scheduled-tasks");
     const availableSurfaces = ["issues", ...(SCHEDULED_AVAILABLE ? ["scheduled"] : []), "agents", ...(hasFeature("project-management") ? ["projects"] : [])];
     const initialProjectRoute = hasFeature("project-management") ? webProjectRoute() : null;
     const initialAgentRoute = webAgentRoute();
