@@ -3902,16 +3902,24 @@ export class Store {
         const detached = this.db.prepare("DELETE FROM issue_sessions WHERE issue_id = ? AND active_turn_id IS NULL").run(input.issueId);
         if (detached.changes !== 1) throw new Error("issue_session_replace_conflict");
       }
+      const draftText = issue.reply_draft.trim();
+      const draftPaths = issue.reply_draft_attachments.map(attachment => attachment.path).filter(Boolean);
+      const draftMessages = draftPaths.length
+        ? ["附带文件：", "Attached files:"].map(label => [draftText, `${label}\n${draftPaths.map(path => `- ${path}`).join("\n")}`].filter(Boolean).join("\n\n"))
+        : [draftText];
+      const clearDraft = draftMessages.includes(input.message.trim());
       if (!input.deferred) {
         this.db.prepare(`
           UPDATE issues
           SET status = 'in_progress',
               needs_attention = 0,
               pending_actor = 'agent',
+              reply_draft = CASE WHEN ? THEN '' ELSE reply_draft END,
+              reply_draft_attachments_json = CASE WHEN ? THEN '[]' ELSE reply_draft_attachments_json END,
               version = version + 1,
               updated_at = ?
           WHERE id = ? AND archived_at IS NULL
-        `).run(timestamp, input.issueId);
+        `).run(Number(clearDraft), Number(clearDraft), timestamp, input.issueId);
         this.db.prepare(`
           INSERT INTO issue_replies (issue_id, request_id, status, message, error, started_at, finished_at)
           VALUES (?, ?, 'running', ?, NULL, ?, NULL)
@@ -3923,6 +3931,15 @@ export class Store {
             started_at = excluded.started_at,
             finished_at = NULL
         `).run(input.issueId, input.requestId, input.message, timestamp);
+      } else if (clearDraft) {
+        this.db.prepare(`
+          UPDATE issues
+          SET reply_draft = '',
+              reply_draft_attachments_json = '[]',
+              version = version + 1,
+              updated_at = ?
+          WHERE id = ? AND archived_at IS NULL
+        `).run(timestamp, input.issueId);
       }
       if (commandId) {
         this.db.prepare(`

@@ -7587,6 +7587,7 @@ export function install(config: Record<string, any>) {
       let editingLocked = issuePermissions(issue).editingLocked;
       let completedIssueUpdate = Promise.resolve();
       let replyDraftUpdate = Promise.resolve();
+      let replyDraftPersistenceError = null;
       let retainCreateDraft = !issue;
       let createRequestId = issue ? "" : cachedCreateDraft?.requestId || globalThis.crypto?.randomUUID?.() || VERSION + "-create-" + Date.now() + "-" + Math.random().toString(36).slice(2);
       let submitInFlight = false;
@@ -7694,7 +7695,7 @@ export function install(config: Record<string, any>) {
           clearTimeout(replyDraftTimer);
           replyDraftTimer = null;
         }
-        persistReplyDraft(draft.reply, draft.replyAttachments, { enqueue: options.enqueueDraftClear === true });
+        if (!composerUnchanged || options.persistDraftClear === true) persistReplyDraft(draft.reply, draft.replyAttachments);
         const attachments = dialog.querySelector("[data-reply-attachments]");
         if (attachments) attachments.outerHTML = attachmentList(draft.replyAttachments, "reply");
         updateReplySendState();
@@ -7792,9 +7793,10 @@ export function install(config: Record<string, any>) {
         return items.filter(item => item.path).map(item => ({ name: item.name, path: item.path, type: item.type || item.file?.type || "" }));
       }
 
-      function persistReplyDraft(value, items = draft.replyAttachments, options = {}) {
+      function persistReplyDraft(value, items = draft.replyAttachments) {
         if (!issue || REMOTE && !RELAY) return;
         replyDraftUpdate = replyDraftUpdate.catch(() => {}).then(async () => {
+          replyDraftPersistenceError = null;
           try {
             if (RELAY) await cacheRemoteAttachments(items);
             else await uploadPastedImages(items);
@@ -7807,7 +7809,7 @@ export function install(config: Record<string, any>) {
           for (let attempt = 0; attempt < 2; attempt += 1) {
             try {
               const body = { version: current.version, reply_draft: value, reply_draft_attachments: attachments };
-              const updated = await api("/api/issues/" + encodeURIComponent(issue.id), { method: "PATCH", body: JSON.stringify(body), enqueue: options.enqueue === true });
+              const updated = await api("/api/issues/" + encodeURIComponent(issue.id), { method: "PATCH", body: JSON.stringify(body) });
               if (updated?.queued === true) {
                 watchQueuedCommand(updated.command_id, {
                   applied: payload => {
@@ -7824,6 +7826,7 @@ export function install(config: Record<string, any>) {
               return;
             } catch (error) {
               if (attempt === 1 || !(error instanceof Error) || error.message !== "version_conflict") {
+                replyDraftPersistenceError = error;
                 showError(error);
                 return;
               }
@@ -7844,10 +7847,12 @@ export function install(config: Record<string, any>) {
       }
 
       function flushReplyDraft() {
-        if (replyDraftTimer === null) return;
-        clearTimeout(replyDraftTimer);
-        replyDraftTimer = null;
-        persistReplyDraft(latestReplyDraft);
+        if (replyDraftTimer !== null) {
+          clearTimeout(replyDraftTimer);
+          replyDraftTimer = null;
+          persistReplyDraft(latestReplyDraft);
+        }
+        return replyDraftUpdate;
       }
 
       function updateSubmitState() {
@@ -8838,7 +8843,7 @@ export function install(config: Record<string, any>) {
           clearConversationFailure();
           try {
             const result = await executeSessionNativeCommand(slashCommand, slashArgument, requestId);
-            completeReplySubmission(text, []);
+            completeReplySubmission(text, [], { persistDraftClear: true });
             semanticMenuState = { nativeResult: { command: slashCommand, result } };
             renderSemanticMenu();
             await loadIssues({ background: true });
@@ -8849,6 +8854,17 @@ export function install(config: Record<string, any>) {
             send.disabled = false;
           }
           return;
+        }
+        if (!retrying) {
+          try {
+            await flushReplyDraft();
+          } catch (error) {
+            replyDraftPersistenceError = error;
+          }
+          if (replyDraftPersistenceError) {
+            presentInlineError(errorOutput, replyDraftPersistenceError, errorLabel(replyDraftPersistenceError), { source: "reply_draft_flush", request_id: requestId });
+            return;
+          }
         }
         stopReplyRecovery();
         send.disabled = true;
@@ -8895,7 +8911,7 @@ export function install(config: Record<string, any>) {
         }
         lastReplyRequestId = reply.request_id || requestId;
         stopReplyRecovery();
-        const composerCleared = completeReplySubmission(text, submittedAttachments, { enqueueDraftClear: reply.queued === true });
+        const composerCleared = completeReplySubmission(text, submittedAttachments);
         if (reply.queued === true) {
           pendingQueueCommands.set(submissionCommandId, { action: "reply", requestId });
           if (queueMode) {
