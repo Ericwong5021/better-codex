@@ -4,6 +4,14 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.10-beta.27] - 2026-08-26
+
+- Keep Issue execution state tied to a real active turn and recover stale persisted session states after Runtime updates.
+- Surface model-provider retry, recovery, and exhaustion state on active Issues with elapsed time and structured Runtime diagnostics.
+- Acknowledge Web Issue creation, replies, and queued-message actions immediately while durable commands settle through local or Relay delivery.
+- Restore cached draft image previews after reopening a dialog without persisting large preview responses as write receipts.
+- Restore the mobile Web board scroll control and keep project and semantic menus visible outside dialog bounds.
+
 ## [0.4.10-beta.26] - 2026-08-26
 
 - Preserve UTF-8 messages across fragmented Session Host streams and emit structured diagnostics for invalid deliveries.
@@ -879,7 +887,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.26...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.27...HEAD
+[0.4.10-beta.27]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.26...v0.4.10-beta.27
 [0.4.10-beta.26]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.25...v0.4.10-beta.26
 [0.4.10-beta.25]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.24...v0.4.10-beta.25
 [0.4.10-beta.24]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.23...v0.4.10-beta.24
