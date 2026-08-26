@@ -348,7 +348,7 @@ export function install(config: Record<string, any>) {
     const localeResources = { "zh-CN": {}, en: {
       "调度失败": "Scheduling failed",
       "重试回复": "Retry reply", "重新加载": "Reload", "回复等待超时。请检查模型服务连接后重试。": "The reply timed out. Check the model service connection and retry.", "网络连接异常，回复未完成。请检查网络和 Better Codex Runtime 后重试。": "The reply did not finish because of a network problem. Check your network and Better Codex Runtime, then retry.", "当前权限不足，无法完成回复。请调整智能体权限或允许所需操作后重试。": "The reply needs additional permission. Adjust the agent permission or allow the required action, then retry.", "Better Codex Runtime 已停止。请重新启动后重试。": "Better Codex Runtime stopped. Restart it and retry.", "上一条回复仍在进行中。请稍后重新加载。": "The previous reply is still running. Reload shortly.", "回复未完成。请打开完整会话查看详情，然后重试。": "The reply did not finish. Open the full conversation for details, then retry.", "会话加载超时。请确认 Better Codex Runtime 正在运行，然后重新加载。": "The conversation timed out while loading. Make sure Better Codex Runtime is running, then reload.", "无法加载会话。请检查网络和 Better Codex Runtime，然后重新加载。": "Unable to load the conversation. Check your network and Better Codex Runtime, then reload.", "没有权限加载会话。请调整权限后重新加载。": "You do not have permission to load the conversation. Adjust the permission, then reload.", "VPS 入口返回了 404；这表示路径或资源不存在，不能据此判断本机 Runtime 已停止。": "The VPS endpoint returned 404. The path or resource does not exist; this does not show that the local Runtime stopped.", "浏览器无法连接 VPS Relay 入口。请检查域名、网络、反向代理和 Relay 服务；本机 Runtime 状态未知。": "The browser cannot reach the VPS Relay endpoint. Check DNS, network, reverse proxy, and the Relay service. The local Runtime state is unknown.", "VPS 入口无法连接 Relay 服务。本机 Runtime 状态未知。": "The VPS endpoint cannot reach the Relay service. The local Runtime state is unknown.", "VPS Relay 当前没有连接到本机 Runtime。可能是 Runtime 停止、正在重启或网络中断。": "The VPS Relay is not connected to the local Runtime. The Runtime may be stopped or restarting, or the network may be interrupted.", "本机 Runtime 已主动断开与 VPS Relay 的连接，可能正在重启或已停止。": "The local Runtime actively disconnected from the VPS Relay. It may be restarting or stopped.", "VPS Relay 与本机 Runtime 的请求通道已中断，请等待重连后重试。": "The request channel between the VPS Relay and local Runtime was interrupted. Wait for reconnection, then retry.",
-      "内容已在其他窗口更新，请重新加载后再试。": "This content changed in another window. Reload and try again.", "相关内容不存在或已被移除。": "The requested content does not exist or was removed.", "当前账号没有执行此操作的权限。": "Your account does not have permission to perform this action.", "输入内容不符合要求，请检查后重试。": "Check the entered values and try again.", "当前状态无法完成此操作，请刷新后重试。": "This action is not available in the current state. Refresh and try again.", "服务暂时不可用，请稍后重试。": "The service is temporarily unavailable. Try again shortly.", "服务返回的数据格式异常，请稍后重试。": "The service returned an invalid response. Try again shortly.", "数据完整性检查失败，操作已停止。": "The integrity check failed, so the operation was stopped.", "安全校验失败，操作已停止。": "The security check failed, so the operation was stopped.", "服务发生异常，请稍后重试。": "The service encountered an error. Try again shortly.",
+      "内容刚刚发生变化，请稍后重试。": "This content just changed. Try again shortly.", "内容刚刚发生变化，已同步最新状态，请重试本次操作。": "This content just changed. The latest state is synced; try the action again.", "相关内容不存在或已被移除。": "The requested content does not exist or was removed.", "当前账号没有执行此操作的权限。": "Your account does not have permission to perform this action.", "输入内容不符合要求，请检查后重试。": "Check the entered values and try again.", "当前状态无法完成此操作，请刷新后重试。": "This action is not available in the current state. Refresh and try again.", "服务暂时不可用，请稍后重试。": "The service is temporarily unavailable. Try again shortly.", "服务返回的数据格式异常，请稍后重试。": "The service returned an invalid response. Try again shortly.", "数据完整性检查失败，操作已停止。": "The integrity check failed, so the operation was stopped.", "安全校验失败，操作已停止。": "The security check failed, so the operation was stopped.", "服务发生异常，请稍后重试。": "The service encountered an error. Try again shortly.",
       "任务看板": "Task board", "打开任务看板": "Open task board", "智能体": "Agents", "管理智能体": "Manage agents", "创建和管理你的智能体": "Create and manage your agents",
       "Better Codex 服务需要重启": "Better Codex needs to restart", "当前页面与后台服务的连接已失效。请在终端运行下面的命令，完成后重新连接。": "The connection between this page and the background service has expired. Run the command below in your terminal, then reconnect.", "复制重启命令": "Copy restart command", "复制消息": "Copy message", "已复制": "Copied", "重新连接": "Reconnect", "正在连接…": "Connecting…", "错误详情": "Error details",
       "全部": "All", "已分配": "Assigned", "未分配": "Unassigned", "待规划": "Backlog", "待办": "Todo", "进行中": "In progress", "待审核": "In review", "调度中": "Scheduling", "已完成": "Done", "已阻塞": "Blocked", "归档": "Archive", "拖到这里即可归档": "Drop here to archive", "查看已归档卡片": "View archived cards", "已归档任务": "Archived tasks", "搜索已归档任务": "Search archived tasks", "所有项目": "All projects", "全部删除": "Delete all", "删除已归档聊天": "Delete archived chat", "删除项目中的全部内容": "Delete all project content", "确定删除项目中的全部已归档任务吗？": "Delete all archived tasks in this project?", "取消归档": "Unarchive", "已归档卡片": "Archived cards", "暂无已归档卡片": "No archived cards", "归档列表加载失败": "Unable to load archived cards",
@@ -501,7 +501,8 @@ export function install(config: Record<string, any>) {
     localeResources.en["保存修改"] = "Save changes";
     localeResources.en["取消编辑"] = "Cancel editing";
     localeResources.en["当前任务已结束，消息会按队列顺序发送。"] = "The current task has finished. This message will be sent in queue order.";
-    localeResources.en["该队列消息已发生变化，请重新加载。"] = "This queued message has changed. Reload the conversation.";
+    localeResources.en["该队列消息已发生变化，正在同步最新状态。"] = "This queued message changed. Syncing the latest state.";
+    localeResources.en["该队列消息已发生变化，已同步最新状态。"] = "This queued message changed. The latest state is synced.";
     localeResources.en["队列操作失败，请重试。"] = "The queue action failed. Try again.";
     localeResources.en["正在停止…"] = "Stopping…";
     localeResources.en["未命名任务"] = "Untitled issue";
@@ -1537,6 +1538,55 @@ export function install(config: Record<string, any>) {
       const message = error instanceof Error ? error.message : String(error || "");
       const failureType = String(error?.betterCodexDiagnostics?.failure_type || "");
       return transientRuntimeTransportError(error) || failureType === "network_transport" || ["browser_transport_failed", "Failed to fetch", "NetworkError when attempting to fetch resource."].includes(message);
+    }
+
+    function contentConflict(error) {
+      const value = error instanceof Error ? error.message : String(error || "");
+      return value === "version_conflict" || value === "queued_reply_update_conflict";
+    }
+
+    function reconciledContentConflict() {
+      return new Error("content_conflict_reconciled");
+    }
+
+    async function loadLatestIssue(issueId) {
+      const latest = await api("/api/issues/" + encodeURIComponent(issueId));
+      const dialog = document.getElementById("better-codex-dialog");
+      if (dialog?.dataset.issueId === issueId && typeof dialog.__betterCodexSyncIssue === "function") dialog.__betterCodexSyncIssue(latest);
+      else {
+        const index = state.issues.findIndex(issue => issue.id === issueId);
+        if (index >= 0) state.issues[index] = { ...state.issues[index], ...latest };
+        else state.issues.push(latest);
+      }
+      if (active) render();
+      return state.issues.find(issue => issue.id === issueId) || latest;
+    }
+
+    async function withLatestIssueOnConflict(issueId, action) {
+      let current = state.issues.find(issue => issue.id === issueId) || await loadLatestIssue(issueId);
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          return await action(current);
+        } catch (error) {
+          if (attempt === 1 || !contentConflict(error)) throw error;
+          appendDiagnostic("content_conflict_retry", { issue_id: issueId, previous_version: current.version });
+          current = await loadLatestIssue(issueId);
+        }
+      }
+      throw new Error("version_conflict");
+    }
+
+    async function reconcileSurfaceConflict(error) {
+      if (!contentConflict(error)) return error;
+      appendDiagnostic("content_conflict_sync_started", { surface: state.surface });
+      try {
+        await loadSurface({ background: true });
+        appendDiagnostic("content_conflict_sync_completed", { surface: state.surface });
+        return reconciledContentConflict();
+      } catch (syncError) {
+        appendDiagnostic("content_conflict_sync_failed", { surface: state.surface, error: syncError instanceof Error ? syncError.message : String(syncError || "request_failed") });
+        return syncError;
+      }
     }
 
     function api(path, options = {}) {
@@ -2611,7 +2661,8 @@ export function install(config: Record<string, any>) {
       if (value === "issue_archived") return t("该会话对应的 Issue 已归档，请先取消归档。");
       if (["project_planning_busy", "project_planning_agent_locked", "project_planning_unavailable", "project_planning_invalid_output", "project_planning_session_missing"].includes(value)) return projectPlanningErrorLabel(value);
       if (["project_overview_timeout", "project_overview_unavailable", "project_document_invalid_output", "remote_command_timeout", "workspace_missing"].includes(value)) return projectDocumentErrorLabel(value);
-      if (value === "version_conflict" || value === "queued_reply_update_conflict") return t("内容已在其他窗口更新，请重新加载后再试。");
+      if (value === "content_conflict_reconciled") return t("内容刚刚发生变化，已同步最新状态，请重试本次操作。");
+      if (value === "version_conflict" || value === "queued_reply_update_conflict") return t("内容刚刚发生变化，请稍后重试。");
       const presentation = errorPresentation(error);
       if (presentation.category === "not_found") return t("相关内容不存在或已被移除。");
       if (presentation.category === "authorization") return t("当前账号没有执行此操作的权限。");
@@ -3152,7 +3203,7 @@ export function install(config: Record<string, any>) {
           showPassiveNetworkError();
           return null;
         }
-        showError(error);
+        showError(options.background ? error : await reconcileSurfaceConflict(error));
         return null;
       }
     }
@@ -3712,8 +3763,7 @@ export function install(config: Record<string, any>) {
     }
 
     async function stopIssueSession(issueId) {
-      const issue = state.issues.find(item => item.id === issueId);
-      const updated = await api("/api/issues/" + encodeURIComponent(issueId) + "/stop", { method: "POST", body: JSON.stringify({ version: issue?.version }) });
+      const updated = await withLatestIssueOnConflict(issueId, issue => api("/api/issues/" + encodeURIComponent(issueId) + "/stop", { method: "POST", body: JSON.stringify({ version: issue.version }) }));
       await loadIssues();
       return state.issues.find(issue => issue.id === issueId) || updated;
     }
@@ -3769,13 +3819,15 @@ export function install(config: Record<string, any>) {
         const alreadyAgent = kind === "agent" && current.agent_enabled && (agentId ? current.agent_id === agentId : !current.agent_id);
         if (alreadyUser || alreadyNone || alreadyAgent) return closeIssueMenu();
         closeIssueMenu();
-        const body = kind === "user"
-          ? { version: current.version, user_assigned: true, assignee_user_id: REMOTE ? userId || null : null, agent_enabled: false, agent_id: "" }
-          : kind === "agent"
-            ? { version: current.version, user_assigned: false, assignee_user_id: null, agent_enabled: true, agent_id: agentId }
-            : { version: current.version, user_assigned: false, assignee_user_id: null, agent_enabled: false, agent_id: "" };
         await perform(async () => {
-          await api("/api/issues/" + encodeURIComponent(current.id), { method: "PATCH", body: JSON.stringify(body) });
+          await withLatestIssueOnConflict(current.id, latest => {
+            const body = kind === "user"
+              ? { version: latest.version, user_assigned: true, assignee_user_id: REMOTE ? userId || null : null, agent_enabled: false, agent_id: "" }
+              : kind === "agent"
+                ? { version: latest.version, user_assigned: false, assignee_user_id: null, agent_enabled: true, agent_id: agentId }
+                : { version: latest.version, user_assigned: false, assignee_user_id: null, agent_enabled: false, agent_id: "" };
+            return api("/api/issues/" + encodeURIComponent(current.id), { method: "PATCH", body: JSON.stringify(body) });
+          });
           await loadIssues();
         });
       }
@@ -3802,7 +3854,7 @@ export function install(config: Record<string, any>) {
         if (item.dataset.contextAction === "regenerate-title") {
           closeIssueMenu();
           return void perform(async () => {
-            await api("/api/issues/" + encodeURIComponent(current.id) + "/regenerate-title", { method: "POST", body: JSON.stringify({ version: current.version }) });
+            await withLatestIssueOnConflict(current.id, latest => api("/api/issues/" + encodeURIComponent(current.id) + "/regenerate-title", { method: "POST", body: JSON.stringify({ version: latest.version }) }));
             await loadIssues();
           });
         }
@@ -3816,7 +3868,7 @@ export function install(config: Record<string, any>) {
         if (item.dataset.contextAction === "archive") {
           closeIssueMenu();
           return void perform(async () => {
-            await api("/api/issues/" + encodeURIComponent(current.id) + "/archive", { method: "POST", body: JSON.stringify({ version: current.version }) });
+            await withLatestIssueOnConflict(current.id, latest => api("/api/issues/" + encodeURIComponent(current.id) + "/archive", { method: "POST", body: JSON.stringify({ version: latest.version }) }));
             await loadIssues();
           });
         }
@@ -3838,7 +3890,7 @@ export function install(config: Record<string, any>) {
         if (!field || !value || current[field] === value) return closeIssueMenu();
         closeIssueMenu();
         void perform(async () => {
-          await api("/api/issues/" + encodeURIComponent(current.id), { method: "PATCH", body: JSON.stringify({ version: current.version, [field]: value }) });
+          await withLatestIssueOnConflict(current.id, latest => api("/api/issues/" + encodeURIComponent(current.id), { method: "PATCH", body: JSON.stringify({ version: latest.version, [field]: value }) }));
           await loadIssues();
         });
       });
@@ -7976,6 +8028,16 @@ export function install(config: Record<string, any>) {
         syncConversationStatus(issue.reply_status || "idle");
       }
 
+      async function reconcileIssueConflict(error) {
+        if (!issue || !contentConflict(error)) return error;
+        try {
+          await loadLatestIssue(issue.id);
+          return reconciledContentConflict();
+        } catch (syncError) {
+          return syncError;
+        }
+      }
+
       function header() {
         const breadcrumbProject = state.projects.find(item => item.id === draft.projectId);
         const openThreadButton = issue && sessionId && !enrichmentLocked && HOST_CAPABILITIES.nativeThreads !== false
@@ -8387,8 +8449,19 @@ export function install(config: Record<string, any>) {
       function queuedReplyError(error) {
         const value = String(error instanceof Error ? error.message : error || "");
         if (value === "issue_not_running") return t("当前任务已结束，消息会按队列顺序发送。");
-        if (["queued_reply_not_found", "queued_reply_not_pending", "queued_reply_update_conflict"].includes(value)) return t("该队列消息已发生变化，请重新加载。");
+        if (value === "content_conflict_reconciled") return t("该队列消息已发生变化，已同步最新状态。");
+        if (["queued_reply_not_found", "queued_reply_not_pending", "queued_reply_update_conflict"].includes(value)) return t("该队列消息已发生变化，正在同步最新状态。");
         return t("队列操作失败，请重试。");
+      }
+
+      async function reconcileQueuedReplyConflict(error) {
+        if (!contentConflict(error)) return error;
+        try {
+          await loadConversation({ quiet: true });
+          return reconciledContentConflict();
+        } catch (syncError) {
+          return syncError;
+        }
       }
 
       async function updateQueuedReply(action, requestId) {
@@ -8422,11 +8495,12 @@ export function install(config: Record<string, any>) {
               },
               failed: async error => {
                 pendingQueueCommands.delete(commandId);
-                queueActionError = queuedReplyError(error);
+                const failure = await reconcileQueuedReplyConflict(error);
+                queueActionError = queuedReplyError(failure);
                 reportUnexpectedError(error, { source: "conversation_queue_settle", action, issue_id: issue.id, request_id: requestId, command_id: commandId });
                 if (dialog.isConnected) {
                   syncQueuedReplyState();
-                  if (!pendingQueueCommands.size) await loadConversation({ quiet: true });
+                  if (!pendingQueueCommands.size && failure === error) await loadConversation({ quiet: true });
                 }
               },
             });
@@ -8450,7 +8524,7 @@ export function install(config: Record<string, any>) {
           }
         } catch (error) {
           reportUnexpectedError(error, { source: "conversation_queue", action, issue_id: issue.id, request_id: requestId });
-          queueActionError = queuedReplyError(error);
+          queueActionError = queuedReplyError(await reconcileQueuedReplyConflict(error));
         } finally {
           queueActionRequestId = "";
           syncQueuedReplyState();
@@ -9939,7 +10013,8 @@ export function install(config: Record<string, any>) {
           }
         } catch (error) {
           traceDialog("dialog_submit_error", { action: issue ? "update_issue" : "create_issue", error: String(error instanceof Error ? error.message : "create_failed").slice(0, 200) });
-          presentInlineError(errorOutput, error, errorLabel(error), { source: "issue_dialog_submit", action: issue ? "update" : "create" });
+          const failure = await reconcileIssueConflict(error);
+          presentInlineError(errorOutput, failure, errorLabel(failure), { source: "issue_dialog_submit", action: issue ? "update" : "create" });
           submitInFlight = false;
           submit.disabled = false;
         }
@@ -9979,7 +10054,8 @@ export function install(config: Record<string, any>) {
           await loadIssues();
           dialog.close();
         } catch (error) {
-          presentInlineError(errorOutput, error, errorLabel(error), { source: "issue_start" });
+          const failure = await reconcileIssueConflict(error);
+          presentInlineError(errorOutput, failure, errorLabel(failure), { source: "issue_start" });
           button.disabled = false;
         }
       }
@@ -10100,7 +10176,8 @@ export function install(config: Record<string, any>) {
         const issue = state.issues.find(item => item.id === pin.dataset.pin);
         if (!issue || issuePermissions(issue).enrichmentPending) return;
         return void perform(async () => {
-          await api("/api/issues/" + encodeURIComponent(issue.id), { method: "PATCH", body: JSON.stringify({ version: issue.version, pinned: !issue.pinned }) });
+          const pinned = !issue.pinned;
+          await withLatestIssueOnConflict(issue.id, latest => api("/api/issues/" + encodeURIComponent(issue.id), { method: "PATCH", body: JSON.stringify({ version: latest.version, pinned }) }));
           await loadIssues();
         });
       }
@@ -10268,7 +10345,7 @@ export function install(config: Record<string, any>) {
       if (!issue || issuePermissions(issue).boardLocked || !status) return;
       if (status === "archive") {
         return void perform(async () => {
-          await api("/api/issues/" + encodeURIComponent(issue.id) + "/archive", { method: "POST", body: JSON.stringify({ version: issue.version }) });
+          await withLatestIssueOnConflict(issue.id, latest => api("/api/issues/" + encodeURIComponent(issue.id) + "/archive", { method: "POST", body: JSON.stringify({ version: latest.version }) }));
           await loadIssues();
         });
       }
@@ -10281,7 +10358,7 @@ export function install(config: Record<string, any>) {
       }
       if (issue.status === status) return;
       void perform(async () => {
-        await api("/api/issues/" + encodeURIComponent(issue.id), { method: "PATCH", body: JSON.stringify({ version: issue.version, status }) });
+        await withLatestIssueOnConflict(issue.id, latest => api("/api/issues/" + encodeURIComponent(issue.id), { method: "PATCH", body: JSON.stringify({ version: latest.version, status }) }));
         await loadIssues();
       });
     }
