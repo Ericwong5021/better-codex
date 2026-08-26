@@ -80,10 +80,10 @@ function savePastedImage(value: unknown) {
 }
 
 function readCachedImageAttachment(value: unknown) {
-  const path = cleanString(value, 4096).trim();
-  if (!path) throw new Error("attachment_not_found");
+  const name = cleanString(value, 255).trim();
+  if (!name || basename(name) !== name) throw new Error("attachment_not_found");
   const root = canonicalPath(attachmentPath);
-  const resolved = canonicalPath(path);
+  const resolved = canonicalPath(join(root, name));
   if (dirname(resolved) !== root || !existsSync(resolved)) throw new Error("attachment_not_found");
   const stats = statSync(resolved);
   if (!stats.isFile() || !stats.size || stats.size > maxPastedImageBytes) throw new Error("invalid_image_attachment");
@@ -1194,10 +1194,7 @@ export function startServer() {
         }
         return sendJson(response, 201, savePastedImage(body.data));
       }
-      if (url.pathname === "/api/issues/attachments/preview" && method === "POST") {
-        const body = await readBody(request);
-        return sendJson(response, 200, readCachedImageAttachment(body.path));
-      }
+      if (url.pathname === "/api/issues/attachments/preview" && method === "GET") return sendJson(response, 200, readCachedImageAttachment(url.searchParams.get("name")));
       if (url.pathname === "/api/bootstrap" && method === "GET") {
         const agentModelCatalog = await readModelCatalog();
         const agentModels = agentModelCatalog.map(model => model.id);

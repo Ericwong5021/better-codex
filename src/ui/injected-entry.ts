@@ -8540,7 +8540,8 @@ export function install(config: Record<string, any>) {
         const data = { name: attachment.name, type: attachment.type || attachment.file?.type || "image/png", kind: "image", size: attachment.file?.size || 0 };
         await openAttachmentPreview(data, async () => {
           if (attachment.previewUrl) return { source: attachment.previewUrl, attachment: data };
-          const result = await api("/api/issues/attachments/preview", { method: "POST", body: JSON.stringify({ path: attachment.path }), timeoutMs: 120_000 });
+          const cacheName = String(attachment.path || "").replace(/[\\/]+$/, "").split(/[\\/]/).pop() || "";
+          const result = await api("/api/issues/attachments/preview?name=" + encodeURIComponent(cacheName), { timeoutMs: 120_000 });
           const source = URL.createObjectURL(attachmentBlob(result.data, result.type));
           return { source, attachment: { ...result, name: attachment.name || result.name }, objectUrl: source };
         }, { issue_id: issue?.id || "", attachment_scope: scope, attachment_index: attachmentIndex });
@@ -9791,7 +9792,7 @@ export function install(config: Record<string, any>) {
             state.projectId = draft.projectId;
             if (result?.queued === true) {
               queuedCreate = true;
-              const placeholder = queuedIssuePlaceholder(commandId, body);
+              const placeholder = queuedIssuePlaceholder(commandId, { ...body, project_id: draft.projectId });
               pendingIssueCreates.set(commandId, { issue: placeholder, requestId: createRequestId });
               state.issues.push(placeholder);
               state.issuesLoaded = true;
