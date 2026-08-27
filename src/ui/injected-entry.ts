@@ -3312,7 +3312,7 @@ export function install(config: Record<string, any>) {
         accept.element.dataset.confirmAccept = "true";
         actions.append(cancel.element, accept.element);
         content.append(body, actions);
-        dialogHandle = createDialog({ accessibleName: t(title), content, initialFocus: cancel.element, onRequestClose: () => finish(false) }, componentContext("confirmation", "confirm-dialog:" + (++managedButtonSequence)));
+        dialogHandle = createDialog({ accessibleName: t(title), content, initialFocus: accept.element, onRequestClose: () => finish(false) }, componentContext("confirmation", "confirm-dialog:" + (++managedButtonSequence)));
         dialogHandle.element.id = "better-codex-confirm";
         dialogHandle.element.setAttribute(OWNED, "true");
         registerOwnedComponent(cancel.element, cancel);
