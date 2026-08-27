@@ -4,6 +4,12 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.10-beta.38] - 2026-08-27
+
+- Preserve conversation attachment ownership, literal local file references, and downloadable attachments outside the visible transcript window.
+- Expose the project planning conversation on mobile while keeping project tab state inside the Projects feature boundary.
+- Clear stale Runtime activation errors after confirming the current version and release terminal Session Host worker state.
+
 ## [0.4.10-beta.37] - 2026-08-27
 
 - Measure Codex output speed from completed streaming intervals while counting every completed output-bearing request.
@@ -942,7 +948,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.37...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.38...HEAD
+[0.4.10-beta.38]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.37...v0.4.10-beta.38
 [0.4.10-beta.37]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.36...v0.4.10-beta.37
 [0.4.10-beta.36]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.35...v0.4.10-beta.36
 [0.4.10-beta.35]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.34...v0.4.10-beta.35
