@@ -497,7 +497,13 @@ webErrorDialog.addEventListener("click", event => {
   const bounds = webErrorDialog.getBoundingClientRect();
   if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) webErrorDialog.close();
 });
-window.addEventListener("error", event => reportHostError(event.error || event.message, { source: "window_error", filename: event.filename || "", line: event.lineno || 0, column: event.colno || 0 }));
+window.addEventListener("error", event => {
+  if (!event.error && !event.filename && !event.lineno && !event.colno && event.message === "ResizeObserver loop completed with undelivered notifications.") {
+    hostDiagnostic("window_diagnostic", { source: "window_error", kind: "resize_observer_delivery", message: event.message });
+    return;
+  }
+  reportHostError(event.error || event.message, { source: "window_error", filename: event.filename || "", line: event.lineno || 0, column: event.colno || 0 });
+});
 window.addEventListener("unhandledrejection", event => reportHostError(event.reason, { source: "unhandled_rejection" }));
 
 function updateWebProfile(detail) {

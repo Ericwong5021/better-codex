@@ -2650,6 +2650,10 @@ export function install(config: Record<string, any>) {
     }
 
     function onWindowError(event) {
+      if (!event.error && !event.filename && !event.lineno && !event.colno && event.message === "ResizeObserver loop completed with undelivered notifications.") {
+        appendDiagnostic("window_diagnostic", { source: "window_error", kind: "resize_observer_delivery", message: event.message });
+        return;
+      }
       reportGlobalError(event.error || event.message, { source: "window_error", filename: event.filename || "", line: event.lineno || 0, column: event.colno || 0 });
     }
 
