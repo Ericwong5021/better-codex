@@ -598,6 +598,7 @@ input.on("line", line => {
   if (message.method === "thread/name/set") return send({ id: message.id, result: {} });
   if (message.method === "turn/start") {
     send({ id: message.id, result: { turn: { id: "${turnId}", status: "inProgress" } } });
+    send({ method: "thread/status/changed", params: { threadId: "${threadId}", status: { type: "active", activeFlags: [] } } });
     send({ method: "turn/started", params: { threadId: "${threadId}", turn: { id: "${turnId}", status: "inProgress" } } });
     setTimeout(() => {
       send({ method: "item/completed", params: { threadId: "${threadId}", turnId: "${turnId}", item: { type: "agentMessage", text: "continued after Runtime restart" } } });

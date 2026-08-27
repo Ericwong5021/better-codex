@@ -530,6 +530,7 @@ class AppServerSessionWorker {
       const turn = object(params.turn);
       const turnId = sessionId(turn.id);
       if (turnId && this.activeTurns.get(threadId) === turnId) this.activeTurns.delete(threadId);
+      if (!this.activeTurns.has(threadId)) this.busyThreads.delete(threadId);
       const turnError = object(turn.error);
       const items = Array.isArray(turn.items) ? turn.items.flatMap(value => {
         const item = object(value);
@@ -966,6 +967,7 @@ class AppServerSessionWorker {
         const turn = turns.map(object).find(item => sessionId(item.id) === turnId);
         if (!turn || !["completed", "interrupted", "failed"].includes(String(turn.status || ""))) continue;
         if (this.activeTurns.get(threadId) === turnId) this.activeTurns.delete(threadId);
+        if (!this.activeTurns.has(threadId)) this.busyThreads.delete(threadId);
         const items = Array.isArray(turn.items) ? turn.items.flatMap(value => {
           const item = object(value);
           return item.type === "agentMessage" && typeof item.text === "string" ? [{ type: "agentMessage", text: item.text }] : [];
