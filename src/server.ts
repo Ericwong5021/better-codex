@@ -10,6 +10,7 @@ import { defaultAgentProfile, syncAgentProfiles, updateDefaultAgentProfile } fro
 import { readCodexAppearance, readHostThemeInput } from "./appearance.js";
 import { normalizeCodexLocale, readCodexLocale } from "./locale.js";
 import { readCodexUserProfile } from "./user-profile.js";
+import { readCodexActivity } from "./codex-activity.js";
 import { readCodexUsage } from "./codex-usage.js";
 import { MentionCatalogService, codexSemanticRequestFingerprint, normalizeCodexSemanticSelections, readCodexSemanticCatalog, resolveCodexSemanticReferences, searchCodexFiles } from "./codex-semantics.js";
 import { appendInputDocumentText, compileInputDocument, inputDocumentLegacyReferences, inputDocumentText, legacyInputDocument, type SemanticKindV2 } from "./codex-input-document.js";
@@ -1212,6 +1213,9 @@ export function startServer() {
       }
       if (url.pathname === "/api/account/usage" && method === "GET") {
         return sendJson(response, 200, { usage: await readCodexUsage() });
+      }
+      if (url.pathname === "/api/account/usage/activity" && method === "GET") {
+        return sendJson(response, 200, { activity: await readCodexActivity(Number(url.searchParams.get("since") || Date.now())) });
       }
       if (mockupEnabled && url.pathname === "/api/mockup/state" && method === "GET") {
         return sendJson(response, 200, readMockupState(mockupLocale));

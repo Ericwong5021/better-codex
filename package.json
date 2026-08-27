@@ -19,6 +19,7 @@
     "dist/cdp.js",
     "dist/cli.js",
     "dist/codex-cli.js",
+    "dist/codex-activity.js",
     "dist/codex-usage.js",
     "dist/codex-semantics.js",
     "dist/design-system.js",

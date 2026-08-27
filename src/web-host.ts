@@ -66,6 +66,11 @@ const webHostHtml = String.raw`<!doctype html>
             <button id="web-usage-pin" class="web-usage-pin" type="button" aria-label="固定额度展示" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5"></path><path d="M5 17h14"></path><path d="M6 3h12"></path><path d="M8 3v4.6a2 2 0 0 1-.4 1.2L6 11v2h12v-2l-1.6-2.2a2 2 0 0 1-.4-1.2V3"></path></svg></button>
             <button id="web-usage-close" class="web-usage-close" type="button" aria-label="关闭额度"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"></path></svg></button>
           </div>
+          <div id="web-usage-activity" class="web-usage-activity" aria-label="实时 Codex 用量">
+            <div><span>Token 速度</span><strong id="web-usage-token-rate">—</strong></div>
+            <div><span>请求数</span><strong id="web-usage-request-count">—</strong></div>
+            <small id="web-usage-activity-status">展开后开始读取</small>
+          </div>
           <div id="web-usage-body" class="web-usage-body"><span class="web-usage-status">点击查看 Codex 额度</span></div>
         </section>
       </footer>
@@ -172,6 +177,11 @@ body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; 
 @keyframes web-usage-refresh-spin { to { transform: rotate(360deg); } }
 .web-usage-heading strong { font-weight: 590; }
 .web-usage-close { display: none; }
+.web-usage-activity { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-top: 9px; }
+.web-usage-activity > div { display: grid; min-width: 0; gap: 3px; border-radius: var(--bc-radius-sm); padding: 8px; background: var(--bc-color-surface); box-shadow: inset 0 0 0 1px var(--bc-color-hairline); }
+.web-usage-activity span { overflow: hidden; color: var(--bc-color-text-muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.web-usage-activity strong { overflow: hidden; color: var(--bc-color-text); font-size: 14px; font-weight: 670; font-variant-numeric: tabular-nums; letter-spacing: -.02em; text-overflow: ellipsis; white-space: nowrap; }
+.web-usage-activity small { grid-column: 1 / -1; color: var(--bc-color-text-muted); font-size: 9px; line-height: 1.4; }
 .web-usage-body { display: grid; gap: 10px; margin-top: 9px; }
 .web-usage-status { color: var(--bc-color-text-muted); font-size: 10px; line-height: 1.5; }
 .web-usage-window { display: grid; gap: 6px; }
@@ -306,6 +316,10 @@ const usageRefreshButton = document.getElementById("web-usage-refresh");
 const usagePinButton = document.getElementById("web-usage-pin");
 const usageTitle = document.getElementById("web-usage-title");
 const usageBody = document.getElementById("web-usage-body");
+const usageActivity = document.getElementById("web-usage-activity");
+const usageTokenRate = document.getElementById("web-usage-token-rate");
+const usageRequestCount = document.getElementById("web-usage-request-count");
+const usageActivityStatus = document.getElementById("web-usage-activity-status");
 let installing = false;
 const HOST_KIND = document.documentElement.dataset.betterCodexHost || (document.documentElement.dataset.betterCodexRemote === "true" ? "remote-projection" : "local");
 const REMOTE = HOST_KIND !== "local";
@@ -321,6 +335,10 @@ let usageLoadedAt = 0;
 let usageLoading = false;
 let usagePinned = false;
 let cachedUsage;
+let usageActivityTimer;
+let usageActivityStartedAt = 0;
+let usageActivityLoading = false;
+let usageActivityGeneration = 0;
 let installPrompt;
 let relayRetryTimer;
 let relayOfflineReported = false;
@@ -503,6 +521,7 @@ function updateWebProfile(detail) {
   usagePinButton.setAttribute("aria-label", usagePinned ? profileText("取消固定额度展示", "Unpin Codex usage") : profileText("固定额度展示", "Pin Codex usage"));
   profileButton.setAttribute("aria-label", REMOTE ? profileText("编辑个人资料", "Edit profile") : profileText("查看 Codex 额度", "View Codex usage"));
   usageToggleButton.setAttribute("aria-label", profileText("查看 Codex 额度", "View Codex usage"));
+  usageActivity.setAttribute("aria-label", profileText("实时 Codex 用量", "Live Codex usage"));
   if (usageLoadedAt) renderUsage(cachedUsage);
 }
 
@@ -593,6 +612,74 @@ async function loadUsage(force = false) {
   }
 }
 
+function formatTokenRate(value) {
+  const rate = Number(value);
+  if (!Number.isFinite(rate)) return "—";
+  if (rate >= 1000) return (rate / 1000).toFixed(rate >= 10_000 ? 0 : 1) + "k tok/s";
+  return rate.toFixed(rate >= 100 ? 0 : 1) + " tok/s";
+}
+
+function renderUsageActivity(activity) {
+  if (!activity || activity.status === "unavailable") {
+    usageTokenRate.textContent = "—";
+    usageRequestCount.textContent = "—";
+    usageActivityStatus.textContent = profileText("实时记录暂不可用", "Live activity is unavailable");
+    return;
+  }
+  usageTokenRate.textContent = formatTokenRate(activity.tokensPerSecond);
+  usageRequestCount.textContent = Number(activity.requestCount || 0).toLocaleString(profileLocale === "zh-CN" ? "zh-CN" : "en-US");
+  usageActivityStatus.textContent = activity.status === "degraded"
+    ? profileText("近 1 分钟 · 部分记录读取失败", "Last minute · some records failed")
+    : profileText("近 1 分钟 · 请求完成后更新", "Last minute · updates after completion");
+}
+
+function stopUsageActivity() {
+  usageActivityGeneration += 1;
+  if (usageActivityTimer) clearTimeout(usageActivityTimer);
+  usageActivityTimer = undefined;
+  usageActivityLoading = false;
+  usageActivityStartedAt = 0;
+}
+
+function scheduleUsageActivity(generation, delay = 2000) {
+  if (generation !== usageActivityGeneration || usagePanel.hidden || document.hidden) return;
+  if (usageActivityTimer) clearTimeout(usageActivityTimer);
+  usageActivityTimer = setTimeout(() => void loadUsageActivity(generation), delay);
+}
+
+async function loadUsageActivity(generation) {
+  if (generation !== usageActivityGeneration || usagePanel.hidden || document.hidden || usageActivityLoading) return;
+  usageActivityLoading = true;
+  try {
+    const result = await requestRuntime({ path: "/api/account/usage/activity?since=" + encodeURIComponent(String(usageActivityStartedAt)), method: "GET" });
+    if (generation !== usageActivityGeneration || usagePanel.hidden) return;
+    renderUsageActivity(result?.activity ?? null);
+  } catch (error) {
+    if (generation !== usageActivityGeneration || usagePanel.hidden) return;
+    renderUsageActivity(null);
+    hostDiagnostic("usage_activity_request_unavailable", { error: error?.message || "request_failed" });
+  } finally {
+    if (generation === usageActivityGeneration) {
+      usageActivityLoading = false;
+      scheduleUsageActivity(generation);
+    }
+  }
+}
+
+function startUsageActivity() {
+  stopUsageActivity();
+  usageActivityStartedAt = Date.now();
+  if (HOST_KIND === "remote-projection") {
+    renderUsageActivity(null);
+    return;
+  }
+  usageTokenRate.textContent = "0.0 tok/s";
+  usageRequestCount.textContent = "0";
+  usageActivityStatus.textContent = profileText("近 1 分钟 · 等待新请求完成", "Last minute · waiting for a request");
+  const generation = usageActivityGeneration;
+  void loadUsageActivity(generation);
+}
+
 function setUsagePinned(pinned) {
   usagePinned = pinned;
   usagePinButton.setAttribute("aria-pressed", String(pinned));
@@ -600,6 +687,7 @@ function setUsagePinned(pinned) {
 }
 
 function closeUsage(resetPin = false) {
+  stopUsageActivity();
   if (resetPin) setUsagePinned(false);
   usageToggleButton.setAttribute("aria-expanded", "false");
   usagePanel.hidden = true;
@@ -624,13 +712,27 @@ usageToggleButton.addEventListener("click", () => {
   if (!expanded) setUsagePinned(false);
   usageToggleButton.setAttribute("aria-expanded", String(expanded));
   usagePanel.hidden = !expanded;
-  if (expanded) void loadUsage();
+  if (expanded) {
+    void loadUsage();
+    startUsageActivity();
+  } else stopUsageActivity();
 });
 usageCloseButton.addEventListener("click", () => {
   closeUsage(true);
 });
-usageRefreshButton.addEventListener("click", () => void loadUsage(true));
+usageRefreshButton.addEventListener("click", () => {
+  void loadUsage(true);
+  if (!usagePanel.hidden) scheduleUsageActivity(usageActivityGeneration, 0);
+});
 usagePinButton.addEventListener("click", () => setUsagePinned(!usagePinned));
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    if (usageActivityTimer) clearTimeout(usageActivityTimer);
+    usageActivityTimer = undefined;
+    return;
+  }
+  if (!usagePanel.hidden && usageActivityStartedAt) scheduleUsageActivity(usageActivityGeneration, 0);
+});
 document.addEventListener("click", event => {
   if (usagePinned || usagePanel.hidden || event.target?.closest?.("#web-usage, #web-usage-toggle, #web-profile")) return;
   closeUsage();

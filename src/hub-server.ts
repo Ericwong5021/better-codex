@@ -377,6 +377,10 @@ export function createHubServer(options: HubServerOptions) {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" });
         return sendJson(response, 200, { usage: store.runtime()?.usage ?? null });
       }
+      if (url.pathname === "/api/account/usage/activity" && method === "GET") {
+        if (!browser) return sendJson(response, 401, { error: "unauthorized" });
+        return sendJson(response, 200, { activity: null });
+      }
       if (url.pathname === "/api/settings/auto-dispatch" && method === "GET") {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" });
         return sendJson(response, 200, { enabled: store.runtime()?.auto_dispatch === true });
