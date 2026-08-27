@@ -2,7 +2,7 @@ import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, c
 import { createInterface } from "node:readline";
 import { homedir } from "node:os";
 import { basename, extname, isAbsolute, join } from "node:path";
-import { renderMarkdown } from "./markdown.js";
+import { markdownLinks, renderMarkdown } from "./markdown.js";
 
 const MAX_MESSAGES = 80;
 const MAX_ROLLOUT_PATHS = 1024;
@@ -162,9 +162,21 @@ function attachmentName(value: string) {
   }
 }
 
+function conversationAttachment(value: string) {
+  const remote = /^https?:\/\//i.test(value);
+  if (!remote && !isAbsolute(value)) return null;
+  const type = attachmentType(value);
+  return { name: attachmentName(value), type, kind: attachmentKind(type), source: remote ? "url" as const : "local" as const, ...(remote ? { url: value } : {}), value };
+}
+
+function localMarkdownPath(value: string) {
+  if (/^https?:\/\//i.test(value)) return value;
+  return decodeURIComponent(value);
+}
+
 export function conversationContent(value: string) {
-  const markdown = stripMemoryCitation(String(value || "").replace(/\r\n?/g, "\n")).trim();
-  const lines = markdown.split("\n");
+  const source = stripMemoryCitation(String(value || "").replace(/\r\n?/g, "\n")).trim();
+  const lines = source.split("\n");
   let marker = -1;
   for (let index = lines.length - 1; index >= 0; index -= 1) {
     if (["附带文件：", "Attached files:"].includes(lines[index].trim())) {
@@ -172,18 +184,30 @@ export function conversationContent(value: string) {
       break;
     }
   }
-  if (marker < 0) return { markdown, attachments: [] as Array<ConversationAttachment & { value: string }> };
-  const trailing = lines.slice(marker + 1).filter(line => line.trim());
-  if (!trailing.length || trailing.some(line => !/^\s*[-*]\s+\S/.test(line))) return { markdown, attachments: [] as Array<ConversationAttachment & { value: string }> };
-  const values = trailing.map(line => line.replace(/^\s*[-*]\s+/, "").trim()).filter(Boolean).slice(0, 16);
-  const attachments = values.flatMap(value => {
-    const remote = /^https?:\/\//i.test(value);
-    if (!remote && !isAbsolute(value)) return [];
-    const type = attachmentType(value);
-    return [{ name: attachmentName(value), type, kind: attachmentKind(type), source: remote ? "url" as const : "local" as const, ...(remote ? { url: value } : {}), value }];
-  });
-  if (!attachments.length) return { markdown, attachments: [] as Array<ConversationAttachment & { value: string }> };
-  return { markdown: lines.slice(0, marker).join("\n").trim(), attachments };
+  const trailing = marker < 0 ? [] : lines.slice(marker + 1).filter(line => line.trim());
+  const attachmentBlock = trailing.length > 0 && trailing.every(line => /^\s*[-*]\s+\S/.test(line));
+  const listed = attachmentBlock
+    ? trailing.map(line => line.replace(/^\s*[-*]\s+/, "").trim()).filter(Boolean).slice(0, 16).flatMap(value => {
+      const attachment = conversationAttachment(value);
+      return attachment ? [attachment] : [];
+    })
+    : [];
+  const markdown = listed.length ? lines.slice(0, marker).join("\n").trim() : source;
+  const attachments = [...listed];
+  const selected = new Set(attachments.map(attachment => `${attachment.source}:${attachment.value}`));
+  const attachmentLinks: string[] = [];
+  for (const link of markdownLinks(markdown)) {
+    const attachment = conversationAttachment(localMarkdownPath(link));
+    if (!attachment || attachment.kind !== "image") continue;
+    const key = `${attachment.source}:${attachment.value}`;
+    if (!selected.has(key)) {
+      if (attachments.length >= 16) continue;
+      selected.add(key);
+      attachments.push(attachment);
+    }
+    attachmentLinks.push(link);
+  }
+  return { markdown, attachments, attachmentLinks };
 }
 
 export function conversationMessagesWithPendingReply(
@@ -207,7 +231,7 @@ export function conversationMessagesWithPendingReply(
     id: replyId,
     role: "user",
     markdown: reply.message,
-    html: renderMarkdown(content.markdown),
+    html: renderMarkdown(content.markdown, content.attachmentLinks),
     phase: null,
     timestamp: reply.started_at || null,
     ...(content.attachments.length ? { attachments: content.attachments.map(({ value: _value, ...attachment }) => attachment) } : {}),
@@ -250,7 +274,7 @@ async function readConversationMessages(rolloutPath: string) {
       id: `user-${index++}`,
       role: "user",
       markdown: message,
-      html: renderMarkdown(content.markdown),
+      html: renderMarkdown(content.markdown, content.attachmentLinks),
       phase: null,
       timestamp,
       ...(content.attachments.length ? { attachments: content.attachments.map(({ value: _value, ...attachment }) => attachment) } : {}),
@@ -285,7 +309,7 @@ async function readConversationMessages(rolloutPath: string) {
       id: `agent-${index++}`,
       role: "agent",
       markdown: message,
-      html: renderMarkdown(content.markdown),
+      html: renderMarkdown(content.markdown, content.attachmentLinks),
       phase,
       timestamp,
       ...(content.attachments.length ? { attachments: content.attachments.map(({ value: _value, ...attachment }) => attachment) } : {}),
