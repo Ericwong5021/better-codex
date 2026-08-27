@@ -1545,8 +1545,16 @@ export function install(config: Record<string, any>) {
       return value === "version_conflict" || value === "queued_reply_update_conflict";
     }
 
-    function reconciledContentConflict() {
-      return new Error("content_conflict_reconciled");
+    function contentConflictCorrelation(error) {
+      const diagnostics = error?.betterCodexDiagnostics || {};
+      return compactFields({
+        trace_id: diagnostics.trace_id,
+        command_id: diagnostics.command_id,
+        request_id: diagnostics.response_request_id || diagnostics.request_id,
+        method: diagnostics.method,
+        path: diagnostics.path,
+        http_status: diagnostics.http_status,
+      });
     }
 
     async function loadLatestIssue(issueId) {
@@ -1577,15 +1585,16 @@ export function install(config: Record<string, any>) {
     }
 
     async function reconcileSurfaceConflict(error) {
-      if (!contentConflict(error)) return error;
-      appendDiagnostic("content_conflict_sync_started", { surface: state.surface });
+      if (!contentConflict(error)) return { error, reconciled: false };
+      const correlation = contentConflictCorrelation(error);
+      appendDiagnostic("content_conflict_sync_started", { surface: state.surface, ...correlation });
       try {
         await loadSurface({ background: true });
-        appendDiagnostic("content_conflict_sync_completed", { surface: state.surface });
-        return reconciledContentConflict();
+        appendDiagnostic("content_conflict_sync_completed", { surface: state.surface, ...correlation });
+        return { error, reconciled: true };
       } catch (syncError) {
-        appendDiagnostic("content_conflict_sync_failed", { surface: state.surface, error: syncError instanceof Error ? syncError.message : String(syncError || "request_failed") });
-        return syncError;
+        appendDiagnostic("content_conflict_sync_failed", { surface: state.surface, ...correlation, error: syncError instanceof Error ? syncError.message : String(syncError || "request_failed") });
+        return { error: syncError, reconciled: false };
       }
     }
 
@@ -2672,7 +2681,6 @@ export function install(config: Record<string, any>) {
       if (value === "issue_archived") return t("该会话对应的 Issue 已归档，请先取消归档。");
       if (["project_planning_busy", "project_planning_agent_locked", "project_planning_unavailable", "project_planning_invalid_output", "project_planning_session_missing"].includes(value)) return projectPlanningErrorLabel(value);
       if (["project_overview_timeout", "project_overview_unavailable", "project_document_invalid_output", "remote_command_timeout", "workspace_missing"].includes(value)) return projectDocumentErrorLabel(value);
-      if (value === "content_conflict_reconciled") return t("内容刚刚发生变化，已同步最新状态，请重试本次操作。");
       if (value === "version_conflict" || value === "queued_reply_update_conflict") return t("内容刚刚发生变化，请稍后重试。");
       const presentation = errorPresentation(error);
       if (presentation.category === "not_found") return t("相关内容不存在或已被移除。");
@@ -2750,6 +2758,31 @@ export function install(config: Record<string, any>) {
       return presentation;
     }
 
+    function reportReconciledContentConflict(error, context = {}) {
+      appendDiagnostic("user_feedback", {
+        category: "conflict",
+        tone: "info",
+        message: "content_conflict_reconciled",
+        source: context.source || "ui_action",
+        action: context.action || "",
+        origin: context.origin || "",
+        issue_id: context.issue_id || "",
+        command_id: context.command_id || "",
+        request_id: context.request_id || "",
+        ...contentConflictCorrelation(error),
+      });
+      return { category: "conflict", tone: "info", report: false };
+    }
+
+    function presentReconciledContentConflict(output, error, context = {}) {
+      const presentation = reportReconciledContentConflict(error, context);
+      if (!output) return presentation;
+      output.dataset.tone = presentation.tone;
+      output.textContent = t("内容刚刚发生变化，已同步最新状态，请重试本次操作。");
+      output.hidden = false;
+      return presentation;
+    }
+
     function updateErrorLabel(error) {
       let value = error instanceof Error ? error.message : String(error || "update_install_failed");
       if (value.startsWith("update_activation_failed:")) value = value.slice("update_activation_failed:".length);
@@ -2777,6 +2810,13 @@ export function install(config: Record<string, any>) {
         output.textContent = state.error;
         output.hidden = false;
       }
+    }
+
+    function showReconciledContentConflict(error) {
+      if (destroyed) return;
+      passiveNetworkErrorVisible = false;
+      state.error = t("内容刚刚发生变化，已同步最新状态，请重试本次操作。");
+      presentReconciledContentConflict(panel?.querySelector("#better-codex-error"), error, { source: "ui_action" });
     }
 
     function showPassiveNetworkError() {
@@ -3214,7 +3254,9 @@ export function install(config: Record<string, any>) {
           showPassiveNetworkError();
           return null;
         }
-        showError(options.background ? error : await reconcileSurfaceConflict(error));
+        const reconciliation = options.background ? { error, reconciled: false } : await reconcileSurfaceConflict(error);
+        if (reconciliation.reconciled) showReconciledContentConflict(reconciliation.error);
+        else showError(reconciliation.error);
         return null;
       }
     }
@@ -8040,12 +8082,16 @@ export function install(config: Record<string, any>) {
       }
 
       async function reconcileIssueConflict(error) {
-        if (!issue || !contentConflict(error)) return error;
+        if (!issue || !contentConflict(error)) return { error, reconciled: false };
+        const correlation = contentConflictCorrelation(error);
+        appendDiagnostic("content_conflict_sync_started", { surface: "issue_dialog", issue_id: issue.id, ...correlation });
         try {
           await loadLatestIssue(issue.id);
-          return reconciledContentConflict();
+          appendDiagnostic("content_conflict_sync_completed", { surface: "issue_dialog", issue_id: issue.id, ...correlation });
+          return { error, reconciled: true };
         } catch (syncError) {
-          return syncError;
+          appendDiagnostic("content_conflict_sync_failed", { surface: "issue_dialog", issue_id: issue.id, ...correlation, error: syncError instanceof Error ? syncError.message : String(syncError || "request_failed") });
+          return { error: syncError, reconciled: false };
         }
       }
 
@@ -8457,21 +8503,25 @@ export function install(config: Record<string, any>) {
           : "";
       }
 
-      function queuedReplyError(error) {
+      function queuedReplyError(error, reconciled = false) {
         const value = String(error instanceof Error ? error.message : error || "");
         if (value === "issue_not_running") return t("当前任务已结束，消息会按队列顺序发送。");
-        if (value === "content_conflict_reconciled") return t("该队列消息已发生变化，已同步最新状态。");
+        if (reconciled) return t("该队列消息已发生变化，已同步最新状态。");
         if (["queued_reply_not_found", "queued_reply_not_pending", "queued_reply_update_conflict"].includes(value)) return t("该队列消息已发生变化，正在同步最新状态。");
         return t("队列操作失败，请重试。");
       }
 
       async function reconcileQueuedReplyConflict(error) {
-        if (!contentConflict(error)) return error;
+        if (!contentConflict(error)) return { error, reconciled: false };
+        const correlation = contentConflictCorrelation(error);
+        appendDiagnostic("content_conflict_sync_started", { surface: "conversation_queue", issue_id: issue?.id || "", ...correlation });
         try {
           await loadConversation({ quiet: true });
-          return reconciledContentConflict();
+          appendDiagnostic("content_conflict_sync_completed", { surface: "conversation_queue", issue_id: issue?.id || "", ...correlation });
+          return { error, reconciled: true };
         } catch (syncError) {
-          return syncError;
+          appendDiagnostic("content_conflict_sync_failed", { surface: "conversation_queue", issue_id: issue?.id || "", ...correlation, error: syncError instanceof Error ? syncError.message : String(syncError || "request_failed") });
+          return { error: syncError, reconciled: false };
         }
       }
 
@@ -8506,12 +8556,14 @@ export function install(config: Record<string, any>) {
               },
               failed: async error => {
                 pendingQueueCommands.delete(commandId);
-                const failure = await reconcileQueuedReplyConflict(error);
-                queueActionError = queuedReplyError(failure);
-                reportUnexpectedError(error, { source: "conversation_queue_settle", action, issue_id: issue.id, request_id: requestId, command_id: commandId });
+                const reconciliation = await reconcileQueuedReplyConflict(error);
+                const reportContext = { source: "conversation_queue_settle", action, issue_id: issue.id, request_id: requestId, command_id: commandId };
+                queueActionError = queuedReplyError(reconciliation.error, reconciliation.reconciled);
+                if (reconciliation.reconciled) reportReconciledContentConflict(reconciliation.error, reportContext);
+                else reportUnexpectedError(reconciliation.error, reportContext);
                 if (dialog.isConnected) {
                   syncQueuedReplyState();
-                  if (!pendingQueueCommands.size && failure === error) await loadConversation({ quiet: true });
+                  if (!pendingQueueCommands.size && reconciliation.error === error) await loadConversation({ quiet: true });
                 }
               },
             });
@@ -8534,8 +8586,11 @@ export function install(config: Record<string, any>) {
             conversationTimer = setTimeout(() => void loadConversation({ quiet: true }), 1500);
           }
         } catch (error) {
-          reportUnexpectedError(error, { source: "conversation_queue", action, issue_id: issue.id, request_id: requestId });
-          queueActionError = queuedReplyError(await reconcileQueuedReplyConflict(error));
+          const reconciliation = await reconcileQueuedReplyConflict(error);
+          const reportContext = { source: "conversation_queue", action, issue_id: issue.id, request_id: requestId };
+          queueActionError = queuedReplyError(reconciliation.error, reconciliation.reconciled);
+          if (reconciliation.reconciled) reportReconciledContentConflict(reconciliation.error, reportContext);
+          else reportUnexpectedError(reconciliation.error, reportContext);
         } finally {
           queueActionRequestId = "";
           syncQueuedReplyState();
@@ -10024,8 +10079,10 @@ export function install(config: Record<string, any>) {
           }
         } catch (error) {
           traceDialog("dialog_submit_error", { action: issue ? "update_issue" : "create_issue", error: String(error instanceof Error ? error.message : "create_failed").slice(0, 200) });
-          const failure = await reconcileIssueConflict(error);
-          presentInlineError(errorOutput, failure, errorLabel(failure), { source: "issue_dialog_submit", action: issue ? "update" : "create" });
+          const reconciliation = await reconcileIssueConflict(error);
+          const reportContext = { source: "issue_dialog_submit", action: issue ? "update" : "create" };
+          if (reconciliation.reconciled) presentReconciledContentConflict(errorOutput, reconciliation.error, reportContext);
+          else presentInlineError(errorOutput, reconciliation.error, errorLabel(reconciliation.error), reportContext);
           submitInFlight = false;
           submit.disabled = false;
         }
@@ -10065,8 +10122,9 @@ export function install(config: Record<string, any>) {
           await loadIssues();
           dialog.close();
         } catch (error) {
-          const failure = await reconcileIssueConflict(error);
-          presentInlineError(errorOutput, failure, errorLabel(failure), { source: "issue_start" });
+          const reconciliation = await reconcileIssueConflict(error);
+          if (reconciliation.reconciled) presentReconciledContentConflict(errorOutput, reconciliation.error, { source: "issue_start" });
+          else presentInlineError(errorOutput, reconciliation.error, errorLabel(reconciliation.error), { source: "issue_start" });
           button.disabled = false;
         }
       }
