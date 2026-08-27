@@ -197,6 +197,38 @@ test("a stale activation failure cannot roll back a newer committed update", () 
   }
 });
 
+test("a committed Runtime authority cannot be reopened as rollback recovery", () => {
+  const home = mkdtempSync(join(tmpdir(), "better-codex-authority-commit-"));
+  try {
+    const updateId = "019fec06-788f-7af3-a031-76b546904fb0";
+    const script = [
+      'const { mkdirSync, writeFileSync } = await import("node:fs");',
+      'const { dirname } = await import("node:path");',
+      'const config = await import("./src/config.ts");',
+      'const runtime = await import("./src/runtime-state.ts");',
+      'mkdirSync(dirname(config.runtimeAuthorityPath), { recursive: true });',
+      'const identity = { instanceId: "runtime-commit", generation: 7, processStartedAt: "2026-08-27T00:00:00.000Z" };',
+      `writeFileSync(config.runtimeAuthorityPath, JSON.stringify({ generation: 7, status: "claimed", runtimeInstanceId: identity.instanceId, runtimePid: process.pid, processStartedAt: identity.processStartedAt, updateId: "${updateId}", targetVersion: "9.9.9", recovery: false, hostReplacement: false, updatedAt: new Date().toISOString() }));`,
+      `runtime.completeRuntimeAuthorityHandoff(identity, "${updateId}", "committed");`,
+      `runtime.completeRuntimeAuthorityHandoff(identity, "${updateId}", "committed");`,
+      'let recoveryError = null;',
+      `try { runtime.reserveRuntimeAuthorityRecovery("${updateId}", "1.0.0", 7); } catch (error) { recoveryError = error.message; }`,
+      `console.log(JSON.stringify({ authority: runtime.runtimeAuthorityUpdateState("${updateId}", 7), recoveryError }));`,
+    ].join("");
+    const result = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "--eval", script], {
+      cwd: root,
+      encoding: "utf8",
+      env: { ...process.env, BETTER_CODEX_HOME: home, BETTER_CODEX_DISABLE_DELEGATION: "1" },
+    });
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    const output = JSON.parse(result.stdout) as { authority: { state?: string; generation?: number }; recoveryError?: string };
+    assert.deepEqual(output.authority, { state: "committed", generation: 7, runtimeInstanceId: "runtime-commit" });
+    assert.equal(output.recoveryError, "runtime_authority_update_committed");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("startup recovers a core and compatibility transaction interrupted between pointer commits", () => {
   const home = mkdtempSync(join(tmpdir(), "better-codex-update-wal-"));
   try {
@@ -263,12 +295,17 @@ test("standalone core and compatibility updates enter the WAL before pointer mut
   const cli = readFileSync(join(root, "src", "cli.ts"), "utf8");
   const service = readFileSync(join(root, "src", "service.ts"), "utf8");
   const applyUpdate = cli.slice(cli.indexOf("async function applyUpdate"), cli.indexOf("async function withLaunchLock"));
+  const doctor = cli.slice(cli.indexOf("async function doctor"), cli.indexOf("async function uninstall"));
   assert.match(compatibility, /writeRollbackState\(before, plannedAfter, "applying"\)[\s\S]*updateCompatibilityUnlocked/);
   assert.match(core, /writeRollbackState\(before, plannedAfter, "applying"\)[\s\S]*updateCoreUnlocked/);
   assert.match(source, /pendingCoreActivation\(\)[\s\S]*update_staged_core_manifest_mismatch[\s\S]*rollbackAllUpdates\(\)[\s\S]*update_staged_core_rollback_failed/);
   assert.match(server, /sendJson\(response, 202, \{ accepted: true, update_id: operation\.id, state: "STAGING"[\s\S]*void \(async \(\) => \{[\s\S]*const result = await installGatewayUpdate\(\)/);
   assert.match(server, /if \(installedCoreVersion !== coreVersion\) throw new Error\(`update_core_activation_required:/);
   assert.match(cli, /if \(operation\.status === "COMPLETED"\) \{[\s\S]*const runtime = await health\(\)/);
+  assert.match(applyUpdate, /waitForRuntimeReady\(120_000\)[\s\S]*\/api\/update\/commit[\s\S]*runtimeAuthorityUpdateState\(updateId, targetGeneration\)/);
+  assert.match(server, /operation\.status === "SERVING_READY"[\s\S]*completeSessionHandoff\(updateId\)[\s\S]*transitionUpdateOperation\(updateId, "COMPLETED"\)/);
+  assert.doesNotMatch(server.slice(server.indexOf('if \(!rollingBack && operation.status === "RECONCILING"'), server.indexOf("})().catch", server.indexOf('if \(!rollingBack && operation.status === "RECONCILING"'))), /transitionUpdateOperation\(updateId, "COMPLETED"\)/);
+  assert.match(doctor, /runtime = await readiness\(\)[\s\S]*ok: false, ready: false/);
   assert.match(cli, /const \[command, \.\.\.expectedArgs\] = mcpCommand\(\)/);
   assert.match(service, /const managed = managedCoreCommand\(\["runtime"\]\)/);
   assert.doesNotMatch(server, /interrupt_running/);

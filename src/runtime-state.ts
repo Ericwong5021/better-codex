@@ -27,8 +27,12 @@ type RuntimeAuthority = {
   targetVersion: string | null;
   recovery: boolean;
   hostReplacement: boolean;
+  settledUpdateId?: string | null;
+  settledOutcome?: "committed" | "rolled_back" | null;
   updatedAt: string;
 };
+
+export type RuntimeAuthorityUpdateState = "active" | "committed" | "rolled_back" | "superseded" | "missing";
 
 function processAlive(pid: number) {
   try {
@@ -133,19 +137,34 @@ export function cancelRuntimeAuthorityReservation(identity: Pick<RuntimeState, "
   writeAuthority({ ...current, generation: identity.generation, status: "claimed", updateId: null, targetVersion: identity.version, recovery: false, hostReplacement: false, updatedAt: new Date().toISOString() });
 }
 
-export function reserveRuntimeAuthorityRecovery(updateId: string, targetVersion: string | null) {
+export function runtimeAuthorityUpdateState(updateId: string, expectedGeneration?: number) {
   const current = readAuthority();
-  if (!current || current.updateId !== updateId) throw new Error("runtime_authority_recovery_mismatch");
+  if (!current) return { state: "missing" as RuntimeAuthorityUpdateState, generation: null, runtimeInstanceId: null };
+  const generationMatches = expectedGeneration === undefined || current.generation === expectedGeneration;
+  if (current.updateId === updateId && generationMatches) return { state: "active" as RuntimeAuthorityUpdateState, generation: current.generation, runtimeInstanceId: current.runtimeInstanceId };
+  if (current.settledUpdateId === updateId && (expectedGeneration === undefined || current.generation >= expectedGeneration)) {
+    return { state: current.settledOutcome === "rolled_back" ? "rolled_back" as RuntimeAuthorityUpdateState : "committed" as RuntimeAuthorityUpdateState, generation: current.generation, runtimeInstanceId: current.runtimeInstanceId };
+  }
+  return { state: "superseded" as RuntimeAuthorityUpdateState, generation: current.generation, runtimeInstanceId: current.runtimeInstanceId };
+}
+
+export function reserveRuntimeAuthorityRecovery(updateId: string, targetVersion: string | null, expectedGeneration?: number) {
+  const current = readAuthority();
+  if (current?.settledUpdateId === updateId && current.settledOutcome === "committed") throw new Error("runtime_authority_update_committed");
+  if (!current || current.updateId !== updateId || expectedGeneration !== undefined && current.generation !== expectedGeneration) throw new Error("runtime_authority_recovery_mismatch");
   if (current.runtimePid !== process.pid && processAlive(current.runtimePid)) throw new Error("runtime_authority_owner_alive");
   const generation = current.generation + 1;
   writeAuthority({ ...current, generation, status: "reserved", updateId, targetVersion, recovery: true, hostReplacement: current.hostReplacement === true, updatedAt: new Date().toISOString() });
   return generation;
 }
 
-export function completeRuntimeAuthorityHandoff(identity: Pick<RuntimeState, "instanceId" | "generation" | "processStartedAt">, updateId: string) {
+export function completeRuntimeAuthorityHandoff(identity: Pick<RuntimeState, "instanceId" | "generation" | "processStartedAt">, updateId: string, outcome: "committed" | "rolled_back" = "committed") {
   const current = readAuthority();
-  if (!current || current.status !== "claimed" || current.runtimeInstanceId !== identity.instanceId || current.runtimePid !== process.pid || current.generation !== identity.generation || current.processStartedAt !== identity.processStartedAt || current.updateId !== updateId) throw new Error("runtime_authority_handoff_mismatch");
-  writeAuthority({ ...current, updateId: null, targetVersion: null, recovery: false, hostReplacement: false, updatedAt: new Date().toISOString() });
+  const ownerMatches = current?.status === "claimed" && current.runtimeInstanceId === identity.instanceId && current.runtimePid === process.pid && current.generation === identity.generation && current.processStartedAt === identity.processStartedAt;
+  if (!ownerMatches) throw new Error("runtime_authority_handoff_mismatch");
+  if (current!.updateId === null && current!.settledUpdateId === updateId && current!.settledOutcome === outcome) return;
+  if (current!.updateId !== updateId) throw new Error("runtime_authority_handoff_mismatch");
+  writeAuthority({ ...current!, updateId: null, targetVersion: null, recovery: false, hostReplacement: false, settledUpdateId: updateId, settledOutcome: outcome, updatedAt: new Date().toISOString() });
 }
 
 export function acquireRuntimeLock(identity: Pick<RuntimeState, "instanceId" | "startedAt" | "processStartedAt">) {

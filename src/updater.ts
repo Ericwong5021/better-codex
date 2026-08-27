@@ -8,6 +8,7 @@ import { packagedBuild } from "./build.js";
 import { activeCompatibility, bundledCompatibility, compareVersions, coreVersion, readCompatibilityPointer, rollbackCompatibility, validateCompatibility, writeCompatibilityPointer } from "./compatibility.js";
 import { compatibilityCurrentPath, compatibilityVersionsPath, ensureDirectories, runtimeCurrentPath, runtimeVersionsPath, updateActivationPath, updateChannelPath, updatePublicKeyPath, updateRollbackPath, updateStatePath } from "./config.js";
 import { requireStorageCapacity } from "./storage-health.js";
+import { runtimeAuthorityUpdateState } from "./runtime-state.js";
 
 export type UpdateChannel = "stable" | "preview";
 
@@ -143,6 +144,19 @@ function persistedActivationState(): GatewayUpdateState {
   try {
     const value = JSON.parse(readFileSync(updateActivationPath, "utf8")) as ActivationState;
     if (value.status === "activating") {
+      if (value.updateId) {
+        const authority = runtimeAuthorityUpdateState(value.updateId, value.targetRuntimeGeneration ?? undefined);
+        if (authority.state === "committed") {
+          const committed = { ...value, status: "success", error: null, ownerPid: null, updatedAt: new Date().toISOString() };
+          writeJsonAtomic(updateActivationPath, committed);
+          return { status: "current", currentVersion: coreVersion, latestVersion: null, checkedAt: committed.updatedAt, error: null, channel: selectedUpdateChannel() };
+        }
+        if (authority.state === "rolled_back") {
+          const rolledBack = { ...value, status: "error", error: "update_rolled_back", ownerPid: null, updatedAt: new Date().toISOString() };
+          writeJsonAtomic(updateActivationPath, rolledBack);
+          return { status: "error", currentVersion: coreVersion, latestVersion: null, checkedAt: rolledBack.updatedAt, error: "update_activation_failed:update_rolled_back", channel: selectedUpdateChannel() };
+        }
+      }
       const startedAt = Date.parse(value.updatedAt || "");
       if (Number.isInteger(value.ownerPid) && value.ownerPid && processAlive(value.ownerPid)) return { status: "restarting", currentVersion: coreVersion, latestVersion: null, checkedAt: value.updatedAt ?? null, error: null, channel: selectedUpdateChannel() };
       if (Number.isFinite(startedAt) && Date.now() - startedAt <= activationRecoveryTimeout) return { status: "restarting", currentVersion: coreVersion, latestVersion: null, checkedAt: value.updatedAt ?? null, error: null, channel: selectedUpdateChannel() };

@@ -16,8 +16,8 @@ import { MentionCatalogService, codexSemanticRequestFingerprint, normalizeCodexS
 import { appendInputDocumentText, compileInputDocument, inputDocumentLegacyReferences, inputDocumentText, legacyInputDocument, type SemanticKindV2 } from "./codex-input-document.js";
 import { readModelCatalog } from "./model-catalog.js";
 import { attachmentPath, canonicalPath, databasePath, runPath, runtimePort, token, updateLogPath } from "./config.js";
-import { acquireRuntimeLock, cancelRuntimeAuthorityReservation, claimRuntimeAuthority, clearRuntimeState, completeRuntimeAuthorityHandoff, createRuntimeIdentity, publishRuntimeState, reserveRuntimeAuthority } from "./runtime-state.js";
-import { activeCoreCommand, checkGatewayUpdate, getGatewayUpdateState, installGatewayUpdate, readGatewayUpdateActivationState, recordGatewayUpdateActivation, rollbackAbandonedUpdate, rollbackActivatedUpdate, startGatewayUpdateChecks } from "./updater.js";
+import { acquireRuntimeLock, cancelRuntimeAuthorityReservation, claimRuntimeAuthority, clearRuntimeState, completeRuntimeAuthorityHandoff, createRuntimeIdentity, publishRuntimeState, reserveRuntimeAuthority, runtimeAuthorityUpdateState } from "./runtime-state.js";
+import { activeCoreCommand, activeVersions, checkGatewayUpdate, getGatewayUpdateState, installGatewayUpdate, readGatewayUpdateActivationState, recordGatewayUpdateActivation, rollbackAbandonedUpdate, rollbackActivatedUpdate, startGatewayUpdateChecks } from "./updater.js";
 import { packagedBuild } from "./build.js";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { conversationMessagesWithPendingReply, normalizeSessionId, readConversationActivity, readConversationAttachment, readConversationResult, sessionWorkspace } from "./session-transcript.js";
@@ -733,7 +733,7 @@ function errorCode(error: unknown) {
 function errorStatus(code: string) {
   if (code === "body_too_large") return 413;
   if (code === "insufficient_disk_space") return 507;
-  if (code === "version_conflict" || code === "request_id_conflict" || code === "request_outcome_unknown" || code === "remote_mode_disabled" || code === "reply_busy" || code === "update_in_progress" || code === "issue_execution_locked" || code === "issue_execution_running" || code === "issue_session_handed_off" || code === "issue_session_starting" || code === "issue_session_already_bound" || code === "session_relay_not_leader" || code === "session_command_not_claimed" || code === "session_command_outcome_unknown" || code === "queued_reply_not_pending" || code === "queued_reply_update_conflict" || code === "project_planning_busy" || code === "project_planning_agent_locked") return 409;
+  if (code === "version_conflict" || code === "request_id_conflict" || code === "request_outcome_unknown" || code === "remote_mode_disabled" || code === "reply_busy" || code === "update_in_progress" || code === "update_commit_pending" || code === "issue_execution_locked" || code === "issue_execution_running" || code === "issue_session_handed_off" || code === "issue_session_starting" || code === "issue_session_already_bound" || code === "session_relay_not_leader" || code === "session_command_not_claimed" || code === "session_command_outcome_unknown" || code === "queued_reply_not_pending" || code === "queued_reply_update_conflict" || code === "project_planning_busy" || code === "project_planning_agent_locked") return 409;
   if (code.endsWith("_not_found")) return 404;
   if (code === "database_unavailable" || code === "database_integrity_check_failed" || code === "runtime_reconciling") return 503;
   return 400;
@@ -976,6 +976,7 @@ export function startServer() {
       const localCommandRequest = !relayRequest && authorized(request, url, webSessions) && /^[A-Za-z0-9_-]{8,200}$/.test(browserCommandId) && Boolean(webCommandTarget(method, `${url.pathname}${url.search}`));
 
       if (!runtimeServingReady && url.pathname.startsWith("/api/") && !["GET", "HEAD", "OPTIONS"].includes(method) && url.pathname !== "/api/shutdown") throw new Error("runtime_reconciling");
+      if (identity.handoffUpdateId && !identity.handoffRecovery && url.pathname.startsWith("/api/") && !["GET", "HEAD", "OPTIONS"].includes(method) && !["/api/shutdown", "/api/update/commit"].includes(url.pathname)) throw new Error("update_commit_pending");
 
       if (url.pathname.startsWith("/api/") && !["GET", "HEAD", "OPTIONS"].includes(method) && url.pathname !== "/api/shutdown") {
         const storage = storageHealth(databasePath);
@@ -1668,6 +1669,37 @@ export function startServer() {
         const requestedUpdateId = url.searchParams.get("update_id");
         const operation = requestedUpdateId ? store.getUpdateOperation(requestedUpdateId) : store.getActiveUpdateOperation();
         return sendJson(response, 200, { ...getGatewayUpdateState(), operation: operation || null, accepting_new_tasks: runtimeServingReady && (!operation || ["ACCEPTED", "STAGING", "COMPLETED", "ROLLED_BACK", "FAILED"].includes(operation.status)) });
+      }
+      if (url.pathname === "/api/update/commit" && method === "POST") {
+        const body = await readBody(request, 1024);
+        const updateId = typeof body.update_id === "string" ? body.update_id : "";
+        const runtimeInstanceId = typeof body.runtime_instance_id === "string" ? body.runtime_instance_id : "";
+        const targetGeneration = Number(body.target_runtime_generation);
+        const ownerPid = Number(body.owner_pid);
+        if (!/^[a-f0-9-]{36}$/i.test(updateId) || runtimeInstanceId !== identity.instanceId || !Number.isSafeInteger(targetGeneration) || targetGeneration !== identity.generation || !Number.isSafeInteger(ownerPid) || ownerPid < 1) throw new Error("update_commit_identity_invalid");
+        let operation = store.getUpdateOperation(updateId);
+        if (!operation) throw new Error("update_operation_not_found");
+        if (operation.target_runtime_generation !== identity.generation || operation.target_core_version !== identity.version) throw new Error("update_commit_operation_mismatch");
+        const activation = readGatewayUpdateActivationState();
+        if (operation.status !== "COMPLETED" && (activation?.status !== "activating" || activation.updateId !== updateId || activation.targetRuntimeGeneration !== identity.generation || activation.ownerPid !== ownerPid)) throw new Error("update_commit_activation_mismatch");
+        const versions = activeVersions();
+        if (versions.core !== identity.version || activation?.coreVersion && versions.core !== activation.coreVersion || activation?.compatibilityVersion && versions.compatibility !== activation.compatibilityVersion) throw new Error("update_commit_pointer_mismatch");
+        if (operation.status === "SERVING_READY") {
+          if (!identity.handoffHostReplacement) await worker.completeSessionHandoff(updateId);
+          operation = store.transitionUpdateOperation(updateId, "COMPLETED");
+        } else if (operation.status !== "COMPLETED") {
+          throw new Error("update_commit_state_invalid");
+        }
+        const authority = runtimeAuthorityUpdateState(updateId, identity.generation);
+        if (authority.state === "active") completeRuntimeAuthorityHandoff(identity, updateId, "committed");
+        else if (authority.state !== "committed") throw new Error("update_commit_authority_mismatch");
+        identity.handoffUpdateId = null;
+        identity.handoffRecovery = false;
+        identity.handoffHostReplacement = false;
+        publishRuntimeState({ ...identity, port: activeRuntimePort });
+        recordGatewayUpdateActivation("success", null, { core: activation?.coreVersion || operation.target_core_version, compatibility: activation?.compatibilityVersion || null }, null, updateId, identity.generation);
+        console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "update", event: "update_activation_committed", update_id: updateId, runtime_instance_id: identity.instanceId, runtime_generation: identity.generation, host_instance_id: operation.host_instance_id, owner_pid: ownerPid })}`);
+        return sendJson(response, 200, { committed: true, operation, runtime: { instance_id: identity.instanceId, generation: identity.generation, version: identity.version } });
       }
       if (url.pathname === "/api/update/check" && method === "POST") return sendJson(response, 200, await checkGatewayUpdate());
       if (url.pathname === "/api/update/install" && method === "POST") {
@@ -2403,7 +2435,12 @@ export function startServer() {
         if (activation?.status !== "activating" || activation.updateId !== updateId) throw new Error("update_activation_state_mismatch");
         if (!rollingBack && (typeof activation.targetRuntimeGeneration !== "number" || activation.targetRuntimeGeneration > identity.generation || activation.coreVersion && activation.coreVersion !== identity.version)) throw new Error("update_activation_identity_mismatch");
         if (operation.status === "COMPLETED" || operation.status === "ROLLED_BACK") {
-          completeRuntimeAuthorityHandoff(identity, updateId);
+          completeRuntimeAuthorityHandoff(identity, updateId, operation.status === "ROLLED_BACK" ? "rolled_back" : "committed");
+          identity.handoffUpdateId = null;
+          identity.handoffRecovery = false;
+          identity.handoffHostReplacement = false;
+          publishRuntimeState({ ...identity, port: address.port });
+          if (operation.status === "COMPLETED") recordGatewayUpdateActivation("success", null, { core: operation.target_core_version, compatibility: activation.compatibilityVersion || null }, null, updateId, identity.generation);
           runtimeServingReady = true;
           startRuntimeServices();
           return;
@@ -2421,13 +2458,18 @@ export function startServer() {
         await worker.reconcileSessionHandoff(snapshot);
         operation = store.getUpdateOperation(updateId)!;
         if (!rollingBack && operation.status === "RECONCILING") store.transitionUpdateOperation(updateId, "SERVING_READY");
-        if (!identity.handoffHostReplacement) await worker.completeSessionHandoff(updateId);
-        if (rollingBack) store.transitionUpdateOperation(updateId, "ROLLED_BACK");
-        else store.transitionUpdateOperation(updateId, "COMPLETED");
-        completeRuntimeAuthorityHandoff(identity, updateId);
+        if (rollingBack && !identity.handoffHostReplacement) await worker.completeSessionHandoff(updateId);
+        if (rollingBack) {
+          store.transitionUpdateOperation(updateId, "ROLLED_BACK");
+          completeRuntimeAuthorityHandoff(identity, updateId, "rolled_back");
+          identity.handoffUpdateId = null;
+          identity.handoffRecovery = false;
+          identity.handoffHostReplacement = false;
+          publishRuntimeState({ ...identity, port: address.port });
+        }
         runtimeServingReady = true;
         startRuntimeServices();
-        console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "runtime", event: rollingBack ? "update_rollback_ready" : "update_serving_ready", update_id: updateId, runtime_instance_id: identity.instanceId, runtime_generation: identity.generation, host_instance_id: snapshot.host_instance_id, app_server_pid: snapshot.app_server_pid, app_server_started_at: snapshot.app_server_started_at, active_turns: snapshot.active_turns, queued_deliveries: snapshot.queued_deliveries })}`);
+        console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "runtime", event: rollingBack ? "update_rollback_ready" : "update_serving_ready_pending_commit", update_id: updateId, runtime_instance_id: identity.instanceId, runtime_generation: identity.generation, host_instance_id: snapshot.host_instance_id, app_server_pid: snapshot.app_server_pid, app_server_started_at: snapshot.app_server_started_at, active_turns: snapshot.active_turns, queued_deliveries: snapshot.queued_deliveries })}`);
       })().catch(error => {
         const code = error instanceof Error ? error.message : "runtime_handoff_reconciliation_failed";
         const operation = store.getUpdateOperation(updateId);
