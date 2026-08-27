@@ -4,6 +4,12 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.10-beta.28] - 2026-08-27
+
+- Clear submitted reply drafts atomically while preserving newer text and attachment edits.
+- Reconcile stale Issue updates automatically without requiring a manual reload.
+- Recover empty session startup failures after transient App Server or desktop bridge disconnects with structured request diagnostics.
+
 ## [0.4.10-beta.27] - 2026-08-26
 
 - Keep Issue execution state tied to a real active turn and recover stale persisted session states after Runtime updates.
@@ -887,7 +893,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.27...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.28...HEAD
+[0.4.10-beta.28]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.27...v0.4.10-beta.28
 [0.4.10-beta.27]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.26...v0.4.10-beta.27
 [0.4.10-beta.26]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.25...v0.4.10-beta.26
 [0.4.10-beta.25]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.24...v0.4.10-beta.25
