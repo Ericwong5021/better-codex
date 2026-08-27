@@ -210,6 +210,9 @@ test("issue assignee can be the current user or an agent", () => {
     assert.equal(agentOwned.user_assigned, false);
     assert.equal(agentOwned.agent_enabled, true);
     assert.equal(agentOwned.agent_id, profile.id);
+    assert.equal(agentOwned.pending_actor, "user");
+    assert.equal(agentOwned.needs_attention, true);
+    assert.equal(store.isDispatchable(agentOwned), false);
 
     const cleared = store.updateIssue(agentOwned.id, agentOwned.version, { user_assigned: false, agent_enabled: false });
     assert.equal(cleared.user_assigned, false);
@@ -1169,32 +1172,40 @@ test("ambiguous legacy thread associations are rejected", () => {
   }
 });
 
-test("changed agent configuration continues the existing native session", () => {
+test("reassigned issue waits for a user reply before continuing the native session as the new agent", () => {
   const target = temporaryDatabase();
   try {
     const store = new Store(target.file);
     const worker = new IssueWorker(store);
     const project = store.createProject({ name: "Config continuation", workspacePath: target.directory });
+    const previousProfile = store.createAgentProfile({ name: "Previous", description: "", instructions: "previous instructions", model: "gpt-test", reasoning_effort: "medium" });
     const profile = store.createAgentProfile({ name: "Restricted", description: "", instructions: "new instructions", model: "gpt-test", reasoning_effort: "medium", sandbox_mode: "read-only" });
-    const issue = store.createIssue({ projectId: project.id, title: "Continue thread", status: "todo", agentEnabled: true, agentId: profile.id, workspacePath: target.directory });
+    const issue = store.createIssue({ projectId: project.id, title: "Continue thread", status: "in_review", agentEnabled: true, agentId: previousProfile.id, workspacePath: target.directory });
     const timestamp = new Date().toISOString();
     const oldThreadId = "019fec06-788f-7af3-a031-76b546904f30";
     store.db.prepare(`
       INSERT INTO issue_sessions (issue_id, host_id, thread_id, status, config_fingerprint, last_agent_message, created_at, updated_at)
       VALUES (?, 'local', ?, 'idle', 'old-config', '', ?, ?)
     `).run(issue.id, oldThreadId, timestamp, timestamp);
-    const claim = store.claimNextIssue(issue.id)!;
-    (worker as unknown as { dispatch(value: typeof claim): void }).dispatch(claim);
-    const command = store.getActiveSessionCommand(issue.id)!;
+    const settled = store.updateIssue(issue.id, issue.version, { pending_actor: "user", needs_attention: true });
+    const reassigned = store.updateIssue(settled.id, settled.version, { agent_enabled: true, agent_id: profile.id });
+    assert.equal(reassigned.pending_actor, "user");
+    assert.equal(reassigned.needs_attention, true);
+    assert.equal(store.isDispatchable(reassigned), false);
+    assert.equal(store.claimNextIssue(reassigned.id), null);
+
+    const handoff = worker.sendIssueMessage(reassigned.id, "continue-after-reassign", "Continue here");
+    const command = handoff.command;
     assert.equal(command.kind, "turn");
     assert.equal(command.thread_id, oldThreadId);
     assert.equal(command.payload.sandbox_mode, "read-only");
     assert.equal(command.payload.developer_instructions, "new instructions");
+    assert.equal(command.payload.message, "Continue here");
     assert.notEqual(command.payload.config_fingerprint, "old-config");
     assert.equal(store.getIssueSession(issue.id)?.thread_id, oldThreadId);
     assert.equal(store.hasActiveAgentSessionWork(profile.id), true);
     store.db.prepare("DELETE FROM session_commands WHERE issue_id = ?").run(issue.id);
-    store.finishRun(claim.runId, issue.id, false, "test_cleanup");
+    store.db.prepare("DELETE FROM issue_replies WHERE issue_id = ?").run(issue.id);
     assert.equal(store.hasActiveAgentSessionWork(profile.id), false);
 
     const replyIssue = store.createIssue({ projectId: project.id, title: "Continue reply thread", status: "in_review", agentEnabled: true, agentId: profile.id, workspacePath: target.directory });

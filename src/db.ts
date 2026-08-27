@@ -2943,6 +2943,13 @@ export class Store {
         patch.assignee_user_id = null;
         if (patch.pending_actor === undefined) patch.pending_actor = "agent";
       }
+      const nextAgentEnabled = patch.agent_enabled ?? issue.agent_enabled;
+      const nextAgentId = patch.agent_id !== undefined ? patch.agent_id : issue.agent_id;
+      const agentAssigneeChanged = nextAgentEnabled && (!issue.agent_enabled || nextAgentId !== issue.agent_id);
+      if (agentAssigneeChanged && !pendingActorProvided) {
+        patch.pending_actor = "user";
+        if (patch.needs_attention === undefined) patch.needs_attention = true;
+      }
       if (patch.status === "done") {
         patch.pending_actor = "user";
         patch.needs_attention = false;
