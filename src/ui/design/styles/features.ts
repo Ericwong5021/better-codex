@@ -8127,6 +8127,35 @@ export function betterCodexFeatureStylesCss() {
     }
 
     @media (max-width: 720px) {
+      #better-codex-panel[data-host="web"][data-surface="projects"] .better-codex-projects:has(:is(.better-codex-project-planning-layout, .better-codex-project-work-board)) {
+        display: flex;
+        flex-direction: column;
+      }
+
+      #better-codex-panel[data-host="web"] .better-codex-project-detail:has(:is(.better-codex-project-planning-layout, .better-codex-project-work-board)) {
+        height: 100%;
+        min-height: 0;
+        flex: 0 0 auto;
+      }
+
+      #better-codex-panel[data-host="web"] .better-codex-project-dashboard:has(> :is(.better-codex-project-planning-layout, .better-codex-project-work-board)) {
+        height: 100%;
+        min-height: 0;
+        grid-template-rows: auto auto minmax(420px, 1fr);
+      }
+
+      #better-codex-panel[data-host="web"] :is(.better-codex-project-planning-layout, .better-codex-project-work-board) {
+        height: 100%;
+        min-height: 0;
+      }
+
+      #better-codex-panel[data-host="web"] .better-codex-project-plan,
+      #better-codex-panel[data-host="web"] .better-codex-project-planning-chat,
+      #better-codex-panel[data-host="web"] .better-codex-project-planning-layout[data-project-planning-pane="chat"] .better-codex-project-planning-chat {
+        height: 100%;
+        min-height: 0;
+      }
+
       #better-codex-panel[data-host="web"] .better-codex-board {
         padding-bottom: var(--bc-space-2);
         scrollbar-width: none;
