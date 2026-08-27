@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { normalizeSessionId, readConversationResult, sessionWorkspace } from "../src/session-transcript.js";
+import { normalizeSessionId, readConversationAttachment, readConversationResult, sessionWorkspace } from "../src/session-transcript.js";
 
 test("sessionWorkspace reads cwd from the session rollout meta", () => {
   const codexHome = mkdtempSync(join(tmpdir(), "better-codex-session-cwd-"));
@@ -37,6 +37,7 @@ test("readConversationResult builds a user/commentary/final_answer bubble timeli
     const directory = join(codexHome, "sessions", "2026", "08", "06");
     const inputImage = join(codexHome, "input.png");
     const outputImage = join(codexHome, "output.png");
+    const outputDocument = join(codexHome, "design-qa.md");
     mkdirSync(directory, { recursive: true });
     writeFileSync(join(directory, `rollout-2026-08-06T12-00-00-${id}.jsonl`), [
       JSON.stringify({ type: "session_meta", payload: { cwd: codexHome } }),
@@ -44,8 +45,8 @@ test("readConversationResult builds a user/commentary/final_answer bubble timeli
       JSON.stringify({ type: "event_msg", timestamp: "2026-08-06T12:00:02.000Z", payload: { type: "user_message", message: `请检查发布状态\n\n附带文件：\n- ${inputImage}` } }),
       JSON.stringify({ type: "event_msg", timestamp: "2026-08-06T12:00:03.000Z", payload: { type: "agent_message", phase: "commentary", message: "working" } }),
       JSON.stringify({ type: "response_item", timestamp: "2026-08-06T12:00:03.000Z", payload: { type: "message", role: "assistant", phase: "commentary", content: [{ type: "output_text", text: "working" }], internal_chat_message_metadata_passthrough: { turn_id: "turn-1" } } }),
-      JSON.stringify({ type: "event_msg", timestamp: "2026-08-06T12:00:04.000Z", payload: { type: "agent_message", phase: "final_answer", message: `First **done**\n\n![input](${inputImage})\n\n![output](${outputImage})` } }),
-      JSON.stringify({ type: "response_item", timestamp: "2026-08-06T12:00:04.000Z", payload: { type: "message", role: "assistant", phase: "final_answer", content: [{ type: "output_text", text: `First **done**\n\n![input](${inputImage})\n\n![output](${outputImage})` }], internal_chat_message_metadata_passthrough: { turn_id: "turn-1" } } }),
+      JSON.stringify({ type: "event_msg", timestamp: "2026-08-06T12:00:04.000Z", payload: { type: "agent_message", phase: "final_answer", message: `First **done**\n\n![input](${inputImage})\n\n![output](${outputImage})\n\n[design-qa.md](${outputDocument})` } }),
+      JSON.stringify({ type: "response_item", timestamp: "2026-08-06T12:00:04.000Z", payload: { type: "message", role: "assistant", phase: "final_answer", content: [{ type: "output_text", text: `First **done**\n\n![input](${inputImage})\n\n![output](${outputImage})\n\n[design-qa.md](${outputDocument})` }], internal_chat_message_metadata_passthrough: { turn_id: "turn-1" } } }),
       JSON.stringify({ type: "event_msg", timestamp: "2026-08-06T12:00:05.000Z", payload: { type: "user_message", message: "再确认一次" } }),
       JSON.stringify({ type: "event_msg", timestamp: "2026-08-06T12:00:06.000Z", payload: { type: "agent_message", phase: "final_answer", message: "Latest result with `code`" } }),
       JSON.stringify({ type: "response_item", timestamp: "2026-08-06T12:00:06.000Z", payload: { type: "message", role: "assistant", phase: "final_answer", content: [{ type: "output_text", text: "Latest result with `code`" }], internal_chat_message_metadata_passthrough: { turn_id: "turn-2" } } }),
@@ -61,9 +62,46 @@ test("readConversationResult builds a user/commentary/final_answer bubble timeli
     assert.equal(result.messages[1].phase, "commentary");
     assert.equal(result.messages[2].phase, "final_answer");
     assert.deepEqual(result.messages[2].attachments?.map(attachment => attachment.name), ["output.png"]);
+    assert.doesNotMatch(result.messages[2].html, /href=/);
+    assert.match(result.messages[2].html, new RegExp(outputDocument.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     assert.equal(result.markdown, "Latest result with `code`");
     assert.match(result.html, /<code>code<\/code>/);
     assert.match(result.messages[4].html, /<code>code<\/code>/);
+  } finally {
+    if (previous === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previous;
+    rmSync(codexHome, { recursive: true, force: true });
+  }
+});
+
+test("readConversationAttachment preserves ownership beyond the visible timeline", async () => {
+  const codexHome = mkdtempSync(join(tmpdir(), "better-codex-session-attachment-"));
+  const previous = process.env.CODEX_HOME;
+  process.env.CODEX_HOME = codexHome;
+  try {
+    const id = "019fd63c-15b5-7bc1-8110-22dbe0117e76";
+    const directory = join(codexHome, "sessions", "2026", "08", "06");
+    const hiddenImage = join(codexHome, "hidden.png");
+    const inputImage = join(codexHome, "input.png");
+    const outputImage = join(codexHome, "output.png");
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(hiddenImage, "hidden", "utf8");
+    writeFileSync(inputImage, "input", "utf8");
+    writeFileSync(outputImage, "output", "utf8");
+    const fillers = Array.from({ length: 81 }, (_, index) => JSON.stringify({ type: "event_msg", timestamp: `2026-08-06T${String(12 + Math.floor(index / 60)).padStart(2, "0")}:${String(index % 60).padStart(2, "0")}:02.000Z`, payload: { type: "user_message", message: `filler-${index}` } }));
+    writeFileSync(join(directory, `rollout-2026-08-06T12-00-00-${id}.jsonl`), [
+      JSON.stringify({ type: "event_msg", timestamp: "2026-08-06T11:59:59.000Z", payload: { type: "user_message", message: `/better-codex\n\n附带文件：\n- ${hiddenImage}` } }),
+      JSON.stringify({ type: "event_msg", timestamp: "2026-08-06T12:00:01.000Z", payload: { type: "user_message", message: `检查文件\n\n附带文件：\n- ${inputImage}` } }),
+      ...fillers,
+      JSON.stringify({ type: "event_msg", timestamp: "2026-08-06T14:00:03.000Z", payload: { type: "agent_message", phase: "final_answer", message: `![hidden](${hiddenImage})\n\n![input](${inputImage})\n\n![output](${outputImage})` } }),
+      "",
+    ].join("\n"), "utf8");
+
+    const result = await readConversationResult(id);
+    const message = result.messages.at(-1)!;
+    assert.deepEqual(message.attachments?.map(attachment => attachment.name), ["output.png"]);
+    const attachment = await readConversationAttachment(id, message.id, 0);
+    assert.equal(Buffer.from(attachment.data.split(",", 2)[1], "base64").toString("utf8"), "output");
   } finally {
     if (previous === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = previous;

@@ -200,9 +200,15 @@ export function conversationContent(value: string, excludedAttachments?: Readonl
   const attachments = [...listed];
   const selected = new Set(attachments.map(conversationAttachmentKey));
   const attachmentLinks: string[] = [];
+  const literalLinks: string[] = [];
   for (const link of markdownLinks(markdown)) {
     const attachment = conversationAttachment(localMarkdownPath(link));
-    if (!attachment || attachment.kind !== "image") continue;
+    if (!attachment) continue;
+    if (attachment.source === "local" && attachment.kind !== "image") {
+      literalLinks.push(link);
+      continue;
+    }
+    if (attachment.kind !== "image") continue;
     const key = conversationAttachmentKey(attachment);
     if (!selected.has(key)) {
       if (attachments.length >= 16) continue;
@@ -215,6 +221,7 @@ export function conversationContent(value: string, excludedAttachments?: Readonl
     markdown,
     attachments: excludedAttachments ? attachments.filter(attachment => !excludedAttachments.has(conversationAttachmentKey(attachment))) : attachments,
     attachmentLinks,
+    literalLinks,
   };
 }
 
@@ -239,7 +246,7 @@ export function conversationMessagesWithPendingReply(
     id: replyId,
     role: "user",
     markdown: reply.message,
-    html: renderMarkdown(content.markdown, content.attachmentLinks),
+    html: renderMarkdown(content.markdown, content.attachmentLinks, content.literalLinks),
     phase: null,
     timestamp: reply.started_at || null,
     ...(content.attachments.length ? { attachments: content.attachments.map(({ value: _value, ...attachment }) => attachment) } : {}),
@@ -266,8 +273,9 @@ type PendingAgent = {
   timestamp: string | null;
 };
 
-async function readConversationMessages(rolloutPath: string) {
+async function readConversationMessages(rolloutPath: string, limited = true) {
   const messages: ConversationMessage[] = [];
+  const attachmentsByMessage = new Map<string, Array<ConversationAttachment & { value: string }>>();
   let activity: ConversationActivity = { status: "idle", turn_id: null, started_at: null, completed_at: null, updated_at: null };
   let index = 0;
   let lastIncludedUserAt: string | null = null;
@@ -278,15 +286,17 @@ async function readConversationMessages(rolloutPath: string) {
   const pushUser = (message: string, timestamp: string | null, content = conversationContent(message)) => {
     flushPendingAgent(null);
     lastIncludedUserAt = timestamp;
+    const id = `user-${index++}`;
     messages.push({
-      id: `user-${index++}`,
+      id,
       role: "user",
       markdown: message,
-      html: renderMarkdown(content.markdown, content.attachmentLinks),
+      html: renderMarkdown(content.markdown, content.attachmentLinks, content.literalLinks),
       phase: null,
       timestamp,
       ...(content.attachments.length ? { attachments: content.attachments.map(({ value: _value, ...attachment }) => attachment) } : {}),
     });
+    attachmentsByMessage.set(id, content.attachments);
   };
 
   const shouldDropStaleTurn = (turnId: string | null, timestamp: string | null) => {
@@ -313,15 +323,17 @@ async function readConversationMessages(rolloutPath: string) {
       return;
     }
     const content = conversationContent(message, userAttachments);
+    const id = `agent-${index++}`;
     messages.push({
-      id: `agent-${index++}`,
+      id,
       role: "agent",
       markdown: message,
-      html: renderMarkdown(content.markdown, content.attachmentLinks),
+      html: renderMarkdown(content.markdown, content.attachmentLinks, content.literalLinks),
       phase,
       timestamp,
       ...(content.attachments.length ? { attachments: content.attachments.map(({ value: _value, ...attachment }) => attachment) } : {}),
     });
+    attachmentsByMessage.set(id, content.attachments);
   };
 
   const flushPendingAgent = (turnId: string | null) => {
@@ -430,7 +442,7 @@ async function readConversationMessages(rolloutPath: string) {
     }
   }
   flushPendingAgent(null);
-  return { messages: messages.length > MAX_MESSAGES ? messages.slice(-MAX_MESSAGES) : messages, activity };
+  return { messages: limited && messages.length > MAX_MESSAGES ? messages.slice(-MAX_MESSAGES) : messages, activity, attachmentsByMessage };
 }
 
 export async function readConversationActivity(threadId: string | null | undefined, expectedTurnId = ""): Promise<ConversationActivityResult> {
@@ -544,16 +556,10 @@ export async function readConversationResult(threadId: string | null | undefined
 export async function readConversationAttachment(threadId: string | null | undefined, messageId: string, attachmentIndex: number): Promise<ConversationAttachmentData> {
   if (!Number.isInteger(attachmentIndex) || attachmentIndex < 0 || attachmentIndex >= 16) throw new Error("attachment_not_found");
   const conversation = await readConversationResult(threadId);
-  const message = conversation.messages.find(item => item.id === messageId);
-  if (!message) throw new Error("attachment_not_found");
-  const userAttachments = new Set<string>();
-  for (const item of conversation.messages) {
-    if (item === message) break;
-    if (item.role !== "user") continue;
-    for (const attachment of conversationContent(item.markdown).attachments) userAttachments.add(conversationAttachmentKey(attachment));
-  }
-  const content = conversationContent(message.markdown, message.role === "agent" ? userAttachments : undefined);
-  const attachment = content.attachments[attachmentIndex];
+  if (!conversation.messages.some(item => item.id === messageId) || !conversation.rollout_path) throw new Error("attachment_not_found");
+  const { messages, attachmentsByMessage } = await readConversationMessages(conversation.rollout_path, false);
+  if (!messages.some(item => item.id === messageId)) throw new Error("attachment_not_found");
+  const attachment = attachmentsByMessage.get(messageId)?.[attachmentIndex];
   if (!attachment || attachment.source !== "local") throw new Error("attachment_not_found");
   let stats;
   try {
