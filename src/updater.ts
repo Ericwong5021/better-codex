@@ -531,7 +531,12 @@ export function installGatewayUpdate() {
     if (pending) {
       if (!existsSync(pending.executable)) throw new Error("update_staged_core_unavailable");
       const manifest = await fetchUpdateManifest(channel);
-      if (manifest.core?.version !== pending.current) throw new Error(`update_staged_core_manifest_mismatch:${pending.current}:${manifest.core?.version || "missing"}`);
+      if (manifest.core?.version !== pending.current) {
+        if (!manifest.core || compareVersions(manifest.core.version, pending.current) <= 0) throw new Error(`update_staged_core_manifest_mismatch:${pending.current}:${manifest.core?.version || "missing"}`);
+        const rollback = rollbackAllUpdates();
+        if (!rollback.rolledBack || pendingCoreActivation()) throw new Error("update_staged_core_rollback_failed");
+        return updateAll(channel);
+      }
       return {
         channel,
         core: { updated: true, previous: coreVersion, version: pending.current, pendingRestart: true },
