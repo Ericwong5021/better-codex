@@ -387,6 +387,10 @@ function sessionCommandFingerprint(input: {
   })).digest("hex");
 }
 
+function retryableEmptySessionFailure(error: string) {
+  return ["app_server_timeout", "app_server_closed", "app_server_unavailable", "app_server_output_too_large"].includes(error);
+}
+
 function issueCreateFingerprint(input: IssueInput) {
   return createHash("sha256").update(canonicalJson(input)).digest("hex");
 }
@@ -4532,6 +4536,29 @@ export class Store {
       const command = sessionCommandFromRow(row);
       const threadId = partialThreadId && /^[a-f0-9-]{36}$/i.test(partialThreadId) ? partialThreadId : command.thread_id;
       const turnId = partialTurnId && /^[a-f0-9-]{36}$/i.test(partialTurnId) ? partialTurnId : command.turn_id;
+      if (command.kind === "start" && !turnId && command.attempts < 2 && retryableEmptySessionFailure(error)) {
+        if (threadId) {
+          this.db.prepare(`
+            DELETE FROM issue_sessions
+            WHERE issue_id = ? AND thread_id = ? AND active_turn_id IS NULL AND last_turn_id IS NULL
+              AND active_command_id = ?
+          `).run(command.issue_id, threadId, command.id);
+        }
+        this.db.prepare(`
+          UPDATE session_commands
+          SET status = 'pending', thread_id = NULL, turn_id = NULL, relay_id = NULL,
+              claimed_at = NULL, error = ?, finished_at = NULL
+          WHERE id = ? AND status = 'claimed' AND relay_id = ?
+        `).run(error, commandId, relayId);
+        if (command.run_id) {
+          this.db.prepare(`
+            UPDATE issue_runs
+            SET status = 'claimed', thread_id = NULL, turn_id = NULL, pid = NULL, error = NULL
+            WHERE id = ? AND issue_id = ? AND status IN ('claimed', 'running') AND execution_mode = 'desktop'
+          `).run(command.run_id, command.issue_id);
+        }
+        return { ...command, status: "pending" as const, thread_id: null, turn_id: null, relay_id: null, claimed_at: null, error, finished_at: null };
+      }
       if (command.kind === "interrupt" && command.attempts < 3 && command.turn_id) {
         const active = this.db.prepare("SELECT 1 AS value FROM issue_sessions WHERE issue_id = ? AND active_turn_id = ?").get(command.issue_id, command.turn_id);
         if (active) {

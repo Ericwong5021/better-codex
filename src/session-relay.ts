@@ -29,6 +29,8 @@ type PendingRequest = {
   resolve: (value: unknown) => void;
   reject: (error: Error) => void;
   timer: NodeJS.Timeout;
+  method: string;
+  startedAt: number;
 };
 
 type RelayEvent = {
@@ -42,6 +44,14 @@ function object(value: unknown) {
 
 function semanticDiagnostic(event: string, detail: Record<string, unknown>) {
   console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "semantic_compiler", event, host_instance_id: detail.host_instance_id || null, app_server_pid: detail.app_server_pid || null, app_server_started_at: detail.app_server_started_at || null, app_server_version: detail.app_server_version || null, ...detail })}`);
+}
+
+function relayDiagnostic(event: string, detail: Record<string, unknown>) {
+  console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "session_relay", event, ...detail })}`);
+}
+
+function appServerConnectionFailure(error: unknown) {
+  return ["app_server_unavailable", "app_server_timeout", "app_server_closed", "app_server_output_too_large"].includes(error instanceof Error ? error.message : String(error || ""));
 }
 
 function codexVersion(executable: string) {
@@ -247,6 +257,18 @@ export class RuntimeSessionRelay {
 
   private disconnect(child: ChildProcessWithoutNullStreams, error: string) {
     if (this.child !== child) return;
+    relayDiagnostic("app_server_disconnected", {
+      host_instance_id: this.hostInstanceId || null,
+      app_server_pid: child.pid || null,
+      app_server_started_at: this.appServerStartedAt,
+      app_server_version: this.appServerVersion || null,
+      error,
+      exit_code: child.exitCode,
+      signal_code: child.signalCode,
+      pending_requests: this.pending.size,
+      command_in_flight: this.commandInFlight,
+      thread_id: this.currentThreadId || null,
+    });
     this.child = null;
     this.appServerStartedAt = null;
     this.appServerVersion = "";
@@ -301,6 +323,18 @@ export class RuntimeSessionRelay {
         if (!request) continue;
         this.pending.delete(id);
         clearTimeout(request.timer);
+        const elapsed = Date.now() - request.startedAt;
+        if (elapsed >= 5000) relayDiagnostic("app_server_request_slow", {
+          host_instance_id: this.hostInstanceId || null,
+          app_server_pid: this.child?.pid ?? null,
+          app_server_started_at: this.appServerStartedAt,
+          app_server_version: this.appServerVersion || null,
+          request_id: id,
+          method: request.method,
+          elapsed_ms: elapsed,
+          outcome: message.error ? "error" : "success",
+          thread_id: this.currentThreadId || null,
+        });
         if (message.error) request.reject(new Error(appServerError(message.error)));
         else request.resolve(message.result);
         continue;
@@ -321,13 +355,27 @@ export class RuntimeSessionRelay {
 
   private request(method: string, params: Record<string, unknown>, timeout = 30000) {
     const id = ++this.sequence;
+    const startedAt = Date.now();
     return new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
+        relayDiagnostic("app_server_request_timeout", {
+          host_instance_id: this.hostInstanceId || null,
+          app_server_pid: this.child?.pid ?? null,
+          app_server_started_at: this.appServerStartedAt,
+          app_server_version: this.appServerVersion || null,
+          request_id: id,
+          method,
+          timeout_ms: timeout,
+          elapsed_ms: Date.now() - startedAt,
+          pending_requests: this.pending.size,
+          command_in_flight: this.commandInFlight,
+          thread_id: this.currentThreadId || null,
+        });
         reject(new Error("app_server_timeout"));
       }, timeout);
       timer.unref();
-      this.pending.set(id, { resolve, reject, timer });
+      this.pending.set(id, { resolve, reject, timer, method, startedAt });
       try {
         this.write({ id, method, params });
       } catch (error) {
@@ -510,7 +558,17 @@ export class RuntimeSessionRelay {
         this.host.checkpoint(command.id, relayId, { thread_id: threadId });
         try {
           await this.request("thread/name/set", { threadId, name: String(payload.title || "Better Codex") });
-        } catch {}
+        } catch (error) {
+          if (appServerConnectionFailure(error)) throw error;
+          relayDiagnostic("thread_name_failed", {
+            host_instance_id: this.hostInstanceId || null,
+            app_server_pid: this.child?.pid ?? null,
+            app_server_started_at: this.appServerStartedAt,
+            app_server_version: this.appServerVersion || null,
+            thread_id: threadId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
         const turn = payload.semantic_command === "review"
           ? object(await this.request("review/start", { threadId, target: { type: "uncommittedChanges" }, delivery: "inline" }))
           : object(await this.request("turn/start", await this.turnStartParams(threadId, payload)));

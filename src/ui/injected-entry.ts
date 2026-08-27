@@ -1750,6 +1750,10 @@ export function install(config: Record<string, any>) {
       return "desktop_bridge_request_failed";
     }
 
+    function desktopBridgeConnectionFailure(error) {
+      return ["desktop_bridge_unavailable", "desktop_bridge_timeout", "injection_destroyed"].includes(error instanceof Error ? error.message : String(error || ""));
+    }
+
     function codexError(value) {
       const error = value && typeof value === "object" ? value : {};
       const info = error.codexErrorInfo;
@@ -1813,6 +1817,8 @@ export function install(config: Record<string, any>) {
         event?.stopImmediatePropagation?.();
         appServerRequests.delete(id);
         clearTimeout(pending.timer);
+        const elapsed = Date.now() - pending.startedAt;
+        if (elapsed >= 5000) appendDiagnostic("app_server_request_slow", { request_id: id, method: pending.method, elapsed_ms: elapsed, outcome: response.error ? "error" : "success", thread_id: relayCurrentThreadId || null });
         if (response.error) pending.reject(new Error(appServerError(response.error)));
         else pending.resolve(response.result);
         return true;
@@ -1888,12 +1894,14 @@ export function install(config: Record<string, any>) {
     function sendAppServerRequest(method, params) {
       if (typeof window.electronBridge?.sendMessageFromView !== "function") return Promise.reject(new Error("desktop_bridge_unavailable"));
       const id = relayId + ":" + (++appServerSequence);
+      const startedAt = Date.now();
       return new Promise((resolve, reject) => {
         const timer = setTimeout(() => {
           appServerRequests.delete(id);
+          appendDiagnostic("app_server_request_timeout", { request_id: id, method, timeout_ms: 30000, elapsed_ms: Date.now() - startedAt, pending_requests: appServerRequests.size, command_in_flight: relayCommandInFlight, thread_id: relayCurrentThreadId || null });
           reject(new Error("desktop_bridge_timeout"));
         }, 30000);
-        appServerRequests.set(id, { resolve, reject, timer });
+        appServerRequests.set(id, { resolve, reject, timer, method, startedAt });
         Promise.resolve(window.electronBridge.sendMessageFromView({
           type: "mcp-request",
           hostId: "local",
@@ -2107,7 +2115,10 @@ export function install(config: Record<string, any>) {
           });
           try {
             await sendAppServerRequest("thread/name/set", { threadId, name: String(payload.title || "Better Codex") });
-          } catch {}
+          } catch (error) {
+            if (desktopBridgeConnectionFailure(error)) throw error;
+            appendDiagnostic("thread_name_failed", { thread_id: threadId, error: error instanceof Error ? error.message : String(error) });
+          }
           const turn = payload.semantic_command === "review"
             ? await sendAppServerRequest("review/start", { threadId, target: { type: "uncommittedChanges" }, delivery: "inline" })
             : await sendAppServerRequest("turn/start", turnStartParams(threadId, payload));
