@@ -22,7 +22,7 @@ Collect only the required values:
 - Exact release, such as `v0.4.5`.
 - Public domain.
 - Browser username.
-- Browser password of at least 12 characters.
+- Browser password of at least 8 characters.
 - VPS SSH target when Codex is not running on the server.
 
 The first browser credential becomes the initial Web account. Additional Web accounts are created only through the administrator-authenticated Better Codex CLI. The Web UI has no registration endpoint.

@@ -8,7 +8,7 @@ export function readHubSecret(fileVariable: string, valueVariable: string) {
 }
 
 export function validateWebPassword(password: string) {
-  if (password.length < 12 || password.length > 1024 || password.includes("\0")) throw new Error("hub_web_password_invalid");
+  if (password.length < 8 || password.length > 1024 || password.includes("\0")) throw new Error("hub_web_password_invalid");
   return password;
 }
 

@@ -218,7 +218,7 @@ install_vps() {
   printf 'Web password: ' >/dev/tty
   IFS= read -r -s password </dev/tty
   printf '\n' >/dev/tty
-  [ "${#password}" -ge 12 ] || fail "password must contain at least 12 characters"
+  [ "${#password}" -ge 8 ] || fail "password must contain at least 8 characters"
   target="$(version_tag)"
   directory="${BETTER_CODEX_SELFHOST_DIR:-/opt/better-codex}"
   prepare_install_source "$directory" "$target"
