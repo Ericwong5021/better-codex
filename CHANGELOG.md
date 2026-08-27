@@ -4,6 +4,12 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.10-beta.34] - 2026-08-27
+
+- Show live Codex token activity and keep the usage panel pinned, refreshable, and dismissible.
+- Reconcile queued Issue creation, Session lifecycle, and reply progress without duplicate or stale interface state.
+- Distinguish execution failures from semantic blockers and keep actionable failure details visible in conversations.
+
 ## [0.4.10-beta.33] - 2026-08-27
 
 - Keep auxiliary Web menus stable during refreshes and report scheduler failure only when the latest scheduler run failed.
@@ -917,7 +923,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.33...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.34...HEAD
+[0.4.10-beta.34]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.33...v0.4.10-beta.34
 [0.4.10-beta.33]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.32...v0.4.10-beta.33
 [0.4.10-beta.32]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.31...v0.4.10-beta.32
 [0.4.10-beta.31]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.30...v0.4.10-beta.31
