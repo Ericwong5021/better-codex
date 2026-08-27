@@ -4,6 +4,14 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.10-beta.37] - 2026-08-27
+
+- Measure Codex output speed from completed streaming intervals while counting every completed output-bearing request.
+- Preserve blocked Issue state after terminal interruptions and durably terminate poison Session Host deliveries with structured diagnostics.
+- Activate Runtime updates transactionally through drain, handoff replay, reconciliation, and readiness recovery.
+- Classify ResizeObserver delivery diagnostics without reporting benign browser delivery behavior as a product failure.
+- Release Better Codex-owned thread writers before handoff or native Codex resume.
+
 ## [0.4.10-beta.36] - 2026-08-27
 
 - Keep remote replies active until durable acknowledgement and wait for a user reply before continuing a reassigned Issue with its new Agent.
@@ -934,7 +942,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.36...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.37...HEAD
+[0.4.10-beta.37]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.36...v0.4.10-beta.37
 [0.4.10-beta.36]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.35...v0.4.10-beta.36
 [0.4.10-beta.35]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.34...v0.4.10-beta.35
 [0.4.10-beta.34]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.33...v0.4.10-beta.34
