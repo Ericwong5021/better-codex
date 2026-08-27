@@ -4,6 +4,10 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.10-beta.33] - 2026-08-27
+
+- Keep auxiliary Web menus stable during refreshes and report scheduler failure only when the latest scheduler run failed.
+
 ## [0.4.10-beta.32] - 2026-08-27
 
 - Bind MCP and system service registration to the current managed Core instead of accepting stale versioned entrypoints.
@@ -913,7 +917,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.32...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.33...HEAD
+[0.4.10-beta.33]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.32...v0.4.10-beta.33
 [0.4.10-beta.32]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.31...v0.4.10-beta.32
 [0.4.10-beta.31]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.30...v0.4.10-beta.31
 [0.4.10-beta.30]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.29...v0.4.10-beta.30
