@@ -190,7 +190,7 @@ export function betterCodexComponentStylesCss() {
       display: inline-flex;
       align-items: center;
       margin: 0;
-      font-size: 30px;
+      font-size: var(--bc-text-xl);
       font-weight: 400;
       line-height: 1.2;
     }
@@ -239,7 +239,7 @@ export function betterCodexComponentStylesCss() {
       box-shadow: var(--bc-inset-hairline);
       padding-inline: var(--bc-control-padding);
       font: inherit;
-      font-size: 16px;
+      font-size: var(--bc-text-md);
     }
 
     #better-codex-archive-dialog .better-codex-archive-search {
@@ -420,13 +420,13 @@ export function betterCodexComponentStylesCss() {
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-      font-size: 16px;
+      font-size: var(--bc-text-md);
       font-weight: 500;
     }
 
     #better-codex-archive-dialog .better-codex-archive-project-count {
       color: var(--bc-color-text-muted);
-      font-size: 14px;
+      font-size: var(--bc-text-sm);
     }
 
     #better-codex-archive-dialog .better-codex-archive-more {
@@ -484,8 +484,8 @@ export function betterCodexComponentStylesCss() {
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-      font-size: 16px;
-      font-weight: 500;
+      font-size: var(--bc-text-md);
+      font-weight: 550;
     }
 
     #better-codex-archive-dialog .better-codex-archive-row-copy span {
@@ -511,7 +511,7 @@ export function betterCodexComponentStylesCss() {
       color: var(--bc-color-text-muted);
       background: transparent;
       font: inherit;
-      font-size: 16px;
+      font-size: var(--bc-text-md);
       line-height: 1;
       cursor: pointer;
     }
@@ -560,7 +560,7 @@ export function betterCodexComponentStylesCss() {
       #better-codex-archive-dialog .better-codex-archive-shell { padding: 24px 24px 0; }
       #better-codex-archive-dialog .better-codex-archive-end-spacer { height: 24px; flex-basis: 24px; }
       #better-codex-archive-dialog header { margin-bottom: 24px; }
-      #better-codex-archive-dialog header h1 { font-size: calc(var(--bc-text-xl) + 5px); }
+      #better-codex-archive-dialog header h1 { font-size: var(--bc-text-xl); }
       #better-codex-archive-dialog .better-codex-archive-toolbar { grid-template-columns: 1fr; align-items: stretch; margin: 0 0 30px; }
       #better-codex-archive-dialog .better-codex-archive-search,
       #better-codex-archive-dialog .better-codex-archive-project-filter { width: auto; }
