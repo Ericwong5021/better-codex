@@ -231,6 +231,7 @@ export class IssueWorker {
       else this.enrichIssue(issue, issue.description, issue.agent_id || "");
     }
     this.sessionRelay.start();
+    for (const issue of this.store.listIssues()) this.syncIssueSessionTitle(issue.id);
     this.scheduleThreadActions(250);
     void this.reconcileDesktopRuns();
     this.schedule(0);
@@ -244,6 +245,30 @@ export class IssueWorker {
 
   applyThreadAction(issueId: string, action: IssueThreadAction) {
     return this.sessionRelay.threadAction(this.store.listIssueThreadIds(issueId), action);
+  }
+
+  private syncIssueSessionTitle(issueId: string) {
+    const issue = this.store.getIssue(issueId);
+    if (!issue || issue.archived_at || this.store.isEnrichmentPending(issue) || !issue.session_owned) return;
+    const session = this.store.getIssueSession(issueId);
+    if (!session || issueSessionIsEmptyFailure(session)) return;
+    const title = `${issue.identifier} ${issue.title}`.trim().slice(0, 200);
+    const requestId = `issue-title:${createHash("sha256").update(title).digest("hex")}`;
+    const existing = this.store.getSessionCommandByRequest(issueId, requestId);
+    if (existing && !["failed", "cancelled"].includes(existing.status)) return;
+    try {
+      this.store.enqueueSessionCommand({
+        issueId,
+        requestId,
+        kind: "rename",
+        threadId: session.thread_id,
+        payload: { title },
+        hostId: session.host_id,
+      });
+      workerDiagnostic("thread_name_queued", { issue_id: issue.id, issue_identifier: issue.identifier, thread_id: session.thread_id, title_length: title.length });
+    } catch (error) {
+      workerDiagnostic("thread_name_queue_failed", { issue_id: issue.id, issue_identifier: issue.identifier, thread_id: session.thread_id, error: error instanceof Error ? error.message : String(error) });
+    }
   }
 
   beginUpdateDrain() {
@@ -833,6 +858,7 @@ export class IssueWorker {
         const updated = mode === "regenerate"
           ? this.store.updateIssue(issue.id, current.version, result ? { title: result.title, enrichment_status: null } : { enrichment_status: "failed" })
           : this.store.updateIssue(issue.id, current.version, result ? { title: result.title, enrichment_status: null } : { enrichment_status: "failed" });
+        this.syncIssueSessionTitle(updated.id);
         workerDebug("enrichment_applied", {
           issue_id: issue.id,
           identifier: issue.identifier,
@@ -868,12 +894,14 @@ export class IssueWorker {
   private failEnrichment(issue: Issue, reason: string, mode: "initial" | "regenerate" = "initial") {
     workerDebug("enrichment_failed", { issue_id: issue.id, identifier: issue.identifier, mode, reason });
     try {
-      if (mode === "regenerate") this.store.updateIssue(issue.id, issue.version, { enrichment_status: "failed" });
+      let updated: Issue;
+      if (mode === "regenerate") updated = this.store.updateIssue(issue.id, issue.version, { enrichment_status: "failed" });
       else {
         const current = this.store.getIssue(issue.id);
         if (!current || current.enrichment_status !== "pending") return;
-        this.store.updateIssue(issue.id, current.version, { enrichment_status: "failed" });
+        updated = this.store.updateIssue(issue.id, current.version, { enrichment_status: "failed" });
       }
+      this.syncIssueSessionTitle(updated.id);
       this.onChange();
     } catch (error) {
       workerDebug("enrichment_apply_failed", {
@@ -1181,11 +1209,14 @@ export class IssueWorker {
   completeSessionCommand(commandId: string, relayId: string, result: Record<string, unknown>) {
     const command = this.store.completeSessionCommand(commandId, relayId, result);
     if (command.cancel_requested) this.store.enqueueSessionInterrupt(command.issue_id);
+    if (command.kind === "start") this.syncIssueSessionTitle(command.issue_id);
     return command;
   }
 
   checkpointSessionCommand(commandId: string, relayId: string, result: Record<string, unknown>) {
-    return this.store.checkpointSessionCommand(commandId, relayId, result);
+    const command = this.store.checkpointSessionCommand(commandId, relayId, result);
+    if (command.kind === "start" && command.turn_id) this.syncIssueSessionTitle(command.issue_id);
+    return command;
   }
 
   failSessionCommand(commandId: string, relayId: string, error: string, partialThreadId?: string, partialTurnId?: string) {
@@ -1224,12 +1255,16 @@ export class IssueWorker {
         return true;
       }
       if (message.kind === "checkpoint") {
-        this.store.checkpointSessionCommand(String(payload.command_id || ""), String(payload.relay_id || ""), payload.result && typeof payload.result === "object" ? payload.result as Record<string, unknown> : {});
+        const command = this.store.checkpointSessionCommand(String(payload.command_id || ""), String(payload.relay_id || ""), payload.result && typeof payload.result === "object" ? payload.result as Record<string, unknown> : {});
+        if (command.kind === "start" && command.turn_id) afterCommit = () => this.syncIssueSessionTitle(command.issue_id);
         return true;
       }
       if (message.kind === "complete") {
         const command = this.store.completeSessionCommand(String(payload.command_id || ""), String(payload.relay_id || ""), payload.result && typeof payload.result === "object" ? payload.result as Record<string, unknown> : {});
-        if (command.cancel_requested) afterCommit = () => this.store.enqueueSessionInterrupt(command.issue_id);
+        if (command.cancel_requested || command.kind === "start") afterCommit = () => {
+          if (command.cancel_requested) this.store.enqueueSessionInterrupt(command.issue_id);
+          if (command.kind === "start") this.syncIssueSessionTitle(command.issue_id);
+        };
         return true;
       }
       if (message.kind === "fail") {

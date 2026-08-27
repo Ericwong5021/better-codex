@@ -153,7 +153,7 @@ test("core workflow persists, orders status moves, and rejects stale writes", ()
     assert.equal(enriching.enrichment_status, "pending");
     assert.equal(store.isDispatchable(enriching), true);
     const enrichmentClaim = store.claimNextIssue(enriching.id);
-    assert.equal(enrichmentClaim?.issue.status, "in_progress");
+    assert.equal(enrichmentClaim?.issue.status, "todo");
     assert.equal(enrichmentClaim?.issue.enrichment_status, "pending");
     const enriched = store.updateIssue(enriching.id, enrichmentClaim!.issue.version, {
       title: "整理后的标题",
@@ -279,7 +279,7 @@ test("manual mode requires an explicit issue start", () => {
     const ready = store.updateIssue(userOwned.id, userOwned.version, { pending_actor: "agent", needs_attention: true });
     const claimed = store.claimNextIssue();
     assert.equal(claimed?.issue.id, ready.id);
-    assert.equal(claimed?.issue.status, "in_progress");
+    assert.equal(claimed?.issue.status, "in_review");
     assert.equal(claimed?.issue.needs_attention, false);
     assert.equal(store.claimNextIssue(), null);
 
@@ -582,7 +582,7 @@ test("user-stopped runs stay in their issue column and hand control back to the 
     assert.equal(claimed?.issue.id, issue.id);
     store.interruptRun(claimed!.runId, claimed!.issue.id);
     const stopped = store.getIssue(issue.id)!;
-    assert.equal(stopped.status, "in_progress");
+    assert.equal(stopped.status, "todo");
     assert.equal(stopped.latest_run_status, "interrupted");
     assert.equal(stopped.needs_attention, true);
     assert.equal(stopped.pending_actor, "user");
@@ -698,6 +698,7 @@ test("desktop session relay binds one native thread and tracks its turn", () => 
       workspacePath: target.directory,
     });
     const claim = store.claimNextIssue(issue.id)!;
+    assert.equal(claim.issue.status, "todo");
     const command = store.enqueueSessionCommand({
       issueId: issue.id,
       runId: claim.runId,
@@ -713,7 +714,17 @@ test("desktop session relay binds one native thread and tracks its turn", () => 
     const turnId = "019fec06-788f-7af3-a031-76b546904fe7";
     assert.equal(store.sessionTurnStarted(threadId, turnId), undefined);
     assert.equal(store.getSessionCommand(command.id)?.turn_id, null);
-    store.completeSessionCommand(command.id, "relay-a", { thread_id: threadId, turn_id: turnId });
+    worker.checkpointSessionCommand(command.id, "relay-a", { thread_id: threadId });
+    assert.equal(store.getIssue(issue.id)?.session_thread_id, threadId);
+    assert.equal(store.getIssue(issue.id)?.status, "todo");
+    worker.checkpointSessionCommand(command.id, "relay-a", { thread_id: threadId, turn_id: turnId });
+    assert.equal(store.getIssue(issue.id)?.status, "in_progress");
+    worker.completeSessionCommand(command.id, "relay-a", { thread_id: threadId, turn_id: turnId });
+    const rename = store.claimSessionCommand("relay-a")!;
+    assert.equal(rename.kind, "rename");
+    assert.equal(rename.thread_id, threadId);
+    assert.equal(rename.payload.title, `${issue.identifier} ${issue.title}`);
+    worker.completeSessionCommand(rename.id, "relay-a", { thread_id: threadId });
     assert.equal(store.sessionTurnStarted(threadId, turnId)?.issue_id, issue.id);
     const linked = store.getIssue(issue.id)!;
     assert.equal(linked.session_owned, true);

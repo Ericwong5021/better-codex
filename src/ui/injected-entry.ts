@@ -1764,10 +1764,6 @@ export function install(config: Record<string, any>) {
       return "desktop_bridge_request_failed";
     }
 
-    function desktopBridgeConnectionFailure(error) {
-      return ["desktop_bridge_unavailable", "desktop_bridge_timeout", "injection_destroyed"].includes(error instanceof Error ? error.message : String(error || ""));
-    }
-
     function codexError(value) {
       const error = value && typeof value === "object" ? value : {};
       const info = error.codexErrorInfo;
@@ -2127,12 +2123,6 @@ export function install(config: Record<string, any>) {
             method: "POST",
             body: JSON.stringify({ relay_id: relayId, result: { thread_id: threadId } })
           });
-          try {
-            await sendAppServerRequest("thread/name/set", { threadId, name: String(payload.title || "Better Codex") });
-          } catch (error) {
-            if (desktopBridgeConnectionFailure(error)) throw error;
-            appendDiagnostic("thread_name_failed", { thread_id: threadId, error: error instanceof Error ? error.message : String(error) });
-          }
           const turn = payload.semantic_command === "review"
             ? await sendAppServerRequest("review/start", { threadId, target: { type: "uncommittedChanges" }, delivery: "inline" })
             : await sendAppServerRequest("turn/start", turnStartParams(threadId, payload));
@@ -2176,6 +2166,14 @@ export function install(config: Record<string, any>) {
           relayCurrentThreadId = threadId;
           await resumePersistedThread(threadId, payload);
           await sendAppServerRequest("thread/compact/start", { threadId });
+        } else if (command.kind === "rename") {
+          if (!threadId) throw new Error("session_thread_invalid");
+          const name = String(payload.title || "").trim().slice(0, 200);
+          if (!name) throw new Error("thread_name_required");
+          relayCurrentThreadId = threadId;
+          await sendAppServerRequest("thread/name/set", { threadId, name });
+          completion = { name };
+          appendDiagnostic("thread_name_updated", { command_id: command.id, issue_id: command.issue_id, thread_id: threadId, title_length: name.length });
         } else if (command.kind === "native") {
           if (!threadId) throw new Error("session_thread_invalid");
           relayCurrentThreadId = threadId;
@@ -2207,6 +2205,7 @@ export function install(config: Record<string, any>) {
         if (threadId) relayThreads.add(threadId);
       } catch (error) {
         const commandError = error instanceof Error ? error.message : "desktop_bridge_request_failed";
+        if (command.kind === "rename") appendDiagnostic("thread_name_failed", { command_id: command.id, issue_id: command.issue_id, thread_id: threadId || null, error: commandError });
         if (threadId && turnId && commandError === "session_command_not_claimed") {
           await sendAppServerRequest("turn/interrupt", { threadId, turnId }).catch(() => {});
         }

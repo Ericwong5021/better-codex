@@ -50,10 +50,6 @@ function relayDiagnostic(event: string, detail: Record<string, unknown>) {
   console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "session_relay", event, ...detail })}`);
 }
 
-function appServerConnectionFailure(error: unknown) {
-  return ["app_server_unavailable", "app_server_timeout", "app_server_closed", "app_server_output_too_large"].includes(error instanceof Error ? error.message : String(error || ""));
-}
-
 function codexVersion(executable: string) {
   try {
     return execFileSync(executable, ["--version"], { encoding: "utf8", windowsHide: true, timeout: 5000 }).trim().match(/\b(\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?)\b/)?.[1] || "unknown";
@@ -556,19 +552,6 @@ export class RuntimeSessionRelay {
         if (!threadId) throw new Error("desktop_thread_start_invalid");
         this.currentThreadId = threadId;
         this.host.checkpoint(command.id, relayId, { thread_id: threadId });
-        try {
-          await this.request("thread/name/set", { threadId, name: String(payload.title || "Better Codex") });
-        } catch (error) {
-          if (appServerConnectionFailure(error)) throw error;
-          relayDiagnostic("thread_name_failed", {
-            host_instance_id: this.hostInstanceId || null,
-            app_server_pid: this.child?.pid ?? null,
-            app_server_started_at: this.appServerStartedAt,
-            app_server_version: this.appServerVersion || null,
-            thread_id: threadId,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
         const turn = payload.semantic_command === "review"
           ? object(await this.request("review/start", { threadId, target: { type: "uncommittedChanges" }, delivery: "inline" }))
           : object(await this.request("turn/start", await this.turnStartParams(threadId, payload)));
@@ -606,6 +589,14 @@ export class RuntimeSessionRelay {
         this.currentThreadId = threadId;
         await this.resume(threadId, payload);
         await this.request("thread/compact/start", { threadId });
+      } else if (command.kind === "rename") {
+        if (!threadId) throw new Error("session_thread_invalid");
+        const name = String(payload.title || "").trim().slice(0, 200);
+        if (!name) throw new Error("thread_name_required");
+        this.currentThreadId = threadId;
+        await this.request("thread/name/set", { threadId, name });
+        completion = { name };
+        relayDiagnostic("thread_name_updated", { command_id: command.id, issue_id: command.issue_id, host_instance_id: this.hostInstanceId || null, app_server_pid: this.child?.pid ?? null, app_server_started_at: this.appServerStartedAt, app_server_version: this.appServerVersion || null, thread_id: threadId, title_length: name.length });
       } else if (command.kind === "native") {
         if (!threadId) throw new Error("session_thread_invalid");
         this.currentThreadId = threadId;
@@ -636,6 +627,7 @@ export class RuntimeSessionRelay {
       if (threadId) this.threads.add(threadId);
     } catch (error) {
       const commandError = error instanceof Error ? error.message : "app_server_request_failed";
+      if (command.kind === "rename") relayDiagnostic("thread_name_failed", { command_id: command.id, issue_id: command.issue_id, host_instance_id: this.hostInstanceId || null, app_server_pid: this.child?.pid ?? null, app_server_started_at: this.appServerStartedAt, app_server_version: this.appServerVersion || null, thread_id: threadId || null, error: commandError });
       if (threadId && turnId && commandError === "session_command_not_claimed") {
         try {
           await this.request("turn/interrupt", { threadId, turnId });

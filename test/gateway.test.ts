@@ -385,7 +385,7 @@ test("gateway completes the issue workflow and survives restart", async () => {
       method: "POST",
       body: JSON.stringify({ project_id: nativeProject.id, title: "Native thread", description: "Implement it", status: "todo", agent_enabled: true, workspace_path: home }),
     });
-    const nativeIssue = await nativeIssueResponse.json() as { id: string; version: number; session_thread_id: string | null };
+    const nativeIssue = await nativeIssueResponse.json() as { id: string; identifier: string; version: number; session_thread_id: string | null };
     assert.equal(nativeIssue.session_thread_id, null);
     const nativeStart = await request(`/api/issues/${nativeIssue.id}/start`, { method: "POST", body: JSON.stringify({ version: nativeIssue.version }) });
     assert.equal(nativeStart.status, 202);
@@ -408,6 +408,18 @@ test("gateway completes the issue workflow and survives restart", async () => {
     assert.equal(linkedIssue.session_owned, true);
     assert.equal(linkedIssue.session_thread_id, nativeThreadId);
     assert.equal(linkedIssue.session_active_turn_id, nativeTurnId);
+    const renamePoll = await request("/api/session-relay/poll", {
+      method: "POST",
+      body: JSON.stringify({ relay_id: "relay-test", app_session_id: "app-test", capability: "ready" }),
+    });
+    const rename = await renamePoll.json() as { command: { id: string; kind: string; thread_id: string; payload: { title: string } } };
+    assert.equal(rename.command.kind, "rename");
+    assert.equal(rename.command.thread_id, nativeThreadId);
+    assert.equal(rename.command.payload.title, `${nativeIssue.identifier} Native thread`);
+    assert.equal((await request(`/api/session-relay/commands/${rename.command.id}/complete`, {
+      method: "POST",
+      body: JSON.stringify({ relay_id: "relay-test", result: { thread_id: nativeThreadId } }),
+    })).status, 200);
     const retryEvent = await request("/api/session-relay/events", {
       method: "POST",
       body: JSON.stringify({ relay_id: "relay-test", method: "error", params: { threadId: nativeThreadId, turnId: nativeTurnId, willRetry: true, error: { kind: "stream", code: "responseStreamDisconnected", httpStatusCode: 502, message: "stream disconnected" } } }),
