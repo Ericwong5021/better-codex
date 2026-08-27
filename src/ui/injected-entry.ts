@@ -1321,8 +1321,13 @@ export function install(config: Record<string, any>) {
 
     function syncAuxiliaryMenuOrder() {
       if (!auxiliaryMenu) return;
-      for (const item of [scheduledMobileEntry, projectsEntry, usageEntry, themeEntry, profileEntry]) {
-        if (item) auxiliaryMenu.append(item);
+      const items = [scheduledMobileEntry, projectsEntry, usageEntry, themeEntry, profileEntry].filter(
+        (item): item is HTMLElement => Boolean(item),
+      );
+      for (const [index, item] of items.entries()) {
+        if (auxiliaryMenu.children[index] !== item) {
+          auxiliaryMenu.insertBefore(item, auxiliaryMenu.children[index] ?? null);
+        }
       }
     }
 
