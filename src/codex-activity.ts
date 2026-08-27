@@ -416,6 +416,8 @@ class CodexActivityCollector {
         if (code !== "ENOENT") failures.push({ event: "file_discovery_failed", code, file: path });
       }
     }
+    if (!this.running || generation !== this.generation) return;
+    for (const path of files) notifySessionChange(path);
     const targets: Array<[string, FileCursor]> = discover ? [...this.cursors.entries()] : [];
     if (!discover) {
       for (const path of files) {
@@ -426,7 +428,7 @@ class CodexActivityCollector {
     for (const [path, cursor] of targets) {
       if (!this.running || generation !== this.generation) return;
       try {
-        if (await this.readFile(path, cursor, generation)) notifySessionChange(path);
+        await this.readFile(path, cursor, generation);
       } catch (error) {
         const code = errorCode(error);
         if (code === "ENOENT") this.cursors.delete(path);

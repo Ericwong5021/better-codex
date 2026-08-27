@@ -8,7 +8,7 @@ import { issueStatuses, Store } from "../src/db.js";
 import { IssueWorker } from "../src/worker.js";
 import { defaultAgentProfile, updateDefaultAgentProfile } from "../src/agent-profiles.js";
 import { readCodexAppearance } from "../src/appearance.js";
-import { startCodexActivityCollection, stopCodexActivityCollection } from "../src/codex-activity.js";
+import { readCodexActivity, startCodexActivityCollection, stopCodexActivityCollection } from "../src/codex-activity.js";
 import { SessionHostTransport, sessionHostDeliveryHash } from "../src/session-host-transport.js";
 import { SessionHostLineDecoder } from "../src/session-host-stream.js";
 
@@ -799,7 +799,8 @@ test("desktop session relay binds one native thread and tracks its turn", async 
     startCodexActivityCollection();
     worker = new IssueWorker(store);
     worker.start();
-    writeFileSync(rolloutPath, `${JSON.stringify({ type: "event_msg", timestamp: nativeStartedAt, payload: { type: "task_started", turn_id: nativeTurnId } })}\n`);
+    const oversizedRecord = JSON.stringify({ type: "response_item", timestamp: nativeStartedAt, payload: { type: "custom_tool_call", input: "x".repeat(1024 * 1024) } });
+    writeFileSync(rolloutPath, `${oversizedRecord}\n${JSON.stringify({ type: "event_msg", timestamp: nativeStartedAt, payload: { type: "task_started", turn_id: nativeTurnId } })}\n`);
     const waitFor = async (predicate: () => boolean) => {
       const deadline = Date.now() + 5000;
       while (Date.now() < deadline) {
@@ -808,6 +809,7 @@ test("desktop session relay binds one native thread and tracks its turn", async 
       }
       assert.fail("session_sync_timeout");
     };
+    await waitFor(() => readCodexActivity().errors.includes("codex_activity_line_too_large"));
     await waitFor(() => store.getIssue(issue.id)?.status === "in_progress" && store.getIssueReplyState(issue.id).status === "running");
     assert.equal(store.getIssue(issue.id)?.session_owned, false);
     assert.equal(store.getIssueSession(issue.id)?.active_turn_id, nativeTurnId);
