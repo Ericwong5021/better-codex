@@ -151,7 +151,8 @@ test("remote shared Web UI shows pending, acknowledgement, conflict, and resubmi
     await expect(page.locator(`[data-issue-id="${issue.id}"] [data-run="scheduling"]`)).toBeVisible();
     local.interruptRun(claim.runId, issue.id);
     await client.syncNow();
-    await expect(page.locator(`[data-issue-id="${issue.id}"] [data-run="interrupted"]`)).toBeVisible();
+    expect(local.getIssue(issue.id)?.status).toBe("blocked");
+    await expect(page.locator(`[data-issue-id="${issue.id}"] [data-run="blocked"]`)).toBeVisible();
     const completed = local.getIssue(issue.id)!;
     local.updateIssue(issue.id, completed.version, { status: "done" });
     await client.syncNow();
