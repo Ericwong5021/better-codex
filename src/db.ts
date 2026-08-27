@@ -780,12 +780,13 @@ export class Store {
     this.ensureAgentAvatarTable();
     this.ensureRunTable();
     this.ensureSessionTables();
+    this.ensureSessionHandoffColumn();
+    this.recoverHandedOffSessionBindings();
     this.ensureIssueReplyTable();
     this.ensureSettingsTable();
     this.ensureDispatchColumns();
     this.ensureEnrichmentColumn();
     this.ensureReplyDraftColumns();
-    this.ensureSessionHandoffColumn();
     this.ensureProjectColumns();
     this.recoverProjectPlanning();
     this.ensureSyncTriggers();
@@ -1391,6 +1392,58 @@ export class Store {
   private ensureSessionHandoffColumn() {
     const columns = new Set((this.db.prepare("PRAGMA table_info(issues)").all() as Array<{ name: string }>).map(item => item.name));
     if (!columns.has("session_handoff_at")) this.db.exec("ALTER TABLE issues ADD COLUMN session_handoff_at TEXT");
+  }
+
+  private recoverHandedOffSessionBindings() {
+    const rows = this.db.prepare(`
+      SELECT issues.id AS issue_id,
+        issues.session_handoff_at,
+        COALESCE(
+          (
+            SELECT issue_runs.thread_id
+            FROM issue_runs
+            WHERE issue_runs.issue_id = issues.id
+              AND issue_runs.thread_id IS NOT NULL
+              AND issue_runs.thread_id NOT LIKE 'local:%'
+              AND issue_runs.thread_id NOT LIKE 'cloud:%'
+            ORDER BY issue_runs.started_at DESC, issue_runs.rowid DESC
+            LIMIT 1
+          ),
+          issues.thread_id
+        ) AS thread_id,
+        (
+          SELECT issue_runs.turn_id
+          FROM issue_runs
+          WHERE issue_runs.issue_id = issues.id
+            AND issue_runs.thread_id IS NOT NULL
+            AND issue_runs.thread_id NOT LIKE 'local:%'
+            AND issue_runs.thread_id NOT LIKE 'cloud:%'
+          ORDER BY issue_runs.started_at DESC, issue_runs.rowid DESC
+          LIMIT 1
+        ) AS turn_id
+      FROM issues
+      WHERE issues.session_handoff_at IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM issue_sessions WHERE issue_sessions.issue_id = issues.id)
+    `).all() as Array<{ issue_id: string; session_handoff_at: string; thread_id: string | null; turn_id: string | null }>;
+    const insert = this.db.prepare(`
+      INSERT INTO issue_sessions (
+        issue_id, host_id, thread_id, status, active_turn_id, active_command_id, last_turn_id,
+        config_fingerprint, last_agent_message, last_error, created_at, updated_at
+      ) VALUES (?, 'local', ?, 'idle', NULL, NULL, ?, '', '', NULL, ?, ?)
+    `);
+    for (const row of rows) {
+      if (!row.thread_id || !/^[a-f0-9-]{36}$/i.test(row.thread_id)) {
+        console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: now(), scope: "session_binding", event: "handoff_binding_recovery_skipped", issue_id: row.issue_id, thread_id: row.thread_id, session_handoff_at: row.session_handoff_at, error: "thread_id_missing_or_invalid" })}`);
+        continue;
+      }
+      const owner = this.db.prepare("SELECT issue_id FROM issue_sessions WHERE thread_id = ?").get(row.thread_id) as { issue_id: string } | undefined;
+      if (owner && owner.issue_id !== row.issue_id) throw new Error("thread_association_conflict");
+      if (!owner) {
+        const lastTurnId = row.turn_id && /^[a-f0-9-]{36}$/i.test(row.turn_id) ? row.turn_id : null;
+        insert.run(row.issue_id, row.thread_id, lastTurnId, row.session_handoff_at, now());
+        console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: now(), scope: "session_binding", event: "handoff_binding_recovered", issue_id: row.issue_id, thread_id: row.thread_id, last_turn_id: lastTurnId, session_handoff_at: row.session_handoff_at })}`);
+      }
+    }
   }
 
   private ensureSettingsTable() {
@@ -2581,7 +2634,7 @@ export class Store {
         issue_sessions.status AS session_status,
         issue_sessions.active_turn_id AS session_active_turn_id,
         issue_sessions.last_error AS session_last_error, issue_sessions.retry_json AS session_retry_json, issue_sessions.updated_at AS session_updated_at,
-        CASE WHEN issue_sessions.issue_id IS NULL THEN 0 ELSE 1 END AS session_owned,
+        CASE WHEN issue_sessions.issue_id IS NOT NULL AND issues.session_handoff_at IS NULL THEN 1 ELSE 0 END AS session_owned,
         COALESCE((SELECT CASE WHEN session_relay.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now') THEN 1 ELSE 0 END FROM session_relay WHERE singleton = 1), 0) AS session_relay_connected,
         (SELECT error FROM session_relay WHERE singleton = 1) AS session_relay_error
       FROM issues
@@ -2801,7 +2854,7 @@ export class Store {
           FROM issue_sessions
           WHERE issue_sessions.issue_id = issues.id
         ) AS session_updated_at,
-        EXISTS(SELECT 1 FROM issue_sessions WHERE issue_sessions.issue_id = issues.id) AS session_owned,
+        CASE WHEN issues.session_handoff_at IS NULL AND EXISTS(SELECT 1 FROM issue_sessions WHERE issue_sessions.issue_id = issues.id) THEN 1 ELSE 0 END AS session_owned,
         COALESCE((SELECT CASE WHEN session_relay.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now') THEN 1 ELSE 0 END FROM session_relay WHERE singleton = 1), 0) AS session_relay_connected,
         (SELECT error FROM session_relay WHERE singleton = 1) AS session_relay_error
       FROM issues
@@ -3434,7 +3487,23 @@ export class Store {
     return this.transaction(() => {
       const timestamp = now();
       const issue = this.assertIssueSessionHandoffReady(issueId, threadId);
-      const session = this.db.prepare("SELECT 1 AS value FROM issue_sessions WHERE issue_id = ? AND thread_id = ?").get(issueId, threadId);
+      const session = this.getIssueSession(issueId);
+      if (!session) {
+        const owner = this.getIssueSessionByThread(threadId);
+        if (owner) throw new Error("thread_association_conflict");
+        const run = this.db.prepare(`
+          SELECT turn_id FROM issue_runs
+          WHERE issue_id = ? AND thread_id = ?
+          ORDER BY started_at DESC, rowid DESC
+          LIMIT 1
+        `).get(issueId, threadId) as { turn_id: string | null } | undefined;
+        this.db.prepare(`
+          INSERT INTO issue_sessions (
+            issue_id, host_id, thread_id, status, active_turn_id, active_command_id, last_turn_id,
+            config_fingerprint, last_agent_message, last_error, created_at, updated_at
+          ) VALUES (?, 'local', ?, 'idle', NULL, NULL, ?, '', '', NULL, ?, ?)
+        `).run(issueId, threadId, run?.turn_id || null, timestamp, timestamp);
+      }
       if (!issue.session_handoff_at) {
         this.db.prepare(`
           UPDATE issues
@@ -3443,10 +3512,6 @@ export class Store {
               updated_at = ?
           WHERE id = ? AND session_handoff_at IS NULL
         `).run(timestamp, timestamp, issueId);
-      }
-      if (session) {
-        const detached = this.db.prepare("DELETE FROM issue_sessions WHERE issue_id = ? AND thread_id = ? AND active_turn_id IS NULL").run(issueId, threadId);
-        if (detached.changes !== 1) throw new Error("thread_handoff_busy");
       }
       return this.getIssue(issueId)!;
     });
@@ -3810,13 +3875,40 @@ export class Store {
   }
 
   listSessionThreadIds() {
-    return (this.db.prepare("SELECT thread_id FROM issue_sessions ORDER BY created_at").all() as Array<{ thread_id: string }>).map(row => row.thread_id);
+    return (this.db.prepare(`
+      SELECT issue_sessions.thread_id
+      FROM issue_sessions
+      JOIN issues ON issues.id = issue_sessions.issue_id
+      WHERE issues.session_handoff_at IS NULL
+      ORDER BY issue_sessions.created_at
+    `).all() as Array<{ thread_id: string }>).map(row => row.thread_id);
   }
 
-  listActiveIssueSessions() {
-    return (this.db.prepare("SELECT issue_id FROM issue_sessions WHERE active_turn_id IS NOT NULL OR active_command_id IS NOT NULL ORDER BY updated_at").all() as Array<{ issue_id: string }>).flatMap(row => {
+  listOwnedActiveIssueSessions() {
+    return (this.db.prepare(`
+      SELECT issue_sessions.issue_id
+      FROM issue_sessions
+      JOIN issues ON issues.id = issue_sessions.issue_id
+      WHERE issues.session_handoff_at IS NULL
+        AND (issue_sessions.active_turn_id IS NOT NULL OR issue_sessions.active_command_id IS NOT NULL)
+      ORDER BY issue_sessions.updated_at
+    `).all() as Array<{ issue_id: string }>).flatMap(row => {
       const session = this.getIssueSession(row.issue_id);
       return session ? [session] : [];
+    });
+  }
+
+  listHandedOffIssueSessions() {
+    return (this.db.prepare(`
+      SELECT issue_sessions.issue_id, issues.session_handoff_at
+      FROM issue_sessions
+      JOIN issues ON issues.id = issue_sessions.issue_id
+      WHERE issues.session_handoff_at IS NOT NULL
+        AND issues.archived_at IS NULL
+      ORDER BY issue_sessions.updated_at
+    `).all() as Array<{ issue_id: string; session_handoff_at: string }>).flatMap(row => {
+      const session = this.getIssueSession(row.issue_id);
+      return session ? [{ ...session, session_handoff_at: row.session_handoff_at }] : [];
     });
   }
 
@@ -4796,6 +4888,9 @@ export class Store {
   enqueueSessionInterrupt(issueId: string) {
     const session = this.getIssueSession(issueId);
     if (!session?.active_turn_id) return undefined;
+    const issue = this.getIssue(issueId);
+    if (!issue) throw new Error("issue_not_found");
+    if (issue.session_handoff_at && !issue.session_owned) throw new Error("issue_session_handed_off");
     const run = this.db.prepare(`
       SELECT id FROM issue_runs
       WHERE issue_id = ? AND turn_id = ? AND status IN ('claimed', 'running') AND execution_mode = 'desktop'
@@ -4822,13 +4917,15 @@ export class Store {
     return command;
   }
 
-  sessionTurnStarted(threadId: string, turnId: string) {
+  sessionTurnStarted(threadId: string, turnId: string, startedAt?: string | null) {
     const timestamp = now();
+    const replyStartedAt = startedAt && Number.isFinite(Date.parse(startedAt)) ? startedAt : timestamp;
     return this.transaction(() => {
-      const session = this.db.prepare("SELECT issue_id, active_turn_id, active_command_id FROM issue_sessions WHERE thread_id = ?").get(threadId) as { issue_id: string; active_turn_id: string | null; active_command_id: string | null } | undefined;
+      const session = this.db.prepare("SELECT issue_id, active_turn_id, active_command_id, last_turn_id FROM issue_sessions WHERE thread_id = ?").get(threadId) as { issue_id: string; active_turn_id: string | null; active_command_id: string | null; last_turn_id: string | null } | undefined;
       if (!session) {
         return undefined;
       }
+      if (!session.active_turn_id && session.last_turn_id === turnId) return undefined;
       if (session.active_turn_id && session.active_turn_id !== turnId) {
         this.db.prepare(`
           UPDATE issue_runs
@@ -4871,7 +4968,7 @@ export class Store {
             error = NULL,
             started_at = excluded.started_at,
             finished_at = NULL
-        `).run(session.issue_id, `native:${threadId}:${turnId}`, timestamp);
+        `).run(session.issue_id, `native:${threadId}:${turnId}`, replyStartedAt);
         this.db.prepare(`
           UPDATE issues
           SET status = 'in_progress',

@@ -56,6 +56,19 @@ const recentFileMs = 24 * 60 * 60 * 1000;
 const maxInitialReadBytes = 8 * 1024 * 1024;
 const maxLineBytes = 1024 * 1024;
 const readChunkBytes = 256 * 1024;
+const sessionChangeListeners = new Set<(threadId: string) => void>();
+
+function notifySessionChange(path: string) {
+  const threadId = path.match(/-([a-f0-9-]{36})\.jsonl$/i)?.[1] || "";
+  if (!threadId) return;
+  for (const listener of sessionChangeListeners) {
+    try {
+      listener(threadId);
+    } catch (error) {
+      diagnostic("session_change_listener_failed", { thread_id: threadId, error: errorCode(error) });
+    }
+  }
+}
 
 function nonNegativeInteger(value: unknown) {
   const number = Number(value);
@@ -323,7 +336,7 @@ class CodexActivityCollector {
       cursor.outputCompletedAt = null;
       cursor.discardFirstLine = cursor.offset > 0;
     }
-    if (fileStat.size === cursor.offset) return;
+    if (fileStat.size === cursor.offset) return false;
     const descriptor = await open(path, "r");
     try {
       const buffer = Buffer.allocUnsafe(readChunkBytes);
@@ -331,7 +344,7 @@ class CodexActivityCollector {
         const length = Math.min(buffer.length, fileStat.size - cursor.offset);
         const { bytesRead } = await descriptor.read(buffer, 0, length, cursor.offset);
         if (bytesRead <= 0) throw new Error("codex_activity_read_stalled");
-        if (!this.running || generation !== this.generation) return;
+        if (!this.running || generation !== this.generation) return false;
         const combined = cursor.remainder.length ? Buffer.concat([cursor.remainder, buffer.subarray(0, bytesRead)]) : buffer.subarray(0, bytesRead);
         let start = 0;
         let discardFirstLine = cursor.discardFirstLine;
@@ -355,6 +368,7 @@ class CodexActivityCollector {
     } finally {
       await descriptor.close();
     }
+    return true;
   }
 
   private prune(now: number) {
@@ -412,7 +426,7 @@ class CodexActivityCollector {
     for (const [path, cursor] of targets) {
       if (!this.running || generation !== this.generation) return;
       try {
-        await this.readFile(path, cursor, generation);
+        if (await this.readFile(path, cursor, generation)) notifySessionChange(path);
       } catch (error) {
         const code = errorCode(error);
         if (code === "ENOENT") this.cursors.delete(path);
@@ -515,4 +529,9 @@ export function stopCodexActivityCollection() {
 
 export function readCodexActivity() {
   return activityCollector.snapshot();
+}
+
+export function subscribeCodexSessionChanges(listener: (threadId: string) => void) {
+  sessionChangeListeners.add(listener);
+  return () => sessionChangeListeners.delete(listener);
 }

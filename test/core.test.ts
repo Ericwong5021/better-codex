@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -8,6 +8,7 @@ import { issueStatuses, Store } from "../src/db.js";
 import { IssueWorker } from "../src/worker.js";
 import { defaultAgentProfile, updateDefaultAgentProfile } from "../src/agent-profiles.js";
 import { readCodexAppearance } from "../src/appearance.js";
+import { startCodexActivityCollection, stopCodexActivityCollection } from "../src/codex-activity.js";
 import { SessionHostTransport, sessionHostDeliveryHash } from "../src/session-host-transport.js";
 import { SessionHostLineDecoder } from "../src/session-host-stream.js";
 
@@ -686,11 +687,16 @@ test("agent avatars persist independently and are removed with their profile", (
   }
 });
 
-test("desktop session relay binds one native thread and tracks its turn", () => {
+test("desktop session relay binds one native thread and tracks its turn", async () => {
   const target = temporaryDatabase();
+  const previousCodexHome = process.env.CODEX_HOME;
+  const previousDisableSessionRelay = process.env.BETTER_CODEX_DISABLE_RUNTIME_SESSION_RELAY;
+  let worker: IssueWorker | undefined;
   try {
+    process.env.CODEX_HOME = join(target.directory, "codex");
+    process.env.BETTER_CODEX_DISABLE_RUNTIME_SESSION_RELAY = "1";
     let store = new Store(target.file);
-    const worker = new IssueWorker(store);
+    worker = new IssueWorker(store);
     const project = store.createProject({ name: "Native session", workspacePath: target.directory });
     const issue = store.createIssue({
       projectId: project.id,
@@ -769,13 +775,60 @@ test("desktop session relay binds one native thread and tracks its turn", () => 
     assert.equal(store.getIssue(issue.id)?.active_run_status, "scheduling");
     assert.equal(store.listPendingSchedulerRuns()[0]?.executionResult, "Finished");
     assert.equal(store.assertIssueSessionHandoffReady(issue.id, threadId).run_thread_id, threadId);
+    store.finalizeScheduler(claim.runId, issue.id, true, { status: "done", reason: "Finished", evidence: ["Finished"] });
     const handedOff = store.handoffIssueSession(issue.id, threadId);
     assert.equal(handedOff.run_thread_id, threadId);
     assert.equal(handedOff.session_owned, false);
     assert.ok(handedOff.session_handoff_at);
-    assert.equal(store.getIssueSession(issue.id), undefined);
+    assert.equal(store.getIssueSession(issue.id)?.thread_id, threadId);
+    assert.deepEqual(store.listSessionThreadIds(), []);
+    store.db.prepare("DELETE FROM issue_sessions WHERE issue_id = ?").run(issue.id);
+    store.close();
+    store = new Store(target.file);
+    assert.equal(store.getIssueSession(issue.id)?.thread_id, threadId);
+    assert.equal(store.getIssueSession(issue.id)?.last_turn_id, turnId);
+    assert.equal(store.getIssue(issue.id)?.session_owned, false);
+
+    const sessionDirectory = join(process.env.CODEX_HOME, "sessions", "2026", "08", "27");
+    mkdirSync(sessionDirectory, { recursive: true });
+    const rolloutPath = join(sessionDirectory, `rollout-2026-08-27T00-00-00-${threadId}.jsonl`);
+    const nativeTurnId = "019fec06-788f-7af3-a031-76b546904ff8";
+    const handoffAt = Date.parse(store.getIssue(issue.id)?.session_handoff_at || "");
+    const nativeStartedAt = new Date(handoffAt + 1000).toISOString();
+    const nativeCompletedAt = new Date(handoffAt + 2000).toISOString();
+    startCodexActivityCollection();
+    worker = new IssueWorker(store);
+    worker.start();
+    writeFileSync(rolloutPath, `${JSON.stringify({ type: "event_msg", timestamp: nativeStartedAt, payload: { type: "task_started", turn_id: nativeTurnId } })}\n`);
+    const waitFor = async (predicate: () => boolean) => {
+      const deadline = Date.now() + 5000;
+      while (Date.now() < deadline) {
+        if (predicate()) return;
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+      assert.fail("session_sync_timeout");
+    };
+    await waitFor(() => store.getIssue(issue.id)?.status === "in_progress" && store.getIssueReplyState(issue.id).status === "running");
+    assert.equal(store.getIssue(issue.id)?.session_owned, false);
+    assert.equal(store.getIssueSession(issue.id)?.active_turn_id, nativeTurnId);
+    appendFileSync(rolloutPath, `${JSON.stringify({ type: "event_msg", timestamp: nativeCompletedAt, payload: { type: "task_complete", turn_id: nativeTurnId, last_agent_message: "Native reply" } })}\n`);
+    await waitFor(() => store.getIssueReplyState(issue.id).status === "succeeded");
+    assert.equal(store.getIssue(issue.id)?.status, "in_review");
+    assert.equal(store.getIssueSession(issue.id)?.active_turn_id, null);
+    assert.equal(store.getIssueSession(issue.id)?.last_turn_id, nativeTurnId);
+    assert.equal(store.getIssueSession(issue.id)?.last_agent_message, "Native reply");
+    assert.equal(store.sessionTurnStarted(threadId, nativeTurnId), undefined);
+    worker.stop();
+    worker = undefined;
+    stopCodexActivityCollection();
     store.close();
   } finally {
+    worker?.stop();
+    stopCodexActivityCollection();
+    if (previousCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previousCodexHome;
+    if (previousDisableSessionRelay === undefined) delete process.env.BETTER_CODEX_DISABLE_RUNTIME_SESSION_RELAY;
+    else process.env.BETTER_CODEX_DISABLE_RUNTIME_SESSION_RELAY = previousDisableSessionRelay;
     rmSync(target.directory, { recursive: true, force: true });
   }
 });

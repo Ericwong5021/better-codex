@@ -4,8 +4,9 @@ import { appendFileSync, createWriteStream, existsSync, mkdirSync, readFileSync,
 import { createInterface } from "node:readline";
 import { dirname, join } from "node:path";
 import { agentConfigProfileName, defaultAgentProfile } from "./agent-profiles.js";
+import { subscribeCodexSessionChanges } from "./codex-activity.js";
 import { debugLoggingEnabled, schedulerRuntimePath, schedulerSchemaPath, runLogPath, workerLogPath } from "./config.js";
-import { agentSandboxModes, issueSessionIsEmptyFailure, Store, type AgentSandboxMode, type ClaimedIssue, type Issue, type IssueSessionRetryKind, type IssueThreadAction, type PendingThreadAction, type Project, type ScheduledTaskInput, type SchedulerDecision, type SessionCommand } from "./db.js";
+import { agentSandboxModes, issueSessionIsEmptyFailure, Store, type AgentSandboxMode, type ClaimedIssue, type Issue, type IssueSession, type IssueSessionRetryKind, type IssueThreadAction, type PendingThreadAction, type Project, type ScheduledTaskInput, type SchedulerDecision, type SessionCommand } from "./db.js";
 import { codexExecutablePath } from "./codex-cli.js";
 import { renderMarkdown } from "./markdown.js";
 import { readConversationActivity, readConversationResult } from "./session-transcript.js";
@@ -134,7 +135,11 @@ export class IssueWorker {
   private readonly manualQueue = new Set<string>();
   private readonly stoppingRuns = new Set<string>();
   private readonly sessionRelay: SessionHostClient;
-  private reconcilingSessions = false;
+  private sessionReconciliation: Promise<void> | null = null;
+  private readonly pendingSessionThreads = new Set<string>();
+  private reconcileAllSessions = false;
+  private reconcileWhileStopped = false;
+  private stopSessionChangeSubscription: (() => void) | null = null;
   private drainingThreadActions = false;
   private stopped = true;
 
@@ -220,6 +225,11 @@ export class IssueWorker {
 
   start() {
     this.stopped = false;
+    this.stopSessionChangeSubscription?.();
+    this.stopSessionChangeSubscription = subscribeCodexSessionChanges(threadId => {
+      if (this.stopped) return;
+      void this.reconcileDesktopRuns(false, threadId).catch(error => workerDiagnostic("session_reconciliation_failed", { thread_id: threadId, error: error instanceof Error ? error.message : String(error) }));
+    });
     this.store.recoverInterruptedRuns();
     const recoveredStaleSessions = this.store.recoverStaleSessionStatuses();
     if (recoveredStaleSessions) workerDebug("stale_session_statuses_recovered", { recovered_sessions: recoveredStaleSessions });
@@ -237,7 +247,7 @@ export class IssueWorker {
     this.sessionRelay.start();
     for (const issue of this.store.listIssues()) this.syncIssueSessionTitle(issue.id);
     this.scheduleThreadActions(250);
-    void this.reconcileDesktopRuns();
+    void this.reconcileDesktopRuns().catch(error => workerDiagnostic("session_reconciliation_failed", { error: error instanceof Error ? error.message : String(error) }));
     this.schedule(0);
   }
 
@@ -277,6 +287,8 @@ export class IssueWorker {
 
   beginUpdateDrain() {
     this.stopped = true;
+    this.stopSessionChangeSubscription?.();
+    this.stopSessionChangeSubscription = null;
     if (this.timer) clearTimeout(this.timer);
     if (this.threadActionTimer) clearTimeout(this.threadActionTimer);
     this.timer = null;
@@ -398,6 +410,8 @@ export class IssueWorker {
 
   stop() {
     this.stopped = true;
+    this.stopSessionChangeSubscription?.();
+    this.stopSessionChangeSubscription = null;
     if (this.timer) clearTimeout(this.timer);
     if (this.threadActionTimer) clearTimeout(this.threadActionTimer);
     this.timer = null;
@@ -1205,7 +1219,7 @@ export class IssueWorker {
       command: command || null,
       thread_ids: lease.leader ? this.store.listSessionThreadIds() : [],
       active_turns: lease.leader
-        ? this.store.listActiveIssueSessions().flatMap(session => session.active_turn_id ? [{ thread_id: session.thread_id, turn_id: session.active_turn_id }] : [])
+        ? this.store.listOwnedActiveIssueSessions().flatMap(session => session.active_turn_id ? [{ thread_id: session.thread_id, turn_id: session.active_turn_id }] : [])
         : [],
     };
   }
@@ -1407,30 +1421,104 @@ export class IssueWorker {
     if (!this.stopped) this.scheduler(claim, executionSuccess, executionError, completion.message.trim());
   }
 
-  private async reconcileDesktopRuns(allowStopped = false) {
-    if (this.reconcilingSessions || this.stopped && !allowStopped) return;
-    this.reconcilingSessions = true;
-    try {
-      for (const session of this.store.listActiveIssueSessions()) {
-        const threadId = session.thread_id;
-        const expectedTurnId = session.active_turn_id || "";
-        if (!threadId) continue;
-        const result = await readConversationActivity(threadId, expectedTurnId);
-        const activity = result.activity;
-        if (!activity.turn_id || (expectedTurnId && activity.turn_id !== expectedTurnId)) continue;
-        if (!expectedTurnId && !this.store.sessionTurnStarted(threadId, activity.turn_id)) continue;
-        if (activity.status === "running") {
-          this.store.sessionTurnStarted(threadId, activity.turn_id);
-          continue;
-        }
-        if (activity.status !== "completed" && activity.status !== "interrupted") continue;
-        if (result.last_agent_message) this.store.recordSessionAgentMessage(threadId, activity.turn_id, result.last_agent_message);
-        const completion = this.store.completeSessionTurn(threadId, activity.turn_id, activity.status);
-        if (completion) this.finishSessionTurn(completion);
-      }
-    } finally {
-      this.reconcilingSessions = false;
+  private reconcileDesktopRuns(allowStopped = false, changedThreadId = "") {
+    if (changedThreadId) this.pendingSessionThreads.add(changedThreadId);
+    else this.reconcileAllSessions = true;
+    if (allowStopped) this.reconcileWhileStopped = true;
+    if (this.stopped && !this.reconcileWhileStopped) {
+      this.pendingSessionThreads.clear();
+      this.reconcileAllSessions = false;
+      return Promise.resolve();
     }
+    if (this.sessionReconciliation) return this.sessionReconciliation;
+    const reconciliation = this.drainSessionReconciliation();
+    this.sessionReconciliation = reconciliation;
+    reconciliation.then(
+      () => this.finishSessionReconciliation(reconciliation),
+      () => this.finishSessionReconciliation(reconciliation),
+    );
+    return reconciliation;
+  }
+
+  private finishSessionReconciliation(reconciliation: Promise<void>) {
+    if (this.sessionReconciliation !== reconciliation) return;
+    this.sessionReconciliation = null;
+    const allowStopped = this.reconcileWhileStopped;
+    this.reconcileWhileStopped = false;
+    if (!this.reconcileAllSessions && !this.pendingSessionThreads.size) return;
+    if (this.stopped && !allowStopped) return;
+    void this.reconcileDesktopRuns(allowStopped).catch(error => workerDiagnostic("session_reconciliation_failed", { error: error instanceof Error ? error.message : String(error) }));
+  }
+
+  private async drainSessionReconciliation() {
+    while (this.reconcileAllSessions || this.pendingSessionThreads.size) {
+      const reconcileAll = this.reconcileAllSessions;
+      const changedThreadIds = [...this.pendingSessionThreads];
+      this.reconcileAllSessions = false;
+      this.pendingSessionThreads.clear();
+      const targets = new Map<string, IssueSession & { session_handoff_at: string | null }>();
+      if (reconcileAll) {
+        for (const session of this.store.listOwnedActiveIssueSessions()) targets.set(session.thread_id, { ...session, session_handoff_at: null });
+        for (const session of this.store.listHandedOffIssueSessions()) targets.set(session.thread_id, session);
+      } else {
+        for (const threadId of changedThreadIds) {
+          const session = this.store.getIssueSessionByThread(threadId);
+          if (!session) continue;
+          const issue = this.store.getIssue(session.issue_id);
+          if (!issue || issue.archived_at) continue;
+          const handedOffAt = issue.session_handoff_at && !issue.session_owned ? issue.session_handoff_at : null;
+          if (!handedOffAt && !session.active_turn_id && !session.active_command_id) continue;
+          targets.set(threadId, { ...session, session_handoff_at: handedOffAt });
+        }
+      }
+      let firstError: unknown;
+      for (const session of targets.values()) {
+        try {
+          await this.reconcileSessionActivity(session);
+        } catch (error) {
+          if (!firstError) firstError = error;
+          workerDiagnostic("session_reconciliation_failed", {
+            issue_id: session.issue_id,
+            thread_id: session.thread_id,
+            session_handoff_at: session.session_handoff_at,
+            active_turn_id: session.active_turn_id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+      if (firstError) throw firstError;
+    }
+  }
+
+  private async reconcileSessionActivity(session: IssueSession & { session_handoff_at: string | null }) {
+    const threadId = session.thread_id;
+    const expectedTurnId = session.active_turn_id || "";
+    const result = await readConversationActivity(threadId, expectedTurnId);
+    const activity = result.activity;
+    if (!activity.turn_id || expectedTurnId && activity.turn_id !== expectedTurnId) return;
+    if (session.session_handoff_at && !expectedTurnId) {
+      const handoffAt = Date.parse(session.session_handoff_at);
+      const startedAt = Date.parse(activity.started_at || "");
+      if (!Number.isFinite(handoffAt) || !Number.isFinite(startedAt)) {
+        workerDiagnostic("handed_off_session_timestamp_invalid", { issue_id: session.issue_id, thread_id: threadId, turn_id: activity.turn_id, session_handoff_at: session.session_handoff_at, started_at: activity.started_at });
+        return;
+      }
+      if (startedAt <= handoffAt) return;
+    }
+    const started = this.store.sessionTurnStarted(threadId, activity.turn_id, activity.started_at);
+    if (!expectedTurnId && !started) return;
+    if (started) {
+      if (session.session_handoff_at && !expectedTurnId) workerDiagnostic("handed_off_turn_started", { issue_id: session.issue_id, thread_id: threadId, turn_id: activity.turn_id, started_at: activity.started_at });
+      this.onChange();
+    }
+    if (activity.status === "running") return;
+    if (activity.status !== "completed" && activity.status !== "interrupted") return;
+    if (result.last_agent_message) this.store.recordSessionAgentMessage(threadId, activity.turn_id, result.last_agent_message);
+    const completion = this.store.completeSessionTurn(threadId, activity.turn_id, activity.status);
+    if (!completion) return;
+    this.finishSessionTurn(completion);
+    if (session.session_handoff_at) workerDiagnostic("handed_off_turn_completed", { issue_id: session.issue_id, thread_id: threadId, turn_id: activity.turn_id, status: activity.status, completed_at: activity.completed_at });
+    this.onChange();
   }
 
   private scheduler(claim: ClaimedIssue, executionSuccess: boolean, executionError: string | undefined, executionResult: string) {
