@@ -376,7 +376,10 @@ export class SyncClient {
             || recentlyFinished;
         })
       : issues;
-    for (const issue of candidates) if (issue.run_thread_id) await this.pushConversation(configuration, issue.id);
+    for (const issue of candidates) {
+      const failed = issue.latest_run_status === "failed" || issue.latest_scheduler_status === "failed" || issue.session_status === "failed" || this.store.getIssueReplyState(issue.id).status === "failed";
+      if (issue.run_thread_id || failed) await this.pushConversation(configuration, issue.id);
+    }
   }
 
   private async pullCommands(configuration: SyncConfiguration) {

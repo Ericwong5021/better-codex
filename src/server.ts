@@ -20,7 +20,7 @@ import { acquireRuntimeLock, cancelRuntimeAuthorityReservation, claimRuntimeAuth
 import { activeCoreCommand, checkGatewayUpdate, getGatewayUpdateState, installGatewayUpdate, readGatewayUpdateActivationState, recordGatewayUpdateActivation, rollbackAbandonedUpdate, rollbackActivatedUpdate, startGatewayUpdateChecks } from "./updater.js";
 import { packagedBuild } from "./build.js";
 import { basename, dirname, extname, join, resolve } from "node:path";
-import { normalizeSessionId, readConversationActivity, readConversationAttachment, readConversationResult, sessionWorkspace } from "./session-transcript.js";
+import { conversationMessagesWithPendingReply, normalizeSessionId, readConversationActivity, readConversationAttachment, readConversationResult, sessionWorkspace } from "./session-transcript.js";
 import { IssueWorker } from "./worker.js";
 import { maxMockupBytes, normalizeMockupLocale, readMockupState, replaceMockupState, resetMockupState, updateMockupState } from "./mockup.js";
 import { injectionScript } from "./dom.js";
@@ -850,8 +850,8 @@ export function startServer() {
     },
     async issueId => {
       const issue = store.getIssue(issueId);
-      if (!issue?.run_thread_id) return null;
-      const conversation = await readConversationResult(issue.run_thread_id);
+      if (!issue) return null;
+      const conversation = await readConversationResult(issue.run_thread_id || "");
       return store.conversationProjection(issueId, conversation.messages);
     },
     (issueId, requestId, message, files) => {
@@ -2232,10 +2232,14 @@ export function startServer() {
           const [current] = await reconcileInterruptedIssues(store, [issue]);
           const threadId = current.run_thread_id || current.session_thread_id || current.thread_id || "";
           const conversation = await readConversationResult(threadId);
+          const reply = store.getConversationReplyState(current.id);
+          const messages = conversationMessagesWithPendingReply(conversation.messages, reply, current.id);
           return sendJson(response, 200, {
             ...conversation,
+            found: messages.length > 0,
+            messages,
             issue_id: current.id,
-            reply: store.getIssueReplyState(current.id),
+            reply,
             queued_replies: queuedReplies(current, relayRequest ? "relay" : "local"),
             user: readCodexUserProfile(),
             issue: store.getIssue(current.id),

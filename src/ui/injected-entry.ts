@@ -147,6 +147,7 @@ export function install(config: Record<string, any>) {
     const state = { projects: [], projectsLoaded: false, issues: [], issuesLoaded: false, scheduledTasks: [], scheduledTasksLoaded: false, projectIssues: [], projectIssuesProjectId: "", projectDetailId: initialProjectRoute?.projectId || "", projectPage: "overview", projectDocumentView: "charter", projectDocumentPending: null, projectDocumentError: null, projectPlanningPending: null, projectPlanningError: null, agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: USER_AVATAR_COLORS[0], avatar: "", avatar_generated: true }, users: [], projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: initialAgentKey === "new" ? "create" : initialAgentKey ? "detail" : "preview", selectedAgentId: initialAgentKey && initialAgentKey !== "new" ? initialAgentKey : "", agentDraft: initialAgentKey === "new" ? { avatar: "icon:bot" } : null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: initialProjectRoute ? "projects" : initialAgentRoute ? "agents" : availableSurfaces.includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, autoDispatchPending: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", issueDescriptionLimit: 100000, mockup: false, keepCreate: rememberedKeepCreate, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], project: [], label: [] } };
     const pendingIssueRemovals = new Map();
     const pendingIssueCreates = new Map();
+    const pendingIssueReplies = new Map();
     const projectPlanningDrafts = new Map();
     let projectPlanningComposition = "";
     let projectRenderDeferred = null;
@@ -347,6 +348,7 @@ export function install(config: Record<string, any>) {
     }
     const localeResources = { "zh-CN": {}, en: {
       "调度失败": "Scheduling failed",
+      "任务执行失败。请根据下方失败原因处理后重新运行。": "Task execution failed. Resolve the failure below, then run the task again.",
       "重试回复": "Retry reply", "重新加载": "Reload", "回复等待超时。请检查模型服务连接后重试。": "The reply timed out. Check the model service connection and retry.", "网络连接异常，回复未完成。请检查网络和 Better Codex Runtime 后重试。": "The reply did not finish because of a network problem. Check your network and Better Codex Runtime, then retry.", "当前权限不足，无法完成回复。请调整智能体权限或允许所需操作后重试。": "The reply needs additional permission. Adjust the agent permission or allow the required action, then retry.", "Better Codex Runtime 已停止。请重新启动后重试。": "Better Codex Runtime stopped. Restart it and retry.", "上一条回复仍在进行中。请稍后重新加载。": "The previous reply is still running. Reload shortly.", "回复未完成。请打开完整会话查看详情，然后重试。": "The reply did not finish. Open the full conversation for details, then retry.", "会话加载超时。请确认 Better Codex Runtime 正在运行，然后重新加载。": "The conversation timed out while loading. Make sure Better Codex Runtime is running, then reload.", "无法加载会话。请检查网络和 Better Codex Runtime，然后重新加载。": "Unable to load the conversation. Check your network and Better Codex Runtime, then reload.", "没有权限加载会话。请调整权限后重新加载。": "You do not have permission to load the conversation. Adjust the permission, then reload.", "VPS 入口返回了 404；这表示路径或资源不存在，不能据此判断本机 Runtime 已停止。": "The VPS endpoint returned 404. The path or resource does not exist; this does not show that the local Runtime stopped.", "浏览器无法连接 VPS Relay 入口。请检查域名、网络、反向代理和 Relay 服务；本机 Runtime 状态未知。": "The browser cannot reach the VPS Relay endpoint. Check DNS, network, reverse proxy, and the Relay service. The local Runtime state is unknown.", "VPS 入口无法连接 Relay 服务。本机 Runtime 状态未知。": "The VPS endpoint cannot reach the Relay service. The local Runtime state is unknown.", "VPS Relay 当前没有连接到本机 Runtime。可能是 Runtime 停止、正在重启或网络中断。": "The VPS Relay is not connected to the local Runtime. The Runtime may be stopped or restarting, or the network may be interrupted.", "本机 Runtime 已主动断开与 VPS Relay 的连接，可能正在重启或已停止。": "The local Runtime actively disconnected from the VPS Relay. It may be restarting or stopped.", "VPS Relay 与本机 Runtime 的请求通道已中断，请等待重连后重试。": "The request channel between the VPS Relay and local Runtime was interrupted. Wait for reconnection, then retry.",
       "内容刚刚发生变化，请稍后重试。": "This content just changed. Try again shortly.", "内容刚刚发生变化，已同步最新状态，请重试本次操作。": "This content just changed. The latest state is synced; try the action again.", "相关内容不存在或已被移除。": "The requested content does not exist or was removed.", "当前账号没有执行此操作的权限。": "Your account does not have permission to perform this action.", "输入内容不符合要求，请检查后重试。": "Check the entered values and try again.", "当前状态无法完成此操作，请刷新后重试。": "This action is not available in the current state. Refresh and try again.", "服务暂时不可用，请稍后重试。": "The service is temporarily unavailable. Try again shortly.", "服务返回的数据格式异常，请稍后重试。": "The service returned an invalid response. Try again shortly.", "数据完整性检查失败，操作已停止。": "The integrity check failed, so the operation was stopped.", "安全校验失败，操作已停止。": "The security check failed, so the operation was stopped.", "服务发生异常，请稍后重试。": "The service encountered an error. Try again shortly.",
       "任务看板": "Task board", "打开任务看板": "Open task board", "智能体": "Agents", "管理智能体": "Manage agents", "创建和管理你的智能体": "Create and manage your agents",
@@ -494,6 +496,7 @@ export function install(config: Record<string, any>) {
     localeResources.en["标题生成中"] = "Regenerating title";
     localeResources.en["标题生成失败"] = "Title generation failed";
     localeResources.en["加入队列"] = "Queue message";
+    localeResources.en["正在发送…"] = "Sending…";
     localeResources.en["队列中 {{count}} 条消息"] = "{{count}} queued messages";
     localeResources.en["立即发送"] = "Send now";
     localeResources.en["编辑队列消息"] = "Edit queued message";
@@ -7208,6 +7211,10 @@ export function install(config: Record<string, any>) {
         throw error;
       }
       issues = issues.filter(issue => !pendingIssueRemovals.has(issue.id));
+      issues = issues.map(issue => {
+        const pending = pendingIssueReplies.get(issue.id);
+        return pending ? { ...issue, ...pending.patch } : issue;
+      });
       for (const pending of pendingIssueCreates.values()) {
         if (!issues.some(issue => issue.id === pending.issue.id)) issues.push(pending.issue);
       }
@@ -7697,6 +7704,7 @@ export function install(config: Record<string, any>) {
       let completedIssueUpdate = Promise.resolve();
       let replyDraftUpdate = Promise.resolve();
       let replyDraftPersistenceError = null;
+      let replySubmitInFlight = false;
       let retainCreateDraft = !issue;
       let createRequestId = issue ? "" : cachedCreateDraft?.requestId || globalThis.crypto?.randomUUID?.() || VERSION + "-create-" + Date.now() + "-" + Math.random().toString(36).slice(2);
       let submitInFlight = false;
@@ -7809,6 +7817,51 @@ export function install(config: Record<string, any>) {
         if (attachments) attachments.outerHTML = attachmentList(draft.replyAttachments, "reply");
         updateReplySendState();
         return composerUnchanged || composerAlreadyCleared;
+      }
+
+      function recomputeIssuePermissions() {
+        const permissions = issuePermissions(issue);
+        enrichmentLocked = permissions.enrichmentPending;
+        executionRunning = permissions.executionRunning;
+        executionLocked = permissions.executionLocked;
+        sessionHandoff = permissions.sessionHandoff;
+        completedIssue = permissions.executed && !executionRunning;
+        editingLocked = permissions.editingLocked;
+      }
+
+      function acceptReplySubmission(requestId, message) {
+        const timestamp = new Date().toISOString();
+        const patch = { status: "in_progress", reply_status: "running", needs_attention: false, pending_actor: "agent", updated_at: timestamp };
+        pendingIssueReplies.set(issue.id, {
+          requestId,
+          patch,
+          previous: {
+            status: issue.status,
+            reply_status: issue.reply_status,
+            needs_attention: issue.needs_attention,
+            pending_actor: issue.pending_actor,
+            updated_at: issue.updated_at,
+          },
+        });
+        Object.assign(issue, patch);
+        recomputeIssuePermissions();
+        optimisticReplies.set(requestId, { role: "user", markdown: message, timestamp, optimistic_request_id: requestId, accepted_at_ms: Date.now() });
+        syncOptimisticReplies();
+        syncConversationStatus("running");
+        render();
+      }
+
+      function settlePendingIssueReply(requestId, rollback = false) {
+        const pending = pendingIssueReplies.get(issue.id);
+        if (!pending || pending.requestId !== requestId) return;
+        pendingIssueReplies.delete(issue.id);
+        if (!rollback) return;
+        Object.assign(issue, pending.previous);
+        recomputeIssuePermissions();
+        state.selected = issue;
+        const issueIndex = state.issues.findIndex(candidate => candidate.id === issue.id);
+        if (issueIndex >= 0) state.issues[issueIndex] = issue;
+        render();
       }
 
       function recoverReply(requestId, message, submittedText, submittedAttachments, attempts = 0) {
@@ -7979,12 +8032,23 @@ export function install(config: Record<string, any>) {
         const send = dialog.querySelector("[data-conversation-send]");
         const reply = dialog.querySelector('[name="reply"]');
         if (!send) return;
+        const composer = send.closest(".better-codex-composer");
+        if (replySubmitInFlight) {
+          if (composer) composer.dataset.state = "submitting";
+          send.dataset.composerMode = "submitting";
+          send.setAttribute("aria-label", t("正在发送…"));
+          send.setAttribute("aria-busy", "true");
+          send.title = t("正在发送…");
+          send.innerHTML = replySubmitLoadingIcon();
+          send.disabled = true;
+          return;
+        }
+        send.removeAttribute("aria-busy");
         const stopping = issue?.session_status === "stopping";
         const archived = Boolean(issue?.archived_at);
         const working = stopping || executionRunning || replyStatus === "running";
         const hasContent = Boolean(String(reply?.value || "").trim() || draft.replyAttachments.length);
         const mode = stopping ? "stopping" : working && !hasContent ? "stop" : working ? "queue" : "send";
-        const composer = send.closest(".better-codex-composer");
         if (reply) reply.disabled = sessionHandoff || archived;
         if (composer) composer.dataset.state = mode;
         send.dataset.composerMode = mode;
@@ -7995,6 +8059,15 @@ export function install(config: Record<string, any>) {
         send.disabled = stopping || sessionHandoff || archived || (mode !== "stop" && !hasContent);
         const attach = dialog.querySelector("[data-conversation-attach]");
         if (attach) attach.disabled = sessionHandoff || archived;
+      }
+
+      function setReplySubmitLoading(loading) {
+        replySubmitInFlight = loading;
+        updateReplySendState();
+      }
+
+      function replySubmitLoadingIcon() {
+        return icon("refresh").replace("<svg ", '<svg data-bc-spin="true" ');
       }
 
       function applyDialogPermissions() {
@@ -8117,12 +8190,17 @@ export function install(config: Record<string, any>) {
         return '<div class="better-codex-dialog-head"><div class="better-codex-dialog-head-leading"><nav class="better-codex-dialog-breadcrumb" aria-label="' + te("任务看板") + '">' + crumb + '</nav></div><div class="better-codex-dialog-head-actions">' + restoreButton + openThreadButton + startNowButton + '<button class="better-codex-icon-button" type="button" data-dialog-expand aria-label="' + te(draft.expanded ? (issue ? "退出全屏" : "缩小") : "展开") + '">' + icon(draft.expanded ? "shrink" : "expand") + '</button><button class="better-codex-icon-button" type="button" data-dialog-close aria-label="' + te("关闭") + '">' + icon("close") + '</button></div></div>';
       }
 
+      function issueConversationFailed(candidate = issue) {
+        return candidate?.latest_run_status === "failed" || candidate?.latest_scheduler_status === "failed" || candidate?.session_status === "failed" || candidate?.reply_status === "failed";
+      }
+
       function conversationPanel() {
-        if (!issue || (!sessionId && !executionRunning)) return "";
+        if (!issue || (!sessionId && !executionRunning && !issueConversationFailed())) return "";
         const conversationState = issue.reply_status || "idle";
         const conversationStatus = conversationStatusMarkup(conversationState);
         const conversationBody = sessionId ? '<p class="better-codex-markdown-empty">' + te("加载对话…") + '</p>' : "";
-        return '<div class="better-codex-conversation-shell"><section class="better-codex-conversation"><div class="better-codex-conversation-head"><span>' + te("对话") + '</span><span class="better-codex-conversation-status" data-conversation-status data-state="' + escapeHtml(conversationState) + '"' + (conversationStatus ? "" : " hidden") + '>' + conversationStatus + '</span></div><div class="better-codex-timeline" data-conversation-body>' + conversationBody + '</div></section>' + sessionRetryBannerMarkup() + '<div class="better-codex-conversation-feedback" data-conversation-feedback hidden></div><div class="better-codex-composer-queue" data-conversation-queue role="list" hidden></div>' + conversationComposer() + '</div>';
+        const composer = sessionId ? '<div class="better-codex-composer-queue" data-conversation-queue role="list" hidden></div>' + conversationComposer() : "";
+        return '<div class="better-codex-conversation-shell"><section class="better-codex-conversation"><div class="better-codex-conversation-head"><span>' + te("对话") + '</span><span class="better-codex-conversation-status" data-conversation-status data-state="' + escapeHtml(conversationState) + '"' + (conversationStatus ? "" : " hidden") + '>' + conversationStatus + '</span></div><div class="better-codex-timeline" data-conversation-body><div data-conversation-messages>' + conversationBody + '</div><div class="better-codex-conversation-feedback" data-conversation-feedback role="alert" hidden></div></div></section>' + sessionRetryBannerMarkup() + composer + '</div>';
       }
 
       function sessionRetryBannerMarkup() {
@@ -8470,13 +8548,14 @@ export function install(config: Record<string, any>) {
         const archived = Boolean(issue.archived_at);
         const working = stopping || executionRunning || issue.reply_status === "running";
         const hasContent = Boolean(draft.reply.trim() || draft.replyAttachments.length);
-        const mode = stopping ? "stopping" : working && !hasContent ? "stop" : working ? "queue" : "send";
+        const mode = replySubmitInFlight ? "submitting" : stopping ? "stopping" : working && !hasContent ? "stop" : working ? "queue" : "send";
         const inputDisabled = sessionHandoff || archived ? " disabled" : "";
-        const actionDisabled = stopping || sessionHandoff || archived || (mode !== "stop" && !hasContent) ? " disabled" : "";
-        const actionLabel = t(stopping ? "正在停止…" : mode === "stop" ? "停止任务" : mode === "queue" ? "加入队列" : "发送");
+        const actionDisabled = replySubmitInFlight || stopping || sessionHandoff || archived || (mode !== "stop" && !hasContent) ? " disabled" : "";
+        const actionLabel = t(replySubmitInFlight ? "正在发送…" : stopping ? "正在停止…" : mode === "stop" ? "停止任务" : mode === "queue" ? "加入队列" : "发送");
         const attachments = attachmentList(draft.replyAttachments, "reply");
         const attachButton = '<button class="better-codex-composer-attach" type="button" data-conversation-attach aria-label="' + te("添加附件") + '" title="' + te("添加附件") + '"' + inputDisabled + '>' + icon("plus", "", "1.9") + '</button>';
-        return '<div class="better-codex-composer" data-state="' + mode + '">' + attachments + '<div class="better-codex-semantic-menu" id="better-codex-semantic-menu" data-semantic-menu role="listbox" hidden></div><textarea name="reply" rows="2" placeholder="' + te(archived ? "取消归档后继续对话" : sessionHandoff ? "请前往会话继续对话" : "输入下一步要求…") + '" aria-label="' + te("回复") + '" aria-autocomplete="list" aria-controls="better-codex-semantic-menu" aria-expanded="false"' + inputDisabled + '>' + escapeHtml(draft.reply) + '</textarea>' + semanticWarningMarkup(draft.replySemanticDocument) + '<div class="better-codex-composer-toolbar">' + attachButton + '<button class="better-codex-composer-send" type="button" data-conversation-send data-composer-mode="' + mode + '" aria-label="' + escapeHtml(actionLabel) + '" title="' + escapeHtml(actionLabel) + '"' + actionDisabled + '>' + icon(mode === "stop" || mode === "stopping" ? "stop" : "send", "", mode === "stop" || mode === "stopping" ? "2.5" : "2") + '</button></div></div>';
+        const actionIcon = replySubmitInFlight ? replySubmitLoadingIcon() : icon(mode === "stop" || mode === "stopping" ? "stop" : "send", "", mode === "stop" || mode === "stopping" ? "2.5" : "2");
+        return '<div class="better-codex-composer" data-state="' + mode + '">' + attachments + '<div class="better-codex-semantic-menu" id="better-codex-semantic-menu" data-semantic-menu role="listbox" hidden></div><textarea name="reply" rows="2" placeholder="' + te(archived ? "取消归档后继续对话" : sessionHandoff ? "请前往会话继续对话" : "输入下一步要求…") + '" aria-label="' + te("回复") + '" aria-autocomplete="list" aria-controls="better-codex-semantic-menu" aria-expanded="false"' + inputDisabled + '>' + escapeHtml(draft.reply) + '</textarea>' + semanticWarningMarkup(draft.replySemanticDocument) + '<div class="better-codex-composer-toolbar">' + attachButton + '<button class="better-codex-composer-send" type="button" data-conversation-send data-composer-mode="' + mode + '" aria-label="' + escapeHtml(actionLabel) + '" title="' + escapeHtml(actionLabel) + '"' + (replySubmitInFlight ? ' aria-busy="true"' : "") + actionDisabled + '>' + actionIcon + '</button></div></div>';
       }
 
       function syncQueuedReplyState() {
@@ -8605,6 +8684,7 @@ export function install(config: Record<string, any>) {
         const value = String(error instanceof Error ? error.message : error || "request_failed").toLowerCase();
         const serviceLabel = serviceFailureLabel(error);
         if (serviceLabel) return serviceLabel;
+        if (action === "execution") return "任务执行失败。请根据下方失败原因处理后重新运行。";
         if (action === "load") {
           if (value.includes("timeout") || value.includes("timed out") || value.includes("deadline")) return "会话加载超时。请确认 Better Codex Runtime 正在运行，然后重新加载。";
           if (["permission", "eacces", "eperm", "forbidden", "unauthorized", "401", "403", "approval"].some(marker => value.includes(marker))) return "没有权限加载会话。请调整权限后重新加载。";
@@ -8629,7 +8709,11 @@ export function install(config: Record<string, any>) {
         conversationFailureState = "failed";
         if (message) lastReplyMessage = message;
         feedback.dataset.tone = presentation.tone;
-        feedback.innerHTML = '<span>' + te(replyFailureMessage(failure, action)) + '</span><button type="button" data-conversation-retry="' + action + '">' + te(action === "load" ? "重新加载" : "重试回复") + '</button>';
+        const retry = action === "load" || action === "reply" && Boolean(message)
+          ? '<button type="button" data-conversation-retry="' + action + '">' + te(action === "load" ? "重新加载" : "重试回复") + '</button>'
+          : "";
+        const reasonLabel = state.locale === "zh-CN" ? "失败原因" : "Failure reason";
+        feedback.innerHTML = '<span><strong>' + te(action === "load" ? "无法加载会话" : "执行失败") + '</strong><br><span>' + te(replyFailureMessage(failure, action)) + '</span><br><code>' + escapeHtml(reasonLabel + ": " + failure.message) + '</code></span>' + retry;
         feedback.hidden = false;
         syncConversationStatus("failed");
         feedback.querySelector("[data-conversation-retry]")?.addEventListener("click", event => {
@@ -8796,11 +8880,28 @@ export function install(config: Record<string, any>) {
 
       function syncOptimisticReplies() {
         const body = dialog.querySelector("[data-conversation-body]");
-        if (!body) return;
+        const messages = dialog.querySelector("[data-conversation-messages]");
+        if (!body || !messages) return;
         const confirmed = conversationMessages.filter(message => !message.optimistic_request_id);
         conversationMessages = [...confirmed, ...optimisticReplies.values()];
-        body.innerHTML = conversationBubbles(conversationMessages, RELAY ? state.user : null);
+        messages.innerHTML = conversationBubbles(conversationMessages, RELAY ? state.user : null);
         body.scrollTop = body.scrollHeight;
+      }
+
+      function reconcileOptimisticReplies(messages) {
+        for (const [requestId, optimistic] of optimisticReplies) {
+          const optimisticAt = Date.parse(optimistic.timestamp || "");
+          const confirmed = messages.some(message => {
+            if (message.id === "reply-" + requestId) return true;
+            if (message.role !== "user" || message.markdown !== optimistic.markdown) return false;
+            const messageAt = Date.parse(message.timestamp || "");
+            return Number.isFinite(messageAt) && (!Number.isFinite(optimisticAt) || messageAt >= optimisticAt);
+          });
+          if (confirmed) {
+            optimisticReplies.delete(requestId);
+            traceDialog("reply_optimistic_confirmed", { request_id: requestId, confirmation_latency_ms: Math.max(0, Date.now() - Number(optimistic.accepted_at_ms || Date.now())) });
+          }
+        }
       }
 
       function renderPlainBubble(value) {
@@ -8809,9 +8910,10 @@ export function install(config: Record<string, any>) {
 
       function applyConversation(data, options = {}) {
         const body = dialog.querySelector("[data-conversation-body]");
+        const messageList = dialog.querySelector("[data-conversation-messages]");
         const status = dialog.querySelector("[data-conversation-status]");
         const send = dialog.querySelector("[data-conversation-send]");
-        if (!body || !status) return;
+        if (!body || !messageList || !status) return;
         if (!RELAY && data?.user && typeof data.user === "object") state.user = { ...state.user, ...data.user };
         const nextQueuedReplies = Array.isArray(data?.queued_replies) ? data.queued_replies : Array.isArray(data?.reply?.queued_replies) ? data.reply.queued_replies : null;
         if (nextQueuedReplies && !queueActionRequestId && !pendingQueueCommands.size) queuedReplies = nextQueuedReplies;
@@ -8821,16 +8923,17 @@ export function install(config: Record<string, any>) {
           : data?.html
             ? [{ role: "agent", html: data.html, markdown: data.markdown || "", timestamp: null }]
             : [];
+        reconcileOptimisticReplies(confirmedMessages);
         const messages = [...confirmedMessages, ...optimisticReplies.values()];
         const previousScrollTop = body.scrollTop;
         const stickToBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 48;
         if (messages.length) {
           conversationMessages = messages;
-          body.innerHTML = conversationBubbles(messages, RELAY ? state.user : data.user);
+          messageList.innerHTML = conversationBubbles(messages, RELAY ? state.user : data.user);
           body.scrollTop = stickToBottom ? body.scrollHeight : previousScrollTop;
         } else if (!options.preserveBody) {
           conversationMessages = [];
-          body.innerHTML = sessionId
+          messageList.innerHTML = sessionId
             ? sessionHandoff
               ? '<div class="better-codex-conversation-empty"><h3>' + te("开始对话") + '</h3><p>' + te("请前往会话继续对话") + '</p></div>'
               : executionRunning
@@ -8844,7 +8947,7 @@ export function install(config: Record<string, any>) {
         const stateName = optimisticReplies.size ? "running" : reply.status || "idle";
         lastReplyStatus = stateName;
         const expectedInterruption = stateName === "interrupted" && ["user_stopped", "session_interrupted"].includes(String(reply.error || ""));
-        if (!sessionHandoff && (stateName === "failed" || (stateName === "interrupted" && !expectedInterruption))) showConversationFailure(reply.error, "reply", reply.message, { origin: "turn" });
+        if (!sessionHandoff && (stateName === "failed" || (stateName === "interrupted" && !expectedInterruption))) showConversationFailure(reply.error, reply.message ? "reply" : "execution", reply.message, { origin: "turn" });
         else {
           clearConversationFailure();
           syncConversationStatus(stateName);
@@ -8856,7 +8959,7 @@ export function install(config: Record<string, any>) {
       }
 
       async function loadConversation(options = {}) {
-        if (!issue || !sessionId || !dialog.isConnected) return;
+        if (!issue || !dialog.isConnected) return;
         try {
           const data = await api("/api/issues/" + encodeURIComponent(issue.id) + "/conversation");
           conversationLoadFailures = 0;
@@ -8999,6 +9102,10 @@ export function install(config: Record<string, any>) {
           }
           return;
         }
+        if (replySubmitInFlight) return;
+        const initialComposerMode = send.dataset.composerMode || "send";
+        traceDialog("reply_submit_started", { request_id: requestId, composer_mode: initialComposerMode, message_length: text.length, attachment_count: draft.replyAttachments.length });
+        setReplySubmitLoading(true);
         if (!retrying) {
           try {
             await flushReplyDraft();
@@ -9007,6 +9114,7 @@ export function install(config: Record<string, any>) {
           }
           if (replyDraftPersistenceError) {
             presentInlineError(errorOutput, replyDraftPersistenceError, errorLabel(replyDraftPersistenceError), { source: "reply_draft_flush", request_id: requestId });
+            setReplySubmitLoading(false);
             return;
           }
         }
@@ -9028,17 +9136,16 @@ export function install(config: Record<string, any>) {
             }
           } catch (error) {
             presentInlineError(errorOutput, error, t(error instanceof Error ? error.message : "图片保存失败"), { source: "attachment_prepare", action: "reply", report: false });
-            send.disabled = false;
+            setReplySubmitLoading(false);
             return;
           }
         }
         const submittedAttachments = draft.replyAttachments.slice();
         const submittedSemanticDocument = reconcileSemanticText(semanticDocument, message);
         const submissionCommandId = globalThis.crypto?.randomUUID?.() || VERSION + "-reply-command-" + Date.now() + "-" + Math.random().toString(36).slice(2);
-        const queueMode = send.dataset.composerMode === "queue" || executionRunning;
+        const queueMode = initialComposerMode === "queue" || executionRunning;
         let reply;
         try {
-          lastReplyStatus = "running";
           lastReplySemanticReferences = semanticReferences.map(reference => ({ ...reference }));
           lastReplySemanticDocument = submittedSemanticDocument;
           lastReplyCommand = semanticCommand;
@@ -9050,10 +9157,11 @@ export function install(config: Record<string, any>) {
           traceDialog("reply_submit_unconfirmed", { request_id: requestId, outcome_uncertain: outcomeUncertain, composer_cleared: composerCleared, error: String(error instanceof Error ? error.message : "request_failed").slice(0, 200) });
           showConversationFailure(error, "reply", message);
           scheduleReplyRecovery(requestId, message, text, submittedAttachments);
-          send.disabled = false;
+          setReplySubmitLoading(false);
           return;
         }
         lastReplyRequestId = reply.request_id || requestId;
+        lastReplyStatus = "running";
         stopReplyRecovery();
         const composerCleared = completeReplySubmission(text, submittedAttachments);
         if (reply.queued === true) {
@@ -9062,18 +9170,16 @@ export function install(config: Record<string, any>) {
             if (!queuedReplies.some(item => item.request_id === requestId)) queuedReplies.push({ request_id: requestId, message, created_at: new Date().toISOString(), input_document: serializeSemanticDraft(submittedSemanticDocument) });
             syncQueuedReplyState();
           } else {
-            optimisticReplies.set(requestId, { role: "user", markdown: message, timestamp: new Date().toISOString(), optimistic_request_id: requestId });
-            syncOptimisticReplies();
-            syncConversationStatus("running");
+            acceptReplySubmission(requestId, message);
           }
+          setReplySubmitLoading(false);
           traceDialog("reply_command_queued", { command_id: submissionCommandId, request_id: requestId, queue_mode: queueMode, composer_cleared: composerCleared });
           watchQueuedCommand(submissionCommandId, {
             applied: async payload => {
               pendingQueueCommands.delete(submissionCommandId);
-              optimisticReplies.delete(requestId);
+              settlePendingIssueReply(requestId);
               if (!pendingQueueCommands.size && Array.isArray(payload?.queued_replies)) queuedReplies = payload.queued_replies;
               if (!dialog.isConnected) return;
-              syncOptimisticReplies();
               syncQueuedReplyState();
               await loadIssues({ background: true });
               if (payload?.initial_run) dialog.close();
@@ -9081,6 +9187,7 @@ export function install(config: Record<string, any>) {
             },
             failed: async error => {
               pendingQueueCommands.delete(submissionCommandId);
+              settlePendingIssueReply(requestId, true);
               optimisticReplies.delete(requestId);
               queuedReplies = queuedReplies.filter(item => item.request_id !== requestId);
               reportUnexpectedError(error, { source: "reply_queue_settle", issue_id: issue.id, request_id: requestId, command_id: submissionCommandId });
@@ -9092,6 +9199,9 @@ export function install(config: Record<string, any>) {
           });
           return;
         }
+        if (!queueMode) acceptReplySubmission(requestId, message);
+        setReplySubmitLoading(false);
+        settlePendingIssueReply(requestId);
         traceDialog("reply_submit_confirmed", { request_id: lastReplyRequestId, initial_run: Boolean(reply.initial_run), composer_cleared: composerCleared });
         if (reply.initial_run) {
           try {
@@ -9660,7 +9770,7 @@ export function install(config: Record<string, any>) {
             if (["send", "queue"].includes(sendButton?.dataset.composerMode || "")) void sendReply();
           }
         });
-        if (issue && sessionId && dialog.open) void loadConversation();
+        if (issue && dialog.open && (sessionId || issueConversationFailed())) void loadConversation();
         const closeDialogSelects = () => {
           dialog.querySelectorAll("[data-dialog-select]").forEach(picker => {
             picker.classList.remove("is-open");
@@ -10226,7 +10336,7 @@ export function install(config: Record<string, any>) {
       window.addEventListener("resize", mobileDialogViewport, { passive: true });
       traceDialog("dialog_open", { dialog_open: dialog.open });
       dialog.querySelector(draft.mode === "agent" ? '[name="prompt"]' : HOST_KIND === "web" && window.matchMedia("(max-width: 720px)").matches ? "[data-dialog-close]" : '[name="title"]')?.focus();
-      if (issue && sessionId) requestAnimationFrame(() => void loadConversation());
+      if (issue && (sessionId || issueConversationFailed())) requestAnimationFrame(() => void loadConversation());
     }
 
     function onBoardClick(event) {
@@ -10703,6 +10813,7 @@ export function install(config: Record<string, any>) {
       completionNoticeStack = null;
       issueSessionSnapshot.clear();
       sessionHandoffPending.clear();
+      pendingIssueReplies.clear();
       closeFilterMenu();
       closeIssueMenu();
       closeAuxiliaryMenu();

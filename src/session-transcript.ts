@@ -186,6 +186,35 @@ export function conversationContent(value: string) {
   return { markdown: lines.slice(0, marker).join("\n").trim(), attachments };
 }
 
+export function conversationMessagesWithPendingReply(
+  messages: ConversationMessage[],
+  reply: { request_id?: string; status: string; message: string; started_at?: string },
+  issueId: string,
+) {
+  const projected = messages.slice(-MAX_MESSAGES);
+  if (reply.status !== "running" || !reply.message) return projected;
+  const replyId = `reply-${reply.request_id || issueId}`;
+  const startedAt = Date.parse(reply.started_at || "");
+  const confirmed = projected.some(message => {
+    if (message.id === replyId) return true;
+    if (message.role !== "user" || message.markdown !== reply.message) return false;
+    const messageAt = Date.parse(message.timestamp || "");
+    return !Number.isFinite(startedAt) || Number.isFinite(messageAt) && messageAt >= startedAt;
+  });
+  if (confirmed) return projected;
+  const content = conversationContent(reply.message);
+  projected.push({
+    id: replyId,
+    role: "user",
+    markdown: reply.message,
+    html: renderMarkdown(content.markdown),
+    phase: null,
+    timestamp: reply.started_at || null,
+    ...(content.attachments.length ? { attachments: content.attachments.map(({ value: _value, ...attachment }) => attachment) } : {}),
+  });
+  return projected.slice(-MAX_MESSAGES);
+}
+
 function extractAssistantText(content: unknown) {
   if (!Array.isArray(content)) return "";
   const parts: string[] = [];

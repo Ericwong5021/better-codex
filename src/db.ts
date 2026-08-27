@@ -5,6 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import { databasePath, developmentDatabaseSnapshotSourcePath } from "./config.js";
 import { compileInputDocument, inputDocumentFingerprint, inputDocumentText, legacyInputDocument, normalizeInputDocument, type InputDocumentV2 } from "./codex-input-document.js";
 import { renderMarkdown } from "./markdown.js";
+import { conversationMessagesWithPendingReply } from "./session-transcript.js";
 import { syncProtocolVersion } from "./sync-contract.js";
 import { projectDocumentKeys, type ConversationProjection, type DirectoryBrowserResult, type IssueProjection, type ProjectDocumentKey, type ProjectDocumentView, type ProjectPlanningState, type ProjectPlanSnapshot, type ProjectProjection, type RemoteCommand, type RemoteCommandAck, type SyncEntityType, type SyncProjection } from "./sync-contract.js";
 
@@ -5110,14 +5111,50 @@ export class Store {
     return this.getIssueReplyState(state.issue_id);
   }
 
-  conversationProjection(issueId: string, messages: ConversationProjection["messages"]): ConversationProjection {
+  getConversationReplyState(issueId: string): IssueReplyState {
     const issue = this.getIssue(issueId);
     if (!issue) throw new Error("issue_not_found");
     const reply = this.getIssueReplyState(issueId);
-    const projected = messages.slice(-80).map(({ attachments: _attachments, ...message }) => ({ ...message, html: "" }));
-    if (reply.status === "running" && reply.message && !projected.some(message => message.role === "user" && message.markdown === reply.message)) {
-      projected.push({ id: `reply-${reply.request_id || issueId}`, role: "user", markdown: reply.message, html: "", phase: null, timestamp: reply.started_at || null });
-    }
+    if (reply.status !== "idle") return reply;
+    const run = this.db.prepare(`
+      SELECT id, status, error, scheduler_status, scheduler_error, started_at, finished_at
+      FROM issue_runs
+      WHERE issue_id = ?
+      ORDER BY started_at DESC, rowid DESC
+      LIMIT 1
+    `).get(issueId) as {
+      id: string;
+      status: string;
+      error: string | null;
+      scheduler_status: string | null;
+      scheduler_error: string | null;
+      started_at: string;
+      finished_at: string | null;
+    } | undefined;
+    const error = issue.session_status === "failed" && issue.session_last_error
+      ? issue.session_last_error
+      : run?.status === "failed"
+        ? run.error || "issue_execution_failed"
+        : run?.scheduler_status === "failed"
+          ? run.scheduler_error || "issue_scheduler_failed"
+          : "";
+    if (!error) return reply;
+    return {
+      issue_id: issueId,
+      request_id: run ? `run:${run.id}` : `session:${issueId}`,
+      status: "failed",
+      message: "",
+      error,
+      started_at: run?.started_at || issue.session_updated_at || issue.updated_at,
+      finished_at: run?.finished_at || issue.session_updated_at || issue.updated_at,
+    };
+  }
+
+  conversationProjection(issueId: string, messages: ConversationProjection["messages"]): ConversationProjection {
+    const issue = this.getIssue(issueId);
+    if (!issue) throw new Error("issue_not_found");
+    const reply = this.getConversationReplyState(issueId);
+    const projected = conversationMessagesWithPendingReply(messages, reply, issueId).map(({ attachments: _attachments, ...message }) => ({ ...message, html: "" }));
     return {
       issue_id: issueId,
       found: projected.length > 0,
