@@ -4,6 +4,13 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.10-beta.29] - 2026-08-27
+
+- Restore the mobile board scrollbar styling and keep reconciled edit conflicts out of error reports.
+- Restart only truly empty failed sessions and require explicit recovery before other session commands continue.
+- Start Issue execution immediately while generating titles in the background.
+- Confirm focused destructive actions with Enter.
+
 ## [0.4.10-beta.28] - 2026-08-27
 
 - Clear submitted reply drafts atomically while preserving newer text and attachment edits.
@@ -893,7 +900,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.28...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.29...HEAD
+[0.4.10-beta.29]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.28...v0.4.10-beta.29
 [0.4.10-beta.28]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.27...v0.4.10-beta.28
 [0.4.10-beta.27]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.26...v0.4.10-beta.27
 [0.4.10-beta.26]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.25...v0.4.10-beta.26
