@@ -4,6 +4,10 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.10-beta.35] - 2026-08-27
+
+- Keep live usage activity styling on the canonical Better Codex design tokens.
+
 ## [0.4.10-beta.34] - 2026-08-27
 
 - Show live Codex token activity and keep the usage panel pinned, refreshable, and dismissible.
@@ -923,7 +927,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.34...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.35...HEAD
+[0.4.10-beta.35]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.34...v0.4.10-beta.35
 [0.4.10-beta.34]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.33...v0.4.10-beta.34
 [0.4.10-beta.33]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.32...v0.4.10-beta.33
 [0.4.10-beta.32]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.31...v0.4.10-beta.32
