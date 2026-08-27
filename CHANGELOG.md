@@ -4,6 +4,13 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.10-beta.36] - 2026-08-27
+
+- Keep remote replies active until durable acknowledgement and wait for a user reply before continuing a reassigned Issue with its new Agent.
+- Collect Codex activity through the Runtime-owned resident watcher instead of rescanning rollouts per client.
+- Move terminal execution interruptions to the blocked column while keeping ordinary execution failures available for review.
+- Render Markdown image links as conversation attachments without duplicating them in the message body.
+
 ## [0.4.10-beta.35] - 2026-08-27
 
 - Keep live usage activity styling on the canonical Better Codex design tokens.
@@ -927,7 +934,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.35...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.36...HEAD
+[0.4.10-beta.36]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.35...v0.4.10-beta.36
 [0.4.10-beta.35]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.34...v0.4.10-beta.35
 [0.4.10-beta.34]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.33...v0.4.10-beta.34
 [0.4.10-beta.33]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.32...v0.4.10-beta.33
