@@ -63,6 +63,7 @@ const webHostHtml = String.raw`<!doctype html>
           <div class="web-usage-heading">
             <button id="web-usage-refresh" class="web-usage-refresh" type="button" aria-label="刷新 Codex 额度"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg></button>
             <strong id="web-usage-title">剩余用量</strong>
+            <button id="web-usage-pin" class="web-usage-pin" type="button" aria-label="固定额度展示" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5"></path><path d="M5 17h14"></path><path d="M6 3h12"></path><path d="M8 3v4.6a2 2 0 0 1-.4 1.2L6 11v2h12v-2l-1.6-2.2a2 2 0 0 1-.4-1.2V3"></path></svg></button>
             <button id="web-usage-close" class="web-usage-close" type="button" aria-label="关闭额度"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"></path></svg></button>
           </div>
           <div id="web-usage-body" class="web-usage-body"><span class="web-usage-status">点击查看 Codex 额度</span></div>
@@ -161,11 +162,12 @@ body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; 
 .web-account-usage[aria-expanded="true"] svg { transform: rotate(90deg); }
 .web-usage { margin: 0 6px; border-top: 1px solid var(--bc-color-hairline); padding: 9px 4px 10px; }
 .web-usage[hidden] { display: none; }
-.web-usage-heading { display: grid; grid-template-columns: 22px minmax(0, 1fr); align-items: center; gap: 4px; color: var(--bc-color-text-muted); font-size: 10px; }
-.web-usage-refresh { display: grid; width: 22px; height: 22px; border: 0; border-radius: var(--bc-radius-xs); padding: 0; place-items: center; color: inherit; background: transparent; cursor: pointer; }
-.web-usage-refresh:hover { color: var(--bc-color-text); background: var(--bc-color-hover); }
+.web-usage-heading { display: grid; grid-template-columns: 22px minmax(0, 1fr) 22px; align-items: center; gap: 4px; color: var(--bc-color-text-muted); font-size: 10px; }
+.web-usage-refresh, .web-usage-pin { display: grid; width: 22px; height: 22px; border: 0; border-radius: var(--bc-radius-xs); padding: 0; place-items: center; color: inherit; background: transparent; cursor: pointer; }
+.web-usage-refresh:hover, .web-usage-pin:hover { color: var(--bc-color-text); background: var(--bc-color-hover); }
 .web-usage-refresh:disabled { cursor: wait; }
-.web-usage-refresh svg { width: 13px; height: 13px; }
+.web-usage-refresh svg, .web-usage-pin svg { width: 13px; height: 13px; }
+.web-usage-pin[aria-pressed="true"] { color: var(--bc-color-text); background: var(--bc-color-pressed); }
 .web-usage-refresh[aria-busy="true"] svg { animation: web-usage-refresh-spin calc(var(--bc-motion-normal) + var(--bc-motion-normal) + var(--bc-motion-normal) + var(--bc-motion-normal)) linear infinite; }
 @keyframes web-usage-refresh-spin { to { transform: rotate(360deg); } }
 .web-usage-heading strong { font-weight: 590; }
@@ -258,7 +260,7 @@ body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; 
   .web-account:has(.web-account-usage[aria-expanded="true"]) { position: fixed; z-index: 60; right: max(10px, env(safe-area-inset-right)); bottom: calc(68px + env(safe-area-inset-bottom)); display: block; width: min(280px, calc(100vw - 20px)); border: 1px solid var(--bc-color-hairline); border-radius: var(--bc-radius-md); padding: 6px; background: var(--bc-color-surface-raised); box-shadow: var(--bc-elevation-menu); }
   .web-account:has(.web-account-usage[aria-expanded="true"]) .web-profile, .web-account:has(.web-account-usage[aria-expanded="true"]) .web-account-theme, .web-account:has(.web-account-usage[aria-expanded="true"]) .web-account-usage { display: none; }
   .web-account:has(.web-account-usage[aria-expanded="true"]) .web-usage { margin: 0; border: 0; padding: 10px; }
-  .web-account:has(.web-account-usage[aria-expanded="true"]) .web-usage-heading { grid-template-columns: 22px minmax(0, 1fr) 28px; }
+  .web-account:has(.web-account-usage[aria-expanded="true"]) .web-usage-heading { grid-template-columns: 22px minmax(0, 1fr) 22px 28px; }
   .web-account:has(.web-account-usage[aria-expanded="true"]) .web-usage-close { display: grid; width: 28px; height: 28px; border: 0; border-radius: var(--bc-radius-xs); padding: 0; place-items: center; color: var(--bc-color-text-muted); background: transparent; cursor: pointer; }
   .web-account:has(.web-account-usage[aria-expanded="true"]) .web-usage-close svg { width: 15px; height: 15px; }
   .web-nav-button .text-fade-truncate { display: block; }
@@ -301,6 +303,7 @@ const usageToggleButton = document.getElementById("web-usage-toggle");
 const usagePanel = document.getElementById("web-usage");
 const usageCloseButton = document.getElementById("web-usage-close");
 const usageRefreshButton = document.getElementById("web-usage-refresh");
+const usagePinButton = document.getElementById("web-usage-pin");
 const usageTitle = document.getElementById("web-usage-title");
 const usageBody = document.getElementById("web-usage-body");
 let installing = false;
@@ -316,6 +319,7 @@ const eventCursorKey = "better-codex-web-event-cursor";
 let profileLocale = "zh-CN";
 let usageLoadedAt = 0;
 let usageLoading = false;
+let usagePinned = false;
 let cachedUsage;
 let installPrompt;
 let relayRetryTimer;
@@ -496,6 +500,7 @@ function updateWebProfile(detail) {
   usageTitle.textContent = profileText("剩余用量", "Usage remaining");
   usageCloseButton.setAttribute("aria-label", profileText("关闭额度", "Close usage"));
   usageRefreshButton.setAttribute("aria-label", profileText("刷新 Codex 额度", "Refresh Codex usage"));
+  usagePinButton.setAttribute("aria-label", usagePinned ? profileText("取消固定额度展示", "Unpin Codex usage") : profileText("固定额度展示", "Pin Codex usage"));
   profileButton.setAttribute("aria-label", REMOTE ? profileText("编辑个人资料", "Edit profile") : profileText("查看 Codex 额度", "View Codex usage"));
   usageToggleButton.setAttribute("aria-label", profileText("查看 Codex 额度", "View Codex usage"));
   if (usageLoadedAt) renderUsage(cachedUsage);
@@ -588,7 +593,14 @@ async function loadUsage(force = false) {
   }
 }
 
-function closeUsage() {
+function setUsagePinned(pinned) {
+  usagePinned = pinned;
+  usagePinButton.setAttribute("aria-pressed", String(pinned));
+  usagePinButton.setAttribute("aria-label", pinned ? profileText("取消固定额度展示", "Unpin Codex usage") : profileText("固定额度展示", "Pin Codex usage"));
+}
+
+function closeUsage(resetPin = false) {
+  if (resetPin) setUsagePinned(false);
   usageToggleButton.setAttribute("aria-expanded", "false");
   usagePanel.hidden = true;
 }
@@ -609,16 +621,18 @@ profileButton.addEventListener("click", () => {
 });
 usageToggleButton.addEventListener("click", () => {
   const expanded = usageToggleButton.getAttribute("aria-expanded") !== "true";
+  if (!expanded) setUsagePinned(false);
   usageToggleButton.setAttribute("aria-expanded", String(expanded));
   usagePanel.hidden = !expanded;
   if (expanded) void loadUsage();
 });
 usageCloseButton.addEventListener("click", () => {
-  closeUsage();
+  closeUsage(true);
 });
 usageRefreshButton.addEventListener("click", () => void loadUsage(true));
+usagePinButton.addEventListener("click", () => setUsagePinned(!usagePinned));
 document.addEventListener("click", event => {
-  if (usagePanel.hidden || event.target?.closest?.("#web-usage, #web-usage-toggle, #web-profile")) return;
+  if (usagePinned || usagePanel.hidden || event.target?.closest?.("#web-usage, #web-usage-toggle, #web-profile")) return;
   closeUsage();
 });
 
