@@ -4,6 +4,10 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.10-beta.41] - 2026-08-28
+
+- Release terminal Session workers before late status events can block native thread handoff.
+
 ## [0.4.10-beta.40] - 2026-08-28
 
 - Keep Issue and Session state updates immediate when Codex activity metrics encounter oversized or malformed rollout records.
@@ -957,7 +961,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.40...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.41...HEAD
+[0.4.10-beta.41]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.40...v0.4.10-beta.41
 [0.4.10-beta.40]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.39...v0.4.10-beta.40
 [0.4.10-beta.39]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.38...v0.4.10-beta.39
 [0.4.10-beta.38]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.37...v0.4.10-beta.38
