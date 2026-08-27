@@ -7845,6 +7845,9 @@ export function install(config: Record<string, any>) {
         });
         Object.assign(issue, patch);
         recomputeIssuePermissions();
+        state.selected = issue;
+        const issueIndex = state.issues.findIndex(candidate => candidate.id === issue.id);
+        if (issueIndex >= 0) state.issues[issueIndex] = issue;
         optimisticReplies.set(requestId, { role: "user", markdown: message, timestamp, optimistic_request_id: requestId, accepted_at_ms: Date.now() });
         syncOptimisticReplies();
         syncConversationStatus("running");
@@ -9164,8 +9167,13 @@ export function install(config: Record<string, any>) {
         lastReplyStatus = "running";
         stopReplyRecovery();
         const composerCleared = completeReplySubmission(text, submittedAttachments);
-        if (reply.queued === true) {
-          pendingQueueCommands.set(submissionCommandId, { action: "reply", requestId });
+        const queuedCommandId = reply.queued === true
+          ? submissionCommandId
+          : HOST_KIND === "remote-projection" && reply.status === "running"
+            ? reply.request_id || requestId
+            : "";
+        if (queuedCommandId) {
+          pendingQueueCommands.set(queuedCommandId, { action: "reply", requestId });
           if (queueMode) {
             if (!queuedReplies.some(item => item.request_id === requestId)) queuedReplies.push({ request_id: requestId, message, created_at: new Date().toISOString(), input_document: serializeSemanticDraft(submittedSemanticDocument) });
             syncQueuedReplyState();
@@ -9173,10 +9181,10 @@ export function install(config: Record<string, any>) {
             acceptReplySubmission(requestId, message);
           }
           setReplySubmitLoading(false);
-          traceDialog("reply_command_queued", { command_id: submissionCommandId, request_id: requestId, queue_mode: queueMode, composer_cleared: composerCleared });
-          watchQueuedCommand(submissionCommandId, {
+          traceDialog("reply_command_queued", { command_id: queuedCommandId, request_id: requestId, queue_mode: queueMode, composer_cleared: composerCleared });
+          watchQueuedCommand(queuedCommandId, {
             applied: async payload => {
-              pendingQueueCommands.delete(submissionCommandId);
+              pendingQueueCommands.delete(queuedCommandId);
               settlePendingIssueReply(requestId);
               if (!pendingQueueCommands.size && Array.isArray(payload?.queued_replies)) queuedReplies = payload.queued_replies;
               if (!dialog.isConnected) return;
@@ -9186,15 +9194,15 @@ export function install(config: Record<string, any>) {
               else await loadConversation({ quiet: true });
             },
             failed: async error => {
-              pendingQueueCommands.delete(submissionCommandId);
+              pendingQueueCommands.delete(queuedCommandId);
               settlePendingIssueReply(requestId, true);
               optimisticReplies.delete(requestId);
               queuedReplies = queuedReplies.filter(item => item.request_id !== requestId);
-              reportUnexpectedError(error, { source: "reply_queue_settle", issue_id: issue.id, request_id: requestId, command_id: submissionCommandId });
+              reportUnexpectedError(error, { source: "reply_queue_settle", issue_id: issue.id, request_id: requestId, command_id: queuedCommandId });
               if (!dialog.isConnected) return;
               syncOptimisticReplies();
               syncQueuedReplyState();
-              showConversationFailure(error, "reply", message, { origin: "command_queue", command_id: submissionCommandId });
+              showConversationFailure(error, "reply", message, { origin: "command_queue", command_id: queuedCommandId });
             },
           });
           return;
