@@ -5,7 +5,7 @@ import { createInterface } from "node:readline";
 import { dirname, join } from "node:path";
 import { agentConfigProfileName, defaultAgentProfile } from "./agent-profiles.js";
 import { debugLoggingEnabled, schedulerRuntimePath, schedulerSchemaPath, runLogPath, workerLogPath } from "./config.js";
-import { agentSandboxModes, Store, type AgentSandboxMode, type ClaimedIssue, type Issue, type IssueSessionRetryKind, type IssueThreadAction, type PendingThreadAction, type Project, type ScheduledTaskInput, type SchedulerDecision, type SessionCommand } from "./db.js";
+import { agentSandboxModes, issueSessionIsEmptyFailure, Store, type AgentSandboxMode, type ClaimedIssue, type Issue, type IssueSessionRetryKind, type IssueThreadAction, type PendingThreadAction, type Project, type ScheduledTaskInput, type SchedulerDecision, type SessionCommand } from "./db.js";
 import { codexExecutablePath } from "./codex-cli.js";
 import { renderMarkdown } from "./markdown.js";
 import { readConversationActivity, readConversationResult } from "./session-transcript.js";
@@ -1012,7 +1012,7 @@ export class IssueWorker {
     }
     if (workspacePath !== claim.workspacePath) this.store.setRunWorkspace(claim.issue.id, workspacePath);
     const session = this.store.getIssueSession(claim.issue.id);
-    const replaceSession = Boolean(session && session.status === "failed" && !session.active_turn_id && !session.last_turn_id && !session.active_command_id);
+    const replaceSession = issueSessionIsEmptyFailure(session);
     const semantics = this.store.getInitialIssueSemantics(claim.issue.id);
     const payload = this.sessionPayload(claim.issue, workspacePath, issuePrompt(claim), semantics.references, semantics.command, semantics.document);
     try {
@@ -1089,13 +1089,13 @@ export class IssueWorker {
       if (["start", "turn", "review", "compact"].includes(existingCommand.kind)) {
         if (existingCommand.turn_id || (existingCommand.thread_id && existingCommand.error === "session_outcome_unknown")) throw new Error("session_command_outcome_unknown");
         const retrySession = this.store.getIssueSession(issueId);
-        const replaceSession = existingCommand.kind === "start" && Boolean(retrySession && !retrySession.active_turn_id);
+        const replaceSession = issueSessionIsEmptyFailure(retrySession) || Boolean(existingCommand.kind === "start" && retrySession && retrySession.status === "interrupted" && !retrySession.active_turn_id && !retrySession.last_turn_id);
         const deferred = existingCommand.payload.queued_reply === true;
         const queued = this.store.enqueueSessionReply({
           issueId,
           requestId,
-          kind: existingCommand.kind as "start" | "turn" | "review" | "compact",
-          threadId: existingCommand.kind === "start" ? null : existingCommand.thread_id,
+          kind: replaceSession ? "start" : existingCommand.kind as "start" | "turn" | "review" | "compact",
+          threadId: replaceSession || existingCommand.kind === "start" ? null : existingCommand.thread_id,
           payload: existingCommand.payload,
           message,
           hostId: existingCommand.host_id,
@@ -1108,7 +1108,7 @@ export class IssueWorker {
     const session = this.store.getIssueSession(issueId);
     if (!session) throw new Error("session_required");
     const payload: Record<string, unknown> = { ...this.sessionPayload(issue, issue.workspace_path || "", message, references, semanticCommand, document), request_message: message, request_input: requestInput };
-    const replaceSession = session.status === "failed" && !session.active_turn_id && !session.last_turn_id && !session.active_command_id;
+    const replaceSession = issueSessionIsEmptyFailure(session);
     if (replaceSession) {
       const queued = this.store.enqueueSessionReply({
         issueId,
@@ -1163,6 +1163,7 @@ export class IssueWorker {
     if (issue.session_handoff_at && !issue.session_owned) throw new Error("issue_session_handed_off");
     const session = this.store.getIssueSession(issueId);
     if (!session) throw new Error("session_required");
+    if (issueSessionIsEmptyFailure(session)) throw new Error("issue_session_restart_required");
     if (session.active_turn_id || issue.active_run_status || this.store.getIssueReplyState(issueId).status === "running") throw new Error("issue_execution_running");
     const payload = {
       ...this.sessionPayload(issue, issue.workspace_path || "", `/${command}${argument ? ` ${argument}` : ""}`),

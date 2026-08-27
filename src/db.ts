@@ -147,6 +147,10 @@ export type IssueSession = {
   updated_at: string;
 };
 
+export function issueSessionIsEmptyFailure(session: IssueSession | undefined) {
+  return Boolean(session && session.status === "failed" && !session.active_turn_id && !session.last_turn_id && !session.active_command_id);
+}
+
 export type SessionCommand = {
   id: string;
   issue_id: string;
@@ -3796,6 +3800,9 @@ export class Store {
       const issue = this.getIssue(input.issueId);
       if (!issue) throw new Error("issue_not_found");
       if (issue.archived_at) throw new Error("issue_archived");
+      const session = this.getIssueSession(input.issueId);
+      const restartEmptySession = issueSessionIsEmptyFailure(session) && input.kind === "start" && input.replaceSession === true;
+      if (issueSessionIsEmptyFailure(session) && !restartEmptySession) throw new Error("issue_session_restart_required");
       const existing = this.db.prepare("SELECT * FROM session_commands WHERE issue_id = ? AND request_id = ?").get(input.issueId, input.requestId) as Record<string, unknown> | undefined;
       if (existing) {
         const command = sessionCommandFromRow(existing);
@@ -3803,7 +3810,7 @@ export class Store {
         commandId = command.id;
         if (command.status === "failed" || command.status === "cancelled") {
           if (input.replaceSession) {
-            const detached = this.db.prepare("DELETE FROM issue_sessions WHERE issue_id = ? AND active_turn_id IS NULL").run(input.issueId);
+            const detached = this.db.prepare("DELETE FROM issue_sessions WHERE issue_id = ? AND active_turn_id IS NULL AND last_turn_id IS NULL AND ((status = 'failed' AND active_command_id IS NULL) OR status = 'interrupted')").run(input.issueId);
             if (detached.changes !== 1) throw new Error("issue_session_replace_conflict");
           }
           this.db.prepare(`
@@ -3816,7 +3823,7 @@ export class Store {
         }
       } else {
         if (input.replaceSession) {
-          const detached = this.db.prepare("DELETE FROM issue_sessions WHERE issue_id = ? AND active_turn_id IS NULL").run(input.issueId);
+          const detached = this.db.prepare("DELETE FROM issue_sessions WHERE issue_id = ? AND active_turn_id IS NULL AND last_turn_id IS NULL AND ((status = 'failed' AND active_command_id IS NULL) OR status = 'interrupted')").run(input.issueId);
           if (detached.changes !== 1) throw new Error("issue_session_replace_conflict");
         }
         commandId = randomUUID();
@@ -3882,10 +3889,14 @@ export class Store {
       const issue = this.getIssue(input.issueId);
       if (!issue) throw new Error("issue_not_found");
       if (issue.archived_at) throw new Error("issue_archived");
+      const session = this.getIssueSession(input.issueId);
+      const restartEmptySession = issueSessionIsEmptyFailure(session) && input.kind === "start" && input.replaceSession === true;
+      if (issueSessionIsEmptyFailure(session) && !restartEmptySession) throw new Error("issue_session_restart_required");
       const existingRow = this.db.prepare("SELECT * FROM session_commands WHERE issue_id = ? AND request_id = ?").get(input.issueId, input.requestId) as Record<string, unknown> | undefined;
       if (existingRow) {
         const existing = sessionCommandFromRow(existingRow);
-        if (existing.request_fingerprint !== fingerprint) throw new Error("request_id_conflict");
+        const matchingRestartPayload = restartEmptySession && existing.status === "failed" && canonicalJson(existing.payload) === canonicalJson(input.payload);
+        if (existing.request_fingerprint !== fingerprint && !matchingRestartPayload) throw new Error("request_id_conflict");
         commandId = existing.id;
         if (existing.status !== "failed" && existing.status !== "cancelled") {
           replayed = true;
@@ -3898,12 +3909,11 @@ export class Store {
       if (!input.deferred && issue.active_run_status) throw new Error("issue_execution_running");
       if (!input.deferred && reply.status === "running" && reply.request_id !== input.requestId) throw new Error("reply_busy");
       if (input.deferred) {
-        const session = this.getIssueSession(input.issueId);
         if (!session || session.thread_id !== input.threadId) throw new Error("issue_session_mismatch");
         if (input.kind !== "turn" || input.payload.queued_reply !== true) throw new Error("queued_reply_invalid");
       }
       if (input.replaceSession) {
-        const detached = this.db.prepare("DELETE FROM issue_sessions WHERE issue_id = ? AND active_turn_id IS NULL").run(input.issueId);
+        const detached = this.db.prepare("DELETE FROM issue_sessions WHERE issue_id = ? AND active_turn_id IS NULL AND last_turn_id IS NULL AND ((status = 'failed' AND active_command_id IS NULL) OR status = 'interrupted')").run(input.issueId);
         if (detached.changes !== 1) throw new Error("issue_session_replace_conflict");
       }
       const draftText = issue.reply_draft.trim();
@@ -3948,11 +3958,11 @@ export class Store {
       if (commandId) {
         this.db.prepare(`
           UPDATE session_commands
-          SET kind = ?, host_id = ?, thread_id = ?, turn_id = NULL, payload_json = ?,
+          SET request_fingerprint = ?, kind = ?, host_id = ?, thread_id = ?, turn_id = NULL, payload_json = ?,
               status = 'pending', result_json = NULL, relay_id = NULL, cancel_requested = 0,
               attempts = 0, error = NULL, claimed_at = NULL, finished_at = NULL, created_at = ?
           WHERE id = ? AND status IN ('failed', 'cancelled')
-        `).run(input.kind, input.hostId || "local", input.threadId || null, JSON.stringify(input.payload), timestamp, commandId);
+        `).run(fingerprint, input.kind, input.hostId || "local", input.threadId || null, JSON.stringify(input.payload), timestamp, commandId);
       } else {
         commandId = randomUUID();
         this.db.prepare(`
