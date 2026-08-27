@@ -149,6 +149,7 @@ class SessionHostServer {
   private handoff: SessionHostStatus["handoff"] = null;
   private orphanTimer: NodeJS.Timeout | null = null;
   private statusTimer: NodeJS.Timeout | null = null;
+  private deliveryRetryTimer: NodeJS.Timeout | null = null;
   private readonly relay = new RuntimeSessionRelay(this.proxyHost(), this.hostInstanceId);
 
   start() {
@@ -492,9 +493,25 @@ class SessionHostServer {
       return;
     }
     if (message.type === "delivery_ack") {
+      if (message.outcome === "retryable_error") {
+        const attempt = this.transport.retry(message);
+        this.sentDeliveries.delete(message.delivery_id);
+        this.writeStatus();
+        diagnostic("delivery_retry_scheduled", { delivery_id: message.delivery_id, host_instance_id: message.host_instance_id, sequence: message.sequence, error_code: message.error_code, attempt, connection_epoch: connection.epoch, runtime_instance_id: connection.runtimeInstanceId });
+        const delay = Math.min(30_000, 250 * 2 ** Math.min(7, attempt - 1));
+        if (this.deliveryRetryTimer) clearTimeout(this.deliveryRetryTimer);
+        this.deliveryRetryTimer = setTimeout(() => {
+          this.deliveryRetryTimer = null;
+          this.flushDeliveries();
+        }, delay);
+        this.deliveryRetryTimer.unref();
+        return;
+      }
       this.transport.acknowledge(message);
       this.sentDeliveries.delete(message.delivery_id);
       this.writeStatus();
+      diagnostic("delivery_acknowledged", { delivery_id: message.delivery_id, host_instance_id: message.host_instance_id, sequence: message.sequence, outcome: message.outcome || "applied", error_code: message.error_code || null, connection_epoch: connection.epoch, runtime_instance_id: connection.runtimeInstanceId });
+      this.flushDeliveries();
       return;
     }
   }
@@ -540,17 +557,15 @@ class SessionHostServer {
 
   private flushDeliveries() {
     const connection = this.connection?.authenticated ? this.connection : null;
-    if (!connection) return;
-    for (const delivery of this.transport.pending()) {
-      if (this.sentDeliveries.has(delivery.delivery_id)) continue;
-      try {
-        writeMessage(connection.socket, delivery);
-        this.sentDeliveries.add(delivery.delivery_id);
-      } catch (error) {
-        diagnostic("delivery_failed", { connection_epoch: connection.epoch, runtime_instance_id: connection.runtimeInstanceId, delivery_id: delivery.delivery_id, host_instance_id: delivery.host_instance_id, sequence: delivery.sequence, kind: delivery.kind, error: error instanceof Error ? error.message : String(error) });
-        connection.socket.destroy();
-        return;
-      }
+    if (!connection || this.sentDeliveries.size || this.deliveryRetryTimer) return;
+    const [delivery] = this.transport.pending();
+    if (!delivery) return;
+    try {
+      writeMessage(connection.socket, delivery);
+      this.sentDeliveries.add(delivery.delivery_id);
+    } catch (error) {
+      diagnostic("delivery_failed", { connection_epoch: connection.epoch, runtime_instance_id: connection.runtimeInstanceId, delivery_id: delivery.delivery_id, host_instance_id: delivery.host_instance_id, sequence: delivery.sequence, kind: delivery.kind, error: error instanceof Error ? error.message : String(error) });
+      connection.socket.destroy();
     }
   }
 
@@ -559,8 +574,10 @@ class SessionHostServer {
     this.shuttingDown = true;
     if (this.orphanTimer) clearTimeout(this.orphanTimer);
     if (this.statusTimer) clearInterval(this.statusTimer);
+    if (this.deliveryRetryTimer) clearTimeout(this.deliveryRetryTimer);
     this.orphanTimer = null;
     this.statusTimer = null;
+    this.deliveryRetryTimer = null;
     this.relay.stop();
     for (const connection of this.connections) connection.socket.destroy();
     this.connections.clear();

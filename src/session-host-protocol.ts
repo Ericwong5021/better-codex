@@ -71,6 +71,9 @@ export type SessionHostStatus = {
   queued_deliveries: number;
   last_delivery_sequence: number;
   last_acked_sequence: number;
+  terminal_rejected_deliveries: number;
+  retrying_deliveries: number;
+  last_delivery_error: string | null;
   handoff: {
     update_id: string;
     source_runtime_instance_id: string;
@@ -118,6 +121,9 @@ export type SessionHostHandoffSnapshot = {
   queued_deliveries: number;
   last_delivery_sequence: number;
   last_acked_sequence: number;
+  terminal_rejected_deliveries: number;
+  retrying_deliveries: number;
+  last_delivery_error: string | null;
 };
 
 export type SessionHostHandoffResponse = {
@@ -152,12 +158,21 @@ export type SessionHostDelivery = {
   payload: Record<string, unknown>;
 };
 
+export type SessionHostDeliveryOutcome = "applied" | "rejected_terminal" | "retryable_error";
+
+export type SessionHostDeliveryApplication = {
+  outcome: Exclude<SessionHostDeliveryOutcome, "retryable_error">;
+  error_code?: string;
+};
+
 export type SessionHostDeliveryAck = {
   type: "delivery_ack";
   delivery_id: string;
   host_instance_id: string;
   sequence: number;
   payload_hash: string;
+  outcome?: SessionHostDeliveryOutcome;
+  error_code?: string;
 };
 
 export type SessionHostShutdown = {

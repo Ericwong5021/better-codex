@@ -125,7 +125,7 @@ test("gateway completes the issue workflow and survives restart", async () => {
   try {
     await waitForGateway(port, gateway);
     const health = await (await fetch(`http://127.0.0.1:${port}/health`)).json() as { generation: number; database: { schemaVersion: number } };
-    assert.equal(health.database.schemaVersion, 22);
+    assert.equal(health.database.schemaVersion, 23);
     assert.equal(health.generation, 1);
     const firstRuntime = JSON.parse(readFileSync(join(home, "run", "runtime.json"), "utf8")) as { generation: number; instanceId: string };
     const firstAuthority = JSON.parse(readFileSync(join(home, "run", "runtime-authority.json"), "utf8")) as { generation: number; runtimeInstanceId: string; status: string };
@@ -659,6 +659,7 @@ input.on("line", line => {
     assert.equal((await sourceNext()).type, "hello_ack");
     diagnosticState.phase = "source_authenticated";
     let dispatched = false;
+    let retriedDeliveryId = "";
     let sourceSnapshot: Extract<SessionHostServerMessage, { type: "handoff_response" }>["snapshot"] | null = null;
     const updateId = "019fec06-788f-7af3-a031-76b546904f83";
     while (!sourceSnapshot) {
@@ -672,13 +673,20 @@ input.on("line", line => {
       }
       if (message.type === "delivery") {
         diagnosticState.last_delivery = message.kind;
-        source.write(`${JSON.stringify({ type: "delivery_ack", delivery_id: message.delivery_id, host_instance_id: message.host_instance_id, sequence: message.sequence, payload_hash: message.payload_hash })}\n`);
+        if (!retriedDeliveryId) {
+          retriedDeliveryId = message.delivery_id;
+          source.write(`${JSON.stringify({ type: "delivery_ack", delivery_id: message.delivery_id, host_instance_id: message.host_instance_id, sequence: message.sequence, payload_hash: message.payload_hash, outcome: "retryable_error", error_code: "database_busy" })}\n`);
+          continue;
+        }
+        if (message.delivery_id === retriedDeliveryId) retriedDeliveryId = "retried";
+        source.write(`${JSON.stringify({ type: "delivery_ack", delivery_id: message.delivery_id, host_instance_id: message.host_instance_id, sequence: message.sequence, payload_hash: message.payload_hash, outcome: "applied" })}\n`);
         if (message.kind === "fail") throw new Error(`session_host_command_failed:${JSON.stringify(message.payload)}`);
         if (message.kind === "event" && message.payload.method === "turn/started") source.write(`${JSON.stringify({ type: "begin_handoff", request_id: "continuity-handoff", update_id: updateId, target_runtime_generation: 2, target_version: "1.1.0", deadline_at: new Date(Date.now() + 60_000).toISOString() })}\n`);
       }
       if (message.type === "handoff_response" && message.request_id === "continuity-handoff") sourceSnapshot = message.snapshot;
     }
     diagnosticState.phase = "source_handoff_ready";
+    assert.equal(retriedDeliveryId, "retried");
     assert.equal(sourceSnapshot.active_turns.length, 1);
     assert.ok(sourceSnapshot.app_server_pid);
     source.destroy();

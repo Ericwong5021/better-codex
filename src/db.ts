@@ -104,6 +104,8 @@ export type SessionDeliveryReceipt = {
   payload_hash: string;
 };
 
+export type SessionDeliveryReceiptOutcome = "applied" | "rejected_terminal";
+
 export const updateOperationStatuses = ["ACCEPTED", "STAGING", "DRAINING_DISPATCH", "WAITING_FOR_HOST_DRAIN", "HANDOFF_READY", "RESTARTING_RUNTIME", "REPLAYING", "RECONCILING", "SERVING_READY", "COMPLETED", "ROLLING_BACK", "ROLLED_BACK", "FAILED"] as const;
 export type UpdateOperationStatus = typeof updateOperationStatuses[number];
 
@@ -363,7 +365,7 @@ export function cleanMaxConcurrency(value: number | undefined) {
   return value;
 }
 
-const latestSchemaVersion = 22;
+const latestSchemaVersion = 23;
 
 function now() {
   return new Date().toISOString();
@@ -1243,6 +1245,14 @@ export class Store {
         const columns = new Set((this.db.prepare("PRAGMA table_info(issue_sessions)").all() as Array<{ name: string }>).map(item => item.name));
         if (!columns.has("retry_json")) this.db.exec("ALTER TABLE issue_sessions ADD COLUMN retry_json TEXT");
         this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (22, ?)").run(now());
+      });
+    }
+    if (fromVersion < 23) {
+      this.transaction(() => {
+        const columns = new Set((this.db.prepare("PRAGMA table_info(session_delivery_receipts)").all() as Array<{ name: string }>).map(item => item.name));
+        if (!columns.has("outcome")) this.db.exec("ALTER TABLE session_delivery_receipts ADD COLUMN outcome TEXT NOT NULL DEFAULT 'applied'");
+        if (!columns.has("error_code")) this.db.exec("ALTER TABLE session_delivery_receipts ADD COLUMN error_code TEXT");
+        this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (23, ?)").run(now());
       });
     }
   }
@@ -4172,21 +4182,30 @@ export class Store {
     `).run(timestamp, error, timestamp, relayId);
   }
 
-  applySessionHostDelivery<T>(receipt: SessionDeliveryReceipt, apply: () => T) {
+  applySessionHostDelivery<T>(receipt: SessionDeliveryReceipt, apply: () => T, terminalErrorCode: (error: unknown) => string | null = () => null) {
     return this.transaction(() => {
-      const existing = this.db.prepare("SELECT host_instance_id, sequence, payload_hash FROM session_delivery_receipts WHERE delivery_id = ?").get(receipt.delivery_id) as { host_instance_id: string; sequence: number; payload_hash: string } | undefined;
+      const existing = this.db.prepare("SELECT host_instance_id, sequence, payload_hash, outcome, error_code FROM session_delivery_receipts WHERE delivery_id = ?").get(receipt.delivery_id) as { host_instance_id: string; sequence: number; payload_hash: string; outcome: SessionDeliveryReceiptOutcome; error_code: string | null } | undefined;
       if (existing) {
         if (existing.host_instance_id !== receipt.host_instance_id || Number(existing.sequence) !== receipt.sequence || existing.payload_hash !== receipt.payload_hash) throw new Error("delivery_id_conflict");
-        return { duplicate: true as const, value: undefined };
+        return { duplicate: true as const, outcome: existing.outcome, error_code: existing.error_code, value: undefined };
       }
       const sequence = this.db.prepare("SELECT delivery_id, payload_hash FROM session_delivery_receipts WHERE host_instance_id = ? AND sequence = ?").get(receipt.host_instance_id, receipt.sequence) as { delivery_id: string; payload_hash: string } | undefined;
       if (sequence) throw new Error("delivery_sequence_conflict");
-      const value = apply();
+      let value: T | undefined;
+      let outcome: SessionDeliveryReceiptOutcome = "applied";
+      let errorCode: string | null = null;
+      try {
+        value = apply();
+      } catch (error) {
+        errorCode = terminalErrorCode(error);
+        if (!errorCode) throw error;
+        outcome = "rejected_terminal";
+      }
       this.db.prepare(`
-        INSERT INTO session_delivery_receipts (delivery_id, host_instance_id, sequence, payload_hash, applied_at)
-        VALUES (?, ?, ?, ?, ?)
-      `).run(receipt.delivery_id, receipt.host_instance_id, receipt.sequence, receipt.payload_hash, now());
-      return { duplicate: false as const, value };
+        INSERT INTO session_delivery_receipts (delivery_id, host_instance_id, sequence, payload_hash, applied_at, outcome, error_code)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(receipt.delivery_id, receipt.host_instance_id, receipt.sequence, receipt.payload_hash, now(), outcome, errorCode);
+      return { duplicate: false as const, outcome, error_code: errorCode, value };
     });
   }
 

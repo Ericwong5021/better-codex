@@ -10,7 +10,7 @@ import { codexExecutablePath } from "./codex-cli.js";
 import { renderMarkdown } from "./markdown.js";
 import { readConversationActivity, readConversationResult } from "./session-transcript.js";
 import { SessionHostClient } from "./session-host-client.js";
-import type { SessionHostDelivery } from "./session-host-protocol.js";
+import type { SessionHostDelivery, SessionHostDeliveryApplication } from "./session-host-protocol.js";
 import type { SessionHostSemanticMethod } from "./session-host-protocol.js";
 import { projectDocumentKeys, type ProjectDocumentDiagram, type ProjectDocumentKey, type ProjectPlanItem, type ProjectPlanSnapshot } from "./sync-contract.js";
 import { compileInputDocument, type InputDocumentV2 } from "./codex-input-document.js";
@@ -1241,7 +1241,7 @@ export class IssueWorker {
     }
   }
 
-  private applySessionHostDelivery(message: SessionHostDelivery) {
+  private applySessionHostDelivery(message: SessionHostDelivery): SessionHostDeliveryApplication {
     let afterCommit: (() => void) | undefined;
     const result = this.store.applySessionHostDelivery({
       delivery_id: message.delivery_id,
@@ -1276,10 +1276,15 @@ export class IssueWorker {
       const event = this.applySessionEvent(String(payload.method || ""), payload.params && typeof payload.params === "object" ? payload.params as Record<string, unknown> : {});
       if (event.completion) afterCommit = () => this.finishSessionTurn(event.completion!);
       return event.changed;
-    });
-    if (result.duplicate) return;
+    }, error => error instanceof Error && error.message === "session_command_not_claimed" ? error.message : null);
+    if (result.outcome === "rejected_terminal") {
+      workerDiagnostic("session_delivery_rejected_terminal", { delivery_id: message.delivery_id, host_instance_id: message.host_instance_id, sequence: message.sequence, kind: message.kind, error_code: result.error_code });
+      return { outcome: "rejected_terminal", error_code: result.error_code || "session_delivery_rejected" };
+    }
+    if (result.duplicate) return { outcome: "applied" };
     afterCommit?.();
     if (result.value) this.onChange();
+    return { outcome: "applied" };
   }
 
   handleSessionEvent(method: string, params: Record<string, unknown>) {
