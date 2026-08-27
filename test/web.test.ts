@@ -291,6 +291,29 @@ test("web host boots the shared DOM injection behind a local session", async () 
     assert.match(resetSource, /id: 2/);
     resetController.abort();
 
+    const humanEnrichedIssueResponse = await fetch(`${base}/api/issues`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${sessionToken}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        project_id: eventProject.id,
+        title: "Human assigned enriched issue",
+        description: "Generate a title, then wait for the assigned user.",
+        workspace_path: home,
+        ai_enrich: true,
+        agent_enabled: false,
+        user_assigned: true,
+        input_document: {
+          schema_version: 2,
+          parts: [{ type: "text", text: "Generate a title, then wait for the assigned user." }],
+          references: {},
+        },
+      }),
+    });
+    assert.equal(humanEnrichedIssueResponse.status, 201);
+    const humanEnrichedIssue = await humanEnrichedIssueResponse.json() as { agent_enabled: boolean; user_assigned: boolean };
+    assert.equal(humanEnrichedIssue.agent_enabled, false);
+    assert.equal(humanEnrichedIssue.user_assigned, true);
+
     const englishInjection = await fetch(`${base}/web/injection.js?locale=en-US&session=${sessionToken}`);
     assert.equal(englishInjection.status, 200);
     assert.match(await englishInjection.text(), /"initialLocale":"en"/);

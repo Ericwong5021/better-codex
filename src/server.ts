@@ -2062,7 +2062,8 @@ export function startServer() {
           throw new Error("workspace_required");
         }
         const semanticSelections = normalizeCodexSemanticSelections(body.semantic_references);
-        if ((semanticSelections.length || body.input_document !== undefined) && !agentEnabled) throw new Error("issue_agent_required");
+        const semanticInputEnabled = agentEnabled || aiEnrich;
+        if ((semanticSelections.length || body.input_document !== undefined) && !semanticInputEnabled) throw new Error("issue_agent_required");
         if ("semantic_command" in body && body.semantic_command !== "" && body.semantic_command !== "review") throw new Error("semantic_command_invalid");
         const semanticCommand = body.semantic_command === "review" ? "review" : undefined;
         if (semanticCommand && !agentEnabled) throw new Error("issue_agent_required");
