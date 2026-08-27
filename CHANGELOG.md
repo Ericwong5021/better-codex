@@ -4,6 +4,11 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.10-beta.39] - 2026-08-27
+
+- Keep agent creation inside a compact dialog.
+- Preserve Issue session synchronization after handing a thread back to native Codex.
+
 ## [0.4.10-beta.38] - 2026-08-27
 
 - Preserve conversation attachment ownership, literal local file references, and downloadable attachments outside the visible transcript window.
@@ -948,7 +953,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.38...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.39...HEAD
+[0.4.10-beta.39]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.38...v0.4.10-beta.39
 [0.4.10-beta.38]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.37...v0.4.10-beta.38
 [0.4.10-beta.37]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.36...v0.4.10-beta.37
 [0.4.10-beta.36]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.35...v0.4.10-beta.36
