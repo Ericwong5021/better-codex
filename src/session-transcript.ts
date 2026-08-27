@@ -169,12 +169,16 @@ function conversationAttachment(value: string) {
   return { name: attachmentName(value), type, kind: attachmentKind(type), source: remote ? "url" as const : "local" as const, ...(remote ? { url: value } : {}), value };
 }
 
+function conversationAttachmentKey(attachment: { source: "local" | "url"; value: string }) {
+  return `${attachment.source}:${attachment.value}`;
+}
+
 function localMarkdownPath(value: string) {
   if (/^https?:\/\//i.test(value)) return value;
   return decodeURIComponent(value);
 }
 
-export function conversationContent(value: string) {
+export function conversationContent(value: string, excludedAttachments?: ReadonlySet<string>) {
   const source = stripMemoryCitation(String(value || "").replace(/\r\n?/g, "\n")).trim();
   const lines = source.split("\n");
   let marker = -1;
@@ -194,12 +198,12 @@ export function conversationContent(value: string) {
     : [];
   const markdown = listed.length ? lines.slice(0, marker).join("\n").trim() : source;
   const attachments = [...listed];
-  const selected = new Set(attachments.map(attachment => `${attachment.source}:${attachment.value}`));
+  const selected = new Set(attachments.map(conversationAttachmentKey));
   const attachmentLinks: string[] = [];
   for (const link of markdownLinks(markdown)) {
     const attachment = conversationAttachment(localMarkdownPath(link));
     if (!attachment || attachment.kind !== "image") continue;
-    const key = `${attachment.source}:${attachment.value}`;
+    const key = conversationAttachmentKey(attachment);
     if (!selected.has(key)) {
       if (attachments.length >= 16) continue;
       selected.add(key);
@@ -207,7 +211,11 @@ export function conversationContent(value: string) {
     }
     attachmentLinks.push(link);
   }
-  return { markdown, attachments, attachmentLinks };
+  return {
+    markdown,
+    attachments: excludedAttachments ? attachments.filter(attachment => !excludedAttachments.has(conversationAttachmentKey(attachment))) : attachments,
+    attachmentLinks,
+  };
 }
 
 export function conversationMessagesWithPendingReply(
@@ -264,12 +272,12 @@ async function readConversationMessages(rolloutPath: string) {
   let index = 0;
   let lastIncludedUserAt: string | null = null;
   const turnStartedAt = new Map<string, string>();
+  const userAttachments = new Set<string>();
   let pendingAgent: PendingAgent | null = null;
 
-  const pushUser = (message: string, timestamp: string | null) => {
+  const pushUser = (message: string, timestamp: string | null, content = conversationContent(message)) => {
     flushPendingAgent(null);
     lastIncludedUserAt = timestamp;
-    const content = conversationContent(message);
     messages.push({
       id: `user-${index++}`,
       role: "user",
@@ -304,7 +312,7 @@ async function readConversationMessages(rolloutPath: string) {
     ) {
       return;
     }
-    const content = conversationContent(message);
+    const content = conversationContent(message, userAttachments);
     messages.push({
       id: `agent-${index++}`,
       role: "agent",
@@ -407,8 +415,10 @@ async function readConversationMessages(rolloutPath: string) {
     if (!message) continue;
 
     if (type === "user_message") {
+      const content = conversationContent(message);
+      for (const attachment of content.attachments) userAttachments.add(conversationAttachmentKey(attachment));
       if (!shouldIncludeUserMessage(message)) continue;
-      pushUser(message, timestamp);
+      pushUser(message, timestamp, content);
       continue;
     }
 
@@ -536,7 +546,13 @@ export async function readConversationAttachment(threadId: string | null | undef
   const conversation = await readConversationResult(threadId);
   const message = conversation.messages.find(item => item.id === messageId);
   if (!message) throw new Error("attachment_not_found");
-  const content = conversationContent(message.markdown);
+  const userAttachments = new Set<string>();
+  for (const item of conversation.messages) {
+    if (item === message) break;
+    if (item.role !== "user") continue;
+    for (const attachment of conversationContent(item.markdown).attachments) userAttachments.add(conversationAttachmentKey(attachment));
+  }
+  const content = conversationContent(message.markdown, message.role === "agent" ? userAttachments : undefined);
   const attachment = content.attachments[attachmentIndex];
   if (!attachment || attachment.source !== "local") throw new Error("attachment_not_found");
   let stats;

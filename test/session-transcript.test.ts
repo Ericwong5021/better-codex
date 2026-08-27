@@ -35,15 +35,17 @@ test("readConversationResult builds a user/commentary/final_answer bubble timeli
   try {
     const id = "019fd63c-15b5-7bc1-8110-22dbe0117e75";
     const directory = join(codexHome, "sessions", "2026", "08", "06");
+    const inputImage = join(codexHome, "input.png");
+    const outputImage = join(codexHome, "output.png");
     mkdirSync(directory, { recursive: true });
     writeFileSync(join(directory, `rollout-2026-08-06T12-00-00-${id}.jsonl`), [
       JSON.stringify({ type: "session_meta", payload: { cwd: codexHome } }),
       JSON.stringify({ type: "event_msg", timestamp: "2026-08-06T12:00:01.000Z", payload: { type: "user_message", message: "/better-codex\n内部任务提示" } }),
-      JSON.stringify({ type: "event_msg", timestamp: "2026-08-06T12:00:02.000Z", payload: { type: "user_message", message: "请检查发布状态" } }),
+      JSON.stringify({ type: "event_msg", timestamp: "2026-08-06T12:00:02.000Z", payload: { type: "user_message", message: `请检查发布状态\n\n附带文件：\n- ${inputImage}` } }),
       JSON.stringify({ type: "event_msg", timestamp: "2026-08-06T12:00:03.000Z", payload: { type: "agent_message", phase: "commentary", message: "working" } }),
       JSON.stringify({ type: "response_item", timestamp: "2026-08-06T12:00:03.000Z", payload: { type: "message", role: "assistant", phase: "commentary", content: [{ type: "output_text", text: "working" }], internal_chat_message_metadata_passthrough: { turn_id: "turn-1" } } }),
-      JSON.stringify({ type: "event_msg", timestamp: "2026-08-06T12:00:04.000Z", payload: { type: "agent_message", phase: "final_answer", message: "First **done**" } }),
-      JSON.stringify({ type: "response_item", timestamp: "2026-08-06T12:00:04.000Z", payload: { type: "message", role: "assistant", phase: "final_answer", content: [{ type: "output_text", text: "First **done**" }], internal_chat_message_metadata_passthrough: { turn_id: "turn-1" } } }),
+      JSON.stringify({ type: "event_msg", timestamp: "2026-08-06T12:00:04.000Z", payload: { type: "agent_message", phase: "final_answer", message: `First **done**\n\n![input](${inputImage})\n\n![output](${outputImage})` } }),
+      JSON.stringify({ type: "response_item", timestamp: "2026-08-06T12:00:04.000Z", payload: { type: "message", role: "assistant", phase: "final_answer", content: [{ type: "output_text", text: `First **done**\n\n![input](${inputImage})\n\n![output](${outputImage})` }], internal_chat_message_metadata_passthrough: { turn_id: "turn-1" } } }),
       JSON.stringify({ type: "event_msg", timestamp: "2026-08-06T12:00:05.000Z", payload: { type: "user_message", message: "再确认一次" } }),
       JSON.stringify({ type: "event_msg", timestamp: "2026-08-06T12:00:06.000Z", payload: { type: "agent_message", phase: "final_answer", message: "Latest result with `code`" } }),
       JSON.stringify({ type: "response_item", timestamp: "2026-08-06T12:00:06.000Z", payload: { type: "message", role: "assistant", phase: "final_answer", content: [{ type: "output_text", text: "Latest result with `code`" }], internal_chat_message_metadata_passthrough: { turn_id: "turn-2" } } }),
@@ -55,9 +57,10 @@ test("readConversationResult builds a user/commentary/final_answer bubble timeli
     assert.equal(result.found, true);
     assert.equal(result.messages.length, 5);
     assert.deepEqual(result.messages.map(item => item.role), ["user", "agent", "agent", "user", "agent"]);
-    assert.equal(result.messages[0].markdown, "请检查发布状态");
+    assert.equal(result.messages[0].attachments?.[0]?.name, "input.png");
     assert.equal(result.messages[1].phase, "commentary");
     assert.equal(result.messages[2].phase, "final_answer");
+    assert.deepEqual(result.messages[2].attachments?.map(attachment => attachment.name), ["output.png"]);
     assert.equal(result.markdown, "Latest result with `code`");
     assert.match(result.html, /<code>code<\/code>/);
     assert.match(result.messages[4].html, /<code>code<\/code>/);
