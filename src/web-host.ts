@@ -177,11 +177,11 @@ body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; 
 @keyframes web-usage-refresh-spin { to { transform: rotate(360deg); } }
 .web-usage-heading strong { font-weight: 590; }
 .web-usage-close { display: none; }
-.web-usage-activity { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-top: 9px; }
-.web-usage-activity > div { display: grid; min-width: 0; gap: 3px; border-radius: var(--bc-radius-sm); padding: 8px; background: var(--bc-color-surface); box-shadow: inset 0 0 0 1px var(--bc-color-hairline); }
-.web-usage-activity span { overflow: hidden; color: var(--bc-color-text-muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
-.web-usage-activity strong { overflow: hidden; color: var(--bc-color-text); font-size: 14px; font-weight: 670; font-variant-numeric: tabular-nums; letter-spacing: -.02em; text-overflow: ellipsis; white-space: nowrap; }
-.web-usage-activity small { grid-column: 1 / -1; color: var(--bc-color-text-muted); font-size: 9px; line-height: 1.4; }
+.web-usage-activity { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--bc-space-2); margin-top: var(--bc-space-2); }
+.web-usage-activity > div { display: grid; min-width: 0; gap: var(--bc-space-1); border-radius: var(--bc-radius-sm); padding: var(--bc-space-2); background: var(--bc-color-surface); box-shadow: var(--bc-inset-hairline); }
+.web-usage-activity span { overflow: hidden; color: var(--bc-color-text-muted); font-size: var(--bc-text-2xs); text-overflow: ellipsis; white-space: nowrap; }
+.web-usage-activity strong { overflow: hidden; color: var(--bc-color-text); font-size: var(--bc-text-base); font-weight: 670; font-variant-numeric: tabular-nums; letter-spacing: -.02em; text-overflow: ellipsis; white-space: nowrap; }
+.web-usage-activity small { grid-column: 1 / -1; color: var(--bc-color-text-muted); font-size: var(--bc-text-2xs); line-height: var(--bc-leading-body); }
 .web-usage-body { display: grid; gap: 10px; margin-top: 9px; }
 .web-usage-status { color: var(--bc-color-text-muted); font-size: 10px; line-height: 1.5; }
 .web-usage-window { display: grid; gap: 6px; }
