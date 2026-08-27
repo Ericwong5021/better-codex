@@ -4,6 +4,10 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.10-beta.31] - 2026-08-27
+
+- Roll back an older staged Runtime transaction before downloading and activating a newer signed release.
+
 ## [0.4.10-beta.30] - 2026-08-27
 
 - Activate a previously staged managed Runtime through the live handoff instead of treating it as already running.
@@ -905,7 +909,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.30...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.31...HEAD
+[0.4.10-beta.31]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.30...v0.4.10-beta.31
 [0.4.10-beta.30]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.29...v0.4.10-beta.30
 [0.4.10-beta.29]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.28...v0.4.10-beta.29
 [0.4.10-beta.28]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.27...v0.4.10-beta.28
