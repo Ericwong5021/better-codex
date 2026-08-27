@@ -67,8 +67,8 @@ const webHostHtml = String.raw`<!doctype html>
             <button id="web-usage-close" class="web-usage-close" type="button" aria-label="关闭额度"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"></path></svg></button>
           </div>
           <div id="web-usage-activity" class="web-usage-activity" aria-label="实时 Codex 用量">
-            <div><span>Token 速度</span><strong id="web-usage-token-rate">—</strong></div>
-            <div><span>请求数</span><strong id="web-usage-request-count">—</strong></div>
+            <div><span>输出速度</span><strong id="web-usage-token-rate">—</strong></div>
+            <div><span>模型请求</span><strong id="web-usage-request-count">—</strong></div>
             <small id="web-usage-activity-status">展开后开始读取</small>
           </div>
           <div id="web-usage-body" class="web-usage-body"><span class="web-usage-status">点击查看 Codex 额度</span></div>
@@ -612,6 +612,7 @@ async function loadUsage(force = false) {
 }
 
 function formatTokenRate(value) {
+  if (value === null || value === undefined) return "—";
   const rate = Number(value);
   if (!Number.isFinite(rate)) return "—";
   if (rate >= 1000) return (rate / 1000).toFixed(rate >= 10_000 ? 0 : 1) + "k tok/s";
@@ -635,7 +636,9 @@ function renderUsageActivity(activity) {
   usageRequestCount.textContent = Number(activity.requestCount || 0).toLocaleString(profileLocale === "zh-CN" ? "zh-CN" : "en-US");
   usageActivityStatus.textContent = activity.status === "degraded"
     ? profileText("近 1 分钟 · 部分记录读取失败", "Last minute · some records failed")
-    : profileText("近 1 分钟 · 请求完成后更新", "Last minute · updates after completion");
+    : activity.requestCount > 0 && activity.speedSampleCount === 0
+      ? profileText("近 1 分钟 · 暂无完整生成时序", "Last minute · no complete generation timing")
+      : profileText("近 1 分钟 · 按完成请求的输出时长加权", "Last minute · weighted by completed output time");
 }
 
 function stopUsageActivity() {

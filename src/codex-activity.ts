@@ -8,9 +8,11 @@ export type CodexActivity = {
   collector: "running" | "stopped";
   watching: boolean;
   windowSeconds: number;
-  tokensPerSecond: number;
+  tokensPerSecond: number | null;
   requestCount: number;
-  totalTokens: number;
+  speedSampleCount: number;
+  outputTokens: number;
+  generationSeconds: number;
   sampledAt: number;
   startedAt: number | null;
   lastCollectedAt: number | null;
@@ -24,7 +26,8 @@ export type CodexActivity = {
 
 type TokenEvent = {
   timestamp: number;
-  totalTokens: number;
+  outputTokens: number;
+  generationMs: number | null;
   key: string;
 };
 
@@ -32,6 +35,9 @@ type FileCursor = {
   offset: number;
   remainder: Buffer;
   totalTokens: number | null;
+  requestStartedAt: number | null;
+  outputStartedAt: number | null;
+  outputCompletedAt: number | null;
   discardFirstLine: boolean;
   lastSeenAt: number;
 };
@@ -56,16 +62,11 @@ function nonNegativeInteger(value: unknown) {
   return Number.isSafeInteger(number) && number >= 0 ? number : null;
 }
 
-function usageTotal(value: unknown) {
+function usageOutput(value: unknown) {
   if (!value || typeof value !== "object") return null;
   const usage = value as Record<string, unknown>;
-  const total = nonNegativeInteger(usage.total_tokens);
-  const input = nonNegativeInteger(usage.input_tokens);
   const output = nonNegativeInteger(usage.output_tokens);
-  const cached = nonNegativeInteger(usage.cached_input_tokens);
-  const reasoning = nonNegativeInteger(usage.reasoning_output_tokens);
-  if (input === null && output === null && cached === null && reasoning === null) return null;
-  return total ?? (input ?? 0) + (output ?? 0);
+  return output;
 }
 
 function cumulativeTotal(value: unknown) {
@@ -93,10 +94,37 @@ function tokenRecord(line: string) {
   const timestamp = Date.parse(String(record.timestamp || ""));
   if (!Number.isFinite(timestamp)) throw new Error("codex_activity_timestamp_invalid");
   return {
-    lastTokens: usageTotal(info.last_token_usage),
+    outputTokens: usageOutput(info.last_token_usage),
     totalTokens: cumulativeTotal(info.total_token_usage),
     timestamp,
   };
+}
+
+function generationTimingRecord(line: string) {
+  const itemCompleted = line.includes('"type":"item_completed"') && (line.includes('"type":"Reasoning"') || line.includes('"type":"AgentMessage"'));
+  const requestBoundary = line.includes('"type":"task_started"') || line.includes('"type":"user_message"');
+  const outputCompleted = line.includes('"type":"reasoning"') || line.includes('"type":"message"') || line.includes('"type":"custom_tool_call"') || line.includes('"type":"function_call"') || line.includes('"type":"agent_message"');
+  if (!itemCompleted && !requestBoundary && !outputCompleted) return null;
+  const record = JSON.parse(line) as Record<string, unknown>;
+  if (!record.payload || typeof record.payload !== "object") return null;
+  const payload = record.payload as Record<string, unknown>;
+  const timestamp = Date.parse(String(record.timestamp || ""));
+  if (!Number.isFinite(timestamp)) throw new Error("codex_activity_timestamp_invalid");
+  if (record.type === "event_msg" && (payload.type === "task_started" || payload.type === "user_message")) return { requestStartedAt: timestamp, outputStartedAt: null, outputCompletedAt: null };
+  if (record.type === "event_msg" && payload.type === "item_completed" && payload.item && typeof payload.item === "object") {
+    const item = payload.item as Record<string, unknown>;
+    if (item.type !== "Reasoning" && item.type !== "AgentMessage") return null;
+    const startedAt = nonNegativeInteger(item.started_at_ms);
+    const completedAt = nonNegativeInteger(item.completed_at_ms);
+    if (startedAt === null || completedAt === null || completedAt < startedAt) throw new Error("codex_activity_generation_timing_invalid");
+    return { requestStartedAt: null, outputStartedAt: startedAt, outputCompletedAt: completedAt };
+  }
+  if (record.type === "event_msg" && payload.type === "agent_message") return { requestStartedAt: null, outputStartedAt: null, outputCompletedAt: timestamp };
+  if (record.type !== "response_item") return null;
+  const type = String(payload.type);
+  const assistantMessage = type === "message" && payload.role === "assistant";
+  if (!["reasoning", "custom_tool_call", "function_call", "agent_message"].includes(type) && !assistantMessage) return null;
+  return { requestStartedAt: null, outputStartedAt: null, outputCompletedAt: timestamp };
 }
 
 class CodexActivityCollector {
@@ -232,33 +260,55 @@ class CodexActivityCollector {
       offset,
       remainder: Buffer.alloc(0),
       totalTokens: null,
+      requestStartedAt: null,
+      outputStartedAt: null,
+      outputCompletedAt: null,
       discardFirstLine: offset > 0,
       lastSeenAt: fileStat.mtimeMs,
     });
   }
 
-  private addEvent(timestamp: number, totalTokens: number, cumulative: number | null) {
+  private addEvent(timestamp: number, outputTokens: number, generationMs: number | null, cumulative: number | null) {
     const now = Date.now();
     if (timestamp > now + 5000) throw new Error("codex_activity_timestamp_in_future");
-    if (totalTokens <= 0 || timestamp < now - retentionMs) return;
+    if (outputTokens <= 0 || timestamp < now - retentionMs) return;
     const safeTimestamp = Math.min(now, timestamp);
-    const key = [safeTimestamp, totalTokens, cumulative ?? ""].join(":");
+    const key = [safeTimestamp, outputTokens, generationMs ?? "", cumulative ?? ""].join(":");
     if (this.eventKeys.has(key)) return;
     this.eventKeys.add(key);
-    this.events.push({ timestamp: safeTimestamp, totalTokens, key });
+    this.events.push({ timestamp: safeTimestamp, outputTokens, generationMs, key });
     this.lastEventAt = Math.max(this.lastEventAt, safeTimestamp);
   }
 
   private parseLine(cursor: FileCursor, line: string) {
+    const timing = generationTimingRecord(line);
+    if (timing) {
+      if (timing.requestStartedAt !== null) {
+        cursor.requestStartedAt = timing.requestStartedAt;
+        cursor.outputStartedAt = null;
+        cursor.outputCompletedAt = null;
+      }
+      if (timing.outputStartedAt !== null) cursor.outputStartedAt = cursor.outputStartedAt === null ? timing.outputStartedAt : Math.min(cursor.outputStartedAt, timing.outputStartedAt);
+      if (timing.outputCompletedAt !== null) cursor.outputCompletedAt = cursor.outputCompletedAt === null ? timing.outputCompletedAt : Math.max(cursor.outputCompletedAt, timing.outputCompletedAt);
+      return;
+    }
     if (!line.includes("token_count")) return;
     const record = tokenRecord(line);
     if (!record) return;
+    const generationStartedAt = cursor.outputStartedAt ?? cursor.requestStartedAt;
+    const generationCompletedAt = cursor.outputCompletedAt;
+    cursor.requestStartedAt = record.timestamp;
+    cursor.outputStartedAt = null;
+    cursor.outputCompletedAt = null;
     const previousTotal = cursor.totalTokens;
     if (record.totalTokens !== null) {
       cursor.totalTokens = record.totalTokens;
       if (previousTotal !== null && record.totalTokens <= previousTotal) return;
     }
-    if (record.lastTokens !== null) this.addEvent(record.timestamp, record.lastTokens, record.totalTokens);
+    const generationMs = generationStartedAt !== null && generationCompletedAt !== null && generationCompletedAt > generationStartedAt
+      ? generationCompletedAt - generationStartedAt
+      : null;
+    if (record.outputTokens !== null) this.addEvent(generationCompletedAt ?? record.timestamp, record.outputTokens, generationMs, record.totalTokens);
   }
 
   private async readFile(path: string, cursor: FileCursor, generation: number) {
@@ -268,6 +318,9 @@ class CodexActivityCollector {
       cursor.offset = Math.max(0, fileStat.size - maxInitialReadBytes);
       cursor.remainder = Buffer.alloc(0);
       cursor.totalTokens = null;
+      cursor.requestStartedAt = null;
+      cursor.outputStartedAt = null;
+      cursor.outputCompletedAt = null;
       cursor.discardFirstLine = cursor.offset > 0;
     }
     if (fileStat.size === cursor.offset) return;
@@ -417,7 +470,10 @@ class CodexActivityCollector {
     const now = Date.now();
     this.prune(now);
     const events = this.events.filter(event => event.timestamp >= now - activityWindowMs && event.timestamp <= now);
-    const totalTokens = events.reduce((sum, event) => sum + event.totalTokens, 0);
+    const speedSamples = events.filter(event => event.generationMs !== null);
+    const outputTokens = events.reduce((sum, event) => sum + event.outputTokens, 0);
+    const sampledOutputTokens = speedSamples.reduce((sum, event) => sum + event.outputTokens, 0);
+    const generationMs = speedSamples.reduce((sum, event) => sum + (event.generationMs ?? 0), 0);
     const errors = [...new Set([...this.cycleFailures.map(failure => failure.code), ...(this.watcherError ? [this.watcherError] : [])])];
     const status = !this.running
       ? "unavailable"
@@ -429,9 +485,11 @@ class CodexActivityCollector {
       collector: this.running ? "running" : "stopped",
       watching: Boolean(this.watcher),
       windowSeconds: activityWindowMs / 1000,
-      tokensPerSecond: Math.round(totalTokens / (activityWindowMs / 1000) * 10) / 10,
+      tokensPerSecond: generationMs > 0 ? Math.round(sampledOutputTokens / (generationMs / 1000) * 10) / 10 : null,
       requestCount: events.length,
-      totalTokens,
+      speedSampleCount: speedSamples.length,
+      outputTokens,
+      generationSeconds: Math.round(generationMs / 100) / 10,
       sampledAt: now,
       startedAt: this.startedAt || null,
       lastCollectedAt: this.lastCollectedAt || null,
