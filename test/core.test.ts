@@ -566,7 +566,7 @@ test("finishRun keeps board updates already made by the agent skill", () => {
   }
 });
 
-test("user-stopped runs stay in their issue column and hand control back to the user", () => {
+test("user-stopped runs move to blocked and hand control back to the user", () => {
   const target = temporaryDatabase();
   try {
     const store = new Store(target.file);
@@ -585,7 +585,7 @@ test("user-stopped runs stay in their issue column and hand control back to the 
     assert.equal(claimed?.issue.id, issue.id);
     store.interruptRun(claimed!.runId, claimed!.issue.id);
     const stopped = store.getIssue(issue.id)!;
-    assert.equal(stopped.status, "todo");
+    assert.equal(stopped.status, "blocked");
     assert.equal(stopped.latest_run_status, "interrupted");
     assert.equal(stopped.needs_attention, true);
     assert.equal(stopped.pending_actor, "user");
@@ -596,7 +596,7 @@ test("user-stopped runs stay in their issue column and hand control back to the 
   }
 });
 
-test("an interrupted native session observed by polling stays in its issue column", () => {
+test("an interrupted native session observed by polling moves to blocked", () => {
   const target = temporaryDatabase();
   try {
     const store = new Store(target.file);
@@ -618,7 +618,7 @@ test("an interrupted native session observed by polling stays in its issue colum
       updated_at: completedAt,
     }), true);
     const stopped = store.getIssue(issue.id)!;
-    assert.equal(stopped.status, "in_progress");
+    assert.equal(stopped.status, "blocked");
     assert.equal(store.getIssueReplyState(issue.id).status, "interrupted");
     assert.equal(stopped.needs_attention, true);
     assert.equal(stopped.pending_actor, "user");
@@ -800,6 +800,7 @@ test("stopping a claimed desktop start before turn binding releases the run", as
     assert.equal(store.getIssueSession(issue.id)?.active_turn_id, null);
     const stopped = store.getIssue(issue.id)!;
     assert.equal(stopped.active_run_status, null);
+    assert.equal(stopped.status, "blocked");
     const archived = store.archiveIssue(stopped.id, stopped.version);
     assert.ok(archived.archived_at);
     assert.deepEqual(store.listPendingThreadActions().map(entry => ({ thread_id: entry.thread_id, action: entry.action })), [{ thread_id: threadId, action: "archive" }]);

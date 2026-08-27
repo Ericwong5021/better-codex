@@ -1556,7 +1556,7 @@ export class Store {
         this.db.prepare("UPDATE issue_replies SET status = 'interrupted', error = 'runtime_restarted', finished_at = ? WHERE issue_id = ? AND status = 'running'").run(timestamp, row.issue_id);
         this.db.prepare(`
           UPDATE issues
-          SET status = 'in_review',
+          SET status = 'blocked',
               needs_attention = 1,
               pending_actor = 'user',
               version = version + 1,
@@ -3150,7 +3150,7 @@ export class Store {
         this.db.prepare("UPDATE issue_runs SET status = 'interrupted', finished_at = ?, error = 'runtime_restarted' WHERE id = ?").run(timestamp, row.id);
         this.db.prepare(`
           UPDATE issues
-          SET status = 'in_review',
+          SET status = 'blocked',
               needs_attention = 1,
               pending_actor = 'user',
               version = version + 1,
@@ -3186,6 +3186,7 @@ export class Store {
           SET status = CASE
                 WHEN (SELECT status FROM issue_replies WHERE issue_id = issues.id) = 'succeeded' THEN 'in_review'
                 WHEN (SELECT status FROM issue_replies WHERE issue_id = issues.id) = 'failed' THEN 'in_review'
+                WHEN (SELECT status FROM issue_replies WHERE issue_id = issues.id) = 'interrupted' THEN 'blocked'
                 ELSE status
               END,
               needs_attention = 1,
@@ -3527,7 +3528,8 @@ export class Store {
       if (result.changes === 1) {
         this.db.prepare(`
           UPDATE issues
-          SET needs_attention = CASE WHEN status = 'done' THEN needs_attention ELSE 1 END,
+          SET status = CASE WHEN status = 'done' THEN status ELSE 'blocked' END,
+              needs_attention = CASE WHEN status = 'done' THEN needs_attention ELSE 1 END,
               pending_actor = CASE WHEN status = 'done' THEN pending_actor ELSE 'user' END,
               version = version + 1,
               updated_at = ?
@@ -3726,7 +3728,7 @@ export class Store {
             updated_at = ?
         WHERE id = ? AND status = ? AND updated_at = ? AND archived_at IS NULL
       `).run(
-        activity.status === "running" ? "in_progress" : activity.status === "completed" ? "in_review" : issue.status,
+        activity.status === "running" ? "in_progress" : activity.status === "completed" ? "in_review" : "blocked",
         Number(activity.status !== "running"),
         activity.status === "running" ? "agent" : "user",
         timestamp,
@@ -4969,7 +4971,8 @@ export class Store {
           `).run(timestamp, error || "user_stopped", message, run.id, String(session.issue_id));
           this.db.prepare(`
             UPDATE issues
-            SET needs_attention = CASE WHEN status = 'done' THEN needs_attention ELSE 1 END,
+            SET status = CASE WHEN status = 'done' THEN status ELSE 'blocked' END,
+                needs_attention = CASE WHEN status = 'done' THEN needs_attention ELSE 1 END,
                 pending_actor = CASE WHEN status = 'done' THEN pending_actor ELSE 'user' END,
                 version = version + 1, updated_at = ?
             WHERE id = ? AND archived_at IS NULL
@@ -4992,7 +4995,8 @@ export class Store {
         if (status === "interrupted") {
           this.db.prepare(`
             UPDATE issues
-            SET needs_attention = CASE WHEN status = 'done' THEN needs_attention ELSE 1 END,
+            SET status = CASE WHEN status = 'done' THEN status ELSE 'blocked' END,
+                needs_attention = CASE WHEN status = 'done' THEN needs_attention ELSE 1 END,
                 pending_actor = CASE WHEN status = 'done' THEN pending_actor ELSE 'user' END,
                 version = version + 1, updated_at = ?
             WHERE id = ? AND archived_at IS NULL
@@ -5034,7 +5038,8 @@ export class Store {
       if (status === "interrupted") {
         this.db.prepare(`
           UPDATE issues
-          SET needs_attention = 1,
+          SET status = 'blocked',
+              needs_attention = 1,
               pending_actor = 'user',
               version = version + 1,
               updated_at = ?

@@ -89,9 +89,9 @@ function defaultIssues(agents: MockupRecord[], locale: MockupLocale) {
   const specs = locale === "en" ? [
     ["PM-101", "Simplify Issue templates", "Reduce extra formatting when creating tasks and keep only the task details, Skill instructions, and taskid.", "backlog", "urgent", "Codex", ["Issue", "Product"], "not-started"],
     ["PM-108", "Unify Issue creation entry points", "Make the top button and board-column shortcuts share the project, status, and default Agent values.", "todo", "medium", "Codex", ["Issue", "Creation"], "claimed"],
-    ["PM-122", "Wait for Windows hardware regression", "Verify PNA, CDP connectivity, and card dragging on the Windows target machine.", "in_review", "high", "Engineering", ["Windows", "Blocked"], "interrupted"],
+    ["PM-122", "Wait for Windows hardware regression", "Verify PNA, CDP connectivity, and card dragging on the Windows target machine.", "blocked", "high", "Engineering", ["Windows", "Blocked"], "interrupted"],
     ["PM-115", "Verify ownership after Agent deletion", "Confirm that related Issues become unassigned after an Agent is deleted and do not fall back to the default Agent.", "in_review", "medium", "Quality Assurance", ["Agent", "Data consistency"], "failed"],
-    ["PM-103", "Research Codex session recovery boundaries", "Confirm session recovery behavior after app restarts, thread switches, and interrupted runs.", "in_review", "medium", "Engineering", ["Session", "Research"], "interrupted"],
+    ["PM-103", "Research Codex session recovery boundaries", "Confirm session recovery behavior after app restarts, thread switches, and interrupted runs.", "blocked", "medium", "Engineering", ["Session", "Research"], "interrupted"],
     ["PM-102", "Review task card information density", "Adjust the visual hierarchy of titles, projects, labels, Agents, and run status.", "backlog", "high", "Product Planning", ["Board", "Interaction"], "not-started"],
     ["PM-104", "Evaluate cross-project workspace switching", "Review path, filter, and context-retention rules when switching between local repositories.", "backlog", "low", "Codex", ["Workspace", "Planning"], "not-started"],
     ["PM-124", "Confirm the Windows CDP compatibility range", "Document supported Codex versions, port discovery methods, and known limitations.", "backlog", "low", "Product Planning", ["Windows", "Planning"], "not-started"],
@@ -118,9 +118,9 @@ function defaultIssues(agents: MockupRecord[], locale: MockupLocale) {
   ] as const : [
     ["PM-101", "规划 Issue 模板精简", "减少创建任务时的额外编排，只保留任务详情、Skill 指令和 taskid。", "backlog", "urgent", "Codex", ["Issue", "产品"], "not-started"],
     ["PM-108", "统一 Issue 创建入口", "让顶部按钮和看板列快捷入口共享项目、状态与 Agent 默认值。", "todo", "medium", "Codex", ["Issue", "创建"], "claimed"],
-    ["PM-122", "等待 Windows 真机回归", "需要在 Windows 目标机器验证 PNA、CDP 连接和卡片拖拽。", "in_review", "high", "工程实现", ["Windows", "阻塞"], "interrupted"],
+    ["PM-122", "等待 Windows 真机回归", "需要在 Windows 目标机器验证 PNA、CDP 连接和卡片拖拽。", "blocked", "high", "工程实现", ["Windows", "阻塞"], "interrupted"],
     ["PM-115", "校验 Agent 删除后的任务归属", "确认删除 Agent 后相关 Issue 变为未分配且不会错误回退到默认 Agent。", "in_review", "medium", "质量保障", ["Agent", "数据一致性"], "failed"],
-    ["PM-103", "调研 Codex 会话恢复边界", "确认应用重启、线程切换和运行中断后的会话恢复行为。", "in_review", "medium", "工程实现", ["会话", "调研"], "interrupted"],
+    ["PM-103", "调研 Codex 会话恢复边界", "确认应用重启、线程切换和运行中断后的会话恢复行为。", "blocked", "medium", "工程实现", ["会话", "调研"], "interrupted"],
     ["PM-102", "梳理任务卡片信息密度", "调整标题、项目、标签、Agent 与运行状态的视觉层级。", "backlog", "high", "产品策划", ["看板", "交互"], "not-started"],
     ["PM-104", "评估跨项目工作区切换", "梳理多个本地仓库切换时的路径、筛选与上下文保留规则。", "backlog", "low", "Codex", ["工作区", "规划"], "not-started"],
     ["PM-124", "确认 Windows CDP 兼容范围", "整理受支持的 Codex 版本、端口发现方式和已知限制。", "backlog", "low", "产品策划", ["Windows", "规划"], "not-started"],
