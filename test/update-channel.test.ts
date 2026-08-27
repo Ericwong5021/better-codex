@@ -261,6 +261,7 @@ test("standalone core and compatibility updates enter the WAL before pointer mut
   const compatibility = source.slice(source.indexOf("export async function updateCompatibility"), source.indexOf("async function updateCoreUnlocked"));
   const core = source.slice(source.indexOf("export async function updateCore"), source.indexOf("export async function updateAll"));
   const cli = readFileSync(join(root, "src", "cli.ts"), "utf8");
+  const service = readFileSync(join(root, "src", "service.ts"), "utf8");
   const applyUpdate = cli.slice(cli.indexOf("async function applyUpdate"), cli.indexOf("async function withLaunchLock"));
   assert.match(compatibility, /writeRollbackState\(before, plannedAfter, "applying"\)[\s\S]*updateCompatibilityUnlocked/);
   assert.match(core, /writeRollbackState\(before, plannedAfter, "applying"\)[\s\S]*updateCoreUnlocked/);
@@ -268,6 +269,8 @@ test("standalone core and compatibility updates enter the WAL before pointer mut
   assert.match(server, /sendJson\(response, 202, \{ accepted: true, update_id: operation\.id, state: "STAGING"[\s\S]*void \(async \(\) => \{[\s\S]*const result = await installGatewayUpdate\(\)/);
   assert.match(server, /if \(installedCoreVersion !== coreVersion\) throw new Error\(`update_core_activation_required:/);
   assert.match(cli, /if \(operation\.status === "COMPLETED"\) \{[\s\S]*const runtime = await health\(\)/);
+  assert.match(cli, /const \[command, \.\.\.expectedArgs\] = mcpCommand\(\)/);
+  assert.match(service, /const managed = managedCoreCommand\(\["runtime"\]\)/);
   assert.doesNotMatch(server, /interrupt_running/);
   assert.doesNotMatch(applyUpdate, /stopSessionHostProcess\(\)/);
 });

@@ -40,7 +40,7 @@ import { betterCodexMcpName, startMcpAppServer } from "./mcp-app.js";
 import { packagedBuild } from "./build.js";
 import { bundledBetterCodexSkill } from "./bundled-skill.js";
 import { installService, repairServiceConfiguration, restartService, serviceLogs, serviceStatus, startService, stopService, uninstallService } from "./service.js";
-import { activeVersions, checkForUpdates, maybeDelegateToActiveCore, recordGatewayUpdateActivation, rollbackActivatedUpdate, rollbackAllUpdates, selectedUpdateChannel, setUpdateChannel, updateAll, updateCompatibility, type UpdateChannel } from "./updater.js";
+import { activeVersions, checkForUpdates, managedCoreCommand, maybeDelegateToActiveCore, recordGatewayUpdateActivation, rollbackActivatedUpdate, rollbackAllUpdates, selectedUpdateChannel, setUpdateChannel, updateAll, updateCompatibility, type UpdateChannel } from "./updater.js";
 import { requireCodexExecutablePath } from "./codex-cli.js";
 import { normalizeHubUrl, readSyncConfiguration, removeSyncConfiguration, writeSyncConfiguration } from "./sync-config.js";
 import { normalizeRelayUrl, readRelayConfiguration, removeRelayConfiguration, writeRelayConfiguration } from "./relay-config.js";
@@ -791,21 +791,21 @@ function codexCliPath() {
   return requireCodexExecutablePath({ applicationPath: codexInstallationStatus().path });
 }
 
-function packagedMcpTransport(command: string | undefined, args: string[]) {
-  if (!packagedBuild || !command || !existsSync(command)) return false;
-  if (args.length === 2 && args[1] === "mcp" && ["node", "node.exe"].includes(basename(command).toLowerCase()) && basename(args[0]).toLowerCase() === "better-codex.cjs" && existsSync(args[0])) return true;
-  return args.length === 1 && args[0] === "mcp" && ["better-codex", "better-codex.exe"].includes(basename(command).toLowerCase());
+function mcpCommand() {
+  const managed = managedCoreCommand(["mcp"]);
+  if (managed) return [managed.command, ...managed.args];
+  const [command, ...commandArgs] = selfCommand();
+  return [command, ...commandArgs, "mcp"];
 }
 
 function mcpStatus() {
   try {
-    const [command, ...commandArgs] = selfCommand();
-    const expectedArgs = [...commandArgs, "mcp"];
+    const [command, ...expectedArgs] = mcpCommand();
     const value = execFileSync(codexCliPath(), ["mcp", "get", betterCodexMcpName, "--json"], { encoding: "utf8", windowsHide: true });
     const configuration = JSON.parse(value) as { transport?: { command?: string; args?: string[] } };
     const transportCommand = configuration.transport?.command;
     const transportArgs = configuration.transport?.args ?? [];
-    const configured = (transportCommand === command && JSON.stringify(transportArgs) === JSON.stringify(expectedArgs)) || packagedMcpTransport(transportCommand, transportArgs);
+    const configured = transportCommand === command && JSON.stringify(transportArgs) === JSON.stringify(expectedArgs);
     return { installed: true, configured, configuration };
   } catch {
     return { installed: false, configured: false };
@@ -814,8 +814,7 @@ function mcpStatus() {
 
 function installMcp() {
   const cli = codexCliPath();
-  const [command, ...commandArgs] = selfCommand();
-  const expectedArgs = [...commandArgs, "mcp"];
+  const [command, ...expectedArgs] = mcpCommand();
   const current = mcpStatus();
   if (current.installed) {
     if (current.configured) return { ...current, existing: true };

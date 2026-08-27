@@ -5,6 +5,7 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import { isSea } from "node:sea";
 import { isDeepStrictEqual } from "node:util";
 import { betterCodexHome, betterCodexProfile, cdpPort, ensureDirectories, logPath, runPath, runtimeLogPath, sourceProcessArguments } from "./config.js";
+import { managedCoreCommand } from "./updater.js";
 
 const label = "com.better-codex.runtime";
 const legacyLabel = "com.better-codex.gateway";
@@ -18,6 +19,8 @@ function xml(value: string) {
 }
 
 function command() {
+  const managed = managedCoreCommand(["runtime"]);
+  if (managed) return [managed.command, ...managed.args];
   if (isSea()) return [process.env.BETTER_CODEX_LAUNCHER_PATH || process.execPath, "runtime"];
   if (process.env.BETTER_CODEX_BASE_ENTRYPOINT) return [process.execPath, resolve(process.env.BETTER_CODEX_BASE_ENTRYPOINT), "runtime"];
   const args = sourceProcessArguments(["runtime"]);

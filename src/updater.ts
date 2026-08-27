@@ -447,6 +447,12 @@ export function activeCoreExecutable() {
   return pointer && compareVersions(pointer.current, coreVersion) > 0 ? pointer.executable : currentCoreEntrypoint();
 }
 
+export function managedCoreCommand(args: string[]) {
+  const pointer = readRuntimePointer();
+  if (!pointer || compareVersions(pointer.current, coreVersion) < 0 || !existsSync(pointer.executable)) return null;
+  return coreInvocation(pointer.executable, args);
+}
+
 export function activeCoreCommand(args: string[]) {
   return coreInvocation(activeCoreExecutable(), args);
 }
