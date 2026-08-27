@@ -4826,39 +4826,9 @@ export function install(config: Record<string, any>) {
 
     const suggestedAgents = config.suggestedAgents;
 
-    let agentCreateFullscreen = false;
-    let agentWindowBoundsObserver = null;
     let agentAutosaveTimer = null;
     let agentAutosavePending = null;
     let agentAutosaveRunning = null;
-
-    function clearAgentCreateFullscreenBounds(inspector) {
-      inspector?.style.removeProperty("--bc-agent-fullscreen-top");
-      inspector?.style.removeProperty("--bc-agent-fullscreen-left");
-      inspector?.style.removeProperty("--bc-agent-fullscreen-width");
-      inspector?.style.removeProperty("--bc-agent-fullscreen-height");
-    }
-
-    function syncAgentCreateFullscreenBounds(inspector) {
-      const compact = HOST_KIND === "web" && window.matchMedia("(max-width: 720px)").matches;
-      if (!agentCreateFullscreen || compact || !panel?.isConnected) return clearAgentCreateFullscreenBounds(inspector);
-      const bounds = panel.getBoundingClientRect();
-      inspector.style.setProperty("--bc-agent-fullscreen-top", bounds.top + "px");
-      inspector.style.setProperty("--bc-agent-fullscreen-left", bounds.left + "px");
-      inspector.style.setProperty("--bc-agent-fullscreen-width", bounds.width + "px");
-      inspector.style.setProperty("--bc-agent-fullscreen-height", bounds.height + "px");
-    }
-
-    function setAgentCreateFullscreen(fullscreen) {
-      const inspector = panel?.querySelector('.better-codex-agent-inspector[data-agent-window="create"]');
-      if (!inspector) return;
-      agentCreateFullscreen = Boolean(fullscreen);
-      inspector.dataset.fullscreen = String(agentCreateFullscreen);
-      syncAgentCreateFullscreenBounds(inspector);
-      const button = inspector.querySelector("[data-agent-window-expand]");
-      button?.setAttribute("aria-label", t(agentCreateFullscreen ? "退出全屏" : "全屏"));
-      if (button) button.innerHTML = icon(agentCreateFullscreen ? "shrink" : "expand");
-    }
 
     function agentInspectorWidthLimit() {
       const available = panel?.getBoundingClientRect().width || window.innerWidth;
@@ -4939,9 +4909,6 @@ export function install(config: Record<string, any>) {
 
     function closeAgentInspector() {
       if (state.agentPane === "preview") return;
-      agentWindowBoundsObserver?.disconnect();
-      agentWindowBoundsObserver = null;
-      agentCreateFullscreen = false;
       state.agentPane = "preview";
       state.selectedAgentId = "";
       state.agentDraft = null;
@@ -4993,12 +4960,11 @@ export function install(config: Record<string, any>) {
       const animateAttr = options.animateEnter ? ' data-animate="enter"' : "";
       const mobilePage = HOST_KIND === "web" && window.matchMedia("(max-width: 720px)").matches;
       const tag = creating && !mobilePage ? "dialog" : "aside";
-      const windowAttr = creating ? ' data-agent-window="create" data-fullscreen="' + agentCreateFullscreen + '"' : "";
+      const windowAttr = creating ? ' data-agent-window="create"' : "";
       const resizeHandle = creating ? "" : '<div class="better-codex-agent-inspector-resize" data-agent-inspector-resize role="separator" aria-orientation="vertical" aria-label="' + te("调整侧边栏宽度") + '" tabindex="0"></div>';
-      const leading = creating ? '<div class="better-codex-agent-inspector-head-leading"><button class="better-codex-agent-window-back" type="button" data-agent-window-back aria-label="' + te("返回") + '">' + icon("back") + '</button><nav class="better-codex-agent-window-title" aria-label="' + te("智能体") + '"><span>' + te("智能体") + '</span><span aria-hidden="true">&gt;</span><strong>' + te("创建智能体") + '</strong></nav></div>' : '<span>' + heading + '</span>';
-      const windowAction = creating ? '<button class="better-codex-agent-card-action" type="button" data-agent-window-expand aria-label="' + te(agentCreateFullscreen ? "退出全屏" : "全屏") + '">' + icon(agentCreateFullscreen ? "shrink" : "expand") + '</button>' : "";
+      const leading = creating ? '<div class="better-codex-agent-inspector-head-leading"><nav class="better-codex-agent-window-title" aria-label="' + te("智能体") + '"><span>' + te("智能体") + '</span><span aria-hidden="true">&gt;</span><strong>' + te("创建智能体") + '</strong></nav></div>' : '<span>' + heading + '</span>';
       const footer = readOnly ? "" : creating ? '<footer class="better-codex-agent-inspector-footer"><button class="better-codex-submit" type="submit">' + te("创建") + '</button></footer>' : deleteButton ? '<footer class="better-codex-agent-inspector-footer">' + deleteButton + '</footer>' : "";
-      return '<' + tag + ' class="better-codex-agent-inspector"' + animateAttr + windowAttr + '>' + resizeHandle + '<form data-agent-form="' + (creating ? "create" : isDefault ? "default" : "update") + '" data-agent-key="' + escapeHtml(creating ? "" : agentKey(draft)) + '"><header class="better-codex-agent-inspector-head">' + leading + '<div class="better-codex-agent-inspector-head-actions">' + windowAction + '<button class="better-codex-agent-card-action" type="button" data-agent-close-pane aria-label="' + te(creating ? "关闭" : "关闭详情") + '">' + icon("close") + '</button></div></header><div class="better-codex-agent-inspector-scroll">' + profileHead + identity + '<h3>' + te("详情") + '</h3><div class="better-codex-agent-inspector-group">' + agentPicker("model", t("模型"), model, modelOptions) + agentFastToggle(fast, fastEnabled) + agentPicker("reasoning_effort", t("推理"), effort, effortOptions) + agentPicker("sandbox_mode", t("权限"), sandboxMode, sandboxOptions) + agentNumberInput("max_concurrency", t("最大并发"), draft.max_concurrency, 1, 20) + '</div>' + instructionField + '<output class="better-codex-agent-inspector-status" hidden></output><div class="better-codex-agent-inspector-error" role="alert" hidden></div></div>' + footer + '</form></' + tag + '>';
+      return '<' + tag + ' class="better-codex-agent-inspector"' + animateAttr + windowAttr + '>' + resizeHandle + '<form data-agent-form="' + (creating ? "create" : isDefault ? "default" : "update") + '" data-agent-key="' + escapeHtml(creating ? "" : agentKey(draft)) + '"><header class="better-codex-agent-inspector-head">' + leading + '<div class="better-codex-agent-inspector-head-actions"><button class="better-codex-agent-card-action" type="button" data-agent-close-pane aria-label="' + te(creating ? "关闭" : "关闭详情") + '">' + icon("close") + '</button></div></header><div class="better-codex-agent-inspector-scroll">' + profileHead + identity + '<h3>' + te("详情") + '</h3><div class="better-codex-agent-inspector-group">' + agentPicker("model", t("模型"), model, modelOptions) + agentFastToggle(fast, fastEnabled) + agentPicker("reasoning_effort", t("推理"), effort, effortOptions) + agentPicker("sandbox_mode", t("权限"), sandboxMode, sandboxOptions) + agentNumberInput("max_concurrency", t("最大并发"), draft.max_concurrency, 1, 20) + '</div>' + instructionField + '<output class="better-codex-agent-inspector-status" hidden></output><div class="better-codex-agent-inspector-error" role="alert" hidden></div></div>' + footer + '</form></' + tag + '>';
     }
 
     function renderAgents() {
@@ -5028,33 +4994,20 @@ export function install(config: Record<string, any>) {
         return '<button class="better-codex-agent-suggestion' + (selected ? " is-selected" : "") + '" type="button" data-agent-template="' + item.key + '" aria-pressed="' + selected + '"><span class="better-codex-agent-suggestion-icon" data-tone="' + escapeHtml(item.tone) + '">' + icon(item.icon, "", "2.4") + '</span><span><strong>' + te(item.name) + '</strong><small>' + te(item.description) + '</small></span></button>';
       }).join("");
       const animateEnter = previousPane === "preview" && state.agentPane !== "preview";
-      agentWindowBoundsObserver?.disconnect();
-      agentWindowBoundsObserver = null;
       container.innerHTML = '<div class="better-codex-agent-shell" data-pane="' + state.agentPane + '"><section class="better-codex-agent-directory"><header class="better-codex-agent-page-heading"><h1>' + te("智能体") + '</h1><p>' + te("创建和管理你的智能体") + '</p></header><div class="better-codex-agent-search-wrap">' + icon("search") + '<input class="better-codex-search" data-agent-search type="search" value="' + escapeHtml(state.agentSearch) + '" placeholder="' + te("搜索智能体") + '" aria-label="' + te("搜索智能体") + '"></div><div class="better-codex-agent-list">' + (rows || empty) + '</div>' + (state.agentView === "all" && !query ? '<div class="better-codex-agent-suggestions"><h3>' + te("建议") + '</h3>' + suggestions + '</div>' : "") + '</section>' + agentInspector(selected, { animateEnter }) + '</div>';
       const inspector = container.querySelector(".better-codex-agent-inspector");
       if (state.agentPane !== "create") return applyAgentInspectorWidth(inspector);
-      if (!inspector.matches("dialog")) {
-        agentCreateFullscreen = false;
-        return;
-      }
+      if (!inspector.matches("dialog")) return;
       inspector.addEventListener("cancel", event => {
         event.preventDefault();
         closeAgentInspector();
       });
       inspector.addEventListener("close", () => {
-        agentWindowBoundsObserver?.disconnect();
-        agentWindowBoundsObserver = null;
-        agentCreateFullscreen = false;
         if (state.agentPane !== "create") return;
         closeAgentInspector();
       }, { once: true });
       bindModalDismiss(inspector, closeAgentInspector);
       inspector.showModal();
-      setAgentCreateFullscreen(agentCreateFullscreen);
-      if (panel && typeof ResizeObserver === "function") {
-        agentWindowBoundsObserver = new ResizeObserver(() => syncAgentCreateFullscreenBounds(inspector));
-        agentWindowBoundsObserver.observe(panel);
-      }
     }
 
     function projectRootPaths(project) {
@@ -7376,7 +7329,6 @@ export function install(config: Record<string, any>) {
 
     function startAgentCreate(draft = null) {
       if (AGENTS_READ_ONLY) return;
-      agentCreateFullscreen = false;
       state.agentPane = "create";
       state.selectedAgentId = "";
       state.agentDraft = draft
@@ -7520,8 +7472,6 @@ export function install(config: Record<string, any>) {
 
     function onAgentsClick(event) {
       if (suppressAgentOutside) return;
-      if (event.target.closest("[data-agent-window-back]")) return void closeAgentInspectorAfterSave();
-      if (event.target.closest("[data-agent-window-expand]")) return setAgentCreateFullscreen(!agentCreateFullscreen);
       if (event.target.closest("[data-agent-close-pane]")) return void closeAgentInspectorAfterSave();
       const row = event.target.closest(".better-codex-agent-directory [data-agent-key]");
       if (row) {
@@ -10612,7 +10562,6 @@ export function install(config: Record<string, any>) {
       } else if (surface === "agents") {
         state.projectDetailId = "";
         const agentKey = typeof options.agentKey === "string" ? options.agentKey : "";
-        agentCreateFullscreen = false;
         state.agentPane = agentKey === "new" ? "create" : agentKey ? "detail" : "preview";
         state.selectedAgentId = agentKey && agentKey !== "new" ? agentKey : "";
         state.agentDraft = agentKey === "new" ? { avatar: "icon:bot" } : null;
@@ -10838,8 +10787,6 @@ export function install(config: Record<string, any>) {
       boardScrollResizeObserver = null;
       panelSizeCleanup?.();
       panelSizeCleanup = null;
-      agentWindowBoundsObserver?.disconnect();
-      agentWindowBoundsObserver = null;
       Array.from(completionNoticeDismissals.values()).forEach(dismissNotice => dismissNotice(false));
       completionNoticeTimers.forEach(timer => clearTimeout(timer));
       completionNoticeTimers.clear();

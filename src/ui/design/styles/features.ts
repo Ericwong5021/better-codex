@@ -4605,22 +4605,6 @@ export function betterCodexFeatureStylesCss() {
       backdrop-filter: none;
     }
 
-    #better-codex-panel .better-codex-agent-inspector[data-agent-window="create"][data-fullscreen="true"] {
-      inset: var(--bc-agent-fullscreen-top) auto auto var(--bc-agent-fullscreen-left);
-      width: var(--bc-agent-fullscreen-width);
-      height: var(--bc-agent-fullscreen-height);
-      max-height: none;
-      margin: 0;
-      border-radius: 0;
-      box-shadow: none;
-    }
-
-    @media (min-width: 721px) {
-      #better-codex-panel .better-codex-agent-inspector[data-agent-window="create"][data-fullscreen="true"]::backdrop {
-        background: transparent;
-      }
-    }
-
     #better-codex-panel .better-codex-agent-inspector[data-resized="true"] {
       min-width: 320px;
     }
@@ -4725,35 +4709,6 @@ export function betterCodexFeatureStylesCss() {
     #better-codex-panel .better-codex-agent-window-title strong {
       color: var(--bc-color-text);
       font-weight: 600;
-    }
-
-    #better-codex-panel .better-codex-agent-window-back {
-      display: none;
-      width: var(--bc-control-height);
-      height: var(--bc-control-height);
-      flex: 0 0 var(--bc-control-height);
-      align-items: center;
-      justify-content: center;
-      border: 0;
-      border-radius: var(--bc-radius-sm);
-      color: var(--bc-color-text-muted);
-      background: transparent;
-      padding: 0;
-      cursor: pointer;
-    }
-
-    #better-codex-panel .better-codex-agent-window-back:hover {
-      color: var(--bc-color-text);
-      background: var(--bc-color-hover);
-    }
-
-    #better-codex-panel .better-codex-agent-window-back svg {
-      width: var(--bc-icon-md);
-      height: var(--bc-icon-md);
-    }
-
-    #better-codex-panel .better-codex-agent-inspector[data-agent-window="create"][data-fullscreen="true"] .better-codex-agent-window-back {
-      display: inline-flex;
     }
 
     #better-codex-panel .better-codex-agent-inspector-scroll {
@@ -8332,7 +8287,6 @@ export function betterCodexFeatureStylesCss() {
       #better-codex-panel .better-codex-agent-inspector[data-agent-window="create"] .better-codex-agent-inspector-footer {
         padding-inline: var(--bc-space-4);
       }
-      #better-codex-panel .better-codex-agent-inspector [data-agent-window-expand] { display: none; }
       #better-codex-panel .better-codex-agent-inspector-resize { display: none; }
       #better-codex-panel .better-codex-agent-inspector,
       #better-codex-panel .better-codex-agent-inspector[data-animate="enter"],

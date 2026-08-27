@@ -371,7 +371,6 @@ test("agent inspector uses desktop entry motion and opens mobile pages fullscree
   assert.match(css, /\.better-codex-agent-inspector\[data-animate="enter"\]\s*\{[^}]*animation:\s*better-codex-inspector-enter/s);
   assert.match(mobileCss, /\.better-codex-agent-inspector\[data-agent-window="create"\]\s*\{[^}]*position:\s*relative;[^}]*width:\s*100%;[^}]*height:\s*100%;[^}]*border-radius:\s*0;/s);
   assert.match(mobileCss, /\.better-codex-agent-inspector\[data-animate="enter"\],\s*#better-codex-panel \.better-codex-agent-inspector\[data-agent-window="create"\]\[data-animate="enter"\]\s*\{[^}]*animation:\s*none;[^}]*transition:\s*none;/s);
-  assert.match(mobileCss, /\[data-agent-window-expand\]\s*\{[^}]*display:\s*none;/s);
   assert.doesNotMatch(mobileCss, /animation-name:/);
   assert.doesNotMatch(css, /\.better-codex-agent-inspector\.is-closing/);
   assert.match(css, /@keyframes better-codex-inspector-enter/);
