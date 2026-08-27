@@ -602,7 +602,7 @@ input.on("line", line => {
     send({ method: "turn/started", params: { threadId: "${threadId}", turn: { id: "${turnId}", status: "inProgress" } } });
     setTimeout(() => {
       send({ method: "item/completed", params: { threadId: "${threadId}", turnId: "${turnId}", item: { type: "agentMessage", text: "continued after Runtime restart" } } });
-      send({ method: "turn/completed", params: { threadId: "${threadId}", turn: { id: "${turnId}", status: "completed", items: [{ type: "agentMessage", text: "continued after Runtime restart" }] } } });
+      process.stdout.write(JSON.stringify({ method: "turn/completed", params: { threadId: "${threadId}", turn: { id: "${turnId}", status: "completed", items: [{ type: "agentMessage", text: "continued after Runtime restart" }] } } }) + "\\n" + JSON.stringify({ method: "thread/status/changed", params: { threadId: "${threadId}", status: { type: "active", activeFlags: [] } } }) + "\\n");
     }, 1800);
     return;
   }

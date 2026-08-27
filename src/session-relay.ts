@@ -1096,7 +1096,7 @@ export class RuntimeSessionRelay {
       catalog: this.catalog,
       onThreadBound: (threadId, source) => this.bindWorker(threadId, source),
       onTerminal: (threadId, turnId, source) => {
-        setImmediate(() => void this.releaseWorker(source, threadId, `turn_terminal:${turnId}`).catch(error => relayDiagnostic("thread_worker_release_failed", { host_instance_id: this.hostInstanceId || null, thread_id: threadId, turn_id: turnId, error: error instanceof Error ? error.message : String(error) })));
+        void this.releaseWorker(source, threadId, `turn_terminal:${turnId}`).catch(error => relayDiagnostic("thread_worker_release_failed", { host_instance_id: this.hostInstanceId || null, thread_id: threadId, turn_id: turnId, error: error instanceof Error ? error.message : String(error) }));
       },
       onIdle: (threadId, source) => {
         setImmediate(() => void this.releaseWorker(source, threadId, "thread_idle").catch(error => {
