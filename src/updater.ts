@@ -456,6 +456,11 @@ function effectiveCoreVersion() {
   return managed && compareVersions(managed, coreVersion) > 0 ? managed : coreVersion;
 }
 
+function pendingCoreActivation() {
+  const pointer = readRuntimePointer();
+  return pointer && compareVersions(pointer.current, coreVersion) > 0 ? pointer : null;
+}
+
 export function getGatewayUpdateState() {
   if (gatewayUpdateState.status === "restarting") {
     const persisted = persistedActivationState();
@@ -521,7 +526,20 @@ export function startGatewayUpdateChecks() {
 export function installGatewayUpdate() {
   if (gatewayInstallPromise) return gatewayInstallPromise;
   const channel = selectedUpdateChannel();
-  const promise = checkGatewayUpdate(channel).then(state => {
+  const promise = (async () => {
+    const pending = pendingCoreActivation();
+    if (pending) {
+      if (!existsSync(pending.executable)) throw new Error("update_staged_core_unavailable");
+      const manifest = await fetchUpdateManifest(channel);
+      if (manifest.core?.version !== pending.current) throw new Error(`update_staged_core_manifest_mismatch:${pending.current}:${manifest.core?.version || "missing"}`);
+      return {
+        channel,
+        core: { updated: true, previous: coreVersion, version: pending.current, pendingRestart: true },
+        compatibility: { updated: false, reason: "compatibility_current", version: activeCompatibility().version },
+        runtimeSessionHandoff: manifest.runtimeSessionHandoff || null,
+      };
+    }
+    const state = await checkGatewayUpdate(channel);
     if (state.status === "current") {
       return {
         channel,
@@ -533,7 +551,7 @@ export function installGatewayUpdate() {
     if (state.status !== "available") throw new Error(state.error || "update_not_available");
     gatewayUpdateState = { ...getGatewayUpdateState(), status: "installing", error: null };
     return updateAll(channel);
-  }).then(result => {
+  })().then(result => {
     const updated = result.core.updated || result.compatibility.updated;
     gatewayUpdateState = {
       ...getGatewayUpdateState(),

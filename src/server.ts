@@ -1695,6 +1695,7 @@ export function startServer() {
             const installedCoreVersion = result.core.updated ? result.core.version : getGatewayUpdateState().currentVersion;
             if (requestedTargetVersion && installedCoreVersion !== requestedTargetVersion) throw new Error(`update_target_version_mismatch:${requestedTargetVersion}:${installedCoreVersion}`);
             if (!updated) {
+              if (installedCoreVersion !== coreVersion) throw new Error(`update_core_activation_required:${coreVersion}:${installedCoreVersion}`);
               store.transitionUpdateOperation(operation.id, "COMPLETED", { targetCoreVersion: installedCoreVersion });
               updateInstallInProgress = false;
               return;

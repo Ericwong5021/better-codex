@@ -264,7 +264,10 @@ test("standalone core and compatibility updates enter the WAL before pointer mut
   const applyUpdate = cli.slice(cli.indexOf("async function applyUpdate"), cli.indexOf("async function withLaunchLock"));
   assert.match(compatibility, /writeRollbackState\(before, plannedAfter, "applying"\)[\s\S]*updateCompatibilityUnlocked/);
   assert.match(core, /writeRollbackState\(before, plannedAfter, "applying"\)[\s\S]*updateCoreUnlocked/);
+  assert.match(source, /pendingCoreActivation\(\)[\s\S]*update_staged_core_manifest_mismatch/);
   assert.match(server, /sendJson\(response, 202, \{ accepted: true, update_id: operation\.id, state: "STAGING"[\s\S]*void \(async \(\) => \{[\s\S]*const result = await installGatewayUpdate\(\)/);
+  assert.match(server, /if \(installedCoreVersion !== coreVersion\) throw new Error\(`update_core_activation_required:/);
+  assert.match(cli, /if \(operation\.status === "COMPLETED"\) \{[\s\S]*const runtime = await health\(\)/);
   assert.doesNotMatch(server, /interrupt_running/);
   assert.doesNotMatch(applyUpdate, /stopSessionHostProcess\(\)/);
 });

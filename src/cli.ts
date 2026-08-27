@@ -140,7 +140,8 @@ async function installRuntimeUpdate(targetVersion: string | undefined, channel: 
       if (!operation || operation.id !== updateId) throw new Error("update_operation_missing");
       if (operation.status === "FAILED" || operation.status === "ROLLED_BACK") throw new Error(`update_terminal:${operation.error_code || operation.status.toLowerCase()}`);
       if (operation.status === "COMPLETED") {
-        const currentVersion = String(state.currentVersion || "");
+        const runtime = await health();
+        const currentVersion = String(runtime.version || "");
         if (targetVersion && currentVersion !== targetVersion) throw new Error(`update_target_version_mismatch:${targetVersion}:${currentVersion || "unknown"}`);
         return { updated: true, update_id: updateId, currentVersion, operation };
       }
@@ -1374,6 +1375,7 @@ async function main() {
   }
   if (command === "update") {
     const values = [action, ...args].filter(Boolean) as string[];
+    if (["--help", "-h", "help"].includes(action || "")) return usage();
     if (action === "channel") {
       const requested = args[0];
       if (!requested || args.length !== 1 || !["stable", "preview"].includes(requested)) throw new Error("update_channel_invalid");
