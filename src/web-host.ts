@@ -61,7 +61,7 @@ const webHostHtml = String.raw`<!doctype html>
         </button>
         <section id="web-usage" class="web-usage" aria-live="polite" hidden>
           <div class="web-usage-heading">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>
+            <button id="web-usage-refresh" class="web-usage-refresh" type="button" aria-label="刷新 Codex 额度"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg></button>
             <strong id="web-usage-title">剩余用量</strong>
             <button id="web-usage-close" class="web-usage-close" type="button" aria-label="关闭额度"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"></path></svg></button>
           </div>
@@ -161,8 +161,13 @@ body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; 
 .web-account-usage[aria-expanded="true"] svg { transform: rotate(90deg); }
 .web-usage { margin: 0 6px; border-top: 1px solid var(--bc-color-hairline); padding: 9px 4px 10px; }
 .web-usage[hidden] { display: none; }
-.web-usage-heading { display: grid; grid-template-columns: 13px minmax(0, 1fr); align-items: center; gap: 6px; color: var(--bc-color-text-muted); font-size: 10px; }
-.web-usage-heading svg { width: 13px; height: 13px; }
+.web-usage-heading { display: grid; grid-template-columns: 22px minmax(0, 1fr); align-items: center; gap: 4px; color: var(--bc-color-text-muted); font-size: 10px; }
+.web-usage-refresh { display: grid; width: 22px; height: 22px; border: 0; border-radius: var(--bc-radius-xs); padding: 0; place-items: center; color: inherit; background: transparent; cursor: pointer; }
+.web-usage-refresh:hover { color: var(--bc-color-text); background: var(--bc-color-hover); }
+.web-usage-refresh:disabled { cursor: wait; }
+.web-usage-refresh svg { width: 13px; height: 13px; }
+.web-usage-refresh[aria-busy="true"] svg { animation: web-usage-refresh-spin calc(var(--bc-motion-normal) + var(--bc-motion-normal) + var(--bc-motion-normal) + var(--bc-motion-normal)) linear infinite; }
+@keyframes web-usage-refresh-spin { to { transform: rotate(360deg); } }
 .web-usage-heading strong { font-weight: 590; }
 .web-usage-close { display: none; }
 .web-usage-body { display: grid; gap: 10px; margin-top: 9px; }
@@ -253,7 +258,7 @@ body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; 
   .web-account:has(.web-account-usage[aria-expanded="true"]) { position: fixed; z-index: 60; right: max(10px, env(safe-area-inset-right)); bottom: calc(68px + env(safe-area-inset-bottom)); display: block; width: min(280px, calc(100vw - 20px)); border: 1px solid var(--bc-color-hairline); border-radius: var(--bc-radius-md); padding: 6px; background: var(--bc-color-surface-raised); box-shadow: var(--bc-elevation-menu); }
   .web-account:has(.web-account-usage[aria-expanded="true"]) .web-profile, .web-account:has(.web-account-usage[aria-expanded="true"]) .web-account-theme, .web-account:has(.web-account-usage[aria-expanded="true"]) .web-account-usage { display: none; }
   .web-account:has(.web-account-usage[aria-expanded="true"]) .web-usage { margin: 0; border: 0; padding: 10px; }
-  .web-account:has(.web-account-usage[aria-expanded="true"]) .web-usage-heading { grid-template-columns: 13px minmax(0, 1fr) 28px; }
+  .web-account:has(.web-account-usage[aria-expanded="true"]) .web-usage-heading { grid-template-columns: 22px minmax(0, 1fr) 28px; }
   .web-account:has(.web-account-usage[aria-expanded="true"]) .web-usage-close { display: grid; width: 28px; height: 28px; border: 0; border-radius: var(--bc-radius-xs); padding: 0; place-items: center; color: var(--bc-color-text-muted); background: transparent; cursor: pointer; }
   .web-account:has(.web-account-usage[aria-expanded="true"]) .web-usage-close svg { width: 15px; height: 15px; }
   .web-nav-button .text-fade-truncate { display: block; }
@@ -295,6 +300,7 @@ const profileAvatarInitials = document.getElementById("web-avatar-initials");
 const usageToggleButton = document.getElementById("web-usage-toggle");
 const usagePanel = document.getElementById("web-usage");
 const usageCloseButton = document.getElementById("web-usage-close");
+const usageRefreshButton = document.getElementById("web-usage-refresh");
 const usageTitle = document.getElementById("web-usage-title");
 const usageBody = document.getElementById("web-usage-body");
 let installing = false;
@@ -489,6 +495,7 @@ function updateWebProfile(detail) {
   installButton.setAttribute("aria-label", profileText("安装 Better Codex", "Install Better Codex"));
   usageTitle.textContent = profileText("剩余用量", "Usage remaining");
   usageCloseButton.setAttribute("aria-label", profileText("关闭额度", "Close usage"));
+  usageRefreshButton.setAttribute("aria-label", profileText("刷新 Codex 额度", "Refresh Codex usage"));
   profileButton.setAttribute("aria-label", REMOTE ? profileText("编辑个人资料", "Edit profile") : profileText("查看 Codex 额度", "View Codex usage"));
   usageToggleButton.setAttribute("aria-label", profileText("查看 Codex 额度", "View Codex usage"));
   if (usageLoadedAt) renderUsage(cachedUsage);
@@ -555,9 +562,11 @@ function renderUsage(usage) {
   }
 }
 
-async function loadUsage() {
-  if (usageLoading || (usageLoadedAt && Date.now() - usageLoadedAt < 60_000)) return;
+async function loadUsage(force = false) {
+  if (usageLoading || (!force && usageLoadedAt && Date.now() - usageLoadedAt < 60_000)) return;
   usageLoading = true;
+  usageRefreshButton.disabled = true;
+  usageRefreshButton.setAttribute("aria-busy", "true");
   usageBody.replaceChildren();
   const status = document.createElement("span");
   status.className = "web-usage-status";
@@ -574,7 +583,14 @@ async function loadUsage() {
     hostDiagnostic("usage_request_unavailable", { error: error?.message || "request_failed" });
   } finally {
     usageLoading = false;
+    usageRefreshButton.disabled = false;
+    usageRefreshButton.removeAttribute("aria-busy");
   }
+}
+
+function closeUsage() {
+  usageToggleButton.setAttribute("aria-expanded", "false");
+  usagePanel.hidden = true;
 }
 
 window.addEventListener("better-codex:bootstrap", event => {
@@ -598,8 +614,12 @@ usageToggleButton.addEventListener("click", () => {
   if (expanded) void loadUsage();
 });
 usageCloseButton.addEventListener("click", () => {
-  usageToggleButton.setAttribute("aria-expanded", "false");
-  usagePanel.hidden = true;
+  closeUsage();
+});
+usageRefreshButton.addEventListener("click", () => void loadUsage(true));
+document.addEventListener("click", event => {
+  if (usagePanel.hidden || event.target?.closest?.("#web-usage, #web-usage-toggle, #web-profile")) return;
+  closeUsage();
 });
 
 function consumeFragmentToken() {
