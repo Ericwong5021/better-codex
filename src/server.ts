@@ -1734,6 +1734,8 @@ export function startServer() {
             if (!updated) {
               if (installedCoreVersion !== coreVersion) throw new Error(`update_core_activation_required:${coreVersion}:${installedCoreVersion}`);
               store.transitionUpdateOperation(operation.id, "COMPLETED", { targetCoreVersion: installedCoreVersion });
+              recordGatewayUpdateActivation("success", null, { core: installedCoreVersion, compatibility: result.compatibility.version }, null, operation.id, identity.generation);
+              console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "update", event: "update_current_confirmed", update_id: operation.id, runtime_instance_id: identity.instanceId, runtime_generation: identity.generation, core_version: installedCoreVersion, compatibility_version: result.compatibility.version })}`);
               updateInstallInProgress = false;
               return;
             }
