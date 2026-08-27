@@ -10,7 +10,7 @@ import { defaultAgentProfile, syncAgentProfiles, updateDefaultAgentProfile } fro
 import { readCodexAppearance, readHostThemeInput } from "./appearance.js";
 import { normalizeCodexLocale, readCodexLocale } from "./locale.js";
 import { readCodexUserProfile } from "./user-profile.js";
-import { readCodexActivity } from "./codex-activity.js";
+import { readCodexActivity, startCodexActivityCollection, stopCodexActivityCollection } from "./codex-activity.js";
 import { readCodexUsage } from "./codex-usage.js";
 import { MentionCatalogService, codexSemanticRequestFingerprint, normalizeCodexSemanticSelections, readCodexSemanticCatalog, resolveCodexSemanticReferences, searchCodexFiles } from "./codex-semantics.js";
 import { appendInputDocumentText, compileInputDocument, inputDocumentLegacyReferences, inputDocumentText, legacyInputDocument, type SemanticKindV2 } from "./codex-input-document.js";
@@ -948,6 +948,7 @@ export function startServer() {
     if (cleaned) return;
     cleaned = true;
     worker.stop();
+    stopCodexActivityCollection();
     syncClient.stop();
     relayClient.stop();
     stopUpdateChecks();
@@ -1215,7 +1216,7 @@ export function startServer() {
         return sendJson(response, 200, { usage: await readCodexUsage() });
       }
       if (url.pathname === "/api/account/usage/activity" && method === "GET") {
-        return sendJson(response, 200, { activity: await readCodexActivity(Number(url.searchParams.get("since") || Date.now())) });
+        return sendJson(response, 200, { activity: readCodexActivity() });
       }
       if (mockupEnabled && url.pathname === "/api/mockup/state" && method === "GET") {
         return sendJson(response, 200, readMockupState(mockupLocale));
@@ -2373,6 +2374,7 @@ export function startServer() {
     activeRuntimePort = address.port;
     publishRuntimeState({ ...identity, port: address.port });
     const startRuntimeServices = () => {
+      if (!mockupEnabled) startCodexActivityCollection();
       if (!mockupEnabled) worker.start();
       if (!mockupEnabled && remoteMode === "projection") syncClient.start();
       if (!mockupEnabled && remoteMode === "relay") relayClient.start();

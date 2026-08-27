@@ -1,6 +1,7 @@
 # Better Codex runtime invariants
 
 - The local Runtime is the only owner of the Better Codex business database. Its runtime lock and published identity must agree on PID, process start time, instance ID, port, version, and profile.
+- Codex token activity is collected by one Runtime-owned resident watcher with incremental rollout reads and periodic reconciliation. Browser and Relay consumers read the cached rolling snapshot and must never create per-client filesystem scanners.
 - A Session Host is single-instance within one profile. Runtime connections are authenticated before replacement and fenced by connection epoch. Host status must continuously identify the Host PID, process start time, Host instance, Runtime instance, App Server PID, and command state.
 - Stable and development Session Hosts may use separate profile homes, but every detected Host must be represented by a fresh status record. `untracked` Hosts are operational drift and must never be killed without verifying their exact PID, start time, profile lock, and active work.
 - Relay accepts one active Runtime connection. Connection-wide closure is reserved for authentication, identity, epoch, or protocol failures. Request sequence and channel state failures terminate only the affected channel and emit structured diagnostics.

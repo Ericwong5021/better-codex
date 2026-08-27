@@ -336,7 +336,6 @@ let usageLoading = false;
 let usagePinned = false;
 let cachedUsage;
 let usageActivityTimer;
-let usageActivityStartedAt = 0;
 let usageActivityLoading = false;
 let usageActivityGeneration = 0;
 let installPrompt;
@@ -626,6 +625,12 @@ function renderUsageActivity(activity) {
     usageActivityStatus.textContent = profileText("实时记录暂不可用", "Live activity is unavailable");
     return;
   }
+  if (activity.status === "starting") {
+    usageTokenRate.textContent = "—";
+    usageRequestCount.textContent = "—";
+    usageActivityStatus.textContent = profileText("常驻统计正在启动…", "Starting resident tracking…");
+    return;
+  }
   usageTokenRate.textContent = formatTokenRate(activity.tokensPerSecond);
   usageRequestCount.textContent = Number(activity.requestCount || 0).toLocaleString(profileLocale === "zh-CN" ? "zh-CN" : "en-US");
   usageActivityStatus.textContent = activity.status === "degraded"
@@ -638,7 +643,6 @@ function stopUsageActivity() {
   if (usageActivityTimer) clearTimeout(usageActivityTimer);
   usageActivityTimer = undefined;
   usageActivityLoading = false;
-  usageActivityStartedAt = 0;
 }
 
 function scheduleUsageActivity(generation, delay = 2000) {
@@ -651,7 +655,7 @@ async function loadUsageActivity(generation) {
   if (generation !== usageActivityGeneration || usagePanel.hidden || document.hidden || usageActivityLoading) return;
   usageActivityLoading = true;
   try {
-    const result = await requestRuntime({ path: "/api/account/usage/activity?since=" + encodeURIComponent(String(usageActivityStartedAt)), method: "GET" });
+    const result = await requestRuntime({ path: "/api/account/usage/activity", method: "GET" });
     if (generation !== usageActivityGeneration || usagePanel.hidden) return;
     renderUsageActivity(result?.activity ?? null);
   } catch (error) {
@@ -668,14 +672,13 @@ async function loadUsageActivity(generation) {
 
 function startUsageActivity() {
   stopUsageActivity();
-  usageActivityStartedAt = Date.now();
   if (HOST_KIND === "remote-projection") {
     renderUsageActivity(null);
     return;
   }
-  usageTokenRate.textContent = "0.0 tok/s";
-  usageRequestCount.textContent = "0";
-  usageActivityStatus.textContent = profileText("近 1 分钟 · 等待新请求完成", "Last minute · waiting for a request");
+  usageTokenRate.textContent = "—";
+  usageRequestCount.textContent = "—";
+  usageActivityStatus.textContent = profileText("正在读取常驻统计…", "Loading resident tracking…");
   const generation = usageActivityGeneration;
   void loadUsageActivity(generation);
 }
@@ -731,7 +734,7 @@ document.addEventListener("visibilitychange", () => {
     usageActivityTimer = undefined;
     return;
   }
-  if (!usagePanel.hidden && usageActivityStartedAt) scheduleUsageActivity(usageActivityGeneration, 0);
+  if (!usagePanel.hidden) scheduleUsageActivity(usageActivityGeneration, 0);
 });
 document.addEventListener("click", event => {
   if (usagePinned || usagePanel.hidden || event.target?.closest?.("#web-usage, #web-usage-toggle, #web-profile")) return;
