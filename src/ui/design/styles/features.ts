@@ -8183,11 +8183,11 @@ export function betterCodexFeatureStylesCss() {
       #better-codex-panel[data-host="web"] .better-codex-board-scroll {
         box-sizing: border-box;
         display: flex;
-        min-height: 40px;
-        flex: 0 0 40px;
+        min-height: var(--bc-board-scroll-control-size);
+        flex: 0 0 var(--bc-board-scroll-control-size);
         align-items: center;
         gap: var(--bc-space-2);
-        padding: 0 var(--bc-space-3) var(--bc-space-2);
+        padding: 0 var(--bc-space-4) var(--bc-space-2);
         color: var(--bc-color-text-faint);
         background: var(--bc-color-canvas);
       }
@@ -8217,18 +8217,12 @@ export function betterCodexFeatureStylesCss() {
       #better-codex-panel[data-host="web"] .better-codex-board-scroll input {
         width: 100%;
         min-width: 0;
-        height: 32px;
+        height: var(--bc-board-scroll-input-size);
         margin: 0;
         appearance: none;
         -webkit-appearance: none;
         background: transparent;
         cursor: ew-resize;
-        touch-action: none;
-      }
-
-      #better-codex-panel[data-host="web"] .better-codex-board-scroll input:focus {
-        outline: none;
-        box-shadow: none;
       }
 
       #better-codex-panel[data-host="web"] .better-codex-board-scroll input::-webkit-slider-runnable-track {
@@ -8239,7 +8233,7 @@ export function betterCodexFeatureStylesCss() {
       }
 
       #better-codex-panel[data-host="web"] .better-codex-board-scroll input::-webkit-slider-thumb {
-        width: var(--bc-board-scroll-thumb-width);
+        width: var(--bc-board-scroll-thumb-width, 48px);
         height: var(--bc-board-scroll-thumb-size);
         margin-top: calc((var(--bc-board-scroll-track-size) - var(--bc-board-scroll-thumb-size)) / 2);
         appearance: none;
@@ -8247,7 +8241,7 @@ export function betterCodexFeatureStylesCss() {
         border: 1px solid var(--bc-color-hairline);
         border-radius: var(--bc-radius-pill);
         background: var(--bc-color-surface-raised);
-        box-shadow: var(--bc-elevation-thumb);
+        box-shadow: var(--bc-board-scroll-thumb-shadow);
       }
 
       #better-codex-panel[data-host="web"] .better-codex-board-scroll input::-moz-range-track {
@@ -8259,20 +8253,12 @@ export function betterCodexFeatureStylesCss() {
       }
 
       #better-codex-panel[data-host="web"] .better-codex-board-scroll input::-moz-range-thumb {
-        width: var(--bc-board-scroll-thumb-width);
+        width: var(--bc-board-scroll-thumb-width, 48px);
         height: var(--bc-board-scroll-thumb-size);
         border: 1px solid var(--bc-color-hairline);
         border-radius: var(--bc-radius-pill);
         background: var(--bc-color-surface-raised);
-        box-shadow: var(--bc-elevation-thumb);
-      }
-
-      #better-codex-panel[data-host="web"] .better-codex-board-scroll input:focus-visible::-webkit-slider-thumb {
-        box-shadow: var(--bc-board-scroll-focus-shadow);
-      }
-
-      #better-codex-panel[data-host="web"] .better-codex-board-scroll input:focus-visible::-moz-range-thumb {
-        box-shadow: var(--bc-board-scroll-focus-shadow);
+        box-shadow: var(--bc-board-scroll-thumb-shadow);
       }
 
       #better-codex-panel[data-surface="agents"] {
