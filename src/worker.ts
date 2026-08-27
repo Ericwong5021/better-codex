@@ -1296,11 +1296,12 @@ export class IssueWorker {
       const activeFlags = Array.isArray(status.activeFlags) ? status.activeFlags.filter((value): value is string => typeof value === "string") : [];
       const statusType = String(status.type || "");
       const changed = this.store.syncSessionThreadStatus(threadId, statusType, activeFlags);
-      if (!changed && statusType === "active") {
+      if (!changed && ["active", "systemError"].includes(statusType)) {
         const session = this.store.getIssueSessionByThread(threadId);
-        if (session && !session.active_turn_id) workerDebug("stale_thread_active_ignored", {
+        if (session && !session.active_turn_id) workerDebug("stale_thread_status_ignored", {
           issue_id: session.issue_id,
           thread_id: threadId,
+          status_type: statusType,
           session_status: session.status,
           active_command_id: session.active_command_id,
           last_turn_id: session.last_turn_id,

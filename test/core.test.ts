@@ -956,6 +956,7 @@ test("manual native turns reopen completed issues and return them for review", (
     assert.equal(afterStaleActive.status, "in_review");
     assert.equal(afterStaleActive.session_status, "idle");
     assert.equal(afterStaleActive.session_active_turn_id, null);
+
     store.db.prepare("UPDATE issue_sessions SET status = 'active' WHERE issue_id = ?").run(issue.id);
     store.db.prepare("UPDATE issues SET status = 'in_progress', needs_attention = 0, pending_actor = 'agent' WHERE id = ?").run(issue.id);
     assert.equal(store.recoverStaleSessionStatuses(), 1);
@@ -964,6 +965,16 @@ test("manual native turns reopen completed issues and return them for review", (
     assert.equal(recovered.needs_attention, true);
     assert.equal(recovered.pending_actor, "user");
     assert.equal(recovered.session_status, "idle");
+
+    const interruptedTurnId = "019fec06-788f-7af3-a031-76b546904f2b";
+    assert.equal(store.sessionTurnStarted(threadId, interruptedTurnId)?.turn_id, interruptedTurnId);
+    assert.equal(store.completeSessionTurn(threadId, interruptedTurnId, "interrupted", "user_stopped")?.turn_id, interruptedTurnId);
+    assert.equal(store.getIssue(issue.id)?.status, "blocked");
+    assert.equal(store.syncSessionThreadStatus(threadId, "systemError"), false);
+    const interruptedReply = store.getIssue(issue.id)!;
+    assert.equal(interruptedReply.status, "blocked");
+    assert.equal(interruptedReply.session_status, "interrupted");
+    assert.equal(interruptedReply.session_active_turn_id, null);
 
     const failedTurnId = "019fec06-788f-7af3-a031-76b546904f2a";
     assert.equal(store.sessionTurnStarted(threadId, failedTurnId)?.turn_id, failedTurnId);
@@ -1007,8 +1018,9 @@ test("manual native turns reopen completed issues and return them for review", (
       INSERT INTO issue_sessions (issue_id, host_id, thread_id, status, config_fingerprint, last_agent_message, created_at, updated_at)
       VALUES (?, 'local', ?, 'idle', 'config', '', ?, ?)
     `).run(disconnectedIssue.id, disconnectedThreadId, timestamp, timestamp);
-    assert.equal(store.syncSessionThreadStatus(disconnectedThreadId, "systemError"), true);
+    assert.equal(store.syncSessionThreadStatus(disconnectedThreadId, "systemError"), false);
     assert.equal(store.getIssue(disconnectedIssue.id)?.status, "done");
+    assert.equal(store.getIssue(disconnectedIssue.id)?.session_status, "idle");
   } finally {
     store?.close();
     rmSync(target.directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });

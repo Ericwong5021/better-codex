@@ -4904,7 +4904,7 @@ export class Store {
     const session = this.getIssueSessionByThread(threadId);
     if (!session) return false;
     if (session.status === "stopping" && session.active_turn_id && status !== "systemError") return false;
-    if (status === "active" && !session.active_turn_id) return false;
+    if (["active", "systemError"].includes(status) && !session.active_turn_id) return false;
     const nextStatus: IssueSessionStatus = status === "active"
       ? activeFlags.includes("waitingOnApproval")
         ? "waiting_on_approval"
