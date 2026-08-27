@@ -236,7 +236,7 @@ test("preserves project planning scroll across live updates", async ({ browser }
   database.prepare("INSERT INTO project_plan_revisions (id, project_id, revision, plan_json, source_message_id, created_at) VALUES (?, ?, 1, ?, ?, ?)").run(randomUUID(), project.id, JSON.stringify(plan), randomUUID(), timestamp);
   database.close();
   await page.goto(`${runtime.baseUrl}/web/projects/${encodeURIComponent(project.id)}#token=${encodeURIComponent(runtime.token)}`);
-  await page.locator('.better-codex-project-dashboard-tabs [data-project-dashboard-view="planning"]').click();
+  await page.locator('.better-codex-project-dashboard-tabs-mobile [data-project-planning-pane="plan"]').click();
   const planScroll = page.locator(".better-codex-project-plan-scroll");
   await expect(planScroll).toBeVisible();
   const previousScrollTop = await planScroll.evaluate(element => {
