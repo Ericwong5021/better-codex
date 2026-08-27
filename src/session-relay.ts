@@ -22,7 +22,7 @@ export type SessionRelayHost = {
   checkpoint: (commandId: string, relayId: string, result: Record<string, unknown>) => void | Promise<void>;
   complete: (commandId: string, relayId: string, result: Record<string, unknown>) => void | Promise<void>;
   fail: (commandId: string, relayId: string, error: string, threadId?: string, turnId?: string) => void | Promise<void>;
-  event: (method: string, params: Record<string, unknown>) => void | Promise<void>;
+  event: (method: string, params: Record<string, unknown>) => void;
 };
 
 type PendingRequest = {
@@ -36,6 +36,15 @@ type PendingRequest = {
 type RelayEvent = {
   method: string;
   params: Record<string, unknown>;
+};
+
+type AppServerWorkerOptions = {
+  role: "catalog" | "thread";
+  catalog?: AppServerSessionWorker;
+  onThreadBound?: (threadId: string, worker: AppServerSessionWorker) => void;
+  onTerminal?: (threadId: string, turnId: string, worker: AppServerSessionWorker) => void;
+  onIdle?: (threadId: string, worker: AppServerSessionWorker) => void;
+  onDisconnected?: (threadIds: string[], error: string, worker: AppServerSessionWorker) => void;
 };
 
 function object(value: unknown) {
@@ -108,21 +117,18 @@ function eventTurnId(event: RelayEvent) {
   return "";
 }
 
-export class RuntimeSessionRelay {
+class AppServerSessionWorker {
   private child: ChildProcessWithoutNullStreams | null = null;
   private reconnectTimer: NodeJS.Timeout | null = null;
-  private pollTimer: NodeJS.Timeout | null = null;
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private stopped = true;
-  private pollBusy = false;
   private commandInFlight = false;
   private generation = 0;
   private sequence = 0;
-  private relayId = "";
   private output = "";
-  private lastTurnProbe = 0;
   private currentThreadId = "";
   private readonly threads = new Set<string>();
+  private readonly busyThreads = new Set<string>();
   private readonly activeTurns = new Map<string, string>();
   private readonly pending = new Map<number, PendingRequest>();
   private readonly guardianDenials = new Map<string, Array<Record<string, unknown>>>();
@@ -131,8 +137,10 @@ export class RuntimeSessionRelay {
   private appServerStartedAt: string | null = null;
   private appServerVersion = "";
   private appServerReady = false;
+  private readonly readyWaiters = new Set<{ resolve: () => void; reject: (error: Error) => void; timer: NodeJS.Timeout }>();
+  private terminalTurn: { threadId: string; turnId: string } | null = null;
 
-  constructor(private readonly host: SessionRelayHost, private readonly hostInstanceId = "") {}
+  constructor(private readonly host: SessionRelayHost, private readonly hostInstanceId: string, private readonly options: AppServerWorkerOptions) {}
 
   status() {
     return {
@@ -143,11 +151,14 @@ export class RuntimeSessionRelay {
       command_in_flight: this.commandInFlight,
       pending_requests: this.pending.size,
       active_turns: [...this.activeTurns].map(([thread_id, turn_id]) => ({ thread_id, turn_id })).sort((left, right) => left.thread_id.localeCompare(right.thread_id)),
+      busy_threads: [...this.busyThreads].sort(),
+      role: this.options.role,
+      thread_ids: [...this.threads].sort(),
     };
   }
 
   idle() {
-    return !this.commandInFlight && this.pending.size === 0 && !this.pollBusy && this.activeTurns.size === 0;
+    return !this.commandInFlight && this.pending.size === 0 && this.activeTurns.size === 0;
   }
 
   start() {
@@ -160,20 +171,65 @@ export class RuntimeSessionRelay {
     if (this.stopped) return;
     this.stopped = true;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-    if (this.pollTimer) clearInterval(this.pollTimer);
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     this.reconnectTimer = null;
-    this.pollTimer = null;
     this.heartbeatTimer = null;
     const child = this.child;
-    this.child = null;
-    this.appServerStartedAt = null;
-    this.appServerVersion = "";
     this.appServerReady = false;
-    this.activeTurns.clear();
     this.rejectPending("runtime_stopped");
-    if (this.relayId) this.host.release(this.relayId, "runtime_stopped");
-    child?.kill("SIGTERM");
+    this.rejectReadyWaiters("app_server_stopped");
+    if (child) child.kill("SIGTERM");
+    else {
+      this.appServerStartedAt = null;
+      this.appServerVersion = "";
+      this.activeTurns.clear();
+      this.busyThreads.clear();
+    }
+  }
+
+  async stopAndWait(timeout = 5000) {
+    const child = this.child;
+    this.stop();
+    if (!child) return;
+    if (child.exitCode !== null || child.signalCode !== null) {
+      this.disconnect(child, "app_server_stopped");
+      return;
+    }
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        child.kill("SIGKILL");
+        const killed = setTimeout(() => reject(new Error("app_server_stop_timeout")), 2000);
+        killed.unref();
+        child.once("close", () => { clearTimeout(killed); resolve(); });
+      }, timeout);
+      timer.unref();
+      child.once("close", () => { clearTimeout(timer); resolve(); });
+    });
+  }
+
+  waitUntilReady(timeout = 10000) {
+    if (this.child && this.appServerReady) return Promise.resolve();
+    if (this.stopped) return Promise.reject(new Error("app_server_unavailable"));
+    return new Promise<void>((resolve, reject) => {
+      const waiter = { resolve, reject, timer: setTimeout(() => {
+        this.readyWaiters.delete(waiter);
+        reject(new Error("app_server_timeout"));
+      }, timeout) };
+      waiter.timer.unref();
+      this.readyWaiters.add(waiter);
+    });
+  }
+
+  hasActiveTurn() {
+    return this.activeTurns.size > 0;
+  }
+
+  ownsThread(threadId: string) {
+    return this.threads.has(threadId) || this.currentThreadId === threadId || this.activeTurns.has(threadId) || this.busyThreads.has(threadId);
+  }
+
+  busyForThread(threadId: string) {
+    return (this.commandInFlight && this.currentThreadId === threadId) || this.activeTurns.has(threadId) || this.busyThreads.has(threadId) || (this.pending.size > 0 && this.ownsThread(threadId));
   }
 
   threadAction(threadIds: string[], action: IssueThreadAction) {
@@ -217,7 +273,6 @@ export class RuntimeSessionRelay {
   private connect() {
     if (this.stopped || this.child) return;
     this.generation += 1;
-    this.relayId = `runtime:${process.pid}:${this.generation}`;
     this.output = "";
     const child = spawn(codexExecutablePath(), ["app-server"], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
     this.child = child;
@@ -241,11 +296,8 @@ export class RuntimeSessionRelay {
       if (this.child !== child || this.stopped) return;
       this.appServerVersion = String(object(initialized.serverInfo).version || initialized.version || codexVersion(codexExecutablePath()));
       this.appServerReady = true;
+      this.resolveReadyWaiters();
       this.notify("initialized", {});
-      await this.poll();
-      if (this.child !== child || this.stopped) return;
-      this.pollTimer = setInterval(() => void this.poll(), 1000);
-      this.pollTimer.unref();
     } catch (error) {
       this.disconnect(child, error instanceof Error ? error.message : "app_server_initialize_failed");
     }
@@ -253,6 +305,8 @@ export class RuntimeSessionRelay {
 
   private disconnect(child: ChildProcessWithoutNullStreams, error: string) {
     if (this.child !== child) return;
+    const intentional = this.stopped;
+    const affectedThreads = [...new Set([...this.threads, ...this.activeTurns.keys(), ...this.busyThreads])];
     relayDiagnostic("app_server_disconnected", {
       host_instance_id: this.hostInstanceId || null,
       app_server_pid: child.pid || null,
@@ -270,18 +324,17 @@ export class RuntimeSessionRelay {
     this.appServerVersion = "";
     this.appServerReady = false;
     this.activeTurns.clear();
-    if (this.pollTimer) clearInterval(this.pollTimer);
+    this.busyThreads.clear();
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
-    this.pollTimer = null;
     this.heartbeatTimer = null;
-    this.pollBusy = false;
     this.commandInFlight = false;
     this.currentThreadId = "";
     this.bufferedEvents = [];
     this.rejectPending(error);
-    this.host.release(this.relayId, error);
+    this.rejectReadyWaiters(error);
+    if (!intentional) this.options.onDisconnected?.(affectedThreads, error, this);
     if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
-    if (!this.stopped && !this.reconnectTimer) {
+    if (this.options.role === "catalog" && !this.stopped && !this.reconnectTimer) {
       this.reconnectTimer = setTimeout(() => {
         this.reconnectTimer = null;
         this.connect();
@@ -296,6 +349,22 @@ export class RuntimeSessionRelay {
       request.reject(new Error(error));
     }
     this.pending.clear();
+  }
+
+  private resolveReadyWaiters() {
+    for (const waiter of this.readyWaiters) {
+      clearTimeout(waiter.timer);
+      waiter.resolve();
+    }
+    this.readyWaiters.clear();
+  }
+
+  private rejectReadyWaiters(error: string) {
+    for (const waiter of this.readyWaiters) {
+      clearTimeout(waiter.timer);
+      waiter.reject(new Error(error));
+    }
+    this.readyWaiters.clear();
   }
 
   private read(chunk: Buffer) {
@@ -409,13 +478,17 @@ export class RuntimeSessionRelay {
     let relayParams: Record<string, unknown> = params;
     if (method === "thread/status/changed") {
       const status = object(params.status);
+      const statusType = String(status.type || "");
+      if (statusType === "idle" || statusType === "notLoaded") this.busyThreads.delete(threadId);
+      else if (statusType) this.busyThreads.add(threadId);
       relayParams = {
         threadId,
         status: {
-          type: String(status.type || ""),
+          type: statusType,
           activeFlags: Array.isArray(status.activeFlags) ? status.activeFlags.filter(value => typeof value === "string") : [],
         },
       };
+      if (statusType === "idle") setImmediate(() => this.options.onIdle?.(threadId, this));
     }
     if (method === "turn/started") {
       const turn = object(params.turn);
@@ -471,16 +544,16 @@ export class RuntimeSessionRelay {
           error: Object.keys(turnError).length ? { message: String(turnError.message || "") } : null,
         },
       };
+      if (turnId) this.terminalTurn = { threadId, turnId };
     }
     const event = { method, params: relayParams };
     if (this.commandInFlight && method !== "thread/status/changed" && method !== "turn/started") this.bufferedEvents.push(event);
     else this.emit(event);
+    this.settleTerminalTurn();
   }
 
   private emit(event: RelayEvent) {
-    try {
-      this.host.event(event.method, event.params);
-    } catch {}
+    this.host.event(event.method, event.params);
   }
 
   private flush(turnId = "", includeUnmatched = false) {
@@ -492,38 +565,21 @@ export class RuntimeSessionRelay {
     }
   }
 
-  private async poll() {
-    if (this.pollBusy || this.stopped || !this.child) return;
-    this.pollBusy = true;
-    try {
-      const result = await this.host.poll(this.relayId, false);
-      this.threads.clear();
-      for (const value of result.thread_ids) {
-        const threadId = sessionId(value);
-        if (threadId) this.threads.add(threadId);
-      }
-      if (!result.leader) return;
-      if (result.command) {
-        await this.execute(result.command, this.relayId);
-        return;
-      }
-      if (result.active_turns.length && Date.now() - this.lastTurnProbe >= 5000) {
-        this.lastTurnProbe = Date.now();
-        await this.reconcile(result.active_turns);
-      }
-    } finally {
-      this.pollBusy = false;
-    }
+  private settleTerminalTurn() {
+    if (!this.terminalTurn || this.commandInFlight) return;
+    const terminal = this.terminalTurn;
+    this.terminalTurn = null;
+    this.options.onTerminal?.(terminal.threadId, terminal.turnId, this);
   }
 
   private heartbeat(relayId: string) {
-    if (relayId !== this.relayId || !this.child) return;
+    if (!this.child) return;
     try {
       void this.host.poll(relayId, true);
     } catch {}
   }
 
-  private execute(command: SessionCommand, relayId: string) {
+  execute(command: SessionCommand, relayId: string) {
     return this.serialize(() => this.executeCommand(command, relayId));
   }
 
@@ -531,6 +587,10 @@ export class RuntimeSessionRelay {
     const payload = command.payload;
     let threadId = sessionId(command.thread_id);
     let turnId = sessionId(command.turn_id);
+    if (threadId) {
+      this.threads.add(threadId);
+      this.options.onThreadBound?.(threadId, this);
+    }
     this.commandInFlight = true;
     this.bufferedEvents = [];
     this.heartbeatTimer = setInterval(() => this.heartbeat(relayId), 2000);
@@ -551,6 +611,8 @@ export class RuntimeSessionRelay {
         threadId = sessionId(object(started.thread).id);
         if (!threadId) throw new Error("desktop_thread_start_invalid");
         this.currentThreadId = threadId;
+        this.threads.add(threadId);
+        this.options.onThreadBound?.(threadId, this);
         this.host.checkpoint(command.id, relayId, { thread_id: threadId });
         const turn = payload.semantic_command === "review"
           ? object(await this.request("review/start", { threadId, target: { type: "uncommittedChanges" }, delivery: "inline" }))
@@ -647,6 +709,7 @@ export class RuntimeSessionRelay {
         this.flush("", true);
       }
       this.currentThreadId = "";
+      this.settleTerminalTurn();
     }
   }
 
@@ -667,7 +730,9 @@ export class RuntimeSessionRelay {
   private async semanticInput(payload: Record<string, unknown>) {
     if (payload.input_document && typeof payload.input_document === "object" && !Array.isArray(payload.input_document)) {
       const document = normalizeInputDocument(payload.input_document);
-      const expectedGeneration = `${this.hostInstanceId}:${this.generation}:${this.child?.pid ?? 0}:${this.appServerStartedAt || ""}`;
+      const catalog = this.options.catalog || this;
+      const catalogIdentity = (await catalog.semanticRequest("skills/list", { cwds: [String(payload.workspace_path || "")], forceReload: false })).identity;
+      const expectedGeneration = `${this.hostInstanceId}:${catalogIdentity.catalog_generation}`;
       const references = Object.values(document.references);
       semanticDiagnostic("compile_started", { host_instance_id: this.hostInstanceId, app_server_pid: this.child?.pid ?? null, app_server_started_at: this.appServerStartedAt, app_server_version: this.appServerVersion, reference_count: references.length, reference_kinds: references.map(reference => reference.kind), part_count: document.parts.length });
       for (const reference of references) {
@@ -678,7 +743,7 @@ export class RuntimeSessionRelay {
       }
       const skillReferences = references.filter(reference => reference.kind === "skill");
       if (skillReferences.length) {
-        const result = object(await this.request("skills/list", { cwds: [String(payload.workspace_path || "")], forceReload: false }));
+        const result = object((await catalog.semanticRequest("skills/list", { cwds: [String(payload.workspace_path || "")], forceReload: false })).result);
         const skills = (Array.isArray(result.data) ? result.data : []).flatMap(entry => Array.isArray(object(entry).skills) ? object(entry).skills as unknown[] : []).map(object);
         for (const reference of skillReferences) {
           const locator = object(reference.locator);
@@ -687,7 +752,7 @@ export class RuntimeSessionRelay {
       }
       const appReferences = references.filter(reference => reference.kind === "app" || reference.kind === "desktop_app");
       if (appReferences.length) {
-        const result = object(await this.request("app/installed", { forceRefresh: false }));
+        const result = object((await catalog.semanticRequest("app/installed", { forceRefresh: false })).result);
         const apps = (Array.isArray(result.apps) ? result.apps : []).map(object);
         for (const reference of appReferences) {
           const locator = object(reference.locator);
@@ -862,11 +927,13 @@ export class RuntimeSessionRelay {
     return value.includes("thread not found") || value.includes("thread_not_found");
   }
 
-  private async reconcile(values: Array<{ thread_id: string; turn_id: string }>) {
+  async reconcile(values: Array<{ thread_id: string; turn_id: string }>) {
     for (const value of values) {
       const threadId = sessionId(value.thread_id);
       const turnId = sessionId(value.turn_id);
       if (!threadId || !turnId) continue;
+      this.threads.add(threadId);
+      this.options.onThreadBound?.(threadId, this);
       try {
         let summary = object(await this.request("thread/read", { threadId, includeTurns: false }));
         let thread = object(summary.thread);
@@ -916,7 +983,202 @@ export class RuntimeSessionRelay {
             },
           },
         });
-      } catch {}
+      } catch (error) {
+        relayDiagnostic("thread_reconcile_failed", { host_instance_id: this.hostInstanceId || null, app_server_pid: this.child?.pid ?? null, thread_id: threadId, turn_id: turnId, error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+  }
+}
+
+export class RuntimeSessionRelay {
+  private readonly catalog: AppServerSessionWorker;
+  private readonly workers = new Set<AppServerSessionWorker>();
+  private readonly threadWorkers = new Map<string, AppServerSessionWorker>();
+  private readonly handedOffThreads = new Set<string>();
+  private pollTimer: NodeJS.Timeout | null = null;
+  private stopped = true;
+  private pollBusy = false;
+  private lastTurnProbe = 0;
+  private relayGeneration = 0;
+  private relayId = "";
+
+  constructor(private readonly host: SessionRelayHost, private readonly hostInstanceId = "") {
+    this.catalog = new AppServerSessionWorker(host, hostInstanceId, { role: "catalog" });
+  }
+
+  status() {
+    const catalog = this.catalog.status();
+    const threadWorkers = [...this.workers].map(worker => worker.status()).map(status => ({
+      thread_id: status.thread_ids[0] || null,
+      app_server_pid: status.app_server_pid,
+      app_server_started_at: status.app_server_started_at,
+      app_server_version: status.app_server_version,
+      command_in_flight: status.command_in_flight,
+      pending_requests: status.pending_requests,
+      active_turns: status.active_turns,
+      busy: status.busy_threads.length > 0,
+    })).sort((left, right) => String(left.thread_id || "").localeCompare(String(right.thread_id || "")));
+    const activeTurns = threadWorkers.flatMap(worker => worker.active_turns);
+    return {
+      app_server_pid: catalog.app_server_pid,
+      app_server_started_at: catalog.app_server_started_at,
+      app_server_version: catalog.app_server_version,
+      app_server_connected: catalog.app_server_connected,
+      command_in_flight: threadWorkers.some(worker => worker.command_in_flight),
+      pending_requests: catalog.pending_requests + threadWorkers.reduce((total, worker) => total + worker.pending_requests, 0),
+      active_turns: [...new Map(activeTurns.map(turn => [turn.thread_id, turn])).values()].sort((left, right) => left.thread_id.localeCompare(right.thread_id)),
+      thread_workers: threadWorkers,
+    };
+  }
+
+  idle() {
+    return !this.pollBusy && this.workers.size === 0 && this.catalog.idle();
+  }
+
+  start() {
+    if (!this.stopped || process.env.BETTER_CODEX_DISABLE_RUNTIME_SESSION_RELAY === "1") return;
+    this.stopped = false;
+    this.relayId = `runtime:${process.pid}:${++this.relayGeneration}`;
+    this.catalog.start();
+    void this.catalog.waitUntilReady().then(() => this.poll()).catch(error => relayDiagnostic("catalog_start_failed", { host_instance_id: this.hostInstanceId || null, error: error instanceof Error ? error.message : String(error) }));
+    this.pollTimer = setInterval(() => void this.poll(), 1000);
+    this.pollTimer.unref();
+  }
+
+  stop() {
+    if (this.stopped) return;
+    this.stopped = true;
+    if (this.pollTimer) clearInterval(this.pollTimer);
+    this.pollTimer = null;
+    for (const worker of this.workers) worker.stop();
+    this.workers.clear();
+    this.threadWorkers.clear();
+    this.handedOffThreads.clear();
+    this.catalog.stop();
+    if (this.relayId) this.host.release(this.relayId, "runtime_stopped");
+  }
+
+  async threadAction(threadIds: string[], action: IssueThreadAction) {
+    for (const threadId of threadIds) {
+      const worker = this.threadWorkers.get(threadId);
+      if (worker?.busyForThread(threadId)) throw new Error("thread_handoff_busy");
+      if (worker) await this.releaseWorker(worker, threadId, "thread_action");
+    }
+    await this.catalog.waitUntilReady();
+    return this.catalog.threadAction(threadIds, action);
+  }
+
+  async semanticRequest(method: SessionHostSemanticMethod, params: Record<string, unknown>, timeout = 8000) {
+    await this.catalog.waitUntilReady(timeout);
+    return this.catalog.semanticRequest(method, params, timeout);
+  }
+
+  async handoffThread(threadId: string) {
+    const id = sessionId(threadId);
+    if (!id) throw new Error("thread_id_invalid");
+    const worker = this.threadWorkers.get(id);
+    if (!worker) {
+      this.handedOffThreads.add(id);
+      return { released: true, thread_id: id, worker: null };
+    }
+    if (worker.busyForThread(id)) throw new Error("thread_handoff_busy");
+    const status = worker.status();
+    this.handedOffThreads.add(id);
+    await this.releaseWorker(worker, id, "desktop_handoff");
+    return { released: true, thread_id: id, worker: { app_server_pid: status.app_server_pid, app_server_started_at: status.app_server_started_at } };
+  }
+
+  private createWorker(initialThreadId = "") {
+    const worker = new AppServerSessionWorker(this.host, this.hostInstanceId, {
+      role: "thread",
+      catalog: this.catalog,
+      onThreadBound: (threadId, source) => this.bindWorker(threadId, source),
+      onTerminal: (threadId, turnId, source) => {
+        setImmediate(() => void this.releaseWorker(source, threadId, `turn_terminal:${turnId}`).catch(error => relayDiagnostic("thread_worker_release_failed", { host_instance_id: this.hostInstanceId || null, thread_id: threadId, turn_id: turnId, error: error instanceof Error ? error.message : String(error) })));
+      },
+      onIdle: (threadId, source) => {
+        setImmediate(() => void this.releaseWorker(source, threadId, "thread_idle").catch(error => {
+          if (error instanceof Error && error.message === "thread_handoff_busy") return;
+          relayDiagnostic("thread_worker_release_failed", { host_instance_id: this.hostInstanceId || null, thread_id: threadId, error: error instanceof Error ? error.message : String(error) });
+        }));
+      },
+      onDisconnected: (threadIds, error, source) => {
+        this.removeWorker(source);
+        for (const threadId of threadIds) this.host.event("thread/status/changed", { threadId, status: { type: "systemError", activeFlags: [] }, error, hostInstanceId: this.hostInstanceId || null });
+      },
+    });
+    this.workers.add(worker);
+    if (initialThreadId) this.bindWorker(initialThreadId, worker);
+    worker.start();
+    return worker;
+  }
+
+  private bindWorker(threadId: string, worker: AppServerSessionWorker) {
+    const current = this.threadWorkers.get(threadId);
+    if (current && current !== worker) throw new Error("thread_worker_conflict");
+    this.threadWorkers.set(threadId, worker);
+  }
+
+  private removeWorker(worker: AppServerSessionWorker) {
+    this.workers.delete(worker);
+    for (const [threadId, current] of this.threadWorkers) if (current === worker) this.threadWorkers.delete(threadId);
+  }
+
+  private async releaseWorker(worker: AppServerSessionWorker, threadId: string, reason: string) {
+    if (!this.workers.has(worker)) return;
+    if (worker.busyForThread(threadId)) throw new Error("thread_handoff_busy");
+    const status = worker.status();
+    await worker.stopAndWait();
+    this.removeWorker(worker);
+    relayDiagnostic("thread_worker_released", { host_instance_id: this.hostInstanceId || null, thread_id: threadId, app_server_pid: status.app_server_pid, app_server_started_at: status.app_server_started_at, reason });
+  }
+
+  private workerForThread(threadId: string) {
+    if (this.handedOffThreads.has(threadId)) throw new Error("thread_handed_off");
+    return this.threadWorkers.get(threadId) || this.createWorker(threadId);
+  }
+
+  private async execute(command: SessionCommand) {
+    const threadId = sessionId(command.thread_id);
+    const worker = threadId ? this.workerForThread(threadId) : this.createWorker();
+    await worker.waitUntilReady();
+    await worker.execute(command, this.relayId);
+    if (!worker.hasActiveTurn() && command.kind !== "compact") {
+      const boundThread = sessionId(command.thread_id) || worker.status().thread_ids[0] || "";
+      if (boundThread) await this.releaseWorker(worker, boundThread, `command_complete:${command.kind}`);
+      else {
+        this.removeWorker(worker);
+        await worker.stopAndWait();
+      }
+    }
+  }
+
+  private async poll() {
+    if (this.pollBusy || this.stopped) return;
+    this.pollBusy = true;
+    try {
+      await this.catalog.waitUntilReady();
+      const result = await this.host.poll(this.relayId, false);
+      if (!result.leader) return;
+      if (result.command) {
+        await this.execute(result.command);
+        return;
+      }
+      if (result.active_turns.length && Date.now() - this.lastTurnProbe >= 5000) {
+        this.lastTurnProbe = Date.now();
+        for (const active of result.active_turns) {
+          const threadId = sessionId(active.thread_id);
+          if (!threadId) continue;
+          const worker = this.workerForThread(threadId);
+          await worker.waitUntilReady();
+          await worker.reconcile([active]);
+          if (!worker.hasActiveTurn()) await this.releaseWorker(worker, threadId, "reconciled_terminal");
+        }
+      }
+    } catch (error) {
+      relayDiagnostic("coordinator_poll_failed", { host_instance_id: this.hostInstanceId || null, relay_id: this.relayId, error: error instanceof Error ? error.message : String(error) });
+    } finally {
+      this.pollBusy = false;
     }
   }
 }

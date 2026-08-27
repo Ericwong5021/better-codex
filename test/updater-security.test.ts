@@ -32,7 +32,7 @@ test("update manifests reject core versions that can escape the managed runtime 
 });
 
 test("update manifests validate Session Host handoff requirements", () => {
-  const payload = { ...updatePayload("1.2.3"), runtimeSessionHandoff: { protocol: "session-host/v2", requiredCapabilities: ["durable_deliveries", "runtime_handoff"] } };
+  const payload = { ...updatePayload("1.2.3"), runtimeSessionHandoff: { protocol: "session-host/v2", requiredCapabilities: ["durable_deliveries", "runtime_handoff", "thread_worker_handoff"] } };
   assert.equal(validateUpdatePayloadForTest(payload).runtimeSessionHandoff?.protocol, "session-host/v2");
   assert.throws(() => validateUpdatePayloadForTest({ ...payload, runtimeSessionHandoff: { protocol: "", requiredCapabilities: [] } }), /update_session_handoff_invalid/);
   assert.throws(() => validateUpdatePayloadForTest({ ...payload, runtimeSessionHandoff: { protocol: "session-host/v2", requiredCapabilities: [""] } }), /update_session_handoff_invalid/);

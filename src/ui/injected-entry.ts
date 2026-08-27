@@ -779,6 +779,7 @@ export function install(config: Record<string, any>) {
     const bridgeRequests = new Map();
     const appServerRequests = new Map();
     const sessionHandoffPending = new Set();
+    let nativeThreadOpenBypass = "";
     const relayId = "better-codex:" + (globalThis.crypto?.randomUUID?.() || Date.now() + ":" + Math.random().toString(36).slice(2));
     const relayThreads = new Set();
     let bridgeSequence = 0;
@@ -10688,22 +10689,28 @@ export function install(config: Record<string, any>) {
       return activeRow ? nativeThreadId(activeRow) : "";
     }
 
+    async function requestSessionHandoff(issue, threadId) {
+      if (sessionHandoffPending.has(issue.id)) throw new Error("thread_handoff_busy");
+      sessionHandoffPending.add(issue.id);
+      try {
+        const updated = await api("/api/issues/" + encodeURIComponent(issue.id) + "/session-handoff", { method: "POST", body: JSON.stringify({ thread_id: threadId }) });
+        const index = state.issues.findIndex(candidate => candidate.id === issue.id);
+        if (index >= 0) state.issues[index] = { ...state.issues[index], ...updated };
+        const dialog = document.getElementById("better-codex-dialog");
+        if (dialog?.dataset.issueId === issue.id && typeof dialog.__betterCodexSyncIssue === "function") dialog.__betterCodexSyncIssue(updated);
+        if (active) render();
+        return updated;
+      } finally {
+        sessionHandoffPending.delete(issue.id);
+      }
+    }
+
     function syncSessionHandoffFromHost() {
       const threadId = currentRouteThreadId() || activeThreadId();
       if (!threadId) return;
       const issue = state.issues.find(candidate => issueSessionId(candidate) === threadId && !candidate.session_owned && !candidate.session_handoff_at);
       if (!issue || sessionHandoffPending.has(issue.id)) return;
-      sessionHandoffPending.add(issue.id);
-      void api("/api/issues/" + encodeURIComponent(issue.id) + "/session-handoff", { method: "POST", body: JSON.stringify({ thread_id: threadId }) })
-        .then(updated => {
-          const index = state.issues.findIndex(candidate => candidate.id === issue.id);
-          if (index >= 0) state.issues[index] = { ...state.issues[index], ...updated };
-          const dialog = document.getElementById("better-codex-dialog");
-          if (dialog?.dataset.issueId === issue.id && typeof dialog.__betterCodexSyncIssue === "function") dialog.__betterCodexSyncIssue(updated);
-          if (active) render();
-        })
-        .catch(() => {})
-        .finally(() => sessionHandoffPending.delete(issue.id));
+      void requestSessionHandoff(issue, threadId).catch(error => reportUnexpectedError(error, { source: "session_handoff_sync", issue_id: issue.id, thread_id: threadId }));
     }
 
     async function waitForThreadOpen(expected) {
@@ -10716,6 +10723,7 @@ export function install(config: Record<string, any>) {
         const row = findThreadRow(expected);
         if (row && !clickedRow) {
           clickedRow = true;
+          nativeThreadOpenBypass = expected;
           row.click();
         }
         await new Promise(resolve => setTimeout(resolve, THREAD_OPEN_POLL_MS));
@@ -10726,6 +10734,8 @@ export function install(config: Record<string, any>) {
     async function openThread(threadId) {
       const expected = normalizeSessionId(threadId);
       if (!expected) throw new Error("thread_id_invalid");
+      const issue = state.issues.find(candidate => issueSessionId(candidate) === expected && !candidate.session_handoff_at);
+      if (issue) await requestSessionHandoff(issue, expected);
       await resumePersistedThread(expected);
       const row = findThreadRow(expected);
       close();
@@ -10763,6 +10773,15 @@ export function install(config: Record<string, any>) {
         suppressSessionClickUntil = 0;
         event.preventDefault();
         event.stopImmediatePropagation();
+        return;
+      }
+      const threadRow = target.closest(SELECTORS.threadRow);
+      const threadId = threadRow ? nativeThreadId(threadRow) : "";
+      if (threadId && nativeThreadOpenBypass === threadId) nativeThreadOpenBypass = "";
+      else if (threadId && state.issues.some(candidate => issueSessionId(candidate) === threadId && !candidate.session_handoff_at)) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        void perform(() => openThread(threadId));
         return;
       }
       if (isSidebarNavigationTarget(target)) close({ resume: true });

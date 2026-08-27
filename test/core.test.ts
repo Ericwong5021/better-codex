@@ -735,6 +735,8 @@ test("desktop session relay binds one native thread and tracks its turn", () => 
     assert.equal(linked.run_thread_id, threadId);
     assert.equal(linked.session_active_turn_id, turnId);
     assert.equal(linked.active_run_status, "running");
+    assert.throws(() => store.assertIssueSessionHandoffReady(issue.id, threadId), /thread_handoff_busy/);
+    assert.throws(() => store.handoffIssueSession(issue.id, threadId), /thread_handoff_busy/);
     assert.deepEqual(worker.pollSessionRelay("relay-a", "app-a", "ready").active_turns, [{ thread_id: threadId, turn_id: turnId }]);
     assert.equal(store.syncSessionThreadStatus(threadId, "active", ["waitingOnApproval"]), true);
     assert.equal(store.getIssue(issue.id)?.pending_actor, "user");
@@ -766,6 +768,12 @@ test("desktop session relay binds one native thread and tracks its turn", () => 
     assert.equal(store.getIssueSession(issue.id)?.active_turn_id, null);
     assert.equal(store.getIssue(issue.id)?.active_run_status, "scheduling");
     assert.equal(store.listPendingSchedulerRuns()[0]?.executionResult, "Finished");
+    assert.equal(store.assertIssueSessionHandoffReady(issue.id, threadId).run_thread_id, threadId);
+    const handedOff = store.handoffIssueSession(issue.id, threadId);
+    assert.equal(handedOff.run_thread_id, threadId);
+    assert.equal(handedOff.session_owned, false);
+    assert.ok(handedOff.session_handoff_at);
+    assert.equal(store.getIssueSession(issue.id), undefined);
     store.close();
   } finally {
     rmSync(target.directory, { recursive: true, force: true });

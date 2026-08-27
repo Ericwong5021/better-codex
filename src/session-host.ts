@@ -255,6 +255,7 @@ class SessionHostServer {
       app_server_started_at: relay.app_server_started_at,
       command_in_flight: relay.command_in_flight,
       active_turns: relay.active_turns,
+      thread_workers: relay.thread_workers,
       ...transport,
     };
   }
@@ -363,7 +364,7 @@ class SessionHostServer {
       this.runtimeDisconnectedAt = null;
       if (this.orphanTimer) clearTimeout(this.orphanTimer);
       this.orphanTimer = null;
-      writeMessage(connection.socket, { type: "hello_ack", protocol_version: sessionHostProtocolVersion, host_pid: process.pid, host_instance_id: this.hostInstanceId, connection_epoch: connection.epoch, runtime_instance_id: message.runtime_instance_id, runtime_generation: message.runtime_generation, started_at: this.startedAt, relay_id: `session-host:${process.pid}`, capabilities: { thread_actions: true, durable_deliveries: true, runtime_handoff: true, semantic_requests: true } });
+      writeMessage(connection.socket, { type: "hello_ack", protocol_version: sessionHostProtocolVersion, host_pid: process.pid, host_instance_id: this.hostInstanceId, connection_epoch: connection.epoch, runtime_instance_id: message.runtime_instance_id, runtime_generation: message.runtime_generation, started_at: this.startedAt, relay_id: `session-host:${process.pid}`, capabilities: { thread_actions: true, durable_deliveries: true, runtime_handoff: true, semantic_requests: true, thread_worker_handoff: true } });
       this.writeStatus();
       diagnostic("runtime_connected", { connection_epoch: connection.epoch, runtime_instance_id: message.runtime_instance_id, runtime_generation: message.runtime_generation, runtime_version: message.runtime_version, handoff_update_id: message.handoff_update_id });
       this.flushDeliveries();
@@ -399,6 +400,21 @@ class SessionHostServer {
         if (this.connection === connection) writeMessage(connection.socket, { type: "thread_action_response", request_id: message.request_id, ok: true });
       } catch (error) {
         if (this.connection === connection) writeMessage(connection.socket, { type: "thread_action_response", request_id: message.request_id, ok: false, error: error instanceof Error ? error.message : "codex_thread_action_failed" });
+      }
+      return;
+    }
+    if (message.type === "thread_handoff_request") {
+      const threadId = typeof message.thread_id === "string" && /^[a-f0-9-]{36}$/i.test(message.thread_id) ? message.thread_id : "";
+      if (!connection.authenticated || !threadId) {
+        writeMessage(connection.socket, { type: "thread_handoff_response", request_id: String(message.request_id || ""), ok: false, error: "thread_handoff_invalid", thread_id: threadId });
+        return;
+      }
+      try {
+        const result = await this.relay.handoffThread(threadId);
+        this.writeStatus();
+        if (this.connection === connection) writeMessage(connection.socket, { type: "thread_handoff_response", request_id: message.request_id, ok: true, ...result });
+      } catch (error) {
+        if (this.connection === connection) writeMessage(connection.socket, { type: "thread_handoff_response", request_id: message.request_id, ok: false, error: error instanceof Error ? error.message : "thread_handoff_failed", thread_id: threadId });
       }
       return;
     }

@@ -172,6 +172,10 @@ export class IssueWorker {
     return this.sessionRelay.semanticRequest(method, params, timeout);
   }
 
+  releaseSessionThread(threadId: string) {
+    return this.sessionRelay.handoffThread(threadId);
+  }
+
   beginSessionHandoff(updateId: string, targetRuntimeGeneration: number, targetVersion: string | null, deadlineAt: string) {
     return this.sessionRelay.beginHandoff(updateId, targetRuntimeGeneration, targetVersion, deadlineAt);
   }
@@ -197,7 +201,7 @@ export class IssueWorker {
     const deadline = Date.now() + timeout;
     while (Date.now() < deadline) {
       const result = await this.sessionRelay.handoffStatus();
-      if (!result.snapshot.command_in_flight && result.snapshot.active_turns.length === 0 && result.snapshot.queued_deliveries === 0) return result.snapshot;
+      if (!result.snapshot.command_in_flight && result.snapshot.active_turns.length === 0 && !(result.snapshot.thread_workers || []).some(worker => worker.busy) && result.snapshot.queued_deliveries === 0) return result.snapshot;
       await new Promise(resolve => setTimeout(resolve, 250));
     }
     throw new Error("session_host_idle_timeout");

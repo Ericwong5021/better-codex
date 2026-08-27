@@ -726,6 +726,9 @@ test("open-in-conversation requires a valid session uuid", () => {
   assert.ok(source.includes("if (!issue || !sessionId) return \"\""));
   assert.ok(source.includes('if (!expected) throw new Error("thread_id_invalid")'));
   assert.doesNotMatch(openHandler, /\/stop|session-handoff|终止并打开/);
+  assert.ok(openThread.indexOf("requestSessionHandoff(issue, expected)") < openThread.indexOf("resumePersistedThread(expected)"));
+  assert.ok(source.includes("nativeThreadOpenBypass === threadId"));
+  assert.ok(source.includes("void perform(() => openThread(threadId))"));
   assert.ok(source.includes('type: "mcp-request"'));
   assert.ok(source.includes('sendAppServerRequest("thread/start"'));
   assert.ok(source.includes('sendAppServerRequest("thread/resume", params)'));
@@ -800,7 +803,7 @@ test("user-stopped sessions render a red-dot stopped state", () => {
   assert.ok(source.includes('activityState === "interrupted" ? "已停止"'));
   assert.ok(source.includes('issue.reply_status === "succeeded" ? "completed"'));
   assert.ok(source.includes('replyStatus === "succeeded" ? "completed"'));
-  assert.ok(source.includes('activeExecutionState || replyResultState || executionState'));
+  assert.ok(source.includes('activeExecutionState || (issue?.enrichment_status === "failed" ? "title-regeneration-failed" : replyResultState || executionState)'));
   assert.ok(source.includes('["completed", "interrupted", "not-started"].includes(activityState)'));
   assert.match(css, /\.better-codex-conversation-status \.better-codex-activity\[data-run="interrupted"\]\s*\{[^}]*color:\s*var\(--bc-color-danger\);/s);
 });

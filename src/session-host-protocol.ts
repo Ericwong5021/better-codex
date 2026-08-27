@@ -26,6 +26,7 @@ export type SessionHostHello = {
     durable_deliveries: boolean;
     runtime_handoff: boolean;
     semantic_requests?: boolean;
+    thread_worker_handoff?: boolean;
   };
 };
 
@@ -44,6 +45,7 @@ export type SessionHostHelloAck = {
     durable_deliveries?: boolean;
     runtime_handoff?: boolean;
     semantic_requests?: boolean;
+    thread_worker_handoff?: boolean;
   };
 };
 
@@ -74,6 +76,16 @@ export type SessionHostStatus = {
   terminal_rejected_deliveries: number;
   retrying_deliveries: number;
   last_delivery_error: string | null;
+  thread_workers: Array<{
+    thread_id: string | null;
+    app_server_pid: number | null;
+    app_server_started_at: string | null;
+    app_server_version: string;
+    command_in_flight: boolean;
+    pending_requests: number;
+    active_turns: Array<{ thread_id: string; turn_id: string }>;
+    busy: boolean;
+  }>;
   handoff: {
     update_id: string;
     source_runtime_instance_id: string;
@@ -118,6 +130,7 @@ export type SessionHostHandoffSnapshot = {
   app_server_started_at: string | null;
   command_in_flight: boolean;
   active_turns: Array<{ thread_id: string; turn_id: string }>;
+  thread_workers: SessionHostStatus["thread_workers"];
   queued_deliveries: number;
   last_delivery_sequence: number;
   last_acked_sequence: number;
@@ -194,6 +207,22 @@ export type SessionHostThreadActionResponse = {
   error?: string;
 };
 
+export type SessionHostThreadHandoffRequest = {
+  type: "thread_handoff_request";
+  request_id: string;
+  thread_id: string;
+};
+
+export type SessionHostThreadHandoffResponse = {
+  type: "thread_handoff_response";
+  request_id: string;
+  ok: boolean;
+  error?: string;
+  released?: boolean;
+  thread_id: string;
+  worker?: { app_server_pid: number | null; app_server_started_at: string | null } | null;
+};
+
 export type SessionHostSemanticRequest = {
   type: "semantic_request";
   request_id: string;
@@ -217,5 +246,5 @@ export type SessionHostSemanticResponse = {
   };
 };
 
-export type SessionHostMessage = SessionHostHello | SessionHostPollResponse | SessionHostDeliveryAck | SessionHostShutdown | SessionHostThreadActionRequest | SessionHostSemanticRequest | SessionHostBeginHandoff | SessionHostCompleteHandoff | SessionHostCancelHandoff | SessionHostHandoffStatusRequest;
-export type SessionHostServerMessage = SessionHostHelloAck | SessionHostPollRequest | SessionHostDelivery | SessionHostThreadActionResponse | SessionHostSemanticResponse | SessionHostHandoffResponse;
+export type SessionHostMessage = SessionHostHello | SessionHostPollResponse | SessionHostDeliveryAck | SessionHostShutdown | SessionHostThreadActionRequest | SessionHostThreadHandoffRequest | SessionHostSemanticRequest | SessionHostBeginHandoff | SessionHostCompleteHandoff | SessionHostCancelHandoff | SessionHostHandoffStatusRequest;
+export type SessionHostServerMessage = SessionHostHelloAck | SessionHostPollRequest | SessionHostDelivery | SessionHostThreadActionResponse | SessionHostThreadHandoffResponse | SessionHostSemanticResponse | SessionHostHandoffResponse;

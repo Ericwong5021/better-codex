@@ -27,6 +27,7 @@ test("CLI installation enters the Runtime update transaction and waits for its e
       response.setHeader("content-type", "application/json");
       if (request.url === "/api/update/install" && request.method === "POST") return void response.writeHead(202).end(JSON.stringify({ accepted: true, update_id: "update-runtime-0001" }));
       if (request.url === "/api/update?update_id=update-runtime-0001") return void response.end(JSON.stringify({ currentVersion: targetVersion, operation: { id: "update-runtime-0001", status: "COMPLETED", error_code: null } }));
+      if (request.url === "/health") return void response.end(JSON.stringify({ ok: true, version: targetVersion, pid: process.pid, instanceId: "runtime-test" }));
       response.writeHead(404).end(JSON.stringify({ error: "not_found" }));
     });
   });

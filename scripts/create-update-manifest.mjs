@@ -61,7 +61,7 @@ const payload = {
   installers,
   runtimeSessionHandoff: {
     protocol: "session-host/v2",
-    requiredCapabilities: ["durable_deliveries", "runtime_handoff"],
+    requiredCapabilities: ["durable_deliveries", "runtime_handoff", "thread_worker_handoff"],
   },
 };
 const key = createPrivateKey(privatePem);

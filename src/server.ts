@@ -733,9 +733,9 @@ function errorCode(error: unknown) {
 function errorStatus(code: string) {
   if (code === "body_too_large") return 413;
   if (code === "insufficient_disk_space") return 507;
-  if (code === "version_conflict" || code === "request_id_conflict" || code === "request_outcome_unknown" || code === "remote_mode_disabled" || code === "reply_busy" || code === "update_in_progress" || code === "update_commit_pending" || code === "issue_execution_locked" || code === "issue_execution_running" || code === "issue_session_handed_off" || code === "issue_session_starting" || code === "issue_session_already_bound" || code === "session_relay_not_leader" || code === "session_command_not_claimed" || code === "session_command_outcome_unknown" || code === "queued_reply_not_pending" || code === "queued_reply_update_conflict" || code === "project_planning_busy" || code === "project_planning_agent_locked") return 409;
+  if (code === "version_conflict" || code === "request_id_conflict" || code === "request_outcome_unknown" || code === "remote_mode_disabled" || code === "reply_busy" || code === "update_in_progress" || code === "update_commit_pending" || code === "thread_handoff_busy" || code === "thread_handed_off" || code === "issue_execution_locked" || code === "issue_execution_running" || code === "issue_session_handed_off" || code === "issue_session_starting" || code === "issue_session_already_bound" || code === "session_relay_not_leader" || code === "session_command_not_claimed" || code === "session_command_outcome_unknown" || code === "queued_reply_not_pending" || code === "queued_reply_update_conflict" || code === "project_planning_busy" || code === "project_planning_agent_locked") return 409;
   if (code.endsWith("_not_found")) return 404;
-  if (code === "database_unavailable" || code === "database_integrity_check_failed" || code === "runtime_reconciling") return 503;
+  if (code === "database_unavailable" || code === "database_integrity_check_failed" || code === "runtime_reconciling" || code === "session_host_unavailable" || code === "session_host_timeout" || code === "session_host_thread_handoff_unavailable") return 503;
   return 400;
 }
 
@@ -1741,7 +1741,8 @@ export function startServer() {
             updateRelaunchScheduled = true;
             const targetVersion = updates.core || coreVersion;
             const handoffRequirement = result.runtimeSessionHandoff;
-            const hostCompatible = handoffRequirement?.protocol === sessionHostProtocolVersion && handoffRequirement.requiredCapabilities.every(capability => ["durable_deliveries", "runtime_handoff"].includes(capability));
+            const sessionHost = worker.sessionHostStatus();
+            const hostCompatible = sessionHost.connected && handoffRequirement?.protocol === sessionHostProtocolVersion && handoffRequirement.requiredCapabilities.every(capability => sessionHost.capabilities[capability as keyof typeof sessionHost.capabilities] === true);
             store.transitionUpdateOperation(operation.id, "DRAINING_DISPATCH", { targetCoreVersion: targetVersion });
             runtimeServingReady = false;
             worker.beginUpdateDrain();
@@ -2211,11 +2212,12 @@ export function startServer() {
           const body = await readBody(request);
           const threadId = normalizeSessionId(cleanString(body.thread_id, 200));
           if (!threadId) throw new Error("session_required");
-          if (issue.session_owned) {
-            if (issue.session_thread_id !== threadId) throw new Error("issue_session_mismatch");
-            return sendJson(response, 200, issue);
-          }
-          return sendJson(response, 200, store.handoffIssueSession(issue.id, threadId));
+          if (issue.run_thread_id !== threadId) throw new Error("issue_session_mismatch");
+          store.assertIssueSessionHandoffReady(issue.id, threadId);
+          const released = await worker.releaseSessionThread(threadId);
+          const updated = store.handoffIssueSession(issue.id, threadId);
+          console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "session_handoff", event: "thread_released", issue_id: issue.id, thread_id: threadId, released: released.released, app_server_pid: released.worker?.app_server_pid ?? null, app_server_started_at: released.worker?.app_server_started_at ?? null })}`);
+          return sendJson(response, 200, updated);
         }
         if (method === "POST" && path[3] === "archive") {
           const body = await readBody(request);

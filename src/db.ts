@@ -3420,13 +3420,21 @@ export class Store {
     }
   }
 
+  assertIssueSessionHandoffReady(issueId: string, threadId: string) {
+    const issue = this.getIssue(issueId);
+    if (!issue) throw new Error("issue_not_found");
+    if (!issue.run_thread_id || issue.run_thread_id !== threadId) throw new Error("issue_session_mismatch");
+    const session = this.db.prepare("SELECT status, active_turn_id FROM issue_sessions WHERE issue_id = ? AND thread_id = ?").get(issueId, threadId) as { status: string; active_turn_id: string | null } | undefined;
+    const command = this.db.prepare("SELECT 1 AS value FROM session_commands WHERE issue_id = ? AND status IN ('pending', 'claimed') LIMIT 1").get(issueId);
+    if (session?.active_turn_id || (session && ["starting", "active", "stopping", "waiting_on_approval", "waiting_on_user"].includes(session.status)) || command) throw new Error("thread_handoff_busy");
+    return issue;
+  }
+
   handoffIssueSession(issueId: string, threadId: string) {
-    const timestamp = now();
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
-      const issue = this.getIssue(issueId);
-      if (!issue) throw new Error("issue_not_found");
-      if (!issue.run_thread_id || issue.run_thread_id !== threadId) throw new Error("issue_session_mismatch");
+    return this.transaction(() => {
+      const timestamp = now();
+      const issue = this.assertIssueSessionHandoffReady(issueId, threadId);
+      const session = this.db.prepare("SELECT 1 AS value FROM issue_sessions WHERE issue_id = ? AND thread_id = ?").get(issueId, threadId);
       if (!issue.session_handoff_at) {
         this.db.prepare(`
           UPDATE issues
@@ -3436,12 +3444,12 @@ export class Store {
           WHERE id = ? AND session_handoff_at IS NULL
         `).run(timestamp, timestamp, issueId);
       }
-      this.db.exec("COMMIT");
+      if (session) {
+        const detached = this.db.prepare("DELETE FROM issue_sessions WHERE issue_id = ? AND thread_id = ? AND active_turn_id IS NULL").run(issueId, threadId);
+        if (detached.changes !== 1) throw new Error("thread_handoff_busy");
+      }
       return this.getIssue(issueId)!;
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
+    });
   }
 
   beginReplyRun(issueId: string) {

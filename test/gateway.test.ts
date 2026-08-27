@@ -531,7 +531,7 @@ test("session host handoff fences stale Runtime generations", async () => {
       }
     }
     assert.ok(source);
-    const capabilities = { durable_deliveries: true, runtime_handoff: true };
+    const capabilities = { durable_deliveries: true, runtime_handoff: true, thread_worker_handoff: true };
     const sourceAckPromise = readSocketMessage(source);
     source.write(`${JSON.stringify({ type: "hello", protocol_version: sessionHostProtocolVersion, token, runtime_instance_id: "runtime-source", runtime_generation: 1, runtime_version: "1.0.0", profile: "development", handoff_update_id: null, capabilities })}\n`);
     const sourceAck = await sourceAckPromise;
@@ -654,13 +654,14 @@ input.on("line", line => {
     assert.ok(source, hostOutput || "session_host_start_timeout");
     diagnosticState.phase = "source_connected";
     const sourceNext = queue(source);
-    const capabilities = { durable_deliveries: true, runtime_handoff: true };
+    const capabilities = { durable_deliveries: true, runtime_handoff: true, thread_worker_handoff: true };
     source.write(`${JSON.stringify({ type: "hello", protocol_version: sessionHostProtocolVersion, token, runtime_instance_id: "runtime-source", runtime_generation: 1, runtime_version: "1.0.0", profile: "development", handoff_update_id: null, capabilities })}\n`);
     assert.equal((await sourceNext()).type, "hello_ack");
     diagnosticState.phase = "source_authenticated";
     let dispatched = false;
     let retriedDeliveryId = "";
     let sourceSnapshot: Extract<SessionHostServerMessage, { type: "handoff_response" }>["snapshot"] | null = null;
+    let busyHandoffRequested = false;
     const updateId = "019fec06-788f-7af3-a031-76b546904f83";
     while (!sourceSnapshot) {
       const message = await sourceNext();
@@ -681,7 +682,15 @@ input.on("line", line => {
         if (message.delivery_id === retriedDeliveryId) retriedDeliveryId = "retried";
         source.write(`${JSON.stringify({ type: "delivery_ack", delivery_id: message.delivery_id, host_instance_id: message.host_instance_id, sequence: message.sequence, payload_hash: message.payload_hash, outcome: "applied" })}\n`);
         if (message.kind === "fail") throw new Error(`session_host_command_failed:${JSON.stringify(message.payload)}`);
-        if (message.kind === "event" && message.payload.method === "turn/started") source.write(`${JSON.stringify({ type: "begin_handoff", request_id: "continuity-handoff", update_id: updateId, target_runtime_generation: 2, target_version: "1.1.0", deadline_at: new Date(Date.now() + 60_000).toISOString() })}\n`);
+        if (message.kind === "event" && message.payload.method === "turn/started" && !busyHandoffRequested) {
+          busyHandoffRequested = true;
+          source.write(`${JSON.stringify({ type: "thread_handoff_request", request_id: "busy-thread-handoff", thread_id: threadId })}\n`);
+        }
+      }
+      if (message.type === "thread_handoff_response" && message.request_id === "busy-thread-handoff") {
+        assert.equal(message.ok, false);
+        assert.equal(message.error, "thread_handoff_busy");
+        source.write(`${JSON.stringify({ type: "begin_handoff", request_id: "continuity-handoff", update_id: updateId, target_runtime_generation: 2, target_version: "1.1.0", deadline_at: new Date(Date.now() + 60_000).toISOString() })}\n`);
       }
       if (message.type === "handoff_response" && message.request_id === "continuity-handoff") sourceSnapshot = message.snapshot;
     }
@@ -689,6 +698,9 @@ input.on("line", line => {
     assert.equal(retriedDeliveryId, "retried");
     assert.equal(sourceSnapshot.active_turns.length, 1);
     assert.ok(sourceSnapshot.app_server_pid);
+    assert.equal(sourceSnapshot.thread_workers.length, 1);
+    assert.equal(sourceSnapshot.thread_workers[0]?.thread_id, threadId);
+    assert.ok(sourceSnapshot.thread_workers[0]?.app_server_pid);
     source.destroy();
 
     target = await openSocket(socketPath);
@@ -726,6 +738,17 @@ input.on("line", line => {
     assert.equal(targetSnapshot.host_instance_id, sourceSnapshot.host_instance_id);
     assert.equal(targetSnapshot.app_server_pid, sourceSnapshot.app_server_pid);
     assert.equal(targetSnapshot.app_server_started_at, sourceSnapshot.app_server_started_at);
+    assert.deepEqual(targetSnapshot.thread_workers, []);
+    target.write(`${JSON.stringify({ type: "thread_handoff_request", request_id: "idle-thread-handoff", thread_id: threadId })}\n`);
+    while (true) {
+      const message = await targetNext();
+      if (message.type === "thread_handoff_response" && message.request_id === "idle-thread-handoff") {
+        assert.equal(message.ok, true);
+        assert.equal(message.released, true);
+        break;
+      }
+      if (message.type === "poll_request") target.write(`${JSON.stringify({ type: "poll_response", request_id: message.request_id, result: { leader: true, acquired: true, expires_at: new Date(Date.now() + 10_000).toISOString(), previous_relay_id: null, command: null, thread_ids: [threadId], active_turns: [] } })}\n`);
+    }
     target.write(`${JSON.stringify({ type: "complete_handoff", request_id: "continuity-complete", update_id: updateId })}\n`);
     diagnosticState.phase = "handoff_completing";
     while (true) {
