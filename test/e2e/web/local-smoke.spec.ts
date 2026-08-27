@@ -42,6 +42,7 @@ test("rejects an invalid token and accepts the local runtime token", async ({ pa
 });
 
 test("creates, edits, moves, archives, and restores an issue", async ({ page }) => {
+  test.setTimeout(90_000);
   const originalTitle = `Web 自动化 ${Date.now()}`;
   const editedTitle = `${originalTitle} 已编辑`;
   await page.goto(`${runtime.baseUrl}/web#token=${encodeURIComponent(runtime.token)}`);
@@ -76,7 +77,9 @@ test("creates, edits, moves, archives, and restores an issue", async ({ page }) 
   await editor.locator(".better-codex-submit").click();
 
   const card = page.locator(`[data-issue-id]:has(.better-codex-card-title:text-is("${originalTitle}"))`);
+  await expect(card).toHaveCount(1);
   await expect(card).toBeVisible();
+  await expect(card).not.toHaveClass(/is-remote-pending/, { timeout: 60_000 });
   await card.click();
   await expect(editor).toBeVisible();
   await editor.locator('[name="title"]').fill(editedTitle);

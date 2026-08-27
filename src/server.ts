@@ -2047,6 +2047,7 @@ export function startServer() {
         let created;
         try {
           created = store.createIssueRequest({
+            id: cleanString(body.id, 200) || undefined,
             projectId,
             title: cleanString(body.title, 500),
             description: semanticDocument ? inputDocumentText(semanticDocument) : withRemoteFilePaths(body.description, files.paths, "issue_description_too_long"),

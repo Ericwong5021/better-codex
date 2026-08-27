@@ -522,7 +522,9 @@ test("agent issue creation does not require or bind the current session", () => 
   const submitIssue = source.slice(source.indexOf("async function submitIssue()"), source.indexOf("async function startIssueNow()"));
   assert.doesNotMatch(submitIssue, /thread_id:\s*threadId/);
   assert.match(submitIssue, /if \(editingLocked \|\| submitInFlight\) return/);
+  assert.match(submitIssue, /id: createRequestId, request_id: createRequestId/);
   assert.match(submitIssue, /request_id: createRequestId/);
+  assert.ok(source.includes('id: body.id || "queued:" + commandId'));
   assert.ok(source.includes("cachedCreateDraft?.requestId"));
   assert.ok(source.includes("writeCreateDraft(draft, createRequestId)"));
   assert.ok(submitIssue.indexOf("writeCreateDraft(draft, createRequestId)") < submitIssue.indexOf('await api("/api/issues"'));

@@ -1087,7 +1087,7 @@ export function install(config: Record<string, any>) {
     function queuedIssuePlaceholder(commandId, body) {
       const timestamp = new Date().toISOString();
       return {
-        id: "queued:" + commandId,
+        id: body.id || "queued:" + commandId,
         identifier: "…",
         project_id: body.project_id,
         title: body.title,
@@ -10024,7 +10024,7 @@ export function install(config: Record<string, any>) {
             files,
             ...(state.mockup ? { mockup_run_status: draft.runStatus } : {}),
             ...assignee,
-            ...(!issue ? { request_id: createRequestId } : {})
+            ...(!issue ? { id: createRequestId, request_id: createRequestId } : {})
           };
           const transferTimeoutMs = files.length ? 120_000 : undefined;
           let queuedCreate = false;

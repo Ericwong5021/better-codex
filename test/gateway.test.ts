@@ -356,10 +356,11 @@ test("gateway completes the issue workflow and survives restart", async () => {
     assert.equal(completedRunningIssue.reply_status, "succeeded");
     assert.equal(completedRunningIssue.session_status, "idle");
 
-    const createRequest = { project_id: project.id, title: "Round trip", request_id: "gateway-create-round-trip" };
+    const createRequest = { id: "gateway-created-issue", project_id: project.id, title: "Round trip", request_id: "gateway-create-round-trip" };
     const issueResponse = await request("/api/issues", { method: "POST", body: JSON.stringify(createRequest) });
     assert.equal(issueResponse.status, 201);
     const issue = await issueResponse.json() as { id: string; version: number };
+    assert.equal(issue.id, createRequest.id);
     const replayedIssueResponse = await request("/api/issues", { method: "POST", body: JSON.stringify(createRequest) });
     assert.equal(replayedIssueResponse.status, 200);
     assert.equal((await replayedIssueResponse.json() as { id: string }).id, issue.id);
