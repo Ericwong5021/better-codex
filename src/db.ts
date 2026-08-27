@@ -194,6 +194,7 @@ export type Issue = {
   agent_id: string | null;
   user_assigned: boolean;
   assignee_user_id: string | null;
+  creator_user_id: string | null;
   needs_attention: boolean;
   pending_actor: PendingActor;
   enrichment_status: EnrichmentStatus;
@@ -343,6 +344,7 @@ type IssueInput = {
   agentId?: string;
   userAssigned?: boolean;
   assigneeUserId?: string;
+  creatorUserId?: string;
   enrichmentStatus?: EnrichmentStatus;
   semanticReferences?: IssueSemanticReference[];
   semanticDocument?: InputDocumentV2;
@@ -365,7 +367,7 @@ export function cleanMaxConcurrency(value: number | undefined) {
   return value;
 }
 
-const latestSchemaVersion = 23;
+const latestSchemaVersion = 24;
 
 function now() {
   return new Date().toISOString();
@@ -1256,6 +1258,14 @@ export class Store {
         this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (23, ?)").run(now());
       });
     }
+    if (fromVersion < 24) {
+      this.transaction(() => {
+        const columns = new Set((this.db.prepare("PRAGMA table_info(issues)").all() as Array<{ name: string }>).map(item => item.name));
+        if (!columns.has("creator_user_id")) this.db.exec("ALTER TABLE issues ADD COLUMN creator_user_id TEXT");
+        this.db.exec("CREATE INDEX IF NOT EXISTS issues_creator_user_id ON issues(creator_user_id)");
+        this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (24, ?)").run(now());
+      });
+    }
   }
 
   private ensureProjectColumns() {
@@ -1772,6 +1782,7 @@ export class Store {
       agent_id: issue.agent_id,
       user_assigned: issue.user_assigned,
       assignee_user_id: issue.assignee_user_id,
+      creator_user_id: issue.creator_user_id,
       pending_actor: issue.pending_actor,
       enrichment_status: issue.enrichment_status,
       active_run_status: issue.active_run_status ?? null,
@@ -1882,6 +1893,7 @@ export class Store {
             agentId: typeof payload.agent_id === "string" ? payload.agent_id : undefined,
             userAssigned: payload.user_assigned === true,
             assigneeUserId: typeof payload.assignee_user_id === "string" ? payload.assignee_user_id : undefined,
+            creatorUserId: typeof payload.creator_user_id === "string" ? payload.creator_user_id : undefined,
             enrichmentStatus: payload.ai_enrich === true ? "pending" : null,
           });
         } else {
@@ -2886,6 +2898,8 @@ export class Store {
     const userAssigned = Boolean(input.userAssigned) && !Boolean(input.agentEnabled) && !importedSession;
     const assigneeUserId = userAssigned ? String(input.assigneeUserId || "").trim() || null : null;
     if (assigneeUserId && (assigneeUserId.length > 200 || assigneeUserId.includes("\0"))) throw new Error("invalid_assignee_user_id");
+    const creatorUserId = String(input.creatorUserId || "").trim() || null;
+    if (creatorUserId && (creatorUserId.length > 200 || creatorUserId.includes("\0"))) throw new Error("invalid_creator_user_id");
     const agentId = input.agentEnabled && input.agentId ? input.agentId : null;
     if (agentId && !this.getAgentProfile(agentId)) throw new Error("agent_not_found");
     const agentEnabled = (Boolean(input.agentEnabled) || Boolean(importedSession)) && !userAssigned;
@@ -2921,9 +2935,9 @@ export class Store {
       this.db.prepare(`
         INSERT INTO issues (
           id, identifier, project_id, title, description, status, priority, labels_json,
-          sort_order, pinned, archived_at, thread_id, workspace_path, agent_enabled, agent_id, user_assigned, assignee_user_id,
+          sort_order, pinned, archived_at, thread_id, workspace_path, agent_enabled, agent_id, user_assigned, assignee_user_id, creator_user_id,
            needs_attention, pending_actor, enrichment_status, version, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
       `).run(
         id,
         identifier,
@@ -2940,6 +2954,7 @@ export class Store {
         agentId,
         Number(userAssigned),
         assigneeUserId,
+        creatorUserId,
         needsAttention,
         pendingActor,
         enrichmentStatus,

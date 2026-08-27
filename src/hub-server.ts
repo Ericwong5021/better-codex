@@ -160,11 +160,13 @@ function userForWeb(user: NonNullable<ReturnType<HubStore["webUser"]>>) {
     color: user.avatar_color,
     avatar: user.avatar,
     avatar_generated: user.avatar_generated,
+    disabled: user.disabled,
   };
 }
 
 function issueForWeb(store: HubStore, issue: ReturnType<HubStore["board"]>["issues"][number]) {
   const assigneeUser = issue.user_assigned ? issue.assignee_user_id ? store.webUser(issue.assignee_user_id) || store.defaultWebUser() : store.defaultWebUser() : null;
+  const creatorUser = issue.creator_user_id ? store.webUser(issue.creator_user_id) : null;
   return {
     ...issue,
     version: issue.local_revision,
@@ -178,6 +180,7 @@ function issueForWeb(store: HubStore, issue: ReturnType<HubStore["board"]>["issu
     user_assigned: issue.user_assigned,
     assignee_user_id: issue.assignee_user_id,
     assignee_user: assigneeUser ? userForWeb(assigneeUser) : null,
+    creator_user: creatorUser ? userForWeb(creatorUser) : null,
     pending_actor: issue.pending_actor,
     enrichment_status: issue.enrichment_status,
     reply_draft: "",
@@ -361,6 +364,7 @@ export function createHubServer(options: HubServerOptions) {
           appearance: { theme: "system", accent: "green" },
           locale: "zh-CN",
           user: userForWeb(browser.user),
+          users: store.listWebUsers().map(userForWeb),
           agentModelCatalog,
           agentModels: agentModelCatalog.map(model => model.id),
           agentReasoningEfforts: [...new Set(agentModelCatalog.flatMap(model => model.supportedReasoningEfforts.map(effort => effort.value)))],
@@ -546,7 +550,7 @@ export function createHubServer(options: HubServerOptions) {
           operation: "issue.create",
           entity_id: body.id,
           base_revision: null,
-          payload: { project_id: body.project_id, title: body.title, description: body.description, status: body.status, priority: body.priority, labels: body.labels, agent_enabled: body.agent_enabled, agent_id: body.agent_id, user_assigned: body.user_assigned, assignee_user_id: body.user_assigned === true ? browser.user.id : null, ai_enrich: body.ai_enrich, files: body.files },
+          payload: { project_id: body.project_id, title: body.title, description: body.description, status: body.status, priority: body.priority, labels: body.labels, agent_enabled: body.agent_enabled, agent_id: body.agent_id, user_assigned: body.user_assigned, assignee_user_id: body.user_assigned === true ? browser.user.id : null, creator_user_id: browser.user.id, ai_enrich: body.ai_enrich, files: body.files },
         });
         notifyControl(command.device_id);
         const issue = store.board().issues.find(item => item.id === command.entity_id)!;

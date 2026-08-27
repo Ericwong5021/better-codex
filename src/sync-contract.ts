@@ -3,8 +3,8 @@ import type { ConversationMessage } from "./session-transcript.js";
 
 export const legacySyncProtocolVersion = "sync/v11" as const;
 export const compatibilitySyncProtocolVersion = "sync/v12" as const;
-export const previousSyncProtocolVersion = "sync/v14" as const;
-export const syncProtocolVersion = "sync/v15" as const;
+export const previousSyncProtocolVersion = "sync/v15" as const;
+export const syncProtocolVersion = "sync/v16" as const;
 export const supportedSyncProtocolVersions = [syncProtocolVersion, previousSyncProtocolVersion, compatibilitySyncProtocolVersion, legacySyncProtocolVersion] as const;
 export type SyncProtocolVersion = typeof supportedSyncProtocolVersions[number];
 export const syncEntityTypes = ["project", "issue", "agent_directory"] as const;
@@ -125,6 +125,7 @@ export type IssueProjection = {
   agent_id: string | null;
   user_assigned: boolean;
   assignee_user_id: string | null;
+  creator_user_id: string | null;
   pending_actor: "user" | "agent";
   enrichment_status: "pending" | "regenerating" | "failed" | null;
   active_run_status: "claimed" | "running" | "scheduling" | null;

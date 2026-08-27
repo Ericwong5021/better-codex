@@ -196,6 +196,7 @@ function cleanProjection(type: SyncEntityType, id: string, value: unknown): Sync
   for (const field of ["pinned", "assigned", "agent_enabled", "user_assigned", "has_conversation", "needs_attention"] as const) if (typeof source[field] !== "boolean") throw new Error("invalid_projection");
   if (source.agent_id !== null && (typeof source.agent_id !== "string" || !/^[a-f0-9-]{36}$/i.test(source.agent_id))) throw new Error("invalid_projection");
   if (source.assignee_user_id !== undefined && source.assignee_user_id !== null && (typeof source.assignee_user_id !== "string" || source.assignee_user_id.length > 200)) throw new Error("invalid_projection");
+  if (source.creator_user_id !== undefined && source.creator_user_id !== null && (typeof source.creator_user_id !== "string" || source.creator_user_id.length > 200)) throw new Error("invalid_projection");
   if (source.pending_actor !== "user" && source.pending_actor !== "agent") throw new Error("invalid_projection");
   if (source.enrichment_status !== undefined && source.enrichment_status !== null && !["pending", "regenerating", "failed"].includes(String(source.enrichment_status))) throw new Error("invalid_projection");
   if (source.archived_at !== null && (typeof source.archived_at !== "string" || source.archived_at.length > 64)) throw new Error("invalid_projection");
@@ -221,6 +222,7 @@ function cleanProjection(type: SyncEntityType, id: string, value: unknown): Sync
     agent_id: source.agent_id as string | null,
     user_assigned: source.user_assigned as boolean,
     assignee_user_id: typeof source.assignee_user_id === "string" ? source.assignee_user_id : null,
+    creator_user_id: typeof source.creator_user_id === "string" ? source.creator_user_id : null,
     pending_actor: source.pending_actor,
     enrichment_status: source.enrichment_status === "pending" || source.enrichment_status === "regenerating" || source.enrichment_status === "failed" ? source.enrichment_status : null,
     active_run_status: source.active_run_status as IssueProjection["active_run_status"],
@@ -290,7 +292,7 @@ function cleanCommandPayload(operation: RemoteCommandOperation, value: unknown) 
   if (!value || typeof value !== "object" || Array.isArray(value) || (operation !== "project.create" && containsForbiddenKey(value))) throw new Error("invalid_command_payload");
   const source = value as Record<string, unknown>;
   const allowed = operation === "issue.create"
-    ? ["project_id", "title", "description", "status", "priority", "labels", "agent_enabled", "agent_id", "user_assigned", "assignee_user_id", "ai_enrich", "files"]
+    ? ["project_id", "title", "description", "status", "priority", "labels", "agent_enabled", "agent_id", "user_assigned", "assignee_user_id", "creator_user_id", "ai_enrich", "files"]
     : operation === "issue.update"
       ? ["project_id", "title", "description", "status", "priority", "labels", "sort_order", "pinned", "agent_enabled", "agent_id", "user_assigned", "assignee_user_id", "files"]
       : operation === "issue.start"
@@ -336,6 +338,7 @@ function cleanCommandPayload(operation: RemoteCommandOperation, value: unknown) 
   }
   if (source.user_assigned !== undefined) payload.user_assigned = source.user_assigned === true;
   if (source.assignee_user_id !== undefined) payload.assignee_user_id = source.assignee_user_id === null ? null : cleanString(source.assignee_user_id, 200);
+  if (source.creator_user_id !== undefined) payload.creator_user_id = source.creator_user_id === null ? null : cleanString(source.creator_user_id, 200);
   if (source.ai_enrich !== undefined) payload.ai_enrich = source.ai_enrich === true;
   if (source.enabled !== undefined) payload.enabled = source.enabled === true;
   if (source.before_id !== undefined) payload.before_id = cleanString(source.before_id, 200);
@@ -950,10 +953,11 @@ export class HubStore {
     if (operation === "issue.stop" && !running) throw new Error("issue_not_running");
     if (payload.agent_id && !this.board().agents.some(agent => agent.id === payload.agent_id)) throw new Error("agent_not_found");
     const deviceId = this.writerDeviceId(settingOperation || createOperation ? "" : entityId, entityType);
-    if (operation === "issue.delete" || operation === "project.delete" || operation === "project.browse_directory" || operation === "project.create_directory" || operation === "issue.queue.update" || operation === "issue.queue.send" || operation === "issue.queue.delete" || operation === "issue.regenerate-title") {
+    const creatorProtocolRequired = operation === "issue.create" && Boolean(payload.creator_user_id);
+    if (creatorProtocolRequired || operation === "issue.delete" || operation === "project.delete" || operation === "project.browse_directory" || operation === "project.create_directory" || operation === "issue.queue.update" || operation === "issue.queue.send" || operation === "issue.queue.delete" || operation === "issue.regenerate-title") {
       const runtimeRow = this.db.prepare("SELECT payload_json FROM runtime_projection WHERE device_id = ?").get(deviceId) as { payload_json: string } | undefined;
       const protocolVersion = runtimeRow ? (JSON.parse(runtimeRow.payload_json) as RuntimeProjection).protocol_version : null;
-      const incompatible = operation === "project.delete" || operation === "project.browse_directory" || operation === "project.create_directory" || operation === "issue.queue.update" || operation === "issue.queue.send" || operation === "issue.queue.delete" || operation === "issue.regenerate-title"
+      const incompatible = creatorProtocolRequired || operation === "project.delete" || operation === "project.browse_directory" || operation === "project.create_directory" || operation === "issue.queue.update" || operation === "issue.queue.send" || operation === "issue.queue.delete" || operation === "issue.regenerate-title"
         ? protocolVersion !== syncProtocolVersion
         : protocolVersion !== syncProtocolVersion && protocolVersion !== previousSyncProtocolVersion;
       if (incompatible) throw new Error("incompatible_protocol");
@@ -1185,6 +1189,7 @@ export class HubStore {
           agent_id: typeof command.payload.agent_id === "string" && command.payload.agent_id ? command.payload.agent_id : null,
           user_assigned: command.payload.user_assigned === true,
           assignee_user_id: typeof command.payload.assignee_user_id === "string" && command.payload.assignee_user_id ? command.payload.assignee_user_id : null,
+          creator_user_id: typeof command.payload.creator_user_id === "string" && command.payload.creator_user_id ? command.payload.creator_user_id : null,
           pending_actor: command.payload.agent_enabled === true ? "agent" : "user",
           enrichment_status: command.payload.ai_enrich === true ? "pending" : null,
           active_run_status: null,

@@ -125,7 +125,7 @@ test("gateway completes the issue workflow and survives restart", async () => {
   try {
     await waitForGateway(port, gateway);
     const health = await (await fetch(`http://127.0.0.1:${port}/health`)).json() as { generation: number; database: { schemaVersion: number } };
-    assert.equal(health.database.schemaVersion, 23);
+    assert.equal(health.database.schemaVersion, 24);
     assert.equal(health.generation, 1);
     const firstRuntime = JSON.parse(readFileSync(join(home, "run", "runtime.json"), "utf8")) as { generation: number; instanceId: string };
     const firstAuthority = JSON.parse(readFileSync(join(home, "run", "runtime-authority.json"), "utf8")) as { generation: number; runtimeInstanceId: string; status: string };

@@ -73,7 +73,7 @@ function relaySocketUrl(configuration: RelayConfiguration) {
 }
 
 function requestHeaders(headers: Record<string, string>, token: string) {
-  const allowed = new Set(["accept", "accept-language", "content-type", "if-none-match", "last-event-id", "range", "x-better-codex-request-id", "x-better-codex-trace-id"]);
+  const allowed = new Set(["accept", "accept-language", "content-type", "if-none-match", "last-event-id", "range", "x-better-codex-request-id", "x-better-codex-trace-id", "x-better-codex-user-id"]);
   const result: Record<string, string> = { authorization: `Bearer ${token}`, "x-better-codex-relay": "1" };
   for (const [name, value] of Object.entries(headers)) if (allowed.has(name.toLowerCase())) result[name.toLowerCase()] = value;
   return result;

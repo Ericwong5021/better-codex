@@ -2037,6 +2037,7 @@ export function startServer() {
           workspacePath: cleanString(body.workspace_path, 4096) || project.workspace_path,
           agentEnabled: true,
           userAssigned: false,
+          creatorUserId: relayRequest ? cleanString(request.headers["x-better-codex-user-id"], 200) : readCodexUserProfile().id,
           session: {
             threadId,
             configFingerprint: worker.sessionConfigFingerprint(null),
@@ -2100,6 +2101,7 @@ export function startServer() {
             agentEnabled,
             agentId,
             userAssigned,
+            creatorUserId: relayRequest ? cleanString(request.headers["x-better-codex-user-id"], 200) : readCodexUserProfile().id,
             enrichmentStatus: aiEnrich ? "pending" : null,
             semanticReferences,
             semanticDocument,

@@ -318,9 +318,9 @@ function connectionMatches(runtime: ActiveRuntime | null, message: Exclude<Relay
   return Boolean(runtime && message.device_id === runtime.deviceId && message.runtime_instance_id === runtime.runtimeInstanceId && message.connection_epoch === runtime.connectionEpoch);
 }
 
-function forwardedRequestHeaders(request: IncomingMessage, requestId: string) {
+function forwardedRequestHeaders(request: IncomingMessage, requestId: string, userId: string) {
   const allowed = new Set(["accept", "accept-language", "content-type", "if-none-match", "last-event-id", "range", "x-better-codex-trace-id"]);
-  const headers: Record<string, string> = { "x-better-codex-request-id": requestId };
+  const headers: Record<string, string> = { "x-better-codex-request-id": requestId, "x-better-codex-user-id": userId };
   for (const [name, value] of Object.entries(request.headers)) {
     if (!allowed.has(name.toLowerCase()) || value === undefined) continue;
     headers[name.toLowerCase()] = Array.isArray(value) ? value.join(", ") : value;
@@ -659,9 +659,9 @@ export function createRelayServer(options: RelayServerOptions) {
     if (!capacity) return;
     for (const command of store.claimCommands(active.deviceId, Math.min(capacity, 8))) dispatchCommand(active, command);
   };
-  const forwardCommand = async (request: IncomingMessage, response: ServerResponse, url: URL, method: string, sessionId: string) => {
+  const forwardCommand = async (request: IncomingMessage, response: ServerResponse, url: URL, method: string, sessionId: string, userId: string) => {
     const suppliedRequestId = String(request.headers["x-better-codex-request-id"] || request.headers["x-better-codex-command-id"] || "");
-    if (!/^[A-Za-z0-9_-]{8,200}$/.test(suppliedRequestId)) return forwardRequest(request, response, url, method, sessionId);
+    if (!/^[A-Za-z0-9_-]{8,200}$/.test(suppliedRequestId)) return forwardRequest(request, response, url, method, sessionId, userId);
     const body = await readRawBody(request, Math.min(maxRequestBytes, 2 * 1024 * 1024));
     const path = `${url.pathname}${url.search}`;
     const command = createWebCommand(suppliedRequestId, method, path, body);
@@ -674,7 +674,7 @@ export function createRelayServer(options: RelayServerOptions) {
       }
       if (payload.user_assigned === true && typeof payload.assignee_user_id !== "string") throw new Error("web_user_not_found");
     }
-    const result = store.enqueueCommand(sessionId, command, forwardedRequestHeaders(request, command.command_id));
+    const result = store.enqueueCommand(sessionId, command, forwardedRequestHeaders(request, command.command_id, userId));
     if (result.kind === "conflict") return sendJson(response, 409, { error: "request_id_conflict", command_id: command.command_id });
     if (["applied", "rejected", "conflict", "expired"].includes(result.command.status)) return sendCommandResult(response, result.command);
     if (!runtime || webCommandAcknowledgesQueue(method, path)) {
@@ -685,7 +685,7 @@ export function createRelayServer(options: RelayServerOptions) {
     waitForCommand(response, result.command);
     pumpCommands(runtime);
   };
-  function forwardRequest(request: IncomingMessage, response: ServerResponse, url: URL, method: string, sessionId: string) {
+  function forwardRequest(request: IncomingMessage, response: ServerResponse, url: URL, method: string, sessionId: string, userId: string) {
     const active = runtime;
     const presence = active || reconnectingRuntime;
     if (["/api/shutdown"].includes(url.pathname) || url.pathname.startsWith("/api/session-relay/") || url.pathname.startsWith("/api/mockup/") || url.pathname.startsWith("/api/sync/") || url.pathname.startsWith("/api/relay/")) return sendJson(response, 404, { error: "not_found" });
@@ -709,7 +709,7 @@ export function createRelayServer(options: RelayServerOptions) {
       }
     }, 120_000);
     timeout.unref();
-    const channel: RelayChannel = { id: channelId, sessionId, deviceId: presence?.deviceId || "", requestId, traceId, method, request, response, path: `${url.pathname}${url.search}`, headers: forwardedRequestHeaders(request, requestId), recoverable, requestSequence: 0, responseSequence: 0, upstreamResponseStarted: false, downstreamResponseStarted: false, bufferResponse: false, responseStatus: null, responseHeaders: {}, responseChunks: [], responseBytes: 0, completed: false, requestBytes: 0, requestCredit: relayInitialWindowBytes, requestQueue: [], requestChunks: [], requestEnded: false, requestEndSent: false, replayAttempts: 0, retryTimeout: null, connectionEpoch: presence?.connectionEpoch || 0, runtimeInstanceId: presence?.runtimeInstanceId || "", timeout };
+    const channel: RelayChannel = { id: channelId, sessionId, deviceId: presence?.deviceId || "", requestId, traceId, method, request, response, path: `${url.pathname}${url.search}`, headers: forwardedRequestHeaders(request, requestId, userId), recoverable, requestSequence: 0, responseSequence: 0, upstreamResponseStarted: false, downstreamResponseStarted: false, bufferResponse: false, responseStatus: null, responseHeaders: {}, responseChunks: [], responseBytes: 0, completed: false, requestBytes: 0, requestCredit: relayInitialWindowBytes, requestQueue: [], requestChunks: [], requestEnded: false, requestEndSent: false, replayAttempts: 0, retryTimeout: null, connectionEpoch: presence?.connectionEpoch || 0, runtimeInstanceId: presence?.runtimeInstanceId || "", timeout };
     request.on("data", chunkValue => {
       if (channel.completed) return;
       request.pause();
@@ -989,11 +989,11 @@ export function createRelayServer(options: RelayServerOptions) {
       }
       if (url.pathname === "/web/injection.js" && method === "GET") {
         if (!session) return sendJson(response, 401, { error: "unauthorized" });
-        return forwardRequest(request, response, url, method, session.id);
+        return forwardRequest(request, response, url, method, session.id, session.user.id);
       }
       if (url.pathname === "/health" && method === "GET") {
         if (!session) return sendJson(response, 401, { error: "unauthorized" });
-        return forwardRequest(request, response, url, method, session.id);
+        return forwardRequest(request, response, url, method, session.id, session.user.id);
       }
       const commandStatusMatch = url.pathname.match(/^\/api\/commands\/([A-Za-z0-9_-]{8,200})$/);
       if (commandStatusMatch && method === "GET") {
@@ -1006,8 +1006,8 @@ export function createRelayServer(options: RelayServerOptions) {
       if (url.pathname.startsWith("/api/")) {
         if (!session) return sendJson(response, 401, { error: "unauthorized" });
         if (!["GET", "HEAD"].includes(method) && (!trustedOrigin(request, true) || !csrfValid)) return sendJson(response, 403, { error: "csrf_invalid" });
-        if (webCommandTarget(method, `${url.pathname}${url.search}`)) return forwardCommand(request, response, url, method, session.id);
-        return forwardRequest(request, response, url, method, session.id);
+        if (webCommandTarget(method, `${url.pathname}${url.search}`)) return forwardCommand(request, response, url, method, session.id, session.user.id);
+        return forwardRequest(request, response, url, method, session.id, session.user.id);
       }
       return sendJson(response, 404, { error: "not_found" });
     })().catch(error => {
