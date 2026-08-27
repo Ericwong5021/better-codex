@@ -814,47 +814,25 @@ export class IssueWorker {
         return;
       }
       const current = this.store.getIssue(issue.id);
-      if (!current || current.version !== issue.version) {
+      const enrichmentChanged = mode === "initial"
+        ? current?.enrichment_status !== "pending"
+        : current?.version !== issue.version || current?.enrichment_status !== "regenerating";
+      if (!current || enrichmentChanged) {
         workerDebug("enrichment_discarded", {
           issue_id: issue.id,
           identifier: issue.identifier,
           mode,
-          reason: !current ? "issue_missing" : "version_changed",
+          reason: !current ? "issue_missing" : "enrichment_state_changed",
           expected_version: issue.version,
           current_version: current?.version ?? null,
+          current_enrichment_status: current?.enrichment_status ?? null,
         });
         return;
       }
       try {
-        const humanAssigned = current.user_assigned;
         const updated = mode === "regenerate"
           ? this.store.updateIssue(issue.id, current.version, result ? { title: result.title, enrichment_status: null } : { enrichment_status: "failed" })
-          : this.store.updateIssue(issue.id, current.version, {
-              ...(result
-                ? {
-                    title: result.title,
-                    description: current.description,
-                    status: "todo" as const,
-                    agent_enabled: !humanAssigned,
-                    agent_id: humanAssigned ? null : agentId,
-                    user_assigned: humanAssigned,
-                    assignee_user_id: humanAssigned ? current.assignee_user_id : null,
-                    pending_actor: humanAssigned ? "user" as const : "agent" as const,
-                    needs_attention: true,
-                    enrichment_status: null,
-                  }
-                : {
-                    title: "任务理解失败",
-                    status: "blocked" as const,
-                    agent_enabled: !humanAssigned,
-                    agent_id: humanAssigned ? null : agentId,
-                    user_assigned: humanAssigned,
-                    assignee_user_id: humanAssigned ? current.assignee_user_id : null,
-                    pending_actor: "user" as const,
-                    needs_attention: true,
-                    enrichment_status: "failed" as const,
-                  }),
-            });
+          : this.store.updateIssue(issue.id, current.version, result ? { title: result.title, enrichment_status: null } : { enrichment_status: "failed" });
         workerDebug("enrichment_applied", {
           issue_id: issue.id,
           identifier: issue.identifier,
@@ -891,17 +869,11 @@ export class IssueWorker {
     workerDebug("enrichment_failed", { issue_id: issue.id, identifier: issue.identifier, mode, reason });
     try {
       if (mode === "regenerate") this.store.updateIssue(issue.id, issue.version, { enrichment_status: "failed" });
-      else this.store.updateIssue(issue.id, issue.version, {
-        title: "任务理解失败",
-        status: "blocked",
-        agent_enabled: !issue.user_assigned,
-        agent_id: issue.user_assigned ? null : issue.agent_id,
-        user_assigned: issue.user_assigned,
-        assignee_user_id: issue.user_assigned ? issue.assignee_user_id : null,
-        pending_actor: "user",
-        needs_attention: true,
-        enrichment_status: "failed",
-      });
+      else {
+        const current = this.store.getIssue(issue.id);
+        if (!current || current.enrichment_status !== "pending") return;
+        this.store.updateIssue(issue.id, current.version, { enrichment_status: "failed" });
+      }
       this.onChange();
     } catch (error) {
       workerDebug("enrichment_apply_failed", {

@@ -1825,7 +1825,7 @@ export class Store {
           if (!current) throw new Error("issue_not_found");
           if (!["issue.reply", "issue.stop", "issue.queue.update", "issue.queue.send", "issue.queue.delete"].includes(command.operation) && current.version !== command.base_revision) throw new Error("version_conflict");
           if (!["issue.reply", "issue.stop", "issue.queue.update", "issue.queue.send", "issue.queue.delete"].includes(command.operation) && (current.active_run_status || current.session_active_turn_id || this.getIssueReplyState(current.id).status === "running")) throw new Error("issue_execution_running");
-          if (["issue.archive", "issue.delete"].includes(command.operation) && this.isEnrichmentPending(current)) throw new Error("issue_enrichment_pending");
+          if (["issue.archive", "issue.delete"].includes(command.operation) && this.isTitleRegenerationPending(current)) throw new Error("issue_enrichment_pending");
           if (command.operation === "issue.delete") {
             this.deleteArchivedIssue(current.id, current.version);
             return { command_id: command.command_id, status: "applied", error: null, projection: null } satisfies RemoteCommandAck;
@@ -2201,7 +2201,7 @@ export class Store {
 
   isDispatchable(issue: Issue) {
     return Boolean(
-      !this.isEnrichmentPending(issue)
+      !this.isTitleRegenerationPending(issue)
       &&
       issue.needs_attention
       && issue.pending_actor === "agent"
@@ -2214,6 +2214,10 @@ export class Store {
 
   isEnrichmentPending(issue: Issue) {
     return issue.enrichment_status === "pending" || issue.enrichment_status === "regenerating";
+  }
+
+  isTitleRegenerationPending(issue: Issue) {
+    return issue.enrichment_status === "regenerating";
   }
 
   listPendingEnrichmentIssues() {
@@ -2263,7 +2267,7 @@ export class Store {
     if (!project) throw new Error("project_not_found");
     const issues = [...this.listIssues({ projectId: id }), ...this.listIssues({ projectId: id, archived: true })];
     if (project.overview_status === "generating" || project.planning.status === "running") throw new Error("project_operation_running");
-    if (issues.some(issue => this.isEnrichmentPending(issue) || issue.active_run_status || issue.session_active_turn_id || ["starting", "active", "stopping", "waiting_on_approval", "waiting_on_user"].includes(issue.session_status || "") || this.getIssueReplyState(issue.id).status === "running")) throw new Error("project_operation_running");
+    if (issues.some(issue => this.isTitleRegenerationPending(issue) || issue.active_run_status || issue.session_active_turn_id || ["starting", "active", "stopping", "waiting_on_approval", "waiting_on_user"].includes(issue.session_status || "") || this.getIssueReplyState(issue.id).status === "running")) throw new Error("project_operation_running");
     return { project, issues };
   }
 
@@ -2811,7 +2815,7 @@ export class Store {
     else delete fingerprintInput.semanticCommand;
     const requestFingerprint = requestId ? issueCreateFingerprint(fingerprintInput) : "";
     const enrichmentStatus = input.enrichmentStatus ?? null;
-    const title = enrichmentStatus === "pending" ? "正在理解任务" : cleanTitle(input.title);
+    const title = cleanTitle(input.title);
     if (input.status && !issueStatuses.includes(input.status)) throw new Error("invalid_status");
     if (input.priority && !issuePriorities.includes(input.priority)) throw new Error("invalid_priority");
     const importedSession = input.session;
@@ -2822,7 +2826,7 @@ export class Store {
     if (agentId && !this.getAgentProfile(agentId)) throw new Error("agent_not_found");
     const agentEnabled = (Boolean(input.agentEnabled) || Boolean(importedSession)) && !userAssigned;
     if (enrichmentStatus !== null && enrichmentStatus !== "pending" && enrichmentStatus !== "regenerating" && enrichmentStatus !== "failed") throw new Error("invalid_enrichment_status");
-    const status = importedSession ? importedSession.active ? "in_progress" : "in_review" : enrichmentStatus === "pending" ? "backlog" : input.status ?? "todo";
+    const status = importedSession ? importedSession.active ? "in_progress" : "in_review" : enrichmentStatus === "pending" ? "todo" : input.status ?? "todo";
     const userHandoff = status === "blocked" || status === "in_review";
     const needsAttention = importedSession ? Number(!importedSession.active) : userHandoff ? 1 : agentEnabled && status !== "backlog" && status !== "done" ? 1 : 0;
     const pendingActor = importedSession ? importedSession.active ? "agent" : "user" : agentEnabled && !userHandoff && status !== "done" ? "agent" : "user";
@@ -2915,8 +2919,12 @@ export class Store {
       const issue = this.getIssue(id);
       if (!issue) throw new Error("issue_not_found");
       if (issue.version !== version) throw new Error("version_conflict");
-      if (this.isEnrichmentPending(issue) && patch.enrichment_status === undefined) throw new Error("issue_enrichment_pending");
-      if ((issue.run_thread_id || issue.active_run_status) && (patch.description !== undefined || (patch.title !== undefined && issue.enrichment_status !== "regenerating"))) throw new Error("issue_execution_locked");
+      if (this.isTitleRegenerationPending(issue) && patch.enrichment_status === undefined) throw new Error("issue_enrichment_pending");
+      const titleChanged = patch.title !== undefined && patch.title !== issue.title;
+      const descriptionChanged = patch.description !== undefined && patch.description !== issue.description;
+      if (issue.enrichment_status === "pending" && patch.enrichment_status === undefined && (titleChanged || descriptionChanged)) patch.enrichment_status = null;
+      const generatedTitleUpdate = patch.title !== undefined && patch.enrichment_status !== undefined && this.isEnrichmentPending(issue);
+      if ((issue.run_thread_id || issue.active_run_status) && (patch.description !== undefined || (patch.title !== undefined && !generatedTitleUpdate))) throw new Error("issue_execution_locked");
       if (patch.project_id !== undefined && !this.getProject(patch.project_id)) throw new Error("project_not_found");
       if (patch.user_assigned !== undefined) patch.user_assigned = Boolean(patch.user_assigned);
       if (patch.user_assigned === true) {
@@ -3021,7 +3029,7 @@ export class Store {
     const issue = this.getIssue(id);
     if (!issue) throw new Error("issue_not_found");
     if (issue.version !== version) throw new Error("version_conflict");
-    if (this.isEnrichmentPending(issue)) throw new Error("issue_enrichment_pending");
+    if (this.isTitleRegenerationPending(issue)) throw new Error("issue_enrichment_pending");
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const timestamp = now();
@@ -3064,7 +3072,7 @@ export class Store {
     const issue = this.getIssue(id);
     if (!issue) throw new Error("issue_not_found");
     if (issue.version !== version) throw new Error("version_conflict");
-    if (this.isEnrichmentPending(issue)) throw new Error("issue_enrichment_pending");
+    if (this.isTitleRegenerationPending(issue)) throw new Error("issue_enrichment_pending");
     if (issue.active_run_status || issue.session_active_turn_id || this.getIssueReplyState(issue.id).status === "running") throw new Error("issue_execution_running");
     this.db.exec("BEGIN IMMEDIATE");
     try {
@@ -3254,7 +3262,7 @@ export class Store {
           AND pending_actor = 'agent'
           AND agent_enabled = 1
           AND status NOT IN ('backlog', 'done')
-          AND (enrichment_status IS NULL OR enrichment_status NOT IN ('pending', 'regenerating'))
+          AND (enrichment_status IS NULL OR enrichment_status != 'regenerating')
       `).run(timestamp, issue.id, issue.version);
       if (result.changes !== 1) throw new Error("claim_conflict");
       this.db.prepare("DELETE FROM issue_replies WHERE issue_id = ?").run(issue.id);

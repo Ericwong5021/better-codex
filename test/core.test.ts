@@ -145,23 +145,23 @@ test("core workflow persists, orders status moves, and rejects stale writes", ()
       description: "原始需求",
       agentEnabled: true,
       workspacePath: target.directory,
+      status: "backlog",
       enrichmentStatus: "pending",
     });
-    assert.equal(enriching.title, "正在理解任务");
-    assert.equal(enriching.status, "backlog");
+    assert.equal(enriching.title, "原始需求");
+    assert.equal(enriching.status, "todo");
     assert.equal(enriching.enrichment_status, "pending");
-    assert.equal(store.isDispatchable(enriching), false);
-    assert.throws(() => store.updateIssue(enriching.id, enriching.version, { title: "不能编辑" }), /issue_enrichment_pending/);
-    const enriched = store.updateIssue(enriching.id, enriching.version, {
+    assert.equal(store.isDispatchable(enriching), true);
+    const enrichmentClaim = store.claimNextIssue(enriching.id);
+    assert.equal(enrichmentClaim?.issue.status, "in_progress");
+    assert.equal(enrichmentClaim?.issue.enrichment_status, "pending");
+    const enriched = store.updateIssue(enriching.id, enrichmentClaim!.issue.version, {
       title: "整理后的标题",
-      description: "整理后的详情",
-      status: "todo",
-      pending_actor: "agent",
-      needs_attention: true,
       enrichment_status: null,
     });
+    assert.equal(enriched.title, "整理后的标题");
     assert.equal(enriched.enrichment_status, null);
-    assert.equal(store.isDispatchable(enriched), true);
+    store.finishRun(enrichmentClaim!.runId, enriching.id, true);
 
     const reassigned = store.updateIssue(second.id, second.version, { project_id: samePrefixProject.id });
     assert.equal(reassigned.project_id, samePrefixProject.id);

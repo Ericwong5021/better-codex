@@ -841,7 +841,10 @@ export function startServer() {
       if (command.operation === "settings.auto-dispatch" && command.payload.enabled === true) worker.wake();
       if (command.operation === "issue.create" && command.payload.ai_enrich === true) {
         const issue = store.getIssue(command.entity_id);
-        if (issue?.description.trim() && issue.enrichment_status === "pending") worker.enrichIssue(issue, issue.description, issue.agent_id || "");
+        if (issue?.description.trim() && issue.enrichment_status === "pending") {
+          worker.enrichIssue(issue, issue.description, issue.agent_id || "");
+          worker.wake();
+        }
       }
     },
     async issueId => {
@@ -2046,7 +2049,7 @@ export function startServer() {
             projectId,
             title: cleanString(body.title, 500),
             description: semanticDocument ? inputDocumentText(semanticDocument) : withRemoteFilePaths(body.description, files.paths, "issue_description_too_long"),
-            status: aiEnrich ? "backlog" : "status" in body ? asStatus(body.status) : undefined,
+            status: "status" in body ? asStatus(body.status) : undefined,
             priority: "priority" in body ? asPriority(body.priority) : undefined,
             labels: asLabels(body.labels),
             threadId: "",
@@ -2065,7 +2068,10 @@ export function startServer() {
         }
         const { issue } = created;
         if (created.replayed) return sendJson(response, 200, issue);
-        if (aiEnrich) worker.enrichIssue(issue, issue.description, agentId);
+        if (aiEnrich) {
+          worker.enrichIssue(issue, issue.description, agentId);
+          worker.wake();
+        }
         else if (issue.agent_enabled && store.isDispatchable(issue)) worker.wake();
         return sendJson(response, 201, issue);
       }
@@ -2144,7 +2150,7 @@ export function startServer() {
           if (!Number.isInteger(version) || version < 1) throw new Error("invalid_version");
           if (issue.version !== version) throw new Error("version_conflict");
           if (issue.archived_at) throw new Error("issue_archived");
-          if (store.isEnrichmentPending(issue)) throw new Error("issue_enrichment_pending");
+          if (store.isTitleRegenerationPending(issue)) throw new Error("issue_enrichment_pending");
           if (issue.active_run_status || issue.session_active_turn_id || store.getIssueReplyState(issue.id).status === "running") throw new Error("issue_execution_running");
           return sendJson(response, 202, await worker.regenerateIssueTitle(issue));
         }
@@ -2177,7 +2183,7 @@ export function startServer() {
           const version = Number(body.version);
           if (!Number.isInteger(version) || version < 1) throw new Error("invalid_version");
           if (issue.version !== version) throw new Error("version_conflict");
-          if (store.isEnrichmentPending(issue)) throw new Error("issue_enrichment_pending");
+          if (store.isTitleRegenerationPending(issue)) throw new Error("issue_enrichment_pending");
           if (issue.session_active_turn_id || store.getIssueReplyState(issue.id).status === "running") throw new Error("issue_execution_running");
           if (issue.active_run_status) {
             await worker.stopIssue(issue.id);
@@ -2204,7 +2210,7 @@ export function startServer() {
           const version = Number(body.version);
           if (!Number.isInteger(version) || version < 1) throw new Error("invalid_version");
           if (issue.version !== version) throw new Error("version_conflict");
-          if (store.isEnrichmentPending(issue)) throw new Error("issue_enrichment_pending");
+          if (store.isTitleRegenerationPending(issue)) throw new Error("issue_enrichment_pending");
           if (issue.active_run_status || issue.session_active_turn_id || store.getIssueReplyState(issue.id).status === "running") throw new Error("issue_execution_running");
           store.deleteArchivedIssue(issue.id, version);
           worker.wake();
@@ -2216,7 +2222,7 @@ export function startServer() {
           return sendJson(response, 200, attachment);
         }
         if (method === "GET" && path[3] === "conversation" && path.length === 4) {
-          if (store.isEnrichmentPending(issue)) throw new Error("issue_enrichment_pending");
+          if (store.isTitleRegenerationPending(issue)) throw new Error("issue_enrichment_pending");
           const [current] = await reconcileInterruptedIssues(store, [issue]);
           const threadId = current.run_thread_id || current.session_thread_id || current.thread_id || "";
           const conversation = await readConversationResult(threadId);
