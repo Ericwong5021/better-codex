@@ -1555,7 +1555,7 @@ export class Store {
         this.db.prepare("UPDATE issue_replies SET status = 'interrupted', error = 'runtime_restarted', finished_at = ? WHERE issue_id = ? AND status = 'running'").run(timestamp, row.issue_id);
         this.db.prepare(`
           UPDATE issues
-          SET status = 'blocked',
+          SET status = 'in_review',
               needs_attention = 1,
               pending_actor = 'user',
               version = version + 1,
@@ -3142,7 +3142,7 @@ export class Store {
         this.db.prepare("UPDATE issue_runs SET status = 'interrupted', finished_at = ?, error = 'runtime_restarted' WHERE id = ?").run(timestamp, row.id);
         this.db.prepare(`
           UPDATE issues
-          SET status = 'blocked',
+          SET status = 'in_review',
               needs_attention = 1,
               pending_actor = 'user',
               version = version + 1,
@@ -3177,7 +3177,7 @@ export class Store {
           UPDATE issues
           SET status = CASE
                 WHEN (SELECT status FROM issue_replies WHERE issue_id = issues.id) = 'succeeded' THEN 'in_review'
-                WHEN (SELECT status FROM issue_replies WHERE issue_id = issues.id) = 'failed' THEN 'blocked'
+                WHEN (SELECT status FROM issue_replies WHERE issue_id = issues.id) = 'failed' THEN 'in_review'
                 ELSE status
               END,
               needs_attention = 1,
@@ -3335,8 +3335,8 @@ export class Store {
 
   finalizeScheduler(runId: string, issueId: string, executionSuccess: boolean, decision: SchedulerDecision | null, schedulerError?: string) {
     const timestamp = now();
-    const status: IssueStatus = executionSuccess ? decision?.status || "in_review" : "blocked";
-    const finalSchedulerError = schedulerError ?? (!decision ? "scheduler_invalid_output" : !executionSuccess && decision.status !== "blocked" ? "scheduler_decision_overridden" : null);
+    const status: IssueStatus = decision?.status || "in_review";
+    const finalSchedulerError = schedulerError ?? (!decision ? "scheduler_invalid_output" : null);
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const result = this.db.prepare(`
@@ -3350,7 +3350,7 @@ export class Store {
             scheduler_result = ?
         WHERE id = ? AND issue_id = ? AND status = 'scheduling'
       `).run(
-        status === "blocked" ? "failed" : "completed",
+        executionSuccess ? "completed" : "failed",
         timestamp,
         decision ? "completed" : "failed",
         finalSchedulerError,
@@ -3467,7 +3467,7 @@ export class Store {
         WHERE id = ?
           AND status = 'in_progress'
           AND archived_at IS NULL
-      `).run(success ? "in_review" : "blocked", timestamp, issueId);
+      `).run("in_review", timestamp, issueId);
       this.db.exec("COMMIT");
     } catch (caught) {
       this.db.exec("ROLLBACK");
@@ -3499,7 +3499,7 @@ export class Store {
               WHERE issue_runs.issue_id = issues.id
                 AND issue_runs.status IN ('claimed', 'running')
             )
-        `).run(success ? "in_review" : "blocked", timestamp, issueId);
+        `).run("in_review", timestamp, issueId);
       }
       this.db.exec("COMMIT");
     } catch (caught) {
@@ -3544,7 +3544,7 @@ export class Store {
         WHERE interrupted.issue_id = ?
           AND interrupted.thread_id = ?
           AND interrupted.status = 'interrupted'
-          AND issues.status = 'blocked'
+          AND issues.status IN ('blocked', 'in_review')
           AND interrupted.id = (
             SELECT latest.id
             FROM issue_runs AS latest
@@ -3571,7 +3571,7 @@ export class Store {
             version = version + 1,
             updated_at = ?
         WHERE id = ?
-          AND status = 'blocked'
+          AND status IN ('blocked', 'in_review')
           AND ? = (
             SELECT latest.id
             FROM issue_runs AS latest
@@ -3660,7 +3660,7 @@ export class Store {
         this.db.exec("COMMIT");
         return false;
       }
-      if (activity.status === "interrupted" && reply?.status === "interrupted" && ["in_progress", "blocked"].includes(issue.status)) {
+      if (activity.status === "interrupted" && reply?.status === "interrupted" && ["in_progress", "in_review", "blocked"].includes(issue.status)) {
         this.db.exec("COMMIT");
         return false;
       }
@@ -3672,7 +3672,7 @@ export class Store {
       const sameTrackedTurn = reply?.request_id === sessionRequestId;
       const unchangedRuntimeInterruption = reply?.status === "interrupted"
         && reply.error === "runtime_restarted"
-        && issue.status === "blocked"
+        && ["in_review", "blocked"].includes(issue.status)
         && replyFinishedTime > 0
         && issueUpdatedTime <= replyFinishedTime;
       if (reply?.status === "interrupted" && reply.error === "runtime_restarted" && !unchangedRuntimeInterruption) {
@@ -4861,14 +4861,14 @@ export class Store {
     return this.transaction(() => {
       this.db.prepare("UPDATE issue_sessions SET status = ?, retry_json = CASE WHEN ? IN ('active', 'waiting_on_approval', 'waiting_on_user') THEN retry_json ELSE NULL END, updated_at = ? WHERE issue_id = ?").run(nextStatus, nextStatus, timestamp, session.issue_id);
       if (["active", "waiting_on_approval", "waiting_on_user", "failed"].includes(nextStatus)) {
-        const issueStatus = nextStatus === "failed" ? "blocked" : "in_progress";
+        const issueStatus = nextStatus === "failed" ? "in_review" : "in_progress";
         const pendingActor = nextStatus === "active" ? "agent" : "user";
         const needsAttention = Number(nextStatus !== "active");
         this.db.prepare(`
           UPDATE issues
           SET status = ?, needs_attention = ?, pending_actor = ?, version = version + 1, updated_at = ?
           WHERE id = ? AND archived_at IS NULL
-            AND (? != 'blocked' OR status != 'done')
+            AND (? != 'in_review' OR status != 'done')
             AND (status != ? OR needs_attention != ? OR pending_actor != ?)
         `).run(issueStatus, needsAttention, pendingActor, timestamp, session.issue_id, issueStatus, issueStatus, needsAttention, pendingActor);
       }
@@ -4947,7 +4947,7 @@ export class Store {
                 pending_actor = CASE WHEN status = 'done' THEN pending_actor ELSE 'user' END,
                 version = version + 1, updated_at = ?
             WHERE id = ? AND archived_at IS NULL
-          `).run(status === "completed" ? "in_review" : "blocked", timestamp, String(session.issue_id));
+          `).run("in_review", timestamp, String(session.issue_id));
         }
       }
       return {
@@ -4991,7 +4991,7 @@ export class Store {
               version = version + 1,
               updated_at = ?
           WHERE id = ? AND status = 'in_progress' AND archived_at IS NULL
-        `).run(status === "completed" ? "in_review" : "blocked", timestamp, issueId);
+        `).run("in_review", timestamp, issueId);
       }
       this.db.exec("COMMIT");
     } catch (caught) {

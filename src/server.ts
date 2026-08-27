@@ -161,7 +161,7 @@ async function reconcileInterruptedIssues(store: Store, issues: Issue[]) {
       : conversation.activity.status === "idle"
         ? conversation.last_final_at
         : null;
-    if (issue.status === "blocked" && issue.latest_run_status === "interrupted" && completedAt) {
+    if (["blocked", "in_review"].includes(issue.status) && issue.latest_run_status === "interrupted" && completedAt) {
       store.reconcileInterruptedRun(issue.id, issue.run_thread_id, completedAt, conversation.activity.started_at);
     }
     if (conversation.activity.status !== "idle") {

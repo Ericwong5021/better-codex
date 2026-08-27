@@ -461,7 +461,7 @@ test("opening the store does not re-arm resting user-owned agent issues", () => 
   }
 });
 
-test("failed runs hand back to the user and do not auto-reclaim", () => {
+test("execution failures hand back for review and do not become task blockers", () => {
   const target = temporaryDatabase();
   try {
     const store = new Store(target.file);
@@ -480,9 +480,31 @@ test("failed runs hand back to the user and do not auto-reclaim", () => {
     assert.equal(claimed?.issue.id, issue.id);
     store.finishRun(claimed!.runId, claimed!.issue.id, false, "codex_exit_1");
     const failed = store.getIssue(issue.id)!;
-    assert.equal(failed.status, "blocked");
+    assert.equal(failed.status, "in_review");
     assert.equal(failed.needs_attention, true);
     assert.equal(failed.pending_actor, "user");
+    assert.equal(store.claimNextIssue(), null);
+
+    const scheduledIssue = store.createIssue({
+      projectId: project.id,
+      title: "Capacity failure",
+      status: "todo",
+      agentEnabled: true,
+      agentId: profile.id,
+      workspacePath: target.directory,
+    });
+    const scheduledClaim = store.claimNextIssue(scheduledIssue.id)!;
+    store.beginScheduling(scheduledClaim.runId, scheduledIssue.id, false, "Selected model is at capacity. Please try a different model.");
+    assert.equal(store.finalizeScheduler(scheduledClaim.runId, scheduledIssue.id, false, {
+      status: "in_review",
+      reason: "Agent did not report a task blocker",
+      evidence: ["Work remains incomplete"],
+    }), "in_review");
+    const reviewed = store.getIssue(scheduledIssue.id)!;
+    assert.equal(reviewed.status, "in_review");
+    assert.equal(reviewed.latest_run_status, "failed");
+    assert.equal(reviewed.latest_scheduler_status, "completed");
+    assert.equal(reviewed.latest_scheduler_error, null);
     assert.equal(store.claimNextIssue(), null);
     store.close();
   } finally {
@@ -913,6 +935,7 @@ test("manual native turns reopen completed issues and return them for review", (
     assert.equal(reviewed.pending_actor, "user");
     assert.equal(reviewed.session_active_turn_id, null);
     assert.equal(store.getIssueReplyState(issue.id).status, "succeeded");
+
     assert.equal(store.syncSessionThreadStatus(threadId, "active"), false);
     const afterStaleActive = store.getIssue(issue.id)!;
     assert.equal(afterStaleActive.status, "in_review");
@@ -926,6 +949,15 @@ test("manual native turns reopen completed issues and return them for review", (
     assert.equal(recovered.needs_attention, true);
     assert.equal(recovered.pending_actor, "user");
     assert.equal(recovered.session_status, "idle");
+
+    const failedTurnId = "019fec06-788f-7af3-a031-76b546904f2a";
+    assert.equal(store.sessionTurnStarted(threadId, failedTurnId)?.turn_id, failedTurnId);
+    assert.equal(store.completeSessionTurn(threadId, failedTurnId, "failed", "Selected model is at capacity. Please try a different model.")?.turn_id, failedTurnId);
+    const failedReply = store.getIssue(issue.id)!;
+    assert.equal(failedReply.status, "in_review");
+    assert.equal(failedReply.session_status, "failed");
+    assert.equal(store.getIssueReplyState(issue.id).status, "failed");
+    assert.equal(store.getIssueReplyState(issue.id).error, "Selected model is at capacity. Please try a different model.");
 
     const staleTurnId = "019fec06-788f-7af3-a031-76b546904f26";
     const replacementTurnId = "019fec06-788f-7af3-a031-76b546904f27";
@@ -1173,6 +1205,7 @@ test("changed agent configuration continues the existing native session", () => 
     store.claimSessionCommand("relay-config");
     worker.failSessionCommand(sent.command.id, "relay-config", "turn_start_failed", replyThreadId);
     assert.equal(store.getIssueReplyState(replyIssue.id).status, "failed");
+    assert.equal(store.getIssue(replyIssue.id)?.status, "in_review");
     assert.equal(store.getIssueSession(replyIssue.id)?.status, "idle");
     assert.equal(store.getIssueSession(replyIssue.id)?.last_error, "turn_start_failed");
     const retried = worker.sendIssueMessage(replyIssue.id, "config-retry", "continue");
