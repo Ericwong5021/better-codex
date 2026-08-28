@@ -115,6 +115,8 @@ The Relay runs in Docker on your Linux server and uses either the bundled Caddy 
 
 Codex verifies the signed, version-pinned [self-hosting runbook](SELF_HOSTING.md), inspects the environment, preserves existing services and partial installations, and verifies the public service before reporting success. After deployment, enter the public URL in Better Codex to get the Runtime connection command. The same page then shows service status, version, browser access, and a verified upgrade prompt.
 
+Beta testers using remote access must upgrade the local Runtime and the VPS Relay/Web UI separately. Follow the [Beta upgrade guide](BETA_UPGRADE.md) to keep both sides on the same version and verify the public service after the Runtime reconnects.
+
 ## FAQ
 
 **Is this an official OpenAI product?**<br>
@@ -133,7 +135,7 @@ The app entry and route are registered through the local MCP server. The page in
 `better-codex eject` disables the page integration but keeps your task data and installed components. `better-codex uninstall` removes the MCP server, background service, launcher, Skill, Agent profiles, local data, and CLI bundle.
 
 **How do updates work?**<br>
-Better Codex checks a signed update manifest in the background and shows a notice inside Codex when a new version is available. You can also rerun the install command at any time. Runtime updates pause new dispatch while active conversations continue in the independent Session Host and Codex App Server. The new Runtime replays committed Host deliveries and reconciles active turns before becoming ready; failed activation restores the previous Runtime against the same Host. A protocol-incompatible Host update waits for active turns and unacknowledged deliveries to drain before replacing the Host.
+Better Codex checks a signed update manifest in the background and shows a notice inside Codex when a new version is available. You can also rerun the install command at any time. Runtime updates pause new dispatch while active conversations continue in the independent Session Host and Codex App Server. The new Runtime replays committed Host deliveries and reconciles active turns before becoming ready; failed activation restores the previous Runtime against the same Host. A protocol-incompatible Host update waits for active turns and unacknowledged deliveries to drain before replacing the Host. Remote access has a separate VPS Relay and Web UI update, so Beta testers must complete and verify both sides as described in the [Beta upgrade guide](BETA_UPGRADE.md).
 
 **Which platforms are supported?**<br>
 Codex Desktop on macOS (Apple Silicon and Intel) and the Microsoft Store version of Codex on Windows x64. Release packages and CI cover all three. Codex compatibility is capability-based rather than pinned to a permanent version list; if required page capabilities are unavailable, Better Codex stops the page integration and reports the incompatibility without modifying board data.
@@ -170,7 +172,7 @@ The development instance does not auto-update its core. Pull source changes and 
 
 - Found a bug or want a feature? Open a [GitHub Issue](https://github.com/Ericwong5021/better-codex/issues).
 - Questions and workflow ideas belong in [GitHub Discussions](https://github.com/Ericwong5021/better-codex/discussions).
-- Want to help test Beta releases? Read the [Beta testing guide](CONTRIBUTING.md#beta-testing).
+- Want to help test Beta releases? Read the [Beta testing notes](CONTRIBUTING.md#beta-testing) and [Beta upgrade guide](BETA_UPGRADE.md).
 - Please use English in public GitHub conversations so everyone can follow them.
 
 If Better Codex makes your Codex better, a star helps other heavy users find it.

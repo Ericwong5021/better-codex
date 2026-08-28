@@ -107,6 +107,8 @@ Better Codex 以轻量 Node.js bundle 运行，需要 Node.js 22.5 或更新版�
 
 需要从浏览器远程访问自己的看板时，可以部署独立的 Relay 和 Web UI。本机 Runtime 主动建立出站 WSS，Relay 只实时转发浏览器流量，不保存项目、任务、会话、智能体配置或附件。服务器准备、HTTPS、设备配对、备份恢复和升级方法见英文版 [Self-hosting runbook](SELF_HOSTING.md)。
 
+使用远程访问的 Beta 测试者需要分别升级本机 Runtime 与 VPS Relay/Web UI。按照 [Beta 升级指南](BETA_UPGRADE.zh.md)让两侧保持同一版本，并在 Runtime 重新连接后验证公网服务。
+
 Relay 支持由系统管理员创建多个 Web 账户。每个账户使用独立身份登录，可把任务指派给任一启用账户；Web 端不提供注册入口，账户创建、禁用、启用和密码重置统一通过 `better-codex relay user-*` 管理命令完成。
 
 ## 常见问题
@@ -127,7 +129,7 @@ Codex 通过本地 MCP 应用识别 Better Codex 的应用入口和路由，让�
 `better-codex eject` 只关闭页面集成，任务数据和安装组件会保留。`better-codex uninstall` 会删除 MCP、后台服务、启动入口、Skill、Agent 配置、本地数据和 CLI bundle。
 
 **更新怎么做？**<br>
-Better Codex 会在后台检查带签名的更新清单，发现新版本时在 Codex 内提示。你也可以随时重新运行安装命令，它会优先原地升级。
+Better Codex 会在后台检查带签名的更新清单，发现新版本时在 Codex 内提示。你也可以随时重新运行安装命令，它会优先原地升级。远程访问使用独立的 VPS Relay 和 Web UI 更新流程，Beta 测试者需要按照 [Beta 升级指南](BETA_UPGRADE.zh.md)完成并验证两侧升级。
 
 **支持哪些平台？**<br>
 macOS 版 Codex Desktop（Apple Silicon 和 Intel），以及 Windows x64 上 Microsoft Store 版本的 Codex。Release 安装包和 CI 覆盖全部三个平台。Codex 兼容性按能力检测，而不是绑定一个永久版本列表；缺少必要页面能力时，Better Codex 会停止页面集成并报告不兼容，不修改看板数据。
@@ -164,6 +166,6 @@ npm run dev:install
 
 - 发现 Bug 或想要新功能？提交 [GitHub Issue](https://github.com/Ericwong5021/better-codex/issues)。
 - 使用问题和工作流想法欢迎到 [GitHub Discussions](https://github.com/Ericwong5021/better-codex/discussions) 交流。
-- 想作为测试者参与 Beta 验证？请阅读[贡献指南中的 Beta 测试说明](CONTRIBUTING.md#beta-testing)。
+- 想作为测试者参与 Beta 验证？请阅读[贡献指南中的 Beta 测试说明](CONTRIBUTING.md#beta-testing)和 [Beta 升级指南](BETA_UPGRADE.zh.md)。
 
 如果 Better Codex 让你的 Codex 变得更好用，点个 Star 能帮更多重度用户找到它。

@@ -12,6 +12,8 @@ Please do not include API keys, personal task content, private conversation data
 
 Testing Beta releases is a way to contribute without changing the source code. Beta testers help catch installer, update, compatibility, and runtime problems before a release reaches the stable channel.
 
+Follow the [Beta upgrade guide](BETA_UPGRADE.md) when upgrading an existing installation. Remote-access testers must upgrade and verify both the local Runtime and the VPS Relay/Web UI.
+
 Install the current Beta on macOS:
 
 ```bash
