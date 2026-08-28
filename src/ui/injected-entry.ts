@@ -1993,6 +1993,7 @@ export function install(config: Record<string, any>) {
         body: JSON.stringify({
           relay_id: relayId,
           app_session_id: relayAppSessionId || relayId,
+          owner: "native",
           capability: relayCapability,
           capability_error: relayCapabilityError,
           busy: true
@@ -2110,13 +2111,13 @@ export function install(config: Record<string, any>) {
       relayBufferedEvents = [];
       try {
         let completion = {};
-        if (command.kind === "start") {
+        if (command.kind === "bind" || command.kind === "start") {
           const params = {
-            cwd: String(payload.workspace_path || ""),
             approvalPolicy: String(payload.approval_policy || "on-request"),
             approvalsReviewer: String(payload.approvals_reviewer || "auto_review"),
             sandbox: String(payload.sandbox_mode || "workspace-write")
           };
+          if (payload.workspace_path) params.cwd = String(payload.workspace_path);
           if (payload.model) params.model = String(payload.model);
           if (payload.service_tier) params.serviceTier = String(payload.service_tier);
           if (payload.developer_instructions) params.developerInstructions = String(payload.developer_instructions);
@@ -2128,15 +2129,17 @@ export function install(config: Record<string, any>) {
             method: "POST",
             body: JSON.stringify({ relay_id: relayId, result: { thread_id: threadId } })
           });
-          const turn = payload.semantic_command === "review"
-            ? await sendAppServerRequest("review/start", { threadId, target: { type: "uncommittedChanges" }, delivery: "inline" })
-            : await sendAppServerRequest("turn/start", turnStartParams(threadId, payload));
-          turnId = normalizeSessionId(turn?.turn?.id);
-          if (!turnId) throw new Error("desktop_turn_start_invalid");
-          await api("/api/session-relay/commands/" + encodeURIComponent(command.id) + "/checkpoint", {
-            method: "POST",
-            body: JSON.stringify({ relay_id: relayId, result: { thread_id: threadId, turn_id: turnId } })
-          });
+          if (command.kind === "start") {
+            const turn = payload.semantic_command === "review"
+              ? await sendAppServerRequest("review/start", { threadId, target: { type: "uncommittedChanges" }, delivery: "inline" })
+              : await sendAppServerRequest("turn/start", turnStartParams(threadId, payload));
+            turnId = normalizeSessionId(turn?.turn?.id);
+            if (!turnId) throw new Error("desktop_turn_start_invalid");
+            await api("/api/session-relay/commands/" + encodeURIComponent(command.id) + "/checkpoint", {
+              method: "POST",
+              body: JSON.stringify({ relay_id: relayId, result: { thread_id: threadId, turn_id: turnId } })
+            });
+          }
         } else if (command.kind === "turn") {
           if (!threadId) throw new Error("session_thread_invalid");
           relayCurrentThreadId = threadId;
@@ -2305,6 +2308,7 @@ export function install(config: Record<string, any>) {
           body: JSON.stringify({
             relay_id: relayId,
             app_session_id: await resolveRelayAppSessionId(),
+            owner: "native",
             capability: relayCapability,
             capability_error: relayCapabilityError
           })
@@ -8029,16 +8033,16 @@ export function install(config: Record<string, any>) {
         const working = stopping || executionRunning || replyStatus === "running";
         const hasContent = Boolean(String(reply?.value || "").trim() || draft.replyAttachments.length);
         const mode = stopping ? "stopping" : working && !hasContent ? "stop" : working ? "queue" : "send";
-        if (reply) reply.disabled = sessionHandoff || archived;
+        if (reply) reply.disabled = archived;
         if (composer) composer.dataset.state = mode;
         send.dataset.composerMode = mode;
         const actionLabel = t(stopping ? "正在停止…" : mode === "stop" ? "停止任务" : mode === "queue" ? "加入队列" : "发送");
         send.setAttribute("aria-label", actionLabel);
         send.title = actionLabel;
         send.innerHTML = icon(mode === "stop" || mode === "stopping" ? "stop" : "send", "", mode === "stop" || mode === "stopping" ? "2.5" : "2");
-        send.disabled = stopping || sessionHandoff || archived || (mode !== "stop" && !hasContent);
+        send.disabled = stopping || archived || (mode !== "stop" && !hasContent);
         const attach = dialog.querySelector("[data-conversation-attach]");
-        if (attach) attach.disabled = sessionHandoff || archived;
+        if (attach) attach.disabled = archived;
       }
 
       function setReplySubmitLoading(loading) {
@@ -8069,10 +8073,6 @@ export function install(config: Record<string, any>) {
             return;
           }
           if (enrichmentLocked) {
-            control.disabled = true;
-            return;
-          }
-          if (sessionHandoff && control.matches('[name="reply"], [data-conversation-send], [data-conversation-attach], [data-dialog-attachment-scope="reply"]')) {
             control.disabled = true;
             return;
           }
@@ -8529,13 +8529,13 @@ export function install(config: Record<string, any>) {
         const working = stopping || executionRunning || issue.reply_status === "running";
         const hasContent = Boolean(draft.reply.trim() || draft.replyAttachments.length);
         const mode = replySubmitInFlight ? "submitting" : stopping ? "stopping" : working && !hasContent ? "stop" : working ? "queue" : "send";
-        const inputDisabled = sessionHandoff || archived ? " disabled" : "";
-        const actionDisabled = replySubmitInFlight || stopping || sessionHandoff || archived || (mode !== "stop" && !hasContent) ? " disabled" : "";
+        const inputDisabled = archived ? " disabled" : "";
+        const actionDisabled = replySubmitInFlight || stopping || archived || (mode !== "stop" && !hasContent) ? " disabled" : "";
         const actionLabel = t(replySubmitInFlight ? "正在发送…" : stopping ? "正在停止…" : mode === "stop" ? "停止任务" : mode === "queue" ? "加入队列" : "发送");
         const attachments = attachmentList(draft.replyAttachments, "reply");
         const attachButton = '<button class="better-codex-composer-attach" type="button" data-conversation-attach aria-label="' + te("添加附件") + '" title="' + te("添加附件") + '"' + inputDisabled + '>' + icon("plus", "", "1.9") + '</button>';
         const actionIcon = replySubmitInFlight ? replySubmitLoadingIcon() : icon(mode === "stop" || mode === "stopping" ? "stop" : "send", "", mode === "stop" || mode === "stopping" ? "2.5" : "2");
-        return '<div class="better-codex-composer" data-state="' + mode + '">' + attachments + '<div class="better-codex-semantic-menu" id="better-codex-semantic-menu" data-semantic-menu role="listbox" hidden></div><textarea name="reply" rows="2" placeholder="' + te(archived ? "取消归档后继续对话" : sessionHandoff ? "请前往会话继续对话" : "输入下一步要求…") + '" aria-label="' + te("回复") + '" aria-autocomplete="list" aria-controls="better-codex-semantic-menu" aria-expanded="false"' + inputDisabled + '>' + escapeHtml(draft.reply) + '</textarea>' + semanticWarningMarkup(draft.replySemanticDocument) + '<div class="better-codex-composer-toolbar">' + attachButton + '<button class="better-codex-composer-send" type="button" data-conversation-send data-composer-mode="' + mode + '" aria-label="' + escapeHtml(actionLabel) + '" title="' + escapeHtml(actionLabel) + '"' + (replySubmitInFlight ? ' aria-busy="true"' : "") + actionDisabled + '>' + actionIcon + '</button></div></div>';
+        return '<div class="better-codex-composer" data-state="' + mode + '">' + attachments + '<div class="better-codex-semantic-menu" id="better-codex-semantic-menu" data-semantic-menu role="listbox" hidden></div><textarea name="reply" rows="2" placeholder="' + te(archived ? "取消归档后继续对话" : "输入下一步要求…") + '" aria-label="' + te("回复") + '" aria-autocomplete="list" aria-controls="better-codex-semantic-menu" aria-expanded="false"' + inputDisabled + '>' + escapeHtml(draft.reply) + '</textarea>' + semanticWarningMarkup(draft.replySemanticDocument) + '<div class="better-codex-composer-toolbar">' + attachButton + '<button class="better-codex-composer-send" type="button" data-conversation-send data-composer-mode="' + mode + '" aria-label="' + escapeHtml(actionLabel) + '" title="' + escapeHtml(actionLabel) + '"' + (replySubmitInFlight ? ' aria-busy="true"' : "") + actionDisabled + '>' + actionIcon + '</button></div></div>';
       }
 
       function syncQueuedReplyState() {
@@ -8560,7 +8560,7 @@ export function install(config: Record<string, any>) {
             if (queueEditingRequestId === requestId) {
               return '<div class="better-codex-composer-queue-row is-editing" role="listitem" data-queue-request="' + escapeHtml(requestId) + '"><span class="better-codex-composer-queue-icon" aria-hidden="true">' + icon("queue") + '</span><span class="better-codex-composer-queue-edit-field"><textarea class="better-codex-composer-queue-edit" data-queue-edit-input rows="2" aria-label="' + te("编辑队列消息") + '">' + escapeHtml(queueEditDraft) + '</textarea><span class="better-codex-semantic-warning" data-queue-edit-warning role="status"' + (queueEditSemanticDocument?.degraded ? "" : " hidden") + '>' + icon("permissionDanger") + '<span>' + escapeHtml(semanticWarningText()) + '</span></span></span><span class="better-codex-composer-queue-actions"><button type="button" data-queue-edit-save="' + escapeHtml(requestId) + '" aria-label="' + te("保存修改") + '" title="' + te("保存修改") + '"' + (busy || !queueEditDraft.trim() ? " disabled" : "") + '>' + icon(busy ? "refresh" : "check", busy ? "better-codex-spin" : "") + '</button><button type="button" data-queue-edit-cancel aria-label="' + te("取消编辑") + '" title="' + te("取消编辑") + '"' + (busy ? " disabled" : "") + '>' + icon("close") + '</button></span></div>';
             }
-            const disabled = busy || sessionHandoff || Boolean(issue?.archived_at);
+            const disabled = busy || Boolean(issue?.archived_at);
             return '<div class="better-codex-composer-queue-row" role="listitem" data-queue-request="' + escapeHtml(requestId) + '" title="' + escapeHtml(message) + '"><span class="better-codex-composer-queue-icon" aria-hidden="true">' + icon("queue") + '</span><span class="better-codex-composer-queue-message">' + escapeHtml(message) + '</span><span class="better-codex-composer-queue-actions"><button type="button" data-queue-send-now="' + escapeHtml(requestId) + '" aria-label="' + te("立即发送") + '" title="' + te("立即发送") + '"' + (disabled ? " disabled" : "") + '>' + icon(busy ? "refresh" : "send", busy ? "better-codex-spin" : "") + '</button><button type="button" data-queue-edit="' + escapeHtml(requestId) + '" aria-label="' + te("编辑队列消息") + '" title="' + te("编辑队列消息") + '"' + (disabled ? " disabled" : "") + '>' + icon("edit") + '</button><button type="button" data-queue-delete="' + escapeHtml(requestId) + '" aria-label="' + te("删除队列消息") + '" title="' + te("删除队列消息") + '"' + (disabled ? " disabled" : "") + '>' + icon("trash") + '</button></span></div>';
           }).join("") + (queueActionError ? '<div class="better-codex-composer-queue-error" role="listitem">' + escapeHtml(queueActionError) + '</div>' : "")
           : "";
@@ -8914,9 +8914,7 @@ export function install(config: Record<string, any>) {
         } else if (!options.preserveBody) {
           conversationMessages = [];
           messageList.innerHTML = sessionId
-            ? sessionHandoff
-              ? '<div class="better-codex-conversation-empty"><h3>' + te("开始对话") + '</h3><p>' + te("请前往会话继续对话") + '</p></div>'
-              : executionRunning
+            ? executionRunning
               ? '<div class="better-codex-conversation-empty"><h3>' + te("正在处理任务") + '</h3><p>' + te("智能体回复产生后会显示在这里。") + '</p><span>' + te("请稍候") + '</span></div>'
               : '<div class="better-codex-conversation-empty"><h3>' + te("开始对话") + '</h3><p>' + te("补充下一步要求，智能体会继续处理。") + '</p><span>' + te("在下方输入消息并发送") + '</span></div>'
             : '<p class="better-codex-markdown-empty">' + te("未关联对话。") + '</p>';
@@ -8927,7 +8925,7 @@ export function install(config: Record<string, any>) {
         const stateName = optimisticReplies.size ? "running" : reply.status || "idle";
         lastReplyStatus = stateName;
         const expectedInterruption = stateName === "interrupted" && ["user_stopped", "session_interrupted"].includes(String(reply.error || ""));
-        if (!sessionHandoff && (stateName === "failed" || (stateName === "interrupted" && !expectedInterruption))) showConversationFailure(reply.error, reply.message ? "reply" : "execution", reply.message, { origin: "turn" });
+        if (stateName === "failed" || (stateName === "interrupted" && !expectedInterruption)) showConversationFailure(reply.error, reply.message ? "reply" : "execution", reply.message, { origin: "turn" });
         else {
           clearConversationFailure();
           syncConversationStatus(stateName);
@@ -9027,7 +9025,7 @@ export function install(config: Record<string, any>) {
         const semanticReferences = retrying ? (retrySemanticReferences || []) : draft.replySemanticReferences.filter(reference => text.includes((reference.type === "skill" ? "$" : "@") + reference.name));
         const semanticDocument = retrySemanticDocument || reconcileSemanticText(draft.replySemanticDocument, text);
         const requestId = retryRequestId || (globalThis.crypto?.randomUUID?.() || VERSION + "-reply-" + Date.now() + "-" + Math.random().toString(36).slice(2));
-        if (sessionHandoff || !issue || !sessionId || (!text && !draft.replyAttachments.length) || !send || !errorOutput) return;
+        if (!issue || !sessionId || (!text && !draft.replyAttachments.length) || !send || !errorOutput) return;
         if (!retrying && slashCommand === "status") {
           if (textarea) textarea.value = "";
           draft.reply = "";
@@ -10879,6 +10877,7 @@ export function install(config: Record<string, any>) {
       });
       observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-theme", "aria-current", ATTRIBUTES.threadActive] });
       startLiveUpdates();
+      if (HOST_KIND !== "web" && HOST_CAPABILITIES.nativeThreads !== false) startSessionRelay();
       refresh();
       void checkUpdateNotice();
       updateTimer = setInterval(() => { if (!document.hidden) void checkUpdateNotice(); }, 15000);

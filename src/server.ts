@@ -734,7 +734,7 @@ function errorCode(error: unknown) {
 function errorStatus(code: string) {
   if (code === "body_too_large") return 413;
   if (code === "insufficient_disk_space") return 507;
-  if (code === "version_conflict" || code === "request_id_conflict" || code === "request_outcome_unknown" || code === "remote_mode_disabled" || code === "reply_busy" || code === "update_in_progress" || code === "update_commit_pending" || code === "thread_handoff_busy" || code === "thread_handed_off" || code === "issue_execution_locked" || code === "issue_execution_running" || code === "issue_session_handed_off" || code === "issue_session_starting" || code === "issue_session_already_bound" || code === "session_relay_not_leader" || code === "session_command_not_claimed" || code === "session_command_outcome_unknown" || code === "queued_reply_not_pending" || code === "queued_reply_update_conflict" || code === "project_planning_busy" || code === "project_planning_agent_locked") return 409;
+  if (code === "version_conflict" || code === "request_id_conflict" || code === "request_outcome_unknown" || code === "remote_mode_disabled" || code === "reply_busy" || code === "update_in_progress" || code === "update_commit_pending" || code === "thread_handoff_busy" || code === "thread_handed_off" || code === "issue_execution_locked" || code === "issue_execution_running" || code === "issue_deleting" || code === "issue_not_archived" || code === "issue_session_handed_off" || code === "issue_session_starting" || code === "issue_session_already_bound" || code === "session_relay_not_leader" || code === "session_command_not_claimed" || code === "session_command_outcome_unknown" || code === "queued_reply_not_pending" || code === "queued_reply_update_conflict" || code === "project_planning_busy" || code === "project_planning_agent_locked") return 409;
   if (code.endsWith("_not_found")) return 404;
   if (code === "database_unavailable" || code === "database_integrity_check_failed" || code === "runtime_reconciling" || code === "session_host_unavailable" || code === "session_host_timeout" || code === "session_host_thread_handoff_unavailable") return 503;
   return 400;
@@ -1964,7 +1964,9 @@ export function startServer() {
         const appSessionId = cleanString(body.app_session_id, 200);
         const capability = body.capability === "ready" || body.capability === "failed" ? body.capability : "unknown";
         if (!relayId || !appSessionId) throw new Error("session_relay_identity_required");
-        const result = worker.pollSessionRelay(relayId, appSessionId, capability, cleanString(body.capability_error, 2000), body.busy === true);
+        const result = body.owner === "native"
+          ? worker.pollNativeSessionProxy(relayId, appSessionId, capability, cleanString(body.capability_error, 2000), body.busy === true)
+          : worker.pollSessionRelay(relayId, appSessionId, capability, cleanString(body.capability_error, 2000), body.busy === true);
         return sendJson(response, 200, result);
       }
       if (path[0] === "api" && path[1] === "session-relay" && path[2] === "commands" && path[3] && path[4] === "complete" && path.length === 5 && method === "POST") {
@@ -1990,7 +1992,8 @@ export function startServer() {
         const relayId = cleanString(body.relay_id, 200);
         const eventMethod = cleanString(body.method, 100);
         const params = body.params && typeof body.params === "object" && !Array.isArray(body.params) ? body.params as Record<string, unknown> : {};
-        if (!relayId || !store.sessionRelayIsLeader(relayId)) throw new Error("session_relay_not_leader");
+        const eventThreadId = normalizeSessionId(cleanString(params.threadId, 200));
+        if (!relayId || !eventThreadId || !store.sessionCommandRelayOwnsThread(relayId, eventThreadId)) throw new Error("session_relay_not_leader");
         if (!["thread/status/changed", "turn/started", "turn/completed", "error", "item/started", "item/completed"].includes(eventMethod)) throw new Error("session_event_invalid");
         return sendJson(response, 200, { accepted: worker.handleSessionEvent(eventMethod, params) });
       }
@@ -2113,13 +2116,14 @@ export function startServer() {
           throw error;
         }
         const { issue } = created;
-        if (created.replayed) return sendJson(response, 200, issue);
+        worker.ensureIssueSessionBinding(issue.id);
+        worker.wake();
+        if (created.replayed) return sendJson(response, 200, store.getIssue(issue.id));
         if (aiEnrich) {
           worker.enrichIssue(issue, issue.description, agentId);
           worker.wake();
         }
-        else if (issue.agent_enabled && store.isDispatchable(issue)) worker.wake();
-        return sendJson(response, 201, issue);
+        return sendJson(response, 201, store.getIssue(issue.id));
       }
       if (path[0] === "api" && path[1] === "issues" && path[2]) {
         const issue = store.getIssue(decodeURIComponent(path[2]));
@@ -2156,6 +2160,7 @@ export function startServer() {
             files.cleanup();
             throw error;
           }
+          if (patch.title !== undefined) worker.syncIssueSessionTitle(updated.id);
           if (store.isDispatchable(updated)) worker.wake();
           return sendJson(response, 200, updated);
         }
@@ -2262,7 +2267,7 @@ export function startServer() {
           if (issue.active_run_status || issue.session_active_turn_id || store.getIssueReplyState(issue.id).status === "running") throw new Error("issue_execution_running");
           store.deleteArchivedIssue(issue.id, version);
           worker.wake();
-          return sendJson(response, 200, { ok: true });
+          return sendJson(response, 202, { ok: true, deleting: Boolean(store.getIssue(issue.id)?.deleting_at) });
         }
         if (method === "GET" && path[3] === "attachments" && path.length === 6) {
           const threadId = issue.run_thread_id || issue.session_thread_id || issue.thread_id || "";
@@ -2329,7 +2334,6 @@ export function startServer() {
         if (method === "POST" && path[3] === "reply" && path.length === 4) {
           if (updateInstallInProgress) throw new Error("update_in_progress");
           if (issue.archived_at) throw new Error("issue_archived");
-          if (issue.session_handoff_at && !issue.session_owned) throw new Error("issue_session_handed_off");
           const body = await readBody(request, maxRemoteFileBodyBytes);
           const requestId = cleanString(body.request_id, 200) || randomUUID();
           const files = saveRemoteFiles(body.files, requestId);

@@ -93,7 +93,7 @@ export type IssueSessionRetry = {
   updated_at: string;
   http_status: number | null;
 };
-export type SessionCommandKind = "start" | "turn" | "review" | "compact" | "native" | "rename" | "steer" | "interrupt";
+export type SessionCommandKind = "bind" | "start" | "turn" | "review" | "compact" | "native" | "rename" | "steer" | "interrupt";
 export type SessionCommandStatus = "pending" | "claimed" | "completed" | "failed" | "cancelled";
 export type IssueThreadAction = "archive" | "unarchive" | "delete";
 
@@ -188,6 +188,7 @@ export type Issue = {
   sort_order: number;
   pinned: boolean;
   archived_at: string | null;
+  deleting_at: string | null;
   thread_id: string | null;
   workspace_path: string | null;
   agent_enabled: boolean;
@@ -367,7 +368,7 @@ export function cleanMaxConcurrency(value: number | undefined) {
   return value;
 }
 
-const latestSchemaVersion = 24;
+const latestSchemaVersion = 25;
 
 function now() {
   return new Date().toISOString();
@@ -1264,6 +1265,23 @@ export class Store {
         if (!columns.has("creator_user_id")) this.db.exec("ALTER TABLE issues ADD COLUMN creator_user_id TEXT");
         this.db.exec("CREATE INDEX IF NOT EXISTS issues_creator_user_id ON issues(creator_user_id)");
         this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (24, ?)").run(now());
+      });
+    }
+    if (fromVersion < 25) {
+      this.transaction(() => {
+        const columns = new Set((this.db.prepare("PRAGMA table_info(issues)").all() as Array<{ name: string }>).map(item => item.name));
+        if (!columns.has("deleting_at")) this.db.exec("ALTER TABLE issues ADD COLUMN deleting_at TEXT");
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS native_session_proxy (
+            singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+            relay_id TEXT NOT NULL,
+            app_session_id TEXT NOT NULL,
+            error TEXT,
+            expires_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          )
+        `);
+        this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (25, ?)").run(now());
       });
     }
   }
@@ -2626,7 +2644,7 @@ export class Store {
   }
 
   listIssues(filters: { projectId?: string; search?: string; archived?: boolean } = {}) {
-    const conditions = [filters.archived ? "issues.archived_at IS NOT NULL" : "issues.archived_at IS NULL"];
+    const conditions = [filters.archived ? "issues.archived_at IS NOT NULL" : "issues.archived_at IS NULL", "issues.deleting_at IS NULL"];
     const values: Array<string> = [];
     if (filters.projectId) {
       conditions.push("issues.project_id = ?");
@@ -3117,6 +3135,7 @@ export class Store {
     const issue = this.getIssue(id);
     if (!issue) throw new Error("issue_not_found");
     if (issue.version !== version) throw new Error("version_conflict");
+    if (issue.deleting_at) throw new Error("issue_deleting");
     if (this.isTitleRegenerationPending(issue)) throw new Error("issue_enrichment_pending");
     this.db.exec("BEGIN IMMEDIATE");
     try {
@@ -3139,6 +3158,7 @@ export class Store {
     const issue = this.getIssue(id);
     if (!issue) throw new Error("issue_not_found");
     if (issue.version !== version) throw new Error("version_conflict");
+    if (issue.deleting_at) throw new Error("issue_deleting");
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const timestamp = now();
@@ -3161,15 +3181,19 @@ export class Store {
     if (!issue) throw new Error("issue_not_found");
     if (issue.version !== version) throw new Error("version_conflict");
     if (this.isTitleRegenerationPending(issue)) throw new Error("issue_enrichment_pending");
+    if (!issue.archived_at) throw new Error("issue_not_archived");
+    if (issue.deleting_at) return issue;
     if (issue.active_run_status || issue.session_active_turn_id || this.getIssueReplyState(issue.id).status === "running") throw new Error("issue_execution_running");
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      this.enqueueThreadAction(issue.id, "delete", now());
-      this.db.prepare("DELETE FROM issue_replies WHERE issue_id = ?").run(issue.id);
-      this.db.prepare("DELETE FROM issue_runs WHERE issue_id = ?").run(issue.id);
-      const result = this.db.prepare("DELETE FROM issues WHERE id = ? AND version = ?").run(issue.id, version);
+      const timestamp = now();
+      this.enqueueThreadAction(issue.id, "delete", timestamp);
+      const result = this.db.prepare("UPDATE issues SET deleting_at = ?, version = version + 1, updated_at = ? WHERE id = ? AND version = ? AND deleting_at IS NULL")
+        .run(timestamp, timestamp, issue.id, version);
       if (result.changes !== 1) throw new Error("version_conflict");
+      this.finalizeIssueDeletion(issue.id);
       this.db.exec("COMMIT");
+      return this.getIssue(issue.id);
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
@@ -3194,7 +3218,10 @@ export class Store {
   }
 
   completeThreadAction(entry: PendingThreadAction) {
-    this.db.prepare("DELETE FROM thread_action_queue WHERE thread_id = ? AND event_id = ?").run(entry.thread_id, entry.event_id);
+    this.transaction(() => {
+      this.db.prepare("DELETE FROM thread_action_queue WHERE thread_id = ? AND event_id = ?").run(entry.thread_id, entry.event_id);
+      if (entry.action === "delete") this.finalizeIssueDeletion(entry.issue_id);
+    });
   }
 
   failThreadAction(entry: PendingThreadAction, error: string) {
@@ -3219,6 +3246,17 @@ export class Store {
         updated_at = excluded.updated_at
     `);
     for (const threadId of this.listIssueThreadIds(issueId)) statement.run(threadId, issueId, action, randomUUID(), timestamp, timestamp, timestamp);
+  }
+
+  private finalizeIssueDeletion(issueId: string) {
+    const issue = this.getIssue(issueId);
+    if (!issue?.deleting_at) return false;
+    const pending = this.db.prepare("SELECT 1 AS value FROM thread_action_queue WHERE issue_id = ? AND action = 'delete' LIMIT 1").get(issueId);
+    if (pending) return false;
+    this.db.prepare("DELETE FROM issue_replies WHERE issue_id = ?").run(issueId);
+    this.db.prepare("DELETE FROM issue_runs WHERE issue_id = ?").run(issueId);
+    this.db.prepare("DELETE FROM issues WHERE id = ? AND deleting_at IS NOT NULL").run(issueId);
+    return true;
   }
 
   recoverInterruptedRuns() {
@@ -3311,6 +3349,15 @@ export class Store {
           ${issueId ? "AND issues.id = ?" : ""}
           AND issues.archived_at IS NULL
           AND issues.status NOT IN ('backlog', 'done')
+          AND (
+            NOT EXISTS (
+              SELECT 1 FROM session_commands
+              WHERE session_commands.issue_id = issues.id
+                AND session_commands.kind = 'bind'
+                AND session_commands.status IN ('pending', 'claimed')
+            )
+            OR EXISTS (SELECT 1 FROM issue_sessions WHERE issue_sessions.issue_id = issues.id)
+          )
           AND (issues.workspace_path IS NOT NULL OR projects.workspace_path != '')
           AND NOT EXISTS (
             SELECT 1 FROM issue_runs
@@ -3541,7 +3588,6 @@ export class Store {
       const issue = this.getIssue(issueId);
       if (!issue) throw new Error("issue_not_found");
       if (issue.archived_at) throw new Error("issue_archived");
-      if (issue.session_handoff_at && !issue.session_owned) throw new Error("issue_session_handed_off");
       if (issue.active_run_status) throw new Error("issue_execution_running");
       if (this.getIssueReplyState(issueId).status === "running") throw new Error("reply_busy");
       this.db.prepare(`
@@ -4052,7 +4098,6 @@ export class Store {
           return { command: this.getSessionCommand(commandId)!, replayed };
         }
       }
-      if (issue.session_handoff_at && !issue.session_owned) throw new Error("issue_session_handed_off");
       const reply = this.getIssueReplyState(input.issueId);
       if (!input.deferred && issue.active_run_status) throw new Error("issue_execution_running");
       if (!input.deferred && reply.status === "running" && reply.request_id !== input.requestId) throw new Error("reply_busy");
@@ -4425,11 +4470,60 @@ export class Store {
     return Boolean(row && row.relay_id === relayId && Date.parse(row.expires_at) > Date.now());
   }
 
-  failClaimedSessionCommands(relayId?: string) {
+  heartbeatNativeSessionProxy(relayId: string, appSessionId: string, capabilityError?: string | null) {
+    const timestamp = now();
+    const expiresAt = new Date(Date.now() + 5000).toISOString();
+    return this.transaction(() => {
+      const current = this.db.prepare("SELECT relay_id, expires_at, error FROM native_session_proxy WHERE singleton = 1").get() as { relay_id: string; expires_at: string; error: string | null } | undefined;
+      const leader = !current || current.relay_id === relayId || Date.parse(current.expires_at) <= Date.now();
+      const acquired = leader && current?.relay_id !== relayId;
+      if (leader) {
+        const proxyError = capabilityError === undefined ? current?.error || null : capabilityError;
+        this.db.prepare(`
+          INSERT INTO native_session_proxy (singleton, relay_id, app_session_id, error, expires_at, updated_at)
+          VALUES (1, ?, ?, ?, ?, ?)
+          ON CONFLICT(singleton) DO UPDATE SET
+            relay_id = excluded.relay_id,
+            app_session_id = excluded.app_session_id,
+            error = excluded.error,
+            expires_at = excluded.expires_at,
+            updated_at = excluded.updated_at
+        `).run(relayId, appSessionId, proxyError, expiresAt, timestamp);
+      }
+      return { leader, acquired, expires_at: leader ? expiresAt : current?.expires_at || expiresAt, previous_relay_id: acquired ? current?.relay_id || null : null };
+    });
+  }
+
+  releaseNativeSessionProxy(relayId: string, error: string) {
+    const timestamp = now();
+    this.db.prepare("UPDATE native_session_proxy SET expires_at = ?, error = ?, updated_at = ? WHERE singleton = 1 AND relay_id = ?")
+      .run(timestamp, error, timestamp, relayId);
+  }
+
+  nativeSessionProxyIsLeader(relayId: string) {
+    const row = this.db.prepare("SELECT relay_id, expires_at FROM native_session_proxy WHERE singleton = 1").get() as { relay_id: string; expires_at: string } | undefined;
+    return Boolean(row && row.relay_id === relayId && Date.parse(row.expires_at) > Date.now());
+  }
+
+  sessionCommandRelayOwnsThread(relayId: string, threadId: string) {
+    if (this.sessionRelayIsLeader(relayId)) return true;
+    if (!this.nativeSessionProxyIsLeader(relayId)) return false;
+    return Boolean(this.db.prepare(`
+      SELECT 1 AS value
+      FROM issue_sessions
+      JOIN issues ON issues.id = issue_sessions.issue_id
+      WHERE issue_sessions.thread_id = ? AND issues.session_handoff_at IS NOT NULL
+    `).get(threadId));
+  }
+
+  failClaimedSessionCommands(relayId?: string, owner: "host" | "native" = "host") {
     const timestamp = now();
     const rows = this.db.prepare(`
-      SELECT * FROM session_commands
-      WHERE status = 'claimed' ${relayId ? "AND relay_id != ?" : ""}
+      SELECT session_commands.* FROM session_commands
+      JOIN issues ON issues.id = session_commands.issue_id
+      WHERE session_commands.status = 'claimed'
+        AND ${owner === "native" ? "issues.session_handoff_at IS NOT NULL" : "issues.session_handoff_at IS NULL"}
+        ${relayId ? "AND session_commands.relay_id != ?" : ""}
     `).all(...(relayId ? [relayId] : [])) as Record<string, unknown>[];
     const failed: SessionCommand[] = [];
     for (const row of rows) {
@@ -4453,7 +4547,7 @@ export class Store {
         `).run(command.id);
         continue;
       }
-      const commandError = (["start", "turn", "review", "native"] as SessionCommandKind[]).includes(command.kind) && command.thread_id
+      const commandError = (["bind", "start", "turn", "review", "native"] as SessionCommandKind[]).includes(command.kind) && command.thread_id
         ? "session_outcome_unknown"
         : relayId ? "relay_replaced" : "runtime_restarted";
       this.db.prepare(`
@@ -4507,15 +4601,17 @@ export class Store {
     });
   }
 
-  claimSessionCommand(relayId: string) {
-    if (!this.sessionRelayIsLeader(relayId)) throw new Error("session_relay_not_leader");
+  claimSessionCommand(relayId: string, owner: "host" | "native" = "host") {
+    if (owner === "host" ? !this.sessionRelayIsLeader(relayId) : !this.nativeSessionProxyIsLeader(relayId)) throw new Error("session_relay_not_leader");
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const row = this.db.prepare(`
-        SELECT * FROM session_commands
-        WHERE status = 'pending'
+        SELECT session_commands.* FROM session_commands
+        JOIN issues ON issues.id = session_commands.issue_id
+        WHERE session_commands.status = 'pending'
+          AND ${owner === "native" ? "issues.session_handoff_at IS NOT NULL" : "issues.session_handoff_at IS NULL"}
           AND (
-            kind IN ('interrupt', 'steer', 'rename')
+            session_commands.kind IN ('interrupt', 'steer', 'rename')
             OR (
               NOT EXISTS (
                 SELECT 1 FROM issue_sessions
@@ -4523,7 +4619,7 @@ export class Store {
                   AND issue_sessions.active_turn_id IS NOT NULL
               )
               AND (
-                run_id IS NOT NULL
+                session_commands.run_id IS NOT NULL
                 OR NOT EXISTS (
                   SELECT 1 FROM issue_runs
                   WHERE issue_runs.issue_id = session_commands.issue_id
@@ -4532,7 +4628,7 @@ export class Store {
               )
             )
           )
-        ORDER BY CASE kind WHEN 'interrupt' THEN 0 ELSE 1 END, created_at, rowid
+        ORDER BY CASE session_commands.kind WHEN 'interrupt' THEN 0 ELSE 1 END, session_commands.created_at, session_commands.rowid
         LIMIT 1
       `).get() as Record<string, unknown> | undefined;
       if (!row) {
@@ -4581,14 +4677,14 @@ export class Store {
       const row = this.db.prepare("SELECT * FROM session_commands WHERE id = ? AND status = 'claimed' AND relay_id = ?").get(commandId, relayId) as Record<string, unknown> | undefined;
       if (!row) throw new Error("session_command_not_claimed");
       const command = sessionCommandFromRow(row);
-      if (!["start", "turn", "review"].includes(command.kind)) throw new Error("session_command_checkpoint_invalid");
+      if (!["bind", "start", "turn", "review"].includes(command.kind)) throw new Error("session_command_checkpoint_invalid");
       const threadId = typeof result.thread_id === "string" ? result.thread_id : command.thread_id;
       const turnId = typeof result.turn_id === "string" ? result.turn_id : command.turn_id;
       if (!threadId || !/^[a-f0-9-]{36}$/i.test(threadId)) throw new Error("session_thread_invalid");
       if (turnId && !/^[a-f0-9-]{36}$/i.test(turnId)) throw new Error("session_turn_invalid");
       const owner = this.db.prepare("SELECT issue_id FROM issue_sessions WHERE thread_id = ?").get(threadId) as { issue_id: string } | undefined;
       if (owner && owner.issue_id !== command.issue_id) throw new Error("issue_session_already_bound");
-      if (command.kind === "start") {
+      if (command.kind === "bind" || command.kind === "start") {
         const binding = this.db.prepare("SELECT thread_id FROM issue_sessions WHERE issue_id = ?").get(command.issue_id) as { thread_id: string } | undefined;
         if (binding && binding.thread_id !== threadId) throw new Error("issue_session_already_bound");
         this.db.prepare(`
@@ -4649,7 +4745,7 @@ export class Store {
       const timestamp = now();
       if (command.kind !== "interrupt" && (!threadId || !/^[a-f0-9-]{36}$/i.test(threadId))) throw new Error("session_thread_invalid");
       if (["start", "turn", "review", "steer"].includes(command.kind) && (!turnId || !/^[a-f0-9-]{36}$/i.test(turnId))) throw new Error("session_turn_invalid");
-      if (command.kind === "start") {
+      if (command.kind === "bind" || command.kind === "start") {
         const existingBinding = this.db.prepare("SELECT thread_id FROM issue_sessions WHERE issue_id = ?").get(command.issue_id) as { thread_id: string } | undefined;
         if (existingBinding && existingBinding.thread_id !== threadId) throw new Error("issue_session_already_bound");
         const existingOwner = this.db.prepare("SELECT issue_id FROM issue_sessions WHERE thread_id = ?").get(threadId) as { issue_id: string } | undefined;
@@ -4658,18 +4754,18 @@ export class Store {
           INSERT INTO issue_sessions (
             issue_id, host_id, thread_id, status, active_turn_id, active_command_id, last_turn_id,
             config_fingerprint, last_agent_message, last_error, created_at, updated_at
-          ) VALUES (?, ?, ?, 'active', ?, ?, NULL, ?, '', NULL, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, '', NULL, ?, ?)
           ON CONFLICT(issue_id) DO UPDATE SET
             host_id = excluded.host_id,
             thread_id = excluded.thread_id,
-            status = 'active',
+            status = excluded.status,
             active_turn_id = excluded.active_turn_id,
             active_command_id = excluded.active_command_id,
             config_fingerprint = excluded.config_fingerprint,
             last_agent_message = CASE WHEN issue_sessions.active_turn_id = excluded.active_turn_id THEN issue_sessions.last_agent_message ELSE '' END,
             last_error = NULL,
             updated_at = excluded.updated_at
-        `).run(command.issue_id, command.host_id, threadId, turnId, command.id, String(command.payload.config_fingerprint || ""), timestamp, timestamp);
+        `).run(command.issue_id, command.host_id, threadId, command.kind === "bind" ? "idle" : "active", command.kind === "bind" ? null : turnId, command.kind === "bind" ? null : command.id, String(command.payload.config_fingerprint || ""), timestamp, timestamp);
       } else if (command.kind === "turn" || command.kind === "review" || command.kind === "steer") {
         const binding = this.db.prepare("SELECT thread_id FROM issue_sessions WHERE issue_id = ?").get(command.issue_id) as { thread_id: string } | undefined;
         if (!binding || binding.thread_id !== threadId) throw new Error("issue_session_mismatch");
@@ -4739,7 +4835,7 @@ export class Store {
       const command = sessionCommandFromRow(row);
       const threadId = partialThreadId && /^[a-f0-9-]{36}$/i.test(partialThreadId) ? partialThreadId : command.thread_id;
       const turnId = partialTurnId && /^[a-f0-9-]{36}$/i.test(partialTurnId) ? partialTurnId : command.turn_id;
-      if (command.kind === "start" && !turnId && command.attempts < 2 && retryableEmptySessionFailure(error)) {
+      if ((command.kind === "bind" || command.kind === "start") && !turnId && command.attempts < 2 && retryableEmptySessionFailure(error)) {
         if (threadId) {
           this.db.prepare(`
             DELETE FROM issue_sessions
@@ -4787,7 +4883,7 @@ export class Store {
       let commandError = error;
       let boundThreadId = threadId;
       let boundTurnId = turnId;
-      if (command.kind === "start" && threadId) {
+      if ((command.kind === "bind" || command.kind === "start") && threadId) {
         const existingBinding = this.db.prepare("SELECT thread_id FROM issue_sessions WHERE issue_id = ?").get(command.issue_id) as { thread_id: string } | undefined;
         const existingOwner = this.db.prepare("SELECT issue_id FROM issue_sessions WHERE thread_id = ?").get(threadId) as { issue_id: string } | undefined;
         const bindingConflict = Boolean(existingBinding && existingBinding.thread_id !== threadId) || Boolean(existingOwner && existingOwner.issue_id !== command.issue_id);
@@ -4907,7 +5003,6 @@ export class Store {
     if (!session?.active_turn_id) return undefined;
     const issue = this.getIssue(issueId);
     if (!issue) throw new Error("issue_not_found");
-    if (issue.session_handoff_at && !issue.session_owned) throw new Error("issue_session_handed_off");
     const run = this.db.prepare(`
       SELECT id FROM issue_runs
       WHERE issue_id = ? AND turn_id = ? AND status IN ('claimed', 'running') AND execution_mode = 'desktop'

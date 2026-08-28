@@ -245,7 +245,10 @@ export class IssueWorker {
       else this.enrichIssue(issue, issue.description, issue.agent_id || "");
     }
     this.sessionRelay.start();
-    for (const issue of this.store.listIssues()) this.syncIssueSessionTitle(issue.id);
+    for (const issue of this.store.listIssues()) {
+      this.ensureIssueSessionBinding(issue.id);
+      this.syncIssueSessionTitle(issue.id);
+    }
     this.scheduleThreadActions(250);
     void this.reconcileDesktopRuns().catch(error => workerDiagnostic("session_reconciliation_failed", { error: error instanceof Error ? error.message : String(error) }));
     this.schedule(0);
@@ -261,9 +264,9 @@ export class IssueWorker {
     return this.sessionRelay.threadAction(this.store.listIssueThreadIds(issueId), action);
   }
 
-  private syncIssueSessionTitle(issueId: string) {
+  syncIssueSessionTitle(issueId: string) {
     const issue = this.store.getIssue(issueId);
-    if (!issue || issue.archived_at || this.store.isEnrichmentPending(issue) || !issue.session_owned) return;
+    if (!issue || issue.archived_at || this.store.isEnrichmentPending(issue)) return;
     const session = this.store.getIssueSession(issueId);
     if (!session || issueSessionIsEmptyFailure(session)) return;
     const title = `${issue.identifier} ${issue.title}`.trim().slice(0, 200);
@@ -283,6 +286,24 @@ export class IssueWorker {
     } catch (error) {
       workerDiagnostic("thread_name_queue_failed", { issue_id: issue.id, issue_identifier: issue.identifier, thread_id: session.thread_id, error: error instanceof Error ? error.message : String(error) });
     }
+  }
+
+  ensureIssueSessionBinding(issueId: string) {
+    const issue = this.store.getIssue(issueId);
+    if (!issue || issue.archived_at || issue.deleting_at || this.store.getIssueSession(issueId)) return false;
+    const existing = this.store.getSessionCommandByRequest(issueId, `issue-bind:${issueId}`);
+    if (existing && !["failed", "cancelled"].includes(existing.status)) return true;
+    const project = this.store.getProject(issue.project_id);
+    const workspacePath = issue.workspace_path || project?.workspace_path || "";
+    this.store.enqueueSessionCommand({
+      issueId,
+      requestId: `issue-bind:${issueId}`,
+      kind: "bind",
+      payload: this.sessionPayload(issue, workspacePath, ""),
+      hostId: "local",
+    });
+    workerDiagnostic("issue_thread_binding_queued", { issue_id: issue.id, issue_identifier: issue.identifier, workspace_path_present: Boolean(workspacePath) });
+    return true;
   }
 
   beginUpdateDrain() {
@@ -333,7 +354,13 @@ export class IssueWorker {
 
   startIssue(issueId: string) {
     if (this.stopped) return false;
-    if (this.store.getActiveSessionCommand(issueId)) return false;
+    const activeCommand = this.store.getActiveSessionCommand(issueId);
+    if (activeCommand) {
+      if (!["bind", "rename"].includes(activeCommand.kind)) return false;
+      this.store.enqueueManualStart(issueId);
+      this.manualQueue.add(issueId);
+      return true;
+    }
     const claim = this.store.claimNextIssue(issueId);
     if (!claim) {
       const issue = this.store.getIssue(issueId);
@@ -1178,7 +1205,6 @@ export class IssueWorker {
     const issue = this.store.getIssue(issueId);
     if (!issue) throw new Error("issue_not_found");
     if (issue.archived_at) throw new Error("issue_archived");
-    if (issue.session_handoff_at && !issue.session_owned) throw new Error("issue_session_handed_off");
     const session = this.store.getIssueSession(issueId);
     if (!session) throw new Error("session_required");
     if (issueSessionIsEmptyFailure(session)) throw new Error("issue_session_restart_required");
@@ -1224,10 +1250,32 @@ export class IssueWorker {
     };
   }
 
+  pollNativeSessionProxy(relayId: string, appSessionId: string, capability: "unknown" | "ready" | "failed", capabilityError?: string, busy = false) {
+    if (capability !== "ready") {
+      this.store.releaseNativeSessionProxy(relayId, capability === "failed" ? capabilityError || "desktop_bridge_unavailable" : "desktop_bridge_unverified");
+      return { leader: false, acquired: false, expires_at: new Date().toISOString(), previous_relay_id: null, command: null, thread_ids: [] as string[], active_turns: [] as Array<{ thread_id: string; turn_id: string }> };
+    }
+    const lease = this.store.heartbeatNativeSessionProxy(relayId, appSessionId, null);
+    if (lease.acquired && !busy) {
+      for (const command of this.store.failClaimedSessionCommands(relayId, "native")) this.handleSessionCommandFailure(command, command.error || "native_proxy_replaced");
+    }
+    const command = lease.leader && !busy ? this.store.claimSessionCommand(relayId, "native") : undefined;
+    const sessions = lease.leader ? this.store.listHandedOffIssueSessions() : [];
+    return {
+      ...lease,
+      command: command || null,
+      thread_ids: sessions.map(session => session.thread_id),
+      active_turns: sessions.flatMap(session => session.active_turn_id ? [{ thread_id: session.thread_id, turn_id: session.active_turn_id }] : []),
+    };
+  }
+
   completeSessionCommand(commandId: string, relayId: string, result: Record<string, unknown>) {
     const command = this.store.completeSessionCommand(commandId, relayId, result);
     if (command.cancel_requested) this.store.enqueueSessionInterrupt(command.issue_id);
-    if (command.kind === "start") this.syncIssueSessionTitle(command.issue_id);
+    if (command.kind === "bind" || command.kind === "start") {
+      this.syncIssueSessionTitle(command.issue_id);
+      this.wake();
+    }
     return command;
   }
 
@@ -1279,9 +1327,12 @@ export class IssueWorker {
       }
       if (message.kind === "complete") {
         const command = this.store.completeSessionCommand(String(payload.command_id || ""), String(payload.relay_id || ""), payload.result && typeof payload.result === "object" ? payload.result as Record<string, unknown> : {});
-        if (command.cancel_requested || command.kind === "start") afterCommit = () => {
+        if (command.cancel_requested || command.kind === "bind" || command.kind === "start") afterCommit = () => {
           if (command.cancel_requested) this.store.enqueueSessionInterrupt(command.issue_id);
-          if (command.kind === "start") this.syncIssueSessionTitle(command.issue_id);
+          if (command.kind === "bind" || command.kind === "start") {
+            this.syncIssueSessionTitle(command.issue_id);
+            this.wake();
+          }
         };
         return true;
       }

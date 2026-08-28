@@ -154,6 +154,7 @@ test("Hub mirrors the privacy-filtered projection with durable idempotent sync",
 
     const archived = local.archiveIssue(issue.id, local.getIssue(issue.id)!.version);
     local.deleteArchivedIssue(issue.id, archived.version);
+    for (const action of local.listPendingThreadActions()) local.completeThreadAction(action);
     await client.syncNow();
     assert.equal(hub.store.board().issues.some(item => item.id === issue.id), false);
 

@@ -598,13 +598,13 @@ class AppServerSessionWorker {
     this.heartbeatTimer.unref();
     try {
       let completion: Record<string, unknown> = {};
-      if (command.kind === "start") {
+      if (command.kind === "bind" || command.kind === "start") {
         const params: Record<string, unknown> = {
-          cwd: String(payload.workspace_path || ""),
           approvalPolicy: String(payload.approval_policy || "on-request"),
           approvalsReviewer: String(payload.approvals_reviewer || "auto_review"),
           sandbox: String(payload.sandbox_mode || "workspace-write"),
         };
+        if (payload.workspace_path) params.cwd = String(payload.workspace_path);
         if (payload.model) params.model = String(payload.model);
         if (payload.service_tier) params.serviceTier = String(payload.service_tier);
         if (payload.developer_instructions) params.developerInstructions = String(payload.developer_instructions);
@@ -615,13 +615,15 @@ class AppServerSessionWorker {
         this.threads.add(threadId);
         this.options.onThreadBound?.(threadId, this);
         this.host.checkpoint(command.id, relayId, { thread_id: threadId });
-        const turn = payload.semantic_command === "review"
-          ? object(await this.request("review/start", { threadId, target: { type: "uncommittedChanges" }, delivery: "inline" }))
-          : object(await this.request("turn/start", await this.turnStartParams(threadId, payload)));
-        turnId = sessionId(object(turn.turn).id);
-        if (!turnId) throw new Error("desktop_turn_start_invalid");
-        this.activeTurns.set(threadId, turnId);
-        this.host.checkpoint(command.id, relayId, { thread_id: threadId, turn_id: turnId });
+        if (command.kind === "start") {
+          const turn = payload.semantic_command === "review"
+            ? object(await this.request("review/start", { threadId, target: { type: "uncommittedChanges" }, delivery: "inline" }))
+            : object(await this.request("turn/start", await this.turnStartParams(threadId, payload)));
+          turnId = sessionId(object(turn.turn).id);
+          if (!turnId) throw new Error("desktop_turn_start_invalid");
+          this.activeTurns.set(threadId, turnId);
+          this.host.checkpoint(command.id, relayId, { thread_id: threadId, turn_id: turnId });
+        }
       } else if (command.kind === "turn") {
         if (!threadId) throw new Error("session_thread_invalid");
         this.currentThreadId = threadId;
