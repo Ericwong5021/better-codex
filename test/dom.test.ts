@@ -24,6 +24,15 @@ test("generated injection script is valid JavaScript", () => {
   assert.ok(source.includes("showAutoDispatchHelp(\"settings\")"));
   assert.ok(source.includes('HOST_KIND === "web" ? INITIAL_LOCALE : bootstrap.locale'));
   assert.ok(source.includes('const REMOTE = HOST_ADAPTER.remote'));
+  assert.ok(source.includes('return (RELAY ? "/api/runtime-update" : "/api/update") + suffix'));
+  const remoteUpdateStart = injectedEntrySource.indexOf('remoteUpgrade?.addEventListener("click"');
+  const runtimeUpdateStart = injectedEntrySource.indexOf('checkUpdate.addEventListener("click"');
+  const remoteUpdateHandler = injectedEntrySource.slice(remoteUpdateStart, injectedEntrySource.indexOf('remoteRefresh?.addEventListener("click"', remoteUpdateStart));
+  const runtimeUpdateHandler = injectedEntrySource.slice(runtimeUpdateStart, injectedEntrySource.indexOf('dialog.addEventListener("cancel"', runtimeUpdateStart));
+  assert.ok(remoteUpdateHandler.includes('api("/api/update/check", { method: "POST" })'));
+  assert.ok(remoteUpdateHandler.includes('api("/api/update/install", { method: "POST"'));
+  assert.doesNotMatch(remoteUpdateHandler, /runtimeUpdatePath/);
+  assert.ok(runtimeUpdateHandler.includes('api(runtimeUpdatePath("/check"), { method: "POST" })'));
   assert.ok(source.includes('const CODEX_SEMANTICS_AVAILABLE = HOST_CAPABILITIES.codexSemantics !== false'));
   assert.ok(source.includes('if (!CODEX_SEMANTICS_AVAILABLE) return semanticCatalog'));
   assert.doesNotMatch(source, /if \(REMOTE\) return semanticCatalog/);

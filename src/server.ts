@@ -982,10 +982,21 @@ export function startServer() {
       const relayRequest = validAccessToken(bearerToken(request)) && request.headers["x-better-codex-relay"] === "1";
       const browserCommandId = String(request.headers["x-better-codex-command-id"] || "");
       const localCommandRequest = !relayRequest && authorized(request, url, webSessions) && /^[A-Za-z0-9_-]{8,200}$/.test(browserCommandId) && Boolean(webCommandTarget(method, `${url.pathname}${url.search}`));
+      const runtimeUpdatePath = url.pathname === "/api/runtime-update"
+        ? "/api/update"
+        : url.pathname === "/api/runtime-update/check"
+          ? "/api/update/check"
+          : url.pathname === "/api/runtime-update/install"
+            ? "/api/update/install"
+            : "";
+      const localUpdatePath = runtimeUpdatePath || url.pathname;
 
       if (relayRequest && (url.pathname === "/api/update" || url.pathname.startsWith("/api/update/"))) {
         console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "update", event: "relay_update_misdirected", method, path: url.pathname, runtime_instance_id: identity.instanceId, runtime_generation: identity.generation, runtime_version: identity.version, relay_request_id: String(request.headers["x-better-codex-request-id"] || "") })}`);
         throw new Error("hub_update_not_configured");
+      }
+      if (relayRequest && runtimeUpdatePath && method === "POST") {
+        console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "update", event: "runtime_update_forwarded", method, path: url.pathname, runtime_instance_id: identity.instanceId, runtime_generation: identity.generation, runtime_version: identity.version, relay_request_id: String(request.headers["x-better-codex-request-id"] || "") })}`);
       }
 
       if (!runtimeServingReady && url.pathname.startsWith("/api/") && !["GET", "HEAD", "OPTIONS"].includes(method) && url.pathname !== "/api/shutdown") throw new Error("runtime_reconciling");
@@ -1678,7 +1689,7 @@ export function startServer() {
           return sendJson(response, 202, store.getScheduledTask(task.id));
         }
       }
-      if (url.pathname === "/api/update" && method === "GET") {
+      if (localUpdatePath === "/api/update" && method === "GET") {
         const requestedUpdateId = url.searchParams.get("update_id");
         const operation = requestedUpdateId ? store.getUpdateOperation(requestedUpdateId) : store.getActiveUpdateOperation();
         return sendJson(response, 200, { ...getGatewayUpdateState(), operation: operation || null, accepting_new_tasks: runtimeServingReady && (!operation || ["ACCEPTED", "STAGING", "COMPLETED", "ROLLED_BACK", "FAILED"].includes(operation.status)) });
@@ -1714,8 +1725,8 @@ export function startServer() {
         console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "update", event: "update_activation_committed", update_id: updateId, runtime_instance_id: identity.instanceId, runtime_generation: identity.generation, host_instance_id: operation.host_instance_id, owner_pid: ownerPid })}`);
         return sendJson(response, 200, { committed: true, operation, runtime: { instance_id: identity.instanceId, generation: identity.generation, version: identity.version } });
       }
-      if (url.pathname === "/api/update/check" && method === "POST") return sendJson(response, 200, await checkGatewayUpdate());
-      if (url.pathname === "/api/update/install" && method === "POST") {
+      if (localUpdatePath === "/api/update/check" && method === "POST") return sendJson(response, 200, await checkGatewayUpdate());
+      if (localUpdatePath === "/api/update/install" && method === "POST") {
         const body = await readBody(request, 1024);
         const requestedKey = typeof body.idempotency_key === "string" ? body.idempotency_key : "";
         const requestedTargetVersion = typeof body.target_version === "string" ? body.target_version : "";

@@ -419,6 +419,22 @@ test("runtime relay client forwards concurrent HTTP requests with only the local
   assert.equal(healthBody.relay, "1");
   assert.ok(healthBody.request_id.length > 8);
 
+  const runtimeUpdate = await fetch(`${base}/api/runtime-update?update_id=runtime-update-check`, { headers: { cookie } });
+  assert.equal(runtimeUpdate.status, 200);
+  const runtimeUpdateBody = await runtimeUpdate.json() as { path: string; method: string; relay: string; request_id: string };
+  assert.equal(runtimeUpdateBody.path, "/api/runtime-update?update_id=runtime-update-check");
+  assert.equal(runtimeUpdateBody.method, "GET");
+  assert.equal(runtimeUpdateBody.relay, "1");
+  assert.ok(runtimeUpdateBody.request_id.length > 8);
+
+  const runtimeUpdateCheck = await fetch(`${base}/api/runtime-update/check`, { method: "POST", headers: { cookie, origin: base, "content-type": "application/json", "x-csrf-token": session.csrf_token }, body: "{}" });
+  assert.equal(runtimeUpdateCheck.status, 200);
+  const runtimeUpdateCheckBody = await runtimeUpdateCheck.json() as { path: string; method: string; relay: string; request_id: string };
+  assert.equal(runtimeUpdateCheckBody.path, "/api/runtime-update/check");
+  assert.equal(runtimeUpdateCheckBody.method, "POST");
+  assert.equal(runtimeUpdateCheckBody.relay, "1");
+  assert.ok(runtimeUpdateCheckBody.request_id.length > 8);
+
   const responses = await Promise.all(Array.from({ length: 8 }, async (_, index) => {
     const requestId = `request-${index}-abcdef`;
     const response = await fetch(`${base}/api/echo?index=${index}`, { method: "POST", headers: { authorization: "Bearer browser-secret", cookie, origin: base, "content-type": "application/json", "x-csrf-token": session.csrf_token, "x-better-codex-request-id": requestId }, body: JSON.stringify({ index }) });

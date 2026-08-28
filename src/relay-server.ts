@@ -1028,6 +1028,13 @@ export function createRelayServer(options: RelayServerOptions) {
           throw error;
         }
       }
+      if (["/api/runtime-update", "/api/runtime-update/check", "/api/runtime-update/install"].includes(url.pathname)) {
+        if (!session) return sendJson(response, 401, { error: "unauthorized" });
+        if (!["GET", "HEAD"].includes(method) && (!trustedOrigin(request, true) || !csrfValid)) return sendJson(response, 403, { error: "csrf_invalid" });
+        if (method === "POST") console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "runtime_update_proxy", event: "request_forwarded", method, path: url.pathname, relay_version: coreVersion, runtime_instance_id: runtime?.runtimeInstanceId || null, runtime_core_version: runtime?.coreVersion || null, request_id: String(request.headers["x-better-codex-request-id"] || "") })}`);
+        return forwardRequest(request, response, url, method, session.id, session.user.id);
+      }
+      if (url.pathname.startsWith("/api/runtime-update/")) return sendJson(response, 404, { error: "not_found" });
       const commandStatusMatch = url.pathname.match(/^\/api\/commands\/([A-Za-z0-9_-]{8,200})$/);
       if (commandStatusMatch && method === "GET") {
         if (!session) return sendJson(response, 401, { error: "unauthorized" });

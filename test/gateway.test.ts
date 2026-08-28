@@ -9,6 +9,7 @@ import { createConnection, type Socket } from "node:net";
 import test from "node:test";
 import { Store } from "../src/db.js";
 import { sessionHostProtocolVersion, type SessionHostServerMessage } from "../src/session-host-protocol.js";
+import { coreVersion } from "../src/version.js";
 
 async function availablePort() {
   return new Promise<number>((resolve, reject) => {
@@ -103,6 +104,12 @@ test("gateway rejects Relay-forwarded update routes", async () => {
       assert.equal(response.status, 400);
       assert.deepEqual(await response.json(), { error: "hub_update_not_configured" });
     }
+    const runtimeUpdate = await fetch(`http://127.0.0.1:${port}/api/runtime-update`, { headers: { authorization: `Bearer ${token}`, "x-better-codex-relay": "1", "x-better-codex-request-id": "relay-runtime-update-get" } });
+    assert.equal(runtimeUpdate.status, 200);
+    const runtimeUpdateState = await runtimeUpdate.json() as { currentVersion: string; channel: string; operation: unknown };
+    assert.equal(runtimeUpdateState.currentVersion, coreVersion);
+    assert.ok(["stable", "preview"].includes(runtimeUpdateState.channel));
+    assert.equal(runtimeUpdateState.operation, null);
   } finally {
     await stopGateway(gateway);
     rmSync(home, { recursive: true, force: true });

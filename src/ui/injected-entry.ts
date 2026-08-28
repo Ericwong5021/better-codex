@@ -1678,6 +1678,10 @@ export function install(config: Record<string, any>) {
       });
     }
 
+    function runtimeUpdatePath(suffix = "") {
+      return (RELAY ? "/api/runtime-update" : "/api/update") + suffix;
+    }
+
     function settleIssueRemoval(issueId, commandId, attempt = 0) {
       const pending = pendingIssueRemovals.get(issueId);
       if (!pending || pending.commandId !== commandId) return;
@@ -2926,7 +2930,7 @@ export function install(config: Record<string, any>) {
         await new Promise(resolve => setTimeout(resolve, 500));
         let update;
         try {
-          update = await api("/api/update?update_id=" + encodeURIComponent(updateId), { passive: true });
+          update = await api(runtimeUpdatePath("?update_id=" + encodeURIComponent(updateId)), { passive: true });
         } catch (reason) {
           if (destroyed || updateNotice !== notice) return;
           if (transientNetworkError(reason)) continue;
@@ -2941,7 +2945,7 @@ export function install(config: Record<string, any>) {
           localStorage.removeItem("better-codex-update-request-key");
           notice.dataset.status = "current";
           title.textContent = t("Better Codex 已是最新版本");
-          description.textContent = REMOTE ? t("远程服务升级完成。") : t("更新已完成。");
+          description.textContent = t("更新已完成。");
           notice.querySelector(".better-codex-update-actions").remove();
           if (REMOTE && typeof window.betterCodexHost?.reloadAfterUpdate === "function") {
             window.betterCodexHost.reloadAfterUpdate();
@@ -2968,7 +2972,7 @@ export function install(config: Record<string, any>) {
         } else {
           notice.dataset.status = "installing";
           title.textContent = t("正在更新 Better Codex");
-          description.textContent = REMOTE ? t("正在备份并升级远程服务，请不要关闭页面。") : t("正在下载并校验新版本，请保持 Codex 打开。");
+          description.textContent = t("正在下载并校验新版本，请保持 Codex 打开。");
         }
       }
       if (!destroyed && updateNotice === notice) throw new Error("runtime_bridge_timeout");
@@ -3004,9 +3008,7 @@ export function install(config: Record<string, any>) {
       updateNotice.setAttribute(OWNED, "true");
       updateNotice.setAttribute("role", "status");
       updateNotice.setAttribute("aria-live", "polite");
-      const updateDescription = REMOTE
-        ? "v" + version + " 已可用。升级期间正在运行的会话会继续执行。"
-        : "v" + version + " 已可用。Runtime 会安全切换，正在运行的会话会继续执行。";
+      const updateDescription = "v" + version + " 已可用。Runtime 会安全切换，正在运行的会话会继续执行。";
       updateNotice.innerHTML = '<button class="better-codex-update-menu-toggle" type="button" aria-label="' + escapeHtml(t("更多操作")) + '" aria-expanded="false" aria-haspopup="menu" data-update-menu-toggle>' + icon("more") + '</button><div class="better-codex-update-menu" data-update-menu hidden><button type="button" role="menuitem" data-update-ignore>' + escapeHtml(t("忽略当前版本")) + '</button></div><button class="better-codex-update-close" type="button" aria-label="' + escapeHtml(t("稍后提醒")) + '">' + icon("close") + '</button><div class="better-codex-update-layout"><span class="better-codex-update-icon">' + icon("refresh") + '</span><div class="better-codex-update-copy"><p class="better-codex-update-title">' + escapeHtml(t("Better Codex 有新版本")) + '</p><p class="better-codex-update-description">' + escapeHtml(t(updateDescription)) + '</p><p class="better-codex-update-error" hidden></p></div><div class="better-codex-update-actions"><button class="better-codex-update-button" type="button" data-update-later>' + escapeHtml(t("稍后")) + '</button><button class="better-codex-update-button is-primary" type="button" data-update-install>' + escapeHtml(t("立即更新")) + '</button></div></div>';
       document.body.appendChild(updateNotice);
       updateNoticeResizeObserver = new ResizeObserver(syncCompletionNoticePosition);
@@ -3061,7 +3063,7 @@ export function install(config: Record<string, any>) {
         try {
           const requestKey = localStorage.getItem("better-codex-update-request-key") || crypto.randomUUID();
           localStorage.setItem("better-codex-update-request-key", requestKey);
-          const result = await api("/api/update/install", { method: "POST", body: JSON.stringify({ idempotency_key: requestKey }), timeoutMs: 45000 });
+          const result = await api(runtimeUpdatePath("/install"), { method: "POST", body: JSON.stringify({ idempotency_key: requestKey }), timeoutMs: 45000 });
           if (updateNotice !== notice) return;
           if (result?.accepted !== true || typeof result?.update_id !== "string") throw new Error("update_not_accepted");
           localStorage.setItem("better-codex-active-update-id", result.update_id);
@@ -3089,7 +3091,7 @@ export function install(config: Record<string, any>) {
 
     async function checkUpdateNotice() {
       try {
-        renderUpdateNotice(await api("/api/update", { passive: true }));
+        renderUpdateNotice(await api(runtimeUpdatePath(), { passive: true }));
         clearPassiveNetworkError();
       } catch (error) {
         if (transientNetworkError(error)) showPassiveNetworkError();
@@ -6607,7 +6609,7 @@ export function install(config: Record<string, any>) {
         checkUpdate.disabled = true;
         checkUpdate.textContent = t("检查中…");
         try {
-          const update = await api("/api/update/check", { method: "POST" });
+          const update = await api(runtimeUpdatePath("/check"), { method: "POST" });
           renderUpdateState(update, true);
           if (update?.status === "available") {
             finish();
@@ -6625,7 +6627,7 @@ export function install(config: Record<string, any>) {
       dialog.showModal();
       setHelpView(initialView);
       dialog.querySelector("[data-product-core]").textContent = "v" + CORE_VERSION;
-      void api("/api/update").then(update => {
+      void api(runtimeUpdatePath()).then(update => {
         if (!dialog.isConnected) return;
         renderUpdateState(update);
       }).catch(() => {});
