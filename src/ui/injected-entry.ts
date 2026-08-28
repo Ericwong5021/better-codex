@@ -8737,7 +8737,7 @@ export function install(config: Record<string, any>) {
         feedback.querySelector("[data-conversation-retry]")?.addEventListener("click", event => {
           if (event.currentTarget.dataset.conversationRetry === "load") void loadConversation();
           else {
-            const retryRequestId = lastReplyStatus === "interrupted" ? "" : lastReplyRequestId;
+            const retryRequestId = ["failed", "interrupted"].includes(lastReplyStatus) ? "" : lastReplyRequestId;
             void sendReply(lastReplyMessage, retryRequestId, lastReplySemanticReferences, lastReplyCommand);
           }
         });

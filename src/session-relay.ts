@@ -47,6 +47,9 @@ type AppServerWorkerOptions = {
   onDisconnected?: (threadIds: string[], error: string, worker: AppServerSessionWorker) => void;
 };
 
+const THREAD_WORKER_RELEASE_TIMEOUT_MS = 5000;
+const THREAD_WORKER_RELEASE_POLL_MS = 25;
+
 function object(value: unknown) {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
@@ -998,6 +1001,7 @@ export class RuntimeSessionRelay {
   private readonly catalog: AppServerSessionWorker;
   private readonly workers = new Set<AppServerSessionWorker>();
   private readonly threadWorkers = new Map<string, AppServerSessionWorker>();
+  private readonly workerReleaseTasks = new Map<AppServerSessionWorker, Promise<void>>();
   private readonly handedOffThreads = new Set<string>();
   private pollTimer: NodeJS.Timeout | null = null;
   private stopped = true;
@@ -1020,6 +1024,7 @@ export class RuntimeSessionRelay {
       command_in_flight: status.command_in_flight,
       pending_requests: status.pending_requests,
       active_turns: status.active_turns,
+      busy_threads: status.busy_threads,
       busy: status.busy_threads.length > 0,
     })).sort((left, right) => String(left.thread_id || "").localeCompare(String(right.thread_id || "")));
     const activeTurns = threadWorkers.flatMap(worker => worker.active_turns);
@@ -1098,13 +1103,10 @@ export class RuntimeSessionRelay {
       catalog: this.catalog,
       onThreadBound: (threadId, source) => this.bindWorker(threadId, source),
       onTerminal: (threadId, turnId, source) => {
-        void this.releaseWorker(source, threadId, `turn_terminal:${turnId}`).catch(error => relayDiagnostic("thread_worker_release_failed", { host_instance_id: this.hostInstanceId || null, thread_id: threadId, turn_id: turnId, error: error instanceof Error ? error.message : String(error) }));
+        void this.releaseWorkerWhenAvailable(source, threadId, `turn_terminal:${turnId}`, turnId).catch(error => relayDiagnostic("thread_worker_release_failed", { ...this.workerReleaseDetail(source, threadId, `turn_terminal:${turnId}`), turn_id: turnId, error: error instanceof Error ? error.message : String(error) }));
       },
       onIdle: (threadId, source) => {
-        setImmediate(() => void this.releaseWorker(source, threadId, "thread_idle").catch(error => {
-          if (error instanceof Error && error.message === "thread_handoff_busy") return;
-          relayDiagnostic("thread_worker_release_failed", { host_instance_id: this.hostInstanceId || null, thread_id: threadId, error: error instanceof Error ? error.message : String(error) });
-        }));
+        void this.releaseWorkerWhenAvailable(source, threadId, "thread_idle").catch(error => relayDiagnostic("thread_worker_release_failed", { ...this.workerReleaseDetail(source, threadId, "thread_idle"), error: error instanceof Error ? error.message : String(error) }));
       },
       onDisconnected: (threadIds, error, source) => {
         this.removeWorker(source);
@@ -1137,6 +1139,54 @@ export class RuntimeSessionRelay {
     relayDiagnostic("thread_worker_released", { host_instance_id: this.hostInstanceId || null, thread_id: threadId, app_server_pid: status.app_server_pid, app_server_started_at: status.app_server_started_at, reason });
   }
 
+  private workerReleaseDetail(worker: AppServerSessionWorker, threadId: string, reason: string) {
+    const status = worker.status();
+    return {
+      host_instance_id: this.hostInstanceId || null,
+      thread_id: threadId,
+      app_server_pid: status.app_server_pid,
+      app_server_started_at: status.app_server_started_at,
+      command_in_flight: status.command_in_flight,
+      pending_requests: status.pending_requests,
+      active_turns: status.active_turns,
+      busy_threads: status.busy_threads,
+      reason,
+    };
+  }
+
+  private releaseWorkerWhenAvailable(worker: AppServerSessionWorker, threadId: string, reason: string, terminalTurnId = "") {
+    const existing = this.workerReleaseTasks.get(worker);
+    if (existing) return existing;
+    let tracked: Promise<void>;
+    tracked = this.waitAndReleaseWorker(worker, threadId, reason, terminalTurnId).finally(() => {
+      if (this.workerReleaseTasks.get(worker) === tracked) this.workerReleaseTasks.delete(worker);
+    });
+    this.workerReleaseTasks.set(worker, tracked);
+    return tracked;
+  }
+
+  private async waitAndReleaseWorker(worker: AppServerSessionWorker, threadId: string, reason: string, terminalTurnId: string) {
+    await new Promise<void>(resolve => setImmediate(resolve));
+    const startedAt = Date.now();
+    let attempts = 0;
+    while (this.workers.has(worker) && worker.busyForThread(threadId)) {
+      const status = worker.status();
+      const replacement = status.active_turns.find(turn => turn.thread_id === threadId && turn.turn_id !== terminalTurnId);
+      if (replacement) {
+        relayDiagnostic("thread_worker_release_superseded", { ...this.workerReleaseDetail(worker, threadId, reason), terminal_turn_id: terminalTurnId || null, replacement_turn_id: replacement.turn_id, attempts, elapsed_ms: Date.now() - startedAt });
+        return;
+      }
+      attempts += 1;
+      if (attempts === 1) relayDiagnostic("thread_worker_release_deferred", { ...this.workerReleaseDetail(worker, threadId, reason), terminal_turn_id: terminalTurnId || null });
+      if (Date.now() - startedAt >= THREAD_WORKER_RELEASE_TIMEOUT_MS) {
+        relayDiagnostic("thread_worker_release_timeout", { ...this.workerReleaseDetail(worker, threadId, reason), terminal_turn_id: terminalTurnId || null, attempts, elapsed_ms: Date.now() - startedAt });
+        throw new Error("thread_worker_release_timeout");
+      }
+      await new Promise<void>(resolve => setTimeout(resolve, THREAD_WORKER_RELEASE_POLL_MS));
+    }
+    if (this.workers.has(worker)) await this.releaseWorker(worker, threadId, reason);
+  }
+
   private workerForThread(threadId: string) {
     if (this.handedOffThreads.has(threadId)) throw new Error("thread_handed_off");
     return this.threadWorkers.get(threadId) || this.createWorker(threadId);
@@ -1149,7 +1199,7 @@ export class RuntimeSessionRelay {
     await worker.execute(command, this.relayId);
     if (!worker.hasActiveTurn() && command.kind !== "compact") {
       const boundThread = sessionId(command.thread_id) || worker.status().thread_ids[0] || "";
-      if (boundThread) await this.releaseWorker(worker, boundThread, `command_complete:${command.kind}`);
+      if (boundThread) await this.releaseWorkerWhenAvailable(worker, boundThread, `command_complete:${command.kind}`);
       else {
         this.removeWorker(worker);
         await worker.stopAndWait();
@@ -1176,7 +1226,7 @@ export class RuntimeSessionRelay {
           const worker = this.workerForThread(threadId);
           await worker.waitUntilReady();
           await worker.reconcile([active]);
-          if (!worker.hasActiveTurn()) await this.releaseWorker(worker, threadId, "reconciled_terminal");
+          if (!worker.hasActiveTurn()) await this.releaseWorkerWhenAvailable(worker, threadId, "reconciled_terminal", active.turn_id);
         }
       }
     } catch (error) {

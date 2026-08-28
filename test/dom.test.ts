@@ -772,7 +772,7 @@ test("issue details render the latest conversation result and reply composer", (
   assert.ok(source.includes('["send", "queue"].includes(button.dataset.composerMode)'));
   assert.ok(source.includes("stopIssueFromDialog(button)"));
   assert.equal(permissions.match(/\[data-conversation-retry\]/g)?.length, 2);
-  assert.ok(source.includes('const retryRequestId = lastReplyStatus === "interrupted" ? "" : lastReplyRequestId'));
+  assert.ok(source.includes('const retryRequestId = ["failed", "interrupted"].includes(lastReplyStatus) ? "" : lastReplyRequestId'));
   assert.ok(source.includes("sendReply(lastReplyMessage, retryRequestId, lastReplySemanticReferences, lastReplyCommand)"));
   assert.match(css, /\.better-codex-timeline\s*\{/s);
   assert.match(css, /\.better-codex-bubble\s*\{/s);
