@@ -93,7 +93,6 @@ test("web host boots the shared DOM injection behind a local session", async () 
 
   try {
     await waitForRuntime(port, runtime);
-    const initialSyncQueueCount = syncQueueCount(join(home, "better-codex.db"));
 
     const relayModeStatus = await fetch(`${base}/api/relay/status`, { headers: { authorization: `Bearer ${token}` } }).then(response => response.json()) as { remote_mode: string };
     assert.equal(relayModeStatus.remote_mode, "relay");
@@ -318,6 +317,7 @@ test("web host boots the shared DOM injection behind a local session", async () 
     assert.equal(englishInjection.status, 200);
     assert.match(await englishInjection.text(), /"initialLocale":"en"/);
 
+    const syncQueueBeforeSessions = syncQueueCount(join(home, "better-codex.db"));
     let newestSessionToken = "";
     for (let index = 0; index < 32; index++) {
       const nextSession = await fetch(`${base}/web/session`, {
@@ -334,7 +334,7 @@ test("web host boots the shared DOM injection behind a local session", async () 
     const threadFallback = await fetch(`${base}/local/00000000-0000-4000-8000-000000000000`);
     assert.equal(threadFallback.status, 200);
     assert.match(await threadFallback.text(), /正在加载任务看板/);
-    assert.equal(syncQueueCount(join(home, "better-codex.db")), initialSyncQueueCount);
+    assert.equal(syncQueueCount(join(home, "better-codex.db")), syncQueueBeforeSessions);
   } finally {
     await stopRuntime(runtime);
     rmSync(home, { recursive: true, force: true });

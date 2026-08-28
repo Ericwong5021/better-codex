@@ -4733,7 +4733,7 @@ export class Store {
           WHERE id = ? AND issue_id = ? AND status IN ('claimed', 'running') AND execution_mode = 'desktop'
         `).run(threadId, turnId || null, turnId || null, command.run_id, command.issue_id);
       }
-      if (command.kind === "start" && turnId) {
+      if ((command.kind === "start" || command.kind === "turn" || command.kind === "review") && turnId) {
         this.db.prepare(`
           UPDATE issues
           SET status = 'in_progress', needs_attention = 0, pending_actor = 'agent', version = version + 1, updated_at = ?
@@ -4825,7 +4825,7 @@ export class Store {
         SET status = 'completed', thread_id = ?, turn_id = ?, result_json = ?, error = NULL, finished_at = ?
         WHERE id = ? AND status = 'claimed' AND relay_id = ?
       `).run(threadId || null, turnId || null, JSON.stringify(result), timestamp, commandId, relayId);
-      if (command.kind === "start") {
+      if (command.kind === "start" || command.kind === "turn" || command.kind === "review") {
         this.db.prepare(`
           UPDATE issues
           SET status = 'in_progress', needs_attention = 0, pending_actor = 'agent', version = version + 1, updated_at = ?

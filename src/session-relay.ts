@@ -1176,6 +1176,7 @@ export class RuntimeSessionRelay {
         relayDiagnostic("thread_worker_release_superseded", { ...this.workerReleaseDetail(worker, threadId, reason), terminal_turn_id: terminalTurnId || null, replacement_turn_id: replacement.turn_id, attempts, elapsed_ms: Date.now() - startedAt });
         return;
       }
+      if (terminalTurnId && !status.command_in_flight && status.pending_requests === 0 && !status.active_turns.some(turn => turn.thread_id === threadId)) break;
       attempts += 1;
       if (attempts === 1) relayDiagnostic("thread_worker_release_deferred", { ...this.workerReleaseDetail(worker, threadId, reason), terminal_turn_id: terminalTurnId || null });
       if (Date.now() - startedAt >= THREAD_WORKER_RELEASE_TIMEOUT_MS) {

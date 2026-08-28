@@ -290,7 +290,7 @@ export class IssueWorker {
 
   ensureIssueSessionBinding(issueId: string) {
     const issue = this.store.getIssue(issueId);
-    if (!issue || issue.archived_at || issue.deleting_at || this.store.getIssueSession(issueId)) return false;
+    if (!issue || issue.archived_at || issue.deleting_at || issue.thread_id || this.store.getIssueSession(issueId)) return false;
     const existing = this.store.getSessionCommandByRequest(issueId, `issue-bind:${issueId}`);
     if (existing && !["failed", "cancelled"].includes(existing.status)) return true;
     const project = this.store.getProject(issue.project_id);
