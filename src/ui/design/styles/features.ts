@@ -4834,8 +4834,8 @@ export function betterCodexFeatureStylesCss() {
       height: 20px;
       border-radius: var(--bc-radius-pill);
       background: var(--bc-color-control);
-      box-shadow: var(--bc-inset-hairline);
-      transition: background-color var(--bc-motion-fast) ease-out;
+      box-shadow: var(--bc-switch-outline);
+      transition: background-color var(--bc-motion-fast) ease-out, box-shadow var(--bc-motion-fast) ease-out;
     }
 
     #better-codex-panel .better-codex-agent-switch i::after {
@@ -4845,7 +4845,7 @@ export function betterCodexFeatureStylesCss() {
       width: 14px;
       height: 14px;
       border-radius: 50%;
-      background: var(--bc-color-surface-raised);
+      background: var(--bc-color-text-muted);
       box-shadow: var(--bc-elevation-card);
       content: "";
       transition: transform var(--bc-motion-fast) var(--bc-ease-out);
@@ -4853,10 +4853,12 @@ export function betterCodexFeatureStylesCss() {
 
     #better-codex-panel .better-codex-agent-switch input:checked + i {
       background: var(--bc-color-primary);
+      box-shadow: none;
     }
 
     #better-codex-panel .better-codex-agent-switch input:checked + i::after {
       transform: translateX(14px);
+      background: var(--bc-color-on-primary);
     }
 
     #better-codex-panel .better-codex-agent-switch input:focus-visible + i {
