@@ -60,6 +60,19 @@ sudo env BETTER_CODEX_SELFHOST_DIR=/opt/better-codex \
 
 ## 升级现有 Beta 安装
 
+### 从 beta.43 或更早版本升级 Relay
+
+`v0.4.10-beta.43` 及更早版本的 Relay 还没有主机侧在线更新路由，不能通过公网 Web UI 自举到新版本。旧 Relay 会把更新 API 转发给本机 Runtime，因此新版 Runtime 会拒绝这类误路由请求，防止远程升级按钮改变本机版本。
+
+首次跨过这个版本边界时，请按照[自托管运行手册](SELF_HOSTING.md)验证目标 Release，然后在 VPS 上执行一次精确版本升级：
+
+```bash
+sudo env BETTER_CODEX_SELFHOST_DIR=/opt/better-codex \
+  bash /opt/better-codex/scripts/selfhost.sh upgrade vps vX.Y.Z-beta.N
+```
+
+Relay 到达 `v0.4.10-beta.44` 或更高版本后，后续 Beta 才能使用公网 Web UI 的在线升级按钮。
+
 ### 升级 VPS Relay 和远程 Web UI
 
 启用了远程访问时，建议先升级 VPS 服务：

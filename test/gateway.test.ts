@@ -91,6 +91,24 @@ function readSocketMessage(socket: Socket) {
   });
 }
 
+test("gateway rejects Relay-forwarded update routes", async () => {
+  const home = mkdtempSync(join(tmpdir(), "better-codex-relay-update-test-"));
+  const port = await availablePort();
+  const token = "gateway-relay-update-test-token";
+  const gateway = startGateway(home, port, token);
+  try {
+    await waitForGateway(port, gateway);
+    for (const [path, method] of [["/api/update", "GET"], ["/api/update/check", "POST"], ["/api/update/install", "POST"]]) {
+      const response = await fetch(`http://127.0.0.1:${port}${path}`, { method, headers: { authorization: `Bearer ${token}`, "content-type": "application/json", "x-better-codex-relay": "1", "x-better-codex-request-id": `relay-update-${method.toLowerCase()}-${path.split("/").pop()}` }, ...(method === "POST" ? { body: "{}" } : {}) });
+      assert.equal(response.status, 400);
+      assert.deepEqual(await response.json(), { error: "hub_update_not_configured" });
+    }
+  } finally {
+    await stopGateway(gateway);
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("gateway completes the issue workflow and survives restart", async () => {
   const home = mkdtempSync(join(tmpdir(), "better-codex-gateway-test-"));
   const port = await availablePort();

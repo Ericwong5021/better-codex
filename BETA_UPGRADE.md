@@ -60,6 +60,19 @@ Replace `/opt/better-codex` if the deployment uses another absolute path. After 
 
 ## Upgrade an existing Beta installation
 
+### Upgrade a Relay from beta.43 or earlier
+
+Relays at `v0.4.10-beta.43` or earlier do not have the host-side online update routes needed to bootstrap themselves through the public Web UI. An old Relay forwards the update API to the local Runtime, so a newer Runtime rejects that misrouted request instead of allowing a remote-service action to change the local installation.
+
+To cross this version boundary, verify the target Release as described in the [self-hosting runbook](SELF_HOSTING.md), then run one exact-version upgrade on the VPS:
+
+```bash
+sudo env BETTER_CODEX_SELFHOST_DIR=/opt/better-codex \
+  bash /opt/better-codex/scripts/selfhost.sh upgrade vps vX.Y.Z-beta.N
+```
+
+After the Relay reaches `v0.4.10-beta.44` or later, subsequent Beta releases can use the online update action in the public Web UI.
+
 ### Upgrade the VPS Relay and remote Web UI
 
 If remote access is enabled, upgrade the VPS service first:

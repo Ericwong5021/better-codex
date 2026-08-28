@@ -983,6 +983,11 @@ export function startServer() {
       const browserCommandId = String(request.headers["x-better-codex-command-id"] || "");
       const localCommandRequest = !relayRequest && authorized(request, url, webSessions) && /^[A-Za-z0-9_-]{8,200}$/.test(browserCommandId) && Boolean(webCommandTarget(method, `${url.pathname}${url.search}`));
 
+      if (relayRequest && (url.pathname === "/api/update" || url.pathname.startsWith("/api/update/"))) {
+        console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "update", event: "relay_update_misdirected", method, path: url.pathname, runtime_instance_id: identity.instanceId, runtime_generation: identity.generation, runtime_version: identity.version, relay_request_id: String(request.headers["x-better-codex-request-id"] || "") })}`);
+        throw new Error("hub_update_not_configured");
+      }
+
       if (!runtimeServingReady && url.pathname.startsWith("/api/") && !["GET", "HEAD", "OPTIONS"].includes(method) && url.pathname !== "/api/shutdown") throw new Error("runtime_reconciling");
       if (identity.handoffUpdateId && !identity.handoffRecovery && url.pathname.startsWith("/api/") && !["GET", "HEAD", "OPTIONS"].includes(method) && !["/api/shutdown", "/api/update/commit"].includes(url.pathname)) throw new Error("update_commit_pending");
 
