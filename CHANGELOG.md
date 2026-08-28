@@ -4,6 +4,12 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.11] - 2026-08-28
+
+- Keep imported Issues on their existing Codex thread instead of starting a replacement bind.
+- Mark an Issue in progress when a turn starts on an already bound thread.
+- Release thread workers after terminal turn delivery even if Codex still reports the thread as loaded.
+
 ## [0.4.10] - 2026-08-28
 
 ### Added
@@ -1008,7 +1014,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.11...HEAD
+[0.4.11]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10...v0.4.11
 [0.4.10]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9...v0.4.10
 [0.4.10-beta.45]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.44...v0.4.10-beta.45
 [0.4.10-beta.44]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.43...v0.4.10-beta.44
