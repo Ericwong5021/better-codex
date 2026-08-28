@@ -4,6 +4,10 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.10-beta.45] - 2026-08-28
+
+- Keep remote-service update actions from changing the local Runtime when an older Relay forwards update endpoints, and document the one-time VPS bridge required for beta.43 and earlier.
+
 ## [0.4.10-beta.44] - 2026-08-28
 
 - Align archived Issue dialogs with Board typography and tighter spacing.
@@ -981,7 +985,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.44...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.45...HEAD
+[0.4.10-beta.45]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.44...v0.4.10-beta.45
 [0.4.10-beta.44]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.43...v0.4.10-beta.44
 [0.4.10-beta.43]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.42...v0.4.10-beta.43
 [0.4.10-beta.42]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.41...v0.4.10-beta.42
