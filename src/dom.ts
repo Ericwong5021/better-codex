@@ -1,5 +1,5 @@
 import { activeCompatibility, coreVersion } from "./compatibility.js";
-import { betterCodexLogoPng } from "./brand-assets.js";
+import { agentAvatarPngDataUrl, betterCodexLogoPng } from "./brand-assets.js";
 import { betterCodexProfile } from "./config.js";
 import { betterCodexDesignSystemCss } from "./design-system.js";
 import { renderMarkdown } from "./markdown.js";
@@ -170,18 +170,18 @@ Object.assign(lucideIcons, {
 });
 
 const agentAvatarPresets = [
-  { id: "reviewer", icon: "review", tone: "info", label: "代码审查" },
-  { id: "frontend", icon: "layout", tone: "success", label: "前端实现" },
-  { id: "debugger", icon: "bug", tone: "warning", label: "问题排查" },
-  { id: "bot", icon: "bot", tone: "muted", label: "通用助手" },
-  { id: "terminal", icon: "terminal", tone: "info", label: "终端工程" },
-  { id: "wrench", icon: "wrench", tone: "warning", label: "修复工具" },
-  { id: "code", icon: "code", tone: "success", label: "代码实现" },
-  { id: "test", icon: "test", tone: "warning", label: "测试验证" },
-  { id: "docs", icon: "docs", tone: "info", label: "文档写作" },
-  { id: "shield", icon: "shield", tone: "success", label: "安全审查" },
-  { id: "database", icon: "database", tone: "info", label: "数据与存储" },
-  { id: "sparkles", icon: "sparkles", tone: "warning", label: "创意探索" },
+  { id: "reviewer", image: agentAvatarPngDataUrl("reviewer"), label: "代码审查" },
+  { id: "frontend", image: agentAvatarPngDataUrl("frontend"), label: "前端实现" },
+  { id: "debugger", image: agentAvatarPngDataUrl("debugger"), label: "问题排查" },
+  { id: "bot", image: agentAvatarPngDataUrl("bot"), label: "通用助手" },
+  { id: "terminal", image: agentAvatarPngDataUrl("terminal"), label: "终端工程" },
+  { id: "wrench", image: agentAvatarPngDataUrl("wrench"), label: "修复工具" },
+  { id: "code", image: agentAvatarPngDataUrl("code"), label: "代码实现" },
+  { id: "test", image: agentAvatarPngDataUrl("test"), label: "测试验证" },
+  { id: "docs", image: agentAvatarPngDataUrl("docs"), label: "文档写作" },
+  { id: "shield", image: agentAvatarPngDataUrl("shield"), label: "安全审查" },
+  { id: "database", image: agentAvatarPngDataUrl("database"), label: "数据与存储" },
+  { id: "sparkles", image: agentAvatarPngDataUrl("sparkles"), label: "创意探索" },
 ] as const;
 
 const suggestedAgents = [
@@ -209,8 +209,6 @@ const suggestedAgents = [
     ].join("\n"),
     model: "gpt-5.6-sol",
     reasoning_effort: "high",
-    icon: "review",
-    tone: "info",
   },
   {
     key: "frontend",
@@ -235,8 +233,6 @@ const suggestedAgents = [
     ].join("\n"),
     model: "gpt-5.6-terra",
     reasoning_effort: "medium",
-    icon: "layout",
-    tone: "success",
   },
   {
     key: "debugger",
@@ -261,8 +257,6 @@ const suggestedAgents = [
     ].join("\n"),
     model: "gpt-5.6-sol",
     reasoning_effort: "high",
-    icon: "bug",
-    tone: "warning",
   },
 ];
 
@@ -312,6 +306,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     baseUrl: `http://127.0.0.1:${port}`,
     bridgeToken: accessToken,
     logoUrl: `data:image/png;base64,${betterCodexLogoPng().toString("base64")}`,
+    defaultAgentAvatarUrl: agentAvatarPngDataUrl("codex"),
     initialLocale: locale,
     selectors: compatibility.selectors,
     attributes: compatibility.attributes,

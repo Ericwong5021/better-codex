@@ -145,11 +145,6 @@ export function betterCodexComponentStylesCss() {
       background: var(--bc-color-control);
     }
 
-    #better-codex-dialog .better-codex-agent-avatar.is-fallback svg {
-      width: 12px;
-      height: 12px;
-    }
-
     #better-codex-archive-dialog {
       width: min(1120px, calc(100vw - 48px), calc((100vh - 48px) * 1.5));
       height: min(746.667px, calc(100vh - 48px), calc((100vw - 48px) * .666667));

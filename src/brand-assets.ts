@@ -12,6 +12,8 @@ function readAsset(name: string) {
   return readFileSync(path);
 }
 
+const agentAvatarIds = new Set(["codex", "reviewer", "frontend", "debugger", "bot", "terminal", "wrench", "code", "test", "docs", "shield", "database", "sparkles"]);
+
 export function appIconIcns() {
   return readAsset("AppIcon.icns");
 }
@@ -26,4 +28,13 @@ export function betterCodexLogoPng() {
 
 export function betterCodexWebIconPng(size: 192 | 512) {
   return readAsset(`web/better-codex-icon-${size}.png`);
+}
+
+export function agentAvatarPng(id: string) {
+  if (!agentAvatarIds.has(id)) throw new Error(`agent_avatar_asset_invalid:${id}`);
+  return readAsset(`agent-avatars/${id}.png`);
+}
+
+export function agentAvatarPngDataUrl(id: string) {
+  return `data:image/png;base64,${agentAvatarPng(id).toString("base64")}`;
 }

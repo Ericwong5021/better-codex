@@ -14,6 +14,7 @@
   },
   "files": [
     "assets/better-codex.png",
+    "assets/agent-avatars/*.png",
     "assets/web/better-codex-icon-192.png",
     "assets/web/better-codex-icon-512.png",
     "dist/cdp.js",

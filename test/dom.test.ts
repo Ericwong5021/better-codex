@@ -324,7 +324,7 @@ test("column cards fill the padded column evenly", () => {
 test("default Codex agent opens a branded config editor", () => {
   const source = injectionSource(4317, "test-token", "install");
 
-  assert.ok(source.includes('aria-label="Better Codex"') || source.includes('aria-label="Codex"'));
+  assert.ok(source.includes('return \'<img src="\' + escapeHtml(DEFAULT_AGENT_AVATAR_URL) + \'" alt="Codex">\''));
   assert.ok(source.includes("const isDefault = Boolean(draft.is_default);"));
   assert.ok(source.includes('"/api/agents/default"'));
   assert.ok(source.includes('te("Codex 默认智能体")'));
@@ -398,20 +398,18 @@ test("outside click dismisses the avatar picker without closing the agent inspec
   assert.ok(!source.includes("anchor?.contains?.(event.target)"));
 });
 
-test("agent suggestion icons use thicker strokes and semantic tones", () => {
+test("agent suggestions use bundled PNG avatars", () => {
   const source = injectionSource(4317, "test-token", "install");
   const css = betterCodexDesignSystemCss();
+  const start = source.indexOf("const suggestions = suggestedAgents.map");
+  const suggestions = source.slice(start, source.indexOf("const animateEnter", start));
 
-  assert.ok(source.includes('"tone":"info"'));
-  assert.ok(source.includes('"tone":"success"'));
-  assert.ok(source.includes('"tone":"warning"'));
   assert.ok(source.includes('"key":"debugger"'));
   assert.ok(source.includes('"name":"问题排查"'));
-  assert.ok(source.includes('icon(item.icon, "", "2.4")'));
-  assert.ok(source.includes("data-tone=") && source.includes("escapeHtml(item.tone)"));
-  assert.match(css, /\.better-codex-agent-suggestion-icon\[data-tone="info"\]\s*\{[^}]*color:\s*var\(--bc-color-info\)/s);
-  assert.match(css, /\.better-codex-agent-suggestion-icon\[data-tone="success"\]\s*\{[^}]*color:\s*var\(--bc-color-success\)/s);
-  assert.match(css, /\.better-codex-agent-suggestion-icon\[data-tone="warning"\]\s*\{[^}]*color:\s*var\(--bc-color-warning\)/s);
+  assert.ok(suggestions.includes('class="better-codex-agent-suggestion-icon"><img src="'));
+  assert.ok(source.includes('"image":"data:image/png;base64,'));
+  assert.doesNotMatch(suggestions, /icon\(item\.icon/);
+  assert.match(css, /\.better-codex-agent-suggestion-icon > img\s*\{[^}]*width:\s*100%;[^}]*height:\s*100%;[^}]*object-fit:\s*cover/s);
 });
 
 test("agent toolbar and inspector occupy separate Codex-style grid regions", () => {
@@ -531,10 +529,10 @@ test("agent issue creation does not require or bind the current session", () => 
   assert.ok(source.includes('sendAppServerRequest("turn/interrupt", { threadId, turnId })'));
 });
 
-test("agent detail avatars use preset icons and open an avatar picker", () => {
+test("agent detail avatars use PNG presets and open an avatar picker", () => {
   const source = injectionSource(4317, "test-token", "install");
 
-  assert.ok(source.includes('branded ? codexLogo() : icon("bot")'));
+  assert.ok(source.includes('branded ? codexLogo() : \'<img src="\' + escapeHtml(fallback.image)'));
   assert.ok(source.includes('data-agent-avatar-form'));
   assert.ok(source.includes("chooseAgentAvatar("));
   assert.ok(source.includes('id = "better-codex-avatar-picker"'));
@@ -546,36 +544,33 @@ test("agent detail avatars use preset icons and open an avatar picker", () => {
   assert.ok(source.includes('const heading = t(creating ? "新建" : "智能体")'));
   assert.ok(source.includes('<h2>\' + te("创建智能体") + \'</h2><div class="better-codex-agent-avatar-field">'));
   assert.ok(source.includes("点击选择预设图标，或上传图片"));
-  assert.ok(source.includes('avatar: draft.avatar || ("icon:" + draft.key)'));
+  assert.ok(source.includes('AGENT_AVATAR_PRESETS.find(item => item.id === draft.key)?.image'));
   assert.ok(source.includes("state.agentDraft?.key === item.key"));
   assert.ok(!source.includes('class="better-codex-agent-profile-name" name="name"'));
   assert.ok(!source.includes('data-agent-avatar-edit'));
   assert.ok(source.includes('id = "better-codex-avatar-cropper"'));
   assert.ok(source.includes('canvas.addEventListener("pointermove"'));
   assert.ok(source.includes('output.width = 256'));
-  assert.ok(source.includes('output.toDataURL("image/webp", .86)'));
+  assert.ok(source.includes('output.toDataURL("image/png")'));
+  assert.ok(source.includes('better-codex-avatar-preset-visual"><img src="'));
 });
 
-test("every rendered Codex logo receives an independent SVG gradient id", () => {
+test("every rendered Codex avatar uses the bundled PNG", () => {
   const source = injectionSource(4317, "test-token", "install");
 
-  assert.ok(source.includes('const gradientId = "better-codex-logo-gradient-" + (++codexLogoSequence)'));
-  assert.ok(source.includes("fill=\"url(#' + gradientId + ')\""));
-  assert.ok(source.includes('aria-label="Codex"'));
+  assert.ok(source.includes('return \'<img src="\' + escapeHtml(DEFAULT_AGENT_AVATAR_URL) + \'" alt="Codex">\''));
   assert.ok(source.includes('visual: () => agentAvatarMarkup(agent, "better-codex-agent-avatar")'));
   assert.ok(source.includes('typeof option.visual === "function" ? option.visual()'));
-  assert.doesNotMatch(source, /id="better-codex-logo-gradient"/);
-  assert.doesNotMatch(source, />better<\/text>|gradientId \+ '-badge'/);
+  assert.doesNotMatch(source, /better-codex-logo-gradient|codexLogoSequence/);
 });
 
-test("issue agent avatars use the same fallback material as the agent directory", () => {
+test("issue agent avatars use the same PNG fallback as the agent directory", () => {
   const css = betterCodexDesignSystemCss();
-  const fallbackRule = css.match(/#better-codex-dialog \.better-codex-agent-avatar\.is-fallback\s*\{([^}]*)\}/)?.[1] || "";
+  const source = injectionSource(4317, "test-token", "install");
 
-  assert.match(fallbackRule, /color:\s*var\(--bc-color-text-muted\)/);
-  assert.match(fallbackRule, /background:\s*var\(--bc-color-control\)/);
-  assert.match(fallbackRule, /border-radius:\s*var\(--bc-radius-xs\)/);
-  assert.match(css, /#better-codex-dialog \.better-codex-agent-avatar\.is-fallback svg\s*\{[^}]*width:\s*12px;[^}]*height:\s*12px;/s);
+  assert.ok(source.includes('const fallback = AGENT_AVATAR_PRESETS.find(item => item.id === "bot")'));
+  assert.ok(source.includes('className + " has-image"'));
+  assert.match(css, /\.better-codex-completion-avatar img[^}]*width:\s*100%;[^}]*height:\s*100%;[^}]*object-fit:\s*cover/s);
 });
 
 test("agent issue creation reserves enough height for its scaled footer", () => {

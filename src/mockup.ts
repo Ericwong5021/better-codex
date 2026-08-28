@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { agentAvatarPngDataUrl } from "./brand-assets.js";
 import { mockupStatePath } from "./config.js";
 
 const statuses = ["backlog", "todo", "in_progress", "in_review", "done", "blocked"];
@@ -37,17 +38,17 @@ export function normalizeMockupLocale(value: unknown): MockupLocale {
 function defaultAgents(locale: MockupLocale) {
   if (locale === "en") {
     return [
-      { id: "", role: "codex", name: "Codex", description: "General task handling", instructions: "", model: "gpt-5.6-sol", reasoning_effort: "high", sandbox_mode: "danger-full-access", is_default: true, max_concurrency: 4, avatar: "", version: 1 },
-      { id: "agent-product", role: "product", name: "Product Planning", description: "Clarify requirements, design solutions, and define acceptance criteria", instructions: "", model: "gpt-5.6-sol", reasoning_effort: "high", sandbox_mode: "workspace-write", is_default: false, max_concurrency: 3, avatar: "icon:docs", version: 1 },
-      { id: "agent-engineering", role: "engineering", name: "Engineering", description: "Handle frontend and backend implementation, integration, and delivery", instructions: "", model: "gpt-5.6-terra", reasoning_effort: "medium", sandbox_mode: "workspace-write", is_default: false, max_concurrency: 5, avatar: "icon:frontend", version: 1 },
-      { id: "agent-quality", role: "quality", name: "Quality Assurance", description: "Locate defects, run regression checks, and enforce release gates", instructions: "", model: "gpt-5.6-sol", reasoning_effort: "high", sandbox_mode: "workspace-write", is_default: false, max_concurrency: 5, avatar: "icon:reviewer", version: 1 },
+      { id: "", role: "codex", name: "Codex", description: "General task handling", instructions: "", model: "gpt-5.6-sol", reasoning_effort: "high", sandbox_mode: "danger-full-access", is_default: true, max_concurrency: 4, avatar: agentAvatarPngDataUrl("codex"), version: 1 },
+      { id: "agent-product", role: "product", name: "Product Planning", description: "Clarify requirements, design solutions, and define acceptance criteria", instructions: "", model: "gpt-5.6-sol", reasoning_effort: "high", sandbox_mode: "workspace-write", is_default: false, max_concurrency: 3, avatar: agentAvatarPngDataUrl("docs"), version: 1 },
+      { id: "agent-engineering", role: "engineering", name: "Engineering", description: "Handle frontend and backend implementation, integration, and delivery", instructions: "", model: "gpt-5.6-terra", reasoning_effort: "medium", sandbox_mode: "workspace-write", is_default: false, max_concurrency: 5, avatar: agentAvatarPngDataUrl("frontend"), version: 1 },
+      { id: "agent-quality", role: "quality", name: "Quality Assurance", description: "Locate defects, run regression checks, and enforce release gates", instructions: "", model: "gpt-5.6-sol", reasoning_effort: "high", sandbox_mode: "workspace-write", is_default: false, max_concurrency: 5, avatar: agentAvatarPngDataUrl("reviewer"), version: 1 },
     ];
   }
   return [
-    { id: "", role: "codex", name: "Codex", description: "拆解里程碑、协调依赖并跟进交付节奏", instructions: "", model: "gpt-5.6-sol", reasoning_effort: "high", sandbox_mode: "danger-full-access", is_default: true, max_concurrency: 4, avatar: "", version: 1 },
-    { id: "agent-product", role: "product", name: "产品策划", description: "负责需求澄清、方案设计和验收口径", instructions: "", model: "gpt-5.6-sol", reasoning_effort: "high", sandbox_mode: "workspace-write", is_default: false, max_concurrency: 3, avatar: "icon:docs", version: 1 },
-    { id: "agent-engineering", role: "engineering", name: "工程实现", description: "负责前后端开发、联调和技术交付", instructions: "", model: "gpt-5.6-terra", reasoning_effort: "medium", sandbox_mode: "workspace-write", is_default: false, max_concurrency: 5, avatar: "icon:frontend", version: 1 },
-    { id: "agent-quality", role: "quality", name: "质量保障", description: "负责缺陷定位、回归检查和发布门禁", instructions: "", model: "gpt-5.6-sol", reasoning_effort: "high", sandbox_mode: "workspace-write", is_default: false, max_concurrency: 5, avatar: "icon:reviewer", version: 1 },
+    { id: "", role: "codex", name: "Codex", description: "拆解里程碑、协调依赖并跟进交付节奏", instructions: "", model: "gpt-5.6-sol", reasoning_effort: "high", sandbox_mode: "danger-full-access", is_default: true, max_concurrency: 4, avatar: agentAvatarPngDataUrl("codex"), version: 1 },
+    { id: "agent-product", role: "product", name: "产品策划", description: "负责需求澄清、方案设计和验收口径", instructions: "", model: "gpt-5.6-sol", reasoning_effort: "high", sandbox_mode: "workspace-write", is_default: false, max_concurrency: 3, avatar: agentAvatarPngDataUrl("docs"), version: 1 },
+    { id: "agent-engineering", role: "engineering", name: "工程实现", description: "负责前后端开发、联调和技术交付", instructions: "", model: "gpt-5.6-terra", reasoning_effort: "medium", sandbox_mode: "workspace-write", is_default: false, max_concurrency: 5, avatar: agentAvatarPngDataUrl("frontend"), version: 1 },
+    { id: "agent-quality", role: "quality", name: "质量保障", description: "负责缺陷定位、回归检查和发布门禁", instructions: "", model: "gpt-5.6-sol", reasoning_effort: "high", sandbox_mode: "workspace-write", is_default: false, max_concurrency: 5, avatar: agentAvatarPngDataUrl("reviewer"), version: 1 },
   ];
 }
 

@@ -160,7 +160,7 @@ test("gateway completes the issue workflow and survives restart", async () => {
       avatar: "",
     });
 
-    const avatar = "data:image/webp;base64,UklGRg==";
+    const avatar = "data:image/png;base64,iVBORw0KGgo=";
     const defaultAgentResponse = await request("/api/agents/default", {
       method: "PATCH",
       body: JSON.stringify({ model: "gpt-5.6-luna", reasoning_effort: "high", avatar }),
@@ -191,7 +191,8 @@ test("gateway completes the issue workflow and survives restart", async () => {
       body: JSON.stringify({ avatar: "icon:reviewer" }),
     });
     assert.equal(iconAvatarResponse.status, 200);
-    assert.equal(((await iconAvatarResponse.json()) as { avatar: string }).avatar, "icon:reviewer");
+    const reviewerAvatar = ((await iconAvatarResponse.json()) as { avatar: string }).avatar;
+    assert.match(reviewerAvatar, /^data:image\/png;base64,/);
 
     const preflight = await fetch(`http://127.0.0.1:${port}/api/bootstrap`, {
       method: "OPTIONS",
@@ -495,7 +496,7 @@ test("gateway completes the issue workflow and survives restart", async () => {
     assert.equal(replayedAfterRestart.status, 200);
     assert.equal((await replayedAfterRestart.json() as { id: string }).id, issue.id);
     const restoredAgents = await (await request("/api/agents")).json() as Array<{ id: string; avatar: string }>;
-    assert.equal(restoredAgents.find(agent => agent.id === optionalAgent.id)?.avatar, "icon:reviewer");
+    assert.equal(restoredAgents.find(agent => agent.id === optionalAgent.id)?.avatar, reviewerAvatar);
   } finally {
     await stopGateway(gateway);
     rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });

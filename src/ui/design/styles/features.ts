@@ -100,8 +100,7 @@ export function betterCodexFeatureStructureStylesCss() {
     #better-codex-panel .better-codex-card-avatar { display: inline-flex; width: 16px; height: 16px; flex: 0 0 auto; align-items: center; justify-content: center; overflow: hidden; border-radius: var(--bc-radius-pill); color: var(--bc-color-on-primary); background: var(--bc-color-primary); }
     #better-codex-panel .better-codex-card-avatar.is-codex { color: inherit; background: transparent; border-radius: 4px; }
     #better-codex-panel .better-codex-card-avatar.is-fallback, #better-codex-panel .better-codex-card-avatar.is-icon { color: var(--bc-color-text-muted); background: var(--bc-color-hover); }
-    #better-codex-panel .better-codex-card-avatar img, #better-codex-panel .better-codex-card-avatar svg { width: 100%; height: 100%; display: block; object-fit: cover; }
-    #better-codex-panel .better-codex-card-avatar.is-fallback svg, #better-codex-panel .better-codex-card-avatar.is-icon svg { width: 10px; height: 10px; margin: auto; }
+    #better-codex-panel .better-codex-card-avatar img { width: 100%; height: 100%; display: block; object-fit: cover; }
     #better-codex-panel .better-codex-card-avatar.is-user.is-initials { color: var(--bc-color-on-avatar); font-size: 9px; font-weight: 700; line-height: 1; }
     #better-codex-panel .better-codex-link { overflow: hidden; border: 0; color: var(--bc-color-info); background: transparent; padding: 0; font: inherit; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
     #better-codex-panel .better-codex-link:hover { text-decoration: underline; }
@@ -369,7 +368,7 @@ export function betterCodexFeatureStructureStylesCss() {
     #better-codex-panel .better-codex-project-document-agent-picker .better-codex-agent-menu { top: auto; right: 0; bottom: calc(100% + 6px); display: none; width: 100%; min-width: 220px; transform-origin: bottom right; }
     #better-codex-panel .better-codex-project-document-agent-picker.is-open .better-codex-agent-menu { display: block; animation: better-codex-menu-enter var(--bc-motion-fast) var(--bc-ease-out); }
     #better-codex-panel .better-codex-project-document-agent-avatar { display: inline-flex; width: 18px; height: 18px; flex: 0 0 18px; align-items: center; justify-content: center; overflow: hidden; border-radius: 999px; }
-    #better-codex-panel .better-codex-project-document-agent-avatar img, #better-codex-panel .better-codex-project-document-agent-avatar svg { display: block; width: 100%; height: 100%; object-fit: cover; }
+    #better-codex-panel .better-codex-project-document-agent-avatar img { display: block; width: 100%; height: 100%; object-fit: cover; }
     #better-codex-panel .better-codex-project-document-form output { color: var(--bc-color-danger); font-size: var(--bc-text-caption); line-height: 1.45; }
     #better-codex-panel .better-codex-project-document-form output[data-tone="warning"] { color: var(--bc-color-warning); }
     #better-codex-panel .better-codex-project-document-form output[data-tone="info"] { color: var(--bc-color-info); }
@@ -469,7 +468,6 @@ export function betterCodexFeatureStructureStylesCss() {
     #better-codex-panel .better-codex-project-planning-form > div { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: end; gap: 8px; }
     #better-codex-panel .better-codex-project-planning-form .better-codex-project-document-agent-picker > span:first-child { display: none; }
     #better-codex-panel .better-codex-project-planning-agent { display: inline-flex; min-height: 36px; align-items: center; gap: 7px; color: var(--bc-color-text-muted); font-size: var(--bc-text-caption); }
-    #better-codex-panel .better-codex-project-planning-agent > svg { width: 18px; height: 18px; }
     #better-codex-panel .better-codex-project-planning-form .better-codex-submit { display: inline-flex; min-height: 36px; align-items: center; justify-content: center; gap: 7px; padding-inline: 13px; }
     #better-codex-panel .better-codex-project-planning-form .better-codex-submit svg { width: 14px; height: 14px; }
     #better-codex-panel .better-codex-project-planning-form output { grid-column: 1 / -1; color: var(--bc-color-danger); font-size: var(--bc-text-caption); }
@@ -513,7 +511,7 @@ export function betterCodexFeatureStructureStylesCss() {
     #better-codex-panel .better-codex-agent-card-head { display: flex; align-items: flex-start; gap: 11px; }
     #better-codex-panel .better-codex-agent-card-avatar { display: inline-flex; width: 36px; height: 36px; flex: 0 0 auto; align-items: center; justify-content: center; border-radius: var(--bc-radius-sm); color: var(--bc-color-on-primary); background: var(--bc-color-primary); font-size: var(--bc-text-md); font-weight: 700; letter-spacing: -.02em; }
     #better-codex-panel .better-codex-agent-card-avatar.is-codex { overflow: hidden; color: inherit; background: transparent; }
-    #better-codex-panel .better-codex-agent-card-avatar.is-codex svg { width: 36px; height: 36px; }
+    #better-codex-panel .better-codex-agent-card-avatar.is-codex img { width: 36px; height: 36px; }
     #better-codex-panel .better-codex-agent-card-title { min-width: 0; flex: 1; }
     #better-codex-panel .better-codex-agent-card-title-line { display: flex; min-width: 0; align-items: center; gap: 7px; }
     #better-codex-panel .better-codex-agent-card-title strong { display: block; overflow: hidden; font-size: var(--bc-text-md); font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
@@ -559,9 +557,8 @@ export function betterCodexFeatureStructureStylesCss() {
     .better-codex-completion-notice { position: relative; display: flex; box-sizing: border-box; width: max-content; max-width: min(420px,calc(100vw - 32px)); min-height: 40px; align-items: center; gap: 8px; border: 1px solid var(--bc-color-hairline); border-radius: var(--bc-radius-sm); color: var(--bc-color-text); background: var(--bc-color-surface-raised); padding: 6px 6px 6px 12px; box-shadow: var(--bc-elevation-menu); font-family: var(--bc-font-ui); font-size: var(--bc-text-sm); cursor: pointer; pointer-events: auto; animation: better-codex-completion-enter .28s cubic-bezier(.16,1,.3,1); }
     .better-codex-completion-notice .better-codex-completion-layout { display: flex; min-width: 0; align-items: center; gap: 8px; }
     .better-codex-completion-notice .better-codex-completion-avatar { width: 24px; height: 24px; flex: 0 0 auto; overflow: hidden; border-radius: var(--bc-radius-xs); }
-    .better-codex-completion-notice .better-codex-completion-avatar img, .better-codex-completion-notice .better-codex-completion-avatar svg { display: block; width: 100%; height: 100%; object-fit: cover; }
+    .better-codex-completion-notice .better-codex-completion-avatar img { display: block; width: 100%; height: 100%; object-fit: cover; }
     .better-codex-completion-notice .better-codex-completion-avatar.is-fallback { display: inline-flex; align-items: center; justify-content: center; color: var(--bc-color-text-muted); background: var(--bc-color-hover); }
-    .better-codex-completion-notice .better-codex-completion-avatar.is-fallback svg { width: 14px; height: 14px; }
     .better-codex-completion-notice .better-codex-completion-message { min-width: 0; margin: 0; overflow: hidden; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
     .better-codex-completion-notice .better-codex-completion-status { flex: 0 0 auto; border-radius: var(--bc-radius-pill); color: var(--bc-color-text-muted); background: var(--bc-color-hover); padding: 2px 7px; font-size: var(--bc-text-xs); font-weight: 500; line-height: 1.4; }
     .better-codex-completion-notice .better-codex-completion-menu-toggle, .better-codex-completion-notice .better-codex-completion-close { display: inline-flex; width: 28px; height: 28px; flex: 0 0 auto; align-items: center; justify-content: center; border: 0; border-radius: var(--bc-radius-xs); color: var(--bc-color-text-muted); background: transparent; cursor: pointer; }
@@ -681,7 +678,6 @@ export function betterCodexFeatureStructureStylesCss() {
     #better-codex-dialog .better-codex-agent-assignee:focus-within { border-radius: var(--bc-radius-xs); box-shadow: var(--bc-focus-ring); }
     #better-codex-dialog .better-codex-agent-avatar { display: inline-flex; width: 18px; height: 18px; align-items: center; justify-content: center; border-radius: var(--bc-radius-pill); color: var(--bc-color-on-primary); background: var(--bc-color-primary); font-size: var(--bc-text-avatar); }
     #better-codex-dialog .better-codex-agent-avatar.is-codex { overflow: hidden; color: inherit; background: transparent; }
-    #better-codex-dialog .better-codex-agent-avatar svg { width: 18px; height: 18px; }
     #better-codex-dialog .better-codex-agent-avatar.has-image { overflow: hidden; }
     #better-codex-dialog .better-codex-agent-avatar img { width: 100%; height: 100%; object-fit: cover; }
     #better-codex-dialog .better-codex-run-hint { display: flex; flex: 0 0 auto; align-items: center; gap: 7px; color: var(--bc-color-text-muted); padding: 1px 20px 4px; font-size: var(--bc-text-md); }
@@ -3311,19 +3307,11 @@ export function betterCodexFeatureStylesCss() {
       background: var(--bc-color-control);
     }
 
-    #better-codex-panel .better-codex-filter-avatar img,
-    #better-codex-panel .better-codex-filter-avatar svg {
+    #better-codex-panel .better-codex-filter-avatar img {
       display: block;
       width: 100%;
       height: 100%;
       object-fit: cover;
-    }
-
-    #better-codex-panel .better-codex-filter-avatar.is-fallback svg,
-    #better-codex-panel .better-codex-filter-avatar.is-icon svg {
-      width: 10px;
-      height: 10px;
-      margin: auto;
     }
 
     #better-codex-panel .better-codex-filter-avatar.is-user.is-initials {
@@ -3935,19 +3923,11 @@ export function betterCodexFeatureStylesCss() {
       background: var(--bc-color-control);
     }
 
-    #better-codex-panel .better-codex-card-avatar img,
-    #better-codex-panel .better-codex-card-avatar svg {
+    #better-codex-panel .better-codex-card-avatar img {
       display: block;
       width: 100%;
       height: 100%;
       object-fit: cover;
-    }
-
-    #better-codex-panel .better-codex-card-avatar.is-fallback svg,
-    #better-codex-panel .better-codex-card-avatar.is-icon svg {
-      width: 10px;
-      height: 10px;
-      margin: auto;
     }
 
     #better-codex-panel .better-codex-card-avatar.is-user.is-initials {
@@ -4286,16 +4266,6 @@ export function betterCodexFeatureStylesCss() {
       background: transparent;
     }
 
-    #better-codex-panel .better-codex-agent-list-avatar svg {
-      width: 36px;
-      height: 36px;
-    }
-
-    #better-codex-panel .better-codex-agent-list-avatar.is-fallback svg {
-      width: 20px;
-      height: 20px;
-    }
-
     #better-codex-panel .better-codex-agent-list-avatar img {
       width: 100%;
       height: 100%;
@@ -4480,67 +4450,15 @@ export function betterCodexFeatureStylesCss() {
       background: var(--bc-color-surface);
     }
 
-    #better-codex-panel .better-codex-agent-suggestion-icon > svg {
-      width: 18px;
-      height: 18px;
-    }
-
-    #better-codex-panel .better-codex-agent-suggestion-icon[data-tone="info"] {
-      color: var(--bc-color-info);
-      background: color-mix(in oklch, var(--bc-color-info) 14%, var(--bc-color-surface));
-    }
-
-    #better-codex-panel .better-codex-agent-suggestion-icon[data-tone="success"] {
-      color: var(--bc-color-success);
-      background: color-mix(in oklch, var(--bc-color-success) 14%, var(--bc-color-surface));
-    }
-
-    #better-codex-panel .better-codex-agent-suggestion-icon[data-tone="warning"] {
-      color: var(--bc-color-warning);
-      background: color-mix(in oklch, var(--bc-color-warning) 16%, var(--bc-color-surface));
+    #better-codex-panel .better-codex-agent-suggestion-icon > img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      border-radius: inherit;
+      object-fit: cover;
     }
 
     #better-codex-panel .better-codex-agent-suggestion.is-selected {
-      background: var(--bc-color-control);
-    }
-
-    #better-codex-panel :is(.better-codex-filter-avatar, .better-codex-card-avatar, .better-codex-agent-list-avatar).is-icon,
-    #better-codex-context-menu .better-codex-context-avatar.is-icon,
-    #better-codex-dialog :is(.better-codex-agent-avatar, .better-codex-bubble-avatar).is-icon {
-      color: var(--bc-color-text-muted);
-      background: var(--bc-color-control);
-    }
-
-    #better-codex-panel .better-codex-agent-list-avatar.is-icon svg {
-      width: 18px;
-      height: 18px;
-    }
-
-    #better-codex-panel :is(.better-codex-filter-avatar, .better-codex-card-avatar, .better-codex-agent-list-avatar).is-icon[data-tone="info"],
-    #better-codex-context-menu .better-codex-context-avatar.is-icon[data-tone="info"],
-    #better-codex-dialog :is(.better-codex-agent-avatar, .better-codex-bubble-avatar).is-icon[data-tone="info"] {
-      color: var(--bc-color-info);
-      background: color-mix(in oklch, var(--bc-color-info) 14%, var(--bc-color-surface));
-    }
-
-    #better-codex-panel :is(.better-codex-filter-avatar, .better-codex-card-avatar, .better-codex-agent-list-avatar).is-icon[data-tone="success"],
-    #better-codex-context-menu .better-codex-context-avatar.is-icon[data-tone="success"],
-    #better-codex-dialog :is(.better-codex-agent-avatar, .better-codex-bubble-avatar).is-icon[data-tone="success"] {
-      color: var(--bc-color-success);
-      background: color-mix(in oklch, var(--bc-color-success) 14%, var(--bc-color-surface));
-    }
-
-    #better-codex-panel :is(.better-codex-filter-avatar, .better-codex-card-avatar, .better-codex-agent-list-avatar).is-icon[data-tone="warning"],
-    #better-codex-context-menu .better-codex-context-avatar.is-icon[data-tone="warning"],
-    #better-codex-dialog :is(.better-codex-agent-avatar, .better-codex-bubble-avatar).is-icon[data-tone="warning"] {
-      color: var(--bc-color-warning);
-      background: color-mix(in oklch, var(--bc-color-warning) 16%, var(--bc-color-surface));
-    }
-
-    #better-codex-panel :is(.better-codex-filter-avatar, .better-codex-card-avatar, .better-codex-agent-list-avatar).is-icon[data-tone="muted"],
-    #better-codex-context-menu .better-codex-context-avatar.is-icon[data-tone="muted"],
-    #better-codex-dialog :is(.better-codex-agent-avatar, .better-codex-bubble-avatar).is-icon[data-tone="muted"] {
-      color: var(--bc-color-text-muted);
       background: var(--bc-color-control);
     }
 
@@ -4797,22 +4715,6 @@ export function betterCodexFeatureStylesCss() {
       grid-column: 2;
     }
 
-    #better-codex-panel .better-codex-agent-profile-head .better-codex-agent-list-avatar svg {
-      width: 54px;
-      height: 54px;
-    }
-
-    #better-codex-panel .better-codex-agent-profile-head .better-codex-agent-list-avatar.is-fallback svg {
-      width: 27px;
-      height: 27px;
-    }
-
-    #better-codex-panel .better-codex-agent-profile-head .better-codex-agent-list-avatar.is-icon svg,
-    #better-codex-panel .better-codex-agent-avatar-field .better-codex-agent-list-avatar.is-icon svg {
-      width: 26px;
-      height: 26px;
-    }
-
     #better-codex-panel .better-codex-agent-inspector-scroll > h2 {
       margin: 0 0 22px;
       font-size: var(--bc-text-lg);
@@ -4834,21 +4736,6 @@ export function betterCodexFeatureStylesCss() {
       width: 54px;
       height: 54px;
       border-radius: var(--bc-radius-md);
-    }
-
-    #better-codex-panel .better-codex-agent-avatar-field .better-codex-agent-list-avatar svg {
-      width: 54px;
-      height: 54px;
-    }
-
-    #better-codex-panel .better-codex-agent-avatar-field .better-codex-agent-list-avatar.is-fallback svg {
-      width: 27px;
-      height: 27px;
-    }
-
-    #better-codex-panel .better-codex-agent-avatar-field .better-codex-agent-list-avatar.is-icon svg {
-      width: 26px;
-      height: 26px;
     }
 
     #better-codex-panel .better-codex-agent-avatar-field > div {
@@ -4886,7 +4773,7 @@ export function betterCodexFeatureStylesCss() {
       flex: 0 0 auto;
     }
 
-    #better-codex-panel .better-codex-agent-summary-logo svg {
+    #better-codex-panel .better-codex-agent-summary-logo img {
       width: 38px;
       height: 38px;
     }
@@ -5836,23 +5723,10 @@ export function betterCodexFeatureStylesCss() {
       background: var(--bc-color-control);
     }
 
-    #better-codex-dialog .better-codex-bubble-avatar.has-image img,
-    #better-codex-dialog .better-codex-bubble-avatar svg {
+    #better-codex-dialog .better-codex-bubble-avatar.has-image img {
       width: 100%;
       height: 100%;
       object-fit: cover;
-    }
-
-    #better-codex-dialog .better-codex-bubble-avatar.is-fallback svg,
-    #better-codex-dialog .better-codex-bubble-avatar.is-icon svg,
-    #better-codex-dialog .better-codex-bubble-avatar.is-user svg {
-      width: 14px;
-      height: 14px;
-    }
-
-    #better-codex-dialog .better-codex-bubble-avatar.is-codex svg {
-      width: 28px;
-      height: 28px;
     }
 
     #better-codex-dialog .better-codex-bubble-main {
@@ -7668,8 +7542,7 @@ export function betterCodexFeatureStylesCss() {
       overflow: hidden;
     }
 
-    .better-codex-completion-notice .better-codex-completion-avatar img,
-    .better-codex-completion-notice .better-codex-completion-avatar svg {
+    .better-codex-completion-notice .better-codex-completion-avatar img {
       width: 100%;
       height: 100%;
       display: block;
@@ -7808,10 +7681,12 @@ export function betterCodexFeatureStylesCss() {
       transition: box-shadow var(--bc-motion-fast) ease-out, transform var(--bc-motion-fast) var(--bc-ease-out);
     }
 
-    #better-codex-avatar-picker .better-codex-avatar-preset-visual > svg {
+    #better-codex-avatar-picker .better-codex-avatar-preset-visual > img {
       display: block;
-      width: 18px;
-      height: 18px;
+      width: 100%;
+      height: 100%;
+      border-radius: inherit;
+      object-fit: cover;
     }
 
     #better-codex-avatar-picker .better-codex-avatar-preset-visual[data-tone="info"] {

@@ -63,6 +63,7 @@ export function install(config: Record<string, any>) {
     const BASE_URL = config.baseUrl;
     const BRIDGE_TOKEN = config.bridgeToken;
     const BETTER_CODEX_LOGO_URL = config.logoUrl;
+    const DEFAULT_AGENT_AVATAR_URL = config.defaultAgentAvatarUrl;
     const INITIAL_LOCALE = config.initialLocale;
     const SELECTORS = HOST_KIND === "web" ? {
       sidebarScroll: "[data-app-action-sidebar-scroll]",
@@ -95,6 +96,7 @@ export function install(config: Record<string, any>) {
     const SIDEBAR_NAVIGATION_ITEM = SELECTORS.sidebarNavigationItem || ".sidebar-item";
     const LUCIDE_ICONS = config.lucideIcons;
     const AGENT_AVATAR_PRESETS = config.agentAvatarPresets;
+    const DEFAULT_PRESET_AVATAR_URL = AGENT_AVATAR_PRESETS.find(item => item.id === "bot").image;
     const USER_AVATAR_COLORS = config.userAvatarColors;
     const RESUME_SURFACE_KEY = "better-codex-resume-surface";
     const PROJECT_KEY = "better-codex-project-id";
@@ -144,7 +146,7 @@ export function install(config: Record<string, any>) {
     const initialAgentRoute = webAgentRoute();
     if (HOST_KIND === "web" && !hasFeature("project-management") && /^\/web\/projects(?:\/|$)/.test(location.pathname)) history.replaceState({ betterCodex: true, betterCodexSurface: "issues" }, "", "/web");
     const initialAgentKey = initialAgentRoute?.agentKey || "";
-    const state = { projects: [], projectsLoaded: false, issues: [], issuesLoaded: false, scheduledTasks: [], scheduledTasksLoaded: false, projectIssues: [], projectIssuesProjectId: "", projectDetailId: initialProjectRoute?.projectId || "", projectPage: "overview", projectDocumentView: "charter", projectDocumentPending: null, projectDocumentError: null, projectPlanningPending: null, projectPlanningError: null, agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: USER_AVATAR_COLORS[0], avatar: "", avatar_generated: true }, users: [], projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: initialAgentKey === "new" ? "create" : initialAgentKey ? "detail" : "preview", selectedAgentId: initialAgentKey && initialAgentKey !== "new" ? initialAgentKey : "", agentDraft: initialAgentKey === "new" ? { avatar: "icon:bot" } : null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: initialProjectRoute ? "projects" : initialAgentRoute ? "agents" : availableSurfaces.includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, autoDispatchPending: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", issueDescriptionLimit: 100000, mockup: false, keepCreate: rememberedKeepCreate, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], creator: [], project: [], label: [] } };
+    const state = { projects: [], projectsLoaded: false, issues: [], issuesLoaded: false, scheduledTasks: [], scheduledTasksLoaded: false, projectIssues: [], projectIssuesProjectId: "", projectDetailId: initialProjectRoute?.projectId || "", projectPage: "overview", projectDocumentView: "charter", projectDocumentPending: null, projectDocumentError: null, projectPlanningPending: null, projectPlanningError: null, agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: USER_AVATAR_COLORS[0], avatar: "", avatar_generated: true }, users: [], projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: initialAgentKey === "new" ? "create" : initialAgentKey ? "detail" : "preview", selectedAgentId: initialAgentKey && initialAgentKey !== "new" ? initialAgentKey : "", agentDraft: initialAgentKey === "new" ? { avatar: DEFAULT_PRESET_AVATAR_URL } : null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: initialProjectRoute ? "projects" : initialAgentRoute ? "agents" : availableSurfaces.includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, autoDispatchPending: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", issueDescriptionLimit: 100000, mockup: false, keepCreate: rememberedKeepCreate, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], creator: [], project: [], label: [] } };
     const pendingIssueRemovals = new Map();
     const pendingIssueCreates = new Map();
     const pendingIssueReplies = new Map();
@@ -861,7 +863,6 @@ export function install(config: Record<string, any>) {
     let sessionDropInFlight = false;
     const listRequests = new Map();
     let suppressSessionClickUntil = 0;
-    let codexLogoSequence = 0;
     let active = false;
     let bootstrapReady = false;
 
@@ -3520,8 +3521,7 @@ export function install(config: Record<string, any>) {
     }
 
     function codexLogo() {
-      const gradientId = "better-codex-logo-gradient-" + (++codexLogoSequence);
-      return '<svg viewBox="0 0 24 24" width="36" height="36" role="img" aria-label="Codex"><path d="M19.503 0H4.496A4.496 4.496 0 000 4.496v15.007A4.496 4.496 0 004.496 24h15.007A4.496 4.496 0 0024 19.503V4.496A4.496 4.496 0 0019.503 0z" fill="var(--bc-color-on-avatar)"></path><path d="M9.064 3.344a4.578 4.578 0 012.285-.312c1 .115 1.891.54 2.673 1.275.01.01.024.017.037.021a.09.09 0 00.043 0 4.55 4.55 0 013.046.275l.047.022.116.057a4.581 4.581 0 012.188 2.399c.209.51.313 1.041.315 1.595a4.24 4.24 0 01-.134 1.223.123.123 0 00.03.115c.594.607.988 1.33 1.183 2.17.289 1.425-.007 2.71-.887 3.854l-.136.166a4.548 4.548 0 01-2.201 1.388.123.123 0 00-.081.076c-.191.551-.383 1.023-.74 1.494-.9 1.187-2.222 1.846-3.711 1.838-1.187-.006-2.239-.44-3.157-1.302a.107.107 0 00-.105-.024c-.388.125-.78.143-1.204.138a4.441 4.441 0 01-1.945-.466 4.544 4.544 0 01-1.61-1.335c-.152-.202-.303-.392-.414-.617a5.81 5.81 0 01-.37-.961 4.582 4.582 0 01-.014-2.298.124.124 0 00.006-.056.085.085 0 00-.027-.048 4.467 4.467 0 01-1.034-1.651 3.896 3.896 0 01-.251-1.192 5.189 5.189 0 01.141-1.6c.337-1.112.982-1.985 1.933-2.618.212-.141.413-.251.601-.33.215-.089.43-.164.646-.227a.098.098 0 00.065-.066 4.51 4.51 0 01.829-1.615 4.535 4.535 0 011.837-1.388zm3.482 10.565a.637.637 0 000 1.272h3.636a.637.637 0 100-1.272h-3.636zM8.462 9.23a.637.637 0 00-1.106.631l1.272 2.224-1.266 2.136a.636.636 0 101.095.649l1.454-2.455a.636.636 0 00.005-.64L8.462 9.23z" fill="url(#' + gradientId + ')"></path><defs><linearGradient gradientUnits="userSpaceOnUse" id="' + gradientId + '" x1="12" x2="12" y1="3" y2="21"><stop stop-color="var(--bc-logo-gradient-start)"></stop><stop offset=".5" stop-color="var(--bc-logo-gradient-middle)"></stop><stop offset="1" stop-color="var(--bc-logo-gradient-end)"></stop></linearGradient></defs></svg>';
+      return '<img src="' + escapeHtml(DEFAULT_AGENT_AVATAR_URL) + '" alt="Codex">';
     }
 
     function betterCodexLogo() {
@@ -4373,22 +4373,62 @@ export function install(config: Record<string, any>) {
       return agent.is_default ? "default" : agent.id;
     }
 
-    function parseIconAvatar(avatar) {
-      const match = String(avatar || "").match(/^icon:([a-z0-9_-]+)$/i);
-      if (!match) return null;
-      return AGENT_AVATAR_PRESETS.find(item => item.id === match[1]) || null;
+    function parseAgentAvatarPreset(avatar) {
+      const value = String(avatar || "");
+      const match = value.match(/^icon:([a-z0-9_-]+)$/i);
+      return AGENT_AVATAR_PRESETS.find(item => item.id === match?.[1] || item.image === value) || null;
+    }
+
+    function rasterAgentAvatarPng(value) {
+      const source = String(value || "");
+      if (/^data:image\/png;base64,/.test(source)) return Promise.resolve(source);
+      const preset = parseAgentAvatarPreset(source);
+      if (preset) return Promise.resolve(preset.image);
+      if (!/^data:image\/(?:jpeg|webp);base64,/.test(source)) return Promise.reject(new Error("invalid_agent_avatar_format"));
+      return new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => {
+          const canvas = document.createElement("canvas");
+          canvas.width = 256;
+          canvas.height = 256;
+          const context = canvas.getContext("2d");
+          if (!context) return reject(new Error("avatar_canvas_unavailable"));
+          context.drawImage(image, 0, 0, 256, 256);
+          const png = canvas.toDataURL("image/png");
+          if (png.length > 400000) return reject(new Error("agent_avatar_png_too_large"));
+          resolve(png);
+        };
+        image.onerror = () => reject(new Error("agent_avatar_png_conversion_failed"));
+        image.src = source;
+      });
+    }
+
+    async function normalizeAgentAvatarPngs(agents) {
+      const normalized = [];
+      for (const agent of agents) {
+        const source = String(agent?.avatar || "");
+        if (!source || /^data:image\/png;base64,/.test(source)) {
+          normalized.push(agent);
+          continue;
+        }
+        const avatar = await rasterAgentAvatarPng(source);
+        const next = { ...agent, avatar };
+        if (!AGENTS_READ_ONLY) {
+          const path = agent.is_default ? "/api/agents/default/avatar" : "/api/agents/" + encodeURIComponent(agent.id) + "/avatar";
+          await api(path, { method: "PATCH", body: JSON.stringify({ avatar }) });
+        }
+        normalized.push(next);
+      }
+      return normalized;
     }
 
     function agentAvatarMarkup(agent, className) {
       const branded = Boolean(agent?.is_default);
-      const preset = parseIconAvatar(agent?.avatar);
+      const preset = parseAgentAvatarPreset(agent?.avatar);
       const customized = Boolean(agent?.avatar) && !preset;
-      const content = customized
-        ? '<img src="' + escapeHtml(agent.avatar) + '" alt="">'
-        : preset ? icon(preset.icon, "", "2.2")
-        : branded ? codexLogo() : icon("bot");
-      const tone = preset ? ' data-tone="' + escapeHtml(preset.tone) + '"' : "";
-      return '<span class="' + className + (customized ? " has-image" : preset ? " is-icon" : branded ? " is-codex" : " is-fallback") + '"' + tone + '>' + content + '</span>';
+      const fallback = AGENT_AVATAR_PRESETS.find(item => item.id === "bot");
+      const content = customized ? '<img src="' + escapeHtml(agent.avatar) + '" alt="">' : preset ? '<img src="' + escapeHtml(preset.image) + '" alt="">' : branded ? codexLogo() : '<img src="' + escapeHtml(fallback.image) + '" alt="">';
+      return '<span class="' + className + " has-image" + (preset ? " is-preset" : branded ? " is-codex" : customized ? "" : " is-fallback") + '">' + content + '</span>';
     }
 
     function issueUserProfile(issue) {
@@ -4462,15 +4502,15 @@ export function install(config: Record<string, any>) {
     function syncAgentAvatar(node, agent) {
       if (!node) return;
       const branded = Boolean(agent?.is_default);
-      const preset = parseIconAvatar(agent?.avatar);
+      const preset = parseAgentAvatarPreset(agent?.avatar);
       const customized = Boolean(agent?.avatar) && !preset;
-      node.classList.toggle("has-image", customized);
-      node.classList.toggle("is-icon", Boolean(preset));
+      const fallback = AGENT_AVATAR_PRESETS.find(item => item.id === "bot");
+      node.classList.add("has-image");
+      node.classList.toggle("is-preset", Boolean(preset));
       node.classList.toggle("is-codex", !customized && !preset && branded);
       node.classList.toggle("is-fallback", !customized && !preset && !branded);
-      if (preset) node.setAttribute("data-tone", preset.tone);
-      else node.removeAttribute("data-tone");
-      node.innerHTML = customized ? '<img src="' + escapeHtml(agent.avatar) + '" alt="">' : preset ? icon(preset.icon, "", "2.2") : branded ? codexLogo() : icon("bot");
+      node.removeAttribute("data-tone");
+      node.innerHTML = customized ? '<img src="' + escapeHtml(agent.avatar) + '" alt="">' : preset ? '<img src="' + escapeHtml(preset.image) + '" alt="">' : branded ? codexLogo() : '<img src="' + escapeHtml(fallback.image) + '" alt="">';
     }
 
     function agentAvatarEditorMarkup(agent, key) {
@@ -4486,8 +4526,8 @@ export function install(config: Record<string, any>) {
         picker.setAttribute(OWNED, "true");
         picker.setAttribute("role", "dialog");
         picker.setAttribute("aria-label", t("选择头像"));
-        const currentPreset = parseIconAvatar(current)?.id || "";
-        const presets = AGENT_AVATAR_PRESETS.map(item => '<button class="better-codex-avatar-preset' + (item.id === currentPreset ? " is-selected" : "") + '" type="button" data-avatar-preset="' + escapeHtml(item.id) + '" title="' + te(item.label) + '" aria-label="' + te(item.label) + '" aria-pressed="' + (item.id === currentPreset) + '"><span class="better-codex-avatar-preset-visual is-icon" data-tone="' + escapeHtml(item.tone) + '">' + icon(item.icon, "", "2.25") + '</span><span class="better-codex-avatar-preset-label">' + te(item.label) + "</span></button>").join("");
+        const currentPreset = parseAgentAvatarPreset(current)?.id || "";
+        const presets = AGENT_AVATAR_PRESETS.map(item => '<button class="better-codex-avatar-preset' + (item.id === currentPreset ? " is-selected" : "") + '" type="button" data-avatar-preset="' + escapeHtml(item.id) + '" title="' + te(item.label) + '" aria-label="' + te(item.label) + '" aria-pressed="' + (item.id === currentPreset) + '"><span class="better-codex-avatar-preset-visual"><img src="' + escapeHtml(item.image) + '" alt=""></span><span class="better-codex-avatar-preset-label">' + te(item.label) + "</span></button>").join("");
         picker.innerHTML = '<div class="better-codex-avatar-picker-shell"><header><div><strong>' + te("选择头像") + '</strong><span>' + te("从预设图标中选择，也可以上传图片") + '</span></div><button type="button" data-avatar-picker-cancel aria-label="' + te("关闭") + '">' + icon("close") + '</button></header><div class="better-codex-avatar-preset-grid" role="listbox" aria-label="' + te("预设头像") + '">' + presets + '</div><footer><button type="button" data-avatar-picker-cancel>' + te("取消") + '</button><button class="is-primary" type="button" data-avatar-picker-upload>' + icon("image") + '<span>' + te("上传图片") + '</span></button></footer></div>';
         let settled = false;
         const finish = value => {
@@ -4532,7 +4572,7 @@ export function install(config: Record<string, any>) {
         };
         document.body.appendChild(picker);
         position();
-        picker.querySelectorAll("[data-avatar-preset]").forEach(button => button.addEventListener("click", () => finish("icon:" + button.dataset.avatarPreset)));
+        picker.querySelectorAll("[data-avatar-preset]").forEach(button => button.addEventListener("click", () => finish(AGENT_AVATAR_PRESETS.find(item => item.id === button.dataset.avatarPreset)?.image || null)));
         picker.querySelectorAll("[data-avatar-picker-cancel]").forEach(button => button.addEventListener("click", () => finish(null)));
         picker.querySelector("[data-avatar-picker-upload]").addEventListener("click", () => finish("__upload__"));
         window.addEventListener("resize", position);
@@ -4614,7 +4654,7 @@ export function install(config: Record<string, any>) {
             output.width = 256;
             output.height = 256;
             output.getContext("2d").drawImage(canvas, 0, 0, 256, 256);
-            finish(output.toDataURL("image/webp", .86));
+            finish(output.toDataURL("image/png"));
           });
           dialog.addEventListener("cancel", event => { event.preventDefault(); finish(null); });
           bindModalDismiss(dialog, () => finish(null));
@@ -5013,7 +5053,8 @@ export function install(config: Record<string, any>) {
       const empty = '<div class="better-codex-agent-list-empty">' + te(query ? "没有匹配的智能体" : "此分类暂无智能体") + '</div>';
       const suggestions = suggestedAgents.map(item => {
         const selected = state.agentPane === "create" && state.agentDraft?.key === item.key;
-        return '<button class="better-codex-agent-suggestion' + (selected ? " is-selected" : "") + '" type="button" data-agent-template="' + item.key + '" aria-pressed="' + selected + '"><span class="better-codex-agent-suggestion-icon" data-tone="' + escapeHtml(item.tone) + '">' + icon(item.icon, "", "2.4") + '</span><span><strong>' + te(item.name) + '</strong><small>' + te(item.description) + '</small></span></button>';
+        const avatar = AGENT_AVATAR_PRESETS.find(preset => preset.id === item.key) || AGENT_AVATAR_PRESETS.find(preset => preset.id === "bot");
+        return '<button class="better-codex-agent-suggestion' + (selected ? " is-selected" : "") + '" type="button" data-agent-template="' + item.key + '" aria-pressed="' + selected + '"><span class="better-codex-agent-suggestion-icon"><img src="' + escapeHtml(avatar.image) + '" alt=""></span><span><strong>' + te(item.name) + '</strong><small>' + te(item.description) + '</small></span></button>';
       }).join("");
       const animateEnter = previousPane === "preview" && state.agentPane !== "preview";
       container.innerHTML = '<div class="better-codex-agent-shell" data-pane="' + state.agentPane + '"><section class="better-codex-agent-directory"><header class="better-codex-agent-page-heading"><h1>' + te("智能体") + '</h1><p>' + te("创建和管理你的智能体") + '</p></header><div class="better-codex-agent-search-wrap">' + icon("search") + '<input class="better-codex-search" data-agent-search type="search" value="' + escapeHtml(state.agentSearch) + '" placeholder="' + te("搜索智能体") + '" aria-label="' + te("搜索智能体") + '"></div><div class="better-codex-agent-list">' + (rows || empty) + '</div>' + (state.agentView === "all" && !query ? '<div class="better-codex-agent-suggestions"><h3>' + te("建议") + '</h3>' + suggestions + '</div>' : "") + '</section>' + agentInspector(selected, { animateEnter }) + '</div>';
@@ -5052,7 +5093,7 @@ export function install(config: Record<string, any>) {
       const defaultAgent = state.agents.find(agent => agent.is_default);
       const options = [{ value: "", label: t("使用默认智能体"), agent: defaultAgent }, ...state.agents.filter(agent => !agent.is_default && agent.id).map(agent => ({ value: agent.id, label: agentDisplayName(agent), agent }))];
       const current = options.find(option => option.value === selectedId) || options[0];
-      const avatar = option => option.agent ? agentAvatarMarkup(option.agent, "better-codex-project-document-agent-avatar") : '<span class="better-codex-project-document-agent-avatar">' + icon("bot") + '</span>';
+      const avatar = option => option.agent ? agentAvatarMarkup(option.agent, "better-codex-project-document-agent-avatar") : '<span class="better-codex-project-document-agent-avatar">' + codexLogo() + '</span>';
       const rows = options.map(option => '<button class="better-codex-agent-menu-item' + (option.value === current.value ? " is-selected" : "") + '" type="button" role="option" aria-selected="' + String(option.value === current.value) + '" data-project-document-agent-option="' + escapeHtml(option.value) + '"><span class="better-codex-agent-menu-item-copy">' + avatar(option) + '<span>' + escapeHtml(option.label) + '</span></span><span class="better-codex-agent-menu-item-check">' + (option.value === current.value ? icon("check") : "") + '</span></button>').join("");
       return '<div class="better-codex-project-document-agent-picker better-codex-agent-setting" data-project-document-agent-picker><span>' + te("生成智能体") + '</span><input type="hidden" name="agent_id" value="' + escapeHtml(current.value) + '"><button class="better-codex-agent-picker-trigger" type="button" role="combobox" aria-haspopup="listbox" aria-expanded="false" data-project-document-agent-toggle><span>' + avatar(current) + '<span data-project-document-agent-label>' + escapeHtml(current.label) + '</span></span>' + icon("chevron") + '</button><div class="better-codex-agent-menu" role="listbox"><div class="better-codex-agent-menu-title">' + te("生成智能体") + '</div>' + rows + '</div></div>';
     }
@@ -5231,7 +5272,7 @@ export function install(config: Record<string, any>) {
         : '<div class="better-codex-project-planning-starters"><span>' + te("从一个问题开始，智能体会读取代码、Issue 和关联会话。") + '</span>' + ["梳理这个项目的目标、范围和非目标", "根据当前代码和 Issue 生成下一阶段计划", "找出当前最大的风险、依赖和待确认问题"].map(prompt => '<button type="button" data-project-planning-prompt="' + escapeHtml(prompt) + '">' + escapeHtml(t(prompt)) + icon("chevron") + '</button>').join("") + '</div>';
       const selectedAgent = state.agents.find(agent => agentKey(agent) === String(planning.agent_id || "default"));
       const agentControl = planning.messages.length || planning.agent_id
-        ? '<input type="hidden" name="agent_id" value="' + escapeHtml(planning.agent_id || "") + '"><span class="better-codex-project-planning-agent">' + (selectedAgent ? agentAvatarMarkup(selectedAgent, "better-codex-project-document-agent-avatar") + '<span>' + escapeHtml(agentDisplayName(selectedAgent)) + '</span>' : icon("bot") + '<span>' + te("使用默认智能体") + '</span>') + '</span>'
+        ? '<input type="hidden" name="agent_id" value="' + escapeHtml(planning.agent_id || "") + '"><span class="better-codex-project-planning-agent">' + (selectedAgent ? agentAvatarMarkup(selectedAgent, "better-codex-project-document-agent-avatar") + '<span>' + escapeHtml(agentDisplayName(selectedAgent)) + '</span>' : '<span class="better-codex-project-document-agent-avatar">' + codexLogo() + '</span><span>' + te("使用默认智能体") + '</span>') + '</span>'
         : projectDocumentAgentPicker("");
       const inlineError = state.projectPlanningError?.projectId === project.id ? '<output data-tone="' + escapeHtml(state.projectPlanningError.tone || "danger") + '">' + escapeHtml(state.projectPlanningError.message) + '</output>' : "";
       const draft = projectPlanningDrafts.get(project.id) || "";
@@ -7011,17 +7052,12 @@ export function install(config: Record<string, any>) {
       });
     }
 
-    function boardMarkupSignature(markup) {
-      return markup.replace(/better-codex-logo-gradient-\d+/g, "better-codex-logo-gradient");
-    }
-
     function syncBoardElement(current, next) {
       const markup = next.innerHTML;
-      const signature = boardMarkupSignature(markup);
       syncBoardAttributes(current, next);
-      if (current.__betterCodexMarkup === signature) return;
+      if (current.__betterCodexMarkup === markup) return;
       if (current.innerHTML !== markup) current.innerHTML = markup;
-      current.__betterCodexMarkup = signature;
+      current.__betterCodexMarkup = markup;
     }
 
     function reconcileBoard(board, markup) {
@@ -7040,8 +7076,8 @@ export function install(config: Record<string, any>) {
         const currentCardsContainer = currentColumn?.querySelector(":scope > .better-codex-cards");
         if (!currentColumn || !nextHead || !nextCards || !currentHead || !currentCardsContainer) {
           currentColumn = nextColumn;
-          if (nextHead) nextHead.__betterCodexMarkup = boardMarkupSignature(nextHead.innerHTML);
-          Array.from(nextCards?.children || []).forEach(card => { card.__betterCodexMarkup = boardMarkupSignature(card.innerHTML); });
+          if (nextHead) nextHead.__betterCodexMarkup = nextHead.innerHTML;
+          Array.from(nextCards?.children || []).forEach(card => { card.__betterCodexMarkup = card.innerHTML; });
         } else {
           syncBoardAttributes(currentColumn, nextColumn);
           syncBoardElement(currentHead, nextHead);
@@ -7051,7 +7087,7 @@ export function install(config: Record<string, any>) {
             let currentCard = issueId ? currentCards.get(issueId) : Array.from(currentCardsContainer.children).find(card => !card.dataset.issueId);
             if (!currentCard || currentCard.tagName !== nextCard.tagName) {
               currentCard = nextCard;
-              currentCard.__betterCodexMarkup = boardMarkupSignature(currentCard.innerHTML);
+              currentCard.__betterCodexMarkup = currentCard.innerHTML;
             }
             else syncBoardElement(currentCard, nextCard);
             retainedCards.add(currentCard);
@@ -7223,7 +7259,7 @@ export function install(config: Record<string, any>) {
     }
 
     async function loadAgents(options = {}) {
-      const agents = await requestList("/api/agents", "agents", { passive: Boolean(options.background) });
+      const agents = await normalizeAgentAvatarPngs(await requestList("/api/agents", "agents", { passive: Boolean(options.background) }));
       const changed = JSON.stringify(agents) !== JSON.stringify(state.agents);
       state.agents = agents;
       if (state.surface === "agents" && state.agentPane === "detail" && !agents.some(agent => agentKey(agent) === state.selectedAgentId)) {
@@ -7305,6 +7341,7 @@ export function install(config: Record<string, any>) {
           if (!(error instanceof Error) || error.message !== "invalid_agents_response") throw error;
           state.agents = await requestList("/api/agents", "agents");
         }
+        state.agents = await normalizeAgentAvatarPngs(state.agents);
         try {
           state.projects = listResponse(bootstrap.projects, "/api/bootstrap", "projects");
         } catch (error) {
@@ -7351,11 +7388,12 @@ export function install(config: Record<string, any>) {
 
     function startAgentCreate(draft = null) {
       if (AGENTS_READ_ONLY) return;
+      const fallbackAvatar = AGENT_AVATAR_PRESETS.find(item => item.id === "bot").image;
       state.agentPane = "create";
       state.selectedAgentId = "";
       state.agentDraft = draft
-        ? { ...draft, avatar: draft.avatar || ("icon:" + draft.key) }
-        : { avatar: "icon:bot" };
+        ? { ...draft, avatar: draft.avatar || AGENT_AVATAR_PRESETS.find(item => item.id === draft.key)?.image || fallbackAvatar }
+        : { avatar: fallbackAvatar };
       syncWebAgentRoute("new");
       renderAgents();
       setTimeout(() => panel?.querySelector('[data-agent-form="create"] [data-agent-name]')?.focus(), 0);
@@ -10580,7 +10618,7 @@ export function install(config: Record<string, any>) {
         const agentKey = typeof options.agentKey === "string" ? options.agentKey : "";
         state.agentPane = agentKey === "new" ? "create" : agentKey ? "detail" : "preview";
         state.selectedAgentId = agentKey && agentKey !== "new" ? agentKey : "";
-        state.agentDraft = agentKey === "new" ? { avatar: "icon:bot" } : null;
+        state.agentDraft = agentKey === "new" ? { avatar: DEFAULT_PRESET_AVATAR_URL } : null;
         if (HOST_KIND === "web") {
           if (options.history === "none" && agentKey && !history.state?.betterCodexAgentFromList) {
             syncWebAgentRoute("", "replace");

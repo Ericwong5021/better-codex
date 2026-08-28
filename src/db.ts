@@ -2580,6 +2580,16 @@ export class Store {
     return dataUrl;
   }
 
+  migrateAgentAvatarPresets(resolve: (value: string) => string) {
+    const rows = this.db.prepare("SELECT agent_id, data_url FROM agent_avatars WHERE data_url LIKE 'icon:%'").all() as Array<{ agent_id: string; data_url: string }>;
+    if (!rows.length) return 0;
+    const update = this.db.prepare("UPDATE agent_avatars SET data_url = ?, updated_at = ? WHERE agent_id = ? AND data_url = ?");
+    this.transaction(() => {
+      for (const row of rows) update.run(resolve(row.data_url), now(), row.agent_id, row.data_url);
+    });
+    return rows.length;
+  }
+
   createAgentProfile(input: AgentProfileInput) {
     const profile = cleanAgentProfile(input);
     const id = randomUUID();

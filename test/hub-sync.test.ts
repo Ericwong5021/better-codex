@@ -98,8 +98,8 @@ test("Hub mirrors the privacy-filtered projection with durable idempotent sync",
     const board = hub.store.board();
     assert.equal(board.issues.find(item => item.id === issue.id)?.title, "Safe projection");
     assert.equal(board.agents.find(item => item.id === agent.id)?.name, "Remote Agent");
-    assert.equal(board.agents.find(item => item.id === agent.id)?.avatar, "icon:reviewer");
-    assert.equal(board.default_avatar, "icon:sparkles");
+    assert.match(board.agents.find(item => item.id === agent.id)?.avatar || "", /^data:image\/png;base64,/);
+    assert.match(board.default_avatar, /^data:image\/png;base64,/);
     assert.equal(board.runtime?.health_state, "online");
     assert.deepEqual(board.runtime?.usage, expectedUsage);
     assert.equal(hub.store.changeWindow(0).changes.some(change => change.entity_type === "runtime"), true);

@@ -45,11 +45,16 @@ const embedBrandAssets = {
       const logo = readFileSync(join(root, "assets", "better-codex.png")).toString("base64");
       const webIcon192 = readFileSync(join(root, "assets", "web", "better-codex-icon-192.png")).toString("base64");
       const webIcon512 = readFileSync(join(root, "assets", "web", "better-codex-icon-512.png")).toString("base64");
+      const agentAvatarIds = ["codex", "reviewer", "frontend", "debugger", "bot", "terminal", "wrench", "code", "test", "docs", "shield", "database", "sparkles"];
+      const agentAvatars = Object.fromEntries(agentAvatarIds.map(id => [id, readFileSync(join(root, "assets", "agent-avatars", `${id}.png`)).toString("base64")]));
       return {
         contents: `export function appIconIcns(){return Buffer.from(${javascriptStringLiteral(icns)},"base64")}
 export function appIconIco(){return Buffer.from(${javascriptStringLiteral(ico)},"base64")}
 export function betterCodexLogoPng(){return Buffer.from(${javascriptStringLiteral(logo)},"base64")}
 export function betterCodexWebIconPng(size){return Buffer.from(size===192?${javascriptStringLiteral(webIcon192)}:${javascriptStringLiteral(webIcon512)},"base64")}
+const agentAvatars=${JSON.stringify(agentAvatars)}
+export function agentAvatarPng(id){const value=agentAvatars[id];if(!value)throw new Error("agent_avatar_asset_invalid:"+id);return Buffer.from(value,"base64")}
+export function agentAvatarPngDataUrl(id){return "data:image/png;base64,"+agentAvatarPng(id).toString("base64")}
 `,
         loader: "js",
       };

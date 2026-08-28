@@ -262,6 +262,11 @@ test("recovers after a Runtime restart with a new Web session", async ({ page })
     method: "POST",
     body: JSON.stringify({ name: "Notification restart project", workspace_path: workspacePath }),
   }), runtime.workspacePath);
+  await page.evaluate(async () => await (window as any).betterCodexHost.request({
+    path: "/api/agents/default/avatar",
+    method: "PATCH",
+    body: JSON.stringify({ avatar: "icon:sparkles" }),
+  }));
   const issue = await page.evaluate(async projectId => await (window as any).betterCodexHost.request({
     path: "/api/issues",
     method: "POST",
@@ -275,6 +280,8 @@ test("recovers after a Runtime restart with a new Web session", async ({ page })
   await page.reload();
   const notice = page.locator(".better-codex-completion-notice", { hasText: "Runtime restart notification" });
   await expect(notice).toBeVisible();
+  await expect(notice.locator(".better-codex-completion-avatar img")).toHaveAttribute("src", /^data:image\/png;base64,/);
+  await expect(notice.locator(".better-codex-completion-avatar svg")).toHaveCount(0);
   await expect(notice.locator(".better-codex-completion-close")).toBeVisible();
   await notice.locator("[data-completion-menu-toggle]").click();
   await notice.locator("[data-completion-suppress]").click();

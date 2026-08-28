@@ -25,7 +25,7 @@ import { IssueWorker } from "./worker.js";
 import { maxMockupBytes, normalizeMockupLocale, readMockupState, replaceMockupState, resetMockupState, updateMockupState } from "./mockup.js";
 import { injectionScript } from "./dom.js";
 import { betterCodexWebHostCss, betterCodexWebHostHtml, betterCodexWebHostJavaScript } from "./web-host.js";
-import { betterCodexWebIconPng } from "./brand-assets.js";
+import { agentAvatarPngDataUrl, betterCodexWebIconPng } from "./brand-assets.js";
 import { betterCodexWebManifest, betterCodexWebServiceWorker } from "./web-app.js";
 import { SyncClient } from "./sync-client.js";
 import { readSyncConfiguration, removeSyncConfiguration } from "./sync-config.js";
@@ -664,8 +664,9 @@ function asAgentAvatar(value: unknown) {
   if (value === undefined) return undefined;
   if (typeof value !== "string" || value.length > 400000) throw new Error("invalid_agent_avatar");
   if (!value) return "";
-  if (/^icon:[a-z0-9_-]{1,32}$/i.test(value)) return value.toLowerCase();
-  if (!/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(value)) throw new Error("invalid_agent_avatar");
+  const preset = value.match(/^icon:([a-z0-9_-]{1,32})$/i);
+  if (preset) return agentAvatarPngDataUrl(preset[1].toLowerCase());
+  if (!/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(value)) throw new Error("invalid_agent_avatar");
   return value;
 }
 
@@ -789,6 +790,12 @@ export function startServer() {
   let store: Store;
   try {
     store = new Store();
+    const migratedAgentAvatars = store.migrateAgentAvatarPresets(value => {
+      const match = value.match(/^icon:([a-z0-9_-]{1,32})$/i);
+      if (!match) throw new Error("invalid_agent_avatar_preset");
+      return agentAvatarPngDataUrl(match[1].toLowerCase());
+    });
+    if (migratedAgentAvatars) console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "agent_avatar", event: "avatar_presets_migrated_to_png", count: migratedAgentAvatars, runtime_instance_id: identity.instanceId, runtime_pid: identity.pid, runtime_started_at: identity.processStartedAt, runtime_version: identity.version })}`);
     if (remoteMode === "relay") disableProjectionSync(databasePath);
     if (!mockupEnabled) syncAgentProfiles(store.listAgentProfiles());
   } catch (error) {

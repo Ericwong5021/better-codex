@@ -6,6 +6,7 @@ import { readModelCatalog } from "./model-catalog.js";
 import { readSyncConfiguration, type SyncConfiguration } from "./sync-config.js";
 import { legacySyncProtocolVersion, supportedSyncProtocolVersions, syncProtocolVersion, type AgentDirectoryProjection, type AgentModelCatalogProjection, type CodexUsageProjection, type ConversationProjection, type DirectoryBrowserResult, type RemoteCommand, type RemoteCommandAck, type RemoteFilePayload, type RuntimeProjection, type SyncChange, type SyncProtocolVersion, type SyncPushResponse } from "./sync-contract.js";
 import { controlCapabilities, controlProtocolVersion, decodeControlMessage, encodeControlMessage } from "./control-protocol.js";
+import { agentAvatarPngDataUrl } from "./brand-assets.js";
 
 type SyncState = {
   connected: boolean;
@@ -19,6 +20,11 @@ type SyncState = {
 
 function errorCode(error: unknown) {
   return error instanceof Error ? error.message : "sync_failed";
+}
+
+function synchronizedAgentAvatar(value: string) {
+  const match = value.match(/^icon:([a-z0-9_-]{1,32})$/i);
+  return match ? agentAvatarPngDataUrl(match[1].toLowerCase()) : value;
 }
 
 async function hubRequest<T>(configuration: SyncConfiguration, path: string, options: RequestInit = {}) {
@@ -408,12 +414,12 @@ export class SyncClient {
       name_en: profile.name_en,
       description: profile.description,
       ...(protocolVersion !== legacySyncProtocolVersion ? { model: profile.model, reasoning_effort: profile.reasoning_effort, service_tier: profile.service_tier } : {}),
-      avatar: this.store.getAgentAvatar(profile.id),
+      avatar: synchronizedAgentAvatar(this.store.getAgentAvatar(profile.id)),
       version: profile.version,
       created_at: profile.created_at,
       updated_at: profile.updated_at,
     }));
-    const defaultAvatar = this.store.getAgentAvatar("default");
+    const defaultAvatar = synchronizedAgentAvatar(this.store.getAgentAvatar("default"));
     const hash = createHash("sha256").update(JSON.stringify({ agents, defaultAvatar })).digest("hex");
     const projection: AgentDirectoryProjection = {
       id: "agents",
