@@ -4,7 +4,30 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
-## [0.4.10-beta.45] - 2026-08-28
+## [0.4.10] - 2026-08-28
+
+### Added
+
+- Share one generated browser UI across Codex injection, local Web, and Relay Web with canonical design tokens and reusable component lifecycles.
+- Persist ordered structured composer input and resolve Codex semantic mentions through the active Session Host with opaque Relay-safe candidates.
+- Show live Codex token activity and keep attachments, skills, file mentions, and slash commands available in Issue conversations.
+- Promote project management to the Release feature set while keeping scheduled tasks on the Preview channel.
+- Support multiple administrator-created Relay Web accounts, editable profiles, and authenticated VPS upgrades from the Web workspace.
+
+### Changed
+
+- Run Session Host as a single instance with a catalog App Server and disposable thread workers, and hand native threads back without a second writer.
+- Activate Runtime updates transactionally through drain, handoff replay, reconciliation, and readiness recovery.
+- Collect Codex activity through one Runtime-owned resident watcher and keep Relay update checks on the VPS service.
+
+### Fixed
+
+- Keep Issue creator identity, reply recovery, Agent creation, archived dialogs, and compact mobile layouts consistent across local and Relay views.
+- Preserve attachments, queued replies, Session Host deliveries, and native-thread handoff across Runtime replacements and bounded interruptions.
+- Keep installation, MCP and system-service registration, and signed exact-version updates bound to the current managed Core.
+- Separate Runtime and Relay update routes so remote About and service upgrades cannot change the local installation.
+
+
 
 - Keep remote-service update actions from changing the local Runtime when an older Relay forwards update endpoints, and document the one-time VPS bridge required for beta.43 and earlier.
 
@@ -985,7 +1008,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.45...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10...HEAD
+[0.4.10]: https://github.com/Ericwong5021/better-codex/compare/v0.4.9...v0.4.10
 [0.4.10-beta.45]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.44...v0.4.10-beta.45
 [0.4.10-beta.44]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.43...v0.4.10-beta.44
 [0.4.10-beta.43]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.42...v0.4.10-beta.43
