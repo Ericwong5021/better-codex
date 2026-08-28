@@ -7,6 +7,7 @@ import { betterCodexWebIconPng } from "./brand-assets.js";
 import { createWebCommand, webCommandAcknowledgesQueue, webCommandTarget } from "./command-contract.js";
 import { coreVersion } from "./compatibility.js";
 import { deviceAuthorizationPage } from "./device-authorization-page.js";
+import { HubUpdater, type HubUpdateState } from "./hub-updater.js";
 import { clearRelaySessionCookie, parseCookies, passwordHash, passwordMatches, readHubSecret, relaySessionCookie, validateWebPassword, validateWebUsername } from "./relay-auth.js";
 import { decodeRelayMessage, encodeRelayMessage, relayCapabilities, relayInitialWindowBytes, relayMaxChunkBytes, relayProtocolVersion, relayRuntimeReconnectCloseCode, relayRuntimeStoppedCloseCode, relayWebSocketProtocol, type RelayHello, type RelayMessage } from "./relay-protocol.js";
 import { RelayStore, type RelayCommand } from "./relay-store.js";
@@ -32,6 +33,7 @@ export type RelayServerOptions = {
   maxBufferedResponseBytes?: number;
   reconnectGraceMs?: number;
   maxReplayAttempts?: number;
+  updaterDirectory?: string;
 };
 
 type DeviceAuthorization = {
@@ -361,11 +363,15 @@ export function createRelayServer(options: RelayServerOptions) {
   const maxReplayAttempts = options.maxReplayAttempts || 3;
   const authorizations = new Map<string, DeviceAuthorization>();
   const loginAttempts = new Map<string, { count: number; resetAt: number }>();
+  const updater = new HubUpdater(options.updaterDirectory);
   let runtime: ActiveRuntime | null = null;
   let reconnectingRuntime: ReconnectingRuntime | null = null;
   let reconnectGraceTimeout: NodeJS.Timeout | null = null;
   const retryableChannels = new Map<string, RelayChannel>();
   const commandWaiters = new Map<string, Set<{ response: ServerResponse; timeout: NodeJS.Timeout }>>();
+  const updateDiagnostic = (event: string, state: HubUpdateState, detail: Record<string, unknown> = {}) => {
+    console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "relay_update", event, relay_version: coreVersion, runtime_instance_id: runtime?.runtimeInstanceId || null, runtime_core_version: runtime?.coreVersion || null, update_status: state.status, current_version: state.currentVersion, target_version: state.latestVersion, install_supported: state.installSupported, error: state.error, ...detail })}`);
+  };
   const syncActiveChannels = (active: ActiveRuntime) => {
     active.activeChannels = active.channels.size + active.commandChannels.size;
   };
@@ -994,6 +1000,33 @@ export function createRelayServer(options: RelayServerOptions) {
       if (url.pathname === "/health" && method === "GET") {
         if (!session) return sendJson(response, 401, { error: "unauthorized" });
         return forwardRequest(request, response, url, method, session.id, session.user.id);
+      }
+      if (url.pathname === "/api/update" && method === "GET") {
+        if (!session) return sendJson(response, 401, { error: "unauthorized" });
+        const state = await updater.current(String(url.searchParams.get("update_id") || ""));
+        return sendJson(response, 200, state);
+      }
+      if (url.pathname === "/api/update/check" && method === "POST") {
+        if (!session) return sendJson(response, 401, { error: "unauthorized" });
+        if (!trustedOrigin(request, true) || !csrfValid) return sendJson(response, 403, { error: "csrf_invalid" });
+        const state = await updater.check();
+        updateDiagnostic(state.status === "error" ? "check_failed" : "check_completed", state);
+        return sendJson(response, 200, state);
+      }
+      if (url.pathname === "/api/update/install" && method === "POST") {
+        if (!session) return sendJson(response, 401, { error: "unauthorized" });
+        if (!trustedOrigin(request, true) || !csrfValid) return sendJson(response, 403, { error: "csrf_invalid" });
+        const body = await readBody(request, 1024);
+        try {
+          const result = await updater.install(typeof body.idempotency_key === "string" ? body.idempotency_key : "");
+          store.audit(session.user.id, "relay_update_requested", result.operation?.target_core_version || "unknown");
+          updateDiagnostic("install_accepted", result.update, { update_id: result.update_id, operation_status: result.operation?.status || null });
+          return sendJson(response, 202, result);
+        } catch (error) {
+          const state = updater.get();
+          updateDiagnostic("install_rejected", state, { error: error instanceof Error ? error.message : String(error) });
+          throw error;
+        }
       }
       const commandStatusMatch = url.pathname.match(/^\/api\/commands\/([A-Za-z0-9_-]{8,200})$/);
       if (commandStatusMatch && method === "GET") {

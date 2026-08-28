@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, request as httpRequest } from "node:http";
 import type { Socket } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import WebSocket, { type RawData } from "ws";
+import { coreVersion } from "../src/compatibility.js";
 import { createRelayServer } from "../src/relay-server.js";
 import { encodeRelayMessage, relayProtocolVersion, relayRuntimeStoppedCloseCode, relayWebSocketProtocol } from "../src/relay-protocol.js";
 import { RuntimeRelayClient } from "../src/runtime-relay-client.js";
@@ -54,7 +58,10 @@ function requestStatus(port: number, path: string, headers: Record<string, strin
 
 test("relay authenticates one runtime, replaces old connections, and stores no business tables", { timeout: 5000 }, async () => {
   const adminToken = "a".repeat(64);
-  const relay = createRelayServer({ host: "127.0.0.1", port: 0, database: ":memory:", adminToken, webUsername: "admin", webPassword: "relay-password-123", secureCookies: false, heartbeatIntervalMs: 1000 });
+  const updaterDirectory = mkdtempSync(join(tmpdir(), "better-codex-relay-updater-"));
+  writeFileSync(join(updaterDirectory, "ready"), "");
+  writeFileSync(join(updaterDirectory, "state.json"), JSON.stringify({ status: "current", targetVersion: `v${coreVersion}`, currentVersion: coreVersion, stage: "complete", progress: 100, updatedAt: new Date().toISOString(), error: null }));
+  const relay = createRelayServer({ host: "127.0.0.1", port: 0, database: ":memory:", adminToken, webUsername: "admin", webPassword: "relay-password-123", secureCookies: false, heartbeatIntervalMs: 1000, updaterDirectory });
   relay.server.listen(0, "127.0.0.1");
   await once(relay.server, "listening");
   const address = relay.server.address();
@@ -82,6 +89,14 @@ test("relay authenticates one runtime, replaces old connections, and stores no b
   assert.match(host, /连接恢复后将自动重试/);
   assert.match(host, /RELAY \? 45_000 : 10_000/);
   assert.doesNotMatch(host, /Hub 管理命令/);
+  const unauthorizedUpdate = await fetch(`${base}/api/update?update_id=relay-update-check`);
+  assert.equal(unauthorizedUpdate.status, 401);
+  const login = await fetch(`${base}/relay/session`, { method: "POST", headers: { "content-type": "application/json", origin: base }, body: JSON.stringify({ username: "admin", password: "relay-password-123" }) });
+  assert.equal(login.status, 200);
+  const cookie = String(login.headers.get("set-cookie") || "").split(";", 1)[0];
+  const update = await fetch(`${base}/api/update?update_id=relay-update-check`, { headers: { cookie } }).then(response => response.json()) as { currentVersion: string; operation: { id: string; status: string; target_core_version: string } };
+  assert.equal(update.currentVersion, coreVersion);
+  assert.deepEqual(update.operation, { id: "relay-update-check", status: "COMPLETED", target_core_version: coreVersion, error_code: null });
 
   const first = new WebSocket(`${socketBase}/api/v1/runtime/connect`, relayWebSocketProtocol, { headers: { authorization: `Bearer ${device.device_token}` } });
   await once(first, "open");
@@ -124,6 +139,7 @@ test("relay authenticates one runtime, replaces old connections, and stores no b
   (revokedRequest as { destroy: () => void }).destroy();
   assert.doesNotMatch(JSON.stringify(relay.store.auditEvents(100)), new RegExp(`${device.device_token}|${rotated.device_token}`));
   await relay.close();
+  rmSync(updaterDirectory, { recursive: true, force: true });
 });
 
 test("relay replays buffered JSON reads interrupted after the upstream response starts", { timeout: 5000 }, async () => {

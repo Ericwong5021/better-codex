@@ -419,7 +419,7 @@ export function createHubServer(options: HubServerOptions) {
       }
       if (url.pathname === "/api/update" && method === "GET") {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" });
-        return sendJson(response, 200, await updater.current());
+        return sendJson(response, 200, await updater.current(String(url.searchParams.get("update_id") || "")));
       }
       if (url.pathname === "/api/update/check" && method === "POST") {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" });
@@ -431,8 +431,9 @@ export function createHubServer(options: HubServerOptions) {
         if (!trustedOrigin(request, true) || !csrfValid) return sendJson(response, 403, { error: "csrf_invalid" });
         const client = loginClientAddress(request, options.trustedProxy === true);
         if (!client) return sendJson(response, 400, { error: "invalid_proxy_client" });
-        const result = await updater.install();
-        store.audit(client, "hub_update_requested", result.state.latestVersion || "unknown");
+        const body = await readBody(request, 1024);
+        const result = await updater.install(typeof body.idempotency_key === "string" ? body.idempotency_key : "");
+        store.audit(client, "hub_update_requested", result.operation?.target_core_version || "unknown");
         return sendJson(response, 202, result);
       }
       if (url.pathname === "/api/agents" && method === "GET") {

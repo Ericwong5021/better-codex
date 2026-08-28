@@ -290,6 +290,7 @@ test("startup completes a rollback interrupted between pointer restores", () => 
 test("standalone core and compatibility updates enter the WAL before pointer mutation", () => {
   const source = readFileSync(join(root, "src", "updater.ts"), "utf8");
   const server = readFileSync(join(root, "src", "server.ts"), "utf8");
+  const relayServer = readFileSync(join(root, "src", "relay-server.ts"), "utf8");
   const compatibility = source.slice(source.indexOf("export async function updateCompatibility"), source.indexOf("async function updateCoreUnlocked"));
   const core = source.slice(source.indexOf("export async function updateCore"), source.indexOf("export async function updateAll"));
   const cli = readFileSync(join(root, "src", "cli.ts"), "utf8");
@@ -301,6 +302,11 @@ test("standalone core and compatibility updates enter the WAL before pointer mut
   assert.match(core, /writeRollbackState\(before, plannedAfter, "applying"\)[\s\S]*updateCoreUnlocked/);
   assert.match(source, /pendingCoreActivation\(\)[\s\S]*update_staged_core_manifest_mismatch[\s\S]*rollbackAllUpdates\(\)[\s\S]*update_staged_core_rollback_failed/);
   assert.match(server, /sendJson\(response, 202, \{ accepted: true, update_id: operation\.id, state: "STAGING"[\s\S]*void \(async \(\) => \{[\s\S]*const result = await installGatewayUpdate\(\)/);
+  assert.match(relayServer, /const updater = new HubUpdater\(options\.updaterDirectory\)/);
+  assert.match(relayServer, /url\.pathname === "\/api\/update"[\s\S]*updater\.current\(String\(url\.searchParams\.get\("update_id"\)/);
+  assert.match(relayServer, /url\.pathname === "\/api\/update\/check"[\s\S]*await updater\.check\(\)/);
+  assert.match(relayServer, /url\.pathname === "\/api\/update\/install"[\s\S]*await updater\.install\(/);
+  assert.ok(relayServer.indexOf('url.pathname === "/api/update/check"') < relayServer.indexOf('url.pathname.startsWith("/api/")'));
   assert.match(server, /if \(installedCoreVersion !== coreVersion\) throw new Error\(`update_core_activation_required:/);
   assert.match(currentActivation, /transitionUpdateOperation\(operation\.id, "COMPLETED"[\s\S]*recordGatewayUpdateActivation\("success"[\s\S]*update_current_confirmed/);
   assert.match(cli, /if \(operation\.status === "COMPLETED"\) \{[\s\S]*const runtime = await health\(\)/);

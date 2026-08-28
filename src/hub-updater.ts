@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { compareVersions } from "./compatibility.js";
@@ -25,6 +26,14 @@ export type HubUpdateState = {
   deployment: "vps";
   installSupported: boolean;
   channel: ReleaseChannel;
+  operation?: HubUpdateOperation | null;
+};
+
+export type HubUpdateOperation = {
+  id: string;
+  status: "ACCEPTED" | "STAGING" | "COMPLETED" | "FAILED";
+  target_core_version: string | null;
+  error_code: string | null;
 };
 
 const checkInterval = 60 * 60 * 1000;
@@ -66,12 +75,13 @@ export class HubUpdater {
     }
   }
 
-  get() {
+  get(updateId = "") {
     const host = this.hostState();
     const installSupported = this.supported();
     const hostTarget = host?.targetVersion?.replace(/^v/, "") || null;
+    let state: HubUpdateState;
     if (host?.status === "installing") {
-      return {
+      state = {
         ...this.state,
         status: "installing" as const,
         currentVersion: coreVersion,
@@ -83,14 +93,24 @@ export class HubUpdater {
         installSupported,
         channel: this.channel,
       };
+    } else if (host?.status === "error" && (!hostTarget || compareVersions(hostTarget, coreVersion) > 0)) {
+      state = { ...this.state, status: "error" as const, latestVersion: hostTarget || this.state.latestVersion, checkedAt: host.updatedAt || this.state.checkedAt, error: host.error || "update_install_failed", stage: host.stage || "error", progress: Number.isFinite(host.progress) ? Math.max(0, Math.min(100, Number(host.progress))) : this.state.progress, installSupported, channel: this.channel };
+    } else if (host?.status === "current" && host.currentVersion === coreVersion && this.state.latestVersion === coreVersion) {
+      state = { ...this.state, status: "current" as const, currentVersion: coreVersion, latestVersion: coreVersion, checkedAt: host.updatedAt || this.state.checkedAt, error: null, stage: host.stage || this.state.stage, progress: Number.isFinite(host.progress) ? Math.max(0, Math.min(100, Number(host.progress))) : this.state.progress, installSupported, channel: this.channel };
+    } else {
+      state = { ...this.state, currentVersion: coreVersion, installSupported, channel: this.channel };
     }
-    if (host?.status === "error" && (!hostTarget || compareVersions(hostTarget, coreVersion) > 0)) {
-      return { ...this.state, status: "error" as const, latestVersion: hostTarget || this.state.latestVersion, checkedAt: host.updatedAt || this.state.checkedAt, error: host.error || "update_install_failed", stage: host.stage || "error", progress: Number.isFinite(host.progress) ? Math.max(0, Math.min(100, Number(host.progress))) : this.state.progress, installSupported, channel: this.channel };
-    }
-    if (host?.status === "current" && host.currentVersion === coreVersion && this.state.latestVersion === coreVersion) {
-      return { ...this.state, status: "current" as const, currentVersion: coreVersion, latestVersion: coreVersion, checkedAt: host.updatedAt || this.state.checkedAt, error: null, stage: host.stage || this.state.stage, progress: Number.isFinite(host.progress) ? Math.max(0, Math.min(100, Number(host.progress))) : this.state.progress, installSupported, channel: this.channel };
-    }
-    return { ...this.state, currentVersion: coreVersion, installSupported, channel: this.channel };
+    if (!updateId) return state;
+    const hostCurrent = host?.status === "current" && host.currentVersion === coreVersion;
+    const targetVersion = host?.status === "installing" || host?.status === "error" || hostCurrent ? hostTarget || state.latestVersion : state.latestVersion;
+    const status: HubUpdateOperation["status"] = state.status === "error"
+      ? "FAILED"
+      : state.status === "installing"
+        ? "STAGING"
+        : host?.status === "current" && host.currentVersion === coreVersion && (!hostTarget || hostTarget === coreVersion)
+          ? "COMPLETED"
+          : "ACCEPTED";
+    return { ...state, operation: { id: updateId, status, target_core_version: targetVersion, error_code: status === "FAILED" ? state.error || "update_install_failed" : null } };
   }
 
   stale() {
@@ -111,18 +131,23 @@ export class HubUpdater {
     return promise;
   }
 
-  async current() {
+  async current(updateId = "") {
+    if (updateId) return this.get(updateId);
     return this.stale() ? this.check() : this.get();
   }
 
-  async install() {
+  async install(idempotencyKey = "") {
+    const updateId = idempotencyKey || randomUUID();
+    if (!/^[A-Za-z0-9_-]{8,200}$/.test(updateId)) throw new Error("invalid_idempotency_key");
     const request = join(this.directory, "request");
     const running = join(this.directory, "request.running");
     const lock = join(this.directory, "request.lock");
     const host = this.hostState();
-    if (host?.status === "installing" || existsSync(request) || existsSync(running)) throw new Error("update_in_progress");
-    await this.check();
-    const state = this.state;
+    if (host?.status === "installing" || existsSync(request) || existsSync(running)) {
+      const state = this.get(updateId);
+      return { accepted: true, update_id: updateId, state: state.operation?.status || "STAGING", operation: state.operation, update: state };
+    }
+    const state = await this.check();
     if (!state.installSupported) throw new Error("hub_update_not_configured");
     if (state.status !== "available" || !state.latestVersion) throw new Error(state.error || "update_not_available");
     const target = `v${state.latestVersion}`;
@@ -139,9 +164,14 @@ export class HubUpdater {
     } catch (error) {
       try { if (existsSync(temporary)) unlinkSync(temporary); } catch {}
       try { if (locked && existsSync(lock)) unlinkSync(lock); } catch {}
-      throw (error as NodeJS.ErrnoException).code === "EEXIST" ? new Error("update_in_progress") : error;
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+        const update = this.get(updateId);
+        return { accepted: true, update_id: updateId, state: update.operation?.status || "STAGING", operation: update.operation, update };
+      }
+      throw error;
     }
     this.state = { ...state, status: "installing", error: null, stage: "queued", progress: 5 };
-    return { accepted: true, state: this.get() };
+    const update = this.get(updateId);
+    return { accepted: true, update_id: updateId, state: update.operation?.status || "STAGING", operation: update.operation, update };
   }
 }
