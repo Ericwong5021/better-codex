@@ -4,6 +4,8 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+- Keep Issue creator identity bound to the authenticated Web account and allow local administrators to correct legacy creator metadata without permitting Relay-side impersonation.
+
 ## [0.4.10-beta.42] - 2026-08-28
 
 - Accept eight-character Web passwords for self-hosted deployments.

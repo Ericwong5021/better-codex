@@ -352,7 +352,7 @@ type IssueInput = {
   session?: ImportedSessionInput;
 };
 
-export type IssuePatch = Partial<Pick<Issue, "project_id" | "title" | "description" | "status" | "priority" | "labels" | "sort_order" | "pinned" | "thread_id" | "workspace_path" | "agent_enabled" | "agent_id" | "user_assigned" | "assignee_user_id" | "needs_attention" | "pending_actor" | "enrichment_status" | "reply_draft" | "reply_draft_attachments">>;
+export type IssuePatch = Partial<Pick<Issue, "project_id" | "title" | "description" | "status" | "priority" | "labels" | "sort_order" | "pinned" | "thread_id" | "workspace_path" | "agent_enabled" | "agent_id" | "user_assigned" | "assignee_user_id" | "creator_user_id" | "needs_attention" | "pending_actor" | "enrichment_status" | "reply_draft" | "reply_draft_attachments">>;
 
 type AgentProfileInput = Pick<AgentProfile, "name" | "name_en" | "description" | "instructions" | "model" | "reasoning_effort"> & { service_tier?: AgentServiceTier; sandbox_mode?: AgentSandboxMode; max_concurrency?: number };
 type AgentProfilePatch = Partial<AgentProfileInput>;
@@ -2991,6 +2991,7 @@ export class Store {
     if (patch.agent_id && !this.getAgentProfile(patch.agent_id)) throw new Error("agent_not_found");
     if (patch.pending_actor !== undefined) patch.pending_actor = asPendingActor(patch.pending_actor);
     if (patch.assignee_user_id !== undefined && patch.assignee_user_id !== null && (patch.assignee_user_id.length > 200 || patch.assignee_user_id.includes("\0"))) throw new Error("invalid_assignee_user_id");
+    if (patch.creator_user_id !== undefined && patch.creator_user_id !== null && (patch.creator_user_id.length > 200 || patch.creator_user_id.includes("\0"))) throw new Error("invalid_creator_user_id");
     if (patch.needs_attention !== undefined) patch.needs_attention = Boolean(patch.needs_attention);
     if (patch.reply_draft_attachments !== undefined) patch.reply_draft_attachments = cleanReplyDraftAttachments(patch.reply_draft_attachments);
     this.db.exec("BEGIN IMMEDIATE");
@@ -3066,6 +3067,7 @@ export class Store {
         agent_id: "agent_id",
         user_assigned: "user_assigned",
         assignee_user_id: "assignee_user_id",
+        creator_user_id: "creator_user_id",
         needs_attention: "needs_attention",
         pending_actor: "pending_actor",
         enrichment_status: "enrichment_status",
@@ -3080,7 +3082,7 @@ export class Store {
         values.push(
           key === "labels" || key === "reply_draft_attachments" ? JSON.stringify(value)
             : key === "pinned" || key === "agent_enabled" || key === "user_assigned" || key === "needs_attention" ? Number(value)
-              : key === "thread_id" || key === "workspace_path" || key === "agent_id" || key === "assignee_user_id" || key === "enrichment_status" ? value || null
+              : key === "thread_id" || key === "workspace_path" || key === "agent_id" || key === "assignee_user_id" || key === "creator_user_id" || key === "enrichment_status" ? value || null
                 : value,
         );
       }

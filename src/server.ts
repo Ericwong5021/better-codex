@@ -709,6 +709,7 @@ function parseIssuePatch(body: Record<string, unknown>) {
     patch.user_assigned = body.user_assigned;
   }
   if ("assignee_user_id" in body) patch.assignee_user_id = body.assignee_user_id === null ? null : cleanString(body.assignee_user_id, 200) || null;
+  if ("creator_user_id" in body) patch.creator_user_id = body.creator_user_id === null ? null : cleanString(body.creator_user_id, 200) || null;
   if ("needs_attention" in body) {
     if (typeof body.needs_attention !== "boolean") throw new Error("invalid_needs_attention");
     patch.needs_attention = body.needs_attention;
@@ -2129,6 +2130,7 @@ export function startServer() {
         }
         if (method === "PATCH" && path.length === 3) {
           const body = await readBody(request, maxRemoteFileBodyBytes);
+          if (relayRequest && "creator_user_id" in body) throw new Error("issue_creator_update_local_only");
           const version = Number(body.version);
           if (!Number.isInteger(version) || version < 1) throw new Error("invalid_version");
           const patch = parseIssuePatch(body);
