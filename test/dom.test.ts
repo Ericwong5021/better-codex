@@ -251,8 +251,12 @@ test("issue creation uses a primary split button with a project creation menu", 
   assert.ok(source.includes("通过智能体创建"));
   assert.ok(source.includes('function openEditor(issue = null, initialStatus = "todo", createMode = "agent") {\n      state.selected = issue;'));
   assert.ok(source.includes('const draftMode = issue ? "manual" : createMode === "manual" ? "manual" : "agent"'));
+  assert.ok(source.includes('expanded: draftMode === "agent" ? false : localStorage.getItem(issue ? ISSUE_DIALOG_EXPANDED_KEY : CREATE_DIALOG_EXPANDED_KEY) === "true"'));
   assert.doesNotMatch(source, /state\.createMode/);
   assert.ok(source.includes('te(draft.mode === "agent" ? "切换到手动" : "切换到智能体")'));
+  assert.ok(source.includes('const expandButton = draft.mode === "agent" ? ""'));
+  assert.ok(source.includes('startNowButton + expandButton + \'<button class="better-codex-icon-button" type="button" data-dialog-close'));
+  assert.ok(source.includes('setDialogExpanded(false);\n            draft.mode = "agent"'));
   assert.ok(source.includes('const crumb = issue'));
   assert.ok(source.includes(': \'<strong>\' + title + \'</strong>\''));
   assert.match(css, /#better-codex-panel \.better-codex-create-split\s*\{[^}]*background:\s*var\(--bc-color-primary\);/s);

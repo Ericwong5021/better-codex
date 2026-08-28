@@ -52,6 +52,7 @@ test("creates, edits, moves, archives, and restores an issue", async ({ page }) 
   await page.locator(".better-codex-create-primary").click();
   const editor = page.locator("#better-codex-dialog");
   await expect(editor).toBeVisible();
+  await expect(editor.locator("[data-dialog-expand]")).toHaveCount(0);
   await editor.locator('[name="prompt"]').fill("/");
   const semanticMenu = editor.locator("[data-semantic-menu]");
   await expect(semanticMenu).toBeVisible();
@@ -72,6 +73,7 @@ test("creates, edits, moves, archives, and restores an issue", async ({ page }) 
   await editor.locator('[name="prompt"]').fill("");
   await expect(semanticMenu).toBeHidden();
   await editor.locator("[data-dialog-switch]").click();
+  await expect(editor.locator("[data-dialog-expand]")).toBeVisible();
   await editor.locator('[name="title"]').fill(originalTitle);
   await editor.locator('[name="description"]').fill("通过 Playwright 在独立临时数据库中创建");
   await editor.locator(".better-codex-submit").click();
