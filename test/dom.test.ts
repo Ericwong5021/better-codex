@@ -350,7 +350,7 @@ test("opening an agent inspector hides the toolbar create action", () => {
   assert.match(betterCodexDesignSystemCss(), /\.better-codex-agent-actions\[hidden\]\s*\{[^}]*display:\s*none\s*!important/s);
 });
 
-test("agent inspector uses desktop entry motion and opens mobile pages fullscreen without motion", () => {
+test("agent creation reuses the inspector side pane and opens mobile pages fullscreen without motion", () => {
   const source = injectionSource(4317, "test-token", "install");
   const css = betterCodexDesignSystemCss();
   const closeInspector = source.slice(source.indexOf("function closeAgentInspector()"), source.indexOf("function agentInspector("));
@@ -364,8 +364,9 @@ test("agent inspector uses desktop entry motion and opens mobile pages fullscree
   assert.ok(!closeInspector.includes("transitionend"));
   assert.ok(source.includes('data-animate="enter"'));
   assert.ok(source.includes('const animateEnter = previousPane === "preview" && state.agentPane !== "preview"'));
-  assert.ok(source.includes('const tag = creating && !mobilePage ? "dialog" : "aside"'));
-  assert.ok(source.includes('if (!inspector.matches("dialog"))'));
+  assert.ok(source.includes('const tag = "aside"'));
+  assert.doesNotMatch(source, /inspector\.showModal\(\)/);
+  assert.doesNotMatch(css, /\.better-codex-agent-inspector\[data-agent-window="create"\]\s*\{[^}]*position:\s*fixed/s);
   assert.ok(source.includes("return void closeAgentInspectorAfterSave()"));
   assert.ok(source.includes('return "/web/agents"'));
   assert.match(css, /\.better-codex-agent-inspector\[data-animate="enter"\]\s*\{[^}]*animation:\s*better-codex-inspector-enter/s);

@@ -5020,10 +5020,9 @@ export function install(config: Record<string, any>) {
         { value: "danger-full-access", label: t("完全访问"), description: t("可不受限制地访问互联网和电脑上的任何文件"), icon: "permissionDanger", tone: "warning" },
       ];
       const animateAttr = options.animateEnter ? ' data-animate="enter"' : "";
-      const mobilePage = HOST_KIND === "web" && window.matchMedia("(max-width: 720px)").matches;
-      const tag = creating && !mobilePage ? "dialog" : "aside";
+      const tag = "aside";
       const windowAttr = creating ? ' data-agent-window="create"' : "";
-      const resizeHandle = creating ? "" : '<div class="better-codex-agent-inspector-resize" data-agent-inspector-resize role="separator" aria-orientation="vertical" aria-label="' + te("调整侧边栏宽度") + '" tabindex="0"></div>';
+      const resizeHandle = '<div class="better-codex-agent-inspector-resize" data-agent-inspector-resize role="separator" aria-orientation="vertical" aria-label="' + te("调整侧边栏宽度") + '" tabindex="0"></div>';
       const leading = creating ? '<div class="better-codex-agent-inspector-head-leading"><nav class="better-codex-agent-window-title" aria-label="' + te("智能体") + '"><span>' + te("智能体") + '</span><span aria-hidden="true">&gt;</span><strong>' + te("创建智能体") + '</strong></nav></div>' : '<span>' + heading + '</span>';
       const footer = readOnly ? "" : creating ? '<footer class="better-codex-agent-inspector-footer"><button class="better-codex-submit" type="submit">' + te("创建") + '</button></footer>' : deleteButton ? '<footer class="better-codex-agent-inspector-footer">' + deleteButton + '</footer>' : "";
       return '<' + tag + ' class="better-codex-agent-inspector"' + animateAttr + windowAttr + '>' + resizeHandle + '<form data-agent-form="' + (creating ? "create" : isDefault ? "default" : "update") + '" data-agent-key="' + escapeHtml(creating ? "" : agentKey(draft)) + '"><header class="better-codex-agent-inspector-head">' + leading + '<div class="better-codex-agent-inspector-head-actions"><button class="better-codex-agent-card-action" type="button" data-agent-close-pane aria-label="' + te(creating ? "关闭" : "关闭详情") + '">' + icon("close") + '</button></div></header><div class="better-codex-agent-inspector-scroll">' + profileHead + identity + '<h3>' + te("详情") + '</h3><div class="better-codex-agent-inspector-group">' + agentPicker("model", t("模型"), model, modelOptions) + agentFastToggle(fast, fastEnabled) + agentPicker("reasoning_effort", t("推理"), effort, effortOptions) + agentPicker("sandbox_mode", t("权限"), sandboxMode, sandboxOptions) + agentNumberInput("max_concurrency", t("最大并发"), draft.max_concurrency, 1, 20) + '</div>' + instructionField + '<output class="better-codex-agent-inspector-status" hidden></output><div class="better-codex-agent-inspector-error" role="alert" hidden></div></div>' + footer + '</form></' + tag + '>';
@@ -5059,18 +5058,7 @@ export function install(config: Record<string, any>) {
       const animateEnter = previousPane === "preview" && state.agentPane !== "preview";
       container.innerHTML = '<div class="better-codex-agent-shell" data-pane="' + state.agentPane + '"><section class="better-codex-agent-directory"><header class="better-codex-agent-page-heading"><h1>' + te("智能体") + '</h1><p>' + te("创建和管理你的智能体") + '</p></header><div class="better-codex-agent-search-wrap">' + icon("search") + '<input class="better-codex-search" data-agent-search type="search" value="' + escapeHtml(state.agentSearch) + '" placeholder="' + te("搜索智能体") + '" aria-label="' + te("搜索智能体") + '"></div><div class="better-codex-agent-list">' + (rows || empty) + '</div>' + (state.agentView === "all" && !query ? '<div class="better-codex-agent-suggestions"><h3>' + te("建议") + '</h3>' + suggestions + '</div>' : "") + '</section>' + agentInspector(selected, { animateEnter }) + '</div>';
       const inspector = container.querySelector(".better-codex-agent-inspector");
-      if (state.agentPane !== "create") return applyAgentInspectorWidth(inspector);
-      if (!inspector.matches("dialog")) return;
-      inspector.addEventListener("cancel", event => {
-        event.preventDefault();
-        closeAgentInspector();
-      });
-      inspector.addEventListener("close", () => {
-        if (state.agentPane !== "create") return;
-        closeAgentInspector();
-      }, { once: true });
-      bindModalDismiss(inspector, closeAgentInspector);
-      inspector.showModal();
+      applyAgentInspectorWidth(inspector);
     }
 
     function projectRootPaths(project) {

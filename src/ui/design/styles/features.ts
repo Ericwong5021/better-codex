@@ -4497,32 +4497,6 @@ export function betterCodexFeatureStylesCss() {
       transition: width var(--bc-motion-normal) var(--bc-ease-out), min-width var(--bc-motion-normal) var(--bc-ease-out), opacity var(--bc-motion-fast) ease-out, transform var(--bc-motion-normal) var(--bc-ease-out), box-shadow var(--bc-motion-fast) ease-out;
     }
 
-    #better-codex-panel .better-codex-agent-inspector[data-agent-window="create"] {
-      position: fixed;
-      inset: 0;
-      box-sizing: border-box;
-      width: min(760px, calc(100vw - 48px));
-      min-width: 0;
-      max-width: none;
-      height: min(84vh, 820px);
-      max-height: calc(100vh - 48px);
-      margin: auto;
-      overflow: hidden;
-      border: 0;
-      border-radius: var(--bc-radius-xl);
-      color: var(--bc-color-text);
-      background: var(--bc-color-surface-raised);
-      padding: 0;
-      box-shadow: var(--bc-elevation-float);
-      transform: none;
-      transition: none;
-    }
-
-    #better-codex-panel .better-codex-agent-inspector[data-agent-window="create"]::backdrop {
-      background: var(--bc-color-scrim);
-      backdrop-filter: none;
-    }
-
     #better-codex-panel .better-codex-agent-inspector[data-resized="true"] {
       min-width: 320px;
     }
@@ -4568,10 +4542,6 @@ export function betterCodexFeatureStylesCss() {
 
     #better-codex-panel .better-codex-agent-inspector[data-animate="enter"] {
       animation: better-codex-inspector-enter var(--bc-motion-normal) var(--bc-ease-out);
-    }
-
-    #better-codex-panel .better-codex-agent-inspector[data-agent-window="create"][data-animate="enter"] {
-      animation-name: better-codex-surface-enter;
     }
 
     #better-codex-panel .better-codex-agent-inspector form {
