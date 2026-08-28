@@ -4,6 +4,16 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.10-beta.44] - 2026-08-28
+
+- Align archived Issue dialogs with Board typography and tighter spacing.
+- Keep Relay update checks and installs on the VPS service while the local Runtime is offline.
+- Keep each Issue on one canonical Codex thread and route handed-off card commands through the authenticated native session without giving the Session Host a second writer.
+- Use canonical PNG assets for Agent avatars across every surface.
+- Document the separate Beta upgrade paths and verification steps for the local Runtime and VPS Relay/Web UI.
+- Retry failed Issue replies with a fresh request identity and defer terminal thread-worker release until its state is clear.
+- Keep Agent creation in the existing resizable sidebar on desktop and Web.
+
 ## [0.4.10-beta.43] - 2026-08-28
 
 - Keep Issue creator identity bound to the authenticated Web account and allow local administrators to correct legacy creator metadata without permitting Relay-side impersonation.
@@ -971,7 +981,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.43...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.44...HEAD
+[0.4.10-beta.44]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.43...v0.4.10-beta.44
 [0.4.10-beta.43]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.42...v0.4.10-beta.43
 [0.4.10-beta.42]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.41...v0.4.10-beta.42
 [0.4.10-beta.41]: https://github.com/Ericwong5021/better-codex/compare/v0.4.10-beta.40...v0.4.10-beta.41
