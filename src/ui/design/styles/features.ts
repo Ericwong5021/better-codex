@@ -4964,7 +4964,8 @@ export function betterCodexFeatureStylesCss() {
       animation: better-codex-menu-enter var(--bc-motion-fast) var(--bc-ease-out);
     }
 
-    #better-codex-panel .better-codex-agent-menu-title {
+    #better-codex-panel .better-codex-agent-menu-title,
+    #better-codex-panel .better-codex-agent-menu-group {
       padding: 5px 9px 7px;
       color: var(--bc-color-text-faint);
       font-size: var(--bc-text-caption);

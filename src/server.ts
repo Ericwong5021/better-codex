@@ -14,7 +14,7 @@ import { readCodexActivity, startCodexActivityCollection, stopCodexActivityColle
 import { readCodexUsage } from "./codex-usage.js";
 import { MentionCatalogService, codexSemanticRequestFingerprint, normalizeCodexSemanticSelections, readCodexSemanticCatalog, resolveCodexSemanticReferences, searchCodexFiles } from "./codex-semantics.js";
 import { appendInputDocumentText, compileInputDocument, inputDocumentLegacyReferences, inputDocumentText, legacyInputDocument, type SemanticKindV2 } from "./codex-input-document.js";
-import { readModelCatalog } from "./model-catalog.js";
+import { readModelCatalog, warmupModelCatalog } from "./model-catalog.js";
 import { attachmentPath, canonicalPath, databasePath, runPath, runtimePort, token, updateLogPath } from "./config.js";
 import { acquireRuntimeLock, cancelRuntimeAuthorityReservation, claimRuntimeAuthority, clearRuntimeState, completeRuntimeAuthorityHandoff, createRuntimeIdentity, publishRuntimeState, reserveRuntimeAuthority, runtimeAuthorityUpdateState } from "./runtime-state.js";
 import { activeCoreCommand, activeVersions, checkGatewayUpdate, getGatewayUpdateState, installGatewayUpdate, readGatewayUpdateActivationState, recordGatewayUpdateActivation, rollbackAbandonedUpdate, rollbackActivatedUpdate, startGatewayUpdateChecks } from "./updater.js";
@@ -798,6 +798,7 @@ export function startServer() {
     if (migratedAgentAvatars) console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "agent_avatar", event: "avatar_presets_migrated_to_png", count: migratedAgentAvatars, runtime_instance_id: identity.instanceId, runtime_pid: identity.pid, runtime_started_at: identity.processStartedAt, runtime_version: identity.version })}`);
     if (remoteMode === "relay") disableProjectionSync(databasePath);
     if (!mockupEnabled) syncAgentProfiles(store.listAgentProfiles());
+    void warmupModelCatalog();
   } catch (error) {
     clearRuntimeState(identity.instanceId);
     throw error;

@@ -1,3 +1,4 @@
+import { inferModelProvider } from "./model-catalog.js";
 import type { IssuePriority, IssueReplyStatus, IssueSessionRetry, IssueSessionStatus, IssueStatus } from "./db.js";
 import type { ConversationMessage } from "./session-transcript.js";
 
@@ -176,6 +177,7 @@ export type AgentModelCatalogProjection = {
   id: string;
   displayName: string;
   description: string;
+  provider: string;
   isDefault: boolean;
   defaultReasoningEffort: string;
   supportedReasoningEfforts: AgentReasoningEffortProjection[];
@@ -302,10 +304,13 @@ export function normalizeAgentModelCatalogProjection(value: unknown): AgentModel
         return tierId ? [{ id: tierId, name: projectionString(tier.name, 80) || tierId, description: projectionString(tier.description, 500) }] : [];
       })
       : [];
+    const displayName = projectionString(source.displayName, 200) || id;
+    const provider = projectionString(source.provider, 80) || inferModelProvider(id, displayName);
     return [{
       id,
-      displayName: projectionString(source.displayName, 200) || id,
+      displayName,
       description: projectionString(source.description, 2000),
+      provider,
       isDefault: source.isDefault === true,
       defaultReasoningEffort,
       supportedReasoningEfforts: efforts.length ? efforts : [{ value: defaultReasoningEffort, description: "" }],

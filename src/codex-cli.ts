@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join, posix, win32 } from "node:path";
 
 export type CodexExecutableDiscoveryOptions = {
@@ -88,6 +88,20 @@ function copiedWindowsApplicationCandidates(applicationPath: string | null, temp
   });
 }
 
+function unixLocalCliCandidates() {
+  const home = homedir();
+  const paths = [
+    join(home, ".hermes", "node", "bin", "codex"),
+    join(home, ".local", "bin", "codex"),
+    join(home, ".npm-global", "bin", "codex"),
+    join(home, ".yarn", "bin", "codex"),
+    "/opt/homebrew/bin/codex",
+    "/usr/local/bin/codex",
+    "/usr/bin/codex",
+  ];
+  return existing(paths);
+}
+
 function macApplicationCandidates(applicationPath: string | null | undefined) {
   const applications = applicationPath === undefined
     ? ["/Applications/Codex.app", "/Applications/ChatGPT.app"]
@@ -110,7 +124,8 @@ export function codexExecutableCandidates(options: CodexExecutableDiscoveryOptio
       "codex",
     ]);
   }
-  if (platform === "darwin") return unique([...configured, ...macApplicationCandidates(options.applicationPath), "codex"]);
+  if (platform === "darwin") return unique([...configured, ...macApplicationCandidates(options.applicationPath), ...unixLocalCliCandidates(), "codex"]);
+  if (platform === "linux") return unique([...configured, ...unixLocalCliCandidates(), "codex"]);
   return unique([...configured, "codex"]);
 }
 

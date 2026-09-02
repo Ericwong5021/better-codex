@@ -4868,12 +4868,18 @@ export function install(config: Record<string, any>) {
     function agentPicker(name, label, selected, options) {
       const current = options.find(option => option.value === selected) || options[0] || { value: "", label: "未提供" };
       const fastSuffix = name === "model" ? fastMark() : "";
+      let lastGroup = "";
       const rows = options.map(option => {
+        let groupHeader = "";
+        if (option.provider && option.provider !== lastGroup) {
+          lastGroup = option.provider;
+          groupHeader = '<div class="better-codex-agent-menu-group">' + escapeHtml(option.provider) + '</div>';
+        }
         const hasDescription = Boolean(option.description);
         const copy = hasDescription
           ? '<span class="better-codex-agent-menu-item-copy">' + (option.icon ? '<span class="better-codex-agent-menu-item-icon">' + icon(option.icon) + '</span>' : "") + '<span><strong>' + escapeHtml(option.label) + '</strong><small>' + escapeHtml(option.description) + '</small></span></span>'
           : '<span class="better-codex-agent-menu-item-copy">' + (option.icon ? '<span class="better-codex-agent-menu-item-icon">' + icon(option.icon) + '</span>' : "") + '<span>' + escapeHtml(option.label) + '</span></span>';
-        return '<button class="better-codex-agent-menu-item' + (option.value === current.value ? " is-selected" : "") + (option.tone === "warning" ? " is-warning" : "") + '" type="button" role="option" aria-selected="' + (option.value === current.value) + '" data-agent-option="' + escapeHtml(name) + '" data-agent-option-value="' + escapeHtml(option.value) + '">' + copy + '<span class="better-codex-agent-menu-item-check">' + (option.value === current.value ? icon("check") : "") + '</span></button>';
+        return groupHeader + '<button class="better-codex-agent-menu-item' + (option.value === current.value ? " is-selected" : "") + (option.tone === "warning" ? " is-warning" : "") + '" type="button" role="option" aria-selected="' + (option.value === current.value) + '" data-agent-option="' + escapeHtml(name) + '" data-agent-option-value="' + escapeHtml(option.value) + '">' + copy + '<span class="better-codex-agent-menu-item-check">' + (option.value === current.value ? icon("check") : "") + '</span></button>';
       }).join("");
       return '<div class="better-codex-agent-setting" data-agent-picker="' + escapeHtml(name) + '"><span>' + escapeHtml(label) + '</span><input type="hidden" name="' + escapeHtml(name) + '" value="' + escapeHtml(current.value) + '"><button class="better-codex-agent-picker-trigger" type="button" role="combobox" aria-haspopup="listbox" aria-expanded="false" data-agent-picker-toggle="' + escapeHtml(name) + '"><span data-agent-picker-label>' + escapeHtml(current.label) + '</span>' + fastSuffix + icon("chevron") + '</button><div class="better-codex-agent-menu" role="listbox"><div class="better-codex-agent-menu-title">' + escapeHtml(label) + '</div>' + rows + '</div></div>';
     }
@@ -5012,10 +5018,20 @@ export function install(config: Record<string, any>) {
         : '<label class="better-codex-agent-inspector-field"><span>' + te("名称") + '</span><input data-agent-name name="' + nameField + '" maxlength="80" value="' + escapeHtml(name) + '" placeholder="' + te("智能体名称") + '" required></label><label class="better-codex-agent-inspector-field"><span>' + te("介绍") + ' <small>' + te("可选") + '</small></span><textarea name="description" maxlength="500" rows="3" placeholder="' + te("说明这个智能体适合承担什么工作") + '">' + escapeHtml(description) + '</textarea></label>';
       const instructionField = isDefault || readOnly ? "" : '<label class="better-codex-agent-inspector-field"><span>' + te("指令") + ' <small>' + te("可选") + '</small></span><textarea name="instructions" rows="7" placeholder="' + te("定义职责、工作方式和输出要求") + '">' + escapeHtml(instructions) + '</textarea></label>';
       const deleteButton = !creating && !isDefault ? '<button class="better-codex-agent-danger" type="button" data-agent-delete data-agent-key="' + escapeHtml(agentKey(draft)) + '">' + te("删除智能体") + '</button>' : "";
-      const modelOptions = [
-        ...(model && !state.agentModels.includes(model) ? [{ value: model, label: model, description: t("当前模型目录未提供此配置"), tone: "warning" }] : []),
-        ...state.agentModelCatalog.map(item => ({ value: item.id, label: item.displayName, description: item.description || "" })),
-      ];
+      const providerOrder = ["OpenAI", "Anthropic", "Google", "DeepSeek", "Meta", "Mistral", "Qwen", "xAI", "Other"];
+      const customOptions = model && !state.agentModels.includes(model)
+        ? [{ value: model, label: model, description: t("当前模型目录未提供此配置"), provider: t("当前配置"), tone: "warning" }]
+        : [];
+      const catalogOptions = [...state.agentModelCatalog]
+        .map(item => ({ value: item.id, label: item.displayName, description: item.description || "", provider: item.provider || "Other" }))
+        .sort((a, b) => {
+          const ai = providerOrder.indexOf(a.provider);
+          const bi = providerOrder.indexOf(b.provider);
+          const orderDiff = (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+          if (orderDiff !== 0) return orderDiff;
+          return 0;
+        });
+      const modelOptions = [...customOptions, ...catalogOptions];
       const sandboxOptions = [
         { value: "read-only", label: t("只读"), description: t("仅可读取工作区文件，不能修改"), icon: "permissionReadOnly" },
         { value: "workspace-write", label: t("工作区可写"), description: t("可修改当前工作区内的文件"), icon: "permissionWorkspace" },
