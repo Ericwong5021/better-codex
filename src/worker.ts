@@ -1874,6 +1874,12 @@ export function enrichmentMessage(line: string) {
     };
     if (event.type === "item.completed" && event.item?.type === "agent_message") return event.item.text || "";
     if (event.type === "event_msg" && event.payload?.type === "agent_message") return event.payload.message || "";
+    if (event.type === "event_msg" && event.payload?.type === "item_completed" && (event.payload as { item?: { type?: string; content?: Array<{ type?: string; text?: string }> } }).item?.type === "AgentMessage") {
+      return ((event.payload as { item?: { content?: Array<{ type?: string; text?: string }> } }).item?.content || [])
+        .filter(item => typeof item.type === "string" && item.type.toLowerCase() === "text")
+        .map(item => item.text || "")
+        .join("\n");
+    }
     if (event.type === "response_item" && event.payload?.type === "message") {
       return (event.payload.content || []).filter(item => item.type === "output_text").map(item => item.text || "").join("\n");
     }

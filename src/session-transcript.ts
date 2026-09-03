@@ -267,6 +267,44 @@ function extractAssistantText(content: unknown) {
   return stripMemoryCitation(parts.join("\n"));
 }
 
+function extractItemUserMessage(item: unknown) {
+  if (!item || typeof item !== "object") return null;
+  const record = item as { type?: unknown; content?: unknown };
+  if (record.type !== "UserMessage" || !Array.isArray(record.content)) return null;
+  const texts: string[] = [];
+  const imagePaths: string[] = [];
+  for (const entry of record.content) {
+    if (!entry || typeof entry !== "object") continue;
+    const row = entry as { type?: unknown; text?: unknown; path?: unknown };
+    if (row.type === "text" && typeof row.text === "string" && row.text.trim()) {
+      texts.push(row.text.trim());
+    } else if (row.type === "local_image" && typeof row.path === "string" && row.path.trim()) {
+      imagePaths.push(row.path.trim());
+    }
+  }
+  let message = texts.join("\n").trim();
+  if (imagePaths.length && !imagePaths.some(path => message.includes(path))) {
+    const list = imagePaths.map(path => `- ${path}`).join("\n");
+    message = message ? `${message}\n\n附带文件：\n${list}` : `附带文件：\n${list}`;
+  }
+  return message;
+}
+
+function extractItemAgentMessage(item: unknown) {
+  if (!item || typeof item !== "object") return "";
+  const record = item as { type?: unknown; content?: unknown };
+  if (record.type !== "AgentMessage" || !Array.isArray(record.content)) return "";
+  const texts: string[] = [];
+  for (const entry of record.content) {
+    if (!entry || typeof entry !== "object") continue;
+    const row = entry as { type?: unknown; text?: unknown };
+    if (typeof row.type === "string" && row.type.toLowerCase() === "text" && typeof row.text === "string" && row.text.trim()) {
+      texts.push(row.text.trim());
+    }
+  }
+  return stripMemoryCitation(texts.join("\n"));
+}
+
 type PendingAgent = {
   message: string;
   phase: string | null;
@@ -345,7 +383,7 @@ async function readConversationMessages(rolloutPath: string, limited = true) {
 
   const lines = createInterface({ input: createReadStream(rolloutPath, { encoding: "utf8" }), crlfDelay: Infinity });
   for await (const line of lines) {
-    if (!line.includes("user_message") && !line.includes("agent_message") && !line.includes("response_item") && !line.includes("task_started") && !line.includes("task_complete") && !line.includes("turn_aborted")) continue;
+    if (!line.includes("user_message") && !line.includes("agent_message") && !line.includes("response_item") && !line.includes("task_started") && !line.includes("task_complete") && !line.includes("turn_aborted") && !line.includes("item_completed")) continue;
     let event: {
       type?: string;
       timestamp?: unknown;
@@ -357,6 +395,8 @@ async function readConversationMessages(rolloutPath: string, limited = true) {
         content?: unknown;
         turn_id?: unknown;
         internal_chat_message_metadata_passthrough?: { turn_id?: unknown };
+        item?: unknown;
+        last_agent_message?: unknown;
       };
     };
     try {
@@ -389,6 +429,11 @@ async function readConversationMessages(rolloutPath: string, limited = true) {
           completed_at: timestamp,
           updated_at: timestamp,
         };
+      }
+      const lastMessage = typeof event.payload.last_agent_message === "string" ? event.payload.last_agent_message.trim() : "";
+      if (lastMessage) {
+        const target = [...messages].reverse().find(m => m.role === "agent" && m.markdown === lastMessage);
+        if (target && !target.phase) target.phase = "final_answer";
       }
       continue;
     }
@@ -423,6 +468,25 @@ async function readConversationMessages(rolloutPath: string, limited = true) {
 
     if (event.type !== "event_msg" || !event.payload) continue;
     const type = event.payload.type;
+
+    if (type === "item_completed" && event.payload.item) {
+      const userMessage = extractItemUserMessage(event.payload.item);
+      if (userMessage !== null) {
+        const content = conversationContent(userMessage);
+        for (const attachment of content.attachments) userAttachments.add(conversationAttachmentKey(attachment));
+        if (!shouldIncludeUserMessage(userMessage)) continue;
+        pushUser(userMessage, timestamp, content);
+        continue;
+      }
+      const agentMessage = extractItemAgentMessage(event.payload.item);
+      if (agentMessage) {
+        const turnId = typeof event.payload.turn_id === "string" ? event.payload.turn_id : null;
+        flushPendingAgent(null);
+        pushAgent(agentMessage, null, timestamp, turnId);
+        continue;
+      }
+    }
+
     const message = typeof event.payload.message === "string" ? event.payload.message.trim() : "";
     if (!message) continue;
 
@@ -465,7 +529,7 @@ export async function readConversationActivity(threadId: string | null | undefin
   let lastAgentMessage = "";
   const lines = createInterface({ input: createReadStream(rolloutPath, { encoding: "utf8" }), crlfDelay: Infinity });
   for await (const line of lines) {
-    if (!line.includes("task_started") && !line.includes("task_complete") && !line.includes("turn_aborted") && !line.includes("agent_message") && !line.includes("response_item")) continue;
+    if (!line.includes("task_started") && !line.includes("task_complete") && !line.includes("turn_aborted") && !line.includes("agent_message") && !line.includes("response_item") && !line.includes("item_completed")) continue;
     let event: { type?: string; timestamp?: unknown; payload?: { type?: string; role?: string; phase?: unknown; turn_id?: unknown; last_agent_message?: unknown } };
     try { event = JSON.parse(line) as typeof event; } catch { continue; }
     const timestamp = typeof event.timestamp === "string" ? event.timestamp : null;
@@ -478,6 +542,7 @@ export async function readConversationActivity(threadId: string | null | undefin
       if ((!expectedTurnId || turnId === expectedTurnId) && (!activity.turn_id || !turnId || activity.turn_id === turnId)) {
         activity = { status: "completed", turn_id: turnId || activity.turn_id, started_at: activity.started_at, completed_at: timestamp, updated_at: timestamp };
         lastAgentMessage = typeof event.payload.last_agent_message === "string" ? event.payload.last_agent_message.trim() : "";
+        if (lastAgentMessage && timestamp) lastFinalAt = timestamp;
       }
     } else if (event.type === "event_msg" && event.payload?.type === "turn_aborted") {
       const turnId = typeof event.payload.turn_id === "string" ? event.payload.turn_id : null;

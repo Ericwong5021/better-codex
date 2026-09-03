@@ -4,6 +4,8 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+- Parse modern Codex session messages and attachments from completed items.
+
 ## [0.4.12-beta.1] - 2026-09-02
 
 - Warm up and cache model catalog on runtime startup and categorize models by provider in agent settings.

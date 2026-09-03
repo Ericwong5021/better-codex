@@ -153,3 +153,48 @@ test("readConversationResult drops stale finals from older turns after a newer u
     rmSync(codexHome, { recursive: true, force: true });
   }
 });
+
+test("readConversationResult builds timeline from modern item_completed events", async () => {
+  const codexHome = mkdtempSync(join(tmpdir(), "better-codex-session-modern-"));
+  const previous = process.env.CODEX_HOME;
+  process.env.CODEX_HOME = codexHome;
+  try {
+    const id = "019fd63c-15b5-7bc1-8110-22dbe0117e78";
+    const directory = join(codexHome, "sessions", "2026", "09", "03");
+    const inputImage = join(codexHome, "input.png");
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(inputImage, "image-content", "utf8");
+    writeFileSync(join(directory, `rollout-2026-09-03T11-00-00-${id}.jsonl`), [
+      JSON.stringify({ type: "session_meta", payload: { cwd: codexHome, cli_version: "0.151.0-alpha.7.2" } }),
+      JSON.stringify({ type: "event_msg", timestamp: "2026-09-03T11:00:01.000Z", payload: { type: "task_started", turn_id: "turn-1" } }),
+      JSON.stringify({ type: "event_msg", timestamp: "2026-09-03T11:00:02.000Z", payload: { type: "item_completed", turn_id: "turn-1", item: { type: "UserMessage", content: [{ type: "text", text: "hi" }] } } }),
+      JSON.stringify({ type: "event_msg", timestamp: "2026-09-03T11:00:03.000Z", payload: { type: "item_completed", turn_id: "turn-1", item: { type: "AgentMessage", content: [{ type: "Text", text: "你好，请告诉我接下来需要处理的任务。" }] } } }),
+      JSON.stringify({ type: "event_msg", timestamp: "2026-09-03T11:00:04.000Z", payload: { type: "task_complete", turn_id: "turn-1", last_agent_message: "你好，请告诉我接下来需要处理的任务。" } }),
+      JSON.stringify({ type: "event_msg", timestamp: "2026-09-03T11:01:01.000Z", payload: { type: "task_started", turn_id: "turn-2" } }),
+      JSON.stringify({ type: "event_msg", timestamp: "2026-09-03T11:01:02.000Z", payload: { type: "item_completed", turn_id: "turn-2", item: { type: "UserMessage", content: [{ type: "text", text: "检查截图" }, { type: "local_image", path: inputImage }] } } }),
+      JSON.stringify({ type: "event_msg", timestamp: "2026-09-03T11:01:03.000Z", payload: { type: "item_completed", turn_id: "turn-2", item: { type: "AgentMessage", content: [{ type: "Text", text: "正在检查代码" }] } } }),
+      JSON.stringify({ type: "event_msg", timestamp: "2026-09-03T11:01:05.000Z", payload: { type: "item_completed", turn_id: "turn-2", item: { type: "AgentMessage", content: [{ type: "Text", text: "截图检查完毕，项目正常。" }] } } }),
+      JSON.stringify({ type: "event_msg", timestamp: "2026-09-03T11:01:06.000Z", payload: { type: "task_complete", turn_id: "turn-2", last_agent_message: "截图检查完毕，项目正常。" } }),
+      "",
+    ].join("\n"), "utf8");
+
+    const result = await readConversationResult(id);
+    assert.equal(result.found, true);
+    assert.equal(result.messages.length, 5);
+    assert.deepEqual(result.messages.map(item => item.role), ["user", "agent", "user", "agent", "agent"]);
+    assert.equal(result.messages[0].markdown, "hi");
+    assert.equal(result.messages[1].markdown, "你好，请告诉我接下来需要处理的任务。");
+    assert.equal(result.messages[1].phase, "final_answer");
+    assert.match(result.messages[2].markdown, /检查截图/);
+    assert.equal(result.messages[2].attachments?.length, 1);
+    assert.equal(result.messages[2].attachments[0].name, "input.png");
+    assert.equal(result.messages[3].markdown, "正在检查代码");
+    assert.equal(result.messages[4].markdown, "截图检查完毕，项目正常。");
+    assert.equal(result.messages[4].phase, "final_answer");
+    assert.equal(result.markdown, "截图检查完毕，项目正常。");
+  } finally {
+    if (previous === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previous;
+    rmSync(codexHome, { recursive: true, force: true });
+  }
+});
