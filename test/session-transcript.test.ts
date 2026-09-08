@@ -198,3 +198,53 @@ test("readConversationResult builds timeline from modern item_completed events",
     rmSync(codexHome, { recursive: true, force: true });
   }
 });
+
+test("readConversationResult and readConversationActivity extract thinking and execution steps", async () => {
+  const codexHome = mkdtempSync(join(tmpdir(), "better-codex-session-steps-"));
+  const previous = process.env.CODEX_HOME;
+  process.env.CODEX_HOME = codexHome;
+  try {
+    const id = "019fd78a-beef-7bc1-8110-22dbe0119999";
+    const directory = join(codexHome, "sessions", "2026", "09", "03");
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(join(directory, `rollout-2026-09-03T12-00-00-${id}.jsonl`), [
+      JSON.stringify({ type: "session_meta", payload: { cwd: codexHome, cli_version: "0.151.0-alpha.7.2" } }),
+      JSON.stringify({ type: "event_msg", timestamp: "2026-09-03T12:00:01.000Z", payload: { type: "task_started", turn_id: "turn-1" } }),
+      JSON.stringify({ type: "event_msg", timestamp: "2026-09-03T12:00:02.000Z", payload: { type: "item_completed", turn_id: "turn-1", item: { type: "UserMessage", content: [{ type: "text", text: "检查登录问题" }] } } }),
+      JSON.stringify({ type: "event_msg", timestamp: "2026-09-03T12:00:03.000Z", payload: { type: "item_completed", turn_id: "turn-1", started_at_ms: 1000, completed_at_ms: 3500, item: { id: "rs-1", type: "Reasoning", summary_text: ["正在分析登录组件"] } } }),
+      JSON.stringify({ type: "response_item", timestamp: "2026-09-03T12:00:04.000Z", payload: { type: "function_call", call_id: "cmd-call-1", name: "exec_command", arguments: JSON.stringify({ cmd: "rg 'login' src/" }) } }),
+      JSON.stringify({ type: "event_msg", timestamp: "2026-09-03T12:00:05.000Z", payload: { type: "item_completed", turn_id: "turn-1", started_at_ms: 4000, completed_at_ms: 4300, item: { id: "cmd-call-1", type: "CommandExecution", command: ["/bin/zsh", "-lc", "rg 'login' src/"], exit_code: 0 } } }),
+      JSON.stringify({ type: "event_msg", timestamp: "2026-09-03T12:00:06.000Z", payload: { type: "item_completed", turn_id: "turn-1", item: { type: "AgentMessage", content: [{ type: "Text", text: "登录组件未发现异常。" }] } } }),
+      JSON.stringify({ type: "event_msg", timestamp: "2026-09-03T12:00:07.000Z", payload: { type: "task_complete", turn_id: "turn-1", last_agent_message: "登录组件未发现异常。" } }),
+      // Turn 2 is running
+      JSON.stringify({ type: "event_msg", timestamp: "2026-09-03T12:01:01.000Z", payload: { type: "task_started", turn_id: "turn-2" } }),
+      JSON.stringify({ type: "event_msg", timestamp: "2026-09-03T12:01:02.000Z", payload: { type: "item_completed", turn_id: "turn-2", item: { type: "UserMessage", content: [{ type: "text", text: "继续执行测试" }] } } }),
+      JSON.stringify({ type: "response_item", timestamp: "2026-09-03T12:01:03.000Z", payload: { type: "function_call", call_id: "cmd-call-2", name: "exec_command", arguments: JSON.stringify({ cmd: "npm test" }) } }),
+      "",
+    ].join("\n"), "utf8");
+
+    const result = await readConversationResult(id);
+    assert.equal(result.found, true);
+    assert.equal(result.messages.length, 3); // user-1, agent-1, user-2
+    assert.equal(result.messages[1].role, "agent");
+    assert.equal(result.messages[1].steps?.length, 2);
+    assert.equal(result.messages[1].steps[0].kind, "reasoning");
+    assert.equal(result.messages[1].steps[0].title, "思考过程");
+    assert.equal(result.messages[1].steps[0].duration_ms, 2500);
+    assert.equal(result.messages[1].steps[0].status, "completed");
+    assert.equal(result.messages[1].steps[1].kind, "command");
+    assert.equal(result.messages[1].steps[1].title, "rg 'login' src/");
+    assert.equal(result.messages[1].steps[1].status, "completed");
+
+    // Active turn steps in result.activity
+    assert.equal(result.activity.status, "running");
+    assert.equal(result.activity.steps?.length, 1);
+    assert.equal(result.activity.steps[0].kind, "command");
+    assert.equal(result.activity.steps[0].title, "npm test");
+    assert.equal(result.activity.steps[0].status, "running");
+  } finally {
+    if (previous === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previous;
+    rmSync(codexHome, { recursive: true, force: true });
+  }
+});

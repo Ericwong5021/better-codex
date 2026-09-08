@@ -882,6 +882,40 @@ test("stopping a claimed desktop start before turn binding releases the run", as
   }
 });
 
+test("active unarchived issues can be deleted directly without prior archiving", () => {
+  const target = temporaryDatabase();
+  try {
+    const store = new Store(target.file);
+    const project = store.createProject({ name: "Direct Delete", workspacePath: target.directory });
+
+    // Case 1: Active issue without thread is deleted immediately
+    const issueWithoutThread = store.createIssue({ title: "Without Thread", description: "testing direct delete", projectId: project.id });
+    assert.equal(issueWithoutThread.archived_at, null);
+    store.deleteArchivedIssue(issueWithoutThread.id, issueWithoutThread.version);
+    assert.equal(store.getIssue(issueWithoutThread.id), undefined);
+
+    // Case 2: Active issue with thread queues thread deletion
+    const issueWithThread = store.createIssue({ title: "With Thread", description: "testing direct delete with thread", projectId: project.id });
+    const threadId = "019fec06-788f-7af3-a031-76b546904fb1";
+    const timestamp = new Date().toISOString();
+    store.db.prepare(`
+      INSERT INTO issue_sessions (issue_id, host_id, thread_id, status, config_fingerprint, last_agent_message, created_at, updated_at)
+      VALUES (?, 'local', ?, 'idle', 'config', '', ?, ?)
+    `).run(issueWithThread.id, threadId, timestamp, timestamp);
+    store.deleteArchivedIssue(issueWithThread.id, store.getIssue(issueWithThread.id)!.version);
+    assert.ok(store.getIssue(issueWithThread.id)?.deleting_at);
+    const [deletion] = store.listPendingThreadActions();
+    assert.equal(deletion.action, "delete");
+    assert.equal(deletion.thread_id, threadId);
+    store.completeThreadAction(deletion);
+    assert.equal(store.getIssue(issueWithThread.id), undefined);
+
+    store.close();
+  } finally {
+    rmSync(target.directory, { recursive: true, force: true });
+  }
+});
+
 test("session reply idempotency is issue-scoped, fingerprinted, and atomic", () => {
   const target = temporaryDatabase();
   try {

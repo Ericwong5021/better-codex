@@ -522,6 +522,8 @@ export function install(config: Record<string, any>) {
     localeResources.en["发送消息"] = "Send messages";
     localeResources.en["选择消息输入框的发送按键"] = "Choose the key used to send from message fields";
     localeResources.en["横向滚动任务看板"] = "Scroll the task board horizontally";
+    localeResources.en["向左滚动任务看板"] = "Scroll the task board left";
+    localeResources.en["向右滚动任务看板"] = "Scroll the task board right";
     Object.assign(localeResources.en, {
       "项目文档": "Project documentation",
       "项目章程": "Charter",
@@ -2706,6 +2708,7 @@ export function install(config: Record<string, any>) {
       if (value === "browser_transport_failed") return t("网络连接不稳定，正在等待恢复。");
       if (["runtime_response_invalid", "invalid_projects_response", "invalid_issues_response", "invalid_agents_response"].includes(value)) return t("列表数据暂时无法读取，请稍后重试。");
       if (value === "issue_archived") return t("该会话对应的 Issue 已归档，请先取消归档。");
+      if (value === "issue_not_archived") return t("该任务尚未归档。");
       if (["project_planning_busy", "project_planning_agent_locked", "project_planning_unavailable", "project_planning_invalid_output", "project_planning_session_missing"].includes(value)) return projectPlanningErrorLabel(value);
       if (["project_overview_timeout", "project_overview_unavailable", "project_document_invalid_output", "remote_command_timeout", "workspace_missing"].includes(value)) return projectDocumentErrorLabel(value);
       if (value === "version_conflict" || value === "queued_reply_update_conflict") return t("内容刚刚发生变化，请稍后重试。");
@@ -3969,7 +3972,7 @@ export function install(config: Record<string, any>) {
         if (item.dataset.contextAction === "delete") {
           closeIssueMenu();
           return void confirmAction("删除任务", "确定删除任务 “" + current.title + "” 吗？", "删除").then(confirmed => confirmed && perform(async () => {
-            await api("/api/issues/" + encodeURIComponent(current.id), { method: "DELETE", body: JSON.stringify({ version: current.version }) });
+            await withLatestIssueOnConflict(current.id, latest => api("/api/issues/" + encodeURIComponent(current.id), { method: "DELETE", body: JSON.stringify({ version: latest.version }) }));
             await loadIssues();
           }));
         }
@@ -4038,6 +4041,60 @@ export function install(config: Record<string, any>) {
     function onIssueLongPressEnd(event) {
       if (!issueLongPress || event.pointerId !== issueLongPress.pointerId) return;
       resetIssueLongPress();
+    }
+
+    let isPanningBoard = false;
+    let panStartX = 0;
+    let panStartScrollLeft = 0;
+    let panPointerId = -1;
+    let panMoved = false;
+    let panActiveBoard = null;
+
+    function onBoardPanStart(event) {
+      if (event.button !== 0 || event.pointerType === "touch") return;
+      const target = event.target;
+      if (!target || typeof target.closest !== "function") return;
+      if (target.closest("[data-issue-id], button, input, textarea, a, select, [role='button'], [data-archive-open], [data-add-status], [data-pin], [data-thread]")) {
+        return;
+      }
+      const board = target.closest(".better-codex-board");
+      if (!board || board.scrollWidth <= board.clientWidth) return;
+      isPanningBoard = true;
+      panActiveBoard = board;
+      panStartX = event.clientX;
+      panStartScrollLeft = board.scrollLeft;
+      panPointerId = event.pointerId;
+      panMoved = false;
+      event.preventDefault();
+      try {
+        board.setPointerCapture(event.pointerId);
+      } catch {}
+    }
+
+    function onBoardPanMove(event) {
+      if (!isPanningBoard || event.pointerId !== panPointerId || !panActiveBoard) return;
+      const dx = event.clientX - panStartX;
+      if (Math.abs(dx) > 3) {
+        panMoved = true;
+        panActiveBoard.classList.add("is-panning");
+      }
+      panActiveBoard.scrollLeft = panStartScrollLeft - dx;
+    }
+
+    function onBoardPanEnd(event) {
+      if (!isPanningBoard || event.pointerId !== panPointerId) return;
+      isPanningBoard = false;
+      const board = panActiveBoard;
+      panActiveBoard = null;
+      if (board) {
+        board.classList.remove("is-panning");
+        try {
+          board.releasePointerCapture(event.pointerId);
+        } catch {}
+      }
+      if (panMoved) {
+        suppressIssueClickUntil = Date.now() + 250;
+      }
     }
 
     function createPanel() {
@@ -4235,25 +4292,32 @@ export function install(config: Record<string, any>) {
       board.addEventListener("pointermove", onIssueLongPressMove);
       board.addEventListener("pointerup", onIssueLongPressEnd);
       board.addEventListener("pointercancel", onIssueLongPressEnd);
+      board.addEventListener("pointerdown", onBoardPanStart);
+      board.addEventListener("pointermove", onBoardPanMove);
+      board.addEventListener("pointerup", onBoardPanEnd);
+      board.addEventListener("pointercancel", onBoardPanEnd);
       board.addEventListener("dragstart", onCardDragStart);
       board.addEventListener("dragend", onCardDragEnd);
       board.addEventListener("dragover", event => event.preventDefault());
       board.addEventListener("drop", onDrop);
-      let boardScrollControl = null;
-      if (HOST_KIND === "web") {
-        boardScrollControl = document.createElement("div");
-        boardScrollControl.className = "better-codex-board-scroll better-codex-issue-only";
-        boardScrollControl.hidden = true;
-        boardScrollControl.innerHTML = '<span class="is-start" aria-hidden="true">' + icon("chevron") + '</span><input type="range" min="0" max="0" value="0" step="1" aria-label="' + te("横向滚动任务看板") + '"><span aria-hidden="true">' + icon("chevron") + "</span>";
-        const range = boardScrollControl.querySelector("input");
-        range.addEventListener("input", () => {
-          board.scrollLeft = Number(range.value);
-        });
-        board.addEventListener("scroll", syncBoardScrollControl, { passive: true });
-        boardScrollResizeObserver?.disconnect();
-        boardScrollResizeObserver = new ResizeObserver(syncBoardScrollControl);
-        boardScrollResizeObserver.observe(board);
-      }
+      const boardScrollControl = document.createElement("div");
+      boardScrollControl.className = "better-codex-board-scroll better-codex-issue-only";
+      boardScrollControl.hidden = true;
+      boardScrollControl.innerHTML = '<button class="better-codex-board-scroll-btn is-start" type="button" aria-label="' + te("向左滚动任务看板") + '">' + icon("chevron") + '</button><input type="range" min="0" max="0" value="0" step="1" aria-label="' + te("横向滚动任务看板") + '"><button class="better-codex-board-scroll-btn is-end" type="button" aria-label="' + te("向右滚动任务看板") + '">' + icon("chevron") + '</button>';
+      const range = boardScrollControl.querySelector("input");
+      range.addEventListener("input", () => {
+        board.scrollLeft = Number(range.value);
+      });
+      boardScrollControl.querySelector(".is-start")?.addEventListener("click", () => {
+        board.scrollBy({ left: -300, behavior: "smooth" });
+      });
+      boardScrollControl.querySelector(".is-end")?.addEventListener("click", () => {
+        board.scrollBy({ left: 300, behavior: "smooth" });
+      });
+      board.addEventListener("scroll", syncBoardScrollControl, { passive: true });
+      boardScrollResizeObserver?.disconnect();
+      boardScrollResizeObserver = new ResizeObserver(syncBoardScrollControl);
+      boardScrollResizeObserver.observe(board);
       const recovery = document.createElement("main");
       recovery.id = "better-codex-recovery";
       recovery.className = "better-codex-recovery";
@@ -4319,6 +4383,10 @@ export function install(config: Record<string, any>) {
       projects.addEventListener("pointermove", onIssueLongPressMove);
       projects.addEventListener("pointerup", onIssueLongPressEnd);
       projects.addEventListener("pointercancel", onIssueLongPressEnd);
+      projects.addEventListener("pointerdown", onBoardPanStart);
+      projects.addEventListener("pointermove", onBoardPanMove);
+      projects.addEventListener("pointerup", onBoardPanEnd);
+      projects.addEventListener("pointercancel", onBoardPanEnd);
       projects.addEventListener("dragstart", onCardDragStart);
       projects.addEventListener("dragend", onCardDragEnd);
       projects.addEventListener("dragover", event => {
@@ -4353,19 +4421,18 @@ export function install(config: Record<string, any>) {
       });
       projects.addEventListener("submit", onProjectDocumentSubmit);
       projects.addEventListener("submit", onProjectPlanningSubmit);
-      section.append(toolbar, board, ...(boardScrollControl ? [boardScrollControl] : []), scheduledTasks, agents, projects, recovery);
+      section.append(toolbar, board, boardScrollControl, scheduledTasks, agents, projects, recovery);
       return section;
     }
 
     function syncBoardScrollControl() {
-      if (HOST_KIND !== "web" || !panel) return;
+      if (!panel) return;
       const board = panel.querySelector("#better-codex-board");
       const control = panel.querySelector(".better-codex-board-scroll");
       const range = control?.querySelector("input");
       if (!board || !control || !range) return;
-      const compact = window.matchMedia("(max-width: 720px)").matches;
       const max = Math.max(0, Math.ceil(board.scrollWidth - board.clientWidth));
-      control.hidden = !compact || state.surface !== "issues" || max < 2;
+      control.hidden = state.surface !== "issues" || max < 2;
       range.max = String(max);
       range.value = String(Math.min(max, Math.max(0, Math.round(board.scrollLeft))));
       if (control.hidden) return;
@@ -6471,6 +6538,21 @@ export function install(config: Record<string, any>) {
         syncShortcutControls(shortcut);
       });
       const completionToggle = dialog.querySelector("[data-setting-completion]");
+      const positionHelpMenu = (toggle: HTMLElement, menu: HTMLElement) => {
+        const viewportTop = window.visualViewport?.offsetTop || 0;
+        const viewportBottom = viewportTop + (window.visualViewport?.height || window.innerHeight);
+        const toggleRect = toggle.getBoundingClientRect();
+        const spaceAbove = Math.max(0, toggleRect.top - viewportTop - 12);
+        const spaceBelow = Math.max(0, viewportBottom - toggleRect.bottom - 12);
+        const openAbove = spaceBelow < 280 && spaceAbove > spaceBelow;
+        const availableHeight = Math.min(320, Math.max(140, openAbove ? spaceAbove : spaceBelow));
+        menu.classList.toggle("is-above", openAbove);
+        menu.style.maxHeight = Math.floor(availableHeight) + "px";
+        const selected = menu.querySelector(".is-selected") as HTMLElement | null;
+        if (selected && typeof selected.scrollIntoView === "function") {
+          selected.scrollIntoView({ block: "nearest" });
+        }
+      };
       const completionDurationSelect = dialog.querySelector("[data-setting-completion-duration]");
       const completionDurationPicker = dialog.querySelector("[data-setting-completion-picker]");
       const completionDurationMenu = dialog.querySelector(".better-codex-help-duration-menu");
@@ -6478,6 +6560,8 @@ export function install(config: Record<string, any>) {
         completionDurationPicker.classList.remove("is-open");
         completionDurationMenu.hidden = true;
         completionDurationSelect.setAttribute("aria-expanded", "false");
+        completionDurationMenu.classList.remove("is-above");
+        completionDurationMenu.style.removeProperty("max-height");
       };
       const schedulerModelPicker = dialog.querySelector("[data-setting-scheduler-model-picker]");
       const schedulerModelSelect = dialog.querySelector("[data-setting-scheduler-model]");
@@ -6491,11 +6575,15 @@ export function install(config: Record<string, any>) {
         schedulerModelPicker.classList.remove("is-open");
         schedulerModelMenu.hidden = true;
         schedulerModelSelect.setAttribute("aria-expanded", "false");
+        schedulerModelMenu.classList.remove("is-above");
+        schedulerModelMenu.style.removeProperty("max-height");
       };
       const closeSchedulerReasoningMenu = () => {
         schedulerReasoningPicker.classList.remove("is-open");
         schedulerReasoningMenu.hidden = true;
         schedulerReasoningSelect.setAttribute("aria-expanded", "false");
+        schedulerReasoningMenu.classList.remove("is-above");
+        schedulerReasoningMenu.style.removeProperty("max-height");
       };
       const syncSchedulerModel = model => {
         state.schedulerModel = model;
@@ -6542,6 +6630,7 @@ export function install(config: Record<string, any>) {
           completionDurationPicker.classList.add("is-open");
           completionDurationMenu.hidden = false;
           completionDurationSelect.setAttribute("aria-expanded", "true");
+          positionHelpMenu(completionDurationSelect, completionDurationMenu);
         }
       });
       completionDurationMenu.querySelectorAll("[data-setting-completion-option]").forEach(option => option.addEventListener("click", () => {
@@ -6569,6 +6658,7 @@ export function install(config: Record<string, any>) {
           schedulerModelPicker.classList.add("is-open");
           schedulerModelMenu.hidden = false;
           schedulerModelSelect.setAttribute("aria-expanded", "true");
+          positionHelpMenu(schedulerModelSelect, schedulerModelMenu);
         }
       });
       schedulerModelMenu.querySelectorAll("[data-setting-scheduler-model-option]").forEach(option => option.addEventListener("click", async () => {
@@ -6598,6 +6688,7 @@ export function install(config: Record<string, any>) {
           schedulerReasoningPicker.classList.add("is-open");
           schedulerReasoningMenu.hidden = false;
           schedulerReasoningSelect.setAttribute("aria-expanded", "true");
+          positionHelpMenu(schedulerReasoningSelect, schedulerReasoningMenu);
         }
       });
       schedulerReasoningMenu.addEventListener("click", async event => {
@@ -8903,6 +8994,52 @@ export function install(config: Record<string, any>) {
         }, { issue_id: issue?.id || "", attachment_scope: scope, attachment_index: attachmentIndex });
       }
 
+      const expandedThinkingCards = new Set<string>();
+
+      function conversationStepsMarkup(steps, isRunning = false, id = "") {
+        if (!Array.isArray(steps) || !steps.length) return "";
+        const count = steps.length;
+        const totalDurationMs = steps.reduce((sum, s) => sum + (Number(s.duration_ms) || 0), 0);
+        const durationLabel = totalDurationMs >= 60000
+          ? Math.floor(totalDurationMs / 60000) + "m " + Math.floor((totalDurationMs % 60000) / 1000) + "s"
+          : totalDurationMs >= 1000
+            ? (totalDurationMs / 1000).toFixed(0) + "s"
+            : "";
+        const title = isRunning ? te("思考与执行中…") : te("思考与执行过程");
+        const countLabel = te("共 ") + count + te(" 步") + (durationLabel ? " · " + durationLabel : "");
+        const isOpen = id ? expandedThinkingCards.has(id) : false;
+
+        const stepItems = steps.map(step => {
+          const iconKey = step.kind === "reasoning" ? "sparkles"
+            : step.kind === "command" ? "terminal"
+            : step.kind === "image" ? "image"
+            : step.kind === "file" ? "folder"
+            : "wrench";
+          const statusMarkup = step.status === "failed" ? icon("close")
+            : step.status === "running" ? '<span class="better-codex-activity-dot" aria-hidden="true"></span>'
+            : icon("check");
+          const stepDuration = step.duration_ms && step.duration_ms >= 1000
+            ? (step.duration_ms / 1000).toFixed(1) + "s"
+            : "";
+          return '<li class="better-codex-thinking-step ' + escapeHtml(step.status || "completed") + '">'
+            + '<span class="better-codex-thinking-step-icon">' + icon(iconKey) + '</span>'
+            + '<span class="better-codex-thinking-step-title" title="' + escapeHtml(step.detail || step.title) + '">' + escapeHtml(step.title) + '</span>'
+            + (stepDuration ? '<span class="better-codex-thinking-step-duration">' + escapeHtml(stepDuration) + '</span>' : "")
+            + '<span class="better-codex-thinking-step-status">' + statusMarkup + '</span>'
+            + '</li>';
+        }).join("");
+
+        return '<details class="better-codex-thinking-card" data-thinking-id="' + escapeHtml(id) + '"' + (isOpen ? " open" : "") + '>'
+          + '<summary class="better-codex-thinking-summary">'
+          + '<span class="better-codex-thinking-icon">' + (isRunning ? '<span class="better-codex-activity-dot" aria-hidden="true"></span>' : icon("check")) + '</span>'
+          + '<span class="better-codex-thinking-title">' + title + '</span>'
+          + '<span class="better-codex-thinking-badge">' + countLabel + '</span>'
+          + '<span class="better-codex-thinking-chevron">' + icon("chevronDown") + '</span>'
+          + '</summary>'
+          + '<div class="better-codex-thinking-content"><ol class="better-codex-thinking-steps">' + stepItems + '</ol></div>'
+          + '</details>';
+      }
+
       function conversationBubbles(messages, profile = null) {
         const agent = state.agents.find(item => item.id === issue?.agent_id) || state.agents.find(item => item.is_default) || null;
         const agentName = agent ? agentDisplayName(agent) : (issue?.agent_enabled ? "Codex" : t("智能体"));
@@ -8914,7 +9051,10 @@ export function install(config: Record<string, any>) {
           const name = isUser ? (user.name || t("你")) : agentName;
           const time = relativeTime(message.timestamp);
           const content = message.html || (message.attachments?.length ? "" : renderPlainBubble(message.markdown || ""));
-          return '<article class="better-codex-bubble ' + (isUser ? "is-user" : "is-agent") + '">' + avatar + '<div class="better-codex-bubble-main"><button class="better-codex-bubble-copy" type="button" data-conversation-copy="' + index + '" aria-label="' + te("复制消息") + '" title="' + te("复制消息") + '">' + icon("copy") + '</button><div class="better-codex-bubble-meta"><strong>' + escapeHtml(name) + '</strong>' + (time ? '<time datetime="' + escapeHtml(message.timestamp || "") + '">' + escapeHtml(time) + '</time>' : "") + '</div>' + (content ? '<div class="better-codex-bubble-content">' + content + '</div>' : "") + conversationAttachments(message, index) + '</div></article>';
+          const stepsMarkup = !isUser && message.steps?.length
+            ? conversationStepsMarkup(message.steps, false, message.id || ("msg-step-" + index))
+            : "";
+          return '<article class="better-codex-bubble ' + (isUser ? "is-user" : "is-agent") + '">' + avatar + '<div class="better-codex-bubble-main"><button class="better-codex-bubble-copy" type="button" data-conversation-copy="' + index + '" aria-label="' + te("复制消息") + '" title="' + te("复制消息") + '">' + icon("copy") + '</button><div class="better-codex-bubble-meta"><strong>' + escapeHtml(name) + '</strong>' + (time ? '<time datetime="' + escapeHtml(message.timestamp || "") + '">' + escapeHtml(time) + '</time>' : "") + '</div>' + stepsMarkup + (content ? '<div class="better-codex-bubble-content">' + content + '</div>' : "") + conversationAttachments(message, index) + '</div></article>';
         }).join("");
       }
 
@@ -8973,9 +9113,21 @@ export function install(config: Record<string, any>) {
         const stateName = optimisticReplies.size ? "running" : reply.status || "idle";
         lastReplyStatus = stateName;
         const isRunning = stateName === "running" || data?.activity?.status === "running";
+        const activeSteps = Array.isArray(data?.activity?.steps) ? data.activity.steps : [];
+        const lastMsg = messages[messages.length - 1];
+        const agent = state.agents.find(item => item.id === issue?.agent_id) || state.agents.find(item => item.is_default) || null;
+        const agentName = agent ? agentDisplayName(agent) : (issue?.agent_enabled ? "Codex" : t("智能体"));
+        const runningBubbleHtml = (isRunning && lastMsg?.role === "user")
+          ? '<article class="better-codex-bubble is-agent is-running">'
+            + agentAvatarMarkup(agent, "better-codex-bubble-avatar")
+            + '<div class="better-codex-bubble-main">'
+            + '<div class="better-codex-bubble-meta"><strong>' + escapeHtml(agentName) + '</strong><span class="better-codex-activity" data-run="running"><span class="better-codex-activity-dot" aria-hidden="true"></span><span class="better-codex-shimmer">' + te("正在思考与处理…") + '</span></span></div>'
+            + (activeSteps.length ? conversationStepsMarkup(activeSteps, true, "active-running-" + (data?.activity?.turn_id || "turn")) : "")
+            + '</div></article>'
+          : "";
         if (messages.length) {
           conversationMessages = messages;
-          messageList.innerHTML = conversationBubbles(messages, RELAY ? state.user : data.user);
+          messageList.innerHTML = conversationBubbles(messages, RELAY ? state.user : data.user) + runningBubbleHtml;
           body.scrollTop = stickToBottom ? body.scrollHeight : previousScrollTop;
         } else if (!options.preserveBody) {
           conversationMessages = [];
@@ -8986,7 +9138,7 @@ export function install(config: Record<string, any>) {
             failed: stateName === "failed" || issue?.latest_run_status === "failed",
             error: reply.error || issue?.session_last_error,
           });
-          messageList.innerHTML = '<div class="better-codex-conversation-empty"><h3>' + te(empty.title) + '</h3><p>' + te(empty.description) + '</p><span>' + te(empty.hint) + '</span>' + '</div>';
+          messageList.innerHTML = '<div class="better-codex-conversation-empty"><h3>' + te(empty.title) + '</h3><p>' + te(empty.description) + '</p><span>' + te(empty.hint) + '</span>' + (activeSteps.length ? conversationStepsMarkup(activeSteps, true, "empty-running") : "") + '</div>';
         }
         const expectedInterruption = stateName === "interrupted" && ["user_stopped", "session_interrupted"].includes(String(reply.error || ""));
         if (stateName === "failed" || (stateName === "interrupted" && !expectedInterruption)) showConversationFailure(reply.error, reply.message ? "reply" : "execution", reply.message, { origin: "turn" });
@@ -9757,6 +9909,15 @@ export function install(config: Record<string, any>) {
           if (button.dataset.composerMode === "stop") void stopIssueFromDialog(button);
           else if (["send", "queue"].includes(button.dataset.composerMode)) void sendReply();
         });
+        dialog.querySelector("[data-conversation-body]")?.addEventListener("toggle", event => {
+          const details = (event.target as HTMLElement | null)?.closest?.(".better-codex-thinking-card") as HTMLDetailsElement | null;
+          if (!details) return;
+          const id = details.dataset.thinkingId;
+          if (id) {
+            if (details.open) expandedThinkingCards.add(id);
+            else expandedThinkingCards.delete(id);
+          }
+        }, true);
         dialog.querySelector("[data-conversation-body]")?.addEventListener("click", async event => {
           const attachmentButton = event.target.closest("[data-conversation-attachment]");
           if (attachmentButton) {
@@ -10867,6 +11028,8 @@ export function install(config: Record<string, any>) {
       updateNoticeResizeObserver = null;
       boardScrollResizeObserver?.disconnect();
       boardScrollResizeObserver = null;
+      isPanningBoard = false;
+      panActiveBoard = null;
       panelSizeCleanup?.();
       panelSizeCleanup = null;
       Array.from(completionNoticeDismissals.values()).forEach(dismissNotice => dismissNotice(false));

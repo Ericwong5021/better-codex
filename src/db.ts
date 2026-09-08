@@ -3192,7 +3192,6 @@ export class Store {
     if (!issue) throw new Error("issue_not_found");
     if (issue.version !== version) throw new Error("version_conflict");
     if (this.isTitleRegenerationPending(issue)) throw new Error("issue_enrichment_pending");
-    if (!issue.archived_at) throw new Error("issue_not_archived");
     if (issue.deleting_at) return issue;
     if (issue.active_run_status || issue.session_active_turn_id || this.getIssueReplyState(issue.id).status === "running") throw new Error("issue_execution_running");
     this.db.exec("BEGIN IMMEDIATE");

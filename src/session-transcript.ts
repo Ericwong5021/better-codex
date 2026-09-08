@@ -70,6 +70,16 @@ export function sessionWorkspace(value: string | null | undefined) {
   }
 }
 
+export type ConversationStep = {
+  id: string;
+  kind: "reasoning" | "command" | "image" | "file" | "tool";
+  title: string;
+  detail?: string;
+  duration_ms?: number;
+  status: "running" | "completed" | "failed";
+  timestamp: string | null;
+};
+
 export type ConversationMessage = {
   id: string;
   role: "user" | "agent";
@@ -78,6 +88,7 @@ export type ConversationMessage = {
   phase: string | null;
   timestamp: string | null;
   attachments?: ConversationAttachment[];
+  steps?: ConversationStep[];
 };
 
 export type ConversationAttachment = {
@@ -99,6 +110,7 @@ export type ConversationActivity = {
   started_at: string | null;
   completed_at: string | null;
   updated_at: string | null;
+  steps?: ConversationStep[];
 };
 
 export type ConversationResult = {
@@ -305,6 +317,195 @@ function extractItemAgentMessage(item: unknown) {
   return stripMemoryCitation(texts.join("\n"));
 }
 
+function extractStepFromFunctionCall(payload: unknown, timestamp: string | null): ConversationStep | null {
+  if (!payload || typeof payload !== "object") return null;
+  const p = payload as { id?: unknown; call_id?: unknown; name?: unknown; arguments?: unknown };
+  const id = typeof p.call_id === "string" && p.call_id ? p.call_id : typeof p.id === "string" ? p.id : "";
+  const name = typeof p.name === "string" ? p.name : "tool";
+  let args: Record<string, unknown> = {};
+  if (typeof p.arguments === "string") {
+    try { args = JSON.parse(p.arguments); } catch {}
+  } else if (p.arguments && typeof p.arguments === "object") {
+    args = p.arguments as Record<string, unknown>;
+  }
+  let kind: ConversationStep["kind"] = "tool";
+  let title = name;
+  let detail = "";
+  if (name === "exec_command" || name === "bash") {
+    kind = "command";
+    const cmd = String(args.cmd || args.command || "").trim();
+    title = cmd ? (cmd.length > 90 ? cmd.slice(0, 90) + "…" : cmd) : "执行命令";
+    detail = cmd.slice(0, 300);
+  } else if (name === "view_image") {
+    kind = "image";
+    const path = String(args.path || "").trim();
+    const fileName = basename(path) || path;
+    title = fileName ? `查看图片: ${fileName}` : "查看图片";
+    detail = path.slice(0, 300);
+  } else if (name.includes("file") || name.includes("patch") || name.includes("write")) {
+    kind = "file";
+    const path = String(args.path || args.file || args.target || "").trim();
+    const fileName = basename(path) || path;
+    title = fileName ? `文件操作: ${fileName}` : "文件操作";
+    detail = path.slice(0, 300);
+  } else {
+    detail = JSON.stringify(args).slice(0, 300);
+  }
+  return {
+    id: id || `call-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    kind,
+    title,
+    detail: detail || undefined,
+    duration_ms: 0,
+    status: "running",
+    timestamp,
+  };
+}
+
+function extractStepFromItemCompleted(item: unknown, startedAtMs?: unknown, completedAtMs?: unknown, timestamp?: string | null): ConversationStep | null {
+  if (!item || typeof item !== "object") return null;
+  const it = item as {
+    type?: unknown;
+    id?: unknown;
+    command?: unknown;
+    parsed_cmd?: unknown;
+    exit_code?: unknown;
+    path?: unknown;
+    server?: unknown;
+    tool?: unknown;
+    summary_text?: unknown;
+  };
+  const id = typeof it.id === "string" ? it.id : "";
+  const start = Number(startedAtMs);
+  const end = Number(completedAtMs);
+  const duration_ms = Number.isFinite(start) && Number.isFinite(end) && end >= start ? Math.max(0, end - start) : 0;
+  const type = typeof it.type === "string" ? it.type : "";
+
+  if (type === "Reasoning") {
+    let detail = "";
+    if (Array.isArray(it.summary_text) && it.summary_text.length) {
+      detail = it.summary_text.map(s => String(s || "")).join(" ").trim().slice(0, 300);
+    }
+    return {
+      id: id || `reasoning-${Date.now()}`,
+      kind: "reasoning",
+      title: "思考过程",
+      detail: detail || undefined,
+      duration_ms,
+      status: "completed",
+      timestamp: timestamp || null,
+    };
+  }
+
+  if (type === "CommandExecution") {
+    let cmd = "";
+    if (Array.isArray(it.parsed_cmd) && it.parsed_cmd[0] && typeof it.parsed_cmd[0] === "object") {
+      const pcmd = (it.parsed_cmd[0] as { cmd?: unknown }).cmd;
+      if (typeof pcmd === "string" && pcmd.trim()) cmd = pcmd.trim();
+    }
+    if (!cmd && Array.isArray(it.command)) {
+      if (it.command.length >= 3 && it.command[0] === "/bin/zsh" && it.command[1] === "-lc") {
+        cmd = String(it.command[2] || "").trim();
+      } else {
+        cmd = it.command.map(c => String(c || "")).join(" ").trim();
+      }
+    } else if (!cmd && typeof it.command === "string") {
+      cmd = it.command.trim();
+    }
+    const exitCode = typeof it.exit_code === "number" ? it.exit_code : 0;
+    const title = cmd ? (cmd.length > 90 ? cmd.slice(0, 90) + "…" : cmd) : "执行命令";
+    return {
+      id: id || `cmd-${Date.now()}`,
+      kind: "command",
+      title,
+      detail: cmd.slice(0, 300) || undefined,
+      duration_ms,
+      status: exitCode === 0 ? "completed" : "failed",
+      timestamp: timestamp || null,
+    };
+  }
+
+  if (type === "ImageView") {
+    const path = typeof it.path === "string" ? it.path.trim() : "";
+    const fileName = basename(path) || path;
+    return {
+      id: id || `img-${Date.now()}`,
+      kind: "image",
+      title: fileName ? `查看图片: ${fileName}` : "查看图片",
+      detail: path.slice(0, 300) || undefined,
+      duration_ms,
+      status: "completed",
+      timestamp: timestamp || null,
+    };
+  }
+
+  if (type === "FileChange") {
+    const path = typeof it.path === "string" ? it.path.trim() : "";
+    const fileName = basename(path) || path;
+    return {
+      id: id || `file-${Date.now()}`,
+      kind: "file",
+      title: fileName ? `修改文件: ${fileName}` : "修改文件",
+      detail: path.slice(0, 300) || undefined,
+      duration_ms,
+      status: "completed",
+      timestamp: timestamp || null,
+    };
+  }
+
+  if (type === "McpToolCall") {
+    const server = typeof it.server === "string" ? it.server.trim() : "";
+    const tool = typeof it.tool === "string" ? it.tool.trim() : "";
+    const name = server && tool ? `${server}/${tool}` : tool || server || "工具调用";
+    return {
+      id: id || `mcp-${Date.now()}`,
+      kind: "tool",
+      title: `MCP: ${name}`,
+      duration_ms,
+      status: "completed",
+      timestamp: timestamp || null,
+    };
+  }
+
+  if (type === "SubAgentActivity") {
+    return {
+      id: id || `subagent-${Date.now()}`,
+      kind: "tool",
+      title: "子任务执行",
+      duration_ms,
+      status: "completed",
+      timestamp: timestamp || null,
+    };
+  }
+
+  return null;
+}
+
+function recordTurnStep(
+  turnSteps: ConversationStep[],
+  stepMap: Map<string, ConversationStep>,
+  step: ConversationStep
+) {
+  const existing = step.id ? stepMap.get(step.id) : null;
+  if (existing) {
+    existing.status = step.status;
+    if (step.duration_ms) existing.duration_ms = step.duration_ms;
+    if (step.detail) existing.detail = step.detail;
+    if (step.title && existing.title === "tool") existing.title = step.title;
+    return;
+  }
+  if (step.kind === "reasoning" && turnSteps.length > 0 && turnSteps[turnSteps.length - 1].kind === "reasoning") {
+    turnSteps[turnSteps.length - 1].duration_ms = (turnSteps[turnSteps.length - 1].duration_ms || 0) + (step.duration_ms || 0);
+    return;
+  }
+  turnSteps.push(step);
+  if (step.id) stepMap.set(step.id, step);
+  if (turnSteps.length > 100) {
+    const removed = turnSteps.shift();
+    if (removed?.id) stepMap.delete(removed.id);
+  }
+}
+
 type PendingAgent = {
   message: string;
   phase: string | null;
@@ -320,9 +521,13 @@ async function readConversationMessages(rolloutPath: string, limited = true) {
   const turnStartedAt = new Map<string, string>();
   const userAttachments = new Set<string>();
   let pendingAgent: PendingAgent | null = null;
+  let turnSteps: ConversationStep[] = [];
+  const stepMap = new Map<string, ConversationStep>();
 
   const pushUser = (message: string, timestamp: string | null, content = conversationContent(message)) => {
     flushPendingAgent(null);
+    turnSteps = [];
+    stepMap.clear();
     lastIncludedUserAt = timestamp;
     const id = `user-${index++}`;
     messages.push({
@@ -362,6 +567,9 @@ async function readConversationMessages(rolloutPath: string, limited = true) {
     }
     const content = conversationContent(message, userAttachments);
     const id = `agent-${index++}`;
+    const steps = turnSteps.length ? [...turnSteps] : undefined;
+    turnSteps = [];
+    stepMap.clear();
     messages.push({
       id,
       role: "agent",
@@ -370,6 +578,7 @@ async function readConversationMessages(rolloutPath: string, limited = true) {
       phase,
       timestamp,
       ...(content.attachments.length ? { attachments: content.attachments.map(({ value: _value, ...attachment }) => attachment) } : {}),
+      ...(steps?.length ? { steps } : {}),
     });
     attachmentsByMessage.set(id, content.attachments);
   };
@@ -396,6 +605,8 @@ async function readConversationMessages(rolloutPath: string, limited = true) {
         turn_id?: unknown;
         internal_chat_message_metadata_passthrough?: { turn_id?: unknown };
         item?: unknown;
+        started_at_ms?: unknown;
+        completed_at_ms?: unknown;
         last_agent_message?: unknown;
       };
     };
@@ -434,6 +645,11 @@ async function readConversationMessages(rolloutPath: string, limited = true) {
       if (lastMessage) {
         const target = [...messages].reverse().find(m => m.role === "agent" && m.markdown === lastMessage);
         if (target && !target.phase) target.phase = "final_answer";
+        if (target && !target.steps?.length && turnSteps.length) {
+          target.steps = [...turnSteps];
+          turnSteps = [];
+          stepMap.clear();
+        }
       }
       continue;
     }
@@ -450,6 +666,13 @@ async function readConversationMessages(rolloutPath: string, limited = true) {
         };
       }
       continue;
+    }
+
+    if (event.type === "response_item" && event.payload?.type === "function_call") {
+      try {
+        const step = extractStepFromFunctionCall(event.payload, timestamp);
+        if (step) recordTurnStep(turnSteps, stepMap, step);
+      } catch {}
     }
 
     if (event.type === "response_item" && event.payload?.type === "message" && event.payload.role === "assistant") {
@@ -485,6 +708,10 @@ async function readConversationMessages(rolloutPath: string, limited = true) {
         pushAgent(agentMessage, null, timestamp, turnId);
         continue;
       }
+      try {
+        const step = extractStepFromItemCompleted(event.payload.item, event.payload.started_at_ms, event.payload.completed_at_ms, timestamp);
+        if (step) recordTurnStep(turnSteps, stepMap, step);
+      } catch {}
     }
 
     const message = typeof event.payload.message === "string" ? event.payload.message.trim() : "";
@@ -506,6 +733,14 @@ async function readConversationMessages(rolloutPath: string, limited = true) {
     }
   }
   flushPendingAgent(null);
+  if (activity.status === "running") {
+    if (turnSteps.length) activity.steps = [...turnSteps];
+  } else if (turnSteps.length && messages.length) {
+    const lastAgent = [...messages].reverse().find(m => m.role === "agent");
+    if (lastAgent && !lastAgent.steps?.length) {
+      lastAgent.steps = [...turnSteps];
+    }
+  }
   return { messages: limited && messages.length > MAX_MESSAGES ? messages.slice(-MAX_MESSAGES) : messages, activity, attachmentsByMessage };
 }
 
@@ -527,28 +762,53 @@ export async function readConversationActivity(threadId: string | null | undefin
   let activity: ConversationActivity = { status: "idle", turn_id: null, started_at: null, completed_at: null, updated_at: null };
   let lastFinalAt: string | null = null;
   let lastAgentMessage = "";
+  const activeSteps: ConversationStep[] = [];
+  const stepMap = new Map<string, ConversationStep>();
   const lines = createInterface({ input: createReadStream(rolloutPath, { encoding: "utf8" }), crlfDelay: Infinity });
   for await (const line of lines) {
     if (!line.includes("task_started") && !line.includes("task_complete") && !line.includes("turn_aborted") && !line.includes("agent_message") && !line.includes("response_item") && !line.includes("item_completed")) continue;
-    let event: { type?: string; timestamp?: unknown; payload?: { type?: string; role?: string; phase?: unknown; turn_id?: unknown; last_agent_message?: unknown } };
+    let event: { type?: string; timestamp?: unknown; payload?: { type?: string; role?: string; phase?: unknown; turn_id?: unknown; last_agent_message?: unknown; item?: unknown; started_at_ms?: unknown; completed_at_ms?: unknown } };
     try { event = JSON.parse(line) as typeof event; } catch { continue; }
     const timestamp = typeof event.timestamp === "string" ? event.timestamp : null;
     if (activity.status === "running" && timestamp) activity.updated_at = timestamp;
     if (event.type === "event_msg" && event.payload?.type === "task_started") {
       const turnId = typeof event.payload.turn_id === "string" ? event.payload.turn_id : null;
-      if (!expectedTurnId || turnId === expectedTurnId) activity = { status: "running", turn_id: turnId, started_at: timestamp, completed_at: null, updated_at: timestamp };
+      if (!expectedTurnId || turnId === expectedTurnId) {
+        activity = { status: "running", turn_id: turnId, started_at: timestamp, completed_at: null, updated_at: timestamp };
+        activeSteps.length = 0;
+        stepMap.clear();
+      }
     } else if (event.type === "event_msg" && event.payload?.type === "task_complete") {
       const turnId = typeof event.payload.turn_id === "string" ? event.payload.turn_id : null;
       if ((!expectedTurnId || turnId === expectedTurnId) && (!activity.turn_id || !turnId || activity.turn_id === turnId)) {
         activity = { status: "completed", turn_id: turnId || activity.turn_id, started_at: activity.started_at, completed_at: timestamp, updated_at: timestamp };
         lastAgentMessage = typeof event.payload.last_agent_message === "string" ? event.payload.last_agent_message.trim() : "";
         if (lastAgentMessage && timestamp) lastFinalAt = timestamp;
+        activeSteps.length = 0;
+        stepMap.clear();
       }
     } else if (event.type === "event_msg" && event.payload?.type === "turn_aborted") {
       const turnId = typeof event.payload.turn_id === "string" ? event.payload.turn_id : null;
-      if ((!expectedTurnId || turnId === expectedTurnId) && (!activity.turn_id || !turnId || activity.turn_id === turnId)) activity = { status: "interrupted", turn_id: turnId || activity.turn_id, started_at: activity.started_at, completed_at: timestamp, updated_at: timestamp };
+      if ((!expectedTurnId || turnId === expectedTurnId) && (!activity.turn_id || !turnId || activity.turn_id === turnId)) {
+        activity = { status: "interrupted", turn_id: turnId || activity.turn_id, started_at: activity.started_at, completed_at: timestamp, updated_at: timestamp };
+        activeSteps.length = 0;
+        stepMap.clear();
+      }
+    } else if (activity.status === "running" && event.type === "response_item" && event.payload?.type === "function_call") {
+      try {
+        const step = extractStepFromFunctionCall(event.payload, timestamp);
+        if (step) recordTurnStep(activeSteps, stepMap, step);
+      } catch {}
+    } else if (activity.status === "running" && event.type === "event_msg" && event.payload?.type === "item_completed" && event.payload.item) {
+      try {
+        const step = extractStepFromItemCompleted(event.payload.item, event.payload.started_at_ms, event.payload.completed_at_ms, timestamp);
+        if (step) recordTurnStep(activeSteps, stepMap, step);
+      } catch {}
     }
     if (((event.type === "event_msg" && event.payload?.type === "agent_message") || (event.type === "response_item" && event.payload?.type === "message" && event.payload.role === "assistant")) && event.payload?.phase === "final_answer") lastFinalAt = timestamp;
+  }
+  if (activity.status === "running" && activeSteps.length) {
+    activity.steps = [...activeSteps];
   }
   const result = { activity, last_final_at: lastFinalAt, last_agent_message: lastAgentMessage };
   try {

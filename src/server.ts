@@ -1550,7 +1550,6 @@ export function startServer() {
             const index = state.issues.findIndex(issue => issue.id === issueId || issue.identifier === issueId);
             if (index < 0) throw new Error("issue_not_found");
             requireVersion(body, state.issues[index]);
-            if (!state.issues[index].archived_at) throw new Error("issue_not_archived");
             state.issues.splice(index, 1);
           });
           return sendJson(response, 200, { ok: true });
