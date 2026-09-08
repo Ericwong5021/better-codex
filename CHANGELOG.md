@@ -4,6 +4,11 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.12-beta.4] - 2026-09-08
+
+- Preserve the active conversation thinking state while streaming Codex replies.
+- Classify document-sourced ResizeObserver diagnostics separately from browser delivery warnings.
+
 ## [0.4.12-beta.3] - 2026-09-08
 
 - Show Codex thinking and execution steps in Issue conversations and allow direct deletion of active unarchived Issues.
@@ -1026,7 +1031,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.12-beta.3...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.12-beta.4...HEAD
+[0.4.12-beta.4]: https://github.com/Ericwong5021/better-codex/compare/v0.4.12-beta.3...v0.4.12-beta.4
 [0.4.12-beta.3]: https://github.com/Ericwong5021/better-codex/compare/v0.4.12-beta.2...v0.4.12-beta.3
 [0.4.12-beta.2]: https://github.com/Ericwong5021/better-codex/compare/v0.4.12-beta.1...v0.4.12-beta.2
 [0.4.12-beta.1]: https://github.com/Ericwong5021/better-codex/compare/v0.4.11...v0.4.12-beta.1
