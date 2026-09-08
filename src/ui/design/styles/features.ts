@@ -5747,7 +5747,8 @@ export function betterCodexFeatureStylesCss() {
       background: var(--bc-color-danger);
     }
 
-    #better-codex-dialog .better-codex-conversation-status .better-codex-shimmer {
+    #better-codex-dialog .better-codex-conversation-status .better-codex-shimmer,
+    #better-codex-dialog .better-codex-composer-thinking .better-codex-shimmer {
       background-image: linear-gradient(90deg, var(--bc-color-text-muted) 0%, var(--bc-color-text-muted) 35%, var(--bc-color-text) 50%, var(--bc-color-text-muted) 65%, var(--bc-color-text-muted) 100%);
       background-size: 200% 100%;
       background-clip: text;
@@ -7144,6 +7145,59 @@ export function betterCodexFeatureStylesCss() {
       justify-content: space-between;
     }
 
+    #better-codex-dialog .better-codex-composer-toolbar-leading {
+      display: inline-flex;
+      min-width: 0;
+      align-items: center;
+      gap: var(--bc-space-2);
+    }
+
+    #better-codex-dialog .better-codex-composer-thinking {
+      display: inline-flex;
+      min-width: 0;
+      align-items: center;
+      gap: 6px;
+      color: var(--bc-color-info);
+      font-size: var(--bc-text-caption);
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    #better-codex-dialog .better-codex-composer-thinking[hidden] {
+      display: none;
+    }
+
+    #better-codex-dialog .better-codex-composer-thinking-dots {
+      display: inline-flex;
+      align-items: center;
+      gap: var(--bc-space-1);
+      width: 17px;
+      height: 16px;
+    }
+
+    #better-codex-dialog .better-codex-composer-thinking-dots i {
+      display: block;
+      width: 4px;
+      height: 4px;
+      border-radius: var(--bc-radius-pill);
+      background: currentColor;
+      opacity: .35;
+      animation: better-codex-thinking-dot calc(var(--bc-motion-normal) * 6) ease-in-out infinite;
+    }
+
+    #better-codex-dialog .better-codex-composer-thinking-dots i:nth-child(2) {
+      animation-delay: .14s;
+    }
+
+    #better-codex-dialog .better-codex-composer-thinking-dots i:nth-child(3) {
+      animation-delay: .28s;
+    }
+
+    @keyframes better-codex-thinking-dot {
+      0%, 60%, 100% { opacity: .35; transform: translateY(0) scale(.8); }
+      30% { opacity: 1; transform: translateY(-2px) scale(1); }
+    }
+
     #better-codex-dialog .better-codex-composer-attach,
     #better-codex-dialog .better-codex-composer-send {
       display: inline-flex;
@@ -7210,6 +7264,11 @@ export function betterCodexFeatureStylesCss() {
     @media (prefers-reduced-motion: reduce) {
       #better-codex-dialog .better-codex-composer :is(.better-codex-composer-attach, .better-codex-composer-send) {
         transition: none;
+      }
+
+      #better-codex-dialog .better-codex-composer-thinking-dots i {
+        animation: none;
+        opacity: .8;
       }
     }
 
