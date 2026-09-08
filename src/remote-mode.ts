@@ -11,23 +11,15 @@ export function readRemoteMode(): BetterCodexRemoteMode {
 export function disableProjectionSync(file: string) {
   const database = new DatabaseSync(file);
   try {
-    database.exec(`
-      DROP TRIGGER IF EXISTS sync_project_insert;
-      DROP TRIGGER IF EXISTS sync_project_update;
-      DROP TRIGGER IF EXISTS sync_project_delete;
-      DROP TRIGGER IF EXISTS sync_issue_insert;
-      DROP TRIGGER IF EXISTS sync_issue_update;
-      DROP TRIGGER IF EXISTS sync_issue_delete;
-      DROP TRIGGER IF EXISTS sync_run_insert;
-      DROP TRIGGER IF EXISTS sync_run_update;
-      DROP TRIGGER IF EXISTS sync_run_delete;
-      DROP TRIGGER IF EXISTS sync_session_insert;
-      DROP TRIGGER IF EXISTS sync_session_update;
-      DROP TRIGGER IF EXISTS sync_session_delete;
-      DROP TRIGGER IF EXISTS sync_reply_insert;
-      DROP TRIGGER IF EXISTS sync_reply_update;
-      DROP TRIGGER IF EXISTS sync_reply_delete;
-    `);
+    const triggers = database.prepare("SELECT name FROM sqlite_master WHERE type = 'trigger' AND name GLOB 'sync_*' AND sql LIKE '%sync_outbox%'").all() as Array<{ name: string }>;
+    database.exec("BEGIN IMMEDIATE");
+    try {
+      for (const trigger of triggers) database.exec(`DROP TRIGGER "${trigger.name.replaceAll('"', '""')}"`);
+      database.exec("COMMIT");
+    } catch (error) {
+      database.exec("ROLLBACK");
+      throw error;
+    }
   } finally {
     database.close();
   }

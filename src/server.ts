@@ -14,7 +14,7 @@ import { readCodexActivity, startCodexActivityCollection, stopCodexActivityColle
 import { readCodexUsage } from "./codex-usage.js";
 import { MentionCatalogService, codexSemanticRequestFingerprint, normalizeCodexSemanticSelections, readCodexSemanticCatalog, resolveCodexSemanticReferences, searchCodexFiles } from "./codex-semantics.js";
 import { appendInputDocumentText, compileInputDocument, inputDocumentLegacyReferences, inputDocumentText, legacyInputDocument, type SemanticKindV2 } from "./codex-input-document.js";
-import { readModelCatalog, warmupModelCatalog } from "./model-catalog.js";
+import { ModelCatalog, mockupModelCatalog } from "./model-catalog.js";
 import { attachmentPath, canonicalPath, databasePath, runPath, runtimePort, token, updateLogPath } from "./config.js";
 import { acquireRuntimeLock, cancelRuntimeAuthorityReservation, claimRuntimeAuthority, clearRuntimeState, completeRuntimeAuthorityHandoff, createRuntimeIdentity, publishRuntimeState, reserveRuntimeAuthority, runtimeAuthorityUpdateState } from "./runtime-state.js";
 import { activeCoreCommand, activeVersions, checkGatewayUpdate, getGatewayUpdateState, installGatewayUpdate, readGatewayUpdateActivationState, recordGatewayUpdateActivation, rollbackAbandonedUpdate, rollbackActivatedUpdate, startGatewayUpdateChecks } from "./updater.js";
@@ -798,7 +798,6 @@ export function startServer() {
     if (migratedAgentAvatars) console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "agent_avatar", event: "avatar_presets_migrated_to_png", count: migratedAgentAvatars, runtime_instance_id: identity.instanceId, runtime_pid: identity.pid, runtime_started_at: identity.processStartedAt, runtime_version: identity.version })}`);
     if (remoteMode === "relay") disableProjectionSync(databasePath);
     if (!mockupEnabled) syncAgentProfiles(store.listAgentProfiles());
-    void warmupModelCatalog();
   } catch (error) {
     clearRuntimeState(identity.instanceId);
     throw error;
@@ -835,6 +834,14 @@ export function startServer() {
   let publishChange = () => {};
   const worker = new IssueWorker(store, () => publishChange(), identity);
   const semanticRequest = worker.semanticRequest.bind(worker);
+  const modelCatalog = new ModelCatalog(
+    async () => (await worker.semanticRequest("model/list", { cursor: null, includeHidden: false, limit: 100 })).result,
+    () => {
+      const status = worker.sessionHostStatus();
+      return status.connected ? status.host?.instanceId || "" : "";
+    },
+  );
+  const readModelCatalog = () => mockupEnabled ? Promise.resolve(mockupModelCatalog) : modelCatalog.read();
   const mentionCatalog = new MentionCatalogService(identity.instanceId, semanticRequest);
   const queuedReplies = (issue: Issue, audience: string) => store.listQueuedIssueReplies(issue.id).map(reply => {
     const command = store.getSessionCommandByRequest(issue.id, reply.request_id);
@@ -916,6 +923,7 @@ export function startServer() {
       worker.wake();
       publishChange();
     },
+    readModelCatalog,
   );
   let activeRuntimePort = 0;
   const relayClient = new RuntimeRelayClient({ runtimePort: () => activeRuntimePort, localToken: accessToken, runtimeInstanceId: identity.instanceId, coreVersion: identity.version });
@@ -1227,12 +1235,16 @@ export function startServer() {
       }
       if (url.pathname === "/api/issues/attachments/preview" && method === "GET") return sendJson(response, 200, readCachedImageAttachment(url.searchParams.get("name")));
       if (url.pathname === "/api/bootstrap" && method === "GET") {
-        const agentModelCatalog = await readModelCatalog();
+        let agentModelCatalogError: string | null = null;
+        const agentModelCatalog = await readModelCatalog().catch(error => {
+          agentModelCatalogError = error instanceof Error ? error.message : String(error);
+          return [];
+        });
         const agentModels = agentModelCatalog.map(model => model.id);
         const agentReasoningEfforts = [...new Set(agentModelCatalog.flatMap(model => model.supportedReasoningEfforts.map(effort => effort.value)))];
         const mockup = mockupEnabled ? readMockupState(mockupLocale) : null;
         if (!mockup) syncCodexProjects(store);
-        return sendJson(response, 200, { projects: projectSummaries(mockup ? mockup.projects : store.listProjects()), agents: mockup ? mockup.agents : visibleAgentProfiles(), statuses: issueStatuses, priorities: issuePriorities, appearance: readCodexAppearance(), hostTheme: readHostThemeInput(), locale: readCodexLocale(), user: readCodexUserProfile(), agentModelCatalog, agentModels, agentReasoningEfforts, autoDispatch: mockup ? mockup.auto_dispatch : store.getAutoDispatch(), schedulerModel: mockup ? mockup.scheduler_model : store.getSchedulerModel(defaultAgentProfile().model), schedulerReasoningEffort: mockup ? mockup.scheduler_reasoning_effort : store.getSchedulerReasoningEffort(), limits: { issue_description: maxIssueDescriptionLength }, mockup: mockupEnabled, featureManifest: featureManifest() });
+        return sendJson(response, 200, { projects: projectSummaries(mockup ? mockup.projects : store.listProjects()), agents: mockup ? mockup.agents : visibleAgentProfiles(), statuses: issueStatuses, priorities: issuePriorities, appearance: readCodexAppearance(), hostTheme: readHostThemeInput(), locale: readCodexLocale(), user: readCodexUserProfile(), agentModelCatalog, agentModelCatalogError, agentModels, agentReasoningEfforts, autoDispatch: mockup ? mockup.auto_dispatch : store.getAutoDispatch(), schedulerModel: mockup ? mockup.scheduler_model : store.getSchedulerModel(defaultAgentProfile().model), schedulerReasoningEffort: mockup ? mockup.scheduler_reasoning_effort : store.getSchedulerReasoningEffort(), limits: { issue_description: maxIssueDescriptionLength }, mockup: mockupEnabled, featureManifest: featureManifest() });
       }
       if (mockupEnabled && path[0] === "api" && path[1] === "scheduled-tasks") {
         if (method === "GET" && path.length === 2) return sendJson(response, 200, []);
@@ -2140,7 +2152,6 @@ export function startServer() {
           throw error;
         }
         const { issue } = created;
-        worker.ensureIssueSessionBinding(issue.id);
         worker.wake();
         if (created.replayed) return sendJson(response, 200, store.getIssue(issue.id));
         if (aiEnrich) {

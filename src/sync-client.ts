@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { defaultAgentProfile } from "./agent-profiles.js";
 import { coreVersion } from "./compatibility.js";
 import type { IssueThreadAction, Store } from "./db.js";
-import { readModelCatalog } from "./model-catalog.js";
+import type { ModelCatalogEntry } from "./model-catalog.js";
 import { readSyncConfiguration, type SyncConfiguration } from "./sync-config.js";
 import { legacySyncProtocolVersion, supportedSyncProtocolVersions, syncProtocolVersion, type AgentDirectoryProjection, type AgentModelCatalogProjection, type CodexUsageProjection, type ConversationProjection, type DirectoryBrowserResult, type RemoteCommand, type RemoteCommandAck, type RemoteFilePayload, type RuntimeProjection, type SyncChange, type SyncProtocolVersion, type SyncPushResponse } from "./sync-contract.js";
 import { controlCapabilities, controlProtocolVersion, decodeControlMessage, encodeControlMessage } from "./control-protocol.js";
@@ -57,6 +57,7 @@ export class SyncClient {
   private lastUsageSyncAt = 0;
   private syncProtocolCache: { key: string; value: SyncProtocolVersion; expiresAt: number } | null = null;
   private controlRequests = new Map<string, { resolve: (value: Record<string, unknown>) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }>();
+  private modelCatalogError: string | null = null;
   private state: SyncState = { connected: false, syncing: false, last_sync_at: null, last_error: null, hub_url: null, device_name: null, lease_expires_at: null };
 
   constructor(
@@ -80,6 +81,7 @@ export class SyncClient {
     private readonly queue: (issueId: string, requestId: string, action: "update" | "send" | "delete", message?: string) => void | Promise<void> = () => { throw new Error("remote_queue_unavailable"); },
     private readonly regenerateTitle: (issueId: string) => void | Promise<void> = () => { throw new Error("remote_title_regeneration_unavailable"); },
     private readonly projectDelete: (projectId: string) => void | Promise<void> = () => { throw new Error("remote_project_delete_unavailable"); },
+    private readonly modelCatalog: () => Promise<ModelCatalogEntry[]> = async () => [],
   ) {}
 
   start() {
@@ -262,6 +264,7 @@ export class SyncClient {
       usage,
       ...(protocolVersion !== legacySyncProtocolVersion ? {
         agent_models: agentModelCatalog,
+        agent_models_error: this.modelCatalogError,
         auto_dispatch: this.store.getAutoDispatch(),
         scheduler_model: this.store.getSchedulerModel(defaultAgent.model),
         scheduler_reasoning_effort: this.store.getSchedulerReasoningEffort(),
@@ -314,7 +317,14 @@ export class SyncClient {
 
   private async push(configuration: SyncConfiguration) {
     const protocolVersion = await this.negotiatedSyncProtocol(configuration);
-    const [usage, agentModelCatalog] = await Promise.all([this.accountUsage(), protocolVersion !== legacySyncProtocolVersion ? readModelCatalog() : Promise.resolve([])]);
+    const [usage, agentModelCatalog] = await Promise.all([this.accountUsage(), protocolVersion !== legacySyncProtocolVersion ? this.modelCatalog().then(models => {
+      this.modelCatalogError = null;
+      return models;
+    }).catch(error => {
+      this.modelCatalogError = errorCode(error);
+      console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "sync", event: "model_catalog_unavailable", error: this.modelCatalogError })}`);
+      return [];
+    }) : Promise.resolve([])]);
     let directoryPending = true;
     for (let page = 0; page < 100; page += 1) {
       const limit = directoryPending ? 99 : 100;

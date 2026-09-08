@@ -154,6 +154,7 @@ export type RuntimeProjection = {
   health_state: "online" | "offline";
   usage?: CodexUsageProjection | null;
   agent_models?: AgentModelCatalogProjection[];
+  agent_models_error?: string | null;
   auto_dispatch?: boolean;
   scheduler_model?: string;
   scheduler_reasoning_effort?: string;

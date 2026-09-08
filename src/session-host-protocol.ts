@@ -1,7 +1,7 @@
 export const sessionHostProtocolVersion = "session-host/v2" as const;
 
 export type SessionHostThreadAction = "archive" | "unarchive" | "delete";
-export type SessionHostSemanticMethod = "skills/list" | "app/installed" | "app/list" | "plugin/installed" | "mcpServerStatus/list" | "fuzzyFileSearch";
+export type SessionHostSemanticMethod = "model/list" | "skills/list" | "app/installed" | "app/list" | "plugin/installed" | "mcpServerStatus/list" | "fuzzyFileSearch";
 
 export type SessionHostPoll = {
   leader: boolean;
@@ -27,6 +27,7 @@ export type SessionHostHello = {
     runtime_handoff: boolean;
     semantic_requests?: boolean;
     thread_worker_handoff?: boolean;
+    thread_binding_lifecycle?: boolean;
   };
 };
 
@@ -46,6 +47,7 @@ export type SessionHostHelloAck = {
     runtime_handoff?: boolean;
     semantic_requests?: boolean;
     thread_worker_handoff?: boolean;
+    thread_binding_lifecycle?: boolean;
   };
 };
 
@@ -85,6 +87,7 @@ export type SessionHostStatus = {
     pending_requests: number;
     active_turns: Array<{ thread_id: string; turn_id: string }>;
     busy: boolean;
+    awaiting_persistence?: string[];
   }>;
   handoff: {
     update_id: string;

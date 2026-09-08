@@ -15,6 +15,12 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  verify-candidate:
+    needs: validate-release
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
   validate-release:
     runs-on: ubuntu-latest
     steps:
@@ -68,81 +74,8 @@ jobs:
             exit 1
           fi
 
-  runtime-session-continuity:
-    needs: validate-release
-    strategy:
-      fail-fast: false
-      matrix:
-        runner:
-          - ubuntu-latest
-          - macos-15
-          - windows-2025
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22.22.0
-          cache: npm
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npx tsx --test --test-force-exit --test-concurrency=1 test/core.test.ts test/gateway.test.ts test/update-channel.test.ts test/updater-security.test.ts
-
-  acceptance:
-    needs: validate-release
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22.22.0
-          cache: npm
-      - run: npm ci
-      - run: npx playwright install --with-deps chromium
-      - run: npm run test:acceptance
-      - uses: actions/upload-artifact@v4
-        with:
-          name: selfhost-acceptance
-          path: release/acceptance.json
-
-  web-ui:
-    needs: validate-release
-    runs-on: macos-15
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22.22.0
-          cache: npm
-      - run: npm ci
-      - run: npx playwright install chromium
-      - run: npm run typecheck
-      - run: npm run test:web
-      - if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: playwright-report
-          path: |
-            playwright-report/
-            test-results/
-          if-no-files-found: ignore
-          retention-days: 7
-
-  node-24-lifecycle:
-    needs: validate-release
-    runs-on: windows-2025
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-      - run: npm ci
-      - run: npm run build
-      - run: npx tsx --test test/cdp-lifecycle.test.ts
-
   package:
-    needs: acceptance
+    needs: [validate-release, verify-candidate]
     strategy:
       matrix:
         runner:
@@ -172,10 +105,7 @@ jobs:
   release:
     needs:
       - package
-      - acceptance
-      - web-ui
-      - node-24-lifecycle
-      - runtime-session-continuity
+      - verify-candidate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

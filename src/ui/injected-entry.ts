@@ -1,3 +1,6 @@
+import { createCommandObserver } from "./core/command-observer.js";
+import { conversationEmptyState } from "./features/board/model.js";
+import { sessionThreadMissing } from "../session-execution-policy.js";
 import { createHostAdapter } from "./hosts/index.js";
 import { applyHostTheme } from "./theme/apply.js";
 import { themeIsDegraded } from "./theme/diagnostics.js";
@@ -350,6 +353,8 @@ export function install(config: Record<string, any>) {
     }
     const localeResources = { "zh-CN": {}, en: {
       "调度失败": "Scheduling failed",
+      "模型列表暂不可用，请检查 Codex 会话服务后刷新。": "Model list unavailable. Check the Codex session service and refresh.",
+      "任务执行失败": "Task execution failed", "任务尚未启动": "Task has not started", "正在启动任务": "Starting the task", "请求已接收，正在准备会话。": "Request received. Preparing the conversation.", "会话记录尚不可恢复，需要先处理会话绑定问题。": "The conversation cannot be restored yet. Resolve the thread binding issue first.", "请查看下方失败原因，处理后再继续。": "Resolve the failure shown below before continuing.", "原始任务内容已保留": "Your original task has been preserved", "尚未开始对话": "Conversation has not started", "发送消息后将开始处理任务。": "Send a message to start the task.",
       "任务执行失败。请根据下方失败原因处理后重新运行。": "Task execution failed. Resolve the failure below, then run the task again.",
       "重试回复": "Retry reply", "重新加载": "Reload", "回复等待超时。请检查模型服务连接后重试。": "The reply timed out. Check the model service connection and retry.", "网络连接异常，回复未完成。请检查网络和 Better Codex Runtime 后重试。": "The reply did not finish because of a network problem. Check your network and Better Codex Runtime, then retry.", "当前权限不足，无法完成回复。请调整智能体权限或允许所需操作后重试。": "The reply needs additional permission. Adjust the agent permission or allow the required action, then retry.", "Better Codex Runtime 已停止。请重新启动后重试。": "Better Codex Runtime stopped. Restart it and retry.", "上一条回复仍在进行中。请稍后重新加载。": "The previous reply is still running. Reload shortly.", "回复未完成。请打开完整会话查看详情，然后重试。": "The reply did not finish. Open the full conversation for details, then retry.", "会话加载超时。请确认 Better Codex Runtime 正在运行，然后重新加载。": "The conversation timed out while loading. Make sure Better Codex Runtime is running, then reload.", "无法加载会话。请检查网络和 Better Codex Runtime，然后重新加载。": "Unable to load the conversation. Check your network and Better Codex Runtime, then reload.", "没有权限加载会话。请调整权限后重新加载。": "You do not have permission to load the conversation. Adjust the permission, then reload.", "VPS 入口返回了 404；这表示路径或资源不存在，不能据此判断本机 Runtime 已停止。": "The VPS endpoint returned 404. The path or resource does not exist; this does not show that the local Runtime stopped.", "浏览器无法连接 VPS Relay 入口。请检查域名、网络、反向代理和 Relay 服务；本机 Runtime 状态未知。": "The browser cannot reach the VPS Relay endpoint. Check DNS, network, reverse proxy, and the Relay service. The local Runtime state is unknown.", "VPS 入口无法连接 Relay 服务。本机 Runtime 状态未知。": "The VPS endpoint cannot reach the Relay service. The local Runtime state is unknown.", "VPS Relay 当前没有连接到本机 Runtime。可能是 Runtime 停止、正在重启或网络中断。": "The VPS Relay is not connected to the local Runtime. The Runtime may be stopped or restarting, or the network may be interrupted.", "本机 Runtime 已主动断开与 VPS Relay 的连接，可能正在重启或已停止。": "The local Runtime actively disconnected from the VPS Relay. It may be restarting or stopped.", "VPS Relay 与本机 Runtime 的请求通道已中断，请等待重连后重试。": "The request channel between the VPS Relay and local Runtime was interrupted. Wait for reconnection, then retry.",
       "内容刚刚发生变化，请稍后重试。": "This content just changed. Try again shortly.", "内容刚刚发生变化，已同步最新状态，请重试本次操作。": "This content just changed. The latest state is synced; try the action again.", "相关内容不存在或已被移除。": "The requested content does not exist or was removed.", "当前账号没有执行此操作的权限。": "Your account does not have permission to perform this action.", "输入内容不符合要求，请检查后重试。": "Check the entered values and try again.", "当前状态无法完成此操作，请刷新后重试。": "This action is not available in the current state. Refresh and try again.", "服务暂时不可用，请稍后重试。": "The service is temporarily unavailable. Try again shortly.", "服务返回的数据格式异常，请稍后重试。": "The service returned an invalid response. Try again shortly.", "数据完整性检查失败，操作已停止。": "The integrity check failed, so the operation was stopped.", "安全校验失败，操作已停止。": "The security check failed, so the operation was stopped.", "服务发生异常，请稍后重试。": "The service encountered an error. Try again shortly.",
@@ -7286,33 +7291,31 @@ export function install(config: Record<string, any>) {
       return state.autoDispatch;
     }
 
-    async function waitForRemoteCommand(commandId, timeoutMs = 30_000) {
-      const deadline = Date.now() + timeoutMs;
-      while (Date.now() < deadline) {
-        const command = await api((HOST_KIND === "remote-projection" ? "/api/v1/commands/" : "/api/commands/") + encodeURIComponent(commandId));
-        if (["applied", "rejected", "conflict", "expired"].includes(command.status)) return command;
-        await new Promise(resolve => setTimeout(resolve, 500));
-      }
-      throw new Error("remote_command_timeout");
+    const commandObserver = createCommandObserver({
+      read: commandId => api((HOST_KIND === "remote-projection" ? "/api/v1/commands/" : "/api/commands/") + encodeURIComponent(commandId)),
+      retryable: error => transientNetworkError(error) || error instanceof Error && ["command_not_found", "runtime_offline", "runtime_unavailable", "relay_stream_interrupted", "request_outcome_unknown"].includes(error.message),
+      diagnostic: appendDiagnostic,
+    });
+
+    function waitForRemoteCommand(commandId, timeoutMs = 30_000) {
+      return commandObserver.wait(commandId, timeoutMs);
     }
 
-    function watchQueuedCommand(commandId, handlers, attempt = 0) {
-      const delays = [300, 700, 1500, 3000, 5000, 10000, 30000, 120000, 600000];
-      setTimeout(async () => {
-        try {
-          const command = await api((HOST_KIND === "remote-projection" ? "/api/v1/commands/" : "/api/commands/") + encodeURIComponent(commandId));
-          if (["pending", "dispatched", "processing"].includes(command.status) || command.queued === true) return watchQueuedCommand(commandId, handlers, attempt + 1);
-          if (command.status !== "applied") throw new Error(command.error || "command_rejected");
-          appendDiagnostic("queued_command_applied", { command_id: commandId, attempt_count: attempt + 1 });
-          await handlers.applied?.(command.payload, command);
-        } catch (error) {
-          if (transientNetworkError(error) || error instanceof Error && ["command_not_found", "runtime_offline", "runtime_unavailable", "relay_stream_interrupted", "request_outcome_unknown"].includes(error.message)) {
-            return watchQueuedCommand(commandId, handlers, attempt + 1);
-          }
-          appendDiagnostic("queued_command_failed", { command_id: commandId, attempt_count: attempt + 1, error: error instanceof Error ? error.message : String(error || "command_rejected") });
-          await handlers.failed?.(error);
-        }
-      }, delays[Math.min(attempt, delays.length - 1)]);
+    function watchQueuedCommand(commandId, handlers) {
+      const failed = error => {
+        if (destroyed) return;
+        appendDiagnostic("queued_command_failed", { command_id: commandId, error: error.message });
+        Promise.resolve().then(() => handlers.failed?.(error)).catch(callbackError => reportUnexpectedError(callbackError, { source: "command_observer", command_id: commandId }));
+      };
+      return commandObserver.watch(commandId, {
+        resolve: command => {
+          if (destroyed) return;
+          if (command.status !== "applied") return failed(new Error(command.error || "command_rejected"));
+          appendDiagnostic("queued_command_applied", { command_id: commandId });
+          Promise.resolve().then(() => handlers.applied?.(command.payload, command)).catch(error => reportUnexpectedError(error, { source: "command_observer", command_id: commandId }));
+        },
+        reject: failed,
+      });
     }
 
     async function loadSurface(options = {}) {
@@ -7355,6 +7358,17 @@ export function install(config: Record<string, any>) {
           state.projects = await requestProjects();
         }
         state.agentModelCatalog = bootstrap.agentModelCatalog || (bootstrap.agentModels || []).map(id => ({ id, displayName: id, description: "", isDefault: false, defaultReasoningEffort: "medium", supportedReasoningEfforts: (bootstrap.agentReasoningEfforts || []).map(value => ({ value, description: "" })) }));
+        state.agentModelCatalogError = bootstrap.agentModelCatalogError || null;
+        if (state.agentModelCatalogError) {
+          appendDiagnostic("model_catalog_unavailable", { error: state.agentModelCatalogError });
+          state.error = t("模型列表暂不可用，请检查 Codex 会话服务后刷新。");
+          const output = panel?.querySelector("#better-codex-error");
+          if (output) {
+            output.dataset.tone = "warning";
+            output.textContent = state.error;
+            output.hidden = false;
+          }
+        }
         state.agentModels = state.agentModelCatalog.map(model => model.id);
         state.agentReasoningEfforts = bootstrap.agentReasoningEfforts || [];
         state.autoDispatch = Boolean(bootstrap.autoDispatch);
@@ -8709,6 +8723,7 @@ export function install(config: Record<string, any>) {
         const value = String(error instanceof Error ? error.message : error || "request_failed").toLowerCase();
         const serviceLabel = serviceFailureLabel(error);
         if (serviceLabel) return serviceLabel;
+        if (sessionThreadMissing(value)) return "会话记录尚不可恢复，需要先处理会话绑定问题。";
         if (action === "execution") return "任务执行失败。请根据下方失败原因处理后重新运行。";
         if (action === "load") {
           if (value.includes("timeout") || value.includes("timed out") || value.includes("deadline")) return "会话加载超时。请确认 Better Codex Runtime 正在运行，然后重新加载。";
@@ -8952,23 +8967,27 @@ export function install(config: Record<string, any>) {
         const messages = [...confirmedMessages, ...optimisticReplies.values()];
         const previousScrollTop = body.scrollTop;
         const stickToBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 48;
+        const reply = data?.reply || { status: "idle" };
+        if (reply.message) lastReplyMessage = reply.message;
+        if (reply.request_id) lastReplyRequestId = reply.request_id;
+        const stateName = optimisticReplies.size ? "running" : reply.status || "idle";
+        lastReplyStatus = stateName;
+        const isRunning = stateName === "running" || data?.activity?.status === "running";
         if (messages.length) {
           conversationMessages = messages;
           messageList.innerHTML = conversationBubbles(messages, RELAY ? state.user : data.user);
           body.scrollTop = stickToBottom ? body.scrollHeight : previousScrollTop;
         } else if (!options.preserveBody) {
           conversationMessages = [];
-          messageList.innerHTML = sessionId
-            ? executionRunning
-              ? '<div class="better-codex-conversation-empty"><h3>' + te("正在处理任务") + '</h3><p>' + te("智能体回复产生后会显示在这里。") + '</p><span>' + te("请稍候") + '</span></div>'
-              : '<div class="better-codex-conversation-empty"><h3>' + te("开始对话") + '</h3><p>' + te("补充下一步要求，智能体会继续处理。") + '</p><span>' + te("在下方输入消息并发送") + '</span></div>'
-            : '<p class="better-codex-markdown-empty">' + te("未关联对话。") + '</p>';
+          const empty = conversationEmptyState({
+            hasThread: Boolean(sessionId),
+            running: executionRunning || isRunning,
+            started: Boolean(data?.activity?.turn_id || issue?.session_active_turn_id),
+            failed: stateName === "failed" || issue?.latest_run_status === "failed",
+            error: reply.error || issue?.session_last_error,
+          });
+          messageList.innerHTML = '<div class="better-codex-conversation-empty"><h3>' + te(empty.title) + '</h3><p>' + te(empty.description) + '</p><span>' + te(empty.hint) + '</span>' + '</div>';
         }
-        const reply = data?.reply || { status: "idle" };
-        if (reply.message) lastReplyMessage = reply.message;
-        if (reply.request_id) lastReplyRequestId = reply.request_id;
-        const stateName = optimisticReplies.size ? "running" : reply.status || "idle";
-        lastReplyStatus = stateName;
         const expectedInterruption = stateName === "interrupted" && ["user_stopped", "session_interrupted"].includes(String(reply.error || ""));
         if (stateName === "failed" || (stateName === "interrupted" && !expectedInterruption)) showConversationFailure(reply.error, reply.message ? "reply" : "execution", reply.message, { origin: "turn" });
         else {
@@ -10835,6 +10854,7 @@ export function install(config: Record<string, any>) {
     function destroy() {
       if (destroyed) return;
       destroyed = true;
+      commandObserver.destroy();
       refreshPending = false;
       if (refreshTimer !== null) clearTimeout(refreshTimer);
       refreshTimer = null;

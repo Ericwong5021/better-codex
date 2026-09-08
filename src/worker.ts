@@ -206,7 +206,7 @@ export class IssueWorker {
     const deadline = Date.now() + timeout;
     while (Date.now() < deadline) {
       const result = await this.sessionRelay.handoffStatus();
-      if (!result.snapshot.command_in_flight && result.snapshot.active_turns.length === 0 && !(result.snapshot.thread_workers || []).some(worker => worker.busy) && result.snapshot.queued_deliveries === 0) return result.snapshot;
+      if (!result.snapshot.command_in_flight && result.snapshot.active_turns.length === 0 && !(result.snapshot.thread_workers || []).some(worker => worker.busy || worker.awaiting_persistence?.length) && result.snapshot.queued_deliveries === 0) return result.snapshot;
       await new Promise(resolve => setTimeout(resolve, 250));
     }
     throw new Error("session_host_idle_timeout");
@@ -246,7 +246,6 @@ export class IssueWorker {
     }
     this.sessionRelay.start();
     for (const issue of this.store.listIssues()) {
-      this.ensureIssueSessionBinding(issue.id);
       this.syncIssueSessionTitle(issue.id);
     }
     this.scheduleThreadActions(250);
@@ -286,24 +285,6 @@ export class IssueWorker {
     } catch (error) {
       workerDiagnostic("thread_name_queue_failed", { issue_id: issue.id, issue_identifier: issue.identifier, thread_id: session.thread_id, error: error instanceof Error ? error.message : String(error) });
     }
-  }
-
-  ensureIssueSessionBinding(issueId: string) {
-    const issue = this.store.getIssue(issueId);
-    if (!issue || issue.archived_at || issue.deleting_at || issue.thread_id || this.store.getIssueSession(issueId)) return false;
-    const existing = this.store.getSessionCommandByRequest(issueId, `issue-bind:${issueId}`);
-    if (existing && !["failed", "cancelled"].includes(existing.status)) return true;
-    const project = this.store.getProject(issue.project_id);
-    const workspacePath = issue.workspace_path || project?.workspace_path || "";
-    this.store.enqueueSessionCommand({
-      issueId,
-      requestId: `issue-bind:${issueId}`,
-      kind: "bind",
-      payload: this.sessionPayload(issue, workspacePath, ""),
-      hostId: "local",
-    });
-    workerDiagnostic("issue_thread_binding_queued", { issue_id: issue.id, issue_identifier: issue.identifier, workspace_path_present: Boolean(workspacePath) });
-    return true;
   }
 
   beginUpdateDrain() {

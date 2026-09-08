@@ -181,6 +181,7 @@ export class SessionHostClient implements SessionRelayHost {
   private acknowledged = false;
   private threadActionsSupported = false;
   private threadHandoffSupported = false;
+  private threadBindingLifecycleSupported = false;
   private semanticRequestsSupported = false;
   private pendingHostSpawn: { pid: number; processStartedAt: string } | null = null;
   private pendingHostSpawnReported = false;
@@ -212,6 +213,7 @@ export class SessionHostClient implements SessionRelayHost {
         thread_actions: this.threadActionsSupported,
         semantic_requests: this.semanticRequestsSupported,
         thread_worker_handoff: this.threadHandoffSupported,
+        thread_binding_lifecycle: this.threadBindingLifecycleSupported,
       },
     };
   }
@@ -231,6 +233,7 @@ export class SessionHostClient implements SessionRelayHost {
     this.acknowledged = false;
     this.threadActionsSupported = false;
     this.threadHandoffSupported = false;
+    this.threadBindingLifecycleSupported = false;
     this.semanticRequestsSupported = false;
     this.pendingHostSpawn = null;
     this.pendingHostSpawnReported = false;
@@ -453,6 +456,7 @@ export class SessionHostClient implements SessionRelayHost {
     this.acknowledged = false;
     this.threadActionsSupported = false;
     this.threadHandoffSupported = false;
+    this.threadBindingLifecycleSupported = false;
     this.semanticRequestsSupported = false;
     this.hostIdentity = null;
     this.handoff = null;
@@ -505,6 +509,7 @@ export class SessionHostClient implements SessionRelayHost {
       this.pendingHostSpawnReported = false;
       this.threadActionsSupported = message.capabilities?.thread_actions === true;
       this.threadHandoffSupported = message.capabilities?.thread_worker_handoff === true;
+      this.threadBindingLifecycleSupported = message.capabilities?.thread_binding_lifecycle === true;
       this.semanticRequestsSupported = message.capabilities?.semantic_requests === true;
       this.hostIdentity = { pid: message.host_pid, instanceId: message.host_instance_id || null, connectionEpoch: message.connection_epoch ?? null, startedAt: message.started_at || null, runtimeGeneration: message.runtime_generation ?? null };
       diagnostic("connected", { runtime_instance_id: this.runtimeIdentity.instanceId, runtime_generation: this.runtimeIdentity.generation, host_pid: message.host_pid, host_instance_id: message.host_instance_id || null, connection_epoch: message.connection_epoch ?? null });

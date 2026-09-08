@@ -255,6 +255,7 @@ function cleanRuntime(value: unknown, deviceId: string): RuntimeProjection {
     health_state: "online",
     usage: normalizeCodexUsageProjection(source.usage),
     agent_models: normalizeAgentModelCatalogProjection(source.agent_models),
+    agent_models_error: typeof source.agent_models_error === "string" ? cleanString(source.agent_models_error, 500) : null,
     auto_dispatch: source.auto_dispatch === true,
     scheduler_model: typeof source.scheduler_model === "string" ? cleanString(source.scheduler_model, 200) : "",
     scheduler_reasoning_effort: typeof source.scheduler_reasoning_effort === "string" ? cleanString(source.scheduler_reasoning_effort, 40) : "",

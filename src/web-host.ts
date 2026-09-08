@@ -1,3 +1,4 @@
+import { webCommandTarget, webCommandResponseDisposition, webCommandMaxBodyBytes } from "./web-command-policy.js";
 import { betterCodexLogoPng } from "./brand-assets.js";
 import { betterCodexDesignTokensCss, betterCodexThemeColors } from "./design-system.js";
 import { betterCodexWebAppRegistrationJavaScript } from "./web-app.js";
@@ -294,6 +295,9 @@ html[data-better-codex-read-only] [data-card-more] { display: none !important; }
 `;
 
 const webHostJavaScript = String.raw`
+const WEB_COMMAND_MAX_BODY_BYTES = ${webCommandMaxBodyBytes};
+const webCommandTarget = ${webCommandTarget.toString()};
+const webCommandResponseDisposition = ${webCommandResponseDisposition.toString()};
 const connectDialog = document.getElementById("web-connect");
 const connectForm = document.getElementById("web-connect-form");
 const tokenInput = document.getElementById("web-token");
@@ -952,21 +956,10 @@ async function relayRuntimeOnline() {
 const commandQueueEnabled = HOST_KIND === "relay" || HOST_KIND === "local";
 let commandQueueDatabase;
 let commandQueueDrainTimer;
+let commandQueueDraining = false;
 
 function queueableCommand(method, path, bodyBytes) {
-  if (!commandQueueEnabled || bodyBytes > 2 * 1024 * 1024) return false;
-  const pathname = new URL(path, location.origin).pathname;
-  if (method === "POST" && /^\/api\/issues$/.test(pathname)) return true;
-  if (method === "POST" && /^\/api\/issues\/from-thread$/.test(pathname)) return true;
-  if (["PATCH", "DELETE"].includes(method) && /^\/api\/issues\/[^/]+$/.test(pathname)) return true;
-  if (method === "DELETE" && /^\/api\/projects\/[^/]+$/.test(pathname)) return true;
-  if (method === "POST" && /^\/api\/issues\/[^/]+\/(start|stop|move|archive|unarchive|reply|session-handoff)$/.test(pathname)) return true;
-  if (["PATCH", "DELETE"].includes(method) && /^\/api\/issues\/[^/]+\/queue\/[^/]+$/.test(pathname)) return true;
-  if (method === "POST" && /^\/api\/issues\/[^/]+\/queue\/[^/]+\/send$/.test(pathname)) return true;
-  if (method === "POST" && (/^\/api\/projects$/.test(pathname) || /^\/api\/projects\/ensure$/.test(pathname) || /^\/api\/projects\/[^/]+\/(overview|planning\/(messages|reset))$/.test(pathname))) return true;
-  if (method === "POST" && /^\/api\/agents$/.test(pathname)) return true;
-  if (["PATCH", "DELETE"].includes(method) && /^\/api\/agents\/[^/]+$/.test(pathname)) return true;
-  return method === "PATCH" && /^\/api\/settings\/(auto-dispatch|scheduler-model|scheduler-reasoning-effort)$/.test(pathname);
+  return commandQueueEnabled && bodyBytes <= WEB_COMMAND_MAX_BODY_BYTES && Boolean(webCommandTarget(method, path));
 }
 
 function openCommandQueue() {
@@ -1034,7 +1027,7 @@ function commandHeaders(command) {
 }
 
 function commandAcceptedOrTerminal(status, error = "") {
-  return status === 202 || (status >= 200 && status < 500 && ![401, 408, 425, 429].includes(status) && error !== "request_outcome_unknown");
+  return webCommandResponseDisposition(status, error) !== "retry";
 }
 
 function scheduleCommandQueueDrain(delay = 1000) {
@@ -1046,42 +1039,48 @@ function scheduleCommandQueueDrain(delay = 1000) {
 }
 
 async function drainCommandQueue() {
-  if (!commandQueueEnabled) return;
-  if (!navigator.onLine || (REMOTE && !csrfToken) || (!REMOTE && !sessionToken)) {
-    scheduleCommandQueueDrain(5000);
-    return;
-  }
-  let commands;
-  try { commands = (await queuedCommands()).sort((left, right) => left.createdAt - right.createdAt); }
-  catch {
-    scheduleCommandQueueDrain(5000);
-    return;
-  }
-  for (const command of commands) {
-    if (Number(command.nextAttemptAt) > Date.now()) continue;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 30_000);
-    try {
-      const response = await fetch(command.path, { method: command.method, headers: commandHeaders(command), body: command.body, signal: controller.signal });
-      let responseError = "";
-      try { responseError = String((await response.clone().json())?.error || ""); } catch {}
-      if (commandAcceptedOrTerminal(response.status, responseError)) {
-        hostDiagnostic("command_queue_delivered", { command_id: command.commandId, method: command.method, path: command.path, http_status: response.status, attempts: Number(command.attempts || 0) + 1 });
-        clearTimeout(timeout);
-        await deleteQueuedCommand(command.commandId);
+  if (!commandQueueEnabled || commandQueueDraining) return;
+  commandQueueDraining = true;
+  try {
+    if (!navigator.onLine || (REMOTE && !csrfToken) || (!REMOTE && !sessionToken)) return;
+    const commands = (await queuedCommands()).sort((left, right) => left.createdAt - right.createdAt);
+    const blockedTargets = new Set();
+    for (const command of commands) {
+      const target = webCommandTarget(command.method, command.path);
+      const targetKey = target ? target.kind + ":" + (target.entity_id || command.commandId) : command.commandId;
+      if (blockedTargets.has(targetKey)) continue;
+      if (Number(command.nextAttemptAt) > Date.now()) {
+        blockedTargets.add(targetKey);
         continue;
       }
-      hostDiagnostic("command_queue_retry", { command_id: command.commandId, method: command.method, path: command.path, http_status: response.status, error: responseError || response.statusText || "request_failed", attempts: Number(command.attempts || 0) + 1 });
-    } catch (error) {
-      hostDiagnostic("command_queue_retry", { command_id: command.commandId, method: command.method, path: command.path, error: error?.message || "network_error", attempts: Number(command.attempts || 0) + 1 });
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30_000);
+      try {
+        const response = await fetch(command.path, { method: command.method, headers: commandHeaders(command), body: command.body, signal: controller.signal });
+        const payload = await response.json();
+        const responseError = String(payload?.error || "");
+        if (commandAcceptedOrTerminal(response.status, responseError)) {
+          hostDiagnostic("command_queue_delivered", { command_id: command.commandId, method: command.method, path: command.path, http_status: response.status, attempts: Number(command.attempts || 0) + 1 });
+          await deleteQueuedCommand(command.commandId);
+          continue;
+        }
+        hostDiagnostic("command_queue_retry", { command_id: command.commandId, method: command.method, path: command.path, http_status: response.status, error: responseError || response.statusText || "request_failed", attempts: Number(command.attempts || 0) + 1 });
+      } catch (error) {
+        hostDiagnostic("command_queue_retry", { command_id: command.commandId, method: command.method, path: command.path, error: error?.message || "network_error", attempts: Number(command.attempts || 0) + 1 });
+      } finally {
+        clearTimeout(timeout);
+      }
+      const attempts = Number(command.attempts || 0) + 1;
+      const delays = [1000, 5000, 30000, 120000, 600000, 1800000];
+      await writeQueuedCommand({ ...command, attempts, nextAttemptAt: Date.now() + delays[Math.min(attempts - 1, delays.length - 1)] });
+      blockedTargets.add(targetKey);
     }
-    const attempts = Number(command.attempts || 0) + 1;
-    const delays = [1000, 5000, 30000, 120000, 600000, 1800000];
-    await writeQueuedCommand({ ...command, attempts, nextAttemptAt: Date.now() + delays[Math.min(attempts - 1, delays.length - 1)] });
-    clearTimeout(timeout);
-    break;
+  } catch (error) {
+    hostDiagnostic("command_queue_drain_failed", { error: error?.message || "command_queue_unavailable" });
+  } finally {
+    commandQueueDraining = false;
+    scheduleCommandQueueDrain(5000);
   }
-  scheduleCommandQueueDrain(5000);
 }
 
 window.addEventListener("online", () => scheduleCommandQueueDrain(0));
@@ -1157,7 +1156,7 @@ async function requestRuntime(request) {
       value = { error: response.statusText || "request_failed" };
     }
     hostDiagnostic("request_response", { trace_id: traceId, method, path: request.path, command_id: request.commandId || "", http_status: response.status, elapsed_ms: Date.now() - startedAt, attempt_count: attemptCount });
-    if (queued && commandAcceptedOrTerminal(response.status, String(value?.error || ""))) await deleteQueuedCommand(request.commandId);
+    if (queuedLocally && !responseParseError && commandAcceptedOrTerminal(response.status, String(value?.error || ""))) await deleteQueuedCommand(request.commandId);
     if (updateInstallRequest && response.ok && value?.accepted === true) beginRemoteUpdateRecovery(value?.operation?.target_core_version, value?.update_id);
     const updateInterruption = remoteUpdateRecoveryActive() && (response.status === 401 || [408, 425, 429, 502, 503, 504].includes(response.status) || ["runtime_offline", "runtime_unavailable", "relay_stream_interrupted"].includes(String(value?.error || "")));
     if (updateInterruption) markRemoteUpdateDisconnected(String(value?.error || "http_" + response.status));
@@ -1186,7 +1185,7 @@ async function requestRuntime(request) {
   } catch (error) {
     hostDiagnostic("request_failure", { trace_id: traceId, method, path: request.path, command_id: request.commandId || "", elapsed_ms: Date.now() - startedAt, attempt_count: attemptCount, failure_type: error?.betterCodexDiagnostics?.failure_type || (error?.name === "AbortError" ? "timeout" : error?.name || "network_error"), error: error?.message || "runtime_unavailable" });
     if (remoteUpdateRecoveryActive() && (error?.name === "AbortError" || !error?.betterCodexDiagnostics || error?.message === "runtime_unavailable")) markRemoteUpdateDisconnected(error?.message || "network_error");
-    if (queued && (error?.name === "AbortError" || !error?.betterCodexDiagnostics)) {
+    if (queuedLocally && (error?.name === "AbortError" || !error?.betterCodexDiagnostics || webCommandResponseDisposition(Number(error.betterCodexDiagnostics.http_status) || 0, error.message) === "retry")) {
       scheduleCommandQueueDrain(1000);
       return { command_id: request.commandId, status: "pending", queued: true };
     }

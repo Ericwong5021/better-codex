@@ -28,7 +28,7 @@ Runtime 在执行业务处理前将 Request ID、请求指纹和处理租约写�
 - Relay 命令使用派发租约。连接中断、租约超时、`408`、`425`、`429`、`5xx` 和 Runtime 结果未知可以重试；确定性 `4xx` 不重试。
 - Relay 重试采用有上限的指数退避，最多 20 次，命令最长保留 7 天；过期命令进入终态，不再补发。
 - Runtime 正在处理且租约未过期时返回结果未知，Relay 保持命令待定；本地处理租约过期后允许同一指纹重放。
-- Relay 只缓存不超过 512 KiB 的白名单命令正文，流式附件和大请求不进入命令队列。
+- Relay 只缓存不超过 2 MiB 的白名单命令正文，流式附件和大请求不进入命令队列。
 - HTTP、SSE 和附件通过同一隧道协议流式转发。
 - Relay 审计日志只记录路由类别、命令状态、耗时和字节数；命令正文只存在 Relay SQLite 命令表，不写入日志。
 - 本机 WebUI 无需 Relay 即可独立运行。
@@ -38,3 +38,5 @@ Runtime 在执行业务处理前将 Request ID、请求指纹和处理租约写�
 ## 迁移
 
 Relay 命令队列只保存传输信封，不恢复旧 Projection Sync 的业务副本。回滚窗口内保留旧表和 `BETTER_CODEX_REMOTE_MODE=projection`，但 Relay 模式不得读取或写入旧业务投影。
+
+命令路由与响应分类的实现真源是 `src/web-command-policy.ts`。跨层完成语义与生命周期细则见 [执行、投递与发布边界](execution-and-delivery-boundaries.md)。

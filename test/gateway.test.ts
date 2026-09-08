@@ -425,11 +425,6 @@ test("gateway completes the issue workflow and survives restart", async () => {
     });
     const nativeThreadId = "019fec06-788f-7af3-a031-76b546904fe6";
     const nativeTurnId = "019fec06-788f-7af3-a031-76b546904fe7";
-    const bindPoll = await (await pollRelay()).json() as { leader: boolean; command: { id: string; kind: string; issue_id: string } };
-    assert.equal(bindPoll.leader, true);
-    assert.equal(bindPoll.command.kind, "bind");
-    const bindThreadId = bindPoll.command.issue_id === nativeIssue.id ? nativeThreadId : "019fec06-788f-7af3-a031-76b546904ff0";
-    assert.equal((await completeRelay(bindPoll.command.id, { thread_id: bindThreadId })).status, 200);
     let startCommand: { id: string; kind: string; payload: { message: string } } | undefined;
     for (let attempt = 0; attempt < 20 && !startCommand; attempt++) {
       const next = await (await pollRelay()).json() as { command: { id: string; kind: string; issue_id: string; thread_id: string; payload: { message?: string; title?: string } } | null };
@@ -502,9 +497,9 @@ test("gateway completes the issue workflow and survives restart", async () => {
     const stuckStart = await request(`/api/issues/${stuckIssue.id}/start`, { method: "POST", body: JSON.stringify({ version: stuckIssue.version }) });
     assert.equal(stuckStart.status, 202);
     const stuckRelay = await pollRelay();
-    assert.equal(((await stuckRelay.json()) as { command: { kind: string } }).command.kind, "bind");
+    assert.equal(((await stuckRelay.json()) as { command: { kind: string } }).command.kind, "start");
     const stuckCurrent = await (await request(`/api/issues/${stuckIssue.id}`)).json() as { version: number; active_run_status: string | null };
-    assert.equal(stuckCurrent.active_run_status, null);
+    assert.equal(stuckCurrent.active_run_status, "claimed");
     const stuckArchiveResponse = await request(`/api/issues/${stuckIssue.id}/archive`, { method: "POST", body: JSON.stringify({ version: stuckCurrent.version }) });
     assert.equal(stuckArchiveResponse.status, 200);
     const stuckArchived = await stuckArchiveResponse.json() as { version: number; archived_at: string; active_run_status: string | null };
@@ -632,6 +627,9 @@ test("session host keeps an active App Server turn alive across Runtime handoff"
   writeFileSync(fakeCodexScript, `#!/usr/bin/env node
 const readline = require("node:readline");
 const { basename } = require("node:path");
+const { existsSync, writeFileSync } = require("node:fs");
+const rolloutPath = ${JSON.stringify(join(home, "thread-rollout.jsonl"))};
+let loaded = false;
 if (process.argv.includes("--version")) { console.log("codex-fake 1.0.0"); process.exit(0); }
 if (!process.argv.some(value => basename(value) === "app-server")) process.exit(2);
 const send = value => process.stdout.write(JSON.stringify(value) + "\\n");
@@ -640,9 +638,19 @@ input.on("line", line => {
   const message = JSON.parse(line);
   if (message.id === undefined) return;
   if (message.method === "initialize") return send({ id: message.id, result: {} });
-  if (message.method === "thread/start") return send({ id: message.id, result: { thread: { id: "${threadId}" } } });
+  if (message.method === "thread/start") {
+    loaded = true;
+    return send({ id: message.id, result: { thread: { id: "${threadId}", path: rolloutPath } } });
+  }
+  if (message.method === "thread/resume") {
+    if (!existsSync(rolloutPath)) return send({ id: message.id, error: { message: "no rollout found for thread id ${threadId}" } });
+    loaded = true;
+    return send({ id: message.id, result: { thread: { id: "${threadId}", path: rolloutPath } } });
+  }
   if (message.method === "thread/name/set") return send({ id: message.id, result: {} });
   if (message.method === "turn/start") {
+    if (!loaded) return send({ id: message.id, error: { message: "thread not loaded" } });
+    writeFileSync(rolloutPath, "materialized");
     send({ id: message.id, result: { turn: { id: "${turnId}", status: "inProgress" } } });
     send({ method: "thread/status/changed", params: { threadId: "${threadId}", status: { type: "active", activeFlags: [] } } });
     send({ method: "turn/started", params: { threadId: "${threadId}", turn: { id: "${turnId}", status: "inProgress" } } });
@@ -706,6 +714,8 @@ input.on("line", line => {
     assert.equal((await sourceNext()).type, "hello_ack");
     diagnosticState.phase = "source_authenticated";
     let dispatched = false;
+    let bindingCompleted = false;
+    let turnDispatched = false;
     let retriedDeliveryId = "";
     let sourceSnapshot: Extract<SessionHostServerMessage, { type: "handoff_response" }>["snapshot"] | null = null;
     let busyHandoffRequested = false;
@@ -715,7 +725,12 @@ input.on("line", line => {
       diagnosticState.last_message = message.type;
       if (message.type === "poll_request") {
         diagnosticState.source_polls = Number(diagnosticState.source_polls) + 1;
-        const command = dispatched ? null : { id: "command-long-turn", kind: "start", thread_id: null, turn_id: null, payload: { workspace_path: home, input: [{ type: "text", text: "run long turn" }] } };
+        const command = !dispatched
+          ? { id: "command-bind", kind: "bind", thread_id: null, turn_id: null, payload: { workspace_path: home } }
+          : bindingCompleted && !turnDispatched
+            ? { id: "command-long-turn", kind: "turn", thread_id: threadId, turn_id: null, payload: { workspace_path: home, input: [{ type: "text", text: "run long turn" }] } }
+            : null;
+        if (command?.kind === "turn") turnDispatched = true;
         dispatched = true;
         source.write(`${JSON.stringify({ type: "poll_response", request_id: message.request_id, result: { leader: true, acquired: true, expires_at: new Date(Date.now() + 10_000).toISOString(), previous_relay_id: null, command, thread_ids: command ? [] : [threadId], active_turns: [] } })}\n`);
       }
@@ -728,6 +743,10 @@ input.on("line", line => {
         }
         if (message.delivery_id === retriedDeliveryId) retriedDeliveryId = "retried";
         source.write(`${JSON.stringify({ type: "delivery_ack", delivery_id: message.delivery_id, host_instance_id: message.host_instance_id, sequence: message.sequence, payload_hash: message.payload_hash, outcome: "applied" })}\n`);
+        if (message.kind === "complete" && message.payload.command_id === "command-bind") {
+          bindingCompleted = true;
+          assert.equal((message.payload.result as Record<string, unknown>).persistence, "awaiting_first_turn");
+        }
         if (message.kind === "fail") throw new Error(`session_host_command_failed:${JSON.stringify(message.payload)}`);
         if (message.kind === "event" && message.payload.method === "turn/started" && !busyHandoffRequested) {
           busyHandoffRequested = true;
@@ -890,11 +909,11 @@ test("active mockup injection lease does not pause production issue dispatch", a
     const startResponse = await request(`/api/issues/${issue.id}/start`, { method: "POST", body: JSON.stringify({ version: issue.version }) });
     assert.equal(startResponse.status, 202);
     const started = await startResponse.json() as { active_run_status: string | null };
-    assert.equal(started.active_run_status, null);
+    assert.equal(started.active_run_status, "claimed");
     const store = new Store(join(home, "better-codex.db"));
     try {
       const command = store.getActiveSessionCommand(issue.id);
-      assert.equal(command?.kind, "bind");
+      assert.equal(command?.kind, "start");
       assert.equal(command?.status, "pending");
     } finally {
       store.close();

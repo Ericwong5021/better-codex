@@ -1,7 +1,3 @@
-import { spawn } from "node:child_process";
-import { coreVersion } from "./compatibility.js";
-import { codexExecutableCandidates, codexExecutablePath } from "./codex-cli.js";
-
 export type ReasoningEffortOption = {
   value: string;
   description: string;
@@ -62,7 +58,7 @@ export function inferModelProvider(modelId: string, displayName = ""): string {
   return "Other";
 }
 
-const fallbackCatalog: ModelCatalogEntry[] = [
+export const mockupModelCatalog: ModelCatalogEntry[] = [
   ["gpt-5.6-sol", "GPT-5.6-Sol", "low", ["low", "medium", "high", "xhigh", "max", "ultra"], true],
   ["gpt-5.6-terra", "GPT-5.6-Terra", "medium", ["low", "medium", "high", "xhigh", "max", "ultra"], true],
   ["gpt-5.6-luna", "GPT-5.6-Luna", "medium", ["low", "medium", "high", "xhigh", "max"], true],
@@ -118,79 +114,37 @@ export function normalizeModelCatalog(value: unknown): ModelCatalogEntry[] {
   });
 }
 
-function queryCatalog(executable: string) {
-  return new Promise<ModelCatalogEntry[]>((resolve, reject) => {
-    const child = spawn(executable, ["app-server"], { stdio: ["pipe", "pipe", "ignore"], windowsHide: true });
-    let output = "";
-    let settled = false;
-    const finish = (error?: Error, catalog?: ModelCatalogEntry[]) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      child.kill();
-      if (error) {
-        console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "model_catalog", event: "query_failed", executable, error: error.message })}`);
-        reject(error);
-      } else {
-        const loaded = catalog || [];
-        console.log(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "model_catalog", event: "catalog_loaded", executable, model_count: loaded.length, providers: [...new Set(loaded.map(item => item.provider))] })}`);
-        resolve(loaded);
-      }
-    };
-    const timer = setTimeout(() => finish(new Error("model_catalog_timeout")), 10000);
-    child.on("error", error => finish(error));
-    child.stdout.on("data", chunk => {
-      output += String(chunk);
-      const lines = output.split(/\r?\n/);
-      output = lines.pop() || "";
-      for (const line of lines) {
-        try {
-          const message = JSON.parse(line) as { id?: number; result?: unknown; error?: unknown };
-          if (message.id !== 2) continue;
-          if (message.error) return finish(new Error("model_catalog_request_failed"));
-          const catalog = normalizeModelCatalog(message.result);
-          return catalog.length ? finish(undefined, catalog) : finish(new Error("model_catalog_empty"));
-        } catch { /* app-server can emit non-protocol diagnostics */ }
-      }
+export class ModelCatalog {
+  private cached: { key: string; expiresAt: number; value: ModelCatalogEntry[] } | null = null;
+  private refresh: { key: string; promise: Promise<ModelCatalogEntry[]> } | null = null;
+  private lastError: string | null = null;
+
+  constructor(private readonly load: () => Promise<unknown>, private readonly identity: () => string) {}
+
+  status() {
+    return { source: "session_host", available: Boolean(this.cached && this.cached.key === this.identity() && this.cached.expiresAt > Date.now()), error: this.lastError };
+  }
+
+  async read() {
+    const key = this.identity();
+    if (this.cached?.key === key && this.cached.expiresAt > Date.now()) return this.cached.value;
+    if (this.refresh?.key === key) return this.refresh.promise;
+    const promise = this.load().then(result => {
+      const loadedKey = this.identity();
+      if (!loadedKey || key && loadedKey !== key) throw new Error("model_catalog_host_changed");
+      const value = normalizeModelCatalog(result);
+      if (!value.length) throw new Error("model_catalog_empty");
+      this.cached = { key: loadedKey, expiresAt: Date.now() + 5 * 60_000, value };
+      this.lastError = null;
+      return value;
+    }).catch(error => {
+      this.lastError = error instanceof Error ? error.message : String(error);
+      console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "model_catalog", event: "query_failed", host_identity: key, error: this.lastError })}`);
+      throw error;
+    }).finally(() => {
+      if (this.refresh?.promise === promise) this.refresh = null;
     });
-    child.stdin.write(JSON.stringify({ id: 1, method: "initialize", params: { clientInfo: { name: "better-codex", title: "Better Codex", version: coreVersion }, capabilities: { experimentalApi: true } } }) + "\n");
-    child.stdin.write(JSON.stringify({ method: "initialized", params: {} }) + "\n");
-    child.stdin.write(JSON.stringify({ id: 2, method: "model/list", params: { cursor: null, includeHidden: false, limit: 100 } }) + "\n");
-  });
-}
-
-let cachedCatalog: { expiresAt: number; value: ModelCatalogEntry[] } | null = null;
-let catalogRefresh: Promise<void> | null = null;
-
-function refreshModelCatalog() {
-  if (catalogRefresh) return catalogRefresh;
-  const candidates = [...new Set([codexExecutablePath(), ...codexExecutableCandidates()])].filter(Boolean);
-  const refresh = (async () => {
-    let lastError: Error | undefined;
-    for (const executable of candidates) {
-      try {
-        const value = await queryCatalog(executable);
-        cachedCatalog = { expiresAt: Date.now() + 5 * 60_000, value };
-        return;
-      } catch (error) {
-        lastError = error instanceof Error ? error : new Error(String(error));
-      }
-    }
-    console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "model_catalog", event: "refresh_failed", candidates, error: lastError?.message || "all_candidates_failed" })}`);
-    cachedCatalog = { expiresAt: Date.now() + 30_000, value: fallbackCatalog };
-  })().finally(() => {
-    if (catalogRefresh === refresh) catalogRefresh = null;
-  });
-  catalogRefresh = refresh;
-  return refresh;
-}
-
-export async function warmupModelCatalog() {
-  await refreshModelCatalog();
-  return cachedCatalog?.value ?? fallbackCatalog;
-}
-
-export async function readModelCatalog() {
-  if (!cachedCatalog || cachedCatalog.expiresAt <= Date.now()) await refreshModelCatalog();
-  return cachedCatalog?.value ?? fallbackCatalog;
+    this.refresh = { key, promise };
+    return promise;
+  }
 }

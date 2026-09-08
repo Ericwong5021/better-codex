@@ -1,3 +1,4 @@
+import { sessionCommandCanRetry } from "./session-execution-policy.js";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, linkSync, mkdirSync, unlinkSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -4619,6 +4620,10 @@ export class Store {
         SELECT session_commands.* FROM session_commands
         JOIN issues ON issues.id = session_commands.issue_id
         WHERE session_commands.status = 'pending'
+          AND NOT EXISTS (
+            SELECT 1 FROM session_commands AS executing
+            WHERE executing.issue_id = session_commands.issue_id AND executing.status = 'claimed'
+          )
           AND ${owner === "native" ? "issues.session_handoff_at IS NOT NULL" : "issues.session_handoff_at IS NULL"}
           AND (
             session_commands.kind IN ('interrupt', 'steer', 'rename')
@@ -4879,7 +4884,7 @@ export class Store {
           return { ...command, status: "pending" as const, error, relay_id: null, claimed_at: null, finished_at: null };
         }
       }
-      if (command.kind === "rename" && command.attempts < 5 && threadId) {
+      if (sessionCommandCanRetry(command.kind, command.attempts, error) && threadId) {
         const binding = this.db.prepare("SELECT thread_id FROM issue_sessions WHERE issue_id = ?").get(command.issue_id) as { thread_id: string } | undefined;
         if (binding?.thread_id === threadId) {
           this.db.prepare(`

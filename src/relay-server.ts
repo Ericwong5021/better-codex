@@ -1,3 +1,4 @@
+import { webCommandResponseDisposition, webCommandMaxBodyBytes } from "./web-command-policy.js";
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { once } from "node:events";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -615,7 +616,7 @@ export function createRelayServer(options: RelayServerOptions) {
     const body = Buffer.concat(channel.responseChunks, channel.responseBytes);
     let responseError = "";
     try { responseError = String(JSON.parse(body.toString("utf8"))?.error || ""); } catch {}
-    if (status === 408 || status === 425 || status === 429 || status >= 500 || responseError === "request_outcome_unknown") {
+    if (webCommandResponseDisposition(status, responseError) === "retry") {
       store.retryCommand(channel.commandId, channel.deliveryId, `runtime_http_${status}`);
       return;
     }
@@ -668,7 +669,7 @@ export function createRelayServer(options: RelayServerOptions) {
   const forwardCommand = async (request: IncomingMessage, response: ServerResponse, url: URL, method: string, sessionId: string, userId: string) => {
     const suppliedRequestId = String(request.headers["x-better-codex-request-id"] || request.headers["x-better-codex-command-id"] || "");
     if (!/^[A-Za-z0-9_-]{8,200}$/.test(suppliedRequestId)) return forwardRequest(request, response, url, method, sessionId, userId);
-    const body = await readRawBody(request, Math.min(maxRequestBytes, 2 * 1024 * 1024));
+    const body = await readRawBody(request, Math.min(maxRequestBytes, webCommandMaxBodyBytes));
     const path = `${url.pathname}${url.search}`;
     const command = createWebCommand(suppliedRequestId, method, path, body);
     if (!command) return sendJson(response, 400, { error: "command_not_supported" });

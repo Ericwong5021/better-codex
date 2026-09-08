@@ -29,3 +29,7 @@ The release gate runs the continuity lifecycle, delivery idempotency, update sta
 ## Compatibility boundary
 
 This implementation is the bridge release. Versions older than the bridge do not possess the durable Host queue or non-destructive activation path, so their first update retains the legacy behavior. Continuous-session guarantees apply from this bridge release to later manifests that declare a compatible handoff protocol. A stable release requires two consecutive bridge-aware update validations.
+
+## Thread allocation capability
+
+The `thread_binding_lifecycle` capability distinguishes workers that retain unmaterialized threads from older command-scoped workers. Manifests requiring it must drain and replace older Hosts. New Issues allocate their physical thread together with the first input; legacy bind commands remain supported. An unmaterialized worker is not safe for a Host-replacing update. See [execution and delivery boundaries](execution-and-delivery-boundaries.md).

@@ -364,7 +364,7 @@ class SessionHostServer {
       this.runtimeDisconnectedAt = null;
       if (this.orphanTimer) clearTimeout(this.orphanTimer);
       this.orphanTimer = null;
-      writeMessage(connection.socket, { type: "hello_ack", protocol_version: sessionHostProtocolVersion, host_pid: process.pid, host_instance_id: this.hostInstanceId, connection_epoch: connection.epoch, runtime_instance_id: message.runtime_instance_id, runtime_generation: message.runtime_generation, started_at: this.startedAt, relay_id: `session-host:${process.pid}`, capabilities: { thread_actions: true, durable_deliveries: true, runtime_handoff: true, semantic_requests: true, thread_worker_handoff: true } });
+      writeMessage(connection.socket, { type: "hello_ack", protocol_version: sessionHostProtocolVersion, host_pid: process.pid, host_instance_id: this.hostInstanceId, connection_epoch: connection.epoch, runtime_instance_id: message.runtime_instance_id, runtime_generation: message.runtime_generation, started_at: this.startedAt, relay_id: `session-host:${process.pid}`, capabilities: { thread_actions: true, durable_deliveries: true, runtime_handoff: true, semantic_requests: true, thread_worker_handoff: true, thread_binding_lifecycle: true } });
       this.writeStatus();
       diagnostic("runtime_connected", { connection_epoch: connection.epoch, runtime_instance_id: message.runtime_instance_id, runtime_generation: message.runtime_generation, runtime_version: message.runtime_version, handoff_update_id: message.handoff_update_id });
       this.flushDeliveries();
@@ -419,7 +419,7 @@ class SessionHostServer {
       return;
     }
     if (message.type === "semantic_request") {
-      const methods: SessionHostSemanticMethod[] = ["skills/list", "app/installed", "app/list", "plugin/installed", "mcpServerStatus/list", "fuzzyFileSearch"];
+      const methods: SessionHostSemanticMethod[] = ["model/list", "skills/list", "app/installed", "app/list", "plugin/installed", "mcpServerStatus/list", "fuzzyFileSearch"];
       const deadline = Date.parse(message.deadline_at);
       const validParams = message.params && typeof message.params === "object" && !Array.isArray(message.params) && Buffer.byteLength(JSON.stringify(message.params)) <= 131_072;
       const identity = () => {

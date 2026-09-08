@@ -366,6 +366,7 @@ export function createHubServer(options: HubServerOptions) {
           user: userForWeb(browser.user),
           users: store.listWebUsers().map(userForWeb),
           agentModelCatalog,
+          agentModelCatalogError: runtime?.agent_models_error || null,
           agentModels: agentModelCatalog.map(model => model.id),
           agentReasoningEfforts: [...new Set(agentModelCatalog.flatMap(model => model.supportedReasoningEfforts.map(effort => effort.value)))],
           autoDispatch: runtime?.auto_dispatch === true,
