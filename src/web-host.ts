@@ -387,6 +387,7 @@ function hostErrorReport(records) {
       request: record.diagnostics ? Object.fromEntries(Object.entries(record.diagnostics).filter(([key, value]) => !["source", "trace_id", "trace_timeline"].includes(key) && value !== "" && value !== null && value !== undefined)) : {},
       timeline: record.related_logs,
       occurrences: record.occurrences,
+      ...(record.context?.source === "window_error" ? { browser_event: { filename: record.context.filename, line: record.context.line, column: record.context.column, error_present: record.context.error_present, trusted: record.context.trusted } } : {}),
       ...(["window_error", "unhandled_rejection"].includes(record.context?.source) && record.stack ? { stack: String(record.stack).split("\n").slice(0, 8).join("\n") } : {}),
     })),
   }, null, 2);
@@ -502,11 +503,12 @@ webErrorDialog.addEventListener("click", event => {
   if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) webErrorDialog.close();
 });
 window.addEventListener("error", event => {
-  if (!event.error && !event.filename && !event.lineno && !event.colno && event.message === "ResizeObserver loop completed with undelivered notifications.") {
-    hostDiagnostic("window_diagnostic", { source: "window_error", kind: "resize_observer_delivery", message: event.message });
+  const context = { source: "window_error", filename: event.filename || "", line: event.lineno || 0, column: event.colno || 0, error_present: event.error != null, trusted: event.isTrusted };
+  if (!event.error && (!event.filename || event.filename === document.URL) && !event.lineno && !event.colno && event.message === "ResizeObserver loop completed with undelivered notifications.") {
+    hostDiagnostic("window_diagnostic", { ...context, kind: "resize_observer_delivery", message: event.message });
     return;
   }
-  reportHostError(event.error || event.message, { source: "window_error", filename: event.filename || "", line: event.lineno || 0, column: event.colno || 0 });
+  reportHostError(event.error || event.message, context);
 });
 window.addEventListener("unhandledrejection", event => reportHostError(event.reason, { source: "unhandled_rejection" }));
 

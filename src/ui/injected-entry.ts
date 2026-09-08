@@ -2540,6 +2540,7 @@ export function install(config: Record<string, any>) {
         timeline,
         occurrences: record.occurrences,
       };
+      if (source === "window_error") report.browser_event = compactFields({ filename: context.filename, line: context.line, column: context.column, error_present: context.error_present, trusted: context.trusted });
       if (["window_error", "unhandled_rejection"].includes(source) && record.stack) report.stack = String(record.stack).split("\n").slice(0, 8).join("\n");
       return report;
     }
@@ -2669,11 +2670,12 @@ export function install(config: Record<string, any>) {
     }
 
     function onWindowError(event) {
-      if (!event.error && !event.filename && !event.lineno && !event.colno && event.message === "ResizeObserver loop completed with undelivered notifications.") {
-        appendDiagnostic("window_diagnostic", { source: "window_error", kind: "resize_observer_delivery", message: event.message });
+      const context = { source: "window_error", filename: event.filename || "", line: event.lineno || 0, column: event.colno || 0, error_present: event.error != null, trusted: event.isTrusted };
+      if (!event.error && (!event.filename || event.filename === document.URL) && !event.lineno && !event.colno && event.message === "ResizeObserver loop completed with undelivered notifications.") {
+        appendDiagnostic("window_diagnostic", { ...context, kind: "resize_observer_delivery", message: event.message });
         return;
       }
-      reportGlobalError(event.error || event.message, { source: "window_error", filename: event.filename || "", line: event.lineno || 0, column: event.colno || 0 });
+      reportGlobalError(event.error || event.message, context);
     }
 
     function onUnhandledRejection(event) {
