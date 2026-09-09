@@ -25,7 +25,6 @@ const tool = {
   annotations: { title: "Better Codex", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   _meta: {
     ui: { resourceUri, visibility: ["app"] },
-    "openai/ui": { entrypoints: [{ type: "global" }] },
     "openai/outputTemplate": resourceUri,
   },
 };
