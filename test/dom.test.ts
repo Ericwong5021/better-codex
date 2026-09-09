@@ -99,7 +99,7 @@ test("leaving the app surface suspends the panel and restores its previous surfa
   assert.ok(source.includes('syncEntryIcon(entry, "issues")'));
   assert.ok(source.includes('"issues":{"name":"square-kanban"'));
   assert.ok(source.includes('"bot":{"name":"bot"'));
-  assert.ok(source.includes("return entry.isConnected && (!scheduledEntry || scheduledEntry.isConnected) && (!scheduledMobileEntry || scheduledMobileEntry.isConnected) && agentsEntry.isConnected && projectsEntry.isConnected"));
+  assert.ok(source.includes("return entry.isConnected && agentsEntry.isConnected && projectsEntry.isConnected && (HOST_KIND !== \"web\" || auxiliaryNavigation?.isConnected)"));
   assert.ok(source.includes("const entriesAvailable = ensureEntry()"));
   assert.ok(source.includes("if (active && !betterCodexRoute) close({ resume: true, suppressRoute: false })"));
   assert.ok(source.includes("routeSeen = false"));
@@ -876,7 +876,7 @@ test("every modal dialog closes only when its backdrop is clicked", () => {
 
   assert.ok(source.includes("function bindModalDismiss(dialog, dismiss)"));
   assert.ok(sharedDialogSource.includes("pointer.clientX < bounds.left || pointer.clientX > bounds.right || pointer.clientY < bounds.top || pointer.clientY > bounds.bottom"));
-  assert.equal(bindings.length, 4);
+  assert.equal(bindings.length, 3);
 });
 
 test("Codex-native visual values live behind semantic design tokens", () => {

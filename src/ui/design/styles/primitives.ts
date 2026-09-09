@@ -3,7 +3,6 @@ export function betterCodexPrimitiveStylesCss() {
     #better-codex-panel,
     #better-codex-archive-dialog,
     #better-codex-dialog,
-    #better-codex-scheduled-dialog,
     #better-codex-attachment-dialog,
     #better-codex-agent-dialog,
     #better-codex-confirm,

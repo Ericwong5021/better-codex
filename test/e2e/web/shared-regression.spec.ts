@@ -43,6 +43,8 @@ test.afterEach(async ({}, testInfo) => {
 test("synchronizes two browser contexts and rejects a stale write", async ({ browser }) => {
   const first = await openAuthenticatedPage(browser, { locale: "zh-CN" });
   const second = await openAuthenticatedPage(browser, { locale: "zh-CN" });
+  await expect(first.page.locator("#better-codex-scheduled-entry")).toHaveCount(0);
+  await expect(first.page.locator("#better-codex-scheduled-mobile-entry")).toHaveCount(0);
   const title = `双窗口同步 ${Date.now()}`;
   const project = await first.page.evaluate(async workspacePath => await (window as any).betterCodexHost.request({
     path: "/api/projects",
@@ -83,19 +85,8 @@ test("supports English, dark theme, mobile viewport, and keyboard dismissal", as
   });
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await expect(page.locator("#better-codex-entry")).toContainText("Task board");
-  await expect(page.locator("#better-codex-scheduled-entry")).toBeHidden();
-  const manifest = await page.evaluate(async () => await (window as any).betterCodexHost.request({ path: "/api/bootstrap" }));
-  const scheduledEnabled = manifest.featureManifest.features.some((feature: { id: string; enabled: boolean }) => feature.id === "scheduled-tasks" && feature.enabled);
-  if (scheduledEnabled) {
-    await page.locator("#better-codex-more-entry").click();
-    await expect(page.locator("#better-codex-scheduled-mobile-entry")).toContainText("Scheduled");
-    await page.locator("#better-codex-scheduled-mobile-entry").click();
-    await expect(page.locator("#better-codex-panel")).toHaveAttribute("data-surface", "scheduled");
-    await expect(page.locator("#better-codex-more-entry")).toHaveAttribute("aria-current", "page");
-    await page.locator("#better-codex-entry").click();
-  } else {
-    await expect(page.locator("#better-codex-scheduled-mobile-entry")).toHaveCount(0);
-  }
+  await expect(page.locator("#better-codex-scheduled-entry")).toHaveCount(0);
+  await expect(page.locator("#better-codex-scheduled-mobile-entry")).toHaveCount(0);
   await page.locator("#better-codex-more-entry").click();
   await expect(page.locator("#better-codex-theme-entry")).toContainText("Switch to light theme");
   await page.locator("#better-codex-theme-entry").click();

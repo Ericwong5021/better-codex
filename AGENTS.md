@@ -17,8 +17,8 @@
 - Frontend design values are registered only in `src/ui/design/registry.ts` and its layer modules. Feature styles consume canonical `--bc-*` semantic tokens directly; legacy and `--web-*` aliases are not permitted.
 - Codex injection, local WebUI, and Relay WebUI consume the same generated browser entry. Hosts own only mount, theme input, transport, and capability differences.
 - Shared UI follows `core -> primitives -> components -> patterns -> features -> hosts`. Components expose update and destroy lifecycles, feature code owns product state and API intent, and host code must not contain product rendering rules.
-- Settings, Scheduled, Projects, Agents, and Board each have `controller.ts`, `model.ts`, and `view.ts` boundaries under `src/ui/features`. Features must not import another feature's internal controller, model, or view.
-- Scheduled tasks are Beta-only in the feature manifest and shared UI, while project management is a Release feature. Release visibility gates must not silently disable or migrate scheduled tasks that users created on the Beta channel.
+- Settings, Projects, Agents, and Board each have `controller.ts`, `model.ts`, and `view.ts` boundaries under `src/ui/features`. Features must not import another feature's internal controller, model, or view.
+- Project management is a Release feature in the feature manifest and shared UI.
 - Structured composer input is persisted as ordered `InputDocumentV2` and compiled only through `src/codex-input-document.ts`. Semantic discovery and execution-time validation use the active Session Host's catalog App Server; Runtime must not start another catalog scanner or use a thread worker for discovery. Relay-visible candidates contain opaque expiring handles and safe display fields only, never local locators or absolute paths.
 
 - Session command admission is bounded across Issues and serialized within one Issue and worker. Global polling must not await unrelated long-running command execution. Missing thread history is a visible terminal dependency failure, not a rename retry condition.

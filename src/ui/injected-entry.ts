@@ -15,7 +15,6 @@ import { destroyRemovedComponents, registerOwnedComponent } from "./core/ownersh
 import { adoptButton, adoptIconButton, createButton, createIconButton } from "./primitives/button.js";
 import { adoptBadge, adoptStatusBadge, createStatusBadge } from "./primitives/badge.js";
 import { adoptFormRow } from "./patterns/form-row.js";
-import { adoptListRow } from "./patterns/list-row.js";
 import { adoptToolbar } from "./patterns/toolbar.js";
 import { createAgentsController } from "./features/agents/controller.js";
 import { createBoardController } from "./features/board/controller.js";
@@ -23,7 +22,6 @@ import { createSemanticController } from "./features/board/semantic-controller.j
 import { createSemanticDraft, insertSemanticReference, reconcileSemanticText, serializeSemanticDraft } from "./features/board/semantic-model.js";
 import { semanticCandidateGroup, semanticCandidateIcon } from "./features/board/semantic-view.js";
 import { createProjectsController } from "./features/projects/controller.js";
-import { createScheduledController } from "./features/scheduled/controller.js";
 import { createSettingsController } from "./features/settings/controller.js";
 
 export function install(config: Record<string, any>) {
@@ -42,7 +40,6 @@ export function install(config: Record<string, any>) {
     const AGENTS_READ_ONLY = HOST_CAPABILITIES.agents === "read-only";
     const CODEX_SEMANTICS_AVAILABLE = HOST_CAPABILITIES.codexSemantics !== false;
     const REMOTE = HOST_ADAPTER.remote;
-    const SCHEDULED_HOST_AVAILABLE = !REMOTE || RELAY;
     if (READ_ONLY) document.documentElement.setAttribute("data-better-codex-read-only", "true");
     const HELP_MODE_MARKDOWN = config.helpModeMarkdown;
     const previous = window.__betterCodexInjection__;
@@ -53,8 +50,6 @@ export function install(config: Record<string, any>) {
     previous?.destroy?.();
 
     const ENTRY_ID = "better-codex-entry";
-    const SCHEDULED_ENTRY_ID = "better-codex-scheduled-entry";
-    const SCHEDULED_MOBILE_ENTRY_ID = "better-codex-scheduled-mobile-entry";
     const AGENTS_ENTRY_ID = "better-codex-agents-entry";
     const PROJECTS_ENTRY_ID = "better-codex-projects-entry";
     const MORE_ENTRY_ID = "better-codex-more-entry";
@@ -143,13 +138,12 @@ export function install(config: Record<string, any>) {
     const systemLocale = resolveSystemLocale(INITIAL_LOCALE);
     const MOCKUP_PROJECT_ID = "mockup-better-codex";
     const hasFeature = feature => ENABLED_FEATURES.has(feature);
-    const SCHEDULED_AVAILABLE = SCHEDULED_HOST_AVAILABLE && hasFeature("scheduled-tasks");
-    const availableSurfaces = ["issues", ...(SCHEDULED_AVAILABLE ? ["scheduled"] : []), "agents", ...(hasFeature("project-management") ? ["projects"] : [])];
+    const availableSurfaces = ["issues", "agents", ...(hasFeature("project-management") ? ["projects"] : [])];
     const initialProjectRoute = hasFeature("project-management") ? webProjectRoute() : null;
     const initialAgentRoute = webAgentRoute();
     if (HOST_KIND === "web" && !hasFeature("project-management") && /^\/web\/projects(?:\/|$)/.test(location.pathname)) history.replaceState({ betterCodex: true, betterCodexSurface: "issues" }, "", "/web");
     const initialAgentKey = initialAgentRoute?.agentKey || "";
-    const state = { projects: [], projectsLoaded: false, issues: [], issuesLoaded: false, scheduledTasks: [], scheduledTasksLoaded: false, projectIssues: [], projectIssuesProjectId: "", projectDetailId: initialProjectRoute?.projectId || "", projectPage: "overview", projectDocumentView: "charter", projectDocumentPending: null, projectDocumentError: null, projectPlanningPending: null, projectPlanningError: null, agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: USER_AVATAR_COLORS[0], avatar: "", avatar_generated: true }, users: [], projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: initialAgentKey === "new" ? "create" : initialAgentKey ? "detail" : "preview", selectedAgentId: initialAgentKey && initialAgentKey !== "new" ? initialAgentKey : "", agentDraft: initialAgentKey === "new" ? { avatar: DEFAULT_PRESET_AVATAR_URL } : null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: initialProjectRoute ? "projects" : initialAgentRoute ? "agents" : availableSurfaces.includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, autoDispatchPending: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", issueDescriptionLimit: 100000, mockup: false, keepCreate: rememberedKeepCreate, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], creator: [], project: [], label: [] } };
+    const state = { projects: [], projectsLoaded: false, issues: [], issuesLoaded: false, projectIssues: [], projectIssuesProjectId: "", projectDetailId: initialProjectRoute?.projectId || "", projectPage: "overview", projectDocumentView: "charter", projectDocumentPending: null, projectDocumentError: null, projectPlanningPending: null, projectPlanningError: null, agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: USER_AVATAR_COLORS[0], avatar: "", avatar_generated: true }, users: [], projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: initialAgentKey === "new" ? "create" : initialAgentKey ? "detail" : "preview", selectedAgentId: initialAgentKey && initialAgentKey !== "new" ? initialAgentKey : "", agentDraft: initialAgentKey === "new" ? { avatar: DEFAULT_PRESET_AVATAR_URL } : null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: initialProjectRoute ? "projects" : initialAgentRoute ? "agents" : availableSurfaces.includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, autoDispatchPending: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", issueDescriptionLimit: 100000, mockup: false, keepCreate: rememberedKeepCreate, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], creator: [], project: [], label: [] } };
     const pendingIssueRemovals = new Map();
     const pendingIssueCreates = new Map();
     const pendingIssueReplies = new Map();
@@ -707,85 +701,6 @@ export function install(config: Record<string, any>) {
       "任务内容超过长度限制，请缩短内容或作为附件上传。": "The task content is too long. Shorten it or upload it as an attachment.",
       "网络连接不稳定，正在等待恢复。": "The network connection is unstable. Waiting to reconnect.",
     });
-    Object.assign(localeResources["zh-CN"], {
-      invalid_scheduled_task_name: "请输入定时任务名称",
-      invalid_scheduled_task_prompt: "请输入任务内容",
-      invalid_scheduled_task_time: "请选择有效的执行时间",
-      invalid_scheduled_task_interval: "请输入有效的循环间隔",
-      invalid_scheduled_task_repeat: "循环状态无效",
-      invalid_scheduled_task_enabled: "启用状态无效",
-      scheduled_task_not_found: "定时任务不存在",
-      scheduled_task_running: "这个任务已有一次执行正在进行",
-      scheduled_task_creation_failed: "智能体未能创建定时任务，请重试",
-      scheduled_task_creation_timeout: "智能体创建超时，请重试",
-      scheduled_task_creation_invalid_output: "智能体返回的定时任务格式无效，请重试",
-      workspace_invalid: "项目文件夹不可用",
-    });
-    Object.assign(localeResources.en, {
-      "定时任务": "Scheduled",
-      "管理定时任务": "Manage scheduled tasks",
-      "新建定时任务": "New scheduled task",
-      "编辑定时任务": "Edit scheduled task",
-      "告诉智能体你想如何安排任务": "Tell the agent what to do and when",
-      "例如：每天上午 9 点整理这个项目昨天的进展和今天的待办": "For example: Every day at 9 AM, summarize yesterday's progress and today's tasks",
-      "智能体创建中…": "Agent is creating…",
-      "保存中…": "Saving…",
-      "创建中…": "Creating…",
-      "正在加载定时任务": "Loading scheduled tasks",
-      "还没有定时任务": "No scheduled tasks yet",
-      "设置执行时间和循环间隔，Better Codex 会按计划创建任务并交给智能体执行。": "Choose a start time and recurrence. Better Codex will create a task and hand it to an agent on schedule.",
-      "按计划创建独立任务并交给智能体执行": "Create an independent task on schedule and hand it to an agent",
-      "例如：每天整理项目进展": "For example: Summarize project progress every day",
-      "任务内容": "Task instructions",
-      "说明每次需要完成的具体任务": "Describe exactly what each run should complete",
-      "执行智能体": "Agent",
-      "默认智能体": "Default agent",
-      "使用智能体当前的模型、推理和权限设置": "Uses the agent's current model, reasoning, and permission settings",
-      "首次执行": "First run",
-      "循环执行": "Repeat",
-      "按固定间隔持续执行这个任务": "Continue running this task at a fixed interval",
-      "每隔": "Every",
-      "单位": "Unit",
-      "分钟": "Minutes",
-      "小时": "Hours",
-      "天": "Days",
-      "周": "Weeks",
-      "立即启用": "Enable now",
-      "关闭后会保存为已暂停状态": "Turn this off to save the task as paused",
-      "执行一次": "Run once",
-      "个任务": "tasks",
-      "已启用": "Active",
-      "已暂停": "Paused",
-      "执行中": "Running",
-      "等待执行": "Waiting",
-      "暂停": "Pause",
-      "启用": "Enable",
-      "立即运行": "Run now",
-      "最近运行": "Recent runs",
-      "尚未运行": "No runs yet",
-      "尚未创建任务": "Task not created yet",
-      "查看任务": "View task",
-      "下次执行": "Next run",
-      "当前计划": "Schedule",
-      "暂无下次执行": "No next run",
-      "暂无已启用的计划": "No active schedules",
-      "创建或启用一个定时任务": "Create or enable a scheduled task",
-      "删除定时任务": "Delete scheduled task",
-      "删除后不会影响已经创建或正在执行的任务。": "Deleting this schedule will not affect tasks that were already created or are running.",
-      "未知项目": "Unknown project",
-      invalid_scheduled_task_name: "Enter a scheduled task name",
-      invalid_scheduled_task_prompt: "Enter task instructions",
-      invalid_scheduled_task_time: "Choose a valid start time",
-      invalid_scheduled_task_interval: "Enter a valid recurrence interval",
-      invalid_scheduled_task_repeat: "The recurrence state is invalid",
-      invalid_scheduled_task_enabled: "The enabled state is invalid",
-      scheduled_task_not_found: "Scheduled task not found",
-      scheduled_task_running: "A run for this task is already in progress",
-      scheduled_task_creation_failed: "The agent could not create the scheduled task. Try again.",
-      scheduled_task_creation_timeout: "The agent timed out while creating the scheduled task. Try again.",
-      scheduled_task_creation_invalid_output: "The agent returned an invalid scheduled task. Try again.",
-      workspace_invalid: "The project folder is unavailable",
-    });
     const bridgeRequests = new Map();
     const appServerRequests = new Map();
     const sessionHandoffPending = new Set();
@@ -800,8 +715,6 @@ export function install(config: Record<string, any>) {
     let errorQueueIndex = 0;
     let errorDialog = null;
     let entry = null;
-    let scheduledEntry = null;
-    let scheduledMobileEntry = null;
     let agentsEntry = null;
     let projectsEntry = null;
     let auxiliaryNavigation = null;
@@ -889,7 +802,6 @@ export function install(config: Record<string, any>) {
         agents: createAgentsController({ render: () => renderAgents() }),
         board: createBoardController({ render: () => renderBoard() }),
         projects: createProjectsController({ render: () => renderProjects() }),
-        scheduled: createScheduledController({ render: () => renderScheduledTasks() }),
         settings: createSettingsController({ open: initialView => renderSettingsOverlay(initialView) }),
       };
       return featureControllers;
@@ -897,7 +809,7 @@ export function install(config: Record<string, any>) {
 
     function activateFeature(name) {
       const activeControllers = controllers();
-      ["agents", "board", "projects", "scheduled"].forEach(feature => {
+      ["agents", "board", "projects"].forEach(feature => {
         if (feature !== name) activeControllers[feature].deactivate();
       });
       activeControllers[name].render();
@@ -1162,9 +1074,9 @@ export function install(config: Record<string, any>) {
       style.id = STYLE_ID;
       style.setAttribute(OWNED, "true");
       style.textContent = `
-        #${ENTRY_ID}[aria-current="page"], #${SCHEDULED_ENTRY_ID}[aria-current="page"], #${AGENTS_ENTRY_ID}[aria-current="page"], #${PROJECTS_ENTRY_ID}[aria-current="page"], #${MORE_ENTRY_ID}[aria-current="page"] { background: var(--color-background-primary-soft-active, var(--color-token-list-hover-background, color-mix(in srgb, currentColor 8%, transparent))); }
-        html[data-better-codex-open="true"] ${SELECTORS.sidebarNavigation} [aria-current="page"]:not(#${ENTRY_ID}):not(#${SCHEDULED_ENTRY_ID}):not(#${AGENTS_ENTRY_ID}):not(#${PROJECTS_ENTRY_ID}):not(#${MORE_ENTRY_ID}) { background: transparent !important; }
-        html[data-better-codex-open="true"] ${SELECTORS.sidebarNavigation} [aria-current="page"]:not(#${ENTRY_ID}):not(#${SCHEDULED_ENTRY_ID}):not(#${AGENTS_ENTRY_ID}):not(#${PROJECTS_ENTRY_ID}):not(#${MORE_ENTRY_ID}) .text-token-list-active-selection-foreground { color: var(--color-token-foreground) !important; }
+        #${ENTRY_ID}[aria-current="page"], #${AGENTS_ENTRY_ID}[aria-current="page"], #${PROJECTS_ENTRY_ID}[aria-current="page"], #${MORE_ENTRY_ID}[aria-current="page"] { background: var(--color-background-primary-soft-active, var(--color-token-list-hover-background, color-mix(in srgb, currentColor 8%, transparent))); }
+        html[data-better-codex-open="true"] ${SELECTORS.sidebarNavigation} [aria-current="page"]:not(#${ENTRY_ID}):not(#${AGENTS_ENTRY_ID}):not(#${PROJECTS_ENTRY_ID}):not(#${MORE_ENTRY_ID}) { background: transparent !important; }
+        html[data-better-codex-open="true"] ${SELECTORS.sidebarNavigation} [aria-current="page"]:not(#${ENTRY_ID}):not(#${AGENTS_ENTRY_ID}):not(#${PROJECTS_ENTRY_ID}):not(#${MORE_ENTRY_ID}) .text-token-list-active-selection-foreground { color: var(--color-token-foreground) !important; }
         [${HOST}="true"] { position: relative !important; z-index: 31 !important; pointer-events: none !important; }
         [${HIDDEN}="true"] { visibility: hidden !important; pointer-events: none !important; }
         ${config.designSystemCss}
@@ -1237,7 +1149,6 @@ export function install(config: Record<string, any>) {
         ".better-codex-confirm-actions > button",
         ".better-codex-error-report-actions > button",
         ".better-codex-error-report-navigation > button",
-        ".better-codex-scheduled-empty > button",
         ".better-codex-recovery-command > button",
         ".better-codex-recovery-retry",
         "dialog footer > button:not([aria-label])",
@@ -1247,7 +1158,7 @@ export function install(config: Record<string, any>) {
         const label = button.textContent?.trim() || button.getAttribute("aria-label")?.trim();
         if (!label) return;
         const primary = button.classList.contains("is-primary") || button.classList.contains("better-codex-submit") || button.classList.contains("better-codex-confirm-primary");
-        const danger = button.classList.contains("is-danger") || button.matches("[data-agent-delete], [data-scheduled-delete], [data-confirm-danger]");
+        const danger = button.classList.contains("is-danger") || button.matches("[data-agent-delete], [data-confirm-danger]");
         const handle = adoptButton(button, {
           disabled: button.disabled,
           label,
@@ -1260,7 +1171,7 @@ export function install(config: Record<string, any>) {
     function hydrateSharedControls(root, feature) {
       hydrateIconButtons(root, feature);
       hydrateActionButtons(root, feature);
-      root.querySelectorAll(".better-codex-scheduled-status, .better-codex-remote-status-badge, .better-codex-completion-status").forEach(element => {
+      root.querySelectorAll(".better-codex-remote-status-badge, .better-codex-completion-status").forEach(element => {
         if (!(element instanceof HTMLElement) || element.dataset.bcComponent) return;
         const stateValue = element.dataset.state || element.closest("[data-remote-status]")?.getAttribute("data-remote-status") || "";
         const variant = ["running", "enabled", "online", "completed"].includes(stateValue) ? "success" : ["offline", "failed", "blocked"].includes(stateValue) ? "danger" : "neutral";
@@ -1290,11 +1201,6 @@ export function install(config: Record<string, any>) {
       root.querySelectorAll(".better-codex-project-document-form > label").forEach(element => {
         if (!(element instanceof HTMLElement) || element.dataset.bcComponent) return;
         const handle = adoptFormRow(element, componentContext(feature, "adopted-form-row:" + (++adoptedPatternSequence)));
-        registerOwnedComponent(element, handle);
-      });
-      root.querySelectorAll(".better-codex-scheduled-row").forEach(element => {
-        if (!(element instanceof HTMLElement) || element.dataset.bcComponent) return;
-        const handle = adoptListRow(element, componentContext(feature, "adopted-list-row:" + (++adoptedPatternSequence)));
         registerOwnedComponent(element, handle);
       });
     }
@@ -1335,7 +1241,7 @@ export function install(config: Record<string, any>) {
 
     function syncAuxiliaryMenuOrder() {
       if (!auxiliaryMenu) return;
-      const items = [scheduledMobileEntry, projectsEntry, usageEntry, themeEntry, profileEntry].filter(
+      const items = [projectsEntry, usageEntry, themeEntry, profileEntry].filter(
         (item): item is HTMLElement => Boolean(item),
       );
       for (const [index, item] of items.entries()) {
@@ -1364,10 +1270,6 @@ export function install(config: Record<string, any>) {
       auxiliaryMenu.className = "web-nav-more-menu";
       auxiliaryMenu.setAttribute(OWNED, "true");
       auxiliaryMenu.setAttribute("aria-label", t("更多功能"));
-      if (SCHEDULED_AVAILABLE) {
-        scheduledMobileEntry = createEntry("定时任务", SCHEDULED_MOBILE_ENTRY_ID, "管理定时任务", "scheduled");
-        scheduledMobileEntry.classList.add("web-nav-mobile-action");
-      }
       if (REMOTE) {
         profileEntry = nativeButton("");
         profileEntry.id = "better-codex-profile-entry";
@@ -1421,7 +1323,7 @@ export function install(config: Record<string, any>) {
     function syncEntryIcon(button, surface) {
       const svg = button.querySelector("svg");
       if (svg) {
-        const iconKey = { scheduled: "calendar", agents: "bot", projects: "folder", more: "more", usage: "usage", moon: "moon", sun: "sun" }[surface] || "issues";
+        const iconKey = { agents: "bot", projects: "folder", more: "more", usage: "usage", moon: "moon", sun: "sun" }[surface] || "issues";
         const definition = LUCIDE_ICONS[iconKey];
         if (svg.getAttribute("viewBox") !== "0 0 24 24") svg.setAttribute("viewBox", "0 0 24 24");
         if (svg.getAttribute("fill") !== "none") svg.setAttribute("fill", "none");
@@ -1452,10 +1354,6 @@ export function install(config: Record<string, any>) {
         profileEntry.setAttribute("aria-label", t("编辑个人资料"));
         profileEntry.setAttribute("title", t("编辑个人资料"));
       }
-      if (scheduledMobileEntry) {
-        syncEntryLabel(scheduledMobileEntry, "定时任务", "管理定时任务");
-        syncEntryIcon(scheduledMobileEntry, "scheduled");
-      }
       syncEntryLabel(usageEntry, "Codex 额度", "查看 Codex 额度");
       syncEntryIcon(usageEntry, "usage");
       const light = document.documentElement.dataset.theme === "dark";
@@ -1478,17 +1376,10 @@ export function install(config: Record<string, any>) {
       } else if (entry.parentElement !== parent || entry !== parent.firstElementChild) {
         parent.prepend(entry);
       }
-      if (!scheduledEntry && SCHEDULED_AVAILABLE) scheduledEntry = createEntry("定时任务", SCHEDULED_ENTRY_ID, "管理定时任务", "scheduled");
-      if (scheduledEntry) {
-        syncEntryLabel(scheduledEntry, "定时任务", "管理定时任务");
-        syncEntryIcon(scheduledEntry, "scheduled");
-        if (scheduledEntry.parentElement !== parent || scheduledEntry.previousElementSibling !== entry) entry.after(scheduledEntry);
-      }
       if (!agentsEntry) agentsEntry = createEntry("智能体", AGENTS_ENTRY_ID, "管理智能体", "agents");
       syncEntryLabel(agentsEntry, "智能体", "管理智能体");
       syncEntryIcon(agentsEntry, "agents");
-      const agentReference = scheduledEntry || entry;
-      if (agentsEntry.parentElement !== parent || agentsEntry.previousElementSibling !== agentReference) agentReference.after(agentsEntry);
+      if (agentsEntry.parentElement !== parent || agentsEntry.previousElementSibling !== entry) entry.after(agentsEntry);
       if (!projectsEntry) projectsEntry = createEntry("项目管理", PROJECTS_ENTRY_ID, "管理项目", "projects");
       syncEntryLabel(projectsEntry, "项目管理", "管理项目");
       syncEntryIcon(projectsEntry, "projects");
@@ -1502,20 +1393,16 @@ export function install(config: Record<string, any>) {
         if (auxiliaryNavigation.parentElement !== parent || auxiliaryNavigation.previousElementSibling !== agentsEntry) agentsEntry.after(auxiliaryNavigation);
         syncAuxiliaryMenuOrder();
       } else if (projectsEntry.parentElement !== parent || projectsEntry.previousElementSibling !== agentsEntry) agentsEntry.after(projectsEntry);
-      const currentEntry = active && state.surface === "issues" ? entry : active && state.surface === "scheduled" ? scheduledEntry : active && state.surface === "agents" ? agentsEntry : active && state.surface === "projects" ? projectsEntry : null;
-      for (const item of [entry, scheduledEntry, agentsEntry, projectsEntry].filter(Boolean)) {
+      const currentEntry = active && state.surface === "issues" ? entry : active && state.surface === "agents" ? agentsEntry : active && state.surface === "projects" ? projectsEntry : null;
+      for (const item of [entry, agentsEntry, projectsEntry].filter(Boolean)) {
         if (item === currentEntry && item.getAttribute("aria-current") !== "page") item.setAttribute("aria-current", "page");
         if (item !== currentEntry && item.hasAttribute("aria-current")) item.removeAttribute("aria-current");
       }
-      if (scheduledMobileEntry) {
-        if (active && state.surface === "scheduled" && scheduledMobileEntry.getAttribute("aria-current") !== "page") scheduledMobileEntry.setAttribute("aria-current", "page");
-        if ((!active || state.surface !== "scheduled") && scheduledMobileEntry.hasAttribute("aria-current")) scheduledMobileEntry.removeAttribute("aria-current");
-      }
       if (moreEntry) {
-        if (active && ["scheduled", "projects"].includes(state.surface) && moreEntry.getAttribute("aria-current") !== "page") moreEntry.setAttribute("aria-current", "page");
-        if ((!active || !["scheduled", "projects"].includes(state.surface)) && moreEntry.hasAttribute("aria-current")) moreEntry.removeAttribute("aria-current");
+        if (active && state.surface === "projects" && moreEntry.getAttribute("aria-current") !== "page") moreEntry.setAttribute("aria-current", "page");
+        if ((!active || state.surface !== "projects") && moreEntry.hasAttribute("aria-current")) moreEntry.removeAttribute("aria-current");
       }
-      return entry.isConnected && (!scheduledEntry || scheduledEntry.isConnected) && (!scheduledMobileEntry || scheduledMobileEntry.isConnected) && agentsEntry.isConnected && projectsEntry.isConnected && (HOST_KIND !== "web" || auxiliaryNavigation?.isConnected);
+      return entry.isConnected && agentsEntry.isConnected && projectsEntry.isConnected && (HOST_KIND !== "web" || auxiliaryNavigation?.isConnected);
     }
 
     function findMount() {
@@ -4262,16 +4149,6 @@ export function install(config: Record<string, any>) {
       addAgent.insertAdjacentHTML("afterbegin", icon("plus"));
       addAgent.addEventListener("click", () => startAgentCreate());
       agentActions.append(addAgent);
-      const scheduledHeading = document.createElement("div");
-      scheduledHeading.className = "better-codex-scheduled-heading";
-      scheduledHeading.innerHTML = '<strong>' + te("定时任务") + '</strong><span data-scheduled-heading-meta></span>';
-      const scheduledActions = document.createElement("div");
-      scheduledActions.className = "better-codex-scheduled-actions";
-      const addScheduledTask = actionButton("新建定时任务");
-      addScheduledTask.classList.add("is-bordered");
-      addScheduledTask.innerHTML = icon("plus") + '<span>' + te("新建定时任务") + '</span>';
-      addScheduledTask.addEventListener("click", () => openScheduledTaskDialog());
-      scheduledActions.append(addScheduledTask);
       const projectHeading = document.createElement("div");
       projectHeading.className = "better-codex-project-heading";
       projectHeading.innerHTML = '<strong>' + te("项目管理") + '</strong><span data-project-heading-meta></span>';
@@ -4285,7 +4162,7 @@ export function install(config: Record<string, any>) {
       addProject.insertAdjacentHTML("afterbegin", icon("plus"));
       addProject.addEventListener("click", () => state.projectDetailId ? openEditor() : openCreateProjectDialog());
       projectActions.append(projectRefreshButton.element, addProject);
-      toolbar.append(tabs, scheduledHeading, agentHeading, projectHeading, error, actions, scheduledActions, agentActions, projectActions);
+      toolbar.append(tabs, agentHeading, projectHeading, error, actions, agentActions, projectActions);
       const board = document.createElement("main");
       board.id = "better-codex-board";
       board.className = "better-codex-board better-codex-issue-only";
@@ -4372,10 +4249,6 @@ export function install(config: Record<string, any>) {
         if (form) scheduleAgentAutosave(form);
       });
       agents.addEventListener("submit", onAgentSubmit);
-      const scheduledTasks = document.createElement("main");
-      scheduledTasks.id = "better-codex-scheduled";
-      scheduledTasks.className = "better-codex-scheduled";
-      scheduledTasks.addEventListener("click", onScheduledTasksClick);
       const projects = document.createElement("main");
       projects.id = "better-codex-projects";
       projects.className = "better-codex-projects";
@@ -4424,7 +4297,7 @@ export function install(config: Record<string, any>) {
       });
       projects.addEventListener("submit", onProjectDocumentSubmit);
       projects.addEventListener("submit", onProjectPlanningSubmit);
-      section.append(toolbar, board, boardScrollControl, scheduledTasks, agents, projects, recovery);
+      section.append(toolbar, board, boardScrollControl, agents, projects, recovery);
       return section;
     }
 
@@ -6748,380 +6621,6 @@ export function install(config: Record<string, any>) {
       }).catch(() => {});
     }
 
-    function scheduledTaskDateTime(value) {
-      const date = new Date(value);
-      if (!Number.isFinite(date.getTime())) return t("未设置");
-      return new Intl.DateTimeFormat(state.locale === "zh-CN" ? "zh-CN" : "en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(date);
-    }
-
-    function scheduledTaskLocalValue(value) {
-      const date = new Date(value);
-      if (!Number.isFinite(date.getTime())) return "";
-      return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
-    }
-
-    function scheduledTaskIntervalLabel(task) {
-      if (!task.repeat) return t("执行一次");
-      const unit = state.locale === "zh-CN"
-        ? { minute: "分钟", hour: "小时", day: "天", week: "周" }[task.interval_unit]
-        : { minute: "minute", hour: "hour", day: "day", week: "week" }[task.interval_unit];
-      if (state.locale === "zh-CN") return "每 " + task.interval_value + " " + unit;
-      return "Every " + task.interval_value + " " + unit + (Number(task.interval_value) === 1 ? "" : "s");
-    }
-
-    function scheduledTaskRunState(run) {
-      if (run.status === "failed") return { key: "failed", label: t("执行失败") };
-      if (run.status === "pending") return { key: "pending", label: t("等待执行") };
-      if (run.active_run_status) return { key: "running", label: t("执行中") };
-      if (run.issue_status === "done") return { key: "completed", label: t("已完成") };
-      if (run.issue_status === "in_review") return { key: "review", label: t("待审核") };
-      if (run.issue_status === "blocked") return { key: "failed", label: t("已阻塞") };
-      return { key: "pending", label: t("排队中") };
-    }
-
-    function scheduledTaskAgentName(task) {
-      const agent = state.agents.find(item => item.id === task.agent_id);
-      return agent ? agentDisplayName(agent) : t("默认智能体");
-    }
-
-    function scheduledTaskProjectName(task) {
-      return projectLabel(state.projects.find(project => project.id === task.project_id)) || t("未知项目");
-    }
-
-    function renderScheduledTasks() {
-      const container = panel?.querySelector("#better-codex-scheduled");
-      if (!container) return;
-      const enabled = state.scheduledTasks.filter(task => task.enabled);
-      const running = state.scheduledTasks.filter(task => task.recent_runs?.some(run => run.status === "pending" || run.active_run_status)).length;
-      const next = enabled.filter(task => task.next_run_at).sort((left, right) => String(left.next_run_at).localeCompare(String(right.next_run_at)))[0];
-      const headingMeta = panel.querySelector("[data-scheduled-heading-meta]");
-      if (headingMeta) headingMeta.textContent = state.scheduledTasks.length + " " + t("个任务");
-      const actions = panel.querySelector(".better-codex-scheduled-actions");
-      if (actions) actions.hidden = state.mockup;
-      if (!state.scheduledTasksLoaded) {
-        container.innerHTML = '<section class="better-codex-scheduled-loading" role="status"><span></span><strong>' + te("正在加载定时任务") + '</strong></section>';
-        return;
-      }
-      if (!state.scheduledTasks.length) {
-        container.innerHTML = '<section class="better-codex-scheduled-empty">' + icon("calendar") + '<h1>' + te("还没有定时任务") + '</h1><p>' + te("设置执行时间和循环间隔，Better Codex 会按计划创建任务并交给智能体执行。") + '</p>' + (state.mockup ? "" : '<button class="better-codex-submit" type="button" data-scheduled-create>' + icon("plus") + '<span>' + te("新建定时任务") + '</span></button>') + '</section>';
-        return;
-      }
-      const rows = state.scheduledTasks.map(task => {
-        const latest = task.recent_runs?.[0];
-        const active = Boolean(latest && (latest.status === "pending" || latest.active_run_status));
-        const runRows = (task.recent_runs || []).map(run => {
-          const runState = scheduledTaskRunState(run);
-          const issue = run.issue_id ? '<button type="button" data-scheduled-issue="' + escapeHtml(run.issue_id) + '">' + escapeHtml(run.issue_identifier || t("查看任务")) + icon("chevron") + '</button>' : '<span>' + escapeHtml(run.error || t("尚未创建任务")) + '</span>';
-          return '<li><span class="better-codex-scheduled-run-state" data-state="' + runState.key + '"><i></i>' + escapeHtml(runState.label) + '</span><time datetime="' + escapeHtml(run.scheduled_for) + '">' + escapeHtml(scheduledTaskDateTime(run.scheduled_for)) + '</time>' + issue + '</li>';
-        }).join("");
-        const recent = runRows ? '<details class="better-codex-scheduled-runs"><summary>' + te("最近运行") + '<span>' + escapeHtml(String(task.recent_runs.length)) + '</span>' + icon("chevron") + '</summary><ul>' + runRows + '</ul></details>' : '<div class="better-codex-scheduled-never">' + te("尚未运行") + '</div>';
-        return '<article class="better-codex-scheduled-row" data-enabled="' + task.enabled + '"><div class="better-codex-scheduled-row-main"><span class="better-codex-scheduled-status" data-state="' + (task.enabled ? active ? "running" : "enabled" : "paused") + '"><i></i>' + escapeHtml(task.enabled ? active ? t("执行中") : t("已启用") : t("已暂停")) + '</span><div class="better-codex-scheduled-copy"><h2>' + escapeHtml(task.name) + '</h2><p>' + escapeHtml(task.prompt.replace(/\s+/g, " ")) + '</p><div><span>' + icon("folder") + escapeHtml(scheduledTaskProjectName(task)) + '</span><span>' + icon("bot") + escapeHtml(scheduledTaskAgentName(task)) + '</span></div></div><div class="better-codex-scheduled-timing"><span>' + escapeHtml(scheduledTaskIntervalLabel(task)) + '</span><strong>' + escapeHtml(task.enabled && task.next_run_at ? scheduledTaskDateTime(task.next_run_at) : t("暂无下次执行")) + '</strong><small>' + te(task.enabled && task.next_run_at ? "下次执行" : "当前计划") + '</small></div><div class="better-codex-scheduled-row-actions"><button type="button" data-scheduled-run="' + escapeHtml(task.id) + '" aria-label="' + te("立即运行") + '" title="' + te("立即运行") + '"' + (active || state.mockup ? " disabled" : "") + '>' + icon("refresh") + '</button><button type="button" data-scheduled-toggle="' + escapeHtml(task.id) + '" aria-label="' + te(task.enabled ? "暂停" : "启用") + '" title="' + te(task.enabled ? "暂停" : "启用") + '"' + (state.mockup ? " disabled" : "") + '>' + icon(task.enabled ? "stop" : "check") + '</button><button type="button" data-scheduled-edit="' + escapeHtml(task.id) + '" aria-label="' + te("编辑") + '" title="' + te("编辑") + '"' + (state.mockup ? " disabled" : "") + '>' + icon("edit") + '</button><button class="is-danger" type="button" data-scheduled-delete="' + escapeHtml(task.id) + '" aria-label="' + te("删除") + '" title="' + te("删除") + '"' + (state.mockup ? " disabled" : "") + '>' + icon("trash") + '</button></div></div>' + recent + '</article>';
-      }).join("");
-      container.innerHTML = '<section class="better-codex-scheduled-shell"><header class="better-codex-scheduled-overview"><div><span>' + te("下次执行") + '</span><strong>' + escapeHtml(next?.next_run_at ? scheduledTaskDateTime(next.next_run_at) : t("暂无已启用的计划")) + '</strong><small>' + escapeHtml(next?.name || t("创建或启用一个定时任务")) + '</small></div><dl><div><dt>' + te("已启用") + '</dt><dd>' + enabled.length + '</dd></div><div><dt>' + te("执行中") + '</dt><dd>' + running + '</dd></div><div><dt>' + te("已暂停") + '</dt><dd>' + (state.scheduledTasks.length - enabled.length) + '</dd></div></dl></header><div class="better-codex-scheduled-list">' + rows + '</div></section>';
-    }
-
-    async function loadScheduledTasks(options = {}) {
-      const tasks = await requestList("/api/scheduled-tasks", "scheduledTasks", { passive: Boolean(options.background) });
-      const changed = JSON.stringify(tasks) !== JSON.stringify(state.scheduledTasks);
-      state.scheduledTasks = tasks;
-      state.scheduledTasksLoaded = true;
-      if (options.background && !changed) return;
-      render();
-    }
-
-    function openScheduledTaskDialog(task = null) {
-      if (state.mockup || !SCHEDULED_AVAILABLE) return;
-      const existingDialog = document.getElementById("better-codex-scheduled-dialog");
-      if (existingDialog?.open) existingDialog.close();
-      else existingDialog?.remove();
-      const firstProject = state.projects.find(project => project.id === (task?.project_id || state.projectId) && project.workspace_path) || state.projects.find(project => project.workspace_path) || state.projects[0];
-      const start = task?.starts_at || new Date(Math.ceil((Date.now() + 300_000) / 300_000) * 300_000).toISOString();
-      const projectOptions = state.projects.map(project => ({ value: project.id, label: projectLabel(project), icon: "folder" }));
-      const agentOptions = [{ value: "", label: t("默认智能体"), icon: "bot" }, ...state.agents.filter(agent => !agent.is_default && agent.id).map(agent => ({ value: agent.id, label: agentDisplayName(agent), icon: "bot" }))];
-      const intervalUnits = [["minute", "分钟"], ["hour", "小时"], ["day", "天"], ["week", "周"]];
-      const draft = {
-        mode: task ? "manual" : "agent",
-        conversationPrompt: "",
-        name: task?.name || "",
-        prompt: task?.prompt || "",
-        projectId: firstProject?.id || "",
-        agentId: task?.agent_id || "",
-        startsAt: scheduledTaskLocalValue(start),
-        repeat: Boolean(task?.repeat),
-        intervalValue: String(task?.interval_value || 1),
-        intervalUnit: task?.interval_unit || "hour",
-        enabled: task?.enabled !== false,
-      };
-      const dialog = document.createElement("dialog");
-      dialog.id = "better-codex-scheduled-dialog";
-      dialog.dataset.host = HOST_KIND;
-      dialog.setAttribute(OWNED, "true");
-      let scheduledInputFrame = null;
-      let form = null;
-      const scheduledTaskPicker = (name, label, selected, options, meta = "") => {
-        const current = options.find(option => option.value === selected) || options[0] || { value: "", label: t("未提供"), icon: "" };
-        const optionCopy = option => '<span class="better-codex-scheduled-picker-option-copy">' + (option.icon ? icon(option.icon) : "") + '<span>' + escapeHtml(option.label) + '</span></span>';
-        const rows = options.map(option => '<button class="better-codex-scheduled-picker-option' + (option.value === current.value ? " is-selected" : "") + '" type="button" role="option" aria-selected="' + String(option.value === current.value) + '" data-scheduled-picker-option="' + escapeHtml(name) + '" data-scheduled-picker-value="' + escapeHtml(option.value) + '">' + optionCopy(option) + '<span class="better-codex-scheduled-picker-check">' + (option.value === current.value ? icon("check") : "") + '</span></button>').join("");
-        return '<div class="better-codex-scheduled-field better-codex-scheduled-picker" data-scheduled-picker="' + escapeHtml(name) + '"><span class="better-codex-scheduled-field-label">' + escapeHtml(label) + '</span><input type="hidden" name="' + escapeHtml(name) + '" value="' + escapeHtml(current.value) + '"><button class="better-codex-scheduled-picker-trigger" type="button" role="combobox" aria-label="' + escapeHtml(label) + '" aria-haspopup="listbox" aria-expanded="false" data-scheduled-picker-toggle="' + escapeHtml(name) + '"' + (options.length ? "" : " disabled") + '><span data-scheduled-picker-label>' + optionCopy(current) + '</span>' + icon("chevronDown") + '</button><span class="better-codex-scheduled-picker-menu" role="listbox" hidden>' + rows + '</span>' + (meta ? '<small class="better-codex-scheduled-project-path" data-scheduled-project-path>' + escapeHtml(meta) + '</small>' : "") + '</div>';
-      };
-      const syncDraft = () => {
-        if (!form) return;
-        draft.projectId = String(form.elements.project_id?.value || draft.projectId);
-        draft.agentId = String(form.elements.agent_id?.value || "");
-        if (draft.mode === "agent") draft.conversationPrompt = String(form.elements.conversation_prompt?.value || "");
-        else {
-          draft.name = String(form.elements.name?.value || "");
-          draft.prompt = String(form.elements.prompt?.value || "");
-          draft.startsAt = String(form.elements.starts_at?.value || "");
-          draft.repeat = Boolean(form.elements.repeat?.checked);
-          draft.intervalValue = String(form.elements.interval_value?.value || "1");
-          draft.intervalUnit = String(form.elements.interval_unit?.value || "hour");
-          draft.enabled = Boolean(form.elements.enabled?.checked);
-        }
-      };
-      const closeScheduledPickers = except => {
-        dialog.querySelectorAll("[data-scheduled-picker]").forEach(picker => {
-          if (picker === except) return;
-          picker.classList.remove("is-open");
-          picker.querySelector("[data-scheduled-picker-toggle]").setAttribute("aria-expanded", "false");
-          picker.querySelector(".better-codex-scheduled-picker-menu").hidden = true;
-        });
-      };
-      const scheduledDialogViewport = () => {
-        if (scheduledInputFrame !== null) cancelAnimationFrame(scheduledInputFrame);
-        const compact = HOST_KIND === "web" && window.matchMedia("(max-width: 720px)").matches;
-        if (!compact) {
-          dialog.style.removeProperty("--bc-mobile-viewport-top");
-          dialog.style.removeProperty("--bc-mobile-viewport-height");
-          return;
-        }
-        const viewport = window.visualViewport;
-        dialog.style.setProperty("--bc-mobile-viewport-top", (viewport?.offsetTop || 0) + "px");
-        dialog.style.setProperty("--bc-mobile-viewport-height", (viewport?.height || window.innerHeight) + "px");
-        const active = document.activeElement;
-        scheduledInputFrame = requestAnimationFrame(() => {
-          scheduledInputFrame = null;
-          if (active instanceof HTMLElement && dialog.contains(active) && active.matches("input, textarea, select")) active.scrollIntoView({ block: "nearest", inline: "nearest" });
-        });
-      };
-      const renderDialog = () => {
-        closeScheduledPickers();
-        dialog.dataset.mode = draft.mode;
-        const project = state.projects.find(item => item.id === draft.projectId);
-        const projectPicker = scheduledTaskPicker("project_id", t("项目"), draft.projectId, projectOptions, project?.workspace_path || t("未提供项目文件夹"));
-        const agentPicker = scheduledTaskPicker("agent_id", t("执行智能体"), draft.agentId, agentOptions);
-        const header = '<header><div><span class="better-codex-scheduled-dialog-icon">' + icon(draft.mode === "agent" ? "bot" : "calendar") + '</span><h2>' + te(task ? "编辑定时任务" : draft.mode === "agent" ? "通过智能体创建" : "手动创建") + '</h2></div><button type="button" data-scheduled-dialog-close aria-label="' + te("关闭") + '">' + icon("close") + '</button></header>';
-        const switchButton = task ? "" : '<button class="better-codex-scheduled-mode-switch" type="button" data-scheduled-dialog-switch>' + icon("switch") + te(draft.mode === "agent" ? "切换到手动" : "切换到智能体") + '</button>';
-        let body = "";
-        let leading = "";
-        if (draft.mode === "agent") {
-          const selectedAgent = state.agents.find(agent => agent.is_default ? !draft.agentId : agent.id === draft.agentId);
-          const agentName = selectedAgent?.name || t("默认智能体");
-          const hint = state.locale === "zh-CN" ? agentName + " 会理解任务内容和执行时间，并直接创建定时任务。" : agentName + " will interpret the task and timing, then create the schedule.";
-          body = '<div class="better-codex-scheduled-agent-create"><label class="is-wide"><span>' + te("告诉智能体你想如何安排任务") + '</span><textarea name="conversation_prompt" maxlength="100000" rows="7" placeholder="' + te("例如：每天上午 9 点整理这个项目昨天的进展和今天的待办") + '" required>' + escapeHtml(draft.conversationPrompt) + '</textarea></label><div class="better-codex-scheduled-agent-hint">' + agentAvatarMarkup(selectedAgent, "better-codex-agent-avatar") + '<span>' + escapeHtml(hint) + '</span></div>' + projectPicker + agentPicker + '<output hidden></output></div>';
-        } else {
-          const intervalUnitOptions = intervalUnits.map(([value, label]) => '<button type="button" role="radio" aria-checked="' + String(value === draft.intervalUnit) + '" data-scheduled-interval-unit="' + value + '">' + te(label) + '</button>').join("");
-          body = '<label class="is-wide"><span>' + te("名称") + '</span><input name="name" maxlength="120" value="' + escapeHtml(draft.name) + '" placeholder="' + te("例如：每天整理项目进展") + '" required></label><label class="is-wide"><span>' + te("任务内容") + '</span><textarea name="prompt" maxlength="100000" rows="6" placeholder="' + te("说明每次需要完成的具体任务") + '" required>' + escapeHtml(draft.prompt) + '</textarea></label>' + projectPicker + agentPicker + '<label><span>' + te("首次执行") + '</span><input name="starts_at" type="datetime-local" value="' + escapeHtml(draft.startsAt) + '" required></label><label class="better-codex-scheduled-switch"><strong>' + te("循环执行") + '</strong><input name="repeat" type="checkbox"' + (draft.repeat ? " checked" : "") + '></label><div class="better-codex-scheduled-interval is-wide"><label><span>' + te("每隔") + '</span><input name="interval_value" type="number" min="1" max="999" value="' + escapeHtml(draft.intervalValue) + '"></label><div class="better-codex-scheduled-field"><span class="better-codex-scheduled-field-label">' + te("单位") + '</span><input type="hidden" name="interval_unit" value="' + escapeHtml(draft.intervalUnit) + '"><div class="better-codex-scheduled-unit-switch" role="radiogroup" aria-label="' + te("单位") + '">' + intervalUnitOptions + '</div></div></div><output hidden></output>';
-          leading = '<label class="better-codex-scheduled-enable"><input name="enabled" type="checkbox"' + (draft.enabled ? " checked" : "") + '><strong>' + te("立即启用") + '</strong></label>';
-        }
-        dialog.innerHTML = '<form method="dialog">' + header + '<div class="better-codex-scheduled-dialog-body">' + body + '</div><footer>' + leading + '<div>' + switchButton + '<button type="button" data-scheduled-dialog-cancel>' + te("取消") + '</button><button class="better-codex-submit" type="submit">' + te(task ? "保存" : "创建") + '</button></div></footer></form>';
-        form = dialog.querySelector("form");
-        const repeat = form.elements.repeat;
-        const syncRepeat = () => {
-          const interval = dialog.querySelector(".better-codex-scheduled-interval");
-          if (!interval || !repeat) return;
-          interval.hidden = !repeat.checked;
-          form.elements.interval_value.required = repeat.checked;
-          form.elements.interval_unit.required = repeat.checked;
-        };
-        repeat?.addEventListener("change", syncRepeat);
-        syncRepeat();
-        form.elements.project_id?.addEventListener("change", () => {
-          draft.projectId = form.elements.project_id.value;
-          const selectedProject = state.projects.find(item => item.id === draft.projectId);
-          const path = dialog.querySelector("[data-scheduled-project-path]");
-          if (path) path.textContent = selectedProject?.workspace_path || t("未提供项目文件夹");
-        });
-        form.elements.agent_id?.addEventListener("change", () => {
-          draft.agentId = form.elements.agent_id.value;
-          const selectedAgent = state.agents.find(agent => agent.is_default ? !draft.agentId : agent.id === draft.agentId);
-          const name = selectedAgent?.name || t("默认智能体");
-          const hint = dialog.querySelector(".better-codex-scheduled-agent-hint span:last-child");
-          if (hint) hint.textContent = state.locale === "zh-CN" ? name + " 会理解任务内容和执行时间，并直接创建定时任务。" : name + " will interpret the task and timing, then create the schedule.";
-        });
-        dialog.querySelector("[data-scheduled-dialog-close]").addEventListener("click", () => dialog.close());
-        dialog.querySelector("[data-scheduled-dialog-cancel]").addEventListener("click", () => dialog.close());
-        dialog.querySelector("[data-scheduled-dialog-switch]")?.addEventListener("click", () => {
-          syncDraft();
-          if (draft.mode === "agent") {
-            draft.name ||= draft.conversationPrompt.split(/\n/).find(line => line.trim())?.trim().slice(0, 120) || "";
-            draft.prompt ||= draft.conversationPrompt;
-            draft.mode = "manual";
-          } else {
-            const unit = state.locale === "zh-CN" ? { minute: "分钟", hour: "小时", day: "天", week: "周" }[draft.intervalUnit] : draft.intervalUnit;
-            const timing = state.locale === "zh-CN"
-              ? "首次执行：" + draft.startsAt + (draft.repeat ? "，每 " + draft.intervalValue + " " + unit + "执行一次" : "，仅执行一次")
-              : "First run: " + draft.startsAt + (draft.repeat ? ", repeat every " + draft.intervalValue + " " + unit : ", run once");
-            draft.conversationPrompt ||= [draft.name, draft.prompt, timing].filter(Boolean).join("\n\n");
-            draft.mode = "agent";
-          }
-          renderDialog();
-          form.elements[draft.mode === "agent" ? "conversation_prompt" : "name"]?.focus();
-        });
-        form.addEventListener("input", () => {
-          const output = form.querySelector("output");
-          if (output?.dataset.tone === "info") output.hidden = true;
-        });
-        form.addEventListener("submit", event => {
-          event.preventDefault();
-          if (!form.reportValidity()) return;
-          syncDraft();
-          const submit = form.querySelector('[type="submit"]');
-          const output = form.querySelector("output");
-          submit.disabled = true;
-          submit.textContent = t(draft.mode === "agent" ? "智能体创建中…" : task ? "保存中…" : "创建中…");
-          output.hidden = true;
-          void perform(async () => {
-            try {
-              if (draft.mode === "agent") {
-                const result = await api("/api/scheduled-tasks/agent-create", { method: "POST", body: JSON.stringify({ prompt: draft.conversationPrompt, project_id: draft.projectId, agent_id: draft.agentId }), timeoutMs: 110000 });
-                if (!result.created) {
-                  output.textContent = result.question;
-                  output.dataset.tone = "info";
-                  output.hidden = false;
-                  submit.disabled = false;
-                  submit.textContent = t("创建");
-                  return;
-                }
-              } else {
-                const body = {
-                  name: draft.name,
-                  prompt: draft.prompt,
-                  project_id: draft.projectId,
-                  agent_id: draft.agentId,
-                  starts_at: new Date(draft.startsAt).toISOString(),
-                  repeat: draft.repeat,
-                  interval_value: Number(draft.intervalValue),
-                  interval_unit: draft.intervalUnit,
-                  enabled: draft.enabled,
-                  ...(task ? { version: task.version } : {})
-                };
-                await api(task ? "/api/scheduled-tasks/" + encodeURIComponent(task.id) : "/api/scheduled-tasks", { method: task ? "PATCH" : "POST", body: JSON.stringify(body) });
-              }
-              await loadScheduledTasks();
-              dialog.close();
-            } catch (caught) {
-              presentInlineError(output, caught, errorLabel(caught), { source: draft.mode === "agent" ? "scheduled_task_agent_create" : "scheduled_task_save" });
-              submit.disabled = false;
-              submit.textContent = t(task ? "保存" : "创建");
-            }
-          });
-        });
-      };
-      dialog.addEventListener("click", event => {
-        const toggle = event.target.closest("[data-scheduled-picker-toggle]");
-        if (toggle) {
-          const picker = toggle.closest("[data-scheduled-picker]");
-          const menu = picker.querySelector(".better-codex-scheduled-picker-menu");
-          const opening = menu.hidden;
-          closeScheduledPickers(picker);
-          picker.classList.toggle("is-open", opening);
-          menu.hidden = !opening;
-          toggle.setAttribute("aria-expanded", String(opening));
-          return;
-        }
-        const option = event.target.closest("[data-scheduled-picker-option]");
-        if (option) {
-          const name = option.dataset.scheduledPickerOption;
-          const picker = option.closest("[data-scheduled-picker]");
-          const trigger = picker.querySelector("[data-scheduled-picker-toggle]");
-          const input = form.elements[name];
-          input.value = option.dataset.scheduledPickerValue;
-          trigger.querySelector("[data-scheduled-picker-label]").innerHTML = option.querySelector(".better-codex-scheduled-picker-option-copy").outerHTML;
-          picker.querySelectorAll("[data-scheduled-picker-option]").forEach(item => {
-            const selected = item === option;
-            item.classList.toggle("is-selected", selected);
-            item.setAttribute("aria-selected", String(selected));
-            item.querySelector(".better-codex-scheduled-picker-check").innerHTML = selected ? icon("check") : "";
-          });
-          input.dispatchEvent(new Event("change", { bubbles: true }));
-          closeScheduledPickers();
-          trigger.focus();
-          return;
-        }
-        const unit = event.target.closest("[data-scheduled-interval-unit]");
-        if (unit) {
-          form.elements.interval_unit.value = unit.dataset.scheduledIntervalUnit;
-          dialog.querySelectorAll("[data-scheduled-interval-unit]").forEach(button => button.setAttribute("aria-checked", String(button === unit)));
-          return;
-        }
-        closeScheduledPickers();
-      });
-      dialog.addEventListener("cancel", event => {
-        event.preventDefault();
-        if (dialog.querySelector("[data-scheduled-picker].is-open")) closeScheduledPickers();
-        else dialog.close();
-      });
-      dialog.addEventListener("close", () => {
-        window.visualViewport?.removeEventListener("resize", scheduledDialogViewport);
-        window.visualViewport?.removeEventListener("scroll", scheduledDialogViewport);
-        window.removeEventListener("resize", scheduledDialogViewport);
-        if (scheduledInputFrame !== null) cancelAnimationFrame(scheduledInputFrame);
-        dialog.remove();
-      }, { once: true });
-      bindModalDismiss(dialog, () => dialog.close());
-      document.body.append(dialog);
-      renderDialog();
-      dialog.showModal();
-      scheduledDialogViewport();
-      window.visualViewport?.addEventListener("resize", scheduledDialogViewport, { passive: true });
-      window.visualViewport?.addEventListener("scroll", scheduledDialogViewport, { passive: true });
-      window.addEventListener("resize", scheduledDialogViewport, { passive: true });
-      form.elements[draft.mode === "agent" ? "conversation_prompt" : "name"]?.focus();
-    }
-
-    function onScheduledTasksClick(event) {
-      if (event.target.closest("[data-scheduled-create]")) return openScheduledTaskDialog();
-      const edit = event.target.closest("[data-scheduled-edit]");
-      if (edit) return openScheduledTaskDialog(state.scheduledTasks.find(task => task.id === edit.dataset.scheduledEdit));
-      const toggle = event.target.closest("[data-scheduled-toggle]");
-      if (toggle) {
-        const task = state.scheduledTasks.find(item => item.id === toggle.dataset.scheduledToggle);
-        if (!task) return;
-        return void perform(async () => {
-          toggle.disabled = true;
-          await api("/api/scheduled-tasks/" + encodeURIComponent(task.id), { method: "PATCH", body: JSON.stringify({ version: task.version, enabled: !task.enabled }) });
-          await loadScheduledTasks();
-        });
-      }
-      const run = event.target.closest("[data-scheduled-run]");
-      if (run) {
-        const task = state.scheduledTasks.find(item => item.id === run.dataset.scheduledRun);
-        if (!task) return;
-        return void perform(async () => {
-          run.disabled = true;
-          await api("/api/scheduled-tasks/" + encodeURIComponent(task.id) + "/run", { method: "POST" });
-          await loadScheduledTasks();
-        });
-      }
-      const remove = event.target.closest("[data-scheduled-delete]");
-      if (remove) {
-        const task = state.scheduledTasks.find(item => item.id === remove.dataset.scheduledDelete);
-        if (!task) return;
-        return void confirmAction("删除定时任务", "删除后不会影响已经创建或正在执行的任务。", "删除").then(confirmed => confirmed && perform(async () => {
-          await api("/api/scheduled-tasks/" + encodeURIComponent(task.id), { method: "DELETE", body: JSON.stringify({ version: task.version }) });
-          await loadScheduledTasks();
-        }));
-      }
-      const issueButton = event.target.closest("[data-scheduled-issue]");
-      if (issueButton) return void perform(async () => {
-        const issue = await api("/api/issues/" + encodeURIComponent(issueButton.dataset.scheduledIssue));
-        openRoute("issues");
-        await loadIssues();
-        await openEditor(issue);
-      });
-    }
-
     function syncAutoDispatch() {
       const button = panel?.querySelector("#better-codex-auto-dispatch");
       if (!button) return;
@@ -7213,14 +6712,9 @@ export function install(config: Record<string, any>) {
     function render() {
       if (!panel) return;
       panel.dataset.surface = state.surface;
-      if (HOST_KIND === "web" && state.surface !== "projects") document.title = t(state.surface === "agents" ? "智能体" : state.surface === "scheduled" ? "定时任务" : "任务看板") + " · Better Codex";
+      if (HOST_KIND === "web" && state.surface !== "projects") document.title = t(state.surface === "agents" ? "智能体" : "任务看板") + " · Better Codex";
       syncAutoDispatch();
       syncMockupUi();
-      if (state.surface === "scheduled") {
-        activateFeature("scheduled");
-        hydrateSharedControls(panel, "scheduled");
-        return;
-      }
       if (state.surface === "agents") {
         activateFeature("agents");
         hydrateSharedControls(panel, "agents");
@@ -7413,8 +6907,7 @@ export function install(config: Record<string, any>) {
     }
 
     async function loadSurface(options = {}) {
-      if (state.surface === "scheduled") await loadScheduledTasks(options);
-      else if (state.surface === "agents") await loadAgents(options);
+      if (state.surface === "agents") await loadAgents(options);
       else if (state.surface === "projects") {
         if (state.projectDetailId && state.projectPage === "work") await Promise.all([loadProjects(options), loadIssues(options)]);
         else await loadProjects(options);
@@ -10975,7 +10468,7 @@ export function install(config: Record<string, any>) {
     function onClick(event) {
       if (!active || suppressAgentOutside) return;
       const target = event.target?.closest?.("button,a,[role='button']," + SELECTORS.threadRow);
-      if (!target || target === entry || target === scheduledEntry || target === scheduledMobileEntry || target === agentsEntry || target === projectsEntry || target === moreEntry || target === profileEntry || target === usageEntry || target === themeEntry || target.closest("#" + PANEL_ID) || target.closest("#better-codex-dialog") || target.closest("#better-codex-agent-dialog") || target.closest("#better-codex-scheduled-dialog") || target.closest("#better-codex-project-dialog") || target.closest("#better-codex-profile-dialog") || target.closest("#better-codex-avatar-picker")) return;
+      if (!target || target === entry || target === agentsEntry || target === projectsEntry || target === moreEntry || target === profileEntry || target === usageEntry || target === themeEntry || target.closest("#" + PANEL_ID) || target.closest("#better-codex-dialog") || target.closest("#better-codex-agent-dialog") || target.closest("#better-codex-project-dialog") || target.closest("#better-codex-profile-dialog") || target.closest("#better-codex-avatar-picker")) return;
       if (Date.now() < suppressSessionClickUntil && target.closest(SELECTORS.threadRow)) {
         suppressSessionClickUntil = 0;
         event.preventDefault();
@@ -11056,9 +10549,6 @@ export function install(config: Record<string, any>) {
       closeFilterMenu();
       closeIssueMenu();
       closeAuxiliaryMenu();
-      const scheduledDialog = document.getElementById("better-codex-scheduled-dialog");
-      if (scheduledDialog?.open) scheduledDialog.close();
-      else scheduledDialog?.remove();
       observer?.disconnect();
       for (const pending of bridgeRequests.values()) {
         clearTimeout(pending.timer);
@@ -11079,7 +10569,6 @@ export function install(config: Record<string, any>) {
         featureControllers.agents.destroy();
         featureControllers.board.destroy();
         featureControllers.projects.destroy();
-        featureControllers.scheduled.destroy();
         featureControllers.settings.destroy();
         featureControllers = null;
       }
