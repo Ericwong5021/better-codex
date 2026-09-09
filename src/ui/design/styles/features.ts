@@ -3353,6 +3353,14 @@ export function betterCodexFeatureStylesCss() {
       scrollbar-width: none;
     }
 
+    #better-codex-panel .better-codex-project-work-board {
+      box-sizing: border-box;
+      border: 1px solid var(--bc-color-hairline);
+      border-radius: var(--bc-radius-lg);
+      background: var(--bc-color-control);
+      padding: var(--bc-space-3);
+    }
+
     #better-codex-panel .better-codex-board::-webkit-scrollbar {
       display: none;
     }
@@ -5748,7 +5756,7 @@ export function betterCodexFeatureStylesCss() {
     }
 
     #better-codex-dialog .better-codex-conversation-status .better-codex-shimmer,
-    #better-codex-dialog .better-codex-composer-thinking .better-codex-shimmer {
+    #better-codex-dialog .better-codex-conversation-thinking .better-codex-shimmer {
       background-image: linear-gradient(90deg, var(--bc-color-text-muted) 0%, var(--bc-color-text-muted) 35%, var(--bc-color-text) 50%, var(--bc-color-text-muted) 65%, var(--bc-color-text-muted) 100%);
       background-size: 200% 100%;
       background-clip: text;
@@ -5912,7 +5920,6 @@ export function betterCodexFeatureStylesCss() {
       display: block;
       margin-top: var(--bc-space-2);
       margin-bottom: var(--bc-space-3);
-      border: 1px solid var(--bc-color-hairline);
       border-radius: var(--bc-radius-md);
       background: var(--bc-color-control);
       overflow: hidden;
@@ -5972,7 +5979,6 @@ export function betterCodexFeatureStylesCss() {
     }
 
     #better-codex-dialog .better-codex-thinking-content {
-      border-top: 1px solid var(--bc-color-hairline);
       padding: var(--bc-space-2) var(--bc-space-3);
       max-height: min(280px, calc(100dvh - 120px));
       overflow-y: auto;
@@ -7152,22 +7158,19 @@ export function betterCodexFeatureStylesCss() {
       gap: var(--bc-space-2);
     }
 
-    #better-codex-dialog .better-codex-composer-thinking {
+    #better-codex-dialog .better-codex-conversation-thinking {
       display: inline-flex;
       min-width: 0;
       align-items: center;
       gap: 6px;
+      margin-top: var(--bc-space-2);
       color: var(--bc-color-info);
       font-size: var(--bc-text-caption);
       font-weight: 600;
       white-space: nowrap;
     }
 
-    #better-codex-dialog .better-codex-composer-thinking[hidden] {
-      display: none;
-    }
-
-    #better-codex-dialog .better-codex-composer-thinking-dots {
+    #better-codex-dialog .better-codex-conversation-thinking-dots {
       display: inline-flex;
       align-items: center;
       gap: var(--bc-space-1);
@@ -7175,7 +7178,7 @@ export function betterCodexFeatureStylesCss() {
       height: 16px;
     }
 
-    #better-codex-dialog .better-codex-composer-thinking-dots i {
+    #better-codex-dialog .better-codex-conversation-thinking-dots i {
       display: block;
       width: 4px;
       height: 4px;
@@ -7185,11 +7188,11 @@ export function betterCodexFeatureStylesCss() {
       animation: better-codex-thinking-dot calc(var(--bc-motion-normal) * 6) ease-in-out infinite;
     }
 
-    #better-codex-dialog .better-codex-composer-thinking-dots i:nth-child(2) {
+    #better-codex-dialog .better-codex-conversation-thinking-dots i:nth-child(2) {
       animation-delay: .14s;
     }
 
-    #better-codex-dialog .better-codex-composer-thinking-dots i:nth-child(3) {
+    #better-codex-dialog .better-codex-conversation-thinking-dots i:nth-child(3) {
       animation-delay: .28s;
     }
 
@@ -7266,7 +7269,7 @@ export function betterCodexFeatureStylesCss() {
         transition: none;
       }
 
-      #better-codex-dialog .better-codex-composer-thinking-dots i {
+      #better-codex-dialog .better-codex-conversation-thinking-dots i {
         animation: none;
         opacity: .8;
       }

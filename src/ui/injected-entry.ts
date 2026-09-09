@@ -8169,15 +8169,8 @@ export function install(config: Record<string, any>) {
         const reply = dialog.querySelector('[name="reply"]');
         if (!send) return;
         const composer = send.closest(".better-codex-composer");
-        const thinking = dialog.querySelector("[data-conversation-thinking]");
-        const syncThinking = (active: boolean) => {
-          if (!thinking) return;
-          thinking.hidden = !active;
-          thinking.setAttribute("aria-busy", String(active));
-        };
         if (replySubmitInFlight) {
           if (composer) composer.dataset.state = "submitting";
-          syncThinking(true);
           send.dataset.composerMode = "submitting";
           send.setAttribute("aria-label", t("正在发送…"));
           send.setAttribute("aria-busy", "true");
@@ -8190,7 +8183,6 @@ export function install(config: Record<string, any>) {
         const stopping = issue?.session_status === "stopping";
         const archived = Boolean(issue?.archived_at);
         const working = stopping || executionRunning || enrichmentLocked || replyStatus === "running";
-        syncThinking(working);
         const hasContent = Boolean(String(reply?.value || "").trim() || draft.replyAttachments.length);
         const mode = stopping ? "stopping" : working && !hasContent ? "stop" : working ? "queue" : "send";
         if (reply) reply.disabled = archived;
@@ -8695,9 +8687,8 @@ export function install(config: Record<string, any>) {
         const actionLabel = t(replySubmitInFlight ? "正在发送…" : stopping ? "正在停止…" : mode === "stop" ? "停止任务" : mode === "queue" ? "加入队列" : "发送");
         const attachments = attachmentList(draft.replyAttachments, "reply");
         const attachButton = '<button class="better-codex-composer-attach" type="button" data-conversation-attach aria-label="' + te("添加附件") + '" title="' + te("添加附件") + '"' + inputDisabled + '>' + icon("plus", "", "1.9") + '</button>';
-        const thinking = '<span class="better-codex-composer-thinking" data-conversation-thinking role="status" aria-live="polite" aria-label="' + te("正在思考与处理…") + '"' + ((working || replySubmitInFlight) ? ' aria-busy="true"' : " hidden") + '><span class="better-codex-composer-thinking-dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="better-codex-shimmer">' + te("正在思考与处理…") + '</span></span>';
         const actionIcon = replySubmitInFlight ? replySubmitLoadingIcon() : icon(mode === "stop" || mode === "stopping" ? "stop" : "send", "", mode === "stop" || mode === "stopping" ? "2.5" : "2");
-        return '<div class="better-codex-composer" data-state="' + mode + '">' + attachments + '<div class="better-codex-semantic-menu" id="better-codex-semantic-menu" data-semantic-menu role="listbox" hidden></div><textarea name="reply" rows="2" placeholder="' + te(archived ? "取消归档后继续对话" : "输入下一步要求…") + '" aria-label="' + te("回复") + '" aria-autocomplete="list" aria-controls="better-codex-semantic-menu" aria-expanded="false"' + inputDisabled + '>' + escapeHtml(draft.reply) + '</textarea>' + semanticWarningMarkup(draft.replySemanticDocument) + '<div class="better-codex-composer-toolbar"><div class="better-codex-composer-toolbar-leading">' + thinking + attachButton + '</div><button class="better-codex-composer-send" type="button" data-conversation-send data-composer-mode="' + mode + '" aria-label="' + escapeHtml(actionLabel) + '" title="' + escapeHtml(actionLabel) + '"' + (replySubmitInFlight ? ' aria-busy="true"' : "") + actionDisabled + '>' + actionIcon + '</button></div></div>';
+        return '<div class="better-codex-composer" data-state="' + mode + '">' + attachments + '<div class="better-codex-semantic-menu" id="better-codex-semantic-menu" data-semantic-menu role="listbox" hidden></div><textarea name="reply" rows="2" placeholder="' + te(archived ? "取消归档后继续对话" : "输入下一步要求…") + '" aria-label="' + te("回复") + '" aria-autocomplete="list" aria-controls="better-codex-semantic-menu" aria-expanded="false"' + inputDisabled + '>' + escapeHtml(draft.reply) + '</textarea>' + semanticWarningMarkup(draft.replySemanticDocument) + '<div class="better-codex-composer-toolbar"><div class="better-codex-composer-toolbar-leading">' + attachButton + '</div><button class="better-codex-composer-send" type="button" data-conversation-send data-composer-mode="' + mode + '" aria-label="' + escapeHtml(actionLabel) + '" title="' + escapeHtml(actionLabel) + '"' + (replySubmitInFlight ? ' aria-busy="true"' : "") + actionDisabled + '>' + actionIcon + '</button></div></div>';
       }
 
       function syncQueuedReplyState() {
@@ -9019,7 +9010,7 @@ export function install(config: Record<string, any>) {
           : totalDurationMs >= 1000
             ? (totalDurationMs / 1000).toFixed(0) + "s"
             : "";
-        const title = isRunning ? te("思考与执行中…") : te("思考与执行过程");
+        const title = isRunning ? te("执行中…") : te("执行过程");
         const countLabel = te("共 ") + count + te(" 步") + (durationLabel ? " · " + durationLabel : "");
         const isOpen = id ? expandedThinkingCards.has(id) : false;
 
@@ -9102,6 +9093,10 @@ export function install(config: Record<string, any>) {
         return '<p>' + escapeHtml(value).replace(/\n/g, "<br>") + '</p>';
       }
 
+      function conversationThinkingMarkup() {
+        return '<span class="better-codex-conversation-thinking" data-conversation-thinking role="status" aria-live="polite" aria-busy="true" aria-label="' + te("正在思考与处理…") + '"><span class="better-codex-conversation-thinking-dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="better-codex-shimmer">' + te("正在思考与处理…") + '</span></span>';
+      }
+
       function applyConversation(data, options = {}) {
         const body = dialog.querySelector("[data-conversation-body]");
         const messageList = dialog.querySelector("[data-conversation-messages]");
@@ -9135,7 +9130,8 @@ export function install(config: Record<string, any>) {
           ? '<article class="better-codex-bubble is-agent is-running">'
             + agentAvatarMarkup(agent, "better-codex-bubble-avatar")
             + '<div class="better-codex-bubble-main">'
-            + '<div class="better-codex-bubble-meta"><strong>' + escapeHtml(agentName) + '</strong><span class="better-codex-activity" data-run="running"><span class="better-codex-activity-dot" aria-hidden="true"></span><span class="better-codex-shimmer">' + te("正在思考与处理…") + '</span></span></div>'
+            + '<div class="better-codex-bubble-meta"><strong>' + escapeHtml(agentName) + '</strong></div>'
+            + conversationThinkingMarkup()
             + (activeSteps.length ? conversationStepsMarkup(activeSteps, true, "active-running-" + (data?.activity?.turn_id || "turn")) : "")
             + '</div></article>'
           : "";
@@ -9152,7 +9148,7 @@ export function install(config: Record<string, any>) {
             failed: stateName === "failed" || issue?.latest_run_status === "failed",
             error: reply.error || issue?.session_last_error,
           });
-          messageList.innerHTML = '<div class="better-codex-conversation-empty"><h3>' + te(empty.title) + '</h3><p>' + te(empty.description) + '</p><span>' + te(empty.hint) + '</span>' + (activeSteps.length ? conversationStepsMarkup(activeSteps, true, "empty-running") : "") + '</div>';
+          messageList.innerHTML = '<div class="better-codex-conversation-empty"><h3>' + te(empty.title) + '</h3><p>' + te(empty.description) + '</p><span>' + te(empty.hint) + '</span>' + (isRunning ? conversationThinkingMarkup() : "") + (activeSteps.length ? conversationStepsMarkup(activeSteps, true, "empty-running") : "") + '</div>';
         }
         const expectedInterruption = stateName === "interrupted" && ["user_stopped", "session_interrupted"].includes(String(reply.error || ""));
         if (stateName === "failed" || (stateName === "interrupted" && !expectedInterruption)) showConversationFailure(reply.error, reply.message ? "reply" : "execution", reply.message, { origin: "turn" });
