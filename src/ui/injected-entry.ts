@@ -9069,7 +9069,7 @@ export function install(config: Record<string, any>) {
         if (!body || !messages) return;
         const confirmed = conversationMessages.filter(message => !message.optimistic_request_id);
         conversationMessages = [...confirmed, ...optimisticReplies.values()];
-        messages.innerHTML = conversationBubbles(conversationMessages, RELAY ? state.user : null);
+        messages.innerHTML = conversationBubbles(conversationMessages, RELAY ? state.user : null) + (optimisticReplies.size ? conversationRunningMarkup() : "");
         body.scrollTop = body.scrollHeight;
       }
 
@@ -9095,6 +9095,18 @@ export function install(config: Record<string, any>) {
 
       function conversationThinkingMarkup() {
         return '<span class="better-codex-conversation-thinking" data-conversation-thinking role="status" aria-live="polite" aria-busy="true" aria-label="' + te("正在思考与处理…") + '"><span class="better-codex-conversation-thinking-dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="better-codex-shimmer">' + te("正在思考与处理…") + '</span></span>';
+      }
+
+      function conversationRunningMarkup(activeSteps = [], turnId = "") {
+        const agent = state.agents.find(item => item.id === issue?.agent_id) || state.agents.find(item => item.is_default) || null;
+        const agentName = agent ? agentDisplayName(agent) : (issue?.agent_enabled ? "Codex" : t("智能体"));
+        return '<article class="better-codex-bubble is-agent is-running">'
+          + agentAvatarMarkup(agent, "better-codex-bubble-avatar")
+          + '<div class="better-codex-bubble-main">'
+          + '<div class="better-codex-bubble-meta"><strong>' + escapeHtml(agentName) + '</strong></div>'
+          + conversationThinkingMarkup()
+          + (activeSteps.length ? conversationStepsMarkup(activeSteps, true, "active-running-" + (turnId || "turn")) : "")
+          + '</div></article>';
       }
 
       function applyConversation(data, options = {}) {
@@ -9124,17 +9136,7 @@ export function install(config: Record<string, any>) {
         const isRunning = stateName === "running" || data?.activity?.status === "running";
         const activeSteps = Array.isArray(data?.activity?.steps) ? data.activity.steps : [];
         const lastMsg = messages[messages.length - 1];
-        const agent = state.agents.find(item => item.id === issue?.agent_id) || state.agents.find(item => item.is_default) || null;
-        const agentName = agent ? agentDisplayName(agent) : (issue?.agent_enabled ? "Codex" : t("智能体"));
-        const runningBubbleHtml = (isRunning && lastMsg?.role === "user")
-          ? '<article class="better-codex-bubble is-agent is-running">'
-            + agentAvatarMarkup(agent, "better-codex-bubble-avatar")
-            + '<div class="better-codex-bubble-main">'
-            + '<div class="better-codex-bubble-meta"><strong>' + escapeHtml(agentName) + '</strong></div>'
-            + conversationThinkingMarkup()
-            + (activeSteps.length ? conversationStepsMarkup(activeSteps, true, "active-running-" + (data?.activity?.turn_id || "turn")) : "")
-            + '</div></article>'
-          : "";
+        const runningBubbleHtml = (isRunning && lastMsg?.role === "user") ? conversationRunningMarkup(activeSteps, data?.activity?.turn_id || "") : "";
         if (messages.length) {
           conversationMessages = messages;
           messageList.innerHTML = conversationBubbles(messages, RELAY ? state.user : data.user) + runningBubbleHtml;
