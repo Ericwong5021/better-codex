@@ -582,7 +582,12 @@ function writeCodexState(value: string) {
 
 function removeCodexProject(store: Store, projectId: string) {
   const removal = store.projectRemoval(projectId);
-  const externalId = removal.project.external_id || removal.project.id;
+  const externalId = removal.project.external_id;
+  const finish = (codexProjectDeleted: boolean) => {
+    const deleted = store.deleteProject(projectId);
+    return { ok: true, project_id: projectId, issue_count: deleted.issue_count, workspace_deleted: false, codex_project_deleted: codexProjectDeleted };
+  };
+  if (!externalId || externalId === "inbox") return finish(false);
   let original: string;
   let state: Record<string, unknown>;
   try {
@@ -601,8 +606,7 @@ function removeCodexProject(store: Store, projectId: string) {
   state["local-projects"] = localProjects;
   writeCodexState(JSON.stringify(state));
   try {
-    const deleted = store.deleteProject(projectId);
-    return { ok: true, project_id: projectId, issue_count: deleted.issue_count, workspace_deleted: false };
+    return finish(true);
   } catch (error) {
     try {
       writeCodexState(original);

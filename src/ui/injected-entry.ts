@@ -2377,7 +2377,7 @@ export function install(config: Record<string, any>) {
       const value = String(message || "request_failed").toLowerCase();
       const detail = String(diagnostics.response_detail || "").toLowerCase();
       const status = Number(diagnostics.http_status) || 0;
-      if (HOST_KIND === "web" && status === 404) return "vps_http_not_found";
+      if (HOST_KIND === "web" && status === 404 && ["not_found", "not found"].includes(value)) return "vps_http_not_found";
       if (HOST_KIND === "web" && value === "browser_transport_failed") return "vps_relay_unreachable";
       if (HOST_KIND === "web" && [502, 503, 504].includes(status) && !diagnostics.relay_channel_id && !["runtime_offline", "runtime_unavailable"].includes(value)) return "vps_relay_unreachable";
       if (HOST_KIND === "web" && ["runtime_stopped", "runtime_unavailable"].includes(value) && (value === "runtime_stopped" || detail.includes("runtime_stopped"))) return "local_runtime_stopped";

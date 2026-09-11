@@ -157,11 +157,20 @@ test("gateway completes the issue workflow and survives restart", async () => {
     assert.equal(firstRuntime.generation, 1);
     assert.deepEqual(firstAuthority, { ...firstAuthority, generation: 1, runtimeInstanceId: firstRuntime.instanceId, status: "claimed" });
 
-    const bootstrap = await (await request("/api/bootstrap")).json() as { projects: Array<{ external_id: string | null; created_at: string }>; agents: Array<{ id: string; name: string; is_default?: boolean }>; appearance: unknown };
+    const bootstrap = await (await request("/api/bootstrap")).json() as { projects: Array<{ id: string; external_id: string | null; created_at: string }>; agents: Array<{ id: string; name: string; is_default?: boolean }>; appearance: unknown };
     assert.equal(
       bootstrap.projects.find(project => project.external_id === "codex-source-project")?.created_at,
       new Date(codexProjectCreatedAt).toISOString(),
     );
+    const inbox = bootstrap.projects.find(project => project.external_id === "inbox");
+    assert.ok(inbox);
+    const inboxDeleteResponse = await request(`/api/projects/${inbox.id}`, { method: "DELETE", body: "{}" });
+    assert.equal(inboxDeleteResponse.status, 200);
+    assert.deepEqual(await inboxDeleteResponse.json(), { ok: true, project_id: inbox.id, issue_count: 0, workspace_deleted: false, codex_project_deleted: false });
+    const projectsAfterInboxDelete = await (await request("/api/projects")).json() as Array<{ external_id: string | null }>;
+    assert.equal(projectsAfterInboxDelete.some(project => project.external_id === "inbox"), false);
+    const codexStateAfterInboxDelete = JSON.parse(readFileSync(join(home, ".codex-global-state.json"), "utf8") as string) as { "local-projects": Record<string, unknown> };
+    assert.ok(codexStateAfterInboxDelete["local-projects"]["codex-source-project"]);
     assert.deepEqual(bootstrap.appearance, {
       theme: "system",
       light: { accent: "#339cff", contrast: 45, ink: "#1a1c1f", surface: "#ffffff", uiFont: 'ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif' },

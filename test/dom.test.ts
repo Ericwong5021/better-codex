@@ -81,6 +81,14 @@ test("board bridge retries timed out GET requests without repeating writes", () 
   assert.ok(source.includes("function showError(error) {\n      if (destroyed) return;"));
 });
 
+test("web service failures preserve Runtime business 404 errors", () => {
+  const classifier = injectedEntrySource.slice(injectedEntrySource.indexOf("function serviceFailureKind"), injectedEntrySource.indexOf("function serviceFailureLabel"));
+
+  assert.ok(classifier.includes('status === 404 && ["not_found", "not found"].includes(value)'));
+  assert.doesNotMatch(classifier, /status === 404\) return "vps_http_not_found"/);
+  assert.ok(injectedEntrySource.includes('["codex_project_not_found", "codex_project_ambiguous"].includes(value)'));
+});
+
 test("injected panel opts out of the native Electron drag region", () => {
   const source = injectionSource(4317, "test-token", "install");
   const css = betterCodexDesignSystemCss();
