@@ -2569,8 +2569,9 @@ export function install(config: Record<string, any>) {
 
     function onWindowError(event) {
       const context = { source: "window_error", filename: event.filename || "", line: event.lineno || 0, column: event.colno || 0, error_present: event.error != null, trusted: event.isTrusted };
-      if (!event.error && (!event.filename || event.filename === document.URL) && !event.lineno && !event.colno && event.message === "ResizeObserver loop completed with undelivered notifications.") {
-        appendDiagnostic("window_diagnostic", { ...context, kind: "resize_observer_delivery", message: event.message });
+      const message = String(event.message || (typeof event.error === "object" && event.error?.message) || event.error || "");
+      if (/ResizeObserver loop (?:completed with undelivered notifications|limit exceeded)/.test(message)) {
+        appendDiagnostic("window_diagnostic", { ...context, kind: "resize_observer_delivery", message });
         return;
       }
       reportGlobalError(event.error || event.message, context);
@@ -6750,26 +6751,31 @@ export function install(config: Record<string, any>) {
     }
 
     function renderBoard(options = {}) {
+      if (!panel && !options.board) return;
       const projectBoard = Boolean(options.projectId);
       const sourceIssues = options.issues || state.issues;
-      if (!projectBoard) {
+      if (!projectBoard && panel) {
         const runningCount = state.issues.filter(issue => issueExecutionRunning(issue)).length;
         panel.querySelectorAll("[data-view]").forEach(button => button.classList.toggle("is-active", button.dataset.view === state.view));
         const working = panel.querySelector("#better-codex-working");
-        const workingMarkup = icon("bot") + '<span>' + te(runningCount + " 个智能体工作中") + "</span>";
-        if (working.innerHTML !== workingMarkup) working.innerHTML = workingMarkup;
-        working.dataset.runningCount = String(runningCount);
-        working.setAttribute("aria-label", t(runningCount + " 个智能体工作中"));
-        working.title = t(runningCount ? "查看运行中的任务" : "当前没有运行中的任务");
-        working.classList.toggle("has-work", runningCount > 0);
-        working.classList.toggle("is-active", state.view === "working");
-        working.hidden = false;
+        if (working) {
+          const workingMarkup = icon("bot") + '<span>' + te(runningCount + " 个智能体工作中") + "</span>";
+          if (working.innerHTML !== workingMarkup) working.innerHTML = workingMarkup;
+          working.dataset.runningCount = String(runningCount);
+          working.setAttribute("aria-label", t(runningCount + " 个智能体工作中"));
+          working.title = t(runningCount ? "查看运行中的任务" : "当前没有运行中的任务");
+          working.classList.toggle("has-work", runningCount > 0);
+          working.classList.toggle("is-active", state.view === "working");
+          working.hidden = false;
+        }
         const filterButton = panel.querySelector("#better-codex-filter");
-        const filterCount = Object.values(state.filters).reduce((total, values) => total + values.length, 0);
-        const filterMarkup = icon("filter") + "<span>" + te(filterCount ? filterCount + " 个筛选" : "筛选") + "</span>";
-        if (filterButton.innerHTML !== filterMarkup) filterButton.innerHTML = filterMarkup;
-        filterButton.setAttribute("aria-label", t(filterCount ? filterCount + " 个筛选" : "筛选"));
-        filterButton.classList.toggle("is-active", filterCount > 0);
+        if (filterButton) {
+          const filterCount = Object.values(state.filters).reduce((total, values) => total + values.length, 0);
+          const filterMarkup = icon("filter") + "<span>" + te(filterCount ? filterCount + " 个筛选" : "筛选") + "</span>";
+          if (filterButton.innerHTML !== filterMarkup) filterButton.innerHTML = filterMarkup;
+          filterButton.setAttribute("aria-label", t(filterCount ? filterCount + " 个筛选" : "筛选"));
+          filterButton.classList.toggle("is-active", filterCount > 0);
+        }
       }
       const visible = sourceIssues.filter(issue => {
         const assigned = Boolean(issue.agent_enabled || issue.user_assigned);

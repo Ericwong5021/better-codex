@@ -89,6 +89,19 @@ test("web service failures preserve Runtime business 404 errors", () => {
   assert.ok(injectedEntrySource.includes('["codex_project_not_found", "codex_project_ambiguous"].includes(value)'));
 });
 
+test("window error listener ignores benign ResizeObserver notifications", () => {
+  const onWindowErrorBlock = injectedEntrySource.slice(injectedEntrySource.indexOf("function onWindowError(event)"), injectedEntrySource.indexOf("function onUnhandledRejection"));
+  assert.match(onWindowErrorBlock, /ResizeObserver loop \(\?:completed with undelivered notifications\|limit exceeded\)/);
+  assert.doesNotMatch(onWindowErrorBlock, /!event\.error && \(!event\.filename/);
+});
+
+test("renderBoard checks element existence before innerHTML manipulation", () => {
+  const renderBoardBlock = injectedEntrySource.slice(injectedEntrySource.indexOf("function renderBoard(options = {})"), injectedEntrySource.indexOf("const visible = sourceIssues.filter"));
+  assert.match(renderBoardBlock, /if \(!panel && !options\.board\) return;/);
+  assert.match(renderBoardBlock, /if \(working\) \{/);
+  assert.match(renderBoardBlock, /if \(filterButton\) \{/);
+});
+
 test("injected panel opts out of the native Electron drag region", () => {
   const source = injectionSource(4317, "test-token", "install");
   const css = betterCodexDesignSystemCss();

@@ -593,14 +593,15 @@ function removeCodexProject(store: Store, projectId: string) {
   try {
     original = readFileSync(codexStatePath, "utf8");
     state = JSON.parse(original) as Record<string, unknown>;
-  } catch {
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return finish(false);
     throw new Error("codex_state_invalid");
   }
   const current = state["local-projects"];
-  if (!current || typeof current !== "object" || Array.isArray(current)) throw new Error("codex_projects_invalid");
+  if (!current || typeof current !== "object" || Array.isArray(current)) return finish(false);
   const localProjects = { ...(current as Record<string, unknown>) };
   const matches = Object.entries(localProjects).filter(([key, value]) => key === externalId || value && typeof value === "object" && !Array.isArray(value) && cleanString((value as Record<string, unknown>).id, 200) === externalId);
-  if (!matches.length) throw new Error("codex_project_not_found");
+  if (!matches.length) return finish(false);
   if (matches.length > 1) throw new Error("codex_project_ambiguous");
   delete localProjects[matches[0][0]];
   state["local-projects"] = localProjects;

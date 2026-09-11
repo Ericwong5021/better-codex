@@ -171,6 +171,14 @@ test("gateway completes the issue workflow and survives restart", async () => {
     assert.equal(projectsAfterInboxDelete.some(project => project.external_id === "inbox"), false);
     const codexStateAfterInboxDelete = JSON.parse(readFileSync(join(home, ".codex-global-state.json"), "utf8") as string) as { "local-projects": Record<string, unknown> };
     assert.ok(codexStateAfterInboxDelete["local-projects"]["codex-source-project"]);
+    delete codexStateAfterInboxDelete["local-projects"]["codex-source-project"];
+    writeFileSync(join(home, ".codex-global-state.json"), JSON.stringify(codexStateAfterInboxDelete));
+    const sourceProject = bootstrap.projects.find(project => project.external_id === "codex-source-project")!;
+    const deleteRemovedResponse = await request(`/api/projects/${sourceProject.id}`, { method: "DELETE", body: "{}" });
+    assert.equal(deleteRemovedResponse.status, 200);
+    assert.deepEqual(await deleteRemovedResponse.json(), { ok: true, project_id: sourceProject.id, issue_count: 0, workspace_deleted: false, codex_project_deleted: false });
+    const projectsAfterRemovedDelete = await (await request("/api/projects")).json() as Array<{ id: string }>;
+    assert.equal(projectsAfterRemovedDelete.some(project => project.id === sourceProject.id), false);
     assert.deepEqual(bootstrap.appearance, {
       theme: "system",
       light: { accent: "#339cff", contrast: 45, ink: "#1a1c1f", surface: "#ffffff", uiFont: 'ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif' },

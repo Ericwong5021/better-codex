@@ -527,8 +527,9 @@ webErrorDialog.addEventListener("click", event => {
 });
 window.addEventListener("error", event => {
   const context = { source: "window_error", filename: event.filename || "", line: event.lineno || 0, column: event.colno || 0, error_present: event.error != null, trusted: event.isTrusted };
-  if (!event.error && (!event.filename || event.filename === document.URL) && !event.lineno && !event.colno && event.message === "ResizeObserver loop completed with undelivered notifications.") {
-    hostDiagnostic("window_diagnostic", { ...context, kind: "resize_observer_delivery", message: event.message });
+  const message = String(event.message || (typeof event.error === "object" && event.error?.message) || event.error || "");
+  if (/ResizeObserver loop (?:completed with undelivered notifications|limit exceeded)/.test(message)) {
+    hostDiagnostic("window_diagnostic", { ...context, kind: "resize_observer_delivery", message });
     return;
   }
   reportHostError(event.error || event.message, context);
