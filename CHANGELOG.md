@@ -4,6 +4,16 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.12] - 2026-09-11
+
+- Warm up and cache model catalog on runtime startup and categorize models by provider in agent settings.
+- Parse modern Codex session messages and attachments from completed items.
+- Show Codex thinking and execution steps in Issue conversations and simplify execution process display.
+- Support direct deletion of active unarchived Issues and deleting projects already removed from Codex state.
+- Enable remote project folder selection and redesign usage panel with remembered activity disclosure.
+- Fix CDP bridge API routing for project subpaths and guard board view against missing DOM elements.
+- Filter benign ResizeObserver notifications to prevent spurious error report popups.
+
 ## [0.4.12-beta.5] - 2026-09-09
 
 - Move thinking indicator into Issue conversation and simplify execution process display.
@@ -1037,7 +1047,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.12-beta.5...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.12...HEAD
+[0.4.12]: https://github.com/Ericwong5021/better-codex/compare/v0.4.11...v0.4.12
 [0.4.12-beta.5]: https://github.com/Ericwong5021/better-codex/compare/v0.4.12-beta.4...v0.4.12-beta.5
 [0.4.12-beta.4]: https://github.com/Ericwong5021/better-codex/compare/v0.4.12-beta.3...v0.4.12-beta.4
 [0.4.12-beta.3]: https://github.com/Ericwong5021/better-codex/compare/v0.4.12-beta.2...v0.4.12-beta.3
