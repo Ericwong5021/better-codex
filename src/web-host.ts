@@ -62,17 +62,26 @@ const webHostHtml = String.raw`<!doctype html>
         </button>
         <section id="web-usage" class="web-usage" aria-live="polite" hidden>
           <div class="web-usage-heading">
+            <strong id="web-usage-title">剩余额度</strong>
             <button id="web-usage-refresh" class="web-usage-refresh" type="button" aria-label="刷新 Codex 额度"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg></button>
-            <strong id="web-usage-title">剩余用量</strong>
             <button id="web-usage-pin" class="web-usage-pin" type="button" aria-label="固定额度展示" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5"></path><path d="M5 17h14"></path><path d="M6 3h12"></path><path d="M8 3v4.6a2 2 0 0 1-.4 1.2L6 11v2h12v-2l-1.6-2.2a2 2 0 0 1-.4-1.2V3"></path></svg></button>
             <button id="web-usage-close" class="web-usage-close" type="button" aria-label="关闭额度"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"></path></svg></button>
           </div>
-          <div id="web-usage-activity" class="web-usage-activity" aria-label="实时 Codex 用量">
-            <div><span>输出速度</span><strong id="web-usage-token-rate">—</strong></div>
-            <div><span>模型请求</span><strong id="web-usage-request-count">—</strong></div>
-            <small id="web-usage-activity-status">展开后开始读取</small>
-          </div>
           <div id="web-usage-body" class="web-usage-body"><span class="web-usage-status">点击查看 Codex 额度</span></div>
+          <div class="web-usage-disclosure">
+            <button id="web-usage-activity-toggle" class="web-usage-activity-toggle" type="button" aria-expanded="false" aria-controls="web-usage-activity">
+              <span id="web-usage-activity-title">实时活动</span>
+              <span id="web-usage-activity-warning" class="web-usage-activity-warning" hidden>统计异常</span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 5 7 7-7 7"></path></svg>
+            </button>
+            <div id="web-usage-activity" class="web-usage-activity" aria-label="实时 Codex 用量" hidden>
+              <small id="web-usage-activity-period">近 1 分钟</small>
+              <div><span id="web-usage-token-label">输出速度</span><strong id="web-usage-token-rate">—</strong></div>
+              <div><span id="web-usage-request-label">模型请求</span><strong id="web-usage-request-count">—</strong></div>
+              <small id="web-usage-activity-status">正在读取统计…</small>
+              <button id="web-usage-activity-retry" class="web-usage-activity-retry" type="button" hidden>重试</button>
+            </div>
+          </div>
         </section>
       </footer>
     </aside>
@@ -154,7 +163,7 @@ body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; 
 .web-nav-mobile-action { display: none; }
 .text-fade-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .web-account { position: relative; border-radius: var(--bc-radius-md); background: transparent; }
-.web-account:has(.web-account-usage[aria-expanded="true"]) { background: var(--bc-color-hover); }
+.web-account:has(.web-account-usage[aria-expanded="true"]) { background: var(--bc-color-surface-raised); box-shadow: var(--bc-elevation-menu); width: var(--bc-usage-panel-width); max-width: calc(100vw - var(--bc-space-5)); z-index: var(--bc-z-menu); }
 .web-profile { position: relative; z-index: 1; display: grid; grid-template-columns: 30px minmax(0, 1fr); width: 100%; min-height: 48px; align-items: center; gap: 9px; border: 0; border-radius: var(--bc-radius-sm); padding: 6px 70px 6px 6px; background: transparent; text-align: left; cursor: pointer; }
 .web-account-theme { position: absolute; z-index: 2; top: 7px; right: 27px; }
 .web-account-usage { position: absolute; z-index: 2; top: 7px; right: 0; color: var(--bc-color-text-muted); }
@@ -166,10 +175,10 @@ body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; 
 .web-online { position: absolute; right: -1px; bottom: -1px; width: 7px; height: 7px; border: 2px solid var(--bc-color-navigation); border-radius: var(--bc-radius-pill); background: var(--bc-color-success); }
 .web-account-usage svg { width: 14px; height: 14px; transition: transform var(--bc-motion-fast) var(--bc-ease-out); }
 .web-account-usage[aria-expanded="true"] svg { transform: rotate(90deg); }
-.web-usage { margin: 0 6px; border-top: 1px solid var(--bc-color-hairline); padding: 9px 4px 10px; }
+.web-usage { margin: 0; border-top: 1px solid var(--bc-color-hairline); padding: var(--bc-space-4); max-height: calc(100dvh - var(--bc-toolbar-height) * 2); overflow-y: auto; }
 .web-usage[hidden] { display: none; }
-.web-usage-heading { display: grid; grid-template-columns: 22px minmax(0, 1fr) 22px; align-items: center; gap: 4px; color: var(--bc-color-text-muted); font-size: 10px; }
-.web-usage-refresh, .web-usage-pin { display: grid; width: 22px; height: 22px; border: 0; border-radius: var(--bc-radius-xs); padding: 0; place-items: center; color: inherit; background: transparent; cursor: pointer; }
+.web-usage-heading { display: grid; grid-template-columns: minmax(0, 1fr) var(--bc-control-height) var(--bc-control-height); align-items: center; gap: var(--bc-space-1); color: var(--bc-color-text-muted); font-size: var(--bc-text-caption); }
+.web-usage-refresh, .web-usage-pin { display: grid; width: var(--bc-control-height); height: var(--bc-control-height); border: 0; border-radius: var(--bc-radius-xs); padding: 0; place-items: center; color: inherit; background: transparent; cursor: pointer; }
 .web-usage-refresh:hover, .web-usage-pin:hover { color: var(--bc-color-text); background: var(--bc-color-hover); }
 .web-usage-refresh:disabled { cursor: wait; }
 .web-usage-refresh svg, .web-usage-pin svg { width: 13px; height: 13px; }
@@ -178,20 +187,28 @@ body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; 
 @keyframes web-usage-refresh-spin { to { transform: rotate(360deg); } }
 .web-usage-heading strong { font-weight: 590; }
 .web-usage-close { display: none; }
-.web-usage-activity { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--bc-space-2); margin-top: var(--bc-space-2); }
-.web-usage-activity > div { display: grid; min-width: 0; gap: var(--bc-space-1); border-radius: var(--bc-radius-sm); padding: var(--bc-space-2); background: var(--bc-color-surface); box-shadow: var(--bc-inset-hairline); }
-.web-usage-activity span { overflow: hidden; color: var(--bc-color-text-muted); font-size: var(--bc-text-2xs); text-overflow: ellipsis; white-space: nowrap; }
-.web-usage-activity strong { overflow: hidden; color: var(--bc-color-text); font-size: var(--bc-text-base); font-weight: 670; font-variant-numeric: tabular-nums; letter-spacing: -.02em; text-overflow: ellipsis; white-space: nowrap; }
-.web-usage-activity small { grid-column: 1 / -1; color: var(--bc-color-text-muted); font-size: var(--bc-text-2xs); line-height: var(--bc-leading-body); }
-.web-usage-body { display: grid; gap: 10px; margin-top: 9px; }
-.web-usage-status { color: var(--bc-color-text-muted); font-size: 10px; line-height: 1.5; }
-.web-usage-window { display: grid; gap: 6px; }
-.web-usage-row { display: flex; min-width: 0; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 10px; }
-.web-usage-row > span:first-child { font-weight: 620; }
-.web-usage-value { display: flex; min-width: 0; align-items: baseline; gap: 6px; color: var(--bc-color-text-muted); }
-.web-usage-value strong { color: var(--bc-color-text); font-size: 11px; font-weight: 650; font-variant-numeric: tabular-nums; }
-.web-usage-value small { overflow: hidden; white-space: nowrap; font-size: 9px; }
-.web-usage-progress { width: 100%; height: 3px; border: 0; border-radius: var(--bc-radius-pill); overflow: hidden; background: var(--bc-color-hairline); appearance: none; }
+.web-usage-disclosure { margin-top: var(--bc-space-4); border-top: 1px solid var(--bc-color-hairline); padding-top: var(--bc-space-2); }
+.web-usage .web-usage-activity-toggle { display: flex; align-items: center; gap: var(--bc-space-2); width: 100%; min-height: var(--bc-control-height); padding: 0; border: 0; border-radius: var(--bc-radius-xs); background: transparent; color: var(--bc-color-text-muted); font-size: var(--bc-text-caption); cursor: pointer; text-align: left; }
+.web-usage-activity-toggle:hover { color: var(--bc-color-text); background: var(--bc-color-hover); }
+.web-usage-activity-toggle svg { margin-left: auto; flex-shrink: 0; width: var(--bc-icon-sm); height: var(--bc-icon-sm); transition: transform var(--bc-motion-fast) var(--bc-ease-out); }
+.web-usage-activity-toggle[aria-expanded="true"] svg { transform: rotate(90deg); }
+.web-usage-activity-warning { color: var(--bc-color-danger); font-size: var(--bc-text-xs); }
+.web-usage-activity { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--bc-space-3) var(--bc-space-2); padding-top: var(--bc-space-2); }
+.web-usage-activity[hidden], .web-usage-activity-warning[hidden], .web-usage-activity-retry[hidden] { display: none; }
+.web-usage-activity > div { display: grid; min-width: 0; gap: var(--bc-space-1); }
+.web-usage-activity span { color: var(--bc-color-text-muted); font-size: var(--bc-text-caption); }
+.web-usage-activity strong { color: var(--bc-color-text); font-size: var(--bc-text-base); font-weight: 670; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.web-usage-activity small { grid-column: 1 / -1; color: var(--bc-color-text-muted); font-size: var(--bc-text-caption); line-height: var(--bc-leading-body); }
+.web-usage .web-usage-activity-retry { grid-column: 1 / -1; justify-self: start; min-height: var(--bc-control-height); border: 0; border-radius: var(--bc-radius-xs); padding: 0 var(--bc-space-2); background: var(--bc-color-hover); color: var(--bc-color-text); font-size: var(--bc-text-caption); cursor: pointer; }
+.web-usage button:focus-visible { box-shadow: var(--bc-focus-ring); }
+.web-usage-body { display: grid; gap: var(--bc-space-4); margin-top: var(--bc-space-3); }
+.web-usage-status { color: var(--bc-color-text-muted); font-size: var(--bc-text-caption); line-height: var(--bc-leading-body); }
+.web-usage-window { display: grid; gap: var(--bc-space-2); }
+.web-usage-row { display: flex; min-width: 0; align-items: baseline; justify-content: space-between; gap: var(--bc-space-2); font-size: var(--bc-text-caption); }
+.web-usage-row > span:first-child { color: var(--bc-color-text-muted); }
+.web-usage-value { color: var(--bc-color-text); font-size: var(--bc-usage-value-size); font-weight: 650; font-variant-numeric: tabular-nums; line-height: var(--bc-leading-tight); }
+.web-usage-reset { color: var(--bc-color-text-muted); font-size: var(--bc-text-caption); line-height: var(--bc-leading-body); }
+.web-usage-progress { width: 100%; height: var(--bc-space-1); border: 0; border-radius: var(--bc-radius-pill); overflow: hidden; background: var(--bc-color-hairline); appearance: none; }
 .web-usage-progress::-webkit-progress-bar { border-radius: var(--bc-radius-pill); background: var(--bc-color-hairline); }
 .web-usage-progress::-webkit-progress-value { border-radius: var(--bc-radius-pill); background: var(--bc-color-success); }
 .web-usage-progress::-moz-progress-bar { border-radius: var(--bc-radius-pill); background: var(--bc-color-success); }
@@ -270,8 +287,8 @@ body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; 
   .web-nav-profile-entry > svg { width: 14px; height: 14px; color: var(--bc-color-text-muted); }
   .web-account:has(.web-account-usage[aria-expanded="true"]) { position: fixed; z-index: 60; right: max(10px, env(safe-area-inset-right)); bottom: calc(68px + env(safe-area-inset-bottom)); display: block; width: min(280px, calc(100vw - 20px)); border: 1px solid var(--bc-color-hairline); border-radius: var(--bc-radius-md); padding: 6px; background: var(--bc-color-surface-raised); box-shadow: var(--bc-elevation-menu); }
   .web-account:has(.web-account-usage[aria-expanded="true"]) .web-profile, .web-account:has(.web-account-usage[aria-expanded="true"]) .web-account-theme, .web-account:has(.web-account-usage[aria-expanded="true"]) .web-account-usage { display: none; }
-  .web-account:has(.web-account-usage[aria-expanded="true"]) .web-usage { margin: 0; border: 0; padding: 10px; }
-  .web-account:has(.web-account-usage[aria-expanded="true"]) .web-usage-heading { grid-template-columns: 22px minmax(0, 1fr) 22px 28px; }
+  .web-account:has(.web-account-usage[aria-expanded="true"]) .web-usage { margin: 0; border: 0; padding: var(--bc-space-4); }
+  .web-account:has(.web-account-usage[aria-expanded="true"]) .web-usage-heading { grid-template-columns: minmax(0, 1fr) var(--bc-control-height) var(--bc-control-height) var(--bc-control-height); }
   .web-account:has(.web-account-usage[aria-expanded="true"]) .web-usage-close { display: grid; width: 28px; height: 28px; border: 0; border-radius: var(--bc-radius-xs); padding: 0; place-items: center; color: var(--bc-color-text-muted); background: transparent; cursor: pointer; }
   .web-account:has(.web-account-usage[aria-expanded="true"]) .web-usage-close svg { width: 15px; height: 15px; }
   .web-nav-button .text-fade-truncate { display: block; }
@@ -321,6 +338,12 @@ const usagePinButton = document.getElementById("web-usage-pin");
 const usageTitle = document.getElementById("web-usage-title");
 const usageBody = document.getElementById("web-usage-body");
 const usageActivity = document.getElementById("web-usage-activity");
+const usageActivityToggle = document.getElementById("web-usage-activity-toggle");
+const usageActivityWarning = document.getElementById("web-usage-activity-warning");
+const usageActivityRetry = document.getElementById("web-usage-activity-retry");
+const usageRequestLabel = document.getElementById("web-usage-request-label");
+const usageActivityExpandedKey = "better-codex-web-usage-activity-expanded";
+let cachedUsageActivity;
 const usageTokenRate = document.getElementById("web-usage-token-rate");
 const usageRequestCount = document.getElementById("web-usage-request-count");
 const usageActivityStatus = document.getElementById("web-usage-activity-status");
@@ -526,13 +549,20 @@ function updateWebProfile(detail) {
   profileAvatarInitials.hidden = Boolean(avatar);
   profileKind.textContent = profileText("Codex 账户", "Codex account");
   installButton.setAttribute("aria-label", profileText("安装 Better Codex", "Install Better Codex"));
-  usageTitle.textContent = profileText("剩余用量", "Usage remaining");
+  usageTitle.textContent = profileText("剩余额度", "Usage remaining");
   usageCloseButton.setAttribute("aria-label", profileText("关闭额度", "Close usage"));
   usageRefreshButton.setAttribute("aria-label", profileText("刷新 Codex 额度", "Refresh Codex usage"));
   usagePinButton.setAttribute("aria-label", usagePinned ? profileText("取消固定额度展示", "Unpin Codex usage") : profileText("固定额度展示", "Pin Codex usage"));
   profileButton.setAttribute("aria-label", REMOTE ? profileText("编辑个人资料", "Edit profile") : profileText("查看 Codex 额度", "View Codex usage"));
   usageToggleButton.setAttribute("aria-label", profileText("查看 Codex 额度", "View Codex usage"));
   usageActivity.setAttribute("aria-label", profileText("实时 Codex 用量", "Live Codex usage"));
+  document.getElementById("web-usage-activity-title").textContent = profileText("实时活动", "Live activity");
+  document.getElementById("web-usage-activity-period").textContent = profileText("近 1 分钟", "Last minute");
+  document.getElementById("web-usage-token-label").textContent = profileText("输出速度", "Output speed");
+  usageActivityWarning.textContent = profileText("统计异常", "Stats issue");
+  usageActivityRetry.textContent = profileText("重试", "Retry");
+  if (cachedUsageActivity !== undefined) renderUsageActivity(cachedUsageActivity);
+  else usageRequestLabel.textContent = profileText("模型请求", "Model requests");
   if (usageLoadedAt) renderUsage(cachedUsage);
 }
 
@@ -563,20 +593,19 @@ function renderUsageWindow(value) {
   row.className = "web-usage-row";
   const duration = document.createElement("span");
   duration.textContent = usageWindowLabel(Number(value.windowDurationMins));
-  const summary = document.createElement("span");
-  summary.className = "web-usage-value";
   const remaining = document.createElement("strong");
+  remaining.className = "web-usage-value";
   remaining.textContent = String(Number(value.remainingPercent)) + "%";
   const reset = document.createElement("small");
+  reset.className = "web-usage-reset";
   reset.textContent = usageResetLabel(value.resetsAt);
-  summary.append(remaining, reset);
-  row.append(duration, summary);
+  row.append(duration, remaining);
   const progress = document.createElement("progress");
   progress.className = "web-usage-progress";
   progress.max = 100;
   progress.value = Number(value.remainingPercent);
   progress.setAttribute("aria-label", duration.textContent + " " + profileText("剩余额度", "usage remaining"));
-  item.append(row, progress);
+  item.append(row, progress, reset);
   return item;
 }
 
@@ -632,6 +661,11 @@ function formatTokenRate(value) {
 }
 
 function renderUsageActivity(activity) {
+  cachedUsageActivity = activity;
+  const unhealthy = !activity || activity.status === "unavailable" || activity.status === "degraded";
+  usageActivityWarning.hidden = !unhealthy;
+  usageActivityRetry.hidden = !unhealthy;
+  usageRequestLabel.textContent = activity?.status === "degraded" ? profileText("已记录请求", "Recorded requests") : profileText("模型请求", "Model requests");
   if (!activity || activity.status === "unavailable") {
     usageTokenRate.textContent = "—";
     usageRequestCount.textContent = "—";
@@ -645,12 +679,12 @@ function renderUsageActivity(activity) {
     return;
   }
   usageTokenRate.textContent = formatTokenRate(activity.tokensPerSecond);
-  usageRequestCount.textContent = Number(activity.requestCount || 0).toLocaleString(profileLocale === "zh-CN" ? "zh-CN" : "en-US");
+  usageRequestCount.textContent = typeof activity.requestCount === "number" && Number.isFinite(activity.requestCount) ? activity.requestCount.toLocaleString(profileLocale === "zh-CN" ? "zh-CN" : "en-US") + profileText(" 次", " requests") : "—";
   usageActivityStatus.textContent = activity.status === "degraded"
-    ? profileText("近 1 分钟 · 部分记录读取失败", "Last minute · some records failed")
+    ? profileText("部分记录读取失败，统计可能不完整", "Some records failed; totals may be incomplete")
     : activity.requestCount > 0 && activity.speedSampleCount === 0
-      ? profileText("近 1 分钟 · 暂无完整生成时序", "Last minute · no complete generation timing")
-      : profileText("近 1 分钟 · 按完成请求的输出时长加权", "Last minute · weighted by completed output time");
+      ? profileText("暂无完整生成时序", "No complete generation timing")
+      : profileText("速度按已完成请求的输出时长加权", "Speed weighted by completed output time");
 }
 
 function stopUsageActivity() {
@@ -734,6 +768,19 @@ usageToggleButton.addEventListener("click", () => {
     void loadUsage();
     startUsageActivity();
   } else stopUsageActivity();
+});
+usageActivity.hidden = localStorage.getItem(usageActivityExpandedKey) !== "true";
+usageActivityToggle.setAttribute("aria-expanded", String(!usageActivity.hidden));
+usageActivityToggle.addEventListener("click", () => {
+  usageActivity.hidden = !usageActivity.hidden;
+  usageActivityToggle.setAttribute("aria-expanded", String(!usageActivity.hidden));
+  localStorage.setItem(usageActivityExpandedKey, String(!usageActivity.hidden));
+});
+usageActivityRetry.addEventListener("click", () => scheduleUsageActivity(usageActivityGeneration, 0));
+document.addEventListener("keydown", event => {
+  if (event.key !== "Escape" || usagePanel.hidden) return;
+  closeUsage(true);
+  usageToggleButton.focus();
 });
 usageCloseButton.addEventListener("click", () => {
   closeUsage(true);
