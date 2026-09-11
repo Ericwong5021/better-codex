@@ -380,6 +380,7 @@ export function install(config: Record<string, any>) {
     localeResources.en["创建新项目"] = "Create new project";
     localeResources.en["浏览本机文件夹"] = "Browse folders on this device";
     localeResources.en["更改文件夹"] = "Change folder";
+    localeResources.en["选择当前文件夹"] = "Select current folder";
     localeResources.en["目录路径"] = "Folder path";
     localeResources.en["上一级"] = "Up one level";
     localeResources.en["主目录"] = "Home";
@@ -1583,6 +1584,10 @@ export function install(config: Record<string, any>) {
       return (RELAY ? "/api/runtime-update" : "/api/update") + suffix;
     }
 
+    function commandStatusPath(commandId) {
+      return (REMOTE && !RELAY ? "/api/v1/commands/" : "/api/commands/") + encodeURIComponent(commandId);
+    }
+
     function settleIssueRemoval(issueId, commandId, attempt = 0) {
       const pending = pendingIssueRemovals.get(issueId);
       if (!pending || pending.commandId !== commandId) return;
@@ -1591,7 +1596,7 @@ export function install(config: Record<string, any>) {
         const current = pendingIssueRemovals.get(issueId);
         if (!current || current.commandId !== commandId) return;
         try {
-          const result = await api("/api/commands/" + encodeURIComponent(commandId));
+          const result = await api(commandStatusPath(commandId));
           if (result?.queued === true || ["pending", "dispatched", "processing"].includes(result?.status)) return settleIssueRemoval(issueId, commandId, attempt + 1);
           if (["rejected", "conflict", "expired"].includes(result?.status)) throw new Error(result.error || "command_rejected");
           pendingIssueRemovals.delete(issueId);
@@ -3322,7 +3327,7 @@ export function install(config: Record<string, any>) {
         const delays = [1000, 2000, 5000, 10000, 30000, 120000, 600000];
         setTimeout(async () => {
           try {
-            const result = await api("/api/commands/" + encodeURIComponent(commandId));
+            const result = await api(commandStatusPath(commandId));
             if (result?.queued === true || ["pending", "dispatched", "processing"].includes(result?.status)) return settleArchivedRemoval(issue, commandId, attempt + 1);
             if (["rejected", "conflict", "expired"].includes(result?.status)) restoreArchivedIssue(issue);
           } catch (error) {
@@ -5747,13 +5752,18 @@ export function install(config: Record<string, any>) {
         directoryRoot.dataset.path = directory.root_path;
         directoryHidden.disabled = false;
         directoryCreate.disabled = false;
+        chooseButton.disabled = false;
+        chooseButton.textContent = t("选择当前文件夹");
         directoryStatus.textContent = directory.truncated ? t("仅显示前 500 个文件夹") : "";
         renderDirectoryEntries();
       };
       const loadRemoteDirectory = async path => {
         const request = ++directoryRequest;
+        currentDirectory = null;
         directoryPanel.hidden = false;
         directoryPanel.setAttribute("aria-busy", "true");
+        chooseButton.disabled = true;
+        chooseButton.textContent = t("正在选择…");
         directoryHidden.disabled = true;
         directoryCreate.disabled = true;
         directoryCreateForm.hidden = true;
@@ -5772,6 +5782,8 @@ export function install(config: Record<string, any>) {
           if (request !== directoryRequest || !dialog.isConnected) return;
           reportUnexpectedError(error, { source: "directory_browser" });
           currentDirectory = null;
+          chooseButton.disabled = false;
+          chooseButton.textContent = t("重试");
           directoryHidden.disabled = true;
           directoryList.innerHTML = '<span class="better-codex-directory-state">' + escapeHtml(directoryErrorLabel(error)) + '</span>';
           directoryStatus.textContent = directoryErrorLabel(error);
@@ -5780,7 +5792,10 @@ export function install(config: Record<string, any>) {
         }
       };
       const chooseFolder = async () => {
-        if (REMOTE) return void loadRemoteDirectory(workspaceInput.value || currentDirectory?.path || "");
+        if (REMOTE) {
+          if (!directoryPanel.hidden && currentDirectory?.path) return void applyWorkspacePath(currentDirectory.path);
+          return void loadRemoteDirectory(workspaceInput.value || currentDirectory?.path || "");
+        }
         chooseButton.disabled = true;
         chooseButton.textContent = t("正在选择…");
         output.hidden = true;
@@ -6886,7 +6901,7 @@ export function install(config: Record<string, any>) {
     }
 
     const commandObserver = createCommandObserver({
-      read: commandId => api((HOST_KIND === "remote-projection" ? "/api/v1/commands/" : "/api/commands/") + encodeURIComponent(commandId)),
+      read: commandId => api(commandStatusPath(commandId)),
       retryable: error => transientNetworkError(error) || error instanceof Error && ["command_not_found", "runtime_offline", "runtime_unavailable", "relay_stream_interrupted", "request_outcome_unknown"].includes(error.message),
       diagnostic: appendDiagnostic,
     });

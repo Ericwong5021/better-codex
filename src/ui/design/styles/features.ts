@@ -604,6 +604,7 @@ export function betterCodexFeatureStructureStylesCss() {
     #better-codex-project-dialog .better-codex-project-folder-field button, #better-codex-project-dialog .better-codex-project-dialog-actions button { min-height: 40px; border: 0; border-radius: var(--bc-radius-sm); color: var(--bc-color-text); background: var(--bc-color-control); padding: 0 12px; font: inherit; cursor: pointer; }
     #better-codex-project-dialog .better-codex-project-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px; }
     #better-codex-project-dialog .better-codex-project-dialog-actions button[type="submit"] { color: var(--bc-color-on-primary); background: var(--bc-color-primary); }
+    #better-codex-project-dialog .better-codex-project-dialog-actions button:disabled { cursor: not-allowed; opacity: .45; }
     #better-codex-project-dialog output { display: block; margin-top: 10px; color: var(--bc-color-danger); font-size: var(--bc-text-sm); }
     #better-codex-project-dialog output[data-tone="warning"] { color: var(--bc-color-warning); }
     #better-codex-project-dialog output[data-tone="info"] { color: var(--bc-color-info); }
