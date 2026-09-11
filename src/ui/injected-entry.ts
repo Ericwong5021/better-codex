@@ -986,6 +986,12 @@ export function install(config: Record<string, any>) {
         || Boolean(issue?.session_active_turn_id);
     }
 
+    function issueConversationRunning(issue) {
+      return ["claimed", "running", "scheduling"].includes(issue?.active_run_status)
+        || issue?.reply_status === "running"
+        || Boolean(issue?.session_active_turn_id);
+    }
+
     function issuePermissions(issue) {
       const enrichmentPending = issue?.enrichment_status === "regenerating";
       const executionRunning = issueExecutionRunning(issue);
@@ -7821,10 +7827,13 @@ export function install(config: Record<string, any>) {
       }
 
       function conversationPanel() {
-        if (!issue || (!sessionId && !executionRunning && !issueConversationFailed())) return "";
+        const conversationExecutionRunning = issueConversationRunning(issue);
+        if (!issue || (!sessionId && !conversationExecutionRunning && !issueConversationFailed())) return "";
         const conversationState = issue.reply_status || "idle";
         const conversationStatus = conversationStatusMarkup(conversationState);
-        const conversationBody = sessionId ? '<p class="better-codex-markdown-empty">' + te("加载对话…") + '</p>' : "";
+        const conversationBody = sessionId
+          ? '<p class="better-codex-markdown-empty">' + te("加载对话…") + '</p>'
+          : conversationExecutionRunning ? conversationRunningMarkup() : "";
         const composer = sessionId ? '<div class="better-codex-composer-queue" data-conversation-queue role="list" hidden></div>' + conversationComposer() : "";
         return '<div class="better-codex-conversation-shell"><section class="better-codex-conversation"><div class="better-codex-conversation-head"><span>' + te("对话") + '</span><span class="better-codex-conversation-status" data-conversation-status data-state="' + escapeHtml(conversationState) + '"' + (conversationStatus ? "" : " hidden") + '>' + conversationStatus + '</span></div><div class="better-codex-timeline" data-conversation-body><div data-conversation-messages>' + conversationBody + '</div><div class="better-codex-conversation-feedback" data-conversation-feedback role="alert" hidden></div></div></section>' + sessionRetryBannerMarkup() + composer + '</div>';
       }
@@ -8624,12 +8633,12 @@ export function install(config: Record<string, any>) {
         const reply = data?.reply || { status: "idle" };
         if (reply.message) lastReplyMessage = reply.message;
         if (reply.request_id) lastReplyRequestId = reply.request_id;
-        const stateName = optimisticReplies.size ? "running" : reply.status || "idle";
+        const stateName = optimisticReplies.size && ["idle", "running"].includes(reply.status) ? "running" : reply.status || "idle";
         lastReplyStatus = stateName;
-        const isRunning = stateName === "running" || data?.activity?.status === "running";
+        const conversationIssue = { ...(issue || {}), ...(data?.issue || {}), reply_status: stateName };
+        const isRunning = issueConversationRunning(conversationIssue) || data?.activity?.status === "running";
         const activeSteps = Array.isArray(data?.activity?.steps) ? data.activity.steps : [];
-        const lastMsg = messages[messages.length - 1];
-        const runningBubbleHtml = (isRunning && lastMsg?.role === "user") ? conversationRunningMarkup(activeSteps, data?.activity?.turn_id || "") : "";
+        const runningBubbleHtml = isRunning ? conversationRunningMarkup(activeSteps, data?.activity?.turn_id || "") : "";
         if (messages.length) {
           conversationMessages = messages;
           messageList.innerHTML = conversationBubbles(messages, RELAY ? state.user : data.user) + runningBubbleHtml;
@@ -8638,12 +8647,12 @@ export function install(config: Record<string, any>) {
           conversationMessages = [];
           const empty = conversationEmptyState({
             hasThread: Boolean(sessionId),
-            running: executionRunning || isRunning,
+            running: isRunning,
             started: Boolean(data?.activity?.turn_id || issue?.session_active_turn_id),
             failed: stateName === "failed" || issue?.latest_run_status === "failed",
             error: reply.error || issue?.session_last_error,
           });
-          messageList.innerHTML = '<div class="better-codex-conversation-empty"><h3>' + te(empty.title) + '</h3><p>' + te(empty.description) + '</p><span>' + te(empty.hint) + '</span>' + (isRunning ? conversationThinkingMarkup() : "") + (activeSteps.length ? conversationStepsMarkup(activeSteps, true, "empty-running") : "") + '</div>';
+          messageList.innerHTML = '<div class="better-codex-conversation-empty"><h3>' + te(empty.title) + '</h3><p>' + te(empty.description) + '</p><span>' + te(empty.hint) + '</span></div>' + (isRunning ? conversationRunningMarkup(activeSteps, data?.activity?.turn_id || "") : "") + (activeSteps.length ? conversationStepsMarkup(activeSteps, true, "empty-running") : "");
         }
         const expectedInterruption = stateName === "interrupted" && ["user_stopped", "session_interrupted"].includes(String(reply.error || ""));
         if (stateName === "failed" || (stateName === "interrupted" && !expectedInterruption)) showConversationFailure(reply.error, reply.message ? "reply" : "execution", reply.message, { origin: "turn" });
@@ -9483,7 +9492,7 @@ export function install(config: Record<string, any>) {
             if (["send", "queue"].includes(sendButton?.dataset.composerMode || "")) void sendReply();
           }
         });
-        if (issue && dialog.open && (sessionId || issueConversationFailed())) void loadConversation();
+        if (issue && dialog.open && (sessionId || issueConversationRunning(issue) || issueConversationFailed())) void loadConversation();
         const closeDialogSelects = () => {
           dialog.querySelectorAll("[data-dialog-select]").forEach(picker => {
             picker.classList.remove("is-open");
