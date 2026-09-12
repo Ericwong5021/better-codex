@@ -791,6 +791,7 @@ export function install(config: Record<string, any>) {
     let suppressSessionClickUntil = 0;
     let active = false;
     let bootstrapReady = false;
+    let bootstrapPromise = null;
 
     function componentContext(feature, mountId) {
       return {
@@ -6993,10 +6994,12 @@ export function install(config: Record<string, any>) {
       else await loadIssues(options);
     }
 
-    async function load() {
-      clearError();
-      try {
+    function ensureBootstrapReady() {
+      if (bootstrapReady) return Promise.resolve();
+      if (bootstrapPromise) return bootstrapPromise;
+      const request = (async () => {
         const bootstrap = await api("/api/bootstrap");
+        if (destroyed) throw new Error("injection_destroyed");
         applyAppearance(bootstrap.hostTheme || bootstrap.appearance);
         state.systemLocale = resolveSystemLocale(HOST_KIND === "web" ? INITIAL_LOCALE : bootstrap.locale);
         state.locale = state.languageSetting === "system" ? state.systemLocale : state.languageSetting;
@@ -7041,8 +7044,27 @@ export function install(config: Record<string, any>) {
         state.schedulerReasoningEffort = bootstrap.schedulerReasoningEffort || "high";
         const issueDescriptionLimit = Number(bootstrap.limits?.issue_description);
         if (Number.isInteger(issueDescriptionLimit) && issueDescriptionLimit > 0) state.issueDescriptionLimit = issueDescriptionLimit;
+        if (destroyed) throw new Error("injection_destroyed");
         bootstrapReady = true;
+        ensureEntry();
         syncAutoDispatch();
+      })();
+      bootstrapPromise = request.catch(error => {
+        bootstrapReady = false;
+        bootstrapPromise = null;
+        appendDiagnostic("bootstrap_failed", {
+          source: "bootstrap",
+          error: error instanceof Error ? error.message : String(error || "bootstrap_failed"),
+        });
+        throw error;
+      });
+      return bootstrapPromise;
+    }
+
+    async function load() {
+      clearError();
+      try {
+        await ensureBootstrapReady();
         if (state.mockup) {
           state.projectId = MOCKUP_PROJECT_ID;
         } else {
@@ -10444,7 +10466,6 @@ export function install(config: Record<string, any>) {
     function open(surface = state.surface) {
       if (destroyed) return;
       if (!availableSurfaces.includes(surface)) surface = "issues";
-      const ready = bootstrapReady;
       routeSuppressed = false;
       state.surface = surface;
       sessionStorage.setItem(RESUME_SURFACE_KEY, surface);
@@ -10452,7 +10473,7 @@ export function install(config: Record<string, any>) {
       ensureEntry();
       mountPanel();
       render();
-      void (ready ? loadSurface({ preserveInspector: true }) : load());
+      void load();
       if (!startLiveUpdates() && pollTimer === null) pollTimer = setInterval(() => { if (!document.hidden && active && !panel?.dataset.recovery) void perform(() => loadSurface({ background: true }), { background: true }); }, 3000);
       if (retryClockTimer === null) retryClockTimer = setInterval(() => { if (active && state.issues.some(issue => issue.session_retry)) render(); }, 30000);
     }
@@ -10729,11 +10750,17 @@ export function install(config: Record<string, any>) {
       startLiveUpdates();
       if (HOST_KIND !== "web" && HOST_CAPABILITIES.nativeThreads !== false) startSessionRelay();
       refresh();
+      void ensureBootstrapReady().catch(error => {
+        if (destroyed) return;
+        appendDiagnostic("bootstrap_mount_failed", {
+          error: error instanceof Error ? error.message : String(error || "bootstrap_failed"),
+        });
+      });
       void checkUpdateNotice();
       updateTimer = setInterval(() => { if (!document.hidden) void checkUpdateNotice(); }, 15000);
     }
 
-    window.__betterCodexInjection__ = { version: VERSION, bundleChecksum: config.bundleChecksum, profile: PROFILE, host: HOST_KIND, endpoint: BASE_URL, refresh, pulse: () => true, open: openRoute, openThread, close, destroy, reportError: reportGlobalError };
+    window.__betterCodexInjection__ = { version: VERSION, bundleChecksum: config.bundleChecksum, profile: PROFILE, host: HOST_KIND, endpoint: BASE_URL, refresh, pulse: () => true, ready: () => bootstrapReady, open: openRoute, openThread, close, destroy, reportError: reportGlobalError };
     document.addEventListener("click", onClick, true);
     document.addEventListener("pointerdown", onSessionPointerDown, true);
     document.addEventListener("pointermove", onSessionPointerMove, true);

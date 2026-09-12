@@ -714,6 +714,7 @@ export async function cdpStatus(port: number) {
           bundleChecksum: window.__betterCodexInjection__?.bundleChecksum || null,
           profile: window.__betterCodexInjection__?.profile || null,
           endpoint: window.__betterCodexInjection__?.endpoint || null,
+          ready: typeof window.__betterCodexInjection__?.ready === 'function' && Boolean(window.__betterCodexInjection__.ready()),
           entry: Boolean(document.getElementById('better-codex-entry')),
           panel: Boolean(document.getElementById('better-codex-panel')),
           open: document.documentElement.hasAttribute('data-better-codex-open')

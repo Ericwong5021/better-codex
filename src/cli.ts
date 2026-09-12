@@ -971,7 +971,7 @@ async function doctor(allowPendingInjection = false) {
   const sessionHost = sessionHostStatus();
   const sessionHostRequired = process.env.BETTER_CODEX_DISABLE_RUNTIME_SESSION_RELAY !== "1" && process.env.BETTER_CODEX_DISABLE_DELEGATION !== "1" && !process.env.NODE_TEST_CONTEXT;
   const updateKey = (!isSea() && !packagedBuild) || existsSync(updatePublicKeyPath);
-  const injectedTarget = injection.targets.some(target => Boolean((target as { entry?: boolean }).entry) && Boolean((target as { panel?: boolean }).panel));
+  const injectedTarget = injection.targets.some(target => Boolean((target as { entry?: boolean }).entry) && Boolean((target as { ready?: boolean }).ready));
   const activeInjectorPid = injectorPid();
   const injectionReady = injectionEnabled() && Boolean(activeInjectorPid) && injectedTarget;
   const pendingInjection = allowPendingInjection && !injectionReady;

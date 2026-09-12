@@ -134,6 +134,28 @@ test("leaving the app surface suspends the panel and restores its previous surfa
   assert.doesNotMatch(scheduledRefresh, /setTimeout\([\s\S]*?160/);
 });
 
+test("injection bootstraps before opening the panel and hides the native recovery launcher", () => {
+  const source = injectionSource(4317, "test-token", "install");
+  const bootstrapStart = injectedEntrySource.indexOf("function ensureBootstrapReady()");
+  const loadStart = injectedEntrySource.indexOf("async function load()", bootstrapStart);
+  const mountStart = injectedEntrySource.indexOf("function mount()");
+  const mountEnd = injectedEntrySource.indexOf("window.__betterCodexInjection__ =", mountStart);
+  const openStart = injectedEntrySource.indexOf("function open(surface = state.surface)");
+  const openEnd = injectedEntrySource.indexOf("function close(", openStart);
+  assert.ok(bootstrapStart >= 0 && loadStart > bootstrapStart);
+  assert.ok(injectedEntrySource.slice(bootstrapStart, loadStart).includes('api("/api/bootstrap")'));
+  assert.ok(injectedEntrySource.slice(bootstrapStart, loadStart).includes("if (bootstrapPromise) return bootstrapPromise"));
+  assert.ok(injectedEntrySource.slice(bootstrapStart, loadStart).includes("bootstrapReady = true;\n        ensureEntry();"));
+  assert.ok(source.includes('[data-better-codex-launcher-hidden="true"] { display: none !important; }'));
+  assert.ok(injectedEntrySource.slice(mountStart, mountEnd).includes("refresh();"));
+  assert.ok(injectedEntrySource.slice(mountStart, mountEnd).includes("void ensureBootstrapReady().catch(error =>"));
+  assert.ok(injectedEntrySource.slice(openStart, openEnd).includes("void load();"));
+  assert.doesNotMatch(injectedEntrySource.slice(openStart, openEnd), /const ready = bootstrapReady/);
+  assert.ok(source.includes("ready: () => bootstrapReady"));
+  assert.ok(source.includes('appendDiagnostic("bootstrap_failed"'));
+  assert.ok(source.includes('document.querySelectorAll("[data-better-codex-launcher-hidden]").forEach(node => node.removeAttribute("data-better-codex-launcher-hidden"))'));
+});
+
 test("returning from a native settings route resumes the remembered Better Codex surface", () => {
   const source = injectionSource(4317, "test-token", "install");
   const refresh = source.slice(source.indexOf("function refresh()"), source.indexOf("function scheduleRefresh()"));

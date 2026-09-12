@@ -6,6 +6,7 @@ import { darwinCdpListenerTrusted, requiresCodexRestartForLaunch, windowsCodexPa
 import { targetAllowed } from "../src/compatibility.js";
 
 const source = readFileSync(new URL("../src/cdp.ts", import.meta.url), "utf8");
+const cliSource = readFileSync(new URL("../src/cli.ts", import.meta.url), "utf8");
 const nativeDialogSource = readFileSync(new URL("../src/native-dialog.ts", import.meta.url), "utf8");
 const serverSource = readFileSync(new URL("../src/server.ts", import.meta.url), "utf8");
 
@@ -145,6 +146,12 @@ test("CDP injection never treats the Better Codex Web UI as a desktop renderer",
   assert.equal(targetAllowed({ url: "", title: "Codex" }), true);
   assert.equal(targetAllowed({ url: "https://aionui.talktodo.cn/web", title: "Better Codex" }), false);
   assert.equal(targetAllowed({ url: "http://127.0.0.1:57515/web", title: "Better Codex" }), false);
+});
+
+test("injection readiness follows bootstrap state instead of panel visibility", () => {
+  assert.match(source, /ready: typeof window\.__betterCodexInjection__\?\.ready === 'function' && Boolean\(window\.__betterCodexInjection__\.ready\(\)\)/);
+  assert.match(cliSource, /target => Boolean\(\(target as \{ entry\?: boolean \}\)\.entry\) && Boolean\(\(target as \{ ready\?: boolean \}\)\.ready\)/);
+  assert.doesNotMatch(cliSource, /target => Boolean\(\(target as \{ entry\?: boolean \}\)\.entry\) && Boolean\(\(target as \{ panel\?: boolean \}\)\.panel\)/);
 });
 
 test("macOS restart quits only the installed Desktop app by Bundle ID", () => {
