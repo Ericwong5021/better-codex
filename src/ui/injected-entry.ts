@@ -988,9 +988,11 @@ export function install(config: Record<string, any>) {
     }
 
     function issueConversationRunning(issue) {
-      return ["claimed", "running", "scheduling"].includes(issue?.active_run_status)
-        || issue?.reply_status === "running"
-        || Boolean(issue?.session_active_turn_id);
+      const terminalIssue = ["blocked", "cancelled", "done", "in_review"].includes(issue?.status)
+        && !issue?.active_run_status
+        && issue?.reply_status !== "running"
+        && !issue?.session_active_turn_id;
+      return !terminalIssue && issueExecutionRunning(issue);
     }
 
     function issuePermissions(issue) {
