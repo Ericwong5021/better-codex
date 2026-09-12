@@ -203,7 +203,7 @@ Choose exactly one outcome:
 - `in_review`: the work appears complete but needs human inspection, acceptance, or confirmation.
 - `blocked`: the Agent's final reply explicitly says the task failed or is blocked.
 
-Never use `todo`, `backlog`, or `cancelled` as a scheduler outcome. If the Agent's final reply explicitly says the task is complete, use `done` without requiring additional verification evidence. If the final reply is unclear or missing, use `in_review`; execution failure remains recorded separately and is not itself a semantic blocker.
+Never use `todo`, `backlog`, or `cancelled` as a scheduler outcome. If the Agent's final reply explicitly says the task is complete, use `done` without requiring additional verification evidence. If the final reply is unclear or missing, use `in_review`; execution failure remains recorded separately, and Runtime always places failed execution in `blocked` regardless of the semantic decision.
 
 Output exactly one JSON object matching the provided schema without a Markdown code fence or additional text. Include a concise `reason` and an `evidence` array containing the Agent's final reply. A `done` decision must include at least one evidence item from the final reply.
 

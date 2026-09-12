@@ -465,7 +465,7 @@ test("opening the store does not re-arm resting user-owned agent issues", () => 
   }
 });
 
-test("execution failures hand back for review and do not become task blockers", () => {
+test("execution failures block dispatch and override semantic review decisions", () => {
   const target = temporaryDatabase();
   try {
     const store = new Store(target.file);
@@ -484,7 +484,7 @@ test("execution failures hand back for review and do not become task blockers", 
     assert.equal(claimed?.issue.id, issue.id);
     store.finishRun(claimed!.runId, claimed!.issue.id, false, "codex_exit_1");
     const failed = store.getIssue(issue.id)!;
-    assert.equal(failed.status, "in_review");
+    assert.equal(failed.status, "blocked");
     assert.equal(failed.needs_attention, true);
     assert.equal(failed.pending_actor, "user");
     assert.equal(store.claimNextIssue(), null);
@@ -503,9 +503,9 @@ test("execution failures hand back for review and do not become task blockers", 
       status: "in_review",
       reason: "Agent did not report a task blocker",
       evidence: ["Work remains incomplete"],
-    }), "in_review");
+    }), "blocked");
     const reviewed = store.getIssue(scheduledIssue.id)!;
-    assert.equal(reviewed.status, "in_review");
+    assert.equal(reviewed.status, "blocked");
     assert.equal(reviewed.latest_run_status, "failed");
     assert.equal(reviewed.latest_scheduler_status, "completed");
     assert.equal(reviewed.latest_scheduler_error, null);
@@ -1080,7 +1080,7 @@ test("manual native turns reopen completed issues and return them for review", (
     assert.equal(store.sessionTurnStarted(threadId, failedTurnId)?.turn_id, failedTurnId);
     assert.equal(store.completeSessionTurn(threadId, failedTurnId, "failed", "Selected model is at capacity. Please try a different model.")?.turn_id, failedTurnId);
     const failedReply = store.getIssue(issue.id)!;
-    assert.equal(failedReply.status, "in_review");
+    assert.equal(failedReply.status, "blocked");
     assert.equal(failedReply.session_status, "failed");
     assert.equal(store.getIssueReplyState(issue.id).status, "failed");
     assert.equal(store.getIssueReplyState(issue.id).error, "Selected model is at capacity. Please try a different model.");
@@ -1351,7 +1351,7 @@ test("reassigned issue waits for a user reply before continuing the native sessi
     store.claimSessionCommand("relay-config");
     worker.failSessionCommand(sent.command.id, "relay-config", "turn_start_failed", replyThreadId);
     assert.equal(store.getIssueReplyState(replyIssue.id).status, "failed");
-    assert.equal(store.getIssue(replyIssue.id)?.status, "in_review");
+    assert.equal(store.getIssue(replyIssue.id)?.status, "blocked");
     assert.equal(store.getIssueSession(replyIssue.id)?.status, "idle");
     assert.equal(store.getIssueSession(replyIssue.id)?.last_error, "turn_start_failed");
     const retried = worker.sendIssueMessage(replyIssue.id, "config-retry", "continue");
