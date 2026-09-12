@@ -32,3 +32,5 @@
 - Relay automatic updates run in one resident scheduler and use the signed channel feed plus the host updater queue. Compose defaults to stable automatic updates; failed installations pause automatic retries, storage warning reserves block staging, and successful upgrades require target-version /readyz recovery. Health status reports actual updater capability rather than fixed update flags.
 
 - The Better Codex MCP App is a recovery launcher: it starts sidebar injection on explicit user action and reports failures. Its native sidebar entry is hidden only while the injected navigation is mounted and bootstrap has succeeded; destroying injection restores the launcher. Injected navigation owns its interaction state instead of cloning native button state.
+
+- Completed Issue thread archive, unarchive, and delete actions durably queue a desktop catalog notification in the same Runtime transaction. The authenticated native proxy updates the Codex catalog and renderer cache before acknowledging that notification; unavailable desktop services retain a visible retryable error. Backend completion never implies desktop sidebar synchronization.

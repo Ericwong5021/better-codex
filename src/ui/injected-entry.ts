@@ -2213,6 +2213,33 @@ export function install(config: Record<string, any>) {
       }));
     }
 
+    let desktopCatalogServices = null;
+
+    async function syncThreadCatalogAction(action) {
+      let error = "";
+      try {
+        if (!desktopCatalogServices) {
+          const entry = Array.from(document.querySelectorAll('link[rel="modulepreload"][href]')).find(link => /\/app-initial-[^/]+\.js$/.test(new URL(link.href).pathname));
+          if (!entry) throw new Error("desktop_catalog_module_unavailable");
+          const exports = await import(entry.href);
+          desktopCatalogServices = Object.values(exports).find(value => value && typeof value === "object" && typeof value.localThreadCatalog?.notifyThread === "function");
+          if (!desktopCatalogServices) throw new Error("desktop_catalog_service_unavailable");
+        }
+        await desktopCatalogServices.localThreadCatalog.notifyThread({ hostId: "local", threadId: action.thread_id }, action.action === "unarchive" ? "upsert" : "remove");
+        window.dispatchEvent(new MessageEvent("message", { data: {
+          type: "mcp-notification", hostId: "local",
+          method: action.action === "delete" ? "thread/deleted" : action.action === "archive" ? "thread/archived" : "thread/unarchived",
+          params: { threadId: action.thread_id }
+        } }));
+        appendDiagnostic("thread_catalog_synced", { thread_id: action.thread_id, event_id: action.event_id, action: action.action });
+      } catch (failure) {
+        error = failure instanceof Error ? failure.message : String(failure);
+        desktopCatalogServices = null;
+        appendDiagnostic("thread_catalog_sync_failed", { thread_id: action.thread_id, event_id: action.event_id, action: action.action, error });
+      }
+      await api("/api/session-relay/catalog-ack", { method: "POST", body: JSON.stringify({ relay_id: relayId, thread_id: action.thread_id, event_id: action.event_id, error }) });
+    }
+
     async function pollSessionRelay() {
       if (relayBusy || destroyed) return;
       relayBusy = true;
@@ -2246,6 +2273,7 @@ export function install(config: Record<string, any>) {
         });
         if (!result?.leader) return;
         if (relayCapability !== "ready") return;
+        for (const action of result.catalog_actions || []) await syncThreadCatalogAction(action);
         if (result.command) {
           await executeSessionCommand(result.command);
           return;

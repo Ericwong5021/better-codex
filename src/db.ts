@@ -788,6 +788,7 @@ export class Store {
     this.recoverHandedOffSessionBindings();
     this.ensureIssueReplyTable();
     this.ensureSettingsTable();
+    this.ensureThreadCatalogQueue();
     this.ensureDispatchColumns();
     this.ensureEnrichmentColumn();
     this.ensureReplyDraftColumns();
@@ -1472,6 +1473,52 @@ export class Store {
         insert.run(row.issue_id, row.thread_id, lastTurnId, row.session_handoff_at, now());
         console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: now(), scope: "session_binding", event: "handoff_binding_recovered", issue_id: row.issue_id, thread_id: row.thread_id, last_turn_id: lastTurnId, session_handoff_at: row.session_handoff_at })}`);
       }
+    }
+  }
+
+  private ensureThreadCatalogQueue() {
+    this.transaction(() => {
+      const exists = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'thread_catalog_queue'").get();
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS thread_catalog_queue (
+          thread_id TEXT PRIMARY KEY,
+          issue_id TEXT NOT NULL,
+          action TEXT NOT NULL CHECK(action IN ('archive', 'unarchive', 'delete')),
+          event_id TEXT NOT NULL,
+          last_error TEXT,
+          available_at TEXT NOT NULL
+        )
+      `);
+      if (!exists) {
+        this.db.prepare(`
+          INSERT OR IGNORE INTO thread_catalog_queue (thread_id, issue_id, action, event_id, available_at)
+          SELECT threads.thread_id, issues.id, 'archive', lower(hex(randomblob(16))), ? FROM issues
+          JOIN (
+            SELECT id AS issue_id, thread_id FROM issues WHERE thread_id IS NOT NULL
+            UNION SELECT issue_id, thread_id FROM issue_runs WHERE thread_id IS NOT NULL
+            UNION SELECT issue_id, thread_id FROM issue_sessions WHERE thread_id IS NOT NULL
+          ) AS threads ON threads.issue_id = issues.id
+          WHERE issues.archived_at IS NOT NULL AND issues.deleting_at IS NULL
+        `).run(now());
+      }
+    });
+  }
+
+  listThreadCatalogActions() {
+    return this.db.prepare(`
+      SELECT * FROM thread_catalog_queue AS catalog
+      WHERE available_at <= ? AND NOT EXISTS (
+        SELECT 1 FROM thread_action_queue AS execution WHERE execution.thread_id = catalog.thread_id
+      ) ORDER BY available_at LIMIT 16
+    `).all(now()) as Array<{ thread_id: string; issue_id: string; action: IssueThreadAction; event_id: string }>;
+  }
+
+  acknowledgeThreadCatalogAction(threadId: string, eventId: string, error: string) {
+    if (error) {
+      this.db.prepare("UPDATE thread_catalog_queue SET last_error = ?, available_at = ? WHERE thread_id = ? AND event_id = ?")
+        .run(error.slice(0, 2000), new Date(Date.now() + 30000).toISOString(), threadId, eventId);
+    } else {
+      this.db.prepare("DELETE FROM thread_catalog_queue WHERE thread_id = ? AND event_id = ?").run(threadId, eventId);
     }
   }
 
@@ -3229,7 +3276,15 @@ export class Store {
 
   completeThreadAction(entry: PendingThreadAction) {
     this.transaction(() => {
-      this.db.prepare("DELETE FROM thread_action_queue WHERE thread_id = ? AND event_id = ?").run(entry.thread_id, entry.event_id);
+      const removed = this.db.prepare("DELETE FROM thread_action_queue WHERE thread_id = ? AND event_id = ?").run(entry.thread_id, entry.event_id);
+      if (removed.changes) {
+        this.db.prepare(`
+          INSERT INTO thread_catalog_queue (thread_id, issue_id, action, event_id, available_at)
+          VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT(thread_id) DO UPDATE SET issue_id = excluded.issue_id, action = excluded.action,
+            event_id = excluded.event_id, available_at = excluded.available_at, last_error = NULL
+        `).run(entry.thread_id, entry.issue_id, entry.action, entry.event_id, now());
+      }
       if (entry.action === "delete") this.finalizeIssueDeletion(entry.issue_id);
     });
   }

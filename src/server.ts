@@ -1998,6 +1998,18 @@ export function startServer() {
         if (!threadId) throw new Error("session_required");
         return sendJson(response, 200, { workspace_path: sessionWorkspace(threadId) || "" });
       }
+      if (url.pathname === "/api/session-relay/catalog-ack" && method === "POST") {
+        const body = await readBody(request);
+        const relayId = cleanString(body.relay_id, 200);
+        if (!store.nativeSessionProxyIsLeader(relayId)) throw new Error("session_relay_not_leader");
+        const threadId = normalizeSessionId(cleanString(body.thread_id, 200));
+        const eventId = cleanString(body.event_id, 200);
+        if (!threadId || !eventId) throw new Error("thread_catalog_action_invalid");
+        const error = cleanString(body.error, 2000);
+        store.acknowledgeThreadCatalogAction(threadId, eventId, error);
+        console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "thread_catalog", event: error ? "sync_failed" : "sync_completed", relay_id: relayId, thread_id: threadId, event_id: eventId, error: error || null })}`);
+        return sendJson(response, 200, { ok: true });
+      }
       if (url.pathname === "/api/session-relay/poll" && method === "POST") {
         const body = await readBody(request);
         const relayId = cleanString(body.relay_id, 200);
@@ -2007,7 +2019,7 @@ export function startServer() {
         const result = body.owner === "native"
           ? worker.pollNativeSessionProxy(relayId, appSessionId, capability, cleanString(body.capability_error, 2000), body.busy === true)
           : worker.pollSessionRelay(relayId, appSessionId, capability, cleanString(body.capability_error, 2000), body.busy === true);
-        return sendJson(response, 200, result);
+        return sendJson(response, 200, { ...result, catalog_actions: body.owner === "native" && result.leader && capability === "ready" && body.busy !== true ? store.listThreadCatalogActions() : [] });
       }
       if (path[0] === "api" && path[1] === "session-relay" && path[2] === "commands" && path[3] && path[4] === "complete" && path.length === 5 && method === "POST") {
         const body = await readBody(request);
