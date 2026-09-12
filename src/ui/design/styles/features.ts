@@ -5676,6 +5676,12 @@ export function betterCodexFeatureStylesCss() {
       font-weight: 500;
     }
 
+    #better-codex-dialog .better-codex-conversation-head-actions {
+      display: flex;
+      align-items: center;
+      gap: var(--bc-space-2);
+    }
+
     #better-codex-dialog .better-codex-conversation-status .better-codex-activity {
       display: inline-flex;
       align-items: center;
@@ -9049,6 +9055,54 @@ export function betterCodexFeatureStylesCss() {
       .better-codex-completion-notice button {
         transition: none;
       }
+    }
+    #better-codex-dialog[data-detail="true"][data-expanded][data-conversation-expanded="true"] {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      max-width: none;
+      height: 100dvh;
+      max-height: none;
+      margin: 0;
+      overflow: hidden;
+      border: 0;
+      border-radius: 0;
+      box-shadow: none;
+      transition: none;
+    }
+
+    #better-codex-dialog[data-detail="true"][data-conversation-expanded="true"] form {
+      box-sizing: border-box;
+      padding-block: env(safe-area-inset-top) env(safe-area-inset-bottom);
+    }
+
+    #better-codex-dialog[data-conversation-expanded="true"] form > :not(.better-codex-conversation-shell):not(.better-codex-dialog-error),
+    #better-codex-dialog[data-conversation-expanded="true"] .better-codex-conversation-shell > :not(.better-codex-conversation) {
+      display: none;
+    }
+
+    #better-codex-dialog[data-conversation-expanded="true"] .better-codex-conversation-shell {
+      display: flex;
+      min-height: 0;
+      flex: 1 1 0;
+      flex-direction: column;
+    }
+
+    #better-codex-dialog[data-detail="true"][data-conversation-expanded="true"] .better-codex-conversation {
+      margin: 0;
+      border: 0;
+      border-radius: 0;
+      background: var(--bc-color-canvas);
+      box-shadow: none;
+    }
+
+    #better-codex-dialog[data-conversation-expanded="true"] .better-codex-conversation-head {
+      border-bottom-color: var(--bc-color-hairline);
+    }
+
+    #better-codex-dialog[data-host="web"][data-detail="true"][data-expanded][data-conversation-expanded="true"] {
+      inset: var(--bc-mobile-viewport-top, 0) 0 auto;
+      height: var(--bc-mobile-viewport-height, 100dvh);
     }
   `;
 }

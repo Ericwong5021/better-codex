@@ -497,6 +497,7 @@ export function install(config: Record<string, any>) {
     localeResources.en["停止任务"] = "Stop task";
     localeResources.en["停止等待"] = "Stop waiting";
     localeResources.en["打开完整会话"] = "Open full conversation";
+    localeResources.en["全屏查看对话"] = "Read conversation full screen";
     localeResources.en["重新生成标题"] = "Regenerate title";
     localeResources.en["标题生成中"] = "Regenerating title";
     localeResources.en["标题生成失败"] = "Title generation failed";
@@ -7358,6 +7359,7 @@ export function install(config: Record<string, any>) {
         projectId: issue?.project_id || state.projectId,
         expanded: draftMode === "agent" ? false : localStorage.getItem(issue ? ISSUE_DIALOG_EXPANDED_KEY : CREATE_DIALOG_EXPANDED_KEY) === "true",
         descriptionExpanded: false,
+        conversationExpanded: false,
         reply: issue?.reply_draft || "",
         promptSemanticReferences: cachedCreateDraft?.promptSemanticReferences || [],
         replySemanticReferences: [],
@@ -7786,7 +7788,7 @@ export function install(config: Record<string, any>) {
             control.disabled = true;
             return;
           }
-          if (control.matches("[data-dialog-close], [data-dialog-expand], [data-dialog-open-thread], [data-dialog-stop], [data-dialog-restore], [data-description-toggle], [data-conversation-copy], [data-conversation-attachment], [data-dialog-preview]")) {
+          if (control.matches("[data-dialog-close], [data-dialog-expand], [data-conversation-expand], [data-dialog-open-thread], [data-dialog-stop], [data-dialog-restore], [data-description-toggle], [data-conversation-copy], [data-conversation-attachment], [data-dialog-preview]")) {
             control.disabled = false;
             return;
           }
@@ -7906,7 +7908,23 @@ export function install(config: Record<string, any>) {
           ? '<p class="better-codex-markdown-empty">' + te("加载对话…") + '</p>'
           : conversationExecutionRunning ? conversationRunningMarkup() : "";
         const composer = sessionId ? '<div class="better-codex-composer-queue" data-conversation-queue role="list" hidden></div>' + conversationComposer() : "";
-        return '<div class="better-codex-conversation-shell"><section class="better-codex-conversation"><div class="better-codex-conversation-head"><span>' + te("对话") + '</span><span class="better-codex-conversation-status" data-conversation-status data-state="' + escapeHtml(conversationState) + '"' + (conversationStatus ? "" : " hidden") + '>' + conversationStatus + '</span></div><div class="better-codex-timeline" data-conversation-body><div data-conversation-messages>' + conversationBody + '</div><div class="better-codex-conversation-feedback" data-conversation-feedback role="alert" hidden></div></div></section>' + sessionRetryBannerMarkup() + composer + '</div>';
+        return '<div class="better-codex-conversation-shell"><section class="better-codex-conversation"><div class="better-codex-conversation-head"><span>' + te("对话") + '</span><div class="better-codex-conversation-head-actions"><span class="better-codex-conversation-status" data-conversation-status data-state="' + escapeHtml(conversationState) + '"' + (conversationStatus ? "" : " hidden") + '>' + conversationStatus + '</span><button class="better-codex-icon-button" type="button" data-conversation-expand aria-label="' + te(draft.conversationExpanded ? "退出全屏" : "全屏查看对话") + '" title="' + te(draft.conversationExpanded ? "退出全屏" : "全屏查看对话") + '" aria-pressed="' + String(draft.conversationExpanded) + '">' + icon(draft.conversationExpanded ? "shrink" : "expand") + '</button></div></div><div class="better-codex-timeline" data-conversation-body><div data-conversation-messages>' + conversationBody + '</div><div class="better-codex-conversation-feedback" data-conversation-feedback role="alert" hidden></div></div></section>' + sessionRetryBannerMarkup() + composer + '</div>';
+      }
+
+      function setConversationExpanded(expanded) {
+        const body = dialog.querySelector("[data-conversation-body]");
+        const scrollTop = body?.scrollTop || 0;
+        draft.conversationExpanded = expanded;
+        dialog.dataset.conversationExpanded = String(expanded);
+        const button = dialog.querySelector("[data-conversation-expand]");
+        const label = t(expanded ? "退出全屏" : "全屏查看对话");
+        button?.setAttribute("aria-label", label);
+        button?.setAttribute("title", label);
+        button?.setAttribute("aria-pressed", String(expanded));
+        if (button) button.innerHTML = icon(expanded ? "shrink" : "expand");
+        if (body) body.scrollTop = scrollTop;
+        button?.focus({ preventScroll: true });
+        traceDialog("conversation_fullscreen_changed", { expanded, scroll_top: scrollTop });
       }
 
       function sessionRetryBannerMarkup() {
@@ -9319,6 +9337,7 @@ export function install(config: Record<string, any>) {
         dialog.dataset.executionLocked = String(executionLocked);
         dialog.dataset.expanded = String(draft.expanded);
         dialog.dataset.descriptionExpanded = String(draft.descriptionExpanded);
+        dialog.dataset.conversationExpanded = String(draft.conversationExpanded);
         dialog.dataset.locked = String(editingLocked);
         if (draft.mode === "agent") {
           const humanAssigned = draft.assignee.startsWith("user:");
@@ -9744,6 +9763,7 @@ export function install(config: Record<string, any>) {
           projectDismiss = null;
         }));
         dialog.querySelector("[data-dialog-close]")?.addEventListener("click", () => dialog.close());
+        dialog.querySelector("[data-conversation-expand]")?.addEventListener("click", () => setConversationExpanded(!draft.conversationExpanded));
         const handleDialogOpenThread = event => {
           const button = event.currentTarget;
           const threadId = normalizeSessionId(event.currentTarget.dataset.dialogOpenThread);
@@ -10074,6 +10094,12 @@ export function install(config: Record<string, any>) {
       dialog.addEventListener("pointerdown", traceDialogAction, true);
       dialog.addEventListener("click", traceDialogAction, true);
       dialog.addEventListener("keydown", event => {
+        if (event.key === "Escape" && draft.conversationExpanded) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          setConversationExpanded(false);
+          return;
+        }
         if (!["Escape", "Enter"].includes(event.key)) return;
         const fields = {
           key: event.key,
