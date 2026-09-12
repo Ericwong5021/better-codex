@@ -264,7 +264,7 @@ upgrade_vps() {
   read -r total_kib free_kib < <(df -Pk "$directory" | awk 'NR==2 {print $2, $4}')
   [[ "$free_kib" =~ ^[0-9]+$ && "$total_kib" =~ ^[0-9]+$ ]] || fail "unable to inspect VPS update storage"
   [ "$total_kib" -gt 0 ] || fail "invalid VPS storage size"
-  [ "$free_kib" -ge 10485760 ] && [ "$((free_kib * 100 / total_kib))" -ge 5 ] || fail "VPS update blocked by storage warning reserve: free_kib=$free_kib total_kib=$total_kib"
+  [ "$free_kib" -ge 5242880 ] && [ "$((free_kib * 100 / total_kib))" -ge 5 ] || fail "VPS update blocked by storage warning reserve: free_kib=$free_kib total_kib=$total_kib"
   if [ "$external_proxy" -eq 1 ]; then
     docker compose "${compose_args[@]}" stop caddy
   fi

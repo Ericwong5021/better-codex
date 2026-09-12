@@ -478,7 +478,7 @@ export function install(config: Record<string, any>) {
     localeResources.en["有任务正在运行，请等待任务结束后再更新。"] = "A task is running. Wait for it to finish before updating.";
     localeResources.en["更新正在进行中，请稍候。"] = "An update is already in progress. Please wait.";
     localeResources.en["当前部署尚未启用在线升级。"] = "Online updates are not enabled for this deployment.";
-    localeResources.en["服务器磁盘空间不足，请清理空间后重试升级（至少保留 10 GiB 和 5% 可用空间）。"] = "The server is low on disk space. Free up space before retrying the update (at least 10 GiB and 5% free space required).";
+    localeResources.en["服务器磁盘空间不足，请清理空间后重试升级（至少保留 5 GiB 和 5% 可用空间）。"] = "The server is low on disk space. Free up space before retrying the update (at least 5 GiB and 5% free space required).";
     localeResources.en["远程服务升级完成。"] = "The remote service update is complete.";
     localeResources.en["远程服务正在重启，页面稍后会自动恢复。"] = "The remote service is restarting. This page will reconnect automatically.";
     localeResources.en["正在备份并升级远程服务，请不要关闭页面。"] = "Backing up and updating the remote service. Keep this page open.";
@@ -2768,7 +2768,7 @@ export function install(config: Record<string, any>) {
       if (value === "reply_busy" || value === "issue_execution_running") return t("有任务正在运行，请等待任务结束后再更新。");
       if (value === "update_in_progress") return t("更新正在进行中，请稍候。");
       if (value === "hub_update_not_configured") return t("当前部署尚未启用在线升级。");
-      if (value === "update_storage_reserve" || value.startsWith("update_storage_reserve:")) return t("服务器磁盘空间不足，请清理空间后重试升级（至少保留 10 GiB 和 5% 可用空间）。");
+      if (value === "update_storage_reserve" || value.startsWith("update_storage_reserve:")) return t("服务器磁盘空间不足，请清理空间后重试升级（至少保留 5 GiB 和 5% 可用空间）。");
       if (value === "core_version_mismatch" || value === "compatibility_manifest_mismatch") return t("下载的更新版本与发布版本不一致，请稍后重试。");
       if (value === "core_validation_failed" || value === "core_health_validation_failed" || value === "update_asset_invalid" || value === "update_manifest_invalid" || value === "update_compatibility_invalid" || value === "update_core_invalid") return t("更新包验证失败，已保留当前版本。");
       if (value === "core_activation_version_mismatch" || value === "compatibility_activation_version_mismatch") return t("更新后的版本验证失败，已恢复到上一版本。");

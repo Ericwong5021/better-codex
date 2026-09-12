@@ -3,7 +3,7 @@ import { dirname } from "node:path";
 
 const gibibyte = 1024 ** 3;
 const criticalReserveBytes = 2 * gibibyte;
-const warningReserveBytes = 10 * gibibyte;
+const warningReserveBytes = 5 * gibibyte;
 
 export function storageHealth(path: string) {
   let target = dirname(path);
