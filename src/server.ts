@@ -1154,7 +1154,7 @@ export function startServer() {
               if (value.ok !== true || value.name !== "Better Codex Relay" || value.protocol_version !== "relay/v1" || typeof value.version !== "string") throw new Error("invalid_relay_health");
               return value;
             });
-            return sendJson(response, 200, { ...status, remote_mode: remoteMode, last_sync_at: status.last_heartbeat_at, remote: { ...remote, url: configuration.relay_url, reachable: true, update_available: false, upgrade_supported: false } });
+            return sendJson(response, 200, { ...status, remote_mode: remoteMode, last_sync_at: status.last_heartbeat_at, remote: { ...remote, url: configuration.relay_url, reachable: true, update_available: remote.update && typeof remote.update === "object" && "status" in remote.update && "checkedAt" in remote.update && Boolean(remote.update.checkedAt) ? remote.update.status === "available" : null, upgrade_supported: remote.update && typeof remote.update === "object" && "installSupported" in remote.update ? remote.update.installSupported === true : false } });
           } catch (error) {
             return sendJson(response, 200, { ...status, remote_mode: remoteMode, last_sync_at: status.last_heartbeat_at, remote: { name: "Better Codex Relay", url: configuration.relay_url, reachable: false, error: error instanceof Error ? error.message : "remote_unavailable" } });
           }

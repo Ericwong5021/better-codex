@@ -29,4 +29,6 @@
 
 - System services, desktop launchers, and MCP registrations share one stable installation command, never a version-directory core. Service environments preserve that base entrypoint across updates and rollback; only the base launcher selects the active core. Legacy service configuration is migrated on start only after Runtime and service processes have stopped, with structured before/after diagnostics. Launcher failures must also be visible in a native dialog.
 
+- Relay automatic updates run in one resident scheduler and use the signed channel feed plus the host updater queue. Compose defaults to stable automatic updates; failed installations pause automatic retries, storage warning reserves block staging, and successful upgrades require target-version /readyz recovery. Health status reports actual updater capability rather than fixed update flags.
+
 - The Better Codex MCP App is a recovery launcher: it starts sidebar injection on explicit user action and reports failures. Its native sidebar entry is hidden only while the injected navigation is mounted and bootstrap has succeeded; destroying injection restores the launcher. Injected navigation owns its interaction state instead of cloning native button state.

@@ -249,3 +249,13 @@ Return only non-secret deployment facts:
 - any remaining user action.
 
 Never include passwords, administrator tokens, pairing codes, device tokens, cookies, or database contents.
+
+### Automatic Relay updates
+
+The bundled Compose deployment enables `BETTER_CODEX_RELAY_AUTO_UPDATE=1` and uses `BETTER_CODEX_RELAY_UPDATE_CHANNEL=stable`. Set the channel to `preview` to follow signed beta releases, or set automatic updates to `0` to use manual updates. Apply environment changes by recreating the Relay container with the deployment's existing Compose files.
+
+Relay checks the signed release manifest 30 seconds after startup and every hour thereafter. Installation requires the host updater, a connected Runtime with a fresh heartbeat, and storage above the warning reserve. The host checks deployment storage separately before staging. Requests survive the Relay container replacement through the host updater directory. Upgrades preserve deployment mode and secrets, back up authentication data, and require the target version and Runtime connection to recover through `/readyz`; failed validation invokes rollback. Local model turns remain owned by the local Runtime and Session Host.
+
+An installation failure pauses automatic retries until an operator retries the update from the remote Web UI or repairs the host state. Check failures are logged and retried on the next hourly check. `/healthz` includes cached update status, capability, channel, and automatic-update configuration; it does not fetch a release manifest per request. Detailed failures appear in Relay diagnostics and `journalctl -u better-codex-updater.service`.
+
+Existing deployments must first install a release containing this capability using the verified `selfhost.sh upgrade vps v<VERSION>` flow. Older running code cannot activate this feature by itself. A bare Relay process without the Compose configuration does not enable automatic installation.

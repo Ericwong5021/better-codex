@@ -364,7 +364,12 @@ export function createRelayServer(options: RelayServerOptions) {
   const maxReplayAttempts = options.maxReplayAttempts || 3;
   const authorizations = new Map<string, DeviceAuthorization>();
   const loginAttempts = new Map<string, { count: number; resetAt: number }>();
-  const updater = new HubUpdater(options.updaterDirectory);
+  const updateChannel = process.env.BETTER_CODEX_RELAY_UPDATE_CHANNEL || (coreVersion.includes("-beta.") ? "preview" : "stable");
+  if (updateChannel !== "stable" && updateChannel !== "preview") throw new Error("invalid_relay_update_channel");
+  const autoUpdateSetting = process.env.BETTER_CODEX_RELAY_AUTO_UPDATE || "0";
+  if (autoUpdateSetting !== "0" && autoUpdateSetting !== "1") throw new Error("invalid_relay_auto_update");
+  const autoUpdateEnabled = autoUpdateSetting === "1";
+  const updater = new HubUpdater(options.updaterDirectory, updateChannel);
   let runtime: ActiveRuntime | null = null;
   let reconnectingRuntime: ReconnectingRuntime | null = null;
   let reconnectGraceTimeout: NodeJS.Timeout | null = null;
@@ -799,7 +804,7 @@ export function createRelayServer(options: RelayServerOptions) {
         return response.end();
       }
       if (!trustedOrigin(request)) return sendJson(response, 403, { error: "forbidden" });
-      if ((url.pathname === "/livez" || url.pathname === "/healthz") && method === "GET") return sendJson(response, 200, { ok: true, name: "Better Codex Relay", version: coreVersion, protocol_version: relayProtocolVersion, pid: process.pid, uptime_seconds: Math.floor(process.uptime()), runtime: publicRuntime(runtime, reconnectingRuntime), pending_commands: store.pendingCommandCount() });
+      if ((url.pathname === "/livez" || url.pathname === "/healthz") && method === "GET") return sendJson(response, 200, { ok: true, name: "Better Codex Relay", version: coreVersion, protocol_version: relayProtocolVersion, pid: process.pid, uptime_seconds: Math.floor(process.uptime()), runtime: publicRuntime(runtime, reconnectingRuntime), pending_commands: store.pendingCommandCount(), ...(url.pathname === "/healthz" ? { update: { ...updater.get(), autoUpdateEnabled } } : {}) });
       if (url.pathname === "/readyz" && method === "GET") {
         const database = store.health();
         const storage = options.database === ":memory:" ? null : storageHealth(options.database);
@@ -1294,33 +1299,78 @@ export function createRelayServer(options: RelayServerOptions) {
   }, Math.min(5000, heartbeatIntervalMs));
   heartbeatSweep.unref();
 
-  const close = () => new Promise<void>((resolveClose, reject) => {
-    clearInterval(heartbeatSweep);
-    clearReconnectGrace();
-    for (const channel of retryableChannels.values()) {
-      channel.completed = true;
-      clearTimeout(channel.timeout);
-      if (channel.retryTimeout) clearTimeout(channel.retryTimeout);
-      channel.response.end();
-    }
-    retryableChannels.clear();
-    for (const [commandId, waiters] of commandWaiters) {
-      for (const waiter of waiters) {
-        clearTimeout(waiter.timeout);
-        if (!waiter.response.headersSent && !waiter.response.destroyed) sendJson(waiter.response, 202, { command_id: commandId, status: "pending", queued: true });
+  let stopping = false;
+  let autoUpdateTimer: NodeJS.Timeout | null = null;
+  let autoUpdateWork: Promise<void> | null = null;
+  const runAutoUpdate = async () => {
+    try {
+      const previous = updater.get();
+      if (!previous.installSupported) {
+        updateDiagnostic("automatic_update_unavailable", previous);
+        return;
       }
+      if (previous.status === "installing" || previous.status === "error" && previous.stage === "error") {
+        updateDiagnostic("automatic_update_paused", previous);
+        return;
+      }
+      const state = await updater.check();
+      if (stopping) return;
+      updateDiagnostic(state.status === "error" ? "automatic_check_failed" : "automatic_check_completed", state);
+      if (state.status !== "available") return;
+      if (!runtime || Date.now() - Date.parse(runtime.lastHeartbeatAt) > heartbeatIntervalMs * 3) {
+        updateDiagnostic("automatic_update_waiting_for_runtime", state);
+        return;
+      }
+      if (options.database !== ":memory:") {
+        const storage = storageHealth(options.database);
+        if (!storage.ok || storage.degraded) throw new Error(`update_storage_reserve:free=${storage.free_bytes}`);
+      }
+      const result = await updater.install();
+      updateDiagnostic("automatic_install_accepted", result.update, { update_id: result.update_id });
+    } catch (error) {
+      console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "relay_update", event: "automatic_update_failed", pid: process.pid, relay_version: coreVersion, error: error instanceof Error ? error.message : String(error) })}`);
+    } finally {
+      if (!stopping) scheduleAutoUpdate(60 * 60 * 1000);
     }
-    commandWaiters.clear();
-    if (runtime) for (const channel of runtime.commandChannels.values()) clearTimeout(channel.timeout);
-    runtime?.socket.close(1001);
-    runtime = null;
-    server.close(error => {
-      store.close();
-      if (error) reject(error);
-      else resolveClose();
+  };
+  const scheduleAutoUpdate = (delay: number) => {
+    autoUpdateTimer = setTimeout(() => { autoUpdateWork = runAutoUpdate(); }, delay);
+    autoUpdateTimer.unref();
+  };
+  if (autoUpdateEnabled) scheduleAutoUpdate(30_000);
+
+  const close = async () => {
+    stopping = true;
+    if (autoUpdateTimer) clearTimeout(autoUpdateTimer);
+    await autoUpdateWork;
+    return new Promise<void>((resolveClose, reject) => {
+      clearInterval(heartbeatSweep);
+      clearReconnectGrace();
+      for (const channel of retryableChannels.values()) {
+        channel.completed = true;
+        clearTimeout(channel.timeout);
+        if (channel.retryTimeout) clearTimeout(channel.retryTimeout);
+        channel.response.end();
+      }
+      retryableChannels.clear();
+      for (const [commandId, waiters] of commandWaiters) {
+        for (const waiter of waiters) {
+          clearTimeout(waiter.timeout);
+          if (!waiter.response.headersSent && !waiter.response.destroyed) sendJson(waiter.response, 202, { command_id: commandId, status: "pending", queued: true });
+        }
+      }
+      commandWaiters.clear();
+      if (runtime) for (const channel of runtime.commandChannels.values()) clearTimeout(channel.timeout);
+      runtime?.socket.close(1001);
+      runtime = null;
+      server.close(error => {
+        store.close();
+        if (error) reject(error);
+        else resolveClose();
+      });
+      server.closeAllConnections();
     });
-    server.closeAllConnections();
-  });
+  };
   return { server, store, close, runtime: () => runtime };
 }
 

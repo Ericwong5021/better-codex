@@ -44,9 +44,9 @@ export class HubUpdater {
   private readonly directory: string;
   private readonly channel: ReleaseChannel;
 
-  constructor(directory = process.env.BETTER_CODEX_HUB_UPDATER_DIR || "") {
+  constructor(directory = process.env.BETTER_CODEX_HUB_UPDATER_DIR || "", channel: ReleaseChannel = coreVersion.includes("-beta.") ? "preview" : "stable") {
     this.directory = directory ? resolve(directory) : "";
-    this.channel = coreVersion.includes("-beta.") ? "preview" : "stable";
+    this.channel = channel;
     this.state = {
       status: "current",
       currentVersion: coreVersion,
@@ -80,7 +80,17 @@ export class HubUpdater {
     const installSupported = this.supported();
     const hostTarget = host?.targetVersion?.replace(/^v/, "") || null;
     let state: HubUpdateState;
-    if (host?.status === "installing") {
+    let queuedTarget: string | null = null;
+    if (this.directory) {
+      try {
+        queuedTarget = readFileSync(join(this.directory, "request"), "utf8").trim().replace(/^v/, "");
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+    }
+    if (queuedTarget) {
+      state = { ...this.state, status: "installing", latestVersion: queuedTarget, stage: "queued", progress: 5, error: null, installSupported };
+    } else if (host?.status === "installing") {
       state = {
         ...this.state,
         status: "installing" as const,
@@ -147,7 +157,8 @@ export class HubUpdater {
       const state = this.get(updateId);
       return { accepted: true, update_id: updateId, state: state.operation?.status || "STAGING", operation: state.operation, update: state };
     }
-    const state = await this.check();
+    await this.check();
+    const state = this.state;
     if (!state.installSupported) throw new Error("hub_update_not_configured");
     if (state.status !== "available" || !state.latestVersion) throw new Error(state.error || "update_not_available");
     const target = `v${state.latestVersion}`;

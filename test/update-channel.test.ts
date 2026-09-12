@@ -302,7 +302,7 @@ test("standalone core and compatibility updates enter the WAL before pointer mut
   assert.match(core, /writeRollbackState\(before, plannedAfter, "applying"\)[\s\S]*updateCoreUnlocked/);
   assert.match(source, /pendingCoreActivation\(\)[\s\S]*update_staged_core_manifest_mismatch[\s\S]*rollbackAllUpdates\(\)[\s\S]*update_staged_core_rollback_failed/);
   assert.match(server, /sendJson\(response, 202, \{ accepted: true, update_id: operation\.id, state: "STAGING"[\s\S]*void \(async \(\) => \{[\s\S]*const result = await installGatewayUpdate\(\)/);
-  assert.match(relayServer, /const updater = new HubUpdater\(options\.updaterDirectory\)/);
+  assert.match(relayServer, /const updater = new HubUpdater\(options\.updaterDirectory, updateChannel\)/);
   assert.match(relayServer, /url\.pathname === "\/api\/update"[\s\S]*updater\.current\(String\(url\.searchParams\.get\("update_id"\)/);
   assert.match(relayServer, /url\.pathname === "\/api\/update\/check"[\s\S]*await updater\.check\(\)/);
   assert.match(relayServer, /url\.pathname === "\/api\/update\/install"[\s\S]*await updater\.install\(/);

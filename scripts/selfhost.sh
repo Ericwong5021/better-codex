@@ -260,6 +260,11 @@ upgrade_vps() {
     compose_args+=(--profile standalone)
   fi
   docker compose "${compose_args[@]}" config --quiet
+  local free_kib total_kib
+  read -r total_kib free_kib < <(df -Pk "$directory" | awk 'NR==2 {print $2, $4}')
+  [[ "$free_kib" =~ ^[0-9]+$ && "$total_kib" =~ ^[0-9]+$ ]] || fail "unable to inspect VPS update storage"
+  [ "$total_kib" -gt 0 ] || fail "invalid VPS storage size"
+  [ "$free_kib" -ge 10485760 ] && [ "$((free_kib * 100 / total_kib))" -ge 5 ] || fail "VPS update blocked by storage warning reserve: free_kib=$free_kib total_kib=$total_kib"
   if [ "$external_proxy" -eq 1 ]; then
     docker compose "${compose_args[@]}" stop caddy
   fi
@@ -284,7 +289,7 @@ upgrade_vps() {
     docker compose "${compose_args[@]}" build hub
     docker compose "${compose_args[@]}" run --rm --no-deps hub node "$backup_cli" restore "$backup"
     docker compose "${compose_args[@]}" up -d --wait "${up_services[@]}"
-    docker compose "${compose_args[@]}" exec -T -e TARGET_VERSION="$previous_version" hub node -e 'fetch("http://127.0.0.1:4318/healthz").then(response=>response.json()).then(value=>{if(value.ok!==true||value.version!==process.env.TARGET_VERSION)process.exit(1)})'
+    docker compose "${compose_args[@]}" exec -T -e TARGET_VERSION="$previous_version" hub node -e 'const deadline=Date.now()+120000; (async()=>{while(true){try{const response=await fetch("http://127.0.0.1:4318/readyz",{signal:AbortSignal.timeout(5000)});const value=await response.json();if(response.ok&&value.ok===true&&value.version===process.env.TARGET_VERSION)return;console.error(JSON.stringify({event:"update_readiness_pending",target:process.env.TARGET_VERSION,status:response.status,value}));}catch(error){console.error(JSON.stringify({event:"update_readiness_failed",target:process.env.TARGET_VERSION,error:String(error)}));}if(Date.now()>=deadline)process.exit(1);await new Promise(resolve=>setTimeout(resolve,2000));}})()'
   }
   write_upgrade_progress downloading 50
   checkout_source "$directory" "$target"
@@ -302,7 +307,7 @@ upgrade_vps() {
     fail "VPS online updater verification failed and the previous version was restored"
   fi
   write_upgrade_progress health_check 90
-  if ! docker compose "${compose_args[@]}" exec -T -e TARGET_VERSION="${target#v}" hub node -e 'fetch("http://127.0.0.1:4318/healthz").then(response=>response.json()).then(value=>{if(value.ok!==true||value.version!==process.env.TARGET_VERSION)process.exit(1)})'; then
+  if ! docker compose "${compose_args[@]}" exec -T -e TARGET_VERSION="${target#v}" hub node -e 'const deadline=Date.now()+120000; (async()=>{while(true){try{const response=await fetch("http://127.0.0.1:4318/readyz",{signal:AbortSignal.timeout(5000)});const value=await response.json();if(response.ok&&value.ok===true&&value.version===process.env.TARGET_VERSION)return;console.error(JSON.stringify({event:"update_readiness_pending",target:process.env.TARGET_VERSION,status:response.status,value}));}catch(error){console.error(JSON.stringify({event:"update_readiness_failed",target:process.env.TARGET_VERSION,error:String(error)}));}if(Date.now()>=deadline)process.exit(1);await new Promise(resolve=>setTimeout(resolve,2000));}})()'; then
     rollback_vps
     fail "VPS upgrade health check failed and the previous version was restored"
   fi
@@ -312,7 +317,7 @@ upgrade_vps() {
       rollback_vps
       fail "VPS public domain is invalid and the previous version was restored"
     }
-    if ! public_health="$(retry curl -fsSL --connect-timeout 15 --max-time 30 "https://$domain/healthz")" || ! grep -Fq '"ok":true' <<< "$public_health" || ! grep -Fq '"version":"'"${target#v}"'"' <<< "$public_health"; then
+    if ! public_health="$(retry curl -fsSL --connect-timeout 15 --max-time 30 "https://$domain/readyz")" || ! grep -Fq '"ok":true' <<< "$public_health" || ! grep -Fq '"version":"'"${target#v}"'"' <<< "$public_health"; then
       rollback_vps
       fail "VPS public health check failed and the previous version was restored"
     fi

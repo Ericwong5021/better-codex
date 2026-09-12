@@ -129,7 +129,7 @@ Codex 通过本地 MCP 应用识别 Better Codex 的应用入口和路由，让�
 `better-codex eject` 只关闭页面集成，任务数据和安装组件会保留。`better-codex uninstall` 会删除 MCP、后台服务、启动入口、Skill、Agent 配置、本地数据和 CLI bundle。
 
 **更新怎么做？**<br>
-Better Codex 会在后台检查带签名的更新清单，发现新版本时在 Codex 内提示。你也可以随时重新运行安装命令，它会优先原地升级。远程访问使用独立的 VPS Relay 和 Web UI 更新流程，Beta 测试者需要按照 [Beta 升级指南](BETA_UPGRADE.zh.md)完成并验证两侧升级。
+Better Codex 会在后台检查带签名的更新清单，发现新版本时在 Codex 内提示。你也可以随时重新运行安装命令，它会优先原地升级。VPS Relay 和 Web UI 使用独立更新流程；新版自部署默认每小时检查签名正式版并自动升级，失败后暂停自动重试。旧 VPS 需先手动升级一次以启用该能力，配置与验证见 [自部署指南](SELF_HOSTING.md#automatic-relay-updates)。
 
 **支持哪些平台？**<br>
 macOS 版 Codex Desktop（Apple Silicon 和 Intel），以及 Windows x64 上 Microsoft Store 版本的 Codex。Release 安装包和 CI 覆盖全部三个平台。Codex 兼容性按能力检测，而不是绑定一个永久版本列表；缺少必要页面能力时，Better Codex 会停止页面集成并报告不兼容，不修改看板数据。
