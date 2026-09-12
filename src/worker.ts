@@ -806,6 +806,7 @@ export class IssueWorker {
       "--json",
       "--color",
       "never",
+      "--skip-git-repo-check",
       "-m",
       this.store.getSchedulerModel(defaultAgentProfile().model),
       "-c",
