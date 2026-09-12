@@ -780,6 +780,69 @@ function spawnAbandonedUpdateRecovery() {
   }
 }
 
+function terminalUpdateOperation(status: string | undefined) {
+  return ["COMPLETED", "ROLLED_BACK", "FAILED"].includes(status || "");
+}
+
+async function recoverStaleRuntimeHandoff(identity: ReturnType<typeof claimRuntimeAuthority>, store: Store, worker: IssueWorker) {
+  const updateId = identity.handoffUpdateId;
+  if (!updateId) return;
+  const operation = store.getUpdateOperation(updateId);
+  const activation = readGatewayUpdateActivationState();
+  const canResume = Boolean(
+    operation
+      && !terminalUpdateOperation(operation.status)
+      && activation?.status === "activating"
+      && activation.updateId === updateId
+      && activation.targetRuntimeGeneration === identity.generation
+      && (!activation.coreVersion || activation.coreVersion === identity.version),
+  );
+  if (canResume) return;
+  if (!operation) throw new Error("update_operation_not_found");
+
+  const expectedCore = operation.target_core_version || activation?.coreVersion || null;
+  const previousActivationError = typeof activation?.error === "string" && activation.error ? activation.error : null;
+  let outcome: "committed" | "rolled_back";
+  if (operation.status === "COMPLETED") {
+    outcome = "committed";
+  } else {
+    if (expectedCore || !terminalUpdateOperation(operation.status)) {
+      try {
+        rollbackAbandonedUpdate(expectedCore);
+      } catch (error) {
+        if (!(terminalUpdateOperation(operation.status) && error instanceof Error && error.message === "update_rollback_state_missing")) throw error;
+      }
+    }
+    const current = store.getUpdateOperation(updateId);
+    if (current && !terminalUpdateOperation(current.status)) {
+      store.transitionUpdateOperation(updateId, "FAILED", { errorCode: previousActivationError || "update_runtime_handoff_orphaned" });
+    }
+    outcome = "rolled_back";
+  }
+
+  if (!mockupEnabled && process.env.BETTER_CODEX_DISABLE_RUNTIME_SESSION_RELAY !== "1" && process.env.BETTER_CODEX_DISABLE_DELEGATION !== "1" && !process.env.NODE_TEST_CONTEXT) {
+    try {
+      const snapshot = await worker.waitForSessionHandoffReplay();
+      if (operation.host_instance_id && snapshot.host_instance_id !== operation.host_instance_id) throw new Error("session_host_identity_mismatch");
+      await worker.reconcileSessionHandoff(snapshot);
+      if (!identity.handoffHostReplacement) await worker.completeSessionHandoff(updateId);
+    } finally {
+      worker.stopSessionHostClient();
+    }
+  }
+
+  completeRuntimeAuthorityHandoff(identity, updateId, outcome);
+  identity.handoffUpdateId = null;
+  identity.handoffRecovery = false;
+  identity.handoffHostReplacement = false;
+  if (outcome === "committed") {
+    recordGatewayUpdateActivation("success", null, { core: activation?.coreVersion || operation.target_core_version || null, compatibility: activation?.compatibilityVersion || null }, null, updateId, identity.generation);
+  } else {
+    recordGatewayUpdateActivation("error", previousActivationError || operation.error_code || "update_runtime_handoff_orphaned", { core: activation?.coreVersion || operation.target_core_version || null, compatibility: activation?.compatibilityVersion || null }, null, updateId, identity.generation);
+  }
+  console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "runtime", event: "stale_runtime_handoff_recovered", update_id: updateId, runtime_instance_id: identity.instanceId, runtime_pid: identity.pid, runtime_generation: identity.generation, operation_status: operation.status, activation_status: activation?.status || null, outcome })}`);
+}
+
 export function startServer() {
   if (!Number.isInteger(runtimePort) || runtimePort < 0 || runtimePort > 65535) throw new Error("invalid_runtime_port");
   const remoteMode = readRemoteMode();
@@ -2475,81 +2538,92 @@ export function startServer() {
       if (!mockupEnabled && remoteMode === "projection") syncClient.start();
       if (!mockupEnabled && remoteMode === "relay") relayClient.start();
     };
-    if (restartAfterAbandonedUpdate) {
-      setImmediate(() => server.close(() => {
-        cleanup();
-        try {
-          spawnAbandonedUpdateRecovery();
-          process.exit(0);
-        } catch (error) {
-          console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "update", event: "abandoned_update_recovery_failed", error: error instanceof Error ? error.message : String(error) })}`);
-          process.exit(1);
-        }
-      }));
-    } else if (!identity.handoffUpdateId) {
-      runtimeServingReady = true;
-      startRuntimeServices();
-    } else {
-      const updateId = identity.handoffUpdateId;
-      void (async () => {
-        let operation = store.getUpdateOperation(updateId);
-        if (!operation) throw new Error("update_operation_not_found");
-        const rollingBack = identity.handoffRecovery;
-        const activation = readGatewayUpdateActivationState();
-        if (activation?.status !== "activating" || activation.updateId !== updateId) throw new Error("update_activation_state_mismatch");
-        if (!rollingBack && (typeof activation.targetRuntimeGeneration !== "number" || activation.targetRuntimeGeneration > identity.generation || activation.coreVersion && activation.coreVersion !== identity.version)) throw new Error("update_activation_identity_mismatch");
-        if (operation.status === "COMPLETED" || operation.status === "ROLLED_BACK") {
-          completeRuntimeAuthorityHandoff(identity, updateId, operation.status === "ROLLED_BACK" ? "rolled_back" : "committed");
-          identity.handoffUpdateId = null;
-          identity.handoffRecovery = false;
-          identity.handoffHostReplacement = false;
-          publishRuntimeState({ ...identity, port: address.port });
-          if (operation.status === "COMPLETED") recordGatewayUpdateActivation("success", null, { core: operation.target_core_version, compatibility: activation.compatibilityVersion || null }, null, updateId, identity.generation);
-          runtimeServingReady = true;
-          startRuntimeServices();
-          return;
-        }
-        if (rollingBack && operation.status === "RESTARTING_RUNTIME") store.transitionUpdateOperation(updateId, "ROLLING_BACK");
-        if (rollingBack && operation.status !== "RESTARTING_RUNTIME" && operation.status !== "ROLLING_BACK") throw new Error("update_rollback_state_invalid");
-        if (!rollingBack && !["RESTARTING_RUNTIME", "REPLAYING", "RECONCILING", "SERVING_READY"].includes(operation.status)) throw new Error("update_activation_state_invalid");
-        if (!rollingBack && operation.status === "RESTARTING_RUNTIME") store.transitionUpdateOperation(updateId, "REPLAYING", { targetRuntimeGeneration: identity.generation });
-        const snapshot = await worker.waitForSessionHandoffReplay();
-        if (!identity.handoffHostReplacement && snapshot.host_instance_id !== operation.host_instance_id) throw new Error("session_host_identity_mismatch");
-        if (identity.handoffHostReplacement && (snapshot.active_turns.length || snapshot.command_in_flight || snapshot.queued_deliveries)) throw new Error("replacement_session_host_not_idle");
-        if (identity.handoffHostReplacement) store.transitionUpdateOperation(updateId, store.getUpdateOperation(updateId)!.status, { hostInstanceId: snapshot.host_instance_id });
-        operation = store.getUpdateOperation(updateId)!;
-        if (!rollingBack && operation.status === "REPLAYING") store.transitionUpdateOperation(updateId, "RECONCILING");
-        await worker.reconcileSessionHandoff(snapshot);
-        operation = store.getUpdateOperation(updateId)!;
-        if (!rollingBack && operation.status === "RECONCILING") store.transitionUpdateOperation(updateId, "SERVING_READY");
-        if (rollingBack && !identity.handoffHostReplacement) await worker.completeSessionHandoff(updateId);
-        if (rollingBack) {
-          store.transitionUpdateOperation(updateId, "ROLLED_BACK");
-          completeRuntimeAuthorityHandoff(identity, updateId, "rolled_back");
-          identity.handoffUpdateId = null;
-          identity.handoffRecovery = false;
-          identity.handoffHostReplacement = false;
-          publishRuntimeState({ ...identity, port: address.port });
-        }
-        runtimeServingReady = true;
-        startRuntimeServices();
-        console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "runtime", event: rollingBack ? "update_rollback_ready" : "update_serving_ready_pending_commit", update_id: updateId, runtime_instance_id: identity.instanceId, runtime_generation: identity.generation, host_instance_id: snapshot.host_instance_id, app_server_pid: snapshot.app_server_pid, app_server_started_at: snapshot.app_server_started_at, active_turns: snapshot.active_turns, queued_deliveries: snapshot.queued_deliveries })}`);
-      })().catch(error => {
-        const code = error instanceof Error ? error.message : "runtime_handoff_reconciliation_failed";
-        const operation = store.getUpdateOperation(updateId);
-        try {
-          if (operation?.status === "ROLLING_BACK") store.transitionUpdateOperation(updateId, "FAILED", { errorCode: code });
-          else if (operation && !["COMPLETED", "ROLLED_BACK", "FAILED"].includes(operation.status)) store.transitionUpdateOperation(updateId, "ROLLING_BACK", { errorCode: code });
-        } catch (transitionError) {
-          console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "runtime", event: "update_failure_transition_failed", update_id: updateId, error: transitionError instanceof Error ? transitionError.message : String(transitionError) })}`);
-        }
-        console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "runtime", event: "runtime_handoff_reconciliation_failed", update_id: updateId, runtime_instance_id: identity.instanceId, runtime_generation: identity.generation, error: code })}`);
+    const startupHandoffUpdateId = identity.handoffUpdateId;
+    const continueStartup = () => {
+      publishRuntimeState({ ...identity, port: address.port });
+      if (restartAfterAbandonedUpdate) {
         setImmediate(() => server.close(() => {
           cleanup();
-          process.exit(1);
+          try {
+            spawnAbandonedUpdateRecovery();
+            process.exit(0);
+          } catch (error) {
+            console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "update", event: "abandoned_update_recovery_failed", error: error instanceof Error ? error.message : String(error) })}`);
+            process.exit(1);
+          }
         }));
-      });
-    }
+      } else if (!identity.handoffUpdateId) {
+        runtimeServingReady = true;
+        startRuntimeServices();
+      } else {
+        const updateId = identity.handoffUpdateId;
+        void (async () => {
+          let operation = store.getUpdateOperation(updateId);
+          if (!operation) throw new Error("update_operation_not_found");
+          const rollingBack = identity.handoffRecovery;
+          const activation = readGatewayUpdateActivationState();
+          if (activation?.status !== "activating" || activation.updateId !== updateId) throw new Error("update_activation_state_mismatch");
+          if (!rollingBack && (typeof activation.targetRuntimeGeneration !== "number" || activation.targetRuntimeGeneration > identity.generation || activation.coreVersion && activation.coreVersion !== identity.version)) throw new Error("update_activation_identity_mismatch");
+          if (operation.status === "COMPLETED" || operation.status === "ROLLED_BACK") {
+            completeRuntimeAuthorityHandoff(identity, updateId, operation.status === "ROLLED_BACK" ? "rolled_back" : "committed");
+            identity.handoffUpdateId = null;
+            identity.handoffRecovery = false;
+            identity.handoffHostReplacement = false;
+            publishRuntimeState({ ...identity, port: address.port });
+            if (operation.status === "COMPLETED") recordGatewayUpdateActivation("success", null, { core: operation.target_core_version, compatibility: activation.compatibilityVersion || null }, null, updateId, identity.generation);
+            runtimeServingReady = true;
+            startRuntimeServices();
+            return;
+          }
+          if (rollingBack && operation.status === "RESTARTING_RUNTIME") store.transitionUpdateOperation(updateId, "ROLLING_BACK");
+          if (rollingBack && operation.status !== "RESTARTING_RUNTIME" && operation.status !== "ROLLING_BACK") throw new Error("update_rollback_state_invalid");
+          if (!rollingBack && !["RESTARTING_RUNTIME", "REPLAYING", "RECONCILING", "SERVING_READY"].includes(operation.status)) throw new Error("update_activation_state_invalid");
+          if (!rollingBack && operation.status === "RESTARTING_RUNTIME") store.transitionUpdateOperation(updateId, "REPLAYING", { targetRuntimeGeneration: identity.generation });
+          const snapshot = await worker.waitForSessionHandoffReplay();
+          if (!identity.handoffHostReplacement && snapshot.host_instance_id !== operation.host_instance_id) throw new Error("session_host_identity_mismatch");
+          if (identity.handoffHostReplacement && (snapshot.active_turns.length || snapshot.command_in_flight || snapshot.queued_deliveries)) throw new Error("replacement_session_host_not_idle");
+          if (identity.handoffHostReplacement) store.transitionUpdateOperation(updateId, store.getUpdateOperation(updateId)!.status, { hostInstanceId: snapshot.host_instance_id });
+          operation = store.getUpdateOperation(updateId)!;
+          if (!rollingBack && operation.status === "REPLAYING") store.transitionUpdateOperation(updateId, "RECONCILING");
+          await worker.reconcileSessionHandoff(snapshot);
+          operation = store.getUpdateOperation(updateId)!;
+          if (!rollingBack && operation.status === "RECONCILING") store.transitionUpdateOperation(updateId, "SERVING_READY");
+          if (rollingBack && !identity.handoffHostReplacement) await worker.completeSessionHandoff(updateId);
+          if (rollingBack) {
+            store.transitionUpdateOperation(updateId, "ROLLED_BACK");
+            completeRuntimeAuthorityHandoff(identity, updateId, "rolled_back");
+            identity.handoffUpdateId = null;
+            identity.handoffRecovery = false;
+            identity.handoffHostReplacement = false;
+            publishRuntimeState({ ...identity, port: address.port });
+          }
+          runtimeServingReady = true;
+          startRuntimeServices();
+          console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "runtime", event: rollingBack ? "update_rollback_ready" : "update_serving_ready_pending_commit", update_id: updateId, runtime_instance_id: identity.instanceId, runtime_generation: identity.generation, host_instance_id: snapshot.host_instance_id, app_server_pid: snapshot.app_server_pid, app_server_started_at: snapshot.app_server_started_at, active_turns: snapshot.active_turns, queued_deliveries: snapshot.queued_deliveries })}`);
+        })().catch(error => {
+          const code = error instanceof Error ? error.message : "runtime_handoff_reconciliation_failed";
+          const operation = store.getUpdateOperation(updateId);
+          try {
+            if (operation?.status === "ROLLING_BACK") store.transitionUpdateOperation(updateId, "FAILED", { errorCode: code });
+            else if (operation && !["COMPLETED", "ROLLED_BACK", "FAILED"].includes(operation.status)) store.transitionUpdateOperation(updateId, "ROLLING_BACK", { errorCode: code });
+          } catch (transitionError) {
+            console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "runtime", event: "update_failure_transition_failed", update_id: updateId, error: transitionError instanceof Error ? transitionError.message : String(transitionError) })}`);
+          }
+          console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "runtime", event: "runtime_handoff_reconciliation_failed", update_id: updateId, runtime_instance_id: identity.instanceId, runtime_generation: identity.generation, error: code })}`);
+          setImmediate(() => server.close(() => {
+            cleanup();
+            process.exit(1);
+          }));
+        });
+      }
+    };
+    void (startupHandoffUpdateId ? recoverStaleRuntimeHandoff(identity, store, worker) : Promise.resolve()).then(continueStartup).catch(error => {
+      console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "runtime", event: "runtime_startup_recovery_failed", update_id: startupHandoffUpdateId, runtime_instance_id: identity.instanceId, runtime_generation: identity.generation, error: error instanceof Error ? error.message : String(error) })}`);
+      setImmediate(() => server.close(() => {
+        cleanup();
+        process.exit(1);
+      }));
+    });
     console.log(`Better Codex Runtime ${coreVersion} listening on http://127.0.0.1:${address.port}`);
   });
   const stop = () => {
