@@ -41,7 +41,7 @@ import { betterCodexMcpName, startMcpAppServer } from "./mcp-app.js";
 import { packagedBuild } from "./build.js";
 import { bundledBetterCodexSkill } from "./bundled-skill.js";
 import { installService, repairServiceConfiguration, restartService, serviceLogs, serviceStatus, startService, stopService, uninstallService } from "./service.js";
-import { activeVersions, checkForUpdates, maybeDelegateToActiveCore, recordGatewayUpdateActivation, rollbackActivatedUpdate, rollbackAllUpdates, selectedUpdateChannel, setUpdateChannel, updateAll, updateCompatibility, type UpdateChannel } from "./updater.js";
+import { activeVersions, checkForUpdates, maybeDelegateToActiveCore, prepareUpdateRollback, readGatewayUpdateActivationState, recordGatewayUpdateActivation, rollbackActivatedUpdate, rollbackAllUpdates, selectedUpdateChannel, setUpdateChannel, type UpdateChannel } from "./updater.js";
 import { requireCodexExecutablePath } from "./codex-cli.js";
 import { normalizeHubUrl, readSyncConfiguration, removeSyncConfiguration, writeSyncConfiguration } from "./sync-config.js";
 import { normalizeRelayUrl, readRelayConfiguration, removeRelayConfiguration, writeRelayConfiguration } from "./relay-config.js";
@@ -141,7 +141,7 @@ async function installRuntimeUpdate(targetVersion: string | undefined, channel: 
       if (!operation || operation.id !== updateId) throw new Error("update_operation_missing");
       if (operation.status === "FAILED" || operation.status === "ROLLED_BACK") throw new Error(`update_terminal:${operation.error_code || operation.status.toLowerCase()}`);
       if (operation.status === "COMPLETED") {
-        const runtime = await health();
+        const runtime = await readiness();
         const currentVersion = String(runtime.version || "");
         if (targetVersion && currentVersion !== targetVersion) throw new Error(`update_target_version_mismatch:${targetVersion}:${currentVersion || "unknown"}`);
         return { updated: true, update_id: updateId, currentVersion, operation };
@@ -159,7 +159,7 @@ async function installRuntimeUpdate(targetVersion: string | undefined, channel: 
 async function health() {
   const runtime = readRuntimeState();
   if (!runtime) throw new Error("runtime_unavailable");
-  const response = await fetch(`http://127.0.0.1:${runtime.port}/health`);
+  const response = await fetch(`http://127.0.0.1:${runtime.port}/health`, { signal: AbortSignal.timeout(5000) });
   if (!response.ok) throw new Error("runtime_unavailable");
   const value = await response.json() as Record<string, unknown>;
   if (value.instanceId !== runtime.instanceId || value.pid !== runtime.pid) throw new Error("runtime_identity_mismatch");
@@ -169,7 +169,7 @@ async function health() {
 async function readiness() {
   const runtime = readRuntimeState();
   if (!runtime) throw new Error("runtime_unavailable");
-  const response = await fetch(`http://127.0.0.1:${runtime.port}/readyz`);
+  const response = await fetch(`http://127.0.0.1:${runtime.port}/readyz`, { signal: AbortSignal.timeout(5000) });
   const value = await response.json() as Record<string, unknown>;
   if (value.instanceId !== runtime.instanceId || value.pid !== runtime.pid) throw new Error("runtime_identity_mismatch");
   if (!response.ok || value.ok !== true) {
@@ -397,10 +397,11 @@ async function runRuntime() {
 }
 
 async function stopFailedUpdateRuntime(updateId: string) {
-  stopService();
   const current = readRuntimeState();
+  if (current && current.handoffUpdateId !== updateId) throw new Error("update_rollback_runtime_identity_mismatch");
+  if (runtimeAuthorityUpdateState(updateId).state !== "active") throw new Error("update_rollback_authority_mismatch");
+  stopService();
   if (!current) return;
-  if (current.handoffUpdateId !== updateId) throw new Error("update_rollback_runtime_identity_mismatch");
   try {
     await request("/api/shutdown", { method: "POST" });
   } catch (error) {
@@ -418,26 +419,26 @@ async function stopFailedUpdateRuntime(updateId: string) {
   if (processAlive(current.pid)) throw new Error("update_rollback_runtime_stop_timeout");
 }
 
-async function applyUpdate(previousRuntimePid: number, updates: { core: string | null; compatibility: string | null }, updateId: string, sourceCoreVersion: string, targetGeneration: number, drainPath?: string) {
+async function applyUpdate(previousRuntimePid: number, updates: { core: string | null; compatibility: string | null }, updateId: string, sourceCoreVersion: string, targetGeneration: number, drainPath?: string, recovering = false) {
   let mcp: unknown;
   let injection: unknown = { refreshed: false, pending: true, reason: "codex_not_connected" };
   let launchIntegration: unknown;
   try {
-    recordGatewayUpdateActivation("activating", null, updates, process.pid, updateId, targetGeneration);
+    if (recovering) throw new Error(readGatewayUpdateActivationState()?.error || "update_activation_interrupted");
+    recordGatewayUpdateActivation("activating", null, updates, process.pid, updateId, targetGeneration, { sourceCoreVersion });
     const stopDeadline = Date.now() + updateRuntimeStopTimeout;
     while (processAlive(previousRuntimePid) && (!drainPath || !existsSync(drainPath))) {
       if (Date.now() >= stopDeadline) throw new Error("update_runtime_stop_timeout");
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     if (drainPath && existsSync(drainPath)) unlinkSync(drainPath);
-    setInjectionEnabled(false);
     installService();
     await ensureRuntime(120_000);
     let runtime = await waitForRuntimeReady(120_000);
     if (runtime.generation !== targetGeneration || runtime.handoffUpdateId !== updateId) throw new Error("update_runtime_identity_mismatch");
     mcp = installMcp();
     try {
-      injection = { refreshed: true, targets: await cdpRefreshAndInject(cdpPort, activeRuntimePort(), accessToken()) };
+      injection = injectionEnabled() ? { refreshed: true, targets: await cdpRefreshAndInject(cdpPort, activeRuntimePort(), accessToken()) } : { refreshed: false, disabled: true };
     } catch (error) {
       injection = { refreshed: false, pending: true, error: error instanceof Error ? error.message : "injection_refresh_pending" };
     }
@@ -458,30 +459,52 @@ async function applyUpdate(previousRuntimePid: number, updates: { core: string |
     return { updated: true, runtime, injection, launchIntegration, mcp };
   } catch (error) {
     const activationError = error instanceof Error ? error.message : "update_activation_failed";
-    const authority = runtimeAuthorityUpdateState(updateId, targetGeneration);
+    const authority = runtimeAuthorityUpdateState(updateId);
     if (authority.state === "committed") {
       const runtime = await waitForRuntimeReady(30_000);
       recordGatewayUpdateActivation("success", null, updates, null, updateId);
       return { updated: true, runtime, injection, launchIntegration, mcp, commit_recovered: true };
     }
-    if (authority.state !== "active") throw new Error(`update_activation_authority_${authority.state}`, { cause: error });
+    if (authority.state === "rolled_back") {
+      const runtime = await waitForRuntimeReady(30_000);
+      if (runtime.version !== sourceCoreVersion) throw new Error("update_rollback_version_mismatch");
+      recordGatewayUpdateActivation("error", activationError, updates, null, updateId, authority.generation, { stage: "rolled_back" });
+      throw error;
+    }
+    if (authority.state !== "active" || authority.generation === null) throw new Error(`update_activation_authority_${authority.state}`, { cause: error });
     try {
+      prepareUpdateRollback(updateId, activationError, authority.generation);
+      const current = readRuntimeState();
+      if (current?.handoffUpdateId === updateId) {
+        try {
+          await request("/api/update/rollback", { method: "POST", body: JSON.stringify({ update_id: updateId, runtime_instance_id: current.instanceId }), signal: AbortSignal.timeout(5000) });
+        } catch (transitionError) {
+          console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ scope: "update", event: "rollback_intent_delivery_pending", update_id: updateId, error: String(transitionError) })}`);
+        }
+      }
       await stopFailedUpdateRuntime(updateId);
-      const rollback = rollbackActivatedUpdate(updates);
+      const rollback = rollbackActivatedUpdate(updates, updateId);
       if ("reason" in rollback && rollback.reason === "update_superseded") throw new Error("update_superseded");
-      reserveRuntimeAuthorityRecovery(updateId, sourceCoreVersion, targetGeneration);
+      const recoveryGeneration = reserveRuntimeAuthorityRecovery(updateId, sourceCoreVersion, authority.generation);
+      recordGatewayUpdateActivation("activating", activationError, updates, process.pid, updateId, recoveryGeneration, { stage: "rolling_back", sourceCoreVersion });
       installService();
       await ensureRuntime(120_000);
-      await waitForRuntimeReady(120_000);
+      let runtime = await waitForRuntimeReady(120_000);
+      if (runtime.version !== sourceCoreVersion || activeVersions().managedCore !== sourceCoreVersion) throw new Error("update_rollback_version_mismatch");
+      if (runtime.handoffUpdateId === updateId) {
+        await request("/api/update/commit", { method: "POST", body: JSON.stringify({ update_id: updateId, runtime_instance_id: runtime.instanceId, target_runtime_generation: runtime.generation, owner_pid: process.pid, recovery: true }), signal: AbortSignal.timeout(30_000) });
+        runtime = await waitForRuntimeReady(30_000);
+      }
+      if (runtime.handoffUpdateId !== null || runtimeAuthorityUpdateState(updateId).state !== "rolled_back") throw new Error("update_rollback_commit_missing");
     } catch (rollbackError) {
       const rollbackCode = rollbackError instanceof Error ? rollbackError.message : "update_rollback_failed";
-      recordGatewayUpdateActivation("error", `${activationError}:${rollbackCode}`, updates, null, updateId);
+      recordGatewayUpdateActivation("error", activationError, updates, null, updateId, null, { stage: "recovery_failed", failure: { code: activationError, stage: "activating", recoveryError: rollbackCode } });
+      const failedRuntime = readRuntimeState();
+      if (!failedRuntime || failedRuntime.handoffUpdateId === updateId) stopService();
       throw new AggregateError([error, rollbackError], "update_activation_and_rollback_failed");
     }
-    recordGatewayUpdateActivation("error", activationError, updates, null, updateId);
+    recordGatewayUpdateActivation("error", activationError, updates, null, updateId, null, { stage: "rolled_back" });
     throw error;
-  } finally {
-    setInjectionEnabled(true);
   }
 }
 
@@ -974,7 +997,8 @@ async function doctor(allowPendingInjection = false) {
   const injectedTarget = injection.targets.some(target => Boolean((target as { entry?: boolean }).entry) && Boolean((target as { ready?: boolean }).ready));
   const activeInjectorPid = injectorPid();
   const injectionReady = injectionEnabled() && Boolean(activeInjectorPid) && injectedTarget;
-  const pendingInjection = allowPendingInjection && !injectionReady;
+  const desktopState = (compatibility as { state?: string } | null)?.state;
+  const pendingInjection = allowPendingInjection && !injectionReady && (desktopState === "waiting_window" || desktopState === "disabled");
   const checks = {
     core: { ok: true, ...activeVersions(), profile: betterCodexProfile, home: betterCodexHome, executable: process.env.BETTER_CODEX_LAUNCHER_PATH ?? process.execPath },
     service: { ok: service.installed, ...service },
@@ -988,7 +1012,7 @@ async function doctor(allowPendingInjection = false) {
     sessionHost: { ...sessionHost, required: sessionHostRequired },
     updateKey,
   };
-  return { ok: Boolean(runtime.ok) && Boolean((database as { ok?: boolean }).ok) && codex.installed && Boolean((compatibility as { compatible?: boolean } | null)?.compatible) && (injectionReady || pendingInjection) && skills.betterCodex && mcp.installed && mcp.configured && (!sessionHostRequired || sessionHost.ok) && updateKey, checks };
+  return { ok: Boolean(runtime.ok) && Boolean((database as { ok?: boolean }).ok) && codex.installed && (Boolean((compatibility as { compatible?: boolean } | null)?.compatible) || pendingInjection) && (injectionReady || pendingInjection) && skills.betterCodex && mcp.installed && mcp.configured && (!sessionHostRequired || sessionHost.ok) && updateKey, checks };
 }
 
 async function uninstall() {
@@ -1389,7 +1413,7 @@ async function main() {
     return print(await applyUpdate(Number(action), {
       core: option(args, "--expected-core") ?? (args.includes("--core-updated") ? versions.core : null),
       compatibility: option(args, "--expected-compatibility") ?? (args.includes("--compatibility-updated") ? versions.compatibility : null),
-    }, updateId, sourceCoreVersion, targetGeneration, option(args, "--drain-path")));
+    }, updateId, sourceCoreVersion, targetGeneration, option(args, "--drain-path"), args.includes("--recover")));
   }
   if (command === "version" || command === "--version" || command === "-v") {
     const versions = activeVersions();
@@ -1408,33 +1432,9 @@ async function main() {
     if (!["stable", "preview"].includes(selected)) throw new Error("update_channel_invalid");
     const channel = selected as UpdateChannel;
     if (action === "check") return print(await checkForUpdates(channel));
-    if (action === "compatibility") {
-      const result = await updateCompatibility(undefined, channel);
-      if (result.updated && injectionEnabled()) {
-        try {
-          await ensureRuntime();
-          await cdpInject(cdpPort, activeRuntimePort(), accessToken(), false);
-          return print({ ...result, injection: { restored: true } });
-        } catch (error) {
-          return print({ ...result, injection: { restored: false, pending: true, error: error instanceof Error ? error.message : "injection_unavailable" } });
-        }
-      }
-      return print(result);
-    }
     if (action === "rollback") return print(rollbackAllUpdates());
-    if (action && !action.startsWith("--")) return usage();
-    const result = await updateAll(channel);
-    const mcp = installMcp();
-    if (result.compatibility.updated && injectionEnabled()) {
-      try {
-        await ensureRuntime();
-        await cdpInject(cdpPort, activeRuntimePort(), accessToken(), false);
-        return print({ ...result, mcp, injection: { restored: true } });
-      } catch (error) {
-        return print({ ...result, mcp, injection: { restored: false, pending: true, error: error instanceof Error ? error.message : "injection_unavailable" } });
-      }
-    }
-    return print({ ...result, mcp });
+    if (action && action !== "compatibility" && !action.startsWith("--")) return usage();
+    return print(await installRuntimeUpdate(option(values, "--target-version"), channel));
   }
   if (command === "session-host") return startSessionHost();
   if (command === "runtime") return runRuntime();

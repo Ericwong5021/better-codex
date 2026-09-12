@@ -71,6 +71,12 @@ CI 同时支持普通提交与 reusable workflow。Release 与 Preview 在版本
 
 Runtime 更新继续复用持久 update operation、drain、Host capability 协商、投递 replay、generation fencing、readyz 和回滚。新增生命周期能力写入签名 manifest，旧 Host 未声明时必须完成受控替换。处于未持久化状态的旧 worker 不能被误判为空闲而强制结束。
 
+一次更新固定操作 ID、请求参数、频道、签名 manifest 和原版本指针。暂存阶段完成签名、摘要、隔离启动预检及原版本产物保留，随后才进入切换。版本化文件日志负责跨进程进度，业务数据库继续保存 operation 生命周期，schema 保持兼容。读取状态只观察；Runtime 启动和激活器通过操作身份与进程代次协调恢复，不允许查询接口或启动器自行选择回退版本。
+
+切换失败先保存 `rolling_back` 意图，再停止身份匹配的目标 Runtime。恢复指针不代表恢复完成：原版本、指针、Host 重连、投递重放、业务 reconciliation 和服务就绪全部通过后才提交 `ROLLED_BACK`。激活器中断由 Runtime 接管恢复；恢复失败保留错误和日志并暂停激活。已经提交的操作拒绝迟到失败，业务数据库不随二进制回滚恢复备份，避免覆盖已确认的数据。
+
+`/readyz` 检查服务依赖，不再等待 Codex 注入。响应另列 `desktop` 状态：`ready`、`waiting_window`、`disabled`、`failed`。桌面记录携带 Runtime instance/generation、profile、兼容包及文档身份，旧代次探测只能视为待重探测。detached、听写和头像辅助窗口不参与兼容判定；加载和无窗口属于等待状态，主窗口能力缺失或 bootstrap 确认失败才报告集成故障。后台 injector 随窗口出现及文档重载恢复，不修改用户的注入偏好。
+
 ## 保留的边界与风险
 
 - 本次不修改业务数据，不自动重试 BET-398，不部署本机或 VPS。新代码的上线需要正常发布与能力切换。

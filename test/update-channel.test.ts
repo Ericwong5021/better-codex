@@ -229,7 +229,7 @@ test("a committed Runtime authority cannot be reopened as rollback recovery", ()
   }
 });
 
-test("startup recovers a core and compatibility transaction interrupted between pointer commits", () => {
+test("only explicit recovery changes legacy pointers interrupted between commits", () => {
   const home = mkdtempSync(join(tmpdir(), "better-codex-update-wal-"));
   try {
     const runtime = join(home, "runtime");
@@ -245,7 +245,16 @@ test("startup recovers a core and compatibility transaction interrupted between 
       after: { core: interruptedVersion, compatibility: interruptedVersion },
       updatedAt: new Date().toISOString(),
     }));
-    const script = 'await import("./src/updater.ts"); console.log("recovered");';
+    const script = `
+      const { readFileSync } = await import("node:fs");
+      const { updateRollbackPath } = await import("./src/config.ts");
+      const before = readFileSync(updateRollbackPath, "utf8");
+      const updater = await import("./src/updater.ts");
+      updater.getGatewayUpdateState();
+      if (readFileSync(updateRollbackPath, "utf8") !== before) throw new Error("query_mutated_transaction");
+      updater.recoverInterruptedUpdateTransaction();
+      console.log("recovered");
+    `;
     const result = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "--eval", script], {
       cwd: root,
       encoding: "utf8",
@@ -259,7 +268,7 @@ test("startup recovers a core and compatibility transaction interrupted between 
   }
 });
 
-test("startup completes a rollback interrupted between pointer restores", () => {
+test("only explicit recovery completes legacy rollback interrupted between restores", () => {
   const home = mkdtempSync(join(tmpdir(), "better-codex-rollback-wal-"));
   try {
     const runtime = join(home, "runtime");
@@ -273,7 +282,16 @@ test("startup completes a rollback interrupted between pointer restores", () => 
       after: { core: interruptedVersion, compatibility: interruptedVersion },
       updatedAt: new Date().toISOString(),
     }));
-    const script = 'await import("./src/updater.ts"); console.log("recovered");';
+    const script = `
+      const { readFileSync } = await import("node:fs");
+      const { updateRollbackPath } = await import("./src/config.ts");
+      const before = readFileSync(updateRollbackPath, "utf8");
+      const updater = await import("./src/updater.ts");
+      updater.getGatewayUpdateState();
+      if (readFileSync(updateRollbackPath, "utf8") !== before) throw new Error("query_mutated_transaction");
+      updater.recoverInterruptedUpdateTransaction();
+      console.log("recovered");
+    `;
     const result = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "--eval", script], {
       cwd: root,
       encoding: "utf8",
@@ -300,8 +318,9 @@ test("standalone core and compatibility updates enter the WAL before pointer mut
   const currentActivation = server.slice(server.indexOf("if (!updated)"), server.indexOf("if (updateRelaunchScheduled)"));
   assert.match(compatibility, /writeRollbackState\(before, plannedAfter, "applying"\)[\s\S]*updateCompatibilityUnlocked/);
   assert.match(core, /writeRollbackState\(before, plannedAfter, "applying"\)[\s\S]*updateCoreUnlocked/);
-  assert.match(source, /pendingCoreActivation\(\)[\s\S]*update_staged_core_manifest_mismatch[\s\S]*rollbackAllUpdates\(\)[\s\S]*update_staged_core_rollback_failed/);
-  assert.match(server, /sendJson\(response, 202, \{ accepted: true, update_id: operation\.id, state: "STAGING"[\s\S]*void \(async \(\) => \{[\s\S]*const result = await installGatewayUpdate\(\)/);
+  assert.match(source, /pendingCoreActivation\(\)[\s\S]*update_previous_activation_pending/);
+  assert.match(source, /writeRollbackState\(transaction.before, transaction.after, "rolling_back", transaction\)/);
+  assert.match(server, /sendJson\(response, 202, \{ accepted: true, update_id: operation\.id, state: "STAGING"[\s\S]*void \(async \(\) => \{[\s\S]*const result = await installGatewayUpdate\(operation.id, requestedTargetVersion, channel\)/);
   assert.match(relayServer, /const updater = new HubUpdater\(options\.updaterDirectory, updateChannel\)/);
   assert.match(relayServer, /url\.pathname === "\/api\/update"[\s\S]*updater\.current\(String\(url\.searchParams\.get\("update_id"\)/);
   assert.match(relayServer, /url\.pathname === "\/api\/update\/check"[\s\S]*await updater\.check\(\)/);
@@ -309,8 +328,8 @@ test("standalone core and compatibility updates enter the WAL before pointer mut
   assert.ok(relayServer.indexOf('url.pathname === "/api/update/check"') < relayServer.indexOf('url.pathname.startsWith("/api/")'));
   assert.match(server, /if \(installedCoreVersion !== coreVersion\) throw new Error\(`update_core_activation_required:/);
   assert.match(currentActivation, /transitionUpdateOperation\(operation\.id, "COMPLETED"[\s\S]*recordGatewayUpdateActivation\("success"[\s\S]*update_current_confirmed/);
-  assert.match(cli, /if \(operation\.status === "COMPLETED"\) \{[\s\S]*const runtime = await health\(\)/);
-  assert.match(applyUpdate, /waitForRuntimeReady\(120_000\)[\s\S]*\/api\/update\/commit[\s\S]*runtimeAuthorityUpdateState\(updateId, targetGeneration\)/);
+  assert.match(cli, /if \(operation\.status === "COMPLETED"\) \{[\s\S]*const runtime = await readiness\(\)/);
+  assert.match(applyUpdate, /waitForRuntimeReady\(120_000\)[\s\S]*\/api\/update\/commit[\s\S]*runtimeAuthorityUpdateState\(updateId\)/);
   assert.match(server, /operation\.status === "SERVING_READY"[\s\S]*completeSessionHandoff\(updateId\)[\s\S]*transitionUpdateOperation\(updateId, "COMPLETED"\)/);
   assert.doesNotMatch(server.slice(server.indexOf('if \(!rollingBack && operation.status === "RECONCILING"'), server.indexOf("})().catch", server.indexOf('if \(!rollingBack && operation.status === "RECONCILING"'))), /transitionUpdateOperation\(updateId, "COMPLETED"\)/);
   assert.match(doctor, /runtime = await readiness\(\)[\s\S]*ok: false, ready: false/);
@@ -482,4 +501,57 @@ console.log(JSON.stringify(result));
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
+});
+
+
+test("operation journals fence interrupted rollback, stale errors, and reused request keys", () => {
+  const home = mkdtempSync(join(tmpdir(), "better-codex-update-journal-"));
+  try {
+    const script = `
+      import assert from "node:assert/strict";
+      import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+      import { dirname, join } from "node:path";
+      const config = await import("./src/config.ts");
+      const { coreVersion, bundledCompatibility } = await import("./src/compatibility.ts");
+      const runtime = await import("./src/runtime-state.ts");
+      const updater = await import("./src/updater.ts");
+      const updateId = "019fec06-788f-7af3-a031-76b546904fb0";
+      const identity = { instanceId: "current-runtime", generation: 8, processStartedAt: new Date().toISOString() };
+      mkdirSync(dirname(config.runtimeAuthorityPath), { recursive: true });
+      writeFileSync(config.runtimeAuthorityPath, JSON.stringify({ generation: 8, status: "claimed", runtimeInstanceId: identity.instanceId, runtimePid: process.pid, processStartedAt: identity.processStartedAt, updateId, targetVersion: coreVersion, recovery: false }));
+      const executable = join(config.runtimeVersionsPath, coreVersion, "better-codex.cjs");
+      mkdirSync(dirname(executable), { recursive: true });
+      writeFileSync(executable, "preserved source");
+      const source = { current: coreVersion, previous: null, executable, updatedAt: new Date().toISOString() };
+      writeFileSync(config.runtimeCurrentPath, JSON.stringify(source));
+      const transaction = { schemaVersion: 2, updateId, sourceCoreVersion: coreVersion, phase: "applying", before: { core: source, compatibility: null }, after: { core: "99.0.0", compatibility: bundledCompatibility.version }, updatedAt: new Date().toISOString() };
+      writeFileSync(config.updateRollbackPath, JSON.stringify(transaction));
+      updater.recordGatewayUpdateActivation("activating", null, { core: "99.0.0", compatibility: null }, process.pid, updateId, 8);
+      const before = readFileSync(config.updateRollbackPath, "utf8");
+      updater.getGatewayUpdateState();
+      updater.recoverInterruptedUpdateTransaction();
+      assert.equal(readFileSync(config.updateRollbackPath, "utf8"), before);
+      assert.throws(() => updater.rollbackActivatedUpdate({ core: "99.0.0", compatibility: null }, updateId), /update_rollback_intent_missing/);
+      updater.prepareUpdateRollback(updateId, "target_crashed", 8);
+      assert.equal(JSON.parse(readFileSync(config.updateRollbackPath, "utf8")).phase, "rolling_back");
+      assert.throws(() => updater.rollbackActivatedUpdate({ core: "98.0.0", compatibility: null }, updateId), /update_superseded/);
+      updater.rollbackActivatedUpdate({ core: "99.0.0", compatibility: null }, updateId);
+      assert.equal(JSON.parse(readFileSync(config.updateRollbackPath, "utf8")).phase, "restored");
+      assert.equal(JSON.parse(readFileSync(config.runtimeCurrentPath, "utf8")).current, coreVersion);
+      runtime.completeRuntimeAuthorityHandoff(identity, updateId, "committed");
+      updater.recordGatewayUpdateActivation("success", null, { core: "99.0.0", compatibility: null }, null, updateId, 8);
+      assert.throws(() => updater.recordGatewayUpdateActivation("error", "late_error", { core: "99.0.0", compatibility: null }, null, updateId, 8), /runtime_authority_update_committed/);
+      assert.throws(() => updater.prepareUpdateRollback(updateId, "late_error", 8), /update_activation_authority_committed/);
+      assert.equal(updater.getGatewayUpdateState().status, "current");
+      const request = { updateId, targetVersion: "99.0.0", channel: "stable" };
+      updater.bindGatewayUpdateRequest("request-key-123", request);
+      updater.bindGatewayUpdateRequest("request-key-123", request);
+      assert.deepEqual(updater.readGatewayUpdateRequest("request-key-123"), request);
+      assert.throws(() => updater.bindGatewayUpdateRequest("request-key-123", { ...request, targetVersion: "100.0.0" }), /update_idempotency_conflict/);
+    `;
+    const result = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "--eval", script], {
+      cwd: root, encoding: "utf8", env: { ...process.env, BETTER_CODEX_HOME: home, BETTER_CODEX_DISABLE_DELEGATION: "1" },
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+  } finally { rmSync(home, { recursive: true, force: true }); }
 });

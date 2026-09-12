@@ -36,6 +36,10 @@ function localMockupInjectionLeaseActive() {
 
 export function injectionEnabled() {
   localMockupInjectionLeaseActive();
+  return injectionPreferenceEnabled();
+}
+
+export function injectionPreferenceEnabled() {
   return readInjectionState().enabled !== false;
 }
 

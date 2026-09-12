@@ -143,7 +143,10 @@ test("CDP injection trusts only the installed Codex listener and same-port loopb
 
 test("CDP injection never treats the Better Codex Web UI as a desktop renderer", () => {
   assert.equal(targetAllowed({ url: "app://-/index.html", title: "Codex" }), true);
-  assert.equal(targetAllowed({ url: "", title: "Codex" }), true);
+  assert.equal(targetAllowed({ url: "app://-/detached-window.html?initialRoute=%2Fdetached-window", title: "Codex" }), false);
+  assert.equal(targetAllowed({ url: "app://-/index.html?initialRoute=%2Fglobal-dictation", title: "Codex" }), false);
+  assert.equal(targetAllowed({ url: "app://-/index.html?initialRoute=%2Favatar-overlay", title: "Codex" }), false);
+  assert.equal(targetAllowed({ url: "", title: "Codex" }), false);
   assert.equal(targetAllowed({ url: "https://aionui.talktodo.cn/web", title: "Better Codex" }), false);
   assert.equal(targetAllowed({ url: "http://127.0.0.1:57515/web", title: "Better Codex" }), false);
 });

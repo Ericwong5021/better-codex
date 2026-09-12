@@ -30,9 +30,9 @@ const cdpCommandTimeoutMs = 8000;
 const cdpTargetScanTimeoutMs = 30_000;
 const cdpTargetCandidateLimit = 32;
 
-type InjectionIdentity = { version?: string; bundleChecksum?: string; profile?: string; endpoint?: string; pulse?: boolean };
+type InjectionIdentity = { version?: string; bundleChecksum?: string; profile?: string; endpoint?: string; bootstrapError?: string | null; pulse?: boolean; ready?: boolean; documentId?: number };
 
-const injectionIdentityExpression = "({ version: window.__betterCodexInjection__?.version || null, bundleChecksum: window.__betterCodexInjection__?.bundleChecksum || null, profile: window.__betterCodexInjection__?.profile || null, endpoint: window.__betterCodexInjection__?.endpoint || null, pulse: typeof window.__betterCodexInjection__?.pulse === 'function' })";
+const injectionIdentityExpression = "({ version: window.__betterCodexInjection__?.version || null, bundleChecksum: window.__betterCodexInjection__?.bundleChecksum || null, profile: window.__betterCodexInjection__?.profile || null, endpoint: window.__betterCodexInjection__?.endpoint || null, pulse: typeof window.__betterCodexInjection__?.pulse === 'function', ready: typeof window.__betterCodexInjection__?.ready === 'function' && Boolean(window.__betterCodexInjection__.ready()), documentId: performance.timeOrigin, bootstrapError: window.__betterCodexInjection__?.bootstrapError?.() || null })";
 
 function currentInjectionMatches(existing: InjectionIdentity, endpoint: string) {
   return existing.version === injectionVersion()
@@ -327,6 +327,8 @@ async function mainTargets(port: number, options: MainTargetOptions = {}) {
       if (missing.length === 0) {
         selected.push(target);
         compatibleCapabilities ??= capabilities;
+      } else if (capabilities.loading) {
+        lastReason = "renderer_loading";
       } else {
         lastReason = `missing_${missing.join("_")}`;
       }
@@ -346,7 +348,7 @@ async function mainTargets(port: number, options: MainTargetOptions = {}) {
   }
   if (Date.now() >= boundedOptions.deadlineAt) throw new Error(`cdp_unavailable_${port}_timeout`);
   writeCompatibilityStatus({ codexVersion, compatible: false, reason: lastReason, targetId: lastTargetId, capabilities: lastCapabilities });
-  if (candidates.length > 0) throw new Error(`codex_incompatible_${lastReason}`);
+  if (lastReason.startsWith("missing_")) throw new Error(`codex_incompatible_${lastReason}`);
   return [];
 }
 
@@ -594,6 +596,14 @@ async function waitForTargets(port: number) {
   return waitForTargetsWithin(port, 30_000);
 }
 
+async function recordDesktopIntegration(connection: Connection, target: Target, expectedEndpoint: string) {
+  const identity = await evaluate(connection, injectionIdentityExpression) as InjectionIdentity;
+  const current = readCompatibilityStatus();
+  const ready = Boolean(currentInjectionMatches(identity, expectedEndpoint)) && identity.ready === true;
+  const failed = identity.bootstrapError && !/fetch|network|timeout|runtime_|update_|503|reconnecting/i.test(identity.bootstrapError);
+  return writeCompatibilityStatus({ codexVersion: current?.codexVersion ?? desktopVersion(), compatible: ready, reason: ready ? null : failed ? "injection_bootstrap_failed" : "bootstrap_pending", targetId: target.id, targetUrl: target.url, documentId: identity.documentId, capabilities: current?.capabilities ?? null }, ready);
+}
+
 async function installTarget(target: Target, runtimePort: number, accessToken: string) {
   const connection = new Connection(target.webSocketDebuggerUrl!);
   try {
@@ -610,8 +620,7 @@ async function installTarget(target: Target, runtimePort: number, accessToken: s
     const storedIdentifier = await evaluate(connection, "window.__betterCodexNewDocumentScriptId || null");
     if (currentInjectionMatches(existing, expectedEndpoint)) {
       await evaluate(connection, "window.__betterCodexInjection__.refresh()");
-      const current = readCompatibilityStatus();
-      writeCompatibilityStatus({ codexVersion: current?.codexVersion ?? desktopVersion(), compatible: true, reason: null, targetId: target.id, capabilities: current?.capabilities ?? null }, true);
+      await recordDesktopIntegration(connection, target, expectedEndpoint);
       return { targetId: target.id, title: target.title, installed: true, reused: true, identifier: typeof storedIdentifier === "string" ? storedIdentifier : undefined };
     }
     if (typeof storedIdentifier === "string" && storedIdentifier) {
@@ -622,8 +631,7 @@ async function installTarget(target: Target, runtimePort: number, accessToken: s
     const identifier = String(registration.identifier ?? "");
     await evaluate(connection, source);
     await evaluate(connection, `window.__betterCodexNewDocumentScriptId = ${JSON.stringify(identifier)}`);
-    const current = readCompatibilityStatus();
-    writeCompatibilityStatus({ codexVersion: current?.codexVersion ?? desktopVersion(), compatible: true, reason: null, targetId: target.id, capabilities: current?.capabilities ?? null }, true);
+    await recordDesktopIntegration(connection, target, expectedEndpoint);
     return { targetId: target.id, title: target.title, installed: true, reused: false, identifier };
   } finally {
     await connection.close();
@@ -858,8 +866,7 @@ export async function watchInjection(port: number, accessToken: string) {
           attached.set(target.id, { connection, identifier, target });
           transferred = true;
           recordInjectionOwnership(betterCodexProfile, expectedEndpoint);
-          const current = readCompatibilityStatus();
-          writeCompatibilityStatus({ codexVersion: current?.codexVersion ?? desktopVersion(), compatible: true, reason: null, targetId: target.id, capabilities: current?.capabilities ?? null }, true);
+          await recordDesktopIntegration(connection, target, expectedEndpoint);
         } finally {
           if (!transferred) await connection.close();
         }
@@ -875,6 +882,7 @@ export async function watchInjection(port: number, accessToken: string) {
             yieldedToPeer = true;
             break;
           }
+          await recordDesktopIntegration(current.connection, current.target, `http://127.0.0.1:${activeRuntimePort}`);
           if (!currentInjectionMatches(existing, `http://127.0.0.1:${activeRuntimePort}`)) {
             if (current.identifier) {
               try { await current.connection.send("Page.removeScriptToEvaluateOnNewDocument", { identifier: current.identifier }); } catch {}
@@ -893,7 +901,10 @@ export async function watchInjection(port: number, accessToken: string) {
       const message = error instanceof Error ? error.message : "injector_cycle_failed";
       // Renderer often appears before sidebar/content; probe faster than the idle sweep.
       settleMs = message.startsWith("codex_incompatible_") || message.startsWith("cdp_unavailable_") ? 200 : 500;
-      console.error(message);
+      const current = readCompatibilityStatus();
+      const reason = message.startsWith("cdp_unavailable_") ? "renderer_not_found" : message.startsWith("codex_incompatible_") ? message.slice("codex_incompatible_".length) : "renderer_probe_failed";
+      writeCompatibilityStatus({ codexVersion: desktopVersion(), compatible: false, reason, targetId: null, capabilities: null });
+      if (current?.reason !== reason) console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ scope: "desktop", event: "integration_pending", reason, error: message })}`);
     }
     await Promise.race([activity, new Promise<void>(resolve => setTimeout(resolve, settleMs))]);
     wake();

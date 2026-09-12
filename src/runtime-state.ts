@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { closeSync, existsSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { ensureDirectories, runtimeAuthorityPath, runtimeLockPath, runtimeStatePath } from "./config.js";
-import { coreVersion } from "./compatibility.js";
+import { coreVersion } from "./version.js";
 
 export type RuntimeState = {
   pid: number;
@@ -43,7 +43,7 @@ function processAlive(pid: number) {
   }
 }
 
-function processStartTime(pid: number) {
+export function processStartTime(pid: number) {
   try {
     const value = process.platform === "win32"
       ? execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `$process = Get-CimInstance Win32_Process -Filter \"ProcessId = ${pid}\"; if ($process) { $process.CreationDate.ToUniversalTime().ToString('o') }`], { encoding: "utf8", windowsHide: true }).trim()
@@ -109,6 +109,8 @@ export function claimRuntimeAuthority<T extends ReturnType<typeof createRuntimeI
   const generation = reserved ? current.generation : Math.max(current?.generation || 0, identity.generation) + 1;
   const handoffUpdateId = reserved || continuing ? current!.updateId : null;
   writeAuthority({
+    settledUpdateId: current?.settledUpdateId ?? null,
+    settledOutcome: current?.settledOutcome ?? null,
     generation,
     status: "claimed",
     runtimeInstanceId: identity.instanceId,
@@ -131,10 +133,10 @@ export function reserveRuntimeAuthority(identity: Pick<RuntimeState, "instanceId
   return generation;
 }
 
-export function cancelRuntimeAuthorityReservation(identity: Pick<RuntimeState, "instanceId" | "generation" | "processStartedAt" | "version">, updateId: string) {
+export function cancelRuntimeAuthorityReservation(identity: Pick<RuntimeState, "instanceId" | "generation" | "processStartedAt" | "version">, updateId: string, rolledBack = false) {
   const current = readAuthority();
   if (!current || current.status !== "reserved" || current.runtimeInstanceId !== identity.instanceId || current.runtimePid !== process.pid || current.processStartedAt !== identity.processStartedAt || current.updateId !== updateId) throw new Error("runtime_authority_reservation_mismatch");
-  writeAuthority({ ...current, generation: identity.generation, status: "claimed", updateId: null, targetVersion: identity.version, recovery: false, hostReplacement: false, updatedAt: new Date().toISOString() });
+  writeAuthority({ ...current, ...(rolledBack ? { settledUpdateId: updateId, settledOutcome: "rolled_back" as const } : {}), generation: identity.generation, status: "claimed", updateId: null, targetVersion: identity.version, recovery: false, hostReplacement: false, updatedAt: new Date().toISOString() });
 }
 
 export function runtimeAuthorityUpdateState(updateId: string, expectedGeneration?: number) {

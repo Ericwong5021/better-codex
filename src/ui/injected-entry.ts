@@ -791,6 +791,7 @@ export function install(config: Record<string, any>) {
     let suppressSessionClickUntil = 0;
     let active = false;
     let bootstrapReady = false;
+    let bootstrapFailure = null;
     let bootstrapPromise = null;
 
     function componentContext(feature, mountId) {
@@ -7046,11 +7047,13 @@ export function install(config: Record<string, any>) {
         if (Number.isInteger(issueDescriptionLimit) && issueDescriptionLimit > 0) state.issueDescriptionLimit = issueDescriptionLimit;
         if (destroyed) throw new Error("injection_destroyed");
         bootstrapReady = true;
+        bootstrapFailure = null;
         ensureEntry();
         syncAutoDispatch();
       })();
       bootstrapPromise = request.catch(error => {
         bootstrapReady = false;
+        bootstrapFailure = error instanceof Error ? error.message : String(error);
         bootstrapPromise = null;
         appendDiagnostic("bootstrap_failed", {
           source: "bootstrap",
@@ -10760,7 +10763,7 @@ export function install(config: Record<string, any>) {
       updateTimer = setInterval(() => { if (!document.hidden) void checkUpdateNotice(); }, 15000);
     }
 
-    window.__betterCodexInjection__ = { version: VERSION, bundleChecksum: config.bundleChecksum, profile: PROFILE, host: HOST_KIND, endpoint: BASE_URL, refresh, pulse: () => true, ready: () => bootstrapReady, open: openRoute, openThread, close, destroy, reportError: reportGlobalError };
+    window.__betterCodexInjection__ = { version: VERSION, bundleChecksum: config.bundleChecksum, profile: PROFILE, host: HOST_KIND, endpoint: BASE_URL, refresh, pulse: () => true, ready: () => bootstrapReady, bootstrapError: () => bootstrapFailure, open: openRoute, openThread, close, destroy, reportError: reportGlobalError };
     document.addEventListener("click", onClick, true);
     document.addEventListener("pointerdown", onSessionPointerDown, true);
     document.addEventListener("pointermove", onSessionPointerMove, true);
