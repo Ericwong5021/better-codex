@@ -1024,6 +1024,13 @@ export function createRelayServer(options: RelayServerOptions) {
         if (!trustedOrigin(request, true) || !csrfValid) return sendJson(response, 403, { error: "csrf_invalid" });
         const body = await readBody(request, 1024);
         try {
+          if (options.database !== ":memory:") {
+            const storage = storageHealth(options.database);
+            if (!storage.ok || storage.degraded) {
+              updateDiagnostic("install_rejected", updater.get(), { error: "update_storage_reserve", pid: process.pid, storage });
+              return sendJson(response, 507, { error: "update_storage_reserve", storage });
+            }
+          }
           const result = await updater.install(typeof body.idempotency_key === "string" ? body.idempotency_key : "");
           store.audit(session.user.id, "relay_update_requested", result.operation?.target_core_version || "unknown");
           updateDiagnostic("install_accepted", result.update, { update_id: result.update_id, operation_status: result.operation?.status || null });
