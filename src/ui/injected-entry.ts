@@ -1083,7 +1083,11 @@ export function install(config: Record<string, any>) {
       style.id = STYLE_ID;
       style.setAttribute(OWNED, "true");
       style.textContent = `
-        #${ENTRY_ID}[aria-current="page"], #${AGENTS_ENTRY_ID}[aria-current="page"], #${PROJECTS_ENTRY_ID}[aria-current="page"], #${MORE_ENTRY_ID}[aria-current="page"] { background: var(--color-background-primary-soft-active, var(--color-token-list-hover-background, color-mix(in srgb, currentColor 8%, transparent))); }
+        .better-codex-native-navigation { display: flex; align-items: center; width: 100%; border: 0; border-radius: var(--bc-radius-sm); background: transparent; color: inherit; text-align: start; cursor: pointer; }
+        .better-codex-native-navigation:hover { background: var(--bc-color-hover); }
+        .better-codex-native-navigation svg { width: var(--bc-space-4); height: var(--bc-space-4); flex-shrink: 0; }
+        [data-better-codex-launcher-hidden="true"] { display: none !important; }
+        #${ENTRY_ID}[aria-current="page"], #${AGENTS_ENTRY_ID}[aria-current="page"], #${PROJECTS_ENTRY_ID}[aria-current="page"], #${MORE_ENTRY_ID}[aria-current="page"] { background: var(--bc-color-hover); }
         html[data-better-codex-open="true"] ${SELECTORS.sidebarNavigation} [aria-current="page"]:not(#${ENTRY_ID}):not(#${AGENTS_ENTRY_ID}):not(#${PROJECTS_ENTRY_ID}):not(#${MORE_ENTRY_ID}) { background: transparent !important; }
         html[data-better-codex-open="true"] ${SELECTORS.sidebarNavigation} [aria-current="page"]:not(#${ENTRY_ID}):not(#${AGENTS_ENTRY_ID}):not(#${PROJECTS_ENTRY_ID}):not(#${MORE_ENTRY_ID}) .text-token-list-active-selection-foreground { color: var(--color-token-foreground) !important; }
         [${HOST}="true"] { position: relative !important; z-index: 31 !important; pointer-events: none !important; }
@@ -1104,22 +1108,18 @@ export function install(config: Record<string, any>) {
 
     function nativeButton(text) {
       const reference = findReferenceButton();
-      const button = reference ? reference.cloneNode(true) : document.createElement("button");
+      const button = document.createElement("button");
       button.type = "button";
-      if (!reference && HOST_KIND === "web") {
-        button.className = "web-nav-button";
-        button.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"></svg><span class="text-fade-truncate"></span>';
+      button.className = HOST_KIND === "web" ? "web-nav-button" : "better-codex-native-navigation";
+      button.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"></svg><span class="text-fade-truncate"></span>';
+      button.querySelector("span").textContent = text;
+      if (reference && HOST_KIND !== "web") {
+        const style = getComputedStyle(reference);
+        button.style.height = style.height;
+        button.style.padding = style.padding;
+        button.style.font = style.font;
+        button.style.gap = style.gap;
       }
-      ["id", "disabled", "aria-current", "aria-expanded", "aria-controls", "aria-describedby", "data-state"].forEach(name => button.removeAttribute(name));
-      button.classList.remove("bg-token-list-hover-background");
-      button.querySelectorAll(".text-token-list-active-selection-foreground").forEach(node => {
-        node.classList.remove("text-token-list-active-selection-foreground");
-        node.classList.add("text-token-foreground");
-      });
-      button.querySelectorAll("[id]").forEach(node => node.removeAttribute("id"));
-      const content = button.querySelector(SELECTORS.truncatedText) || Array.from(button.querySelectorAll("span")).at(-1);
-      if (content) content.textContent = text;
-      else button.textContent = text;
       return button;
     }
 
@@ -1411,7 +1411,20 @@ export function install(config: Record<string, any>) {
         if (active && state.surface === "projects" && moreEntry.getAttribute("aria-current") !== "page") moreEntry.setAttribute("aria-current", "page");
         if ((!active || state.surface !== "projects") && moreEntry.hasAttribute("aria-current")) moreEntry.removeAttribute("aria-current");
       }
-      return entry.isConnected && agentsEntry.isConnected && projectsEntry.isConnected && (HOST_KIND !== "web" || auxiliaryNavigation?.isConnected);
+      const mounted = entry.isConnected && agentsEntry.isConnected && projectsEntry.isConnected && (HOST_KIND !== "web" || auxiliaryNavigation?.isConnected);
+      if (HOST_KIND !== "web") {
+        const scroll = document.querySelector(SELECTORS.sidebarScroll);
+        scroll?.querySelectorAll("button, a").forEach(button => {
+          if (button.hasAttribute(OWNED)) return;
+          if (button.getAttribute("href") !== BETTER_CODEX_ROUTE && label(button.textContent || button.getAttribute("aria-label")) !== "better codex") return;
+          const hidden = mounted && bootstrapReady ? "true" : "false";
+          if (button.getAttribute("data-better-codex-launcher-hidden") !== hidden) {
+            button.setAttribute("data-better-codex-launcher-hidden", hidden);
+            console.info("[better-codex] launcher_visibility", { hidden: hidden === "true", mounted, bootstrapReady });
+          }
+        });
+      }
+      return mounted;
     }
 
     function findMount() {
@@ -3603,7 +3616,7 @@ export function install(config: Record<string, any>) {
       const width = Math.min(naturalWidth, availableWidth);
       return {
         constrained: naturalWidth > availableWidth,
-        left: openRight ? parentRect.right + gap : parentRect.left - gap - width,
+        openRight,
         width,
       };
     }
@@ -3663,7 +3676,8 @@ export function install(config: Record<string, any>) {
           submenu.style.minWidth = "0px";
           submenu.style.width = placement.width + "px";
         }
-        submenu.style.left = placement.left - menuRect.left + "px";
+        submenu.style.left = placement.openRight ? "calc(100% + var(--bc-space-1))" : "auto";
+        submenu.style.right = placement.openRight ? "auto" : "calc(100% + var(--bc-space-1))";
       }
 
       for (const category of categories) {
@@ -3737,7 +3751,8 @@ export function install(config: Record<string, any>) {
         const submenuRect = submenu.getBoundingClientRect();
         const maximumTop = Math.max(inset, viewportHeight - submenuRect.height - inset);
         const top = Math.max(inset, Math.min(wrapRect.top - 5, maximumTop));
-        submenu.style.left = placement.left - wrapRect.left + "px";
+        submenu.style.left = placement.openRight ? "calc(100% + var(--bc-space-1))" : "auto";
+        submenu.style.right = placement.openRight ? "auto" : "calc(100% + var(--bc-space-1))";
         submenu.style.top = top - wrapRect.top + "px";
         submenu.style.removeProperty("display");
         submenu.style.removeProperty("visibility");
@@ -10623,6 +10638,7 @@ export function install(config: Record<string, any>) {
       window.removeEventListener("better-codex:profile-open", onUserProfileOpen);
       close();
       document.querySelectorAll('[' + OWNED + '="true"]').forEach(node => node.remove());
+      document.querySelectorAll("[data-better-codex-launcher-hidden]").forEach(node => node.removeAttribute("data-better-codex-launcher-hidden"));
       ["light", "dark"].forEach(mode => ["canvas", "ink", "accent", "surface", "control", "raised", "hover", "pressed", "hairline", "font-ui"].forEach(token => document.documentElement.style.removeProperty("--bc-host-" + mode + "-" + token)));
       delete window.__betterCodexBridgeResolve;
       delete window.__betterCodexInjection__;

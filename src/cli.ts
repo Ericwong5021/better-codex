@@ -1441,7 +1441,13 @@ async function main() {
   if (command === "serve") return (await import("./server.js")).startServer();
   if (command === "web") return print(await openWebApp());
   if (command === "watch-inject") return watchInjection(Number(action || cdpPort), accessToken());
-  if (command === "mcp" && !action) return startMcpAppServer();
+  if (command === "mcp" && !action) return startMcpAppServer(async () => {
+    await ensureRuntime();
+    const injection = await cdpInject(cdpPort, activeRuntimePort(), accessToken(), false);
+    setInjectionEnabled(true);
+    await ensureInjector(cdpPort);
+    return injection;
+  });
   if (command === "mcp") {
     if (action === "install") return print(installMcp());
     if (action === "uninstall") return print(uninstallMcp());
