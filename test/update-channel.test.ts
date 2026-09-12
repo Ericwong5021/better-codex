@@ -315,7 +315,52 @@ test("standalone core and compatibility updates enter the WAL before pointer mut
   assert.doesNotMatch(server.slice(server.indexOf('if \(!rollingBack && operation.status === "RECONCILING"'), server.indexOf("})().catch", server.indexOf('if \(!rollingBack && operation.status === "RECONCILING"'))), /transitionUpdateOperation\(updateId, "COMPLETED"\)/);
   assert.match(doctor, /runtime = await readiness\(\)[\s\S]*ok: false, ready: false/);
   assert.match(cli, /const \[command, \.\.\.expectedArgs\] = mcpCommand\(\)/);
-  assert.match(service, /const managed = managedCoreCommand\(\["runtime"\]\)/);
+  assert.doesNotMatch(service, /managedCoreCommand/);
+  assert.match(service, /environment\.BETTER_CODEX_BASE_ENTRYPOINT = invocation\[1\]/);
+  assert.match(service, /installationCommand\(\)/);
+  const home = mkdtempSync(join(tmpdir(), "better-codex-service-entrypoint-"));
+  try {
+    const script = `
+      import assert from "node:assert/strict";
+      import { mkdirSync, writeFileSync } from "node:fs";
+      import { join } from "node:path";
+      import { installationCommand } from "./src/launch-integration.ts";
+      import { servicePlist } from "./src/service.ts";
+      const home = process.env.BETTER_CODEX_HOME;
+      const base = join(home, "better-codex.cjs");
+      const managed = join(home, "runtime", "versions", "99.0.0", "better-codex.cjs");
+      mkdirSync(join(home, "runtime", "versions", "99.0.0"), { recursive: true });
+      mkdirSync(join(home, "run"), { recursive: true });
+      writeFileSync(base, "");
+      writeFileSync(managed, "");
+      process.execArgv = [];
+      process.argv[1] = base;
+      const original = servicePlist();
+      writeFileSync(join(home, "runtime", "current.json"), JSON.stringify({ current: "99.0.0", previous: "0.4.12", executable: managed, updatedAt: new Date().toISOString() }));
+      assert.equal(servicePlist(), original);
+      process.argv[1] = managed;
+      process.env.BETTER_CODEX_BASE_ENTRYPOINT = base;
+      assert.deepEqual(installationCommand(), [process.execPath, base]);
+      assert.equal(servicePlist(), original);
+      writeFileSync(join(home, "runtime", "current.json"), JSON.stringify({ current: "0.4.12", previous: "99.0.0", executable: base, updatedAt: new Date().toISOString() }));
+      assert.equal(servicePlist(), original);
+      delete process.env.BETTER_CODEX_BASE_ENTRYPOINT;
+      writeFileSync(join(home, "run", "launch-integration.json"), JSON.stringify({ platform: "darwin", launcher: process.execPath, launcherArguments: [base] }));
+      assert.equal(servicePlist(), original);
+      process.env.BETTER_CODEX_BASE_ENTRYPOINT = managed;
+      assert.throws(() => servicePlist(), /installation_base_entrypoint_required/);
+      process.env.BETTER_CODEX_BASE_ENTRYPOINT = join(home, "missing.cjs");
+      assert.throws(() => servicePlist(), /installation_base_executable_missing/);
+    `;
+    const result = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "--eval", script], {
+      cwd: root,
+      encoding: "utf8",
+      env: { ...process.env, BETTER_CODEX_HOME: home, BETTER_CODEX_BASE_ENTRYPOINT: "", BETTER_CODEX_LAUNCHER_PATH: "" },
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
   assert.doesNotMatch(server, /interrupt_running/);
   assert.doesNotMatch(applyUpdate, /stopSessionHostProcess\(\)/);
 });

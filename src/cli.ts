@@ -8,6 +8,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { cdpEject, cdpInject, cdpOpenThread, cdpRefreshAndInject, cdpRestartAndInject, cdpStatus, codexInstallationStatus, codexProcessRunning, chooseCodexRestartAction, launchCodex, requiresCodexRestartForLaunch, watchInjection } from "./cdp.js";
 import { removeManagedAgentProfiles } from "./agent-profiles.js";
+import { showNativeChoiceDialog } from "./native-dialog.js";
 import { coreVersion } from "./compatibility.js";
 import {
   cdpPort,
@@ -34,13 +35,13 @@ import {
 } from "./config.js";
 import { readRuntimeState, reserveRuntimeAuthorityRecovery, runtimeAuthorityUpdateState } from "./runtime-state.js";
 import { injectionEnabled, setInjectionEnabled } from "./injection-state.js";
-import { installLaunchIntegration, launchIntegrationStatus, uninstallLaunchIntegration } from "./launch-integration.js";
+import { installationCommand, installLaunchIntegration, launchIntegrationStatus, uninstallLaunchIntegration } from "./launch-integration.js";
 import { readCodexLocale } from "./locale.js";
 import { betterCodexMcpName, startMcpAppServer } from "./mcp-app.js";
 import { packagedBuild } from "./build.js";
 import { bundledBetterCodexSkill } from "./bundled-skill.js";
 import { installService, repairServiceConfiguration, restartService, serviceLogs, serviceStatus, startService, stopService, uninstallService } from "./service.js";
-import { activeVersions, checkForUpdates, managedCoreCommand, maybeDelegateToActiveCore, recordGatewayUpdateActivation, rollbackActivatedUpdate, rollbackAllUpdates, selectedUpdateChannel, setUpdateChannel, updateAll, updateCompatibility, type UpdateChannel } from "./updater.js";
+import { activeVersions, checkForUpdates, maybeDelegateToActiveCore, recordGatewayUpdateActivation, rollbackActivatedUpdate, rollbackAllUpdates, selectedUpdateChannel, setUpdateChannel, updateAll, updateCompatibility, type UpdateChannel } from "./updater.js";
 import { requireCodexExecutablePath } from "./codex-cli.js";
 import { normalizeHubUrl, readSyncConfiguration, removeSyncConfiguration, writeSyncConfiguration } from "./sync-config.js";
 import { normalizeRelayUrl, readRelayConfiguration, removeRelayConfiguration, writeRelayConfiguration } from "./relay-config.js";
@@ -244,6 +245,7 @@ async function openWebApp() {
 }
 
 async function restartRuntime() {
+  installationCommand();
   setInjectionEnabled(false);
   await stopInjector();
   try { await request("/api/shutdown", { method: "POST" }); } catch {}
@@ -801,11 +803,7 @@ function usage() {
 }
 
 function selfCommand() {
-  if (isSea()) return [resolve(process.env.BETTER_CODEX_LAUNCHER_PATH ?? process.execPath)];
-  if (packagedBuild && process.env.BETTER_CODEX_BASE_ENTRYPOINT) return [resolve(process.execPath), resolve(process.env.BETTER_CODEX_BASE_ENTRYPOINT)];
-  const args = sourceProcessArguments([]);
-  if (!args) throw new Error("self_requires_file_entrypoint");
-  return [resolve(process.execPath), ...args];
+  return installationCommand();
 }
 
 function codexCliPath() {
@@ -813,8 +811,6 @@ function codexCliPath() {
 }
 
 function mcpCommand() {
-  const managed = managedCoreCommand(["mcp"]);
-  if (managed) return [managed.command, ...managed.args];
   const [command, ...commandArgs] = selfCommand();
   return [command, ...commandArgs, "mcp"];
 }
@@ -1718,8 +1714,18 @@ async function main() {
 }
 
 void main().catch(error => {
-  console.error(error instanceof Error ? error.message : error);
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(message);
   process.exitCode = 1;
+  if (commandArguments()[0] === "launch") {
+    console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "launcher", event: "launch_failed", profile: betterCodexProfile, home: betterCodexHome, pid: process.pid, error: message })}`);
+    try {
+      const choice = showNativeChoiceDialog({ title: "Better Codex", message: `Better Codex 启动失败：${message}\n\n请查看启动日志。`, primaryLabel: "打开日志", secondaryLabel: "关闭" });
+      if (choice === "primary") execFileSync(process.platform === "win32" ? "notepad.exe" : "open", [join(logPath, "launcher.log")]);
+    } catch (dialogError) {
+      console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "launcher", event: "failure_dialog_failed", profile: betterCodexProfile, home: betterCodexHome, pid: process.pid, error: dialogError instanceof Error ? dialogError.message : String(dialogError) })}`);
+    }
+  }
 });
 
 process.once("exit", () => {

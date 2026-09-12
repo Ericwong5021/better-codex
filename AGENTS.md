@@ -26,3 +26,5 @@
 - Browser, Runtime, and Relay share `src/web-command-policy.ts` for durable command routes, body limits, and response classification. Browser acceptance requires a committed local queue entry or a durable remote acknowledgement.
 - Build and verification never refresh an installed Runtime or injection. Local refresh is explicit. Preview and Release consume the same reusable CI and signed Host capability requirements.
 - Architecture ownership, migration limits, and verification entrypoints are defined in `docs/adr/execution-and-delivery-boundaries.md`.
+
+- System services, desktop launchers, and MCP registrations share one stable installation command, never a version-directory core. Service environments preserve that base entrypoint across updates and rollback; only the base launcher selects the active core. Legacy service configuration is migrated on start only after Runtime and service processes have stopped, with structured before/after diagnostics. Launcher failures must also be visible in a native dialog.

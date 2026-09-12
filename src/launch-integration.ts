@@ -1,11 +1,11 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { homedir } from "node:os";
 import { isSea } from "node:sea";
 import { appIconIcns, appIconIco } from "./brand-assets.js";
-import { betterCodexHome, betterCodexProfile, ensureDirectories, launchIntegrationStatePath, logPath, peerBetterCodexHome, sourceProcessArguments } from "./config.js";
+import { betterCodexHome, betterCodexProfile, ensureDirectories, launchIntegrationStatePath, logPath, peerBetterCodexHome, runtimeVersionsPath, sourceProcessArguments } from "./config.js";
 
 type WindowsOwnedShortcut = {
   path: string;
@@ -25,6 +25,7 @@ type LaunchIntegrationState = {
   platform: string;
   launcher: string;
   launcherArguments?: string[];
+  baseCommand?: string[];
   appPath?: string;
   ownershipToken?: string;
   shortcuts?: Array<WindowsOwnedShortcut | WindowsLegacyShortcut>;
@@ -108,6 +109,7 @@ function validateState(value: unknown): LaunchIntegrationState {
   if (state.launcherArguments && (!Array.isArray(state.launcherArguments) || state.launcherArguments.some(argument => typeof argument !== "string"))) {
     throw new Error("launch_integration_state_invalid");
   }
+  if (state.baseCommand !== undefined && (!Array.isArray(state.baseCommand) || !state.baseCommand.length || state.baseCommand.some(argument => typeof argument !== "string"))) throw new Error("launch_integration_state_invalid");
   if (state.platform === "darwin" && !allowedMacLauncherPaths().includes(state.appPath ?? "")) throw new Error("launch_integration_state_invalid");
   if (state.platform === "win32") {
     if (!Array.isArray(state.shortcuts)) throw new Error("launch_integration_state_invalid");
@@ -166,14 +168,39 @@ function validateLegacyWindowsState(state: LaunchIntegrationState) {
   }
 }
 
-function launcherCommand() {
-  const sourceArgs = sourceProcessArguments([]);
-  const command = process.env.BETTER_CODEX_LAUNCHER_PATH
-    ? [resolve(process.env.BETTER_CODEX_LAUNCHER_PATH)]
-    : isSea()
-      ? [resolve(process.execPath)]
-      : sourceArgs ? [resolve(process.execPath), ...sourceArgs] : null;
-  if (!command) throw new Error("launcher_requires_file_entrypoint");
+function managedEntrypoint(path: string) {
+  const relation = relative(resolve(runtimeVersionsPath), resolve(path));
+  return !relation || (!relation.startsWith("..") && !isAbsolute(relation));
+}
+
+export function installationCommand() {
+  const base = process.env.BETTER_CODEX_BASE_ENTRYPOINT;
+  const launcher = process.env.BETTER_CODEX_LAUNCHER_PATH;
+  let invocation: string[];
+  if (base) invocation = [process.execPath, resolve(base)];
+  else if (launcher) invocation = [resolve(launcher)];
+  else if (managedEntrypoint(isSea() ? process.execPath : process.argv[1] || process.execPath)) {
+    const state = JSON.parse(readFileSync(launchIntegrationStatePath, "utf8")) as { platform?: unknown; launcher?: unknown; launcherArguments?: unknown; baseCommand?: unknown };
+    if (!state || typeof state.launcher !== "string" || (state.launcherArguments !== undefined && (!Array.isArray(state.launcherArguments) || !state.launcherArguments.every(value => typeof value === "string")))) throw new Error("installation_base_entrypoint_invalid");
+    if (state.baseCommand !== undefined) {
+      if (!Array.isArray(state.baseCommand) || !state.baseCommand.length || !state.baseCommand.every(value => typeof value === "string")) throw new Error("installation_base_entrypoint_invalid");
+      invocation = state.baseCommand;
+    } else {
+      if (state.platform !== "darwin") throw new Error("installation_base_entrypoint_required");
+      invocation = [state.launcher, ...(state.launcherArguments as string[] | undefined ?? [])];
+    }
+  } else if (isSea()) invocation = [process.execPath];
+  else {
+    const args = sourceProcessArguments([]);
+    if (!args) throw new Error("installation_requires_file_entrypoint");
+    invocation = [process.execPath, ...args];
+  }
+  if (invocation.some(value => isAbsolute(value) && managedEntrypoint(value))) throw new Error("installation_base_entrypoint_required");
+  if (!isAbsolute(invocation[0]) || invocation.some(value => isAbsolute(value) && !existsSync(value))) throw new Error("installation_base_executable_missing");
+  return invocation;
+}
+
+function launcherCommand(command: string[]) {
   if (process.platform !== "win32") return command;
 
   ensureDirectories();
@@ -301,7 +328,7 @@ function installMacLauncher(command: string[], previous: LaunchIntegrationState 
   const ownedState = migrated && previous ? { ...previous, appPath } : previous;
   if (existsSync(appPath)) assertOwnedMacApp(appPath, ownedState);
   const existingContents = join(appPath, "Contents");
-  const stableCommand = betterCodexProfile === "stable" && existsSync(appPath) && previous?.platform === "darwin" && resolve(previous.launcher) === resolve(command[0])
+  const stableCommand = betterCodexProfile === "stable" && existsSync(appPath) && previous?.platform === "darwin" && resolve(previous.launcher) === resolve(command[0]) && (previous.launcherArguments ?? []).length === command.length - 1 && (previous.launcherArguments ?? []).every((argument, index) => argument === command[index + 1])
     ? [previous.launcher, ...(previous.launcherArguments ?? [])]
     : command;
   const [launcher, ...launcherArguments] = stableCommand;
@@ -557,12 +584,14 @@ foreach ($item in $items) {
 }
 
 export function installLaunchIntegration() {
-  const command = launcherCommand();
+  const baseCommand = installationCommand();
+  const command = launcherCommand(baseCommand);
   const previous = readState();
   let state: LaunchIntegrationState;
   if (process.platform === "darwin") state = installMacLauncher(command, previous);
   else if (process.platform === "win32") state = installWindowsShortcuts(command, previous);
   else return { installed: false, platform: process.platform, reason: "launch_integration_unsupported" };
+  state.baseCommand = baseCommand;
   writeState(state);
   return { installed: true, ...state, shortcutCount: state.shortcuts?.length ?? undefined };
 }

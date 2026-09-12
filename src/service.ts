@@ -2,10 +2,10 @@ import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import { isSea } from "node:sea";
 import { isDeepStrictEqual } from "node:util";
-import { betterCodexHome, betterCodexProfile, cdpPort, ensureDirectories, logPath, runPath, runtimeLogPath, sourceProcessArguments } from "./config.js";
-import { managedCoreCommand } from "./updater.js";
+import { betterCodexHome, betterCodexProfile, cdpPort, ensureDirectories, logPath, runPath, runtimeLogPath } from "./config.js";
+import { installationCommand } from "./launch-integration.js";
+import { readRuntimeState } from "./runtime-state.js";
 
 const label = "com.better-codex.runtime";
 const legacyLabel = "com.better-codex.gateway";
@@ -19,13 +19,7 @@ function xml(value: string) {
 }
 
 function command() {
-  const managed = managedCoreCommand(["runtime"]);
-  if (managed) return [managed.command, ...managed.args];
-  if (isSea()) return [process.env.BETTER_CODEX_LAUNCHER_PATH || process.execPath, "runtime"];
-  if (process.env.BETTER_CODEX_BASE_ENTRYPOINT) return [process.execPath, resolve(process.env.BETTER_CODEX_BASE_ENTRYPOINT), "runtime"];
-  const args = sourceProcessArguments(["runtime"]);
-  if (!args) throw new Error("service_requires_file_entrypoint");
-  return [process.execPath, ...args];
+  return [...installationCommand(), "runtime"];
 }
 
 function quotePowerShell(value: string) {
@@ -60,16 +54,14 @@ function windowsRuntime() {
 
 export function servicePlist() {
   const definition = serviceDefinition();
+  const environmentXml = Object.entries(definition.EnvironmentVariables).map(([key, value]) => `<key>${xml(key)}</key><string>${xml(value)}</string>`).join("");
   const argumentsXml = definition.ProgramArguments.map(value => `<string>${xml(value)}</string>`).join("");
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>Label</key><string>${definition.Label}</string>
 <key>ProgramArguments</key><array>${argumentsXml}</array>
-<key>EnvironmentVariables</key><dict>
-<key>BETTER_CODEX_HOME</key><string>${xml(definition.EnvironmentVariables.BETTER_CODEX_HOME)}</string>
-<key>BETTER_CODEX_CDP_PORT</key><string>${definition.EnvironmentVariables.BETTER_CODEX_CDP_PORT}</string>
-</dict>
+<key>EnvironmentVariables</key><dict>${environmentXml}</dict>
 <key>WorkingDirectory</key><string>${xml(definition.WorkingDirectory)}</string>
 <key>RunAtLoad</key><true/>
 <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
@@ -82,10 +74,14 @@ export function servicePlist() {
 }
 
 function serviceDefinition() {
+  const invocation = command();
+  const environment: Record<string, string> = { BETTER_CODEX_HOME: betterCodexHome, BETTER_CODEX_CDP_PORT: String(cdpPort) };
+  if (invocation.length === 2) environment.BETTER_CODEX_LAUNCHER_PATH = invocation[0];
+  else if (invocation.length === 3 && invocation[1].endsWith(".cjs")) environment.BETTER_CODEX_BASE_ENTRYPOINT = invocation[1];
   return {
     Label: label,
-    ProgramArguments: command(),
-    EnvironmentVariables: { BETTER_CODEX_HOME: betterCodexHome, BETTER_CODEX_CDP_PORT: String(cdpPort) },
+    ProgramArguments: invocation,
+    EnvironmentVariables: environment,
     WorkingDirectory: betterCodexHome,
     RunAtLoad: true,
     KeepAlive: { SuccessfulExit: false },
@@ -98,9 +94,10 @@ function serviceDefinition() {
 
 function serviceConfigurationMatches() {
   if (process.platform !== "darwin" || !existsSync(launchAgentPath)) return false;
+  const expected = serviceDefinition();
   try {
     const installed = JSON.parse(execFileSync("/usr/bin/plutil", ["-convert", "json", "-o", "-", launchAgentPath], { encoding: "utf8" })) as Record<string, unknown>;
-    return isDeepStrictEqual(installed, serviceDefinition());
+    return isDeepStrictEqual(installed, expected);
   } catch {
     return false;
   }
@@ -109,6 +106,8 @@ function serviceConfigurationMatches() {
 export function repairServiceConfiguration() {
   if (betterCodexProfile === "development" || process.platform !== "darwin" || !existsSync(launchAgentPath)) return false;
   if (serviceConfigurationMatches()) return false;
+  const installed = JSON.parse(execFileSync("/usr/bin/plutil", ["-convert", "json", "-o", "-", launchAgentPath], { encoding: "utf8" })) as Record<string, unknown>;
+  console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "service", event: "configuration_repair", profile: betterCodexProfile, home: betterCodexHome, pid: process.pid, installed, expected: serviceDefinition() })}`);
   installService();
   return true;
 }
@@ -186,7 +185,16 @@ export function startService() {
     return { started: true, label: windowsTask };
   }
   if (!existsSync(launchAgentPath)) throw new Error("service_not_installed");
-  if (!serviceConfigurationMatches()) throw new Error("service_configuration_mismatch");
+  if (!serviceConfigurationMatches()) {
+    const runtime = readRuntimeState();
+    const service = serviceStatus();
+    if (runtime || service.running) {
+      console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "service", event: "configuration_repair_blocked", profile: betterCodexProfile, home: betterCodexHome, pid: process.pid, service_pid: service.pid, runtime_pid: runtime?.pid ?? null, runtime_instance_id: runtime?.instanceId ?? null, error: "service_configuration_mismatch_runtime_active" })}`);
+      throw new Error("service_configuration_mismatch_runtime_active");
+    }
+    repairServiceConfiguration();
+    return { started: true, label, configurationRepaired: true };
+  }
   launchctl(["bootstrap", domain(), launchAgentPath], true);
   launchctl(["kickstart", "-k", `${domain()}/${label}`]);
   return { started: true, label };
