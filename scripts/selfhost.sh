@@ -195,6 +195,49 @@ verify_vps_updater() {
   docker compose "$@" exec -T hub node -e 'const { existsSync } = require("node:fs"); const { join } = require("node:path"); const directory = process.env.BETTER_CODEX_HUB_UPDATER_DIR; if (!directory || !existsSync(join(directory, "ready"))) process.exit(1)'
 }
 
+configure_vps_environment() {
+  [ ! -L "$1" ] || fail "$1 must not be a symbolic link"
+  python3 - "$1" "$2" "${BETTER_CODEX_RELAY_UPDATE_CHANNEL:-}" "${3:-}" "${4:-}" <<'PY'
+import json, os, re, shlex, sys, tempfile
+path, target, override, domain, username = sys.argv[1:]
+text = open(path).read() if os.path.exists(path) else ""
+key = "BETTER_CODEX_RELAY_UPDATE_CHANNEL"
+pattern = r"(?m)^[ \t]*(?:export[ \t]+)?" + key + r"[ \t]*=(.*)$"
+matches = list(re.finditer(pattern, text))
+values = shlex.split(matches[-1].group(1), comments=True) if matches else []
+if len(values) > 1:
+    raise SystemExit("invalid Relay update channel")
+existing = values[0] if values else ""
+channel = override or existing or ("preview" if "-beta." in target else "stable")
+if channel not in ("stable", "preview"):
+    raise SystemExit("invalid Relay update channel")
+updates = {key: channel}
+if domain:
+    updates["BETTER_CODEX_HUB_DOMAIN"] = domain
+if username:
+    updates["BETTER_CODEX_HUB_WEB_USERNAME"] = username
+for name, value in updates.items():
+    expression = r"(?m)^[ \t]*(?:export[ \t]+)?" + name + r"[ \t]*=.*$"
+    replacement = name + "=" + value
+    if re.search(expression, text):
+        text = re.sub(expression, lambda _: replacement, text)
+    else:
+        text = text.rstrip("\n") + "\n" + replacement + "\n"
+descriptor, temporary = tempfile.mkstemp(dir=os.path.dirname(path))
+with os.fdopen(descriptor, "w") as stream:
+    stream.write(text)
+    stream.flush()
+    os.fsync(stream.fileno())
+os.replace(temporary, path)
+directory = os.open(os.path.dirname(path), os.O_RDONLY)
+try:
+    os.fsync(directory)
+finally:
+    os.close(directory)
+print("BETTER_CODEX_DIAGNOSTIC " + json.dumps(dict(scope="vps_update", event="channel_configured", target_version=target, channel=channel, source="override" if override else "configuration" if existing else "selected_version")), file=sys.stderr)
+PY
+}
+
 install_vps() {
   [ "$(id -u)" -eq 0 ] || fail "VPS installation must run with sudo"
   need curl
@@ -222,9 +265,7 @@ install_vps() {
   umask 077
   [ -f "$directory/deploy/hub/secrets/bootstrap-secret.txt" ] || write_secret "$directory/deploy/hub/secrets/bootstrap-secret.txt" "$(openssl rand -hex 32)"
   write_secret "$directory/deploy/hub/secrets/web-password.txt" "$password"
-  write_secret "$directory/deploy/hub/.env" "BETTER_CODEX_HUB_DOMAIN=$domain
-BETTER_CODEX_HUB_WEB_USERNAME=$username
-"
+  configure_vps_environment "$directory/deploy/hub/.env" "$target" "$domain" "$username"
   docker compose -f "$directory/deploy/hub/compose.yaml" --env-file "$directory/deploy/hub/.env" --profile standalone up -d --build --wait
   verify_vps_updater -f "$directory/deploy/hub/compose.yaml" --env-file "$directory/deploy/hub/.env" --profile standalone || fail "VPS online updater is unavailable"
   printf 'Better Codex Relay %s is starting at https://%s\n' "$target" "$domain"
@@ -293,6 +334,21 @@ PY
     write_upgrade_progress restoring 40 pending || return 1
     docker image inspect "$previous_image" >/dev/null || return 1
     git -C "$directory" checkout --detach "$previous" || return 1
+    if [ -f "$transaction/environment.env" ]; then
+      python3 - "$transaction/environment.env" "$environment" <<'PY' || return 1
+import os, shutil, sys
+source, destination = sys.argv[1:]
+shutil.copy2(source, destination + ".restoring")
+with open(destination + ".restoring", "rb") as stream:
+    os.fsync(stream.fileno())
+os.replace(destination + ".restoring", destination)
+directory = os.open(os.path.dirname(destination), os.O_RDONLY)
+try:
+    os.fsync(directory)
+finally:
+    os.close(directory)
+PY
+    fi
     docker compose "${recovery_args[@]}" up -d --no-build --wait "${up_services[@]}" || return 1
     verify_deployment "$previous_version" "${recovery_args[@]}" || return 1
     journal_phase restored || return 1
@@ -323,9 +379,13 @@ PY
     docker compose "${compose_args[@]}" config --format json > "$snapshot"
     domain="$(sed -n 's/^BETTER_CODEX_HUB_DOMAIN=//p' "$environment" | tail -n 1)"
     [[ "$domain" =~ ^[A-Za-z0-9.-]+$ ]] || fail "public readiness domain is required"
-    python3 - "$snapshot" "$metadata" "$previous" "$previous_version" "$previous_image" "$target" "$target_commit" "$domain" "$external_proxy" "$caddy_image" <<'PY'
+    python3 - "$snapshot" "$metadata" "$previous" "$previous_version" "$previous_image" "$target" "$target_commit" "$domain" "$external_proxy" "$caddy_image" "$environment" <<'PY'
 import json, os, shutil, sys
-snapshot, metadata, previous, version, image, target, commit, domain, proxy, caddy = sys.argv[1:]
+snapshot, metadata, previous, version, image, target, commit, domain, proxy, caddy, environment = sys.argv[1:]
+saved_environment = os.path.join(os.path.dirname(snapshot), "environment.env")
+shutil.copy2(environment, saved_environment)
+with open(saved_environment, "rb") as stream:
+    os.fsync(stream.fileno())
 value = json.load(open(snapshot))
 value["services"]["hub"].pop("build", None)
 value["services"]["hub"]["image"] = image
@@ -383,6 +443,7 @@ PY
   write_upgrade_progress downloading 45
   git -C "$directory" status --porcelain --untracked-files=no | grep -q . && fail "$directory has local changes"
   git -C "$directory" checkout --detach "$target_commit"
+  configure_vps_environment "$environment" "$target"
   write_upgrade_progress rebuilding 60
   docker compose "${compose_args[@]}" build hub
   if [ "$external_proxy" -eq 1 ]; then docker compose "${compose_args[@]}" stop caddy; fi

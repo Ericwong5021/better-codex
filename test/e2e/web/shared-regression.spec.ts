@@ -291,6 +291,29 @@ test("recovers after a Runtime restart with a new Web session", async ({ page })
   })).toBe("[]");
 });
 
+test("remote access shows the VPS channel and cached updates in local WebUI", async ({ browser }, testInfo) => {
+  const { context, page } = await openAuthenticatedPage(browser, { locale: "zh-CN", viewport: { width: 390, height: 720 } });
+  let available = false;
+  await context.route(url => url.pathname === "/api/remote-access/status", route => route.fulfill({ json: { remote_mode: "relay", last_sync_at: new Date().toISOString(), remote: { reachable: true, name: "Better Codex Relay", url: "https://upgrade.invalid", version: "0.4.13-beta.2", protocol_version: "relay/v1", update: { status: available ? "available" : "current", channel: available ? "preview" : "stable", currentVersion: "0.4.13-beta.2", latestVersion: available ? "0.4.13-beta.3" : "0.4.12", stage: available ? "complete" : null, checkedAt: new Date().toISOString(), installSupported: true } } } }));
+  try {
+    await page.locator(".better-codex-auto-dispatch-help").click();
+    await page.locator('button[data-help-view="remote"]').click();
+    await expect(page.locator("[data-remote-update-channel]")).toHaveText("更新通道 · 稳定版");
+    await expect(page.locator("[data-remote-update-summary-text]")).toHaveText("此通道仅检查正式版，不会提示 Beta 更新。");
+    await expect(page.locator("[data-remote-upgrade]")).toBeHidden();
+    await page.screenshot({ path: testInfo.outputPath("vps-stable-channel.png"), fullPage: true });
+    available = true;
+    await page.locator("[data-remote-refresh]").click();
+    await expect(page.locator("[data-remote-update-channel]")).toHaveText("更新通道 · 预览版");
+    await expect(page.locator("[data-remote-update-summary-text]")).toContainText("发现可用升级 v0.4.13-beta.3");
+    await expect(page.locator("[data-remote-update-summary-text]")).toContainText("前往网站管理更新");
+    expect(await page.locator("[data-remote-update-summary-text]").evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+    await expect(page.locator("[data-remote-update]")).toBeHidden();
+    await expect(page.locator("[data-remote-open]")).toBeInViewport();
+    await page.screenshot({ path: testInfo.outputPath("vps-preview-update.png"), fullPage: true });
+  } finally { await context.close(); }
+});
+
 test("keeps one upgrade operation through a lost receipt, page reload, and recovery", async ({ browser }, testInfo) => {
   const context = await browser.newContext({ locale: "zh-CN", viewport: { width: 1100, height: 720 } });
   const id = randomUUID();

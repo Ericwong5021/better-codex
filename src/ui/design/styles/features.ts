@@ -1888,6 +1888,11 @@ export function betterCodexFeatureStylesCss() {
       gap: 12px;
     }
 
+    #better-codex-auto-dispatch-help-dialog .better-codex-remote-status dd[data-remote-update-summary-text] {
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
+
     #better-codex-auto-dispatch-help-dialog .better-codex-remote-update-track {
       height: 5px;
       margin-top: 8px;

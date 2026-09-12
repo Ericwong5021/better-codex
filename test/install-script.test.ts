@@ -667,8 +667,30 @@ test("macOS release resolution and downloads have hard time limits", () => {
   }
 });
 
-test("VPS readiness failures restore retained images and interrupted rollback never rebuilds", { skip: process.platform === "win32" }, () => {
+test("VPS updates preserve channel selection and restore retained configuration and images", { skip: process.platform === "win32" }, () => {
   const source = readFileSync(new URL("../scripts/selfhost.sh", import.meta.url), "utf8");
+  const configuration = source.slice(source.indexOf("configure_vps_environment() {"), source.indexOf("\ninstall_vps() {"));
+  assert.ok(configuration.startsWith("configure_vps_environment() {"));
+  for (const [target, existing, override, expected] of [
+    ["v2.0.0-beta.1", "", "", "preview"],
+    ["v2.0.0", "", "", "stable"],
+    ["v2.0.0-beta.1", '"stable" # selected by operator', "", "stable"],
+    ["v2.0.0", "preview", "", "preview"],
+    ["v2.0.0-beta.1", "stable", "preview", "preview"],
+  ]) {
+    const directory = mkdtempSync(join(tmpdir(), "better-codex-vps-channel-"));
+    try {
+      const environment = join(directory, ".env");
+      writeFileSync(environment, `BETTER_CODEX_HUB_DOMAIN=old.invalid\nBETTER_CODEX_RELAY_AUTO_UPDATE=0\nUNRELATED_VALUE=preserved\n${existing ? `BETTER_CODEX_RELAY_UPDATE_CHANNEL=${existing}\n` : ""}`);
+      const result = spawnSync("/bin/bash", ["-c", `set -euo pipefail\nfail() { exit 1; }\n${configuration}\nconfigure_vps_environment "$1" "$2" new.invalid administrator`, "test", environment, target], { env: { ...process.env, BETTER_CODEX_RELAY_UPDATE_CHANNEL: override }, encoding: "utf8" });
+      assert.equal(result.status, 0, result.stderr);
+      const saved = readFileSync(environment, "utf8");
+      assert.match(saved, new RegExp(`^BETTER_CODEX_RELAY_UPDATE_CHANNEL=${expected}$`, "m"));
+      assert.match(saved, /^BETTER_CODEX_HUB_DOMAIN=new.invalid$/m);
+      assert.match(saved, /^BETTER_CODEX_RELAY_AUTO_UPDATE=0$/m);
+      assert.match(saved, /^UNRELATED_VALUE=preserved$/m);
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+  }
   const upgrade = source.slice(source.indexOf("upgrade_vps() ("), source.indexOf('\ntarget_version="$(version_tag)"'));
   assert.ok(upgrade.startsWith("upgrade_vps() ("));
   for (const scenario of ["internal", "public", "recovery", "interrupted"]) {
@@ -715,6 +737,7 @@ docker() {
     *' up '*) case "$*" in *compose.json*) printf 1.0.0 > "$BETTER_CODEX_SELFHOST_DIR/current" ;; *) printf 2.0.0 > "$BETTER_CODEX_SELFHOST_DIR/current" ;; esac ;;
   esac
 }
+${configuration}
 ${upgrade}
 upgrade_vps
 `;
@@ -727,6 +750,7 @@ upgrade_vps
       const snapshot = JSON.parse(readFileSync(join(transaction, "compose.json"), "utf8"));
       assert.equal(snapshot.services.hub.image, "sha256:retained-image");
       assert.equal(snapshot.services.hub.build, undefined);
+      assert.equal(readFileSync(join(directory, "deploy", "hub", ".env"), "utf8"), "BETTER_CODEX_HUB_DOMAIN=upgrade.invalid\n");
       const trace = readFileSync(join(directory, "trace"), "utf8");
       assert.match(trace, /compose.json.*up -d --no-build --wait/);
       assert.equal(trace.split("\n").filter(line => line.includes(" build hub")).length, 1);
