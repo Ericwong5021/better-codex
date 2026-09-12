@@ -601,7 +601,7 @@ async function recordDesktopIntegration(connection: Connection, target: Target, 
   const current = readCompatibilityStatus();
   const ready = Boolean(currentInjectionMatches(identity, expectedEndpoint)) && identity.ready === true;
   const failed = identity.bootstrapError && !/fetch|network|timeout|runtime_|update_|503|reconnecting/i.test(identity.bootstrapError);
-  return writeCompatibilityStatus({ codexVersion: current?.codexVersion ?? desktopVersion(), compatible: ready, reason: ready ? null : failed ? "injection_bootstrap_failed" : "bootstrap_pending", targetId: target.id, targetUrl: target.url, documentId: identity.documentId, capabilities: current?.capabilities ?? null }, ready);
+  return writeCompatibilityStatus({ codexVersion: current?.codexVersion ?? desktopVersion(), compatible: ready, reason: ready ? null : failed ? "injection_bootstrap_failed" : "bootstrap_pending", error: identity.bootstrapError || null, targetId: target.id, targetUrl: target.url, documentId: identity.documentId, capabilities: current?.capabilities ?? null }, ready);
 }
 
 async function installTarget(target: Target, runtimePort: number, accessToken: string) {

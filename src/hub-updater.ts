@@ -22,6 +22,10 @@ type HostUpdateState = {
   recovery?: "pending" | "restored" | "failed" | null;
   manifest?: StableManifest;
   requestedTarget?: string;
+  failureStage?: string;
+  exitCode?: number;
+  attempts?: number;
+  stageDurations?: Record<string, number>;
 };
 
 export type HubUpdateOperation = {
@@ -45,6 +49,12 @@ export type HubUpdateState = {
   channel: ReleaseChannel;
   recovery?: HostUpdateState["recovery"];
   operation?: HubUpdateOperation | null;
+  actual_version?: string;
+  target_version?: string;
+  phase?: string;
+  error_details?: { code: string; stage: string; exit_code: number | null } | null;
+  recovery_attempts?: number;
+  stage_durations?: Record<string, number>;
 };
 
 export class HubUpdater {
@@ -100,7 +110,7 @@ export class HubUpdater {
     const base = { ...this.state, currentVersion: coreVersion, installSupported: this.supported() };
     if (!host?.id) return base;
     const status: HubUpdateOperation["status"] = host.recovery === "restored" ? "ROLLED_BACK" : host.recovery === "pending" ? "ROLLING_BACK" : host.status === "error" ? "FAILED" : host.status === "current" && host.stage === "complete" ? "COMPLETED" : host.stage === "queued" ? "ACCEPTED" : "STAGING";
-    return { ...base, status: !updateId && host.status === "current" && base.status === "available" ? "available" : host.status, latestVersion: !updateId && host.status === "current" && base.status === "available" ? base.latestVersion : host.targetVersion.replace(/^v/, ""), checkedAt: host.updatedAt, stage: host.stage, progress: host.progress ?? null, error: host.error, recovery: host.recovery, operation: { id: host.id, status, source_core_version: host.sourceVersion, target_core_version: host.targetVersion.replace(/^v/, ""), error_code: host.error } };
+    return { ...base, status: !updateId && host.status === "current" && base.status === "available" ? "available" : host.status, latestVersion: !updateId && host.status === "current" && base.status === "available" ? base.latestVersion : host.targetVersion.replace(/^v/, ""), checkedAt: host.updatedAt, stage: host.stage, progress: host.progress ?? null, error: host.error, recovery: host.recovery, actual_version: coreVersion, target_version: host.targetVersion.replace(/^v/, ""), phase: host.stage, error_details: host.error ? { code: host.error, stage: host.failureStage || host.stage, exit_code: host.exitCode ?? null } : null, recovery_attempts: Math.max(0, (host.attempts || 1) - 1), stage_durations: host.stageDurations, operation: { id: host.id, status, source_core_version: host.sourceVersion, target_core_version: host.targetVersion.replace(/^v/, ""), error_code: host.error } };
   }
 
   stale() {
@@ -114,7 +124,8 @@ export class HubUpdater {
       this.manifest = result.manifest;
       const { manifest: _manifest, ...state } = result;
       this.state = { ...state, stage: null, progress: null, deployment: "vps", installSupported: this.supported() };
-      return this.get();
+      const current = this.get();
+      return current.status === "error" && current.recovery !== "failed" ? this.state : current;
     }).finally(() => { if (this.checkPromise === promise) this.checkPromise = null; });
     this.checkPromise = promise;
     return promise;

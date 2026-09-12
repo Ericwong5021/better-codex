@@ -58,6 +58,12 @@ const payload = {
     sha256: digest(compatibilityContent),
   },
   core: { version: coreVersion, assets },
+  source: await (async () => {
+    const content = await readFile(join(output, "source-commit.txt"));
+    const commit = content.toString("utf8").trim();
+    if (!/^[a-f0-9]{40}$/i.test(commit)) throw new Error("release_source_commit_invalid");
+    return { commit, url: releaseUrl("source-commit.txt"), sha256: digest(content) };
+  })(),
   installers,
   runtimeSessionHandoff: {
     protocol: "session-host/v2",

@@ -1,5 +1,5 @@
-import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { closeSync, existsSync, fsyncSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { betterCodexProfile, compatibilityCurrentPath, compatibilityStatusPath, compatibilityVersionsPath, ensureDirectories, runtimeCurrentPath } from "./config.js";
 import { readRuntimeState } from "./runtime-state.js";
 import { injectionPreferenceEnabled } from "./injection-state.js";
@@ -108,6 +108,7 @@ export type CompatibilityStatus = {
   codexVersion: string | null;
   compatible: boolean;
   reason: string | null;
+  error?: string | null;
   targetId: string | null;
   capabilities: RendererCapabilities | null;
   checkedAt: string;
@@ -197,8 +198,14 @@ export function readCompatibilityPointer() {
 export function writeCompatibilityPointer(value: CompatibilityPointer) {
   ensureDirectories();
   const temporary = `${compatibilityCurrentPath}.${process.pid}.tmp`;
-  writeFileSync(temporary, JSON.stringify(value), { mode: 0o600 });
+  const descriptor = openSync(temporary, "w", 0o600);
+  try { writeFileSync(descriptor, JSON.stringify(value)); fsyncSync(descriptor); }
+  finally { closeSync(descriptor); }
   renameSync(temporary, compatibilityCurrentPath);
+  if (process.platform !== "win32") {
+    const directory = openSync(dirname(compatibilityCurrentPath), "r");
+    try { fsyncSync(directory); } finally { closeSync(directory); }
+  }
 }
 
 function activeCoreVersion() {
@@ -314,15 +321,21 @@ export function navigationExpression(threadId: string) {
 }
 
 export function readCompatibilityStatus() {
+  const runtime = readRuntimeState();
+  const base: CompatibilityStatus = { state: "waiting_window", compatible: false, reason: "probe_pending", version: bundledCompatibility.version, coreVersion, supportedCodexVersions: bundledCompatibility.supportedCodexVersions, platform: process.platform, codexVersion: null, targetId: null, targetUrl: null, documentId: null, capabilities: null, checkedAt: new Date().toISOString(), lastSuccessfulAt: null, profile: betterCodexProfile, runtimeInstanceId: runtime?.instanceId || null, runtimeGeneration: runtime?.generation ?? null };
+  if (!injectionPreferenceEnabled()) return { ...base, state: "disabled" as const, reason: "disabled" };
+  let compatibility: CompatibilityManifest;
+  try { compatibility = activeCompatibility(); }
+  catch (error) { return { ...base, state: "failed" as const, reason: "compatibility_package_invalid", error: String(error) }; }
+  base.version = compatibility.version;
+  base.supportedCodexVersions = compatibility.supportedCodexVersions;
   try {
     const value = JSON.parse(readFileSync(compatibilityStatusPath, "utf8")) as CompatibilityStatus;
-    const runtime = readRuntimeState();
-    if (!injectionPreferenceEnabled()) return { ...value, state: "disabled" as const, compatible: false, reason: "disabled" };
-    if (value.coreVersion !== coreVersion || value.version !== activeCompatibility().version || value.profile !== betterCodexProfile || value.runtimeInstanceId !== (runtime?.instanceId || null) || value.runtimeGeneration !== (runtime?.generation ?? null) || Date.now() - Date.parse(value.checkedAt) > 90_000) return { ...value, state: "waiting_window" as const, compatible: false, reason: "probe_pending" };
+    if (value.coreVersion !== coreVersion || value.version !== compatibility.version || value.profile !== betterCodexProfile || value.runtimeInstanceId !== (runtime?.instanceId || null) || value.runtimeGeneration !== (runtime?.generation ?? null) || !Number.isFinite(Date.parse(value.checkedAt)) || Date.now() - Date.parse(value.checkedAt) > 90_000) return base;
     return value;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") return { state: "failed", compatible: false, reason: "compatibility_status_invalid", version: bundledCompatibility.version, coreVersion, supportedCodexVersions: bundledCompatibility.supportedCodexVersions, platform: process.platform, codexVersion: null, targetId: null, capabilities: null, checkedAt: new Date().toISOString(), lastSuccessfulAt: null } as CompatibilityStatus;
-    return { state: injectionPreferenceEnabled() ? "waiting_window" : "disabled", compatible: false, reason: injectionPreferenceEnabled() ? "probe_pending" : "disabled", version: activeCompatibility().version, coreVersion, supportedCodexVersions: activeCompatibility().supportedCodexVersions, platform: process.platform, codexVersion: null, targetId: null, capabilities: null, checkedAt: new Date().toISOString(), lastSuccessfulAt: null } as CompatibilityStatus;
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") return { ...base, state: "failed" as const, reason: "compatibility_status_invalid", error: String(error) };
+    return base;
   }
 }
 
@@ -350,6 +363,7 @@ export function writeCompatibilityStatus(input: Omit<CompatibilityStatus, "versi
     codexVersion: input.codexVersion,
     compatible: input.compatible,
     reason: input.reason,
+    error: input.error || null,
     targetId: input.targetId,
     capabilities: input.capabilities,
     checkedAt: now.toISOString(),

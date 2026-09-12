@@ -633,7 +633,7 @@ test("session host handoff fences stale Runtime generations", async () => {
   }
 });
 
-test("session host keeps an active App Server turn alive across Runtime handoff", { timeout: 45_000 }, async () => {
+test("session host keeps an active App Server turn alive across two consecutive Runtime handoffs", { timeout: 45_000 }, async () => {
   const home = mkdtempSync(join(tmpdir(), "better-codex-session-continuity-"));
   const token = "session-host-continuity-token";
   const socketPath = process.platform === "win32" ? "\\\\.\\pipe\\better-codex-session-host-development" : join(home, "run", "session-host");
@@ -671,10 +671,12 @@ input.on("line", line => {
     send({ id: message.id, result: { turn: { id: "${turnId}", status: "inProgress" } } });
     send({ method: "thread/status/changed", params: { threadId: "${threadId}", status: { type: "active", activeFlags: [] } } });
     send({ method: "turn/started", params: { threadId: "${threadId}", turn: { id: "${turnId}", status: "inProgress" } } });
-    setTimeout(() => {
+    const completionTimer = setInterval(() => {
+      if (!existsSync(${JSON.stringify(join(home, "complete-turn"))})) return;
+      clearInterval(completionTimer);
       send({ method: "item/completed", params: { threadId: "${threadId}", turnId: "${turnId}", item: { type: "agentMessage", text: "continued after Runtime restart" } } });
       process.stdout.write(JSON.stringify({ method: "turn/completed", params: { threadId: "${threadId}", turn: { id: "${turnId}", status: "completed", items: [{ type: "agentMessage", text: "continued after Runtime restart" }] } } }) + "\\n" + JSON.stringify({ method: "thread/status/changed", params: { threadId: "${threadId}", status: { type: "idle", activeFlags: [] } } }) + "\\n");
-    }, 1800);
+    }, 50);
     return;
   }
   send({ id: message.id, result: {} });
@@ -788,10 +790,32 @@ input.on("line", line => {
 
     target = await openSocket(socketPath);
     diagnosticState.phase = "target_connected";
-    const targetNext = queue(target);
+    let targetNext = queue(target);
     target.write(`${JSON.stringify({ type: "hello", protocol_version: sessionHostProtocolVersion, token, runtime_instance_id: "runtime-target", runtime_generation: 2, runtime_version: "1.1.0", profile: "development", handoff_update_id: updateId, capabilities })}\n`);
     assert.equal((await targetNext()).type, "hello_ack");
     diagnosticState.phase = "target_authenticated";
+    const exchange = async (request: Record<string, unknown>) => {
+      target!.write(`${JSON.stringify(request)}\n`);
+      while (true) {
+        const message = await targetNext();
+        if (message.type === "handoff_response" && message.request_id === request.request_id) { assert.equal(message.ok, true); return message.snapshot; }
+        if (message.type === "delivery") target!.write(`${JSON.stringify({ type: "delivery_ack", delivery_id: message.delivery_id, host_instance_id: message.host_instance_id, sequence: message.sequence, payload_hash: message.payload_hash, outcome: "applied" })}\n`);
+        if (message.type === "poll_request") target!.write(`${JSON.stringify({ type: "poll_response", request_id: message.request_id, result: { leader: true, acquired: true, expires_at: new Date(Date.now() + 10000).toISOString(), previous_relay_id: null, command: null, thread_ids: [threadId], active_turns: [{ thread_id: threadId, turn_id: turnId }] } })}\n`);
+      }
+    };
+    await exchange({ type: "complete_handoff", request_id: "first-complete", update_id: updateId });
+    const secondUpdateId = "019fec06-788f-7af3-a031-76b546904f84";
+    const secondSnapshot = await exchange({ type: "begin_handoff", request_id: "second-begin", update_id: secondUpdateId, target_runtime_generation: 3, target_version: "1.2.0", deadline_at: new Date(Date.now() + 60000).toISOString() });
+    assert.equal(secondSnapshot.active_turns.length, 1);
+    assert.equal(secondSnapshot.host_instance_id, sourceSnapshot.host_instance_id);
+    assert.equal(secondSnapshot.thread_workers[0].app_server_pid, sourceSnapshot.thread_workers[0].app_server_pid);
+    assert.equal(secondSnapshot.thread_workers[0].app_server_started_at, sourceSnapshot.thread_workers[0].app_server_started_at);
+    target.destroy();
+    target = await openSocket(socketPath);
+    targetNext = queue(target);
+    target.write(`${JSON.stringify({ type: "hello", protocol_version: sessionHostProtocolVersion, token, runtime_instance_id: "runtime-second-target", runtime_generation: 3, runtime_version: "1.2.0", profile: "development", handoff_update_id: secondUpdateId, capabilities })}\n`);
+    assert.equal((await targetNext()).type, "hello_ack");
+    writeFileSync(join(home, "complete-turn"), "complete");
     let targetSnapshot = sourceSnapshot;
     let completedEvent = false;
     let statusSequence = 0;
@@ -822,6 +846,7 @@ input.on("line", line => {
     assert.equal(targetSnapshot.app_server_pid, sourceSnapshot.app_server_pid);
     assert.equal(targetSnapshot.app_server_started_at, sourceSnapshot.app_server_started_at);
     assert.deepEqual(targetSnapshot.thread_workers, []);
+    console.log(`BETTER_CODEX_ACCEPTANCE ${JSON.stringify({ scenario: "two_runtime_handoffs", update_ids: [updateId, secondUpdateId], runtime_generations: [1, 2, 3], host_instance_id: targetSnapshot.host_instance_id, catalog_pid: targetSnapshot.app_server_pid, catalog_started_at: targetSnapshot.app_server_started_at, worker_pid: sourceSnapshot.thread_workers[0].app_server_pid, worker_started_at: sourceSnapshot.thread_workers[0].app_server_started_at, completed_event: completedEvent, queued_deliveries: targetSnapshot.queued_deliveries, retired_workers: targetSnapshot.thread_workers.length, replayed_retryable_delivery: retriedDeliveryId === "retried" })}`);
     target.write(`${JSON.stringify({ type: "thread_handoff_request", request_id: "idle-thread-handoff", thread_id: threadId })}\n`);
     while (true) {
       const message = await targetNext();
@@ -832,7 +857,7 @@ input.on("line", line => {
       }
       if (message.type === "poll_request") target.write(`${JSON.stringify({ type: "poll_response", request_id: message.request_id, result: { leader: true, acquired: true, expires_at: new Date(Date.now() + 10_000).toISOString(), previous_relay_id: null, command: null, thread_ids: [threadId], active_turns: [] } })}\n`);
     }
-    target.write(`${JSON.stringify({ type: "complete_handoff", request_id: "continuity-complete", update_id: updateId })}\n`);
+    target.write(`${JSON.stringify({ type: "complete_handoff", request_id: "continuity-complete", update_id: secondUpdateId })}\n`);
     diagnosticState.phase = "handoff_completing";
     while (true) {
       const message = await targetNext();

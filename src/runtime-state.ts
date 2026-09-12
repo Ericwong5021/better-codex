@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { closeSync, existsSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, fsyncSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { ensureDirectories, runtimeAuthorityPath, runtimeLockPath, runtimeStatePath } from "./config.js";
 import { coreVersion } from "./version.js";
 
@@ -66,17 +67,24 @@ function parse(path: string) {
 function readAuthority() {
   try {
     const value = JSON.parse(readFileSync(runtimeAuthorityPath, "utf8")) as Partial<RuntimeAuthority>;
-    if (!Number.isSafeInteger(value.generation) || value.generation! < 1 || !["claimed", "reserved"].includes(String(value.status))) return null;
+    if (!Number.isSafeInteger(value.generation) || value.generation! < 1 || !["claimed", "reserved"].includes(String(value.status))) throw new Error("runtime_authority_invalid");
     return value as RuntimeAuthority;
-  } catch {
-    return null;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw new Error("runtime_authority_invalid", { cause: error });
   }
 }
 
 function writeAuthority(authority: RuntimeAuthority) {
   const temporary = `${runtimeAuthorityPath}.${process.pid}.tmp`;
-  writeFileSync(temporary, JSON.stringify(authority), { mode: 0o600 });
+  const descriptor = openSync(temporary, "w", 0o600);
+  try { writeFileSync(descriptor, JSON.stringify(authority)); fsyncSync(descriptor); }
+  finally { closeSync(descriptor); }
   renameSync(temporary, runtimeAuthorityPath);
+  if (process.platform !== "win32") {
+    const directory = openSync(dirname(runtimeAuthorityPath), "r");
+    try { fsyncSync(directory); } finally { closeSync(directory); }
+  }
 }
 
 export function readRuntimeState() {
@@ -143,7 +151,7 @@ export function runtimeAuthorityUpdateState(updateId: string, expectedGeneration
   const current = readAuthority();
   if (!current) return { state: "missing" as RuntimeAuthorityUpdateState, generation: null, runtimeInstanceId: null };
   const generationMatches = expectedGeneration === undefined || current.generation === expectedGeneration;
-  if (current.updateId === updateId && generationMatches) return { state: "active" as RuntimeAuthorityUpdateState, generation: current.generation, runtimeInstanceId: current.runtimeInstanceId };
+  if (current.updateId === updateId && generationMatches) return { state: "active" as RuntimeAuthorityUpdateState, generation: current.generation, runtimeInstanceId: current.runtimeInstanceId, runtimePid: current.runtimePid, processStartedAt: current.processStartedAt };
   if (current.settledUpdateId === updateId && (expectedGeneration === undefined || current.generation >= expectedGeneration)) {
     return { state: current.settledOutcome === "rolled_back" ? "rolled_back" as RuntimeAuthorityUpdateState : "committed" as RuntimeAuthorityUpdateState, generation: current.generation, runtimeInstanceId: current.runtimeInstanceId };
   }
@@ -198,6 +206,18 @@ export function publishRuntimeState(state: RuntimeState) {
   const temporary = `${runtimeStatePath}.${process.pid}.tmp`;
   writeFileSync(temporary, JSON.stringify(state), { mode: 0o600 });
   renameSync(temporary, runtimeStatePath);
+}
+
+export function runtimeIdentityHealth(identity: RuntimeState) {
+  try {
+    const lock = parse(runtimeLockPath);
+    const published = parse(runtimeStatePath);
+    const authority = readAuthority();
+    if (lock?.pid !== identity.pid || lock.instanceId !== identity.instanceId || lock.processStartedAt !== identity.processStartedAt) throw new Error("runtime_lock_identity_mismatch");
+    if (!published || published.pid !== identity.pid || published.instanceId !== identity.instanceId || published.processStartedAt !== identity.processStartedAt || published.version !== identity.version || published.port !== identity.port || published.generation !== identity.generation) throw new Error("runtime_published_identity_mismatch");
+    if (!authority || authority.runtimePid !== identity.pid || authority.runtimeInstanceId !== identity.instanceId || authority.processStartedAt !== identity.processStartedAt || authority.generation !== identity.generation + (authority.status === "reserved" ? 1 : 0)) throw new Error("runtime_authority_identity_mismatch");
+    return { ok: true, error: null };
+  } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) }; }
 }
 
 export function clearRuntimeState(instanceId: string) {

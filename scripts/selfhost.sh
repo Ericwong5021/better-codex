@@ -167,7 +167,7 @@ configure_vps_updater() {
   need python3
   need flock
   install -d -m 755 /etc/better-codex /usr/local/libexec
-  install -d -o root -g "${BETTER_CODEX_HUB_CONTAINER_GID:-1000}" -m 0770 /var/lib/better-codex-updater
+  install -d -o root -g "${BETTER_CODEX_HUB_CONTAINER_GID:-1000}" -m 2770 /var/lib/better-codex-updater
   install -d -o root -g "${BETTER_CODEX_HUB_CONTAINER_GID:-1000}" -m 2770 /var/lib/better-codex-updater/operations /var/lib/better-codex-updater/requests
   install -m 0755 "$directory/scripts/selfhost-updater.sh" /usr/local/libexec/better-codex-selfhost-updater.next
   mv -f /usr/local/libexec/better-codex-selfhost-updater.next /usr/local/libexec/better-codex-selfhost-updater
@@ -238,8 +238,8 @@ upgrade_vps() (
   need python3
   need flock
   docker compose version >/dev/null 2>&1 || fail "Docker Compose is required"
-  local target directory compose proxy_compose environment operation_id transaction snapshot metadata previous previous_version previous_image target_commit domain external_proxy
-  local -a compose_args up_services recovery_args
+  target= directory= compose= proxy_compose= environment= operation_id= transaction= snapshot= metadata= previous= previous_version= previous_image= caddy_image= target_commit= domain= external_proxy=
+  compose_args=() up_services=() recovery_args=()
   target="$(version_tag)"
   directory="${BETTER_CODEX_SELFHOST_DIR:-/opt/better-codex}"
   compose="$directory/deploy/hub/compose.yaml"
@@ -308,20 +308,29 @@ PY
     [ "$total_kib" -gt 0 ] && [ "$free_kib" -ge 5242880 ] && [ "$((free_kib * 100 / total_kib))" -ge 5 ] || fail "VPS update blocked by storage warning reserve"
     write_upgrade_progress verifying 20
     target_commit="$(release_source_commit "$target")"
+    [ -z "${BETTER_CODEX_UPDATER_SOURCE_COMMIT:-}" ] || [ "$target_commit" = "$BETTER_CODEX_UPDATER_SOURCE_COMMIT" ] || fail "source commit changed after update acceptance"
     git -C "$directory" fetch --force origin "refs/tags/$target:refs/tags/$target"
     [ "$(git -C "$directory" rev-parse "$target^{commit}")" = "$target_commit" ] || fail "release tag does not match the signed source commit"
     previous="$(git -C "$directory" rev-parse HEAD)"
     previous_version="$(docker compose "${compose_args[@]}" exec -T hub node -e 'fetch("http://127.0.0.1:4318/readyz").then(async r=>{const v=await r.json();if(!r.ok||v.ok!==true)process.exit(1);process.stdout.write(v.version)})')"
     previous_image="$(docker inspect --format '{{.Image}}' "$(docker compose "${compose_args[@]}" ps -q hub)")"
     docker image tag "$previous_image" "better-codex-rollback:$operation_id"
+    caddy_image=""
+    if [ "$external_proxy" -eq 0 ]; then
+      caddy_image="$(docker inspect --format '{{.Image}}' "$(docker compose "${compose_args[@]}" ps -q caddy)")"
+      docker image tag "$caddy_image" "better-codex-caddy-rollback:$operation_id"
+    fi
     docker compose "${compose_args[@]}" config --format json > "$snapshot"
     domain="$(sed -n 's/^BETTER_CODEX_HUB_DOMAIN=//p' "$environment" | tail -n 1)"
-    python3 - "$snapshot" "$metadata" "$previous" "$previous_version" "$previous_image" "$target" "$target_commit" "$domain" "$external_proxy" <<'PY'
+    [[ "$domain" =~ ^[A-Za-z0-9.-]+$ ]] || fail "public readiness domain is required"
+    python3 - "$snapshot" "$metadata" "$previous" "$previous_version" "$previous_image" "$target" "$target_commit" "$domain" "$external_proxy" "$caddy_image" <<'PY'
 import json, os, shutil, sys
-snapshot, metadata, previous, version, image, target, commit, domain, proxy = sys.argv[1:]
+snapshot, metadata, previous, version, image, target, commit, domain, proxy, caddy = sys.argv[1:]
 value = json.load(open(snapshot))
 value["services"]["hub"].pop("build", None)
 value["services"]["hub"]["image"] = image
+if caddy:
+    value["services"]["caddy"]["image"] = caddy
 for volume in value.get("services", {}).get("caddy", {}).get("volumes", []):
     if volume.get("type") == "bind" and os.path.isfile(volume.get("source", "")):
         saved = os.path.join(os.path.dirname(snapshot), "Caddyfile")
@@ -364,8 +373,11 @@ PY
       write_upgrade_progress verified 100
       return 0
     fi
-    rollback_vps
     trap - EXIT
+    if ! rollback_vps; then
+      journal_phase recovery_failed
+      write_upgrade_progress recovery_failed 0 failed
+    fi
     return 1
   fi
   write_upgrade_progress downloading 45

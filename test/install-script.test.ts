@@ -666,3 +666,79 @@ test("macOS release resolution and downloads have hard time limits", () => {
     assert.match(line, /--max-time/);
   }
 });
+
+test("VPS readiness failures restore retained images and interrupted rollback never rebuilds", { skip: process.platform === "win32" }, () => {
+  const source = readFileSync(new URL("../scripts/selfhost.sh", import.meta.url), "utf8");
+  const upgrade = source.slice(source.indexOf("upgrade_vps() ("), source.indexOf('\ntarget_version="$(version_tag)"'));
+  assert.ok(upgrade.startsWith("upgrade_vps() ("));
+  for (const scenario of ["internal", "public", "recovery", "interrupted"]) {
+    const directory = mkdtempSync(join(tmpdir(), "better-codex-vps-rollback-"));
+    const id = "019fec06-788f-7af3-a031-76b546904fa9";
+    try {
+      mkdirSync(join(directory, "deploy", "hub"), { recursive: true });
+      mkdirSync(join(directory, ".git"));
+      writeFileSync(join(directory, "deploy", "hub", "compose.yaml"), "");
+      writeFileSync(join(directory, "deploy", "hub", "compose.proxy.yaml"), "");
+      writeFileSync(join(directory, "deploy", "hub", ".env"), "BETTER_CODEX_HUB_DOMAIN=upgrade.invalid\n");
+      writeFileSync(join(directory, "config.json"), JSON.stringify({ name: "upgrade-test", services: { hub: { image: "mutable:latest", build: "source" } } }));
+      writeFileSync(join(directory, "current"), "1.0.0");
+      const script = `set -euo pipefail
+fail() { echo "$1" >&2; exit 1; }
+need() { :; }
+id() { echo 0; }
+flock() { :; }
+version_tag() { echo v2.0.0; }
+release_source_commit() { echo target-sha; }
+write_upgrade_progress() { printf '%s\\n' "$*" >> "$BETTER_CODEX_SELFHOST_DIR/progress"; }
+configure_vps_updater() { :; }
+verify_vps_updater() { :; }
+retry() { "$@"; }
+df() { printf 'Filesystem 1024-blocks Used Available Capacity Mounted\\nfixture 40000000 1000000 39000000 1%% /\\n'; }
+git() {
+  printf 'git %s\\n' "$*" >> "$BETTER_CODEX_SELFHOST_DIR/trace"
+  case "$*" in *'rev-parse HEAD'*) echo source-sha ;; *'rev-parse v2.0.0'*) echo target-sha ;; esac
+}
+curl() {
+  current="$(cat "$BETTER_CODEX_SELFHOST_DIR/current")"
+  [ "$current" != 2.0.0 ] || [ "$SCENARIO" != public ] || return 22
+  printf '{"ok":true,"version":"%s"}' "$current"
+}
+docker() {
+  printf 'docker %s\\n' "$*" >> "$BETTER_CODEX_SELFHOST_DIR/trace"
+  case "$*" in
+    *' config --format json'*) cat "$BETTER_CODEX_SELFHOST_DIR/config.json" ;;
+    *' ps -q hub'*) echo source-container ;;
+    'inspect '*) echo sha256:retained-image ;;
+    *' exec '*TARGET_VERSION=2.0.0*) [ "$SCENARIO" = public ] ;;
+    *' exec '*TARGET_VERSION=1.0.0*) [ "$SCENARIO" != recovery ] ;;
+    *' exec '*) printf 1.0.0 ;;
+    *' up '*) case "$*" in *compose.json*) printf 1.0.0 > "$BETTER_CODEX_SELFHOST_DIR/current" ;; *) printf 2.0.0 > "$BETTER_CODEX_SELFHOST_DIR/current" ;; esac ;;
+  esac
+}
+${upgrade}
+upgrade_vps
+`;
+      const environment = { ...process.env, BETTER_CODEX_SELFHOST_DIR: directory, BETTER_CODEX_UPDATER_OPERATION_ID: id, SCENARIO: scenario };
+      const result = spawnSync("/bin/bash", ["-c", script], { env: environment, encoding: "utf8", timeout: 20_000 });
+      assert.equal(result.status, 1, `${scenario}\n${result.stdout}\n${result.stderr}`);
+      const transaction = join(directory, ".git", "better-codex-updates", id);
+      const state = JSON.parse(readFileSync(join(transaction, "transaction.json"), "utf8"));
+      assert.equal(state.phase, scenario === "recovery" ? "recovery_failed" : "restored", `${scenario}\n${result.stdout}\n${result.stderr}`);
+      const snapshot = JSON.parse(readFileSync(join(transaction, "compose.json"), "utf8"));
+      assert.equal(snapshot.services.hub.image, "sha256:retained-image");
+      assert.equal(snapshot.services.hub.build, undefined);
+      const trace = readFileSync(join(directory, "trace"), "utf8");
+      assert.match(trace, /compose.json.*up -d --no-build --wait/);
+      assert.equal(trace.split("\n").filter(line => line.includes(" build hub")).length, 1);
+      console.log(`BETTER_CODEX_ACCEPTANCE ${JSON.stringify({ scenario: `vps_${scenario}`, update_id: id, phase: state.phase, source_version: state.sourceVersion, retained_image: snapshot.services.hub.image, target_builds: 1, rollback_builds: 0 })}`);
+      if (scenario === "interrupted") {
+        writeFileSync(join(transaction, "transaction.json"), JSON.stringify({ ...state, phase: "rolling_back" }));
+        writeFileSync(join(directory, "trace"), "");
+        const resumed = spawnSync("/bin/bash", ["-c", script], { env: { ...environment, BETTER_CODEX_UPDATER_RECOVER: "1" }, encoding: "utf8", timeout: 20_000 });
+        assert.equal(resumed.status, 1, resumed.stderr);
+        assert.equal(JSON.parse(readFileSync(join(transaction, "transaction.json"), "utf8")).phase, "restored");
+        assert.doesNotMatch(readFileSync(join(directory, "trace"), "utf8"), / build | fetch /);
+      }
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+  }
+});

@@ -1,3 +1,4 @@
+import { createUpdateObserver, updateOutcome } from "./core/update-observer.js";
 import { createCommandObserver } from "./core/command-observer.js";
 import { conversationEmptyState } from "./features/board/model.js";
 import { sessionThreadMissing } from "../session-execution-policy.js";
@@ -486,11 +487,11 @@ export function install(config: Record<string, any>) {
     localeResources.en["更新包验证失败，已保留当前版本。"] = "The update package could not be verified. The current version was kept.";
     localeResources.en["同步中"] = "Syncing";
     localeResources.en["同步冲突"] = "Sync conflict";
-    localeResources.en["更新后的版本验证失败，已恢复到上一版本。"] = "The updated version could not be verified. The previous version was restored.";
-    localeResources.en["Better Codex 重启超时，已恢复到上一版本。"] = "Better Codex took too long to restart. The previous version was restored.";
+    localeResources.en["更新后的版本验证失败。"] = "The updated version could not be verified.";
+    localeResources.en["Better Codex 重启超时。"] = "Better Codex took too long to restart.";
     localeResources.en["无法下载更新，请检查网络后重试。"] = "The update could not be downloaded. Check your network and try again.";
     localeResources.en["更新包安全校验失败，已保留当前版本。"] = "The update failed its security check. The current version was kept.";
-    localeResources.en["更新进程意外中断，已恢复到上一版本。"] = "The update was interrupted. The previous version was restored.";
+    localeResources.en["更新进程意外中断。"] = "The update was interrupted.";
     localeResources.en["更新失败，请稍后重试。"] = "The update failed. Try again later.";
     localeResources.en["Codex 会话连接失败"] = "Codex connection failed";
     localeResources.en["原生会话正在创建，请稍后重试。"] = "The native conversation is being created. Try again shortly.";
@@ -1465,7 +1466,7 @@ export function install(config: Record<string, any>) {
 
     function transientRuntimeTransportError(error) {
       const message = error instanceof Error ? error.message : String(error || "");
-      return ["runtime_offline", "runtime_unavailable", "runtime_bridge_timeout", "runtime_bridge_unavailable", "injection_destroyed"].includes(message) || message === "runtime_fetch_failed" || message.startsWith("runtime_fetch_failed:");
+      return ["runtime_offline", "runtime_unavailable", "runtime_reconciling", "update_in_progress", "update_commit_pending", "runtime_bridge_timeout", "runtime_bridge_unavailable", "injection_destroyed"].includes(message) || message === "runtime_fetch_failed" || message.startsWith("runtime_fetch_failed:");
     }
 
     function transientNetworkError(error) {
@@ -2401,7 +2402,7 @@ export function install(config: Record<string, any>) {
     }
 
     function relatedDiagnosticLogs(record) {
-      const keys = ["trace_id", "command_id", "request_id", "issue_id", "issue_identifier", "thread_id", "turn_id"];
+      const keys = ["trace_id", "command_id", "request_id", "update_id", "issue_id", "issue_identifier", "thread_id", "turn_id"];
       const sources = [record.context || {}, record.diagnostics || {}];
       const traceId = sources.map(source => String(source.trace_id || "")).find(Boolean);
       const hostTimeline = Array.isArray(record.diagnostics?.trace_timeline) ? record.diagnostics.trace_timeline : [];
@@ -2487,6 +2488,7 @@ export function install(config: Record<string, any>) {
         timeline,
         occurrences: record.occurrences,
       };
+      if (source === "update_details" || source === "remote_update_details") report.update = diagnosticValue(context.update || compactFields({ update_id: context.update_id, phase: context.phase, actual_version: context.actual_version, target_version: context.target_version, recovery: context.recovery, desktop: context.desktop, error_details: context.details }));
       if (source === "window_error") report.browser_event = compactFields({ filename: context.filename, line: context.line, column: context.column, error_present: context.error_present, trusted: context.trusted });
       if (["window_error", "unhandled_rejection"].includes(source) && record.stack) report.stack = String(record.stack).split("\n").slice(0, 8).join("\n");
       return report;
@@ -2585,7 +2587,7 @@ export function install(config: Record<string, any>) {
         occurrences: 1,
         occurrence_times: [new Date().toISOString()],
       };
-      const fingerprint = [record.message, record.context.source || "", record.context.path || "", record.diagnostics.response_detail || ""].join("|");
+      const fingerprint = [record.message, record.context.source || "", record.context.path || "", record.context.update_id || record.context.update?.operation?.id || "", record.diagnostics.response_detail || ""].join("|");
       const repeatedIndex = errorQueue.findIndex(item => item.fingerprint === fingerprint);
       if (repeatedIndex >= 0) {
         const repeated = errorQueue[repeatedIndex];
@@ -2604,7 +2606,7 @@ export function install(config: Record<string, any>) {
         return repeated.id;
       }
       record.fingerprint = fingerprint;
-      appendDiagnostic("error_reported", { id: record.id, trace_id: record.context.trace_id || record.diagnostics.trace_id || "", message: record.message, category: record.category, source: record.context.source });
+      appendDiagnostic("error_reported", { id: record.id, trace_id: record.context.trace_id || record.diagnostics.trace_id || "", update_id: record.context.update_id || record.context.update?.operation?.id || "", message: record.message, category: record.category, source: record.context.source });
       record.related_logs = relatedDiagnosticLogs(record);
       errorQueue.push(record);
       if (errorQueue.length > 50) errorQueue.shift();
@@ -2764,6 +2766,26 @@ export function install(config: Record<string, any>) {
       return presentation;
     }
 
+    Object.assign(localeResources.en, {
+      "升级完成": "Update complete",
+      "已恢复旧版": "Previous version restored",
+      "恢复未完成": "Recovery incomplete",
+      "服务已更新，主窗口可用后会自动连接。": "The service is updated. The main window will reconnect when available.",
+      "旧版已启动并通过服务检查，可以继续使用。": "The previous version is running and has passed readiness checks.",
+      "自动恢复未能完成，请查看详情处理。": "Automatic recovery could not finish. Open details to resolve it.",
+      "服务已升级，桌面连接需要处理": "Service updated; desktop connection needs attention",
+      "服务可以继续使用。请查看桌面连接失败的原因。": "The service is available. Open details to resolve the desktop connection.",
+      "正在启动旧版、重连会话并验证服务状态。": "Starting the previous version, reconnecting sessions, and verifying readiness.",
+      "升级未能完成，请查看原因后重试。": "The update could not finish. Check the details before retrying.",
+      "正在确认升级结果": "Confirming update status",
+      "暂时无法连接服务，恢复连接后会继续确认本次升级。": "The service is temporarily unreachable. This update will be checked again after reconnecting.",
+      "正在重连会话并验证服务状态。": "Reconnecting sessions and verifying readiness.",
+      "正在后台下载并校验新版本，可以继续使用。": "Downloading and verifying the update in the background.",
+      "继续检查": "Continue checking",
+      "重试升级": "Retry update",
+      "查看详情": "View details",
+    });
+
     function updateErrorLabel(error) {
       let value = error instanceof Error ? error.message : String(error || "update_install_failed");
       if (value.startsWith("update_activation_failed:")) value = value.slice("update_activation_failed:".length);
@@ -2773,11 +2795,11 @@ export function install(config: Record<string, any>) {
       if (value === "update_storage_reserve" || value.startsWith("update_storage_reserve:")) return t("服务器磁盘空间不足，请清理空间后重试升级（至少保留 5 GiB 和 5% 可用空间）。");
       if (value === "core_version_mismatch" || value === "compatibility_manifest_mismatch") return t("下载的更新版本与发布版本不一致，请稍后重试。");
       if (value === "core_validation_failed" || value === "core_health_validation_failed" || value === "update_asset_invalid" || value === "update_manifest_invalid" || value === "update_compatibility_invalid" || value === "update_core_invalid") return t("更新包验证失败，已保留当前版本。");
-      if (value === "core_activation_version_mismatch" || value === "compatibility_activation_version_mismatch") return t("更新后的版本验证失败，已恢复到上一版本。");
-      if (value === "update_runtime_stop_timeout" || value === "runtime_restart_timeout") return t("Better Codex 重启超时，已恢复到上一版本。");
+      if (value === "core_activation_version_mismatch" || value === "compatibility_activation_version_mismatch") return t("更新后的版本验证失败。");
+      if (value === "update_runtime_stop_timeout" || value === "runtime_restart_timeout") return t("Better Codex 重启超时。");
       if (value.startsWith("update_http_") || value === "update_check_failed") return t("无法下载更新，请检查网络后重试。");
       if (value === "update_public_key_unavailable" || value === "update_https_required" || value === "update_hash_invalid" || value === "update_hash_mismatch" || value === "update_signature_invalid") return t("更新包安全校验失败，已保留当前版本。");
-      if (value === "update_activation_interrupted") return t("更新进程意外中断，已恢复到上一版本。");
+      if (value === "update_activation_interrupted") return t("更新进程意外中断。");
       return t("更新失败，请稍后重试。");
     }
 
@@ -2882,179 +2904,116 @@ export function install(config: Record<string, any>) {
       syncCompletionNoticePosition();
     }
 
-    async function waitForUpdateCompletion(notice, updateId) {
-      const deadline = Date.now() + 30 * 60 * 1000;
-      const title = notice.querySelector(".better-codex-update-title");
-      const description = notice.querySelector(".better-codex-update-description");
-      while (!destroyed && updateNotice === notice && Date.now() < deadline) {
-        await new Promise(resolve => setTimeout(resolve, 500));
-        let update;
-        try {
-          update = await api(runtimeUpdatePath("?update_id=" + encodeURIComponent(updateId)), { passive: true });
-        } catch (reason) {
-          if (destroyed || updateNotice !== notice) return;
-          if (transientNetworkError(reason)) continue;
-          throw reason;
-        }
-        if (updateNotice !== notice) return;
-        const operationStatus = String(update?.operation?.status || "");
-        if (operationStatus === "FAILED") throw new Error(String(update?.operation?.error_code || update.error || "update_failed"));
-        if (operationStatus === "ROLLED_BACK") throw new Error(String(update?.operation?.error_code || update.error || "update_rolled_back"));
-        if (operationStatus === "COMPLETED") {
-          localStorage.removeItem("better-codex-active-update-id");
-          localStorage.removeItem("better-codex-update-request-key");
-          notice.dataset.status = "current";
-          title.textContent = t("Better Codex 已是最新版本");
-          description.textContent = t("更新已完成。");
-          notice.querySelector(".better-codex-update-actions").remove();
-          if (REMOTE && typeof window.betterCodexHost?.reloadAfterUpdate === "function") {
-            window.betterCodexHost.reloadAfterUpdate();
-            return;
-          }
-          setTimeout(() => {
-            if (updateNotice !== notice) return;
-            notice.remove();
-            updateNotice = null;
-            updateNoticeResizeObserver?.disconnect();
-            updateNoticeResizeObserver = null;
-            syncCompletionNoticePosition();
-          }, 1800);
-          return;
-        }
-        if (["RESTARTING_RUNTIME", "REPLAYING", "RECONCILING", "SERVING_READY", "ROLLING_BACK"].includes(operationStatus)) {
-          notice.dataset.status = "restarting";
-          title.textContent = t(operationStatus === "ROLLING_BACK" ? "正在恢复 Better Codex" : "正在切换 Better Codex Runtime");
-          description.textContent = t(operationStatus === "ROLLING_BACK" ? "新版本未能接管，正在恢复上一版本；运行中的会话不会被中断。" : "Runtime 正在接管，运行中的会话会继续执行。");
-        } else if (operationStatus === "WAITING_FOR_HOST_DRAIN" || operationStatus === "HANDOFF_READY") {
-          notice.dataset.status = "installing";
-          title.textContent = t("正在安全交接会话");
-          description.textContent = t("正在等待命令落盘并准备 Runtime 接管，运行中的会话会继续执行。");
-        } else {
-          notice.dataset.status = "installing";
-          title.textContent = t("正在更新 Better Codex");
-          description.textContent = t("正在下载并校验新版本，请保持 Codex 打开。");
-        }
-      }
-      if (!destroyed && updateNotice === notice) throw new Error("runtime_bridge_timeout");
+    const runtimeUpdateObserver = createUpdateObserver({ storage: localStorage, namespace: "better-codex-runtime-update", request: (suffix, options) => api(runtimeUpdatePath(suffix), options), stopped: () => destroyed, transient: transientNetworkError, diagnostic: event => appendDiagnostic("update_observed", event) });
+    const vpsUpdateObserver = createUpdateObserver({ storage: localStorage, namespace: "better-codex-vps-update", request: (suffix, options) => api("/api/update" + suffix, options), stopped: () => destroyed, transient: transientNetworkError, diagnostic: event => appendDiagnostic("update_observed", event) });
+    const legacyUpdateId = localStorage.getItem("better-codex-active-update-id");
+    if (legacyUpdateId && !runtimeUpdateObserver.pending()) localStorage.setItem("better-codex-runtime-update-request", JSON.stringify({ id: legacyUpdateId, key: localStorage.getItem("better-codex-update-request-key") || legacyUpdateId, target: "" }));
+
+    function updateCopy(update) {
+      const outcome = updateOutcome(update);
+      const phase = String(update.operation?.status || "");
+      if (outcome === "completed" && update.desktop?.state === "failed") return ["服务已升级，桌面连接需要处理", "服务可以继续使用。请查看桌面连接失败的原因。"];
+      if (outcome === "completed") return ["升级完成", update.desktop?.state === "waiting_window" ? "服务已更新，主窗口可用后会自动连接。" : "更新已完成。"];
+      if (outcome === "rolled_back") return ["已恢复旧版", "旧版已启动并通过服务检查，可以继续使用。"];
+      if (outcome === "recovery_failed") return ["恢复未完成", "自动恢复未能完成，请查看详情处理。"];
+      if (outcome === "recovering") return ["正在恢复 Better Codex", "正在启动旧版、重连会话并验证服务状态。"];
+      if (outcome === "failed") return ["更新未完成", "升级未能完成，请查看原因后重试。"];
+      if (outcome === "unknown") return ["正在确认升级结果", "暂时无法连接服务，恢复连接后会继续确认本次升级。"];
+      if (["RESTARTING_RUNTIME", "REPLAYING", "RECONCILING", "SERVING_READY"].includes(phase)) return ["正在切换 Better Codex Runtime", "正在重连会话并验证服务状态。"];
+      if (["WAITING_FOR_HOST_DRAIN", "HANDOFF_READY"].includes(phase)) return ["正在安全交接会话", "正在等待命令落盘并准备 Runtime 接管，运行中的会话会继续执行。"];
+      return ["正在更新 Better Codex", "正在后台下载并校验新版本，可以继续使用。"];
     }
 
     function renderUpdateNotice(update, force = false) {
-      const version = String(update?.latestVersion || "");
-      const activationError = update?.status === "error" && String(update?.error || "").startsWith("update_activation_failed:");
-      const installError = update?.status === "error" && updateNotice?.dataset.status === "install-error";
-      const activeInstall = ["installing", "restarting", "current"].includes(updateNotice?.dataset.status || "");
-      const noticeVersion = activationError ? String(update?.currentVersion || "activation-error") + ":" + String(update?.checkedAt || Date.now()) : version;
-      if (!activationError && (update?.status !== "available" || !version)) {
-        if (installError || activeInstall) return;
-        if (!["checking", "installing", "restarting"].includes(update?.status)) {
-          updateNoticeResizeObserver?.disconnect();
-          updateNoticeResizeObserver = null;
-          updateNotice?.remove();
-          updateNotice = null;
-          syncCompletionNoticePosition();
-        }
-        return;
+      runtimeUpdateObserver.adopt(update);
+      let outcome = updateOutcome(update);
+      if (runtimeUpdateObserver.pending() && outcome === "idle") outcome = "unknown";
+      const version = String(update?.latestVersion || update?.target_version || "");
+      const noticeVersion = String(update.operation?.id || runtimeUpdateObserver.pending()?.id || version);
+      const desktopFailed = outcome === "completed" && update.desktop?.state === "failed";
+      if (outcome === "idle" || outcome === "completed" && !desktopFailed && !runtimeUpdateObserver.pending() && !force) return;
+      if (!force && (dismissedUpdateVersion === noticeVersion || ignoredUpdateVersion === noticeVersion || localStorage.getItem("better-codex-dismissed-update-operation") === noticeVersion)) return;
+      if (updateNotice?.dataset.version !== noticeVersion) {
+        updateNoticeResizeObserver?.disconnect();
+        updateNotice?.remove();
+        const notice = document.createElement("section");
+        notice.id = "better-codex-update-notice";
+        notice.dataset.version = noticeVersion;
+        notice.setAttribute(OWNED, "true");
+        notice.setAttribute("role", "status");
+        notice.setAttribute("aria-live", "polite");
+        notice.innerHTML = '<button class="better-codex-update-menu-toggle" type="button" aria-label="' + escapeHtml(t("更多操作")) + '" aria-expanded="false" aria-haspopup="menu" data-update-menu-toggle>' + icon("more") + '</button><div class="better-codex-update-menu" data-update-menu hidden><button type="button" role="menuitem" data-update-ignore>' + escapeHtml(t("忽略当前版本")) + '</button></div><button class="better-codex-update-close" type="button" aria-label="' + escapeHtml(t("稍后提醒")) + '">' + icon("close") + '</button><div class="better-codex-update-layout"><span class="better-codex-update-icon">' + icon("refresh") + '</span><div class="better-codex-update-copy"><p class="better-codex-update-title"></p><p class="better-codex-update-description"></p><p class="better-codex-update-error" hidden></p></div><div class="better-codex-update-actions"><button class="better-codex-update-button" type="button" data-update-details hidden>' + escapeHtml(t("查看详情")) + '</button><button class="better-codex-update-button" type="button" data-update-later>' + escapeHtml(t("稍后")) + '</button><button class="better-codex-update-button is-primary" type="button" data-update-install></button></div></div>';
+        updateNotice = notice;
+        document.body.appendChild(notice);
+        updateNoticeResizeObserver = new ResizeObserver(syncCompletionNoticePosition);
+        updateNoticeResizeObserver.observe(notice);
+        syncCompletionNoticePosition();
+        const menuToggle = notice.querySelector("[data-update-menu-toggle]");
+        const menu = notice.querySelector("[data-update-menu]");
+        const closeMenu = () => menuHandle.update({ onClose: closeMenu, open: false, trigger: menuToggle });
+        const menuHandle = adoptMenu(menu, { onClose: closeMenu, open: false, trigger: menuToggle }, componentContext("update-notice", "update-menu:" + noticeVersion));
+        registerOwnedComponent(menu, menuHandle);
+        menuToggle.addEventListener("click", () => menuHandle.update({ onClose: closeMenu, open: menu.hidden, trigger: menuToggle }));
+        menu.querySelector("[data-update-ignore]").addEventListener("click", () => { closeMenu(); ignoreUpdate(notice.dataset.version); });
+        const dismiss = () => { localStorage.setItem("better-codex-dismissed-update-operation", notice.dataset.version); dismissUpdate(notice.dataset.version); };
+        notice.querySelector(".better-codex-update-close").addEventListener("click", dismiss);
+        notice.querySelector("[data-update-later]").addEventListener("click", dismiss);
       }
-      if (!force && (dismissedUpdateVersion === noticeVersion || ignoredUpdateVersion === noticeVersion)) return;
-      if (updateNotice?.dataset.version === noticeVersion && updateNotice.dataset.status === (activationError ? "error" : "available")) return;
-      if (activationError) reportGlobalError(new Error(String(update.error || "update_activation_failed")), { source: "update_activation" });
-      updateNoticeResizeObserver?.disconnect();
-      updateNoticeResizeObserver = null;
-      updateNotice?.remove();
-      updateNotice = document.createElement("section");
-      updateNotice.id = "better-codex-update-notice";
-      updateNotice.dataset.version = noticeVersion;
-      updateNotice.dataset.status = activationError ? "error" : "available";
-      updateNotice.setAttribute(OWNED, "true");
-      updateNotice.setAttribute("role", "status");
-      updateNotice.setAttribute("aria-live", "polite");
-      const updateDescription = "v" + version + " 已可用。Runtime 会安全切换，正在运行的会话会继续执行。";
-      updateNotice.innerHTML = '<button class="better-codex-update-menu-toggle" type="button" aria-label="' + escapeHtml(t("更多操作")) + '" aria-expanded="false" aria-haspopup="menu" data-update-menu-toggle>' + icon("more") + '</button><div class="better-codex-update-menu" data-update-menu hidden><button type="button" role="menuitem" data-update-ignore>' + escapeHtml(t("忽略当前版本")) + '</button></div><button class="better-codex-update-close" type="button" aria-label="' + escapeHtml(t("稍后提醒")) + '">' + icon("close") + '</button><div class="better-codex-update-layout"><span class="better-codex-update-icon">' + icon("refresh") + '</span><div class="better-codex-update-copy"><p class="better-codex-update-title">' + escapeHtml(t("Better Codex 有新版本")) + '</p><p class="better-codex-update-description">' + escapeHtml(t(updateDescription)) + '</p><p class="better-codex-update-error" hidden></p></div><div class="better-codex-update-actions"><button class="better-codex-update-button" type="button" data-update-later>' + escapeHtml(t("稍后")) + '</button><button class="better-codex-update-button is-primary" type="button" data-update-install>' + escapeHtml(t("立即更新")) + '</button></div></div>';
-      document.body.appendChild(updateNotice);
-      updateNoticeResizeObserver = new ResizeObserver(syncCompletionNoticePosition);
-      updateNoticeResizeObserver.observe(updateNotice);
-      syncCompletionNoticePosition();
       const notice = updateNotice;
-      const menuToggle = notice.querySelector("[data-update-menu-toggle]");
-      const menu = notice.querySelector("[data-update-menu]");
-      let menuHandle;
-      const closeMenu = () => {
-        menuHandle.update({ onClose: closeMenu, open: false, trigger: menuToggle });
-      };
-      menuHandle = adoptMenu(menu, { onClose: closeMenu, open: false, trigger: menuToggle }, componentContext("update-notice", "update-menu:" + noticeVersion));
-      registerOwnedComponent(menu, menuHandle);
-      const noticeHandle = adoptNotice(notice, { dismissible: true, message: updateDescription, onDismiss: () => dismissUpdate(noticeVersion), tone: activationError ? "error" : "info" }, componentContext("update-notice", "update-notice:" + noticeVersion));
-      registerOwnedComponent(notice, noticeHandle);
-      menuToggle.addEventListener("click", event => {
-        event.stopPropagation();
-        menuHandle.update({ onClose: closeMenu, open: menu.hidden, trigger: menuToggle });
-      });
-      menu.querySelector("[data-update-ignore]").addEventListener("click", () => {
-        closeMenu();
-        ignoreUpdate(noticeVersion);
-      });
-      updateNotice.querySelector(".better-codex-update-close").addEventListener("click", () => dismissUpdate(noticeVersion));
-      updateNotice.querySelector("[data-update-later]").addEventListener("click", () => dismissUpdate(noticeVersion));
-      if (activationError) {
-        updateNotice.querySelector(".better-codex-update-title").textContent = t("更新未完成");
-        updateNotice.querySelector(".better-codex-update-description").textContent = t("Better Codex 已恢复到上一版本。");
-        updateNotice.querySelector(".better-codex-update-error").textContent = updateErrorLabel(update.error);
-        updateNotice.querySelector(".better-codex-update-error").hidden = false;
-        updateNotice.querySelector("[data-update-install]").textContent = t("重试");
-      }
-      updateNotice.querySelector("[data-update-install]").addEventListener("click", async event => {
-        const install = event.currentTarget;
-        const close = notice.querySelector(".better-codex-update-close");
-        const ignore = notice.querySelector("[data-update-ignore]");
-        const later = notice.querySelector("[data-update-later]");
-        const title = notice.querySelector(".better-codex-update-title");
-        const description = notice.querySelector(".better-codex-update-description");
-        const error = notice.querySelector(".better-codex-update-error");
-        notice.dataset.status = "installing";
+      notice.querySelector("[data-update-menu-toggle]").hidden = outcome !== "available";
+      const busy = ["updating", "recovering"].includes(outcome);
+      const failed = ["failed", "recovery_failed", "rolled_back"].includes(outcome);
+      notice.dataset.status = failed ? "install-error" : outcome === "completed" ? "current" : busy || outcome === "unknown" ? "installing" : "available";
+      const copy = outcome === "available" ? ["Better Codex 有新版本", "v" + version + " 已可用。Runtime 会安全切换，正在运行的会话会继续执行。"] : updateCopy(outcome === "unknown" ? { status: "unknown" } : update);
+      notice.querySelector(".better-codex-update-title").textContent = t(copy[0]);
+      notice.querySelector(".better-codex-update-description").textContent = t(copy[1]);
+      const error = notice.querySelector(".better-codex-update-error");
+      error.hidden = !failed || outcome === "recovery_failed";
+      error.textContent = failed ? updateErrorLabel(update.operation?.error_code || update.error) : "";
+      const details = notice.querySelector("[data-update-details]");
+      details.hidden = !failed && !desktopFailed && !update.requires_action;
+      const showDetails = () => reportGlobalError(new Error(String(update.operation?.error_code || update.error || update.desktop?.error || update.desktop?.reason || "update_result_unknown")), { source: "update_details", update_id: update.operation?.id, phase: update.phase, actual_version: update.actual_version || update.currentVersion, target_version: update.target_version, recovery: update.recovery, desktop: update.desktop, details: update.error_details });
+      details.onclick = showDetails;
+      const install = notice.querySelector("[data-update-install]");
+      install.disabled = busy;
+      install.hidden = outcome === "completed" || outcome === "recovery_failed";
+      install.textContent = t(outcome === "recovery_failed" ? "查看详情" : outcome === "unknown" ? "继续检查" : busy ? "正在更新" : failed ? "重试升级" : "立即更新");
+      install.onclick = async () => {
+        if (outcome === "recovery_failed") return showDetails();
         install.disabled = true;
-        menuToggle.disabled = true;
-        close.disabled = true;
-        ignore.disabled = true;
-        later.disabled = true;
-        install.textContent = t("正在更新");
-        title.textContent = t("正在更新 Better Codex");
-        description.textContent = t("正在升级 Better Codex。正在运行的会话会继续执行，新任务会在升级完成后开始。");
-        error.hidden = true;
         try {
-          const requestKey = localStorage.getItem("better-codex-update-request-key") || crypto.randomUUID();
-          localStorage.setItem("better-codex-update-request-key", requestKey);
-          const result = await api(runtimeUpdatePath("/install"), { method: "POST", body: JSON.stringify({ idempotency_key: requestKey }), timeoutMs: 45000 });
-          if (updateNotice !== notice) return;
-          if (result?.accepted !== true || typeof result?.update_id !== "string") throw new Error("update_not_accepted");
-          localStorage.setItem("better-codex-active-update-id", result.update_id);
-          await waitForUpdateCompletion(notice, result.update_id);
+          if (!runtimeUpdateObserver.pending()) await runtimeUpdateObserver.start(String(update.targetVersion || ""));
+          void runtimeUpdateObserver.observe(value => renderUpdateNotice(value, true)).catch(reason => renderUpdateNotice({ status: "unknown", error: String(reason) }, true));
         } catch (reason) {
-          if (updateNotice !== notice) return;
-          window.betterCodexHost?.cancelUpdateRecovery?.("update_install_failed");
-          reportUnexpectedError(reason, { source: "update_install" });
-          notice.dataset.status = "install-error";
+          appendDiagnostic("update_request_failed", { update_id: runtimeUpdateObserver.pending()?.id, error: String(reason) });
+          renderUpdateNotice({ status: "unknown", error: String(reason) }, true);
+        }
+      };
+      if (outcome === "completed") {
+        localStorage.removeItem("better-codex-active-update-id");
+        localStorage.removeItem("better-codex-update-request-key");
+        if (!desktopFailed) setTimeout(() => { if (updateNotice === notice) dismissUpdate(noticeVersion); }, 2500);
+      }
+      if (runtimeUpdateObserver.pending() && !["completed", "rolled_back", "failed", "recovery_failed"].includes(outcome)) void runtimeUpdateObserver.observe(value => renderUpdateNotice(value, true)).catch(reason => {
+        appendDiagnostic("update_observation_failed", { error: String(reason) });
+        if (updateNotice === notice) {
+          notice.querySelector(".better-codex-update-title").textContent = t("正在确认升级结果");
+          notice.querySelector(".better-codex-update-description").textContent = t("暂时无法连接服务，恢复连接后会继续确认本次升级。");
           install.disabled = false;
-          menuToggle.disabled = false;
-          close.disabled = false;
-          ignore.disabled = false;
-          later.disabled = false;
-          install.textContent = t("重试");
-          title.textContent = t("更新未完成");
-          description.textContent = t("Better Codex 保持当前版本运行。");
-          error.textContent = updateErrorLabel(reason);
-          error.hidden = false;
-          localStorage.removeItem("better-codex-active-update-id");
-          localStorage.removeItem("better-codex-update-request-key");
+          install.textContent = t("继续检查");
         }
       });
     }
 
     async function checkUpdateNotice() {
       try {
-        renderUpdateNotice(await api(runtimeUpdatePath(), { passive: true }));
+        const pending = runtimeUpdateObserver.pending();
+        const suffix = pending?.id ? "?update_id=" + encodeURIComponent(pending.id) : pending ? "?idempotency_key=" + encodeURIComponent(pending.key) : "";
+        renderUpdateNotice(await api(runtimeUpdatePath(suffix), { passive: true }));
         clearPassiveNetworkError();
       } catch (error) {
-        if (transientNetworkError(error)) showPassiveNetworkError();
+        if (runtimeUpdateObserver.pending()) renderUpdateNotice({ status: "unknown" });
+        else if (transientNetworkError(error)) showPassiveNetworkError();
       }
     }
 
@@ -6163,7 +6122,10 @@ export function install(config: Record<string, any>) {
           delete button.dataset.copied;
         }, 1600);
       };
+      let lastRemoteUpgrade = null;
       const renderRemoteUpgrade = (update, visible) => {
+        lastRemoteUpgrade = update;
+        if (remoteUpgrade) remoteUpgrade.dataset.recovery = update?.recovery?.status || update?.recovery || "";
         if (!remoteUpgrade || !remoteUpgradeLabel) return;
         remoteUpgrade.hidden = !REMOTE || !visible;
         if (remoteUpgrade.hidden) return;
@@ -6182,13 +6144,16 @@ export function install(config: Record<string, any>) {
           complete: "远程服务升级完成",
           current: "已是最新版本",
           error: "更新未完成",
+          restoring: "正在恢复 Better Codex",
+          restored: "已恢复旧版",
+          recovery_failed: "恢复未完成",
         };
         const stage = String(update?.stage || (installing ? "preparing" : remoteUpdateActive ? "checking" : update?.status === "available" ? "available" : update?.status === "error" ? "error" : ""));
         const label = stage === "available" ? t("发现可用升级") + (update?.latestVersion ? " v" + String(update.latestVersion).replace(/^v/, "") : "") : t(stageLabels[stage] || "正在准备升级");
         const showProgress = remoteUpdateActive || installing || update?.status === "available" || update?.status === "error" || Boolean(update?.stage);
         remoteUpgrade.disabled = installing || remoteUpdateActive;
         remoteUpgrade.dataset.loading = String(installing || remoteUpdateActive);
-        remoteUpgradeLabel.textContent = t(stage === "checking" ? "检查中…" : installing || remoteUpdateActive ? "正在更新" : update?.status === "available" ? "升级" : update?.status === "error" ? "重试" : "检查升级");
+        remoteUpgradeLabel.textContent = t(remoteUpgrade.dataset.recovery === "failed" ? "查看详情" : stage === "checking" ? "检查中…" : installing || remoteUpdateActive ? "正在更新" : update?.status === "available" ? "升级" : update?.status === "error" ? "重试" : "检查升级");
         remoteUpgrade.title = update?.status === "available" && update.latestVersion ? t("升级") + " v" + String(update.latestVersion).replace(/^v/, "") : t("检查升级");
         remoteUpdate.hidden = !showProgress;
         if (showProgress) {
@@ -6307,6 +6272,10 @@ export function install(config: Record<string, any>) {
             REMOTE ? api("/api/update", { passive: true }).catch(() => null) : Promise.resolve(null),
           ]);
           renderRemoteStatus(status, update);
+          if (update && REMOTE) {
+            vpsUpdateObserver.adopt(update);
+            if (vpsUpdateObserver.pending()) void waitForRemoteUpdateCompletion(String(update.latestVersion || ""), vpsUpdateObserver.pending().id || "").catch(error => appendDiagnostic("remote_update_observation_failed", { error: String(error) }));
+          }
           if (remoteSessionsToggle?.getAttribute("aria-expanded") === "true") await loadRemoteSessions(force);
         } catch (error) {
           remoteRefresh.hidden = false;
@@ -6339,73 +6308,65 @@ export function install(config: Record<string, any>) {
         await copiedFeedback(button);
       });
       const waitForRemoteUpdateCompletion = async (targetVersion, updateId = "") => {
-        const deadline = Date.now() + 30 * 60 * 1000;
-        while (!destroyed && dialog.isConnected && Date.now() < deadline) {
-          await new Promise(resolve => setTimeout(resolve, 700));
-          let update;
-          try {
-            update = await api("/api/update" + (updateId ? "?update_id=" + encodeURIComponent(updateId) : ""), { passive: true });
-          } catch (error) {
-            if (transientNetworkError(error)) {
-              renderRemoteUpgrade({ status: "installing", stage: "restarting", progress: 82, latestVersion: targetVersion }, true);
-              continue;
-            }
-            throw error;
-          }
+        if (updateId) vpsUpdateObserver.adopt({ operation: { id: updateId, status: "STAGING", target_core_version: targetVersion } });
+        const result = await vpsUpdateObserver.observe(update => {
+          if (!dialog.isConnected) return;
           renderRemoteUpgrade(update, true);
-          if (update?.operation?.status === "FAILED" || update?.operation?.status === "ROLLED_BACK" || update?.status === "error") throw new Error(String(update?.operation?.error_code || update.error || "update_install_failed"));
-          if (update?.operation?.status === "COMPLETED" || update?.status === "current" && String(update.currentVersion || "").replace(/^v/, "") === targetVersion) {
-            renderRemoteUpgrade({ ...update, stage: "complete", progress: 100 }, true);
-            dialog.querySelector("[data-remote-version]").textContent = "v" + targetVersion;
-            remoteStatusBadge.textContent = t("服务在线");
-            window.setTimeout(() => {
-              if (typeof window.betterCodexHost?.reloadAfterUpdate === "function") window.betterCodexHost.reloadAfterUpdate();
-              else location.reload();
-            }, 1200);
-            return;
+          const outcome = updateOutcome(update);
+          if (["rolled_back", "recovery_failed", "failed", "unknown"].includes(outcome)) {
+            const copy = updateCopy(update);
+            remoteUpdateState.textContent = t(copy[0]);
+            remoteError.textContent = t(copy[1]);
+            remoteError.dataset.tone = outcome === "recovery_failed" ? "error" : "warning";
+            remoteError.hidden = false;
           }
+        });
+        remoteUpdateActive = false;
+        remoteRefresh.disabled = false;
+        if (result && updateOutcome(result) === "completed") {
+          renderRemoteUpgrade({ ...result, stage: "complete", progress: 100 }, true);
+          window.setTimeout(() => {
+            if (typeof window.betterCodexHost?.reloadAfterUpdate === "function") window.betterCodexHost.reloadAfterUpdate();
+            else location.reload();
+          }, 1200);
         }
-        throw new Error("runtime_bridge_timeout");
+        return result;
       };
       remoteUpgrade?.addEventListener("click", async () => {
+        if (remoteUpgrade.dataset.recovery === "failed") {
+          reportGlobalError(new Error("update_recovery_failed"), { source: "remote_update_details", update: lastRemoteUpgrade });
+          return;
+        }
         remoteUpdateActive = true;
         remoteRefresh.disabled = true;
         remoteError.hidden = true;
-        renderRemoteUpgrade({ status: "current", stage: "checking", progress: 2 }, true);
         try {
+          if (vpsUpdateObserver.pending()) {
+            await waitForRemoteUpdateCompletion(vpsUpdateObserver.pending().target, vpsUpdateObserver.pending().id || "");
+            return;
+          }
+          renderRemoteUpgrade({ status: "current", stage: "checking", progress: 2 }, true);
           const update = await api("/api/update/check", { method: "POST" });
           if (update?.status === "error") throw new Error(String(update.error || "update_check_failed"));
           if (update?.status === "current") {
-            remoteUpdateActive = false;
-            remoteRefresh.disabled = false;
             renderRemoteUpgrade({ ...update, stage: "current", progress: 100 }, true);
-            remoteUpgradeLabel.textContent = t("最新");
             return;
           }
-          if (update?.status === "installing" && update.latestVersion) {
-            const targetVersion = String(update.latestVersion).replace(/^v/, "");
-            renderRemoteUpgrade(update, true);
-            await waitForRemoteUpdateCompletion(targetVersion);
-            return;
+          vpsUpdateObserver.adopt(update);
+          if (!vpsUpdateObserver.pending()) {
+            if (update?.status !== "available" || !update.latestVersion) throw new Error("update_not_available");
+            await vpsUpdateObserver.start(String(update.latestVersion).replace(/^v/, ""));
           }
-          if (update?.status !== "available" || !update.latestVersion) throw new Error("update_not_available");
-          if (update.installSupported === false) throw new Error("hub_update_not_configured");
-          const targetVersion = String(update.latestVersion).replace(/^v/, "");
-          renderRemoteUpgrade({ ...update, stage: "queued", progress: 5 }, true);
-          const requestKey = localStorage.getItem("better-codex-update-request-key") || crypto.randomUUID();
-          localStorage.setItem("better-codex-update-request-key", requestKey);
-          const result = await api("/api/update/install", { method: "POST", body: JSON.stringify({ idempotency_key: requestKey }) });
-          if (result?.accepted !== true || typeof result?.update_id !== "string") throw new Error("update_not_accepted");
-          renderRemoteUpgrade({ status: "installing", stage: String(result.state || "STAGING").toLowerCase(), progress: 5, latestVersion: targetVersion }, true);
-          await waitForRemoteUpdateCompletion(targetVersion, result.update_id);
+          await waitForRemoteUpdateCompletion(String(update.latestVersion || ""));
         } catch (error) {
+          appendDiagnostic("remote_update_observation_failed", { update_id: vpsUpdateObserver.pending()?.id, error: String(error) });
+          remoteError.dataset.tone = "warning";
+          remoteError.textContent = vpsUpdateObserver.pending() ? t("暂时无法连接服务，恢复连接后会继续确认本次升级。") : updateErrorLabel(error);
+          remoteError.hidden = false;
+        } finally {
           remoteUpdateActive = false;
           remoteRefresh.disabled = false;
-          const presentation = reportUnexpectedError(error, { source: "remote_update_install" });
-          renderRemoteUpgrade({ status: "error", stage: "error", error: error instanceof Error ? error.message : String(error) }, true);
-          remoteError.dataset.tone = presentation.tone;
-          remoteError.textContent = updateErrorLabel(error);
-          remoteError.hidden = false;
+          remoteUpgrade.disabled = false;
         }
       });
       remoteRefresh?.addEventListener("click", () => void loadRemoteStatus(true, true));

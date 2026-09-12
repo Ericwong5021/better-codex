@@ -4451,6 +4451,7 @@ export class Store {
   }
 
   createUpdateOperation(input: {
+    id?: string;
     idempotencyKey: string;
     sourceCoreVersion: string;
     sourceRuntimeInstanceId: string;
@@ -4467,7 +4468,7 @@ export class Store {
         LIMIT 1
       `).get() as Record<string, unknown> | undefined;
       if (active) return updateOperationFromRow(active);
-      const id = randomUUID();
+      const id = input.id || randomUUID();
       const timestamp = now();
       this.db.prepare(`
         INSERT INTO update_operations (
@@ -4482,6 +4483,11 @@ export class Store {
 
   getUpdateOperation(id: string) {
     const row = this.db.prepare("SELECT * FROM update_operations WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+    return row ? updateOperationFromRow(row) : undefined;
+  }
+
+  getUpdateOperationByKey(key: string) {
+    const row = this.db.prepare("SELECT * FROM update_operations WHERE idempotency_key = ?").get(key) as Record<string, unknown> | undefined;
     return row ? updateOperationFromRow(row) : undefined;
   }
 
@@ -4517,9 +4523,13 @@ export class Store {
       ROLLED_BACK: [],
       FAILED: [],
     };
-    return this.transaction(() => {
+    let previousStatus = "";
+    let previousUpdatedAt = "";
+    const result = this.transaction(() => {
       const current = this.getUpdateOperation(id);
       if (!current) throw new Error("update_operation_not_found");
+      previousStatus = current.status;
+      previousUpdatedAt = current.updated_at;
       if (current.status !== status && !transitions[current.status].includes(status)) throw new Error("update_operation_transition_invalid");
       this.db.prepare(`
         UPDATE update_operations
@@ -4542,6 +4552,8 @@ export class Store {
       );
       return this.getUpdateOperation(id)!;
     });
+    console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ scope: "update", event: "operation_transition", update_id: id, previous_status: previousStatus, status, phase_elapsed_ms: Date.now() - Date.parse(previousUpdatedAt), source_version: result.source_core_version, target_version: result.target_core_version, source_runtime_instance_id: result.source_runtime_instance_id, target_runtime_generation: result.target_runtime_generation, host_instance_id: result.host_instance_id, error: result.error_code, timestamp: result.updated_at })}`);
+    return result;
   }
 
   sessionRelayIsLeader(relayId: string) {

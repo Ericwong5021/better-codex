@@ -9,6 +9,7 @@ export type StableManifest = {
     channel?: string;
     generatedAt?: string;
     core?: { version?: string } | null;
+    source?: { commit?: string; url?: string; sha256?: string };
   };
   signature?: string;
 };
@@ -43,6 +44,7 @@ export async function checkRelease(channel: ReleaseChannel): Promise<ReleaseUpda
     const payload = manifest.payload;
     if (!payload || payload.schemaVersion !== 1 || payload.channel !== channel || !Number.isFinite(Date.parse(payload.generatedAt || "")) || typeof payload.core?.version !== "string" || !updateVersionAllowed(payload.core.version, channel) || typeof manifest.signature !== "string") throw new Error("update_manifest_invalid");
     if (!verify(null, Buffer.from(stableJson(payload)), updatePublicKey, Buffer.from(manifest.signature, "base64"))) throw new Error("update_signature_invalid");
+    if (payload.source && (!/^[a-f0-9]{40}$/i.test(payload.source.commit || "") || !/^[a-f0-9]{64}$/i.test(payload.source.sha256 || ""))) throw new Error("update_source_invalid");
     const latestVersion = payload.core.version;
     return {
       status: compareVersions(latestVersion, coreVersion) > 0 ? "available" : "current",

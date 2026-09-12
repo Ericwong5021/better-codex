@@ -30,7 +30,7 @@ test("generated injection script is valid JavaScript", () => {
   const remoteUpdateHandler = injectedEntrySource.slice(remoteUpdateStart, injectedEntrySource.indexOf('remoteRefresh?.addEventListener("click"', remoteUpdateStart));
   const runtimeUpdateHandler = injectedEntrySource.slice(runtimeUpdateStart, injectedEntrySource.indexOf('dialog.addEventListener("cancel"', runtimeUpdateStart));
   assert.ok(remoteUpdateHandler.includes('api("/api/update/check", { method: "POST" })'));
-  assert.ok(remoteUpdateHandler.includes('api("/api/update/install", { method: "POST"'));
+  assert.ok(remoteUpdateHandler.includes('vpsUpdateObserver.start('));
   assert.doesNotMatch(remoteUpdateHandler, /runtimeUpdatePath/);
   assert.ok(runtimeUpdateHandler.includes('api(runtimeUpdatePath("/check"), { method: "POST" })'));
   assert.ok(source.includes('const CODEX_SEMANTICS_AVAILABLE = HOST_CAPABILITIES.codexSemantics !== false'));
@@ -73,10 +73,10 @@ test("board bridge retries timed out GET requests without repeating writes", () 
   assert.match(source, /timeoutMs: files\.length \? 120_000 : undefined/);
   assert.match(source, /const transferTimeoutMs = files\.length \? 120_000 : undefined/);
   assert.match(source, /"relay_stream"/);
-  assert.match(source, /result\?\.accepted !== true/);
-  assert.match(source, /await waitForUpdateCompletion\(notice, result\.update_id\)/);
+  assert.match(source, /response.accepted !== true/);
+  assert.ok(source.includes("runtimeUpdateObserver.observe"));
   assert.ok(source.includes('message.startsWith("runtime_fetch_failed:")'));
-  assert.ok(source.includes("if (transientNetworkError(reason)) continue"));
+  assert.ok(source.includes("if (!options.transient(failure)) throw failure"));
   assert.ok(source.includes("function reportGlobalError(error, context = {}) {\n      if (destroyed) return null;"));
   assert.ok(source.includes("function showError(error) {\n      if (destroyed) return;"));
 });
@@ -145,7 +145,7 @@ test("injection bootstraps before opening the panel and hides the native recover
   assert.ok(bootstrapStart >= 0 && loadStart > bootstrapStart);
   assert.ok(injectedEntrySource.slice(bootstrapStart, loadStart).includes('api("/api/bootstrap")'));
   assert.ok(injectedEntrySource.slice(bootstrapStart, loadStart).includes("if (bootstrapPromise) return bootstrapPromise"));
-  assert.ok(injectedEntrySource.slice(bootstrapStart, loadStart).includes("bootstrapReady = true;\n        ensureEntry();"));
+  assert.match(injectedEntrySource.slice(bootstrapStart, loadStart), /bootstrapReady = true;\s*bootstrapFailure = null;\s*ensureEntry\(\);/);
   assert.ok(source.includes('[data-better-codex-launcher-hidden="true"] { display: none !important; }'));
   assert.ok(injectedEntrySource.slice(mountStart, mountEnd).includes("refresh();"));
   assert.ok(injectedEntrySource.slice(mountStart, mountEnd).includes("void ensureBootstrapReady().catch(error =>"));

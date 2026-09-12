@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-09-12T15:55:32.873229+00:00",
+  "branch": "main",
+  "business_schema": 25,
+  "backend": {
+    "tests": 288,
+    "pass": 277,
+    "fail": 0,
+    "skipped": 11
+  },
+  "backend_duration_ms": 14465.656041,
+  "browser": {
+    "passed": 14,
+    "duration_seconds": 25.7,
+    "updated_upgrade_cases_passed": 4,
+    "updated_upgrade_cases_duration_seconds": 8.1
+  },
+  "selfhost": {
+    "passed": true,
+    "transport": "wss",
+    "reverse_proxy": "caddy",
+    "relay_business_tables": 0,
+    "external_registry_retries": 1
+  },
+  "package": {
+    "archive": "/Users/wangyidong/project/better-codex/release/better-codex-cli-0.4.13-beta.3-darwin-arm64.tar.gz",
+    "checksum": "e2906a1b7e6bb5edc4c596b58bb7935f83fad97980cc3075baccf66f8b039443"
+  },
+  "fixture_evidence": [
+    {
+      "scenario": "two_runtime_handoffs",
+      "update_ids": [
+        "019fec06-788f-7af3-a031-76b546904f83",
+        "019fec06-788f-7af3-a031-76b546904f84"
+      ],
+      "runtime_generations": [
+        1,
+        2,
+        3
+      ],
+      "host_instance_id": "3de02944-2195-4bab-a4fe-0f400b789969",
+      "catalog_pid": 90754,
+      "catalog_started_at": "2026-09-12T15:54:15.924Z",
+      "worker_pid": 90758,
+      "worker_started_at": "2026-09-12T15:54:15.980Z",
+      "completed_event": true,
+      "queued_deliveries": 0,
+      "retired_workers": 0,
+      "replayed_retryable_delivery": true
+    },
+    {
+      "scenario": "vps_internal",
+      "update_id": "019fec06-788f-7af3-a031-76b546904fa9",
+      "phase": "restored",
+      "source_version": "1.0.0",
+      "retained_image": "sha256:retained-image",
+      "target_builds": 1,
+      "rollback_builds": 0
+    },
+    {
+      "scenario": "vps_public",
+      "update_id": "019fec06-788f-7af3-a031-76b546904fa9",
+      "phase": "restored",
+      "source_version": "1.0.0",
+      "retained_image": "sha256:retained-image",
+      "target_builds": 1,
+      "rollback_builds": 0
+    },
+    {
+      "scenario": "vps_recovery",
+      "update_id": "019fec06-788f-7af3-a031-76b546904fa9",
+      "phase": "recovery_failed",
+      "source_version": "1.0.0",
+      "retained_image": "sha256:retained-image",
+      "target_builds": 1,
+      "rollback_builds": 0
+    },
+    {
+      "scenario": "vps_interrupted",
+      "update_id": "019fec06-788f-7af3-a031-76b546904fa9",
+      "phase": "restored",
+      "source_version": "1.0.0",
+      "retained_image": "sha256:retained-image",
+      "target_builds": 1,
+      "rollback_builds": 0
+    }
+  ],
+  "screenshots": [
+    "closed-window.png",
+    "desktop-action.png",
+    "restored.png",
+    "recovery-action.png"
+  ],
+  "unverified": [
+    "Windows native installation and desktop behavior",
+    "Two real signed binary upgrades with active production model turns",
+    "Installed Codex main-window recovery and production VPS rollout",
+    "Physical power loss between every durable write"
+  ]
+}

@@ -41,7 +41,7 @@ import { betterCodexMcpName, startMcpAppServer } from "./mcp-app.js";
 import { packagedBuild } from "./build.js";
 import { bundledBetterCodexSkill } from "./bundled-skill.js";
 import { installService, repairServiceConfiguration, restartService, serviceLogs, serviceStatus, startService, stopService, uninstallService } from "./service.js";
-import { activeVersions, checkForUpdates, maybeDelegateToActiveCore, prepareUpdateRollback, readGatewayUpdateActivationState, recordGatewayUpdateActivation, rollbackActivatedUpdate, rollbackAllUpdates, selectedUpdateChannel, setUpdateChannel, type UpdateChannel } from "./updater.js";
+import { activeVersions, checkForUpdates, maybeDelegateToActiveCore, prepareUpdateRollback, recoverInterruptedActivation, readGatewayUpdateActivationState, recordGatewayUpdateActivation, rollbackActivatedUpdate, rollbackAllUpdates, selectedUpdateChannel, setUpdateChannel, type UpdateChannel } from "./updater.js";
 import { requireCodexExecutablePath } from "./codex-cli.js";
 import { normalizeHubUrl, readSyncConfiguration, removeSyncConfiguration, writeSyncConfiguration } from "./sync-config.js";
 import { normalizeRelayUrl, readRelayConfiguration, removeRelayConfiguration, writeRelayConfiguration } from "./relay-config.js";
@@ -403,7 +403,19 @@ async function ensureInjector(portNumber: number) {
 
 async function runRuntime() {
   await stopLegacyRuntime();
-  const server = (await import("./server.js")).startServer();
+  let server: ReturnType<typeof import("./server.js").startServer>;
+  try { server = (await import("./server.js")).startServer(); }
+  catch (error) {
+    const activation = readGatewayUpdateActivationState();
+    if (!activation?.updateId || activation.status !== "activating" || runtimeAuthorityUpdateState(activation.updateId).state !== "active") throw error;
+    console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "update", event: "runtime_bootstrap_failed", update_id: activation.updateId, runtime_pid: process.pid, error: String(error) })}`);
+    const recoveryTimer = setInterval(() => {
+      try { recoverInterruptedActivation(process.pid); }
+      catch (failure) { console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ scope: "update", event: "bootstrap_recovery_failed", update_id: activation.updateId, error: String(failure) })}`); }
+    }, 3000);
+    process.once("exit", () => clearInterval(recoveryTimer));
+    return;
+  }
   await stopInjector();
   let stopping = false;
   let reconciling = false;
@@ -432,9 +444,11 @@ async function runRuntime() {
 }
 
 async function stopFailedUpdateRuntime(updateId: string) {
-  const current = readRuntimeState();
-  if (current && current.handoffUpdateId !== updateId) throw new Error("update_rollback_runtime_identity_mismatch");
-  if (runtimeAuthorityUpdateState(updateId).state !== "active") throw new Error("update_rollback_authority_mismatch");
+  const authority = runtimeAuthorityUpdateState(updateId);
+  const current = readRuntimeState() || (authority.state === "active" && authority.runtimePid && processAlive(authority.runtimePid) && processStartTime(authority.runtimePid) === Date.parse(authority.processStartedAt || "") ? { pid: authority.runtimePid, instanceId: authority.runtimeInstanceId, processStartedAt: authority.processStartedAt, handoffUpdateId: updateId } : null);
+  const reservedSource = current && authority.runtimePid === current.pid && authority.runtimeInstanceId === current.instanceId && authority.processStartedAt === current.processStartedAt && "generation" in current && Number(current.generation) + 1 === authority.generation;
+  if (current && current.handoffUpdateId !== updateId && !reservedSource) throw new Error("update_rollback_runtime_identity_mismatch");
+  if (authority.state !== "active") throw new Error("update_rollback_authority_mismatch");
   stopService();
   if (!current) return;
   try {
@@ -445,8 +459,8 @@ async function stopFailedUpdateRuntime(updateId: string) {
   const deadline = Date.now() + 10_000;
   while (processAlive(current.pid) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 100));
   if (processAlive(current.pid)) {
-    const observed = readRuntimeState();
-    if (!observed || observed.pid !== current.pid || observed.instanceId !== current.instanceId || observed.processStartedAt !== current.processStartedAt) throw new Error("update_rollback_runtime_identity_changed");
+    const observed = runtimeAuthorityUpdateState(updateId);
+    if (observed.runtimePid !== current.pid || observed.runtimeInstanceId !== current.instanceId || observed.processStartedAt !== current.processStartedAt || processStartTime(current.pid) !== Date.parse(current.processStartedAt || "")) throw new Error("update_rollback_runtime_identity_changed");
     process.kill(current.pid, "SIGTERM");
   }
   const killedDeadline = Date.now() + 10_000;
@@ -454,12 +468,44 @@ async function stopFailedUpdateRuntime(updateId: string) {
   if (processAlive(current.pid)) throw new Error("update_rollback_runtime_stop_timeout");
 }
 
+async function resumeUpdateCommit(updateId: string, updates: { core: string | null; compatibility: string | null }, sourceCoreVersion: string, recovering: boolean) {
+  let runtime = await waitForRuntimeReady(30_000);
+  if (runtime.handoffUpdateId === updateId) {
+    if (runtimeAuthorityUpdateState(updateId).state === "active") recordGatewayUpdateActivation("activating", readGatewayUpdateActivationState()?.error || null, updates, process.pid, updateId, Number(runtime.generation), { stage: recovering ? "committing_rollback" : "committing", sourceCoreVersion });
+    await request("/api/update/commit", { method: "POST", body: JSON.stringify({ update_id: updateId, runtime_instance_id: runtime.instanceId, target_runtime_generation: runtime.generation, owner_pid: process.pid, recovery: recovering }), signal: AbortSignal.timeout(30_000) });
+    runtime = await waitForRuntimeReady(30_000);
+  }
+  if (runtime.handoffUpdateId !== null || runtime.version !== (recovering ? sourceCoreVersion : updates.core || sourceCoreVersion)) throw new Error("update_commit_runtime_state_stale");
+  const response = await request(`/api/update?update_id=${encodeURIComponent(updateId)}`, { signal: AbortSignal.timeout(10_000) });
+  const operation = response.operation as { status?: string } | null;
+  if (operation?.status !== (recovering ? "ROLLED_BACK" : "COMPLETED")) throw new Error("update_commit_outcome_pending");
+  return runtime;
+}
+
 async function applyUpdate(previousRuntimePid: number, updates: { core: string | null; compatibility: string | null }, updateId: string, sourceCoreVersion: string, targetGeneration: number, drainPath?: string, recovering = false) {
   let mcp: unknown;
   let injection: unknown = { refreshed: false, pending: true, reason: "codex_not_connected" };
   let launchIntegration: unknown;
+  const desktopErrors: Array<{ component: string; error: string }> = [];
+  const desktopSetup = (component: string, install: () => unknown) => {
+    try { return install(); }
+    catch (error) {
+      const failure = { component, error: String(error) };
+      desktopErrors.push(failure);
+      console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "update", event: "desktop_setup_failed", update_id: updateId, ...failure })}`);
+      return { installed: false, ...failure };
+    }
+  };
   try {
-    if (recovering) throw new Error(readGatewayUpdateActivationState()?.error || "update_activation_interrupted");
+    if (recovering) {
+      const activation = readGatewayUpdateActivationState();
+      if (activation?.stage === "committing" || activation?.stage === "committing_rollback") {
+        const rollingBack = activation.stage === "committing_rollback";
+        const runtime = await resumeUpdateCommit(updateId, updates, sourceCoreVersion, rollingBack);
+        return { updated: !rollingBack, recovered: true, runtime };
+      }
+      throw new Error(activation?.error || "update_activation_interrupted");
+    }
     recordGatewayUpdateActivation("activating", null, updates, process.pid, updateId, targetGeneration, { sourceCoreVersion });
     const stopDeadline = Date.now() + updateRuntimeStopTimeout;
     while (processAlive(previousRuntimePid) && (!drainPath || !existsSync(drainPath))) {
@@ -471,13 +517,14 @@ async function applyUpdate(previousRuntimePid: number, updates: { core: string |
     await ensureRuntime(120_000);
     let runtime = await waitForRuntimeReady(120_000);
     if (runtime.generation !== targetGeneration || runtime.handoffUpdateId !== updateId) throw new Error("update_runtime_identity_mismatch");
-    mcp = installMcp();
+    mcp = desktopSetup("mcp", installMcp);
     try {
       injection = injectionEnabled() ? { refreshed: true, targets: await cdpRefreshAndInject(cdpPort, activeRuntimePort(), accessToken()) } : { refreshed: false, disabled: true };
     } catch (error) {
       injection = { refreshed: false, pending: true, error: error instanceof Error ? error.message : "injection_refresh_pending" };
     }
-    launchIntegration = installLaunchIntegration();
+    launchIntegration = desktopSetup("launcher", installLaunchIntegration);
+    recordGatewayUpdateActivation("activating", null, updates, process.pid, updateId, targetGeneration, { desktopErrors });
     runtime = await waitForRuntimeReady(120_000);
     if (updates.core && runtime.version !== updates.core) throw new Error("core_activation_version_mismatch");
     if (updates.compatibility && activeVersions().compatibility !== updates.compatibility) throw new Error("compatibility_activation_version_mismatch");
@@ -496,17 +543,23 @@ async function applyUpdate(previousRuntimePid: number, updates: { core: string |
     const activationError = error instanceof Error ? error.message : "update_activation_failed";
     const authority = runtimeAuthorityUpdateState(updateId);
     if (authority.state === "committed") {
-      const runtime = await waitForRuntimeReady(30_000);
+      const runtime = await resumeUpdateCommit(updateId, updates, sourceCoreVersion, false);
       recordGatewayUpdateActivation("success", null, updates, null, updateId);
       return { updated: true, runtime, injection, launchIntegration, mcp, commit_recovered: true };
     }
     if (authority.state === "rolled_back") {
-      const runtime = await waitForRuntimeReady(30_000);
+      const runtime = await resumeUpdateCommit(updateId, updates, sourceCoreVersion, true);
       if (runtime.version !== sourceCoreVersion) throw new Error("update_rollback_version_mismatch");
       recordGatewayUpdateActivation("error", activationError, updates, null, updateId, authority.generation, { stage: "rolled_back" });
       throw error;
     }
     if (authority.state !== "active" || authority.generation === null) throw new Error(`update_activation_authority_${authority.state}`, { cause: error });
+    const pendingCommit = readGatewayUpdateActivationState();
+    if (pendingCommit?.stage === "committing" || pendingCommit?.stage === "committing_rollback") {
+      const rollingBack = pendingCommit.stage === "committing_rollback";
+      const runtime = await resumeUpdateCommit(updateId, updates, sourceCoreVersion, rollingBack);
+      return { updated: !rollingBack, recovered: true, runtime, commit_recovered: true };
+    }
     try {
       prepareUpdateRollback(updateId, activationError, authority.generation);
       const current = readRuntimeState();
@@ -535,7 +588,7 @@ async function applyUpdate(previousRuntimePid: number, updates: { core: string |
       const rollbackCode = rollbackError instanceof Error ? rollbackError.message : "update_rollback_failed";
       recordGatewayUpdateActivation("error", activationError, updates, null, updateId, null, { stage: "recovery_failed", failure: { code: activationError, stage: "activating", recoveryError: rollbackCode } });
       const failedRuntime = readRuntimeState();
-      if (!failedRuntime || failedRuntime.handoffUpdateId === updateId) stopService();
+      if (!failedRuntime) stopService();
       throw new AggregateError([error, rollbackError], "update_activation_and_rollback_failed");
     }
     recordGatewayUpdateActivation("error", activationError, updates, null, updateId, null, { stage: "rolled_back" });

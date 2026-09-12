@@ -290,3 +290,95 @@ test("recovers after a Runtime restart with a new Web session", async ({ page })
     return localStorage.getItem(`better-codex-completion-notices:${profile}`);
   })).toBe("[]");
 });
+
+test("keeps one upgrade operation through a lost receipt, page reload, and recovery", async ({ browser }, testInfo) => {
+  const context = await browser.newContext({ locale: "zh-CN", viewport: { width: 1100, height: 720 } });
+  const id = randomUUID();
+  let phase = "";
+  let outcome = "not_required";
+  const submissions: string[] = [];
+  const queries: string[] = [];
+  let missingReceipt = true;
+  await context.route("**/api/update**", async route => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname === "/api/update/install") {
+      submissions.push(request.postData() || "");
+      phase = "STAGING";
+      if (submissions.length === 1) return route.abort("failed");
+      return route.fulfill({ json: { accepted: true, update_id: id } });
+    }
+    queries.push(url.search);
+    if (url.searchParams.has("idempotency_key") && missingReceipt) {
+      missingReceipt = false;
+      return route.fulfill({ status: 404, json: { error: "update_operation_not_found" } });
+    }
+    return route.fulfill({ json: { status: phase ? "installing" : "available", currentVersion: "1.0.0", latestVersion: "1.1.0", targetVersion: "1.1.0", phase, desktop: { state: "waiting_window" }, recovery: { status: outcome }, operation: phase ? { id, status: phase, source_core_version: "1.0.0", target_core_version: "1.1.0", error_code: outcome === "restored" ? "target_crashed" : null } : null } });
+  });
+  try {
+    const page = await context.newPage();
+    await page.goto(`${runtime.baseUrl}/web#token=${encodeURIComponent(runtime.token)}`);
+    await page.locator("#better-codex-update-notice [data-update-install]").click();
+    await expect.poll(async () => page.evaluate(() => JSON.parse(localStorage.getItem("better-codex-runtime-update-request") || "{}").id)).toBe(id);
+    phase = "REPLAYING";
+    await page.reload();
+    await expect(page.locator("#better-codex-update-notice")).toContainText("正在切换");
+    await expect(page.locator("#better-codex-error-dialog[open]")).toHaveCount(0);
+    const second = await context.newPage();
+    await second.goto(`${runtime.baseUrl}/web#token=${encodeURIComponent(runtime.token)}`);
+    await expect(second.locator("#better-codex-update-notice")).toContainText("正在切换");
+    phase = "ROLLING_BACK";
+    outcome = "pending";
+    await expect(page.locator("#better-codex-update-notice")).toContainText("正在恢复");
+    await expect(page.locator("#better-codex-update-notice")).not.toContainText("已恢复旧版");
+    phase = "ROLLED_BACK";
+    outcome = "restored";
+    await expect(page.locator("#better-codex-update-notice")).toContainText("已恢复旧版");
+    await expect(second.locator("#better-codex-update-notice")).toContainText("已恢复旧版");
+    await expect(page.locator("#better-codex-error-dialog[open]")).toHaveCount(0);
+    assertSubmissionIdentity(submissions);
+    expect(submissions).toHaveLength(2);
+    expect(queries.some(query => query.includes("update_id=" + id))).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath("upgrade-recovery.png"), fullPage: true });
+    await page.locator("#better-codex-update-notice [data-update-details]").click();
+    await expect(page.locator("#better-codex-error-dialog[open]")).toBeVisible();
+    await expect(page.locator("[data-error-report-detail]")).toContainText(id);
+  } finally { await context.close(); }
+});
+
+for (const scenario of [
+  { name: "closed desktop", status: "COMPLETED", desktop: "waiting_window", recovery: "not_required", title: "升级完成", description: "主窗口可用后会自动连接" },
+  { name: "desktop failure", status: "COMPLETED", desktop: "failed", recovery: "not_required", title: "桌面连接需要处理", description: "服务可以继续使用" },
+  { name: "failed recovery", status: "FAILED", desktop: "waiting_window", recovery: "failed", title: "恢复未完成", description: "自动恢复未能完成" },
+]) test(`upgrade result remains truthful with ${scenario.name}`, async ({ browser }, testInfo) => {
+  const context = await browser.newContext({ locale: "zh-CN", viewport: { width: 390, height: 640 } });
+  const id = randomUUID();
+  let complete = false;
+  await context.addInitScript(id => localStorage.setItem("better-codex-runtime-update-request", JSON.stringify({ id, key: id, target: "1.1.0" })), id);
+  await context.route("**/api/update**", route => route.fulfill({ json: { status: "installing", actual_version: complete ? "1.1.0" : "1.0.0", target_version: "1.1.0", desktop: { state: scenario.desktop, reason: scenario.desktop === "failed" ? "missing_content" : "probe_pending" }, recovery: { status: complete ? scenario.recovery : "not_required" }, operation: { id, status: complete ? scenario.status : "REPLAYING", source_core_version: "1.0.0", target_core_version: "1.1.0", error_code: complete && scenario.status === "FAILED" ? "recovery_runtime_not_ready" : null } } }));
+  try {
+    const page = await context.newPage();
+    await page.goto(`${runtime.baseUrl}/web#token=${encodeURIComponent(runtime.token)}`);
+    await expect(page.locator("#better-codex-update-notice")).toContainText("正在切换");
+    complete = true;
+    const notice = page.locator("#better-codex-update-notice");
+    await expect(notice).toContainText(scenario.title);
+    await expect(notice).toContainText(scenario.description);
+    await expect(notice).not.toContainText("已恢复旧版");
+    await expect(page.locator("#better-codex-error-dialog[open]")).toHaveCount(0);
+    const box = await notice.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(390);
+    await page.screenshot({ path: testInfo.outputPath("upgrade-result.png"), fullPage: true });
+    if (scenario.desktop === "failed" || scenario.recovery === "failed") {
+      await notice.locator("[data-update-details]").click();
+      await expect(page.locator("[data-error-report-detail]")).toContainText(id);
+    }
+  } finally { await context.close(); }
+});
+
+function assertSubmissionIdentity(submissions: string[]) {
+  expect(submissions.length).toBeGreaterThan(0);
+  expect(new Set(submissions).size).toBe(1);
+}

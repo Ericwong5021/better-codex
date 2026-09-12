@@ -64,10 +64,7 @@ def main():
         publish(directory, operation, **patch)
         return
     with (directory / "executor.lock").open("a+") as lock:
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            return
+        fcntl.flock(lock, fcntl.LOCK_EX)
         request = directory / "request"
         running = directory / "request.running"
         interrupted = running.exists()
@@ -97,8 +94,12 @@ def main():
         source = os.environ.get("BETTER_CODEX_SELFHOST_DIR") or Path("/etc/better-codex/updater-directory").read_text().strip()
         publish(directory, operation, status="installing", stage="recovering" if interrupted else "preparing", attempts=attempts + 1, error=None)
         environment = {**os.environ, "BETTER_CODEX_SELFHOST_DIR": source, "BETTER_CODEX_UPDATER_STATE_FILE": str(directory / "state.json"), "BETTER_CODEX_UPDATER_TARGET_VERSION": operation["targetVersion"], "BETTER_CODEX_UPDATER_OPERATION_ID": operation["id"], "BETTER_CODEX_UPDATER_RECOVER": "1" if interrupted else "0"}
+        pinned_source = operation.get("manifest", {}).get("payload", {}).get("source", {}).get("commit", "")
+        if pinned_source and not re.fullmatch(r"[a-fA-F0-9]{40}", pinned_source):
+            raise RuntimeError("update_source_invalid")
+        environment["BETTER_CODEX_UPDATER_SOURCE_COMMIT"] = pinned_source
         command = os.environ.get("BETTER_CODEX_SELFHOST_EXECUTABLE", "/usr/local/libexec/better-codex-selfhost")
-        child = subprocess.Popen(["bash", command, "upgrade", "vps", operation["targetVersion"]], env=environment, start_new_session=True)
+        child = subprocess.Popen(["bash", command, "upgrade", "vps", operation["targetVersion"]], env=environment, start_new_session=True, pass_fds=(lock.fileno(),))
 
         def stop(signum, frame):
             os.killpg(child.pid, signal.SIGTERM)
@@ -114,7 +115,7 @@ def main():
         if result == 0 and operation.get("stage") == "verified":
             publish(directory, operation, status="current", stage="complete", progress=100, currentVersion=operation["targetVersion"][1:], recovery=None, error=None)
         else:
-            publish(directory, operation, status="error", stage="error", error="update_install_failed", recovery="failed" if operation.get("recovery") == "pending" else operation.get("recovery"))
+            publish(directory, operation, status="error", stage="error", error="update_install_failed", exitCode=result, failureStage=operation.get("stage"), recovery="failed" if operation.get("recovery") == "pending" else operation.get("recovery"))
         running.unlink()
 
 
@@ -124,8 +125,12 @@ if __name__ == "__main__":
     except Exception as error:
         directory = Path(os.environ.get("BETTER_CODEX_UPDATER_DIRECTORY", "/var/lib/better-codex-updater"))
         running = directory / "request.running"
-        operation = read(directory / "state.json")
-        if operation and operation.get("id"):
+        try:
+            queued = read(running)
+        except (ValueError, OSError):
+            queued = None
+        operation = (read(directory / "operations" / (queued["id"] + ".json")) or queued) if isinstance(queued, dict) and re.fullmatch(r"[a-fA-F0-9-]{36}", queued.get("id", "")) and queued.get("targetVersion") else None
+        if operation:
             publish(directory, operation, status="error", stage="recovery_failed", recovery="failed", error=str(error))
         if running.exists():
             os.replace(running, directory / ("rejected-" + str(uuid.uuid4()) + ".json"))

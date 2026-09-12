@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { once } from "node:events";
 import { createHash } from "node:crypto";
 import test from "node:test";
 import { bundledCompatibility, compareVersions, coreVersion } from "../src/compatibility.js";
@@ -440,7 +441,7 @@ try {
   }
 });
 
-test("packaged Node bundles install and activate a managed .cjs core", async () => {
+test("packaged Node bundles stage signed artifacts and activate only the pinned pointer pair", async () => {
   const home = mkdtempSync(join(tmpdir(), "better-codex-bundle-update-"));
   const nextVersion = nextBetaVersion();
   const core = Buffer.from(`
@@ -476,15 +477,46 @@ const originalFetch = globalThis.fetch;
 globalThis.fetch = (input, init) => String(input instanceof Request ? input.url : input) === "https://example.invalid/better-codex-core"
   ? Promise.resolve(new Response(core, { status: 200 }))
   : originalFetch(input, init);
+const fs = await import("node:fs");
+const path = await import("node:path");
+const assert = (await import("node:assert/strict")).default;
+const crypto = await import("node:crypto");
+const config = await import("./src/config.ts");
+const runtime = await import("./src/runtime-state.ts");
+const { canonicalUpdateJson } = await import("./src/update-policy.ts");
+config.ensureDirectories();
+process.argv[1] = path.join(config.betterCodexHome, "source.cjs");
+fs.writeFileSync(process.argv[1], "preserved source fixture");
+const keys = crypto.generateKeyPairSync("ed25519");
+process.env.BETTER_CODEX_UPDATE_PUBLIC_KEY = keys.publicKey.export({ type: "spki", format: "pem" });
 const updater = await import("./src/updater.ts");
-const result = await updater.updateCore({
+const payload = {
   schemaVersion: 1,
   channel: "preview",
   generatedAt: new Date().toISOString(),
   compatibility: null,
   core: { version: "${nextVersion}", assets: { "${assetKey}": { url: "https://example.invalid/better-codex-core", sha256: "${createHash("sha256").update(core).digest("hex")}" } } },
-}, "preview");
-console.log(JSON.stringify(result));
+};
+const updateId = "019fec06-788f-7af3-a031-76b546904fa8";
+const manifest = { payload, signature: crypto.sign(null, Buffer.from(canonicalUpdateJson(payload)), keys.privateKey).toString("base64") };
+const result = await updater.updateAll("preview", { updateId, manifest });
+assert.equal(fs.existsSync(config.runtimeCurrentPath), false);
+assert.equal(fs.existsSync(config.compatibilityCurrentPath), false);
+const staged = fs.readFileSync(config.updateRollbackPath, "utf8");
+assert.equal(JSON.parse(staged).before.compatibility.current, "${bundledCompatibility.version}");
+const identity = runtime.createRuntimeIdentity();
+runtime.acquireRuntimeLock(identity);
+const owner = runtime.claimRuntimeAuthority(identity);
+const generation = runtime.reserveRuntimeAuthority(owner, updateId, payload.core.version);
+updater.recordGatewayUpdateActivation("activating", null, { core: payload.core.version, compatibility: null }, process.pid, updateId, generation);
+fs.writeFileSync(config.updateRollbackPath, JSON.stringify({ ...JSON.parse(staged), manifest: { ...manifest, signature: Buffer.alloc(64).toString("base64") } }));
+assert.throws(() => updater.activateStagedUpdate(updateId), /update_staging_signature_invalid/);
+assert.equal(fs.existsSync(config.runtimeCurrentPath), false);
+fs.writeFileSync(config.updateRollbackPath, staged);
+updater.activateStagedUpdate(updateId);
+updater.verifyUpdatePointers(updateId, false);
+assert.equal(JSON.parse(fs.readFileSync(config.compatibilityCurrentPath, "utf8")).current, "${bundledCompatibility.version}");
+console.log(JSON.stringify(result.core));
 `;
     const update = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "--eval", script], {
       cwd: root,
@@ -538,6 +570,8 @@ test("operation journals fence interrupted rollback, stale errors, and reused re
       updater.rollbackActivatedUpdate({ core: "99.0.0", compatibility: null }, updateId);
       assert.equal(JSON.parse(readFileSync(config.updateRollbackPath, "utf8")).phase, "restored");
       assert.equal(JSON.parse(readFileSync(config.runtimeCurrentPath, "utf8")).current, coreVersion);
+      updater.verifyUpdatePointers(updateId, true);
+      assert.throws(() => updater.verifyUpdatePointers(updateId, false), /update_pointer_outcome_mismatch/);
       runtime.completeRuntimeAuthorityHandoff(identity, updateId, "committed");
       updater.recordGatewayUpdateActivation("success", null, { core: "99.0.0", compatibility: null }, null, updateId, 8);
       assert.throws(() => updater.recordGatewayUpdateActivation("error", "late_error", { core: "99.0.0", compatibility: null }, null, updateId, 8), /runtime_authority_update_committed/);
@@ -610,4 +644,118 @@ test("VPS executor resumes an interrupted operation once and preserves recovery 
     assert.equal(failed.error, "update_recovery_interrupted");
     assert.equal(existsSync(join(directory, "request.running")), false);
   } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("interrupted activators retain one recovery owner and never reverse a commit decision", () => {
+  const home = mkdtempSync(join(tmpdir(), "better-codex-recovery-owner-"));
+  try {
+    const script = `
+      import assert from "node:assert/strict";
+      import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+      import { dirname, join } from "node:path";
+      const config = await import("./src/config.ts");
+      const updater = await import("./src/updater.ts");
+      const updateId = "019fec06-788f-7af3-a031-76b546904fab";
+      const executable = join(config.runtimeVersionsPath, "99.0.0", "better-codex.cjs");
+      mkdirSync(dirname(executable), { recursive: true });
+      writeFileSync(executable, "setTimeout(() => {}, 30000)");
+      mkdirSync(dirname(config.runtimeAuthorityPath), { recursive: true });
+      writeFileSync(config.runtimeAuthorityPath, JSON.stringify({ generation: 8, status: "claimed", runtimeInstanceId: "target", runtimePid: process.pid, processStartedAt: new Date().toISOString(), updateId, targetVersion: "99.0.0" }));
+      const state = { schemaVersion: 2, updateId, stage: "committing", status: "activating", ownerPid: null, coreVersion: "99.0.0", sourceCoreVersion: "98.0.0", targetRuntimeGeneration: 8, updatedAt: new Date(Date.now() - 20000).toISOString() };
+      writeFileSync(config.updateActivationPath, JSON.stringify(state));
+      const owner = updater.recoverInterruptedActivation(process.pid);
+      assert.ok(owner);
+      try {
+        assert.equal(updater.recoverInterruptedActivation(process.pid), null);
+        const activation = updater.readGatewayUpdateActivationState(updateId);
+        assert.equal(activation.stage, "committing");
+        assert.equal(activation.ownerPid, owner);
+        assert.equal(activation.recoveryAttempts, 1);
+        assert.throws(() => updater.prepareUpdateRollback(updateId, "late_timeout", 8), /update_commit_outcome_pending/);
+        assert.throws(() => updater.recordGatewayUpdateActivation("activating", "late_timeout", { core: "99.0.0", compatibility: null }, process.pid, updateId, 8), /update_commit_outcome_pending/);
+      } finally { process.kill(owner, "SIGTERM"); }
+      writeFileSync(config.updateActivationPath, JSON.stringify({ ...state, stage: "rolling_back", recoveryAttempts: 2 }));
+      assert.equal(updater.recoverInterruptedActivation(process.pid), null);
+      assert.equal(updater.readGatewayUpdateActivationState().stage, "recovery_failed");
+      assert.equal(updater.recoverInterruptedActivation(process.pid), null);
+    `;
+    const result = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], { cwd: root, encoding: "utf8", timeout: 15_000, env: { ...process.env, BETTER_CODEX_HOME: home, BETTER_CODEX_DISABLE_DELEGATION: "1" } });
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("desktop evidence expires across Runtime generations and invalid packages remain a separate failure", () => {
+  const home = mkdtempSync(join(tmpdir(), "better-codex-desktop-evidence-"));
+  try {
+    const script = `
+      import assert from "node:assert/strict";
+      import { mkdirSync, writeFileSync, rmSync } from "node:fs";
+      import { dirname } from "node:path";
+      const config = await import("./src/config.ts");
+      const desktop = await import("./src/compatibility.ts");
+      const runtime = await import("./src/runtime-state.ts");
+      const identity = { ...runtime.createRuntimeIdentity(), port: 45678, generation: 1 };
+      runtime.publishRuntimeState(identity);
+      desktop.writeCompatibilityStatus({ compatible: true, reason: null, codexVersion: "1", targetId: "main", targetUrl: "app://-/index.html", capabilities: { sidebar: true, content: true, threads: true, projects: true }, documentId: 1 }, true);
+      assert.equal(desktop.readCompatibilityStatus().state, "ready");
+      runtime.publishRuntimeState({ ...identity, generation: 2 });
+      const pending = desktop.readCompatibilityStatus();
+      assert.equal(pending.state, "waiting_window");
+      assert.equal(pending.runtimeGeneration, 2);
+      assert.equal(pending.targetId, null);
+      mkdirSync(dirname(config.compatibilityCurrentPath), { recursive: true });
+      writeFileSync(config.compatibilityCurrentPath, "invalid-json");
+      rmSync(config.compatibilityStatusPath);
+      assert.equal(desktop.readCompatibilityStatus().state, "failed");
+      assert.equal(desktop.readCompatibilityStatus().reason, "compatibility_package_invalid");
+      rmSync(config.compatibilityCurrentPath);
+      for (const url of ["app://-/detached-window.html?initialRoute=%2Fdetached-window", "app://-/index.html?initialRoute=%2Fglobal-dictation", "app://-/index.html?initialRoute=%2Favatar-overlay"]) assert.equal(desktop.targetAllowed({ url, title: "Codex", type: "page" }), false);
+    `;
+    const result = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], { cwd: root, encoding: "utf8", env: { ...process.env, BETTER_CODEX_HOME: home, BETTER_CODEX_DISABLE_DELEGATION: "1" } });
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("a killed VPS executor cannot overlap its surviving deployment child", { skip: process.platform === "win32" }, async () => {
+  const directory = mkdtempSync(join(tmpdir(), "better-codex-vps-fencing-"));
+  const id = "019fec06-788f-7af3-a031-76b546904faa";
+  const helper = join(root, "scripts", "selfhost-update-state.py");
+  const children: ReturnType<typeof spawn>[] = [];
+  let workerPid: number | null = null;
+  try {
+    writeFileSync(join(directory, "request"), JSON.stringify({ schemaVersion: 2, id, targetVersion: "v99.0.0", status: "installing", stage: "queued", createdAt: new Date().toISOString() }));
+    const command = join(directory, "selfhost.sh");
+    writeFileSync(command, 'set -eu\nif [ "$BETTER_CODEX_UPDATER_RECOVER" = "0" ]; then\n  echo $$ > "$BETTER_CODEX_SELFHOST_DIR/child.pid"\n  while [ ! -f "$BETTER_CODEX_SELFHOST_DIR/release" ]; do sleep 0.05; done\nfi\npython3 "$BETTER_CODEX_TEST_HELPER" progress verified 100\n');
+    const environment = { ...process.env, BETTER_CODEX_UPDATER_DIRECTORY: directory, BETTER_CODEX_SELFHOST_DIR: directory, BETTER_CODEX_SELFHOST_EXECUTABLE: command, BETTER_CODEX_TEST_HELPER: helper };
+    const first = spawn("python3", [helper, "run"], { env: environment, stdio: "ignore" });
+    children.push(first);
+    const deadline = Date.now() + 10_000;
+    while (!existsSync(join(directory, "child.pid"))) {
+      assert.equal(first.exitCode, null);
+      assert.ok(Date.now() < deadline, "deployment did not start");
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    workerPid = Number(readFileSync(join(directory, "child.pid"), "utf8"));
+    const exited = once(first, "exit");
+    first.kill("SIGKILL");
+    await exited;
+    const second = spawn("python3", [helper, "run"], { env: environment, stdio: "ignore" });
+    children.push(second);
+    const completed = once(second, "exit");
+    await new Promise(resolve => setTimeout(resolve, 200));
+    assert.equal(second.exitCode, null);
+    assert.equal(JSON.parse(readFileSync(join(directory, "state.json"), "utf8")).attempts, 1);
+    writeFileSync(join(directory, "release"), "ready");
+    const [code] = await completed;
+    assert.equal(code, 0);
+    workerPid = null;
+    const state = JSON.parse(readFileSync(join(directory, "state.json"), "utf8"));
+    assert.equal(state.id, id);
+    assert.equal(state.stage, "complete");
+    assert.equal(state.attempts, 2);
+  } finally {
+    for (const child of children) if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    if (workerPid) { try { process.kill(workerPid, "SIGKILL"); } catch {} }
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
