@@ -1490,8 +1490,7 @@ export class IssueWorker {
       this.pendingSessionThreads.clear();
       const targets = new Map<string, IssueSession & { session_handoff_at: string | null }>();
       if (reconcileAll) {
-        for (const session of this.store.listOwnedActiveIssueSessions()) targets.set(session.thread_id, { ...session, session_handoff_at: null });
-        for (const session of this.store.listHandedOffIssueSessions()) targets.set(session.thread_id, session);
+        for (const session of this.store.listIssueSessionsForReconciliation()) targets.set(session.thread_id, session);
       } else {
         for (const threadId of changedThreadIds) {
           const session = this.store.getIssueSessionByThread(threadId);
@@ -1499,7 +1498,6 @@ export class IssueWorker {
           const issue = this.store.getIssue(session.issue_id);
           if (!issue || issue.archived_at) continue;
           const handedOffAt = issue.session_handoff_at && !issue.session_owned ? issue.session_handoff_at : null;
-          if (!handedOffAt && !session.active_turn_id && !session.active_command_id) continue;
           targets.set(threadId, { ...session, session_handoff_at: handedOffAt });
         }
       }
@@ -1540,6 +1538,7 @@ export class IssueWorker {
     const started = this.store.sessionTurnStarted(threadId, activity.turn_id, activity.started_at);
     if (!expectedTurnId && !started) return;
     if (started) {
+      if (!expectedTurnId) workerDiagnostic("session_turn_discovered", { issue_id: session.issue_id, thread_id: threadId, turn_id: activity.turn_id, previous_turn_id: session.last_turn_id, previous_status: session.status, session_handoff_at: session.session_handoff_at, active_command_id: session.active_command_id, observed_status: activity.status, started_at: activity.started_at });
       if (session.session_handoff_at && !expectedTurnId) workerDiagnostic("handed_off_turn_started", { issue_id: session.issue_id, thread_id: threadId, turn_id: activity.turn_id, started_at: activity.started_at });
       this.onChange();
     }
@@ -1549,6 +1548,7 @@ export class IssueWorker {
     const completion = this.store.completeSessionTurn(threadId, activity.turn_id, activity.status);
     if (!completion) return;
     this.finishSessionTurn(completion);
+    workerDiagnostic("session_turn_reconciled", { issue_id: session.issue_id, thread_id: threadId, turn_id: activity.turn_id, session_handoff_at: session.session_handoff_at, status: activity.status, completed_at: activity.completed_at });
     if (session.session_handoff_at) workerDiagnostic("handed_off_turn_completed", { issue_id: session.issue_id, thread_id: threadId, turn_id: activity.turn_id, status: activity.status, completed_at: activity.completed_at });
     this.onChange();
   }

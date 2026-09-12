@@ -4026,6 +4026,20 @@ export class Store {
     });
   }
 
+  listIssueSessionsForReconciliation() {
+    return (this.db.prepare(`
+      SELECT issue_sessions.issue_id, issues.session_handoff_at
+      FROM issue_sessions
+      JOIN issues ON issues.id = issue_sessions.issue_id
+      WHERE issues.archived_at IS NULL
+      ORDER BY issue_sessions.updated_at
+    `).all() as Array<{ issue_id: string; session_handoff_at: string | null }>).map(row => {
+      const session = this.getIssueSession(row.issue_id);
+      if (!session) throw new Error("session_reconciliation_binding_missing");
+      return { ...session, session_handoff_at: row.session_handoff_at };
+    });
+  }
+
   listHandedOffIssueSessions() {
     return (this.db.prepare(`
       SELECT issue_sessions.issue_id, issues.session_handoff_at
