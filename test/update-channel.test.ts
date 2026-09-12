@@ -555,3 +555,59 @@ test("operation journals fence interrupted rollback, stale errors, and reused re
     assert.equal(result.status, 0, result.stderr || result.stdout);
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
+
+test("VPS queue persists real operation identities across clients and rejects unknown IDs", async () => {
+  const { HubUpdater } = await import("../src/hub-updater.js");
+  const directory = mkdtempSync(join(tmpdir(), "better-codex-vps-queue-"));
+  const id = "019fec06-788f-7af3-a031-76b546904faa";
+  try {
+    mkdirSync(join(directory, "operations"));
+    writeFileSync(join(directory, "ready"), "");
+    const operation = { schemaVersion: 2, id, idempotencyKey: "queue-test-key", channel: "preview", status: "installing", targetVersion: "v99.0.0", sourceVersion: coreVersion, stage: "queued", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), error: null };
+    writeFileSync(join(directory, "request"), JSON.stringify(operation));
+    writeFileSync(join(directory, "operations", `${id}.json`), JSON.stringify(operation));
+    const first = new HubUpdater(directory, "preview");
+    const received = await first.install("queue-test-key", "99.0.0");
+    assert.equal(received.update_id, id);
+    const second = new HubUpdater(directory, "preview");
+    assert.equal((await second.install("queue-test-key", "99.0.0")).update_id, id);
+    await assert.rejects(second.install("queue-test-key", "100.0.0"), /update_idempotency_conflict/);
+    assert.throws(() => second.get("019fec06-788f-7af3-a031-76b546904fff"), /update_operation_not_found/);
+    const queued = readFileSync(join(directory, "request"), "utf8");
+    second.get(id);
+    assert.equal(readFileSync(join(directory, "request"), "utf8"), queued);
+    rmSync(join(directory, "request"));
+    writeFileSync(join(directory, "state.json"), JSON.stringify({ ...operation, status: "error", stage: "error", recovery: "restored", currentVersion: coreVersion, error: "target_health_failed" }));
+    assert.equal((await second.install("queue-test-key", "99.0.0")).operation?.status, "ROLLED_BACK");
+    assert.equal(second.get(id).currentVersion, coreVersion);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("VPS executor resumes an interrupted operation once and preserves recovery evidence", { skip: process.platform === "win32" }, async () => {
+  const directory = mkdtempSync(join(tmpdir(), "better-codex-vps-executor-"));
+  const id = "019fec06-788f-7af3-a031-76b546904fae";
+  const helper = join(root, "scripts", "selfhost-update-state.py");
+  try {
+    const operation = { schemaVersion: 2, id, idempotencyKey: "executor-test-key", channel: "preview", status: "installing", targetVersion: "v99.0.0", sourceVersion: coreVersion, stage: "interrupted", attempts: 1, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), error: "executor_interrupted" };
+    writeFileSync(join(directory, "request.running"), JSON.stringify(operation));
+    const command = join(directory, "selfhost.sh");
+    writeFileSync(command, 'set -eu\n[ "$BETTER_CODEX_UPDATER_RECOVER" = "1" ]\npython3 "$BETTER_CODEX_UPDATER_TEST_HELPER" progress restored 100 restored "$BETTER_CODEX_TEST_SOURCE_VERSION"\nexit 1\n');
+    const environment = { ...process.env, BETTER_CODEX_UPDATER_DIRECTORY: directory, BETTER_CODEX_SELFHOST_DIR: directory, BETTER_CODEX_SELFHOST_EXECUTABLE: command, BETTER_CODEX_UPDATER_TEST_HELPER: helper, BETTER_CODEX_TEST_SOURCE_VERSION: coreVersion };
+    const result = spawnSync("python3", [helper, "run"], { encoding: "utf8", env: environment });
+    assert.equal(result.status, 0, result.stderr);
+    const recovered = JSON.parse(readFileSync(join(directory, "operations", `${id}.json`), "utf8"));
+    assert.equal(recovered.id, id);
+    assert.equal(recovered.recovery, "restored");
+    assert.equal(recovered.currentVersion, coreVersion);
+    assert.equal(recovered.attempts, 2);
+    assert.equal(existsSync(join(directory, "request.running")), false);
+    writeFileSync(join(directory, "request.running"), JSON.stringify({ ...recovered, status: "installing", recovery: "pending" }));
+    writeFileSync(join(directory, "operations", `${id}.json`), JSON.stringify({ ...recovered, status: "installing", recovery: "pending" }));
+    const stopped = spawnSync("python3", [helper, "run"], { encoding: "utf8", env: environment });
+    assert.equal(stopped.status, 0, stopped.stderr);
+    const failed = JSON.parse(readFileSync(join(directory, "state.json"), "utf8"));
+    assert.equal(failed.recovery, "failed");
+    assert.equal(failed.error, "update_recovery_interrupted");
+    assert.equal(existsSync(join(directory, "request.running")), false);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});

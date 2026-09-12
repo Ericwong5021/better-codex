@@ -671,7 +671,7 @@ try {
     $liveUpdateResult = Invoke-BetterCodexCapture $packagedExecutable @("update", "install", "--target-version", $targetVersion, "--channel", $desiredChannel) 660000 $true
     if ($liveUpdateResult.ExitCode -eq 0) {
       $liveUpgradeCompleted = $true
-    } elseif ($previousService.running -or $runtimeWasLive) {
+    } elseif ($liveUpdateResult.Output -notmatch "update_runtime_unavailable_before_acceptance") {
       if ($hadChannel) { Copy-Item -Force $backupChannel $channelPath } else { Remove-Item -LiteralPath $channelPath -Force -ErrorAction SilentlyContinue }
       Write-Host ($liveUpdateResult.Output.TrimEnd())
       throw "Live Runtime update failed; the running installation was left in place."
@@ -713,11 +713,9 @@ try {
   if ($versionResult.ExitCode -ne 0) { throw "Better Codex executable verification failed." }
   if (-not $NoService) {
     if ($liveUpgradeCompleted) {
-      Write-Step "Refreshing launcher and injection after the live Runtime handoff..."
+      Write-Step "Refreshing launcher after the live Runtime handoff..."
       $launcherResult = Invoke-BetterCodexCapture $executable @("launcher", "install") 15000
       if ($launcherResult.ExitCode -ne 0) { throw "Better Codex launcher refresh failed." }
-      $injectResult = Invoke-BetterCodexCapture $executable @("inject", "--launch") 60000 $true
-      if ($injectResult.ExitCode -ne 0) { throw "Better Codex injection refresh failed." }
     } else {
       Write-Step "Registering runtime and refreshing Better Codex..."
       $setupArguments = if ($preserveCodex) { @("setup", "--yes", "--preserve-codex") } else { @("setup", "--yes") }
@@ -730,7 +728,7 @@ try {
     Write-Step "Running installation diagnostics..."
     $doctor = $null
     $doctorOutput = $null
-    $doctorArguments = if ($preserveCodex) { @("doctor", "--allow-pending-injection") } else { @("doctor") }
+    $doctorArguments = if ($preserveCodex -or $liveUpgradeCompleted) { @("doctor", "--allow-pending-injection") } else { @("doctor") }
     for ($attempt = 1; $attempt -le 8; $attempt++) {
       $doctorResult = Invoke-BetterCodexCapture $executable $doctorArguments 20000
       $doctorOutput = $doctorResult.Output
@@ -774,6 +772,7 @@ try {
   }
   Write-Ok "Better Codex v$targetVersion is ready"
   } catch {
+    if ($liveUpgradeCompleted) { throw }
     if ((Test-Path $executable) -and -not $NoService -and -not $liveUpgradeCompleted) {
       $null = Invoke-BetterCodexCapture $executable @("disable") 10000
       $null = Invoke-BetterCodexCapture $executable @("service", "stop") 10000

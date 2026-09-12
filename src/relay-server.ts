@@ -260,6 +260,8 @@ function secretEqual(left: string, right: string) {
 }
 
 function errorStatus(code: string) {
+  if (code === "update_operation_not_found") return 404;
+  if (code === "update_idempotency_conflict" || code === "update_in_progress") return 409;
   if (code === "unauthorized") return 401;
   if (["forbidden", "csrf_invalid", "untrusted_host"].includes(code)) return 403;
   if (["device_not_found", "device_authorization_not_found", "web_session_not_found", "web_user_not_found"].includes(code)) return 404;
@@ -1009,7 +1011,7 @@ export function createRelayServer(options: RelayServerOptions) {
       }
       if (url.pathname === "/api/update" && method === "GET") {
         if (!session) return sendJson(response, 401, { error: "unauthorized" });
-        const state = await updater.current(String(url.searchParams.get("update_id") || ""));
+        const state = await updater.current(String(url.searchParams.get("update_id") || ""), String(url.searchParams.get("idempotency_key") || ""));
         return sendJson(response, 200, state);
       }
       if (url.pathname === "/api/update/check" && method === "POST") {
@@ -1031,7 +1033,7 @@ export function createRelayServer(options: RelayServerOptions) {
               return sendJson(response, 507, { error: "update_storage_reserve", storage });
             }
           }
-          const result = await updater.install(typeof body.idempotency_key === "string" ? body.idempotency_key : "");
+          const result = await updater.install(typeof body.idempotency_key === "string" ? body.idempotency_key : "", typeof body.target_version === "string" ? body.target_version : "");
           store.audit(session.user.id, "relay_update_requested", result.operation?.target_core_version || "unknown");
           updateDiagnostic("install_accepted", result.update, { update_id: result.update_id, operation_status: result.operation?.status || null });
           return sendJson(response, 202, result);
@@ -1316,7 +1318,7 @@ export function createRelayServer(options: RelayServerOptions) {
         updateDiagnostic("automatic_update_unavailable", previous);
         return;
       }
-      if (previous.status === "installing" || previous.status === "error" && previous.stage === "error") {
+      if (previous.status === "installing" || previous.status === "error" && Boolean(previous.operation)) {
         updateDiagnostic("automatic_update_paused", previous);
         return;
       }

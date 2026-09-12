@@ -77,6 +77,10 @@ Runtime 更新继续复用持久 update operation、drain、Host capability 协�
 
 `/readyz` 检查服务依赖，不再等待 Codex 注入。响应另列 `desktop` 状态：`ready`、`waiting_window`、`disabled`、`failed`。桌面记录携带 Runtime instance/generation、profile、兼容包及文档身份，旧代次探测只能视为待重探测。detached、听写和头像辅助窗口不参与兼容判定；加载和无窗口属于等待状态，主窗口能力缺失或 bootstrap 确认失败才报告集成故障。后台 injector 随窗口出现及文档重载恢复，不修改用户的注入偏好。
 
+CLI 安装客户端持久保存原请求键和操作 ID，接收回执丢失后复用原请求，等待终态时使用 `/readyz` 验证目标版本。macOS、Windows 安装器以 Runtime 操作完成为提交点；之后桌面或安装附件检查失败不能再执行文件回退，也不会为升级强制启动 Codex。
+
+VPS 的 `request`、`request.running`、`operations/<id>.json` 和请求指纹索引保存真实操作。查询未知 ID 返回 404，重复请求返回原操作；stable/preview 使用同一版本选择规则，Preview 可接收已经转正的 Release。宿主执行器使用 OS 文件锁，阶段及耗时以原子文件写入，最多接管一次中断操作，随后暂停并保留现场。切换前保存原镜像 digest、保留镜像标签及解析后的 Compose 配置，回退直接使用保留产物；内部与公网 `/readyz` 均验证实际版本，数据库不回退。宿主需要 Python 3 和 flock。升级脚本通过原子替换安装，避免正在执行的脚本被覆盖截断。
+
 ## 保留的边界与风险
 
 - 本次不修改业务数据，不自动重试 BET-398，不部署本机或 VPS。新代码的上线需要正常发布与能力切换。

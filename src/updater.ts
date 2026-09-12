@@ -4,6 +4,7 @@ import { chmodSync, closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, m
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { isSea } from "node:sea";
+import { canonicalUpdateJson as stableJson, updateVersionAllowed } from "./update-policy.js";
 import { packagedBuild } from "./build.js";
 import { activeCompatibility, bundledCompatibility, compareVersions, coreVersion, readCompatibilityPointer, rollbackCompatibility, validateCompatibility, writeCompatibilityPointer } from "./compatibility.js";
 import { compatibilityCurrentPath, compatibilityVersionsPath, ensureDirectories, runtimeCurrentPath, runtimeVersionsPath, updateActivationPath, updateChannelPath, updatePublicKeyPath, updateRollbackPath, updateStatePath } from "./config.js";
@@ -89,9 +90,11 @@ export type ActivationState = {
   targetRuntimeGeneration?: number | null;
 };
 
-export function readGatewayUpdateActivationState() {
+export function readGatewayUpdateActivationState(updateId?: string) {
+  if (updateId && !/^[a-f0-9-]{36}$/i.test(updateId)) throw new Error("update_operation_id_invalid");
   try {
-    const value = JSON.parse(readFileSync(updateActivationPath, "utf8")) as ActivationState;
+    const path = updateId ? join(dirname(updateActivationPath), "updates", `${updateId}.json`) : updateActivationPath;
+    const value = JSON.parse(readFileSync(path, "utf8")) as ActivationState;
     return value && typeof value === "object" ? value : null;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
@@ -207,12 +210,6 @@ export function setUpdateChannel(channel: UpdateChannel) {
   return { channel, previous, changed: channel !== previous };
 }
 
-function stableJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
-  if (value && typeof value === "object") return `{${Object.keys(value as Record<string, unknown>).sort().map(key => `${JSON.stringify(key)}:${stableJson((value as Record<string, unknown>)[key])}`).join(",")}}`;
-  return JSON.stringify(value);
-}
-
 function publicKey() {
   const configured = process.env.BETTER_CODEX_UPDATE_PUBLIC_KEY?.replace(/\\n/g, "\n");
   if (configured) return configured;
@@ -271,6 +268,7 @@ function validatePayload(value: unknown, channel: UpdateChannel) {
       || Array.isArray(payload.core.assets)
     ) throw new Error("update_core_invalid");
     if (channel === "stable" && payload.core.version.includes("-")) throw new Error("update_prerelease_not_allowed");
+    if (!updateVersionAllowed(payload.core.version, channel)) throw new Error("update_core_invalid");
     Object.values(payload.core.assets).forEach(validateUpdateAsset);
   }
   if (payload.installers) {
@@ -987,7 +985,7 @@ export function rollbackCompatibilityUpdate(expectedVersion?: string | null) {
 
 export function maybeDelegateToActiveCore() {
   if (!coreUpdatesSupported || process.env.BETTER_CODEX_DISABLE_DELEGATION === "1") return null;
-  if (process.argv[2] === "apply-update") return null;
+  if (process.argv[2] === "apply-update" || process.argv[2] === "update" && process.argv[3] === "install") return null;
   const pointer = readRuntimePointer();
   if (!pointer || resolve(pointer.executable) === currentCoreEntrypoint()) return null;
   if (!existsSync(pointer.executable)) throw new Error("managed_core_unavailable");

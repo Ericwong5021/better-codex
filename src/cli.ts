@@ -123,15 +123,46 @@ async function request(path: string, options: RequestInit = {}) {
 
 async function installRuntimeUpdate(targetVersion: string | undefined, channel: UpdateChannel) {
   if (targetVersion && !/^\d+\.\d+\.\d+(?:-[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*)?$/.test(targetVersion)) throw new Error("update_target_version_invalid");
+  if (!readRuntimeState()) {
+    if (!serviceStatus().installed) throw new Error("update_runtime_unavailable_before_acceptance");
+    startService();
+    await waitForRuntimeReady(30_000);
+  }
+  const clientPath = join(runPath, "update-client.json");
+  let pending: { idempotencyKey: string; targetVersion: string; channel: UpdateChannel; updateId?: string } | null = null;
+  try { pending = JSON.parse(readFileSync(clientPath, "utf8")); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new Error("update_client_state_invalid", { cause: error }); }
+  if (pending && (pending.targetVersion !== (targetVersion || "") || pending.channel !== channel)) throw new Error("update_in_progress");
   setUpdateChannel(channel);
-  const idempotencyKey = `cli-${randomUUID()}`;
-  const accepted = await request("/api/update/install", {
-    method: "POST",
-    body: JSON.stringify({ idempotency_key: idempotencyKey, ...(targetVersion ? { target_version: targetVersion } : {}) }),
-    signal: AbortSignal.timeout(30_000),
-  });
-  const updateId = String(accepted.update_id || "");
-  if (!updateId) throw new Error("update_operation_missing");
+  const idempotencyKey = pending?.idempotencyKey || `cli-${randomUUID()}`;
+  const persist = (updateId?: string) => {
+    const temporary = `${clientPath}.${process.pid}.tmp`;
+    writeFileSync(temporary, JSON.stringify({ idempotencyKey, targetVersion: targetVersion || "", channel, updateId }), { mode: 0o600 });
+    renameSync(temporary, clientPath);
+  };
+  let updateId = pending?.updateId || "";
+  persist(updateId);
+  if (!updateId) {
+    let acceptanceError: unknown;
+    for (let attempt = 0; attempt < 3 && !updateId; attempt += 1) {
+      try {
+        const accepted = await request("/api/update/install", {
+          method: "POST",
+          body: JSON.stringify({ idempotency_key: idempotencyKey, ...(targetVersion ? { target_version: targetVersion } : {}) }),
+          signal: AbortSignal.timeout(30_000),
+        });
+        updateId = String(accepted.update_id || "");
+        if (!updateId) throw new Error("update_operation_missing");
+        persist(updateId);
+      } catch (error) {
+        acceptanceError = error;
+        const message = error instanceof Error ? error.message : String(error);
+        if (!/fetch|network|timeout|runtime_unavailable|aborted|503/i.test(message)) throw error;
+        await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
+      }
+    }
+    if (!updateId) throw new Error(`update_result_unknown:${idempotencyKey}`, { cause: acceptanceError });
+  }
   const deadline = Date.now() + 10 * 60 * 1000;
   let lastError = "update_install_timeout";
   while (Date.now() < deadline) {
@@ -139,11 +170,15 @@ async function installRuntimeUpdate(targetVersion: string | undefined, channel: 
       const state = await request(`/api/update?update_id=${encodeURIComponent(updateId)}`, { signal: AbortSignal.timeout(15_000) });
       const operation = state.operation as { id?: string; status?: string; error_code?: string | null } | null;
       if (!operation || operation.id !== updateId) throw new Error("update_operation_missing");
-      if (operation.status === "FAILED" || operation.status === "ROLLED_BACK") throw new Error(`update_terminal:${operation.error_code || operation.status.toLowerCase()}`);
+      if (operation.status === "FAILED" || operation.status === "ROLLED_BACK") {
+        unlinkSync(clientPath);
+        throw new Error(`update_terminal:${operation.error_code || operation.status.toLowerCase()}`);
+      }
       if (operation.status === "COMPLETED") {
         const runtime = await readiness();
         const currentVersion = String(runtime.version || "");
         if (targetVersion && currentVersion !== targetVersion) throw new Error(`update_target_version_mismatch:${targetVersion}:${currentVersion || "unknown"}`);
+        unlinkSync(clientPath);
         return { updated: true, update_id: updateId, currentVersion, operation };
       }
     } catch (error) {

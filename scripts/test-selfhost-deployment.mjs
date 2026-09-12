@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import https from "node:https";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -10,6 +10,7 @@ import WebSocket from "ws";
 const root = resolve(import.meta.dirname, "..");
 const composeFile = join(root, "deploy/hub/compose.yaml");
 const directory = mkdtempSync(join(tmpdir(), "better-codex-deploy-"));
+mkdirSync(join(directory, "updater"));
 const project = `better-codex-acceptance-${process.pid}`.toLowerCase();
 const bootstrapSecret = randomBytes(40).toString("base64url");
 const webPassword = `Test-${randomBytes(24).toString("base64url")}`;
@@ -77,6 +78,7 @@ function socketMessage(socket) {
 const environment = {
   ...process.env,
   BETTER_CODEX_HUB_DOMAIN: "localhost",
+  BETTER_CODEX_HUB_UPDATER_STATE_DIR: join(directory, "updater"),
   BETTER_CODEX_HUB_HTTP_PORT: "0",
   BETTER_CODEX_HUB_HTTPS_PORT: "0",
   BETTER_CODEX_HUB_CADDYFILE: caddyFile,

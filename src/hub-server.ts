@@ -140,6 +140,8 @@ function trustedHost(request: IncomingMessage, allowedHosts: string[]) {
 }
 
 function errorStatus(code: string) {
+  if (code === "update_operation_not_found") return 404;
+  if (code === "update_idempotency_conflict" || code === "update_in_progress") return 409;
   if (code === "unauthorized") return 401;
   if (["forbidden", "csrf_invalid", "writer_lease_conflict"].includes(code)) return 403;
   if (["device_not_found", "issue_not_found", "command_not_found"].includes(code)) return 404;
@@ -420,7 +422,7 @@ export function createHubServer(options: HubServerOptions) {
       }
       if (url.pathname === "/api/update" && method === "GET") {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" });
-        return sendJson(response, 200, await updater.current(String(url.searchParams.get("update_id") || "")));
+        return sendJson(response, 200, await updater.current(String(url.searchParams.get("update_id") || ""), String(url.searchParams.get("idempotency_key") || "")));
       }
       if (url.pathname === "/api/update/check" && method === "POST") {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" });
@@ -433,7 +435,7 @@ export function createHubServer(options: HubServerOptions) {
         const client = loginClientAddress(request, options.trustedProxy === true);
         if (!client) return sendJson(response, 400, { error: "invalid_proxy_client" });
         const body = await readBody(request, 1024);
-        const result = await updater.install(typeof body.idempotency_key === "string" ? body.idempotency_key : "");
+        const result = await updater.install(typeof body.idempotency_key === "string" ? body.idempotency_key : "", typeof body.target_version === "string" ? body.target_version : "");
         store.audit(client, "hub_update_requested", result.operation?.target_core_version || "unknown");
         return sendJson(response, 202, result);
       }

@@ -1,8 +1,9 @@
+import { canonicalUpdateJson as stableJson, updateVersionAllowed } from "./update-policy.js";
 import { verify } from "node:crypto";
 import { compareVersions } from "./compatibility.js";
 import { coreVersion } from "./version.js";
 
-type StableManifest = {
+export type StableManifest = {
   payload?: {
     schemaVersion?: number;
     channel?: string;
@@ -21,17 +22,12 @@ export type ReleaseUpdateState = {
   checkedAt: string;
   error: string | null;
   channel: ReleaseChannel;
+  manifest?: StableManifest;
 };
 
 const updatePublicKey = `-----BEGIN PUBLIC KEY-----
 MCowBQYDK2VwAyEALYPId82AFoqMpxFFXsRAidsSGaeuqTWHFqP3BZoyBeM=
 -----END PUBLIC KEY-----`;
-
-function stableJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
-  if (value && typeof value === "object") return `{${Object.keys(value as Record<string, unknown>).sort().map(key => `${JSON.stringify(key)}:${stableJson((value as Record<string, unknown>)[key])}`).join(",")}}`;
-  return JSON.stringify(value);
-}
 
 export async function checkRelease(channel: ReleaseChannel): Promise<ReleaseUpdateState> {
   const checkedAt = new Date().toISOString();
@@ -45,14 +41,14 @@ export async function checkRelease(channel: ReleaseChannel): Promise<ReleaseUpda
     if (!response.ok) throw new Error(`update_http_${response.status}`);
     const manifest = await response.json() as StableManifest;
     const payload = manifest.payload;
-    const versionPattern = channel === "stable" ? /^\d+\.\d+\.\d+$/ : /^\d+\.\d+\.\d+-beta\.\d+$/;
-    if (!payload || payload.schemaVersion !== 1 || payload.channel !== channel || !Number.isFinite(Date.parse(payload.generatedAt || "")) || typeof payload.core?.version !== "string" || !versionPattern.test(payload.core.version) || typeof manifest.signature !== "string") throw new Error("update_manifest_invalid");
+    if (!payload || payload.schemaVersion !== 1 || payload.channel !== channel || !Number.isFinite(Date.parse(payload.generatedAt || "")) || typeof payload.core?.version !== "string" || !updateVersionAllowed(payload.core.version, channel) || typeof manifest.signature !== "string") throw new Error("update_manifest_invalid");
     if (!verify(null, Buffer.from(stableJson(payload)), updatePublicKey, Buffer.from(manifest.signature, "base64"))) throw new Error("update_signature_invalid");
     const latestVersion = payload.core.version;
     return {
       status: compareVersions(latestVersion, coreVersion) > 0 ? "available" : "current",
       currentVersion: coreVersion,
       latestVersion,
+      manifest,
       checkedAt,
       error: null,
       channel,

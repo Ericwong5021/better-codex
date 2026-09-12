@@ -25,9 +25,12 @@ test("CLI installation enters the Runtime update transaction and waits for its e
     request.on("end", () => {
       requests.push({ method: request.method, url: request.url, body });
       response.setHeader("content-type", "application/json");
-      if (request.url === "/api/update/install" && request.method === "POST") return void response.writeHead(202).end(JSON.stringify({ accepted: true, update_id: "update-runtime-0001" }));
+      if (request.url === "/api/update/install" && request.method === "POST") {
+        if (requests.filter(item => item.url === "/api/update/install").length === 1) return request.socket.destroy();
+        return void response.writeHead(202).end(JSON.stringify({ accepted: true, update_id: "update-runtime-0001" }));
+      }
       if (request.url === "/api/update?update_id=update-runtime-0001") return void response.end(JSON.stringify({ currentVersion: targetVersion, operation: { id: "update-runtime-0001", status: "COMPLETED", error_code: null } }));
-      if (request.url === "/health") return void response.end(JSON.stringify({ ok: true, version: targetVersion, pid: process.pid, instanceId: "runtime-test" }));
+      if (request.url === "/readyz") return void response.end(JSON.stringify({ ok: true, version: targetVersion, pid: process.pid, instanceId: "runtime-test" }));
       response.writeHead(404).end(JSON.stringify({ error: "not_found" }));
     });
   });
@@ -52,7 +55,11 @@ test("CLI installation enters the Runtime update transaction and waits for its e
     const result = JSON.parse(stdout) as { updated?: boolean; currentVersion?: string };
     assert.equal(result.updated, true);
     assert.equal(result.currentVersion, targetVersion);
-    const install = requests.find(item => item.url === "/api/update/install");
+    const submissions = requests.filter(item => item.url === "/api/update/install");
+    assert.equal(submissions.length, 2);
+    assert.equal(submissions[0].body, submissions[1].body);
+    assert.equal(existsSync(join(home, "run", "update-client.json")), false);
+    const install = submissions[0];
     assert.equal(JSON.parse(install?.body || "{}").target_version, targetVersion);
     assert.ok(requests.some(item => item.url === "/api/update?update_id=update-runtime-0001"));
   } finally {
@@ -505,7 +512,8 @@ try {
 test("Windows installer opts persistent runtime commands out of success-time job cleanup", () => {
   assert.match(source, /Invoke-BetterCodexCapture \$executable \$setupArguments 120000 \$true/);
   assert.match(source, /Invoke-BetterCodexCapture \$packagedExecutable @\("update", "install"[\s\S]*660000 \$true/);
-  assert.match(source, /Invoke-BetterCodexCapture \$executable @\("inject", "--launch"\) 60000 \$true/);
+  assert.doesNotMatch(source, /Invoke-BetterCodexCapture \$executable @\("inject", "--launch"\) 60000 \$true/);
+  assert.match(source, /if \(\$liveUpgradeCompleted\) \{ throw \}/);
   assert.match(source, /Invoke-BetterCodexCapture \$executable @\("service", "install"\) 10000 \$true/);
   assert.match(source, /Invoke-BetterCodexCapture \$executable @\("service", "start"\) 10000 \$true/);
   assert.match(source, /Invoke-BetterCodexCapture \$executable @\("enable"\) 30000 \$true/);

@@ -30,19 +30,7 @@ retry() {
 write_upgrade_progress() {
   [ -n "${BETTER_CODEX_UPDATER_STATE_FILE:-}" ] || return 0
   [ "$BETTER_CODEX_UPDATER_STATE_FILE" = "/var/lib/better-codex-updater/state.json" ] || fail "invalid updater state file"
-  [[ "${BETTER_CODEX_UPDATER_TARGET_VERSION:-}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?$ ]] || fail "invalid updater target version"
-  local stage="$1"
-  local progress="$2"
-  local temporary
-  case "$stage" in
-    verifying|backing_up|downloading|rebuilding|restarting|health_check) ;;
-    *) fail "invalid updater progress stage" ;;
-  esac
-  [[ "$progress" =~ ^[0-9]+$ ]] && [ "$progress" -le 100 ] || fail "invalid updater progress"
-  temporary="$(mktemp "/var/lib/better-codex-updater/state.XXXXXX")"
-  printf '{"status":"installing","targetVersion":"%s","stage":"%s","progress":%s,"updatedAt":"%s","error":null}\n' "$BETTER_CODEX_UPDATER_TARGET_VERSION" "$stage" "$progress" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$temporary"
-  chmod 644 "$temporary"
-  mv -f "$temporary" "$BETTER_CODEX_UPDATER_STATE_FILE"
+  python3 /usr/local/libexec/better-codex-selfhost-update-state progress "$@"
 }
 
 version_tag() {
@@ -176,10 +164,17 @@ verify_running_installer() {
 
 configure_vps_updater() {
   local directory="$1"
+  need python3
+  need flock
   install -d -m 755 /etc/better-codex /usr/local/libexec
   install -d -o root -g "${BETTER_CODEX_HUB_CONTAINER_GID:-1000}" -m 0770 /var/lib/better-codex-updater
-  install -m 0755 "$directory/scripts/selfhost-updater.sh" /usr/local/libexec/better-codex-selfhost-updater
-  install -m 0755 "$directory/scripts/selfhost.sh" /usr/local/libexec/better-codex-selfhost
+  install -d -o root -g "${BETTER_CODEX_HUB_CONTAINER_GID:-1000}" -m 2770 /var/lib/better-codex-updater/operations /var/lib/better-codex-updater/requests
+  install -m 0755 "$directory/scripts/selfhost-updater.sh" /usr/local/libexec/better-codex-selfhost-updater.next
+  mv -f /usr/local/libexec/better-codex-selfhost-updater.next /usr/local/libexec/better-codex-selfhost-updater
+  install -m 0755 "$directory/scripts/selfhost-update-state.py" /usr/local/libexec/better-codex-selfhost-update-state.next
+  mv -f /usr/local/libexec/better-codex-selfhost-update-state.next /usr/local/libexec/better-codex-selfhost-update-state
+  install -m 0755 "$directory/scripts/selfhost.sh" /usr/local/libexec/better-codex-selfhost.next
+  mv -f /usr/local/libexec/better-codex-selfhost.next /usr/local/libexec/better-codex-selfhost
   printf '%s\n' "$directory" > /etc/better-codex/updater-directory
   chmod 600 /etc/better-codex/updater-directory
   if ! command -v systemctl >/dev/null 2>&1; then
@@ -235,20 +230,31 @@ BETTER_CODEX_HUB_WEB_USERNAME=$username
   printf 'Better Codex Relay %s is starting at https://%s\n' "$target" "$domain"
 }
 
-upgrade_vps() {
+upgrade_vps() (
   [ "$(id -u)" -eq 0 ] || fail "VPS upgrade must run with sudo"
   need curl
   need git
   need docker
+  need python3
+  need flock
   docker compose version >/dev/null 2>&1 || fail "Docker Compose is required"
-  local target directory compose proxy_compose environment backup_output backup backup_cli previous_service previous previous_version domain public_health external_proxy
-  local -a compose_args up_services
+  local target directory compose proxy_compose environment operation_id transaction snapshot metadata previous previous_version previous_image target_commit domain external_proxy
+  local -a compose_args up_services recovery_args
   target="$(version_tag)"
   directory="${BETTER_CODEX_SELFHOST_DIR:-/opt/better-codex}"
   compose="$directory/deploy/hub/compose.yaml"
   proxy_compose="$directory/deploy/hub/compose.proxy.yaml"
   environment="$directory/deploy/hub/.env"
   [ -f "$compose" ] && [ -f "$environment" ] || fail "Better Codex Relay is not installed in $directory"
+  exec 9>"$directory/.git/better-codex-deployment.lock"
+  flock -n 9 || fail "VPS update is already running"
+  operation_id="${BETTER_CODEX_UPDATER_OPERATION_ID:-$(python3 -c 'import uuid; print(uuid.uuid4())')}"
+  [[ "$operation_id" =~ ^[a-fA-F0-9-]{36}$ ]] || fail "invalid updater operation ID"
+  transaction="$directory/.git/better-codex-updates/$operation_id"
+  snapshot="$transaction/compose.json"
+  metadata="$transaction/transaction.json"
+  mkdir -p "$transaction"
+  chmod 700 "$transaction"
   compose_args=(-f "$compose" --env-file "$environment")
   up_services=()
   external_proxy=0
@@ -259,71 +265,126 @@ upgrade_vps() {
   else
     compose_args+=(--profile standalone)
   fi
-  docker compose "${compose_args[@]}" config --quiet
-  local free_kib total_kib
-  read -r total_kib free_kib < <(df -Pk "$directory" | awk 'NR==2 {print $2, $4}')
-  [[ "$free_kib" =~ ^[0-9]+$ && "$total_kib" =~ ^[0-9]+$ ]] || fail "unable to inspect VPS update storage"
-  [ "$total_kib" -gt 0 ] || fail "invalid VPS storage size"
-  [ "$free_kib" -ge 5242880 ] && [ "$((free_kib * 100 / total_kib))" -ge 5 ] || fail "VPS update blocked by storage warning reserve: free_kib=$free_kib total_kib=$total_kib"
-  if [ "$external_proxy" -eq 1 ]; then
-    docker compose "${compose_args[@]}" stop caddy
-  fi
-  previous="$(git -C "$directory" rev-parse HEAD)"
-  previous_version="$(git -C "$directory" show "${previous}:package.json" | sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
-  [ -n "$previous_version" ] || fail "unable to resolve the installed VPS version"
-  write_upgrade_progress verifying 20
-  verify_tag_commit "$directory" "$target"
-  previous_service="$(docker compose "${compose_args[@]}" exec -T hub node -e 'fetch("http://127.0.0.1:4318/healthz").then(response=>response.json()).then(value=>process.stdout.write(String(value.name||"")))')"
-  case "$previous_service" in
-    'Better Codex Relay') backup_cli=dist/relay-cli.js ;;
-    'Better Codex Hub') backup_cli=dist/hub-cli.js ;;
-    *) fail "unable to identify the installed remote service" ;;
-  esac
-  write_upgrade_progress backing_up 35
-  backup_output="$(docker compose "${compose_args[@]}" exec -T --user node hub node "$backup_cli" backup)"
-  backup="$(printf '%s\n' "$backup_output" | sed -n 's/^[[:space:]]*"backup":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
-  [[ "$backup" == /data/backups/*.db ]] || fail "VPS backup path is invalid"
-  rollback_vps() {
-    git -C "$directory" checkout --detach "$previous"
-    docker compose "${compose_args[@]}" stop hub
-    docker compose "${compose_args[@]}" build hub
-    docker compose "${compose_args[@]}" run --rm --no-deps hub node "$backup_cli" restore "$backup"
-    docker compose "${compose_args[@]}" up -d --wait "${up_services[@]}"
-    docker compose "${compose_args[@]}" exec -T -e TARGET_VERSION="$previous_version" hub node -e 'const deadline=Date.now()+120000; (async()=>{while(true){try{const response=await fetch("http://127.0.0.1:4318/readyz",{signal:AbortSignal.timeout(5000)});const value=await response.json();if(response.ok&&value.ok===true&&value.version===process.env.TARGET_VERSION)return;console.error(JSON.stringify({event:"update_readiness_pending",target:process.env.TARGET_VERSION,status:response.status,value}));}catch(error){console.error(JSON.stringify({event:"update_readiness_failed",target:process.env.TARGET_VERSION,error:String(error)}));}if(Date.now()>=deadline)process.exit(1);await new Promise(resolve=>setTimeout(resolve,2000));}})()'
+  journal_phase() {
+    python3 - "$metadata" "$1" <<'PY'
+import json, os, sys, time
+path, phase = sys.argv[1:]
+value = json.load(open(path))
+value.update(phase=phase, updatedAt=time.time())
+with open(path + ".tmp", "w") as stream:
+    json.dump(value, stream)
+    stream.flush()
+    os.fsync(stream.fileno())
+os.replace(path + ".tmp", path)
+PY
   }
-  write_upgrade_progress downloading 50
-  checkout_source "$directory" "$target"
-  if ! configure_vps_updater "$directory"; then
-    git -C "$directory" checkout --detach "$previous"
-    fail "VPS online updater configuration failed"
-  fi
-  write_upgrade_progress rebuilding 65
-  if ! docker compose "${compose_args[@]}" up -d --build --wait "${up_services[@]}"; then
-    rollback_vps
-    fail "VPS upgrade failed and the previous version was restored"
-  fi
-  if ! verify_vps_updater "${compose_args[@]}"; then
-    rollback_vps
-    fail "VPS online updater verification failed and the previous version was restored"
-  fi
-  write_upgrade_progress health_check 90
-  if ! docker compose "${compose_args[@]}" exec -T -e TARGET_VERSION="${target#v}" hub node -e 'const deadline=Date.now()+120000; (async()=>{while(true){try{const response=await fetch("http://127.0.0.1:4318/readyz",{signal:AbortSignal.timeout(5000)});const value=await response.json();if(response.ok&&value.ok===true&&value.version===process.env.TARGET_VERSION)return;console.error(JSON.stringify({event:"update_readiness_pending",target:process.env.TARGET_VERSION,status:response.status,value}));}catch(error){console.error(JSON.stringify({event:"update_readiness_failed",target:process.env.TARGET_VERSION,error:String(error)}));}if(Date.now()>=deadline)process.exit(1);await new Promise(resolve=>setTimeout(resolve,2000));}})()'; then
-    rollback_vps
-    fail "VPS upgrade health check failed and the previous version was restored"
-  fi
-  domain="$(sed -n 's/^BETTER_CODEX_HUB_DOMAIN=//p' "$environment" | tail -n 1)"
-  if [ -n "$domain" ]; then
-    [[ "$domain" =~ ^[A-Za-z0-9.-]+$ ]] || {
-      rollback_vps
-      fail "VPS public domain is invalid and the previous version was restored"
-    }
-    if ! public_health="$(retry curl -fsSL --connect-timeout 15 --max-time 30 "https://$domain/readyz")" || ! grep -Fq '"ok":true' <<< "$public_health" || ! grep -Fq '"version":"'"${target#v}"'"' <<< "$public_health"; then
-      rollback_vps
-      fail "VPS public health check failed and the previous version was restored"
+  verify_deployment() {
+    local version="$1"; shift
+    docker compose "$@" exec -T -e TARGET_VERSION="$version" hub node -e 'const deadline=Date.now()+120000; (async()=>{while(true){try{const response=await fetch("http://127.0.0.1:4318/readyz",{signal:AbortSignal.timeout(5000)});const value=await response.json();if(response.ok&&value.ok===true&&value.version===process.env.TARGET_VERSION)return;console.error(JSON.stringify({event:"update_readiness_pending",target:process.env.TARGET_VERSION,status:response.status,value}));}catch(error){console.error(JSON.stringify({event:"update_readiness_failed",target:process.env.TARGET_VERSION,error:String(error)}));}if(Date.now()>=deadline)process.exit(1);await new Promise(resolve=>setTimeout(resolve,2000));}})()' || return 1
+    if [ -n "$domain" ]; then
+      local public_health
+      [[ "$domain" =~ ^[A-Za-z0-9.-]+$ ]] || return 1
+      public_health="$(retry curl -fsSL --connect-timeout 15 --max-time 30 "https://$domain/readyz")" || return 1
+      printf '%s' "$public_health" | python3 -c 'import json,sys; value=json.load(sys.stdin); sys.exit(0 if value.get("ok") is True and value.get("version")==sys.argv[1] else 1)' "$version" || return 1
     fi
+  }
+  rollback_vps() {
+    journal_phase rolling_back || return 1
+    write_upgrade_progress restoring 40 pending || return 1
+    docker image inspect "$previous_image" >/dev/null || return 1
+    git -C "$directory" checkout --detach "$previous" || return 1
+    docker compose "${recovery_args[@]}" up -d --no-build --wait "${up_services[@]}" || return 1
+    verify_deployment "$previous_version" "${recovery_args[@]}" || return 1
+    journal_phase restored || return 1
+    write_upgrade_progress restored 100 restored "$previous_version" || return 1
+  }
+  if [ -f "$metadata" ]; then
+    [ "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["target"])' "$metadata")" = "$target" ] || fail "update target changed"
+  else
+    docker compose "${compose_args[@]}" config --quiet
+    local free_kib total_kib
+    read -r total_kib free_kib < <(df -Pk "$directory" | awk 'NR==2 {print $2, $4}')
+    [[ "$free_kib" =~ ^[0-9]+$ && "$total_kib" =~ ^[0-9]+$ ]] || fail "unable to inspect VPS update storage"
+    [ "$total_kib" -gt 0 ] && [ "$free_kib" -ge 5242880 ] && [ "$((free_kib * 100 / total_kib))" -ge 5 ] || fail "VPS update blocked by storage warning reserve"
+    write_upgrade_progress verifying 20
+    target_commit="$(release_source_commit "$target")"
+    git -C "$directory" fetch --force origin "refs/tags/$target:refs/tags/$target"
+    [ "$(git -C "$directory" rev-parse "$target^{commit}")" = "$target_commit" ] || fail "release tag does not match the signed source commit"
+    previous="$(git -C "$directory" rev-parse HEAD)"
+    previous_version="$(docker compose "${compose_args[@]}" exec -T hub node -e 'fetch("http://127.0.0.1:4318/readyz").then(async r=>{const v=await r.json();if(!r.ok||v.ok!==true)process.exit(1);process.stdout.write(v.version)})')"
+    previous_image="$(docker inspect --format '{{.Image}}' "$(docker compose "${compose_args[@]}" ps -q hub)")"
+    docker image tag "$previous_image" "better-codex-rollback:$operation_id"
+    docker compose "${compose_args[@]}" config --format json > "$snapshot"
+    domain="$(sed -n 's/^BETTER_CODEX_HUB_DOMAIN=//p' "$environment" | tail -n 1)"
+    python3 - "$snapshot" "$metadata" "$previous" "$previous_version" "$previous_image" "$target" "$target_commit" "$domain" "$external_proxy" <<'PY'
+import json, os, shutil, sys
+snapshot, metadata, previous, version, image, target, commit, domain, proxy = sys.argv[1:]
+value = json.load(open(snapshot))
+value["services"]["hub"].pop("build", None)
+value["services"]["hub"]["image"] = image
+for volume in value.get("services", {}).get("caddy", {}).get("volumes", []):
+    if volume.get("type") == "bind" and os.path.isfile(volume.get("source", "")):
+        saved = os.path.join(os.path.dirname(snapshot), "Caddyfile")
+        shutil.copy2(volume["source"], saved)
+        volume["source"] = saved
+with open(snapshot, "w") as stream:
+    json.dump(value, stream)
+    stream.flush()
+    os.fsync(stream.fileno())
+with open(metadata, "w") as stream:
+    json.dump(dict(schemaVersion=2, phase="prepared", previous=previous, sourceVersion=version, image=image, target=target, commit=commit, domain=domain, externalProxy=proxy), stream)
+    stream.flush()
+    os.fsync(stream.fileno())
+PY
   fi
+  previous="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["previous"])' "$metadata")"
+  previous_version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["sourceVersion"])' "$metadata")"
+  previous_image="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["image"])' "$metadata")"
+  target_commit="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["commit"])' "$metadata")"
+  domain="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["domain"])' "$metadata")"
+  recovery_args=(-f "$snapshot" --profile standalone)
+  finish_upgrade() {
+    local status=$?
+    trap - EXIT
+    if [ "$status" -ne 0 ]; then
+      if rollback_vps; then
+        printf 'BETTER_CODEX_DIAGNOSTIC {"scope":"vps_update","update_id":"%s","event":"rollback_verified","source_version":"%s"}\n' "$operation_id" "$previous_version" >&2
+      else
+        journal_phase recovery_failed
+        write_upgrade_progress recovery_failed 0 failed
+        printf 'BETTER_CODEX_DIAGNOSTIC {"scope":"vps_update","update_id":"%s","event":"rollback_failed"}\n' "$operation_id" >&2
+      fi
+    fi
+    exit "$status"
+  }
+  trap finish_upgrade EXIT
+  if [ "${BETTER_CODEX_UPDATER_RECOVER:-0}" = "1" ]; then
+    if [ "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["phase"])' "$metadata")" = "verified" ]; then
+      verify_deployment "${target#v}" "${compose_args[@]}"
+      write_upgrade_progress verified 100
+      return 0
+    fi
+    rollback_vps
+    trap - EXIT
+    return 1
+  fi
+  write_upgrade_progress downloading 45
+  git -C "$directory" status --porcelain --untracked-files=no | grep -q . && fail "$directory has local changes"
+  git -C "$directory" checkout --detach "$target_commit"
+  write_upgrade_progress rebuilding 60
+  docker compose "${compose_args[@]}" build hub
+  if [ "$external_proxy" -eq 1 ]; then docker compose "${compose_args[@]}" stop caddy; fi
+  journal_phase switching
+  write_upgrade_progress restarting 80
+  docker compose "${compose_args[@]}" up -d --no-build --wait "${up_services[@]}"
+  write_upgrade_progress health_check 90
+  verify_deployment "${target#v}" "${compose_args[@]}"
+  configure_vps_updater "$directory"
+  verify_vps_updater "${compose_args[@]}"
+  journal_phase verified
+  write_upgrade_progress verified 100
   printf 'Better Codex Relay upgraded to %s\n' "$target"
-}
+)
 
 target_version="$(version_tag)"
 if [ "${BETTER_CODEX_SELFHOST_VERIFIED:-0}" != 1 ]; then

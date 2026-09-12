@@ -68,6 +68,7 @@
     "dist/session-transcript.js",
     "dist/markdown.js",
     "dist/updater.js",
+    "dist/update-policy.js",
     "dist/user-profile.js",
     "dist/version.js",
     "dist/web-host.js",

@@ -20,7 +20,7 @@ services:
       - 4318
     volumes:
       - hub-data:/data
-      - /var/lib/better-codex-updater:/run/better-codex-updater
+      - ${BETTER_CODEX_HUB_UPDATER_STATE_DIR:-/var/lib/better-codex-updater}:/run/better-codex-updater
     secrets:
       - hub_bootstrap_secret
       - hub_web_password

@@ -738,6 +738,8 @@ function errorCode(error: unknown) {
 }
 
 function errorStatus(code: string) {
+  if (code === "update_operation_not_found") return 404;
+  if (code === "update_idempotency_conflict" || code === "update_in_progress") return 409;
   if (code === "body_too_large") return 413;
   if (code === "insufficient_disk_space") return 507;
   if (code === "version_conflict" || code === "request_id_conflict" || code === "request_outcome_unknown" || code === "remote_mode_disabled" || code === "reply_busy" || code === "update_in_progress" || code === "update_commit_pending" || code === "thread_handoff_busy" || code === "thread_handed_off" || code === "issue_execution_locked" || code === "issue_execution_running" || code === "issue_deleting" || code === "issue_not_archived" || code === "issue_session_handed_off" || code === "issue_session_starting" || code === "issue_session_already_bound" || code === "session_relay_not_leader" || code === "session_command_not_claimed" || code === "session_command_outcome_unknown" || code === "queued_reply_not_pending" || code === "queued_reply_update_conflict" || code === "project_planning_busy" || code === "project_planning_agent_locked") return 409;
@@ -1735,11 +1737,15 @@ export function startServer() {
         }
       }
       if (localUpdatePath === "/api/update" && method === "GET") {
-        const requestedUpdateId = url.searchParams.get("update_id");
-        const operation = requestedUpdateId ? store.getUpdateOperation(requestedUpdateId) : store.getActiveUpdateOperation() || store.getUpdateOperation(readGatewayUpdateActivationState()?.updateId || "");
-        if (requestedUpdateId && !operation) return sendJson(response, 404, { error: "update_operation_not_found" });
-        return sendJson(response, 200, { ...getGatewayUpdateState(), operation: operation || null, accepting_new_tasks: runtimeServingReady && (!operation || ["ACCEPTED", "STAGING", "COMPLETED", "ROLLED_BACK", "FAILED"].includes(operation.status)) });
+        const requestKey = url.searchParams.get("idempotency_key");
+        const requestedUpdateId = url.searchParams.get("update_id") || (requestKey ? readGatewayUpdateRequest(requestKey)?.updateId : null);
+        const operation = requestedUpdateId ? store.getUpdateOperation(requestedUpdateId) : requestKey ? null : store.getActiveUpdateOperation() || store.getUpdateOperation(readGatewayUpdateActivationState()?.updateId || "");
+        if ((requestedUpdateId || requestKey) && !operation) return sendJson(response, 404, { error: "update_operation_not_found" });
+        const activation = operation ? readGatewayUpdateActivationState(operation.id) : null;
+        const recoveryStatus = activation?.stage === "rolled_back" && runtimeServingReady ? "restored" : activation?.failure?.recoveryError || activation?.stage === "recovery_failed" && !runtimeServingReady ? "failed" : operation?.status === "ROLLING_BACK" ? "pending" : "not_required";
+        return sendJson(response, 200, { ...getGatewayUpdateState(), operation: operation || null, phase: operation?.status || null, actual_version: identity.version, target_version: operation?.target_core_version || null, desktop: readCompatibilityStatus(), recovery: { status: recoveryStatus, error: activation?.failure?.recoveryError || null }, error_details: activation?.failure || null, accepting_new_tasks: runtimeServingReady && !identity.handoffUpdateId && (!operation || ["ACCEPTED", "STAGING", "COMPLETED", "ROLLED_BACK", "FAILED"].includes(operation.status)) });
       }
+
       if (url.pathname === "/api/update/rollback" && method === "POST") {
         const body = await readBody(request, 1024);
         const activation = readGatewayUpdateActivationState();

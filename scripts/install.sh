@@ -432,7 +432,7 @@ INSTALL_MUTATED=0
 finish_install() {
   local status=$?
   set +e
-  if [ "$status" -ne 0 ] && [ "$INSTALL_MUTATED" = "1" ]; then
+  if [ "$status" -ne 0 ] && [ "$INSTALL_MUTATED" = "1" ] && [ "$LIVE_UPGRADE_COMPLETED" != "1" ]; then
     if [ "$WITH_SERVICE" = "1" ] && [ "$HAD_BINARY" = "0" ] && [ -x "$BIN_DIR/better-codex" ]; then
       run_with_timeout 10 "$BIN_DIR/better-codex" disable >/dev/null 2>&1
       run_with_timeout 10 "$BIN_DIR/better-codex" service uninstall >/dev/null 2>&1
@@ -546,7 +546,7 @@ if [ "$WITH_SERVICE" = "1" ] && [ -n "$CURRENT_VERSION" ]; then
   LIVE_UPDATE_LOG="$WORK_DIR/live-update.log"
   if run_with_timeout 660 "$WORK_DIR/better-codex" update install --target-version "$TARGET_VERSION" --channel "$DESIRED_CHANNEL" >"$LIVE_UPDATE_LOG" 2>&1; then
     LIVE_UPGRADE_COMPLETED=1
-  elif [ "$PREVIOUS_SERVICE_RUNNING" = "1" ] || [ "$RUNTIME_WAS_LIVE" = "1" ]; then
+  elif ! grep -Fq "update_runtime_unavailable_before_acceptance" "$LIVE_UPDATE_LOG"; then
     if [ "$HAD_CHANNEL" = "1" ]; then mkdir -p "$(dirname "$CHANNEL_PATH")"; cp -p "$BACKUP_DIR/channel.json" "$CHANNEL_PATH"; else rm -f "$CHANNEL_PATH"; fi
     cat "$LIVE_UPDATE_LOG" >&2
     echo "Live Runtime update failed; the running installation was left in place." >&2
@@ -577,9 +577,8 @@ fi
 run_with_timeout 10 "$BIN_DIR/better-codex" version
 if [ "$WITH_SERVICE" = "1" ]; then
   if [ "$LIVE_UPGRADE_COMPLETED" = "1" ]; then
-    printf '[Better Codex] Refreshing launcher and injection after the live Runtime handoff...\n'
+    printf '[Better Codex] Refreshing launcher after the live Runtime handoff...\n'
     run_with_timeout 15 "$BIN_DIR/better-codex" launcher install >/dev/null
-    run_with_timeout 60 "$BIN_DIR/better-codex" inject --launch >/dev/null
   else
     printf '[Better Codex] Registering runtime and refreshing Better Codex...\n'
     SETUP_LOG="$WORK_DIR/setup.log"
