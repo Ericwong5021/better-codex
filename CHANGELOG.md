@@ -4,6 +4,10 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.13-beta.2] - 2026-09-12
+
+- Update the Web navigation regression assertion for shared host-specific button styles.
+
 ## [0.4.13-beta.1] - 2026-09-12
 
 - Preserve stable desktop, service, and MCP launch commands across updates and rollback.
@@ -1055,7 +1059,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.13-beta.1...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.13-beta.2...HEAD
+[0.4.13-beta.2]: https://github.com/Ericwong5021/better-codex/compare/v0.4.13-beta.1...v0.4.13-beta.2
 [0.4.13-beta.1]: https://github.com/Ericwong5021/better-codex/compare/v0.4.12...v0.4.13-beta.1
 [0.4.12]: https://github.com/Ericwong5021/better-codex/compare/v0.4.11...v0.4.12
 [0.4.12-beta.5]: https://github.com/Ericwong5021/better-codex/compare/v0.4.12-beta.4...v0.4.12-beta.5
