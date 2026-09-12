@@ -4,6 +4,14 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.13-beta.1] - 2026-09-12
+
+- Preserve stable desktop, service, and MCP launch commands across updates and rollback.
+- Automatically update self-hosted Relay from signed releases with storage and readiness checks.
+- Keep running Issue animations visible and reconcile newly observed turns in idle bound sessions.
+- Return terminal execution failures to blocked and synchronize thread archive, unarchive, and deletion with the desktop catalog.
+- Restore the MCP injection launcher and clarify CLI writer conflicts when opening conversations.
+
 ## [0.4.12] - 2026-09-11
 
 - Warm up and cache model catalog on runtime startup and categorize models by provider in agent settings.
@@ -1047,7 +1055,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.12...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.13-beta.1...HEAD
+[0.4.13-beta.1]: https://github.com/Ericwong5021/better-codex/compare/v0.4.12...v0.4.13-beta.1
 [0.4.12]: https://github.com/Ericwong5021/better-codex/compare/v0.4.11...v0.4.12
 [0.4.12-beta.5]: https://github.com/Ericwong5021/better-codex/compare/v0.4.12-beta.4...v0.4.12-beta.5
 [0.4.12-beta.4]: https://github.com/Ericwong5021/better-codex/compare/v0.4.12-beta.3...v0.4.12-beta.4
