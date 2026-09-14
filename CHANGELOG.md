@@ -4,6 +4,8 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+- Allow remote Issue image attachments through the durable Relay command path and document the required Nginx request-body allowance.
+
 ## [0.4.13-beta.3] - 2026-09-12
 
 - Lower the remote update storage warning reserve to 5 GiB.

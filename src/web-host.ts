@@ -1,4 +1,4 @@
-import { webCommandTarget, webCommandResponseDisposition, webCommandMaxBodyBytes } from "./web-command-policy.js";
+import { webCommandBodyLimit, webCommandTarget, webCommandResponseDisposition } from "./web-command-policy.js";
 import { betterCodexLogoPng } from "./brand-assets.js";
 import { betterCodexDesignTokensCss, betterCodexThemeColors } from "./design-system.js";
 import { betterCodexWebAppRegistrationJavaScript } from "./web-app.js";
@@ -312,7 +312,7 @@ html[data-better-codex-read-only] [data-card-more] { display: none !important; }
 `;
 
 const webHostJavaScript = String.raw`
-const WEB_COMMAND_MAX_BODY_BYTES = ${webCommandMaxBodyBytes};
+const webCommandBodyLimit = ${webCommandBodyLimit.toString()};
 const webCommandTarget = ${webCommandTarget.toString()};
 const webCommandResponseDisposition = ${webCommandResponseDisposition.toString()};
 const connectDialog = document.getElementById("web-connect");
@@ -1013,7 +1013,7 @@ let commandQueueDrainTimer;
 let commandQueueDraining = false;
 
 function queueableCommand(method, path, bodyBytes) {
-  return commandQueueEnabled && bodyBytes <= WEB_COMMAND_MAX_BODY_BYTES && Boolean(webCommandTarget(method, path));
+  return commandQueueEnabled && bodyBytes <= webCommandBodyLimit(method, path) && Boolean(webCommandTarget(method, path));
 }
 
 function openCommandQueue() {

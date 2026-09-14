@@ -1,6 +1,13 @@
 export type WebCommandKind = "issue" | "project" | "agent" | "setting" | "scheduled";
 
-export const webCommandMaxBodyBytes = 2 * 1024 * 1024;
+export function webCommandBodyLimit(methodValue: string, pathValue: string) {
+  const method = methodValue.toUpperCase();
+  const pathname = new URL(pathValue, "http://runtime.local").pathname;
+  const carriesAttachments = (method === "POST" && pathname === "/api/issues")
+    || (method === "PATCH" && /^\/api\/issues\/[^/]+$/.test(pathname))
+    || (method === "POST" && /^\/api\/issues\/[^/]+\/reply$/.test(pathname));
+  return carriesAttachments ? 30 * 1024 * 1024 : 2 * 1024 * 1024;
+}
 
 export function webCommandTarget(methodValue: string, pathValue: string) {
   const issueCollection = /^\/api\/issues$/;

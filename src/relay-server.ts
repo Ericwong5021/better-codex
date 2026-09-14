@@ -1,4 +1,4 @@
-import { webCommandResponseDisposition, webCommandMaxBodyBytes } from "./web-command-policy.js";
+import { webCommandBodyLimit, webCommandResponseDisposition } from "./web-command-policy.js";
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { once } from "node:events";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -676,7 +676,7 @@ export function createRelayServer(options: RelayServerOptions) {
   const forwardCommand = async (request: IncomingMessage, response: ServerResponse, url: URL, method: string, sessionId: string, userId: string) => {
     const suppliedRequestId = String(request.headers["x-better-codex-request-id"] || request.headers["x-better-codex-command-id"] || "");
     if (!/^[A-Za-z0-9_-]{8,200}$/.test(suppliedRequestId)) return forwardRequest(request, response, url, method, sessionId, userId);
-    const body = await readRawBody(request, Math.min(maxRequestBytes, webCommandMaxBodyBytes));
+    const body = await readRawBody(request, Math.min(maxRequestBytes, webCommandBodyLimit(method, `${url.pathname}${url.search}`)));
     const path = `${url.pathname}${url.search}`;
     const command = createWebCommand(suppliedRequestId, method, path, body);
     if (!command) return sendJson(response, 400, { error: "command_not_supported" });

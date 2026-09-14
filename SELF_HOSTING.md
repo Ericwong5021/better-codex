@@ -153,6 +153,7 @@ Inspect the existing gateway configuration and add the smallest isolated virtual
 
 ```nginx
 location / {
+    client_max_body_size 32m;
     proxy_pass http://127.0.0.1:4318;
     proxy_http_version 1.1;
     proxy_set_header Host $host;
@@ -164,6 +165,8 @@ location / {
     proxy_read_timeout 1h;
 }
 ```
+
+The 32 MiB proxy limit allows the Relay to receive the Base64-encoded JSON envelope for remote attachments and apply its own structured per-file and total-size validation.
 
 Validate the entire gateway configuration before reload. For Nginx, run `nginx -t`. Reload only after validation succeeds.
 
