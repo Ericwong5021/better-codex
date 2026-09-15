@@ -1,0 +1,580 @@
+{
+  "tags": {
+    "refs/tags/preview": {
+      "object": "d64f9a1236cbed98e0a2217e23818e932bc41715",
+      "commit": "d64f9a1236cbed98e0a2217e23818e932bc41715",
+      "kind": "commit",
+      "tag_object": null
+    },
+    "refs/tags/v0.3.0": {
+      "object": "3cd57720ed2dfd500c816738b520de91640407d9",
+      "commit": "c35b6d026598be0cfd35e048a0d908f5db5ed156",
+      "kind": "tag",
+      "tag_object": "object c35b6d026598be0cfd35e048a0d908f5db5ed156\ntype commit\ntag v0.3.0\ntagger Ericwong <970699442@qq.com> 1785983927 +0800\n\nBetter Codex 0.3.0\n"
+    },
+    "refs/tags/v0.3.1": {
+      "object": "9b30c2eaa654e719995c0665ba1b4c2f593f9b98",
+      "commit": "5cec53cf3155eb18bfe24cad03b1e5cd1b44a17a",
+      "kind": "tag",
+      "tag_object": "object 5cec53cf3155eb18bfe24cad03b1e5cd1b44a17a\ntype commit\ntag v0.3.1\ntagger Ericwong <970699442@qq.com> 1785984195 +0800\n\nBetter Codex 0.3.1\n"
+    },
+    "refs/tags/v0.3.10": {
+      "object": "35c69ccdea1730e64980b7dc1de4b66bd854490c",
+      "commit": "6fda1fb7d196c0dc82fa7f50baecf0a6902e3cd3",
+      "kind": "tag",
+      "tag_object": "object 6fda1fb7d196c0dc82fa7f50baecf0a6902e3cd3\ntype commit\ntag v0.3.10\ntagger Ericwong <970699442@qq.com> 1786076600 +0800\n\nrelease: better-codex 0.3.10\n"
+    },
+    "refs/tags/v0.3.11": {
+      "object": "d383d4ae51f23871b7411f7b83e89162abe275d4",
+      "commit": "d5ad721fedf7b216e73fa33dc009aa369ec62818",
+      "kind": "tag",
+      "tag_object": "object d5ad721fedf7b216e73fa33dc009aa369ec62818\ntype commit\ntag v0.3.11\ntagger Ericwong <970699442@qq.com> 1786078707 +0800\n\nRelease v0.3.11\n"
+    },
+    "refs/tags/v0.3.12": {
+      "object": "0b414a3a32fdaa3035b602efee302cc1f93af609",
+      "commit": "e7978c27a37b06a2a33bf605cf33895b119efc0a",
+      "kind": "tag",
+      "tag_object": "object e7978c27a37b06a2a33bf605cf33895b119efc0a\ntype commit\ntag v0.3.12\ntagger Ericwong <970699442@qq.com> 1786080860 +0800\n\nRelease v0.3.12\n"
+    },
+    "refs/tags/v0.3.13": {
+      "object": "a771c461a865133eac348184733404d254b6547c",
+      "commit": "95c0c0165493b608a64ee045f751e52cba536099",
+      "kind": "tag",
+      "tag_object": "object 95c0c0165493b608a64ee045f751e52cba536099\ntype commit\ntag v0.3.13\ntagger Ericwong <970699442@qq.com> 1786131654 +0800\n\nv0.3.13\n"
+    },
+    "refs/tags/v0.3.14": {
+      "object": "1a5e987ec55a3a03766846f5e410212a9914a1a0",
+      "commit": "30775606cd3a7ebe61459a0043a18e1c4b79b8c4",
+      "kind": "tag",
+      "tag_object": "object 30775606cd3a7ebe61459a0043a18e1c4b79b8c4\ntype commit\ntag v0.3.14\ntagger Ericwong <970699442@qq.com> 1786270337 +0800\n\nv0.3.14\n"
+    },
+    "refs/tags/v0.3.15": {
+      "object": "4e99e6c2120f31739e02c39628e9d7430a69b5f6",
+      "commit": "8e4e914cdd5d359cfa8a866c1cf3139b84ff67db",
+      "kind": "tag",
+      "tag_object": "object 8e4e914cdd5d359cfa8a866c1cf3139b84ff67db\ntype commit\ntag v0.3.15\ntagger Ericwong <970699442@qq.com> 1786292539 +0800\n\nBetter Codex 0.3.15\n"
+    },
+    "refs/tags/v0.3.16": {
+      "object": "7479671252d40034067ed9bc273cf9e9817f56f7",
+      "commit": "6150581dc2bdaeb3291dfc2ce68bbdd7ded0d9c5",
+      "kind": "tag",
+      "tag_object": "object 6150581dc2bdaeb3291dfc2ce68bbdd7ded0d9c5\ntype commit\ntag v0.3.16\ntagger Ericwong <970699442@qq.com> 1786297247 +0800\n\nBetter Codex 0.3.16\n"
+    },
+    "refs/tags/v0.3.17": {
+      "object": "4342ea379e1bf6a812e66fb31f34d8e47a3a183b",
+      "commit": "e4c9d068935abd9b4be3e78d8482898f2f98d8ad",
+      "kind": "tag",
+      "tag_object": "object e4c9d068935abd9b4be3e78d8482898f2f98d8ad\ntype commit\ntag v0.3.17\ntagger Ericwong <970699442@qq.com> 1786302228 +0800\n\nBetter Codex v0.3.17\n"
+    },
+    "refs/tags/v0.3.2": {
+      "object": "d7ca50fb2343e88cb5d2be1b4bded4cf7cb5ba60",
+      "commit": "0df155f48d0971b57d493382a3bd7ff097c1381c",
+      "kind": "tag",
+      "tag_object": "object 0df155f48d0971b57d493382a3bd7ff097c1381c\ntype commit\ntag v0.3.2\ntagger Ericwong <970699442@qq.com> 1785985127 +0800\n\nBetter Codex v0.3.2\n"
+    },
+    "refs/tags/v0.3.3": {
+      "object": "f1067a6d33ce992fa9d58eff79cb040f520631b5",
+      "commit": "db6e37500a19892afb6eb030a36d8b11cda84cd6",
+      "kind": "tag",
+      "tag_object": "object db6e37500a19892afb6eb030a36d8b11cda84cd6\ntype commit\ntag v0.3.3\ntagger Ericwong <970699442@qq.com> 1785985806 +0800\n\nBetter Codex v0.3.3\n"
+    },
+    "refs/tags/v0.3.4": {
+      "object": "4cb84db94586d396af3143b140319319f82453e6",
+      "commit": "6630d08067f0bd796321d81dd00e8ed0b511ade4",
+      "kind": "tag",
+      "tag_object": "object 6630d08067f0bd796321d81dd00e8ed0b511ade4\ntype commit\ntag v0.3.4\ntagger Ericwong <970699442@qq.com> 1785987462 +0800\n\nBetter Codex v0.3.4\n"
+    },
+    "refs/tags/v0.3.5": {
+      "object": "a3149d07815c9f3c5e532365b05920399c0e5641",
+      "commit": "5b05d4a95bfe15353f087d7a04751e1ee3b2c3d8",
+      "kind": "tag",
+      "tag_object": "object 5b05d4a95bfe15353f087d7a04751e1ee3b2c3d8\ntype commit\ntag v0.3.5\ntagger Ericwong <970699442@qq.com> 1785987819 +0800\n\nBetter Codex v0.3.5\n"
+    },
+    "refs/tags/v0.3.6": {
+      "object": "ce141312391a19f9e02638cd8c6f4dfbf8c9d9f7",
+      "commit": "da3bbb9cee9af5b4eeebd539d6dc12d09eb9098b",
+      "kind": "tag",
+      "tag_object": "object da3bbb9cee9af5b4eeebd539d6dc12d09eb9098b\ntype commit\ntag v0.3.6\ntagger Ericwong <970699442@qq.com> 1785988206 +0800\n\nBetter Codex v0.3.6\n"
+    },
+    "refs/tags/v0.3.7": {
+      "object": "75d4ce808b5801ab42bda627066431782b4388cb",
+      "commit": "eaf73c68691c3c2c69df407146e28710e3ae9828",
+      "kind": "tag",
+      "tag_object": "object eaf73c68691c3c2c69df407146e28710e3ae9828\ntype commit\ntag v0.3.7\ntagger Ericwong <970699442@qq.com> 1785998280 +0800\n\nBetter Codex v0.3.7\n"
+    },
+    "refs/tags/v0.3.8": {
+      "object": "958e70d8c5a2b087dd598ce5b333e6c22179651f",
+      "commit": "8669cccec5fe6994f918821e31d6ec162fd30805",
+      "kind": "tag",
+      "tag_object": "object 8669cccec5fe6994f918821e31d6ec162fd30805\ntype commit\ntag v0.3.8\ntagger Ericwong <970699442@qq.com> 1785999618 +0800\n\nBetter Codex v0.3.8\n"
+    },
+    "refs/tags/v0.3.9": {
+      "object": "a9c0604375e7925bef0f0c73f5bcf59a022c8754",
+      "commit": "a9c0604375e7925bef0f0c73f5bcf59a022c8754",
+      "kind": "commit",
+      "tag_object": null
+    },
+    "refs/tags/v0.4.0": {
+      "object": "5e28653b89d544199f614d22e0704939202d9fb4",
+      "commit": "1fe3964ecec3bbf593322b40c34f8757b991e220",
+      "kind": "tag",
+      "tag_object": "object 1fe3964ecec3bbf593322b40c34f8757b991e220\ntype commit\ntag v0.4.0\ntagger U2 <970699442@qq.com> 1786338634 +0800\n\nv0.4.0\n"
+    },
+    "refs/tags/v0.4.1": {
+      "object": "ed1a793fb3476b962056b97a2f2a242b897f360b",
+      "commit": "04bfecd5e7a5df381231cb494a0cd1a01c75fbd8",
+      "kind": "tag",
+      "tag_object": "object 04bfecd5e7a5df381231cb494a0cd1a01c75fbd8\ntype commit\ntag v0.4.1\ntagger Ericwong <970699442@qq.com> 1786379869 +0800\n\nv0.4.1\n"
+    },
+    "refs/tags/v0.4.10": {
+      "object": "d7deeb17f2f4dd84199c7d19804c58a7e1ec6915",
+      "commit": "b76850ee00ceaa4f93bac9768d91acb8b7a83ee4",
+      "kind": "tag",
+      "tag_object": "object b76850ee00ceaa4f93bac9768d91acb8b7a83ee4\ntype commit\ntag v0.4.10\ntagger Ericwong <970699442@qq.com> 1787925915 +0800\n\nBetter Codex v0.4.10\n"
+    },
+    "refs/tags/v0.4.10-beta.1": {
+      "object": "3c339f9768c2ffe59eea87bfc1835fbba65efb4f",
+      "commit": "5efb9b307f8938abe540c3cd3b4f41966c2efce9",
+      "kind": "tag",
+      "tag_object": "object 5efb9b307f8938abe540c3cd3b4f41966c2efce9\ntype commit\ntag v0.4.10-beta.1\ntagger Ericwong <970699442@qq.com> 1787332501 +0800\n\nBetter Codex v0.4.10-beta.1\n"
+    },
+    "refs/tags/v0.4.10-beta.10": {
+      "object": "c735aac0e371514a3c97a55b3d873d27187763f5",
+      "commit": "edf563af831e8dfcac15167950401204625ca75e",
+      "kind": "tag",
+      "tag_object": "object edf563af831e8dfcac15167950401204625ca75e\ntype commit\ntag v0.4.10-beta.10\ntagger Ericwong <970699442@qq.com> 1787400572 +0800\n\nv0.4.10-beta.10\n"
+    },
+    "refs/tags/v0.4.10-beta.11": {
+      "object": "ff22ee27d4caa532c5cb89fed53d12c15e5cbfce",
+      "commit": "6ff8ee4b2836e507f2004f26086efa1395e5a86c",
+      "kind": "tag",
+      "tag_object": "object 6ff8ee4b2836e507f2004f26086efa1395e5a86c\ntype commit\ntag v0.4.10-beta.11\ntagger Ericwong <970699442@qq.com> 1787414810 +0800\n\nBetter Codex v0.4.10-beta.11\n"
+    },
+    "refs/tags/v0.4.10-beta.12": {
+      "object": "31ae450a7f275c1c59fea1ec1ed72d99f0b38220",
+      "commit": "b6fc47d54223ef53934d403b59a4eb1574624953",
+      "kind": "tag",
+      "tag_object": "object b6fc47d54223ef53934d403b59a4eb1574624953\ntype commit\ntag v0.4.10-beta.12\ntagger Ericwong <970699442@qq.com> 1787416769 +0800\n\nBetter Codex v0.4.10-beta.12\n"
+    },
+    "refs/tags/v0.4.10-beta.13": {
+      "object": "09a51ae521ad7786086e9c8a715eac4b610c9b6e",
+      "commit": "4f84f8942776e5795a16eb192b0347784184d735",
+      "kind": "tag",
+      "tag_object": "object 4f84f8942776e5795a16eb192b0347784184d735\ntype commit\ntag v0.4.10-beta.13\ntagger Ericwong <970699442@qq.com> 1787427172 +0800\n\nBetter Codex v0.4.10-beta.13\n"
+    },
+    "refs/tags/v0.4.10-beta.14": {
+      "object": "64e0d796c8096ee6ac868ed921767f8d9b1d5826",
+      "commit": "96ceecf755e3045c2ca488a089f4fa3fd9304b42",
+      "kind": "tag",
+      "tag_object": "object 96ceecf755e3045c2ca488a089f4fa3fd9304b42\ntype commit\ntag v0.4.10-beta.14\ntagger Ericwong <970699442@qq.com> 1787447375 +0800\n\nv0.4.10-beta.14\n"
+    },
+    "refs/tags/v0.4.10-beta.15": {
+      "object": "fc7a722c0cb6bafb1b40916e7744cd575d40f6b9",
+      "commit": "460221350325ff5943be2a5bbaf2d8bb27efab2b",
+      "kind": "tag",
+      "tag_object": "object 460221350325ff5943be2a5bbaf2d8bb27efab2b\ntype commit\ntag v0.4.10-beta.15\ntagger Ericwong <970699442@qq.com> 1787504134 +0800\n\nBetter Codex v0.4.10-beta.15\n"
+    },
+    "refs/tags/v0.4.10-beta.16": {
+      "object": "10fa5cbdc8fae0c93a9e596559bc2d4a8148bb05",
+      "commit": "2fd433ba17c93014d77347486eb56f00f28eb244",
+      "kind": "tag",
+      "tag_object": "object 2fd433ba17c93014d77347486eb56f00f28eb244\ntype commit\ntag v0.4.10-beta.16\ntagger Ericwong <970699442@qq.com> 1787504585 +0800\n\nBetter Codex v0.4.10-beta.16\n"
+    },
+    "refs/tags/v0.4.10-beta.17": {
+      "object": "dddcc79ef43699e3d473cd402bd64a899e64c381",
+      "commit": "bf1459c9d3d8847c3e6406d22f762a62672c0445",
+      "kind": "tag",
+      "tag_object": "object bf1459c9d3d8847c3e6406d22f762a62672c0445\ntype commit\ntag v0.4.10-beta.17\ntagger Ericwong <970699442@qq.com> 1787535948 +0800\n\nBetter Codex v0.4.10-beta.17\n"
+    },
+    "refs/tags/v0.4.10-beta.18": {
+      "object": "c1cd8623051083ede433f8ba83926d132c2e77bd",
+      "commit": "dcf4215eba1113c2428928f8517b7b1653a3c7f2",
+      "kind": "tag",
+      "tag_object": "object dcf4215eba1113c2428928f8517b7b1653a3c7f2\ntype commit\ntag v0.4.10-beta.18\ntagger Ericwong <970699442@qq.com> 1787545038 +0800\n\nv0.4.10-beta.18\n"
+    },
+    "refs/tags/v0.4.10-beta.19": {
+      "object": "45c3aa8b299a6d08bc59e5ca27b8a49676c96d6c",
+      "commit": "289bb5ff93561c7d882302f3fcf50dfaf32b3280",
+      "kind": "tag",
+      "tag_object": "object 289bb5ff93561c7d882302f3fcf50dfaf32b3280\ntype commit\ntag v0.4.10-beta.19\ntagger Ericwong <970699442@qq.com> 1787558568 +0800\n\nv0.4.10-beta.19\n"
+    },
+    "refs/tags/v0.4.10-beta.2": {
+      "object": "36ba9e3342f8873502099c78755a89c63d6f756f",
+      "commit": "8aaff2c563dd2a8182bb015cc04e51fc489094fd",
+      "kind": "tag",
+      "tag_object": "object 8aaff2c563dd2a8182bb015cc04e51fc489094fd\ntype commit\ntag v0.4.10-beta.2\ntagger Ericwong <970699442@qq.com> 1787333081 +0800\n\nBetter Codex v0.4.10-beta.2\n"
+    },
+    "refs/tags/v0.4.10-beta.20": {
+      "object": "93bc890ddf88e3eab64524034d94e100388eb0df",
+      "commit": "97f6e925e451d59fa8a0f7fd869fce76ea8a70e4",
+      "kind": "tag",
+      "tag_object": "object 97f6e925e451d59fa8a0f7fd869fce76ea8a70e4\ntype commit\ntag v0.4.10-beta.20\ntagger Ericwong <970699442@qq.com> 1787647245 +0800\n\nv0.4.10-beta.20\n"
+    },
+    "refs/tags/v0.4.10-beta.21": {
+      "object": "c01f22d47ee570590e54c401e3225f02694f7a47",
+      "commit": "4121edfe5355400f2f74b835d271083a3561d250",
+      "kind": "tag",
+      "tag_object": "object 4121edfe5355400f2f74b835d271083a3561d250\ntype commit\ntag v0.4.10-beta.21\ntagger Ericwong <970699442@qq.com> 1787647454 +0800\n\nv0.4.10-beta.21\n"
+    },
+    "refs/tags/v0.4.10-beta.22": {
+      "object": "c9900e80a7d235bee166b418adfde86659574659",
+      "commit": "3205fdd051ef4c743bbc3a048674e7365e6840e6",
+      "kind": "tag",
+      "tag_object": "object 3205fdd051ef4c743bbc3a048674e7365e6840e6\ntype commit\ntag v0.4.10-beta.22\ntagger Ericwong <970699442@qq.com> 1787655421 +0800\n\nv0.4.10-beta.22\n"
+    },
+    "refs/tags/v0.4.10-beta.23": {
+      "object": "23cd3fa56b2e7711d80af47cb25f60b18b4cdf22",
+      "commit": "4dbbc6d63f12e2574d26cd4c208722c50c37fbe4",
+      "kind": "tag",
+      "tag_object": "object 4dbbc6d63f12e2574d26cd4c208722c50c37fbe4\ntype commit\ntag v0.4.10-beta.23\ntagger Ericwong <970699442@qq.com> 1787656134 +0800\n\nv0.4.10-beta.23\n"
+    },
+    "refs/tags/v0.4.10-beta.24": {
+      "object": "3515f8df52269332ce26d170bd7063ea8223c37f",
+      "commit": "5d9ba0b16fd1ba6d45290950deac004f06548011",
+      "kind": "tag",
+      "tag_object": "object 5d9ba0b16fd1ba6d45290950deac004f06548011\ntype commit\ntag v0.4.10-beta.24\ntagger Ericwong <970699442@qq.com> 1787666858 +0800\n\nv0.4.10-beta.24\n"
+    },
+    "refs/tags/v0.4.10-beta.25": {
+      "object": "1768cc232742582d7a3e7ac5cd33627b599a2b3b",
+      "commit": "daa532560eb75e3d6a8f41c73e2b1b5c19d3504a",
+      "kind": "tag",
+      "tag_object": "object daa532560eb75e3d6a8f41c73e2b1b5c19d3504a\ntype commit\ntag v0.4.10-beta.25\ntagger Ericwong <970699442@qq.com> 1787685525 +0800\n\nv0.4.10-beta.25\n"
+    },
+    "refs/tags/v0.4.10-beta.26": {
+      "object": "ff9d33dc2f45a5de1bed27939d5181ee8dad89e8",
+      "commit": "cd72043f7374acfd5bd9f31eaa66cacc8b55fa99",
+      "kind": "tag",
+      "tag_object": "object cd72043f7374acfd5bd9f31eaa66cacc8b55fa99\ntype commit\ntag v0.4.10-beta.26\ntagger Ericwong <970699442@qq.com> 1787714685 +0800\n\nv0.4.10-beta.26\n"
+    },
+    "refs/tags/v0.4.10-beta.27": {
+      "object": "fc1a0afe56ea0797cef6b267b2bf70bdd4a57f9c",
+      "commit": "80785c0e9ec6fdfb88aefc47fdd8d5aef4a31347",
+      "kind": "tag",
+      "tag_object": "object 80785c0e9ec6fdfb88aefc47fdd8d5aef4a31347\ntype commit\ntag v0.4.10-beta.27\ntagger Ericwong <970699442@qq.com> 1787737482 +0800\n\nv0.4.10-beta.27\n"
+    },
+    "refs/tags/v0.4.10-beta.28": {
+      "object": "56104c33427de493b92c3153096ac5b837245245",
+      "commit": "0afbe3d1dcbd55d1318be56ed7de469cc0298057",
+      "kind": "tag",
+      "tag_object": "object 0afbe3d1dcbd55d1318be56ed7de469cc0298057\ntype commit\ntag v0.4.10-beta.28\ntagger Ericwong <970699442@qq.com> 1787790468 +0800\n\nv0.4.10-beta.28\n"
+    },
+    "refs/tags/v0.4.10-beta.29": {
+      "object": "e4283fcbd68494e65300654178860700e1b0e3a4",
+      "commit": "5ae74e2b3098cc8420ff3e7bb58fca3ce8fceebe",
+      "kind": "tag",
+      "tag_object": "object 5ae74e2b3098cc8420ff3e7bb58fca3ce8fceebe\ntype commit\ntag v0.4.10-beta.29\ntagger Ericwong <970699442@qq.com> 1787802199 +0800\n\nv0.4.10-beta.29\n"
+    },
+    "refs/tags/v0.4.10-beta.3": {
+      "object": "43822dce25803f1df867920e2d72a74e692e66c4",
+      "commit": "b8290e58279276f14553cf844a56d501fd913405",
+      "kind": "tag",
+      "tag_object": "object b8290e58279276f14553cf844a56d501fd913405\ntype commit\ntag v0.4.10-beta.3\ntagger Ericwong <970699442@qq.com> 1787368481 +0800\n\nBetter Codex v0.4.10-beta.3\n"
+    },
+    "refs/tags/v0.4.10-beta.30": {
+      "object": "aa5a2734e71bbca43715096d0009e5aaf9c0183f",
+      "commit": "5fe2ef1c0987d5f6e890ee644816ad0685521b6d",
+      "kind": "tag",
+      "tag_object": "object 5fe2ef1c0987d5f6e890ee644816ad0685521b6d\ntype commit\ntag v0.4.10-beta.30\ntagger Ericwong <970699442@qq.com> 1787802948 +0800\n\nv0.4.10-beta.30\n"
+    },
+    "refs/tags/v0.4.10-beta.31": {
+      "object": "67283de8e89ac23a38b91c8aae8ee27459647397",
+      "commit": "5e4b15572efcbde6620f7340b3b8a9d2c1dae9a9",
+      "kind": "tag",
+      "tag_object": "object 5e4b15572efcbde6620f7340b3b8a9d2c1dae9a9\ntype commit\ntag v0.4.10-beta.31\ntagger Ericwong <970699442@qq.com> 1787803255 +0800\n\nv0.4.10-beta.31\n"
+    },
+    "refs/tags/v0.4.10-beta.32": {
+      "object": "e285ddf19470243bb70469d57f34bfbf4fa1f952",
+      "commit": "0e3909d661233a7747ca9212c60980aa9e31d31c",
+      "kind": "tag",
+      "tag_object": "object 0e3909d661233a7747ca9212c60980aa9e31d31c\ntype commit\ntag v0.4.10-beta.32\ntagger Ericwong <970699442@qq.com> 1787804400 +0800\n\nv0.4.10-beta.32\n"
+    },
+    "refs/tags/v0.4.10-beta.33": {
+      "object": "8c905d6f0359125414b8dcbc17d3720009d7ee9e",
+      "commit": "34673fd9eeb4b96a9024227e2833f99edd46284a",
+      "kind": "tag",
+      "tag_object": "object 34673fd9eeb4b96a9024227e2833f99edd46284a\ntype commit\ntag v0.4.10-beta.33\ntagger Ericwong <970699442@qq.com> 1787813940 +0800\n\nv0.4.10-beta.33\n"
+    },
+    "refs/tags/v0.4.10-beta.34": {
+      "object": "89d41ab0ebef2c4fad15adb93a8751c713ac39e7",
+      "commit": "ef83d480952014a04ccbdc550f22451d3b630bd2",
+      "kind": "tag",
+      "tag_object": "object ef83d480952014a04ccbdc550f22451d3b630bd2\ntype commit\ntag v0.4.10-beta.34\ntagger Ericwong <970699442@qq.com> 1787820597 +0800\n\nv0.4.10-beta.34\n"
+    },
+    "refs/tags/v0.4.10-beta.35": {
+      "object": "1807778b1f69a2b1f18bcdc71c7c7f9c85ea7708",
+      "commit": "5e297dc2a26227b4df1fc22788dba580999b5433",
+      "kind": "tag",
+      "tag_object": "object 5e297dc2a26227b4df1fc22788dba580999b5433\ntype commit\ntag v0.4.10-beta.35\ntagger Ericwong <970699442@qq.com> 1787820873 +0800\n\nv0.4.10-beta.35\n"
+    },
+    "refs/tags/v0.4.10-beta.36": {
+      "object": "24e1b529842a6d25354ef0de521b08fe99f0cb08",
+      "commit": "7723d5246b09c71234f846f4da0cbad363bacac9",
+      "kind": "tag",
+      "tag_object": "object 7723d5246b09c71234f846f4da0cbad363bacac9\ntype commit\ntag v0.4.10-beta.36\ntagger Ericwong <970699442@qq.com> 1787826110 +0800\n\nv0.4.10-beta.36\n"
+    },
+    "refs/tags/v0.4.10-beta.37": {
+      "object": "99109d6347c121357770012429454585ab50845b",
+      "commit": "c6005037126df1c9b8efad76d8b6674f750d5ba4",
+      "kind": "tag",
+      "tag_object": "object c6005037126df1c9b8efad76d8b6674f750d5ba4\ntype commit\ntag v0.4.10-beta.37\ntagger Ericwong <970699442@qq.com> 1787835255 +0800\n\nBetter Codex v0.4.10-beta.37\n"
+    },
+    "refs/tags/v0.4.10-beta.38": {
+      "object": "0f847e74de4cd1279f47a6a6757de6e066abcb04",
+      "commit": "c006478077c40e14cd2c9bb5f7aae3fcf5e9e923",
+      "kind": "tag",
+      "tag_object": "object c006478077c40e14cd2c9bb5f7aae3fcf5e9e923\ntype commit\ntag v0.4.10-beta.38\ntagger Ericwong <970699442@qq.com> 1787841479 +0800\n\nBetter Codex v0.4.10-beta.38\n"
+    },
+    "refs/tags/v0.4.10-beta.39": {
+      "object": "557c288e53dc40756eadd29ee32689472beca02c",
+      "commit": "3d16e2434268b38b098bd533ce5405579456ba8d",
+      "kind": "tag",
+      "tag_object": "object 3d16e2434268b38b098bd533ce5405579456ba8d\ntype commit\ntag v0.4.10-beta.39\ntagger Ericwong <970699442@qq.com> 1787843715 +0800\n\nv0.4.10-beta.39\n"
+    },
+    "refs/tags/v0.4.10-beta.4": {
+      "object": "0a3d420017e51301bc8850b87f99df649fcb8b84",
+      "commit": "3fc126cc619d478c6a1a5ae0e765f8d6b8af3422",
+      "kind": "tag",
+      "tag_object": "object 3fc126cc619d478c6a1a5ae0e765f8d6b8af3422\ntype commit\ntag v0.4.10-beta.4\ntagger Ericwong <970699442@qq.com> 1787368662 +0800\n\nBetter Codex v0.4.10-beta.4\n"
+    },
+    "refs/tags/v0.4.10-beta.40": {
+      "object": "00d2ffd7bcb42f4a277e26470f79749b3371ad9e",
+      "commit": "43d06f527fd66ba564faa541b27af67376f17523",
+      "kind": "tag",
+      "tag_object": "object 43d06f527fd66ba564faa541b27af67376f17523\ntype commit\ntag v0.4.10-beta.40\ntagger Ericwong <970699442@qq.com> 1787848414 +0800\n\nBetter Codex v0.4.10-beta.40\n"
+    },
+    "refs/tags/v0.4.10-beta.41": {
+      "object": "11d4a2a092f3deff50ff9fd9e11b9b8a71bdbc31",
+      "commit": "5f99a0f409358672d03a56751ec151f95ce31486",
+      "kind": "tag",
+      "tag_object": "object 5f99a0f409358672d03a56751ec151f95ce31486\ntype commit\ntag v0.4.10-beta.41\ntagger Ericwong <970699442@qq.com> 1787850400 +0800\n\nv0.4.10-beta.41\n"
+    },
+    "refs/tags/v0.4.10-beta.42": {
+      "object": "a102355e92c6ec70927bd5813a405fc92d6aad1d",
+      "commit": "2f0123af050bfe69082f167208787ecff2da576a",
+      "kind": "tag",
+      "tag_object": "object 2f0123af050bfe69082f167208787ecff2da576a\ntype commit\ntag v0.4.10-beta.42\ntagger Ericwong <970699442@qq.com> 1787877408 +0800\n\nv0.4.10-beta.42\n"
+    },
+    "refs/tags/v0.4.10-beta.43": {
+      "object": "988d9e7b52ddec5bf44b5663002c06b0d2304450",
+      "commit": "b18baa9714caabba2d4b1a2301de6244b606d793",
+      "kind": "tag",
+      "tag_object": "object b18baa9714caabba2d4b1a2301de6244b606d793\ntype commit\ntag v0.4.10-beta.43\ntagger Ericwong <970699442@qq.com> 1787878335 +0800\n\nv0.4.10-beta.43\n"
+    },
+    "refs/tags/v0.4.10-beta.44": {
+      "object": "a4ab2d5214176d4e2b7378989e2c8cf30ad3735b",
+      "commit": "6fdebfc82b222c13a929d34e22b1a4868ecb7d4f",
+      "kind": "tag",
+      "tag_object": "object 6fdebfc82b222c13a929d34e22b1a4868ecb7d4f\ntype commit\ntag v0.4.10-beta.44\ntagger Ericwong <970699442@qq.com> 1787890717 +0800\n\nv0.4.10-beta.44\n"
+    },
+    "refs/tags/v0.4.10-beta.45": {
+      "object": "efc2987247289b39551fdf5344c1a632ff484373",
+      "commit": "f856ab570543be00185161abe89c75f8537f4297",
+      "kind": "tag",
+      "tag_object": "object f856ab570543be00185161abe89c75f8537f4297\ntype commit\ntag v0.4.10-beta.45\ntagger Ericwong <970699442@qq.com> 1787896044 +0800\n\nv0.4.10-beta.45\n"
+    },
+    "refs/tags/v0.4.10-beta.5": {
+      "object": "6aa562a84eba2d4f93af06bd46f9e986adc80518",
+      "commit": "f4cafce18dd2c8e5c0eadc1a390333d726888623",
+      "kind": "tag",
+      "tag_object": "object f4cafce18dd2c8e5c0eadc1a390333d726888623\ntype commit\ntag v0.4.10-beta.5\ntagger Ericwong <970699442@qq.com> 1787369219 +0800\n\nBetter Codex v0.4.10-beta.5\n"
+    },
+    "refs/tags/v0.4.10-beta.6": {
+      "object": "b76b870ed70e25b1cb1ade3084b8a735a8cb4f2e",
+      "commit": "f0bf1cfb5467c764e8490adb4004de84f10ec349",
+      "kind": "tag",
+      "tag_object": "object f0bf1cfb5467c764e8490adb4004de84f10ec349\ntype commit\ntag v0.4.10-beta.6\ntagger Ericwong <970699442@qq.com> 1787369712 +0800\n\nBetter Codex 0.4.10-beta.6\n"
+    },
+    "refs/tags/v0.4.10-beta.7": {
+      "object": "2a17a3019ceaa6a5ad894f6300af508d4b11a6b1",
+      "commit": "df4a1afee0e1c3679b42063d35587a458c1be43f",
+      "kind": "tag",
+      "tag_object": "object df4a1afee0e1c3679b42063d35587a458c1be43f\ntype commit\ntag v0.4.10-beta.7\ntagger Ericwong <970699442@qq.com> 1787370026 +0800\n\nBetter Codex 0.4.10-beta.7\n"
+    },
+    "refs/tags/v0.4.10-beta.8": {
+      "object": "58c2876f5fb5209cbb7cfafcff58baace32fddf5",
+      "commit": "f49668db1f43cdbcc139b417a8c33bd8abd00272",
+      "kind": "tag",
+      "tag_object": "object f49668db1f43cdbcc139b417a8c33bd8abd00272\ntype commit\ntag v0.4.10-beta.8\ntagger Ericwong <970699442@qq.com> 1787371502 +0800\n\nv0.4.10-beta.8\n"
+    },
+    "refs/tags/v0.4.10-beta.9": {
+      "object": "ea92cb8b0a1628ea97813cf97ef51f58b300af3a",
+      "commit": "a39dd8f1643de7e7b7bbc93aa51cecae3ace71fe",
+      "kind": "tag",
+      "tag_object": "object a39dd8f1643de7e7b7bbc93aa51cecae3ace71fe\ntype commit\ntag v0.4.10-beta.9\ntagger Ericwong <970699442@qq.com> 1787371975 +0800\n\nv0.4.10-beta.9\n"
+    },
+    "refs/tags/v0.4.11": {
+      "object": "e749d17de28bcb12be1b7c1694882012902ef90c",
+      "commit": "dccbcc1e8e7d6ee1dc70248c591dd876f35b11e2",
+      "kind": "tag",
+      "tag_object": "object dccbcc1e8e7d6ee1dc70248c591dd876f35b11e2\ntype commit\ntag v0.4.11\ntagger Ericwong <970699442@qq.com> 1787926793 +0800\n\nBetter Codex v0.4.11\n"
+    },
+    "refs/tags/v0.4.12": {
+      "object": "52eca4e42068bcf4e7e34a34314f95a846d0052f",
+      "commit": "4c09d279affc4f1b2da2d9e41168ea9dad588aba",
+      "kind": "tag",
+      "tag_object": "object 4c09d279affc4f1b2da2d9e41168ea9dad588aba\ntype commit\ntag v0.4.12\ntagger Ericwong <970699442@qq.com> 1789119937 +0800\n\nBetter Codex v0.4.12\n"
+    },
+    "refs/tags/v0.4.12-beta.1": {
+      "object": "d96db521c2e4be9b143fba452742e19af8287423",
+      "commit": "9ddfef3614440a1cfde388fb8988dd10f283bcc3",
+      "kind": "tag",
+      "tag_object": "object 9ddfef3614440a1cfde388fb8988dd10f283bcc3\ntype commit\ntag v0.4.12-beta.1\ntagger Ericwong <970699442@qq.com> 1788342674 +0800\n\nbetter-codex 0.4.12-beta.1\n"
+    },
+    "refs/tags/v0.4.12-beta.2": {
+      "object": "d9c7c250739fef91a27609310879344ee546f8f3",
+      "commit": "d3f3ca75f23de3e813c9cf8ad31b83696af1ae92",
+      "kind": "tag",
+      "tag_object": "object d3f3ca75f23de3e813c9cf8ad31b83696af1ae92\ntype commit\ntag v0.4.12-beta.2\ntagger Ericwong <970699442@qq.com> 1788414776 +0800\n\nbetter-codex 0.4.12-beta.2\n"
+    },
+    "refs/tags/v0.4.12-beta.3": {
+      "object": "8f4088d7639ec32b097a5a4565f93125d89e21cb",
+      "commit": "01e0314a93d71a892528e6c73041d07985cca247",
+      "kind": "tag",
+      "tag_object": "object 01e0314a93d71a892528e6c73041d07985cca247\ntype commit\ntag v0.4.12-beta.3\ntagger Ericwong <970699442@qq.com> 1788851767 +0800\n\nRelease v0.4.12-beta.3\n"
+    },
+    "refs/tags/v0.4.12-beta.4": {
+      "object": "9f2867f73da790dd602279eb285b99f905451fc0",
+      "commit": "bbae269475d73e08d623e026dbf5020fdac2f4c1",
+      "kind": "tag",
+      "tag_object": "object bbae269475d73e08d623e026dbf5020fdac2f4c1\ntype commit\ntag v0.4.12-beta.4\ntagger Ericwong <970699442@qq.com> 1788871821 +0800\n\nRelease v0.4.12-beta.4\n"
+    },
+    "refs/tags/v0.4.12-beta.5": {
+      "object": "9c006239b05f131a26122ea71d8ef3376f628e0e",
+      "commit": "39a6ec0fc92ac8a433986e6bb5c66bb6be34ebec",
+      "kind": "tag",
+      "tag_object": "object 39a6ec0fc92ac8a433986e6bb5c66bb6be34ebec\ntype commit\ntag v0.4.12-beta.5\ntagger Ericwong <970699442@qq.com> 1788961187 +0800\n\nRelease v0.4.12-beta.5\n"
+    },
+    "refs/tags/v0.4.13-beta.1": {
+      "object": "162dfcf5ae347ad0deff20758e3800dbee234936",
+      "commit": "31129cc1fcb742d696143e0bac9237bd05c91c73",
+      "kind": "tag",
+      "tag_object": "object 31129cc1fcb742d696143e0bac9237bd05c91c73\ntype commit\ntag v0.4.13-beta.1\ntagger Ericwong <970699442@qq.com> 1789205308 +0800\n\nBetter Codex v0.4.13-beta.1\n"
+    },
+    "refs/tags/v0.4.13-beta.2": {
+      "object": "ca678d31fa9624e35c919c2cfb7ceaa803ab8ae3",
+      "commit": "936678ee80b6ffed35dcb135841f3efe0cf990a1",
+      "kind": "tag",
+      "tag_object": "object 936678ee80b6ffed35dcb135841f3efe0cf990a1\ntype commit\ntag v0.4.13-beta.2\ntagger Ericwong <970699442@qq.com> 1789205474 +0800\n\nBetter Codex v0.4.13-beta.2\n"
+    },
+    "refs/tags/v0.4.13-beta.3": {
+      "object": "be34973751665feed85dffe32ccd2ad019cd5d13",
+      "commit": "2e69d3c6c0c28d227e1f1bec59eb66c4e0476eb2",
+      "kind": "tag",
+      "tag_object": "object 2e69d3c6c0c28d227e1f1bec59eb66c4e0476eb2\ntype commit\ntag v0.4.13-beta.3\ntagger Ericwong <970699442@qq.com> 1789215443 +0800\n\nRelease v0.4.13-beta.3\n"
+    },
+    "refs/tags/v0.4.13-beta.4": {
+      "object": "a04c311c47003a349f84d3d2432a95d4b23587f1",
+      "commit": "b129dc9c271602ccba7b3395d5200d6a85ae9e52",
+      "kind": "tag",
+      "tag_object": "object b129dc9c271602ccba7b3395d5200d6a85ae9e52\ntype commit\ntag v0.4.13-beta.4\ntagger Ericwong <970699442@qq.com> 1789382572 +0800\n\nBetter Codex v0.4.13-beta.4\n"
+    },
+    "refs/tags/v0.4.2": {
+      "object": "4c1b12c9883f069a3ab0a2a29ef588ce11585c20",
+      "commit": "c2617fda15e588437c21e453e778ecad36034d4e",
+      "kind": "tag",
+      "tag_object": "object c2617fda15e588437c21e453e778ecad36034d4e\ntype commit\ntag v0.4.2\ntagger U2 <970699442@qq.com> 1786457024 +0800\n\nv0.4.2\n"
+    },
+    "refs/tags/v0.4.3": {
+      "object": "195ce9cea36c7a750996f72b654423046de05ae8",
+      "commit": "32d97003949d585946f75b3ecf5fe7eb6119f192",
+      "kind": "tag",
+      "tag_object": "object 32d97003949d585946f75b3ecf5fe7eb6119f192\ntype commit\ntag v0.4.3\ntagger U2 <970699442@qq.com> 1786548661 +0800\n\nv0.4.3\n"
+    },
+    "refs/tags/v0.4.4": {
+      "object": "d306b5fcd389e4878775be6b1457204fae5fa9aa",
+      "commit": "d64f9a1236cbed98e0a2217e23818e932bc41715",
+      "kind": "tag",
+      "tag_object": "object d64f9a1236cbed98e0a2217e23818e932bc41715\ntype commit\ntag v0.4.4\ntagger Ericwong <970699442@qq.com> 1786559803 +0800\n\nv0.4.4\n"
+    },
+    "refs/tags/v0.4.5": {
+      "object": "a67a81f662951a8684521ec039b7265d78215c39",
+      "commit": "e0f9aee7b7d521922afc5bb34ba4ac24d229ccaa",
+      "kind": "tag",
+      "tag_object": "object e0f9aee7b7d521922afc5bb34ba4ac24d229ccaa\ntype commit\ntag v0.4.5\ntagger Ericwong <970699442@qq.com> 1786625296 +0800\n\nv0.4.5\n"
+    },
+    "refs/tags/v0.4.6": {
+      "object": "c019feb7cb1b540ceaebd901785753cd97a39cdc",
+      "commit": "b207f18c21a61badd28677977ec0dab947058fe1",
+      "kind": "tag",
+      "tag_object": "object b207f18c21a61badd28677977ec0dab947058fe1\ntype commit\ntag v0.4.6\ntagger Ericwong <970699442@qq.com> 1786812392 +0800\n\nv0.4.6\n"
+    },
+    "refs/tags/v0.4.7": {
+      "object": "c056e983e7e82a71a08e67b71a94a7853a588a3f",
+      "commit": "393c79eff79e19eccd7b0091526adfacd7b854bb",
+      "kind": "tag",
+      "tag_object": "object 393c79eff79e19eccd7b0091526adfacd7b854bb\ntype commit\ntag v0.4.7\ntagger Ericwong <970699442@qq.com> 1786934988 +0800\n\nv0.4.7\n"
+    },
+    "refs/tags/v0.4.8": {
+      "object": "2130012693df403aa5af793694e1ba35ccc0de2d",
+      "commit": "ba03d586852240ad71728e8ca6e4d51047e15a10",
+      "kind": "tag",
+      "tag_object": "object ba03d586852240ad71728e8ca6e4d51047e15a10\ntype commit\ntag v0.4.8\ntagger Ericwong <970699442@qq.com> 1786965233 +0800\n\nBetter Codex v0.4.8\n"
+    },
+    "refs/tags/v0.4.9": {
+      "object": "14cda4a36927c85a255fb645dcac5733f3e5e79b",
+      "commit": "4fd9089c6c7bfdb90332c84f6895038423c49af9",
+      "kind": "tag",
+      "tag_object": "object 4fd9089c6c7bfdb90332c84f6895038423c49af9\ntype commit\ntag v0.4.9\ntagger Ericwong <970699442@qq.com> 1787328926 +0800\n\nBetter Codex v0.4.9\n"
+    }
+  },
+  "remote_tracking_refs": {
+    "refs/remotes/origin/HEAD": {
+      "object": "b129dc9c271602ccba7b3395d5200d6a85ae9e52",
+      "commit": "b129dc9c271602ccba7b3395d5200d6a85ae9e52"
+    },
+    "refs/remotes/origin/agent/archive-and-persist-ui-state": {
+      "object": "5026fcd51524cee75a3b2e78be26b5b2c1958a54",
+      "commit": "5026fcd51524cee75a3b2e78be26b5b2c1958a54"
+    },
+    "refs/remotes/origin/codex/workflow": {
+      "object": "d4de21d7dcb955c039f8c161e04d5b00ded0c11f",
+      "commit": "d4de21d7dcb955c039f8c161e04d5b00ded0c11f"
+    },
+    "refs/remotes/origin/feat/selfhost-hub": {
+      "object": "f1e18201e114af9f10cef07ca2cbfe10ec9d39e8",
+      "commit": "f1e18201e114af9f10cef07ca2cbfe10ec9d39e8"
+    },
+    "refs/remotes/origin/main": {
+      "object": "b129dc9c271602ccba7b3395d5200d6a85ae9e52",
+      "commit": "b129dc9c271602ccba7b3395d5200d6a85ae9e52"
+    }
+  },
+  "backup_refs": {
+    "refs/backup/pre-split-1786041571": {
+      "object": "204af8758cef1732eabde9a4565d18549adeede4",
+      "commit": "204af8758cef1732eabde9a4565d18549adeede4"
+    }
+  },
+  "excluded_generated_refs": [
+    {
+      "reason": "Generated tool checkpoint; latest worktree and explicit stashes archived separately"
+    },
+    {
+      "reason": "Generated tool checkpoint; latest worktree and explicit stashes archived separately"
+    },
+    {
+      "reason": "Generated tool checkpoint; latest worktree and explicit stashes archived separately"
+    },
+    {
+      "reason": "Generated tool checkpoint; latest worktree and explicit stashes archived separately"
+    },
+    {
+      "reason": "Generated tool checkpoint; latest worktree and explicit stashes archived separately"
+    },
+    {
+      "reason": "Generated tool checkpoint; latest worktree and explicit stashes archived separately"
+    },
+    {
+      "reason": "Generated tool checkpoint; latest worktree and explicit stashes archived separately"
+    },
+    {
+      "reason": "Generated tool checkpoint; latest worktree and explicit stashes archived separately"
+    },
+    {
+      "reason": "Generated tool checkpoint; latest worktree and explicit stashes archived separately"
+    },
+    {
+      "reason": "Generated tool checkpoint; latest worktree and explicit stashes archived separately"
+    }
+  ]
+}
