@@ -199,6 +199,10 @@ test("web host boots the shared DOM injection behind a local session", async () 
     assert.match(source, /HOST_KIND === "web" \? INITIAL_LOCALE : bootstrap\.locale/);
     assert.match(source, /data-better-codex-web-surface/);
     assert.match(source, /className = HOST_KIND === "web" \? "web-nav-button" : "better-codex-native-navigation"/);
+    assert.match(source, /--better-codex-native-icon-width/);
+    assert.match(source, /--better-codex-native-icon-height/);
+    assert.match(source, /const referenceIcon = reference\.querySelector\("svg"\)/);
+    assert.match(source, /syncNativeIconSize/);
     assert.match(source, /\.prepend\(entry\)/);
     assert.match(source, /document\.documentElement\.dataset\.theme = resolvedTheme/);
     assert.match(source, /name\.endsWith\("font-ui"\)/);
