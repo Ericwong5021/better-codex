@@ -4,6 +4,19 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.13] - 2026-09-18
+
+- Match native icon size for injected navigation buttons in Codex sidebar.
+- Allow remote Issue image attachments through the durable Relay command path.
+- Preserve VPS update channels across installations and expose cached detection status.
+- Add complete upgrade recovery and shared status observation for desktop and web hosts.
+- Add fullscreen conversation reading in Issue details.
+- Support Issue title generation outside Git repositories.
+- Automatically update self-hosted Relay from signed releases with storage and readiness checks.
+- Preserve stable desktop, service, and MCP launch commands across updates and rollback.
+- Synchronize thread archive, unarchive, and deletion with desktop catalog and return terminal execution failures to blocked.
+- Restore MCP injection launcher and clarify CLI writer conflicts when opening conversations.
+
 ## [0.4.13-beta.4] - 2026-09-14
 
 - Allow remote Issue image attachments through the durable Relay command path and document the required Nginx request-body allowance.
@@ -1070,7 +1083,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.13-beta.4...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.13...HEAD
+[0.4.13]: https://github.com/Ericwong5021/better-codex/compare/v0.4.12...v0.4.13
 [0.4.13-beta.4]: https://github.com/Ericwong5021/better-codex/compare/v0.4.13-beta.3...v0.4.13-beta.4
 [0.4.13-beta.3]: https://github.com/Ericwong5021/better-codex/compare/v0.4.13-beta.2...v0.4.13-beta.3
 [0.4.13-beta.2]: https://github.com/Ericwong5021/better-codex/compare/v0.4.13-beta.1...v0.4.13-beta.2
