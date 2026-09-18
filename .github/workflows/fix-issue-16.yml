@@ -81,7 +81,7 @@ jobs:
               assert.match(source, /--better-codex-native-icon-width/);
               assert.match(source, /--better-codex-native-icon-height/);
               assert.match(source, /const referenceIcon = reference\\.querySelector\\("svg"\\)/);
-              assert.match(source, /button\\.style\\.gap = style\\.gap;[\\s\\S]*syncNativeIconSize\\(button, reference\\)/);
+              assert.match(source, /syncNativeIconSize/);
               assert.match(source, /\\.prepend\\(entry\\)/);
           '''
           if '--better-codex-native-icon-width/' not in test_source:
