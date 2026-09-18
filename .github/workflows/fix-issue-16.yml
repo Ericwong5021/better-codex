@@ -96,7 +96,7 @@ jobs:
         run: npm test
 
       - name: Run type and repository checks
-        run: npm run check
+        run: npm run typecheck
 
       - name: Commit verified fix
         shell: bash
