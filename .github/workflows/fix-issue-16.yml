@@ -50,32 +50,23 @@ jobs:
               raise SystemExit("native icon css: neither old nor expected new form was found")
 
           native_button_marker = '    function nativeButton(text) {\n'
-          helper = '''    function syncNativeIconSize(button, reference) {
-              if (HOST_KIND === "web" || !reference) return;
-              const referenceIcon = reference.querySelector("svg");
-              if (!(referenceIcon instanceof SVGElement)) return;
-              const style = getComputedStyle(referenceIcon);
-              const width = Number.parseFloat(style.width) > 0 ? style.width : "";
-              const height = Number.parseFloat(style.height) > 0 ? style.height : "";
-              if (width) button.style.setProperty("--better-codex-native-icon-width", width);
-              if (height) button.style.setProperty("--better-codex-native-icon-height", height);
-            }
-
-          '''
+          helper = (
+              '    function syncNativeIconSize(button, reference) {\n'
+              '      if (HOST_KIND === "web" || !reference) return;\n'
+              '      const referenceIcon = reference.querySelector("svg");\n'
+              '      if (!(referenceIcon instanceof SVGElement)) return;\n'
+              '      const style = getComputedStyle(referenceIcon);\n'
+              '      const width = Number.parseFloat(style.width) > 0 ? style.width : "";\n'
+              '      const height = Number.parseFloat(style.height) > 0 ? style.height : "";\n'
+              '      if (width) button.style.setProperty("--better-codex-native-icon-width", width);\n'
+              '      if (height) button.style.setProperty("--better-codex-native-icon-height", height);\n'
+              '    }\n\n'
+          )
           if 'function syncNativeIconSize(button, reference)' not in source:
               source = replace_once(source, native_button_marker, helper + native_button_marker, "native icon helper insertion")
 
-          old_sync_call = '''        button.style.font = style.font;
-              button.style.gap = style.gap;
-            }
-            return button;
-          '''
-          new_sync_call = '''        button.style.font = style.font;
-              button.style.gap = style.gap;
-              syncNativeIconSize(button, reference);
-            }
-            return button;
-          '''
+          old_sync_call = 'button.style.gap = style.gap;\n      }\n      return button;'
+          new_sync_call = 'button.style.gap = style.gap;\n        syncNativeIconSize(button, reference);\n      }\n      return button;'
           if 'syncNativeIconSize(button, reference);' not in source:
               source = replace_once(source, old_sync_call, new_sync_call, "native icon sync call")
 
