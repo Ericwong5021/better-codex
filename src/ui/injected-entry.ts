@@ -1099,7 +1099,7 @@ export function install(config: Record<string, any>) {
       style.textContent = `
         .better-codex-native-navigation { display: flex; align-items: center; width: 100%; border: 0; border-radius: var(--bc-radius-sm); background: transparent; color: inherit; text-align: start; cursor: pointer; }
         .better-codex-native-navigation:hover { background: var(--bc-color-hover); }
-        .better-codex-native-navigation svg { width: var(--bc-space-4); height: var(--bc-space-4); flex-shrink: 0; }
+        .better-codex-native-navigation svg { width: var(--better-codex-native-icon-width, var(--bc-space-4)); height: var(--better-codex-native-icon-height, var(--bc-space-4)); flex-shrink: 0; }
         [data-better-codex-launcher-hidden="true"] { display: none !important; }
         #${ENTRY_ID}[aria-current="page"], #${AGENTS_ENTRY_ID}[aria-current="page"], #${PROJECTS_ENTRY_ID}[aria-current="page"], #${MORE_ENTRY_ID}[aria-current="page"] { background: var(--bc-color-hover); }
         html[data-better-codex-open="true"] ${SELECTORS.sidebarNavigation} [aria-current="page"]:not(#${ENTRY_ID}):not(#${AGENTS_ENTRY_ID}):not(#${PROJECTS_ENTRY_ID}):not(#${MORE_ENTRY_ID}) { background: transparent !important; }
@@ -1120,6 +1120,17 @@ export function install(config: Record<string, any>) {
       return buttons.find(button => button.closest(SELECTORS.sidebarSection)) || buttons[0] || null;
     }
 
+    function syncNativeIconSize(button, reference) {
+      if (HOST_KIND === "web" || !reference) return;
+      const referenceIcon = reference.querySelector("svg");
+      if (!(referenceIcon instanceof SVGElement)) return;
+      const style = getComputedStyle(referenceIcon);
+      const width = Number.parseFloat(style.width) > 0 ? style.width : "";
+      const height = Number.parseFloat(style.height) > 0 ? style.height : "";
+      if (width) button.style.setProperty("--better-codex-native-icon-width", width);
+      if (height) button.style.setProperty("--better-codex-native-icon-height", height);
+    }
+
     function nativeButton(text) {
       const reference = findReferenceButton();
       const button = document.createElement("button");
@@ -1133,6 +1144,7 @@ export function install(config: Record<string, any>) {
         button.style.padding = style.padding;
         button.style.font = style.font;
         button.style.gap = style.gap;
+        syncNativeIconSize(button, reference);
       }
       return button;
     }
