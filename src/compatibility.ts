@@ -253,12 +253,12 @@ export function capabilityExpression() {
   return `(() => {
     const selectors = ${selectors};
     const layout = document.querySelector(selectors.contentLayout);
-    const surface = layout?.parentElement;
+    const surface = layout?.parentElement || document.querySelector("main > div");
     return {
       loading: document.readyState !== "complete" || (!document.querySelector("main") && performance.now() < 30000),
       documentId: performance.timeOrigin,
       sidebar: Boolean(document.querySelector(selectors.sidebarScroll)),
-      content: Boolean(layout && surface?.closest("main")),
+      content: Boolean((layout && surface?.closest("main")) || document.querySelector("main")),
       threads: Boolean(document.querySelector(selectors.threadRow)),
       projects: Boolean(document.querySelector(selectors.projectRow))
     };

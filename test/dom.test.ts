@@ -982,3 +982,16 @@ test("web injection shares the Codex user profile with the host shell", () => {
   assert.equal(injectedEntrySource.match(/new CustomEvent\("better-codex:bootstrap"/g)?.length, 3, "bootstrap, profile, and language changes should refresh the Web host profile");
   assert.match(source, /detail: \{ user: state\.user, locale: state\.locale \}/);
 });
+
+test("mountPanel and style hide external MCP app host overlay in Codex 26.915", () => {
+  const source = injectionSource(4317, "test-token", "install");
+
+  assert.match(source, /html\[data-better-codex-open="true"\] body > div\.fixed\.inset-0:has\(webview\[title="Better Codex"\]\)/);
+  assert.match(source, /html\[data-better-codex-open="true"\] body > div\[class\*="fixed"\]:has\(webview\[title="Better Codex"\]\)/);
+  assert.ok(source.includes("function hideExternalMcpAppHost()"));
+  assert.ok(source.includes('view.title !== "Better Codex"'));
+  assert.ok(source.includes('view.closest("body > div.fixed.inset-0, body > div[class*=\'fixed\'], body > div")'));
+  assert.ok(source.includes("host.setAttribute(HIDDEN, \"true\")"));
+  assert.ok(source.includes("hideExternalMcpAppHost()"));
+  assert.match(source, /const surface = layout\?\.parentElement \|\| document\.querySelector\("main > div"\);/);
+});

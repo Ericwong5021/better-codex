@@ -1104,6 +1104,8 @@ export function install(config: Record<string, any>) {
         #${ENTRY_ID}[aria-current="page"], #${AGENTS_ENTRY_ID}[aria-current="page"], #${PROJECTS_ENTRY_ID}[aria-current="page"], #${MORE_ENTRY_ID}[aria-current="page"] { background: var(--bc-color-hover); }
         html[data-better-codex-open="true"] ${SELECTORS.sidebarNavigation} [aria-current="page"]:not(#${ENTRY_ID}):not(#${AGENTS_ENTRY_ID}):not(#${PROJECTS_ENTRY_ID}):not(#${MORE_ENTRY_ID}) { background: transparent !important; }
         html[data-better-codex-open="true"] ${SELECTORS.sidebarNavigation} [aria-current="page"]:not(#${ENTRY_ID}):not(#${AGENTS_ENTRY_ID}):not(#${PROJECTS_ENTRY_ID}):not(#${MORE_ENTRY_ID}) .text-token-list-active-selection-foreground { color: var(--color-token-foreground) !important; }
+        html[data-better-codex-open="true"] body > div.fixed.inset-0:has(webview[title="Better Codex"]),
+        html[data-better-codex-open="true"] body > div[class*="fixed"]:has(webview[title="Better Codex"]) { display: none !important; pointer-events: none !important; }
         [${HOST}="true"] { position: relative !important; z-index: 31 !important; pointer-events: none !important; }
         [${HIDDEN}="true"] { visibility: hidden !important; pointer-events: none !important; }
         ${config.designSystemCss}
@@ -1457,8 +1459,8 @@ export function install(config: Record<string, any>) {
       if (HOST_KIND === "web") return document.querySelector("[data-better-codex-web-surface]");
       const frame = document.querySelector(SELECTORS.contentFrame);
       const layout = frame?.closest(SELECTORS.contentLayout) || document.querySelector(SELECTORS.contentLayout);
-      const surface = layout?.parentElement;
-      return surface?.closest("main") ? surface : null;
+      const surface = layout?.parentElement || document.querySelector("main > div");
+      return surface?.closest("main") ? surface : (document.querySelector("main") || null);
     }
 
     function activeThreadRow() {
@@ -10385,6 +10387,18 @@ export function install(config: Record<string, any>) {
       });
     }
 
+    function hideExternalMcpAppHost() {
+      if (HOST_KIND === "web") return;
+      const views = Array.from(document.querySelectorAll("webview"));
+      for (const view of views) {
+        if (view.title !== "Better Codex") continue;
+        const host = view.closest("body > div.fixed.inset-0, body > div[class*='fixed'], body > div");
+        if (host && host !== document.body && !host.contains(panel)) {
+          host.setAttribute(HIDDEN, "true");
+        }
+      }
+    }
+
     function mountPanel() {
       if (!active) return;
       const surface = findMount();
@@ -10398,6 +10412,7 @@ export function install(config: Record<string, any>) {
       Array.from(surface.children).forEach(child => {
         if (child !== panel && child.getAttribute(OWNED) !== "true") child.setAttribute(HIDDEN, "true");
       });
+      hideExternalMcpAppHost();
       panel.hidden = false;
       document.documentElement.setAttribute("data-better-codex-open", "true");
     }
