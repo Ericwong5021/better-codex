@@ -4,6 +4,11 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.14] - 2026-09-21
+
+- Hide external MCP app host overlay when Better Codex is open in Codex 26.915 (#18).
+- Enhance main content layout detection and fallback for modern Codex builds.
+
 ## [0.4.13] - 2026-09-18
 
 - Match native icon size for injected navigation buttons in Codex sidebar.
@@ -1083,7 +1088,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.13...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.14...HEAD
+[0.4.14]: https://github.com/Ericwong5021/better-codex/compare/v0.4.13...v0.4.14
 [0.4.13]: https://github.com/Ericwong5021/better-codex/compare/v0.4.12...v0.4.13
 [0.4.13-beta.4]: https://github.com/Ericwong5021/better-codex/compare/v0.4.13-beta.3...v0.4.13-beta.4
 [0.4.13-beta.3]: https://github.com/Ericwong5021/better-codex/compare/v0.4.13-beta.2...v0.4.13-beta.3
