@@ -4,6 +4,11 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.15] - 2026-09-27
+
+- Recover desktop injection when Codex starts without a debug listener, and accept the navigation rail when the thread list is unmounted.
+- Mount the task board, agents, and projects on the left navigation rail, and leave other rail destinations uncovered.
+
 ## [0.4.14] - 2026-09-21
 
 - Hide external MCP app host overlay when Better Codex is open in Codex 26.915 (#18).
@@ -1088,7 +1093,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.14...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.15...HEAD
+[0.4.15]: https://github.com/Ericwong5021/better-codex/compare/v0.4.14...v0.4.15
 [0.4.14]: https://github.com/Ericwong5021/better-codex/compare/v0.4.13...v0.4.14
 [0.4.13]: https://github.com/Ericwong5021/better-codex/compare/v0.4.12...v0.4.13
 [0.4.13-beta.4]: https://github.com/Ericwong5021/better-codex/compare/v0.4.13-beta.3...v0.4.13-beta.4
