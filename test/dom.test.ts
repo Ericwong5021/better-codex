@@ -191,9 +191,10 @@ test("sidebar utility controls keep the Better Codex surface mounted", () => {
   assert.ok(onClick.includes("target.closest(SELECTORS.projectRow)"));
   assert.ok(onClick.includes("target !== navigationItem"));
   assert.ok(onClick.includes('target.getAttribute("aria-label")'));
-  assert.ok(injectedEntrySource.includes("function isNativeRailDestination(target)"));
-  assert.ok(injectedEntrySource.includes('button.getAttribute("aria-haspopup") === "menu"'));
-  assert.ok(injectedEntrySource.includes("if (isNativeRailDestination(target)) {\n        close({ resume: true });"));
+  const navigationClicks = injectedEntrySource.slice(injectedEntrySource.indexOf("function isNativeRailDestination(target)"), injectedEntrySource.indexOf("function refresh()"));
+  assert.ok(navigationClicks.includes("function isNativeRailDestination(target)"));
+  assert.ok(navigationClicks.includes('button.getAttribute("aria-haspopup") === "menu"'));
+  assert.match(navigationClicks, /if \(isNativeRailDestination\(target\)\) \{\s*close\(\{ resume: true \}\);/);
   assert.ok(onClick.includes("if (isSidebarNavigationTarget(target)) close({ resume: true })"));
   assert.ok(onClick.includes("else if (target.closest(SELECTORS.sidebarNavigation)) scheduleRefresh()"));
 });
