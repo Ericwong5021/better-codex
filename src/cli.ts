@@ -1531,10 +1531,24 @@ async function main() {
   if (command === "watch-inject") return watchInjection(Number(action || cdpPort), accessToken());
   if (command === "mcp" && !action) return startMcpAppServer(async () => {
     await ensureRuntime();
-    const injection = await cdpInject(cdpPort, activeRuntimePort(), accessToken(), false);
-    setInjectionEnabled(true);
-    await ensureInjector(cdpPort);
-    return injection;
+    try {
+      const injection = await cdpInject(cdpPort, activeRuntimePort(), accessToken(), false);
+      setInjectionEnabled(true);
+      await ensureInjector(cdpPort);
+      return injection;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      if (message !== "cdp_listener_absent" && message !== "cdp_listener_untrusted" && !message.startsWith("cdp_unavailable_")) throw error;
+      if (!codexProcessRunning()) {
+        const injection = await cdpInject(cdpPort, activeRuntimePort(), accessToken(), true);
+        setInjectionEnabled(true);
+        await ensureInjector(cdpPort);
+        return injection;
+      }
+      setInjectionEnabled(true);
+      spawnSelf(["launch", "--restart"], join(logPath, "launcher.log"));
+      return { restarting: true };
+    }
   });
   if (command === "mcp") {
     if (action === "install") return print(installMcp());

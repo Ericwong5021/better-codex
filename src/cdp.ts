@@ -234,9 +234,16 @@ Write-Output $trusted[0]`;
     }
   }
   if (process.platform === "darwin") {
+    let output = "";
     try {
-      const fields = execFileSync("/usr/sbin/lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-F0pd"], { encoding: "utf8", timeout: 5000 })
-        .split(/[\0\r\n]+/).filter(Boolean);
+      output = execFileSync("/usr/sbin/lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-F0pd"], { encoding: "utf8", timeout: 5000 });
+    } catch (error) {
+      const stdout = error && typeof error === "object" && "stdout" in error ? String(error.stdout ?? "") : "";
+      if (!stdout.trim()) throw new Error("cdp_listener_absent");
+      output = stdout;
+    }
+    try {
+      const fields = output.split(/[\0\r\n]+/).filter(Boolean);
       let pid = "";
       const sockets = fields.flatMap(field => {
         if (/^p\d+$/.test(field)) {
@@ -245,6 +252,7 @@ Write-Output $trusted[0]`;
         }
         return pid && /^d.+/.test(field) ? [{ pid, socket: field.slice(1) }] : [];
       });
+      if (!sockets.length) throw new Error("cdp_listener_absent");
       const application = desktopApplication();
       const listeners = sockets.map(listener => {
         const uid = execFileSync("/bin/ps", ["-p", listener.pid, "-o", "uid="], { encoding: "utf8", timeout: 5000 }).trim();
@@ -254,7 +262,8 @@ Write-Output $trusted[0]`;
       });
       if (!darwinCdpListenerTrusted(listeners, process.getuid?.(), application)) throw new Error("cdp_listener_untrusted");
       return;
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && ["cdp_listener_absent", "cdp_listener_untrusted", "codex_app_not_found"].includes(error.message)) throw error;
       throw new Error("cdp_listener_untrusted");
     }
   }
@@ -673,8 +682,8 @@ export async function cdpInject(port: number, runtimePort: number, accessToken: 
   try {
     values = await mainTargets(port);
   } catch (error) {
-    if (!launch) throw error;
     if (error instanceof Error && error.message.startsWith("codex_incompatible_")) values = await waitForTargets(port);
+    else if (!launch) throw error;
     else {
       launchCodex(port);
       values = await waitForTargets(port);

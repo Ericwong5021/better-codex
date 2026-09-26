@@ -179,6 +179,20 @@ test("launcher choice exposes distinct service reset and Codex restart actions",
   assert.doesNotMatch(source, /confirmQuit/);
 });
 
+test("desktop capability accepts the navigation shell when the thread list is unmounted", () => {
+  const compatibility = readFileSync(new URL("../src/compatibility.ts", import.meta.url), "utf8");
+  const expression = compatibility.slice(compatibility.indexOf("export function capabilityExpression"), compatibility.indexOf("export function missingCapabilities"));
+  assert.match(expression, /selectors\.sidebarScroll/);
+  assert.match(expression, /\[data-app-navigation-rail\], \[data-app-shell-page-sidebar\]/);
+});
+
+test("plugin recovery restarts Codex when the debug listener is absent", () => {
+  assert.match(source, /throw new Error\("cdp_listener_absent"\)/);
+  assert.match(source, /codex_incompatible_/);
+  assert.match(cliSource, /message !== "cdp_listener_absent"/);
+  assert.match(cliSource, /spawnSelf\(\["launch", "--restart"\], join\(logPath, "launcher\.log"\)\)/);
+});
+
 test("native restart choice uses Better Codex branding on Windows and macOS", () => {
   assert.match(nativeDialogSource, /appIconIco/);
   assert.match(nativeDialogSource, /AppIcon\.ico/);

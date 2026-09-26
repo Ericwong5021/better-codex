@@ -257,7 +257,7 @@ export function capabilityExpression() {
     return {
       loading: document.readyState !== "complete" || (!document.querySelector("main") && performance.now() < 30000),
       documentId: performance.timeOrigin,
-      sidebar: Boolean(document.querySelector(selectors.sidebarScroll)),
+      sidebar: Boolean(document.querySelector(selectors.sidebarScroll) || document.querySelector("[data-app-navigation-rail], [data-app-shell-page-sidebar]")),
       content: Boolean((layout && surface?.closest("main")) || document.querySelector("main")),
       threads: Boolean(document.querySelector(selectors.threadRow)),
       projects: Boolean(document.querySelector(selectors.projectRow))
