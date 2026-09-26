@@ -1101,7 +1101,6 @@ export function install(config: Record<string, any>) {
         .better-codex-native-navigation:hover { background: var(--bc-color-hover); }
         .better-codex-native-navigation svg { width: var(--better-codex-native-icon-width, var(--bc-space-4)); height: var(--better-codex-native-icon-height, var(--bc-space-4)); flex-shrink: 0; }
         [data-better-codex-rail-entry="true"].better-codex-native-navigation { width: 2.5rem; height: 2.5rem; justify-content: center; padding: 0; }
-        [data-better-codex-rail-entry="true"] .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
         [data-better-codex-launcher-hidden="true"] { display: none !important; }
         #${ENTRY_ID}[aria-current="page"], #${AGENTS_ENTRY_ID}[aria-current="page"], #${PROJECTS_ENTRY_ID}[aria-current="page"], #${MORE_ENTRY_ID}[aria-current="page"] { background: var(--bc-color-hover); }
         html[data-better-codex-open="true"] ${SELECTORS.sidebarNavigation} [aria-current="page"]:not(#${ENTRY_ID}):not(#${AGENTS_ENTRY_ID}):not(#${PROJECTS_ENTRY_ID}):not(#${MORE_ENTRY_ID}) { background: transparent !important; }
