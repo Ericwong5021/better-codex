@@ -4,6 +4,10 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.16] - 2026-09-27
+
+- Remove the raw rail-label offset that blocked the stable release token check.
+
 ## [0.4.15] - 2026-09-27
 
 - Recover desktop injection when Codex starts without a debug listener, and accept the navigation rail when the thread list is unmounted.
@@ -1093,7 +1097,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.15...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.16...HEAD
+[0.4.16]: https://github.com/Ericwong5021/better-codex/compare/v0.4.15...v0.4.16
 [0.4.15]: https://github.com/Ericwong5021/better-codex/compare/v0.4.14...v0.4.15
 [0.4.14]: https://github.com/Ericwong5021/better-codex/compare/v0.4.13...v0.4.14
 [0.4.13]: https://github.com/Ericwong5021/better-codex/compare/v0.4.12...v0.4.13
