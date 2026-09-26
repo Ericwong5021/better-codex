@@ -134,6 +134,17 @@ test("leaving the app surface suspends the panel and restores its previous surfa
   assert.doesNotMatch(scheduledRefresh, /setTimeout\([\s\S]*?160/);
 });
 
+test("desktop injection mounts product entries on the navigation rail", () => {
+  const desktop = injectedEntrySource.slice(injectedEntrySource.indexOf("function ensureDesktopEntries()"), injectedEntrySource.indexOf("function ensureEntry()"));
+
+  assert.ok(injectedEntrySource.includes('document.querySelector("[data-app-navigation-rail]")'));
+  assert.ok(injectedEntrySource.includes('button.setAttribute("data-better-codex-rail-entry", "true")'));
+  assert.ok(injectedEntrySource.includes('if (HOST_KIND !== "web") return ensureDesktopEntries();'));
+  assert.ok(desktop.includes("placeRailSequence([entry, agentsEntry, projectsEntry], parent, anchor)"));
+  assert.doesNotMatch(desktop, /reference\.after\(entry\)/);
+  assert.ok(desktop.includes("hideNativeLaunchers(mounted)"));
+});
+
 test("injection bootstraps before opening the panel and hides the native recovery launcher", () => {
   const source = injectionSource(4317, "test-token", "install");
   const bootstrapStart = injectedEntrySource.indexOf("function ensureBootstrapReady()");
@@ -180,6 +191,9 @@ test("sidebar utility controls keep the Better Codex surface mounted", () => {
   assert.ok(onClick.includes("target.closest(SELECTORS.projectRow)"));
   assert.ok(onClick.includes("target !== navigationItem"));
   assert.ok(onClick.includes('target.getAttribute("aria-label")'));
+  assert.ok(injectedEntrySource.includes("function isNativeRailDestination(target)"));
+  assert.ok(injectedEntrySource.includes('button.getAttribute("aria-haspopup") === "menu"'));
+  assert.ok(injectedEntrySource.includes("if (isNativeRailDestination(target)) {\n        close({ resume: true });"));
   assert.ok(onClick.includes("if (isSidebarNavigationTarget(target)) close({ resume: true })"));
   assert.ok(onClick.includes("else if (target.closest(SELECTORS.sidebarNavigation)) scheduleRefresh()"));
 });

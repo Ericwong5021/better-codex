@@ -1100,6 +1100,8 @@ export function install(config: Record<string, any>) {
         .better-codex-native-navigation { display: flex; align-items: center; width: 100%; border: 0; border-radius: var(--bc-radius-sm); background: transparent; color: inherit; text-align: start; cursor: pointer; }
         .better-codex-native-navigation:hover { background: var(--bc-color-hover); }
         .better-codex-native-navigation svg { width: var(--better-codex-native-icon-width, var(--bc-space-4)); height: var(--better-codex-native-icon-height, var(--bc-space-4)); flex-shrink: 0; }
+        [data-better-codex-rail-entry="true"].better-codex-native-navigation { width: 2.5rem; height: 2.5rem; justify-content: center; padding: 0; }
+        [data-better-codex-rail-entry="true"] .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
         [data-better-codex-launcher-hidden="true"] { display: none !important; }
         #${ENTRY_ID}[aria-current="page"], #${AGENTS_ENTRY_ID}[aria-current="page"], #${PROJECTS_ENTRY_ID}[aria-current="page"], #${MORE_ENTRY_ID}[aria-current="page"] { background: var(--bc-color-hover); }
         html[data-better-codex-open="true"] ${SELECTORS.sidebarNavigation} [aria-current="page"]:not(#${ENTRY_ID}):not(#${AGENTS_ENTRY_ID}):not(#${PROJECTS_ENTRY_ID}):not(#${MORE_ENTRY_ID}) { background: transparent !important; }
@@ -1120,6 +1122,74 @@ export function install(config: Record<string, any>) {
       const plugin = buttons.find(button => ["插件", "plugins"].includes(label(button.textContent || button.getAttribute("aria-label"))));
       if (plugin) return plugin;
       return buttons.find(button => button.closest(SELECTORS.sidebarSection)) || buttons[0] || null;
+    }
+
+    function navigationRail() {
+      return document.querySelector("[data-app-navigation-rail]");
+    }
+
+    function nativeLauncher(button) {
+      if (!(button instanceof Element) || button.hasAttribute(OWNED)) return false;
+      const destination = button.getAttribute("data-sidebar-destination") || "";
+      const name = label(button.querySelector(".sr-only")?.textContent || button.getAttribute("aria-label") || button.textContent);
+      return destination.includes("better-codex") || button.getAttribute("href") === BETTER_CODEX_ROUTE || name === "better codex";
+    }
+
+    function railReferenceButton() {
+      const rail = navigationRail();
+      if (!rail) return null;
+      const buttons = Array.from(rail.querySelectorAll("button")).filter(button => !button.hasAttribute(OWNED) && !nativeLauncher(button));
+      return buttons.find(button => button.hasAttribute("data-sidebar-destination")) || null;
+    }
+
+    function syncRailButton(button) {
+      button.setAttribute("data-better-codex-rail-entry", "true");
+      const reference = railReferenceButton();
+      if (reference) {
+        if (button.className !== reference.className) button.className = reference.className;
+        for (const name of ["data-color", "data-variant", "data-squircle", "data-uniform", "data-size", "data-icon-size"]) {
+          const value = reference.getAttribute(name);
+          if (value === null) button.removeAttribute(name);
+          else if (button.getAttribute(name) !== value) button.setAttribute(name, value);
+        }
+      } else if (!button.classList.contains("better-codex-native-navigation")) {
+        button.classList.add("better-codex-native-navigation");
+      }
+      let inner = button.querySelector(":scope > span");
+      const referenceInner = reference?.querySelector(":scope > span");
+      if (!(inner instanceof HTMLElement)) {
+        inner = document.createElement("span");
+        const svg = button.querySelector("svg");
+        if (svg) inner.append(svg);
+        button.append(inner);
+      }
+      if (referenceInner instanceof HTMLElement && inner.className !== referenceInner.className) inner.className = referenceInner.className;
+      if (!inner.querySelector("svg")) inner.insertAdjacentHTML("afterbegin", '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"></svg>');
+      if (!inner.querySelector(".sr-only")) {
+        const accessible = document.createElement("span");
+        accessible.className = "sr-only";
+        inner.append(accessible);
+      }
+      inner.querySelectorAll(".text-fade-truncate").forEach(node => node.remove());
+    }
+
+    function railButton(text) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.innerHTML = '<span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"></svg><span class="sr-only"></span></span>';
+      const accessible = button.querySelector(".sr-only");
+      if (accessible) accessible.textContent = text;
+      syncRailButton(button);
+      return button;
+    }
+
+    function placeRailSequence(nodes, parent, anchor) {
+      let cursor = anchor;
+      for (let index = nodes.length - 1; index >= 0; index -= 1) {
+        const node = nodes[index];
+        if (node.parentElement !== parent || node.nextSibling !== cursor) parent.insertBefore(node, cursor);
+        cursor = node;
+      }
     }
 
     function syncNativeIconSize(button, reference) {
@@ -1254,7 +1324,7 @@ export function install(config: Record<string, any>) {
     }
 
     function createEntry(text, id, title, surface) {
-      const button = nativeButton(t(text));
+      const button = HOST_KIND === "web" ? nativeButton(t(text)) : railButton(t(text));
       button.id = id;
       button.setAttribute(OWNED, "true");
       button.setAttribute("aria-label", t(title));
@@ -1370,13 +1440,17 @@ export function install(config: Record<string, any>) {
         if (svg.getAttribute("stroke-linejoin") !== "round") svg.setAttribute("stroke-linejoin", "round");
         if (svg.getAttribute("class") !== "lucide lucide-" + definition.name) svg.setAttribute("class", "lucide lucide-" + definition.name);
         if (svg.innerHTML !== definition.nodes) svg.innerHTML = definition.nodes;
+        if (button.hasAttribute("data-better-codex-rail-entry")) {
+          if (svg.getAttribute("width") !== "20") svg.setAttribute("width", "20");
+          if (svg.getAttribute("height") !== "20") svg.setAttribute("height", "20");
+        }
       }
     }
 
     function syncEntryLabel(button, text, title) {
       text = t(text);
       title = t(title);
-      const content = button.querySelector(SELECTORS.truncatedText) || Array.from(button.querySelectorAll("span")).at(-1);
+      const content = button.querySelector(".sr-only") || button.querySelector(SELECTORS.truncatedText) || Array.from(button.querySelectorAll("span")).at(-1);
       if (content && content.textContent !== text) content.textContent = text;
       else if (!content && button.textContent !== text) button.textContent = text;
       if (button.getAttribute("aria-label") !== title) button.setAttribute("aria-label", title);
@@ -1399,9 +1473,69 @@ export function install(config: Record<string, any>) {
       syncEntryIcon(themeEntry, light ? "sun" : "moon");
     }
 
+    function syncEntrySelection() {
+      const currentEntry = active && state.surface === "issues" ? entry : active && state.surface === "agents" ? agentsEntry : active && state.surface === "projects" ? projectsEntry : null;
+      for (const item of [entry, agentsEntry, projectsEntry].filter(Boolean)) {
+        const selected = item === currentEntry;
+        if (selected && item.getAttribute("aria-current") !== "page") item.setAttribute("aria-current", "page");
+        if (!selected && item.hasAttribute("aria-current")) item.removeAttribute("aria-current");
+        if (!item.hasAttribute("data-better-codex-rail-entry")) continue;
+        if (selected && !item.hasAttribute("data-selected")) item.setAttribute("data-selected", "");
+        if (!selected && item.hasAttribute("data-selected")) item.removeAttribute("data-selected");
+        if (selected && item.hasAttribute("data-suppress-active-style")) item.removeAttribute("data-suppress-active-style");
+        if (!selected && !item.hasAttribute("data-suppress-active-style")) item.setAttribute("data-suppress-active-style", "");
+      }
+      if (moreEntry) {
+        if (active && state.surface === "projects" && moreEntry.getAttribute("aria-current") !== "page") moreEntry.setAttribute("aria-current", "page");
+        if ((!active || state.surface !== "projects") && moreEntry.hasAttribute("aria-current")) moreEntry.removeAttribute("aria-current");
+      }
+    }
+
+    function hideNativeLaunchers(mounted) {
+      const roots = [document.querySelector(SELECTORS.sidebarScroll), navigationRail()].filter(Boolean);
+      const hidden = mounted && bootstrapReady ? "true" : "false";
+      for (const root of roots) {
+        root.querySelectorAll("button, a").forEach(button => {
+          if (!nativeLauncher(button)) return;
+          if (button.getAttribute("data-better-codex-launcher-hidden") !== hidden) {
+            button.setAttribute("data-better-codex-launcher-hidden", hidden);
+            console.info("[better-codex] launcher_visibility", { hidden: hidden === "true", mounted, bootstrapReady });
+          }
+        });
+      }
+    }
+
+    function ensureDesktopEntries() {
+      const rail = navigationRail();
+      const launcher = rail ? Array.from(rail.querySelectorAll("button")).find(nativeLauncher) : null;
+      const reference = railReferenceButton();
+      const parent = launcher?.parentElement || reference?.parentElement;
+      if (!parent) return false;
+      if (!entry) entry = createEntry("任务看板", ENTRY_ID, "打开任务看板", "issues");
+      syncRailButton(entry);
+      syncEntryLabel(entry, "任务看板", "打开任务看板");
+      syncEntryIcon(entry, "issues");
+      if (!agentsEntry) agentsEntry = createEntry("智能体", AGENTS_ENTRY_ID, "管理智能体", "agents");
+      syncRailButton(agentsEntry);
+      syncEntryLabel(agentsEntry, "智能体", "管理智能体");
+      syncEntryIcon(agentsEntry, "agents");
+      if (!projectsEntry) projectsEntry = createEntry("项目管理", PROJECTS_ENTRY_ID, "管理项目", "projects");
+      syncRailButton(projectsEntry);
+      syncEntryLabel(projectsEntry, "项目管理", "管理项目");
+      syncEntryIcon(projectsEntry, "projects");
+      projectsEntry.hidden = !hasFeature("project-management");
+      const anchor = launcher && launcher.parentElement === parent ? launcher : null;
+      placeRailSequence([entry, agentsEntry, projectsEntry], parent, anchor);
+      syncEntrySelection();
+      const mounted = entry.isConnected && agentsEntry.isConnected && projectsEntry.isConnected;
+      hideNativeLaunchers(mounted);
+      return mounted;
+    }
+
     function ensureEntry() {
       if (destroyed) return false;
       installStyle();
+      if (HOST_KIND !== "web") return ensureDesktopEntries();
       const reference = findReferenceButton();
       const parent = reference?.parentElement || (HOST_KIND === "web" ? document.querySelector(SELECTORS.sidebarSection) : null);
       if (!parent) return false;
@@ -1429,29 +1563,9 @@ export function install(config: Record<string, any>) {
         auxiliaryNavigation.hidden = false;
         if (auxiliaryNavigation.parentElement !== parent || auxiliaryNavigation.previousElementSibling !== agentsEntry) agentsEntry.after(auxiliaryNavigation);
         syncAuxiliaryMenuOrder();
-      } else if (projectsEntry.parentElement !== parent || projectsEntry.previousElementSibling !== agentsEntry) agentsEntry.after(projectsEntry);
-      const currentEntry = active && state.surface === "issues" ? entry : active && state.surface === "agents" ? agentsEntry : active && state.surface === "projects" ? projectsEntry : null;
-      for (const item of [entry, agentsEntry, projectsEntry].filter(Boolean)) {
-        if (item === currentEntry && item.getAttribute("aria-current") !== "page") item.setAttribute("aria-current", "page");
-        if (item !== currentEntry && item.hasAttribute("aria-current")) item.removeAttribute("aria-current");
       }
-      if (moreEntry) {
-        if (active && state.surface === "projects" && moreEntry.getAttribute("aria-current") !== "page") moreEntry.setAttribute("aria-current", "page");
-        if ((!active || state.surface !== "projects") && moreEntry.hasAttribute("aria-current")) moreEntry.removeAttribute("aria-current");
-      }
+      syncEntrySelection();
       const mounted = entry.isConnected && agentsEntry.isConnected && projectsEntry.isConnected && (HOST_KIND !== "web" || auxiliaryNavigation?.isConnected);
-      if (HOST_KIND !== "web") {
-        const scroll = document.querySelector(SELECTORS.sidebarScroll);
-        scroll?.querySelectorAll("button, a").forEach(button => {
-          if (button.hasAttribute(OWNED)) return;
-          if (button.getAttribute("href") !== BETTER_CODEX_ROUTE && label(button.textContent || button.getAttribute("aria-label")) !== "better codex") return;
-          const hidden = mounted && bootstrapReady ? "true" : "false";
-          if (button.getAttribute("data-better-codex-launcher-hidden") !== hidden) {
-            button.setAttribute("data-better-codex-launcher-hidden", hidden);
-            console.info("[better-codex] launcher_visibility", { hidden: hidden === "true", mounted, bootstrapReady });
-          }
-        });
-      }
       return mounted;
     }
 
@@ -10604,6 +10718,13 @@ export function install(config: Record<string, any>) {
       return "";
     }
 
+    function isNativeRailDestination(target) {
+      if (!(target instanceof Element) || !target.closest("[data-app-navigation-rail]")) return false;
+      const button = target.closest("button,a,[role='button']");
+      if (!button || button.hasAttribute(OWNED) || button.getAttribute("aria-haspopup") === "menu") return false;
+      return true;
+    }
+
     function isSidebarNavigationTarget(target) {
       if (!target.closest(SELECTORS.sidebarNavigation) || target.closest(SELECTORS.projectRow)) return false;
       const navigationItem = target.closest(SIDEBAR_NAVIGATION_ITEM) || target.closest(SELECTORS.threadRow);
@@ -10629,6 +10750,10 @@ export function install(config: Record<string, any>) {
         event.preventDefault();
         event.stopImmediatePropagation();
         void perform(() => openThread(threadId));
+        return;
+      }
+      if (isNativeRailDestination(target)) {
+        close({ resume: true });
         return;
       }
       if (isSidebarNavigationTarget(target)) close({ resume: true });
