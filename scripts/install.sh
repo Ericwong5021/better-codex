@@ -633,6 +633,36 @@ if [ "$WITH_SERVICE" = "1" ]; then
   if [ "$LIVE_UPGRADE_COMPLETED" = "1" ]; then
     printf '[Better Codex] Refreshing launcher after the live Runtime handoff...\n'
     run_with_timeout 15 "$BIN_DIR/better-codex" launcher install >/dev/null
+    if [ -n "${BETTER_CODEX_BUNDLED_NODE:-}" ]; then
+      SERVICE_STATUS_LOG="$WORK_DIR/bundled-node-service-status.log"
+      if ! run_with_timeout 15 "$BIN_DIR/better-codex" service status >"$SERVICE_STATUS_LOG"; then
+        cat "$SERVICE_STATUS_LOG" >&2
+        echo "Unable to read the Better Codex service configuration after installing bundled Node." >&2
+        exit 1
+      fi
+      if ! SERVICE_CONFIGURATION_MATCHES="$(node - "$SERVICE_STATUS_LOG" <<'NODE'
+const fs = require('fs');
+try {
+  const status = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+  if (status?.installed !== true || typeof status.configurationMatches !== 'boolean') throw new Error('installed_service_configuration_missing');
+  console.log(status.configurationMatches);
+} catch (error) {
+  console.error(JSON.stringify({ error: 'install_service_status_invalid', phase: 'bundled_node_service_repair', reason: error.message }));
+  process.exit(1);
+}
+NODE
+      )"; then
+        cat "$SERVICE_STATUS_LOG" >&2
+        exit 1
+      fi
+      if [ "$SERVICE_CONFIGURATION_MATCHES" = "false" ]; then
+        printf '[Better Codex] Updating service and MCP to bundled Node while preserving tasks...\n'
+        run_with_timeout 30 "$BIN_DIR/better-codex" desktop stop >/dev/null
+        run_with_timeout 15 "$BIN_DIR/better-codex" mcp install >/dev/null
+        run_with_timeout 15 "$BIN_DIR/better-codex" service repair >/dev/null
+        run_with_timeout 45 "$BIN_DIR/better-codex" desktop start >/dev/null
+      fi
+    fi
   else
     printf '[Better Codex] Registering runtime and refreshing Better Codex...\n'
     SETUP_LOG="$WORK_DIR/setup.log"
