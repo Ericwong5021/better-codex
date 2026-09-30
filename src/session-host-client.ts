@@ -101,10 +101,15 @@ function readHostStatus(home: string, profile: string) {
   return { profile, home, status_path: statusPath, pid_path: pidPath, recorded_pid: recordedPid, alive, fresh, pid_matches: pidMatches, started_at_matches: startedAtMatches, ok: Boolean(status?.running && alive && fresh && pidMatches && startedAtMatches), error, status };
 }
 
+export function windowsSessionHostProcessPowerShell() {
+  // The query's own command line contains both Host markers.
+  return "Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -match 'session-host' -and $_.CommandLine -match 'better-codex|cli\\.(js|ts)' } | Select-Object ProcessId,ParentProcessId,CreationDate,CommandLine | ConvertTo-Json -Compress";
+}
+
 function discoverHostProcesses() {
   try {
     if (process.platform === "win32") {
-      const source = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'session-host' -and $_.CommandLine -match 'better-codex|cli\\.(js|ts)' } | Select-Object ProcessId,ParentProcessId,CreationDate,CommandLine | ConvertTo-Json -Compress"], { encoding: "utf8", windowsHide: true }).trim();
+      const source = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", windowsSessionHostProcessPowerShell()], { encoding: "utf8", windowsHide: true }).trim();
       const parsed = source ? JSON.parse(source) : [];
       const rows = Array.isArray(parsed) ? parsed : [parsed];
       const matches = rows.map(row => ({ pid: Number(row.ProcessId), ppid: Number(row.ParentProcessId), started_at: row.CreationDate || null, command: String(row.CommandLine || "") })).filter(row => row.pid > 0);
