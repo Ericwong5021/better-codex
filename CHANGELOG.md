@@ -4,6 +4,11 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.18-beta.3] - 2026-10-01
+
+- Accept Windows line endings in the bundled Node migration regression tests.
+- Reserve explicit filesystem headroom when building macOS DMG installers.
+
 ## [0.4.18-beta.2] - 2026-10-01
 
 - Migrate the Runtime service and MCP registration to the DMG's bundled Node after a live upgrade, preserving the Session Host and existing tasks.
@@ -1111,7 +1116,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.18-beta.2...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.18-beta.3...HEAD
+[0.4.18-beta.3]: https://github.com/Ericwong5021/better-codex/compare/v0.4.18-beta.2...v0.4.18-beta.3
 [0.4.18-beta.2]: https://github.com/Ericwong5021/better-codex/compare/v0.4.18-beta.1...v0.4.18-beta.2
 [0.4.18-beta.1]: https://github.com/Ericwong5021/better-codex/compare/v0.4.17...v0.4.18-beta.1
 [0.4.17]: https://github.com/Ericwong5021/better-codex/compare/v0.4.16...v0.4.17
