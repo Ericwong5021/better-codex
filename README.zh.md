@@ -87,7 +87,9 @@ Better Codex 适用于各种角色。只要你的工作会在 Codex 里持续多
 
 ## 安装方法
 
-macOS：
+macOS 13+（提供 DMG 的版本）：将 **Better Codex.app** 拖入“应用程序”，然后打开。程序静默运行，菜单栏使用 Logo 剪影，分别显示 Runtime 是否就绪、看板是否已注入。DMG 内置 Node.js，无需另外安装。通过菜单中的“打开 Codex / 启用看板”使用原有启动与重启确认流程。退出 Better Codex 会停止看板服务，已有模型任务保留原执行进程，重新打开后同步结果。
+
+macOS（命令行安装）：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scripts/install.sh | bash
@@ -103,7 +105,7 @@ Better Codex 以轻量 Node.js bundle 运行，需要 Node.js 22.5 或更新版�
 
 安装脚本会同时安装 CLI、Skill、本地运行时和系统启动入口，并在 Codex 中注册 `better-codex` MCP。MCP 只在本机运行，用来提供 Better Codex 应用入口和路由；项目、任务和会话数据仍保存在本地数据库中。旧版独立 EXE 只有在新 bundle 通过版本检查和健康检查后才会被移除。
 
-从 Better Codex 启动入口重启 Codex，侧边栏会出现 `任务看板` 和 `智能体` 两个入口。完全卸载可运行 `better-codex uninstall`。
+macOS 从 Better Codex 菜单栏选择“打开 Codex / 启用看板”；Windows 通过 Better Codex 启动入口重新打开 Codex。侧边栏会出现 `任务看板` 和 `智能体` 两个入口。完全卸载可运行 `better-codex uninstall`。
 
 需要从浏览器远程访问自己的看板时，可以部署独立的 Relay 和 Web UI。本机 Runtime 主动建立出站 WSS，Relay 只实时转发浏览器流量，不保存项目、任务、会话、智能体配置或附件。服务器准备、HTTPS、设备配对、备份恢复和升级方法见英文版 [Self-hosting runbook](SELF_HOSTING.md)。
 

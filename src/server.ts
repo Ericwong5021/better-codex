@@ -2532,11 +2532,19 @@ export function startServer() {
         }
       }
       if (url.pathname === "/api/shutdown" && method === "POST") {
+        const body = await readBody(request);
+        if (body.reason === "desktop_exit") {
+          if (body.runtime_instance_id !== identity.instanceId) throw new Error("runtime_identity_mismatch");
+          if (store.getActiveUpdateOperation() || identity.handoffUpdateId) throw new Error("desktop_exit_update_in_progress");
+          runtimeServingReady = false;
+          worker.stop();
+        }
         sendJson(response, 200, { ok: true });
         setImmediate(() => server.close(() => {
           cleanup();
           process.exit(0);
         }));
+        if (body.reason === "desktop_exit") setTimeout(() => server.closeAllConnections(), 500).unref();
         return;
       }
       return sendJson(response, 404, { error: "not_found" });

@@ -68,6 +68,35 @@ function openSocket(path: string) {
   });
 }
 
+test("menu-bar shutdown is instance-fenced and closes live status streams", { timeout: 20_000 }, async () => {
+  const home = mkdtempSync(join(tmpdir(), "better-codex-desktop-exit-"));
+  const port = await availablePort();
+  const token = "desktop-exit-test-token";
+  const gateway = startGateway(home, port, token);
+  const streamController = new AbortController();
+  try {
+    await waitForGateway(port, gateway);
+    const runtime = await (await fetch(`http://127.0.0.1:${port}/readyz`)).json() as { instanceId: string };
+    const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+    const stale = await fetch(`http://127.0.0.1:${port}/api/shutdown`, { method: "POST", headers, body: JSON.stringify({ reason: "desktop_exit", runtime_instance_id: "stale-runtime" }) });
+    assert.equal((await stale.json() as { error: string }).error, "runtime_identity_mismatch");
+    assert.equal((await fetch(`http://127.0.0.1:${port}/readyz`)).status, 200);
+    const stream = await fetch(`http://127.0.0.1:${port}/api/events`, { headers, signal: streamController.signal });
+    assert.equal(stream.status, 200);
+    const exited = once(gateway, "exit");
+    const stopped = await fetch(`http://127.0.0.1:${port}/api/shutdown`, { method: "POST", headers, body: JSON.stringify({ reason: "desktop_exit", runtime_instance_id: runtime.instanceId }) });
+    assert.equal(stopped.status, 200);
+    assert.equal((await stopped.json() as { ok: boolean }).ok, true);
+    await Promise.race([exited, new Promise((_, reject) => { const timer = setTimeout(() => reject(new Error("desktop_shutdown_blocked_by_stream")), 3000); timer.unref(); })]);
+    assert.equal(gateway.exitCode, 0);
+    await stream.body?.cancel().catch(() => {});
+  } finally {
+    streamController.abort();
+    await stopGateway(gateway);
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 function readSocketMessage(socket: Socket) {
   return new Promise<SessionHostServerMessage>((resolve, reject) => {
     let output = "";

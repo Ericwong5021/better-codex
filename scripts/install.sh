@@ -240,14 +240,22 @@ run_with_timeout() {
   ACTIVE_COMMAND_GROUP="$child_pid"
   set +m
   (
-    sleep "$seconds"
+    # Do not inherit installer cleanup, or retain the caller's output pipes.
+    # Waiting on an asynchronous sleep lets TERM cancel the timer immediately.
+    trap - EXIT INT TERM
+    sleeper=""
+    trap '[ -z "$sleeper" ] || kill "$sleeper" 2>/dev/null || true; exit 0' TERM INT
+    sleep "$seconds" &
+    sleeper=$!
+    wait "$sleeper"
+    sleeper=""
     if kill -0 "$child_pid" 2>/dev/null; then
       : > "$marker"
       kill -TERM -- "-$child_pid" 2>/dev/null || true
       sleep 1
       kill -KILL -- "-$child_pid" 2>/dev/null || true
     fi
-  ) &
+  ) </dev/null >/dev/null 2>&1 &
   watchdog_pid=$!
   ACTIVE_WATCHDOG_PID="$watchdog_pid"
   if wait "$child_pid"; then status=0; else status=$?; fi
@@ -538,6 +546,36 @@ if [ -n "$TARGET_VERSION" ] && [ "$PACKAGED_VERSION" != "$TARGET_VERSION" ]; the
   exit 1
 fi
 if [ -z "$TARGET_VERSION" ]; then TARGET_VERSION="$PACKAGED_VERSION"; fi
+# A version identifies immutable core bytes. A local development DMG can share
+# the published version, but must never silently delegate to that different core.
+# Run this before the live update request or any installed file is replaced.
+if [ -n "${BETTER_CODEX_ARCHIVE:-}" ] && [ "$CURRENT_VERSION" = "$TARGET_VERSION" ]; then
+  node - "$BETTER_CODEX_DIR" "$EXISTING_BINARY" "$WORK_DIR/better-codex.cjs" "$TARGET_VERSION" <<'NODE'
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+const [home, binary, packaged, version] = process.argv.slice(2);
+const pointerPath = path.join(home, 'runtime/current.json');
+let installed = path.join(path.dirname(binary), 'better-codex.cjs');
+try {
+  if (fs.existsSync(pointerPath)) {
+    const pointer = JSON.parse(fs.readFileSync(pointerPath, 'utf8'));
+    if (pointer.current === version) installed = pointer.executable;
+  }
+  const digest = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+  const installedSha256 = digest(installed);
+  const packagedSha256 = digest(packaged);
+  if (installedSha256 !== packagedSha256) {
+    console.error(JSON.stringify({ error: 'install_same_version_core_conflict', phase: 'preflight', version, installed, installedSha256, packagedSha256 }));
+    console.error(`安装已停止：此验证包与已安装版本均为 ${version}，但程序内容不同。请使用更新版本的正式包或 Beta 包。现有 Runtime 和数据未被修改。`);
+    process.exit(1);
+  }
+} catch (error) {
+  console.error(JSON.stringify({ error: 'install_existing_core_unreadable', phase: 'preflight', version, installed, reason: error.message }));
+  process.exit(1);
+}
+NODE
+fi
 DESIRED_CHANNEL="$(desired_update_channel "$TARGET_VERSION" "$PRESERVE_PREVIEW_LANE")"
 if [ "$WITH_SERVICE" = "1" ] && [ -n "$CURRENT_VERSION" ]; then
   RUNTIME_WAS_LIVE=0
@@ -564,6 +602,22 @@ mkdir -p "$BIN_DIR"
 INSTALL_MUTATED=1
 install -m 755 "$WORK_DIR/better-codex.cjs" "$BIN_DIR/better-codex.cjs"
 install -m 755 "$WORK_DIR/better-codex" "$BIN_DIR/better-codex"
+if [ -n "${BETTER_CODEX_BUNDLED_NODE:-}" ]; then
+  [ -x "$BETTER_CODEX_BUNDLED_NODE" ] || { echo "Bundled Node executable is missing." >&2; exit 1; }
+  NODE_DIGEST="$(shasum -a 256 "$BETTER_CODEX_BUNDLED_NODE" | awk '{print $1}')"
+  NODE_DIRECTORY="$BETTER_CODEX_DIR/dependencies/node-$NODE_DIGEST"
+  mkdir -p "$NODE_DIRECTORY"
+  if [ ! -x "$NODE_DIRECTORY/node" ]; then
+    install -m 755 "$BETTER_CODEX_BUNDLED_NODE" "$NODE_DIRECTORY/node.tmp"
+    mv "$NODE_DIRECTORY/node.tmp" "$NODE_DIRECTORY/node"
+  fi
+  node - "$NODE_DIRECTORY/node" "$BIN_DIR/better-codex" <<'NODE'
+const fs = require('fs');
+const [executable, launcher] = process.argv.slice(2);
+const quoted = "'" + executable.replace(/'/g, "'\"'\"'") + "'";
+fs.writeFileSync(launcher, '#!/bin/sh\nexec ' + quoted + ' "$(dirname "$0")/better-codex.cjs" "$@"\n', { mode: 0o755 });
+NODE
+fi
 printf '[Better Codex] Installing Better Codex skill to %s...\n' "$SKILL_DIR"
 mkdir -p "$SKILL_DIR/agents"
 install -m 644 "$WORK_DIR/skills/better-codex/SKILL.md" "$SKILL_DIR/SKILL.md"
@@ -582,7 +636,9 @@ if [ "$WITH_SERVICE" = "1" ]; then
   else
     printf '[Better Codex] Registering runtime and refreshing Better Codex...\n'
     SETUP_LOG="$WORK_DIR/setup.log"
-    if [ "$PRESERVE_CODEX" = "1" ]; then
+    if [ "${BETTER_CODEX_BACKGROUND_SETUP:-0}" = "1" ]; then
+      SETUP_ARGUMENTS="--yes --background"
+    elif [ "$PRESERVE_CODEX" = "1" ]; then
       SETUP_ARGUMENTS="--yes --preserve-codex"
     else
       SETUP_ARGUMENTS="--yes"
@@ -599,11 +655,14 @@ if [ "$WITH_SERVICE" = "1" ]; then
   else
     DOCTOR_ARGUMENTS=""
   fi
-  if ! run_with_timeout 20 "$BIN_DIR/better-codex" doctor $DOCTOR_ARGUMENTS >"$DOCTOR_LOG" 2>&1; then
+  if [ "${BETTER_CODEX_BACKGROUND_SETUP:-0}" = "1" ]; then
+    if ! run_with_timeout 20 "$BIN_DIR/better-codex" desktop status >"$DOCTOR_LOG"; then cat "$DOCTOR_LOG" >&2; exit 1; fi
+    if ! node -e 'const fs=require("fs");process.exit(JSON.parse(fs.readFileSync(process.argv[1],"utf8")).runtime === "ready" ? 0 : 1)' "$DOCTOR_LOG"; then cat "$DOCTOR_LOG" >&2; exit 1; fi
+  elif ! run_with_timeout 20 "$BIN_DIR/better-codex" doctor $DOCTOR_ARGUMENTS >"$DOCTOR_LOG" 2>&1; then
     cat "$DOCTOR_LOG" >&2
     exit 1
   fi
-  if ! awk '/"ok":/ { found=1; ok=($0 ~ /true/); exit } END { if (!found || !ok) exit 1 }' "$DOCTOR_LOG"; then
+  if [ "${BETTER_CODEX_BACKGROUND_SETUP:-0}" != "1" ] && ! awk '/"ok":/ { found=1; ok=($0 ~ /true/); exit } END { if (!found || !ok) exit 1 }' "$DOCTOR_LOG"; then
     cat "$DOCTOR_LOG" >&2
     exit 1
   fi

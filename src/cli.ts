@@ -35,7 +35,8 @@ import {
 } from "./config.js";
 import { readRuntimeState, reserveRuntimeAuthorityRecovery, runtimeAuthorityUpdateState } from "./runtime-state.js";
 import { injectionEnabled, setInjectionEnabled } from "./injection-state.js";
-import { installationCommand, installLaunchIntegration, launchIntegrationStatus, uninstallLaunchIntegration } from "./launch-integration.js";
+import { installationCommand, installLaunchIntegration, launchIntegrationStatus, uninstallLaunchIntegration, openMacMenuBar } from "./launch-integration.js";
+import { desktopStatus } from "./desktop-status.js";
 import { readCodexLocale } from "./locale.js";
 import { betterCodexMcpName, startMcpAppServer } from "./mcp-app.js";
 import { packagedBuild } from "./build.js";
@@ -434,6 +435,8 @@ async function runRuntime() {
   void reconcileWatcher();
   const watcherTimer = setInterval(() => void reconcileWatcher(), 1000);
   watcherTimer.unref();
+  try { openMacMenuBar(); }
+  catch (error) { console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ scope: "desktop", event: "menubar_launch_failed", profile: betterCodexProfile, home: betterCodexHome, runtime_pid: process.pid, error: String(error) })}`); }
   process.once("exit", () => {
     stopping = true;
     clearInterval(watcherTimer);
@@ -1525,6 +1528,42 @@ async function main() {
     return print(await installRuntimeUpdate(option(values, "--target-version"), channel));
   }
   if (command === "session-host") return startSessionHost();
+  if (command === "desktop") {
+    if (action === "status") return print(await desktopStatus());
+    if (action === "start") {
+      // Opening the menu must not restart a live, unhealthy Runtime.
+      if (!readRuntimeState()) await ensureRuntime();
+      await waitForRuntimeReady();
+      openMacMenuBar();
+      return print(await desktopStatus());
+    }
+    if (action === "stop") {
+      const runtime = readRuntimeState();
+      if (runtime?.handoffUpdateId || readGatewayUpdateActivationState()?.status === "activating") throw new Error("desktop_exit_update_in_progress");
+      const enabled = injectionEnabled();
+      setInjectionEnabled(false);
+      try {
+        if (runtime) {
+          await request("/api/shutdown", { method: "POST", body: JSON.stringify({ reason: "desktop_exit", runtime_instance_id: runtime.instanceId }), signal: AbortSignal.timeout(5000) });
+        }
+        await stopInjector();
+        try { await cdpEject(cdpPort, accessToken(), injectionOwnership()); } catch {}
+        if (runtime) {
+          const deadline = Date.now() + 12_000;
+          while (processAlive(runtime.pid) && readRuntimeState()?.instanceId === runtime.instanceId) {
+            if (Date.now() >= deadline) throw new Error("desktop_exit_runtime_timeout");
+            await new Promise(resolve => setTimeout(resolve, 100));
+          }
+        }
+        if (readRuntimeState()) throw new Error("desktop_exit_runtime_identity_changed");
+        if (betterCodexProfile === "stable" && serviceStatus().installed) stopService();
+        // Keep native Codex and the Session Host alive. Existing turns retain
+        // their writer and durable receipts are replayed on the next start.
+        return print({ stopped: true, tasksPreserved: true });
+      } finally { setInjectionEnabled(enabled); }
+    }
+    return usage();
+  }
   if (command === "runtime") return runRuntime();
   if (command === "serve") return (await import("./server.js")).startServer();
   if (command === "web") return print(await openWebApp());
@@ -1639,20 +1678,29 @@ async function main() {
     const values = [action, ...args].filter(Boolean) as string[];
     const json = values.includes("--json");
     const preserveCodex = values.includes("--preserve-codex");
+    const background = values.includes("--background");
     if (!values.includes("--yes") && !(await confirmSetup())) return print({ configured: false });
     progress("installing_runtime", json);
     setInjectionEnabled(false);
     await stopInjector();
     try {
-      try { await request("/api/shutdown", { method: "POST" }); } catch {}
-      await stopSessionHostProcess();
+      if (!background) {
+        try { await request("/api/shutdown", { method: "POST" }); } catch {}
+        await stopSessionHostProcess();
+      }
       const skills = installBundledSkills();
       if (!skills.installed || !skills.updateKey) throw new Error("reason" in skills ? skills.reason : "bundled_assets_unavailable");
       const mcp = installMcp();
-      installService();
+      if (!background || !readRuntimeState()) installService();
       progress("starting_runtime", json);
       const runtime = await ensureRuntime();
       await waitForRuntimeReady();
+      if (background) {
+        setInjectionEnabled(true);
+        const launchIntegration = installLaunchIntegration();
+        openMacMenuBar();
+        return print({ configured: true, runtime, launchIntegration, skills, mcp, injection: { pending: true } });
+      }
       progress("waiting_for_codex", json);
       if (!codexInstallationStatus().installed) throw new Error("codex_not_found");
       progress("injecting", json);
@@ -1669,6 +1717,7 @@ async function main() {
       setInjectionEnabled(true);
       const pid = await ensureInjector(cdpPort);
       const launchIntegration = installLaunchIntegration();
+      openMacMenuBar();
       progress("ready", json);
       return print({ configured: true, stages: ["installing_runtime", "installing_mcp", "starting_runtime", "waiting_for_codex", "injecting", "installing_launcher", "ready"], runtime, injection, launchIntegration, skills, mcp, injectorPid: pid });
     } catch (error) {

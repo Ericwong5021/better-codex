@@ -1,0 +1,72 @@
+name: Prepare macOS distribution signing
+description: Prepare Developer ID signing, or explicitly allow an ad-hoc Preview when no Apple credentials are configured.
+inputs:
+  allow-ad-hoc:
+    required: false
+    default: "false"
+    description: Allow an unnotarized test package only when every Apple credential is absent
+  certificate:
+    required: true
+    description: Base64 Developer ID Application P12
+  certificate-password:
+    required: true
+    description: P12 password
+  api-key:
+    required: true
+    description: App Store Connect API private key (PEM)
+  key-id:
+    required: true
+    description: App Store Connect API key ID
+  issuer-id:
+    required: true
+    description: App Store Connect API issuer ID
+outputs:
+  signing-mode:
+    description: developer-id-notarized or ad-hoc-unnotarized
+    value: ${{ steps.prepare.outputs.signing-mode }}
+runs:
+  using: composite
+  steps:
+    - id: prepare
+      shell: bash
+      env:
+        ALLOW_AD_HOC: ${{ inputs.allow-ad-hoc }}
+        CERTIFICATE: ${{ inputs.certificate }}
+        CERTIFICATE_PASSWORD: ${{ inputs.certificate-password }}
+        API_KEY: ${{ inputs.api-key }}
+        KEY_ID: ${{ inputs.key-id }}
+        ISSUER_ID: ${{ inputs.issuer-id }}
+      run: |
+        set -euo pipefail
+        if [ "$ALLOW_AD_HOC" != "true" ] && [ "$ALLOW_AD_HOC" != "false" ]; then
+          echo 'macos_allow_ad_hoc_invalid' >&2
+          exit 1
+        fi
+        if [ "$ALLOW_AD_HOC" = "true" ] && [ -z "$CERTIFICATE$CERTIFICATE_PASSWORD$API_KEY$KEY_ID$ISSUER_ID" ]; then
+          printf 'BETTER_CODEX_MACOS_SIGN_IDENTITY=-\nBETTER_CODEX_MACOS_NOTARY_PROFILE=\nBETTER_CODEX_REQUIRE_MACOS_SIGNING=0\n' >> "$GITHUB_ENV"
+          printf 'signing-mode=ad-hoc-unnotarized\n' >> "$GITHUB_OUTPUT"
+          echo '::warning::Preview DMGs will use ad-hoc signing and are not notarized by Apple.'
+          exit 0
+        fi
+        if [ -z "$CERTIFICATE" ] || [ -z "$CERTIFICATE_PASSWORD" ] || [ -z "$API_KEY" ] || [ -z "$KEY_ID" ] || [ -z "$ISSUER_ID" ]; then
+          echo 'macos_distribution_signing_credentials_required' >&2
+          exit 1
+        fi
+        signing_dir="$(mktemp -d "$RUNNER_TEMP/better-codex-signing.XXXXXX")"
+        signing_keychain="$signing_dir/signing.keychain-db"
+        signing_password="$(openssl rand -hex 32)"
+        echo "::add-mask::$signing_password"
+        printf '%s' "$CERTIFICATE" | base64 --decode > "$signing_dir/certificate.p12"
+        printf '%s' "$API_KEY" > "$signing_dir/AuthKey.p8"
+        chmod 600 "$signing_dir/certificate.p12" "$signing_dir/AuthKey.p8"
+        security create-keychain -p "$signing_password" "$signing_keychain"
+        printf 'BETTER_CODEX_MACOS_KEYCHAIN=%s\n' "$signing_keychain" >> "$GITHUB_ENV"
+        security set-keychain-settings -lut 21600 "$signing_keychain"
+        security unlock-keychain -p "$signing_password" "$signing_keychain"
+        security import "$signing_dir/certificate.p12" -k "$signing_keychain" -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+        security set-key-partition-list -S apple-tool:,apple: -s -k "$signing_password" "$signing_keychain" >/dev/null
+        security list-keychains -d user -s "$signing_keychain" login.keychain-db
+        xcrun notarytool store-credentials better-codex-ci --keychain "$signing_keychain" --key "$signing_dir/AuthKey.p8" --key-id "$KEY_ID" --issuer "$ISSUER_ID"
+        rm "$signing_dir/certificate.p12" "$signing_dir/AuthKey.p8"
+        printf 'BETTER_CODEX_MACOS_SIGN_IDENTITY=Developer ID Application\nBETTER_CODEX_MACOS_NOTARY_PROFILE=better-codex-ci\nBETTER_CODEX_REQUIRE_MACOS_SIGNING=1\n' >> "$GITHUB_ENV"
+        printf 'signing-mode=developer-id-notarized\n' >> "$GITHUB_OUTPUT"

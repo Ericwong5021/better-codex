@@ -98,6 +98,9 @@ jobs:
       - run: npm run package:binary
       - name: Install current local package twice
         run: node scripts/test-local-install.mjs
+      - name: Verify the macOS DMG in an isolated home
+        if: runner.os == 'macOS'
+        run: npm run test:macos-dmg
 
   node-24-lifecycle:
     runs-on: windows-2025

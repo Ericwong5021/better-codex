@@ -55,13 +55,39 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      - name: Prepare Apple signing and notarization
+        id: macos-signing
+        if: runner.os == 'macOS'
+        uses: ./.github/actions/macos-signing
+        with:
+          allow-ad-hoc: "true"
+          certificate: ${{ secrets.BETTER_CODEX_MACOS_CERTIFICATE }}
+          certificate-password: ${{ secrets.BETTER_CODEX_MACOS_CERTIFICATE_PASSWORD }}
+          api-key: ${{ secrets.BETTER_CODEX_MACOS_NOTARY_API_KEY }}
+          key-id: ${{ secrets.BETTER_CODEX_MACOS_NOTARY_KEY_ID }}
+          issuer-id: ${{ secrets.BETTER_CODEX_MACOS_NOTARY_ISSUER_ID }}
       - run: npm run package:binary
+      - name: Record macOS distribution status after packaging
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          SIGNING_MODE: ${{ steps.macos-signing.outputs.signing-mode }}
+          PACKAGE_RUNNER: ${{ matrix.runner }}
+        run: |
+          set -euo pipefail
+          node -e 'const fs = require("node:fs"); const mode = process.env.SIGNING_MODE; if (!["ad-hoc-unnotarized", "developer-id-notarized"].includes(mode)) throw new Error("macos_distribution_status_missing"); fs.writeFileSync(`release/macos-distribution-${process.env.PACKAGE_RUNNER}.json`, JSON.stringify({ runner: process.env.PACKAGE_RUNNER, signingMode: mode }));'
+      - name: Remove temporary signing identity
+        if: always() && runner.os == 'macOS' && env.BETTER_CODEX_MACOS_KEYCHAIN != ''
+        shell: bash
+        run: security delete-keychain "$BETTER_CODEX_MACOS_KEYCHAIN"
       - uses: actions/upload-artifact@v4
         with:
           name: better-codex-${{ matrix.runner }}
           path: |
             release/better-codex-cli-*
             release/better-codex-core-*
+            release/better-codex-*.dmg
+            release/macos-distribution-*.json
 
   release-preview:
     needs: package
@@ -80,7 +106,7 @@ jobs:
           merge-multiple: true
       - run: cp scripts/install.sh scripts/install.ps1 scripts/selfhost.sh SELF_HOSTING.md release/
       - run: git rev-parse HEAD > release/source-commit.txt
-      - run: find release -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name 'selfhost.sh' -o -name 'SELF_HOSTING.md' -o -name 'source-commit.txt' \) -exec sha256sum {} \; | sed 's#release/##' > release/checksums.txt
+      - run: find release -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.dmg' -o -name 'selfhost.sh' -o -name 'SELF_HOSTING.md' -o -name 'source-commit.txt' \) -exec sha256sum {} \; | sed 's#release/##' > release/checksums.txt
       - name: Create signed Preview manifest
         env:
           BETTER_CODEX_UPDATE_CHANNEL: preview
@@ -96,12 +122,25 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          assets=(release/better-codex-cli-* release/better-codex-core-* release/better-codex-compatibility-*.json release/checksums.txt release/checksums.sig release/install.ps1 release/install.sh release/selfhost.sh release/SELF_HOSTING.md release/source-commit.txt release/update-manifest.json release/update-public-key.pem)
+          notes="$RUNNER_TEMP/better-codex-beta-notes.md"
+          gh api --method POST "repos/$GITHUB_REPOSITORY/releases/generate-notes" -f tag_name="$GITHUB_REF_NAME" -f target_commitish="$GITHUB_SHA" --jq .body > "$notes"
+          node - "$notes" <<'NODE'
+          const fs = require('node:fs');
+          const runners = ['macos-15', 'macos-15-intel'];
+          const statuses = runners.map(runner => {
+            const status = JSON.parse(fs.readFileSync(`release/macos-distribution-${runner}.json`, 'utf8'));
+            if (status.runner !== runner || !['ad-hoc-unnotarized', 'developer-id-notarized'].includes(status.signingMode)) throw new Error('macos_distribution_status_invalid');
+            return `${runner === 'macos-15' ? 'Apple Silicon' : 'Intel'}: ${status.signingMode === 'ad-hoc-unnotarized' ? 'ad-hoc signed test DMG; not notarized by Apple. macOS may require explicit approval to open it.' : 'Developer ID signed and notarized by Apple.'}`;
+          });
+          fs.appendFileSync(process.argv[2], `\n\n### macOS Beta distribution\n\n${statuses.map(status => `- ${status}`).join('\n')}\n\nThe Better Codex update manifest and checksums are cryptographically signed independently of Apple signing and notarization.\n`);
+          NODE
+          assets=(release/better-codex-cli-* release/better-codex-core-* release/better-codex-*.dmg release/better-codex-compatibility-*.json release/checksums.txt release/checksums.sig release/install.ps1 release/install.sh release/selfhost.sh release/SELF_HOSTING.md release/source-commit.txt release/update-manifest.json release/update-public-key.pem)
           if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
             test "$(gh release view "${GITHUB_REF_NAME}" --json tagName,isDraft,isPrerelease --jq '[.tagName, .isDraft, .isPrerelease] | @tsv')" = "${GITHUB_REF_NAME}"$'\tfalse\ttrue'
             gh release upload "${GITHUB_REF_NAME}" "${assets[@]}" --clobber
+            gh release edit "${GITHUB_REF_NAME}" --notes-file "$notes"
           else
-            gh release create "${GITHUB_REF_NAME}" "${assets[@]}" --prerelease --latest=false --generate-notes --verify-tag
+            gh release create "${GITHUB_REF_NAME}" "${assets[@]}" --prerelease --latest=false --notes-file "$notes" --verify-tag
           fi
           for path in "${assets[@]}"; do
             name="$(basename "$path")"

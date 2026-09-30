@@ -7,6 +7,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { javascriptStringLiteral } from "./javascript-literal.mjs";
+import { packageDmg } from "./package-dmg.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const packageJson = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
@@ -14,6 +15,7 @@ const platform = process.platform === "darwin" ? "darwin" : process.platform;
 const architecture = process.arch === "x64" ? "amd64" : process.arch;
 if (!["darwin", "win32"].includes(platform) || !["arm64", "amd64"].includes(architecture)) throw new Error("package_platform_unsupported");
 if (platform === "win32" && architecture !== "amd64") throw new Error("package_architecture_unsupported");
+if (platform === "darwin") execFileSync(process.execPath, [join(root, "scripts", "build-macos-desktop.mjs")], { cwd: root, stdio: "inherit" });
 
 const work = await mkdtemp(join(tmpdir(), "better-codex-package-"));
 const output = join(root, "release");
@@ -61,6 +63,14 @@ export function agentAvatarPngDataUrl(id){return "data:image/png;base64,"+agentA
     });
   },
 };
+const embedDesktop = {
+  name: "embed-macos-desktop",
+  setup(buildApi) {
+    buildApi.onLoad({ filter: /[/\\]macos-desktop-assets\.ts$/ }, () => ({ loader: "js", contents: platform === "darwin"
+      ? `export function macMenuBarExecutable(){return Buffer.from(${javascriptStringLiteral(readFileSync(join(root, "build/macos/better-codex-menubar")).toString("base64"))},"base64")}\nexport function macMenuBarIcon(){return Buffer.from(${javascriptStringLiteral(readFileSync(join(root, "assets/menubar-template.png")).toString("base64"))},"base64")}`
+      : 'export function macMenuBarExecutable(){throw new Error("macos_only")} export function macMenuBarIcon(){throw new Error("macos_only")}' }));
+  },
+};
 
 try {
   await build({
@@ -71,7 +81,7 @@ try {
     target: "node22",
     outfile: bundle,
     define: { __BETTER_CODEX_PACKAGED__: "true" },
-    plugins: [embedSkill, embedBrandAssets],
+    plugins: [embedSkill, embedBrandAssets, embedDesktop],
   });
   await chmod(bundle, 0o755);
   const versionEnv = { ...process.env, BETTER_CODEX_HOME: join(work, "home"), BETTER_CODEX_DISABLE_DELEGATION: "1", CODEX_HOME: join(work, "codex") };
@@ -107,6 +117,10 @@ try {
   }
   const digest = createHash("sha256").update(await readFile(archive)).digest("hex");
   await writeFile(join(output, "checksums.txt"), `${digest}  ${archiveName}\n`);
+  if (platform === "darwin" && process.env.BETTER_CODEX_SKIP_DMG !== "1") {
+    const dmg = await packageDmg({ root, output, archive, archiveDigest: digest, version: packageJson.version, architecture });
+    await writeFile(join(output, "checksums.txt"), `${digest}  ${archiveName}\n${dmg.sha256}  ${dmg.name}\n`);
+  }
   console.log(JSON.stringify({ archive, checksum: digest }));
 } finally {
   await rm(work, { recursive: true, force: true });

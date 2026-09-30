@@ -92,15 +92,32 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm test
+      - name: Prepare Apple signing and notarization
+        if: runner.os == 'macOS'
+        uses: ./.github/actions/macos-signing
+        with:
+          certificate: ${{ secrets.BETTER_CODEX_MACOS_CERTIFICATE }}
+          certificate-password: ${{ secrets.BETTER_CODEX_MACOS_CERTIFICATE_PASSWORD }}
+          api-key: ${{ secrets.BETTER_CODEX_MACOS_NOTARY_API_KEY }}
+          key-id: ${{ secrets.BETTER_CODEX_MACOS_NOTARY_KEY_ID }}
+          issuer-id: ${{ secrets.BETTER_CODEX_MACOS_NOTARY_ISSUER_ID }}
       - run: npm run package:binary
+      - name: Remove temporary signing identity
+        if: always() && runner.os == 'macOS' && env.BETTER_CODEX_MACOS_KEYCHAIN != ''
+        shell: bash
+        run: security delete-keychain "$BETTER_CODEX_MACOS_KEYCHAIN"
       - name: Install current local package twice
         run: node scripts/test-local-install.mjs
+      - name: Verify the macOS DMG in an isolated home
+        if: runner.os == 'macOS'
+        run: npm run test:macos-dmg
       - uses: actions/upload-artifact@v4
         with:
           name: better-codex-${{ matrix.runner }}
           path: |
             release/better-codex-cli-*
             release/better-codex-core-*
+            release/better-codex-*.dmg
 
   release:
     needs:
@@ -121,7 +138,7 @@ jobs:
           merge-multiple: true
       - run: cp scripts/install.sh scripts/install.ps1 scripts/selfhost.sh SELF_HOSTING.md release/
       - run: git rev-parse HEAD > release/source-commit.txt
-      - run: find release -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name 'selfhost.sh' -o -name 'SELF_HOSTING.md' -o -name 'source-commit.txt' \) -exec sha256sum {} \; | sed 's#release/##' > release/checksums.txt
+      - run: find release -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.dmg' -o -name 'selfhost.sh' -o -name 'SELF_HOSTING.md' -o -name 'source-commit.txt' \) -exec sha256sum {} \; | sed 's#release/##' > release/checksums.txt
       - env:
           BETTER_CODEX_UPDATE_PRIVATE_KEY: ${{ secrets.BETTER_CODEX_UPDATE_PRIVATE_KEY }}
         run: npm run package:update-manifest

@@ -87,7 +87,9 @@ The same loop works for coding, research, writing, document prep, and anything y
 
 ## Installation
 
-macOS:
+macOS 13+ (DMG, for releases that include it): drag **Better Codex.app** into **Applications**, then open it. The app runs quietly in the menu bar and shows Runtime readiness separately from Codex integration. The DMG includes Node.js. Use **Open Codex / Enable board** in the menu to enter the existing launcher flow. Closing Better Codex stops the board service while existing model turns keep their execution processes; results synchronize when Better Codex starts again.
+
+macOS (command-line installer):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Ericwong5021/better-codex/main/scripts/install.sh | bash
@@ -103,7 +105,7 @@ Better Codex runs as a small Node.js bundle and requires Node.js 22.5 or later. 
 
 The installer adds the CLI, Skill, local runtime, and system launcher, then registers the `better-codex` MCP server with Codex. The MCP server runs only on your computer and provides the Better Codex app entry and route. Projects, tasks, and conversation data remain in the local database. Legacy standalone-EXE installations are removed only after the Node.js bundle passes version and health checks.
 
-Restart Codex from the Better Codex launcher, and `Task board` and `Agents` appear as two entries in your sidebar. Run `better-codex uninstall` to remove Better Codex completely.
+On macOS, choose Open Codex / Enable board from the Better Codex menu bar. On Windows, reopen Codex through the Better Codex launcher. `Task board` and `Agents` appear as two entries in your sidebar. Run `better-codex uninstall` to remove Better Codex completely.
 
 ### Remote access
 

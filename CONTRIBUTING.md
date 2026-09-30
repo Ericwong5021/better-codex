@@ -70,6 +70,16 @@ To build a platform package, run this on the target platform:
 npm run package:binary
 ```
 
+On macOS 13 or later this also builds the native menu bar application and a DMG for the current architecture. Xcode command-line tools are required for the Swift build. The DMG includes the checksum-verified official Node.js 22.22.0 runtime; users do not need Homebrew or a system Node installation. `npm run test:macos-dmg` checks the mounted payload, repeat installation into an isolated home, database preservation, and operation after ejecting the disk image. It does not install a system service or refresh the installed Runtime.
+
+Local DMGs use ad-hoc signing for development. Apple-notarized distribution requires `BETTER_CODEX_MACOS_SIGN_IDENTITY` (Developer ID Application) and `BETTER_CODEX_MACOS_NOTARY_PROFILE` (a configured `notarytool` keychain profile). Set `BETTER_CODEX_REQUIRE_MACOS_SIGNING=1` to reject unsigned or unnotarized release builds. Stable Release jobs always require repository secrets `BETTER_CODEX_MACOS_CERTIFICATE` (base64 P12), `BETTER_CODEX_MACOS_CERTIFICATE_PASSWORD`, `BETTER_CODEX_MACOS_NOTARY_API_KEY` (PEM), `BETTER_CODEX_MACOS_NOTARY_KEY_ID`, and `BETTER_CODEX_MACOS_NOTARY_ISSUER_ID`. The job imports them into a temporary keychain and removes it after packaging.
+
+Preview jobs may publish ad-hoc signed, unnotarized test DMGs when all five Apple credentials are absent. Beta release notes report the actual signing and notarization status for each macOS architecture. Partial credentials, signing failures, and notarization failures stop packaging; they never fall back to ad-hoc signing. macOS may require explicit approval before opening an unnotarized Beta app. Preview and Stable still require the separate `BETTER_CODEX_UPDATE_PRIVATE_KEY` to sign update manifests and checksums; Apple notarization does not replace those checks. Never describe an ad-hoc build as a notarized release.
+
+The signed app bundle is immutable; Runtime updates retain it and continue to use the stable installation entrypoint. Replace the app through a newer DMG when updating the desktop shell.
+
+Before release, manually verify the template icon in light/dark menu bars, first launch from Applications, login startup, Codex restart confirmation, and exit during an active task. A local build is not proof of Gatekeeper acceptance or task continuity. An unreleased build with the same version as an installed managed core must not be used to replace that core; publish a new signed version for in-place upgrades. Local-archive installation rejects differing core bytes under the same version before requesting an update or replacing installed files. The DMG regression check covers this conflict against a selected managed core, including preservation of the launcher, core pointer, Skill, and database.
+
 The runtime integrates with Codex Desktop through its local CDP interface. A successful build on one operating system does not verify behavior on another. Changes that affect injection, launchers, installers, or Codex selectors should be checked on every affected platform.
 
 ## Tests and verification

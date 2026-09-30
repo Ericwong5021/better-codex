@@ -93,6 +93,10 @@ VPS 的 `request`、`request.running`、`operations/<id>.json` 和请求指纹�
 
 ## 验证入口
 
+- macOS 菜单栏是 Runtime 的状态与启动客户端，不拥有业务数据库或任务执行器。通过 `/readyz` 校验实例、PID、generation、版本和 Runtime 自检结果，桌面注入状态独立显示。登录时由现有 Runtime 服务唤起菜单栏，不另建 Runtime 守护进程。
+- DMG 首次启动复用安装器，内置 Node 落到用户安装目录，服务与 MCP 仍引用稳定安装入口；签名应用包不被 Runtime 更新改写。普通启动保持静默，只有用户选择菜单中的 Codex 入口才进入原有启动/重启确认流程。
+- 菜单栏退出通过带实例标识的关闭请求停止新调度；更新中拒绝退出。关闭 Runtime 与看板连接，不停止 Session Host 或 Codex 已有执行进程，离线期间的任务结果在重新打开后回放与对账。
+
 - `npm run verify`：类型、生成产物、设计 token 与现有后端验证。
 - `npm run test:web`：真实 Chromium 中的本地与远程共享 UI。
 - `npm run test:acceptance`：流式 Web 链路和 Docker 自部署生命周期。

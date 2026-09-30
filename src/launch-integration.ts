@@ -1,10 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { homedir } from "node:os";
 import { isSea } from "node:sea";
 import { appIconIcns, appIconIco } from "./brand-assets.js";
+import { macMenuBarExecutable, macMenuBarIcon } from "./macos-desktop-assets.js";
 import { betterCodexHome, betterCodexProfile, ensureDirectories, launchIntegrationStatePath, logPath, peerBetterCodexHome, runtimeVersionsPath, sourceProcessArguments } from "./config.js";
 
 type WindowsOwnedShortcut = {
@@ -28,6 +29,7 @@ type LaunchIntegrationState = {
   baseCommand?: string[];
   appPath?: string;
   ownershipToken?: string;
+  desktopBundle?: boolean;
   shortcuts?: Array<WindowsOwnedShortcut | WindowsLegacyShortcut>;
 };
 
@@ -301,6 +303,7 @@ function assertOwnedMacApp(appPath: string, state: LaunchIntegrationState | null
     throw new Error("mac_launcher_path_occupied");
   }
   if (state?.platform !== "darwin" || !state.appPath || resolve(state.appPath) !== resolve(appPath)) throw new Error("mac_launcher_path_occupied");
+  if (state.desktopBundle && nativeMacBundle(appPath)) return;
   const marker = join(contents, "Resources", MAC_OWNERSHIP_FILE);
   if (state.ownershipToken && existsSync(marker) && !lstatSync(marker).isSymbolicLink() && readFileSync(marker, "utf8") === state.ownershipToken) return;
   const executable = join(contents, "MacOS", "better-codex-launcher");
@@ -326,30 +329,25 @@ function installMacLauncher(command: string[], previous: LaunchIntegrationState 
   const appPath = macLauncherPath();
   const migrated = migrateLegacyMacLauncher(appPath, previous);
   const ownedState = migrated && previous ? { ...previous, appPath } : previous;
-  if (existsSync(appPath)) assertOwnedMacApp(appPath, ownedState);
+  // A DMG carries an immutable app bundle. Claim only the exact executable
+  // embedded in this installer; subsequent Runtime updates never rewrite it.
+  const adopting = process.env.BETTER_CODEX_DESKTOP_APP === appPath && nativeMacBundle(appPath)
+    && JSON.parse(readFileSync(join(appPath, "Contents", "Resources", "desktop-bundle.json"), "utf8")).executableSha256 === createHash("sha256").update(macMenuBarExecutable()).digest("hex");
+  if (existsSync(appPath) && !adopting) assertOwnedMacApp(appPath, ownedState);
   const existingContents = join(appPath, "Contents");
   const stableCommand = betterCodexProfile === "stable" && existsSync(appPath) && previous?.platform === "darwin" && resolve(previous.launcher) === resolve(command[0]) && (previous.launcherArguments ?? []).length === command.length - 1 && (previous.launcherArguments ?? []).every((argument, index) => argument === command[index + 1])
     ? [previous.launcher, ...(previous.launcherArguments ?? [])]
     : command;
   const [launcher, ...launcherArguments] = stableCommand;
-  const expectedScript = macLauncherScript(stableCommand);
   const ownershipToken = ownedState?.ownershipToken ?? randomUUID();
+  if (adopting || ownedState?.desktopBundle && nativeMacBundle(appPath)) {
+    return { platform: "darwin", launcher, launcherArguments, appPath, desktopBundle: true } satisfies LaunchIntegrationState;
+  }
   if (existsSync(appPath)) {
     const existingExecutable = join(existingContents, "MacOS", "better-codex-launcher");
     if (!existsSync(existingExecutable) || lstatSync(existingExecutable).isSymbolicLink()) {
       throw new Error("mac_launcher_replacement_required");
     }
-    writeFileSync(existingExecutable, expectedScript, { mode: 0o755 });
-    chmodSync(existingExecutable, 0o755);
-    const resources = join(existingContents, "Resources");
-    writeMacAppIcon(resources);
-    writeFileSync(join(resources, MAC_OWNERSHIP_FILE), ownershipToken, { mode: 0o600 });
-    try {
-      execFileSync("/usr/bin/touch", [appPath]);
-      execFileSync("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister", ["-f", appPath], { stdio: "ignore" });
-    } catch {
-    }
-    return { platform: "darwin", launcher, launcherArguments, appPath, ownershipToken } satisfies LaunchIntegrationState;
   }
   const temporaryApp = `${appPath}.tmp.${randomUUID()}`;
   const contents = join(temporaryApp, "Contents");
@@ -363,20 +361,30 @@ function installMacLauncher(command: string[], previous: LaunchIntegrationState 
 <plist version="1.0"><dict>
 <key>CFBundleDevelopmentRegion</key><string>en</string>
 <key>CFBundleDisplayName</key><string>${launcherDisplayName}</string>
-<key>CFBundleExecutable</key><string>better-codex-launcher</string>
+<key>CFBundleExecutable</key><string>better-codex-menubar</string>
 <key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundleIdentifier</key><string>${MAC_BUNDLE_ID}</string>
 <key>CFBundleName</key><string>${launcherDisplayName}</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>1.0</string>
+<key>LSUIElement</key><true/>
+<key>LSMinimumSystemVersion</key><string>13.0</string>
+<key>BetterCodexProfile</key><string>${betterCodexProfile}</string>
 </dict></plist>
 `);
-    const executable = join(macos, "better-codex-launcher");
-    writeFileSync(executable, expectedScript);
+    const executable = join(macos, "better-codex-menubar");
+    writeFileSync(executable, macMenuBarExecutable());
     chmodSync(executable, 0o755);
     writeMacAppIcon(resources);
+    writeFileSync(join(resources, "MenuBarTemplate.png"), macMenuBarIcon());
+    writeFileSync(join(resources, "desktop-bundle.json"), JSON.stringify({ kind: "better-codex-desktop", schemaVersion: 1 }));
     writeFileSync(join(resources, MAC_OWNERSHIP_FILE), ownershipToken, { mode: 0o600 });
-    renameSync(temporaryApp, appPath);
+    // Retain the owned old app until replacement succeeds.
+    const backup = `${appPath}.previous.${randomUUID()}`;
+    if (existsSync(appPath)) renameSync(appPath, backup);
+    try { renameSync(temporaryApp, appPath); }
+    catch (error) { if (existsSync(backup)) renameSync(backup, appPath); throw error; }
+    rmSync(backup, { recursive: true, force: true });
   } catch (error) {
     rmSync(temporaryApp, { recursive: true, force: true });
     throw error;
@@ -386,7 +394,27 @@ function installMacLauncher(command: string[], previous: LaunchIntegrationState 
     execFileSync("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister", ["-f", appPath], { stdio: "ignore" });
   } catch {
   }
-  return { platform: "darwin", launcher, launcherArguments, appPath, ownershipToken } satisfies LaunchIntegrationState;
+  return { platform: "darwin", launcher, launcherArguments, appPath, ownershipToken, desktopBundle: true } satisfies LaunchIntegrationState;
+}
+
+function nativeMacBundle(appPath: string) {
+  const contents = join(appPath, "Contents");
+  const manifest = join(contents, "Resources", "desktop-bundle.json");
+  const executable = join(contents, "MacOS", "better-codex-menubar");
+  try {
+    return !lstatSync(appPath).isSymbolicLink() && !lstatSync(contents).isSymbolicLink()
+      && !lstatSync(manifest).isSymbolicLink() && !lstatSync(executable).isSymbolicLink()
+      && macBundleIdentifier(join(contents, "Info.plist")) === MAC_BUNDLE_ID
+      && JSON.parse(readFileSync(manifest, "utf8")).kind === "better-codex-desktop";
+  } catch { return false; }
+}
+
+export function openMacMenuBar() {
+  if (process.platform !== "darwin" || process.env.BETTER_CODEX_DISABLE_MENUBAR === "1" || process.env.NODE_TEST_CONTEXT) return;
+  const state = readState();
+  if (!state?.appPath || !existsSync(join(state.appPath, "Contents", "MacOS", "better-codex-menubar"))) return;
+  assertOwnedMacApp(state.appPath, state);
+  execFileSync("/usr/bin/open", ["-g", state.appPath, "--args", "--background", "--home", betterCodexHome], { stdio: "ignore", timeout: 5000 });
 }
 
 function restoreLegacyWindowsShortcuts(state: LaunchIntegrationState) {
