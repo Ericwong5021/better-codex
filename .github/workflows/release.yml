@@ -93,15 +93,26 @@ jobs:
       - run: npm run build
       - run: npm test
       - name: Prepare Apple signing and notarization
+        id: macos-signing
         if: runner.os == 'macOS'
         uses: ./.github/actions/macos-signing
         with:
+          # Explicitly authorized exception for this release only; future releases remain strict.
+          allow-ad-hoc: ${{ github.ref_name == 'v0.4.18' }}
           certificate: ${{ secrets.BETTER_CODEX_MACOS_CERTIFICATE }}
           certificate-password: ${{ secrets.BETTER_CODEX_MACOS_CERTIFICATE_PASSWORD }}
           api-key: ${{ secrets.BETTER_CODEX_MACOS_NOTARY_API_KEY }}
           key-id: ${{ secrets.BETTER_CODEX_MACOS_NOTARY_KEY_ID }}
           issuer-id: ${{ secrets.BETTER_CODEX_MACOS_NOTARY_ISSUER_ID }}
       - run: npm run package:binary
+      - name: Record macOS distribution status
+        if: runner.os == 'macOS'
+        env:
+          SIGNING_MODE: ${{ steps.macos-signing.outputs.signing-mode }}
+          PACKAGE_RUNNER: ${{ matrix.runner }}
+        shell: bash
+        run: |
+          node -e 'const fs = require("node:fs"); const mode = process.env.SIGNING_MODE; if (!["ad-hoc-unnotarized", "developer-id-notarized"].includes(mode)) throw new Error("macos_distribution_status_missing"); fs.writeFileSync(`release/macos-distribution-${process.env.PACKAGE_RUNNER}.json`, JSON.stringify({ runner: process.env.PACKAGE_RUNNER, signingMode: mode }));'
       - name: Remove temporary signing identity
         if: always() && runner.os == 'macOS' && env.BETTER_CODEX_MACOS_KEYCHAIN != ''
         shell: bash
@@ -118,6 +129,7 @@ jobs:
             release/better-codex-cli-*
             release/better-codex-core-*
             release/better-codex-*.dmg
+            release/macos-distribution-*.json
 
   release:
     needs:
@@ -155,22 +167,39 @@ jobs:
         with:
           name: preview-feed-manifest
           path: preview-release/update-manifest.json
-      - env:
+      - name: Publish versioned stable release
+        env:
           GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
           set -euo pipefail
+          notes="$RUNNER_TEMP/better-codex-release-notes.md"
+          gh api --method POST "repos/$GITHUB_REPOSITORY/releases/generate-notes" -f tag_name="$GITHUB_REF_NAME" -f target_commitish="$GITHUB_SHA" --jq .body > "$notes"
+          node - "$notes" <<'NODE'
+          const fs = require('node:fs');
+          const runners = ['macos-15', 'macos-15-intel'];
+          const statuses = runners.map(runner => {
+            const status = JSON.parse(fs.readFileSync(`release/macos-distribution-${runner}.json`, 'utf8'));
+            if (status.runner !== runner || !['ad-hoc-unnotarized', 'developer-id-notarized'].includes(status.signingMode)) throw new Error('macos_distribution_status_invalid');
+            if (status.signingMode === 'ad-hoc-unnotarized' && process.env.GITHUB_REF_NAME !== 'v0.4.18') throw new Error('macos_unnotarized_release_not_authorized');
+            return `${runner === 'macos-15' ? 'Apple Silicon' : 'Intel'}: ${status.signingMode === 'ad-hoc-unnotarized' ? 'ad-hoc signed DMG; not notarized by Apple. macOS may require explicit approval to open it.' : 'Developer ID signed and notarized by Apple.'}`;
+          });
+          fs.appendFileSync(process.argv[2], `\n\n### macOS distribution\n\n${statuses.map(status => `- ${status}`).join('\n')}\n\nThe Better Codex update manifest and checksums are cryptographically signed independently of Apple signing and notarization.\n`);
+          NODE
+          assets=(release/better-codex-cli-* release/better-codex-core-* release/better-codex-*.dmg release/better-codex-compatibility-*.json release/checksums.txt release/checksums.sig release/install.ps1 release/install.sh release/selfhost.sh release/SELF_HOSTING.md release/source-commit.txt release/update-manifest.json release/update-public-key.pem)
           if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
             test "$(gh release view "${GITHUB_REF_NAME}" --json tagName,isDraft,isPrerelease --jq '[.tagName, .isDraft, .isPrerelease] | @tsv')" = "${GITHUB_REF_NAME}"$'\tfalse\tfalse'
-            for path in release/*; do
+            for path in "${assets[@]}"; do
               name="$(basename "$path")"
               if ! gh release view "${GITHUB_REF_NAME}" --json assets --jq '.assets[].name' | grep -Fxq "$name"; then
                 gh release upload "${GITHUB_REF_NAME}" "$path"
               fi
             done
+            gh release edit "${GITHUB_REF_NAME}" --notes-file "$notes"
           else
-            gh release create "${GITHUB_REF_NAME}" release/* --generate-notes --verify-tag
+            gh release create "${GITHUB_REF_NAME}" "${assets[@]}" --notes-file "$notes" --verify-tag
           fi
-          for path in release/*; do
+          for path in "${assets[@]}"; do
             name="$(basename "$path")"
             gh release view "${GITHUB_REF_NAME}" --json assets --jq '.assets[].name' | grep -Fxq "$name"
           done

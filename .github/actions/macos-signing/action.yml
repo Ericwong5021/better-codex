@@ -1,10 +1,10 @@
 name: Prepare macOS distribution signing
-description: Prepare Developer ID signing, or explicitly allow an ad-hoc Preview when no Apple credentials are configured.
+description: Prepare Developer ID signing, or explicitly allow ad-hoc distribution when no Apple credentials are configured.
 inputs:
   allow-ad-hoc:
     required: false
     default: "false"
-    description: Allow an unnotarized test package only when every Apple credential is absent
+    description: Allow an explicitly authorized unnotarized package only when every Apple credential is absent
   certificate:
     required: true
     description: Base64 Developer ID Application P12
@@ -45,7 +45,7 @@ runs:
         if [ "$ALLOW_AD_HOC" = "true" ] && [ -z "$CERTIFICATE$CERTIFICATE_PASSWORD$API_KEY$KEY_ID$ISSUER_ID" ]; then
           printf 'BETTER_CODEX_MACOS_SIGN_IDENTITY=-\nBETTER_CODEX_MACOS_NOTARY_PROFILE=\nBETTER_CODEX_REQUIRE_MACOS_SIGNING=0\n' >> "$GITHUB_ENV"
           printf 'signing-mode=ad-hoc-unnotarized\n' >> "$GITHUB_OUTPUT"
-          echo '::warning::Preview DMGs will use ad-hoc signing and are not notarized by Apple.'
+          echo '::warning::DMGs will use ad-hoc signing and are not notarized by Apple.'
           exit 0
         fi
         if [ -z "$CERTIFICATE" ] || [ -z "$CERTIFICATE_PASSWORD" ] || [ -z "$API_KEY" ] || [ -z "$KEY_ID" ] || [ -z "$ISSUER_ID" ]; then
