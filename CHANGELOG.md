@@ -4,6 +4,15 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.18] - 2026-10-01
+
+- Fix Windows PowerShell installation rollback caused by Session Host discovery detecting its own query process (#19).
+- Add a macOS menu bar app with the Better Codex logo silhouette, Runtime and injection status, silent startup, and task-preserving exit.
+- Package the desktop app and bundled Node.js in a drag-to-install DMG, and migrate the Runtime service and MCP registration while preserving existing tasks and the Session Host.
+- Keep Task board, Agents, and Projects visible across native navigation, retain moved controls, and preserve the native sidebar layout.
+- Report missing or hidden injected content instead of claiming desktop readiness.
+- Reject conflicting local packages under an installed version and reserve sufficient space for DMG creation.
+
 ## [0.4.18-beta.5] - 2026-10-01
 
 - Preserve the native sidebar's pinned or unpinned layout when opening Task board, Agents, and Projects; desktop entries now render in the current workspace without switching to the full-width MCP route.
@@ -1124,7 +1133,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.18-beta.5...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.18...HEAD
+[0.4.18]: https://github.com/Ericwong5021/better-codex/compare/v0.4.17...v0.4.18
 [0.4.18-beta.5]: https://github.com/Ericwong5021/better-codex/compare/v0.4.18-beta.4...v0.4.18-beta.5
 [0.4.18-beta.4]: https://github.com/Ericwong5021/better-codex/compare/v0.4.18-beta.3...v0.4.18-beta.4
 [0.4.18-beta.3]: https://github.com/Ericwong5021/better-codex/compare/v0.4.18-beta.2...v0.4.18-beta.3
