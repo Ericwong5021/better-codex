@@ -162,7 +162,10 @@ test("injection bootstraps before opening the panel and hides the native recover
   assert.ok(injectedEntrySource.slice(mountStart, mountEnd).includes("void ensureBootstrapReady().catch(error =>"));
   assert.ok(injectedEntrySource.slice(openStart, openEnd).includes("void load();"));
   assert.doesNotMatch(injectedEntrySource.slice(openStart, openEnd), /const ready = bootstrapReady/);
-  assert.ok(source.includes("ready: () => bootstrapReady"));
+  assert.ok(source.includes("ready: () => bootstrapReady && !injectionSurfaceError()"));
+  assert.ok(source.includes('return "injection_navigation_unmounted"'));
+  assert.ok(source.includes('return "injection_content_mount_unavailable"'));
+  assert.ok(source.includes('return "injection_surface_render_unavailable"'));
   assert.ok(source.includes('appendDiagnostic("bootstrap_failed"'));
   assert.ok(source.includes('document.querySelectorAll("[data-better-codex-launcher-hidden]").forEach(node => node.removeAttribute("data-better-codex-launcher-hidden"))'));
 });
@@ -1001,12 +1004,14 @@ test("web injection shares the Codex user profile with the host shell", () => {
 test("mountPanel and style hide external MCP app host overlay in Codex 26.915", () => {
   const source = injectionSource(4317, "test-token", "install");
 
-  assert.match(source, /html\[data-better-codex-open="true"\] body > div\.fixed\.inset-0:has\(webview\[title="Better Codex"\]\)/);
-  assert.match(source, /html\[data-better-codex-open="true"\] body > div\[class\*="fixed"\]:has\(webview\[title="Better Codex"\]\)/);
+  assert.ok(source.includes('data-better-codex-external-mcp-host-hidden'));
+  assert.doesNotMatch(source, /html\[data-better-codex-open="true"\] body > div[^\n]*:has\(webview/);
   assert.ok(source.includes("function hideExternalMcpAppHost()"));
   assert.ok(source.includes('view.title !== "Better Codex"'));
   assert.ok(source.includes('view.closest("body > div.fixed.inset-0, body > div[class*=\'fixed\'], body > div")'));
-  assert.ok(source.includes("host.setAttribute(HIDDEN, \"true\")"));
+  assert.ok(source.includes('!host.contains(panel)'));
+  assert.ok(source.includes('host.setAttribute(EXTERNAL_MCP_HIDDEN, "true")'));
   assert.ok(source.includes("hideExternalMcpAppHost()"));
-  assert.match(source, /const surface = layout\?\.parentElement \|\| document\.querySelector\("main > div"\);/);
+  assert.ok(source.includes('return findInjectedMount(SELECTORS, OWNED)'));
+  assert.match(injectedEntrySource, /function mountPanel\(\)[\s\S]*?restoreNative\(\);\s*const surface = findMount\(\);/);
 });

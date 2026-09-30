@@ -275,6 +275,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
       document.querySelectorAll('[data-better-codex-owned="true"]').forEach(node => node.remove());
       document.querySelectorAll('[data-better-codex-native-hidden="true"]').forEach(node => node.removeAttribute('data-better-codex-native-hidden'));
       document.querySelectorAll('[data-better-codex-page-host="true"]').forEach(node => node.removeAttribute('data-better-codex-page-host'));
+      document.querySelectorAll('[data-better-codex-external-mcp-host-hidden="true"]').forEach(node => node.removeAttribute('data-better-codex-external-mcp-host-hidden'));
       document.documentElement.removeAttribute('data-better-codex-open');
       delete window.__betterCodexInjection__;
       return { uninstalled: true };

@@ -3,6 +3,7 @@ import { createCommandObserver } from "./core/command-observer.js";
 import { conversationEmptyState } from "./features/board/model.js";
 import { sessionThreadMissing } from "../session-execution-policy.js";
 import { createHostAdapter } from "./hosts/index.js";
+import { findInjectedMount, injectedElementVisible } from "./hosts/injected-mount.js";
 import { applyHostTheme } from "./theme/apply.js";
 import { themeIsDegraded } from "./theme/diagnostics.js";
 import { createEmptyState } from "./components/empty-state.js";
@@ -59,6 +60,7 @@ export function install(config: Record<string, any>) {
     const OWNED = "data-better-codex-owned";
     const HIDDEN = "data-better-codex-native-hidden";
     const HOST = "data-better-codex-page-host";
+    const EXTERNAL_MCP_HIDDEN = "data-better-codex-external-mcp-host-hidden";
     const BASE_URL = config.baseUrl;
     const BRIDGE_TOKEN = config.bridgeToken;
     const BETTER_CODEX_LOGO_URL = config.logoUrl;
@@ -1105,8 +1107,7 @@ export function install(config: Record<string, any>) {
         #${ENTRY_ID}[aria-current="page"], #${AGENTS_ENTRY_ID}[aria-current="page"], #${PROJECTS_ENTRY_ID}[aria-current="page"], #${MORE_ENTRY_ID}[aria-current="page"] { background: var(--bc-color-hover); }
         html[data-better-codex-open="true"] ${SELECTORS.sidebarNavigation} [aria-current="page"]:not(#${ENTRY_ID}):not(#${AGENTS_ENTRY_ID}):not(#${PROJECTS_ENTRY_ID}):not(#${MORE_ENTRY_ID}) { background: transparent !important; }
         html[data-better-codex-open="true"] ${SELECTORS.sidebarNavigation} [aria-current="page"]:not(#${ENTRY_ID}):not(#${AGENTS_ENTRY_ID}):not(#${PROJECTS_ENTRY_ID}):not(#${MORE_ENTRY_ID}) .text-token-list-active-selection-foreground { color: var(--color-token-foreground) !important; }
-        html[data-better-codex-open="true"] body > div.fixed.inset-0:has(webview[title="Better Codex"]),
-        html[data-better-codex-open="true"] body > div[class*="fixed"]:has(webview[title="Better Codex"]) { display: none !important; pointer-events: none !important; }
+        [${EXTERNAL_MCP_HIDDEN}="true"] { display: none !important; pointer-events: none !important; }
         [${HOST}="true"] { position: relative !important; z-index: 31 !important; pointer-events: none !important; }
         [${HIDDEN}="true"] { visibility: hidden !important; pointer-events: none !important; }
         ${config.designSystemCss}
@@ -1570,10 +1571,7 @@ export function install(config: Record<string, any>) {
 
     function findMount() {
       if (HOST_KIND === "web") return document.querySelector("[data-better-codex-web-surface]");
-      const frame = document.querySelector(SELECTORS.contentFrame);
-      const layout = frame?.closest(SELECTORS.contentLayout) || document.querySelector(SELECTORS.contentLayout);
-      const surface = layout?.parentElement || document.querySelector("main > div");
-      return surface?.closest("main") ? surface : (document.querySelector("main") || null);
+      return findInjectedMount(SELECTORS, OWNED);
     }
 
     function activeThreadRow() {
@@ -10507,15 +10505,20 @@ export function install(config: Record<string, any>) {
         if (view.title !== "Better Codex") continue;
         const host = view.closest("body > div.fixed.inset-0, body > div[class*='fixed'], body > div");
         if (host && host !== document.body && !host.contains(panel)) {
-          host.setAttribute(HIDDEN, "true");
+          host.setAttribute(EXTERNAL_MCP_HIDDEN, "true");
         }
       }
     }
 
     function mountPanel() {
       if (!active) return;
+      // Native routing may reuse a subtree hidden by the previous mount.
+      restoreNative();
       const surface = findMount();
-      if (!surface) return;
+      if (!surface) {
+        if (panel) panel.hidden = true;
+        return;
+      }
       if (!panel) {
         panel = createPanel();
         panelSizeCleanup = observeComponentSize(panel, componentContext("host", "panel-layout"));
@@ -10533,7 +10536,17 @@ export function install(config: Record<string, any>) {
     function restoreNative() {
       document.querySelectorAll('[' + HIDDEN + '="true"]').forEach(node => node.removeAttribute(HIDDEN));
       document.querySelectorAll('[' + HOST + '="true"]').forEach(node => node.removeAttribute(HOST));
+      document.querySelectorAll('[' + EXTERNAL_MCP_HIDDEN + '="true"]').forEach(node => node.removeAttribute(EXTERNAL_MCP_HIDDEN));
       document.documentElement.removeAttribute("data-better-codex-open");
+    }
+
+    function injectionSurfaceError() {
+      if (![entry, agentsEntry, projectsEntry].every(item => item?.isConnected)) return "injection_navigation_unmounted";
+      if (!active) return null;
+      if (!injectedElementVisible(panel)) return "injection_content_mount_unavailable";
+      const content = panel.querySelector(state.surface === "agents" ? "#better-codex-agents" : state.surface === "projects" ? "#better-codex-projects" : "#better-codex-board");
+      if (!injectedElementVisible(content) || !panel.querySelector(".better-codex-toolbar button")) return "injection_surface_render_unavailable";
+      return null;
     }
 
     function isBetterCodexRoute() {
@@ -10774,7 +10787,11 @@ export function install(config: Record<string, any>) {
       syncSessionHandoffFromHost();
       if (active && routeSeen && !betterCodexRoute) return close({ resume: true, suppressRoute: false });
       if (!active && betterCodexRoute && !routeSuppressed && availableSurfaces.includes(resumeSurface)) return open(resumeSurface);
-      if (active) mountPanel();
+      if (active) {
+        const hadPanel = Boolean(panel);
+        mountPanel();
+        if (!hadPanel && panel) render();
+      }
     }
 
     function scheduleRefresh() {
@@ -10891,7 +10908,7 @@ export function install(config: Record<string, any>) {
       updateTimer = setInterval(() => { if (!document.hidden) void checkUpdateNotice(); }, 15000);
     }
 
-    window.__betterCodexInjection__ = { version: VERSION, bundleChecksum: config.bundleChecksum, profile: PROFILE, host: HOST_KIND, endpoint: BASE_URL, refresh, pulse: () => true, ready: () => bootstrapReady, bootstrapError: () => bootstrapFailure, open: openRoute, openThread, close, destroy, reportError: reportGlobalError };
+    window.__betterCodexInjection__ = { version: VERSION, bundleChecksum: config.bundleChecksum, profile: PROFILE, host: HOST_KIND, endpoint: BASE_URL, refresh, pulse: () => true, ready: () => bootstrapReady && !injectionSurfaceError(), bootstrapError: () => bootstrapFailure || injectionSurfaceError(), open: openRoute, openThread, close, destroy, reportError: reportGlobalError };
     document.addEventListener("click", onClick, true);
     document.addEventListener("pointerdown", onSessionPointerDown, true);
     document.addEventListener("pointermove", onSessionPointerMove, true);

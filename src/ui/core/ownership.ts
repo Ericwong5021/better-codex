@@ -21,5 +21,7 @@ export function destroyOwnedComponents(root: Node) {
 }
 
 export function destroyRemovedComponents(records: MutationRecord[]) {
-  records.forEach(record => record.removedNodes.forEach(destroyOwnedComponents));
+  records.forEach(record => record.removedNodes.forEach(node => {
+    if (!node.isConnected) destroyOwnedComponents(node);
+  }));
 }
