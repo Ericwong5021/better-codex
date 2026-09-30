@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-const installer = readFileSync(new URL("../scripts/install.sh", import.meta.url), "utf8");
+const installer = readFileSync(new URL("../scripts/install.sh", import.meta.url), "utf8").replace(/\r\n/g, "\n");
 const start = installer.indexOf('run_with_timeout 10 "$BIN_DIR/better-codex" version\n');
 const end = installer.indexOf('\nREADY_VERSION="$(installed_version', start);
 assert.ok(start >= 0 && end > start, "installer finalization section is missing");

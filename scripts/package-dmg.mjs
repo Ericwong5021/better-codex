@@ -1,12 +1,23 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, writeFile, copyFile, cp, rm, symlink } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile, copyFile, cp, rm, symlink, readdir, lstat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
 const digest = bytes => createHash("sha256").update(bytes).digest("hex");
 const nodeVersion = "22.22.0";
 const run = (command, args) => execFileSync(command, args, { stdio: "inherit" });
+
+async function contentBytes(directory) {
+  let bytes = 0;
+  for (const name of await readdir(directory)) {
+    const path = join(directory, name);
+    const entry = await lstat(path);
+    if (entry.isDirectory()) bytes += await contentBytes(path);
+    else if (entry.isFile()) bytes += entry.size;
+  }
+  return bytes;
+}
 
 export async function packageDmg({ root, output, archive, archiveDigest, version, architecture }) {
   const identity = process.env.BETTER_CODEX_MACOS_SIGN_IDENTITY || "-";
@@ -89,7 +100,10 @@ export async function packageDmg({ root, output, archive, archiveDigest, version
     await symlink("/Applications", join(stage, "Applications"));
     await writeFile(join(stage, "安装说明.txt"), "将 Better Codex 拖入 Applications，然后打开。\n程序静默运行，状态显示在屏幕顶部菜单栏。\n从菜单中打开 Codex 可启用任务看板；首次使用需要已安装 Codex 桌面端。\n退出 Better Codex 会停止看板服务，已有任务保留其执行进程；重新打开后同步结果。\n");
     await rm(destination, { force: true });
-    run("hdiutil", ["create", "-volname", "Better Codex", "-srcfolder", stage, "-format", "UDZO", "-ov", destination]);
+    // Automatic sizing can leave too little room for the bundled Node on newer
+    // macOS runners. Reserve filesystem/copy headroom using logical file sizes.
+    const sizeMiB = Math.max(256, Math.ceil((await contentBytes(stage)) * 1.25 / 1024 / 1024) + 64);
+    run("hdiutil", ["create", "-volname", "Better Codex", "-srcfolder", stage, "-fs", "HFS+", "-size", `${sizeMiB}m`, "-format", "UDZO", "-ov", destination]);
     if (identity !== "-") run("codesign", ["--sign", identity, "--timestamp", destination]);
     if (notaryProfile) {
       notarize(destination);
