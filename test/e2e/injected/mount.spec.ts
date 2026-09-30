@@ -112,3 +112,33 @@ test("without a known layout the panel fills main instead of a small native head
   await page.locator('#better-codex-panel [data-view="assigned"]').click();
   await expect(page.locator('#better-codex-panel [data-view="assigned"]')).toHaveClass(/is-active/);
 });
+
+for (const pinned of [true, false]) {
+  test(`desktop surfaces preserve the native sidebar ${pinned ? "pinned" : "unpinned"} layout`, async ({ page }) => {
+    await installFixture(page, `<style>body[data-sidebar-pinned="true"] main{margin-left:320px}#native-sidebar{position:fixed;left:64px;top:0;width:256px;height:600px}</style><nav id="native-sidebar">Native sidebar</nav>${content}`);
+    await page.evaluate(pinned => {
+      document.body.dataset.sidebarPinned = String(pinned);
+      (window as any).nativeNavigations = [];
+      window.addEventListener("message", event => {
+        if (event.data?.type !== "navigate-to-route") return;
+        (window as any).nativeNavigations.push(event.data.path);
+        // The native MCP destination switches the shell to a full-width workspace.
+        if (event.data.path.startsWith("/mcp-app/")) document.body.dataset.sidebarPinned = "false";
+      });
+    }, pinned);
+    for (const entry of ["better-codex-entry", "better-codex-agents-entry", "better-codex-projects-entry"]) {
+      await page.locator(`#${entry}`).click();
+      await expect(page.locator("#better-codex-panel")).toBeVisible();
+      await expect(page.locator("body")).toHaveAttribute("data-sidebar-pinned", String(pinned));
+      expect(await page.evaluate(() => (window as any).nativeNavigations)).toEqual([]);
+      expect((await page.locator("#better-codex-panel").boundingBox())?.x).toBe(pinned ? 320 : 64);
+      await expect(page.getByText("Native content", { exact: true })).toBeHidden();
+    }
+    // Native sidebar changes remain authoritative while Better Codex is open.
+    await page.evaluate(pinned => { document.body.dataset.sidebarPinned = String(!pinned); }, pinned);
+    expect((await page.locator("#better-codex-panel").boundingBox())?.x).toBe(pinned ? 64 : 320);
+    await page.getByRole("button", { name: "Tasks", exact: true }).click();
+    await expect(page.getByText("Native content", { exact: true })).toBeVisible();
+    await expect(page.locator("body")).toHaveAttribute("data-sidebar-pinned", String(!pinned));
+  });
+}

@@ -10559,6 +10559,8 @@ export function install(config: Record<string, any>) {
       if (!availableSurfaces.includes(surface)) surface = "issues";
       routeSuppressed = false;
       routeSeen = false;
+      // Desktop entries render inside the current native layout. Navigating to
+      // the MCP workspace changes the shell's sidebar placement and pin state.
       if (surface === "projects") {
         const projectId = typeof options.projectId === "string" ? options.projectId : "";
         if (projectId !== state.projectDetailId) {
@@ -10569,8 +10571,6 @@ export function install(config: Record<string, any>) {
         if (HOST_KIND === "web") {
           const mode = options.history || (webProjectRoute() ? "replace" : "push");
           syncWebProjectRoute(state.projectDetailId, mode);
-        } else {
-          window.postMessage({ type: NAVIGATION.messageType, path: BETTER_CODEX_ROUTE }, window.location.origin);
         }
       } else if (surface === "agents") {
         state.projectDetailId = "";
@@ -10586,12 +10586,10 @@ export function install(config: Record<string, any>) {
             const mode = options.history || (webAgentRoute() ? "replace" : "push");
             syncWebAgentRoute(agentKey, mode);
           }
-        } else {
-          window.postMessage({ type: NAVIGATION.messageType, path: BETTER_CODEX_ROUTE }, window.location.origin);
         }
       } else {
         state.projectDetailId = "";
-        if (HOST_KIND !== "web" || options.history !== "none") window.postMessage({ type: NAVIGATION.messageType, path: BETTER_CODEX_ROUTE }, window.location.origin);
+        if (HOST_KIND === "web" && options.history !== "none") window.postMessage({ type: NAVIGATION.messageType, path: BETTER_CODEX_ROUTE }, window.location.origin);
       }
       open(surface);
     }
