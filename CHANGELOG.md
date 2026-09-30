@@ -4,6 +4,12 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.18-beta.1] - 2026-10-01
+
+- Add a macOS menu bar app with the Better Codex logo silhouette, Runtime and injection status, and task-preserving exit.
+- Package the desktop app and bundled Node.js in a drag-to-install DMG, with Apple signing and notarization support for distribution.
+- Reject local packages whose core differs from the installed core under the same version before changing the installation.
+
 ## [0.4.17] - 2026-09-27
 
 - Accept Windows CRLF when checking that a native rail destination closes the board.
@@ -1101,7 +1107,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.17...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.18-beta.1...HEAD
+[0.4.18-beta.1]: https://github.com/Ericwong5021/better-codex/compare/v0.4.17...v0.4.18-beta.1
 [0.4.17]: https://github.com/Ericwong5021/better-codex/compare/v0.4.16...v0.4.17
 [0.4.16]: https://github.com/Ericwong5021/better-codex/compare/v0.4.15...v0.4.16
 [0.4.15]: https://github.com/Ericwong5021/better-codex/compare/v0.4.14...v0.4.15
