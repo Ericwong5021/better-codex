@@ -4,6 +4,10 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.18-beta.4] - 2026-10-01
+
+- Keep injected pages visible when Codex changes content containers, preserve components moved during navigation, and report unavailable content instead of claiming desktop readiness.
+
 ## [0.4.18-beta.3] - 2026-10-01
 
 - Accept Windows line endings in the bundled Node migration regression tests.
@@ -1116,7 +1120,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.18-beta.3...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.18-beta.4...HEAD
+[0.4.18-beta.4]: https://github.com/Ericwong5021/better-codex/compare/v0.4.18-beta.3...v0.4.18-beta.4
 [0.4.18-beta.3]: https://github.com/Ericwong5021/better-codex/compare/v0.4.18-beta.2...v0.4.18-beta.3
 [0.4.18-beta.2]: https://github.com/Ericwong5021/better-codex/compare/v0.4.18-beta.1...v0.4.18-beta.2
 [0.4.18-beta.1]: https://github.com/Ericwong5021/better-codex/compare/v0.4.17...v0.4.18-beta.1
