@@ -4,6 +4,10 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.18-beta.5] - 2026-10-01
+
+- Preserve the native sidebar's pinned or unpinned layout when opening Task board, Agents, and Projects; desktop entries now render in the current workspace without switching to the full-width MCP route.
+
 ## [0.4.18-beta.4] - 2026-10-01
 
 - Keep injected pages visible when Codex changes content containers, preserve components moved during navigation, and report unavailable content instead of claiming desktop readiness.
@@ -1120,7 +1124,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.18-beta.4...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.18-beta.5...HEAD
+[0.4.18-beta.5]: https://github.com/Ericwong5021/better-codex/compare/v0.4.18-beta.4...v0.4.18-beta.5
 [0.4.18-beta.4]: https://github.com/Ericwong5021/better-codex/compare/v0.4.18-beta.3...v0.4.18-beta.4
 [0.4.18-beta.3]: https://github.com/Ericwong5021/better-codex/compare/v0.4.18-beta.2...v0.4.18-beta.3
 [0.4.18-beta.2]: https://github.com/Ericwong5021/better-codex/compare/v0.4.18-beta.1...v0.4.18-beta.2
