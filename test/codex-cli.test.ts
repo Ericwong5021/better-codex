@@ -129,6 +129,23 @@ test("Windows Store Codex executable is copied outside WindowsApps before use", 
   }
 });
 
+test("Codex discovery recovers when the CLI is installed after a missing lookup", () => {
+  const installed = "/local/bin/codex";
+  const discovered = [null, installed];
+  const resolve = createCodexExecutablePathResolver(() => discovered.shift() ?? null, () => true, "darwin");
+  assert.equal(resolve(), "codex");
+  assert.equal(resolve(), installed);
+  assert.equal(resolve(), installed);
+});
+
+test("relative Codex commands are rediscovered before the next launch", () => {
+  const installed = "/local/bin/codex";
+  const discovered = ["codex", installed];
+  const resolve = createCodexExecutablePathResolver(() => discovered.shift() ?? null, () => true, "darwin");
+  assert.equal(resolve(), "codex");
+  assert.equal(resolve(), installed);
+});
+
 test("all background Codex launches use the shared executable resolver", () => {
   const worker = readFileSync(new URL("../src/worker.ts", import.meta.url), "utf8");
   const appServer = readFileSync(new URL("../src/session-app-server.ts", import.meta.url), "utf8");

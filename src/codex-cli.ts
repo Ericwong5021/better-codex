@@ -158,8 +158,8 @@ export function createCodexExecutablePathResolver(
   let cachedExecutable: string | undefined;
   return () => {
     const absolute = cachedExecutable && (platform === "win32" ? win32.isAbsolute(cachedExecutable) : posix.isAbsolute(cachedExecutable));
-    if (!cachedExecutable || (absolute && !pathExists(cachedExecutable))) cachedExecutable = discover() ?? "codex";
-    return cachedExecutable;
+    if (!cachedExecutable || !absolute || !pathExists(cachedExecutable)) cachedExecutable = discover() ?? undefined;
+    return cachedExecutable ?? "codex";
   };
 }
 
