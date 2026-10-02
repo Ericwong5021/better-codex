@@ -1568,7 +1568,7 @@ async function main() {
   if (command === "serve") return (await import("./server.js")).startServer();
   if (command === "web") return print(await openWebApp());
   if (command === "watch-inject") return watchInjection(Number(action || cdpPort), accessToken());
-  if (command === "mcp" && !action) return startMcpAppServer(async () => {
+  if (command === "mcp" && !action) return startMcpAppServer({ ensureRuntime, launchSidebar: async () => {
     await ensureRuntime();
     try {
       const injection = await cdpInject(cdpPort, activeRuntimePort(), accessToken(), false);
@@ -1588,7 +1588,7 @@ async function main() {
       spawnSelf(["launch", "--restart"], join(logPath, "launcher.log"));
       return { restarting: true };
     }
-  });
+  } });
   if (command === "mcp") {
     if (action === "install") return print(installMcp());
     if (action === "uninstall") return print(uninstallMcp());

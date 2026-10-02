@@ -4,25 +4,60 @@ import { injectionScript } from "../../../src/dom.js";
 const navigation = `<aside data-app-navigation-rail><div><button data-sidebar-destination="tasks" aria-label="Tasks"><span>Tasks</span></button><button data-sidebar-destination="better-codex" aria-label="Better Codex"><span>Better Codex</span></button></div></aside>`;
 const content = `<main><div id="surface"><div data-app-shell-main-content-layout><div class="app-shell-main-content-frame">Native content</div></div></div></main>`;
 
-async function installFixture(page: Page, markup: string) {
-  await page.route("http://injected.test/**", route => route.fulfill({ contentType: "text/html", body: `<!doctype html><html><head><style>html,body{margin:0;height:100%}aside{position:fixed;width:64px;height:100%;z-index:50}main{margin-left:64px;height:600px}main>div,[data-app-shell-main-content-layout]{height:100%}.fixed{position:fixed;inset:0}.app-shell-main-content-frame{height:100%}</style></head><body>${navigation}${markup}</body></html>` }));
+async function installFixture(page: Page, markup: string, host: "codex" | "web" = "codex") {
+  await page.route("http://injected.test/**", route => route.fulfill({ contentType: "text/html", body: `<!doctype html><html><head><style>html,body{margin:0;height:100%}aside{position:fixed;width:64px;height:100%;z-index:50}main{margin-left:64px;height:600px}main>div,[data-app-shell-main-content-layout]{height:100%}.fixed{position:fixed;inset:0}.app-shell-main-content-frame{height:100%}</style></head><body>${host === "codex" ? navigation : ""}${markup}</body></html>` }));
   await page.goto("http://injected.test/fixture");
-  await page.evaluate(() => {
+  await page.evaluate(host => {
+    let requestSequence = 0;
+    (window as any).requestIds = [];
     (window as any).betterCodexHost = {
-      capabilities: { nativeThreads: false, codexSemantics: false },
+      ...(host === "web" ? { requestId: () => "fixture-request-" + (++requestSequence) } : {}),
+      capabilities: { nativeThreads: false, codexSemantics: false, fileUploads: host === "web" },
       subscribe: () => () => {},
-      request: async ({ path }: { path: string }) => {
+      request: async ({ path, body, commandId, traceId }: { path: string; body?: string; commandId?: string; traceId?: string }) => {
+        (window as any).requestIds.push({ commandId, traceId });
         const agents = [{ id: "codex", name: "Codex", is_default: true, avatar: "", model: "gpt-5.6-sol" }];
         if (path.startsWith("/api/bootstrap")) return { locale: "en", agents, projects: [], user: { id: "fixture", name: "Fixture" }, agentModelCatalog: [], agentReasoningEfforts: [], autoDispatch: false };
         if (path.startsWith("/api/agents")) return agents;
         if (path.startsWith("/api/projects")) return [];
+        if (path.split("?")[0] === "/api/issues/attachments") {
+          const payload = JSON.parse(body || "{}");
+          (window as any).attachmentUploads = payload.files;
+          return { attachments: payload.files.map((file: { name: string; type: string }) => ({ path: "/fixture/cache/" + file.name, name: file.name, type: file.type })) };
+        }
         if (path.startsWith("/api/issues")) return [];
         if (path.startsWith("/api/update")) return { status: "current", supported: false };
         return {};
       },
     };
-  });
-  await page.evaluate(injectionScript(4317, "fixture-token", "install", "en", "codex"));
+    if (host === "web") {
+      const entries = [{ path: "/web", state: {} as Record<string, unknown> }];
+      let index = 0;
+      const routing = {
+        pathname: () => entries[index].path,
+        state: () => entries[index].state,
+        pushState: (state: Record<string, unknown>, path: string) => {
+          entries.splice(index + 1);
+          entries.push({ path, state });
+          index += 1;
+        },
+        replaceState: (state: Record<string, unknown>, path: string) => { entries[index] = { path, state }; },
+        back: () => {
+          if (index > 0) index -= 1;
+          window.dispatchEvent(new PopStateEvent("popstate"));
+        },
+      };
+      (window as any).betterCodexHost.routing = routing;
+      window.addEventListener("popstate", () => {
+        const path = routing.pathname();
+        const injection = (window as any).__betterCodexInjection__;
+        if (path.startsWith("/web/agents")) injection.open("agents", { agentKey: path.split("/")[3] || "", history: "none" });
+        else if (path.startsWith("/web/projects")) injection.open("projects", { projectId: path.split("/")[3] || "", history: "none" });
+        else injection.open("issues", { history: "none" });
+      });
+    }
+  }, host);
+  await page.evaluate(injectionScript(4317, "fixture-token", "install", "en", host));
   await expect(page.locator("#better-codex-entry")).toBeVisible();
   await expect.poll(() => page.evaluate(() => (window as any).__betterCodexInjection__.ready())).toBe(true);
 }
@@ -46,6 +81,84 @@ test("a fixed MCP container containing the product panel must remain visible", a
     await expect(page.locator(`#better-codex-panel ${buttons}`).first()).toBeVisible();
   }
   await expect.poll(() => page.evaluate(() => (window as any).__betterCodexInjection__.ready())).toBe(true);
+});
+
+test("the native full plugin entry stays visible and uses a route distinct from sidebar injection", async ({ page }) => {
+  await installFixture(page, `${content}<div id="native-plugin"><webview title="Better Codex"></webview></div>`);
+  const pluginEntry = page.getByRole("button", { name: "Better Codex", exact: true });
+  await expect(pluginEntry).toBeVisible();
+  await page.evaluate(() => {
+    const button = document.querySelector('[data-sidebar-destination="better-codex"]')!;
+    button.setAttribute("data-better-codex-launcher-hidden", "true");
+    (window as any).__betterCodexInjection__.refresh();
+    button.addEventListener("click", () => {
+      history.pushState({}, "", "/mcp-app/better-codex/board");
+      (window as any).__betterCodexInjection__.refresh();
+    });
+  });
+  await expect(pluginEntry).not.toHaveAttribute("data-better-codex-launcher-hidden");
+  await page.locator("#better-codex-entry").click();
+  await expect(page.locator("#better-codex-board")).toBeVisible();
+  await expect(pluginEntry).toBeVisible();
+  await pluginEntry.click();
+  await expect(page).toHaveURL("http://injected.test/mcp-app/better-codex/board");
+  await expect(page.locator("#better-codex-panel")).toBeHidden();
+  await page.evaluate(() => (window as any).__betterCodexInjection__.refresh());
+  await expect(page.locator("#better-codex-panel")).toBeHidden();
+  await expect(page.getByText("Native content", { exact: true })).toBeVisible();
+  await page.evaluate(() => {
+    history.pushState({}, "", "/mcp-app/better-codex/sidebar");
+    (window as any).__betterCodexInjection__.refresh();
+  });
+  await expect(page.locator("#better-codex-board")).toBeVisible();
+  await expect(pluginEntry).toBeVisible();
+});
+
+test("plugin routing keeps agent navigation and back inside the iframe", async ({ page }) => {
+  await installFixture(page, '<nav data-app-action-sidebar-section></nav><main data-better-codex-web-surface></main>', "web");
+  const initialBrowserState = await page.evaluate(() => ({ path: location.pathname, length: history.length, state: history.state }));
+  await page.locator("#better-codex-agents-entry").click();
+  await expect(page.locator("#better-codex-agents")).toBeVisible();
+  await expect.poll(() => page.evaluate(() => (window as any).betterCodexHost.routing.pathname())).toBe("/web/agents");
+  await page.locator(".better-codex-agent-actions button").click();
+  await expect.poll(() => page.evaluate(() => (window as any).betterCodexHost.routing.pathname())).toBe("/web/agents/new");
+  await expect(page.locator(".better-codex-agent-inspector")).toBeVisible();
+  await page.locator("[data-agent-close-pane]").click();
+  await expect.poll(() => page.evaluate(() => (window as any).betterCodexHost.routing.pathname())).toBe("/web/agents");
+  await page.locator("#better-codex-entry").click();
+  await expect(page.locator("#better-codex-board")).toBeVisible();
+  await expect.poll(() => page.evaluate(() => (window as any).betterCodexHost.routing.pathname())).toBe("/web");
+  expect(await page.evaluate(() => ({ path: location.pathname, length: history.length, state: history.state }))).toEqual(initialBrowserState);
+});
+
+test("plugin file uploads cache pathless files and preview images without blob URLs", async ({ page }) => {
+  await installFixture(page, '<nav data-app-action-sidebar-section></nav><main data-better-codex-web-surface></main>', "web");
+  await page.locator("#better-codex-entry").click();
+  await page.locator(".better-codex-create-primary").click();
+  const chooserPromise = page.waitForEvent("filechooser");
+  await page.locator("[data-dialog-attach]").click();
+  const chooser = await chooserPromise;
+  const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aWQAAAABJRU5ErkJggg==";
+  await chooser.setFiles([
+    { name: "requirements.txt", mimeType: "text/plain", buffer: Buffer.from("plugin attachment contents") },
+    { name: "preview.png", mimeType: "image/png", buffer: Buffer.from(png, "base64") },
+  ]);
+  await expect(page.locator(".better-codex-attachment-chip")).toHaveCount(2);
+  await expect(page.locator(".better-codex-attachment-chip").first()).toHaveAttribute("title", "/fixture/cache/requirements.txt");
+  await expect(page.locator(".better-codex-attachment-preview")).toHaveAttribute("src", "data:image/png;base64," + png);
+  expect(await page.evaluate(() => (window as any).attachmentUploads)).toEqual([
+    { name: "requirements.txt", type: "text/plain", data: "data:text/plain;base64," + Buffer.from("plugin attachment contents").toString("base64") },
+    { name: "preview.png", type: "image/png", data: "data:image/png;base64," + png },
+  ]);
+  const stored = await page.evaluate(() => JSON.parse(sessionStorage.getItem("better-codex-create-draft") || "{}"));
+  expect(JSON.stringify(stored)).toContain("/fixture/cache/requirements.txt");
+  expect(stored.requestId).toMatch(/^fixture-request-[0-9]+$/);
+  const requestIds = await page.evaluate(() => (window as any).requestIds);
+  expect(requestIds.length).toBeGreaterThan(0);
+  for (const { commandId, traceId } of requestIds) {
+    expect(traceId).toMatch(/^fixture-request-[0-9]+$/);
+    if (commandId) expect(commandId).toMatch(/^[A-Za-z0-9_-]{8,200}$/);
+  }
 });
 
 test("route remount restores old hiding ownership and retains interactive project components", async ({ page }) => {

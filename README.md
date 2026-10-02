@@ -76,7 +76,7 @@ Better Codex works across many roles. If your work spans several Codex conversat
 
 ## A day with Better Codex
 
-1. Open `Task board` from the Codex sidebar to manage work, or `Agents` to configure Agent profiles.
+1. Open `Better Codex` from the Codex sidebar to use the task board, Agents, projects, and settings in the plugin page. Optional desktop integration also provides separate `Task board` and `Agents` entries.
 2. Create a project and capture a task, manually or straight from the conversation you're in.
 3. Assign it to yourself, the default Codex profile, or one of your Agent profiles.
 4. Keep manual mode for full control, or enable automatic mode and let ready Agent-owned tasks run.
@@ -128,7 +128,7 @@ No. Better Codex is an independent open-source project built on top of Codex Des
 It stays on your computer. Projects, tasks, assignments, conversations, Agent configuration, attachments, and run state live in the local SQLite database (`~/.better-codex/better-codex.db` on macOS, `%USERPROFILE%\.better-codex\better-codex.db` on Windows), and the Runtime listens on `127.0.0.1` only. Optional remote access sends live HTTPS/WSS traffic through your Relay while the Runtime is online; the Relay does not persist business data. See the [Self-hosting runbook](SELF_HOSTING.md) for the exact boundary.
 
 **Why does Better Codex register an MCP server?**<br>
-Codex uses the local MCP app to recognize the Better Codex app entry and route. This puts the task board into the Codex navigation flow instead of placing it over the last conversation route. The MCP server runs locally over stdio. It is not a cloud service and does not upload task data.
+The local MCP app provides the full Better Codex plugin page using the same UI as Web. It connects tasks, Agents, projects, and settings to the local Runtime over MCP. Credentials stay in the local MCP process, and Runtime remains the owner of task data. Optional desktop sidebar integration has its own route and does not cover the plugin page.
 
 **Will it break my Codex?**<br>
 The app entry and route are registered through the local MCP server. The page integration uses the desktop app's local CDP interface and page structure. It doesn't patch Codex binaries. A Codex update can occasionally require a matching Better Codex compatibility update; when that happens, an update notice appears inside Codex. If anything looks off, run `better-codex doctor`.

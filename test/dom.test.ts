@@ -43,6 +43,21 @@ test("generated injection script is valid JavaScript", () => {
   assert.doesNotMatch(source, /localizeOwnedTree|localizedText|translateText/);
 });
 
+test("UI request IDs stay admissible without secure-context UUID support", () => {
+  const start = injectedEntrySource.indexOf("    function uiRequestId() {");
+  const end = injectedEntrySource.indexOf("    const HOST_ROUTING", start);
+  const createId = new Function("window", "globalThis", injectedEntrySource.slice(start, end) + "return uiRequestId();");
+  const validId = /^[A-Za-z0-9_-]{8,200}$/;
+  let nativeCalls = 0;
+  assert.equal(createId({ betterCodexHost: { requestId: () => "host-request-1234" } }, { crypto: { randomUUID: () => { nativeCalls += 1; return "native-request-1234"; } } }), "host-request-1234");
+  assert.equal(nativeCalls, 0);
+  assert.equal(createId({}, { crypto: { randomUUID: () => "native-request-1234" } }), "native-request-1234");
+  assert.match(createId({ betterCodexHost: { requestId: () => "0.3.10-invalid" } }, { crypto: { getRandomValues: (bytes: Uint8Array) => bytes.fill(127) } }), validId);
+  assert.match(createId({}, {}), validId);
+  assert.doesNotMatch(injectedEntrySource, /VERSION \+ "-(?:command|trace|create|reply|queue)/);
+  assert.ok(injectedEntrySource.includes('const traceId = uiRequestId();'));
+});
+
 test("web sidebar entries never become their own native clone reference", () => {
   const source = injectionSource(4317, "test-token", "install", "zh-CN", "web");
 
@@ -142,10 +157,10 @@ test("desktop injection mounts product entries on the navigation rail", () => {
   assert.ok(injectedEntrySource.includes('if (HOST_KIND !== "web") return ensureDesktopEntries();'));
   assert.ok(desktop.includes("placeRailSequence([entry, agentsEntry, projectsEntry], parent, anchor)"));
   assert.doesNotMatch(desktop, /reference\.after\(entry\)/);
-  assert.ok(desktop.includes("hideNativeLaunchers(mounted)"));
+  assert.ok(desktop.includes("restoreNativeLaunchers()"));
 });
 
-test("injection bootstraps before opening the panel and hides the native recovery launcher", () => {
+test("injection bootstraps before opening the panel and preserves the native plugin entry", () => {
   const source = injectionSource(4317, "test-token", "install");
   const bootstrapStart = injectedEntrySource.indexOf("function ensureBootstrapReady()");
   const loadStart = injectedEntrySource.indexOf("async function load()", bootstrapStart);
@@ -157,7 +172,8 @@ test("injection bootstraps before opening the panel and hides the native recover
   assert.ok(injectedEntrySource.slice(bootstrapStart, loadStart).includes('api("/api/bootstrap")'));
   assert.ok(injectedEntrySource.slice(bootstrapStart, loadStart).includes("if (bootstrapPromise) return bootstrapPromise"));
   assert.match(injectedEntrySource.slice(bootstrapStart, loadStart), /bootstrapReady = true;\s*bootstrapFailure = null;\s*ensureEntry\(\);/);
-  assert.ok(source.includes('[data-better-codex-launcher-hidden="true"] { display: none !important; }'));
+  assert.doesNotMatch(injectedEntrySource, /launcher-hidden="true".*display: none/);
+  assert.ok(injectedEntrySource.includes('button.removeAttribute("data-better-codex-launcher-hidden")'));
   assert.ok(injectedEntrySource.slice(mountStart, mountEnd).includes("refresh();"));
   assert.ok(injectedEntrySource.slice(mountStart, mountEnd).includes("void ensureBootstrapReady().catch(error =>"));
   assert.ok(injectedEntrySource.slice(openStart, openEnd).includes("void load();"));
@@ -427,13 +443,13 @@ test("opening an agent inspector hides the toolbar create action", () => {
 test("agent creation reuses the inspector side pane and opens mobile pages fullscreen without motion", () => {
   const source = injectionSource(4317, "test-token", "install");
   const css = betterCodexDesignSystemCss();
-  const closeInspector = source.slice(source.indexOf("function closeAgentInspector()"), source.indexOf("function agentInspector("));
+  const closeInspector = injectedEntrySource.slice(injectedEntrySource.indexOf("function closeAgentInspector()"), injectedEntrySource.indexOf("function agentInspector("));
   const mobileStart = css.indexOf("@media (max-width: 720px)", css.indexOf("@keyframes better-codex-inspector-enter"));
   const mobileCss = css.slice(mobileStart, css.indexOf("@media (hover: hover)", mobileStart));
   assert.ok(source.includes("function closeAgentInspector()"));
   assert.ok(closeInspector.includes('state.agentPane = "preview"'));
   assert.ok(closeInspector.includes("renderAgents()"));
-  assert.ok(closeInspector.includes("history.back()"));
+  assert.ok(closeInspector.includes("webHistoryBack()"));
   assert.ok(closeInspector.includes('syncWebAgentRoute("", "replace")'));
   assert.ok(!closeInspector.includes("transitionend"));
   assert.ok(source.includes('data-animate="enter"'));
@@ -897,8 +913,8 @@ test("create and reply dialogs persist cached attachment references", () => {
   assert.ok(source.includes("async function cacheRemoteAttachments(items)"));
   assert.ok(source.includes('api("/api/issues/attachments", { method: "POST", body: JSON.stringify({ files })'));
   assert.ok(source.includes("if (!issue || REMOTE && !RELAY) return;"));
-  assert.ok(source.includes("if (RELAY) await cacheRemoteAttachments(items);"));
-  assert.ok(source.includes("if (RELAY) await cacheRemoteAttachments(next);"));
+  assert.ok(source.includes("if (RELAY || FILE_UPLOADS) await cacheRemoteAttachments(items);"));
+  assert.ok(source.includes("if (RELAY || FILE_UPLOADS) await cacheRemoteAttachments(next);"));
   assert.ok(source.includes("files = await remoteFiles(draft.replyAttachments.filter(item => item.file));"));
   assert.ok(source.includes("message = withAttachments(text, draft.replyAttachments.filter(item => item.path));"));
   assert.ok(source.includes("function withAttachments(text, items = draft.attachments)"));

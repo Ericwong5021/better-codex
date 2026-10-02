@@ -57,7 +57,9 @@ Projection Sync 继续作为回滚兼容路径保留。Relay 模式根据实际�
 
 ## WebUI
 
-三个宿主继续消费同一个生成入口。宿主负责连接、鉴权、传输和主题；失败空状态的产品判断放在 Board model 中。
+桌面注入、本地 Web、Relay Web 和 MCP 插件页消费同一个生成入口。宿主负责连接、鉴权、传输、路由和主题；失败空状态的产品判断放在 Board model 中。
+
+MCP 插件页使用本机 stdio 进程代理 Runtime API，访问令牌只存在服务端。浏览器仍使用共享的持久命令队列、命令回执和更新观察器。实时更新通过有期限的 MCP 请求读取 Runtime 已有 SSE 流，游标绑定 Runtime 实例；插件不增加 rollout 扫描器。插件内部路由由宿主适配器维护，不修改 Codex 的地址与会话导航。完整插件页与可选的侧栏注入使用不同路由，插件入口不因注入就绪而隐藏。
 
 会话空状态分别表达尚未开始、正在启动、正在处理、启动失败和执行失败。缺失线程历史时要求先解决绑定问题，保留原始原因及输入，不再在失败状态中展示鼓励直接继续的通用空对话提示。
 
@@ -99,6 +101,7 @@ VPS 的 `request`、`request.running`、`operations/<id>.json` 和请求指纹�
 
 - `npm run verify`：类型、生成产物、设计 token 与现有后端验证。
 - `npm run test:web`：真实 Chromium 中的本地与远程共享 UI。
+- `test/e2e/mcp/board.spec.ts`：禁止直接联网的隔离插件页，经真实 MCP stdio 和临时 Runtime 验证持久任务、导航与实时更新。
 - `npm run test:acceptance`：流式 Web 链路和 Docker 自部署生命周期。
 - `test/gateway.test.ts` 的既有进程级场景现在模拟首次输入前未落盘，验证旧 bind → 同 worker 首次 turn → Runtime handoff → 终态释放。
 - `test/codex-cli.test.ts` 的既有 executable 约束检查跟随实际进程所有者迁移到 Session Host adapter。

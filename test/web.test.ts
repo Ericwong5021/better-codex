@@ -114,6 +114,14 @@ test("web host boots the shared DOM injection behind a local session", async () 
     assert.match(page.headers.get("content-security-policy") || "", /script-src 'self'/);
     assert.equal(page.headers.get("cross-origin-resource-policy"), "same-origin");
 
+    const unauthorizedMcpUi = await fetch(`${base}/api/ui/mcp`);
+    assert.equal(unauthorizedMcpUi.status, 401);
+    const mcpUi = await fetch(`${base}/api/ui/mcp`, { headers: { authorization: `Bearer ${token}` } }).then(response => response.json()) as { html: string; runtimeInstanceId: string };
+    assert.match(mcpUi.html, /data-better-codex-mcp="true"/);
+    assert.match(mcpUi.html, /BetterCodexInjected\.install/);
+    assert.ok(mcpUi.runtimeInstanceId);
+    assert.ok(!mcpUi.html.includes(token));
+
     const hostScript = await (await fetch(`${base}/web/host.js`)).text();
     assert.match(hostScript, /navigator\.language \|\| document\.documentElement\.lang/);
     assert.match(hostScript, /consumeFragmentToken\(\)/);

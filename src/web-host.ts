@@ -312,6 +312,17 @@ html[data-better-codex-read-only] [data-card-more] { display: none !important; }
 `;
 
 const webHostJavaScript = String.raw`
+const MCP_TRANSPORT = window.betterCodexMcpTransport;
+const fetchHost = (path, options) => MCP_TRANSPORT ? MCP_TRANSPORT.fetch(path, options) : fetch(path, options);
+const hostPathname = () => MCP_TRANSPORT?.routing.pathname() || location.pathname;
+function hostRequestId() {
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 15) | 64;
+  bytes[8] = (bytes[8] & 63) | 128;
+  const hex = Array.from(bytes, value => value.toString(16).padStart(2, "0")).join("");
+  return hex.slice(0, 8) + "-" + hex.slice(8, 12) + "-" + hex.slice(12, 16) + "-" + hex.slice(16, 20) + "-" + hex.slice(20);
+}
 const webCommandBodyLimit = ${webCommandBodyLimit.toString()};
 const webCommandTarget = ${webCommandTarget.toString()};
 const webCommandResponseDisposition = ${webCommandResponseDisposition.toString()};
@@ -484,7 +495,7 @@ function reportHostError(error, context = {}, present = true) {
     return;
   }
   hostErrorQueue.push({
-    id: crypto.randomUUID(),
+    id: hostRequestId(),
     fingerprint,
     time: new Date().toISOString(),
     name: value.name || "Error",
@@ -864,6 +875,10 @@ async function restoreRemoteSession() {
 }
 
 function expireSession() {
+  if (MCP_TRANSPORT) {
+    hostDiagnostic("mcp_runtime_unavailable", { host_kind: HOST_KIND });
+    return;
+  }
   cancelRemoteUpdateRecovery("session_expired");
   sessionToken = "";
   csrfToken = "";
@@ -1096,7 +1111,7 @@ async function drainCommandQueue() {
   if (!commandQueueEnabled || commandQueueDraining) return;
   commandQueueDraining = true;
   try {
-    if (!navigator.onLine || (REMOTE && !csrfToken) || (!REMOTE && !sessionToken)) return;
+    if (!navigator.onLine || (!MCP_TRANSPORT && ((REMOTE && !csrfToken) || (!REMOTE && !sessionToken)))) return;
     const commands = (await queuedCommands()).sort((left, right) => left.createdAt - right.createdAt);
     const blockedTargets = new Set();
     for (const command of commands) {
@@ -1110,7 +1125,7 @@ async function drainCommandQueue() {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 30_000);
       try {
-        const response = await fetch(command.path, { method: command.method, headers: commandHeaders(command), body: command.body, signal: controller.signal });
+        const response = await fetchHost(command.path, { method: command.method, headers: commandHeaders(command), body: command.body, signal: controller.signal });
         const payload = await response.json();
         const responseError = String(payload?.error || "");
         if (commandAcceptedOrTerminal(response.status, responseError)) {
@@ -1145,8 +1160,8 @@ async function requestRuntime(request) {
     throw new Error("invalid_bridge_request");
   }
   const method = String(request.method || "GET").toUpperCase();
-  if (method !== "GET" && !request.commandId) request.commandId = crypto.randomUUID();
-  request.traceId = /^[A-Za-z0-9_-]{8,200}$/.test(String(request.traceId || "")) ? String(request.traceId) : crypto.randomUUID();
+  if (method !== "GET" && !request.commandId) request.commandId = hostRequestId();
+  request.traceId = /^[A-Za-z0-9_-]{8,200}$/.test(String(request.traceId || "")) ? String(request.traceId) : hostRequestId();
   const traceId = request.traceId;
   const startedAt = Date.now();
   const timeoutMs = Math.min(Math.max(Number(request.timeoutMs) || (RELAY ? 45_000 : 10_000), 1_000), 300_000);
@@ -1190,7 +1205,7 @@ async function requestRuntime(request) {
       attemptCount += 1;
       const attemptStartedAt = Date.now();
       try {
-        return await fetch(request.path, { method, headers, body: request.body, signal: controller.signal });
+        return await fetchHost(request.path, { method, headers, body: request.body, signal: controller.signal, timeoutMs });
       } catch (error) {
         const retryable = method === "GET" && ["TypeError", "NetworkError"].includes(error?.name) && !controller.signal.aborted && attemptCount <= delays.length;
         if (!retryable) throw error;
@@ -1269,6 +1284,7 @@ function eventBlock(block, listener) {
 }
 
 function subscribeRuntime(listener) {
+  if (MCP_TRANSPORT) return MCP_TRANSPORT.subscribe(listener);
   let stopped = false;
   let controller = null;
   const connect = async () => {
@@ -1323,11 +1339,13 @@ function subscribeRuntime(listener) {
 window.betterCodexHost = Object.freeze({
   version: 1,
   kind: RELAY ? "web" : REMOTE ? "remote" : "web",
-  capabilities: Object.freeze({ issues: "read-write", agents: REMOTE && !RELAY ? "read-only" : "read-write", codexSemantics: !REMOTE || RELAY, liveUpdates: true, nativeThreads: false }),
+  capabilities: Object.freeze({ issues: "read-write", agents: REMOTE && !RELAY ? "read-only" : "read-write", codexSemantics: !REMOTE || RELAY, liveUpdates: true, nativeThreads: false, fileUploads: Boolean(MCP_TRANSPORT) }),
   user: () => webUser,
   users: () => webUsers.slice(),
   request: requestRuntime,
+  requestId: hostRequestId,
   subscribe: subscribeRuntime,
+  routing: MCP_TRANSPORT?.routing,
   cancelUpdateRecovery: cancelRemoteUpdateRecovery,
   reloadAfterUpdate: reloadAfterRemoteUpdate,
 });
@@ -1343,6 +1361,12 @@ requestRuntime(request)
 
 function loadInjection() {
   if (installing || window.__betterCodexInjection__) return;
+  if (MCP_TRANSPORT) {
+    MCP_TRANSPORT.install();
+    connectDialog.close();
+    openCurrentRoute();
+    return;
+  }
   installing = true;
   const script = document.createElement("script");
   script.src = "/web/injection.js?locale=" + encodeURIComponent(navigator.language || document.documentElement.lang || "en") + (REMOTE ? "" : "&session=" + encodeURIComponent(sessionToken));
@@ -1364,6 +1388,11 @@ function loadInjection() {
 
 async function boot(token = "") {
   try {
+    if (MCP_TRANSPORT) {
+      await MCP_TRANSPORT.ready;
+      loadInjection();
+      return;
+    }
     if (token) await establishSession(token);
     if (REMOTE && (!csrfToken || (RELAY && !webUser))) await restoreRemoteSession();
     if (!REMOTE && !sessionToken) throw new Error("请运行 better-codex web 获取本地访问令牌");
@@ -1387,6 +1416,7 @@ connectForm.addEventListener("submit", event => {
 });
 
 window.addEventListener("message", event => {
+  if (MCP_TRANSPORT) return;
   if (event.origin !== location.origin || event.data?.type !== "navigate-to-route") return;
   const path = String(event.data.path || "");
   if (path.startsWith("/local/")) history.pushState({ betterCodexThread: true }, "", path);
@@ -1394,7 +1424,7 @@ window.addEventListener("message", event => {
 });
 
 function openCurrentRoute() {
-  const match = location.pathname.match(/^\/web\/projects(?:\/([^/?#]+))?\/?$/);
+  const match = hostPathname().match(/^\/web\/projects(?:\/([^/?#]+))?\/?$/);
   if (match) {
     let projectId = "";
     try { projectId = match[1] ? decodeURIComponent(match[1]) : ""; }
@@ -1402,7 +1432,7 @@ function openCurrentRoute() {
     window.__betterCodexInjection__?.open?.("projects", { projectId, history: "none" });
     return;
   }
-  const agentMatch = location.pathname.match(/^\/web\/agents(?:\/([^/?#]+))?\/?$/);
+  const agentMatch = hostPathname().match(/^\/web\/agents(?:\/([^/?#]+))?\/?$/);
   if (agentMatch) {
     let agentKey = "";
     try { agentKey = agentMatch[1] ? decodeURIComponent(agentMatch[1]) : ""; }
@@ -1410,7 +1440,7 @@ function openCurrentRoute() {
     window.__betterCodexInjection__?.open?.("agents", { agentKey, history: "none" });
     return;
   }
-  if (location.pathname === "/web" || location.pathname === "/") window.__betterCodexInjection__?.open?.("issues", { history: "none" });
+  if (hostPathname() === "/web" || hostPathname() === "/") window.__betterCodexInjection__?.open?.("issues", { history: "none" });
   else window.__betterCodexInjection__?.refresh?.();
 }
 
@@ -1457,9 +1487,11 @@ window.addEventListener("appinstalled", () => {
   installButton.hidden = true;
 });
 
+if (!MCP_TRANSPORT) {
 ${betterCodexWebAppRegistrationJavaScript()}
+}
 
-void boot(consumeFragmentToken());
+void boot(MCP_TRANSPORT ? "" : consumeFragmentToken());
 `;
 
 export function betterCodexWebHostHtml(host: boolean | BetterCodexWebHostKind = false) {

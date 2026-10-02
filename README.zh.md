@@ -76,7 +76,7 @@ Better Codex 适用于各种角色。只要你的工作会在 Codex 里持续多
 
 ## 用起来是什么样
 
-1. 从 Codex 侧边栏打开 `任务看板` 管理任务，或打开 `智能体` 配置智能体。
+1. 从 Codex 侧边栏打开 `Better Codex`，在插件页中使用任务看板、智能体、项目管理和设置。已启用桌面集成时，也可以使用独立的 `任务看板` 和 `智能体` 入口。
 2. 创建项目，手动添加任务，或者直接把当前对话收进任务。
 3. 把任务分配给自己、默认 Codex 智能体或某个自定义智能体。
 4. 想完全掌控就用手动运行；想持续推进就开自动运行。
@@ -122,7 +122,7 @@ Relay 支持由系统管理员创建多个 Web 账户。每个账户使用独立
 不会持久化到远端。项目、任务、分配关系、会话、智能体配置、附件和运行状态保存在本机 SQLite 数据库（macOS 在 `~/.better-codex/better-codex.db`，Windows 在 `%USERPROFILE%\.better-codex\better-codex.db`），Runtime 只监听 `127.0.0.1`。可选远程访问只在 Runtime 在线时通过自托管 Relay 实时转发 HTTPS/WSS 流量，Relay 不保存业务数据。具体边界见英文版 [Self-hosting runbook](SELF_HOSTING.md)。
 
 **为什么需要注册 MCP？**<br>
-Codex 通过本地 MCP 应用识别 Better Codex 的应用入口和路由，让任务看板可以进入 Codex 的导航流程，而不是覆盖在最后访问的会话页面上。MCP 通过本机 stdio 运行，不是云端服务，也不会上传任务数据。
+Codex 通过本地 MCP 应用提供 Better Codex 插件页。插件页复用与 Web 相同的完整界面，通过 MCP 连接本机 Runtime，支持任务、智能体、项目和设置。访问凭据留在本机 MCP 进程中；任务数据仍由 Runtime 管理。可选的桌面侧栏集成使用独立入口，不会覆盖插件页。
 
 **它会搞坏我的 Codex 吗？**<br>
 应用入口和路由通过本地 MCP 注册，页面集成使用桌面应用的本地 CDP 接口和页面结构，不修改 Codex 的二进制文件。Codex 更新后偶尔需要安装对应的兼容性更新，届时 Codex 内会出现提示。感觉哪里不对时，运行 `better-codex doctor` 检查。

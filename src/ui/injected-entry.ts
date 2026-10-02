@@ -37,11 +37,39 @@ export function install(config: Record<string, any>) {
     const DESKTOP_NATIVE_COMMANDS = config.desktopNativeCommands;
     const RELAY = document.documentElement.dataset.betterCodexHost === "relay";
     const HOST_ADAPTER = createHostAdapter(HOST_KIND, window.betterCodexHost, RELAY);
+    function uiRequestId() {
+      const hostId = window.betterCodexHost?.requestId?.();
+      if (typeof hostId === "string" && /^[A-Za-z0-9_-]{8,200}$/.test(hostId)) return hostId;
+      const nativeId = globalThis.crypto?.randomUUID?.();
+      if (typeof nativeId === "string" && /^[A-Za-z0-9_-]{8,200}$/.test(nativeId)) return nativeId;
+      if (typeof globalThis.crypto?.getRandomValues === "function") {
+        const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16));
+        return Array.from(bytes, value => value.toString(16).padStart(2, "0")).join("");
+      }
+      return "bc-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2).padEnd(12, "0");
+    }
+    const HOST_ROUTING = HOST_KIND === "web" ? window.betterCodexHost?.routing : null;
+    function webPathname() {
+      return HOST_ROUTING ? HOST_ROUTING.pathname() : location.pathname;
+    }
+    function webHistoryState() {
+      return HOST_ROUTING ? HOST_ROUTING.state() : history.state;
+    }
+    function updateWebHistory(routeState, path, mode = "push") {
+      const operation = mode === "replace" ? "replaceState" : "pushState";
+      if (HOST_ROUTING) HOST_ROUTING[operation](routeState, path);
+      else history[operation](routeState, "", path);
+    }
+    function webHistoryBack() {
+      if (HOST_ROUTING) HOST_ROUTING.back();
+      else history.back();
+    }
     const HOST_CAPABILITIES = HOST_ADAPTER.capabilities;
     const READ_ONLY = HOST_CAPABILITIES.issues === "read-only";
     const AGENTS_READ_ONLY = HOST_CAPABILITIES.agents === "read-only";
     const CODEX_SEMANTICS_AVAILABLE = HOST_CAPABILITIES.codexSemantics !== false;
     const REMOTE = HOST_ADAPTER.remote;
+    const FILE_UPLOADS = HOST_CAPABILITIES.fileUploads === true;
     if (READ_ONLY) document.documentElement.setAttribute("data-better-codex-read-only", "true");
     const HELP_MODE_MARKDOWN = config.helpModeMarkdown;
     const previous = window.__betterCodexInjection__;
@@ -144,7 +172,7 @@ export function install(config: Record<string, any>) {
     const availableSurfaces = ["issues", "agents", ...(hasFeature("project-management") ? ["projects"] : [])];
     const initialProjectRoute = hasFeature("project-management") ? webProjectRoute() : null;
     const initialAgentRoute = webAgentRoute();
-    if (HOST_KIND === "web" && !hasFeature("project-management") && /^\/web\/projects(?:\/|$)/.test(location.pathname)) history.replaceState({ betterCodex: true, betterCodexSurface: "issues" }, "", "/web");
+    if (HOST_KIND === "web" && !hasFeature("project-management") && /^\/web\/projects(?:\/|$)/.test(webPathname())) updateWebHistory({ betterCodex: true, betterCodexSurface: "issues" }, "/web", "replace");
     const initialAgentKey = initialAgentRoute?.agentKey || "";
     const state = { projects: [], projectsLoaded: false, issues: [], issuesLoaded: false, projectIssues: [], projectIssuesProjectId: "", projectDetailId: initialProjectRoute?.projectId || "", projectPage: "overview", projectDocumentView: "charter", projectDocumentPending: null, projectDocumentError: null, projectPlanningPending: null, projectPlanningError: null, agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: USER_AVATAR_COLORS[0], avatar: "", avatar_generated: true }, users: [], projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: initialAgentKey === "new" ? "create" : initialAgentKey ? "detail" : "preview", selectedAgentId: initialAgentKey && initialAgentKey !== "new" ? initialAgentKey : "", agentDraft: initialAgentKey === "new" ? { avatar: DEFAULT_PRESET_AVATAR_URL } : null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: initialProjectRoute ? "projects" : initialAgentRoute ? "agents" : availableSurfaces.includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, autoDispatchPending: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", issueDescriptionLimit: 100000, mockup: false, keepCreate: rememberedKeepCreate, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], creator: [], project: [], label: [] } };
     const pendingIssueRemovals = new Map();
@@ -156,7 +184,7 @@ export function install(config: Record<string, any>) {
     let projectRenderedMarkup = "";
     function webProjectRoute() {
       if (HOST_KIND !== "web") return null;
-      const match = location.pathname.match(/^\/web\/projects(?:\/([^/?#]+))?\/?$/);
+      const match = webPathname().match(/^\/web\/projects(?:\/([^/?#]+))?\/?$/);
       if (!match) return null;
       try {
         return { projectId: match[1] ? decodeURIComponent(match[1]) : "" };
@@ -172,15 +200,15 @@ export function install(config: Record<string, any>) {
     function syncWebProjectRoute(projectId = "", mode = "push") {
       if (HOST_KIND !== "web" || mode === "none") return;
       const path = projectRoutePath(projectId);
-      if (location.pathname === path) return;
+      if (webPathname() === path) return;
       const routeState = { betterCodex: true, betterCodexSurface: "projects", betterCodexProjectId: projectId || "" };
-      if (projectId && location.pathname === projectRoutePath()) routeState.betterCodexProjectFromHome = true;
-      history[mode === "replace" ? "replaceState" : "pushState"](routeState, "", path);
+      if (projectId && webPathname() === projectRoutePath()) routeState.betterCodexProjectFromHome = true;
+      updateWebHistory(routeState, path, mode);
     }
 
     function webAgentRoute() {
       if (HOST_KIND !== "web") return null;
-      const match = location.pathname.match(/^\/web\/agents(?:\/([^/?#]+))?\/?$/);
+      const match = webPathname().match(/^\/web\/agents(?:\/([^/?#]+))?\/?$/);
       if (!match) return null;
       try {
         return { agentKey: match[1] ? decodeURIComponent(match[1]) : "" };
@@ -196,10 +224,10 @@ export function install(config: Record<string, any>) {
     function syncWebAgentRoute(agentKey = "", mode = "push") {
       if (HOST_KIND !== "web" || mode === "none") return;
       const path = agentRoutePath(agentKey);
-      if (location.pathname === path) return;
+      if (webPathname() === path) return;
       const routeState = { betterCodex: true, betterCodexSurface: "agents", betterCodexAgentKey: agentKey || "" };
-      if (agentKey && (location.pathname === agentRoutePath() || history.state?.betterCodexAgentFromList)) routeState.betterCodexAgentFromList = true;
-      history[mode === "replace" ? "replaceState" : "pushState"](routeState, "", path);
+      if (agentKey && (webPathname() === agentRoutePath() || webHistoryState()?.betterCodexAgentFromList)) routeState.betterCodexAgentFromList = true;
+      updateWebHistory(routeState, path, mode);
     }
     function shortcutKeyFromCode(code, key) {
       const source = String(code || "");
@@ -258,7 +286,7 @@ export function install(config: Record<string, any>) {
           promptSemanticReferences: Array.isArray(draft.promptSemanticReferences) ? draft.promptSemanticReferences.filter(reference => reference && ["skill", "app", "mention"].includes(reference.type) && typeof reference.name === "string" && typeof reference.ref === "string").slice(0, 32) : [],
           promptSemanticDocument: draft.promptSemanticDocument && typeof draft.promptSemanticDocument === "object" ? draft.promptSemanticDocument : undefined,
           attachments: Array.isArray(draft.attachments) ? draft.attachments.filter(item => item && typeof item.name === "string" && typeof item.path === "string" && item.path).slice(0, 4).map(item => ({ name: item.name, path: item.path, type: typeof item.type === "string" ? item.type : "" })) : [],
-          requestId: typeof draft.requestId === "string" && draft.requestId.length <= 200 ? draft.requestId : ""
+          requestId: typeof draft.requestId === "string" && /^[A-Za-z0-9_-]{8,200}$/.test(draft.requestId) ? draft.requestId : ""
         };
       } catch {
         sessionStorage.removeItem(CREATE_DRAFT_KEY);
@@ -720,7 +748,7 @@ export function install(config: Record<string, any>) {
     const appServerRequests = new Map();
     const sessionHandoffPending = new Set();
     let nativeThreadOpenBypass = "";
-    const relayId = "better-codex:" + (globalThis.crypto?.randomUUID?.() || Date.now() + ":" + Math.random().toString(36).slice(2));
+    const relayId = "better-codex:" + uiRequestId();
     const relayThreads = new Set();
     let bridgeSequence = 0;
     let appServerSequence = 0;
@@ -1103,7 +1131,6 @@ export function install(config: Record<string, any>) {
         .better-codex-native-navigation:hover { background: var(--bc-color-hover); }
         .better-codex-native-navigation svg { width: var(--better-codex-native-icon-width, var(--bc-space-4)); height: var(--better-codex-native-icon-height, var(--bc-space-4)); flex-shrink: 0; }
         [data-better-codex-rail-entry="true"].better-codex-native-navigation { width: 2.5rem; height: 2.5rem; justify-content: center; padding: 0; }
-        [data-better-codex-launcher-hidden="true"] { display: none !important; }
         #${ENTRY_ID}[aria-current="page"], #${AGENTS_ENTRY_ID}[aria-current="page"], #${PROJECTS_ENTRY_ID}[aria-current="page"], #${MORE_ENTRY_ID}[aria-current="page"] { background: var(--bc-color-hover); }
         html[data-better-codex-open="true"] ${SELECTORS.sidebarNavigation} [aria-current="page"]:not(#${ENTRY_ID}):not(#${AGENTS_ENTRY_ID}):not(#${PROJECTS_ENTRY_ID}):not(#${MORE_ENTRY_ID}) { background: transparent !important; }
         html[data-better-codex-open="true"] ${SELECTORS.sidebarNavigation} [aria-current="page"]:not(#${ENTRY_ID}):not(#${AGENTS_ENTRY_ID}):not(#${PROJECTS_ENTRY_ID}):not(#${MORE_ENTRY_ID}) .text-token-list-active-selection-foreground { color: var(--color-token-foreground) !important; }
@@ -1491,18 +1518,10 @@ export function install(config: Record<string, any>) {
       }
     }
 
-    function hideNativeLaunchers(mounted) {
-      const roots = [document.querySelector(SELECTORS.sidebarScroll), navigationRail()].filter(Boolean);
-      const hidden = mounted && bootstrapReady ? "true" : "false";
-      for (const root of roots) {
-        root.querySelectorAll("button, a").forEach(button => {
-          if (!nativeLauncher(button)) return;
-          if (button.getAttribute("data-better-codex-launcher-hidden") !== hidden) {
-            button.setAttribute("data-better-codex-launcher-hidden", hidden);
-            console.info("[better-codex] launcher_visibility", { hidden: hidden === "true", mounted, bootstrapReady });
-          }
-        });
-      }
+    function restoreNativeLaunchers() {
+      document.querySelectorAll("[data-better-codex-launcher-hidden]").forEach(button => {
+        button.removeAttribute("data-better-codex-launcher-hidden");
+      });
     }
 
     function ensureDesktopEntries() {
@@ -1528,7 +1547,7 @@ export function install(config: Record<string, any>) {
       placeRailSequence([entry, agentsEntry, projectsEntry], parent, anchor);
       syncEntrySelection();
       const mounted = entry.isConnected && agentsEntry.isConnected && projectsEntry.isConnected;
-      hideNativeLaunchers(mounted);
+      restoreNativeLaunchers();
       return mounted;
     }
 
@@ -1668,8 +1687,8 @@ export function install(config: Record<string, any>) {
     function api(path, options = {}) {
       const method = String(options.method || "GET").toUpperCase();
       const requestPath = path + (path.includes("?") ? "&" : "?") + "locale=" + encodeURIComponent(state.locale);
-      const commandId = method === "GET" ? "" : options.commandId || globalThis.crypto?.randomUUID?.() || VERSION + "-command-" + Date.now() + "-" + Math.random().toString(36).slice(2);
-      const traceId = globalThis.crypto?.randomUUID?.() || VERSION + "-trace-" + Date.now() + "-" + Math.random().toString(36).slice(2);
+      const commandId = method === "GET" ? "" : options.commandId || uiRequestId();
+      const traceId = uiRequestId();
       const removalMatch = path.match(/^\/api\/issues\/([^\/?]+)(?:\/(archive))?(?:\?.*)?$/);
       const removalId = removalMatch && (method === "DELETE" || method === "POST" && removalMatch[2] === "archive") ? decodeURIComponent(removalMatch[1]) : "";
       const removalIssue = removalId ? state.issues.find(issue => issue.id === removalId) : null;
@@ -2690,7 +2709,7 @@ export function install(config: Record<string, any>) {
       try { Object.defineProperty(value, "betterCodexReported", { value: true, configurable: true }); } catch {}
       const selected = state.selected;
       const record = {
-        id: globalThis.crypto?.randomUUID?.() || "error-" + Date.now() + "-" + Math.random().toString(36).slice(2),
+        id: uiRequestId(),
         time: new Date().toISOString(),
         display_message: errorLabel(value),
         name: value.name || "Error",
@@ -5088,7 +5107,7 @@ export function install(config: Record<string, any>) {
       state.agentDraft = null;
       renderAgents();
       if (HOST_KIND !== "web" || !webAgentRoute()?.agentKey) return;
-      if (history.state?.betterCodexAgentFromList) history.back();
+      if (webHistoryState()?.betterCodexAgentFromList) webHistoryBack();
       else syncWebAgentRoute("", "replace");
     }
 
@@ -5680,7 +5699,7 @@ export function install(config: Record<string, any>) {
       });
       const back = event.target.closest("[data-project-back],[data-project-home]");
       if (back) {
-        if (HOST_KIND === "web" && history.state?.betterCodexProjectFromHome) return history.back();
+        if (HOST_KIND === "web" && webHistoryState()?.betterCodexProjectFromHome) return webHistoryBack();
         state.projectDetailId = "";
         syncWebProjectRoute("", "replace");
         renderProjects();
@@ -7538,7 +7557,7 @@ export function install(config: Record<string, any>) {
       let replyDraftPersistenceError = null;
       let replySubmitInFlight = false;
       let retainCreateDraft = !issue;
-      let createRequestId = issue ? "" : cachedCreateDraft?.requestId || globalThis.crypto?.randomUUID?.() || VERSION + "-create-" + Date.now() + "-" + Math.random().toString(36).slice(2);
+      let createRequestId = issue ? "" : cachedCreateDraft?.requestId || uiRequestId();
       let submitInFlight = false;
       let mobileInputFrame = null;
       let dialogBoundsObserver = null;
@@ -7795,7 +7814,7 @@ export function install(config: Record<string, any>) {
         replyDraftUpdate = replyDraftUpdate.catch(() => {}).then(async () => {
           replyDraftPersistenceError = null;
           try {
-            if (RELAY) await cacheRemoteAttachments(items);
+            if (RELAY || FILE_UPLOADS) await cacheRemoteAttachments(items);
             else await uploadPastedImages(items);
           } catch (error) {
             showError(error);
@@ -8467,7 +8486,7 @@ export function install(config: Record<string, any>) {
         queueActionError = "";
         syncQueuedReplyState();
         try {
-          const commandId = globalThis.crypto?.randomUUID?.() || VERSION + "-queue-" + Date.now() + "-" + Math.random().toString(36).slice(2);
+          const commandId = uiRequestId();
           const path = "/api/issues/" + encodeURIComponent(issue.id) + "/queue/" + encodeURIComponent(requestId) + (action === "send" ? "/send" : "");
           const result = await api(path, { method: action === "send" ? "POST" : action === "delete" ? "DELETE" : "PATCH", body: JSON.stringify(action === "update" ? { command_id: commandId, message, input_document: serializeSemanticDraft(reconcileSemanticText(queueEditSemanticDocument || createSemanticDraft(message), message)) } : { command_id: commandId }), commandId, enqueue: true });
           if (result.queued === true) {
@@ -8696,8 +8715,8 @@ export function install(config: Record<string, any>) {
         await openAttachmentPreview(attachment, async () => {
           if (attachment.source === "url" && attachment.url) return { source: attachment.url, attachment, originalUrl: attachment.url };
           const result = await api("/api/issues/" + encodeURIComponent(issue.id) + "/attachments/" + encodeURIComponent(message.id) + "/" + attachmentIndex, { timeoutMs: 120_000 });
-          const source = URL.createObjectURL(attachmentBlob(result.data, result.type));
-          return { source, attachment: result, objectUrl: source };
+          const source = FILE_UPLOADS ? result.data : URL.createObjectURL(attachmentBlob(result.data, result.type));
+          return { source, attachment: result, objectUrl: FILE_UPLOADS ? "" : source };
         }, { issue_id: issue.id, message_id: message.id, attachment_index: attachmentIndex });
       }
 
@@ -8710,8 +8729,8 @@ export function install(config: Record<string, any>) {
           if (attachment.previewUrl) return { source: attachment.previewUrl, attachment: data };
           const cacheName = String(attachment.path || "").replace(/[\\/]+$/, "").split(/[\\/]/).pop() || "";
           const result = await api("/api/issues/attachments/preview?name=" + encodeURIComponent(cacheName), { timeoutMs: 120_000 });
-          const source = URL.createObjectURL(attachmentBlob(result.data, result.type));
-          return { source, attachment: { ...result, name: attachment.name || result.name }, objectUrl: source };
+          const source = FILE_UPLOADS ? result.data : URL.createObjectURL(attachmentBlob(result.data, result.type));
+          return { source, attachment: { ...result, name: attachment.name || result.name }, objectUrl: FILE_UPLOADS ? "" : source };
         }, { issue_id: issue?.id || "", attachment_scope: scope, attachment_index: attachmentIndex });
       }
 
@@ -8974,7 +8993,7 @@ export function install(config: Record<string, any>) {
         const semanticCommand = retryCommand || (["review", "compact"].includes(slashCommand) ? slashCommand : "");
         const semanticReferences = retrying ? (retrySemanticReferences || []) : draft.replySemanticReferences.filter(reference => text.includes((reference.type === "skill" ? "$" : "@") + reference.name));
         const semanticDocument = retrySemanticDocument || reconcileSemanticText(draft.replySemanticDocument, text);
-        const requestId = retryRequestId || (globalThis.crypto?.randomUUID?.() || VERSION + "-reply-" + Date.now() + "-" + Math.random().toString(36).slice(2));
+        const requestId = retryRequestId || uiRequestId();
         if (!issue || !sessionId || (!text && !draft.replyAttachments.length) || !send || !errorOutput) return;
         if (!retrying && slashCommand === "status") {
           if (textarea) textarea.value = "";
@@ -9070,7 +9089,7 @@ export function install(config: Record<string, any>) {
         }
         const submittedAttachments = draft.replyAttachments.slice();
         const submittedSemanticDocument = reconcileSemanticText(semanticDocument, message);
-        const submissionCommandId = globalThis.crypto?.randomUUID?.() || VERSION + "-reply-command-" + Date.now() + "-" + Math.random().toString(36).slice(2);
+        const submissionCommandId = uiRequestId();
         const queueMode = initialComposerMode === "queue" || executionRunning;
         let reply;
         try {
@@ -9276,7 +9295,7 @@ export function install(config: Record<string, any>) {
       }
 
       function releaseAttachment(item) {
-        if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+        if (item.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(item.previewUrl);
       }
 
       function fileDataUrl(file) {
@@ -9286,6 +9305,10 @@ export function install(config: Record<string, any>) {
           reader.onerror = () => reject(new Error("无法读取文件"));
           reader.readAsDataURL(file);
         });
+      }
+
+      async function attachmentPreviewUrl(file) {
+        return FILE_UPLOADS ? fileDataUrl(file) : URL.createObjectURL(file);
       }
 
       async function remoteFiles(items) {
@@ -9358,7 +9381,7 @@ export function install(config: Record<string, any>) {
         const accepted = files.filter(file => {
           if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) return false;
           if (file.size > 10 * 1024 * 1024) return false;
-          if (REMOTE && (attachments.length + acceptedCount >= 4 || totalSize + file.size > 20 * 1024 * 1024)) return false;
+          if ((REMOTE || FILE_UPLOADS) && (attachments.length + acceptedCount >= 4 || totalSize + file.size > 20 * 1024 * 1024)) return false;
           totalSize += file.size;
           acceptedCount += 1;
           return true;
@@ -9366,21 +9389,22 @@ export function install(config: Record<string, any>) {
         if (!accepted.length) {
           const errorOutput = dialog.querySelector(".better-codex-dialog-error");
           if (errorOutput) {
-            const message = REMOTE && attachments.length >= 4 ? "最多传输 4 个文件且总大小不能超过 20 MB" : files.some(file => file.size > 10 * 1024 * 1024) ? "图片不能超过 10 MB" : "请选择 PNG、JPEG 或 WebP 图片";
+            const message = (REMOTE || FILE_UPLOADS) && attachments.length >= 4 ? "最多传输 4 个文件且总大小不能超过 20 MB" : files.some(file => file.size > 10 * 1024 * 1024) ? "图片不能超过 10 MB" : "请选择 PNG、JPEG 或 WebP 图片";
             presentInlineError(errorOutput, new Error(message), t(message), { source: "attachment_paste", action: replyPaste ? "reply" : issue ? "edit" : "create", report: false });
           }
           return;
         }
         syncDraft();
-        const next = accepted.map((file, index) => ({
-          name: file.name || t("粘贴的图片") + (accepted.length > 1 ? " " + (index + 1) : ""),
-          path: "",
-          file,
-          type: file.type,
-          previewUrl: URL.createObjectURL(file)
-        }));
+        const next = [];
         try {
-          if (RELAY) await cacheRemoteAttachments(next);
+          next.push(...await Promise.all(accepted.map(async (file, index) => ({
+            name: file.name || t("粘贴的图片") + (accepted.length > 1 ? " " + (index + 1) : ""),
+            path: "",
+            file,
+            type: file.type,
+            previewUrl: await attachmentPreviewUrl(file)
+          }))));
+          if (RELAY || FILE_UPLOADS) await cacheRemoteAttachments(next);
           else if (!REMOTE) await uploadPastedImages(next);
         } catch (error) {
           next.forEach(releaseAttachment);
@@ -9403,14 +9427,14 @@ export function install(config: Record<string, any>) {
           input.type = "file";
           input.accept = "*/*";
           input.multiple = true;
-          input.addEventListener("change", () => {
+          input.addEventListener("change", async () => {
             const files = Array.from(input.files || []);
             const selected = [];
             let skipped = 0;
             let totalSize = existing.reduce((size, item) => size + (item.file?.size || 0), 0);
             for (const file of files) {
               const path = String(file.path || "").trim();
-              if (!path && !REMOTE) {
+              if (!path && !REMOTE && !FILE_UPLOADS) {
                 skipped += 1;
                 continue;
               }
@@ -9418,12 +9442,19 @@ export function install(config: Record<string, any>) {
                 skipped += 1;
                 continue;
               }
-              if (REMOTE && (existing.length + selected.length >= 4 || totalSize + file.size > 20 * 1024 * 1024)) {
+              if ((REMOTE || FILE_UPLOADS) && (existing.length + selected.length >= 4 || totalSize + file.size > 20 * 1024 * 1024)) {
                 skipped += 1;
                 continue;
               }
               const image = file.type.startsWith("image/");
-              selected.push({ name: file.name || path.split(/[\\/]/).pop() || path || t("附件"), path, type: file.type || "", file: REMOTE || image ? file : null, previewUrl: image ? URL.createObjectURL(file) : "" });
+              let previewUrl = "";
+              try {
+                if (image) previewUrl = await attachmentPreviewUrl(file);
+              } catch {
+                skipped += 1;
+                continue;
+              }
+              selected.push({ name: file.name || path.split(/[\\/]/).pop() || path || t("附件"), path, type: file.type || "", file: REMOTE || FILE_UPLOADS || image ? file : null, previewUrl });
               totalSize += file.size;
             }
             resolve({ files: selected, skipped, picked: files.length });
@@ -9686,12 +9717,12 @@ export function install(config: Record<string, any>) {
               presentInlineError(errorOutput, new Error(message), t(message), { source: "attachment_picker", action: "reply", report: false });
             };
             if (!result.picked) return;
-            if (!result.files.length) return showAttachError(REMOTE ? "最多传输 4 个文件且总大小不能超过 20 MB" : "当前环境无法读取本地文件路径");
+            if (!result.files.length) return showAttachError(REMOTE || FILE_UPLOADS ? "最多传输 4 个文件且总大小不能超过 20 MB" : "当前环境无法读取本地文件路径");
             const known = new Set(draft.replyAttachments.map(file => file.path || file.name + ":" + (file.file?.size || 0)));
             const next = result.files.filter(file => !known.has(file.path || file.name + ":" + (file.file?.size || 0)));
             if (next.length) {
               try {
-                if (RELAY) await cacheRemoteAttachments(next);
+                if (RELAY || FILE_UPLOADS) await cacheRemoteAttachments(next);
                 else if (!REMOTE) await uploadPastedImages(next);
                 syncDraft();
                 draft.replyAttachments.push(...next);
@@ -9702,7 +9733,7 @@ export function install(config: Record<string, any>) {
                 return showAttachError(error instanceof Error ? error.message : "附件缓存失败");
               }
             }
-            if (result.skipped) showAttachError(REMOTE ? "部分文件超出传输限制，已跳过" : "部分文件无法读取本地路径，已跳过");
+            if (result.skipped) showAttachError(REMOTE || FILE_UPLOADS ? "部分文件超出传输限制，已跳过" : "部分文件无法读取本地路径，已跳过");
             dialog.querySelector('[name="reply"]')?.focus();
           });
         });
@@ -9965,12 +9996,12 @@ export function install(config: Record<string, any>) {
               presentInlineError(errorOutput, new Error(message), t(message), { source: "attachment_picker", action: issue ? "edit" : "create", report: false });
             };
             if (!result.picked) return;
-            if (!result.files.length) return showAttachError(REMOTE ? "最多传输 4 个文件且总大小不能超过 20 MB" : "当前环境无法读取本地文件路径");
+            if (!result.files.length) return showAttachError(REMOTE || FILE_UPLOADS ? "最多传输 4 个文件且总大小不能超过 20 MB" : "当前环境无法读取本地文件路径");
             const known = new Set(draft.attachments.map(file => file.path || file.name + ":" + (file.file?.size || 0)));
             const next = result.files.filter(file => !known.has(file.path || file.name + ":" + (file.file?.size || 0)));
             if (next.length) {
               try {
-                if (RELAY) await cacheRemoteAttachments(next);
+                if (RELAY || FILE_UPLOADS) await cacheRemoteAttachments(next);
                 else if (!REMOTE) await uploadPastedImages(next);
                 syncDraft();
                 draft.attachments.push(...next);
@@ -9981,7 +10012,7 @@ export function install(config: Record<string, any>) {
                 return showAttachError(error instanceof Error ? error.message : "附件缓存失败");
               }
             }
-            if (result.skipped) showAttachError(REMOTE ? "部分文件超出传输限制，已跳过" : "部分文件无法读取本地路径，已跳过");
+            if (result.skipped) showAttachError(REMOTE || FILE_UPLOADS ? "部分文件超出传输限制，已跳过" : "部分文件无法读取本地路径，已跳过");
             dialog.querySelector(draft.mode === "agent" ? '[name="prompt"]' : '[name="title"]')?.focus();
           });
         });
@@ -10060,7 +10091,7 @@ export function install(config: Record<string, any>) {
             throw new Error("创建智能体 Issue 需要本地工作区：请先打开该项目下的一个 Codex 会话");
           }
           let files = [];
-          if (RELAY) await cacheRemoteAttachments(draft.attachments);
+          if (RELAY || FILE_UPLOADS) await cacheRemoteAttachments(draft.attachments);
           else if (REMOTE) files = await remoteFiles(draft.attachments);
           else await uploadPastedImages();
           const semanticCommand = !issue && draft.mode === "agent" && /^\/review$/.test(prompt) ? "review" : "";
@@ -10086,7 +10117,7 @@ export function install(config: Record<string, any>) {
           if (issue) await api("/api/issues/" + encodeURIComponent(issue.id), { method: "PATCH", body: JSON.stringify({ ...body, version: issue.version }), timeoutMs: transferTimeoutMs });
           else {
             writeCreateDraft(draft, createRequestId);
-            const commandId = globalThis.crypto?.randomUUID?.() || VERSION + "-create-command-" + Date.now() + "-" + Math.random().toString(36).slice(2);
+            const commandId = uiRequestId();
             const submittedDraft = { ...draft, attachments: draft.attachments.map(item => ({ ...item })), promptSemanticReferences: draft.promptSemanticReferences.map(reference => ({ ...reference })) };
             const result = await api("/api/issues", { method: "POST", body: JSON.stringify({ ...body, project_id: draft.projectId }), timeoutMs: transferTimeoutMs, commandId, enqueue: true });
             state.projectId = draft.projectId;
@@ -10122,7 +10153,7 @@ export function install(config: Record<string, any>) {
           if (!issue) sessionStorage.removeItem(CREATE_DRAFT_KEY);
           if (!queuedCreate) await loadIssues();
           if (!issue && state.keepCreate) {
-            createRequestId = globalThis.crypto?.randomUUID?.() || VERSION + "-create-" + Date.now() + "-" + Math.random().toString(36).slice(2);
+            createRequestId = uiRequestId();
             submitInFlight = false;
             draft.title = "";
             draft.description = "";
@@ -10550,7 +10581,8 @@ export function install(config: Record<string, any>) {
     }
 
     function isBetterCodexRoute() {
-      if (HOST_KIND === "web") return location.pathname === "/web" || location.pathname === "/" || Boolean(webProjectRoute()) || Boolean(webAgentRoute());
+      if (HOST_KIND === "web") return webPathname() === "/web" || webPathname() === "/" || Boolean(webProjectRoute()) || Boolean(webAgentRoute());
+      if (location.pathname.startsWith("/mcp-app/")) return location.pathname === BETTER_CODEX_ROUTE;
       if (Array.from(document.querySelectorAll("webview")).some(view => view.title === "Better Codex")) return true;
       return Array.from(document.querySelectorAll("main *")).some(node => ["找不到 MCP 应用视图", "MCP app view not found"].includes(node.textContent?.trim()));
     }
@@ -10579,7 +10611,7 @@ export function install(config: Record<string, any>) {
         state.selectedAgentId = agentKey && agentKey !== "new" ? agentKey : "";
         state.agentDraft = agentKey === "new" ? { avatar: DEFAULT_PRESET_AVATAR_URL } : null;
         if (HOST_KIND === "web") {
-          if (options.history === "none" && agentKey && !history.state?.betterCodexAgentFromList) {
+          if (options.history === "none" && agentKey && !webHistoryState()?.betterCodexAgentFromList) {
             syncWebAgentRoute("", "replace");
             syncWebAgentRoute(agentKey);
           } else {
@@ -10589,7 +10621,10 @@ export function install(config: Record<string, any>) {
         }
       } else {
         state.projectDetailId = "";
-        if (HOST_KIND === "web" && options.history !== "none") window.postMessage({ type: NAVIGATION.messageType, path: BETTER_CODEX_ROUTE }, window.location.origin);
+        if (HOST_KIND === "web" && options.history !== "none") {
+          if (HOST_ROUTING) updateWebHistory({ betterCodex: true, betterCodexSurface: "issues" }, "/web", options.history);
+          else window.postMessage({ type: NAVIGATION.messageType, path: BETTER_CODEX_ROUTE }, window.location.origin);
+        }
       }
       open(surface);
     }
@@ -10771,7 +10806,7 @@ export function install(config: Record<string, any>) {
     }
 
     function refresh() {
-      if (HOST_KIND === "web" && !hasFeature("project-management") && /^\/web\/projects(?:\/|$)/.test(location.pathname)) history.replaceState({ betterCodex: true, betterCodexSurface: "issues" }, "", "/web");
+      if (HOST_KIND === "web" && !hasFeature("project-management") && /^\/web\/projects(?:\/|$)/.test(webPathname())) updateWebHistory({ betterCodex: true, betterCodexSurface: "issues" }, "/web", "replace");
       const betterCodexRoute = isBetterCodexRoute();
       const entriesAvailable = ensureEntry();
       if (!entriesAvailable) {

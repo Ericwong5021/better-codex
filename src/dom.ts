@@ -3,7 +3,7 @@ import { agentAvatarPngDataUrl, betterCodexLogoPng } from "./brand-assets.js";
 import { betterCodexProfile } from "./config.js";
 import { betterCodexDesignSystemCss } from "./design-system.js";
 import { renderMarkdown } from "./markdown.js";
-import { betterCodexMcpRoute } from "./mcp-app.js";
+import { betterCodexMcpRoute } from "./mcp-contract.js";
 import { featureManifest } from "./features.js";
 import { injectedUiBundle, injectedUiBundleChecksum, injectedUiBundleSchemaVersion } from "./generated/injected-ui.js";
 import { desktopNativeCommands, sessionNativeCommands } from "./native-commands.js";
@@ -268,7 +268,7 @@ export function injectionBundleChecksum() {
   return injectedUiBundleChecksum;
 }
 
-export function injectionScript(port: number, accessToken: string, action: "install" | "uninstall", locale: "zh-CN" | "en" = "zh-CN", host: "codex" | "web" = "codex") {
+export function injectionScript(port: number, accessToken: string, action: "install" | "uninstall", locale: "zh-CN" | "en" = "zh-CN", host: "codex" | "web" = "codex", baseUrl = `http://127.0.0.1:${port}`) {
   if (action === "uninstall") {
     return `(() => {
       window.__betterCodexInjection__?.destroy?.();
@@ -304,7 +304,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
         auto: renderMarkdown("{{agent}} automatically runs tasks assigned to it, but does not run {{backlog}} tasks."),
       },
     },
-    baseUrl: `http://127.0.0.1:${port}`,
+    baseUrl,
     bridgeToken: accessToken,
     logoUrl: `data:image/png;base64,${betterCodexLogoPng().toString("base64")}`,
     defaultAgentAvatarUrl: agentAvatarPngDataUrl("codex"),

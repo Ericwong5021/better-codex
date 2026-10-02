@@ -25,6 +25,7 @@ import { IssueWorker } from "./worker.js";
 import { maxMockupBytes, normalizeMockupLocale, readMockupState, replaceMockupState, resetMockupState, updateMockupState } from "./mockup.js";
 import { injectionScript } from "./dom.js";
 import { betterCodexWebHostCss, betterCodexWebHostHtml, betterCodexWebHostJavaScript } from "./web-host.js";
+import { betterCodexMcpHostHtml } from "./mcp-host.js";
 import { agentAvatarPngDataUrl, betterCodexWebIconPng } from "./brand-assets.js";
 import { betterCodexWebManifest, betterCodexWebServiceWorker } from "./web-app.js";
 import { SyncClient } from "./sync-client.js";
@@ -1128,6 +1129,9 @@ export function startServer() {
         return sendWeb(response, 200, injectionScript(activePort, sessionToken, "install", locale, "web"), "text/javascript; charset=utf-8");
       }
       if (!authorized(request, url, webSessions)) return sendJson(response, 401, { error: "unauthorized" });
+      if (url.pathname === "/api/ui/mcp" && method === "GET") {
+        return sendJson(response, 200, { html: betterCodexMcpHostHtml(), version: identity.version, runtimeInstanceId: identity.instanceId, generation: identity.generation });
+      }
       const commandStatusMatch = url.pathname.match(/^\/api\/commands\/([A-Za-z0-9_-]{8,200})$/);
       if (commandStatusMatch && method === "GET") {
         const receipt = requestReceipts.status(commandStatusMatch[1]);
