@@ -1509,8 +1509,21 @@ export function install(config: Record<string, any>) {
       const rail = navigationRail();
       const launcher = rail ? Array.from(rail.querySelectorAll("button")).find(nativeLauncher) : null;
       const reference = railReferenceButton();
-      const parent = launcher?.parentElement || reference?.parentElement;
+      const nativeItem = launcher || reference;
+      if (!rail || !nativeItem) return false;
+      let row = nativeItem;
+      let parent = row.parentElement;
+      // Native buttons may live inside horizontal utility rows. Mount alongside
+      // those rows in the nearest vertical list, without changing host styles.
+      while (parent && parent !== rail) {
+        const style = getComputedStyle(parent);
+        if (style.display === "flex" && style.flexDirection === "column") break;
+        row = parent;
+        parent = parent.parentElement;
+      }
       if (!parent) return false;
+      let anchor = launcher ? row : row.nextElementSibling;
+      while (anchor?.hasAttribute(OWNED)) anchor = anchor.nextElementSibling;
       if (!entry) entry = createEntry("任务看板", ENTRY_ID, "打开任务看板", "issues");
       syncRailButton(entry);
       syncEntryLabel(entry, "任务看板", "打开任务看板");
@@ -1524,7 +1537,6 @@ export function install(config: Record<string, any>) {
       syncEntryLabel(projectsEntry, "项目管理", "管理项目");
       syncEntryIcon(projectsEntry, "projects");
       projectsEntry.hidden = !hasFeature("project-management");
-      const anchor = launcher && launcher.parentElement === parent ? launcher : null;
       placeRailSequence([entry, agentsEntry, projectsEntry], parent, anchor);
       syncEntrySelection();
       const mounted = entry.isConnected && agentsEntry.isConnected && projectsEntry.isConnected;
