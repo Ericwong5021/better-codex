@@ -4,8 +4,8 @@ import { injectionScript } from "../../../src/dom.js";
 const navigation = `<aside data-app-navigation-rail><div><button data-sidebar-destination="tasks" aria-label="Tasks"><span>Tasks</span></button><button data-sidebar-destination="better-codex" aria-label="Better Codex"><span>Better Codex</span></button></div></aside>`;
 const content = `<main><div id="surface"><div data-app-shell-main-content-layout><div class="app-shell-main-content-frame">Native content</div></div></div></main>`;
 
-async function installFixture(page: Page, markup: string) {
-  await page.route("http://injected.test/**", route => route.fulfill({ contentType: "text/html", body: `<!doctype html><html><head><style>html,body{margin:0;height:100%}aside{position:fixed;width:64px;height:100%;z-index:50}main{margin-left:64px;height:600px}main>div,[data-app-shell-main-content-layout]{height:100%}.fixed{position:fixed;inset:0}.app-shell-main-content-frame{height:100%}</style></head><body>${navigation}${markup}</body></html>` }));
+async function installFixture(page: Page, markup: string, navigationMarkup = navigation) {
+  await page.route("http://injected.test/**", route => route.fulfill({ contentType: "text/html", body: `<!doctype html><html><head><style>html,body{margin:0;height:100%}aside{position:fixed;width:64px;height:100%;z-index:50}main{margin-left:64px;height:600px}main>div,[data-app-shell-main-content-layout]{height:100%}.fixed{position:fixed;inset:0}.app-shell-main-content-frame{height:100%}</style></head><body>${navigationMarkup}${markup}</body></html>` }));
   await page.goto("http://injected.test/fixture");
   await page.evaluate(() => {
     (window as any).betterCodexHost = {
@@ -140,5 +140,46 @@ for (const pinned of [true, false]) {
     await page.getByRole("button", { name: "Tasks", exact: true }).click();
     await expect(page.getByText("Native content", { exact: true })).toBeVisible();
     await expect(page.locator("body")).toHaveAttribute("data-sidebar-pinned", String(!pinned));
+  });
+}
+
+for (const recoveryLauncher of [false, true]) {
+  test(`nested desktop navigation rows stay narrow ${recoveryLauncher ? "with" : "without"} a recovery launcher`, async ({ page }) => {
+    const rail = `<style>#nav-list button{width:40px;height:40px;padding:0}.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}</style><aside data-app-navigation-rail style="display:flex;flex-direction:column;align-items:center">
+      <div id="nav-list" style="display:flex;flex-direction:column;align-items:center;gap:8px">
+        <div id="home-row" style="display:flex;align-items:center"><button data-sidebar-destination="tasks" aria-label="Tasks" style="width:40px;height:40px"><span>Tasks</span></button></div>
+        <button aria-label="Spaces" style="width:40px;height:40px">Spaces</button>
+        ${recoveryLauncher ? '<div id="launcher-row" style="display:flex;align-items:center"><button data-sidebar-destination="better-codex" aria-label="Better Codex"><span>Better Codex</span></button></div>' : ""}
+      </div>
+    </aside>`;
+    await installFixture(page, content, rail);
+    const entries = page.locator('[data-better-codex-rail-entry="true"]');
+    await expect(entries).toHaveCount(3);
+    const layout = await page.evaluate(() => {
+      const buttons = [...document.querySelectorAll('[data-better-codex-rail-entry="true"]')];
+      return {
+        parents: buttons.map(button => button.parentElement?.id),
+        rows: buttons.map(button => button.getBoundingClientRect().y),
+        homeWidth: document.getElementById("home-row")!.getBoundingClientRect().width,
+        listWidth: document.getElementById("nav-list")!.getBoundingClientRect().width,
+      };
+    });
+    expect(layout.parents).toEqual(["nav-list", "nav-list", "nav-list"]);
+    expect(layout.rows[1]).toBeGreaterThan(layout.rows[0]);
+    expect(layout.rows[2]).toBeGreaterThan(layout.rows[1]);
+    expect(layout.homeWidth).toBe(40);
+    expect(layout.listWidth).toBeLessThanOrEqual(64);
+    for (const [id, surface] of [["better-codex-entry", "issues"], ["better-codex-agents-entry", "agents"], ["better-codex-projects-entry", "projects"]]) {
+      await page.locator(`#${id}`).click();
+      await expect(page.locator("#better-codex-panel")).toHaveAttribute("data-surface", surface);
+    }
+    await page.getByRole("button", { name: "Tasks", exact: true }).click();
+    await expect(page.locator("#better-codex-panel")).toBeHidden();
+    await page.evaluate(() => (window as any).__betterCodexInjection__.refresh());
+    await expect(page.locator('#nav-list > [data-better-codex-rail-entry="true"]')).toHaveCount(3);
+    await page.evaluate(injectionScript(4317, "fixture-token", "uninstall", "en", "codex"));
+    await expect(entries).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Tasks", exact: true })).toBeVisible();
+    if (recoveryLauncher) await expect(page.getByRole("button", { name: "Better Codex", exact: true })).toBeVisible();
   });
 }
