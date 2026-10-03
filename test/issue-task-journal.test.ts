@@ -3,8 +3,8 @@ import test from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { spawn, type ChildProcess } from "node:child_process";
+import { once } from "node:events";
 import { Store } from "../src/db.js";
 
 const fixture=()=>{const home=mkdtempSync(join(tmpdir(),"owned-task-journal-")),file=join(home,"runtime.db"),store=new Store(file);
@@ -98,11 +98,46 @@ test("simultaneous workers can claim a queued task once; duplicate create has on
   const f=fixture();const task=f.store.createIssueRequest({projectId:f.project.id,title:"Concurrent",agentEnabled:true},"owned-create-unique");
   assert.equal(f.store.createIssueRequest({projectId:f.project.id,title:"Concurrent",agentEnabled:true},"owned-create-unique").issue.id,task.issue.id);
   assert.equal(f.store.taskJournal.history(task.issue.id).events.filter(event=>event.kind==="task_created").length,1);
-  f.store.close();const execute=promisify(execFile);
-  const script="import {Store} from './src/db.ts';const store=new Store(process.argv[1]);console.log(store.claimNextIssue(process.argv[2])?'claimed':'empty');store.close();";
-  try{
-    const result=await Promise.all([1,2].map(()=>execute(process.execPath,["--import","tsx","--input-type=module","-e",script,f.file,task.issue.id])));
-    assert.deepEqual(result.map(r=>r.stdout.trim()).sort(),["claimed","empty"]);
-    const read=new Store(f.file);try{assert.equal(read.taskJournal.history(task.issue.id).runs.length,1);}finally{read.close();}
-  }finally{rmSync(f.home,{recursive:true,force:true});}
+  f.store.close();
+  const workers: ChildProcess[] = [];
+  const script = `
+    import {Store} from './src/db.ts';
+    const store = new Store(process.argv[1]);
+    process.once('message', () => {
+      const result = store.claimNextIssue(process.argv[2]) ? 'claimed' : 'empty';
+      store.close();
+      process.send(result, () => process.disconnect());
+    });
+    process.send('ready');
+  `;
+  const nextMessage = (child: ChildProcess) => new Promise<unknown>((resolve, reject) => {
+    const cleanup = () => { child.off("message", message); child.off("error", failed); child.off("exit", exited); };
+    const message = (value: unknown) => { cleanup(); resolve(value); };
+    const failed = (error: Error) => { cleanup(); reject(error); };
+    const exited = (code: number | null) => failed(new Error(`claim_worker_exited_before_message: ${code}`));
+    child.once("message", message); child.once("error", failed); child.once("exit", exited);
+  });
+  try {
+    // Runtime owns schema initialization. Initialize test connections serially, then
+    // release both ready workers together to test claim contention, not migration races.
+    for (let i = 0; i < 2; i++) {
+      const child = spawn(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script, f.file, task.issue.id], { stdio: ["ignore", "ignore", "inherit", "ipc"] });
+      workers.push(child);
+      assert.equal(await nextMessage(child), "ready");
+    }
+    const claims = workers.map(nextMessage);
+    for (const child of workers) child.send("claim");
+    assert.deepEqual((await Promise.all(claims)).sort(), ["claimed", "empty"]);
+    const read = new Store(f.file);
+    try { assert.equal(read.taskJournal.history(task.issue.id).runs.length, 1); }
+    finally { read.close(); }
+  } finally {
+    await Promise.all(workers.map(async child => {
+      if (child.exitCode !== null || child.signalCode !== null) return;
+      const exited = once(child, "exit");
+      child.kill();
+      await exited;
+    }));
+    rmSync(f.home, { recursive: true, force: true });
+  }
 });
