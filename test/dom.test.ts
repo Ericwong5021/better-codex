@@ -4,9 +4,9 @@ import test from "node:test";
 import { betterCodexDesignSystemCss } from "../src/design-system.js";
 import { browserUiScript } from "../src/browser-ui.js";
 
-const browserEntrySource = readFileSync(new URL("../src/ui/browser-entry.ts", import.meta.url), "utf8");
-const desktopBridgeEntrySource = readFileSync(new URL("../src/ui/desktop-bridge-entry.ts", import.meta.url), "utf8");
-const sharedDialogSource = readFileSync(new URL("../src/ui/components/dialog.ts", import.meta.url), "utf8");
+const browserEntrySource = readFileSync(new URL("../src/ui/browser-entry.ts", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+const desktopBridgeEntrySource = readFileSync(new URL("../src/ui/desktop-bridge-entry.ts", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+const sharedDialogSource = readFileSync(new URL("../src/ui/components/dialog.ts", import.meta.url), "utf8").replace(/\r\n/g, "\n");
 
 function uiSource(...parameters: Parameters<typeof browserUiScript>) {
   return `${browserUiScript(...parameters)}\n${browserEntrySource}`;
@@ -799,7 +799,7 @@ test("archive is an action and cancelled is not an issue status", () => {
 
   // External run cancellation is valid; it must not become an owned board status.
   assert.doesNotMatch(source, /statusCancelled|data-context-value="cancelled"/);
-  const databaseSource=readFileSync(new URL("../src/db.ts",import.meta.url),"utf8");
+  const databaseSource=readFileSync(new URL("../src/db.ts",import.meta.url),"utf8").replace(/\r\n/g, "\n");
   assert.doesNotMatch(databaseSource.match(/export const issueStatuses = \[[^\]]+\]/)?.[0]||"",/cancelled/);
   assert.ok(source.includes('data-context-action="archive">\' + icon("archive") + \'<span>\' + escapeHtml(t("归档"))'));
   const archiveAction = source.match(/if \(item\.dataset\.contextAction === "archive"\) \{[\s\S]*?await loadIssues\(\);\n\s*\}/)?.[0] || "";

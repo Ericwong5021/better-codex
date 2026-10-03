@@ -21,7 +21,9 @@ export async function writeExternalReport(directory: string, input: ExternalRepo
   const id = externalObservationId(base);
   await mkdir(spool, { recursive: true, mode: 0o700 });
   const directoryStat = await lstat(spool);
-  if (directoryStat.isSymbolicLink() || !directoryStat.isDirectory() || (directoryStat.mode & 0o022)) throw new Error("external_spool_permissions");
+  // Windows mode bits are synthetic; access control relies on the directory ACL.
+  // Enforce POSIX write restrictions where the platform exposes them.
+  if (directoryStat.isSymbolicLink() || !directoryStat.isDirectory() || (process.platform !== "win32" && (directoryStat.mode & 0o022))) throw new Error("external_spool_permissions");
   const lockPath = join(spool, `${id}.lock`);
   let lock;
   try { lock = await open(lockPath, "wx", 0o600); }

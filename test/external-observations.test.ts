@@ -122,8 +122,10 @@ test("watcher rejects forged filenames before ingest and will not follow report 
     symlinkSync(join(home, externalReportFileName(report)), join(home, externalReportFileName(other)));
     await watcher.poll(); assert.equal(external.list(true).length, 0); assert.equal(watcher.capability().rejected_reports, 1);
     await watcher.poll(); assert.equal(watcher.capability().rejected_reports, 1, "unchanged invalid file does not spam repeated errors");
-    chmodSync(home, 0o777); await watcher.poll();
-    assert.equal(watcher.capability().connected, false); assert.equal(watcher.capability().error, "external_spool_permissions");
+    if (process.platform !== "win32") {
+      chmodSync(home, 0o777); await watcher.poll();
+      assert.equal(watcher.capability().connected, false); assert.equal(watcher.capability().error, "external_spool_permissions");
+    }
   } finally { chmodSync(home, 0o700); await watcher.stop(); db.close(); rmSync(home, { recursive: true, force: true }); }
 });
 

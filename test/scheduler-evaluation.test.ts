@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after } from "node:test";
@@ -22,11 +22,12 @@ const complete = {
 const fixtureHome = mkdtempSync(join(tmpdir(), "better-codex-evaluator-"));
 process.env.BETTER_CODEX_HOME = fixtureHome;
 process.env.CODEX_HOME = join(fixtureHome, "codex");
-const executable = join(fixtureHome, "codex-fixture.cjs");
+const executable = join(fixtureHome, process.platform === "win32" ? "codex-fixture.exe" : "codex-fixture.cjs");
+const fixtureScript = join(fixtureHome, "codex-fixture.cjs");
 const capture = join(fixtureHome, "invocation.json");
 process.env.BETTER_CODEX_CODEX_PATH = executable;
 process.env.BC_SCHEDULER_FIXTURE_CAPTURE = capture;
-writeFileSync(executable, `#!/usr/bin/env node
+writeFileSync(fixtureScript, `#!/usr/bin/env node
 const fs = require("node:fs");
 const args = process.argv.slice(2);
 if (args.includes("--version")) { console.log("codex simulated fixture"); process.exit(0); }
@@ -39,6 +40,13 @@ const { Store } = await import("../src/db.js");
 const { IssueWorker } = await import("../src/worker.js");
 const { ensureDirectories } = await import("../src/config.js");
 ensureDirectories();
+// Windows cannot execute a shebang. Node receives the Codex "exec" command
+// as a script path in the isolated scheduler cwd; the fixture keeps the same argv.
+if (process.platform === "win32") {
+  copyFileSync(process.execPath, executable);
+  const body = readFileSync(fixtureScript, "utf8").replace("process.argv.slice(2)", '["exec", ...process.argv.slice(2)]');
+  writeFileSync(join(fixtureHome, "scheduler-runtime", "exec"), body);
+}
 after(() => rmSync(fixtureHome, { recursive: true, force: true }));
 
 

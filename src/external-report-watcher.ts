@@ -51,8 +51,10 @@ export class ExternalReportWatcher {
     try {
       const requestedDirectory = resolve(this.options.directory);
       const directoryStat = await lstat(requestedDirectory);
+      // Windows mode bits are synthetic; access control relies on the directory ACL.
+      // Enforce POSIX write restrictions where the platform exposes them.
       if (directoryStat.isSymbolicLink()) throw new Error("external_spool_symlink");
-      if (!directoryStat.isDirectory() || (directoryStat.mode & 0o022)) throw new Error("external_spool_permissions");
+      if (!directoryStat.isDirectory() || (process.platform !== "win32" && (directoryStat.mode & 0o022))) throw new Error("external_spool_permissions");
       const directory = await realpath(requestedDirectory);
       const entries = (await readdir(directory, { withFileTypes: true })).filter(entry => entry.isFile() && reportFilePattern.test(entry.name)).sort((a, b) => a.name.localeCompare(b.name));
       const present = new Set(entries.map(entry => entry.name));
@@ -65,7 +67,7 @@ export class ExternalReportWatcher {
           const info = await file.stat();
           signature = `${info.ino}:${info.size}:${info.mtimeMs}`;
           if (this.seen.get(entry.name) === signature) continue;
-          if (!info.isFile() || info.size > maxReportBytes || (info.mode & 0o022)) throw new Error("external_report_permissions_or_size");
+          if (!info.isFile() || info.size > maxReportBytes || (process.platform !== "win32" && (info.mode & 0o022))) throw new Error("external_report_permissions_or_size");
           const value = normalizeExternalReport(JSON.parse(await file.readFile("utf8")));
           if (externalReportFileName(value) !== entry.name) throw new Error("external_report_filename_mismatch");
           if (this.closing) return;

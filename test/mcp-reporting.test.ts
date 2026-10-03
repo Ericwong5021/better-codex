@@ -14,7 +14,7 @@ test("reporting settings persist privately, fail closed and respect explicit env
     writeMcpReportingSetting(true, path);
     assert.equal(readMcpReportingSetting(path), true);
     assert.equal(mcpReportingEnabled(path, {}), true);
-    assert.equal(statSync(path).mode & 0o777, 0o600);
+    if (process.platform !== "win32") assert.equal(statSync(path).mode & 0o777, 0o600);
     assert.equal(mcpReportingEnabled(path, { BETTER_CODEX_MCP_ALLOW_REPORTS: "0" }), false);
     assert.equal(mcpReportingEnabled(path, { BETTER_CODEX_MCP_ALLOW_REPORTS: "invalid" }), false);
     writeMcpReportingSetting(false, path);
