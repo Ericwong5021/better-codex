@@ -1,0 +1,11 @@
+{
+  "name": "better-codex-local",
+  "plugins": [
+    {
+      "name": "better-codex",
+      "source": { "source": "local", "path": "./plugins/better-codex" },
+      "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+      "category": "Productivity"
+    }
+  ]
+}

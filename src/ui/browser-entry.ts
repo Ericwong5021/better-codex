@@ -1,9 +1,14 @@
 import { createUpdateObserver, updateOutcome } from "./core/update-observer.js";
 import { createCommandObserver } from "./core/command-observer.js";
 import { conversationEmptyState } from "./features/board/model.js";
+import { externalObservationCard, externalMatchesSearch } from "./features/board/external-model.js";
+import { taskCreatorPresentation } from "./features/board/creator-model.js";
+import { creatorMarkup, creatorDetailMarkup } from "./features/board/creator-view.js";
+import { createExternalObservationDetail } from "./features/board/external-view.js";
+import { createTaskHistoryController } from "./features/board/task-history-controller.js";
 import { sessionThreadMissing } from "../session-execution-policy.js";
 import { createHostAdapter } from "./hosts/index.js";
-import { findInjectedMount, injectedElementVisible } from "./hosts/injected-mount.js";
+import { elementVisible } from "./core/visibility.js";
 import { applyHostTheme } from "./theme/apply.js";
 import { themeIsDegraded } from "./theme/diagnostics.js";
 import { createEmptyState } from "./components/empty-state.js";
@@ -13,7 +18,7 @@ import { adoptFieldShell } from "./components/field-shell.js";
 import { adoptMenu } from "./components/menu.js";
 import { adoptNotice } from "./components/notice.js";
 import { observeComponentSize } from "./core/lifecycle.js";
-import { destroyRemovedComponents, registerOwnedComponent } from "./core/ownership.js";
+import { destroyOwnedComponents, destroyRemovedComponents, registerOwnedComponent } from "./core/ownership.js";
 import { adoptButton, adoptIconButton, createButton, createIconButton } from "./primitives/button.js";
 import { adoptBadge, adoptStatusBadge, createStatusBadge } from "./primitives/badge.js";
 import { adoptFormRow } from "./patterns/form-row.js";
@@ -27,12 +32,12 @@ import { createProjectsController } from "./features/projects/controller.js";
 import { createSettingsController } from "./features/settings/controller.js";
 
 export function install(config: Record<string, any>) {
-  if (!config || config.schemaVersion !== 1) throw new Error("injected_ui_schema_mismatch");
+  if (!config || config.schemaVersion !== 1) throw new Error("browser_ui_schema_mismatch");
     "use strict";
     const VERSION = config.version;
     const CORE_VERSION = config.coreVersion;
     const PROFILE = config.profile;
-    const HOST_KIND = config.host;
+    const HOST_KIND = "web";
     const SESSION_NATIVE_COMMANDS = config.sessionNativeCommands;
     const DESKTOP_NATIVE_COMMANDS = config.desktopNativeCommands;
     const RELAY = document.documentElement.dataset.betterCodexHost === "relay";
@@ -72,7 +77,7 @@ export function install(config: Record<string, any>) {
     const FILE_UPLOADS = HOST_CAPABILITIES.fileUploads === true;
     if (READ_ONLY) document.documentElement.setAttribute("data-better-codex-read-only", "true");
     const HELP_MODE_MARKDOWN = config.helpModeMarkdown;
-    const previous = window.__betterCodexInjection__;
+    const previous = window.__betterCodexUI__;
     if (previous?.version === VERSION && previous?.endpoint === config.baseUrl && previous?.profile === PROFILE && previous?.host === HOST_KIND && previous?.bundleChecksum === config.bundleChecksum && typeof previous?.pulse === "function") {
       previous.refresh();
       return { installed: true, reused: true };
@@ -86,40 +91,14 @@ export function install(config: Record<string, any>) {
     const PANEL_ID = "better-codex-panel";
     const STYLE_ID = "better-codex-style";
     const OWNED = "data-better-codex-owned";
-    const HIDDEN = "data-better-codex-native-hidden";
-    const HOST = "data-better-codex-page-host";
-    const EXTERNAL_MCP_HIDDEN = "data-better-codex-external-mcp-host-hidden";
-    const BASE_URL = config.baseUrl;
+                const BASE_URL = config.baseUrl;
     const BRIDGE_TOKEN = config.bridgeToken;
     const BETTER_CODEX_LOGO_URL = config.logoUrl;
     const DEFAULT_AGENT_AVATAR_URL = config.defaultAgentAvatarUrl;
     const INITIAL_LOCALE = config.initialLocale;
-    const SELECTORS = HOST_KIND === "web" ? {
-      sidebarScroll: "[data-app-action-sidebar-scroll]",
-      sidebarSection: "[data-app-action-sidebar-section]",
-      truncatedText: ".text-fade-truncate",
-      contentFrame: ".app-shell-main-content-frame",
-      contentLayout: "[data-app-shell-main-content-layout]",
-      threadRow: "[data-app-action-sidebar-thread-id]",
-      projectList: "[data-app-action-sidebar-project-list-id]",
-      projectId: "[data-app-action-sidebar-project-id]",
-      currentProjectRow: "[data-app-action-sidebar-project-row][aria-current=\"page\"]",
-      projectRow: "[data-app-action-sidebar-project-row]",
-      searchInput: "input[type=\"search\"]",
-      sidebarNavigation: "aside nav[role=\"navigation\"]",
-    } : config.selectors;
-    const ATTRIBUTES = HOST_KIND === "web" ? {
-      threadId: "data-app-action-sidebar-thread-id",
-      threadActive: "data-app-action-sidebar-thread-active",
-      projectListId: "data-app-action-sidebar-project-list-id",
-      projectId: "data-app-action-sidebar-project-id",
-      projectLabel: "data-app-action-sidebar-project-label",
-    } : config.attributes;
-    const NAVIGATION = HOST_KIND === "web" ? {
-      messageType: "navigate-to-route",
-      threadRoutePrefix: "/local/",
-    } : config.navigation;
-    const BETTER_CODEX_ROUTE = config.betterCodexRoute;
+    const SELECTORS = { sidebarSection:'[data-app-action-sidebar-section]' };
+    const NAVIGATION = { messageType:'navigate-to-route', threadRoutePrefix:'/local/' };
+    const BETTER_CODEX_ROUTE = '/web';
     const FEATURE_MANIFEST = config.featureManifest;
     const ENABLED_FEATURES = new Set(FEATURE_MANIFEST.features.filter(feature => feature.enabled).map(feature => feature.id));
     const SIDEBAR_NAVIGATION_ITEM = SELECTORS.sidebarNavigationItem || ".sidebar-item";
@@ -175,6 +154,19 @@ export function install(config: Record<string, any>) {
     if (HOST_KIND === "web" && !hasFeature("project-management") && /^\/web\/projects(?:\/|$)/.test(webPathname())) updateWebHistory({ betterCodex: true, betterCodexSurface: "issues" }, "/web", "replace");
     const initialAgentKey = initialAgentRoute?.agentKey || "";
     const state = { projects: [], projectsLoaded: false, issues: [], issuesLoaded: false, projectIssues: [], projectIssuesProjectId: "", projectDetailId: initialProjectRoute?.projectId || "", projectPage: "overview", projectDocumentView: "charter", projectDocumentPending: null, projectDocumentError: null, projectPlanningPending: null, projectPlanningError: null, agents: [], agentModelCatalog: [], agentModels: [], agentReasoningEfforts: [], user: { id: "", name: "你", email: "", handle: "", initials: "你", color: USER_AVATAR_COLORS[0], avatar: "", avatar_generated: true }, users: [], projectId: "", search: "", agentSearch: "", agentView: "all", agentPane: initialAgentKey === "new" ? "create" : initialAgentKey ? "detail" : "preview", selectedAgentId: initialAgentKey && initialAgentKey !== "new" ? initialAgentKey : "", agentDraft: initialAgentKey === "new" ? { avatar: DEFAULT_PRESET_AVATAR_URL } : null, agentInspectorWidth: Number.isFinite(rememberedAgentInspectorWidth) && rememberedAgentInspectorWidth > 0 ? rememberedAgentInspectorWidth : 0, surface: initialProjectRoute ? "projects" : initialAgentRoute ? "agents" : availableSurfaces.includes(rememberedSurface) ? rememberedSurface : "issues", view: "all", autoDispatch: false, autoDispatchPending: false, schedulerModel: "gpt-5.6-sol", schedulerReasoningEffort: "high", issueDescriptionLimit: 100000, mockup: false, keepCreate: rememberedKeepCreate, selected: null, error: "", systemLocale, languageSetting, locale: languageSetting === "system" ? systemLocale : languageSetting, filters: { status: [], priority: [], date: [], assignee: [], creator: [], project: [], label: [] } };
+    state.filters.source = [];
+    state.schedulerModelLocked = false;
+    let externalObservations = [], externalCapability = null, externalReceivedAt = 0, externalLoadError = "";
+    let taskCreatorProfiles = [];
+    const creatorFor = issue => {
+      const creator = taskCreatorPresentation(issue, taskCreatorProfiles, state.users);
+      const user = creator.filterKey.startsWith("user:") ? state.users.find(item => item.id === issue.creator_user_id) : null;
+      return user && !creator.avatar ? { ...creator, avatar: generatedUserAvatar(creator.name, user.color) } : creator;
+    };
+    let externalDetail = null, externalDetailValue = null, externalRefreshTimer = null, externalRequestSequence = 0;
+    function externalConnection() { return { connected: !externalLoadError && externalCapability?.connected === true, receivedAt: externalReceivedAt }; }
+    function externalCards() { return externalObservations.filter(record => externalMatchesSearch(record, state.search)).map(record => externalObservationCard(record, externalConnection())); }
+    function boardIssues() { return [...state.issues, ...externalCards()]; }
     const pendingIssueRemovals = new Map();
     const pendingIssueCreates = new Map();
     const pendingIssueReplies = new Map();
@@ -377,6 +369,57 @@ export function install(config: Record<string, any>) {
       return api("/api/issues/" + encodeURIComponent(id) + "/move", { method: "POST", body: JSON.stringify({ version, status, before_id: beforeId }) });
     }
     const localeResources = { "zh-CN": {}, en: {
+      "执行记录与依赖": "Runs and dependencies",
+      "查看结果": "View result",
+      "已人工验收": "Accepted",
+      "验收未确认": "Acceptance unconfirmed",
+      "执行结果与人工验收分别记录": "Execution results and acceptance are recorded separately",
+      "执行记录读取中断": "Unable to read runs",
+      "正在读取执行记录…": "Loading runs…",
+      "展开后读取执行记录": "Expand to load runs",
+      "暂无执行记录": "No runs yet",
+      "父任务": "Parent task",
+      "执行完成": "Completed",
+      "等待评审": "Awaiting review",
+      "已领取": "Claimed",
+      "等待用户": "Waiting for input",
+      "等待批准": "Waiting for approval",
+      "时间未知": "Time unknown",
+      "来源与同步详情": "Source and sync details",
+      "创建者来源": "Creator source",
+      "当前执行者": "Executor",
+      "来源可信度": "Source verification",
+      "同步情况": "Sync status",
+      "最近上报": "Last reported",
+      "最近接收": "Last received",
+      "结果与验收": "Result and acceptance",
+      "来源范围": "Source scope",
+      "来源任务": "Source task",
+      "源线程": "Source thread",
+      "上报序号": "Report sequence",
+      "任务上报": "Task reports",
+      "系统记录": "System record",
+      "相同内容上报": "Identical reports",
+      "外部任务详情": "External task details",
+      "暂未收到上报正文": "No reports yet",
+      "未知创建者": "Unknown creator",
+      "任务自报 · 创建者未验证": "Self-reported · Creator unverified",
+      "此任务由来源对话执行，当前页面同步展示。自动发现尚未接通。": "This task runs in its source conversation. Reports appear here; automatic discovery is unavailable.",
+      "任务自报完成；尚未人工验收": "Completion reported; awaiting acceptance",
+      "任务目标是否完成：未知": "Task outcome unknown",
+      "未知 · 来源声明": "Unknown · Source declaration",
+      "执行中 · 自报": "Running · Reported",
+      "等待用户 · 自报": "Waiting for input · Reported",
+      "等待审批 · 自报": "Waiting for approval · Reported",
+      "已阻塞 · 自报": "Blocked · Reported",
+      "执行失败 · 自报": "Failed · Reported",
+      "已取消 · 自报": "Cancelled · Reported",
+      "自报完成 · 待验收": "Completion reported · Awaiting acceptance",
+      "同步正常": "Synced",
+      "同步过期或中断 · 当前状态未知": "Sync interrupted or expired · State unknown",
+      "状态已过期": "State expired",
+      "当前状态未知": "State unknown",
+      "读取中断": "Unable to load",
       "调度失败": "Scheduling failed",
       "模型列表暂不可用，请检查 Codex 会话服务后刷新。": "Model list unavailable. Check the Codex session service and refresh.",
       "任务执行失败": "Task execution failed", "任务尚未启动": "Task has not started", "正在启动任务": "Starting the task", "请求已接收，正在准备会话。": "Request received. Preparing the conversation.", "会话记录尚不可恢复，需要先处理会话绑定问题。": "The conversation cannot be restored yet. Resolve the thread binding issue first.", "请查看下方失败原因，处理后再继续。": "Resolve the failure shown below before continuing.", "原始任务内容已保留": "Your original task has been preserved", "尚未开始对话": "Conversation has not started", "发送消息后将开始处理任务。": "Send a message to start the task.",
@@ -740,18 +783,28 @@ export function install(config: Record<string, any>) {
       "复制全部错误": "Copy all errors",
       "移除当前错误": "Remove current error",
       "复制失败": "Copy failed",
+      "集成": "Integrations",
+      "适配 dots": "Set up dots",
+      "dots 适配": "Dot setup",
+      "让 Dot 主动上报任务进度到看板": "Have your dot report task progress to the board",
+      "持续上报指令": "Ongoing reporting instruction",
+      "先在 Dot 的个人资料中连接这台电脑，并保持桌面应用在线。": "Connect this computer in your dot profile and keep the desktop app online.",
+      "复制设置请求。": "Copy the setup request.",
+      "打开你的 Dot 对话，粘贴并手动发送请求。": "Open your dot conversation, paste the request, and send it manually.",
+      "在 Dot 对话中查看并完成规则添加，然后用真实任务检查看板上报。": "Review and finish adding the rule in your dot conversation, then check board reports with a real task.",
+      "复制设置请求后，请手动发给你的 Dot。规则保存结果由 Dot 的原生流程确认。": "Copy the setup request and send it to your dot manually. The native flow confirms whether the rule is saved.",
+      "复制设置请求": "Copy setup request",
+      "设置请求已复制，请发送给你的 Dot。": "Setup request copied. Send it to your dot.",
+      "正在复制…": "Copying…",
+      "复制失败，请选中上方指令手动复制。": "Copy failed. Select the instruction above and copy it manually.",
       "列表数据暂时无法读取，请稍后重试。": "List data is temporarily unavailable. Try again shortly.",
       "任务内容超过长度限制，请缩短内容或作为附件上传。": "The task content is too long. Shorten it or upload it as an attachment.",
       "网络连接不稳定，正在等待恢复。": "The network connection is unstable. Waiting to reconnect.",
     });
     const bridgeRequests = new Map();
-    const appServerRequests = new Map();
     const sessionHandoffPending = new Set();
-    let nativeThreadOpenBypass = "";
-    const relayId = "better-codex:" + uiRequestId();
     const relayThreads = new Set();
     let bridgeSequence = 0;
-    let appServerSequence = 0;
     let diagnosticSequence = 0;
     const diagnosticLog = [];
     const errorQueue = [];
@@ -790,19 +843,6 @@ export function install(config: Record<string, any>) {
     let passiveNetworkErrorVisible = false;
     let updateTimer = null;
     let retryClockTimer = null;
-    let relayTimer = null;
-    let relayBusy = false;
-    let relayHeartbeatBusy = false;
-    let relayTurnProbeAt = 0;
-    let relayCapability = "unknown";
-    let relayCapabilityError = "";
-    let relayCapabilityCheckedAt = 0;
-    let relayAppSessionId = "";
-    let relayCurrentThreadId = "";
-    let relayEventQueue = Promise.resolve();
-    let relayCommandInFlight = false;
-    let relayBufferedEvents = [];
-    const relayGuardianDenials = new Map();
     let updateNotice = null;
     let updateNoticeResizeObserver = null;
     let boardScrollResizeObserver = null;
@@ -823,8 +863,6 @@ export function install(config: Record<string, any>) {
     let suppressAgentOutside = false;
     let agentInspectorResize = null;
     let draggingIssueId = "";
-    let sessionDragPointer = null;
-    let sessionDropInFlight = false;
     const listRequests = new Map();
     let suppressSessionClickUntil = 0;
     let active = false;
@@ -906,7 +944,11 @@ export function install(config: Record<string, any>) {
       if (localeResources.en[core]) return leading + localeResources.en[core] + trailing;
       if (core === "更多操作") return leading + "More actions" + trailing;
       if (core === "本次启动关闭") return leading + "Disable for this launch" + trailing;
-      let match = core.match(/^(\d+) 个智能体工作中$/);
+      let match = core.match(/^第 (\d+) 次执行$/);
+      if (match) return leading + "Run " + match[1] + trailing;
+      match = core.match(/^创建者：(.+)$/);
+      if (match) return leading + "Created by: " + t(match[1]) + trailing;
+      match = core.match(/^(\d+) 个智能体工作中$/);
       if (match) return leading + match[1] + (match[1] === "1" ? " agent working" : " agents working") + trailing;
       match = core.match(/^(\d+) 个筛选$/);
       if (match) return leading + match[1] + (match[1] === "1" ? " filter" : " filters") + trailing;
@@ -1040,13 +1082,14 @@ export function install(config: Record<string, any>) {
     }
 
     function issuePermissions(issue) {
+      if (issue?.external_observation) return { enrichmentPending: false, executionRunning: issue.external_presentation.execution === "running", remotePending: false, remoteConflict: false, executed: false, sessionHandoff: false, executionLocked: true, editingLocked: true, boardLocked: true, contextLocked: true, archiveLocked: true };
       const enrichmentPending = issue?.enrichment_status === "regenerating";
       const executionRunning = issueExecutionRunning(issue);
       const remotePending = issue?.remote_pending === true || issue?.remote_state?.status === "pending";
       const remoteConflict = issue?.remote_conflict === true || issue?.remote_state?.status === "conflict";
       const executed = Boolean(issue?.run_thread_id);
       const sessionHandoff = Boolean(issue?.session_handoff_at && !issue?.session_owned);
-      const executionLocked = executionRunning || executed;
+      const executionLocked = READ_ONLY || executionRunning || executed;
       return {
         enrichmentPending,
         executionRunning,
@@ -1056,9 +1099,9 @@ export function install(config: Record<string, any>) {
         sessionHandoff,
         executionLocked,
         editingLocked: enrichmentPending || executionLocked || remotePending,
-        boardLocked: enrichmentPending || executionRunning || remotePending,
-        contextLocked: enrichmentPending || executionRunning || remotePending,
-        archiveLocked: enrichmentPending || remotePending,
+        boardLocked: READ_ONLY || enrichmentPending || executionRunning || remotePending,
+        contextLocked: READ_ONLY || enrichmentPending || executionRunning || remotePending,
+        archiveLocked: READ_ONLY || enrichmentPending || remotePending,
       };
     }
 
@@ -1090,7 +1133,7 @@ export function install(config: Record<string, any>) {
     async function resolveWorkspacePath(context) {
       const fromUrl = String(context?.workspacePath || "").trim();
       const threadId = normalizeSessionId(context?.threadId);
-      if (fromUrl && (!threadId || currentRouteThreadId() === threadId)) return fromUrl;
+      if (fromUrl) return fromUrl;
       if (!threadId) return "";
       try {
         const result = await api("/api/sessions/" + encodeURIComponent(threadId) + "/workspace");
@@ -1102,6 +1145,9 @@ export function install(config: Record<string, any>) {
 
     async function ensureContextProject(context) {
       if (!context.projectId) return null;
+      // Shared hosts carry Runtime project IDs; only imported external IDs need ensuring.
+      const ownedProject = state.projects.find(item => item.id === context.projectId);
+      if (ownedProject) return ownedProject;
       const source = context.projects.find(item => item.id === context.projectId);
       const existing = state.projects.find(item => item.external_id === context.projectId);
       const workspacePath = await resolveWorkspacePath(context);
@@ -1121,132 +1167,9 @@ export function install(config: Record<string, any>) {
       return project;
     }
 
-    function installStyle() {
-      if (document.getElementById(STYLE_ID)) return;
-      const style = document.createElement("style");
-      style.id = STYLE_ID;
-      style.setAttribute(OWNED, "true");
-      style.textContent = `
-        .better-codex-native-navigation { display: flex; align-items: center; width: 100%; border: 0; border-radius: var(--bc-radius-sm); background: transparent; color: inherit; text-align: start; cursor: pointer; }
-        .better-codex-native-navigation:hover { background: var(--bc-color-hover); }
-        .better-codex-native-navigation svg { width: var(--better-codex-native-icon-width, var(--bc-space-4)); height: var(--better-codex-native-icon-height, var(--bc-space-4)); flex-shrink: 0; }
-        [data-better-codex-rail-entry="true"].better-codex-native-navigation { width: 2.5rem; height: 2.5rem; justify-content: center; padding: 0; }
-        #${ENTRY_ID}[aria-current="page"], #${AGENTS_ENTRY_ID}[aria-current="page"], #${PROJECTS_ENTRY_ID}[aria-current="page"], #${MORE_ENTRY_ID}[aria-current="page"] { background: var(--bc-color-hover); }
-        html[data-better-codex-open="true"] ${SELECTORS.sidebarNavigation} [aria-current="page"]:not(#${ENTRY_ID}):not(#${AGENTS_ENTRY_ID}):not(#${PROJECTS_ENTRY_ID}):not(#${MORE_ENTRY_ID}) { background: transparent !important; }
-        html[data-better-codex-open="true"] ${SELECTORS.sidebarNavigation} [aria-current="page"]:not(#${ENTRY_ID}):not(#${AGENTS_ENTRY_ID}):not(#${PROJECTS_ENTRY_ID}):not(#${MORE_ENTRY_ID}) .text-token-list-active-selection-foreground { color: var(--color-token-foreground) !important; }
-        [${EXTERNAL_MCP_HIDDEN}="true"] { display: none !important; pointer-events: none !important; }
-        [${HOST}="true"] { position: relative !important; z-index: 31 !important; pointer-events: none !important; }
-        [${HIDDEN}="true"] { visibility: hidden !important; pointer-events: none !important; }
-        ${config.designSystemCss}
-      `;
-      (document.head || document.documentElement).appendChild(style);
-    }
+    function installStyle(){ if(document.getElementById(STYLE_ID))return;const style=document.createElement('style');style.id=STYLE_ID;style.setAttribute(OWNED,'true');style.textContent=config.designSystemCss;(document.head||document.documentElement).appendChild(style); }
 
-    function findReferenceButton() {
-      const scroll = document.querySelector(SELECTORS.sidebarScroll);
-      if (!scroll) return null;
-      const buttons = Array.from(scroll.querySelectorAll("button")).filter(button => !button.hasAttribute(OWNED));
-      const plugin = buttons.find(button => ["插件", "plugins"].includes(label(button.textContent || button.getAttribute("aria-label"))));
-      if (plugin) return plugin;
-      return buttons.find(button => button.closest(SELECTORS.sidebarSection)) || buttons[0] || null;
-    }
-
-    function navigationRail() {
-      return document.querySelector("[data-app-navigation-rail]");
-    }
-
-    function nativeLauncher(button) {
-      if (!(button instanceof Element) || button.hasAttribute(OWNED)) return false;
-      const destination = button.getAttribute("data-sidebar-destination") || "";
-      const name = label(button.querySelector(".sr-only")?.textContent || button.getAttribute("aria-label") || button.textContent);
-      return destination.includes("better-codex") || button.getAttribute("href") === BETTER_CODEX_ROUTE || name === "better codex";
-    }
-
-    function railReferenceButton() {
-      const rail = navigationRail();
-      if (!rail) return null;
-      const buttons = Array.from(rail.querySelectorAll("button")).filter(button => !button.hasAttribute(OWNED) && !nativeLauncher(button));
-      return buttons.find(button => button.hasAttribute("data-sidebar-destination")) || null;
-    }
-
-    function syncRailButton(button) {
-      button.setAttribute("data-better-codex-rail-entry", "true");
-      const reference = railReferenceButton();
-      if (reference) {
-        if (button.className !== reference.className) button.className = reference.className;
-        for (const name of ["data-color", "data-variant", "data-squircle", "data-uniform", "data-size", "data-icon-size"]) {
-          const value = reference.getAttribute(name);
-          if (value === null) button.removeAttribute(name);
-          else if (button.getAttribute(name) !== value) button.setAttribute(name, value);
-        }
-      } else if (!button.classList.contains("better-codex-native-navigation")) {
-        button.classList.add("better-codex-native-navigation");
-      }
-      let inner = button.querySelector(":scope > span");
-      const referenceInner = reference?.querySelector(":scope > span");
-      if (!(inner instanceof HTMLElement)) {
-        inner = document.createElement("span");
-        const svg = button.querySelector("svg");
-        if (svg) inner.append(svg);
-        button.append(inner);
-      }
-      if (referenceInner instanceof HTMLElement && inner.className !== referenceInner.className) inner.className = referenceInner.className;
-      if (!inner.querySelector("svg")) inner.insertAdjacentHTML("afterbegin", '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"></svg>');
-      if (!inner.querySelector(".sr-only")) {
-        const accessible = document.createElement("span");
-        accessible.className = "sr-only";
-        inner.append(accessible);
-      }
-      inner.querySelectorAll(".text-fade-truncate").forEach(node => node.remove());
-    }
-
-    function railButton(text) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.innerHTML = '<span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"></svg><span class="sr-only"></span></span>';
-      const accessible = button.querySelector(".sr-only");
-      if (accessible) accessible.textContent = text;
-      syncRailButton(button);
-      return button;
-    }
-
-    function placeRailSequence(nodes, parent, anchor) {
-      let cursor = anchor;
-      for (let index = nodes.length - 1; index >= 0; index -= 1) {
-        const node = nodes[index];
-        if (node.parentElement !== parent || node.nextSibling !== cursor) parent.insertBefore(node, cursor);
-        cursor = node;
-      }
-    }
-
-    function syncNativeIconSize(button, reference) {
-      if (HOST_KIND === "web" || !reference) return;
-      const referenceIcon = reference.querySelector("svg");
-      if (!(referenceIcon instanceof SVGElement)) return;
-      const style = getComputedStyle(referenceIcon);
-      const width = Number.parseFloat(style.width) > 0 ? style.width : "";
-      const height = Number.parseFloat(style.height) > 0 ? style.height : "";
-      if (width) button.style.setProperty("--better-codex-native-icon-width", width);
-      if (height) button.style.setProperty("--better-codex-native-icon-height", height);
-    }
-
-    function nativeButton(text) {
-      const reference = findReferenceButton();
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = HOST_KIND === "web" ? "web-nav-button" : "better-codex-native-navigation";
-      button.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"></svg><span class="text-fade-truncate"></span>';
-      button.querySelector("span").textContent = text;
-      if (reference && HOST_KIND !== "web") {
-        const style = getComputedStyle(reference);
-        button.style.height = style.height;
-        button.style.padding = style.padding;
-        button.style.font = style.font;
-        button.style.gap = style.gap;
-        syncNativeIconSize(button, reference);
-      }
-      return button;
-    }
+    function navigationButton(text){const button=document.createElement('button');button.type='button';button.className='web-nav-button';button.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"></svg><span class="text-fade-truncate"></span>';button.querySelector('span').textContent=text;return button;}
 
     function actionButton(text) {
       const handle = createButton({ label: t(text), variant: "ghost" }, componentContext("global-toolbar", "action-button:" + (++managedButtonSequence)));
@@ -1351,7 +1274,7 @@ export function install(config: Record<string, any>) {
     }
 
     function createEntry(text, id, title, surface) {
-      const button = HOST_KIND === "web" ? nativeButton(t(text)) : railButton(t(text));
+      const button = navigationButton(t(text));
       button.id = id;
       button.setAttribute(OWNED, "true");
       button.setAttribute("aria-label", t(title));
@@ -1389,7 +1312,7 @@ export function install(config: Record<string, any>) {
       const navigation = document.createElement("div");
       navigation.className = "web-nav-auxiliary";
       navigation.setAttribute(OWNED, "true");
-      moreEntry = nativeButton(t("更多"));
+      moreEntry = navigationButton(t("更多"));
       moreEntry.id = MORE_ENTRY_ID;
       moreEntry.classList.add("web-nav-more-entry");
       moreEntry.setAttribute(OWNED, "true");
@@ -1405,7 +1328,7 @@ export function install(config: Record<string, any>) {
       auxiliaryMenu.setAttribute(OWNED, "true");
       auxiliaryMenu.setAttribute("aria-label", t("更多功能"));
       if (REMOTE) {
-        profileEntry = nativeButton("");
+        profileEntry = navigationButton("");
         profileEntry.id = "better-codex-profile-entry";
         profileEntry.classList.add("web-nav-mobile-action", "web-nav-profile-entry");
         profileEntry.setAttribute(OWNED, "true");
@@ -1416,7 +1339,7 @@ export function install(config: Record<string, any>) {
           showUserProfileDialog();
         });
       }
-      usageEntry = nativeButton(t("Codex 额度"));
+      usageEntry = navigationButton(t("Codex 额度"));
       usageEntry.id = "better-codex-usage-entry";
       usageEntry.classList.add("web-nav-mobile-action");
       usageEntry.setAttribute(OWNED, "true");
@@ -1426,7 +1349,7 @@ export function install(config: Record<string, any>) {
         closeAuxiliaryMenu();
         document.getElementById("web-usage-toggle")?.click();
       });
-      themeEntry = nativeButton("");
+      themeEntry = navigationButton("");
       themeEntry.id = "better-codex-theme-entry";
       themeEntry.classList.add("web-nav-mobile-action");
       themeEntry.setAttribute(OWNED, "true");
@@ -1518,44 +1441,11 @@ export function install(config: Record<string, any>) {
       }
     }
 
-    function restoreNativeLaunchers() {
-      document.querySelectorAll("[data-better-codex-launcher-hidden]").forEach(button => {
-        button.removeAttribute("data-better-codex-launcher-hidden");
-      });
-    }
-
-    function ensureDesktopEntries() {
-      const rail = navigationRail();
-      const launcher = rail ? Array.from(rail.querySelectorAll("button")).find(nativeLauncher) : null;
-      const reference = railReferenceButton();
-      const parent = launcher?.parentElement || reference?.parentElement;
-      if (!parent) return false;
-      if (!entry) entry = createEntry("任务看板", ENTRY_ID, "打开任务看板", "issues");
-      syncRailButton(entry);
-      syncEntryLabel(entry, "任务看板", "打开任务看板");
-      syncEntryIcon(entry, "issues");
-      if (!agentsEntry) agentsEntry = createEntry("智能体", AGENTS_ENTRY_ID, "管理智能体", "agents");
-      syncRailButton(agentsEntry);
-      syncEntryLabel(agentsEntry, "智能体", "管理智能体");
-      syncEntryIcon(agentsEntry, "agents");
-      if (!projectsEntry) projectsEntry = createEntry("项目管理", PROJECTS_ENTRY_ID, "管理项目", "projects");
-      syncRailButton(projectsEntry);
-      syncEntryLabel(projectsEntry, "项目管理", "管理项目");
-      syncEntryIcon(projectsEntry, "projects");
-      projectsEntry.hidden = !hasFeature("project-management");
-      const anchor = launcher && launcher.parentElement === parent ? launcher : null;
-      placeRailSequence([entry, agentsEntry, projectsEntry], parent, anchor);
-      syncEntrySelection();
-      const mounted = entry.isConnected && agentsEntry.isConnected && projectsEntry.isConnected;
-      restoreNativeLaunchers();
-      return mounted;
-    }
-
     function ensureEntry() {
       if (destroyed) return false;
       installStyle();
-      if (HOST_KIND !== "web") return ensureDesktopEntries();
-      const reference = findReferenceButton();
+
+      const reference = null;
       const parent = reference?.parentElement || (HOST_KIND === "web" ? document.querySelector(SELECTORS.sidebarSection) : null);
       if (!parent) return false;
       if (!entry) entry = createEntry("任务看板", ENTRY_ID, "打开任务看板", "issues");
@@ -1588,36 +1478,13 @@ export function install(config: Record<string, any>) {
       return mounted;
     }
 
-    function findMount() {
-      if (HOST_KIND === "web") return document.querySelector("[data-better-codex-web-surface]");
-      return findInjectedMount(SELECTORS, OWNED);
-    }
+    function findMount(){return document.querySelector('[data-better-codex-web-surface]');}
 
-    function activeThreadRow() {
-      const rows = Array.from(document.querySelectorAll(SELECTORS.threadRow));
-      return rows.find(row => row.getAttribute(ATTRIBUTES.threadActive) === "true") || rows.find(row => ["page", "true"].includes(row.getAttribute("aria-current"))) || null;
-    }
-
-    function readContext(row = activeThreadRow()) {
-      const projectList = row?.closest(SELECTORS.projectList);
-      const projectRow = row?.closest(SELECTORS.projectId) || document.querySelector(SELECTORS.currentProjectRow);
-      const projects = Array.from(document.querySelectorAll(SELECTORS.projectRow)).flatMap(item => {
-        const id = item.getAttribute(ATTRIBUTES.projectId)?.trim();
-        const name = (item.getAttribute(ATTRIBUTES.projectLabel) || item.getAttribute("aria-label") || "").trim();
-        return id && name ? [{ id, name }] : [];
-      });
-      const url = new URL(location.href);
-      return {
-        projectId: projectList?.getAttribute(ATTRIBUTES.projectListId) || projectRow?.getAttribute(ATTRIBUTES.projectId) || "",
-        threadId: row ? nativeThreadId(row) : location.pathname.match(/\/local\/([^/?#]+)/)?.[1] || "",
-        workspacePath: url.searchParams.get("workspace") || url.searchParams.get("cwd") || "",
-        projects
-      };
-    }
+    function readContext(){const url=new URL(location.href);return {projectId:state.projectId||'',threadId:'',workspacePath:window.betterCodexHost?.workspacePath||url.searchParams.get('workspace')||url.searchParams.get('cwd')||'',projects:state.projects||[]};}
 
     function transientRuntimeTransportError(error) {
       const message = error instanceof Error ? error.message : String(error || "");
-      return ["runtime_offline", "runtime_unavailable", "runtime_reconciling", "update_in_progress", "update_commit_pending", "runtime_bridge_timeout", "runtime_bridge_unavailable", "injection_destroyed"].includes(message) || message === "runtime_fetch_failed" || message.startsWith("runtime_fetch_failed:");
+      return ["runtime_offline", "runtime_unavailable", "runtime_reconciling", "update_in_progress", "update_commit_pending", "runtime_bridge_timeout", "runtime_bridge_unavailable", "browser_ui_destroyed"].includes(message) || message === "runtime_fetch_failed" || message.startsWith("runtime_fetch_failed:");
     }
 
     function transientNetworkError(error) {
@@ -1845,621 +1712,10 @@ export function install(config: Record<string, any>) {
       void perform(() => REMOTE ? Promise.all([loadSurface({ background: true }), loadAutoDispatch({ background: true })]) : loadSurface({ background: true }), { background: true });
     }
 
-    function appServerError(value) {
-      if (!value) return "desktop_bridge_request_failed";
-      if (typeof value === "string") return value;
-      if (typeof value.message === "string") return value.message;
-      if (typeof value.code === "string") return value.code;
-      return "desktop_bridge_request_failed";
-    }
-
-    function codexError(value) {
-      const error = value && typeof value === "object" ? value : {};
-      const info = error.codexErrorInfo;
-      if (typeof info === "string") return { code: info, httpStatusCode: null };
-      const structured = info && typeof info === "object" ? info : {};
-      const code = Object.keys(structured)[0] || "other";
-      const detail = structured[code] && typeof structured[code] === "object" ? structured[code] : {};
-      return { code, httpStatusCode: Number.isInteger(detail.httpStatusCode) ? detail.httpStatusCode : null };
-    }
-
-    function retryKind(code) {
-      if (code === "httpConnectionFailed") return "network";
-      if (["responseStreamConnectionFailed", "responseStreamDisconnected", "responseTooManyFailedAttempts"].includes(code)) return "stream";
-      if (code === "serverOverloaded") return "overloaded";
-      if (code === "usageLimitExceeded") return "rate_limit";
-      return "service";
-    }
-
-    function relayEventTurnId(method, params) {
-      if (["error", "item/started", "item/completed"].includes(method)) return normalizeSessionId(params?.turnId);
-      if (method === "turn/started" || method === "turn/completed") return normalizeSessionId(params?.turn?.id);
-      return "";
-    }
-
-    function queueRelayEvent(method, params) {
-      relayEventQueue = relayEventQueue.catch(() => {}).then(async () => {
-        for (let attempt = 0; attempt < 3; attempt += 1) {
-          try {
-            return await api("/api/session-relay/events", {
-              method: "POST",
-              body: JSON.stringify({ relay_id: relayId, method, params })
-            });
-          } catch {
-            if (attempt === 2) return;
-            await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
-          }
-        }
-      }).catch(() => {});
-    }
-
-    function flushRelayEvents(turnId = "", includeUnmatched = false) {
-      const buffered = relayBufferedEvents;
-      relayBufferedEvents = [];
-      buffered.forEach(event => {
-        const eventTurnId = relayEventTurnId(event.method, event.params);
-        if (includeUnmatched || !eventTurnId || eventTurnId === turnId) queueRelayEvent(event.method, event.params);
-      });
-    }
-
-    function appServerEnvelope(value, event = null) {
-      let message = value;
-      if (typeof message === "string") {
-        try { message = JSON.parse(message); } catch { return false; }
-      }
-      if (!message || typeof message !== "object") return false;
-      if (message.type === "mcp-response") {
-        const response = message.message && typeof message.message === "object" ? message.message : {};
-        const id = String(response.id || "");
-        const pending = appServerRequests.get(id);
-        if (!pending) return false;
-        event?.stopImmediatePropagation?.();
-        appServerRequests.delete(id);
-        clearTimeout(pending.timer);
-        const elapsed = Date.now() - pending.startedAt;
-        if (elapsed >= 5000) appendDiagnostic("app_server_request_slow", { request_id: id, method: pending.method, elapsed_ms: elapsed, outcome: response.error ? "error" : "success", thread_id: relayCurrentThreadId || null });
-        if (response.error) pending.reject(new Error(appServerError(response.error)));
-        else pending.resolve(response.result);
-        return true;
-      }
-      if (message.type !== "mcp-notification") return false;
-      const method = String(message.method || "");
-      const params = message.params && typeof message.params === "object" ? message.params : {};
-      if (method === "thread/started") return false;
-      const threadId = normalizeSessionId(params.threadId);
-      if (!threadId || (!relayThreads.has(threadId) && threadId !== relayCurrentThreadId)) return false;
-      if (method === "item/autoApprovalReview/completed") {
-        if (params.review?.status === "denied") {
-          const denials = relayGuardianDenials.get(threadId) || [];
-          const source = params.action || {};
-          const commandSource = source.source === "unifiedExec" ? "unified_exec" : source.source;
-          const protocol = source.protocol === "socks5Tcp" ? "socks5_tcp" : source.protocol === "socks5Udp" ? "socks5_udp" : source.protocol;
-          const permissions = source.permissions || {};
-          const action = source.type === "command" ? { type: "command", source: commandSource, command: source.command, cwd: source.cwd }
-            : source.type === "execve" ? { type: "execve", source: commandSource, program: source.program, argv: source.argv, cwd: source.cwd }
-            : source.type === "applyPatch" ? { type: "apply_patch", cwd: source.cwd, files: source.files }
-            : source.type === "networkAccess" ? { type: "network_access", target: source.target, host: source.host, protocol, port: source.port }
-            : source.type === "mcpToolCall" ? { type: "mcp_tool_call", server: source.server, tool_name: source.toolName, connector_id: source.connectorId ?? null, connector_name: source.connectorName ?? null, tool_title: source.toolTitle ?? null }
-            : source.type === "requestPermissions" ? { type: "request_permissions", reason: source.reason ?? null, permissions: { network: permissions.network ?? null, file_system: permissions.fileSystem ?? null } }
-            : { type: source.type };
-          denials.push({ id: String(params.reviewId || ""), target_item_id: params.targetItemId ?? null, turn_id: String(params.turnId || ""), status: String(params.review.status || ""), risk_level: params.review.riskLevel ?? null, user_authorization: params.review.userAuthorization ?? null, rationale: params.review.rationale ?? null, decision_source: params.decisionSource ?? null, action });
-          relayGuardianDenials.set(threadId, denials.slice(-20));
-        }
-        return true;
-      }
-      if (!["thread/status/changed", "turn/started", "turn/completed", "error", "item/started", "item/completed"].includes(method)) return false;
-      let relayParams = params;
-      if (method === "thread/status/changed") {
-        const status = params.status && typeof params.status === "object" ? params.status : {};
-        relayParams = { threadId, status: { type: String(status.type || ""), activeFlags: Array.isArray(status.activeFlags) ? status.activeFlags.filter(value => typeof value === "string") : [] } };
-      }
-      if (method === "turn/started") {
-        const turn = params.turn && typeof params.turn === "object" ? params.turn : {};
-        relayParams = { threadId, turn: { id: String(turn.id || ""), status: String(turn.status || "") } };
-      }
-      if (method === "error") {
-        const turnId = normalizeSessionId(params.turnId);
-        if (!turnId) return false;
-        const error = params.error && typeof params.error === "object" ? params.error : {};
-        const detail = codexError(error);
-        relayParams = { threadId, turnId, willRetry: params.willRetry === true, error: { kind: retryKind(detail.code), code: detail.code, httpStatusCode: detail.httpStatusCode, message: String(error.message || "provider_request_failed").slice(0, 2000) } };
-      }
-      if (method === "item/started") {
-        const turnId = normalizeSessionId(params.turnId);
-        if (!turnId) return false;
-        const item = params.item && typeof params.item === "object" ? params.item : {};
-        relayParams = { threadId, turnId, item: { type: String(item.type || "").slice(0, 100) } };
-      }
-      if (method === "item/completed") {
-        const item = params.item && typeof params.item === "object" ? params.item : {};
-        if (item.type !== "agentMessage" || typeof item.text !== "string") return false;
-        relayParams = { threadId, turnId: String(params.turnId || ""), item: { type: "agentMessage", text: item.text } };
-      }
-      if (method === "turn/completed") {
-        const turn = params.turn && typeof params.turn === "object" ? params.turn : {};
-        const error = turn.error && typeof turn.error === "object" ? turn.error : null;
-        const items = Array.isArray(turn.items) ? turn.items.flatMap(item => item && typeof item === "object" && item.type === "agentMessage" && typeof item.text === "string" ? [{ type: "agentMessage", text: item.text }] : []) : [];
-        relayParams = { threadId, turn: { id: String(turn.id || ""), status: String(turn.status || ""), items, error: error ? { message: String(error.message || "") } : null } };
-      }
-      if (relayCommandInFlight && method !== "thread/status/changed" && method !== "turn/started") relayBufferedEvents.push({ method, params: relayParams });
-      else queueRelayEvent(method, relayParams);
-      return true;
-    }
-
-    function onAppServerMessage(event) {
-      appServerEnvelope(event.data, event);
-    }
-
-    function sendAppServerRequest(method, params) {
-      if (typeof window.electronBridge?.sendMessageFromView !== "function") return Promise.reject(new Error("desktop_bridge_unavailable"));
-      const id = relayId + ":" + (++appServerSequence);
-      const startedAt = Date.now();
-      return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => {
-          appServerRequests.delete(id);
-          appendDiagnostic("app_server_request_timeout", { request_id: id, method, timeout_ms: 30000, elapsed_ms: Date.now() - startedAt, pending_requests: appServerRequests.size, command_in_flight: relayCommandInFlight, thread_id: relayCurrentThreadId || null });
-          reject(new Error("desktop_bridge_timeout"));
-        }, 30000);
-        appServerRequests.set(id, { resolve, reject, timer, method, startedAt });
-        Promise.resolve(window.electronBridge.sendMessageFromView({
-          type: "mcp-request",
-          hostId: "local",
-          request: { id, method, params },
-          source: "better-codex",
-          timeoutMs: 30000
-        })).catch(error => {
-          const pending = appServerRequests.get(id);
-          if (!pending) return;
-          appServerRequests.delete(id);
-          clearTimeout(timer);
-          reject(error instanceof Error ? error : new Error("desktop_bridge_unavailable"));
-        });
-      });
-    }
-
-    async function resumePersistedThread(threadId, payload = null) {
-      const expected = normalizeSessionId(threadId);
-      if (!expected) throw new Error("thread_id_invalid");
-      const params = { threadId: expected, excludeTurns: true };
-      if (payload) {
-        if (payload.workspace_path) params.cwd = String(payload.workspace_path);
-        if (payload.model) params.model = String(payload.model);
-        if (payload.service_tier) params.serviceTier = String(payload.service_tier);
-        params.approvalPolicy = String(payload.approval_policy || "on-request");
-        params.approvalsReviewer = String(payload.approvals_reviewer || "auto_review");
-        params.sandbox = String(payload.sandbox_mode || "workspace-write");
-        params.developerInstructions = String(payload.developer_instructions || "");
-      }
-      const resumed = await sendAppServerRequest("thread/resume", params);
-      const resumedId = normalizeSessionId(resumed?.thread?.id);
-      if (resumedId !== expected) throw new Error("desktop_thread_resume_invalid");
-      relayThreads.add(expected);
-      return resumed;
-    }
-
-    function isThreadNotFoundError(error) {
-      const value = String(error instanceof Error ? error.message : error || "").toLowerCase();
-      return value.includes("thread not found") || value.includes("thread_not_found");
-    }
-
-    function semanticInput(payload) {
-      if (!Array.isArray(payload.input)) return [{ type: "text", text: String(payload.message || "") }];
-      const input = payload.input.slice(0, 33).flatMap(item => {
-        if (!item || typeof item !== "object") return [];
-        if (item.type === "text") return [{ type: "text", text: String(item.text || "").slice(0, 100000) }];
-        if (!["skill", "mention"].includes(item.type)) return [];
-        const name = String(item.name || "").trim().slice(0, 500);
-        const path = String(item.path || "").trim().slice(0, 4096);
-        return name && path ? [{ type: item.type, name, path }] : [];
-      });
-      return input.some(item => item.type === "text") ? input : [{ type: "text", text: String(payload.message || "") }, ...input];
-    }
-
-    function turnStartParams(threadId, payload) {
-      const params = {
-        threadId,
-        input: semanticInput(payload),
-        approvalPolicy: String(payload.approval_policy || "on-request"),
-        approvalsReviewer: String(payload.approvals_reviewer || "auto_review")
-      };
-      if (payload.workspace_path) params.cwd = String(payload.workspace_path);
-      if (payload.model) params.model = String(payload.model);
-      if (payload.effort) params.effort = String(payload.effort);
-      if (payload.service_tier) params.serviceTier = String(payload.service_tier);
-      return params;
-    }
-
-    function heartbeatSessionRelay() {
-      if (relayHeartbeatBusy || destroyed) return Promise.resolve();
-      relayHeartbeatBusy = true;
-      return api("/api/session-relay/poll", {
-        method: "POST",
-        body: JSON.stringify({
-          relay_id: relayId,
-          app_session_id: relayAppSessionId || relayId,
-          owner: "native",
-          capability: relayCapability,
-          capability_error: relayCapabilityError,
-          busy: true
-        })
-      }).catch(() => {}).finally(() => {
-        relayHeartbeatBusy = false;
-      });
-    }
-
-    function nativeArgument(command, argument) {
-      if (!argument) throw new Error("native_command_argument_required:" + command);
-      return argument;
-    }
-
-    async function executeInjectedNativeCommand(threadId, payload) {
-      const command = String(payload.native_command || "");
-      const argument = String(payload.argument || "").trim();
-      const resumed = await resumePersistedThread(threadId, payload);
-      if (command === "approve") {
-        const denials = relayGuardianDenials.get(threadId) || [];
-        const event = denials.at(-1);
-        if (!event) throw new Error("native_approval_not_found");
-        const response = await sendAppServerRequest("thread/approveGuardianDeniedAction", { threadId, event });
-        denials.pop();
-        return { thread_id: threadId, command, approved: true, response };
-      }
-      if (command === "fast") {
-        const value = argument.toLowerCase();
-        if (value && !["on", "off", "fast", "default", "true", "false", "1", "0"].includes(value)) throw new Error("native_fast_value_invalid");
-        const enabled = value ? ["on", "fast", "true", "1"].includes(value) : String(resumed?.serviceTier || "default") !== "fast";
-        await sendAppServerRequest("thread/settings/update", { threadId, serviceTier: enabled ? "fast" : null });
-        return { thread_id: threadId, command, service_tier: enabled ? "fast" : "default" };
-      }
-      if (command === "feedback") {
-        const reason = nativeArgument(command, argument);
-        const response = await sendAppServerRequest("feedback/upload", { classification: "bug", reason, threadId, includeLogs: false });
-        return { thread_id: threadId, command, uploaded: true, response };
-      }
-      if (command === "fork") {
-        const response = await sendAppServerRequest("thread/fork", { threadId, cwd: String(payload.workspace_path || "") || null, excludeTurns: true });
-        const forkedThreadId = normalizeSessionId(response?.thread?.id);
-        if (!forkedThreadId) throw new Error("native_fork_invalid");
-        if (argument) await sendAppServerRequest("thread/name/set", { threadId: forkedThreadId, name: argument.slice(0, 200) });
-        relayThreads.add(forkedThreadId);
-        return { thread_id: forkedThreadId, source_thread_id: threadId, command, rebind_thread: true };
-      }
-      if (command === "goal") {
-        const value = argument.toLowerCase();
-        if (!argument) return { thread_id: threadId, command, ...(await sendAppServerRequest("thread/goal/get", { threadId })) };
-        if (["clear", "off", "none"].includes(value)) {
-          await sendAppServerRequest("thread/goal/clear", { threadId });
-          return { thread_id: threadId, command, goal: null };
-        }
-        return { thread_id: threadId, command, ...(await sendAppServerRequest("thread/goal/set", { threadId, objective: argument, status: "active" })) };
-      }
-      if (command === "init") {
-        const input = [{ type: "text", text: "Create an AGENTS.md file that serves as a concise contributor guide for this repository. Inspect the repository first. Include project structure, build and validation commands, coding conventions, and commit guidance that are actually supported by the repository. Do not overwrite an existing AGENTS.md; if one exists, report that clearly instead." }];
-        const turn = await sendAppServerRequest("turn/start", turnStartParams(threadId, { ...payload, input }));
-        const turnId = normalizeSessionId(turn?.turn?.id);
-        if (!turnId) throw new Error("desktop_turn_start_invalid");
-        return { thread_id: threadId, turn_id: turnId, command };
-      }
-      if (command === "mcp") {
-        const response = await sendAppServerRequest("mcpServerStatus/list", { threadId, cursor: null, limit: 100, detail: "toolsAndAuthOnly" });
-        const servers = (Array.isArray(response?.data) ? response.data : []).map(server => ({ name: String(server?.name || ""), auth_status: String(server?.authStatus || ""), tool_count: server?.tools && typeof server.tools === "object" ? Object.keys(server.tools).length : 0, resource_count: Array.isArray(server?.resources) ? server.resources.length : 0 }));
-        return { thread_id: threadId, command, servers, next_cursor: response?.nextCursor ?? null };
-      }
-      if (command === "memories") {
-        const value = nativeArgument(command, argument).toLowerCase();
-        if (!["on", "off", "enabled", "disabled"].includes(value)) throw new Error("native_memories_value_invalid");
-        const mode = ["on", "enabled"].includes(value) ? "enabled" : "disabled";
-        await sendAppServerRequest("thread/memoryMode/set", { threadId, mode });
-        return { thread_id: threadId, command, memory_mode: mode };
-      }
-      if (command === "model") {
-        const model = nativeArgument(command, argument);
-        await sendAppServerRequest("thread/settings/update", { threadId, model });
-        return { thread_id: threadId, command, model };
-      }
-      if (command === "personality") {
-        const personality = nativeArgument(command, argument).toLowerCase();
-        if (!["none", "friendly", "pragmatic"].includes(personality)) throw new Error("native_personality_value_invalid");
-        await sendAppServerRequest("thread/settings/update", { threadId, personality });
-        return { thread_id: threadId, command, personality };
-      }
-      if (command === "plan") {
-        const value = argument.toLowerCase();
-        if (value && !["on", "off", "plan", "default"].includes(value)) throw new Error("native_plan_value_invalid");
-        const mode = ["off", "default"].includes(value) ? "default" : "plan";
-        const presets = await sendAppServerRequest("collaborationMode/list", {});
-        const preset = (Array.isArray(presets?.data) ? presets.data : []).find(item => item?.mode === mode);
-        if (!preset) throw new Error("native_plan_preset_unavailable");
-        await sendAppServerRequest("thread/settings/update", { threadId, collaborationMode: { mode, settings: { model: preset.model || resumed?.model, reasoning_effort: preset.reasoning_effort ?? resumed?.reasoningEffort, developer_instructions: null } } });
-        return { thread_id: threadId, command, collaboration_mode: mode };
-      }
-      if (command === "project") {
-        const projectId = nativeArgument(command, argument);
-        await sendAppServerRequest("thread/metadata/update", { threadId, projectId: ["none", "clear"].includes(projectId) ? "" : projectId });
-        return { thread_id: threadId, command, project_id: ["none", "clear"].includes(projectId) ? null : projectId };
-      }
-      if (command === "reasoning") {
-        const effort = nativeArgument(command, argument);
-        await sendAppServerRequest("thread/settings/update", { threadId, effort });
-        return { thread_id: threadId, command, reasoning_effort: effort };
-      }
-      throw new Error("native_command_invalid");
-    }
-
-    async function executeSessionCommand(command) {
-      const payload = command?.payload && typeof command.payload === "object" ? command.payload : {};
-      let threadId = normalizeSessionId(command?.thread_id);
-      let turnId = normalizeSessionId(command?.turn_id);
-      const heartbeat = setInterval(() => void heartbeatSessionRelay(), 2000);
-      relayCommandInFlight = true;
-      relayBufferedEvents = [];
-      try {
-        let completion = {};
-        if (command.kind === "bind" || command.kind === "start") {
-          const params = {
-            approvalPolicy: String(payload.approval_policy || "on-request"),
-            approvalsReviewer: String(payload.approvals_reviewer || "auto_review"),
-            sandbox: String(payload.sandbox_mode || "workspace-write")
-          };
-          if (payload.workspace_path) params.cwd = String(payload.workspace_path);
-          if (payload.model) params.model = String(payload.model);
-          if (payload.service_tier) params.serviceTier = String(payload.service_tier);
-          if (payload.developer_instructions) params.developerInstructions = String(payload.developer_instructions);
-          const started = await sendAppServerRequest("thread/start", params);
-          threadId = normalizeSessionId(started?.thread?.id);
-          if (!threadId) throw new Error("desktop_thread_start_invalid");
-          relayCurrentThreadId = threadId;
-          await api("/api/session-relay/commands/" + encodeURIComponent(command.id) + "/checkpoint", {
-            method: "POST",
-            body: JSON.stringify({ relay_id: relayId, result: { thread_id: threadId } })
-          });
-          if (command.kind === "start") {
-            const turn = payload.semantic_command === "review"
-              ? await sendAppServerRequest("review/start", { threadId, target: { type: "uncommittedChanges" }, delivery: "inline" })
-              : await sendAppServerRequest("turn/start", turnStartParams(threadId, payload));
-            turnId = normalizeSessionId(turn?.turn?.id);
-            if (!turnId) throw new Error("desktop_turn_start_invalid");
-            await api("/api/session-relay/commands/" + encodeURIComponent(command.id) + "/checkpoint", {
-              method: "POST",
-              body: JSON.stringify({ relay_id: relayId, result: { thread_id: threadId, turn_id: turnId } })
-            });
-          }
-        } else if (command.kind === "turn") {
-          if (!threadId) throw new Error("session_thread_invalid");
-          relayCurrentThreadId = threadId;
-          await resumePersistedThread(threadId, payload);
-          let turn;
-          try {
-            turn = await sendAppServerRequest("turn/start", turnStartParams(threadId, payload));
-          } catch (error) {
-            if (!isThreadNotFoundError(error)) throw error;
-            await resumePersistedThread(threadId, payload);
-            turn = await sendAppServerRequest("turn/start", turnStartParams(threadId, payload));
-          }
-          turnId = normalizeSessionId(turn?.turn?.id);
-          if (!turnId) throw new Error("desktop_turn_start_invalid");
-          await api("/api/session-relay/commands/" + encodeURIComponent(command.id) + "/checkpoint", {
-            method: "POST",
-            body: JSON.stringify({ relay_id: relayId, result: { thread_id: threadId, turn_id: turnId } })
-          });
-        } else if (command.kind === "review") {
-          if (!threadId) throw new Error("session_thread_invalid");
-          relayCurrentThreadId = threadId;
-          await resumePersistedThread(threadId, payload);
-          const review = await sendAppServerRequest("review/start", { threadId, target: { type: "uncommittedChanges" }, delivery: "inline" });
-          turnId = normalizeSessionId(review?.turn?.id);
-          if (!turnId) throw new Error("desktop_turn_start_invalid");
-          await api("/api/session-relay/commands/" + encodeURIComponent(command.id) + "/checkpoint", {
-            method: "POST",
-            body: JSON.stringify({ relay_id: relayId, result: { thread_id: threadId, turn_id: turnId } })
-          });
-        } else if (command.kind === "compact") {
-          if (!threadId) throw new Error("session_thread_invalid");
-          relayCurrentThreadId = threadId;
-          await resumePersistedThread(threadId, payload);
-          await sendAppServerRequest("thread/compact/start", { threadId });
-        } else if (command.kind === "rename") {
-          if (!threadId) throw new Error("session_thread_invalid");
-          const name = String(payload.title || "").trim().slice(0, 200);
-          if (!name) throw new Error("thread_name_required");
-          relayCurrentThreadId = threadId;
-          await sendAppServerRequest("thread/name/set", { threadId, name });
-          completion = { name };
-          appendDiagnostic("thread_name_updated", { command_id: command.id, issue_id: command.issue_id, thread_id: threadId, title_length: name.length });
-        } else if (command.kind === "native") {
-          if (!threadId) throw new Error("session_thread_invalid");
-          relayCurrentThreadId = threadId;
-          completion = await executeInjectedNativeCommand(threadId, payload);
-          threadId = normalizeSessionId(completion.thread_id) || threadId;
-          turnId = normalizeSessionId(completion.turn_id) || turnId;
-        } else if (command.kind === "steer") {
-          if (!threadId || !turnId) throw new Error("session_turn_invalid");
-          relayCurrentThreadId = threadId;
-          const steered = await sendAppServerRequest("turn/steer", {
-            threadId,
-            expectedTurnId: turnId,
-            input: semanticInput(payload)
-          });
-          turnId = normalizeSessionId(steered?.turnId) || turnId;
-        } else if (command.kind === "interrupt") {
-          if (!threadId || !turnId) throw new Error("session_turn_invalid");
-          relayCurrentThreadId = threadId;
-          await sendAppServerRequest("turn/interrupt", { threadId, turnId });
-        } else {
-          throw new Error("session_command_invalid");
-        }
-        await api("/api/session-relay/commands/" + encodeURIComponent(command.id) + "/complete", {
-          method: "POST",
-          body: JSON.stringify({ relay_id: relayId, result: { thread_id: threadId, turn_id: turnId, ...completion } })
-        });
-        relayCommandInFlight = false;
-        flushRelayEvents(turnId, command.kind === "steer" || command.kind === "interrupt" || command.kind === "compact");
-        if (threadId) relayThreads.add(threadId);
-      } catch (error) {
-        const commandError = error instanceof Error ? error.message : "desktop_bridge_request_failed";
-        if (command.kind === "rename") appendDiagnostic("thread_name_failed", { command_id: command.id, issue_id: command.issue_id, thread_id: threadId || null, error: commandError });
-        if (threadId && turnId && commandError === "session_command_not_claimed") {
-          await sendAppServerRequest("turn/interrupt", { threadId, turnId }).catch(() => {});
-        }
-        const failed = await api("/api/session-relay/commands/" + encodeURIComponent(command.id) + "/fail", {
-          method: "POST",
-          body: JSON.stringify({ relay_id: relayId, error: commandError, thread_id: threadId, turn_id: turnId })
-        }).catch(() => {});
-        relayCommandInFlight = false;
-        flushRelayEvents("", true);
-        if (commandError === "desktop_bridge_unavailable" || commandError === "desktop_bridge_timeout") {
-          relayCapability = "failed";
-          relayCapabilityError = commandError;
-          relayCapabilityCheckedAt = Date.now();
-        }
-        if (failed && threadId) relayThreads.add(threadId);
-      } finally {
-        clearInterval(heartbeat);
-        if (relayCommandInFlight) {
-          relayCommandInFlight = false;
-          flushRelayEvents("", true);
-        }
-        relayCurrentThreadId = "";
-      }
-    }
-
-    async function resolveRelayAppSessionId() {
-      if (relayAppSessionId) return relayAppSessionId;
-      try {
-        const value = await window.electronBridge?.getAppSessionId?.();
-        relayAppSessionId = typeof value === "string" ? value : typeof value?.appSessionId === "string" ? value.appSessionId : relayId;
-      } catch {
-        relayAppSessionId = relayId;
-      }
-      return relayAppSessionId;
-    }
-
-    async function reconcileRelayTurns(values) {
-      await Promise.all(values.map(async value => {
-        const threadId = normalizeSessionId(value?.thread_id);
-        const turnId = normalizeSessionId(value?.turn_id);
-        if (!threadId || !turnId) return;
-        try {
-          let summary = await sendAppServerRequest("thread/read", { threadId, includeTurns: false });
-          let status = summary?.thread?.status && typeof summary.thread.status === "object" ? summary.thread.status : {};
-          let statusType = String(status.type || "");
-          if (statusType === "notLoaded") {
-            await resumePersistedThread(threadId);
-            summary = await sendAppServerRequest("thread/read", { threadId, includeTurns: false });
-            status = summary?.thread?.status && typeof summary.thread.status === "object" ? summary.thread.status : {};
-            statusType = String(status.type || "");
-          }
-          if (statusType === "active") {
-            queueRelayEvent("thread/status/changed", {
-              threadId,
-              status: {
-                type: statusType,
-                activeFlags: Array.isArray(status.activeFlags) ? status.activeFlags.filter(item => typeof item === "string") : []
-              }
-            });
-            return;
-          }
-          if (statusType !== "idle") return;
-          const detail = await sendAppServerRequest("thread/read", { threadId, includeTurns: true });
-          const turns = Array.isArray(detail?.thread?.turns) ? detail.thread.turns : [];
-          const turn = turns.find(item => normalizeSessionId(item?.id) === turnId);
-          if (!turn || !["completed", "interrupted", "failed"].includes(String(turn.status || ""))) return;
-          const items = Array.isArray(turn.items) ? turn.items.flatMap(item => item && typeof item === "object" && item.type === "agentMessage" && typeof item.text === "string" ? [{ type: "agentMessage", text: item.text }] : []) : [];
-          const error = turn.error && typeof turn.error === "object" ? { message: String(turn.error.message || "") } : null;
-          queueRelayEvent("turn/completed", { threadId, turn: { id: turnId, status: String(turn.status), items, error } });
-        } catch {}
-      }));
-    }
-
     let desktopCatalogServices = null;
 
-    async function syncThreadCatalogAction(action) {
-      let error = "";
-      try {
-        if (!desktopCatalogServices) {
-          const entry = Array.from(document.querySelectorAll('link[rel="modulepreload"][href]')).find(link => /\/app-initial-[^/]+\.js$/.test(new URL(link.href).pathname));
-          if (!entry) throw new Error("desktop_catalog_module_unavailable");
-          const exports = await import(entry.href);
-          desktopCatalogServices = Object.values(exports).find(value => value && typeof value === "object" && typeof value.localThreadCatalog?.notifyThread === "function");
-          if (!desktopCatalogServices) throw new Error("desktop_catalog_service_unavailable");
-        }
-        await desktopCatalogServices.localThreadCatalog.notifyThread({ hostId: "local", threadId: action.thread_id }, action.action === "unarchive" ? "upsert" : "remove");
-        window.dispatchEvent(new MessageEvent("message", { data: {
-          type: "mcp-notification", hostId: "local",
-          method: action.action === "delete" ? "thread/deleted" : action.action === "archive" ? "thread/archived" : "thread/unarchived",
-          params: { threadId: action.thread_id }
-        } }));
-        appendDiagnostic("thread_catalog_synced", { thread_id: action.thread_id, event_id: action.event_id, action: action.action });
-      } catch (failure) {
-        error = failure instanceof Error ? failure.message : String(failure);
-        desktopCatalogServices = null;
-        appendDiagnostic("thread_catalog_sync_failed", { thread_id: action.thread_id, event_id: action.event_id, action: action.action, error });
-      }
-      await api("/api/session-relay/catalog-ack", { method: "POST", body: JSON.stringify({ relay_id: relayId, thread_id: action.thread_id, event_id: action.event_id, error }) });
-    }
-
-    async function pollSessionRelay() {
-      if (relayBusy || destroyed) return;
-      relayBusy = true;
-      try {
-        if (relayCapability === "failed" && Date.now() - relayCapabilityCheckedAt > 10000) relayCapability = "unknown";
-        if (relayCapability === "unknown") {
-          relayCapabilityCheckedAt = Date.now();
-          try {
-            await sendAppServerRequest("thread/list", { limit: 1 });
-            relayCapability = "ready";
-            relayCapabilityError = "";
-          } catch (error) {
-            relayCapability = "failed";
-            relayCapabilityError = error instanceof Error ? error.message : "desktop_bridge_unavailable";
-          }
-        }
-        const result = await api("/api/session-relay/poll", {
-          method: "POST",
-          body: JSON.stringify({
-            relay_id: relayId,
-            app_session_id: await resolveRelayAppSessionId(),
-            owner: "native",
-            capability: relayCapability,
-            capability_error: relayCapabilityError
-          })
-        });
-        relayThreads.clear();
-        (Array.isArray(result?.thread_ids) ? result.thread_ids : []).forEach(value => {
-          const threadId = normalizeSessionId(value);
-          if (threadId) relayThreads.add(threadId);
-        });
-        if (!result?.leader) return;
-        if (relayCapability !== "ready") return;
-        for (const action of result.catalog_actions || []) await syncThreadCatalogAction(action);
-        if (result.command) {
-          await executeSessionCommand(result.command);
-          return;
-        }
-        const activeTurns = Array.isArray(result?.active_turns) ? result.active_turns : [];
-        if (activeTurns.length && Date.now() - relayTurnProbeAt >= 5000) {
-          relayTurnProbeAt = Date.now();
-          await reconcileRelayTurns(activeTurns);
-        }
-      } catch {} finally {
-        relayBusy = false;
-      }
-    }
-
-    function pulseSessionRelay() {
-      if (destroyed) return false;
-      if (relayBusy) {
-        if (relayCapability === "ready") void heartbeatSessionRelay();
-        return true;
-      }
-      void pollSessionRelay();
-      return true;
-    }
-
-    function startSessionRelay() {
-      if (relayTimer !== null) return;
-      pulseSessionRelay();
-      relayTimer = setInterval(pulseSessionRelay, 1000);
+    function traceRendererDiagnostic(event, fields = {}) {
+      appendDiagnostic(event, { sequence: ++diagnosticSequence, client_time: new Date().toISOString(), document_focused: document.hasFocus(), ...fields });
     }
 
     function diagnosticTarget(target) {
@@ -2467,56 +1723,6 @@ export function install(config: Record<string, any>) {
       const name = target.getAttribute("name");
       const type = target.getAttribute("type");
       return [target.tagName.toLowerCase(), name ? "name=" + name : "", type ? "type=" + type : ""].filter(Boolean).join(" ");
-    }
-
-    function traceRendererDiagnostic(event, fields = {}) {
-      const context = readContext();
-      const selected = state.selected;
-      const body = {
-        event,
-        sequence: ++diagnosticSequence,
-        client_time: new Date().toISOString(),
-        performance_ms: Math.round(performance.now() * 1000) / 1000,
-        issue_id: selected?.id || "",
-        issue_identifier: selected?.identifier || "",
-        active_thread_id: context.threadId || "",
-        document_focused: document.hasFocus(),
-        ...fields,
-      };
-      appendDiagnostic(event, body);
-      try {
-        void window.electronBridge?.sendMessageFromView?.({
-          type: "log-message",
-          level: "info",
-          message: "BETTER_CODEX_DIAGNOSTIC",
-          tags: { safe: body, sensitive: {} },
-        })?.catch?.(() => {});
-      } catch {}
-    }
-
-    function interruptMessage(detail) {
-      if (!detail || typeof detail !== "object") return null;
-      const candidates = [detail, detail.message, detail.request, detail.params, detail.message?.request, detail.message?.params];
-      for (const candidate of candidates) {
-        if (!candidate || typeof candidate !== "object") continue;
-        const method = String(candidate.method || candidate.requestMethod || "");
-        const type = String(candidate.type || "");
-        if (method !== "turn/interrupt" && type !== "interrupt-conversation") continue;
-        const params = candidate.params && typeof candidate.params === "object" ? candidate.params : candidate;
-        return {
-          message_type: String(detail.type || type || ""),
-          method: method || type,
-          thread_id: String(params.threadId || params.conversationId || ""),
-          turn_id: String(params.turnId || ""),
-        };
-      }
-      return null;
-    }
-
-    function onHostMessageFromView(event) {
-      appServerEnvelope(event.detail);
-      const message = interruptMessage(event.detail);
-      if (message) traceRendererDiagnostic("host_interrupt_message", message);
     }
 
     window.__betterCodexBridgeResolve = (id, result) => {
@@ -3613,7 +2819,7 @@ export function install(config: Record<string, any>) {
     }
 
     function statusIcon(status) {
-      const names = { backlog: "statusBacklog", todo: "statusTodo", in_progress: "statusInProgress", in_review: "statusInReview", done: "statusDone", blocked: "statusBlocked", archive: "archive" };
+      const names = { backlog: "statusBacklog", todo: "statusTodo", in_progress: "statusInProgress", in_review: "statusInReview", done: "statusDone", blocked: "statusBlocked", archive: "archive", unknown: "help" };
       const markup = icon(names[status] || "statusTodo", "better-codex-status-icon", "2.35");
       return markup.replace("<svg ", '<svg data-status="' + escapeHtml(status) + '" ');
     }
@@ -3639,6 +2845,7 @@ export function install(config: Record<string, any>) {
 
     function issueMatchesFilters(issue) {
       const filters = state.filters;
+      if (filters.source.length && !filters.source.includes(issue.external_observation ? "external" : "owned")) return false;
       if (filters.status.length && !filters.status.includes(issue.status)) return false;
       if (filters.priority.length && !filters.priority.includes(issue.priority)) return false;
       if (filters.project.length && !filters.project.includes(issue.project_id)) return false;
@@ -3650,7 +2857,7 @@ export function install(config: Record<string, any>) {
         if (!filters.assignee.includes(assignee)) return false;
       }
       if (filters.creator.length) {
-        const creator = issue.creator_user_id ? "user:" + issue.creator_user_id : "unknown";
+        const creator = creatorFor(issue).filterKey;
         if (!filters.creator.includes(creator)) return false;
       }
       if (filters.date.length) {
@@ -3713,16 +2920,13 @@ export function install(config: Record<string, any>) {
     }
 
     function filterOptions(key) {
-      if (key === "status") return Object.entries(statusLabels).map(([value, text]) => ({ value, text: t(text) }));
+      if (key === "status") return [...Object.entries(statusLabels), ...(externalObservations.length ? [["unknown", "状态未知"]] : [])].map(([value, text]) => ({ value, text: t(text) }));
+      if (key === "source") return [{ value: "owned", text: t("Better Codex 任务") }, { value: "external", text: t("外部任务上报") }];
       if (key === "priority") return Object.entries(priorityLabels).map(([value, text]) => ({ value, text: t(value === "none" ? "无优先级" : text + "优先级") }));
       if (key === "date") return [{ value: "1", text: t("最近 24 小时") }, { value: "7", text: t("最近 7 天") }, { value: "30", text: t("最近 30 天") }];
       if (key === "assignee") return [...state.users.filter(user => !user.disabled).map(user => ({ value: "user:" + user.id, text: user.name || user.handle })), { value: "codex", text: "Codex" }, ...state.agents.filter(agent => !agent.is_default).map(agent => ({ value: agent.id, text: agentDisplayName(agent) })), { value: "none", text: t("未分配") }];
       if (key === "creator") {
-        const creators = new Set(state.issues.map(issue => issue.creator_user_id).filter(Boolean));
-        const users = state.users.filter(user => creators.has(user.id));
-        const knownIds = new Set(users.map(user => user.id));
-        const missing = [...creators].filter(id => !knownIds.has(id)).map(id => ({ id, name: t("已停用用户"), initials: "?", color: "var(--bc-color-text-faint)", disabled: true }));
-        return [...users, ...missing].map(user => ({ value: "user:" + user.id, text: user.name || user.handle, user })).concat(state.issues.some(issue => !issue.creator_user_id) ? [{ value: "unknown", text: t("未知创建人") }] : []);
+        return [...new Map(boardIssues().map(issue => { const creator = creatorFor(issue); return [creator.filterKey, { value: creator.filterKey, text: t(creator.name) }]; })).values()];
       }
       if (key === "project") return projectsByRecentActivity(state.projects).map(project => ({ value: project.id, text: projectLabel(project) }));
       if (key === "label") return [...new Set(state.issues.flatMap(issue => issue.labels || []))].map(value => ({ value, text: value }));
@@ -3745,6 +2949,10 @@ export function install(config: Record<string, any>) {
       }
       if (key === "creator") {
         if (value === "unknown") return '<span class="better-codex-filter-avatar is-fallback">' + icon("userEdit") + '</span>';
+        if (value.startsWith("profile:")) {
+          const profile = taskCreatorProfiles.find(item => item.id === value.slice(8));
+          return profile ? userAvatarMarkup(profile, "better-codex-filter-avatar") : '<span class="better-codex-filter-avatar is-fallback">' + icon("userEdit") + '</span>';
+        }
         const user = state.users.find(item => item.id === value.slice(5)) || { name: t("已停用用户"), initials: "?", color: "var(--bc-color-text-faint)", disabled: true };
         return userAvatarMarkup(user, "better-codex-filter-avatar");
       }
@@ -3771,6 +2979,7 @@ export function install(config: Record<string, any>) {
       if (panel?.querySelector(".better-codex-filter-menu")) return closeFilterMenu();
       closeFilterMenu();
       const categories = [
+        { key: "source", text: "来源", icon: "link" },
         { key: "status", text: "状态", icon: "circle" },
         { key: "priority", text: "优先级", icon: "display" },
         { key: "date", text: "日期", icon: "calendar" },
@@ -3931,6 +3140,8 @@ export function install(config: Record<string, any>) {
     }
 
     function openIssueMenuAt(card, clientX, clientY) {
+      const observation = externalObservations.find(item => item.id === card?.dataset.issueId);
+      if (observation) return void openExternalDetail(observation.id);
       const issue = state.issues.find(item => item.id === card?.dataset.issueId);
       if (!issue) return;
       closeFilterMenu();
@@ -4163,10 +3374,9 @@ export function install(config: Record<string, any>) {
     }
 
     function createPanel() {
-      const nativeFrame = document.querySelector(SELECTORS.contentFrame);
       const section = document.createElement("section");
       section.id = PANEL_ID;
-      section.className = nativeFrame?.className || "";
+      // The host owns the mount; product layout belongs to the shared renderer.
       section.dataset.host = HOST_KIND;
       section.hidden = true;
       section.setAttribute(OWNED, "true");
@@ -4338,7 +3548,9 @@ export function install(config: Record<string, any>) {
       addProject.addEventListener("click", () => state.projectDetailId ? openEditor() : openCreateProjectDialog());
       projectActions.append(projectRefreshButton.element, addProject);
       toolbar.append(tabs, agentHeading, projectHeading, error, actions, agentActions, projectActions);
-      const board = document.createElement("main");
+      // The host already owns the main landmark. Nested main elements inherit
+      // native full-window positioning and can cover our toolbar.
+      const board = document.createElement("div");
       board.id = "better-codex-board";
       board.className = "better-codex-board better-codex-issue-only";
       board.addEventListener("click", onBoardClick);
@@ -4373,7 +3585,7 @@ export function install(config: Record<string, any>) {
       boardScrollResizeObserver?.disconnect();
       boardScrollResizeObserver = new ResizeObserver(syncBoardScrollControl);
       boardScrollResizeObserver.observe(board);
-      const recovery = document.createElement("main");
+      const recovery = document.createElement("div");
       recovery.id = "better-codex-recovery";
       recovery.className = "better-codex-recovery";
       recovery.hidden = true;
@@ -4390,7 +3602,7 @@ export function install(config: Record<string, any>) {
         button.innerHTML = icon("refresh") + "<span>" + te("正在连接…") + "</span>";
         void load();
       });
-      const agents = document.createElement("main");
+      const agents = document.createElement("div");
       agents.id = "better-codex-agents";
       agents.className = "better-codex-agents";
       agents.addEventListener("click", onAgentsClick);
@@ -4424,7 +3636,7 @@ export function install(config: Record<string, any>) {
         if (form) scheduleAgentAutosave(form);
       });
       agents.addEventListener("submit", onAgentSubmit);
-      const projects = document.createElement("main");
+      const projects = document.createElement("div");
       projects.id = "better-codex-projects";
       projects.className = "better-codex-projects";
       projects.addEventListener("click", onProjectsClick);
@@ -4622,6 +3834,13 @@ export function install(config: Record<string, any>) {
       const image = String(profile?.avatar || generatedUserAvatar(profile?.name || profile?.initials || t("你"), color));
       const title = profile?.handle ? "@" + profile.handle : profile?.name || "";
       return '<span class="' + className + ' is-user has-image" style="background:' + escapeHtml(color) + '" title="' + escapeHtml(title) + '" aria-hidden="true"><img src="' + escapeHtml(image) + '" alt=""></span>';
+    }
+
+    function onCreatorAvatarError(event) {
+      const image = event.target;
+      if (!image?.matches?.(":is(#better-codex-panel, #better-codex-dialog) img[data-creator-image]")) return;
+      image.parentElement?.classList.remove("has-image");
+      image.remove();
     }
 
     function syncAgentAvatar(node, agent) {
@@ -6098,13 +5317,14 @@ export function install(config: Record<string, any>) {
     }
 
     function renderSettingsOverlay(initialView = "mode") {
-      document.getElementById("better-codex-auto-dispatch-help-dialog")?.remove();
+      const previousSettingsDialog = document.getElementById("better-codex-auto-dispatch-help-dialog");
+      if (previousSettingsDialog) { destroyOwnedComponents(previousSettingsDialog); previousSettingsDialog.remove(); }
       const dialog = document.createElement("dialog");
       dialog.id = "better-codex-auto-dispatch-help-dialog";
       dialog.setAttribute(OWNED, "true");
       const completionEnabled = !completionNoticeSuppressed();
       const completionDuration = completionNoticeDuration();
-      const mockupTools = "";
+      const mockupTools = state.mockup ? '<div class="better-codex-help-mockup"><button type="button" data-mockup-menu-toggle aria-haspopup="menu" aria-expanded="false" aria-label="Mockup">' + icon("test") + '<span>Mockup</span>' + icon("chevronDown") + '</button><div class="better-codex-help-mockup-menu" role="menu" hidden><button type="button" role="menuitem" data-mockup-export>' + icon("download") + te("导出展示数据") + '</button><button type="button" role="menuitem" data-mockup-import>' + icon("folder") + te("导入展示数据") + '</button><button type="button" role="menuitem" data-mockup-reset>' + icon("refresh") + te("重置展示数据") + '</button></div><input type="file" accept="application/json,.json" data-mockup-import-input hidden></div>' : "";
       const modeDescription = markdown => '<div class="better-codex-help-mode-markdown">' + markdown
         .replace("{{start}}", '<span class="better-codex-help-inline-control is-start">' + te("立即开始任务") + '</span>')
         .replace("{{send}}", '<span class="better-codex-help-inline-control is-send">' + te("发送") + '</span>')
@@ -6112,8 +5332,8 @@ export function install(config: Record<string, any>) {
         .replace("{{backlog}}", '<span class="better-codex-help-inline-state is-backlog">' + icon("statusBacklog") + '<span>' + te("待规划") + '</span></span>') + '</div>';
       const helpMode = HELP_MODE_MARKDOWN[state.locale] || HELP_MODE_MARKDOWN.en;
       const defaultSchedulerModel = state.agentModelCatalog.find(model => model.isDefault)?.id || state.agentModelCatalog[0]?.id || "gpt-5.6-sol";
-      const schedulerModel = state.agentModelCatalog.some(model => model.id === state.schedulerModel) ? state.schedulerModel : defaultSchedulerModel;
-      const schedulerModelLabel = modelLabel(schedulerModel);
+      const schedulerModel = state.schedulerModelLocked || state.agentModelCatalog.some(model => model.id === state.schedulerModel) ? state.schedulerModel : defaultSchedulerModel;
+      const schedulerModelLabel = state.schedulerModelLocked ? state.schedulerModel : modelLabel(schedulerModel);
       const schedulerModelOptions = state.agentModelCatalog.map(model => '<button type="button" role="option" data-setting-scheduler-model-option="' + escapeHtml(model.id) + '" aria-selected="' + String(model.id === schedulerModel) + '" class="' + (model.id === schedulerModel ? "is-selected" : "") + '"><span>' + escapeHtml(model.displayName) + '</span><span class="better-codex-help-model-check">' + (model.id === schedulerModel ? icon("check") : "") + '</span></button>').join("");
       const schedulerReasoningOptions = effortsForModel(schedulerModel);
       const schedulerReasoningEffort = schedulerReasoningOptions.some(item => item.value === state.schedulerReasoningEffort) ? state.schedulerReasoningEffort : state.agentModelCatalog.find(model => model.id === schedulerModel)?.defaultReasoningEffort || schedulerReasoningOptions[0]?.value || "high";
@@ -6146,7 +5366,7 @@ export function install(config: Record<string, any>) {
         '</section>',
       ].join("");
       dialog.innerHTML = [
-        '<div class="better-codex-auto-dispatch-help-shell" data-help-view="mode">',
+        '<div class="better-codex-auto-dispatch-help-shell" data-help-current-view="mode">',
         '<header><div class="better-codex-help-tabs" role="tablist" aria-label="' + te("帮助与设置") + '"><button type="button" class="is-active" data-help-view="mode" aria-selected="true">' + te("运行模式说明") + '</button><button type="button" data-help-view="settings" aria-selected="false">' + te("设置") + '</button><button type="button" data-help-view="shortcuts" aria-selected="false">' + te("快捷键") + '</button><button type="button" data-help-view="remote" aria-selected="false">' + te("远程访问") + '</button><button type="button" data-help-view="about" aria-selected="false">' + te("关于") + '</button></div>' + mockupTools + '<button type="button" data-help-close aria-label="' + te("关闭") + '">' + icon("close") + "</button></header>",
         '<main class="better-codex-help-content">',
         '<section class="better-codex-help-page is-active" data-help-page="mode"><div class="better-codex-auto-dispatch-help-panels"><article class="better-codex-auto-dispatch-help-panel is-manual"><div class="better-codex-auto-dispatch-help-heading">' + icon("user") + "<h3>" + te("手动运行") + "</h3></div>" + modeDescription(helpMode.manual) + "</article>",
@@ -6163,6 +5383,7 @@ export function install(config: Record<string, any>) {
       const finish = () => {
         if (remoteStatusTimer !== null) clearInterval(remoteStatusTimer);
         document.removeEventListener("pointerdown", closeMockupOutside, true);
+        destroyOwnedComponents(dialog);
         dialog.close();
         dialog.remove();
       };
@@ -6206,8 +5427,10 @@ export function install(config: Record<string, any>) {
       dialog.querySelectorAll("[data-help-close]").forEach(button => button.addEventListener("click", finish));
       let loadRemoteStatus = () => Promise.resolve();
       const setHelpView = view => {
-        dialog.querySelector(".better-codex-auto-dispatch-help-shell").dataset.helpView = view;
-        dialog.querySelectorAll("[data-help-view]").forEach(item => {
+        // Retired setup views must not expose an empty or hidden configuration page.
+        if (!["mode", "settings", "shortcuts", "remote", "about"].includes(view)) view = "settings";
+        dialog.querySelector(".better-codex-auto-dispatch-help-shell").dataset.helpCurrentView = view;
+        dialog.querySelectorAll("button[data-help-view]").forEach(item => {
           const selected = item.dataset.helpView === view;
           item.classList.toggle("is-active", selected);
           item.setAttribute("aria-selected", String(selected));
@@ -6219,7 +5442,7 @@ export function install(config: Record<string, any>) {
         });
         if (view === "remote") void loadRemoteStatus();
       };
-      dialog.querySelectorAll("[data-help-view]").forEach(button => button.addEventListener("click", () => setHelpView(button.dataset.helpView)));
+      dialog.querySelectorAll("button[data-help-view]").forEach(button => button.addEventListener("click", () => setHelpView(button.dataset.helpView)));
       const remotePageNode = dialog.querySelector('[data-help-page="remote"]');
       const remoteGuidance = dialog.querySelector("[data-remote-guidance]");
       const remoteUrlInput = dialog.querySelector("[data-remote-url]");
@@ -6558,6 +5781,14 @@ export function install(config: Record<string, any>) {
         finish();
         panelSizeCleanup?.();
         panelSizeCleanup = null;
+        boardScrollResizeObserver?.disconnect();
+        boardScrollResizeObserver = null;
+        destroyProjectRenderComponents();
+        projectRefreshButton?.destroy();
+        projectRefreshButton = null;
+        if (panel) destroyOwnedComponents(panel);
+        managedButtons.forEach(handle => handle.destroy());
+        managedButtons.clear();
         panel?.remove();
         panel = null;
         ensureEntry();
@@ -6637,6 +5868,7 @@ export function install(config: Record<string, any>) {
       };
       const schedulerModelPicker = dialog.querySelector("[data-setting-scheduler-model-picker]");
       const schedulerModelSelect = dialog.querySelector("[data-setting-scheduler-model]");
+      schedulerModelSelect.disabled = state.schedulerModelLocked;
       const schedulerModelMenu = schedulerModelPicker.querySelector(".better-codex-help-model-menu");
       const schedulerModelLabelNode = dialog.querySelector("[data-setting-scheduler-model-label]");
       const schedulerReasoningPicker = dialog.querySelector("[data-setting-scheduler-reasoning-picker]");
@@ -6722,6 +5954,7 @@ export function install(config: Record<string, any>) {
       }));
       schedulerModelSelect.addEventListener("click", event => {
         event.stopPropagation();
+        if (state.schedulerModelLocked) return;
         const opening = schedulerModelMenu.hidden;
         closeSchedulerModelMenu();
         closeCompletionDurationMenu();
@@ -6734,6 +5967,7 @@ export function install(config: Record<string, any>) {
         }
       });
       schedulerModelMenu.querySelectorAll("[data-setting-scheduler-model-option]").forEach(option => option.addEventListener("click", async () => {
+        if (state.schedulerModelLocked) return;
         const model = option.dataset.settingSchedulerModelOption;
         if (!state.agentModelCatalog.some(item => item.id === model)) return;
         const previous = state.schedulerModel;
@@ -6927,7 +6161,7 @@ export function install(config: Record<string, any>) {
     function renderBoard(options = {}) {
       if (!panel && !options.board) return;
       const projectBoard = Boolean(options.projectId);
-      const sourceIssues = options.issues || state.issues;
+      const sourceIssues = options.issues ? [...options.issues, ...externalCards().filter(issue => issue.project_id === options.projectId)] : boardIssues();
       if (!projectBoard && panel) {
         const runningCount = state.issues.filter(issue => issueExecutionRunning(issue)).length;
         panel.querySelectorAll("[data-view]").forEach(button => button.classList.toggle("is-active", button.dataset.view === state.view));
@@ -6961,12 +6195,20 @@ export function install(config: Record<string, any>) {
       });
       const board = options.board || panel.querySelector("#better-codex-board");
       if (!board) throw new Error(projectBoard ? "project_board_mount_missing" : "board_mount_missing");
+      if (!projectBoard) {
+        let notice = panel.querySelector("[data-external-capability]");
+        if (!notice && (externalCapability?.enabled || externalObservations.length)) {
+          notice = document.createElement("div"); notice.className = "better-codex-external-notice better-codex-issue-only";
+          notice.dataset.externalCapability = "true"; board.before(notice);
+        }
+        if (notice) { notice.textContent = externalLoadError ? "任务状态同步中断，保留最近记录。" : ""; notice.hidden = !externalLoadError; }
+      }
       if (!(options.loaded ?? state.issuesLoaded)) {
         board.innerHTML = '<section class="better-codex-board-loading" role="status" aria-live="polite"><span aria-hidden="true"></span><strong>' + te("正在加载任务看板") + '</strong></section>';
         if (!projectBoard) requestAnimationFrame(syncBoardScrollControl);
         return;
       }
-      const visibleStatuses = [...Object.entries(statusLabels), ["archive", "归档"]];
+      const visibleStatuses = [...Object.entries(statusLabels), ...(visible.some(issue => issue.status === "unknown") ? [["unknown", "状态未知"]] : []), ["archive", "归档"]];
       const boardMarkup = visibleStatuses.map(([status, statusLabel]) => {
         const archiveColumn = status === "archive";
         const issues = archiveColumn ? [] : visible.filter(issue => issue.status === status);
@@ -6990,7 +6232,7 @@ export function install(config: Record<string, any>) {
           const activityState = permissions.remotePending ? "remote-pending" : permissions.remoteConflict ? "remote-conflict" : enrichmentLocked ? "thinking" : issue.session_status === "stopping" ? "stopping" : issue.session_retry ? "retrying" : activeExecutionState || (issue.enrichment_status === "failed" ? "title-regeneration-failed" : executionState);
           const activityLabel = activityState === "retrying" ? escapeHtml(sessionRetryCardLabel(issue.session_retry)) : t(activityState === "remote-pending" ? "同步中" : activityState === "remote-conflict" ? "同步冲突" : issue.enrichment_status === "regenerating" ? "标题生成中" : activityState === "title-regeneration-failed" ? "标题生成失败" : activityState === "stopping" ? "正在停止…" : activityState === "running" ? "工作中" : activityState === "scheduling" ? "调度中" : activityState === "scheduler-failed" ? "调度失败" : activityState === "claimed" ? "排队中" : activityState === "in_review" ? "待审核" : activityState === "completed" ? "已完成" : activityState === "blocked" ? "已阻塞" : activityState === "failed" ? "执行失败" : activityState === "interrupted" ? "已停止" : activityState === "not-started" ? "未开始" : "");
           const activityIcon = activityState === "retrying" ? '<span class="better-codex-activity-dot" aria-hidden="true"></span>' : activityState === "scheduling" ? '<span class="better-codex-activity-dot better-codex-scheduler-dot" aria-hidden="true"></span>' : activityState === "scheduler-failed" ? '<span class="better-codex-activity-dot better-codex-scheduler-failed-dot" aria-hidden="true"></span>' : ["completed", "interrupted", "not-started"].includes(activityState) ? '<span class="better-codex-activity-dot" aria-hidden="true"></span>' : ["failed", "blocked", "remote-conflict", "title-regeneration-failed"].includes(activityState) ? icon("close") : agentAvatarMarkup(activityAgent, "better-codex-card-avatar");
-          const activity = activityState
+          const activity = issue.external_observation ? '<span class="better-codex-activity better-codex-external-status" data-external-status="' + escapeHtml(issue.external_presentation.execution) + '" title="' + escapeHtml(issue.external_presentation.statusLabel) + '">' + escapeHtml(issue.external_presentation.cardStatusLabel) + '</span>' : activityState
             ? '<span class="better-codex-activity" data-run="' + escapeHtml(activityState) + '" title="' + (activityState === "retrying" ? escapeHtml(sessionRetryDetail(issue.session_retry)) : activityLabel) + '">' + activityIcon + '<span class="' + ((enrichmentLocked || executionRunning || permissions.remotePending) && activityState !== "retrying" ? "better-codex-shimmer" : "") + '">' + activityLabel + '</span></span>'
             : "";
           const description = mockupText(issue.description).replace(/[#*_`~>[]()]/g, "").replace(/\s+/g, " ").trim();
@@ -7001,14 +6243,15 @@ export function install(config: Record<string, any>) {
           const labelChips = (issue.labels || []).map(value => '<span class="better-codex-chip">' + escapeHtml(mockupText(value)) + '</span>').join("");
           const chips = projectChip + labelChips;
           const assignedUser = issueUserProfile(issue);
-          const meta = assignee
+          const creator = creatorMarkup(creatorFor(issue), escapeHtml, t);
+          const meta = issue.external_observation ? (issue.external_observation.executor?.name ? '<span class="better-codex-card-assignee" data-card-executor title="' + te("当前执行者 · 任务自报") + '"><span>' + te("执行者") + ': ' + escapeHtml(issue.external_observation.executor.name) + '</span></span>' : "") : assignee
             ? '<span class="better-codex-card-assignee">' + agentAvatarMarkup(assignee, "better-codex-card-avatar") + '<span>' + escapeHtml(agentName || "Codex") + '</span></span>'
             : issue.user_assigned
               ? '<span class="better-codex-card-assignee">' + userAvatarMarkup(assignedUser, "better-codex-card-avatar") + '<span>' + escapeHtml(assignedUser?.name || t("我")) + '</span></span>'
               : '<span class="better-codex-card-assignee is-empty">' + icon("user") + '<span>' + te("未分配") + '</span></span>';
-          return '<article class="better-codex-card' + (issue.id === draggingIssueId ? " is-dragging" : "") + (enrichmentLocked ? " is-enrichment-pending" : "") + (executionRunning ? " is-execution-running" : "") + (permissions.remotePending ? " is-remote-pending" : "") + (permissions.remoteConflict ? " is-remote-conflict" : "") + '" draggable="' + String(!issueLocked && supportsIssueDrag()) + '" aria-disabled="' + String(issueLocked) + '"' + (issueLocked ? ' aria-busy="' + String(enrichmentLocked || executionRunning || permissions.remotePending) + '"' : "") + ' data-issue-id="' + escapeHtml(issue.id) + '"><div class="better-codex-card-row"><div class="better-codex-card-id">' + priorityIcon(issue.priority) + '<span>' + escapeHtml(issue.identifier) + '</span></div>' + activity + '</div><div class="better-codex-card-title">' + escapeHtml(mockupText(issue.title)) + '</div>' + (description ? '<div class="better-codex-card-description">' + escapeHtml(description) + '</div>' : "") + (chips ? '<div class="better-codex-chip-row">' + chips + '</div>' : "") + '<div class="better-codex-card-meta">' + meta + '<span>' + te("更新于 " + timeAgo(issue.updated_at)) + '</span></div></article>';
+          return '<article class="better-codex-card' + (issue.id === draggingIssueId ? " is-dragging" : "") + (enrichmentLocked ? " is-enrichment-pending" : "") + (executionRunning ? " is-execution-running" : "") + (permissions.remotePending ? " is-remote-pending" : "") + (permissions.remoteConflict ? " is-remote-conflict" : "") + '" draggable="' + String(!issueLocked && supportsIssueDrag()) + '" aria-disabled="' + String(issueLocked && !issue.external_observation) + '"' + (issueLocked ? ' aria-busy="' + String(enrichmentLocked || executionRunning || permissions.remotePending) + '"' : "") + ' data-issue-id="' + escapeHtml(issue.id) + '"><div class="better-codex-card-row"><div class="better-codex-card-id">' + priorityIcon(issue.priority) + '<span>' + escapeHtml(issue.identifier) + '</span></div>' + activity + '</div><div class="better-codex-card-title">' + escapeHtml(mockupText(issue.title)) + '</div>' + (description ? '<div class="better-codex-card-description">' + escapeHtml(description) + '</div>' : "") + (chips ? '<div class="better-codex-chip-row">' + chips + '</div>' : "") + (issue.external_observation && !issue.external_presentation.fresh ? '<div class="better-codex-external-freshness" data-external-freshness="false" title="' + escapeHtml(issue.external_presentation.freshnessLabel) + '">' + te("状态已过期") + '</div>' : "") + '<div class="better-codex-card-meta"><span class="better-codex-card-people">' + creator + (meta ? '<span class="better-codex-card-executor" title="' + te("当前执行者，独立于创建者") + '">' + meta + '</span>' : "") + '</span><span>' + te("更新于 " + timeAgo(issue.updated_at)) + '</span></div>' + '</article>';
         }).join("");
-        const columnButton = archiveColumn
+        const columnButton = status === "unknown" ? "" : archiveColumn
           ? '<button class="better-codex-column-icon" type="button" data-archive-open aria-label="' + te("查看已归档卡片") + '" title="' + te("查看已归档卡片") + '">' + icon("archive") + '</button>'
           : '<button class="better-codex-column-icon" type="button" data-add-status="' + status + '" aria-label="' + te("新建任务") + '">' + icon("plus") + '</button>';
         return '<section class="better-codex-column" data-status="' + status + '"><div class="better-codex-column-head"><span class="better-codex-column-title">' + statusIcon(status) + '<span>' + te(statusLabel) + '</span>' + (archiveColumn ? "" : '<span>' + issues.length + '</span>') + '</span><span class="better-codex-column-actions">' + columnButton + '</span></div><div class="better-codex-cards">' + (cards || (archiveColumn ? '<div class="better-codex-empty">' + te("拖到这里即可归档") + '</div>' : "")) + '</div></section>';
@@ -7018,8 +6261,53 @@ export function install(config: Record<string, any>) {
       if (!projectBoard) requestAnimationFrame(syncBoardScrollControl);
     }
 
+    async function refreshExternalDetail(id) {
+      const detail = await api("/api/external-observations/" + encodeURIComponent(id), { passive: true });
+      if (externalDetail?.element.isConnected && externalDetail.element.dataset.externalId === id) {
+        externalDetailValue = { ...detail, creatorProfiles: taskCreatorProfiles, projectName: projectLabel(state.projects.find(project => project.id === detail.observation.project_id)), connected: detail.capability?.connected === true, receivedAt: Date.now() };
+        externalDetail.update(externalDetailValue);
+      }
+    }
+
+    async function openExternalDetail(id) {
+      const observation = externalObservations.find(item => item.id === id);
+      if (!observation) return;
+      externalDetail?.destroy();
+      document.getElementById("better-codex-dialog")?.remove();
+      externalDetailValue = { observation, messages: [], creatorProfiles: taskCreatorProfiles, projectName: projectLabel(state.projects.find(project => project.id === observation.project_id)), ...externalConnection() };
+      externalDetail = createExternalObservationDetail(externalDetailValue, componentContext("board", "external-detail:" + (++managedButtonSequence)), { icons: LUCIDE_ICONS, translate: t });
+      externalDetail.element.setAttribute(OWNED, "true");
+      registerOwnedComponent(externalDetail.element, externalDetail);
+      try { await refreshExternalDetail(id); }
+      catch (error) {
+        if (externalDetail?.element.isConnected && externalDetail.element.dataset.externalId === id) {
+          externalDetailValue = { ...externalDetailValue, connected: false, error: String(error instanceof Error ? error.message : error) };
+          externalDetail.update(externalDetailValue);
+        }
+      }
+    }
+
+    async function loadExternalObservations() {
+      if (!externalCapability || state.mockup) return;
+      const sequence = ++externalRequestSequence;
+      try {
+        const result = await api("/api/external-observations", { passive: true });
+        if (sequence !== externalRequestSequence || destroyed) return;
+        externalObservations = listResponse(result.observations, "/api/external-observations", "external_observations");
+        externalCapability = result.capability; externalReceivedAt = Date.now(); externalLoadError = "";
+        if (externalDetail?.element.isConnected) await refreshExternalDetail(externalDetail.element.dataset.externalId);
+      } catch (error) {
+        if (sequence !== externalRequestSequence || destroyed) return;
+        externalLoadError = String(error instanceof Error ? error.message : error);
+        if (externalDetail?.element.isConnected) {
+          externalDetailValue = { ...externalDetailValue, connected: false, error: externalLoadError };
+          externalDetail.update(externalDetailValue);
+        }
+      }
+    }
+
     async function loadIssues(options = {}) {
-      if (options.background && (draggingIssueId || sessionDragPointer?.dragging)) return;
+      if (options.background && draggingIssueId) return;
       const query = new URLSearchParams();
       if (state.search) query.set("search", state.search);
       const issuePath = "/api/issues" + (query.toString() ? "?" + query : "");
@@ -7049,11 +6337,12 @@ export function install(config: Record<string, any>) {
       issueSessionSnapshot = new Map(issues.map(issue => [issue.id, { activeRunStatus: issue.active_run_status || "", replyStatus: issue.reply_status || "idle", lastActivityFinishedAt: issue.last_activity_finished_at || "" }]));
       state.issues = issues;
       state.issuesLoaded = true;
-      syncSessionHandoffFromHost();
+      await loadExternalObservations();
+
       const dialog = document.getElementById("better-codex-dialog");
       const dialogIssue = dialog?.dataset.issueId ? issues.find(issue => issue.id === dialog.dataset.issueId) : null;
       if (dialog && dialogIssue && typeof dialog.__betterCodexSyncIssue === "function") dialog.__betterCodexSyncIssue(dialogIssue);
-      if (options.background && !changed) return;
+      if (options.background && !changed && !externalObservations.length && !externalLoadError) return;
       if (options.background && state.surface === "agents" && state.agentPane !== "preview") return;
       render();
     }
@@ -7121,7 +6410,7 @@ export function install(config: Record<string, any>) {
       if (bootstrapPromise) return bootstrapPromise;
       const request = (async () => {
         const bootstrap = await api("/api/bootstrap");
-        if (destroyed) throw new Error("injection_destroyed");
+        if (destroyed) throw new Error("browser_ui_destroyed");
         applyAppearance(bootstrap.hostTheme || bootstrap.appearance);
         state.systemLocale = resolveSystemLocale(HOST_KIND === "web" ? INITIAL_LOCALE : bootstrap.locale);
         state.locale = state.languageSetting === "system" ? state.systemLocale : state.languageSetting;
@@ -7134,6 +6423,10 @@ export function install(config: Record<string, any>) {
         } else state.users = Array.isArray(bootstrap.users) ? bootstrap.users : [state.user];
         if (HOST_KIND === "web") window.dispatchEvent(new CustomEvent("better-codex:bootstrap", { detail: { user: state.user, locale: state.locale } }));
         state.mockup = Boolean(bootstrap.mockup);
+        externalCapability = bootstrap.external_observation_capability || null;
+        externalObservations = Array.isArray(bootstrap.external_observations) ? bootstrap.external_observations : [];
+        taskCreatorProfiles = Array.isArray(bootstrap.task_creator_profiles) ? bootstrap.task_creator_profiles : [];
+        externalReceivedAt = Date.now();
         try {
           state.agents = listResponse(bootstrap.agents, "/api/bootstrap", "agents");
         } catch (error) {
@@ -7163,10 +6456,11 @@ export function install(config: Record<string, any>) {
         state.agentReasoningEfforts = bootstrap.agentReasoningEfforts || [];
         state.autoDispatch = Boolean(bootstrap.autoDispatch);
         state.schedulerModel = bootstrap.schedulerModel || state.agentModelCatalog.find(model => model.isDefault)?.id || state.agentModels[0] || "gpt-5.6-sol";
+        state.schedulerModelLocked = bootstrap.schedulerModelLocked === true;
         state.schedulerReasoningEffort = bootstrap.schedulerReasoningEffort || "high";
         const issueDescriptionLimit = Number(bootstrap.limits?.issue_description);
         if (Number.isInteger(issueDescriptionLimit) && issueDescriptionLimit > 0) state.issueDescriptionLimit = issueDescriptionLimit;
-        if (destroyed) throw new Error("injection_destroyed");
+        if (destroyed) throw new Error("browser_ui_destroyed");
         bootstrapReady = true;
         bootstrapFailure = null;
         ensureEntry();
@@ -7476,6 +6770,8 @@ export function install(config: Record<string, any>) {
     }
 
     function openEditor(issue = null, initialStatus = "todo", createMode = "agent") {
+      if (issue?.external_observation) return openExternalDetail(issue.id);
+      externalDetail?.destroy(); externalDetail = null; externalDetailValue = null;
       state.selected = issue;
       document.getElementById("better-codex-dialog")?.remove();
       const cachedCreateDraft = issue ? null : readCreateDraft();
@@ -7521,6 +6817,7 @@ export function install(config: Record<string, any>) {
       let projectDismiss = null;
       let selectDismiss = null;
       let conversationTimer = null;
+      let taskHistoryController = null;
       let retryPresentationTimer = null;
       let conversationLoadFailures = 0;
       let conversationFailureState = "";
@@ -7934,7 +7231,7 @@ export function install(config: Record<string, any>) {
             control.disabled = true;
             return;
           }
-          if (control.matches("[data-dialog-close], [data-dialog-expand], [data-conversation-expand], [data-dialog-open-thread], [data-dialog-stop], [data-dialog-restore], [data-description-toggle], [data-conversation-copy], [data-conversation-attachment], [data-dialog-preview]")) {
+          if (control.matches(".better-codex-disclosure-trigger, [data-dialog-close], [data-dialog-expand], [data-conversation-expand], [data-dialog-open-thread], [data-dialog-stop], [data-dialog-restore], [data-description-toggle], [data-conversation-copy], [data-conversation-attachment], [data-dialog-preview]")) {
             control.disabled = false;
             return;
           }
@@ -7958,9 +7255,17 @@ export function install(config: Record<string, any>) {
         });
         updateSubmitState();
         updateReplySendState();
+        if (READ_ONLY) {
+          // Read-only hosts retain details, copy, and view controls. Composer
+          // state updates must never re-enable a mutation after this gate.
+          dialog.querySelectorAll("input, textarea, select, button").forEach(control => {
+            control.disabled = !control.matches(".better-codex-disclosure-trigger, [data-dialog-close], [data-dialog-expand], [data-conversation-expand], [data-description-toggle], [data-conversation-copy], [data-conversation-attachment], [data-dialog-preview]");
+          });
+        }
       }
 
       function refreshIssueState(next) {
+        if (taskHistoryController) void taskHistoryController.refresh();
         if (!issue || !next) return;
         const previousSessionId = sessionId;
         const previousEnrichmentLocked = enrichmentLocked;
@@ -8038,7 +7343,8 @@ export function install(config: Record<string, any>) {
           ? '<span class="better-codex-dialog-route-root">' + te("任务看板") + '</span><span class="better-codex-dialog-route-root-separator" aria-hidden="true">' + icon("chevron") + '</span><span data-dialog-breadcrumb-project>' + escapeHtml(projectLabel(breadcrumbProject) || t("未提供")) + '</span><span aria-hidden="true">' + icon("chevron") + '</span><strong>' + title + '</strong>'
           : '<strong>' + title + '</strong>';
         const expandButton = draft.mode === "agent" ? "" : '<button class="better-codex-icon-button" type="button" data-dialog-expand aria-label="' + te(draft.expanded ? (issue ? "退出全屏" : "缩小") : "展开") + '">' + icon(draft.expanded ? "shrink" : "expand") + '</button>';
-        return '<div class="better-codex-dialog-head"><div class="better-codex-dialog-head-leading"><nav class="better-codex-dialog-breadcrumb" aria-label="' + te("任务看板") + '">' + crumb + '</nav></div><div class="better-codex-dialog-head-actions">' + restoreButton + openThreadButton + startNowButton + expandButton + '<button class="better-codex-icon-button" type="button" data-dialog-close aria-label="' + te("关闭") + '">' + icon("close") + '</button></div></div>';
+        const creator = issue ? creatorDetailMarkup(creatorFor(issue), escapeHtml, t) : "";
+        return '<div class="better-codex-dialog-head"><div class="better-codex-dialog-head-leading"><nav class="better-codex-dialog-breadcrumb" aria-label="' + te("任务看板") + '">' + crumb + '</nav></div><div class="better-codex-dialog-head-actions">' + creator + restoreButton + openThreadButton + startNowButton + expandButton + '<button class="better-codex-icon-button" type="button" data-dialog-close aria-label="' + te("关闭") + '">' + icon("close") + '</button></div></div>';
       }
 
       function issueConversationFailed(candidate = issue) {
@@ -8937,49 +8243,7 @@ export function install(config: Record<string, any>) {
         return result;
       }
 
-      function visibleNativeComposer() {
-        const candidates = Array.from(document.querySelectorAll('textarea,[contenteditable="true"]'));
-        return candidates.find(element => {
-          if (element.closest("[" + OWNED + "]")) return false;
-          const rect = element.getBoundingClientRect();
-          return rect.width > 40 && rect.height > 20 && getComputedStyle(element).visibility !== "hidden";
-        }) || null;
-      }
-
-      async function executeDesktopNativeCommand(command) {
-        if (HOST_KIND === "web") throw new Error("native_desktop_command_unavailable");
-        const original = command;
-        const nativeCommand = command === "task" ? "chat" : command;
-        traceDialog("native_desktop_command_requested", { command: original, native_command: nativeCommand, thread_id: sessionId });
-        dialog.close();
-        const opened = await openThread(sessionId);
-        if (!opened.opened) {
-          dialog.showModal();
-          return;
-        }
-        const deadline = Date.now() + 5000;
-        let composer = visibleNativeComposer();
-        while (!composer && Date.now() < deadline) {
-          await new Promise(resolve => setTimeout(resolve, 100));
-          composer = visibleNativeComposer();
-        }
-        if (!composer) throw new Error("native_desktop_composer_not_found");
-        const value = "/" + nativeCommand;
-        composer.focus();
-        if (composer instanceof HTMLTextAreaElement) {
-          const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
-          if (!setter) throw new Error("native_desktop_composer_invalid");
-          setter.call(composer, value);
-        } else {
-          composer.textContent = value;
-        }
-        composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: value }));
-        composer.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true, cancelable: true }));
-        composer.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", code: "Enter", bubbles: true, cancelable: true }));
-        await new Promise(resolve => setTimeout(resolve, 400));
-        const remaining = composer instanceof HTMLTextAreaElement ? composer.value : composer.textContent;
-        if (remaining === value) throw new Error("native_desktop_command_not_accepted");
-      }
+      async function executeDesktopNativeCommand(){throw new Error('native_desktop_command_unavailable');}
 
       async function sendReply(retryMessage = "", retryRequestId = "", retrySemanticReferences = null, retryCommand = "", retrySemanticDocument = lastReplySemanticDocument) {
         const textarea = dialog.querySelector('[name="reply"]');
@@ -9483,6 +8747,7 @@ export function install(config: Record<string, any>) {
       }
 
       function renderDialog() {
+        const restoreTaskHistory = taskHistoryController?.retainInteraction();
         if (projectDismiss) document.removeEventListener("pointerdown", projectDismiss, true);
         if (selectDismiss) document.removeEventListener("pointerdown", selectDismiss, true);
         projectDismiss = null;
@@ -9514,6 +8779,15 @@ export function install(config: Record<string, any>) {
           dialog.innerHTML = '<form>' + header() + assigneePicker() + '<input class="better-codex-manual-title" name="title" maxlength="500" placeholder="' + te("任务标题") + '" value="' + escapeHtml(draft.title) + '">' + descriptionEditor + conversationPanel() + propertyRows() + attachmentList() + '<div class="better-codex-dialog-error" hidden></div>' + footer() + '</form>';
         } else {
           dialog.innerHTML = '<form>' + header() + assigneePicker() + '<input class="better-codex-manual-title" name="title" maxlength="500" placeholder="' + te("任务标题") + '" value="' + escapeHtml(draft.title) + '"><textarea class="better-codex-dialog-editor" name="description" placeholder="' + te("添加描述...") + '">' + escapeHtml(draft.description) + '</textarea>' + propertyRows() + attachmentList() + '<div class="better-codex-dialog-error" hidden></div>' + footer() + '</form>';
+        }
+        if (issue && !state.mockup && !RELAY) {
+          if (!taskHistoryController) {
+            taskHistoryController = createTaskHistoryController(issue.id,
+              id => api("/api/issues/" + encodeURIComponent(id) + "/history", { passive: true }),
+              componentContext("board", "task-history:" + (++managedButtonSequence)), { chevron: LUCIDE_ICONS.chevron, translate: t });
+            registerOwnedComponent(dialog, { destroy: () => { taskHistoryController?.destroy(); taskHistoryController = null; } });
+          }
+          dialog.querySelector(".better-codex-description-field")?.after(taskHistoryController.element);
         }
         const content = dialog.querySelector(draft.mode === "agent" ? '[name="prompt"]' : '[name="title"]');
         dialog.querySelector("form")?.addEventListener("pointerdown", event => {
@@ -10048,6 +9322,7 @@ export function install(config: Record<string, any>) {
           syncDraft();
           void submitIssue();
         });
+        restoreTaskHistory?.();
       }
 
       async function submitIssue() {
@@ -10291,6 +9566,7 @@ export function install(config: Record<string, any>) {
         }
         draft.attachments.forEach(releaseAttachment);
         draft.replyAttachments.forEach(releaseAttachment);
+        taskHistoryController?.destroy(); taskHistoryController = null;
         stopConversationPoll();
         stopReplyRecovery();
         if (retryPresentationTimer !== null) clearInterval(retryPresentationTimer);
@@ -10348,136 +9624,13 @@ export function install(config: Record<string, any>) {
         });
       }
       const card = event.target.closest("[data-issue-id]");
-      const issue = state.issues.find(item => item.id === card?.dataset.issueId);
+      const issue = boardIssues().find(item => item.id === card?.dataset.issueId);
       const permissions = issuePermissions(issue);
       if (issue && !permissions.enrichmentPending && !permissions.remotePending) return void perform(() => openEditor(issue));
     }
 
-    function sessionThreadTitle(row) {
-      const attribute = ATTRIBUTES.threadTitle ? row.getAttribute(ATTRIBUTES.threadTitle) : "";
-      return String(attribute || row.getAttribute("aria-label") || row.querySelector(SELECTORS.truncatedText)?.textContent || row.textContent || "").replace(/\s+/g, " ").trim();
-    }
-
-    function sessionDropTarget(clientX, clientY) {
-      const board = panel?.querySelector("#better-codex-board");
-      if (!board || panel?.hidden) return null;
-      const bounds = board.getBoundingClientRect();
-      if (clientX < bounds.left || clientX > bounds.right || clientY < bounds.top || clientY > bounds.bottom) return null;
-      const column = Array.from(board.querySelectorAll(".better-codex-column")).find(node => {
-        const rect = node.getBoundingClientRect();
-        return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
-      }) || null;
-      if (column?.dataset.status === "archive") return null;
-      return { board, column };
-    }
-
-    function setSessionDropTarget(target) {
-      panel?.querySelectorAll(".is-session-drop-target").forEach(node => node.classList.remove("is-session-drop-target"));
-      if (!target) return;
-      target.board.classList.add("is-session-drop-target");
-    }
-
-    function resetSessionDrag() {
-      sessionDragPointer = null;
-      setSessionDropTarget(null);
-    }
-
-    function revealImportedIssue(issueId) {
-      requestAnimationFrame(() => {
-        const card = Array.from(panel?.querySelectorAll("[data-issue-id]") || []).find(node => node.dataset.issueId === issueId);
-        if (!card) return;
-        const reducedMotion = globalThis.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
-        card.scrollIntoView({ block: "nearest", inline: "nearest", behavior: reducedMotion ? "auto" : "smooth" });
-        card.classList.add("is-session-imported");
-        setTimeout(() => card.classList.remove("is-session-imported"), 1400);
-      });
-    }
-
-    async function importSessionIssue(context) {
-      if (sessionDropInFlight) return null;
-      sessionDropInFlight = true;
-      try {
-        let issue = null;
-        try {
-          const existing = await api("/api/issues/from-thread?thread_id=" + encodeURIComponent(context.threadId));
-          if (existing && linkedIssueThreadId(existing) === context.threadId) {
-            issue = await api("/api/issues/from-thread", {
-              method: "POST",
-              body: JSON.stringify({ thread_id: context.threadId })
-            });
-          }
-        } catch (error) {
-          if (String(error instanceof Error ? error.message : error) !== "issue_not_found") throw error;
-        }
-        if (!issue) {
-          state.projects = await requestProjects();
-          let project = context.projectId ? await ensureContextProject(context) : null;
-          let workspacePath = String(project?.workspace_path || "").trim();
-          if (!workspacePath) workspacePath = await resolveWorkspacePath(context);
-          if (!project && workspacePath) project = state.projects.find(item => item.workspace_path === workspacePath) || null;
-          if (!project) throw new Error("project_required");
-          issue = await api("/api/issues/from-thread", {
-            method: "POST",
-            body: JSON.stringify({
-              project_id: project.id,
-              title: context.threadTitle || t("未命名任务"),
-              thread_id: context.threadId,
-              workspace_path: workspacePath || project.workspace_path || ""
-            })
-          });
-        }
-        if (issue.archived_at) throw new Error("issue_archived");
-        await loadIssues();
-        revealImportedIssue(issue.id);
-        return issue;
-      } finally {
-        sessionDropInFlight = false;
-      }
-    }
-
-    function onSessionPointerDown(event) {
-      if (!active || state.surface !== "issues" || state.mockup || READ_ONLY || REMOTE || HOST_CAPABILITIES.nativeThreads === false || event.button !== 0 || event.isPrimary === false) return;
-      const row = event.target?.closest?.(SELECTORS.threadRow);
-      if (!row || row.closest("#" + PANEL_ID)) return;
-      const nestedControl = event.target?.closest?.("button,a,input,textarea,select,[contenteditable='true']");
-      if (nestedControl && nestedControl !== row) return;
-      const threadId = nativeThreadId(row);
-      if (!threadId) return;
-      const context = readContext(row);
-      context.threadId = threadId;
-      context.threadTitle = sessionThreadTitle(row);
-      sessionDragPointer = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, dragging: false, context };
-    }
-
-    function onSessionPointerMove(event) {
-      const drag = sessionDragPointer;
-      if (!drag || event.pointerId !== drag.pointerId) return;
-      if (!drag.dragging) {
-        const deltaX = event.clientX - drag.startX;
-        const deltaY = event.clientY - drag.startY;
-        if (deltaX * deltaX + deltaY * deltaY < 36) return;
-        drag.dragging = true;
-      }
-      setSessionDropTarget(sessionDropTarget(event.clientX, event.clientY));
-    }
-
-    function onSessionPointerUp(event) {
-      const drag = sessionDragPointer;
-      if (!drag || event.pointerId !== drag.pointerId) return;
-      const target = drag.dragging ? sessionDropTarget(event.clientX, event.clientY) : null;
-      resetSessionDrag();
-      if (!target) return;
-      suppressSessionClickUntil = Date.now() + 500;
-      void perform(() => importSessionIssue(drag.context));
-    }
-
-    function onSessionPointerCancel(event) {
-      if (!sessionDragPointer || event.pointerId !== sessionDragPointer.pointerId) return;
-      resetSessionDrag();
-    }
-
     function supportsIssueDrag() {
-      return !window.matchMedia?.("(hover: none), (pointer: coarse)")?.matches;
+      return !READ_ONLY && !window.matchMedia?.("(hover: none), (pointer: coarse)")?.matches;
     }
 
     function onCardDragStart(event) {
@@ -10508,7 +9661,7 @@ export function install(config: Record<string, any>) {
       const status = event.target.closest("[data-status]")?.dataset.status;
       const beforeId = event.target.closest("[data-issue-id]")?.dataset.issueId || "";
       const issue = state.issues.find(item => item.id === id);
-      if (!issue || issuePermissions(issue).boardLocked || !status) return;
+      if (!issue || issuePermissions(issue).boardLocked || !status || (status !== "archive" && !Object.hasOwn(statusLabels, status))) return;
       if (status === "archive") {
         return void perform(async () => {
           await withLatestIssueOnConflict(issue.id, latest => api("/api/issues/" + encodeURIComponent(issue.id) + "/archive", { method: "POST", body: JSON.stringify({ version: latest.version }) }));
@@ -10529,70 +9682,36 @@ export function install(config: Record<string, any>) {
       });
     }
 
-    function hideExternalMcpAppHost() {
-      if (HOST_KIND === "web") return;
-      const views = Array.from(document.querySelectorAll("webview"));
-      for (const view of views) {
-        if (view.title !== "Better Codex") continue;
-        const host = view.closest("body > div.fixed.inset-0, body > div[class*='fixed'], body > div");
-        if (host && host !== document.body && !host.contains(panel)) {
-          host.setAttribute(EXTERNAL_MCP_HIDDEN, "true");
-        }
-      }
-    }
+    function mountPanel(){if(!active)return;const surface=findMount();if(!surface){if(panel)panel.hidden=true;return;}if(!panel){panel=createPanel();panelSizeCleanup=observeComponentSize(panel,componentContext('host','panel-layout'));}if(panel.parentElement!==surface)surface.appendChild(panel);panel.hidden=false;}
 
-    function mountPanel() {
-      if (!active) return;
-      // Native routing may reuse a subtree hidden by the previous mount.
-      restoreNative();
-      const surface = findMount();
-      if (!surface) {
-        if (panel) panel.hidden = true;
-        return;
-      }
-      if (!panel) {
-        panel = createPanel();
-        panelSizeCleanup = observeComponentSize(panel, componentContext("host", "panel-layout"));
-      }
-      if (panel.parentElement !== surface) surface.appendChild(panel);
-      surface.setAttribute(HOST, "true");
-      Array.from(surface.children).forEach(child => {
-        if (child !== panel && child.getAttribute(OWNED) !== "true") child.setAttribute(HIDDEN, "true");
-      });
-      hideExternalMcpAppHost();
-      panel.hidden = false;
-      document.documentElement.setAttribute("data-better-codex-open", "true");
-    }
-
-    function restoreNative() {
-      document.querySelectorAll('[' + HIDDEN + '="true"]').forEach(node => node.removeAttribute(HIDDEN));
-      document.querySelectorAll('[' + HOST + '="true"]').forEach(node => node.removeAttribute(HOST));
-      document.querySelectorAll('[' + EXTERNAL_MCP_HIDDEN + '="true"]').forEach(node => node.removeAttribute(EXTERNAL_MCP_HIDDEN));
-      document.documentElement.removeAttribute("data-better-codex-open");
-    }
-
-    function injectionSurfaceError() {
-      if (![entry, agentsEntry, projectsEntry].every(item => item?.isConnected)) return "injection_navigation_unmounted";
+    function surfaceError() {
+      if (![entry, agentsEntry, projectsEntry].every(item => item?.isConnected)) return "browser_ui_navigation_unmounted";
       if (!active) return null;
-      if (!injectedElementVisible(panel)) return "injection_content_mount_unavailable";
-      const content = panel.querySelector(state.surface === "agents" ? "#better-codex-agents" : state.surface === "projects" ? "#better-codex-projects" : "#better-codex-board");
-      if (!injectedElementVisible(content) || !panel.querySelector(".better-codex-toolbar button")) return "injection_surface_render_unavailable";
+      if (!elementVisible(panel)) return "browser_ui_content_mount_unavailable";
+      // Narrow agent inspectors own the visible grid column; their directory
+      // container intentionally has no width while the inspector is open.
+      const agentInspector = state.surface === "agents" ? panel.querySelector(".better-codex-agent-inspector") : null;
+      const content = elementVisible(agentInspector) ? agentInspector : panel.querySelector(state.surface === "agents" ? "#better-codex-agents" : state.surface === "projects" ? "#better-codex-projects" : "#better-codex-board");
+      if (!elementVisible(content) || !panel.querySelector(".better-codex-toolbar button")) return "browser_ui_surface_render_unavailable";
+      if (state.surface === "issues") {
+        const toolbar = panel.querySelector(".better-codex-toolbar");
+        if (!elementVisible(toolbar)) return "browser_ui_toolbar_unavailable";
+        const bounds = toolbar.getBoundingClientRect();
+        const panelBounds = panel.getBoundingClientRect();
+        // Check layout, not elementFromPoint: open menus and dialogs may validly
+        // cover the toolbar. Other surfaces have intentional compact layouts.
+        if (bounds.top < panelBounds.top - 1 || bounds.bottom > panelBounds.bottom + 1 || content.getBoundingClientRect().top < bounds.bottom - 1) return "browser_ui_toolbar_unavailable";
+      }
       return null;
     }
 
-    function isBetterCodexRoute() {
-      if (HOST_KIND === "web") return webPathname() === "/web" || webPathname() === "/" || Boolean(webProjectRoute()) || Boolean(webAgentRoute());
-      if (location.pathname.startsWith("/mcp-app/")) return location.pathname === BETTER_CODEX_ROUTE;
-      if (Array.from(document.querySelectorAll("webview")).some(view => view.title === "Better Codex")) return true;
-      return Array.from(document.querySelectorAll("main *")).some(node => ["找不到 MCP 应用视图", "MCP app view not found"].includes(node.textContent?.trim()));
-    }
+    function isBetterCodexRoute(){return webPathname()==='/web'||webPathname()==='/'||Boolean(webProjectRoute())||Boolean(webAgentRoute());}
 
     function openRoute(surface = state.surface, options = {}) {
       if (!availableSurfaces.includes(surface)) surface = "issues";
       routeSuppressed = false;
       routeSeen = false;
-      // Desktop entries render inside the current native layout. Navigating to
-      // the MCP workspace changes the shell's sidebar placement and pin state.
+      // Host routing retains navigation state across plugin and Web surfaces.
       if (surface === "projects") {
         const projectId = typeof options.projectId === "string" ? options.projectId : "";
         if (projectId !== state.projectDetailId) {
@@ -10642,6 +9761,11 @@ export function install(config: Record<string, any>) {
       void load();
       if (!startLiveUpdates() && pollTimer === null) pollTimer = setInterval(() => { if (!document.hidden && active && !panel?.dataset.recovery) void perform(() => loadSurface({ background: true }), { background: true }); }, 3000);
       if (retryClockTimer === null) retryClockTimer = setInterval(() => { if (active && state.issues.some(issue => issue.session_retry)) render(); }, 30000);
+      if (externalRefreshTimer === null) externalRefreshTimer = setInterval(() => {
+        if (!active || document.hidden || !externalObservations.length) return;
+        render();
+        if (externalDetail?.element.isConnected && externalDetailValue) externalDetail.update(externalDetailValue);
+      }, 5000);
     }
 
     function close(options = {}) {
@@ -10650,7 +9774,8 @@ export function install(config: Record<string, any>) {
       else sessionStorage.removeItem(RESUME_SURFACE_KEY);
       routeSuppressed = options.suppressRoute !== false;
       active = false;
-      resetSessionDrag();
+      clearInterval(externalRefreshTimer); externalRefreshTimer = null;
+      externalDetail?.destroy(); externalDetail = null; externalDetailValue = null;
       closeFilterMenu();
       closeCreateMenu();
       closeIssueMenu();
@@ -10664,27 +9789,8 @@ export function install(config: Record<string, any>) {
         retryClockTimer = null;
       }
       if (panel) panel.hidden = true;
-      restoreNative();
+
       ensureEntry();
-    }
-
-    function findThreadRow(expected) {
-      return Array.from(document.querySelectorAll(SELECTORS.threadRow)).find(item => nativeThreadId(item) === expected);
-    }
-
-    function currentRouteThreadId() {
-      const match = location.pathname.match(/\/local\/([^/?#]+)/);
-      if (!match) return "";
-      try {
-        return normalizeSessionId(decodeURIComponent(match[1]));
-      } catch {
-        return "";
-      }
-    }
-
-    function activeThreadId() {
-      const activeRow = Array.from(document.querySelectorAll(SELECTORS.threadRow)).find(item => item.getAttribute(ATTRIBUTES.threadActive) === "true");
-      return activeRow ? nativeThreadId(activeRow) : "";
     }
 
     async function requestSessionHandoff(issue, threadId) {
@@ -10703,107 +9809,7 @@ export function install(config: Record<string, any>) {
       }
     }
 
-    function syncSessionHandoffFromHost() {
-      const threadId = currentRouteThreadId() || activeThreadId();
-      if (!threadId) return;
-      const issue = state.issues.find(candidate => issueSessionId(candidate) === threadId && !candidate.session_owned && !candidate.session_handoff_at);
-      if (!issue || sessionHandoffPending.has(issue.id)) return;
-      void requestSessionHandoff(issue, threadId).catch(error => reportUnexpectedError(error, { source: "session_handoff_sync", issue_id: issue.id, thread_id: threadId }));
-    }
-
-    async function waitForThreadOpen(expected) {
-      const deadline = Date.now() + THREAD_OPEN_TIMEOUT_MS;
-      let clickedRow = false;
-      while (Date.now() < deadline) {
-        const active = activeThreadId();
-        if (active === expected) return { opened: true, via: "sidebar" };
-        if (currentRouteThreadId() === expected) return { opened: true, via: "route" };
-        const row = findThreadRow(expected);
-        if (row && !clickedRow) {
-          clickedRow = true;
-          nativeThreadOpenBypass = expected;
-          row.click();
-        }
-        await new Promise(resolve => setTimeout(resolve, THREAD_OPEN_POLL_MS));
-      }
-      throw new Error("thread_open_timeout");
-    }
-
-    async function openThread(threadId) {
-      const expected = normalizeSessionId(threadId);
-      if (!expected) throw new Error("thread_id_invalid");
-      const issue = state.issues.find(candidate => issueSessionId(candidate) === expected && !candidate.session_handoff_at);
-      if (issue) await requestSessionHandoff(issue, expected);
-      try {
-        await resumePersistedThread(expected);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (message !== "thread " + expected + " already has an active writer") throw error;
-        appendDiagnostic("thread_open_blocked", { thread_id: expected, reason: "active_writer", stage: "thread_resume", error: message });
-        await confirmAction("对话已被占用", "这个对话已在 Codex CLI 或其他 Codex 客户端中打开。请先在 CLI 或对应客户端关闭这个对话，再返回这里重新打开。", "知道了", true);
-        return { opened: false, reason: "active_writer" };
-      }
-      const row = findThreadRow(expected);
-      close();
-      if (!row) window.postMessage({ type: NAVIGATION.messageType, path: NAVIGATION.threadRoutePrefix + encodeURIComponent(expected) }, window.location.origin);
-      const result = await waitForThreadOpen(expected);
-      close();
-      return result;
-    }
-
-    function nativeThreadId(row) {
-      const annotated = normalizeSessionId(row.getAttribute(ATTRIBUTES.threadId));
-      if (annotated) return annotated;
-      const fiberKey = Object.keys(row).find(key => key.startsWith("__reactFiber$"));
-      let fiber = fiberKey ? row[fiberKey] : null;
-      for (let depth = 0; fiber && depth < 40; depth += 1, fiber = fiber.return) {
-        const conversationId = normalizeSessionId(fiber.memoizedProps?.conversationId);
-        if (conversationId) return conversationId;
-      }
-      return "";
-    }
-
-    function isNativeRailDestination(target) {
-      if (!(target instanceof Element) || !target.closest("[data-app-navigation-rail]")) return false;
-      const button = target.closest("button,a,[role='button']");
-      if (!button || button.hasAttribute(OWNED) || button.getAttribute("aria-haspopup") === "menu") return false;
-      return true;
-    }
-
-    function isSidebarNavigationTarget(target) {
-      if (!target.closest(SELECTORS.sidebarNavigation) || target.closest(SELECTORS.projectRow)) return false;
-      const navigationItem = target.closest(SIDEBAR_NAVIGATION_ITEM) || target.closest(SELECTORS.threadRow);
-      if (!navigationItem) return false;
-      const nestedUtility = target !== navigationItem && target.matches("button,a,[role='button']") && target.getAttribute("aria-label");
-      return !nestedUtility;
-    }
-
-    function onClick(event) {
-      if (!active || suppressAgentOutside) return;
-      const target = event.target?.closest?.("button,a,[role='button']," + SELECTORS.threadRow);
-      if (!target || target === entry || target === agentsEntry || target === projectsEntry || target === moreEntry || target === profileEntry || target === usageEntry || target === themeEntry || target.closest("#" + PANEL_ID) || target.closest("#better-codex-dialog") || target.closest("#better-codex-agent-dialog") || target.closest("#better-codex-project-dialog") || target.closest("#better-codex-profile-dialog") || target.closest("#better-codex-avatar-picker")) return;
-      if (Date.now() < suppressSessionClickUntil && target.closest(SELECTORS.threadRow)) {
-        suppressSessionClickUntil = 0;
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        return;
-      }
-      const threadRow = target.closest(SELECTORS.threadRow);
-      const threadId = threadRow ? nativeThreadId(threadRow) : "";
-      if (threadId && nativeThreadOpenBypass === threadId) nativeThreadOpenBypass = "";
-      else if (threadId && state.issues.some(candidate => issueSessionId(candidate) === threadId && !candidate.session_handoff_at)) {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        void perform(() => openThread(threadId));
-        return;
-      }
-      if (isNativeRailDestination(target)) {
-        close({ resume: true });
-        return;
-      }
-      if (isSidebarNavigationTarget(target)) close({ resume: true });
-      else if (target.closest(SELECTORS.sidebarNavigation)) scheduleRefresh();
-    }
+    async function openThread(threadId){const expected=normalizeSessionId(threadId);if(!expected)throw new Error('thread_id_invalid');const issue=state.issues.find(candidate=>issueSessionId(candidate)===expected&&!candidate.session_handoff_at);if(issue)await requestSessionHandoff(issue,expected);if(typeof window.betterCodexHost?.openThread==='function')return window.betterCodexHost.openThread(expected);throw new Error('native_thread_navigation_unavailable');}
 
     function refresh() {
       if (HOST_KIND === "web" && !hasFeature("project-management") && /^\/web\/projects(?:\/|$)/.test(webPathname())) updateWebHistory({ betterCodex: true, betterCodexSurface: "issues" }, "/web", "replace");
@@ -10817,7 +9823,7 @@ export function install(config: Record<string, any>) {
       const resumeSurface = sessionStorage.getItem(RESUME_SURFACE_KEY);
       if (betterCodexRoute) routeSeen = true;
       if (!betterCodexRoute) routeSuppressed = false;
-      syncSessionHandoffFromHost();
+
       if (active && routeSeen && !betterCodexRoute) return close({ resume: true, suppressRoute: false });
       if (!active && betterCodexRoute && !routeSuppressed && availableSurfaces.includes(resumeSurface)) return open(resumeSurface);
       if (active) {
@@ -10848,8 +9854,6 @@ export function install(config: Record<string, any>) {
       if (pollTimer !== null) clearInterval(pollTimer);
       if (updateTimer !== null) clearInterval(updateTimer);
       if (retryClockTimer !== null) clearInterval(retryClockTimer);
-      if (relayTimer !== null) clearInterval(relayTimer);
-      relayTimer = null;
       updateNoticeResizeObserver?.disconnect();
       updateNoticeResizeObserver = null;
       boardScrollResizeObserver?.disconnect();
@@ -10873,14 +9877,9 @@ export function install(config: Record<string, any>) {
       observer?.disconnect();
       for (const pending of bridgeRequests.values()) {
         clearTimeout(pending.timer);
-        pending.reject(new Error("injection_destroyed"));
+        pending.reject(new Error("browser_ui_destroyed"));
       }
       bridgeRequests.clear();
-      for (const pending of appServerRequests.values()) {
-        clearTimeout(pending.timer);
-        pending.reject(new Error("injection_destroyed"));
-      }
-      appServerRequests.clear();
       liveUnsubscribe?.();
       liveUnsubscribe = null;
       projectRefreshButton?.destroy();
@@ -10895,27 +9894,22 @@ export function install(config: Record<string, any>) {
       }
       managedButtons.forEach(handle => handle.destroy());
       managedButtons.clear();
+      if (panel) destroyOwnedComponents(panel);
       document.removeEventListener("DOMContentLoaded", mount);
-      document.removeEventListener("click", onClick, true);
-      document.removeEventListener("pointerdown", onSessionPointerDown, true);
-      document.removeEventListener("pointermove", onSessionPointerMove, true);
-      document.removeEventListener("pointerup", onSessionPointerUp, true);
-      document.removeEventListener("pointercancel", onSessionPointerCancel, true);
       document.removeEventListener("keydown", onGlobalShortcut, true);
       document.removeEventListener("visibilitychange", onVisibilityChange);
       window.removeEventListener("online", onNetworkOnline);
-      window.removeEventListener("codex-message-from-view", onHostMessageFromView, true);
-      window.removeEventListener("message", onAppServerMessage, true);
+      document.removeEventListener("error", onCreatorAvatarError, true);
       window.removeEventListener("error", onWindowError);
       window.removeEventListener("unhandledrejection", onUnhandledRejection);
       window.removeEventListener("better-codex:error", onExternalError);
       window.removeEventListener("better-codex:profile-open", onUserProfileOpen);
       close();
       document.querySelectorAll('[' + OWNED + '="true"]').forEach(node => node.remove());
-      document.querySelectorAll("[data-better-codex-launcher-hidden]").forEach(node => node.removeAttribute("data-better-codex-launcher-hidden"));
+
       ["light", "dark"].forEach(mode => ["canvas", "ink", "accent", "surface", "control", "raised", "hover", "pressed", "hairline", "font-ui"].forEach(token => document.documentElement.style.removeProperty("--bc-host-" + mode + "-" + token)));
       delete window.__betterCodexBridgeResolve;
-      delete window.__betterCodexInjection__;
+      delete window.__betterCodexUI__;
       errorDialog = null;
     }
 
@@ -10923,13 +9917,14 @@ export function install(config: Record<string, any>) {
       document.removeEventListener("DOMContentLoaded", mount);
       if (destroyed || observer || !document.documentElement) return;
       observer = new MutationObserver(records => {
-        destroyRemovedComponents(records);
+        // The host may detach a closed panel between routes. It remains
+        // ours until explicit teardown; disposal must agree with that lifetime.
+        destroyRemovedComponents(records, { retainedRoots: panel ? [panel] : [] });
         hydrateAddedIconButtons(records);
         scheduleRefresh();
       });
-      observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-theme", "aria-current", ATTRIBUTES.threadActive] });
+      observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-theme", "aria-current"] });
       startLiveUpdates();
-      if (HOST_KIND !== "web" && HOST_CAPABILITIES.nativeThreads !== false) startSessionRelay();
       refresh();
       void ensureBootstrapReady().catch(error => {
         if (destroyed) return;
@@ -10941,17 +9936,11 @@ export function install(config: Record<string, any>) {
       updateTimer = setInterval(() => { if (!document.hidden) void checkUpdateNotice(); }, 15000);
     }
 
-    window.__betterCodexInjection__ = { version: VERSION, bundleChecksum: config.bundleChecksum, profile: PROFILE, host: HOST_KIND, endpoint: BASE_URL, refresh, pulse: () => true, ready: () => bootstrapReady && !injectionSurfaceError(), bootstrapError: () => bootstrapFailure || injectionSurfaceError(), open: openRoute, openThread, close, destroy, reportError: reportGlobalError };
-    document.addEventListener("click", onClick, true);
-    document.addEventListener("pointerdown", onSessionPointerDown, true);
-    document.addEventListener("pointermove", onSessionPointerMove, true);
-    document.addEventListener("pointerup", onSessionPointerUp, true);
-    document.addEventListener("pointercancel", onSessionPointerCancel, true);
+    window.__betterCodexUI__ = { version: VERSION, bundleChecksum: config.bundleChecksum, profile: PROFILE, host: HOST_KIND, endpoint: BASE_URL, refresh, pulse: () => true, ready: () => bootstrapReady && !surfaceError(), bootstrapError: () => bootstrapFailure || surfaceError(), open: openRoute, openThread, close, destroy, reportError: reportGlobalError };
     document.addEventListener("keydown", onGlobalShortcut, true);
     document.addEventListener("visibilitychange", onVisibilityChange);
     window.addEventListener("online", onNetworkOnline);
-    window.addEventListener("codex-message-from-view", onHostMessageFromView, true);
-    window.addEventListener("message", onAppServerMessage, true);
+    document.addEventListener("error", onCreatorAvatarError, true);
     window.addEventListener("error", onWindowError);
     window.addEventListener("unhandledrejection", onUnhandledRejection);
     window.addEventListener("better-codex:error", onExternalError);

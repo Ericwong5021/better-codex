@@ -8,6 +8,8 @@ import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { javascriptStringLiteral } from "./javascript-literal.mjs";
 import { packageDmg } from "./package-dmg.mjs";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const packageJson = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
@@ -90,14 +92,16 @@ try {
   if (versions.core !== packageJson.version || (versions.managedCore && versions.managedCore !== packageJson.version)) {
     throw new Error(`package_version_mismatch: expected ${packageJson.version}, got core ${versions.core || "unknown"} managed ${versions.managedCore || "unknown"}`);
   }
-  const mcpOutput = execFileSync(process.execPath, [bundle, "mcp"], {
-    encoding: "utf8",
-    env: versionEnv,
-    input: `${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } })}\n${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} })}\n`,
-  }).trim().split("\n").map(line => JSON.parse(line));
-  const mcpInitialize = mcpOutput.find(message => message.id === 1);
-  const mcpTools = mcpOutput.find(message => message.id === 2);
-  if (mcpInitialize?.result?.serverInfo?.version !== packageJson.version || !mcpTools?.result?.tools?.some(tool => tool.name === "board")) throw new Error("package_mcp_validation_failed");
+  const mcpTransport = new StdioClientTransport({ command: process.execPath, args: [bundle, "mcp"], env: versionEnv, stderr: "pipe" });
+  const mcpClient = new Client({ name: "better-codex-package-check", version: packageJson.version });
+  try {
+    await mcpClient.connect(mcpTransport, { timeout: 15_000 });
+    const tools = await mcpClient.listTools({}, { timeout: 15_000 });
+    if (mcpClient.getServerVersion()?.version !== packageJson.version || !tools.tools.some(tool => tool.name === "board") || !tools.tools.some(tool => tool.name === "tasks_create")) throw new Error("package_mcp_validation_failed");
+  } finally {
+    await mcpClient.close();
+    await mcpTransport.close();
+  }
   execFileSync(process.execPath, [bundle, "version"], { stdio: "inherit", env: versionEnv });
   await mkdir(output, { recursive: true });
   await copyFile(bundle, join(output, coreName));
@@ -110,6 +114,7 @@ try {
   }
   await copyFile(join(root, "assets", "update-public-key.pem"), join(packageRoot, "update-public-key.pem"));
   await cp(join(root, "skills", "better-codex"), join(packageRoot, "skills", "better-codex"), { recursive: true });
+  await cp(join(root, "plugins", "better-codex"), join(packageRoot, "plugins", "better-codex"), { recursive: true });
   if (platform === "win32") {
     execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `Compress-Archive -Path '${join(packageRoot, "*").replace(/'/g, "''")}' -DestinationPath '${archive.replace(/'/g, "''")}' -Force`], { stdio: "inherit" });
   } else {

@@ -6,7 +6,7 @@ import { isSea } from "node:sea";
 import { homedir, hostname } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
-import { cdpEject, cdpInject, cdpOpenThread, cdpRefreshAndInject, cdpRestartAndInject, cdpStatus, codexInstallationStatus, codexProcessRunning, chooseCodexRestartAction, launchCodex, requiresCodexRestartForLaunch, watchInjection } from "./cdp.js";
+import { cdpDisconnectDesktopBridge, cdpOpenThread, cdpRefreshDesktopBridge, cdpRestartAndConnectDesktopBridge, cdpCleanupLegacyInjection, cdpStatus, codexInstallationStatus, codexProcessRunning, launchCodex, watchDesktopBridge } from "./cdp.js";
 import { removeManagedAgentProfiles } from "./agent-profiles.js";
 import { showNativeChoiceDialog } from "./native-dialog.js";
 import { coreVersion } from "./compatibility.js";
@@ -14,7 +14,8 @@ import {
   cdpPort,
   databasePath,
   ensureDirectories,
-  injectorLogPath,
+  desktopBridgeLogPath,
+  desktopBridgePidPath,
   injectorPidPath,
   betterCodexHome,
   betterCodexProfile,
@@ -34,11 +35,11 @@ import {
   syncConfigPath,
 } from "./config.js";
 import { readRuntimeState, reserveRuntimeAuthorityRecovery, runtimeAuthorityUpdateState } from "./runtime-state.js";
-import { injectionEnabled, setInjectionEnabled } from "./injection-state.js";
 import { installationCommand, installLaunchIntegration, launchIntegrationStatus, uninstallLaunchIntegration, openMacMenuBar } from "./launch-integration.js";
+import { desktopBridgeIdentityMatches, legacyInjectorIdentityMatches, type DesktopBridgeProcess } from "./desktop-process.js";
 import { desktopStatus } from "./desktop-status.js";
 import { readCodexLocale } from "./locale.js";
-import { betterCodexMcpName, startMcpAppServer } from "./mcp-app.js";
+import { betterCodexMcpName, startMcpAppServer, startMockupMcpAppServer } from "./mcp-app.js";
 import { packagedBuild } from "./build.js";
 import { bundledBetterCodexSkill } from "./bundled-skill.js";
 import { installService, repairServiceConfiguration, restartService, serviceLogs, serviceStatus, startService, stopService, uninstallService } from "./service.js";
@@ -48,6 +49,8 @@ import { normalizeHubUrl, readSyncConfiguration, removeSyncConfiguration, writeS
 import { normalizeRelayUrl, readRelayConfiguration, removeRelayConfiguration, writeRelayConfiguration } from "./relay-config.js";
 import { startSessionHost } from "./session-host.js";
 import { sessionHostStatus, stopSessionHostProcess } from "./session-host-client.js";
+import { mcpReportingEnabled, mcpReportingPath, readMcpReportingSetting, writeMcpReportingSetting } from "./mcp-reporting.js";
+import { activateLocalCore, rollbackLocalCore } from "./local-core-activation.js";
 
 function accessToken() {
   return token();
@@ -280,38 +283,19 @@ async function openWebApp() {
   return { opened: true, url: `http://127.0.0.1:${port}/web` };
 }
 
-async function restartRuntime() {
-  installationCommand();
-  setInjectionEnabled(false);
-  await stopInjector();
-  try { await request("/api/shutdown", { method: "POST" }); } catch {}
-  let stopped = false;
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    try {
-      await health();
-    } catch {
-      stopped = true;
-      break;
-    }
-    await new Promise(resolve => setTimeout(resolve, 100));
-  }
-  if (!stopped) throw new Error("runtime_restart_timeout");
-  return ensureRuntime();
-}
-
 function activeRuntimePort() {
   const runtime = readRuntimeState();
   if (!runtime) throw new Error("runtime_unavailable");
   return runtime.port;
 }
 
-function injectionOwnership(profile = betterCodexProfile, stateRunPath = runPath, allowLegacyProfileless = false) {
+function desktopBridgeOwnership(profile = betterCodexProfile, stateRunPath = runPath) {
   const runtime = readJsonFile<{ port?: unknown }>(join(stateRunPath, "runtime.json"));
   const injection = readJsonFile<{ endpoint?: unknown }>(join(stateRunPath, "injection.json"));
   const runtimePort = Number(runtime?.port);
   const recordedEndpoint = typeof injection?.endpoint === "string" ? injection.endpoint : "";
   const expectedEndpoint = Number.isInteger(runtimePort) && runtimePort > 0 ? `http://127.0.0.1:${runtimePort}` : recordedEndpoint;
-  return { profile, ...(expectedEndpoint ? { endpoint: expectedEndpoint } : {}), ...(allowLegacyProfileless ? { allowLegacyProfileless: true } : {}) };
+  return { profile, ...(expectedEndpoint ? { endpoint: expectedEndpoint } : {}) };
 }
 
 function processAlive(pid: number) {
@@ -346,66 +330,94 @@ function processStartTime(pid: number) {
   }
 }
 
-function isInjectorProcess(pid: number) {
-  return /\bwatch-inject\b/.test(processCommandLine(pid));
+function verifiedDesktopBridgeProcess(path = desktopBridgePidPath) {
+  const value = readJsonFile<DesktopBridgeProcess>(path);
+  if (!value || !Number.isInteger(value.pid) || !processAlive(value.pid)) return null;
+  if (!desktopBridgeIdentityMatches(value, { pid: value.pid, startedAt: processStartTime(value.pid), command: processCommandLine(value.pid), profile: betterCodexProfile, home: betterCodexHome })) return null;
+  return value;
 }
 
-function injectorPid() {
-  if (!existsSync(injectorPidPath)) return null;
-  const pid = Number(readFileSync(injectorPidPath, "utf8"));
-  return Number.isInteger(pid) && processAlive(pid) && isInjectorProcess(pid) ? pid : null;
-}
+function desktopBridgePid() { return verifiedDesktopBridgeProcess()?.pid ?? null; }
+const desktopBridgeStartLockPath = `${desktopBridgePidPath}.start`;
 
-const injectorStartLockPath = `${injectorPidPath}.start`;
-
-function tryStartInjector(portNumber: number) {
-  const existing = injectorPid();
-  if (existing) return existing;
+async function ensureDesktopBridge(portNumber: number) {
+  if (process.env.NODE_TEST_CONTEXT || process.env.BETTER_CODEX_DISABLE_DESKTOP_BRIDGE === "1") return null;
+  const existing = verifiedDesktopBridgeProcess();
+  if (existing) return existing.pid;
   let lock: number;
+  try { lock = openSync(desktopBridgeStartLockPath, "wx", 0o600); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    const owner = readJsonFile<{ pid?: number; processStartedAt?: number }>(desktopBridgeStartLockPath);
+    const observed = owner?.pid && processAlive(owner.pid) ? processStartTime(owner.pid) : null;
+    const stale = owner?.pid ? observed !== owner.processStartedAt : Date.now() - statSync(desktopBridgeStartLockPath).mtimeMs > 5000;
+    if (stale) { try { unlinkSync(desktopBridgeStartLockPath); } catch {} }
+    return null;
+  }
   try {
-    lock = openSync(injectorStartLockPath, "wx", 0o600);
+    writeFileSync(lock, JSON.stringify({ pid: process.pid, processStartedAt: processStartTime(process.pid), profile: betterCodexProfile, home: betterCodexHome }));
+    const pending = readJsonFile<DesktopBridgeProcess>(desktopBridgePidPath);
+    if (pending?.pid && processAlive(pending.pid)) throw new Error("desktop_bridge_process_identity_mismatch");
+    const pid = spawnSelf(["watch-desktop-bridge", String(portNumber)], desktopBridgeLogPath).pid;
+    if (!pid) throw new Error("desktop_bridge_start_failed");
+    const processStartedAt = processStartTime(pid);
+    const command = processCommandLine(pid);
+    if (!processStartedAt || !/\bwatch-desktop-bridge\b/.test(command)) throw new Error("desktop_bridge_start_identity_unavailable");
+    if (readJsonFile<DesktopBridgeProcess>(desktopBridgePidPath)?.pid !== pid) writeFileSync(desktopBridgePidPath, JSON.stringify({ pid, processStartedAt, command, profile: betterCodexProfile, home: betterCodexHome, instanceId: randomUUID() }), { mode: 0o600 });
+    return pid;
+  } finally { closeSync(lock); try { unlinkSync(desktopBridgeStartLockPath); } catch {} }
+}
+
+function legacyProcessHome(pid: number) {
+  try {
+    if (process.platform === "win32") return null;
+    const uid = Number(execFileSync("ps", ["-p", String(pid), "-o", "uid="], { encoding: "utf8" }).trim());
+    if (uid !== process.getuid?.()) return null;
+    // Capture locally; never include process environment or credentials in diagnostics.
+    const environment = process.platform === "linux" ? readFileSync(`/proc/${pid}/environ`, "utf8").replace(/\0/g, " ") : execFileSync("ps", ["eww", "-p", String(pid), "-o", "command="], { encoding: "utf8" });
+    const profile = environment.match(/(?:^|\s)BETTER_CODEX_PROFILE=(stable|development)(?:\s|$)/)?.[1] || "stable";
+    if (profile !== betterCodexProfile) return null;
+    const home = environment.match(/(?:^|\s)BETTER_CODEX_HOME=(.*?)(?=\s+[A-Za-z_][A-Za-z0-9_]*=|$)/)?.[1];
+    return resolve(home || join(homedir(), profile === "development" ? ".better-codex-dev" : ".better-codex"));
+  } catch { return null; }
+}
+
+async function migrateLegacyInjector() {
+  if (process.env.BETTER_CODEX_DISABLE_DESKTOP_BRIDGE === "1") return { stopped: false, reason: "desktop_bridge_disabled" };
+  if (!existsSync(injectorPidPath)) return { stopped: false, reason: "absent" };
+  const pid = Number(readFileSync(injectorPidPath, "utf8"));
+  if (!Number.isInteger(pid) || !processAlive(pid)) { unlinkSync(injectorPidPath); return { stopped: false, reason: "stale" }; }
+  const command = processCommandLine(pid);
+  const started = processStartTime(pid);
+  const recordedAt = statSync(injectorPidPath).mtimeMs;
+  const state = readJsonFile<{ profile?: string; endpoint?: string; pid?: number; processStartedAt?: number }>(join(runPath, "injection.json"));
+  if (!legacyInjectorIdentityMatches({ command, executable: process.env.BETTER_CODEX_LAUNCHER_PATH || process.argv[1] || "", startedAt: started, pidFileWrittenAt: recordedAt, recordedProfile: state?.profile, profile: betterCodexProfile, observedHome: legacyProcessHome(pid), home: betterCodexHome })) {
+    console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ scope: "desktop", event: "legacy_injector_identity_unverified", profile: betterCodexProfile, home: betterCodexHome, pid, process_started_at: started, recorded_at: recordedAt })}`);
+    throw new Error("legacy_injector_identity_unverified");
+  }
+  // Recheck all observed identity fields immediately before signalling.
+  if (processCommandLine(pid) !== command || processStartTime(pid) !== started || legacyProcessHome(pid) !== betterCodexHome) throw new Error("legacy_injector_identity_changed");
+  process.kill(pid, "SIGTERM");
+  for (let attempt = 0; attempt < 50 && processAlive(pid); attempt++) await new Promise(resolve => setTimeout(resolve, 100));
+  if (processAlive(pid)) throw new Error("legacy_injector_stop_pending");
+  if (Number(readFileSync(injectorPidPath, "utf8")) === pid) unlinkSync(injectorPidPath);
+  try {
+    const cleanup = await cdpCleanupLegacyInjection(cdpPort, desktopBridgeOwnership());
+    return { stopped: true, pid, cleanup };
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") return null;
+    const message = error instanceof Error ? error.message : String(error);
+    if (message === "cdp_listener_absent" || message === "cdp_listener_untrusted" || message.startsWith("cdp_unavailable_")) return { stopped: true, pid, cleanup: { pending: true, error: message } };
     throw error;
   }
-  try {
-    writeFileSync(lock, String(process.pid));
-    const current = injectorPid();
-    if (current) return current;
-    const pid = spawnSelf(["watch-inject", String(portNumber)], injectorLogPath).pid;
-    if (!pid) throw new Error("injector_start_failed");
-    writeFileSync(injectorPidPath, String(pid));
-    return pid;
-  } finally {
-    closeSync(lock);
-    try { unlinkSync(injectorStartLockPath); } catch {}
-  }
-}
-
-async function ensureInjector(portNumber: number) {
-  const deadline = Date.now() + 10_000;
-  while (Date.now() < deadline) {
-    const pid = injectorPid();
-    if (pid) return pid;
-    const started = tryStartInjector(portNumber);
-    if (started) {
-      await new Promise(resolve => setTimeout(resolve, 100));
-      const running = injectorPid();
-      if (running) return running;
-    } else {
-      try {
-        if (Date.now() - statSync(injectorStartLockPath).mtimeMs > 5000) unlinkSync(injectorStartLockPath);
-      } catch {}
-    }
-    await new Promise(resolve => setTimeout(resolve, 50));
-  }
-  throw new Error("injector_start_failed");
 }
 
 async function runRuntime() {
-  await stopLegacyRuntime();
   let server: ReturnType<typeof import("./server.js").startServer>;
-  try { server = (await import("./server.js")).startServer(); }
+  try {
+    if (process.env.BETTER_CODEX_DISABLE_DESKTOP_BRIDGE !== "1") await stopLegacyRuntime();
+    await migrateLegacyInjector();
+    server = (await import("./server.js")).startServer();
+  }
   catch (error) {
     const activation = readGatewayUpdateActivationState();
     if (!activation?.updateId || activation.status !== "activating" || runtimeAuthorityUpdateState(activation.updateId).state !== "active") throw error;
@@ -417,17 +429,15 @@ async function runRuntime() {
     process.once("exit", () => clearInterval(recoveryTimer));
     return;
   }
-  await stopInjector();
   let stopping = false;
   let reconciling = false;
   const reconcileWatcher = async () => {
     if (stopping || reconciling) return;
     reconciling = true;
     try {
-      if (injectionEnabled()) await ensureInjector(cdpPort);
-      else await stopInjector();
+      if (process.env.BETTER_CODEX_DISABLE_DESKTOP_BRIDGE !== "1") await ensureDesktopBridge(cdpPort);
     } catch (error) {
-      console.error(error instanceof Error ? error.message : "injector_reconcile_failed");
+      console.error(error instanceof Error ? error.message : "desktop_bridge_reconcile_failed");
     } finally {
       reconciling = false;
     }
@@ -440,8 +450,8 @@ async function runRuntime() {
   process.once("exit", () => {
     stopping = true;
     clearInterval(watcherTimer);
-    const pid = injectorPid();
-    if (pid) try { process.kill(pid, "SIGTERM"); } catch {}
+    const identity = verifiedDesktopBridgeProcess();
+    if (identity) try { process.kill(identity.pid, "SIGTERM"); } catch {}
   });
   return server;
 }
@@ -487,7 +497,7 @@ async function resumeUpdateCommit(updateId: string, updates: { core: string | nu
 
 async function applyUpdate(previousRuntimePid: number, updates: { core: string | null; compatibility: string | null }, updateId: string, sourceCoreVersion: string, targetGeneration: number, drainPath?: string, recovering = false) {
   let mcp: unknown;
-  let injection: unknown = { refreshed: false, pending: true, reason: "codex_not_connected" };
+  let desktopBridge: unknown = { refreshed: false, pending: true, reason: "codex_not_connected" };
   let launchIntegration: unknown;
   const desktopErrors: Array<{ component: string; error: string }> = [];
   const desktopSetup = (component: string, install: () => unknown) => {
@@ -522,9 +532,9 @@ async function applyUpdate(previousRuntimePid: number, updates: { core: string |
     if (runtime.generation !== targetGeneration || runtime.handoffUpdateId !== updateId) throw new Error("update_runtime_identity_mismatch");
     mcp = desktopSetup("mcp", installMcp);
     try {
-      injection = injectionEnabled() ? { refreshed: true, targets: await cdpRefreshAndInject(cdpPort, activeRuntimePort(), accessToken()) } : { refreshed: false, disabled: true };
+      desktopBridge = { refreshed: true, targets: await cdpRefreshDesktopBridge(cdpPort, activeRuntimePort(), accessToken()) };
     } catch (error) {
-      injection = { refreshed: false, pending: true, error: error instanceof Error ? error.message : "injection_refresh_pending" };
+      desktopBridge = { refreshed: false, pending: true, error: error instanceof Error ? error.message : "desktop_bridge_refresh_pending" };
     }
     launchIntegration = desktopSetup("launcher", installLaunchIntegration);
     recordGatewayUpdateActivation("activating", null, updates, process.pid, updateId, targetGeneration, { desktopErrors });
@@ -541,14 +551,14 @@ async function applyUpdate(previousRuntimePid: number, updates: { core: string |
     runtime = await waitForRuntimeReady(30_000);
     if (runtime.handoffUpdateId !== null) throw new Error("update_commit_runtime_state_stale");
     recordGatewayUpdateActivation("success", null, updates, null, updateId);
-    return { updated: true, runtime, injection, launchIntegration, mcp };
+    return { updated: true, runtime, desktopBridge, launchIntegration, mcp };
   } catch (error) {
     const activationError = error instanceof Error ? error.message : "update_activation_failed";
     const authority = runtimeAuthorityUpdateState(updateId);
     if (authority.state === "committed") {
       const runtime = await resumeUpdateCommit(updateId, updates, sourceCoreVersion, false);
       recordGatewayUpdateActivation("success", null, updates, null, updateId);
-      return { updated: true, runtime, injection, launchIntegration, mcp, commit_recovered: true };
+      return { updated: true, runtime, desktopBridge, launchIntegration, mcp, commit_recovered: true };
     }
     if (authority.state === "rolled_back") {
       const runtime = await resumeUpdateCommit(updateId, updates, sourceCoreVersion, true);
@@ -655,23 +665,14 @@ async function withLaunchLock<T>(operation: () => Promise<T>) {
   }
 }
 
-async function stopInjector() {
-  const pid = injectorPid();
-  if (pid) {
-    try { process.kill(pid, "SIGTERM"); } catch (error) { if (processAlive(pid)) throw error; }
-    for (let attempt = 0; attempt < 90 && processAlive(pid); attempt += 1) {
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
-    if (processAlive(pid) && isInjectorProcess(pid)) {
-      try { process.kill(pid, "SIGKILL"); } catch (error) { if (processAlive(pid)) throw error; }
-      for (let attempt = 0; attempt < 10 && processAlive(pid); attempt += 1) await new Promise(resolve => setTimeout(resolve, 100));
-    }
-    if (processAlive(pid)) throw new Error("injector_stop_failed");
-  }
-  if (existsSync(injectorPidPath)) {
-    const recorded = Number(readFileSync(injectorPidPath, "utf8"));
-    if (!Number.isInteger(recorded) || recorded === pid || !processAlive(recorded) || !isInjectorProcess(recorded)) unlinkSync(injectorPidPath);
-  }
+async function stopDesktopBridge() {
+  const identity = verifiedDesktopBridgeProcess();
+  if (!identity) return;
+  process.kill(identity.pid, "SIGTERM");
+  for (let attempt = 0; attempt < 90 && verifiedDesktopBridgeProcess()?.instanceId === identity.instanceId; attempt++) await new Promise(resolve => setTimeout(resolve, 100));
+  if (verifiedDesktopBridgeProcess()?.instanceId === identity.instanceId) throw new Error("desktop_bridge_stop_pending");
+  const current = readJsonFile<DesktopBridgeProcess>(desktopBridgePidPath);
+  if (current?.instanceId === identity.instanceId) unlinkSync(desktopBridgePidPath);
 }
 
 async function nextLaunchIntentSequence() {
@@ -756,164 +757,10 @@ function readJsonFile<T>(path: string): T | null {
   }
 }
 
-function peerInjectorPid(peerRunPath: string) {
-  const path = join(peerRunPath, "injector.pid");
-  const pid = Number(existsSync(path) ? readFileSync(path, "utf8") : "");
-  return Number.isInteger(pid) && processAlive(pid) && isInjectorProcess(pid) ? pid : null;
-}
-
-function peerRuntimeState(peerRunPath: string) {
-  const value = readJsonFile<Partial<PeerRuntimeState>>(join(peerRunPath, "runtime.json"));
-  if (!value || !Number.isInteger(value.pid) || !Number.isInteger(value.port) || typeof value.instanceId !== "string") return null;
-  if (!processAlive(value.pid!)) return null;
-  if (typeof value.processStartedAt === "string" || typeof value.startedAt === "string") {
-    const expectedStart = Date.parse(value.processStartedAt ?? value.startedAt!);
-    const observedStart = processStartTime(value.pid!);
-    const tolerance = value.processStartedAt ? 1500 : 30_000;
-    if (Number.isFinite(expectedStart) && observedStart !== null && Math.abs(expectedStart - observedStart) > tolerance) return null;
-  }
-  return value as PeerRuntimeState;
-}
-
-async function disablePeerInjection(peerRunPath: string) {
-  mkdirSync(peerRunPath, { recursive: true });
-  const path = join(peerRunPath, "injection.json");
-  const temporary = `${path}.${process.pid}.tmp`;
-  const current = readJsonFile<Record<string, unknown>>(path) ?? {};
-  writeFileSync(temporary, JSON.stringify({ ...current, enabled: false }), { mode: 0o600 });
-  try {
-    renameSync(temporary, path);
-  } catch {
-    try { unlinkSync(temporary); } catch {}
-    writeFileSync(path, JSON.stringify({ ...current, enabled: false }), { mode: 0o600 });
-  }
-}
-
-async function stopPeerInjector(peerRunPath: string) {
-  const path = join(peerRunPath, "injector.pid");
-  const pid = peerInjectorPid(peerRunPath);
-  if (pid) {
-    try { process.kill(pid, "SIGTERM"); } catch (error) { if (processAlive(pid)) throw error; }
-    for (let attempt = 0; attempt < 90 && processAlive(pid); attempt += 1) {
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
-    if (processAlive(pid) && isInjectorProcess(pid)) {
-      try { process.kill(pid, "SIGKILL"); } catch (error) { if (processAlive(pid)) throw error; }
-      for (let attempt = 0; attempt < 10 && processAlive(pid); attempt += 1) await new Promise(resolve => setTimeout(resolve, 100));
-    }
-  }
-  if (existsSync(path)) {
-    const recorded = Number(readFileSync(path, "utf8"));
-    if (!Number.isInteger(recorded) || !processAlive(recorded)) unlinkSync(path);
-  }
-  return Boolean(pid && !processAlive(pid));
-}
-
-async function stopPeerRuntime(peerHome: string, runtime: PeerRuntimeState | null) {
-  if (!runtime) return false;
-  if (!processAlive(runtime.pid)) return true;
-  const matchesRuntime = async () => {
-    try {
-      const response = await fetch(`http://127.0.0.1:${runtime.port}/health`, { signal: AbortSignal.timeout(750) });
-      const value = await response.json() as { pid?: number; instanceId?: string };
-      return response.ok && value.pid === runtime.pid && value.instanceId === runtime.instanceId;
-    } catch {
-      return false;
-    }
-  };
-  const verified = await matchesRuntime();
-  if (!processAlive(runtime.pid)) return true;
-  if (!verified) return false;
-  try {
-    const peerToken = readFileSync(join(peerHome, "run", "token"), "utf8").trim();
-    await fetch(`http://127.0.0.1:${runtime.port}/api/shutdown`, {
-      method: "POST",
-      signal: AbortSignal.timeout(1500),
-      headers: { authorization: `Bearer ${peerToken}` },
-    });
-  } catch {}
-  for (let attempt = 0; attempt < 30 && processAlive(runtime.pid); attempt += 1) {
-    await new Promise(resolve => setTimeout(resolve, 100));
-  }
-  if (processAlive(runtime.pid)) {
-    if (await matchesRuntime()) {
-      try { process.kill(runtime.pid, "SIGTERM"); } catch {}
-      for (let attempt = 0; attempt < 10 && processAlive(runtime.pid); attempt += 1) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
-    }
-  }
-  return !processAlive(runtime.pid);
-}
-
-function stopPeerMacService(peerHome: string) {
-  if (process.platform !== "darwin") return false;
-  const uid = process.getuid?.();
-  if (uid === undefined) return false;
-  const path = join(homedir(), "Library", "LaunchAgents", "com.better-codex.runtime.plist");
-  if (!existsSync(path)) return false;
-  const expectedHome = peerHome.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;");
-  try {
-    const plist = readFileSync(path, "utf8");
-    if (!plist.includes(`<key>BETTER_CODEX_HOME</key><string>${expectedHome}</string>`)) return false;
-  } catch {
-    return false;
-  }
-  const domain = `gui/${uid}`;
-  try {
-    execFileSync("/bin/launchctl", ["bootout", domain, path], { stdio: "ignore" });
-    return true;
-  } catch {
-    try {
-      execFileSync("/bin/launchctl", ["print", `${domain}/com.better-codex.runtime`], { stdio: "ignore" });
-    } catch {
-      return true;
-    }
-    throw new Error("peer_service_stop_failed");
-  }
-}
-
-async function deactivatePeerInstance() {
-  const peerHome = resolve(peerBetterCodexHome);
-  if (peerHome === resolve(betterCodexHome)) return null;
-  const peerRunPath = join(peerHome, "run");
-  const peerProfile = betterCodexProfile === "development" ? "stable" : "development";
-  const peerOwnership = injectionOwnership(peerProfile, peerRunPath, true);
-  const runtime = peerRuntimeState(peerRunPath);
-  const injector = peerInjectorPid(peerRunPath);
-  const serviceStopped = stopPeerMacService(peerHome);
-  const peerInjectionState = readJsonFile<{ enabled?: boolean }>(join(peerRunPath, "injection.json"));
-  const peerEnabled = peerInjectionState?.enabled !== false && peerInjectionState !== null;
-  const peerWasActive = Boolean(runtime || injector || serviceStopped || peerEnabled);
-  if (peerWasActive) await disablePeerInjection(peerRunPath);
-  const injectorStopped = await stopPeerInjector(peerRunPath);
-  if (injector && !injectorStopped) throw new Error("peer_injector_stop_failed");
-  const runtimeStopped = await stopPeerRuntime(peerHome, runtime);
-  if (runtime && !runtimeStopped) throw new Error("peer_runtime_stop_failed");
-  let injectionRemoved = false;
-  try {
-    const peerToken = existsSync(join(peerRunPath, "token")) ? readFileSync(join(peerRunPath, "token"), "utf8").trim() : "";
-    const result = await cdpEject(cdpPort, peerToken, peerOwnership);
-    injectionRemoved = result.some(item => item.uninstalled === true);
-  } catch {}
-  if (injectionRemoved && !peerWasActive) await disablePeerInjection(peerRunPath);
-  if (peerRuntimeState(peerRunPath) || peerInjectorPid(peerRunPath)) throw new Error("peer_instance_still_running");
-  if (!peerWasActive && !injectionRemoved) return null;
-  return {
-    profile: peerProfile,
-    serviceStopped,
-    injectorStopped,
-    runtimeStopped,
-    injectionRemoved,
-  };
-}
-
-function print(value: unknown) {
-  console.log(JSON.stringify(value, null, 2));
-}
+function print(value: unknown) { console.log(JSON.stringify(value, null, 2)); }
 
 function usage() {
-  console.log("better-codex version | web | relay connect <url> [--pairing-code CODE|--admin-token TOKEN] | relay status|disconnect|doctor | relay user-list|user-add|user-disable|user-enable|user-password-set [--url URL] --admin-token-file PATH | sync connect <url> [--pairing-code CODE|--admin-token TOKEN] [--transport auto|websocket|http] | sync migrate --to <url> --from-admin-token TOKEN | sync status|now|disconnect | update [install --target-version VERSION|check|compatibility|rollback|channel stable|preview] [--channel stable|preview] | setup [--yes] | launch [--restart] | launcher install|uninstall|status | mcp install|uninstall|status | doctor | enable | disable | start [--launch] | stop | status | uninstall | data delete [--yes] | inject [--launch] [--port N] | eject [--port N] | service install|repair|uninstall|start|stop|restart|status|logs | project list|create | agent list | issue list|get|create|update|status|open");
+  console.log("better-codex version | web | relay connect <url> [--pairing-code CODE|--admin-token TOKEN] | relay status|disconnect|doctor | relay user-list|user-add|user-disable|user-enable|user-password-set [--url URL] --admin-token-file PATH | sync connect <url> [--pairing-code CODE|--admin-token TOKEN] [--transport auto|websocket|http] | sync migrate --to <url> --from-admin-token TOKEN | sync status|now|disconnect | update [install --target-version VERSION|activate-local --executable PATH --version VERSION --sha256 HEX|rollback-local --operation-id ID|check|compatibility|rollback|channel stable|preview] [--channel stable|preview] | setup [--yes] | launch [--restart] | launcher install|uninstall|status | mcp install|uninstall|status|reporting enable|disable|status | doctor | start [--launch] | stop | status | uninstall | data delete [--yes] | service install|repair|uninstall|start|stop|restart|status|logs | project list|create | agent list | issue list|get|create|update|status|open");
 }
 
 function selfCommand() {
@@ -1057,7 +904,7 @@ function installBundledSkills() {
   return { installed: true, path: skillRoot, updateKey: true };
 }
 
-async function doctor(allowPendingInjection = false) {
+async function doctor() {
   const service = serviceStatus();
   const state = readRuntimeState();
   let runtime: Record<string, unknown> = { ok: false, error: "runtime_unavailable" };
@@ -1075,8 +922,8 @@ async function doctor(allowPendingInjection = false) {
     ? runtime.database
     : { ok: existsSync(databasePath), path: databasePath, directoryWritable: writable(dirname(databasePath)) };
   const codex = codexInstallationStatus();
-  const injection = await cdpStatus(cdpPort);
-  const compatibility = runtime.compatibility ?? injection.compatibility ?? null;
+  const desktopBridge = await cdpStatus(cdpPort);
+  const compatibility = runtime.compatibility ?? desktopBridge.compatibility ?? null;
   const codexHome = process.env.CODEX_HOME || join(homedir(), ".codex");
   const skills = {
     betterCodex: existsSync(join(codexHome, "skills", "better-codex", "SKILL.md")),
@@ -1085,11 +932,11 @@ async function doctor(allowPendingInjection = false) {
   const sessionHost = sessionHostStatus();
   const sessionHostRequired = process.env.BETTER_CODEX_DISABLE_RUNTIME_SESSION_RELAY !== "1" && process.env.BETTER_CODEX_DISABLE_DELEGATION !== "1" && !process.env.NODE_TEST_CONTEXT;
   const updateKey = (!isSea() && !packagedBuild) || existsSync(updatePublicKeyPath);
-  const injectedTarget = injection.targets.some(target => Boolean((target as { entry?: boolean }).entry) && Boolean((target as { ready?: boolean }).ready));
-  const activeInjectorPid = injectorPid();
-  const injectionReady = injectionEnabled() && Boolean(activeInjectorPid) && injectedTarget;
+  const bridgeTarget = desktopBridge.targets.some(target => Boolean((target as { bridge?: boolean }).bridge) && Boolean((target as { ready?: boolean }).ready));
+  const activeBridgePid = desktopBridgePid();
+  const bridgeReady = Boolean(activeBridgePid) && bridgeTarget;
   const desktopState = (compatibility as { state?: string } | null)?.state;
-  const pendingInjection = allowPendingInjection && !injectionReady && (desktopState === "waiting_window" || desktopState === "disabled");
+  const pendingBridge = !bridgeReady && desktopState === "waiting_window";
   const checks = {
     core: { ok: true, ...activeVersions(), profile: betterCodexProfile, home: betterCodexHome, executable: process.env.BETTER_CODEX_LAUNCHER_PATH ?? process.execPath },
     service: { ok: service.installed, ...service },
@@ -1097,23 +944,23 @@ async function doctor(allowPendingInjection = false) {
     database,
     codex,
     compatibility,
-    injection: { ...injection, enabled: injectionEnabled(), injectorPid: activeInjectorPid, ready: injectionReady, pending: pendingInjection },
+    desktopBridge: { ...desktopBridge, watcherPid: activeBridgePid, ready: bridgeReady, pending: pendingBridge },
     skills,
     mcp,
     sessionHost: { ...sessionHost, required: sessionHostRequired },
     updateKey,
   };
-  return { ok: Boolean(runtime.ok) && Boolean((database as { ok?: boolean }).ok) && codex.installed && (Boolean((compatibility as { compatible?: boolean } | null)?.compatible) || pendingInjection) && (injectionReady || pendingInjection) && skills.betterCodex && mcp.installed && mcp.configured && (!sessionHostRequired || sessionHost.ok) && updateKey, checks };
+  return { ok: Boolean(runtime.ok) && Boolean((database as { ok?: boolean }).ok) && codex.installed && (Boolean((compatibility as { compatible?: boolean } | null)?.compatible) || pendingBridge) && (bridgeReady || pendingBridge) && skills.betterCodex && mcp.installed && mcp.configured && (!sessionHostRequired || sessionHost.ok) && updateKey, checks };
 }
 
 async function uninstall() {
+  await migrateLegacyInjector();
   const dataHome = resolve(betterCodexHome);
   if (dataHome === resolve(homedir()) || dirname(dataHome) === dataHome) throw new Error("unsafe_better_codex_home");
-  setInjectionEnabled(false);
-  await stopInjector();
+  await stopDesktopBridge();
   await stopSessionHostProcess();
-  let injection: unknown = { removed: false, reason: "cdp_unavailable" };
-  try { injection = await cdpEject(cdpPort, accessToken(), injectionOwnership()); } catch {}
+  let desktopBridge: unknown = { removed: false, reason: "cdp_unavailable" };
+  try { desktopBridge = await cdpDisconnectDesktopBridge(cdpPort, accessToken(), desktopBridgeOwnership()); } catch {}
   try { await request("/api/shutdown", { method: "POST" }); } catch {}
   const launchIntegration = uninstallLaunchIntegration();
   const mcp = uninstallMcp();
@@ -1162,7 +1009,7 @@ async function uninstall() {
     for (const path of programPaths) rmSync(path, { recursive: true, force: true });
     for (const path of removableBinaries) rmSync(path, { force: true });
   }
-  return { uninstalled: true, service, launchIntegration, mcp, injection, agentProfiles, removed: programPaths, binaries: removableBinaries, packageManagedBinaries: binaries.filter(path => !removableBinaries.includes(path)), dataPreserved: betterCodexProfile === "development" ? [databasePath] : [] };
+  return { uninstalled: true, service, launchIntegration, mcp, desktopBridge, agentProfiles, removed: programPaths, binaries: removableBinaries, packageManagedBinaries: binaries.filter(path => !removableBinaries.includes(path)), dataPreserved: betterCodexProfile === "development" ? [databasePath] : [] };
 }
 
 async function deleteData(confirmed: boolean) {
@@ -1485,6 +1332,18 @@ async function issueCommand(action: string | undefined, args: string[]) {
 
 async function main() {
   const [command, action, ...args] = commandArguments();
+  if (command === "update" && action === "activate-local") {
+    const executable = option(args, "--executable");
+    const version = option(args, "--version");
+    const sha256 = option(args, "--sha256");
+    if (!executable || !version || !sha256) throw new Error("local_activation_options_required");
+    return print(activateLocalCore({ executable, version, sha256 }));
+  }
+  if (command === "update" && action === "rollback-local") {
+    const operationId = option(args, "--operation-id");
+    if (!operationId) throw new Error("local_activation_operation_required");
+    return print(rollbackLocalCore(operationId));
+  }
   const delegated = maybeDelegateToActiveCore();
   if (delegated !== null) process.exit(delegated);
   if (command === "update" && action === "install") {
@@ -1540,14 +1399,12 @@ async function main() {
     if (action === "stop") {
       const runtime = readRuntimeState();
       if (runtime?.handoffUpdateId || readGatewayUpdateActivationState()?.status === "activating") throw new Error("desktop_exit_update_in_progress");
-      const enabled = injectionEnabled();
-      setInjectionEnabled(false);
       try {
         if (runtime) {
           await request("/api/shutdown", { method: "POST", body: JSON.stringify({ reason: "desktop_exit", runtime_instance_id: runtime.instanceId }), signal: AbortSignal.timeout(5000) });
         }
-        await stopInjector();
-        try { await cdpEject(cdpPort, accessToken(), injectionOwnership()); } catch {}
+        await stopDesktopBridge();
+        try { await cdpDisconnectDesktopBridge(cdpPort, accessToken(), desktopBridgeOwnership()); } catch {}
         if (runtime) {
           const deadline = Date.now() + 12_000;
           while (processAlive(runtime.pid) && readRuntimeState()?.instanceId === runtime.instanceId) {
@@ -1560,36 +1417,43 @@ async function main() {
         // Keep native Codex and the Session Host alive. Existing turns retain
         // their writer and durable receipts are replayed on the next start.
         return print({ stopped: true, tasksPreserved: true });
-      } finally { setInjectionEnabled(enabled); }
+      } finally {}
     }
     return usage();
   }
   if (command === "runtime") return runRuntime();
   if (command === "serve") return (await import("./server.js")).startServer();
   if (command === "web") return print(await openWebApp());
-  if (command === "watch-inject") return watchInjection(Number(action || cdpPort), accessToken());
-  if (command === "mcp" && !action) return startMcpAppServer({ ensureRuntime, launchSidebar: async () => {
-    await ensureRuntime();
-    try {
-      const injection = await cdpInject(cdpPort, activeRuntimePort(), accessToken(), false);
-      setInjectionEnabled(true);
-      await ensureInjector(cdpPort);
-      return injection;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "";
-      if (message !== "cdp_listener_absent" && message !== "cdp_listener_untrusted" && !message.startsWith("cdp_unavailable_")) throw error;
-      if (!codexProcessRunning()) {
-        const injection = await cdpInject(cdpPort, activeRuntimePort(), accessToken(), true);
-        setInjectionEnabled(true);
-        await ensureInjector(cdpPort);
-        return injection;
-      }
-      setInjectionEnabled(true);
-      spawnSelf(["launch", "--restart"], join(logPath, "launcher.log"));
-      return { restarting: true };
-    }
-  } });
+  if (["inject", "eject", "enable", "disable", "refresh-injection", "watch-inject"].includes(command)) throw new Error("page_injection_retired: Open Better Codex in the plugin page; use desktop bridge for native thread operations.");
+  if (command === "watch-desktop-bridge") {
+    if (process.env.BETTER_CODEX_DISABLE_DESKTOP_BRIDGE === "1") throw new Error("desktop_bridge_disabled");
+    const existing = verifiedDesktopBridgeProcess();
+    if (existing && existing.pid !== process.pid) throw new Error("desktop_bridge_already_running");
+    const pending = readJsonFile<DesktopBridgeProcess>(desktopBridgePidPath);
+    if (!existing && pending?.pid && pending.pid !== process.pid && processAlive(pending.pid)) throw new Error("desktop_bridge_process_identity_mismatch");
+    const processStartedAt = processStartTime(process.pid);
+    const command = processCommandLine(process.pid);
+    if (processStartedAt === null) throw new Error("desktop_bridge_process_identity_unavailable");
+    ensureDirectories();
+    if (!existing) writeFileSync(desktopBridgePidPath, JSON.stringify({ pid: process.pid, processStartedAt, command, profile: betterCodexProfile, home: betterCodexHome, instanceId: randomUUID() }), { mode: 0o600 });
+    return watchDesktopBridge(Number(action || cdpPort), accessToken());
+  }
+  if (command === "mcp" && action === "--mockup") {
+    if (isSea() || packagedBuild) throw new Error("mockup_requires_source_development_entry");
+    return startMockupMcpAppServer();
+  }
+  if (command === "mcp" && !action) return startMcpAppServer({ ensureRuntime });
+  if (command === "mcp" && action === "--dot") {
+    if (args.length) throw new Error("mcp_dot_arguments_invalid");
+    return startMcpAppServer({ reportingOnly: true });
+  }
   if (command === "mcp") {
+    if (action === "reporting") {
+      if (args.length !== 1) throw new Error("mcp_reporting_action_required");
+      if (args[0] === "status") return print({ path: mcpReportingPath, configured: readMcpReportingSetting(), enabled: mcpReportingEnabled() });
+      if (args[0] === "enable" || args[0] === "disable") return print(writeMcpReportingSetting(args[0] === "enable"));
+      throw new Error("mcp_reporting_action_invalid");
+    }
     if (action === "install") return print(installMcp());
     if (action === "uninstall") return print(uninstallMcp());
     if (action === "status") return print(mcpStatus());
@@ -1598,74 +1462,14 @@ async function main() {
   if (command === "launch") {
     const intent = await recordLaunchIntent([action, ...args].includes("--restart"));
     return print(await withLaunchLock(async () => {
-      const latestIntent = latestLaunchIntent();
-      if (latestIntent?.token !== intent.token) return { launched: false, superseded: true, requestedProfile: intent.profile };
+      if (latestLaunchIntent()?.token !== intent.token) return { launched: false, superseded: true };
       markLaunchIntentProcessed(intent.sequence);
-      const explicitRestartRequested = latestIntent.restart === true;
-      const detectedCodexRunning = ["darwin", "win32"].includes(process.platform) && codexProcessRunning();
-      const restartChoice = detectedCodexRunning && !explicitRestartRequested ? chooseCodexRestartAction() : null;
-      if (restartChoice === "cancelled") {
-        return { launched: false, restarted: false, cancelled: true };
-      }
-      const current = process.platform === "win32" ? { available: false, targets: [] } : await cdpStatus(cdpPort);
-      const codexRunning = detectedCodexRunning || current.available || current.targets.length > 0;
-      const restartRequested = explicitRestartRequested || restartChoice === "restart-codex" || (restartChoice === null && requiresCodexRestartForLaunch(codexRunning));
-      const switchedFrom = await deactivatePeerInstance();
-      if (!codexRunning) {
-        setInjectionEnabled(true);
-        await ensureRuntime();
-        const injection = await cdpInject(cdpPort, activeRuntimePort(), accessToken(), true);
-        await ensureInjector(cdpPort);
-        return { launched: true, restarted: false, codexStarted: true, switchedFrom, injection };
-      }
-      if (restartChoice === "reset-runtime") {
-        await restartRuntime();
-        setInjectionEnabled(true);
-        launchCodex(cdpPort, true);
-        await ensureInjector(cdpPort);
-        try {
-          const injection = await cdpInject(cdpPort, activeRuntimePort(), accessToken(), false);
-          return { launched: true, restarted: false, runtimeReset: true, openedCurrentCodex: true, switchedFrom, injection };
-        } catch (error) {
-          return { launched: true, restarted: false, runtimeReset: true, openedCurrentCodex: true, switchedFrom, injection: { restored: false, pending: true, error: error instanceof Error ? error.message : "injection_unavailable" } };
-        }
-      }
-      if (switchedFrom && !restartRequested) {
-        setInjectionEnabled(true);
-        await ensureRuntime();
-        launchCodex(cdpPort, true);
-        try {
-          const injection = await cdpInject(cdpPort, activeRuntimePort(), accessToken(), true);
-          await ensureInjector(cdpPort);
-          return { launched: true, restarted: false, openedCurrentCodex: true, switchedFrom, injection };
-        } catch (error) {
-          setInjectionEnabled(false);
-          throw error;
-        }
-      }
-      if (!restartRequested) {
-        setInjectionEnabled(true);
-        await ensureRuntime();
-        launchCodex(cdpPort, true);
-        try {
-          const injection = await cdpInject(cdpPort, activeRuntimePort(), accessToken(), true);
-          await ensureInjector(cdpPort);
-          return { launched: true, restarted: false, openedCurrentCodex: true, injection };
-        } catch (error) {
-          setInjectionEnabled(false);
-          throw error;
-        }
-      }
-      await restartRuntime();
-      setInjectionEnabled(true);
-      try {
-        const injection = await cdpRestartAndInject(cdpPort, activeRuntimePort(), accessToken());
-        await ensureInjector(cdpPort);
-        return { launched: true, restarted: true, injection };
-      } catch (error) {
-        setInjectionEnabled(false);
-        throw error;
-      }
+      await migrateLegacyInjector();
+      const runtime = await ensureRuntime();
+      if (intent.restart) await cdpRestartAndConnectDesktopBridge(cdpPort, activeRuntimePort(), accessToken());
+      else launchCodex(cdpPort, codexProcessRunning());
+      await ensureDesktopBridge(cdpPort);
+      return { launched: true, restarted: intent.restart, runtime, desktopBridge: await cdpStatus(cdpPort) };
     }));
   }
   if (command === "launcher") {
@@ -1677,82 +1481,25 @@ async function main() {
   if (command === "setup") {
     const values = [action, ...args].filter(Boolean) as string[];
     const json = values.includes("--json");
-    const preserveCodex = values.includes("--preserve-codex");
-    const background = values.includes("--background");
     if (!values.includes("--yes") && !(await confirmSetup())) return print({ configured: false });
     progress("installing_runtime", json);
-    setInjectionEnabled(false);
-    await stopInjector();
-    try {
-      if (!background) {
-        try { await request("/api/shutdown", { method: "POST" }); } catch {}
-        await stopSessionHostProcess();
-      }
-      const skills = installBundledSkills();
-      if (!skills.installed || !skills.updateKey) throw new Error("reason" in skills ? skills.reason : "bundled_assets_unavailable");
-      const mcp = installMcp();
-      if (!background || !readRuntimeState()) installService();
-      progress("starting_runtime", json);
-      const runtime = await ensureRuntime();
-      await waitForRuntimeReady();
-      if (background) {
-        setInjectionEnabled(true);
-        const launchIntegration = installLaunchIntegration();
-        openMacMenuBar();
-        return print({ configured: true, runtime, launchIntegration, skills, mcp, injection: { pending: true } });
-      }
-      progress("waiting_for_codex", json);
-      if (!codexInstallationStatus().installed) throw new Error("codex_not_found");
-      progress("injecting", json);
-      let injection: unknown;
-      if (preserveCodex) {
-        try {
-          injection = { refreshed: true, targets: await cdpRefreshAndInject(cdpPort, activeRuntimePort(), accessToken()) };
-        } catch (error) {
-          injection = { refreshed: false, pending: true, error: error instanceof Error ? error.message : "injection_refresh_pending" };
-        }
-      } else {
-        injection = await cdpRestartAndInject(cdpPort, activeRuntimePort(), accessToken());
-      }
-      setInjectionEnabled(true);
-      const pid = await ensureInjector(cdpPort);
-      const launchIntegration = installLaunchIntegration();
-      openMacMenuBar();
-      progress("ready", json);
-      return print({ configured: true, stages: ["installing_runtime", "installing_mcp", "starting_runtime", "waiting_for_codex", "injecting", "installing_launcher", "ready"], runtime, injection, launchIntegration, skills, mcp, injectorPid: pid });
-    } catch (error) {
-      setInjectionEnabled(false);
-      await stopInjector();
-      throw error;
-    }
+    const migration = await migrateLegacyInjector();
+    const skills = installBundledSkills();
+    if (!skills.installed || !skills.updateKey) throw new Error("reason" in skills ? skills.reason : "bundled_assets_unavailable");
+    const mcp = installMcp();
+    if (!readRuntimeState()) installService();
+    progress("starting_runtime", json);
+    const runtime = await ensureRuntime();
+    await waitForRuntimeReady();
+    const desktopBridgePid = await ensureDesktopBridge(cdpPort);
+    const launchIntegration = installLaunchIntegration();
+    openMacMenuBar();
+    progress("ready", json);
+    return print({ configured: true, runtime, launchIntegration, skills, mcp, migration, desktopBridgePid, desktopBridge: await cdpStatus(cdpPort) });
   }
-  if (command === "doctor") return print(await doctor([action, ...args].includes("--allow-pending-injection")));
+  if (command === "doctor") return print(await doctor());
   if (command === "relay") return relayCommand(action, args);
   if (command === "sync") return syncCommand(action, args);
-  if (command === "enable") {
-    setInjectionEnabled(false);
-    await stopInjector();
-    try {
-      const runtime = await ensureRuntime();
-      const selectedPort = Number(option([action, ...args].filter(Boolean) as string[], "--port") ?? cdpPort);
-      await cdpInject(selectedPort, activeRuntimePort(), accessToken(), false);
-      setInjectionEnabled(true);
-      await ensureInjector(selectedPort);
-      return print({ enabled: true, runtime, injection: await cdpStatus(selectedPort) });
-    } catch (error) {
-      setInjectionEnabled(false);
-      await stopInjector();
-      throw error;
-    }
-  }
-  if (command === "disable") {
-    setInjectionEnabled(false);
-    await stopInjector();
-    const selectedPort = Number(option([action, ...args].filter(Boolean) as string[], "--port") ?? cdpPort);
-    let injection: unknown = { available: false, disabled: true };
-    try { injection = await cdpEject(selectedPort, accessToken(), injectionOwnership()); } catch {}
-    return print({ enabled: false, injection });
-  }
   if (command === "uninstall") return print(await uninstall());
   if (command === "data" && action === "delete") return print(await deleteData(args.includes("--yes")));
   if (command === "service") {
@@ -1785,75 +1532,25 @@ async function main() {
     return usage();
   }
   if (command === "start") {
+    await migrateLegacyInjector();
     const runtime = await ensureRuntime();
     if ([action, ...args].includes("--runtime-only")) return print({ runtime });
-    setInjectionEnabled(true);
     const selectedPort = Number(option([action, ...args].filter(Boolean) as string[], "--port") ?? cdpPort);
-    let injection: unknown = await cdpStatus(selectedPort);
-    if ((injection as { available?: boolean }).available || [action, ...args].includes("--launch")) {
-      await cdpInject(selectedPort, activeRuntimePort(), accessToken(), [action, ...args].includes("--launch"));
-      await ensureInjector(selectedPort);
-      injection = await cdpStatus(selectedPort);
-    }
-    return print({ runtime, injection });
+    if ([action, ...args].includes("--launch")) launchCodex(selectedPort, codexProcessRunning());
+    await ensureDesktopBridge(selectedPort);
+    return print({ runtime, desktopBridge: await cdpStatus(selectedPort) });
   }
   if (command === "stop") {
-    await stopInjector();
-    try { await cdpEject(cdpPort, accessToken(), injectionOwnership()); } catch {}
+    await stopDesktopBridge();
+    try { await cdpDisconnectDesktopBridge(cdpPort, accessToken(), desktopBridgeOwnership()); } catch {}
     let runtime: unknown = { stopped: true, alreadyStopped: true };
     try { runtime = await request("/api/shutdown", { method: "POST" }); } catch {}
-    return print({ runtime, injection: { stopped: true } });
+    return print({ runtime, desktopBridge: { stopped: true } });
   }
   if (command === "status") {
     let runtime: unknown;
     try { runtime = await health(); } catch (error) { runtime = { ok: false, error: error instanceof Error ? error.message : "runtime_unavailable" }; }
-    return print({ profile: betterCodexProfile, home: betterCodexHome, runtime, injection: await cdpStatus(Number(option([action, ...args].filter(Boolean) as string[], "--port") ?? cdpPort)), injectionEnabled: injectionEnabled(), injectorPid: injectorPid() });
-  }
-  if (command === "refresh-injection") {
-    return print(await withLaunchLock(async () => {
-      const selectedPort = Number(option([action, ...args].filter(Boolean) as string[], "--port") ?? cdpPort);
-      const runtimeBeforeRefresh = readRuntimeState();
-      setInjectionEnabled(false);
-      await stopInjector();
-      try {
-        await ensureRuntime();
-        const removed = await cdpEject(selectedPort, accessToken(), injectionOwnership());
-        const injection = await cdpInject(selectedPort, activeRuntimePort(), accessToken(), false);
-        setInjectionEnabled(true);
-        const injectorPid = await ensureInjector(selectedPort);
-        return { refreshed: true, removed, injection, injectorPid };
-      } catch (error) {
-        setInjectionEnabled(false);
-        await stopInjector();
-        if (!runtimeBeforeRefresh && readRuntimeState()) {
-          try { await request("/api/shutdown", { method: "POST" }); } catch {}
-        }
-        throw error;
-      }
-    }));
-  }
-  if (command === "inject") {
-    setInjectionEnabled(false);
-    await stopInjector();
-    try {
-      await ensureRuntime();
-      const selectedPort = Number(option([action, ...args].filter(Boolean) as string[], "--port") ?? cdpPort);
-      const launch = [action, ...args].includes("--launch");
-      await cdpInject(selectedPort, activeRuntimePort(), accessToken(), launch);
-      setInjectionEnabled(true);
-      const pid = await ensureInjector(selectedPort);
-      return print({ ...(await cdpStatus(selectedPort)), injectorPid: pid });
-    } catch (error) {
-      setInjectionEnabled(false);
-      await stopInjector();
-      throw error;
-    }
-  }
-  if (command === "eject") {
-    setInjectionEnabled(false);
-    const selectedPort = Number(option([action, ...args].filter(Boolean) as string[], "--port") ?? cdpPort);
-    await stopInjector();
-    return print(await cdpEject(selectedPort, accessToken(), injectionOwnership()));
+    return print({ profile: betterCodexProfile, home: betterCodexHome, runtime, desktopBridge: await cdpStatus(Number(option([action, ...args].filter(Boolean) as string[], "--port") ?? cdpPort)), desktopBridgePid: desktopBridgePid() });
   }
   await ensureRuntime();
   if (command === "project" && action === "list") return print(await request("/api/projects"));
@@ -1886,9 +1583,9 @@ void main().catch(error => {
 });
 
 process.once("exit", () => {
-  if (commandArguments()[0] === "watch-inject" && existsSync(injectorPidPath)) {
-    const recorded = Number(readFileSync(injectorPidPath, "utf8"));
-    if (recorded === process.pid) unlinkSync(injectorPidPath);
+  if (commandArguments()[0] === "watch-desktop-bridge" && existsSync(desktopBridgePidPath)) {
+    const recorded = readJsonFile<DesktopBridgeProcess>(desktopBridgePidPath);
+    if (recorded?.pid === process.pid && recorded.processStartedAt === processStartTime(process.pid)) unlinkSync(desktopBridgePidPath);
   }
 });
 

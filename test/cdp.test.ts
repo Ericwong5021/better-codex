@@ -2,15 +2,15 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { darwinCdpListenerTrusted, requiresCodexRestartForLaunch, windowsCodexPackageProcessPowerShell } from "../src/cdp.js";
-import { targetAllowed } from "../src/compatibility.js";
+import { darwinCdpListenerTrusted, windowsCodexPackageProcessPowerShell } from "../src/cdp.js";
+import { targetAllowed, missingCapabilities } from "../src/compatibility.js";
 
 const source = readFileSync(new URL("../src/cdp.ts", import.meta.url), "utf8");
 const cliSource = readFileSync(new URL("../src/cli.ts", import.meta.url), "utf8");
 const nativeDialogSource = readFileSync(new URL("../src/native-dialog.ts", import.meta.url), "utf8");
 const serverSource = readFileSync(new URL("../src/server.ts", import.meta.url), "utf8");
 
-test("injector reacts to renderer target changes instead of waiting for its fallback sweep", () => {
+test("desktop bridge reacts to renderer target changes instead of waiting for its fallback sweep", () => {
   assert.ok(source.includes('connection.send("Target.setDiscoverTargets", { discover: true })'));
   assert.ok(source.includes('connection.on("Target.targetCreated", wake)'));
   assert.ok(source.includes('connection.on("Target.targetInfoChanged", wake)'));
@@ -18,7 +18,7 @@ test("injector reacts to renderer target changes instead of waiting for its fall
   assert.ok(source.includes("await Promise.race([activity, new Promise<void>(resolve => setTimeout(resolve, settleMs))]"));
 });
 
-test("injection waits for the first capable renderer without a multi-second stability hold", () => {
+test("desktop bridge waits for the first capable renderer without a multi-second stability hold", () => {
   assert.match(source, /async function waitForTargets\(port: number\)/);
   assert.match(source, /if \(values\.length > 0\) return values;/);
   assert.match(source, /if \(error instanceof Error && error\.message\.startsWith\("codex_incompatible_"\)\) values = await waitForTargets\(port\);/);
@@ -28,18 +28,18 @@ test("injection waits for the first capable renderer without a multi-second stab
   assert.match(source, /settleMs = message\.startsWith\("codex_incompatible_"\) \|\| message\.startsWith\("cdp_unavailable_"\) \? 200 : 500/);
 });
 
-test("injector does not open a second debugger against already attached targets", () => {
+test("desktop bridge does not open a second debugger against already attached targets", () => {
   assert.match(source, /trustIds\?: Set<string>/);
   assert.match(source, /mainTargets\(port, \{ trustIds: new Set\(attached\.keys\(\)\) \}\)/);
   assert.match(source, /discovered\.filter\(target => boundedOptions\.trustIds!\.has\(target\.id\)\)/);
   assert.match(source, /if \(boundedOptions\.trustIds\?\.has\(target\.id\)\)/);
 });
 
-test("bridge allows settings and mockup updates", () => {
-  assert.match(source, /settings\\\/auto-dispatch/);
-  assert.match(source, /mockup\\\/\(\?:state\|reset\)/);
-  assert.match(source, /\["GET", "POST", "PUT", "PATCH", "DELETE"\]/);
-  assert.match(source, /projects\(\?:\[\/\?\]\|\$\)/);
+test("native bridge admits only relay operations and bounded native handoff", () => {
+  assert.match(source, /session-relay/);
+  assert.match(source, /checkpoint\|complete\|fail/);
+  assert.match(source, /session-handoff/);
+  assert.doesNotMatch(source, /settings\\\/auto-dispatch|mockup\\\//);
 });
 
 test("thread navigation opens a sidebar row or falls back to the native route", () => {
@@ -52,7 +52,7 @@ test("thread navigation opens a sidebar row or falls back to the native route", 
   assert.match(navigation, /location\.pathname\.match/);
   assert.match(navigation, /thread_open_timeout/);
   assert.match(navigation, /threadRoutePrefix/);
-  assert.match(navigation, /__betterCodexInjection__\?\.openThread/);
+  assert.match(navigation, /__betterCodexDesktopBridge__\?\.openThread/);
 });
 
 test("Windows restart terminates the complete installed Codex package process tree", () => {
@@ -85,15 +85,10 @@ test("Windows restart process-count command is valid PowerShell", {
   assert.match(result.stdout.trim(), /^\d+$/);
 });
 
-test("Windows shortcut offers to restart every running Codex instance", () => {
-  assert.equal(requiresCodexRestartForLaunch(true, "win32"), true);
-  assert.equal(requiresCodexRestartForLaunch(false, "win32"), false);
-  assert.equal(requiresCodexRestartForLaunch(true, "darwin"), false);
-});
 
 test("Windows launch detects Codex without starting PowerShell or probing CDP", () => {
   const start = source.indexOf("export function codexProcessRunning()");
-  const end = source.indexOf("export type CodexRestartChoice", start);
+  const end = source.indexOf("export function windowsCodexPackageProcessPowerShell", start);
   const branch = source.slice(start, end);
   assert.match(branch, /tasklist\.exe/);
   assert.match(branch, /IMAGENAME eq ChatGPT\.exe/);
@@ -116,7 +111,7 @@ test("every main target scan has a total deadline and candidate cap", () => {
   assert.match(source, /\.slice\(0, cdpTargetCandidateLimit\)/);
 });
 
-test("CDP injection trusts only the installed Codex listener and same-port loopback sockets", () => {
+test("CDP bridge trusts only the installed Codex listener and same-port loopback sockets", () => {
   const application = "/Applications/Codex.app";
   const codex = { socket: "0xabc", uid: 501, executable: `${application}/Contents/MacOS/ChatGPT` };
   const helper = { socket: "0xabc", uid: 501, executable: "/usr/local/bin/SkyComputerUseService" };
@@ -141,7 +136,7 @@ test("CDP injection trusts only the installed Codex listener and same-port loopb
   assert.match(source, /if \(verifyListener\) assertTrustedCdpListener\(port\)/);
 });
 
-test("CDP injection never treats the Better Codex Web UI as a desktop renderer", () => {
+test("CDP bridge never treats the Better Codex Web UI as a desktop renderer", () => {
   assert.equal(targetAllowed({ url: "app://-/index.html", title: "Codex" }), true);
   assert.equal(targetAllowed({ url: "app://-/detached-window.html?initialRoute=%2Fdetached-window", title: "Codex" }), false);
   assert.equal(targetAllowed({ url: "app://-/index.html?initialRoute=%2Fglobal-dictation", title: "Codex" }), false);
@@ -151,10 +146,10 @@ test("CDP injection never treats the Better Codex Web UI as a desktop renderer",
   assert.equal(targetAllowed({ url: "http://127.0.0.1:57515/web", title: "Better Codex" }), false);
 });
 
-test("injection readiness follows bootstrap state instead of panel visibility", () => {
-  assert.match(source, /ready: typeof window\.__betterCodexInjection__\?\.ready === 'function' && Boolean\(window\.__betterCodexInjection__\.ready\(\)\)/);
-  assert.match(cliSource, /target => Boolean\(\(target as \{ entry\?: boolean \}\)\.entry\) && Boolean\(\(target as \{ ready\?: boolean \}\)\.ready\)/);
-  assert.doesNotMatch(cliSource, /target => Boolean\(\(target as \{ entry\?: boolean \}\)\.entry\) && Boolean\(\(target as \{ panel\?: boolean \}\)\.panel\)/);
+test("desktop bridge readiness follows bootstrap state instead of panel visibility", () => {
+  assert.match(source, /ready: typeof window\.__betterCodexDesktopBridge__\?\.ready === 'function' && Boolean\(window\.__betterCodexDesktopBridge__\.ready\(\)\)/);
+  assert.match(cliSource, /target => Boolean\(\(target as \{ bridge\?: boolean \}\)\.bridge\) && Boolean\(\(target as \{ ready\?: boolean \}\)\.ready\)/);
+  assert.doesNotMatch(cliSource, /target => Boolean\(\(target as \{ bridge\?: boolean \}\)\.bridge\) && Boolean\(\(target as \{ panel\?: boolean \}\)\.panel\)/);
 });
 
 test("macOS restart quits only the installed Desktop app by Bundle ID", () => {
@@ -165,19 +160,6 @@ test("macOS restart quits only the installed Desktop app by Bundle ID", () => {
   assert.doesNotMatch(source, /\/usr\/bin\/killall/);
 });
 
-test("launcher choice exposes distinct service reset and Codex restart actions", () => {
-  assert.match(source, /function codexProcessRunning\(\)/);
-  assert.match(source, /function chooseCodexRestartAction\(\)/);
-  assert.match(source, /showNativeChoiceDialog\(/);
-  assert.match(source, /reset-runtime/);
-  assert.match(source, /restart-codex/);
-  assert.match(source, /重置服务/);
-  assert.match(source, /重启Codex/);
-  assert.match(nativeDialogSource, /Add-Type -AssemblyName System\.Windows\.Forms/);
-  assert.match(nativeDialogSource, /DialogResult\]::No/);
-  assert.match(nativeDialogSource, /DialogResult\]::Yes/);
-  assert.doesNotMatch(source, /confirmQuit/);
-});
 
 test("desktop capability accepts the navigation shell when the thread list is unmounted", () => {
   const compatibility = readFileSync(new URL("../src/compatibility.ts", import.meta.url), "utf8");
@@ -186,11 +168,10 @@ test("desktop capability accepts the navigation shell when the thread list is un
   assert.match(expression, /\[data-app-navigation-rail\], \[data-app-shell-page-sidebar\]/);
 });
 
-test("plugin recovery restarts Codex when the debug listener is absent", () => {
-  assert.match(source, /throw new Error\("cdp_listener_absent"\)/);
-  assert.match(source, /codex_incompatible_/);
-  assert.match(cliSource, /message !== "cdp_listener_absent"/);
-  assert.match(cliSource, /spawnSelf\(\["launch", "--restart"\], join\(logPath, "launcher\.log"\)\)/);
+test("plugin launch never starts retired injection or restarts Codex for a missing listener", () => {
+  const mcpRoute = cliSource.slice(cliSource.indexOf('if (command === "mcp" && !action)'), cliSource.indexOf('if (command === "mcp")'));
+  assert.match(mcpRoute, /startMcpAppServer\(\{ ensureRuntime \}\)/);
+  assert.doesNotMatch(mcpRoute, /restart|launchSidebar|cdpConnect/);
 });
 
 test("native restart choice uses Better Codex branding on Windows and macOS", () => {
@@ -221,4 +202,9 @@ test("Windows restart choice uses standard Windows dialog chrome and two explici
   assert.doesNotMatch(nativeDialogSource, /Set-RoundedRegion/);
   assert.doesNotMatch(nativeDialogSource, /Add_Paint/);
   assert.doesNotMatch(nativeDialogSource, /\$close = New-Object System\.Windows\.Forms\.Button/);
+});
+
+test("desktop native bridge does not require mounted sidebar UI", () => {
+  assert.deepEqual(missingCapabilities({ content: true, sidebar: false, threads: false, projects: false }), []);
+  assert.deepEqual(missingCapabilities({ content: false, sidebar: true, threads: true, projects: true }), ["content"]);
 });

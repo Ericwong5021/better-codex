@@ -516,7 +516,6 @@ test("Windows installer opts persistent runtime commands out of success-time job
   assert.match(source, /if \(\$liveUpgradeCompleted\) \{ throw \}/);
   assert.match(source, /Invoke-BetterCodexCapture \$executable @\("service", "install"\) 10000 \$true/);
   assert.match(source, /Invoke-BetterCodexCapture \$executable @\("service", "start"\) 10000 \$true/);
-  assert.match(source, /Invoke-BetterCodexCapture \$executable @\("enable"\) 30000 \$true/);
 });
 
 test("Windows timeout fallback uses the trusted system taskkill executable", () => {
@@ -551,7 +550,7 @@ if (Test-VersionAtLeast "0.4.2" "0.4.3-beta.1") { throw "stable must not downgra
 
 test("Windows installer preserves Codex while refreshing Better Codex", () => {
   const preserve = source.indexOf("$preserveCodex = @($codexProcesses).Count -gt 0");
-  const disable = source.indexOf('Invoke-BetterCodexCapture $executable @("disable")', preserve);
+  const disable = source.indexOf('Invoke-BetterCodexCapture $executable @("service", "stop")', preserve);
   const setup = source.indexOf('@("setup", "--yes", "--preserve-codex")', disable);
 
   assert.ok(preserve >= 0, "running Codex detection is missing");
@@ -568,7 +567,7 @@ test("Windows installer preserves Codex while refreshing Better Codex", () => {
 
 test("Windows installer aborts before mutation when previous service state is unknown", () => {
   const status = source.indexOf('Invoke-BetterCodexCapture $executable @("service", "status")');
-  const mutation = source.indexOf("$previousInjectionEnabled", status);
+  const mutation = source.indexOf("if ($hadExecutable) { Copy-Item", status);
   assert.ok(status >= 0 && mutation > status, "previous service status probe is missing");
   assert.match(source.slice(status, mutation), /throw "Unable to read the existing Better Codex service state/);
 });
@@ -595,8 +594,6 @@ test("macOS installer bounds upgrade, setup, diagnostics, and rollback commands"
   assert.match(shellSource, /run_with_timeout 600 "\$EXISTING_BINARY" update/);
   assert.match(shellSource, /run_with_timeout 120 "\$BIN_DIR\/better-codex" setup \$SETUP_ARGUMENTS/);
   assert.match(shellSource, /run_with_timeout 20 "\$BIN_DIR\/better-codex" doctor/);
-  assert.match(shellSource, /run_with_timeout 30 "\$BIN_DIR\/better-codex" enable/);
-  assert.match(shellSource, /run_with_timeout 10 "\$BIN_DIR\/better-codex" disable/);
   assert.doesNotMatch(shellSource, /^\s*"\$EXISTING_BINARY" (?:disable|update|inject|launcher|service)/m);
   assert.doesNotMatch(shellSource, /^\s*"\$BIN_DIR\/better-codex" (?:disable|doctor|enable|launcher|service|setup|version)/m);
   assert.match(shellSource, /kill -TERM -- "-\$child_pid"/);

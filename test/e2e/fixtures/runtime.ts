@@ -54,7 +54,7 @@ async function stopProcess(child: ChildProcess) {
   if (!exited && child.exitCode === null) child.kill("SIGKILL");
 }
 
-export async function startRuntimeFixture(): Promise<RuntimeFixture> {
+export async function startRuntimeFixture(options: { externalReportsDirectory?: string; mcpAllowReports?: boolean; taskCreatorProfilesFile?: string } = {}): Promise<RuntimeFixture> {
   const fixtureHome = mkdtempSync(join(tmpdir(), "better-codex-web-e2e-"));
   const databasePath = join(fixtureHome, "better-codex.db");
   const codexHome = join(fixtureHome, "codex");
@@ -74,6 +74,9 @@ export async function startRuntimeFixture(): Promise<RuntimeFixture> {
         BETTER_CODEX_PORT: String(port),
         BETTER_CODEX_TOKEN: token,
         BETTER_CODEX_DISABLE_RUNTIME_SESSION_RELAY: "1",
+        BETTER_CODEX_EXTERNAL_REPORTS_DIR: options.externalReportsDirectory || "",
+        BETTER_CODEX_TASK_CREATOR_PROFILES: options.taskCreatorProfilesFile || "",
+        BETTER_CODEX_MCP_ALLOW_REPORTS: options.mcpAllowReports ? "1" : "",
         CODEX_HOME: codexHome,
       },
       stdio: ["ignore", "pipe", "pipe"],

@@ -11,7 +11,7 @@
 - [ ] `npm run build`
 - [ ] `npm test`
 - [ ] `npm run package:binary` when packaging or installer behavior changed
-- [ ] `better-codex doctor` when runtime, database, compatibility, injection, or launcher behavior changed
+- [ ] `better-codex doctor` when runtime, database, compatibility, desktop bridge, or launcher behavior changed
 
 ## Platform coverage
 

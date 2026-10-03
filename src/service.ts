@@ -6,6 +6,7 @@ import { isDeepStrictEqual } from "node:util";
 import { betterCodexHome, betterCodexProfile, cdpPort, ensureDirectories, logPath, runPath, runtimeLogPath } from "./config.js";
 import { installationCommand } from "./launch-integration.js";
 import { readRuntimeState } from "./runtime-state.js";
+import { mcpReportingEnvironment } from "./mcp-reporting.js";
 
 const label = "com.better-codex.runtime";
 const legacyLabel = "com.better-codex.gateway";
@@ -75,7 +76,7 @@ export function servicePlist() {
 
 function serviceDefinition() {
   const invocation = command();
-  const environment: Record<string, string> = { BETTER_CODEX_HOME: betterCodexHome, BETTER_CODEX_CDP_PORT: String(cdpPort) };
+  const environment: Record<string, string> = { BETTER_CODEX_HOME: betterCodexHome, BETTER_CODEX_CDP_PORT: String(cdpPort), ...mcpReportingEnvironment() };
   if (invocation.length === 2) environment.BETTER_CODEX_LAUNCHER_PATH = invocation[0];
   else if (invocation.length === 3 && invocation[1].endsWith(".cjs")) environment.BETTER_CODEX_BASE_ENTRYPOINT = invocation[1];
   return {

@@ -1,4 +1,5 @@
 import { sessionCommandCanRetry } from "./session-execution-policy.js";
+import { IssueTaskJournal, type IssueRelationships } from "./issue-task-journal.js";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, linkSync, mkdirSync, unlinkSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -178,6 +179,8 @@ export type SessionCommand = {
 };
 
 export type Issue = {
+  parent_issue_id?: string | null;
+  depends_on_issue_ids?: string[];
   id: string;
   identifier: string;
   project_id: string;
@@ -333,6 +336,8 @@ export type IssueSemanticReference = {
 };
 
 type IssueInput = {
+  parentIssueId?: string | null;
+  dependsOnIssueIds?: string[];
   id?: string;
   projectId: string;
   title: string;
@@ -354,7 +359,7 @@ type IssueInput = {
   session?: ImportedSessionInput;
 };
 
-export type IssuePatch = Partial<Pick<Issue, "project_id" | "title" | "description" | "status" | "priority" | "labels" | "sort_order" | "pinned" | "thread_id" | "workspace_path" | "agent_enabled" | "agent_id" | "user_assigned" | "assignee_user_id" | "creator_user_id" | "needs_attention" | "pending_actor" | "enrichment_status" | "reply_draft" | "reply_draft_attachments">>;
+export type IssuePatch = Partial<Pick<Issue, "project_id" | "title" | "description" | "status" | "priority" | "labels" | "sort_order" | "pinned" | "thread_id" | "workspace_path" | "agent_enabled" | "agent_id" | "user_assigned" | "assignee_user_id" | "creator_user_id" | "needs_attention" | "pending_actor" | "enrichment_status" | "reply_draft" | "reply_draft_attachments">> & Partial<IssueRelationships>;
 
 type AgentProfileInput = Pick<AgentProfile, "name" | "name_en" | "description" | "instructions" | "model" | "reasoning_effort"> & { service_tier?: AgentServiceTier; sandbox_mode?: AgentSandboxMode; max_concurrency?: number };
 type AgentProfilePatch = Partial<AgentProfileInput>;
@@ -761,6 +766,7 @@ function updateOperationFromRow(row: Record<string, unknown>): UpdateOperation {
 
 export class Store {
   readonly db: DatabaseSync;
+  readonly taskJournal: IssueTaskJournal;
   readonly file: string;
   lastBackupPath: string | null = null;
   private transactionCounter = 0;
@@ -771,7 +777,7 @@ export class Store {
     mkdirSync(dirname(file), { recursive: true });
     const existing = existsSync(file);
     this.db = new DatabaseSync(file);
-    this.db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
+    this.db.exec("PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
     const currentVersion = this.schemaVersion();
     if (currentVersion > latestSchemaVersion) {
       this.db.close();
@@ -795,6 +801,7 @@ export class Store {
     this.ensureProjectColumns();
     this.recoverProjectPlanning();
     this.ensureSyncTriggers();
+    this.taskJournal = new IssueTaskJournal(this.db);
     const integrity = this.db.prepare("PRAGMA quick_check").get() as Record<string, unknown> | undefined;
     if (String(integrity?.quick_check ?? "") !== "ok") {
       this.db.close();
@@ -2350,7 +2357,8 @@ export class Store {
       && issue.agent_enabled
       && !issue.archived_at
       && issue.status !== "backlog"
-      && issue.status !== "done",
+      && issue.status !== "done"
+      && !this.taskJournal.blocker(issue.id),
     );
   }
 
@@ -2758,7 +2766,7 @@ export class Store {
       WHERE ${conditions.join(" AND ")}
       ORDER BY issues.pinned DESC, issues.sort_order, issues.created_at
     `).all(...values) as Record<string, unknown>[];
-    return rows.map(issueFromRow);
+    return rows.map(row => ({...issueFromRow(row),...this.taskJournal.relationships(String(row.id))}));
   }
 
   getIssueByThreadId(threadId: string) {
@@ -2948,7 +2956,7 @@ export class Store {
       FROM issues
       WHERE issues.id = ? OR issues.identifier = ?
     `).get(id, id) as Record<string, unknown> | undefined;
-    return row ? issueFromRow(row) : undefined;
+    return row ? {...issueFromRow(row),...this.taskJournal.relationships(String(row.id))} : undefined;
   }
 
   createIssue(input: IssueInput) {
@@ -3044,6 +3052,7 @@ export class Store {
           .run(id, JSON.stringify({ references: semanticReferences, document: semanticDocument, command: semanticCommand || "" }), timestamp);
       }
       if (importedSession) this.writeImportedSession(id, importedSession, timestamp);
+      this.taskJournal.setRelationships(id,{parent_issue_id:input.parentIssueId,depends_on_issue_ids:input.dependsOnIssueIds},project.id);
       if (requestId) {
         this.db.prepare("INSERT INTO issue_create_requests (request_id, request_fingerprint, issue_id, created_at) VALUES (?, ?, ?, ?)")
           .run(requestId, requestFingerprint, id, timestamp);
@@ -3128,7 +3137,11 @@ export class Store {
           .get(projectId, status) as { value: number };
         patch.sort_order = Number(row.value) + 1000;
       }
-      const columns: Record<keyof IssuePatch, string> = {
+      if (projectChanged || patch.parent_issue_id !== undefined || patch.depends_on_issue_ids !== undefined) {
+        this.taskJournal.setRelationships(issue.id,{parent_issue_id:patch.parent_issue_id,depends_on_issue_ids:patch.depends_on_issue_ids},patch.project_id ?? issue.project_id);
+      }
+      const relationshipChange = patch.parent_issue_id !== undefined || patch.depends_on_issue_ids !== undefined;
+      const columns: Record<Exclude<keyof IssuePatch,keyof IssueRelationships>, string> = {
         project_id: "project_id",
         title: "title",
         description: "description",
@@ -3153,6 +3166,7 @@ export class Store {
       const assignments: string[] = [];
       const values: unknown[] = [];
       for (const [key, value] of Object.entries(patch) as Array<[keyof IssuePatch, IssuePatch[keyof IssuePatch]]>) {
+        if (key === "parent_issue_id" || key === "depends_on_issue_ids") continue;
         if (value === undefined) continue;
         assignments.push(`${columns[key]} = ?`);
         values.push(
@@ -3162,7 +3176,7 @@ export class Store {
                 : value,
         );
       }
-      if (assignments.length === 0) {
+      if (assignments.length === 0 && !relationshipChange) {
         this.db.exec("COMMIT");
         return issue;
       }
@@ -3414,6 +3428,10 @@ export class Store {
           ${issueId ? "AND issues.id = ?" : ""}
           AND issues.archived_at IS NULL
           AND issues.status NOT IN ('backlog', 'done')
+          AND NOT EXISTS (
+            SELECT 1 FROM issue_dependencies d LEFT JOIN issues prerequisite ON prerequisite.id=d.depends_on_issue_id
+            WHERE d.issue_id=issues.id AND (prerequisite.id IS NULL OR prerequisite.status!='done')
+          )
           AND (
             NOT EXISTS (
               SELECT 1 FROM session_commands
@@ -3535,7 +3553,8 @@ export class Store {
 
   finalizeScheduler(runId: string, issueId: string, executionSuccess: boolean, decision: SchedulerDecision | null, schedulerError?: string) {
     const timestamp = now();
-    const status: IssueStatus = executionSuccess ? decision?.status || "in_review" : "blocked";
+    // Semantic completion cannot grant human acceptance, including legacy skill output.
+    const status: IssueStatus = !executionSuccess || decision?.status === "blocked" ? "blocked" : "in_review";
     const finalSchedulerError = schedulerError ?? (!decision ? "scheduler_invalid_output" : null);
     this.db.exec("BEGIN IMMEDIATE");
     try {
@@ -3567,9 +3586,10 @@ export class Store {
             version = version + 1,
             updated_at = ?
         WHERE id = ? AND status IN ('todo', 'in_progress')
-      `).run(status, Number(status !== "done"), timestamp, issueId);
+          AND ? = (SELECT id FROM issue_runs WHERE issue_id=issues.id ORDER BY rowid DESC LIMIT 1)
+      `).run(status, 1, timestamp, issueId, runId);
       this.db.exec("COMMIT");
-      return status;
+      return this.getIssue(issueId)?.status ?? status;
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
@@ -3712,6 +3732,7 @@ export class Store {
               version = version + 1,
               updated_at = ?
           WHERE id = ?
+            AND ? = (SELECT id FROM issue_runs WHERE issue_id=issues.id ORDER BY rowid DESC LIMIT 1)
             AND (
               status = 'in_progress'
               OR (status = 'todo' AND (? = 0 OR (needs_attention = 0 AND pending_actor = 'agent')))
@@ -3722,7 +3743,7 @@ export class Store {
               WHERE issue_runs.issue_id = issues.id
                 AND issue_runs.status IN ('claimed', 'running')
             )
-        `).run(success ? "in_review" : "blocked", timestamp, issueId, Number(success));
+        `).run(success ? "in_review" : "blocked", timestamp, issueId, runId, Number(success));
       }
       this.db.exec("COMMIT");
     } catch (caught) {
@@ -3745,7 +3766,8 @@ export class Store {
               version = version + 1,
               updated_at = ?
           WHERE id = ? AND archived_at IS NULL
-        `).run(timestamp, issueId);
+            AND ? = (SELECT id FROM issue_runs WHERE issue_id=issues.id ORDER BY rowid DESC LIMIT 1)
+        `).run(timestamp, issueId, runId);
       }
       this.db.exec("COMMIT");
     } catch (error) {

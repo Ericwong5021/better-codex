@@ -256,6 +256,12 @@ body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; 
 .web-error-report footer button:disabled { cursor: default; opacity: .42; }
 @media (hover:hover) { .web-nav-button:hover, .web-icon-button:hover, .web-profile:hover, .web-error-report button:hover:not(:disabled) { background: var(--bc-color-hover); } .web-error-report footer button.is-primary:hover:not(:disabled) { color: var(--bc-color-canvas); background: color-mix(in srgb, var(--bc-color-text) 86%, var(--bc-color-canvas)); } }
 @media (min-width: 721px) {
+  html[data-better-codex-mcp="true"] .web-sidebar { position: relative; }
+  html[data-better-codex-mcp="true"] .web-brand { position: absolute; top: var(--bc-space-3); right: var(--bc-space-4); min-height: 0; padding: 0; gap: 0; }
+  html[data-better-codex-mcp="true"] .web-brand-logo,
+  html[data-better-codex-mcp="true"] .web-brand strong { display: none; }
+  html[data-better-codex-mcp="true"] .web-sidebar-section { margin-top: 0; }
+  html[data-better-codex-mcp="true"] #better-codex-entry { width: calc(100% - var(--bc-space-7) - var(--bc-space-4)); }
   html[data-web-sidebar-collapsed="true"] .web-shell { grid-template-columns: minmax(0, 1fr); }
   html[data-web-sidebar-collapsed="true"] .web-sidebar { display: none; }
   html[data-web-sidebar-collapsed="true"] .web-sidebar-expand { display: grid; }
@@ -411,7 +417,7 @@ function hostTraceTimeline(traceId) {
 function hostErrorCategory(error) {
   const code = String(error?.message || error || "request_failed");
   const status = Number(error?.betterCodexDiagnostics?.http_status || 0);
-  if (["injection_load_failed", "runtime_response_invalid"].includes(code)) return "protocol";
+  if (["ui_load_failed", "runtime_response_invalid"].includes(code)) return "protocol";
   if (code.includes("signature") || code.includes("hash_mismatch")) return "security";
   if (status >= 500) return "service";
   return "unexpected";
@@ -470,7 +476,7 @@ function reportHostError(error, context = {}, present = true) {
   if (value.betterCodexReported) return;
   const traceId = String(context.trace_id || value.betterCodexDiagnostics?.trace_id || "");
   context = { ...context, ...(traceId ? { trace_id: traceId } : {}) };
-  if (window.__betterCodexInjection__?.reportError) {
+  if (window.__betterCodexUI__?.reportError) {
     window.dispatchEvent(new CustomEvent("better-codex:error", { detail: { error: value, diagnostics: value.betterCodexDiagnostics || {}, source: context.source || "web_host", context } }));
     return;
   }
@@ -886,7 +892,7 @@ function expireSession() {
   webUsers = [];
   sessionStorage.removeItem("better-codex-web-session");
   sessionStorage.removeItem("better-codex-web-csrf");
-  window.__betterCodexInjection__?.destroy?.();
+  window.__betterCodexUI__?.destroy?.();
   connectError.textContent = REMOTE ? "Web 会话已失效，请重新登录" : "Web 会话已失效，请重新运行 better-codex web";
   connectError.hidden = false;
   if (!connectDialog.open) connectDialog.showModal();
@@ -969,7 +975,7 @@ function scheduleRemoteRecovery() {
         const update = await updateResponse.json();
         if (update?.operation?.status === "FAILED" || update?.operation?.status === "ROLLED_BACK" || update?.status === "error") {
           cancelRemoteUpdateRecovery("update_terminal");
-          loadInjection();
+          loadSharedUI();
           return;
         }
         if (update?.operation?.status !== "COMPLETED") {
@@ -983,10 +989,10 @@ function scheduleRemoteRecovery() {
       if (RELAY) {
         relayOfflineReported = false;
         connectError.hidden = true;
-        if (window.__betterCodexInjection__) {
+        if (window.__betterCodexUI__) {
           if (connectDialog.open) connectDialog.close();
           openCurrentRoute();
-        } else loadInjection();
+        } else loadSharedUI();
         return;
       }
       return;
@@ -1006,7 +1012,7 @@ function showRelayOffline() {
   connectError.textContent = "远程连接暂时中断，连接恢复后将自动重试";
   connectError.hidden = false;
   if (!connectDialog.open) connectDialog.showModal();
-  if (!window.__betterCodexInjection__ && !relayOfflineReported) {
+  if (!window.__betterCodexUI__ && !relayOfflineReported) {
     relayOfflineReported = true;
     hostDiagnostic("relay_offline", { host_kind: HOST_KIND });
   }
@@ -1359,8 +1365,8 @@ requestRuntime(request)
     .catch(error => window.__betterCodexBridgeResolve?.(request.id, { ok: false, value: { error: error.message || "runtime_unavailable", diagnostics: error.betterCodexDiagnostics || null } }));
 };
 
-function loadInjection() {
-  if (installing || window.__betterCodexInjection__) return;
+function loadSharedUI() {
+  if (installing || window.__betterCodexUI__) return;
   if (MCP_TRANSPORT) {
     MCP_TRANSPORT.install();
     connectDialog.close();
@@ -1369,7 +1375,7 @@ function loadInjection() {
   }
   installing = true;
   const script = document.createElement("script");
-  script.src = "/web/injection.js?locale=" + encodeURIComponent(navigator.language || document.documentElement.lang || "en") + (REMOTE ? "" : "&session=" + encodeURIComponent(sessionToken));
+  script.src = "/web/ui.js?locale=" + encodeURIComponent(navigator.language || document.documentElement.lang || "en") + (REMOTE ? "" : "&session=" + encodeURIComponent(sessionToken));
   script.onload = () => {
     installing = false;
     script.dataset.betterCodexLoaded = "true";
@@ -1379,7 +1385,7 @@ function loadInjection() {
   script.onerror = () => {
     installing = false;
     script.remove();
-    reportHostError(new Error("injection_load_failed"), { source: "injection_loader", script: script.src.replace(/([?&]session=)[^&]+/, "$1[redacted]") });
+    reportHostError(new Error("ui_load_failed"), { source: "ui_loader", script: script.src.replace(/([?&]session=)[^&]+/, "$1[redacted]") });
     if (RELAY) showRelayOffline();
     else if (!connectDialog.open) connectDialog.showModal();
   };
@@ -1390,7 +1396,7 @@ async function boot(token = "") {
   try {
     if (MCP_TRANSPORT) {
       await MCP_TRANSPORT.ready;
-      loadInjection();
+      loadSharedUI();
       return;
     }
     if (token) await establishSession(token);
@@ -1400,7 +1406,7 @@ async function boot(token = "") {
       showRelayOffline();
       return;
     }
-    loadInjection();
+    loadSharedUI();
   } catch (error) {
     connectError.textContent = error instanceof Error ? error.message : "连接失败";
     connectError.hidden = false;
@@ -1429,7 +1435,7 @@ function openCurrentRoute() {
     let projectId = "";
     try { projectId = match[1] ? decodeURIComponent(match[1]) : ""; }
     catch {}
-    window.__betterCodexInjection__?.open?.("projects", { projectId, history: "none" });
+    window.__betterCodexUI__?.open?.("projects", { projectId, history: "none" });
     return;
   }
   const agentMatch = hostPathname().match(/^\/web\/agents(?:\/([^/?#]+))?\/?$/);
@@ -1437,11 +1443,11 @@ function openCurrentRoute() {
     let agentKey = "";
     try { agentKey = agentMatch[1] ? decodeURIComponent(agentMatch[1]) : ""; }
     catch {}
-    window.__betterCodexInjection__?.open?.("agents", { agentKey, history: "none" });
+    window.__betterCodexUI__?.open?.("agents", { agentKey, history: "none" });
     return;
   }
-  if (hostPathname() === "/web" || hostPathname() === "/") window.__betterCodexInjection__?.open?.("issues", { history: "none" });
-  else window.__betterCodexInjection__?.refresh?.();
+  if (hostPathname() === "/web" || hostPathname() === "/") window.__betterCodexUI__?.open?.("issues", { history: "none" });
+  else window.__betterCodexUI__?.refresh?.();
 }
 
 window.addEventListener("popstate", () => {

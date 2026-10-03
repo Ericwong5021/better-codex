@@ -12,4 +12,8 @@ export const componentTokens = [
   { name: "--bc-switch-outline", layer: "component", light: "inset 0 0 0 1px var(--bc-color-text-muted)", hostOverridable: false, order: 130 },
   { name: "--bc-usage-value-size", layer: "component", light: "28px", hostOverridable: false, order: 131 },
   { name: "--bc-usage-panel-width", layer: "component", light: "280px", hostOverridable: false, order: 132 },
+  { name: "--bc-task-history-max-height", layer: "component", light: "min(28vh, calc(var(--bc-text-base) * 18))", hostOverridable: false, order: 133 },
+  { name: "--bc-task-description-max-height", layer: "component", light: "min(23vh, calc(var(--bc-text-base) * 10))", hostOverridable: false, order: 134 },
+  { name: "--bc-external-conversation-max-height", layer: "component", light: "min(46vh, calc(var(--bc-text-base) * 32))", hostOverridable: false, order: 135 },
+  { name: "--bc-dots-setup-dialog-height", layer: "component", light: "min(80dvh, calc(var(--bc-text-base) * 40))", hostOverridable: false, order: 136 },
 ] as const satisfies readonly DesignTokenDefinition[];

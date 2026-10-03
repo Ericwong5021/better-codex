@@ -2,7 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { isIP } from "node:net";
 import { resolve } from "node:path";
-import { injectionScript } from "./dom.js";
+import { browserUiScript } from "./browser-ui.js";
 import { clearWebSessionCookie, cookies, passwordHash, passwordMatches, readHubSecret, validateWebPassword, validateWebUsername, webSessionCookie } from "./hub-auth.js";
 import { issuePriorities, issueStatuses } from "./db.js";
 import { HubStore } from "./hub-store.js";
@@ -276,10 +276,10 @@ export function createHubServer(options: HubServerOptions) {
         store.revokeWebSession(browserToken);
         return sendJson(response, 200, { ok: true }, { "set-cookie": clearWebSessionCookie(secureCookies) });
       }
-      if (url.pathname === "/web/injection.js" && method === "GET") {
+      if (url.pathname === "/web/ui.js" && method === "GET") {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" });
         const locale = String(url.searchParams.get("locale") || "").toLowerCase().startsWith("zh") ? "zh-CN" : "en";
-        return sendText(response, 200, injectionScript(0, "", "install", locale, "web"), "text/javascript; charset=utf-8");
+        return sendText(response, 200, browserUiScript(0, "", locale), "text/javascript; charset=utf-8");
       }
       if (url.pathname === "/api/profile" && method === "PATCH") {
         if (!browser) return sendJson(response, 401, { error: "unauthorized" });

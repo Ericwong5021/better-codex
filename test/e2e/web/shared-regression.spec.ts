@@ -265,7 +265,7 @@ test("recovers after a Runtime restart with a new Web session", async ({ page })
   }), project.id);
   await page.evaluate(cachedIssue => {
     const key = `${cachedIssue.id}:${cachedIssue.updated_at}:${cachedIssue.status}`;
-    const profile = (window as any).__betterCodexInjection__?.profile || "stable";
+    const profile = (window as any).__betterCodexUI__?.profile || "stable";
     localStorage.setItem(`better-codex-completion-notices:${profile}`, JSON.stringify([{ key, issue: cachedIssue, createdAt: Date.now(), duration: 0 }]));
   }, issue);
   await page.reload();
@@ -286,7 +286,7 @@ test("recovers after a Runtime restart with a new Web session", async ({ page })
   await notice.locator(".better-codex-completion-layout").click();
   await expect(page.locator("#better-codex-dialog")).toBeVisible();
   await expect.poll(() => page.evaluate(() => {
-    const profile = (window as any).__betterCodexInjection__?.profile || "stable";
+    const profile = (window as any).__betterCodexUI__?.profile || "stable";
     return localStorage.getItem(`better-codex-completion-notices:${profile}`);
   })).toBe("[]");
 });

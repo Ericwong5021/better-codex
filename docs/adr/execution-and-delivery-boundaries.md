@@ -57,17 +57,17 @@ Projection Sync 继续作为回滚兼容路径保留。Relay 模式根据实际�
 
 ## WebUI
 
-桌面注入、本地 Web、Relay Web 和 MCP 插件页消费同一个生成入口。宿主负责连接、鉴权、传输、路由和主题；失败空状态的产品判断放在 Board model 中。
+本地 Web、Relay Web、MCP 插件页和本地 dev Mockup消费同一个生成入口。宿主负责连接、鉴权、传输、路由和主题；失败空状态的产品判断放在 Board model 中。
 
-MCP 插件页使用本机 stdio 进程代理 Runtime API，访问令牌只存在服务端。浏览器仍使用共享的持久命令队列、命令回执和更新观察器。实时更新通过有期限的 MCP 请求读取 Runtime 已有 SSE 流，游标绑定 Runtime 实例；插件不增加 rollout 扫描器。插件内部路由由宿主适配器维护，不修改 Codex 的地址与会话导航。完整插件页与可选的侧栏注入使用不同路由，插件入口不因注入就绪而隐藏。
+MCP 插件页使用本机 stdio 进程代理 Runtime API，访问令牌只存在服务端。浏览器仍使用共享的持久命令队列、命令回执和更新观察器。实时更新通过有期限的 MCP 请求读取 Runtime 已有 SSE 流，游标绑定 Runtime 实例；插件不增加 rollout 扫描器。插件内部路由由宿主适配器维护，不修改 Codex 的地址与会话导航。插件页是 Codex 内唯一产品界面；旧侧栏注入及恢复路由已退役。原生会话命令和线程目录同步由独立的无界面桌面桥接承担。
 
 会话空状态分别表达尚未开始、正在启动、正在处理、启动失败和执行失败。缺失线程历史时要求先解决绑定问题，保留原始原因及输入，不再在失败状态中展示鼓励直接继续的通用空对话提示。
 
-`injected-entry.ts` 仍有较多历史产品逻辑。此次按真实状态所有权拆出命令观察和会话状态，不机械地把大文件切成多个互相依赖的闭包文件。后续迁移必须按完整 feature 的状态、API 意图、生命周期一起移动。
+`browser-entry.ts` 仍有较多历史产品逻辑。此次按真实状态所有权拆出命令观察和会话状态，不机械地把大文件切成多个互相依赖的闭包文件。后续迁移必须按完整 feature 的状态、API 意图、生命周期一起移动。
 
 ## 构建、CI 与升级
 
-`npm run build` 只生成和编译；不会更新本机安装、停止 Runtime 或刷新注入。显式 `npm run dev:refresh` 才触发本机刷新。验证与生产进程操作不再隐式耦合。
+`npm run build` 只生成和编译；不会更新本机安装、停止 Runtime 或刷新桌面桥接。显式 `npm run dev:refresh` 才触发本机刷新。验证与生产进程操作不再隐式耦合。
 
 CI 同时支持普通提交与 reusable workflow。Release 与 Preview 在版本校验后调用同一个 CI，以标签对应 SHA 完成类型、后端、WebUI、部署验收、打包与安装检查，然后才发布。Release 内重复的检查定义移除，避免两套检查逐渐漂移。
 
@@ -77,7 +77,7 @@ Runtime 更新继续复用持久 update operation、drain、Host capability 协�
 
 切换失败先保存 `rolling_back` 意图，再停止身份匹配的目标 Runtime。恢复指针不代表恢复完成：原版本、指针、Host 重连、投递重放、业务 reconciliation 和服务就绪全部通过后才提交 `ROLLED_BACK`。激活器中断由 Runtime 接管恢复；恢复失败保留错误和日志并暂停激活。已经提交的操作拒绝迟到失败，业务数据库不随二进制回滚恢复备份，避免覆盖已确认的数据。
 
-`/readyz` 检查服务依赖，不再等待 Codex 注入。响应另列 `desktop` 状态：`ready`、`waiting_window`、`disabled`、`failed`。桌面记录携带 Runtime instance/generation、profile、兼容包及文档身份，旧代次探测只能视为待重探测。detached、听写和头像辅助窗口不参与兼容判定；加载和无窗口属于等待状态，主窗口能力缺失或 bootstrap 确认失败才报告集成故障。后台 injector 随窗口出现及文档重载恢复，不修改用户的注入偏好。
+`/readyz` 检查服务依赖，不再等待 Codex 注入。响应另列 `desktop` 状态：`ready`、`waiting_window`、`disabled`、`failed`。桌面记录携带 Runtime instance/generation、profile、兼容包及文档身份，旧代次探测只能视为待重探测。detached、听写和头像辅助窗口不参与兼容判定；加载和无窗口属于等待状态，主窗口能力缺失或 bootstrap 确认失败才报告集成故障。后台桌面桥接随主窗口出现及文档重载恢复；就绪证据来自原生会话与目录能力，不依赖产品 UI。
 
 CLI 安装客户端持久保存原请求键和操作 ID，接收回执丢失后复用原请求，等待终态时使用 `/readyz` 验证目标版本。macOS、Windows 安装器以 Runtime 操作完成为提交点；之后桌面或安装附件检查失败不能再执行文件回退，也不会为升级强制启动 Codex。
 
@@ -95,7 +95,7 @@ VPS 的 `request`、`request.running`、`operations/<id>.json` 和请求指纹�
 
 ## 验证入口
 
-- macOS 菜单栏是 Runtime 的状态与启动客户端，不拥有业务数据库或任务执行器。通过 `/readyz` 校验实例、PID、generation、版本和 Runtime 自检结果，桌面注入状态独立显示。登录时由现有 Runtime 服务唤起菜单栏，不另建 Runtime 守护进程。
+- macOS 菜单栏是 Runtime 的状态与启动客户端，不拥有业务数据库或任务执行器。通过 `/readyz` 校验实例、PID、generation、版本和 Runtime 自检结果，桌面桥接状态独立显示。登录时由现有 Runtime 服务唤起菜单栏，不另建 Runtime 守护进程。
 - DMG 首次启动复用安装器，内置 Node 落到用户安装目录，服务与 MCP 仍引用稳定安装入口；签名应用包不被 Runtime 更新改写。普通启动保持静默，只有用户选择菜单中的 Codex 入口才进入原有启动/重启确认流程。
 - 菜单栏退出通过带实例标识的关闭请求停止新调度；更新中拒绝退出。关闭 Runtime 与看板连接，不停止 Session Host 或 Codex 已有执行进程，离线期间的任务结果在重新打开后回放与对账。
 
@@ -105,3 +105,9 @@ VPS 的 `request`、`request.running`、`operations/<id>.json` 和请求指纹�
 - `npm run test:acceptance`：流式 Web 链路和 Docker 自部署生命周期。
 - `test/gateway.test.ts` 的既有进程级场景现在模拟首次输入前未落盘，验证旧 bind → 同 worker 首次 turn → Runtime handoff → 终态释放。
 - `test/codex-cli.test.ts` 的既有 executable 约束检查跟随实际进程所有者迁移到 Session Host adapter。
+
+## 页面注入退役与开发 Mockup
+
+旧注入安装、恢复工具和导航不再维护。共享浏览器入口只挂载宿主提供的产品容器，不扫描或隐藏 Codex 原生页面。旧 injector 仅在确认进程身份和所属 profile 后迁移回收；活动任务和 Session Host 不因界面迁移而重启。
+
+`npm run dev:mockup` 准备独立的开发插件，使用源码 `mcp --mockup` 和临时隔离模拟服务。Mockup 复用共享 UI 和原有模拟交互，不使用生产 Runtime，也不启动真实执行、Relay 或更新。模拟请求必须在模拟路由内终止，未支持操作不得落入生产处理器。正式发行入口不提供 Mockup。

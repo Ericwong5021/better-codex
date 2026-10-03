@@ -54,9 +54,11 @@ export class McpRuntimeBridgeError extends Error {
 
 const identifier = /^[A-Za-z0-9_-]{8,200}$/;
 const readRoutes = [
+  /^\/api\/ui\/mcp$/,
+  /^\/api\/external-observations(?:\/[^/]+)?$/,
+  /^\/api\/issues\/[^/]+\/history$/,
   /^\/(?:health|livez|readyz)$/,
   /^\/api\/(?:bootstrap|issues|agents|projects|scheduled-tasks)$/,
-  /^\/api\/ui\/mcp$/,
   /^\/api\/account\/usage(?:\/activity)?$/,
   /^\/api\/settings\/(?:auto-dispatch|scheduler-model|scheduler-reasoning-effort)$/,
   /^\/api\/(?:sync|relay)\/status$/,

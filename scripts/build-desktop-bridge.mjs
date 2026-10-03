@@ -4,13 +4,13 @@ import { dirname, join } from "node:path";
 import { build } from "esbuild";
 
 const root = process.cwd();
-const outputFile = join(root, "src", "generated", "injected-ui.ts");
+const outputFile = join(root, "src", "generated", "desktop-bridge.ts");
 const result = await build({
-  entryPoints: [join(root, "src", "ui", "injected-entry.ts")],
+  entryPoints: [join(root, "src", "ui", "desktop-bridge-entry.ts")],
   bundle: true,
   platform: "browser",
   format: "iife",
-  globalName: "BetterCodexInjected",
+  globalName: "BetterCodexDesktopBridge",
   target: ["chrome120"],
   charset: "utf8",
   legalComments: "none",
@@ -23,18 +23,18 @@ const browserBundle = result.outputFiles[0].text
   .replace(/^\s*\/\/.*$/gm, "")
   .replace(/\n{3,}/g, "\n\n")
   .trim();
-if (!browserBundle.includes("BetterCodexInjected") || !browserBundle.includes("install")) throw new Error("injected_ui_bundle_invalid");
+if (!browserBundle.includes("BetterCodexDesktopBridge") || !browserBundle.includes("install")) throw new Error("desktop_bridge_bundle_invalid");
 const checksum = createHash("sha256").update(browserBundle).digest("hex");
 const generated = [
-  `export const injectedUiBundleSchemaVersion = 1;`,
-  `export const injectedUiBundleChecksum = ${JSON.stringify(checksum)};`,
-  `export const injectedUiBundle = ${JSON.stringify(browserBundle)};`,
+  `export const desktopBridgeBundleSchemaVersion = 1;`,
+  `export const desktopBridgeBundleChecksum = ${JSON.stringify(checksum)};`,
+  `export const desktopBridgeBundle = ${JSON.stringify(browserBundle)};`,
   "",
 ].join("\n");
 
 if (process.argv.includes("--check")) {
   const current = existsSync(outputFile) ? readFileSync(outputFile, "utf8").replace(/\r\n?/g, "\n") : "";
-  if (current !== generated) throw new Error(`injected_ui_bundle_stale:${JSON.stringify({ platform: process.platform, output_file: outputFile, expected_checksum: checksum })}`);
+  if (current !== generated) throw new Error(`desktop_bridge_bundle_stale:${JSON.stringify({ platform: process.platform, output_file: outputFile, expected_checksum: checksum })}`);
 } else {
   mkdirSync(dirname(outputFile), { recursive: true });
   writeFileSync(outputFile, generated);

@@ -128,38 +128,40 @@ No. Better Codex is an independent open-source project built on top of Codex Des
 It stays on your computer. Projects, tasks, assignments, conversations, Agent configuration, attachments, and run state live in the local SQLite database (`~/.better-codex/better-codex.db` on macOS, `%USERPROFILE%\.better-codex\better-codex.db` on Windows), and the Runtime listens on `127.0.0.1` only. Optional remote access sends live HTTPS/WSS traffic through your Relay while the Runtime is online; the Relay does not persist business data. See the [Self-hosting runbook](SELF_HOSTING.md) for the exact boundary.
 
 **Why does Better Codex register an MCP server?**<br>
-The local MCP app provides the full Better Codex plugin page using the same UI as Web. It connects tasks, Agents, projects, and settings to the local Runtime over MCP. Credentials stay in the local MCP process, and Runtime remains the owner of task data. Optional desktop sidebar integration has its own route and does not cover the plugin page.
+The local MCP app provides the full Better Codex plugin page using the same UI as Web. It connects tasks, Agents, projects, and settings to the local Runtime over MCP. Credentials stay in the local MCP process, and Runtime remains the owner of task data. Native thread commands and catalog synchronization use a separate desktop bridge without product rendering.
 
 **Will it break my Codex?**<br>
-The app entry and route are registered through the local MCP server. The page integration uses the desktop app's local CDP interface and page structure. It doesn't patch Codex binaries. A Codex update can occasionally require a matching Better Codex compatibility update; when that happens, an update notice appears inside Codex. If anything looks off, run `better-codex doctor`.
+The app entry and route are registered through the local MCP server. Product UI renders in the plugin page. A separate desktop bridge uses the local CDP interface for native thread commands and catalog synchronization without patching Codex binaries. A Codex update can occasionally require a matching Better Codex compatibility update; when that happens, an update notice appears inside Codex. If anything looks off, run `better-codex doctor`.
 
 **How do I disable or uninstall it?**<br>
-`better-codex eject` disables the page integration but keeps your task data and installed components. `better-codex uninstall` removes the MCP server, background service, launcher, Skill, Agent profiles, local data, and CLI bundle.
+`better-codex stop` stops the local Runtime while retaining installed components and task data. `better-codex uninstall` removes the MCP server, background service, launcher, Skill, Agent profiles, local data, and CLI bundle.
 
 **How do updates work?**<br>
 Better Codex checks a signed update manifest in the background and shows a notice inside Codex when a new version is available. You can also rerun the install command at any time. Runtime updates pause new dispatch while active conversations continue in the independent Session Host and Codex App Server. The new Runtime replays committed Host deliveries and reconciles active turns before becoming ready; failed activation restores the previous Runtime against the same Host. A protocol-incompatible Host update waits for active turns and unacknowledged deliveries to drain before replacing the Host. Remote access has a separate VPS Relay and Web UI update, so Beta testers must complete and verify both sides as described in the [Beta upgrade guide](BETA_UPGRADE.md).
 
 **Which platforms are supported?**<br>
-Codex Desktop on macOS (Apple Silicon and Intel) and the Microsoft Store version of Codex on Windows x64. Release packages and CI cover all three. Codex compatibility is capability-based rather than pinned to a permanent version list; if required page capabilities are unavailable, Better Codex stops the page integration and reports the incompatibility without modifying board data.
+Codex Desktop on macOS (Apple Silicon and Intel) and the Microsoft Store version of Codex on Windows x64. Release packages and CI cover all three. Codex compatibility is capability-based rather than pinned to a permanent version list; if required native bridge capabilities are unavailable, Better Codex reports a desktop bridge failure and reports the incompatibility without modifying board data.
 
 ## Useful commands
 
 ```bash
-better-codex doctor            # check MCP, runtime, database, Codex compatibility, injection state
+better-codex doctor            # check MCP, runtime, database, Codex compatibility, desktop bridge state
 better-codex status            # show the current service and board connection
 better-codex mcp status        # inspect the MCP registration
 better-codex mcp install       # register or repair the MCP server
 better-codex launcher install  # install the system launcher
 better-codex launcher status   # inspect the system launcher
-better-codex eject             # remove the sidebar integration, keep task data
+better-codex stop              # stop the local Runtime, keep task data
 better-codex uninstall         # uninstall completely and delete local data
 ```
 
 ## Install from source
 
+Better Codex supports persistent task events, execution attempts, and task dependencies. MCP tools include `tasks_history`, `external_tasks_report`, and `external_observations_events`; see [the data contract and integration boundaries](docs/task-events-and-dependencies.md). External reporting requires an explicitly enabled, authenticated Runtime connection. Installing the local MCP server does not connect a cloud Dot to it. Dot setup is not exposed in this release.
+
 Requires Node.js 22.5 or later.
 
-If the stable build is already installed, install the source checkout as a separate development instance. Stable keeps `~/.better-codex` and the `Better Codex` launcher; development uses `~/.better-codex-dev` and `Better Codex Dev`. On first launch, development creates `~/.better-codex-dev/better-codex.db` as a consistent snapshot of the stable database when one exists. The snapshot then evolves independently: development migrations and test data never modify the stable database. Runtime files, logs, attachments, and update state are also isolated. Opening either launcher deactivates the other instance's page injection first.
+If the stable build is already installed, install the source checkout as a separate development instance. Stable keeps `~/.better-codex` and the `Better Codex` launcher; development uses `~/.better-codex-dev` and `Better Codex Dev`. On first launch, development creates `~/.better-codex-dev/better-codex.db` as a consistent snapshot of the stable database when one exists. The snapshot then evolves independently: development migrations and test data never modify the stable database. Runtime files, logs, attachments, and update state are also isolated. A desktop bridge yields when another profile owns the renderer; neither launcher stops the other profile’s active tasks.
 
 ```bash
 git clone https://github.com/Ericwong5021/better-codex.git
@@ -168,7 +170,7 @@ npm ci
 npm run dev:install
 ```
 
-The development instance does not auto-update its core. Pull source changes and run `npm run build` to refresh it. Use `npm run dev:status` to inspect the development instance and `npm run dev:uninstall` to remove its launcher and stop it while preserving development data.
+The development instance does not auto-update its core. Pull source changes and run `npm run dev:refresh` to explicitly refresh the local development installation. `npm run build` only builds source artifacts. Use `npm run dev:status` to inspect the development instance and `npm run dev:uninstall` to remove its launcher and stop it while preserving development data.
 
 ## Community
 

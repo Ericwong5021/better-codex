@@ -4,10 +4,8 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { activeCompatibility, capabilityExpression, clearCompatibilityStatus, missingCapabilities, navigationExpression, readCompatibilityStatus, targetAllowed, type RendererCapabilities, writeCompatibilityStatus } from "./compatibility.js";
 import { betterCodexProfile } from "./config.js";
-import { injectionBundleChecksum, injectionScript, injectionVersion } from "./dom.js";
-import { recordInjectionOwnership, setInjectionEnabled } from "./injection-state.js";
+import { desktopBridgeBundleChecksum, desktopBridgeScript, desktopBridgeVersion, desktopBridgeCleanupScript } from "./desktop-bridge.js";
 import { readCodexLocale } from "./locale.js";
-import { showNativeChoiceDialog } from "./native-dialog.js";
 import { readRuntimeState } from "./runtime-state.js";
 
 type Target = {
@@ -30,13 +28,13 @@ const cdpCommandTimeoutMs = 8000;
 const cdpTargetScanTimeoutMs = 30_000;
 const cdpTargetCandidateLimit = 32;
 
-type InjectionIdentity = { version?: string; bundleChecksum?: string; profile?: string; endpoint?: string; bootstrapError?: string | null; pulse?: boolean; ready?: boolean; documentId?: number };
+type DesktopBridgeIdentity = { version?: string; bundleChecksum?: string; profile?: string; endpoint?: string; bootstrapError?: string | null; pulse?: boolean; ready?: boolean; documentId?: number };
 
-const injectionIdentityExpression = "({ version: window.__betterCodexInjection__?.version || null, bundleChecksum: window.__betterCodexInjection__?.bundleChecksum || null, profile: window.__betterCodexInjection__?.profile || null, endpoint: window.__betterCodexInjection__?.endpoint || null, pulse: typeof window.__betterCodexInjection__?.pulse === 'function', ready: typeof window.__betterCodexInjection__?.ready === 'function' && Boolean(window.__betterCodexInjection__.ready()), documentId: performance.timeOrigin, bootstrapError: window.__betterCodexInjection__?.bootstrapError?.() || null })";
+const desktopBridgeIdentityExpression = "({ version: window.__betterCodexDesktopBridge__?.version || null, bundleChecksum: window.__betterCodexDesktopBridge__?.bundleChecksum || null, profile: window.__betterCodexDesktopBridge__?.profile || null, endpoint: window.__betterCodexDesktopBridge__?.endpoint || null, pulse: typeof window.__betterCodexDesktopBridge__?.pulse === 'function', ready: typeof window.__betterCodexDesktopBridge__?.ready === 'function' && Boolean(window.__betterCodexDesktopBridge__.ready()), documentId: performance.timeOrigin, bootstrapError: window.__betterCodexDesktopBridge__?.bootstrapError?.() || null })";
 
-function currentInjectionMatches(existing: InjectionIdentity, endpoint: string) {
-  return existing.version === injectionVersion()
-    && existing.bundleChecksum === injectionBundleChecksum()
+function currentDesktopBridgeMatches(existing: DesktopBridgeIdentity, endpoint: string) {
+  return existing.version === desktopBridgeVersion()
+    && existing.bundleChecksum === desktopBridgeBundleChecksum()
     && existing.profile === betterCodexProfile
     && existing.endpoint === endpoint
     && existing.pulse;
@@ -144,6 +142,15 @@ class Connection {
   }
 }
 
+export function cdpBridgeRequestAllowed(path: string, method: string) {
+  if (method === "GET") return /^\/api\/external-observations(?:\/external-[a-f0-9]{64})?(?:\?[^#]*)?$/.test(path)
+    || /^\/api\/issues\/from-thread\?[^#]*$/.test(path);
+  if (method !== "POST") return false;
+  return /^\/api\/session-relay\/(?:poll|events|catalog-ack)$/.test(path)
+    || /^\/api\/session-relay\/commands\/[A-Za-z0-9_-]+\/(?:checkpoint|complete|fail)$/.test(path)
+    || /^\/api\/issues\/[A-Za-z0-9_-]+\/session-handoff$/.test(path);
+}
+
 async function bridgeRequest(connection: Connection, runtimePort: number, accessToken: string, payload: unknown) {
   let requestId = "";
   let traceId = "";
@@ -156,7 +163,7 @@ async function bridgeRequest(connection: Connection, runtimePort: number, access
     path = typeof request.path === "string" ? request.path : "";
     method = typeof request.method === "string" ? request.method : "GET";
     traceId = typeof request.traceId === "string" && /^[A-Za-z0-9_-]{8,200}$/.test(request.traceId) ? request.traceId : randomUUID();
-    if (!requestId || request.token !== accessToken || !/^\/api\/(?:bootstrap(?:[?]|$)|commands(?:[/?]|$)|profile(?:[?]|$)|scheduled-tasks(?:[/?]|$)|sessions(?:[/?]|$)|system\/(?:directories(?:\/create)?|directory)(?:[?]|$)|update(?:\/(?:install|check))?(?:[?]|$)|remote-access\/(?:status|sessions(?:\/[^/?]+)?)(?:[?]|$)|projects(?:[/?]|$)|issues(?:[/?]|$)|session-relay(?:[/?]|$)|agents(?:[/?]|$)|mockup\/(?:state|reset)(?:[?]|$)|settings\/auto-dispatch(?:[?]|$)|settings\/scheduler-model(?:[?]|$)|settings\/scheduler-reasoning-effort(?:[?]|$))/.test(path) || !["GET", "POST", "PUT", "PATCH", "DELETE"].includes(method)) throw new Error("invalid_bridge_request");
+    if (!requestId || request.token !== accessToken || !cdpBridgeRequestAllowed(path, method)) throw new Error("invalid_bridge_request");
     const response = await fetch(`http://127.0.0.1:${runtimePort}${path}`, {
       method,
       signal: AbortSignal.timeout(cdpCommandTimeoutMs),
@@ -501,10 +508,6 @@ export function launchCodex(port: number, activateExisting = false) {
   throw new Error(`codex_launch_unsupported_${process.platform}`);
 }
 
-export function requiresCodexRestartForLaunch(codexRunning: boolean, platform: NodeJS.Platform = process.platform) {
-  return platform === "win32" && codexRunning;
-}
-
 export function codexProcessRunning() {
   if (process.platform === "win32") {
     const processes = execFileSync("tasklist.exe", ["/FI", "IMAGENAME eq ChatGPT.exe", "/NH", "/FO", "CSV"], { encoding: "utf8", windowsHide: true });
@@ -520,23 +523,6 @@ export function codexProcessRunning() {
   } catch {
     return false;
   }
-}
-
-export type CodexRestartChoice = "reset-runtime" | "restart-codex" | "cancelled";
-
-export function chooseCodexRestartAction(): CodexRestartChoice {
-  const chinese = readCodexLocale() === "zh-CN";
-  const choice = showNativeChoiceDialog({
-    message: chinese
-      ? "“重置服务”只会重启 Better Codex Runtime；“重启Codex”会关闭并重新打开整个 Codex。\n\nBetter Codex 已在运行。"
-      : "Reset Service restarts only the Better Codex Runtime. Restart Codex closes and reopens the entire Codex app.\n\nBetter Codex is already running.",
-    title: "Better Codex",
-    primaryLabel: chinese ? "重启Codex" : "Restart Codex",
-    secondaryLabel: chinese ? "重置服务" : "Reset Service",
-  });
-  if (choice === "primary") return "restart-codex";
-  if (choice === "secondary") return "reset-runtime";
-  return "cancelled";
 }
 
 export function windowsCodexPackageProcessPowerShell(action: "stop" | "count") {
@@ -606,11 +592,11 @@ async function waitForTargets(port: number) {
 }
 
 async function recordDesktopIntegration(connection: Connection, target: Target, expectedEndpoint: string) {
-  const identity = await evaluate(connection, injectionIdentityExpression) as InjectionIdentity;
+  const identity = await evaluate(connection, desktopBridgeIdentityExpression) as DesktopBridgeIdentity;
   const current = readCompatibilityStatus();
-  const ready = Boolean(currentInjectionMatches(identity, expectedEndpoint)) && identity.ready === true;
+  const ready = Boolean(currentDesktopBridgeMatches(identity, expectedEndpoint)) && identity.ready === true;
   const failed = identity.bootstrapError && !/fetch|network|timeout|runtime_|update_|503|reconnecting/i.test(identity.bootstrapError);
-  return writeCompatibilityStatus({ codexVersion: current?.codexVersion ?? desktopVersion(), compatible: ready, reason: ready ? null : failed ? "injection_bootstrap_failed" : "bootstrap_pending", error: identity.bootstrapError || null, targetId: target.id, targetUrl: target.url, documentId: identity.documentId, capabilities: current?.capabilities ?? null }, ready);
+  return writeCompatibilityStatus({ codexVersion: current?.codexVersion ?? desktopVersion(), compatible: ready, reason: ready ? null : failed ? "desktop_bridge_bootstrap_failed" : "bootstrap_pending", error: identity.bootstrapError || null, targetId: target.id, targetUrl: target.url, documentId: identity.documentId, capabilities: current?.capabilities ?? null }, ready);
 }
 
 async function installTarget(target: Target, runtimePort: number, accessToken: string) {
@@ -621,25 +607,25 @@ async function installTarget(target: Target, runtimePort: number, accessToken: s
     await connection.send("Page.setBypassCSP", { enabled: true });
     await connection.send("Runtime.enable");
     try { await connection.send("Runtime.addBinding", { name: "betterCodexRequest" }); } catch {}
-    const existing = await evaluate(connection, injectionIdentityExpression) as InjectionIdentity;
+    await cleanupLegacyRenderer(connection, { profile: betterCodexProfile, endpoint: `http://127.0.0.1:${runtimePort}` });
+    const existing = await evaluate(connection, desktopBridgeIdentityExpression) as DesktopBridgeIdentity;
     const expectedEndpoint = `http://127.0.0.1:${runtimePort}`;
-    const foreignDevelopmentInjection = betterCodexProfile === "development"
-      && ((existing.profile && existing.profile !== betterCodexProfile) || (!existing.profile && existing.endpoint && existing.endpoint !== expectedEndpoint));
-    if (foreignDevelopmentInjection) throw new Error("profile_not_active");
-    const storedIdentifier = await evaluate(connection, "window.__betterCodexNewDocumentScriptId || null");
-    if (currentInjectionMatches(existing, expectedEndpoint)) {
-      await evaluate(connection, "window.__betterCodexInjection__.refresh()");
+    const foreignDesktopBridge =  ((existing.profile && existing.profile !== betterCodexProfile) || (!existing.profile && existing.endpoint && existing.endpoint !== expectedEndpoint));
+    if (foreignDesktopBridge) throw new Error("profile_not_active");
+    const storedIdentifier = await evaluate(connection, "window.__betterCodexDesktopBridgeScriptId || null");
+    if (currentDesktopBridgeMatches(existing, expectedEndpoint)) {
+      await evaluate(connection, "window.__betterCodexDesktopBridge__.refresh()");
       await recordDesktopIntegration(connection, target, expectedEndpoint);
       return { targetId: target.id, title: target.title, installed: true, reused: true, identifier: typeof storedIdentifier === "string" ? storedIdentifier : undefined };
     }
     if (typeof storedIdentifier === "string" && storedIdentifier) {
       try { await connection.send("Page.removeScriptToEvaluateOnNewDocument", { identifier: storedIdentifier }); } catch {}
     }
-    const source = injectionScript(runtimePort, accessToken, "install", readCodexLocale());
+    const source = desktopBridgeScript(runtimePort, accessToken, readCodexLocale());
     const registration = await connection.send("Page.addScriptToEvaluateOnNewDocument", { source });
     const identifier = String(registration.identifier ?? "");
     await evaluate(connection, source);
-    await evaluate(connection, `window.__betterCodexNewDocumentScriptId = ${JSON.stringify(identifier)}`);
+    await evaluate(connection, `window.__betterCodexDesktopBridgeScriptId = ${JSON.stringify(identifier)}`);
     await recordDesktopIntegration(connection, target, expectedEndpoint);
     return { targetId: target.id, title: target.title, installed: true, reused: false, identifier };
   } finally {
@@ -647,22 +633,41 @@ async function installTarget(target: Target, runtimePort: number, accessToken: s
   }
 }
 
-type InjectionOwnership = { profile: string; endpoint?: string; allowLegacyProfileless?: boolean };
+type DesktopBridgeOwnership = { profile: string; endpoint?: string };
 
-async function uninstallTarget(target: Target, accessToken: string, ownership?: InjectionOwnership) {
+async function cleanupLegacyRenderer(connection: Connection, ownership: DesktopBridgeOwnership) {
+  const legacy = await evaluate(connection, "({ profile: window.__betterCodexInjection__?.profile || null, endpoint: window.__betterCodexInjection__?.endpoint || null, identifier: window.__betterCodexNewDocumentScriptId || null })") as { profile?: string; endpoint?: string; identifier?: string };
+  const owned = legacy.profile ? legacy.profile === ownership.profile : Boolean(ownership.endpoint && legacy.endpoint === ownership.endpoint);
+  if (!owned) return false;
+  if (legacy.identifier) try { await connection.send("Page.removeScriptToEvaluateOnNewDocument", { identifier: legacy.identifier }); } catch {}
+  await evaluate(connection, desktopBridgeCleanupScript());
+  return true;
+}
+
+export async function cdpCleanupLegacyInjection(port: number, ownership: DesktopBridgeOwnership) {
+  if (process.env.BETTER_CODEX_DISABLE_DESKTOP_BRIDGE === "1") return [];
+  const values = await targets(port);
+  return Promise.all(values.map(async target => {
+    const connection = new Connection(target.webSocketDebuggerUrl!);
+    try { await connection.open(); await connection.send("Page.enable"); return { targetId: target.id, uninstalled: await cleanupLegacyRenderer(connection, ownership) }; }
+    finally { await connection.close(); }
+  }));
+}
+
+async function uninstallTarget(target: Target, accessToken: string, ownership?: DesktopBridgeOwnership) {
   const connection = new Connection(target.webSocketDebuggerUrl!);
   try {
     await connection.open();
     await connection.send("Page.enable");
     await connection.send("Runtime.enable");
-    const existing = await evaluate(connection, "({ profile: window.__betterCodexInjection__?.profile || null, endpoint: window.__betterCodexInjection__?.endpoint || null })") as { profile?: string; endpoint?: string };
+    const existing = await evaluate(connection, "({ profile: window.__betterCodexDesktopBridge__?.profile || null, endpoint: window.__betterCodexDesktopBridge__?.endpoint || null })") as { profile?: string; endpoint?: string };
     if (ownership) {
       const owned = existing.profile
         ? existing.profile === ownership.profile
-        : Boolean(ownership.allowLegacyProfileless || (ownership.endpoint && existing.endpoint === ownership.endpoint));
+        : Boolean(ownership.endpoint && existing.endpoint === ownership.endpoint);
       if (!owned) return { targetId: target.id, title: target.title, uninstalled: false, reason: "profile_not_active" };
     }
-    const stored = await evaluate(connection, "window.__betterCodexNewDocumentScriptId || null");
+    const stored = await evaluate(connection, "window.__betterCodexDesktopBridgeScriptId || null");
     const scriptIdentifier = typeof stored === "string" ? stored : "";
     if (scriptIdentifier) {
       try {
@@ -670,14 +675,15 @@ async function uninstallTarget(target: Target, accessToken: string, ownership?: 
       } catch {
       }
     }
-    const value = await evaluate(connection, injectionScript(0, accessToken, "uninstall"));
+    const value = await evaluate(connection, "window.__betterCodexDesktopBridge__?.destroy?.(); delete window.__betterCodexDesktopBridgeScriptId");
     return { targetId: target.id, title: target.title, uninstalled: true, value };
   } finally {
     await connection.close();
   }
 }
 
-export async function cdpInject(port: number, runtimePort: number, accessToken: string, launch = false) {
+export async function cdpConnectDesktopBridge(port: number, runtimePort: number, accessToken: string, launch = false) {
+  if (process.env.BETTER_CODEX_DISABLE_DESKTOP_BRIDGE === "1") throw new Error("desktop_bridge_disabled");
   let values: Target[];
   try {
     values = await mainTargets(port);
@@ -695,21 +701,22 @@ export async function cdpInject(port: number, runtimePort: number, accessToken: 
   }
   if (values.length === 0) throw new Error("cdp_main_renderer_not_found");
   const installed = await Promise.all(values.map(target => installTarget(target, runtimePort, accessToken)));
-  recordInjectionOwnership(betterCodexProfile, `http://127.0.0.1:${runtimePort}`);
   return installed;
 }
 
-export async function cdpRestartAndInject(port: number, runtimePort: number, accessToken: string) {
+export async function cdpRestartAndConnectDesktopBridge(port: number, runtimePort: number, accessToken: string) {
+  if (process.env.BETTER_CODEX_DISABLE_DESKTOP_BRIDGE === "1") throw new Error("desktop_bridge_disabled");
   if (!['darwin', 'win32'].includes(process.platform)) throw new Error(`setup_unsupported_${process.platform}`);
   await quitCodex();
-  return cdpInject(port, runtimePort, accessToken, true);
+  return cdpConnectDesktopBridge(port, runtimePort, accessToken, true);
 }
 
-export async function cdpRefreshAndInject(port: number, runtimePort: number, accessToken: string) {
-  return cdpInject(port, runtimePort, accessToken, false);
+export async function cdpRefreshDesktopBridge(port: number, runtimePort: number, accessToken: string) {
+  return cdpConnectDesktopBridge(port, runtimePort, accessToken, false);
 }
 
-export async function cdpEject(port: number, accessToken: string, ownership?: InjectionOwnership) {
+export async function cdpDisconnectDesktopBridge(port: number, accessToken: string, ownership?: DesktopBridgeOwnership) {
+  if (process.env.BETTER_CODEX_DISABLE_DESKTOP_BRIDGE === "1") return [];
   try {
     const values = await targets(port);
     return await Promise.all(values.map(target => uninstallTarget(target, accessToken, ownership)));
@@ -719,6 +726,7 @@ export async function cdpEject(port: number, accessToken: string, ownership?: In
 }
 
 export async function cdpStatus(port: number) {
+  if (process.env.BETTER_CODEX_DISABLE_DESKTOP_BRIDGE === "1") return { available: false, disabled: true, port, compatibility: readCompatibilityStatus(), targets: [] };
   try {
     const values = await mainTargets(port);
     const rendered = [];
@@ -727,15 +735,15 @@ export async function cdpStatus(port: number) {
       try {
         await connection.open();
         const value = await evaluate(connection, `({
-          version: window.__betterCodexInjection__?.version || null,
-          bundleChecksum: window.__betterCodexInjection__?.bundleChecksum || null,
-          profile: window.__betterCodexInjection__?.profile || null,
-          endpoint: window.__betterCodexInjection__?.endpoint || null,
-          ready: typeof window.__betterCodexInjection__?.ready === 'function' && Boolean(window.__betterCodexInjection__.ready()),
-          entry: Boolean(document.getElementById('better-codex-entry')),
-          panel: Boolean(document.getElementById('better-codex-panel')),
-          open: document.documentElement.hasAttribute('data-better-codex-open')
+          version: window.__betterCodexDesktopBridge__?.version || null,
+          bundleChecksum: window.__betterCodexDesktopBridge__?.bundleChecksum || null,
+          profile: window.__betterCodexDesktopBridge__?.profile || null,
+          endpoint: window.__betterCodexDesktopBridge__?.endpoint || null,
+          ready: typeof window.__betterCodexDesktopBridge__?.ready === 'function' && Boolean(window.__betterCodexDesktopBridge__.ready()),
+          bridge: Boolean(window.__betterCodexDesktopBridge__)
         })`);
+        const runtime = readRuntimeState();
+        if (runtime) await recordDesktopIntegration(connection, target, `http://127.0.0.1:${runtime.port}`);
         rendered.push({ targetId: target.id, title: target.title, url: target.url, ...(value as object) });
       } finally {
         await connection.close();
@@ -748,6 +756,7 @@ export async function cdpStatus(port: number) {
 }
 
 export async function cdpOpenThread(port: number, threadId: string) {
+  if (process.env.BETTER_CODEX_DISABLE_DESKTOP_BRIDGE === "1") throw new Error("desktop_bridge_disabled");
   const values = await mainTargets(port);
   const target = values[0];
   if (!target) throw new Error("cdp_main_renderer_not_found");
@@ -760,7 +769,8 @@ export async function cdpOpenThread(port: number, threadId: string) {
   }
 }
 
-export async function watchInjection(port: number, accessToken: string) {
+export async function watchDesktopBridge(port: number, accessToken: string) {
+  if (process.env.BETTER_CODEX_DISABLE_DESKTOP_BRIDGE === "1") throw new Error("desktop_bridge_disabled");
   const attached = new Map<string, { connection: Connection; identifier?: string; target: Target }>();
   let activeRuntimePort = 0;
   let stopping = false;
@@ -772,7 +782,7 @@ export async function watchInjection(port: number, accessToken: string) {
     for (const [id, current] of attached) {
       if (pulsing.has(id)) continue;
       pulsing.add(id);
-      void evaluate(current.connection, "window.__betterCodexInjection__?.pulse?.()").catch(() => {}).finally(() => pulsing.delete(id));
+      void evaluate(current.connection, "window.__betterCodexDesktopBridge__?.pulse?.()").catch(() => {}).finally(() => pulsing.delete(id));
     }
   }, 2000);
   pulseTimer.unref();
@@ -823,7 +833,8 @@ export async function watchInjection(port: number, accessToken: string) {
         for (const current of attached.values()) {
           try {
             if (current.identifier) await current.connection.send("Page.removeScriptToEvaluateOnNewDocument", { identifier: current.identifier });
-            await evaluate(current.connection, injectionScript(0, accessToken, "uninstall"));
+            const identity = await evaluate(current.connection, desktopBridgeIdentityExpression) as DesktopBridgeIdentity;
+            if (identity.profile === betterCodexProfile && identity.endpoint === `http://127.0.0.1:${activeRuntimePort}`) await evaluate(current.connection, "window.__betterCodexDesktopBridge__?.destroy?.(); delete window.__betterCodexDesktopBridgeScriptId");
           } catch {
           }
           await current.connection.close();
@@ -852,29 +863,28 @@ export async function watchInjection(port: number, accessToken: string) {
           connection.on("Runtime.bindingCalled", params => {
             if (params.name === "betterCodexRequest") void bridgeRequest(connection, activeRuntimePort, accessToken, params.payload);
           });
-          const existing = await evaluate(connection, injectionIdentityExpression) as InjectionIdentity;
+          await cleanupLegacyRenderer(connection, { profile: betterCodexProfile, endpoint: `http://127.0.0.1:${activeRuntimePort}` });
+          const existing = await evaluate(connection, desktopBridgeIdentityExpression) as DesktopBridgeIdentity;
           const expectedEndpoint = `http://127.0.0.1:${activeRuntimePort}`;
-          if (betterCodexProfile === "development" && (existing.profile ? existing.profile !== betterCodexProfile : Boolean(existing.endpoint && existing.endpoint !== expectedEndpoint))) {
-            setInjectionEnabled(false);
-            stopping = true;
+          if ((existing.profile ? existing.profile !== betterCodexProfile : Boolean(existing.endpoint && existing.endpoint !== expectedEndpoint))) {
             yieldedToPeer = true;
-            break;
+            writeCompatibilityStatus({ state: "disabled", codexVersion: desktopVersion(), compatible: false, reason: "peer_profile_active", targetId: target.id, targetUrl: target.url, capabilities: null });
+            continue;
           }
           let identifier: string | undefined;
-          if (currentInjectionMatches(existing, expectedEndpoint)) {
-            const stored = await evaluate(connection, "window.__betterCodexNewDocumentScriptId || null");
+          if (currentDesktopBridgeMatches(existing, expectedEndpoint)) {
+            const stored = await evaluate(connection, "window.__betterCodexDesktopBridgeScriptId || null");
             identifier = typeof stored === "string" ? stored : undefined;
-            await evaluate(connection, "window.__betterCodexInjection__.refresh()");
+            await evaluate(connection, "window.__betterCodexDesktopBridge__.refresh()");
           } else {
-            const source = injectionScript(activeRuntimePort, accessToken, "install", readCodexLocale());
+            const source = desktopBridgeScript(activeRuntimePort, accessToken, readCodexLocale());
             const registration = await connection.send("Page.addScriptToEvaluateOnNewDocument", { source });
             identifier = String(registration.identifier ?? "") || undefined;
             await evaluate(connection, source);
-            await evaluate(connection, `window.__betterCodexNewDocumentScriptId = ${JSON.stringify(identifier ?? "")}`);
+            await evaluate(connection, `window.__betterCodexDesktopBridgeScriptId = ${JSON.stringify(identifier ?? "")}`);
           }
           attached.set(target.id, { connection, identifier, target });
           transferred = true;
-          recordInjectionOwnership(betterCodexProfile, expectedEndpoint);
           await recordDesktopIntegration(connection, target, expectedEndpoint);
         } finally {
           if (!transferred) await connection.close();
@@ -884,15 +894,16 @@ export async function watchInjection(port: number, accessToken: string) {
       // Health-check attached sessions without opening a second debugger to the same target.
       for (const [id, current] of attached) {
         try {
-          const existing = await evaluate(current.connection, injectionIdentityExpression) as InjectionIdentity;
-          if (betterCodexProfile === "development" && (existing.profile ? existing.profile !== betterCodexProfile : Boolean(existing.endpoint && existing.endpoint !== `http://127.0.0.1:${activeRuntimePort}`))) {
-            setInjectionEnabled(false);
-            stopping = true;
+          const existing = await evaluate(current.connection, desktopBridgeIdentityExpression) as DesktopBridgeIdentity;
+          if ((existing.profile ? existing.profile !== betterCodexProfile : Boolean(existing.endpoint && existing.endpoint !== `http://127.0.0.1:${activeRuntimePort}`))) {
             yieldedToPeer = true;
-            break;
+            await current.connection.close();
+            attached.delete(id);
+            writeCompatibilityStatus({ state: "disabled", codexVersion: desktopVersion(), compatible: false, reason: "peer_profile_active", targetId: current.target.id, targetUrl: current.target.url, capabilities: null });
+            continue;
           }
           await recordDesktopIntegration(current.connection, current.target, `http://127.0.0.1:${activeRuntimePort}`);
-          if (!currentInjectionMatches(existing, `http://127.0.0.1:${activeRuntimePort}`)) {
+          if (!currentDesktopBridgeMatches(existing, `http://127.0.0.1:${activeRuntimePort}`)) {
             if (current.identifier) {
               try { await current.connection.send("Page.removeScriptToEvaluateOnNewDocument", { identifier: current.identifier }); } catch {}
             }
@@ -905,9 +916,9 @@ export async function watchInjection(port: number, accessToken: string) {
         }
       }
       if (stopping) break;
-      settleMs = attached.size > 0 ? 2500 : 250;
+      settleMs = attached.size > 0 || yieldedToPeer ? 2500 : 250;
     } catch (error) {
-      const message = error instanceof Error ? error.message : "injector_cycle_failed";
+      const message = error instanceof Error ? error.message : "desktop_bridge_cycle_failed";
       // Renderer often appears before sidebar/content; probe faster than the idle sweep.
       settleMs = message.startsWith("codex_incompatible_") || message.startsWith("cdp_unavailable_") ? 200 : 500;
       const current = readCompatibilityStatus();
@@ -924,7 +935,8 @@ export async function watchInjection(port: number, accessToken: string) {
   for (const current of attached.values()) {
     try {
       if (current.identifier) await current.connection.send("Page.removeScriptToEvaluateOnNewDocument", { identifier: current.identifier });
-      if (!yieldedToPeer) await evaluate(current.connection, injectionScript(0, accessToken, "uninstall"));
+      const identity = await evaluate(current.connection, desktopBridgeIdentityExpression) as DesktopBridgeIdentity;
+      if (identity.profile === betterCodexProfile && identity.endpoint === `http://127.0.0.1:${activeRuntimePort}`) await evaluate(current.connection, "window.__betterCodexDesktopBridge__?.destroy?.(); delete window.__betterCodexDesktopBridgeScriptId");
     } catch {
     }
     await current.connection.close();

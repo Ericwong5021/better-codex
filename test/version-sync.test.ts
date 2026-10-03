@@ -13,12 +13,16 @@ const previewPromotion = readFileSync(new URL("../scripts/promote-preview-feed.s
 test("release and preview version sources stay synchronized", () => {
   const version = packageJson.version;
   const coreVersion = versionSource.match(/export const coreVersion = "([^"]+)"/)?.[1];
-  const escapedVersion = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  assert.match(version, /^\d+\.\d+\.\d+(?:-beta\.[1-9]\d*)?$/);
+  // Local-only immutable builds have no published tag or public release entry.
+  const changelogVersion=version.replace(/-local\.mcp\.[1-9]\d*$/,"");
+  const escapedVersion = changelogVersion.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  assert.match(version, /^\d+\.\d+\.\d+(?:-beta\.[1-9]\d*|-local\.mcp\.[1-9]\d*)?$/);
   assert.equal(packageLock.packages[""].version, version);
   assert.equal(coreVersion, version);
-  assert.match(changelog, new RegExp(`^## \\[${escapedVersion}\\] - \\d{4}-\\d{2}-\\d{2}$`, "m"));
-  assert.ok(changelog.includes(`[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v${version}...HEAD`));
+  if (!/-local\.mcp\./.test(version)) {
+    assert.match(changelog, new RegExp(`^## \\[${escapedVersion}\\] - \\d{4}-\\d{2}-\\d{2}$`, "m"));
+    assert.ok(changelog.includes(`[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v${changelogVersion}...HEAD`));
+  } else assert.match(changelog,/^## \[Unreleased\]$/m);
   assert.match(releaseWorkflow, /group: better-codex-release/);
   assert.match(releaseWorkflow, /"!v\*-\*"/);
   assert.match(releaseWorkflow, /queue: max/);

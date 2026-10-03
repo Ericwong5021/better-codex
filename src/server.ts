@@ -23,7 +23,7 @@ import { basename, dirname, extname, join, resolve } from "node:path";
 import { conversationMessagesWithPendingReply, normalizeSessionId, readConversationActivity, readConversationAttachment, readConversationResult, sessionWorkspace } from "./session-transcript.js";
 import { IssueWorker } from "./worker.js";
 import { maxMockupBytes, normalizeMockupLocale, readMockupState, replaceMockupState, resetMockupState, updateMockupState } from "./mockup.js";
-import { injectionScript } from "./dom.js";
+import { browserUiScript } from "./browser-ui.js";
 import { betterCodexWebHostCss, betterCodexWebHostHtml, betterCodexWebHostJavaScript } from "./web-host.js";
 import { betterCodexMcpHostHtml } from "./mcp-host.js";
 import { agentAvatarPngDataUrl, betterCodexWebIconPng } from "./brand-assets.js";
@@ -41,8 +41,14 @@ import { webCommandTarget } from "./command-contract.js";
 import { storageHealth } from "./storage-health.js";
 import { stopSessionHostProcess } from "./session-host-client.js";
 import { sessionHostProtocolVersion } from "./session-host-protocol.js";
+import { ExternalObservationStore, type ExternalObservationCapability } from "./external-observations.js";
+import { ExternalReportWatcher } from "./external-report-watcher.js";
+import { schedulerEvaluationModel, schedulerEvaluationServiceTier } from "./scheduler-evaluation.js";
+import { mcpReportingEnabled } from "./mcp-reporting.js";
+import { TaskCreatorProfiles } from "./task-creator-profiles.js";
 
-const accessToken = token();
+// Importing the server must not materialize production credentials (dev MCP Mockup imports this module).
+let accessToken = "";
 const mockupEnabled = !isSea() && !packagedBuild && process.argv.includes("--mockup");
 const webSessionTtlMs = 12 * 60 * 60 * 1000;
 const maxWebSessions = 32;
@@ -680,6 +686,8 @@ function parseIssuePatch(body: Record<string, unknown>) {
   const patch: Record<string, unknown> = {};
   if ("thread_id" in body) throw new Error("issue_session_binding_disabled");
   if ("project_id" in body) patch.project_id = cleanString(body.project_id, 200);
+  if ("parent_issue_id" in body) patch.parent_issue_id = body.parent_issue_id;
+  if ("depends_on_issue_ids" in body) patch.depends_on_issue_ids = body.depends_on_issue_ids;
   if ("title" in body) patch.title = cleanString(body.title, 500);
   if ("description" in body) patch.description = issueDescription(body.description);
   if ("reply_draft" in body) patch.reply_draft = cleanString(body.reply_draft, 100000);
@@ -810,6 +818,7 @@ async function recoverStaleRuntimeHandoff(identity: ReturnType<typeof claimRunti
 }
 
 export function startServer() {
+  accessToken = token();
   if (!Number.isInteger(runtimePort) || runtimePort < 0 || runtimePort > 65535) throw new Error("invalid_runtime_port");
   const remoteMode = readRemoteMode();
   const initialIdentity = createRuntimeIdentity();
@@ -823,8 +832,11 @@ export function startServer() {
     throw error;
   }
   let store: Store;
+  let externalObservations: ExternalObservationStore;
+  const taskCreatorProfiles = new TaskCreatorProfiles();
   try {
     store = new Store();
+    externalObservations = new ExternalObservationStore(store.db, taskCreatorProfiles);
     const migratedAgentAvatars = store.migrateAgentAvatarPresets(value => {
       const match = value.match(/^icon:([a-z0-9_-]{1,32})$/i);
       if (!match) throw new Error("invalid_agent_avatar_preset");
@@ -972,6 +984,26 @@ export function startServer() {
     if (eventHistory.length > 64) eventHistory.shift();
     for (const response of eventClients.keys()) sendEvent(response, "change", eventRevision);
   };
+  const externalReportWatcher = new ExternalReportWatcher(externalObservations, {
+    directory: mockupEnabled ? null : process.env.BETTER_CODEX_EXTERNAL_REPORTS_DIR?.trim() || null,
+    onChange: () => publishChange(),
+    onDiagnostic: (event, fields) => console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "external_observation", event, runtime_instance_id: identity.instanceId, runtime_pid: identity.pid, ...fields })}`),
+  });
+  const mcpReportsEnabled = !mockupEnabled && mcpReportingEnabled();
+  const externalCapability = (): ExternalObservationCapability => {
+    const fileCapability = externalReportWatcher.capability();
+    if (!mcpReportsEnabled) return fileCapability;
+    return {
+      ...fileCapability, enabled: true, connected: true,
+      mode: fileCapability.enabled ? "mixed" : "mcp_reporting",
+      poll_interval_ms: fileCapability.enabled ? fileCapability.poll_interval_ms : 0,
+      error: fileCapability.enabled ? fileCapability.error : null,
+    };
+  };
+  const externalSnapshot = () => {
+    const capability = externalCapability();
+    return { observations: mockupEnabled ? [] : externalObservations.list({ local_file: externalReportWatcher.capability().connected, mcp: mcpReportsEnabled }), capability };
+  };
   const importedSessionState = async (threadId: string) => {
     const { activity } = await readConversationActivity(threadId);
     return {
@@ -1001,6 +1033,7 @@ export function startServer() {
   const cleanup = () => {
     if (cleaned) return;
     cleaned = true;
+    void externalReportWatcher.stop();
     worker.stop();
     stopCodexActivityCollection();
     syncClient.stop();
@@ -1117,20 +1150,20 @@ export function startServer() {
         const sessionToken = createWebSession(webSessions);
         return sendWeb(response, 200, JSON.stringify({ token: sessionToken }), "application/json; charset=utf-8");
       }
-      if (url.pathname === "/web/injection.js" && method === "GET") {
+      if (url.pathname === "/web/ui.js" && method === "GET") {
         const relayRequest = validAccessToken(bearerToken(request)) && request.headers["x-better-codex-relay"] === "1";
         const locale = normalizeCodexLocale(url.searchParams.get("locale"));
-        if (relayRequest) return sendWeb(response, 200, injectionScript(0, "", "install", locale, "web"), "text/javascript; charset=utf-8");
+        if (relayRequest) return sendWeb(response, 200, browserUiScript(0, "", locale), "text/javascript; charset=utf-8");
         const sessionToken = url.searchParams.get("session") || "";
         if (!sameOriginBrowserRequest(request)) return sendJson(response, 403, { error: "forbidden" });
         if (!validWebSession(webSessions, sessionToken)) return sendJson(response, 401, { error: "unauthorized" });
         const address = server.address();
         const activePort = typeof address === "object" && address ? address.port : 0;
-        return sendWeb(response, 200, injectionScript(activePort, sessionToken, "install", locale, "web"), "text/javascript; charset=utf-8");
+        return sendWeb(response, 200, browserUiScript(activePort, sessionToken, locale), "text/javascript; charset=utf-8");
       }
       if (!authorized(request, url, webSessions)) return sendJson(response, 401, { error: "unauthorized" });
       if (url.pathname === "/api/ui/mcp" && method === "GET") {
-        return sendJson(response, 200, { html: betterCodexMcpHostHtml(), version: identity.version, runtimeInstanceId: identity.instanceId, generation: identity.generation });
+        return sendJson(response, 200, { html: betterCodexMcpHostHtml({ mockup: mockupEnabled }), version: identity.version, runtimeInstanceId: identity.instanceId, generation: identity.generation });
       }
       const commandStatusMatch = url.pathname.match(/^\/api\/commands\/([A-Za-z0-9_-]{8,200})$/);
       if (commandStatusMatch && method === "GET") {
@@ -1275,6 +1308,30 @@ export function startServer() {
         return sendJson(response, 201, savePastedImage(body.data));
       }
       if (url.pathname === "/api/issues/attachments/preview" && method === "GET") return sendJson(response, 200, readCachedImageAttachment(url.searchParams.get("name")));
+      if (path[0] === "api" && path[1] === "external-observations") {
+        if (path.length === 3 && path[2] === "report" && method === "POST") {
+          if (!mcpReportsEnabled || relayRequest) return sendJson(response, 403, { error: "external_reporting_not_enabled" });
+          const report = await readBody(request, 64 * 1024);
+          const result = externalObservations.ingest(report, Date.now(), "mcp");
+          return sendJson(response, result.status === "applied" ? 201 : 200, {
+            ...result, observation: externalObservations.get(result.id, true),
+          });
+        }
+        if (method !== "GET") return sendJson(response, 405, { error: "external_observations_read_only" });
+        if (path.length===3 && path[2]==="events") {
+          const after=Number(url.searchParams.get("after") || 0),limit=Number(url.searchParams.get("limit") || 100),taskId=url.searchParams.get("task_id") || undefined;
+          return sendJson(response,200,externalObservations.journal.events(after,limit,taskId));
+        }
+        if (path.length === 2) return sendJson(response, 200, externalSnapshot());
+        if (path.length === 3) {
+          const id = decodeURIComponent(path[2]);
+          const capability = externalCapability();
+          const observation = mockupEnabled ? null : externalObservations.get(id, { local_file: externalReportWatcher.capability().connected, mcp: mcpReportsEnabled });
+          if (!observation) return sendJson(response, 404, { error: "external_observation_not_found" });
+          return sendJson(response, 200, { observation, messages: externalObservations.messages(id), capability, runs:externalObservations.journal.runs(id),history_cursor:externalObservations.journal.cursor(id) });
+        }
+        return sendJson(response, 404, { error: "external_observation_not_found" });
+      }
       if (url.pathname === "/api/bootstrap" && method === "GET") {
         let agentModelCatalogError: string | null = null;
         const agentModelCatalog = await readModelCatalog().catch(error => {
@@ -1285,7 +1342,8 @@ export function startServer() {
         const agentReasoningEfforts = [...new Set(agentModelCatalog.flatMap(model => model.supportedReasoningEfforts.map(effort => effort.value)))];
         const mockup = mockupEnabled ? readMockupState(mockupLocale) : null;
         if (!mockup) syncCodexProjects(store);
-        return sendJson(response, 200, { projects: projectSummaries(mockup ? mockup.projects : store.listProjects()), agents: mockup ? mockup.agents : visibleAgentProfiles(), statuses: issueStatuses, priorities: issuePriorities, appearance: readCodexAppearance(), hostTheme: readHostThemeInput(), locale: readCodexLocale(), user: readCodexUserProfile(), agentModelCatalog, agentModelCatalogError, agentModels, agentReasoningEfforts, autoDispatch: mockup ? mockup.auto_dispatch : store.getAutoDispatch(), schedulerModel: mockup ? mockup.scheduler_model : store.getSchedulerModel(defaultAgentProfile().model), schedulerReasoningEffort: mockup ? mockup.scheduler_reasoning_effort : store.getSchedulerReasoningEffort(), limits: { issue_description: maxIssueDescriptionLength }, mockup: mockupEnabled, featureManifest: featureManifest() });
+        const external = externalSnapshot();
+        return sendJson(response, 200, { projects: projectSummaries(mockup ? mockup.projects : store.listProjects()), agents: mockup ? mockup.agents : visibleAgentProfiles(), statuses: issueStatuses, priorities: issuePriorities, external_observations: external.observations, external_observation_capability: external.capability, appearance: readCodexAppearance(), hostTheme: readHostThemeInput(), locale: mockup ? mockupLocale : readCodexLocale(), user: mockup ? { name: "Mockup", email: "", avatar: "" } : readCodexUserProfile(), task_creator_profiles: mockup ? [] : taskCreatorProfiles.profiles(), task_creator_profile_error: mockup ? null : taskCreatorProfiles.error, agentModelCatalog, agentModelCatalogError, agentModels, agentReasoningEfforts, autoDispatch: mockup ? mockup.auto_dispatch : store.getAutoDispatch(), schedulerModel: mockup ? mockup.scheduler_model : schedulerEvaluationModel, schedulerModelLocked: !mockup, schedulerServiceTier: schedulerEvaluationServiceTier, schedulerReasoningEffort: mockup ? mockup.scheduler_reasoning_effort : store.getSchedulerReasoningEffort(), limits: { issue_description: maxIssueDescriptionLength }, mockup: mockupEnabled, featureManifest: featureManifest() });
       }
       if (mockupEnabled && path[0] === "api" && path[1] === "scheduled-tasks") {
         if (method === "GET" && path.length === 2) return sendJson(response, 200, []);
@@ -1657,6 +1715,8 @@ export function startServer() {
         }
         return sendJson(response, 400, { error: "mockup_action_not_supported" });
       }
+      // All Mockup mutations are handled above; never enter real execution routes.
+      if (mockupEnabled) return sendJson(response, 400, { error: "mockup_action_not_supported" });
       if (url.pathname === "/api/settings/auto-dispatch" && method === "GET") {
         return sendJson(response, 200, { enabled: store.getAutoDispatch() });
       }
@@ -1668,18 +1728,13 @@ export function startServer() {
         return sendJson(response, 200, { enabled });
       }
       if (url.pathname === "/api/settings/scheduler-model" && method === "GET") {
-        return sendJson(response, 200, { model: store.getSchedulerModel(defaultAgentProfile().model), reasoning_effort: store.getSchedulerReasoningEffort() });
+        return sendJson(response, 200, { model: schedulerEvaluationModel, model_locked: true, service_tier: schedulerEvaluationServiceTier, reasoning_effort: store.getSchedulerReasoningEffort() });
       }
       if (url.pathname === "/api/settings/scheduler-model" && method === "PATCH") {
         const body = await readBody(request);
         const model = cleanString(body.model, 200);
-        const catalog = await readModelCatalog();
-        const selected = catalog.find(item => item.id === model);
-        if (!selected) throw new Error("invalid_model");
-        store.setSchedulerModel(model);
-        const currentEffort = store.getSchedulerReasoningEffort();
-        const reasoningEffort = selected.supportedReasoningEfforts.some(item => item.value === currentEffort) ? currentEffort : store.setSchedulerReasoningEffort(selected.defaultReasoningEffort);
-        return sendJson(response, 200, { model: store.getSchedulerModel(defaultAgentProfile().model), reasoning_effort: reasoningEffort });
+        if (model !== schedulerEvaluationModel) throw new Error("scheduler_model_fixed");
+        return sendJson(response, 200, { model: schedulerEvaluationModel, model_locked: true, service_tier: schedulerEvaluationServiceTier, reasoning_effort: store.getSchedulerReasoningEffort() });
       }
       if (url.pathname === "/api/settings/scheduler-reasoning-effort" && method === "GET") {
         return sendJson(response, 200, { reasoning_effort: store.getSchedulerReasoningEffort() });
@@ -1688,7 +1743,7 @@ export function startServer() {
         const body = await readBody(request);
         const effort = cleanString(body.reasoning_effort, 20);
         const catalog = await readModelCatalog();
-        const model = catalog.find(item => item.id === store.getSchedulerModel(defaultAgentProfile().model));
+        const model = catalog.find(item => item.id === schedulerEvaluationModel);
         if (!model?.supportedReasoningEfforts.some(item => item.value === effort)) throw new Error("invalid_scheduler_reasoning_effort");
         return sendJson(response, 200, { reasoning_effort: store.setSchedulerReasoningEffort(effort) });
       }
@@ -2235,6 +2290,8 @@ export function startServer() {
           created = store.createIssueRequest({
             id: cleanString(body.id, 200) || undefined,
             projectId,
+            parentIssueId: body.parent_issue_id as string | null | undefined,
+            dependsOnIssueIds: body.depends_on_issue_ids as string[] | undefined,
             title: cleanString(body.title, 500),
             description: semanticDocument ? inputDocumentText(semanticDocument) : withRemoteFilePaths(body.description, files.paths, "issue_description_too_long"),
             status: "status" in body ? asStatus(body.status) : undefined,
@@ -2267,6 +2324,9 @@ export function startServer() {
       if (path[0] === "api" && path[1] === "issues" && path[2]) {
         const issue = store.getIssue(decodeURIComponent(path[2]));
         if (!issue) return sendJson(response, 404, { error: "issue_not_found" });
+        if (method === "GET" && path.length === 4 && path[3] === "history") {
+          return sendJson(response,200,store.taskJournal.history(issue.id,Number(url.searchParams.get("after")||0),Number(url.searchParams.get("limit")||100)));
+        }
         if (method === "GET" && path.length === 3) {
           const [current] = await reconcileInterruptedIssues(store, [issue]);
           return sendJson(response, 200, { ...current, reply_status: store.getIssueReplyState(current.id).status });
@@ -2300,7 +2360,7 @@ export function startServer() {
             throw error;
           }
           if (patch.title !== undefined) worker.syncIssueSessionTitle(updated.id);
-          if (store.isDispatchable(updated)) worker.wake();
+          if (store.isDispatchable(updated) || patch.status === "done" || patch.depends_on_issue_ids !== undefined) worker.wake();
           return sendJson(response, 200, updated);
         }
         if (method === "POST" && path[3] === "start" && path.length === 4) {
@@ -2566,6 +2626,7 @@ export function startServer() {
     activeRuntimePort = address.port;
     publishRuntimeState({ ...identity, port: address.port });
     const startRuntimeServices = () => {
+      if (!mockupEnabled) externalReportWatcher.start();
       if (!mockupEnabled) startCodexActivityCollection();
       if (!mockupEnabled && !identity.handoffUpdateId) worker.start();
       if (!mockupEnabled && remoteMode === "projection") syncClient.start();

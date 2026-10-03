@@ -1,0 +1,28 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "better-codex-mockup",
+  "version": "0.4.18",
+  "description": "Source-only isolated Better Codex development Mockup.",
+  "license": "Apache-2.0",
+  "keywords": [
+    "codex",
+    "mockup",
+    "development"
+  ],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Better Codex Mockup",
+        "shortDescription": "Isolated development preview",
+        "longDescription": "Preview the shared Better Codex product UI using temporary simulation data. Does not connect to the production Runtime or execute real tasks.",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Open Better Codex Mockup."
+        ]
+      }
+    }
+  }
+}

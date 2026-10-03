@@ -60,7 +60,7 @@ npm run dev:install
 npm run dev:status
 ```
 
-This uses `~/.better-codex-dev` and creates `Better Codex Dev` separately from the stable `Better Codex` launcher. On first launch, development snapshots the stable database into `~/.better-codex-dev/better-codex.db` when the stable database exists. The copy then evolves independently, so development migrations and test data cannot change stable tasks. Runtime files, logs, attachments, and update state remain isolated as well. Only one profile owns the Codex page injection at a time. Run `npm run dev:uninstall` to remove the development launcher while preserving the development database copy.
+This uses `~/.better-codex-dev` and creates `Better Codex Dev` separately from the stable `Better Codex` launcher. On first launch, development snapshots the stable database into `~/.better-codex-dev/better-codex.db` when the stable database exists. The copy then evolves independently, so development migrations and test data cannot change stable tasks. Runtime files, logs, attachments, and update state remain isolated as well. Only one profile owns the native desktop bridge at a time. Run `npm run dev:uninstall` to remove the development launcher while preserving the development database copy.
 
 On Windows, set `BETTER_CODEX_STABLE_EXECUTABLE` before `npm run dev:install` when the stable binary was installed outside its default location.
 
@@ -82,7 +82,7 @@ The signed app bundle is immutable; Runtime updates retain it and continue to us
 
 Before release, manually verify the template icon in light/dark menu bars, first launch from Applications, login startup, Codex restart confirmation, and exit during an active task. A local build is not proof of Gatekeeper acceptance or task continuity. An unreleased build with the same version as an installed managed core must not be used to replace that core; publish a new signed version for in-place upgrades. Local-archive installation rejects differing core bytes under the same version before requesting an update or replacing installed files. The DMG regression check covers this conflict against a selected managed core, including preservation of the launcher, core pointer, Skill, and database.
 
-The runtime integrates with Codex Desktop through its local CDP interface. A successful build on one operating system does not verify behavior on another. Changes that affect injection, launchers, installers, or Codex selectors should be checked on every affected platform.
+The runtime integrates with Codex Desktop through its local CDP interface. A successful build on one operating system does not verify behavior on another. Changes that affect desktop bridge, launchers, installers, or Codex selectors should be checked on every affected platform.
 
 ## Tests and verification
 
@@ -91,7 +91,7 @@ Run the relevant checks before opening a pull request:
 - `npm run build`
 - `npm test`
 - `npm run package:binary` for packaging changes
-- `better-codex doctor` for runtime, database, compatibility, and injection changes
+- `better-codex doctor` for runtime, database, compatibility, and desktop bridge changes
 
 UI changes should include a screenshot or a short description of the surface that was checked. Installer changes should include the operating system, Codex distribution, and whether Codex was running during the test.
 
@@ -118,7 +118,7 @@ Do not include generated release binaries, local databases, screenshots containi
 
 ## Reporting bugs
 
-Use the bug report template for a confirmed defect. Use the compatibility template when the problem appears after a Codex, macOS, or Windows update, or when injection and launcher behavior differs by platform.
+Use the bug report template for a confirmed defect. Use the compatibility template when the problem appears after a Codex, macOS, or Windows update, or when desktop bridge and launcher behavior differs by platform.
 
 Include the Better Codex version, Codex version and distribution, operating system, reproduction steps, expected behavior, actual behavior, and a redacted `better-codex doctor` result when relevant.
 
@@ -129,3 +129,14 @@ Do not open a public Issue or Discussion for a suspected vulnerability. Follow t
 ## Feature requests
 
 Describe the user problem and the workflow it interrupts before proposing an implementation. Features should preserve the Codex Desktop-first experience, keep task management as the primary workflow, and avoid adding a separate hosted workspace unless the project direction changes.
+
+## Local development Mockup in the plugin
+
+Run `npm run dev:mockup` from the checkout. It prints a temporary local plugin
+directory named `better-codex-mockup`; import that directory into Codex and open
+**Better Codex Mockup**. Its source `mcp --mockup` command owns a separate temporary
+simulation service. It shares the product renderer with the normal plugin and
+retains bilingual sample data, editing, import, export and reset. Closing its MCP
+connection cleans up only that simulation. Each connection starts fresh; export
+Mockup data to retain it. Production plugin registration and installed services
+are untouched. Packaged releases reject the Mockup command.

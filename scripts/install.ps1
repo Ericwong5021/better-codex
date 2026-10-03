@@ -651,7 +651,6 @@ try {
       throw "Unable to read the existing Better Codex service state; no installation changes were made."
     }
   } else { $null }
-  $previousInjectionEnabled = -not (Test-Path (Join-Path $betterCodexHome "run\injection.json")) -or ((Get-Content (Join-Path $betterCodexHome "run\injection.json") -Raw | ConvertFrom-Json).enabled -eq $true)
   if ($hadExecutable) { Copy-Item -Force $executable $backupExecutable }
   if ($hadLauncher) { Copy-Item -Force $launcherPath $backupLauncher }
   if ($hadSkill) { Copy-Item -Recurse -Force $skillDirectory $backupSkill }
@@ -685,8 +684,6 @@ try {
   if ($preserveCodex) { Write-Step "Codex will remain open while Better Codex is upgraded..." }
   if ((Test-Path $executable) -and -not $NoService -and -not $liveUpgradeCompleted) {
     Write-Step "Stopping the existing Better Codex helpers..."
-    $disableResult = Invoke-BetterCodexCapture $executable @("disable") 10000
-    if ($disableResult.TimedOut) { Write-Step "The existing injection did not respond; continuing with process cleanup..." }
     $serviceStopResult = Invoke-BetterCodexCapture $executable @("service", "stop") 10000
     if ($serviceStopResult.TimedOut) { Write-Step "The existing runtime did not stop in time; continuing with process cleanup..." }
   }
@@ -728,7 +725,7 @@ try {
     Write-Step "Running installation diagnostics..."
     $doctor = $null
     $doctorOutput = $null
-    $doctorArguments = if ($preserveCodex -or $liveUpgradeCompleted) { @("doctor", "--allow-pending-injection") } else { @("doctor") }
+    $doctorArguments = @("doctor")
     for ($attempt = 1; $attempt -le 8; $attempt++) {
       $doctorResult = Invoke-BetterCodexCapture $executable $doctorArguments 20000
       $doctorOutput = $doctorResult.Output
@@ -740,7 +737,7 @@ try {
         throw "Better Codex diagnostics returned invalid output."
       }
       if ($doctor.ok) { break }
-      $reason = $doctor.checks.injection.error
+      $reason = $doctor.checks.desktopBridge.error
       if (-not $reason -and $doctorExitCode -ne 0) { $reason = "exit code $doctorExitCode" }
       if (-not $reason) { $reason = "not ready" }
       Write-Step "Diagnostics pending ($attempt/8): $reason. Retrying..."
@@ -774,7 +771,6 @@ try {
   } catch {
     if ($liveUpgradeCompleted) { throw }
     if ((Test-Path $executable) -and -not $NoService -and -not $liveUpgradeCompleted) {
-      $null = Invoke-BetterCodexCapture $executable @("disable") 10000
       $null = Invoke-BetterCodexCapture $executable @("service", "stop") 10000
       if (-not $hadExecutable) {
         $null = Invoke-BetterCodexCapture $executable @("service", "uninstall") 10000
@@ -805,7 +801,6 @@ try {
       } else {
         $null = Invoke-BetterCodexCapture $executable @("service", "uninstall") 10000
       }
-      if ($previousInjectionEnabled) { $null = Invoke-BetterCodexCapture $executable @("enable") 30000 $true } else { $null = Invoke-BetterCodexCapture $executable @("disable") 10000 }
     }
     throw
   }

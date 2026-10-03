@@ -6,7 +6,7 @@ Better Codex should feel like a native Codex task-management surface, not a web 
 
 ## 2. Color palette and roles
 
-All production values live in `src/design-system.ts`. Components must consume semantic tokens and must not copy their resolved values.
+All production values are registered in `src/ui/design/registry.ts` and its layer modules. Components must consume semantic tokens and must not copy their resolved values.
 
 - `--bc-color-canvas`: page background
 - `--bc-color-surface`: grouped content and board columns
@@ -65,3 +65,15 @@ The agent inspector occupies a fixed right-side surface on desktop. Below 720px 
 - Task card: use `--bc-color-surface-raised`, `--bc-radius-md`, 12px padding, and no border or shadow.
 - Menu: use `--bc-color-surface-raised`, `--bc-radius-md`, 34px rows, and `--bc-elevation-menu`.
 - Dialog: use `--bc-color-surface-raised`, `--bc-radius-xl`, no internal dividers, and `--bc-elevation-float`.
+
+## 10. External tasks and execution history
+
+External tasks share board cards, creator avatars, task dialogs, conversation typography and property rows with owned tasks. Keep the creator and executor distinct, using the card's existing compact metadata row. Reuse the circular avatar tier; never create a second square avatar system.
+
+History and provenance use the shared disclosure component with an accessible button, chevron, count and stable update/destroy lifecycle. Begin collapsed. Expanded history shows acceptance, dependencies, run status and localized timestamps before results. Each result is separately expandable; preserve its state, focus and scroll on refresh. Technical source fields belong in secondary provenance content. Keep typed blockers visible without implying success or acceptance.
+
+Use semantic surface steps, muted typography and spacing tokens instead of section rules, browser-default headings or raw timestamps. Long results scroll inside the history pane. All hosts use the generated shared entry; host adapters only supply transport and theme.
+
+External report bodies reuse the owned conversation's avatar, author/time metadata and markdown bubble layout. Conversation height follows its content up to the registered scroll cap. Provenance and run history sit below the conversation. Fold only adjacent, sequence-contiguous messages with identical text and role; retain every original message ID, timestamp and sequence in the expandable repeat records. Never combine different text, roles, separated events or missing sequences. Preserve expanded records, keyboard focus and scroll across live updates.
+
+Agent report bubbles reuse the user-mapped source portrait, including the existing private Dot avatar. The portrait is a display choice for the source and does not change creator verification or executor identity. System records and unmapped sources retain the generic icon. Image decode failures fall back without changing task attribution.

@@ -21,7 +21,7 @@ function call(method: string, params = {}) {
 
 test.beforeAll(async () => {
   runtime = await startRuntimeFixture();
-  child = spawn(process.execPath, ["--import", "tsx", "--input-type=module", "-e", 'import {startMcpAppServer} from "./src/mcp-app.ts"; await startMcpAppServer({ensureRuntime:async()=>{},launchSidebar:async()=>{throw new Error("unexpected_sidebar_activation")}});'], {
+  child = spawn(process.execPath, ["--import", "tsx", "--input-type=module", "-e", 'import {startMcpAppServer} from "./src/mcp-app.ts"; await startMcpAppServer({ensureRuntime:async()=>{}});'], {
     cwd: process.cwd(), env: { ...process.env, BETTER_CODEX_HOME: runtime.workspacePath, BETTER_CODEX_DB: runtime.databasePath, BETTER_CODEX_TOKEN: runtime.token, CODEX_HOME: join(runtime.workspacePath, "codex") }, stdio: ["pipe", "pipe", "pipe"],
   });
   child.stderr!.on("data", chunk => { stderr += String(chunk); });
@@ -33,7 +33,8 @@ test.beforeAll(async () => {
     if (reply.error) item.reject(new Error(reply.error.message)); else item.resolve(reply.result);
   });
   child.on("exit", () => { for (const item of pending.values()) item.reject(new Error("mcp_fixture_exited: " + stderr)); pending.clear(); });
-  await call("initialize", { protocolVersion: "2026-01-26" });
+  await call("initialize", { protocolVersion: "2026-01-26", capabilities: {}, clientInfo: {name:"fixture",version:"1"} });
+  child.stdin!.write(JSON.stringify({jsonrpc:"2.0",method:"notifications/initialized"}) + "\n");
   const resource = await call("resources/read", { uri: "ui://better-codex/board.html" });
   mcpHtml = resource.contents[0].text;
   expect(mcpHtml).not.toContain(runtime.token);
@@ -44,19 +45,36 @@ test.afterAll(async () => {
   await runtime?.stop();
 });
 
-async function openPlugin(page: Page) {
+async function openPlugin(page: Page, options: { textMessages?: boolean } = {}) {
   calls.length = 0;
   const entry = await call("tools/call", { name: "board", arguments: {} });
   await page.exposeFunction("mcpFixtureCall", async (message: any) => {
     calls.push(message);
     return await call(message.method, message.params);
   });
-  await page.route("http://mcp-host.test/**", route => route.fulfill({ contentType: "text/html", body: `<!doctype html><html><body style="margin:0"><iframe id="app" src="http://mcp-app.test/board" sandbox="allow-scripts allow-same-origin allow-forms allow-downloads" style="border:0;width:100vw;height:100vh"></iframe><script>const frame=document.getElementById('app');window.addEventListener('message',async event=>{if(event.source!==frame.contentWindow||event.data?.jsonrpc!=='2.0')return;const message=event.data;if(message.id===undefined)return;let result;if(message.method==='ui/initialize'){result={protocolVersion:'2026-01-26',hostCapabilities:{serverTools:{}},hostContext:{theme:'light'}};}else{result=await window.mcpFixtureCall(message);}frame.contentWindow.postMessage({jsonrpc:'2.0',id:message.id,result},'*');if(message.method==='ui/initialize')frame.contentWindow.postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:${JSON.stringify(entry)}},'*');});</script></body></html>` }));
+  await page.exposeFunction("mcpFixtureMessage", async (message: any) => {
+    calls.push(message);
+    return { isError: true };
+  });
+  const hostCapabilities = { serverTools: {}, ...(options.textMessages ? { message: { text: {} } } : {}) };
+  await page.route("http://mcp-host.test/**", route => route.fulfill({ contentType: "text/html", body: `<!doctype html><html><body style="margin:0"><iframe id="app" src="http://mcp-app.test/board" sandbox="allow-scripts allow-same-origin allow-forms allow-downloads" style="border:0;width:100vw;height:100vh"></iframe><script>const frame=document.getElementById('app');window.addEventListener('message',async event=>{if(event.source!==frame.contentWindow||event.data?.jsonrpc!=='2.0')return;const message=event.data;if(message.id===undefined)return;let result;if(message.method==='ui/initialize'){result={protocolVersion:'2026-01-26',hostCapabilities:${JSON.stringify(hostCapabilities)},hostContext:{theme:'light'}};}else if(message.method==='ui/message'){result=await window.mcpFixtureMessage(message);}else{result=await window.mcpFixtureCall(message);}frame.contentWindow.postMessage({jsonrpc:'2.0',id:message.id,result},'*');if(message.method==='ui/initialize')frame.contentWindow.postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:${JSON.stringify(entry)}},'*');});</script></body></html>` }));
   await page.route("http://mcp-app.test/**", route => route.fulfill({ contentType: "text/html", headers: { "content-security-policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; font-src data:; media-src data:;" }, body: mcpHtml }));
   await page.goto("http://mcp-host.test/");
   const frame = page.frameLocator("#app");
   await expect(frame.locator("#better-codex-board")).toBeVisible();
   return frame;
+}
+
+for (const textMessages of [true, false]) {
+  test(`Dot settings stay unavailable with host message capability ${textMessages}`, async ({ page }) => {
+    const frame = await openPlugin(page, { textMessages });
+    await frame.locator(".better-codex-auto-dispatch-help").click();
+    const settings = frame.locator("#better-codex-auto-dispatch-help-dialog");
+    await expect(settings.locator('[data-help-view="dots"], [data-help-page="dots"], [data-dots-setup]')).toHaveCount(0);
+    await settings.locator('[data-help-view="settings"]').click();
+    await expect(settings.locator('[data-help-page="settings"]')).toBeVisible();
+    expect(calls.filter(message => message.method === "ui/message")).toHaveLength(0);
+  });
 }
 
 async function createSeedIssue(title: string) {

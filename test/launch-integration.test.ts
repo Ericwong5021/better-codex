@@ -70,7 +70,7 @@ test("launcher serializes concurrent Codex restarts and keeps migration guards",
   assert.match(cliSource, /return print\(await withLaunchLock/);
   assert.match(cliSource, /owner\.token === token/);
   assert.match(cliSource, /renameSync\(launchLockPath, stalePath\)/);
-  assert.match(cliSource, /const switchedFrom = await deactivatePeerInstance\(\)/);
+  assert.doesNotMatch(cliSource, /deactivatePeerInstance/);
   assert.match(source, /validateState/);
   assert.match(source, /macBundleIdentifier\(info\) === MAC_BUNDLE_ID/);
   assert.match(source, /temporaryApp/);
@@ -86,75 +86,23 @@ test("launcher serializes concurrent Codex restarts and keeps migration guards",
   assert.match(source, /migrateLegacyMacLauncher/);
 });
 
-test("shortcut launch opens the current Codex and supports an explicit restart", () => {
-  assert.match(cliSource, /openedCurrentCodex: true/);
-  assert.match(cliSource, /async function restartRuntime\(\)/);
-  assert.match(cliSource, /restarted: true/);
-  assert.match(cliSource, /const codexRunning = detectedCodexRunning \|\| current\.available \|\| current\.targets\.length > 0/);
-  assert.match(cliSource, /codexStarted: true/);
-  assert.match(cliSource, /await cdpRestartAndInject\(cdpPort, activeRuntimePort\(\), accessToken\(\)\)/);
-  assert.match(cliSource, /includes\("--restart"\)/);
-  assert.match(cliSource, /latestIntent\.restart === true/);
+test("launcher opens Codex without an implicit restart or peer Runtime shutdown", () => {
+  const launch = cliSource.slice(cliSource.indexOf('if (command === "launch")'), cliSource.indexOf('if (command === "launcher")'));
+  assert.match(launch, /if \(intent\.restart\) await cdpRestartAndConnectDesktopBridge/);
+  assert.match(launch, /else launchCodex\(cdpPort, codexProcessRunning\(\)\)/);
+  assert.doesNotMatch(launch, /restartRuntime|chooseCodexRestartAction|deactivatePeerInstance|stopSessionHost/);
 });
 
-test("Windows shortcut routes every running Codex through restart confirmation", () => {
-  const policy = cliSource.indexOf("requiresCodexRestartForLaunch(codexRunning)");
-  const switchedProfileReuse = cliSource.indexOf("if (switchedFrom && !restartRequested)", policy);
-  const ordinaryReuse = cliSource.indexOf("if (!restartRequested)", switchedProfileReuse);
-  const restart = cliSource.indexOf("await cdpRestartAndInject", ordinaryReuse);
-  assert.ok(policy >= 0 && switchedProfileReuse > policy && ordinaryReuse > switchedProfileReuse && restart > ordinaryReuse);
-});
-
-test("Windows shortcut checks only the Codex process before asking to restart", () => {
-  assert.match(cliSource, /const explicitRestartRequested = latestIntent\.restart === true/);
-  assert.match(cliSource, /const restartRequested = explicitRestartRequested \|\| restartChoice === "restart-codex"/);
-  const launch = cliSource.indexOf("if (command === \"launch\")");
-  const processDiscovery = cliSource.indexOf('const detectedCodexRunning = ["darwin", "win32"].includes(process.platform) && codexProcessRunning()', launch);
-  const confirmation = cliSource.indexOf("chooseCodexRestartAction()", processDiscovery);
-  const platformDiscovery = cliSource.indexOf('const current = process.platform === "win32" ? { available: false, targets: [] } : await cdpStatus(cdpPort)', confirmation);
-  const peerDeactivation = cliSource.indexOf("await deactivatePeerInstance()", confirmation);
-  const runtimeRestart = cliSource.indexOf("await restartRuntime()", confirmation);
-  assert.ok(processDiscovery >= 0 && confirmation > processDiscovery && platformDiscovery > confirmation && peerDeactivation > platformDiscovery && runtimeRestart > peerDeactivation);
-  assert.match(cliSource, /cancelled: true/);
-});
-
-test("launcher reset-service choice restarts only the Runtime and restores injection", () => {
-  const resetChoice = cliSource.indexOf('if (restartChoice === "reset-runtime")');
-  const fullRestart = cliSource.indexOf("const injection = await cdpRestartAndInject", resetChoice);
-  const branch = cliSource.slice(resetChoice, fullRestart);
-  assert.ok(resetChoice >= 0 && fullRestart > resetChoice);
-  assert.match(branch, /await restartRuntime\(\)/);
-  assert.match(branch, /cdpInject\(cdpPort, activeRuntimePort\(\), accessToken\(\), false\)/);
-  assert.match(branch, /runtimeReset: true/);
-  assert.doesNotMatch(branch, /cdpRestartAndInject/);
-});
-
-test("macOS and Windows running Codex instances share the native restart choice", () => {
-  assert.match(cliSource, /\["darwin", "win32"\]\.includes\(process\.platform\)/);
-  assert.match(cliSource, /detectedCodexRunning && !explicitRestartRequested \? chooseCodexRestartAction\(\) : null/);
-});
-
-test("shortcut launch restores the bridge when keeping the current Codex", () => {
-  const start = cliSource.indexOf("if (!restartRequested) {");
-  const end = cliSource.indexOf("return { launched: true, restarted: false, openedCurrentCodex: true, injection }", start);
-  assert.ok(start >= 0 && end > start);
-  const branch = cliSource.slice(start, end);
-  assert.match(branch, /setInjectionEnabled\(true\)/);
-  assert.match(branch, /cdpInject\(cdpPort, activeRuntimePort\(\), accessToken\(\), true\)/);
-  assert.match(branch, /ensureInjector\(cdpPort\)/);
-});
-
-test("injector startup is serialized and independent from runtime polling", () => {
-  assert.match(cliSource, /function isInjectorProcess\(pid: number\)/);
-  assert.match(cliSource, /processAlive\(pid\) && isInjectorProcess\(pid\)/);
-  assert.match(cliSource, /openSync\(injectorStartLockPath, "wx", 0o600\)/);
-  assert.match(cliSource, /async function ensureInjector\(portNumber: number\)/);
-  assert.doesNotMatch(cliSource, /waitForInjector/);
+test("desktop bridge startup records fenced identity and stays independent of Runtime polling", () => {
+  assert.match(cliSource, /openSync\(desktopBridgeStartLockPath, "wx", 0o600\)/);
+  assert.match(cliSource, /async function ensureDesktopBridge\(portNumber: number\)/);
+  assert.match(cliSource, /desktopBridgeIdentityMatches/);
+  assert.match(cliSource, /processStartedAt, command, profile: betterCodexProfile, home: betterCodexHome, instanceId: randomUUID/);
 });
 
 test("launcher coalesces clicks to the latest profile intent and leases the shared lock", () => {
   assert.match(cliSource, /recordLaunchIntent/);
-  assert.match(cliSource, /latestIntent\?\.token !== intent\.token/);
+  assert.match(cliSource, /latestLaunchIntent\(\)\?\.token !== intent\.token/);
   assert.match(cliSource, /superseded: true/);
   assert.match(cliSource, /nextLaunchIntentSequence/);
   assert.match(cliSource, /markLaunchIntentProcessed/);

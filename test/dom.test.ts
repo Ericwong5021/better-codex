@@ -2,33 +2,33 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { betterCodexDesignSystemCss } from "../src/design-system.js";
-import { injectionScript } from "../src/dom.js";
+import { browserUiScript } from "../src/browser-ui.js";
 
-const injectedEntrySource = readFileSync(new URL("../src/ui/injected-entry.ts", import.meta.url), "utf8");
+const browserEntrySource = readFileSync(new URL("../src/ui/browser-entry.ts", import.meta.url), "utf8");
+const desktopBridgeEntrySource = readFileSync(new URL("../src/ui/desktop-bridge-entry.ts", import.meta.url), "utf8");
 const sharedDialogSource = readFileSync(new URL("../src/ui/components/dialog.ts", import.meta.url), "utf8");
 
-function injectionSource(...parameters: Parameters<typeof injectionScript>) {
-  return `${injectionScript(...parameters)}\n${injectedEntrySource}`;
+function uiSource(...parameters: Parameters<typeof browserUiScript>) {
+  return `${browserUiScript(...parameters)}\n${browserEntrySource}`;
 }
 
-test("generated injection script is valid JavaScript", () => {
-  const executable = injectionScript(4317, "test-token", "install");
-  const source = `${executable}\n${injectedEntrySource}`;
+test("generated shared UI script is valid JavaScript", () => {
+  const executable = browserUiScript(4317, "test-token");
+  const source = `${executable}\n${browserEntrySource}`;
 
   assert.doesNotThrow(() => new Function(executable));
-  assert.ok(source.includes("location.pathname.match(/\\/local\\/([^/?#]+)/)"));
-  assert.ok(source.includes("if (options.background && !changed) return"));
+  assert.ok(source.includes("if (options.background && !changed && !externalObservations.length && !externalLoadError) return"));
   assert.ok(source.includes("state.languageSetting = setting"));
   assert.ok(source.includes('state.locale = setting === "system" ? state.systemLocale : setting'));
   assert.ok(source.includes("panel?.remove()"));
   assert.ok(source.includes("showAutoDispatchHelp(\"settings\")"));
-  assert.ok(source.includes('HOST_KIND === "web" ? INITIAL_LOCALE : bootstrap.locale'));
+  assert.ok(source.includes("state.systemLocale = resolveSystemLocale(HOST_KIND === \"web\" ? INITIAL_LOCALE : bootstrap.locale)"));
   assert.ok(source.includes('const REMOTE = HOST_ADAPTER.remote'));
   assert.ok(source.includes('return (RELAY ? "/api/runtime-update" : "/api/update") + suffix'));
-  const remoteUpdateStart = injectedEntrySource.indexOf('remoteUpgrade?.addEventListener("click"');
-  const runtimeUpdateStart = injectedEntrySource.indexOf('checkUpdate.addEventListener("click"');
-  const remoteUpdateHandler = injectedEntrySource.slice(remoteUpdateStart, injectedEntrySource.indexOf('remoteRefresh?.addEventListener("click"', remoteUpdateStart));
-  const runtimeUpdateHandler = injectedEntrySource.slice(runtimeUpdateStart, injectedEntrySource.indexOf('dialog.addEventListener("cancel"', runtimeUpdateStart));
+  const remoteUpdateStart = browserEntrySource.indexOf('remoteUpgrade?.addEventListener("click"');
+  const runtimeUpdateStart = browserEntrySource.indexOf('checkUpdate.addEventListener("click"');
+  const remoteUpdateHandler = browserEntrySource.slice(remoteUpdateStart, browserEntrySource.indexOf('remoteRefresh?.addEventListener("click"', remoteUpdateStart));
+  const runtimeUpdateHandler = browserEntrySource.slice(runtimeUpdateStart, browserEntrySource.indexOf('dialog.addEventListener("cancel"', runtimeUpdateStart));
   assert.ok(remoteUpdateHandler.includes('api("/api/update/check", { method: "POST" })'));
   assert.ok(remoteUpdateHandler.includes('vpsUpdateObserver.start('));
   assert.doesNotMatch(remoteUpdateHandler, /runtimeUpdatePath/);
@@ -44,9 +44,9 @@ test("generated injection script is valid JavaScript", () => {
 });
 
 test("UI request IDs stay admissible without secure-context UUID support", () => {
-  const start = injectedEntrySource.indexOf("    function uiRequestId() {");
-  const end = injectedEntrySource.indexOf("    const HOST_ROUTING", start);
-  const createId = new Function("window", "globalThis", injectedEntrySource.slice(start, end) + "return uiRequestId();");
+  const start = browserEntrySource.indexOf("    function uiRequestId() {");
+  const end = browserEntrySource.indexOf("    const HOST_ROUTING", start);
+  const createId = new Function("window", "globalThis", browserEntrySource.slice(start, end) + "return uiRequestId();");
   const validId = /^[A-Za-z0-9_-]{8,200}$/;
   let nativeCalls = 0;
   assert.equal(createId({ betterCodexHost: { requestId: () => "host-request-1234" } }, { crypto: { randomUUID: () => { nativeCalls += 1; return "native-request-1234"; } } }), "host-request-1234");
@@ -54,23 +54,12 @@ test("UI request IDs stay admissible without secure-context UUID support", () =>
   assert.equal(createId({}, { crypto: { randomUUID: () => "native-request-1234" } }), "native-request-1234");
   assert.match(createId({ betterCodexHost: { requestId: () => "0.3.10-invalid" } }, { crypto: { getRandomValues: (bytes: Uint8Array) => bytes.fill(127) } }), validId);
   assert.match(createId({}, {}), validId);
-  assert.doesNotMatch(injectedEntrySource, /VERSION \+ "-(?:command|trace|create|reply|queue)/);
-  assert.ok(injectedEntrySource.includes('const traceId = uiRequestId();'));
-});
-
-test("web sidebar entries never become their own native clone reference", () => {
-  const source = injectionSource(4317, "test-token", "install", "zh-CN", "web");
-
-  assert.ok(source.includes("filter(button => !button.hasAttribute(OWNED))"));
-  assert.ok(source.includes('const NAVIGATION = HOST_KIND === "web"'));
-  assert.ok(source.includes('threadRoutePrefix: "/local/"'));
-  assert.ok(source.includes("!document.hidden && active"));
-  assert.ok(source.includes("window.betterCodexHost?.request"));
-  assert.ok(source.includes("startLiveUpdates()"));
+  assert.doesNotMatch(browserEntrySource, /VERSION \+ "-(?:command|trace|create|reply|queue)/);
+  assert.ok(browserEntrySource.includes('const traceId = uiRequestId();'));
 });
 
 test("in-review status uses the waiting-for-review label", () => {
-  const source = injectionSource(4317, "test-token", "install");
+  const source = uiSource(4317, "test-token");
 
   assert.ok(source.includes('in_review: "待审核"'));
   assert.ok(source.includes('activityState === "in_review" ? "待审核"'));
@@ -78,7 +67,7 @@ test("in-review status uses the waiting-for-review label", () => {
 });
 
 test("board bridge retries timed out GET requests without repeating writes", () => {
-  const source = injectionSource(4317, "test-token", "install");
+  const source = uiSource(4317, "test-token");
   assert.match(source, /runtime_bridge_timeout/);
   assert.match(source, /const method = String\(options\.method \|\| "GET"\)\.toUpperCase\(\)/);
   assert.match(source, /return attempt\(method === "GET" \? 1 : 0\)/);
@@ -97,28 +86,28 @@ test("board bridge retries timed out GET requests without repeating writes", () 
 });
 
 test("web service failures preserve Runtime business 404 errors", () => {
-  const classifier = injectedEntrySource.slice(injectedEntrySource.indexOf("function serviceFailureKind"), injectedEntrySource.indexOf("function serviceFailureLabel"));
+  const classifier = browserEntrySource.slice(browserEntrySource.indexOf("function serviceFailureKind"), browserEntrySource.indexOf("function serviceFailureLabel"));
 
   assert.ok(classifier.includes('status === 404 && ["not_found", "not found"].includes(value)'));
   assert.doesNotMatch(classifier, /status === 404\) return "vps_http_not_found"/);
-  assert.ok(injectedEntrySource.includes('["codex_project_not_found", "codex_project_ambiguous"].includes(value)'));
+  assert.ok(browserEntrySource.includes('["codex_project_not_found", "codex_project_ambiguous"].includes(value)'));
 });
 
 test("window error listener ignores benign ResizeObserver notifications", () => {
-  const onWindowErrorBlock = injectedEntrySource.slice(injectedEntrySource.indexOf("function onWindowError(event)"), injectedEntrySource.indexOf("function onUnhandledRejection"));
+  const onWindowErrorBlock = browserEntrySource.slice(browserEntrySource.indexOf("function onWindowError(event)"), browserEntrySource.indexOf("function onUnhandledRejection"));
   assert.match(onWindowErrorBlock, /ResizeObserver loop \(\?:completed with undelivered notifications\|limit exceeded\)/);
   assert.doesNotMatch(onWindowErrorBlock, /!event\.error && \(!event\.filename/);
 });
 
 test("renderBoard checks element existence before innerHTML manipulation", () => {
-  const renderBoardBlock = injectedEntrySource.slice(injectedEntrySource.indexOf("function renderBoard(options = {})"), injectedEntrySource.indexOf("const visible = sourceIssues.filter"));
+  const renderBoardBlock = browserEntrySource.slice(browserEntrySource.indexOf("function renderBoard(options = {})"), browserEntrySource.indexOf("const visible = sourceIssues.filter"));
   assert.match(renderBoardBlock, /if \(!panel && !options\.board\) return;/);
   assert.match(renderBoardBlock, /if \(working\) \{/);
   assert.match(renderBoardBlock, /if \(filterButton\) \{/);
 });
 
-test("injected panel opts out of the native Electron drag region", () => {
-  const source = injectionSource(4317, "test-token", "install");
+test("shared panel opts out of the native Electron drag region", () => {
+  const source = uiSource(4317, "test-token");
   const css = betterCodexDesignSystemCss();
 
   assert.match(css, /#better-codex-panel\s*\{[^}]*-webkit-app-region:\s*no-drag\s*!important/s);
@@ -127,99 +116,8 @@ test("injected panel opts out of the native Electron drag region", () => {
   assert.match(css, /\.better-codex-toolbar :is\(button, input, a, select, textarea, label\)[^}]*-webkit-app-region:\s*no-drag;/s);
 });
 
-test("leaving the app surface suspends the panel and restores its previous surface", () => {
-  const source = injectionSource(4317, "test-token", "install");
-
-  assert.ok(source.includes('createEntry("任务看板", ENTRY_ID, "打开任务看板", "issues")'));
-  assert.ok(source.includes('syncEntryLabel(entry, "任务看板", "打开任务看板")'));
-  assert.ok(source.includes('syncEntryIcon(entry, "issues")'));
-  assert.ok(source.includes('"issues":{"name":"square-kanban"'));
-  assert.ok(source.includes('"bot":{"name":"bot"'));
-  assert.ok(source.includes("const mounted = entry.isConnected && agentsEntry.isConnected && projectsEntry.isConnected && (HOST_KIND !== \"web\" || auxiliaryNavigation?.isConnected)"));
-  assert.ok(source.includes("const entriesAvailable = ensureEntry()"));
-  assert.ok(source.includes("if (active && !betterCodexRoute) close({ resume: true, suppressRoute: false })"));
-  assert.ok(source.includes("routeSeen = false"));
-  assert.ok(source.includes("window.postMessage({ type: NAVIGATION.messageType, path: BETTER_CODEX_ROUTE }, window.location.origin)"));
-  assert.ok(source.includes("function scheduleRefresh()"));
-  assert.ok(source.includes("refreshTimer = setTimeout(() =>"));
-  assert.ok(source.includes("}, 50);"));
-  assert.ok(source.includes("if (content && content.textContent !== text) content.textContent = text"));
-  assert.ok(source.includes("if (svg.innerHTML !== definition.nodes) svg.innerHTML = definition.nodes"));
-  const scheduledRefresh = injectedEntrySource.slice(injectedEntrySource.indexOf("function scheduleRefresh()"), injectedEntrySource.indexOf("window.__betterCodexInjection__"));
-  assert.doesNotMatch(scheduledRefresh, /setTimeout\([\s\S]*?160/);
-});
-
-test("desktop injection mounts product entries on the navigation rail", () => {
-  const desktop = injectedEntrySource.slice(injectedEntrySource.indexOf("function ensureDesktopEntries()"), injectedEntrySource.indexOf("function ensureEntry()"));
-
-  assert.ok(injectedEntrySource.includes('document.querySelector("[data-app-navigation-rail]")'));
-  assert.ok(injectedEntrySource.includes('button.setAttribute("data-better-codex-rail-entry", "true")'));
-  assert.ok(injectedEntrySource.includes('if (HOST_KIND !== "web") return ensureDesktopEntries();'));
-  assert.ok(desktop.includes("placeRailSequence([entry, agentsEntry, projectsEntry], parent, anchor)"));
-  assert.doesNotMatch(desktop, /reference\.after\(entry\)/);
-  assert.ok(desktop.includes("restoreNativeLaunchers()"));
-});
-
-test("injection bootstraps before opening the panel and preserves the native plugin entry", () => {
-  const source = injectionSource(4317, "test-token", "install");
-  const bootstrapStart = injectedEntrySource.indexOf("function ensureBootstrapReady()");
-  const loadStart = injectedEntrySource.indexOf("async function load()", bootstrapStart);
-  const mountStart = injectedEntrySource.indexOf("function mount()");
-  const mountEnd = injectedEntrySource.indexOf("window.__betterCodexInjection__ =", mountStart);
-  const openStart = injectedEntrySource.indexOf("function open(surface = state.surface)");
-  const openEnd = injectedEntrySource.indexOf("function close(", openStart);
-  assert.ok(bootstrapStart >= 0 && loadStart > bootstrapStart);
-  assert.ok(injectedEntrySource.slice(bootstrapStart, loadStart).includes('api("/api/bootstrap")'));
-  assert.ok(injectedEntrySource.slice(bootstrapStart, loadStart).includes("if (bootstrapPromise) return bootstrapPromise"));
-  assert.match(injectedEntrySource.slice(bootstrapStart, loadStart), /bootstrapReady = true;\s*bootstrapFailure = null;\s*ensureEntry\(\);/);
-  assert.doesNotMatch(injectedEntrySource, /launcher-hidden="true".*display: none/);
-  assert.ok(injectedEntrySource.includes('button.removeAttribute("data-better-codex-launcher-hidden")'));
-  assert.ok(injectedEntrySource.slice(mountStart, mountEnd).includes("refresh();"));
-  assert.ok(injectedEntrySource.slice(mountStart, mountEnd).includes("void ensureBootstrapReady().catch(error =>"));
-  assert.ok(injectedEntrySource.slice(openStart, openEnd).includes("void load();"));
-  assert.doesNotMatch(injectedEntrySource.slice(openStart, openEnd), /const ready = bootstrapReady/);
-  assert.ok(source.includes("ready: () => bootstrapReady && !injectionSurfaceError()"));
-  assert.ok(source.includes('return "injection_navigation_unmounted"'));
-  assert.ok(source.includes('return "injection_content_mount_unavailable"'));
-  assert.ok(source.includes('return "injection_surface_render_unavailable"'));
-  assert.ok(source.includes('appendDiagnostic("bootstrap_failed"'));
-  assert.ok(source.includes('document.querySelectorAll("[data-better-codex-launcher-hidden]").forEach(node => node.removeAttribute("data-better-codex-launcher-hidden"))'));
-});
-
-test("returning from a native settings route resumes the remembered Better Codex surface", () => {
-  const source = injectionSource(4317, "test-token", "install");
-  const refresh = source.slice(source.indexOf("function refresh()"), source.indexOf("function scheduleRefresh()"));
-
-  assert.ok(refresh.includes("const resumeSurface = sessionStorage.getItem(RESUME_SURFACE_KEY)"));
-  assert.ok(refresh.includes("if (!active && betterCodexRoute && !routeSuppressed && availableSurfaces.includes(resumeSurface)) return open(resumeSurface)"));
-});
-
-test("collapsing the native sidebar keeps Better Codex mounted on its MCP route", () => {
-  const source = injectionSource(4317, "test-token", "install");
-  const refresh = source.slice(source.indexOf("function refresh()"), source.indexOf("function scheduleRefresh()"));
-
-  assert.ok(refresh.includes("if (active && !betterCodexRoute) close({ resume: true, suppressRoute: false })"));
-  assert.doesNotMatch(refresh, /if \(active\) close\(\{ resume: true, suppressRoute: betterCodexRoute \}\)/);
-});
-
-test("sidebar utility controls keep the Better Codex surface mounted", () => {
-  const source = injectionSource(4317, "test-token", "install");
-  const onClick = source.slice(source.indexOf("function isSidebarNavigationTarget(target)"), source.indexOf("function refresh()"));
-
-  assert.ok(source.includes('const SIDEBAR_NAVIGATION_ITEM = SELECTORS.sidebarNavigationItem || ".sidebar-item"'));
-  assert.ok(onClick.includes("target.closest(SELECTORS.projectRow)"));
-  assert.ok(onClick.includes("target !== navigationItem"));
-  assert.ok(onClick.includes('target.getAttribute("aria-label")'));
-  const navigationClicks = injectedEntrySource.slice(injectedEntrySource.indexOf("function isNativeRailDestination(target)"), injectedEntrySource.indexOf("function refresh()"));
-  assert.ok(navigationClicks.includes("function isNativeRailDestination(target)"));
-  assert.ok(navigationClicks.includes('button.getAttribute("aria-haspopup") === "menu"'));
-  assert.match(navigationClicks, /if \(isNativeRailDestination\(target\)\) \{\s*close\(\{ resume: true \}\);/);
-  assert.ok(onClick.includes("if (isSidebarNavigationTarget(target)) close({ resume: true })"));
-  assert.ok(onClick.includes("else if (target.closest(SELECTORS.sidebarNavigation)) scheduleRefresh()"));
-});
-
 test("all interface icons use Lucide definitions", () => {
-  const source = injectionSource(4317, "test-token", "install");
+  const source = uiSource(4317, "test-token");
 
   for (const name of [
     "plus", "ellipsis", "list-filter", "sliders-horizontal", "columns-3", "arrow-left-right",
@@ -238,7 +136,7 @@ test("all interface icons use Lucide definitions", () => {
 });
 
 test("status and priority menus keep their Lucide icons visible", () => {
-  const source = injectionSource(4317, "test-token", "install");
+  const source = uiSource(4317, "test-token");
   const css = betterCodexDesignSystemCss();
 
   assert.ok(source.includes('function filterOptionIcon(key, value)'));
@@ -272,7 +170,7 @@ test("square icon controls center their SVG geometry instead of using the text b
 });
 
 test("task columns render working actions and the project creation shortcut", () => {
-  const source = injectionSource(4317, "test-token", "install");
+  const source = uiSource(4317, "test-token");
 
   assert.doesNotMatch(source, /aria-label="更多"/);
   assert.doesNotMatch(source, /openNativeProjectEditor|data-app-action-sidebar-project-create/);
@@ -282,7 +180,7 @@ test("task columns render working actions and the project creation shortcut", ()
 });
 
 test("issue assignment tabs separate assigned and unassigned work", () => {
-  const source = injectionSource(4317, "test-token", "install");
+  const source = uiSource(4317, "test-token");
 
   assert.ok(source.includes('[["all", "全部"], ["assigned", "已分配"], ["unassigned", "未分配"]]'));
   assert.ok(source.includes("const assigned = Boolean(issue.agent_enabled || issue.user_assigned)"));
@@ -291,7 +189,7 @@ test("issue assignment tabs separate assigned and unassigned work", () => {
 });
 
 test("issues toolbar has a toggleable auto-dispatch icon between filter and create", () => {
-  const source = injectionSource(4317, "test-token", "install");
+  const source = uiSource(4317, "test-token");
   const css = betterCodexDesignSystemCss();
 
   assert.ok(source.includes('id = "better-codex-auto-dispatch"'));
@@ -327,7 +225,7 @@ test("issues toolbar has a toggleable auto-dispatch icon between filter and crea
 });
 
 test("issue creation uses a primary split button with a project creation menu", () => {
-  const source = injectionSource(4317, "test-token", "install");
+  const source = uiSource(4317, "test-token");
   const css = betterCodexDesignSystemCss();
 
   assert.ok(source.includes('className = "better-codex-create-split"'));
@@ -335,7 +233,9 @@ test("issue creation uses a primary split button with a project creation menu", 
   assert.ok(source.includes('project.innerHTML = icon("folder") + "<span>" + escapeHtml(t("创建新项目"))'));
   assert.ok(source.includes('openCreateProjectDialog()'));
   assert.ok(source.includes("通过智能体创建"));
-  assert.ok(source.includes('function openEditor(issue = null, initialStatus = "todo", createMode = "agent") {\n      state.selected = issue;'));
+  assert.ok(source.includes('function openEditor(issue = null, initialStatus = "todo", createMode = "agent") {'));
+  assert.ok(source.includes('if (issue?.external_observation) return openExternalDetail(issue.id);'));
+  assert.ok(source.includes('state.selected = issue;'));
   assert.ok(source.includes('const draftMode = issue ? "manual" : createMode === "manual" ? "manual" : "agent"'));
   assert.ok(source.includes('expanded: draftMode === "agent" ? false : localStorage.getItem(issue ? ISSUE_DIALOG_EXPANDED_KEY : CREATE_DIALOG_EXPANDED_KEY) === "true"'));
   assert.doesNotMatch(source, /state\.createMode/);
@@ -351,7 +251,7 @@ test("issue creation uses a primary split button with a project creation menu", 
 });
 
 test("continue creating preference persists across page reloads", () => {
-  const source = injectionSource(4317, "test-token", "install");
+  const source = uiSource(4317, "test-token");
 
   assert.ok(source.includes('const KEEP_CREATE_KEY = "better-codex-keep-create"'));
   assert.ok(source.includes('const rememberedKeepCreate = localStorage.getItem(KEEP_CREATE_KEY) === "true"'));
@@ -359,8 +259,8 @@ test("continue creating preference persists across page reloads", () => {
   assert.ok(source.includes("localStorage.setItem(KEEP_CREATE_KEY, String(state.keepCreate))"));
 });
 
-test("unread completion notifications survive Runtime reinjection", () => {
-  const source = injectionSource(4317, "test-token", "install");
+test("unread completion notifications survive page remount", () => {
+  const source = uiSource(4317, "test-token");
   const cacheSource = source.slice(source.indexOf("function readCompletionNoticeCache"), source.indexOf("function restoreCompletionNotices"));
 
   assert.ok(source.includes('const COMPLETION_NOTICE_CACHE_KEY = "better-codex-completion-notices:" + PROFILE'));
@@ -379,7 +279,7 @@ test("unread completion notifications survive Runtime reinjection", () => {
 });
 
 test("permanent completion notifications remain manually dismissible", () => {
-  const source = injectionSource(4317, "test-token", "install");
+  const source = uiSource(4317, "test-token");
   const notificationSource = source.slice(source.indexOf("function renderSessionEndNotice"), source.indexOf("async function perform"));
 
   assert.ok(notificationSource.includes("const permanent = duration === 0"));
@@ -391,7 +291,7 @@ test("permanent completion notifications remain manually dismissible", () => {
 });
 
 test("project lists order recent activity first", () => {
-  const source = injectedEntrySource;
+  const source = browserEntrySource;
 
   assert.ok(source.includes("function projectsByRecentActivity(projects, issues = state.issues)"));
   assert.ok(source.includes('const timestamp = Date.parse(project?.updated_at || project?.created_at || "")'));
@@ -412,7 +312,7 @@ test("column cards fill the padded column evenly", () => {
 });
 
 test("default Codex agent opens a branded config editor", () => {
-  const source = injectionSource(4317, "test-token", "install");
+  const source = uiSource(4317, "test-token");
 
   assert.ok(source.includes('return \'<img src="\' + escapeHtml(DEFAULT_AGENT_AVATAR_URL) + \'" alt="Codex">\''));
   assert.ok(source.includes("const isDefault = Boolean(draft.is_default);"));
@@ -423,7 +323,7 @@ test("default Codex agent opens a branded config editor", () => {
 });
 
 test("agent model picker uses the runtime catalog and a Codex-style popover", () => {
-  const source = injectionSource(4317, "test-token", "install");
+  const source = uiSource(4317, "test-token");
 
   assert.ok(source.includes("bootstrap.agentModelCatalog"));
   assert.ok(source.includes('data-agent-picker="'));
@@ -434,16 +334,16 @@ test("agent model picker uses the runtime catalog and a Codex-style popover", ()
 });
 
 test("opening an agent inspector hides the toolbar create action", () => {
-  const source = injectionSource(4317, "test-token", "install");
+  const source = uiSource(4317, "test-token");
 
   assert.ok(source.includes('addAgent.hidden = AGENTS_READ_ONLY || state.agentPane !== "preview"'));
   assert.match(betterCodexDesignSystemCss(), /\.better-codex-agent-actions\[hidden\]\s*\{[^}]*display:\s*none\s*!important/s);
 });
 
 test("agent creation reuses the inspector side pane and opens mobile pages fullscreen without motion", () => {
-  const source = injectionSource(4317, "test-token", "install");
+  const source = uiSource(4317, "test-token");
   const css = betterCodexDesignSystemCss();
-  const closeInspector = injectedEntrySource.slice(injectedEntrySource.indexOf("function closeAgentInspector()"), injectedEntrySource.indexOf("function agentInspector("));
+  const closeInspector = browserEntrySource.slice(browserEntrySource.indexOf("function closeAgentInspector()"), browserEntrySource.indexOf("function agentInspector("));
   const mobileStart = css.indexOf("@media (max-width: 720px)", css.indexOf("@keyframes better-codex-inspector-enter"));
   const mobileCss = css.slice(mobileStart, css.indexOf("@media (hover: hover)", mobileStart));
   assert.ok(source.includes("function closeAgentInspector()"));
@@ -468,7 +368,7 @@ test("agent creation reuses the inspector side pane and opens mobile pages fulls
 });
 
 test("clicking the agent directory outside the inspector closes the side pane", () => {
-  const source = injectionSource(4317, "test-token", "install");
+  const source = uiSource(4317, "test-token");
 
   assert.ok(source.includes('event.target.closest(".better-codex-agent-directory [data-agent-key]")'));
   assert.ok(source.includes('state.agentPane !== "preview" && event.target.closest(".better-codex-agent-directory")'));
@@ -477,20 +377,18 @@ test("clicking the agent directory outside the inspector closes the side pane", 
 });
 
 test("outside click dismisses the avatar picker without closing the agent inspector", () => {
-  const source = injectionSource(4317, "test-token", "install");
+  const source = uiSource(4317, "test-token");
 
   assert.ok(source.includes("let suppressAgentOutside = false"));
   assert.ok(source.includes("suppressAgentOutside = true"));
   assert.ok(source.includes("setTimeout(() => { suppressAgentOutside = false; }, 0)"));
   assert.ok(source.includes("if (suppressAgentOutside) return"));
-  assert.ok(source.includes("if (!active || suppressAgentOutside) return"));
-  assert.ok(source.includes('target.closest("#better-codex-avatar-picker")'));
   assert.ok(source.includes("if (picker.contains(event.target)) return"));
   assert.ok(!source.includes("anchor?.contains?.(event.target)"));
 });
 
 test("agent suggestions use bundled PNG avatars", () => {
-  const source = injectionSource(4317, "test-token", "install");
+  const source = uiSource(4317, "test-token");
   const css = betterCodexDesignSystemCss();
   const start = source.indexOf("const suggestions = suggestedAgents.map");
   const suggestions = source.slice(start, source.indexOf("const animateEnter", start));
@@ -505,7 +403,7 @@ test("agent suggestions use bundled PNG avatars", () => {
 
 test("agent toolbar and inspector occupy separate Codex-style grid regions", () => {
   const css = betterCodexDesignSystemCss();
-  const source = injectionSource(4317, "test-token", "install");
+  const source = uiSource(4317, "test-token");
 
   assert.ok(source.includes("panel.dataset.agentPane = state.agentPane"));
   assert.match(css, /\[data-surface="agents"\]\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*minmax\(0, 1fr\) auto;/s);
@@ -514,21 +412,21 @@ test("agent toolbar and inspector occupy separate Codex-style grid regions", () 
 });
 
 test("background agent polling preserves active inspector forms", () => {
-  const source = injectionSource(4317, "test-token", "install");
+  const source = uiSource(4317, "test-token");
 
   assert.ok(source.includes('loadSurface({ background: true })'));
   assert.ok(source.includes('options.background && (state.agentPane !== "preview" || !changed)'));
 });
 
 test("initial agent loading preserves an inspector opened while the request is pending", () => {
-  const source = injectionSource(4317, "test-token", "install");
+  const source = uiSource(4317, "test-token");
 
   assert.ok(source.includes('loadSurface({ preserveInspector: true })'));
   assert.ok(source.includes('options.preserveInspector && panel?.dataset.surface === "agents" && state.agentPane !== "preview"'));
 });
 
 test("issue editor uses branded listboxes instead of native selects", () => {
-  const source = injectionSource(4317, "test-token", "install");
+  const source = uiSource(4317, "test-token");
   const css = betterCodexDesignSystemCss();
   const editor = source.slice(source.indexOf("function openEditor("), source.indexOf("async function submitIssue()"));
 
@@ -553,7 +451,7 @@ test("issue editor uses branded listboxes instead of native selects", () => {
 });
 
 test("issue board loads every project by default and filters projects explicitly", () => {
-  const source = injectionSource(4317, "test-token", "install");
+  const source = uiSource(4317, "test-token");
 
   assert.ok(source.includes("const query = new URLSearchParams();"));
   assert.ok(source.includes('"/api/issues" + (query.toString() ? "?" + query : "")'));
@@ -562,7 +460,7 @@ test("issue board loads every project by default and filters projects explicitly
 });
 
 test("agent assignment options expose compact model and reasoning tags", () => {
-  const source = injectionSource(4317, "test-token", "install");
+  const source = uiSource(4317, "test-token");
 
   assert.ok(source.includes("function modelTag(value)"));
   assert.ok(source.includes("function reasoningTag(value)"));
@@ -580,7 +478,7 @@ test("agent assignment options expose compact model and reasoning tags", () => {
 });
 
 test("agent issue creation reuses loaded profile names and avatars", () => {
-  const source = injectionSource(4317, "test-token", "install");
+  const source = uiSource(4317, "test-token");
 
   assert.ok(source.includes('state.agents = listResponse(bootstrap.agents, "/api/bootstrap", "agents")'));
   assert.ok(source.includes('function openEditor(issue = null, initialStatus = "todo", createMode = "agent")'));
@@ -589,20 +487,8 @@ test("agent issue creation reuses loaded profile names and avatars", () => {
   assert.ok(source.includes("syncAgentAvatar(runAvatar, selectedAgent)"));
 });
 
-test("panel binds project workspace from the active session cwd", () => {
-  const source = injectionSource(4317, "test-token", "install");
-
-  assert.ok(source.includes("async function resolveWorkspacePath(context)"));
-  assert.ok(source.includes("async function ensureContextProject(context)"));
-  assert.ok(source.includes('"/api/sessions/" + encodeURIComponent(threadId) + "/workspace"'));
-  assert.ok(source.includes("await ensureContextProject(context)"));
-  assert.ok(source.includes("创建智能体 Issue 需要本地工作区：请先打开该项目下的一个 Codex 会话"));
-  assert.ok(source.includes("const latestContext = readContext()"));
-  assert.ok(source.includes("let workspacePath = selectedProject?.workspace_path || await resolveWorkspacePath(latestContext)"));
-});
-
 test("agent issue creation does not require or bind the current session", () => {
-  const source = injectionSource(4317, "test-token", "install");
+  const source = uiSource(4317, "test-token");
 
   assert.ok(source.includes('if (draft.mode === "agent" && !issue && !workspacePath && !state.mockup && !REMOTE)'));
   assert.doesNotMatch(source, /draft\.mode === "agent" && !issue && !threadId/);
@@ -616,12 +502,12 @@ test("agent issue creation does not require or bind the current session", () => 
   assert.ok(source.includes("cachedCreateDraft?.requestId"));
   assert.ok(source.includes("writeCreateDraft(draft, createRequestId)"));
   assert.ok(submitIssue.indexOf("writeCreateDraft(draft, createRequestId)") < submitIssue.indexOf('await api("/api/issues"'));
-  assert.ok(source.includes('commandError === "session_command_not_claimed"'));
-  assert.ok(source.includes('sendAppServerRequest("turn/interrupt", { threadId, turnId })'));
+  assert.ok(desktopBridgeEntrySource.includes('commandError === "session_command_not_claimed"'));
+  assert.ok(desktopBridgeEntrySource.includes('sendAppServerRequest("turn/interrupt", { threadId, turnId })'));
 });
 
 test("agent detail avatars use PNG presets and open an avatar picker", () => {
-  const source = injectionSource(4317, "test-token", "install");
+  const source = uiSource(4317, "test-token");
 
   assert.ok(source.includes('branded ? codexLogo() : \'<img src="\' + escapeHtml(fallback.image)'));
   assert.ok(source.includes('data-agent-avatar-form'));
@@ -647,7 +533,7 @@ test("agent detail avatars use PNG presets and open an avatar picker", () => {
 });
 
 test("every rendered Codex avatar uses the bundled PNG", () => {
-  const source = injectionSource(4317, "test-token", "install");
+  const source = uiSource(4317, "test-token");
 
   assert.ok(source.includes('return \'<img src="\' + escapeHtml(DEFAULT_AGENT_AVATAR_URL) + \'" alt="Codex">\''));
   assert.ok(source.includes('visual: () => agentAvatarMarkup(agent, "better-codex-agent-avatar")'));
@@ -657,7 +543,7 @@ test("every rendered Codex avatar uses the bundled PNG", () => {
 
 test("issue agent avatars use the same PNG fallback as the agent directory", () => {
   const css = betterCodexDesignSystemCss();
-  const source = injectionSource(4317, "test-token", "install");
+  const source = uiSource(4317, "test-token");
 
   assert.ok(source.includes('const fallback = AGENT_AVATAR_PRESETS.find(item => item.id === "bot")'));
   assert.ok(source.includes('className + " has-image"'));
@@ -689,7 +575,7 @@ test("issue detail editors reveal their affordance on hover and focus", () => {
 });
 
 test("issue submit buttons omit visual keyboard shortcut badges", () => {
-  const source = injectionSource(4317, "test-token", "install");
+  const source = uiSource(4317, "test-token");
 
   assert.doesNotMatch(source, /better-codex-keycap/);
   assert.doesNotMatch(source, />⌘<|>↵</);
@@ -697,7 +583,7 @@ test("issue submit buttons omit visual keyboard shortcut badges", () => {
 });
 
 test("issue context menu can assign a Web user or an agent", () => {
-  const source = injectionSource(4317, "test-token", "install");
+  const source = uiSource(4317, "test-token");
 
   assert.ok(source.includes("指定负责人"));
   assert.ok(source.includes('data-context-action="assign"'));
@@ -714,19 +600,19 @@ test("issue context menu can assign a Web user or an agent", () => {
 });
 
 test("issue working activity uses the agent avatar instead of initials", () => {
-  const source = injectionSource(4317, "test-token", "install");
+  const source = uiSource(4317, "test-token");
 
   assert.ok(source.includes("issue.active_run_status"));
   assert.ok(source.includes('issue.reply_status === "running"'));
-  assert.ok(source.includes('sendAppServerRequest("thread/read", { threadId, includeTurns: false })'));
-  assert.ok(source.includes('sendAppServerRequest("thread/read", { threadId, includeTurns: true })'));
-  assert.ok(source.includes('queueRelayEvent("turn/completed"'));
-  assert.ok(source.includes('["thread/status/changed", "turn/started", "turn/completed", "error", "item/started", "item/completed"]'));
+  assert.ok(desktopBridgeEntrySource.includes('sendAppServerRequest("thread/read", { threadId, includeTurns: false })'));
+  assert.ok(desktopBridgeEntrySource.includes('sendAppServerRequest("thread/read", { threadId, includeTurns: true })'));
+  assert.ok(desktopBridgeEntrySource.includes('queueRelayEvent("turn/completed"'));
+  assert.ok(desktopBridgeEntrySource.includes('["thread/status/changed", "turn/started", "turn/completed", "error", "item/started", "item/completed"]'));
   assert.ok(source.includes("sessionRetryDetail(issue.session_retry)"));
   assert.ok(source.includes('data-session-retry role="status"'));
   assert.ok(source.includes('data-dialog-stop'));
   assert.ok(source.includes("10 * 60 * 1000"));
-  assert.ok(source.includes("result?.active_turns"));
+  assert.ok(desktopBridgeEntrySource.includes("result?.active_turns"));
   assert.ok(source.includes('agentAvatarMarkup(activityAgent, "better-codex-card-avatar")'));
   assert.ok(source.includes('"工作中"'));
   assert.ok(source.includes('"排队中"'));
@@ -735,7 +621,7 @@ test("issue working activity uses the agent avatar instead of initials", () => {
 });
 
 test("issue cards show project icon and assignee instead of session entry", () => {
-  const source = injectionSource(4317, "test-token", "install");
+  const source = uiSource(4317, "test-token");
   const css = betterCodexDesignSystemCss();
 
   assert.ok(source.includes('icon("folder")'));
@@ -755,16 +641,12 @@ test("issue cards show project icon and assignee instead of session entry", () =
   assert.ok(source.includes('const PROJECT_KEY = "better-codex-project-id"'));
   assert.ok(source.includes("localStorage.getItem(PROJECT_KEY)"));
   assert.ok(source.includes("state.projects.find(item => item.id === rememberedProjectId)"));
-  assert.ok(source.includes("function activeThreadId()"));
   assert.doesNotMatch(source, /\/api\/issues\/.*\/app|message: "\/app"/);
   assert.ok(source.includes("const NAVIGATION ="));
-  assert.ok(source.includes("window.postMessage({ type: NAVIGATION.messageType"));
-  assert.ok(source.includes("function currentRouteThreadId()"));
   assert.doesNotMatch(source, /THREAD_ROUTE_RETRY_MS|THREAD_ROUTE_CONFIRM_DELAY_MS/);
   assert.ok(source.includes('button.classList.add("is-loading")'));
   assert.ok(source.includes('button.innerHTML = icon("refresh") + "<span>" + te("正在打开…") + "</span>"'));
   assert.ok(source.includes('button.removeAttribute("aria-busy")'));
-  assert.ok(source.includes('throw new Error("thread_open_timeout")'));
   assert.ok(source.includes("Issue 详情"));
   assert.ok(source.includes('data-dialog-start-now'));
   assert.ok(source.includes('/start'));
@@ -792,47 +674,22 @@ test("issue cards show project icon and assignee instead of session entry", () =
 });
 
 test("native thread context menus remain owned by Codex", () => {
-  const source = injectionSource(3210, "token", "install");
+  const source = uiSource(3210, "token");
   assert.doesNotMatch(source, /onNativeThreadContextMenu/);
   assert.doesNotMatch(source, /electronBridge\?\.showContextMenu/);
   assert.doesNotMatch(source, /better-codex-thread-action/);
 });
 
-test("open-in-conversation requires a valid session uuid", () => {
-  const source = injectionSource(4317, "test-token", "install");
-  const openHandler = source.slice(source.indexOf('dialog.querySelector("[data-dialog-open-thread]")'), source.indexOf('const startNow = dialog.querySelector("[data-dialog-start-now]")'));
-  const turnCommand = source.slice(source.indexOf('} else if (command.kind === "turn")'), source.indexOf('} else if (command.kind === "steer")'));
-  const openThread = source.slice(source.indexOf("async function openThread(threadId)"), source.indexOf("function isSidebarNavigationTarget"));
-
-  assert.ok(source.includes("function normalizeSessionId(value)"));
-  assert.ok(source.includes("/^[a-f0-9-]{36}$/i.test(id)"));
-  assert.ok(source.includes("return normalizeSessionId(issue?.run_thread_id) || \"\""));
-  assert.ok(source.includes("const openThreadButton = issue && sessionId"));
-  assert.ok(source.includes("if (!issue || !sessionId) return \"\""));
-  assert.ok(source.includes('if (!expected) throw new Error("thread_id_invalid")'));
-  assert.doesNotMatch(openHandler, /\/stop|session-handoff|终止并打开/);
-  assert.ok(openThread.indexOf("requestSessionHandoff(issue, expected)") < openThread.indexOf("resumePersistedThread(expected)"));
-  assert.ok(source.includes("nativeThreadOpenBypass === threadId"));
-  assert.ok(source.includes("void perform(() => openThread(threadId))"));
-  assert.ok(source.includes('type: "mcp-request"'));
-  assert.ok(source.includes('sendAppServerRequest("thread/start"'));
-  assert.ok(source.includes('sendAppServerRequest("thread/resume", params)'));
-  assert.ok(source.includes('params.sandbox = String(payload.sandbox_mode || "workspace-write")'));
-  assert.ok(source.includes('params.developerInstructions = String(payload.developer_instructions || "")'));
-  assert.ok(source.includes('if (method === "thread/started") return false'));
-  assert.ok(source.includes('sendAppServerRequest("turn/start"'));
-  assert.ok(source.includes('sendAppServerRequest("turn/steer"'));
-  assert.ok(source.includes('sendAppServerRequest("turn/interrupt"'));
-  assert.ok(source.includes('data-context-action="stop"'));
-  assert.ok(source.includes('data-dialog-stop'));
-  assert.ok(source.includes('encodeURIComponent(issueId) + "/stop"'));
-  assert.ok(turnCommand.indexOf("resumePersistedThread(threadId, payload)") < turnCommand.indexOf('sendAppServerRequest("turn/start"'));
-  assert.ok(openThread.indexOf("resumePersistedThread(expected)") < openThread.indexOf("close()"));
-  assert.ok(source.includes("openThread, close, destroy"));
+test("open-in-conversation validates session IDs and delegates native navigation to its host", () => {
+  assert.ok(browserEntrySource.includes("/^[a-f0-9-]{36}$/i.test(id)"));
+  const openThread = browserEntrySource.slice(browserEntrySource.indexOf("async function openThread(threadId)"), browserEntrySource.indexOf("function isSidebarNavigationTarget"));
+  assert.match(openThread, /thread_id_invalid/);
+  assert.ok(openThread.indexOf("requestSessionHandoff") < openThread.indexOf("window.betterCodexHost.openThread"));
+  assert.match(openThread, /native_thread_navigation_unavailable/);
 });
 
 test("issue details render the latest conversation result and reply composer", () => {
-  const source = injectionSource(4317, "test-token", "install");
+  const source = uiSource(4317, "test-token");
   const css = betterCodexDesignSystemCss();
   const permissions = source.slice(source.indexOf("function applyDialogPermissions()"), source.indexOf("function refreshIssueState"));
 
@@ -881,7 +738,7 @@ test("issue details render the latest conversation result and reply composer", (
 });
 
 test("user-stopped sessions render a red-dot stopped state", () => {
-  const source = injectionSource(4317, "test-token", "install");
+  const source = uiSource(4317, "test-token");
   const css = betterCodexDesignSystemCss();
 
   assert.ok(source.includes('interrupted: "已停止"'));
@@ -902,7 +759,7 @@ test("issue keep-open toggle keeps a visible track in light mode", () => {
 });
 
 test("create and reply dialogs persist cached attachment references", () => {
-  const source = injectionSource(4317, "test-token", "install");
+  const source = uiSource(4317, "test-token");
 
   assert.ok(source.includes('data-dialog-attach aria-label="\' + te("添加附件")'));
   assert.ok(source.includes("attachments: cachedCreateDraft?.attachments?.map"));
@@ -928,7 +785,7 @@ test("create and reply dialogs persist cached attachment references", () => {
 });
 
 test("destructive actions use the branded confirmation dialog", () => {
-  const source = injectionSource(4317, "test-token", "install");
+  const source = uiSource(4317, "test-token");
 
   assert.ok(source.includes('dialogHandle.element.id = "better-codex-confirm"'));
   assert.ok(source.includes("createDialog({ accessibleName: t(title)"));
@@ -938,9 +795,12 @@ test("destructive actions use the branded confirmation dialog", () => {
 });
 
 test("archive is an action and cancelled is not an issue status", () => {
-  const source = injectionSource(4317, "test-token", "install");
+  const source = uiSource(4317, "test-token");
 
-  assert.doesNotMatch(source, /statusCancelled|cancelled:\s*"已取消"|data-context-value="cancelled"/);
+  // External run cancellation is valid; it must not become an owned board status.
+  assert.doesNotMatch(source, /statusCancelled|data-context-value="cancelled"/);
+  const databaseSource=readFileSync(new URL("../src/db.ts",import.meta.url),"utf8");
+  assert.doesNotMatch(databaseSource.match(/export const issueStatuses = \[[^\]]+\]/)?.[0]||"",/cancelled/);
   assert.ok(source.includes('data-context-action="archive">\' + icon("archive") + \'<span>\' + escapeHtml(t("归档"))'));
   const archiveAction = source.match(/if \(item\.dataset\.contextAction === "archive"\) \{[\s\S]*?await loadIssues\(\);\n\s*\}/)?.[0] || "";
   assert.ok(archiveAction.includes('/archive'));
@@ -948,7 +808,7 @@ test("archive is an action and cancelled is not an issue status", () => {
 });
 
 test("every modal dialog closes only when its backdrop is clicked", () => {
-  const source = injectedEntrySource;
+  const source = browserEntrySource;
   const bindings = source.match(/bindModalDismiss\(dialog, \(\) =>/g) || [];
 
   assert.ok(source.includes("function bindModalDismiss(dialog, dismiss)"));
@@ -958,7 +818,7 @@ test("every modal dialog closes only when its backdrop is clicked", () => {
 
 test("Codex-native visual values live behind semantic design tokens", () => {
   const css = betterCodexDesignSystemCss();
-  const source = injectionSource(4317, "test-token", "install");
+  const source = uiSource(4317, "test-token");
 
   assert.ok(css.includes("--bc-color-canvas:"));
   assert.ok(css.includes("--bc-radius-xl:"));
@@ -982,7 +842,7 @@ test("Codex-native visual values live behind semantic design tokens", () => {
 
 test("semantic surface hierarchy is derived from the Codex appearance configuration", () => {
   const css = betterCodexDesignSystemCss();
-  const source = injectionSource(4317, "test-token", "install");
+  const source = uiSource(4317, "test-token");
 
   assert.ok(css.includes("--bc-color-canvas: var(--bc-host-light-canvas"));
   assert.ok(css.includes("--bc-color-canvas: var(--bc-host-dark-canvas"));
@@ -1009,25 +869,16 @@ test("semantic surface hierarchy is derived from the Codex appearance configurat
   assert.match(css, /\.better-codex-agent-inspector-field textarea\s*\{[^}]*background:\s*var\(--bc-color-input\);/s);
 });
 
-test("web injection shares the Codex user profile with the host shell", () => {
-  const source = injectionSource(4317, "test-token", "install", "zh-CN", "web");
+test("web UI shares the Codex user profile with the host shell", () => {
+  const source = uiSource(4317, "test-token", "zh-CN");
 
   assert.match(source, /new CustomEvent\("better-codex:bootstrap"/);
-  assert.equal(injectedEntrySource.match(/new CustomEvent\("better-codex:bootstrap"/g)?.length, 3, "bootstrap, profile, and language changes should refresh the Web host profile");
+  assert.equal(browserEntrySource.match(/new CustomEvent\("better-codex:bootstrap"/g)?.length, 3, "bootstrap, profile, and language changes should refresh the Web host profile");
   assert.match(source, /detail: \{ user: state\.user, locale: state\.locale \}/);
 });
 
-test("mountPanel and style hide external MCP app host overlay in Codex 26.915", () => {
-  const source = injectionSource(4317, "test-token", "install");
 
-  assert.ok(source.includes('data-better-codex-external-mcp-host-hidden'));
-  assert.doesNotMatch(source, /html\[data-better-codex-open="true"\] body > div[^\n]*:has\(webview/);
-  assert.ok(source.includes("function hideExternalMcpAppHost()"));
-  assert.ok(source.includes('view.title !== "Better Codex"'));
-  assert.ok(source.includes('view.closest("body > div.fixed.inset-0, body > div[class*=\'fixed\'], body > div")'));
-  assert.ok(source.includes('!host.contains(panel)'));
-  assert.ok(source.includes('host.setAttribute(EXTERNAL_MCP_HIDDEN, "true")'));
-  assert.ok(source.includes("hideExternalMcpAppHost()"));
-  assert.ok(source.includes('return findInjectedMount(SELECTORS, OWNED)'));
-  assert.match(injectedEntrySource, /function mountPanel\(\)[\s\S]*?restoreNative\(\);\s*const surface = findMount\(\);/);
+test("shared browser UI never mounts into or hides the native Codex interface", () => {
+  assert.doesNotMatch(browserEntrySource, /findInjectedMount|ensureDesktopEntries|data-better-codex-native-hidden|data-better-codex-external-mcp-host-hidden/);
+  assert.match(browserEntrySource, /__betterCodexUI__/);
 });

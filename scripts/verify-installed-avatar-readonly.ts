@@ -1,0 +1,114 @@
+/** Bounded acceptance of the installed creator display, with no task writes. */
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { isAbsolute, join, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { connectPluginUI } from "./plugin-ui-session.js";
+import { betterCodexHome, databasePath, runtimeCurrentPath } from "../src/config.js";
+import { readRuntimeState, runtimeIdentityHealth } from "../src/runtime-state.js";
+import { sessionHostStatus } from "../src/session-host-client.js";
+import { serviceStatus } from "../src/service.js";
+import { McpRuntimeClient } from "../src/mcp-runtime-client.js";
+import { taskCreatorPresentation } from "../src/ui/features/board/creator-model.js";
+
+// Expectations must come from the operator's recorded acceptance evidence.
+// Paths below are absolute; no machine, version, hash, or backup defaults apply.
+const usage = "Usage: npx tsx scripts/verify-installed-avatar-readonly.ts <evidence-directory> <expectations.json>. Required JSON fields: version, previous_version, core_sha256, previous_core_sha256, avatar_sha256, base_core_path, backup_directory, before_snapshot_path, profile_id, profile_name, avatar_width, avatar_height.";
+assert.ok(process.argv.length === 4, usage);
+const dir = resolve(process.argv[2]);
+const expected = JSON.parse(readFileSync(process.argv[3], "utf8")) as Record<string, unknown>;
+const stringField = (key: string) => { const value = expected[key]; assert.ok(typeof value === "string" && value.trim(), `${usage} Invalid ${key}`); return value; };
+const pathField = (key: string) => { const value = stringField(key); assert.ok(isAbsolute(value), `${usage} ${key} must be absolute`); return value; };
+const hashField = (key: string) => { const value = stringField(key); assert.match(value, /^[a-f0-9]{64}$/, `${usage} Invalid ${key}`); return value; };
+const dimensionField = (key: string) => { const value = expected[key]; assert.ok(typeof value === "number" && Number.isSafeInteger(value) && value > 0, `${usage} Invalid ${key}`); return value; };
+const version = stringField("version"), previousVersion = stringField("previous_version");
+for (const value of [version, previousVersion]) assert.match(value, /^[0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9.-]+)?$/, `${usage} Invalid version`);
+const expectedAvatar = hashField("avatar_sha256"), expectedCore = hashField("core_sha256"), oldCore = hashField("previous_core_sha256");
+const baseCorePath = pathField("base_core_path"), backup = pathField("backup_directory");
+const profileId = stringField("profile_id"), profileName = stringField("profile_name"), profileKey = `profile:${profileId}`;
+const avatarWidth = dimensionField("avatar_width"), avatarHeight = dimensionField("avatar_height");
+const before = JSON.parse(readFileSync(pathField("before_snapshot_path"), "utf8"));
+assert.ok(before.host && before.counts && before.active && before.source, `${usage} Before snapshot requires host, counts, active, and source`);
+for (const table of Object.keys(before.counts)) assert.ok(["issues", "issue_runs", "issue_sessions", "session_commands"].includes(table), "Unsupported snapshot table");
+const hash = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
+const proof: any = { checked_at: new Date().toISOString(), mode: "installed read-only acceptance", task_writes: 0, inference_calls: 0, automated_discovery: false };
+const client = new McpRuntimeClient();
+let ui: Awaited<ReturnType<typeof connectPluginUI>> | undefined;
+const request = (method: string, params: unknown) => ui!.call(method, params);
+const evaluate = (expression: string) => ui!.evaluate(expression);
+const save = () => writeFileSync(join(dir, "installed-avatar-readonly-proof.json"), JSON.stringify(proof, null, 2) + "\n");
+try {
+  const state = readRuntimeState(); assert.ok(state); assert.equal(state.version, version);
+  assert.equal(runtimeIdentityHealth(state).ok, true);
+  const readyResponse = await fetch(`http://127.0.0.1:${state.port}/readyz`, { signal: AbortSignal.timeout(10_000) });
+  const ready = await readyResponse.json() as any; assert.ok(readyResponse.ok);
+  const selection = JSON.parse(readFileSync(runtimeCurrentPath, "utf8"));
+  const selectedPath = join(betterCodexHome, "runtime", "versions", version, "better-codex.cjs");
+  assert.equal(hash(readFileSync(selectedPath)), expectedCore);
+  assert.equal(hash(readFileSync(baseCorePath)), expectedCore);
+  proof.runtime = { version: state.version, pid: state.pid, instance_id: state.instanceId, generation: state.generation, started_at: state.startedAt, ready_http: readyResponse.status, identity_ok: true, selected_core_sha256: expectedCore, selection_version: selection.version || selection.coreVersion || null };
+  proof.service = serviceStatus();
+  const hosts = sessionHostStatus(); const host = hosts.current.status; assert.ok(host);
+  assert.equal(host.host_pid, before.host.pid); assert.equal(host.host_instance_id, before.host.instance_id); assert.equal(host.started_at, before.host.started_at);
+  assert.equal(hosts.current.ok, true); assert.equal(host.runtime_connected, true); assert.equal(host.runtime_version, state.version); assert.equal(hosts.untracked.length, 0);
+  proof.host = { pid: host.host_pid, instance_id: host.host_instance_id, started_at: host.started_at, preserved: true, connected: true, runtime_version: host.runtime_version, active_turns: host.active_turns.length, thread_workers: host.thread_workers.length, pending_requests: host.pending_requests };
+  const db = new DatabaseSync(databasePath, { readOnly: true });
+  const counts = Object.fromEntries(Object.keys(before.counts).map(table => [table, (db.prepare(`SELECT COUNT(*) n FROM ${table}`).get() as any).n]));
+  const creators = db.prepare("SELECT COUNT(*) total, SUM(CASE WHEN creator_user_id IS NOT NULL AND creator_user_id != '' THEN 1 ELSE 0 END) recorded_users FROM issues").get() as any;
+  const active = { runs: (db.prepare("SELECT COUNT(*) n FROM issue_runs WHERE status IN ('claimed','running','scheduling')").get() as any).n, commands: (db.prepare("SELECT COUNT(*) n FROM session_commands WHERE status IN ('pending','claimed')").get() as any).n };
+  db.close(); assert.deepEqual(counts, before.counts); assert.deepEqual(active, before.active);
+  proof.business = { counts, counts_unchanged: true, active, recorded_user_creators: creators.recorded_users || 0 };
+  const retained = join(betterCodexHome, "runtime", "versions", previousVersion, "better-codex.cjs");
+  assert.equal(hash(readFileSync(retained)), oldCore);
+  assert.equal(hash(readFileSync(join(backup, "base-core.cjs"))), oldCore);
+  assert.ok(existsSync(join(backup, "better-codex.db")) || existsSync(join(backup, "business.db")) || existsSync(join(backup, "database.db")), "Private business backup exists");
+  proof.rollback = { previous_version: previousVersion, retained_core_sha256: oldCore, base_backup_verified: true, private_backup_exists: true, exercised: false, restore_business_database: false };
+  const bootstrap = (await client.boardApiRequest({ path: "/api/bootstrap" })).data as any;
+  const profile = bootstrap.task_creator_profiles?.find((item: any) => item.id === profileId); assert.ok(profile?.avatar?.startsWith("data:image/png;base64,"));
+  assert.equal(hash(Buffer.from(profile.avatar.slice(22), "base64")), expectedAvatar);
+  const config = JSON.parse(readFileSync(join(betterCodexHome, "task-creator-profiles.json"), "utf8"));
+  const dotMappings = config.mappings.filter((item: any) => item.profile_id === profileId);
+  assert.equal(dotMappings.length, 1); assert.deepEqual(dotMappings[0], { provider: before.source.provider, account_id: before.source.account_id, host_id: before.source.host_id, thread_id: before.source.thread_id, profile_id: profileId, scope: "task" });
+  const collection = await client.listExternalObservations();
+  const dot = collection.observations.find(item => item.id === before.source.id); assert.ok(dot);
+  assert.equal(dot.creator.local_profile_id, profileId); assert.equal(dot.creator.display_source, "user_mapping"); assert.equal(dot.creator.verification, "unknown");
+  const other = collection.observations.filter(item => item.id !== dot.id);
+  assert.ok(other.every(item => item.creator.local_profile_id !== profileId));
+  proof.identity_boundary = { dot_mapping_scope: "one exact provider/account/host/thread", platform_verified: false, other_external_records: other.length, other_records_mislabelled_dot: 0 };
+  // The narrow MCP tasks schema deliberately omits creator fields. Use the
+  // supported board read route, which supplies the shared UI's actual records.
+  const owned = (await client.boardApiRequest({ path: "/api/issues?archived=1" })).data as any[];
+  const users = Array.isArray(bootstrap.users) ? bootstrap.users : bootstrap.user ? [bootstrap.user] : [];
+  const unknown = owned.filter(item => !item.creator_user_id);
+  assert.ok(unknown.every(item => taskCreatorPresentation(item, bootstrap.task_creator_profiles, users).filterKey === "unknown"));
+  const recordedUsers = owned.filter(item => !!item.creator_user_id);
+  const userPresentations = recordedUsers.map(item => ({ item, creator: taskCreatorPresentation(item, bootstrap.task_creator_profiles, users) }));
+  assert.ok(userPresentations.every(({ item, creator }) => creator.filterKey === "unknown" || creator.filterKey === `user:${item.creator_user_id}`));
+  assert.ok(owned.every(item => taskCreatorPresentation(item, bootstrap.task_creator_profiles, users).filterKey !== profileKey));
+  proof.unknown_backend = { real_archived_records_without_creator: unknown.length, classified_unknown: unknown.length, mislabelled_dot: 0, evidence: "actual board API records plus shared presentation; no synthetic records" };
+  proof.user_backend = { real_archived_records_with_creator: recordedUsers.length, correctly_resolved_user: userPresentations.filter(value => value.creator.known).length, safely_unresolved_unknown: userPresentations.filter(value => !value.creator.known).length, mislabelled_dot: 0, evidence: "exact persisted user ID or unknown; no current-user/assignee fallback" };
+  save();
+  proof.ui_started_at = new Date().toISOString();
+  ui = await connectPluginUI();
+  const view = await evaluate(`({open:document.documentElement.hasAttribute('data-better-codex-open'),surface:document.getElementById('better-codex-panel')?.dataset.surface,ready:window.__betterCodexUI__?.ready(),compatibility_version:window.__betterCodexUI__?.version})`);
+  proof.ui = view;
+  if (!view.open || view.surface !== "issues") await evaluate(`document.getElementById('better-codex-entry')?.click(); true`);
+  await evaluate(`(()=>{document.querySelector('#better-codex-panel [data-view="all"]')?.click();const s=document.querySelector('#better-codex-panel .better-codex-search');if(s?.value){s.value='';s.dispatchEvent(new Event('input',{bubbles:true}));}return true})()`);
+  const selector = `[data-issue-id="${dot.id}"]`;
+  const readPortrait = () => evaluate(`(()=>{const nodes=document.querySelectorAll('#better-codex-panel ${selector}');const card=nodes[0];const creator=card?.querySelector('[data-card-creator]');const img=creator?.querySelector('img');return {count:nodes.length,visible:!!card&&card.getBoundingClientRect().height>0,key:creator?.dataset.cardCreator,name:creator?.querySelector('span:last-child')?.textContent,src:img?.src,width:img?.naturalWidth,height:img?.naturalHeight,source_chips:card?.querySelectorAll('[data-external-source]').length}})()`);
+  let portrait: any; const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline) { portrait = await readPortrait(); if (portrait.count === 1 && portrait.visible && portrait.width === avatarWidth) break; await new Promise(resolve => setTimeout(resolve, 150)); }
+  assert.equal(portrait.count, 1); assert.equal(portrait.visible, true); assert.equal(portrait.key, profileKey); assert.equal(portrait.name, profileName); assert.equal(portrait.width, avatarWidth); assert.equal(portrait.height, avatarHeight); assert.equal(hash(Buffer.from(portrait.src.slice(22), "base64")), expectedAvatar); assert.equal(portrait.source_chips, 0);
+  proof.dot_card = { visible: true, name: profileName, local_profile_key: portrait.key, decoded_width: portrait.width, decoded_height: portrait.height, png_sha256: expectedAvatar, source_chips: 0 };
+  const bounds = await evaluate(`(()=>{const r=document.getElementById('better-codex-panel').getBoundingClientRect();return {x:Math.max(0,r.x),y:Math.max(0,r.y),width:r.width,height:r.height,scale:1}})()`);
+  const shot = await request("Page.captureScreenshot", { format: "png", clip: bounds, captureBeyondViewport: false });
+  writeFileSync(join(dir, "installed-avatar-native-board.png"), Buffer.from(shot.data, "base64"));
+  const cards = await evaluate(`Array.from(document.querySelectorAll('#better-codex-panel [data-issue-id]')).map(card=>({id:card.dataset.issueId,key:card.querySelector('[data-card-creator]')?.dataset.cardCreator}))`);
+  assert.ok(cards.every((card: any) => card.key !== profileKey || card.id === dot.id));
+  proof.visible_cards = { count: cards.length, dot_count: cards.filter((card: any) => card.key === profileKey).length, unknown_count: cards.filter((card: any) => card.key === "unknown").length, user_count: cards.filter((card: any) => card.key?.startsWith("user:")).length, dot_mislabels: 0 };
+  proof.user_unknown_ui_verification = "not exercised: all owned tasks are archived; existing active board has only the mapped dot card. Archived list does not render creator avatars. No task was unarchived or created for this check.";
+  proof.ok = true; proof.completed_at = new Date().toISOString(); save(); console.log(JSON.stringify(proof, null, 2));
+} catch (error) {
+  proof.ok = false; proof.error = error instanceof Error ? error.message : String(error); proof.completed_at = new Date().toISOString(); save(); console.log(JSON.stringify(proof, null, 2)); process.exitCode = 1;
+} finally { client.close(); ui?.close(); }

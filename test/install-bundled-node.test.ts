@@ -69,22 +69,22 @@ test("live DMG installation repairs a changed Node service entrypoint before fin
   const result = finalize();
   assert.equal(result.error, undefined);
   assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(result.commands, [...repairCommands, ["doctor", "--allow-pending-injection"]]);
+  assert.deepEqual(result.commands, [...repairCommands, ["doctor"]]);
 });
 
 test("live DMG installation leaves a matching service running", shellOnly, () => {
   const result = finalize({ status: JSON.stringify({ installed: true, configurationMatches: true }) });
   assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(result.commands, [["version"], ["launcher", "install"], ["service", "status"], ["doctor", "--allow-pending-injection"]]);
+  assert.deepEqual(result.commands, [["version"], ["launcher", "install"], ["service", "status"], ["doctor"]]);
 });
 
 test("service migration is limited to live updates that install bundled Node", shellOnly, () => {
   const withoutNode = finalize({ bundled: false });
   assert.equal(withoutNode.status, 0, withoutNode.stderr);
-  assert.deepEqual(withoutNode.commands, [["version"], ["launcher", "install"], ["doctor", "--allow-pending-injection"]]);
+  assert.deepEqual(withoutNode.commands, [["version"], ["launcher", "install"], ["doctor"]]);
   const offline = finalize({ live: false });
   assert.equal(offline.status, 0, offline.stderr);
-  assert.deepEqual(offline.commands, [["version"], ["setup", "--yes", "--preserve-codex"], ["doctor", "--allow-pending-injection"]]);
+  assert.deepEqual(offline.commands, [["version"], ["setup", "--yes", "--preserve-codex"], ["doctor"]]);
 });
 
 test("unreadable or invalid service status fails without stopping tasks or claiming readiness", shellOnly, () => {

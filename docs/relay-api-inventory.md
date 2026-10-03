@@ -13,7 +13,7 @@ Relay 模式复用以下 Runtime 路由，不实现第二套业务状态机。
 | GET | `/web/projects/:projectId` |
 | GET | `/web/host.css` |
 | GET | `/web/host.js` |
-| GET | `/web/injection.js` |
+| GET | `/web/ui.js` |
 | GET | `/web/manifest.webmanifest` |
 | GET | `/web/service-worker.js` |
 | GET | `/better-codex-icon-192.png` |

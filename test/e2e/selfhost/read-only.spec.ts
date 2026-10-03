@@ -61,10 +61,14 @@ test("remote shared Web UI shows pending, acknowledgement, conflict, and resubmi
     await page.locator("#web-token").fill(adminToken);
     await page.locator("#web-connect-form button[type=submit]").click();
     await expect(page.locator("#better-codex-board").getByText("Visible remotely")).toBeVisible();
+    const projectEnsureRequests: string[] = [];
+    page.on("request", request => { if (request.url().includes("/api/projects/ensure")) projectEnsureRequests.push(request.url()); });
     await page.locator("#better-codex-agents-entry").click();
     await expect(page.locator("#better-codex-agents").getByText("Remote Agent").first()).toBeVisible();
     await page.locator("#better-codex-entry").click();
     await expect(page.getByText(xssTitle)).toBeVisible();
+    expect(projectEnsureRequests).toEqual([]);
+    await expect(page.locator("#better-codex-error-dialog")).toHaveCount(0);
     expect(await page.locator('img[src="x"]').count()).toBe(0);
     expect(await page.evaluate(() => Boolean((window as typeof window & { __betterCodexXss?: boolean }).__betterCodexXss))).toBe(false);
     await expect(page.locator("html")).not.toHaveAttribute("data-better-codex-read-only", "true");

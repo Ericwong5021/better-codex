@@ -669,12 +669,12 @@ export function installGatewayUpdate(updateId: string, requestedTargetVersion = 
 async function validateCoreRuntime(executable: string) {
   const home = mkdtempSync(join(tmpdir(), "better-codex-update-"));
   mkdirSync(join(home, "run"), { recursive: true });
-  writeFileSync(join(home, "run", "injection.json"), JSON.stringify({ enabled: false }), { mode: 0o600 });
   const environment: NodeJS.ProcessEnv = {
     ...process.env,
     BETTER_CODEX_HOME: home,
     BETTER_CODEX_RUNTIME_PORT: "0",
     BETTER_CODEX_DISABLE_DELEGATION: "1",
+    BETTER_CODEX_DISABLE_DESKTOP_BRIDGE: "1",
     CODEX_HOME: join(home, "codex"),
   };
   delete environment.BETTER_CODEX_DB;

@@ -45,3 +45,11 @@ test("renderMarkdown escapes HTML and renders common blocks", () => {
   assert.match(html, /&lt;SCRIPT src=https:\/\/example\.invalid\/payload\.js&gt;&lt;\/SCRIPT&gt;/);
   assert.doesNotMatch(html, /<script\b/i);
 });
+
+test("observation markdown formats content without loading report-supplied images", () => {
+  const html = renderMarkdown("## Progress\n\n- **done**\n\n![tracking](https://example.invalid/pixel.png)\n\n<script>alert(1)</script>", [], [], { images: false });
+  assert.match(html, /<h2>Progress<\/h2>/);
+  assert.match(html, /<strong>done<\/strong>/);
+  assert.doesNotMatch(html, /<img|<script|src=/);
+  assert.match(html, /tracking/);
+});

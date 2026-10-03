@@ -1,5 +1,18 @@
 export function betterCodexComponentStylesCss() {
   return String.raw`
+    .better-codex-disclosure { min-width: 0; }
+    .better-codex-disclosure > .better-codex-disclosure-trigger {
+      width: 100%; justify-content: flex-start; gap: var(--bc-space-2);
+      padding: 0 var(--bc-space-2); color: var(--bc-color-text-muted);
+      font-size: var(--bc-text-sm); font-weight: 500; box-shadow: none;
+    }
+    .better-codex-disclosure-trigger > svg { width: var(--bc-icon-sm); height: var(--bc-icon-sm); transition: transform var(--bc-motion-fast) var(--bc-ease-out); }
+    .better-codex-disclosure[data-open="true"] > .better-codex-disclosure-trigger > svg { transform: rotate(90deg); }
+    .better-codex-disclosure-trigger .better-codex-disclosure-detail { margin-inline-start: auto; color: var(--bc-color-text-faint); font-size: var(--bc-text-caption); font-variant-numeric: tabular-nums; }
+    .better-codex-disclosure-body { padding: var(--bc-space-2); }
+    .better-codex-disclosure-body[hidden] { display: none; }
+    @media (prefers-reduced-motion: reduce) { .better-codex-disclosure-trigger > svg { transition: none; } }
+
     [data-bc-component="empty-state"] {
       display: flex;
       width: min(520px, 100%);

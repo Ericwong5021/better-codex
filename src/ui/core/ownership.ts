@@ -9,10 +9,11 @@ export function registerOwnedComponent(element: HTMLElement, handle: ComponentHa
   return handle;
 }
 
-export function destroyOwnedComponents(root: Node) {
+export function destroyOwnedComponents(root: Node, retainedRoots: readonly HTMLElement[] = []) {
   if (!(root instanceof HTMLElement)) return;
   const elements = [root, ...root.querySelectorAll<HTMLElement>("[data-bc-component]")];
   elements.forEach(element => {
+    if (retainedRoots.some(retained => retained === element || retained.contains(element))) return;
     const handle = ownedComponents.get(element);
     if (!handle) return;
     ownedComponents.delete(element);
@@ -20,8 +21,8 @@ export function destroyOwnedComponents(root: Node) {
   });
 }
 
-export function destroyRemovedComponents(records: MutationRecord[]) {
+export function destroyRemovedComponents(records: MutationRecord[], options: { retainedRoots?: readonly HTMLElement[] } = {}) {
   records.forEach(record => record.removedNodes.forEach(node => {
-    if (!node.isConnected) destroyOwnedComponents(node);
+    if (!node.isConnected) destroyOwnedComponents(node, options.retainedRoots || []);
   }));
 }

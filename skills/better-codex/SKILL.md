@@ -84,7 +84,7 @@ better-codex mcp status
 better-codex launcher status
 ```
 
-Tell the user to reopen Codex from the Better Codex launcher when activation or sidebar integration needs a fresh desktop session.
+Tell the user to reopen Codex from the Better Codex launcher when native bridge capability detection needs a fresh desktop session.
 
 ### Upgrade locally
 
@@ -110,7 +110,7 @@ better-codex update channel preview
 
 Switching from Preview to stable does not silently downgrade a newer Beta. To install an exact release, rerun the version-pinned installer after verifying its assets.
 
-An installer upgrade keeps a running Codex process open. Core, Runtime, Skill, and MCP activate during installation, and the page is refreshed in place when CDP is available. If page refresh is unavailable, installation completes with injection pending. Only then tell the user to reopen Codex from the Better Codex launcher to activate the page injection; do not claim that Skill or MCP requires a Codex restart.
+An installer upgrade keeps a running Codex process open. Core, Runtime, Skill, and MCP activate during installation. Better Codex product UI lives in the plugin page; retired page injection is never restored. The separate native desktop bridge may wait for a main window. Report plugin rendering, Runtime readiness, and native bridge readiness separately; an unavailable desktop window does not block a service update.
 
 ### Deploy or upgrade remote access
 
@@ -178,10 +178,10 @@ better-codex launcher install
 better-codex relay status
 better-codex relay doctor
 better-codex relay disconnect
-better-codex eject
+better-codex stop
 ```
 
-Explain that `eject` disables page integration while retaining installed components and data. Warn that `uninstall` and `data delete` are destructive; use them only after explicit confirmation and state what data will be removed.
+Explain that `stop` stops the Runtime while retaining installed components and data. Legacy injection commands return a retirement error; open the product through its plugin page. Warn that `uninstall` and `data delete` are destructive; use them only after explicit confirmation and state what data will be removed.
 
 ### Diagnose before repairing
 
@@ -190,6 +190,8 @@ Start with `better-codex doctor`, `better-codex status`, service status and logs
 Do not claim success from a build, a healthy process, a `200` response, or a visible login page alone. Match verification to the user's requested outcome and clearly identify any remaining login, browser, device, or user acceptance step.
 
 ## Scheduler mode
+
+Compatibility note: current Runtime evaluation uses the versioned `better-codex.scheduler-evaluation/v1` prompt and strict output parser without invoking this Skill. Its supplied schema and policy are authoritative. This mode remains installed for compatibility with older scheduler prompts; a Skill reply is never persisted human acceptance, and the current Runtime maps legacy `done` decisions to `in_review`. Normal manual completion remains a separate user action.
 
 Use this mode only inside the isolated Better Codex scheduler process. The task execution conversation is a plain Codex conversation and must not manage the board.
 

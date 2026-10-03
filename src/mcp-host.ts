@@ -1,4 +1,4 @@
-import { injectionScript } from "./dom.js";
+import { browserUiScript } from "./browser-ui.js";
 import { betterCodexWebHostCss, betterCodexWebHostHtml, betterCodexWebHostJavaScript } from "./web-host.js";
 import { coreVersion } from "./version.js";
 
@@ -7,7 +7,8 @@ function inlineScript(source: string) {
 }
 
 /** The MCP host changes transport and routing, while the product UI stays shared. */
-export function betterCodexMcpHostHtml() {
+export function betterCodexMcpHostHtml(options: { mockup?: boolean } = {}) {
+  const mockup = options.mockup === true;
   const transport = String.raw`
 (() => {
   const pending = new Map();
@@ -75,7 +76,7 @@ export function betterCodexMcpHostHtml() {
     if (event.source !== window.parent || event.data?.jsonrpc !== "2.0") return;
     const message = event.data;
     if (message.method === "ui/notifications/tool-result") {
-      const bootstrap = message.params?.structuredContent?.bootstrap;
+      const bootstrap = message.params?._meta?.bootstrap || message.params?.structuredContent?.bootstrap;
       if (bootstrap) initialBootstrap = bootstrap;
     } else if (message.method === "ui/notifications/host-context-changed") {
       applyHostContext(message.params);
@@ -108,7 +109,7 @@ export function betterCodexMcpHostHtml() {
       initialBootstrap = null;
       return new Response(JSON.stringify(bootstrap), { status: 200, headers: { "content-type": "application/json" } });
     }
-    const response = await callTool(method === "GET" ? "runtime_read" : "runtime_command", {
+    const response = await callTool(method === "GET" ? ${JSON.stringify(mockup ? "mockup_read" : "runtime_read")} : ${JSON.stringify(mockup ? "mockup_command" : "runtime_command")}, {
       path, method, body: options.body,
       commandId: headers.get("x-better-codex-command-id") || undefined,
       traceId: headers.get("x-better-codex-trace-id") || undefined,
@@ -139,7 +140,7 @@ export function betterCodexMcpHostHtml() {
       controller = new AbortController();
       let delay = 250;
       try {
-        const result = await callTool("runtime_events", { cursor: cursor || undefined, runtimeInstanceId: runtimeInstanceId || undefined, timeoutMs: 1000 }, 15000, controller.signal);
+        const result = await callTool(${JSON.stringify(mockup ? "mockup_events" : "runtime_events")}, { cursor: cursor || undefined, runtimeInstanceId: runtimeInstanceId || undefined, timeoutMs: 1000 }, 15000, controller.signal);
         if (stopped) return;
         const firstConnection = !runtimeInstanceId;
         runtimeInstanceId = result.runtimeInstanceId;
@@ -162,14 +163,14 @@ export function betterCodexMcpHostHtml() {
     if (destroyed) return;
     destroyed = true;
     for (const stop of Array.from(subscriptions)) stop();
-    window.__betterCodexInjection__?.destroy?.();
+    window.__betterCodexUI__?.destroy?.();
     for (const item of Array.from(pending.values())) item.finish(new Error("mcp_app_disposed"));
     window.removeEventListener("message", onMessage);
   }
   window.addEventListener("pagehide", dispose, { once: true });
   function connect() {
     if (ready) return ready;
-    ready = rpc("ui/initialize", { protocolVersion: "2026-01-26", appInfo: { name: "Better Codex", version: ${JSON.stringify(coreVersion)} }, appCapabilities: {} })
+    ready = rpc("ui/initialize", { protocolVersion: "2026-01-26", appInfo: { name: ${JSON.stringify(mockup ? "Better Codex Mockup" : "Better Codex")}, version: ${JSON.stringify(coreVersion)} }, appCapabilities: {} })
       .then(result => {
         if (!result?.hostCapabilities?.serverTools) throw new Error("mcp_host_tools_unavailable");
         applyHostContext(result.hostContext);
@@ -180,7 +181,7 @@ export function betterCodexMcpHostHtml() {
     return ready;
   }
   window.betterCodexMcpTransport = Object.freeze({ get ready() { return connect(); }, fetch: fetchRuntime, subscribe, routing,
-    install: () => { ${injectionScript(0, "", "install", "zh-CN", "web", "mcp://better-codex/runtime")}; },
+    install: () => { ${browserUiScript(0, "", "zh-CN", "mcp://better-codex/runtime")}; },
   });
   void connect();
 })();`;
@@ -189,7 +190,9 @@ export function betterCodexMcpHostHtml() {
     .replace('  <link rel="apple-touch-icon" href="/better-codex-icon-192.png">\n', "")
     .replace('  <link rel="manifest" href="/web/manifest.webmanifest">\n', "")
     .replace('<link rel="stylesheet" href="/web/host.css">', () => `<style>${betterCodexWebHostCss()}</style>`)
-    .replace("Local connection", "Better Codex")
+    .replace("Local connection", mockup ? "Better Codex Mockup" : "Better Codex")
+    .replace("<title>Better Codex</title>", mockup ? "<title>Better Codex Mockup</title>" : "<title>Better Codex</title>")
+    .replace("<body>", mockup ? '<body data-better-codex-mockup="true"><div role="status" style="position:fixed;right:var(--bc-space-4);bottom:var(--bc-space-2);z-index:var(--bc-z-menu);padding:var(--bc-space-1) var(--bc-space-2);border-radius:var(--bc-radius-sm);background:var(--bc-color-primary);color:var(--bc-color-on-primary);font:var(--bc-text-caption) var(--bc-font-ui);pointer-events:none">Mockup</div>' : "<body>")
     .replace("请运行 <code>better-codex web</code> 自动打开，或粘贴本地访问令牌。令牌只用于连接本机 Runtime。", "插件与本机服务的连接暂时不可用，请重试。")
     .replace('<label><span>访问令牌</span><input id="web-token" type="password" autocomplete="off" spellcheck="false" required></label>', '<input id="web-token" type="hidden">')
     .replace("连接工作台", "重新连接")

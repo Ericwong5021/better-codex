@@ -83,7 +83,7 @@ test("request body limits stop buffering after rejection", () => {
   assert.match(source, /size > limit[\s\S]*request\.off\("data", onData\)[\s\S]*request\.resume\(\)/);
 });
 
-test("web host boots the shared DOM injection behind a local session", async () => {
+test("web host boots the shared browser UI behind a local session", async () => {
   const home = mkdtempSync(join(tmpdir(), "better-codex-web-test-"));
   mkdirSync(join(home, "codex"));
   const port = await availablePort();
@@ -118,7 +118,7 @@ test("web host boots the shared DOM injection behind a local session", async () 
     assert.equal(unauthorizedMcpUi.status, 401);
     const mcpUi = await fetch(`${base}/api/ui/mcp`, { headers: { authorization: `Bearer ${token}` } }).then(response => response.json()) as { html: string; runtimeInstanceId: string };
     assert.match(mcpUi.html, /data-better-codex-mcp="true"/);
-    assert.match(mcpUi.html, /BetterCodexInjected\.install/);
+    assert.match(mcpUi.html, /BetterCodexUI\.install/);
     assert.ok(mcpUi.runtimeInstanceId);
     assert.ok(!mcpUi.html.includes(token));
 
@@ -154,7 +154,7 @@ test("web host boots the shared DOM injection behind a local session", async () 
     assert.doesNotMatch(hostCss, /^\s*button:(?:active|focus-visible)/m);
     assert.match(hostCss, /\.web-sidebar button/);
 
-    const unauthorized = await fetch(`${base}/web/injection.js`);
+    const unauthorized = await fetch(`${base}/web/ui.js`);
     assert.equal(unauthorized.status, 401);
 
     const invalidSession = await fetch(`${base}/web/session`, {
@@ -189,12 +189,12 @@ test("web host boots the shared DOM injection behind a local session", async () 
     const sessionToken = ((await session.json()) as { token?: string }).token || "";
     assert.match(sessionToken, /^[0-9a-f-]{36}$/);
 
-    const crossOriginInjection = await fetch(`${base}/web/injection.js?locale=zh-CN&session=${sessionToken}`, {
+    const crossOriginInjection = await fetch(`${base}/web/ui.js?locale=zh-CN&session=${sessionToken}`, {
       headers: { "sec-fetch-site": "same-site" },
     });
     assert.equal(crossOriginInjection.status, 403);
 
-    const injection = await fetch(`${base}/web/injection.js?locale=zh-CN&session=${sessionToken}`, {
+    const injection = await fetch(`${base}/web/ui.js?locale=zh-CN&session=${sessionToken}`, {
       headers: { "sec-fetch-site": "same-origin" },
     });
     assert.equal(injection.status, 200);
@@ -206,17 +206,11 @@ test("web host boots the shared DOM injection behind a local session", async () 
     assert.match(source, /"initialLocale":"zh-CN"/);
     assert.match(source, /HOST_KIND === "web" \? INITIAL_LOCALE : bootstrap\.locale/);
     assert.match(source, /data-better-codex-web-surface/);
-    assert.match(source, /className = HOST_KIND === "web" \? "web-nav-button" : "better-codex-native-navigation"/);
-    assert.match(source, /--better-codex-native-icon-width/);
-    assert.match(source, /--better-codex-native-icon-height/);
-    assert.match(source, /const referenceIcon = reference\.querySelector\("svg"\)/);
-    assert.match(source, /syncNativeIconSize/);
-    assert.match(source, /\.prepend\(entry\)/);
     assert.match(source, /document\.documentElement\.dataset\.theme = resolvedTheme/);
     assert.match(source, /name\.endsWith\("font-ui"\)/);
     assert.doesNotThrow(() => new Function(source));
 
-    const relayInjection = await fetch(`${base}/web/injection.js?locale=en-US`, {
+    const relayInjection = await fetch(`${base}/web/ui.js?locale=en-US`, {
       headers: { authorization: `Bearer ${token}`, "x-better-codex-relay": "1", "sec-fetch-site": "cross-site" },
     });
     assert.equal(relayInjection.status, 200);
@@ -325,7 +319,7 @@ test("web host boots the shared DOM injection behind a local session", async () 
     assert.equal(humanEnrichedIssue.agent_enabled, false);
     assert.equal(humanEnrichedIssue.user_assigned, true);
 
-    const englishInjection = await fetch(`${base}/web/injection.js?locale=en-US&session=${sessionToken}`);
+    const englishInjection = await fetch(`${base}/web/ui.js?locale=en-US&session=${sessionToken}`);
     assert.equal(englishInjection.status, 200);
     assert.match(await englishInjection.text(), /"initialLocale":"en"/);
 

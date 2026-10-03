@@ -11,6 +11,7 @@ type MarkdownEnvironment = {
   literalLinks?: Set<string>;
   plainLinkDepth?: number;
   literalLinkDepth?: number;
+  images?: boolean;
 };
 
 markdown.renderer.rules.link_open = (tokens, index, options, _environment, renderer) => {
@@ -46,6 +47,7 @@ markdown.renderer.rules.link_close = (tokens, index, options, _environment, rend
 const renderImage = markdown.renderer.rules.image;
 markdown.renderer.rules.image = (tokens, index, options, _environment, renderer) => {
   const environment = _environment as MarkdownEnvironment | undefined;
+  if (environment?.images === false) return markdown.utils.escapeHtml(tokens[index].content);
   const attribute = tokens[index].attrGet("src");
   const source = attribute === null ? "" : String(attribute);
   if (source && environment?.plainLinks?.has(source)) return markdown.utils.escapeHtml(tokens[index].content);
@@ -66,7 +68,7 @@ export function markdownLinks(source: string) {
   return links;
 }
 
-export function renderMarkdown(source: string, plainLinks: readonly string[] = [], literalLinks: readonly string[] = []) {
+export function renderMarkdown(source: string, plainLinks: readonly string[] = [], literalLinks: readonly string[] = [], options: { images?: boolean } = {}) {
   const input = String(source || "").trim();
-  return input ? markdown.render(input, plainLinks.length || literalLinks.length ? { plainLinks: new Set(plainLinks), literalLinks: new Set(literalLinks), plainLinkDepth: 0, literalLinkDepth: 0 } : undefined) : "";
+  return input ? markdown.render(input, { plainLinks: new Set(plainLinks), literalLinks: new Set(literalLinks), plainLinkDepth: 0, literalLinkDepth: 0, images: options.images }) : "";
 }

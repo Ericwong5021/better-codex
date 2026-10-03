@@ -87,7 +87,7 @@ Better Codex 适用于各种角色。只要你的工作会在 Codex 里持续多
 
 ## 安装方法
 
-macOS 13+（提供 DMG 的版本）：将 **Better Codex.app** 拖入“应用程序”，然后打开。程序静默运行，菜单栏使用 Logo 剪影，分别显示 Runtime 是否就绪、看板是否已注入。DMG 内置 Node.js，无需另外安装。通过菜单中的“打开 Codex / 启用看板”使用原有启动与重启确认流程。退出 Better Codex 会停止看板服务，已有模型任务保留原执行进程，重新打开后同步结果。
+macOS 13+（提供 DMG 的版本）：将 **Better Codex.app** 拖入“应用程序”，然后打开。程序静默运行，菜单栏使用 Logo 剪影，分别显示 Runtime 是否就绪、桌面桥接是否就绪。DMG 内置 Node.js，无需另外安装。通过菜单中的“打开 Codex”使用原有启动与重启确认流程。退出 Better Codex 会停止看板服务，已有模型任务保留原执行进程，重新打开后同步结果。
 
 macOS（命令行安装）：
 
@@ -105,7 +105,7 @@ Better Codex 以轻量 Node.js bundle 运行，需要 Node.js 22.5 或更新版�
 
 安装脚本会同时安装 CLI、Skill、本地运行时和系统启动入口，并在 Codex 中注册 `better-codex` MCP。MCP 只在本机运行，用来提供 Better Codex 应用入口和路由；项目、任务和会话数据仍保存在本地数据库中。旧版独立 EXE 只有在新 bundle 通过版本检查和健康检查后才会被移除。
 
-macOS 从 Better Codex 菜单栏选择“打开 Codex / 启用看板”；Windows 通过 Better Codex 启动入口重新打开 Codex。侧边栏会出现 `任务看板` 和 `智能体` 两个入口。完全卸载可运行 `better-codex uninstall`。
+macOS 从 Better Codex 菜单栏选择“打开 Codex”；Windows 通过 Better Codex 启动入口重新打开 Codex。侧边栏会出现 `任务看板` 和 `智能体` 两个入口。完全卸载可运行 `better-codex uninstall`。
 
 需要从浏览器远程访问自己的看板时，可以部署独立的 Relay 和 Web UI。本机 Runtime 主动建立出站 WSS，Relay 只实时转发浏览器流量，不保存项目、任务、会话、智能体配置或附件。服务器准备、HTTPS、设备配对、备份恢复和升级方法见英文版 [Self-hosting runbook](SELF_HOSTING.md)。
 
@@ -122,30 +122,30 @@ Relay 支持由系统管理员创建多个 Web 账户。每个账户使用独立
 不会持久化到远端。项目、任务、分配关系、会话、智能体配置、附件和运行状态保存在本机 SQLite 数据库（macOS 在 `~/.better-codex/better-codex.db`，Windows 在 `%USERPROFILE%\.better-codex\better-codex.db`），Runtime 只监听 `127.0.0.1`。可选远程访问只在 Runtime 在线时通过自托管 Relay 实时转发 HTTPS/WSS 流量，Relay 不保存业务数据。具体边界见英文版 [Self-hosting runbook](SELF_HOSTING.md)。
 
 **为什么需要注册 MCP？**<br>
-Codex 通过本地 MCP 应用提供 Better Codex 插件页。插件页复用与 Web 相同的完整界面，通过 MCP 连接本机 Runtime，支持任务、智能体、项目和设置。访问凭据留在本机 MCP 进程中；任务数据仍由 Runtime 管理。可选的桌面侧栏集成使用独立入口，不会覆盖插件页。
+Codex 通过本地 MCP 应用提供 Better Codex 插件页。插件页复用与 Web 相同的完整界面，通过 MCP 连接本机 Runtime，支持任务、智能体、项目和设置。访问凭据留在本机 MCP 进程中；任务数据仍由 Runtime 管理。原生线程命令和侧栏目录同步由独立桌面桥接处理，桥接不渲染产品界面。安装本地 MCP 不会自动连接云端 Dot；本版本不提供 Dot 设置入口。
 
 **它会搞坏我的 Codex 吗？**<br>
-应用入口和路由通过本地 MCP 注册，页面集成使用桌面应用的本地 CDP 接口和页面结构，不修改 Codex 的二进制文件。Codex 更新后偶尔需要安装对应的兼容性更新，届时 Codex 内会出现提示。感觉哪里不对时，运行 `better-codex doctor` 检查。
+应用入口和路由通过本地 MCP 注册，产品界面在插件页渲染，独立桌面桥接使用本地 CDP 接口处理原生线程命令和目录同步，不修改 Codex 的二进制文件。Codex 更新后偶尔需要安装对应的兼容性更新，届时 Codex 内会出现提示。感觉哪里不对时，运行 `better-codex doctor` 检查。
 
 **怎么关闭或卸载？**<br>
-`better-codex eject` 只关闭页面集成，任务数据和安装组件会保留。`better-codex uninstall` 会删除 MCP、后台服务、启动入口、Skill、Agent 配置、本地数据和 CLI bundle。
+`better-codex stop` 停止本地 Runtime，任务数据和安装组件会保留。`better-codex uninstall` 会删除 MCP、后台服务、启动入口、Skill、Agent 配置、本地数据和 CLI bundle。
 
 **更新怎么做？**<br>
 Better Codex 会在后台检查带签名的更新清单，发现新版本时在 Codex 内提示。你也可以随时重新运行安装命令，它会优先原地升级。VPS Relay 和 Web UI 使用独立更新流程；自部署安装器保存所选通道，默认每小时检查该通道的签名更新并自动升级，失败后暂停自动重试。已有明确通道会保留，“远程访问”页显示 VPS 的通道与检测结果。旧 VPS 需先手动升级一次以启用该能力，配置与验证见 [自部署指南](SELF_HOSTING.md#automatic-relay-updates)。
 
 **支持哪些平台？**<br>
-macOS 版 Codex Desktop（Apple Silicon 和 Intel），以及 Windows x64 上 Microsoft Store 版本的 Codex。Release 安装包和 CI 覆盖全部三个平台。Codex 兼容性按能力检测，而不是绑定一个永久版本列表；缺少必要页面能力时，Better Codex 会停止页面集成并报告不兼容，不修改看板数据。
+macOS 版 Codex Desktop（Apple Silicon 和 Intel），以及 Windows x64 上 Microsoft Store 版本的 Codex。Release 安装包和 CI 覆盖全部三个平台。Codex 兼容性按能力检测，而不是绑定一个永久版本列表；缺少必要原生桥接能力时，Better Codex 会报告桌面桥接失败，不修改看板数据。
 
 ## 常用命令
 
 ```bash
-better-codex doctor            # 检查 MCP、运行时、数据库、Codex 兼容性和注入状态
+better-codex doctor            # 检查 MCP、运行时、数据库、Codex 兼容性和桌面桥接状态
 better-codex status            # 查看当前服务与看板连接
 better-codex mcp status        # 检查 MCP 注册状态
 better-codex mcp install       # 注册或修复 MCP
 better-codex launcher install  # 安装系统启动入口
 better-codex launcher status   # 检查系统启动入口
-better-codex eject             # 移除侧边栏集成，保留任务数据
+better-codex stop              # 停止本地 Runtime，保留任务数据
 better-codex uninstall         # 完全卸载并删除本地数据
 ```
 
@@ -153,7 +153,7 @@ better-codex uninstall         # 完全卸载并删除本地数据
 
 需要 Node.js 22.5 或更新版本。
 
-如果电脑上已经安装正式版，推荐把源码作为独立开发实例安装。正式版继续使用 `~/.better-codex` 和启动器 `Better Codex`；开发版使用 `~/.better-codex-dev` 和启动器 `Better Codex Dev`。开发版首次启动时，如果正式版数据库存在，会把它一致性快照到 `~/.better-codex-dev/better-codex.db`。此后两份数据库独立演进：开发版的迁移和测试数据不会修改正式版数据库。运行时文件、日志、附件和更新状态也彼此隔离。点击任一启动器时会先停用另一个实例的页面注入。
+如果电脑上已经安装正式版，推荐把源码作为独立开发实例安装。正式版继续使用 `~/.better-codex` 和启动器 `Better Codex`；开发版使用 `~/.better-codex-dev` 和启动器 `Better Codex Dev`。开发版首次启动时，如果正式版数据库存在，会把它一致性快照到 `~/.better-codex-dev/better-codex.db`。此后两份数据库独立演进：开发版的迁移和测试数据不会修改正式版数据库。运行时文件、日志、附件和更新状态也彼此隔离。当其他 profile 已拥有 renderer 时，桌面桥接会让出连接；启动器不会停止其他 profile 的活动任务。
 
 ```bash
 git clone https://github.com/Ericwong5021/better-codex.git
@@ -162,7 +162,7 @@ npm ci
 npm run dev:install
 ```
 
-开发实例不会自动升级核心版本；拉取源码并执行 `npm run build` 即可刷新。使用 `npm run dev:status` 检查开发实例，使用 `npm run dev:uninstall` 移除开发版快捷方式并停止开发实例，开发数据会保留。
+开发实例不会自动升级核心版本；拉取源码后，执行 `npm run dev:refresh` 显式刷新本地开发安装。`npm run build` 只构建源码产物。使用 `npm run dev:status` 检查开发实例，使用 `npm run dev:uninstall` 移除开发版快捷方式并停止开发实例，开发数据会保留。
 
 ## 社区
 
@@ -171,3 +171,7 @@ npm run dev:install
 - 想作为测试者参与 Beta 验证？请阅读[贡献指南中的 Beta 测试说明](CONTRIBUTING.md#beta-testing)和 [Beta 升级指南](BETA_UPGRADE.zh.md)。
 
 如果 Better Codex 让你的 Codex 变得更好用，点个 Star 能帮更多重度用户找到它。
+
+### 本地 dev Mockup
+
+在源码目录运行 `npm run dev:mockup`，将命令输出的本地插件目录导入 Codex，打开 **Better Codex Mockup**。它在插件页复用正式 UI，使用独立的临时模拟服务，保留中英文、编辑、导入、导出与重置；每次连接从新的模拟状态开始，需要保留的数据可先导出。正式服务、真实任务与原有插件注册不受影响。

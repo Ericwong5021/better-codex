@@ -1,4 +1,4 @@
-export type BetterCodexUiHostKind = "codex" | "web";
+export type BetterCodexUiHostKind = "web";
 
 export interface BetterCodexUiHostAdapter {
   kind: BetterCodexUiHostKind;

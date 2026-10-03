@@ -2,7 +2,6 @@ import { closeSync, existsSync, fsyncSync, openSync, readFileSync, renameSync, w
 import { dirname, join } from "node:path";
 import { betterCodexProfile, compatibilityCurrentPath, compatibilityStatusPath, compatibilityVersionsPath, ensureDirectories, runtimeCurrentPath } from "./config.js";
 import { readRuntimeState } from "./runtime-state.js";
-import { injectionPreferenceEnabled } from "./injection-state.js";
 export { coreVersion } from "./version.js";
 import { coreVersion } from "./version.js";
 
@@ -266,7 +265,7 @@ export function capabilityExpression() {
 }
 
 export function missingCapabilities(capabilities: RendererCapabilities) {
-  return [capabilities.sidebar ? null : "sidebar", capabilities.content ? null : "content"].filter((value): value is string => Boolean(value));
+  return capabilities.content ? [] : ["content"];
 }
 
 export function navigationExpression(threadId: string) {
@@ -279,8 +278,8 @@ export function navigationExpression(threadId: string) {
     const attributes = ${attributes};
     const navigation = ${navigation};
     const expected = ${JSON.stringify(threadId)}.replace(/^(local|cloud):/i, "");
-    if (typeof window.__betterCodexInjection__?.openThread === "function") {
-      return await window.__betterCodexInjection__.openThread(expected);
+    if (typeof window.__betterCodexDesktopBridge__?.openThread === "function") {
+      return await window.__betterCodexDesktopBridge__.openThread(expected);
     }
     const normalize = value => String(value || "").replace(/^(local|cloud):/i, "");
     const findRow = () => Array.from(document.querySelectorAll(selectors.threadRow)).find(item => normalize(item.getAttribute(attributes.threadId)) === expected);
@@ -299,11 +298,11 @@ export function navigationExpression(threadId: string) {
     while (Date.now() < deadline) {
       const current = currentState();
       if (current.active === expected) {
-        window.__betterCodexInjection__?.close?.();
+        window.__betterCodexDesktopBridge__?.close?.();
         return { opened: true, via: "sidebar" };
       }
       if (currentRoute() === expected) {
-        window.__betterCodexInjection__?.close?.();
+        window.__betterCodexDesktopBridge__?.close?.();
         return { opened: true, via: "route" };
       }
       const row = findRow();
@@ -323,7 +322,7 @@ export function navigationExpression(threadId: string) {
 export function readCompatibilityStatus() {
   const runtime = readRuntimeState();
   const base: CompatibilityStatus = { state: "waiting_window", compatible: false, reason: "probe_pending", version: bundledCompatibility.version, coreVersion, supportedCodexVersions: bundledCompatibility.supportedCodexVersions, platform: process.platform, codexVersion: null, targetId: null, targetUrl: null, documentId: null, capabilities: null, checkedAt: new Date().toISOString(), lastSuccessfulAt: null, profile: betterCodexProfile, runtimeInstanceId: runtime?.instanceId || null, runtimeGeneration: runtime?.generation ?? null };
-  if (!injectionPreferenceEnabled()) return { ...base, state: "disabled" as const, reason: "disabled" };
+  if (process.env.BETTER_CODEX_DISABLE_DESKTOP_BRIDGE === "1") return { ...base, state: "disabled" as const, reason: "disabled" };
   let compatibility: CompatibilityManifest;
   try { compatibility = activeCompatibility(); }
   catch (error) { return { ...base, state: "failed" as const, reason: "compatibility_package_invalid", error: String(error) }; }
@@ -345,7 +344,7 @@ export function writeCompatibilityStatus(input: Omit<CompatibilityStatus, "versi
   const runtime = readRuntimeState();
   const previous = readCompatibilityStatus();
   const now = new Date();
-  const state = input.state || (input.reason === "disabled" ? "disabled" : successful ? "ready" : input.reason?.startsWith("missing_") || input.reason === "unsupported_platform" || input.reason === "injection_bootstrap_failed" ? "failed" : "waiting_window");
+  const state = input.state || (input.reason === "disabled" ? "disabled" : successful ? "ready" : input.reason?.startsWith("missing_") || input.reason === "unsupported_platform" || input.reason === "desktop_bridge_bootstrap_failed" ? "failed" : "waiting_window");
   const unchanged = previous && previous.state === state && previous.runtimeInstanceId === runtime?.instanceId && previous.runtimeGeneration === runtime?.generation && previous.version === compatibility.version && previous.codexVersion === input.codexVersion && previous.compatible === input.compatible && previous.reason === input.reason && previous.targetId === input.targetId && previous.documentId === input.documentId && JSON.stringify(previous.capabilities) === JSON.stringify(input.capabilities);
   const lastWrite = previous ? Date.parse(successful ? previous.lastSuccessfulAt ?? "" : previous.checkedAt) : 0;
   if (unchanged && Number.isFinite(lastWrite) && now.getTime() - lastWrite < 60000) return previous;

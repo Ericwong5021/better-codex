@@ -1,5 +1,4 @@
 import { readRuntimeState, type RuntimeState } from "./runtime-state.js";
-import { injectionEnabled } from "./injection-state.js";
 
 export type DesktopStatus = {
   schemaVersion: 1;
@@ -15,7 +14,7 @@ export type DesktopStatus = {
 /** A read-only client of Runtime readiness; never opens the business database. */
 export async function desktopStatus(
   state: RuntimeState | null = readRuntimeState(),
-  enabled = injectionEnabled(),
+  enabled = process.env.BETTER_CODEX_DISABLE_DESKTOP_BRIDGE !== "1",
   request: typeof fetch = fetch,
 ): Promise<DesktopStatus> {
   const snapshot: DesktopStatus = {

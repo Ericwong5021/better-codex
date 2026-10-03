@@ -28,8 +28,6 @@ try {
   process.exit(1);
 }
 if (status.runtime?.ok === true) {
-  const expectedEndpoint = `http://127.0.0.1:${status.runtime.port}`;
-  const ownsInjection = status.injection?.targets?.some(target => target.endpoint === expectedEndpoint) === true;
   run(["stop"]);
-  if (ownsInjection) run(["start"]);
+  run(["start"]);
 }

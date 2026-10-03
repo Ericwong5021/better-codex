@@ -53,14 +53,12 @@ export const sessionHostSocketPath = process.platform === "win32"
   ? `\\\\.\\pipe\\better-codex-session-host-${betterCodexProfile}`
   : join(runPath, "session-host");
 export const runtimeLogPath = join(logPath, "runtime.log");
-export const injectorLogPath = join(logPath, "injector.log");
 export const updateLogPath = join(logPath, "update.log");
 export const workerLogPath = join(logPath, "worker.log");
 export const runLogPath = join(logPath, "runs");
 export const schedulerRuntimePath = join(betterCodexHome, "scheduler-runtime");
 export const schedulerSchemaPath = join(schedulerRuntimePath, "output-schema.json");
 export const injectorPidPath = join(runPath, "injector.pid");
-export const injectionStatePath = join(runPath, "injection.json");
 export const mockupSessionPath = join(runPath, "mockup-session.json");
 export const mockupStatePath = join(betterCodexHome, "mockup.json");
 export const launchIntegrationStatePath = join(runPath, "launch-integration.json");
@@ -104,3 +102,6 @@ export function token() {
   writeFileSync(tokenPath, value, { mode: 0o600 });
   return value;
 }
+
+export const desktopBridgeLogPath = join(logPath, "desktop-bridge.log");
+export const desktopBridgePidPath = join(runPath, "desktop-bridge.json");

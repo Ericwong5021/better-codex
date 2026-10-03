@@ -415,7 +415,6 @@ HAD_UPDATE_KEY=0
 HAD_CHANNEL=0
 PREVIOUS_SERVICE_INSTALLED=0
 PREVIOUS_SERVICE_RUNNING=0
-PREVIOUS_INJECTION_ENABLED=1
 LIVE_UPGRADE_COMPLETED=0
 [ -e "$BIN_DIR/better-codex" ] && { cp -p "$BIN_DIR/better-codex" "$BACKUP_DIR/better-codex"; HAD_BINARY=1; }
 [ -e "$BIN_DIR/better-codex.cjs" ] && { cp -p "$BIN_DIR/better-codex.cjs" "$BACKUP_DIR/better-codex.cjs"; HAD_BUNDLE=1; }
@@ -434,7 +433,6 @@ if [ "$HAD_BINARY" = "1" ] && [ "$WITH_SERVICE" = "1" ]; then
   fi
   printf '%s' "$PREVIOUS_SERVICE_STATUS" | grep -Eq '"installed"[[:space:]]*:[[:space:]]*true' && PREVIOUS_SERVICE_INSTALLED=1
   printf '%s' "$PREVIOUS_SERVICE_STATUS" | grep -Eq '"running"[[:space:]]*:[[:space:]]*true' && PREVIOUS_SERVICE_RUNNING=1
-  if [ -f "$BETTER_CODEX_DIR/run/injection.json" ] && ! grep -q '"enabled":true' "$BETTER_CODEX_DIR/run/injection.json"; then PREVIOUS_INJECTION_ENABLED=0; fi
 fi
 INSTALL_MUTATED=0
 finish_install() {
@@ -442,7 +440,6 @@ finish_install() {
   set +e
   if [ "$status" -ne 0 ] && [ "$INSTALL_MUTATED" = "1" ] && [ "$LIVE_UPGRADE_COMPLETED" != "1" ]; then
     if [ "$WITH_SERVICE" = "1" ] && [ "$HAD_BINARY" = "0" ] && [ -x "$BIN_DIR/better-codex" ]; then
-      run_with_timeout 10 "$BIN_DIR/better-codex" disable >/dev/null 2>&1
       run_with_timeout 10 "$BIN_DIR/better-codex" service uninstall >/dev/null 2>&1
       run_with_timeout 10 "$BIN_DIR/better-codex" launcher uninstall >/dev/null 2>&1
     fi
@@ -461,7 +458,6 @@ finish_install() {
       else
         run_with_timeout 10 "$BIN_DIR/better-codex" service uninstall >/dev/null 2>&1
       fi
-      if [ "$PREVIOUS_INJECTION_ENABLED" = "1" ]; then run_with_timeout 30 "$BIN_DIR/better-codex" enable >/dev/null 2>&1; else run_with_timeout 10 "$BIN_DIR/better-codex" disable >/dev/null 2>&1; fi
     fi
   fi
   release_install_lock
@@ -680,11 +676,7 @@ NODE
   fi
   printf '[Better Codex] Running installation diagnostics...\n'
   DOCTOR_LOG="$WORK_DIR/doctor.log"
-  if [ "$PRESERVE_CODEX" = "1" ] || [ "$LIVE_UPGRADE_COMPLETED" = "1" ]; then
-    DOCTOR_ARGUMENTS="--allow-pending-injection"
-  else
-    DOCTOR_ARGUMENTS=""
-  fi
+  DOCTOR_ARGUMENTS=""
   if [ "${BETTER_CODEX_BACKGROUND_SETUP:-0}" = "1" ]; then
     if ! run_with_timeout 20 "$BIN_DIR/better-codex" desktop status >"$DOCTOR_LOG"; then cat "$DOCTOR_LOG" >&2; exit 1; fi
     if ! node -e 'const fs=require("fs");process.exit(JSON.parse(fs.readFileSync(process.argv[1],"utf8")).runtime === "ready" ? 0 : 1)' "$DOCTOR_LOG"; then cat "$DOCTOR_LOG" >&2; exit 1; fi

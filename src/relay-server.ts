@@ -1001,7 +1001,7 @@ export function createRelayServer(options: RelayServerOptions) {
         sessionIds.forEach(revokeSessionChannels);
         return sendJson(response, 200, { user: userForWeb(user) });
       }
-      if (url.pathname === "/web/injection.js" && method === "GET") {
+      if (url.pathname === "/web/ui.js" && method === "GET") {
         if (!session) return sendJson(response, 401, { error: "unauthorized" });
         return forwardRequest(request, response, url, method, session.id, session.user.id);
       }

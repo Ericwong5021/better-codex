@@ -48,7 +48,7 @@ The Runtime detects a dead activator by PID and process start. The same coordina
 
 Desktop state is `ready`, `waiting_window`, `disabled`, or `failed`, scoped to the Runtime instance and generation, profile, compatibility package, renderer target, and document. Loading main windows and missing main windows are pending. Detached, dictation, and avatar windows cannot establish incompatibility. Stale evidence expires after 90 seconds. Corrupt compatibility state or package data remains a separate visible desktop failure.
 
-Core activation preserves the user's injection preference. The resident watcher reconnects when a supported main window becomes available; a closed Codex window does not block a service upgrade. MCP or launcher setup failures are retained separately and do not roll back a healthy service.
+Core activation reconnects the independent native desktop bridge without restoring retired page injection. The resident watcher reconnects when a supported main window becomes available; a closed Codex window does not block a service upgrade. MCP or launcher setup failures are retained separately and do not roll back a healthy service.
 
 ## Installer, VPS, and browser boundaries
 
@@ -58,7 +58,7 @@ VPS admission persists the signed channel manifest, request fingerprint, operati
 
 The host executor uses an inherited file lock, so a deployment child keeps ownership if its Python supervisor dies. A replacement waits for that child before recovering the same operation. Queue and history writes are durable, state directories inherit the Relay's group, failed installations pause automatic retries, and recovery failure preserves the transaction. Shell rollback state belongs to the deployment subshell so it remains available to the exit handler.
 
-One shared browser observer serves desktop, local Web, and remote Web. It preserves acceptance identity through receipt loss, reloads, and injection rebuilds. Other windows clearing shared storage cannot stop an already observing window. Polling timeout means that the outcome is unknown, and never proves failure or restoration. Normal reconnection is inline progress. `升级完成`, `正在恢复`, `已恢复旧版`, and `恢复未完成` require the corresponding operation and recovery evidence. Detailed reports are user-opened and carry operation IDs and structured state.
+One shared browser observer serves desktop, local Web, and remote Web. It preserves acceptance identity through receipt loss, reloads, and plugin page reloads. Other windows clearing shared storage cannot stop an already observing window. Polling timeout means that the outcome is unknown, and never proves failure or restoration. Normal reconnection is inline progress. `升级完成`, `正在恢复`, `已恢复旧版`, and `恢复未完成` require the corresponding operation and recovery evidence. Detailed reports are user-opened and carry operation IDs and structured state.
 
 Verification evidence and untested production boundaries are recorded in [the September 12 acceptance record](../verification/upgrade-reliability-2026-09-12.md).
 

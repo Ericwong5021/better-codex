@@ -3,9 +3,8 @@ import { agentAvatarPngDataUrl, betterCodexLogoPng } from "./brand-assets.js";
 import { betterCodexProfile } from "./config.js";
 import { betterCodexDesignSystemCss } from "./design-system.js";
 import { renderMarkdown } from "./markdown.js";
-import { betterCodexMcpRoute } from "./mcp-contract.js";
 import { featureManifest } from "./features.js";
-import { injectedUiBundle, injectedUiBundleChecksum, injectedUiBundleSchemaVersion } from "./generated/injected-ui.js";
+import { browserUiBundle, browserUiBundleChecksum as browserUiBundleChecksumValue, browserUiBundleSchemaVersion } from "./generated/browser-ui.js";
 import { desktopNativeCommands, sessionNativeCommands } from "./native-commands.js";
 import { avatarColors } from "./user-profile.js";
 import {
@@ -260,38 +259,25 @@ const suggestedAgents = [
   },
 ];
 
-export function injectionVersion() {
-  return activeCompatibility().version;
+export function browserUiBundleChecksum() { return browserUiBundleChecksumValue; }
+
+export function browserUiScript(port: number, accessToken: string, locale: "zh-CN" | "en" = "zh-CN", baseUrl = `http://127.0.0.1:${port}`) {
+  return `${browserUiBundle}\nBetterCodexUI.install(${JSON.stringify(browserUiConfig(port, accessToken, locale, baseUrl))})`;
 }
 
-export function injectionBundleChecksum() {
-  return injectedUiBundleChecksum;
-}
-
-export function injectionScript(port: number, accessToken: string, action: "install" | "uninstall", locale: "zh-CN" | "en" = "zh-CN", host: "codex" | "web" = "codex", baseUrl = `http://127.0.0.1:${port}`) {
-  if (action === "uninstall") {
-    return `(() => {
-      window.__betterCodexInjection__?.destroy?.();
-      document.querySelectorAll('[data-better-codex-owned="true"]').forEach(node => node.remove());
-      document.querySelectorAll('[data-better-codex-native-hidden="true"]').forEach(node => node.removeAttribute('data-better-codex-native-hidden'));
-      document.querySelectorAll('[data-better-codex-page-host="true"]').forEach(node => node.removeAttribute('data-better-codex-page-host'));
-      document.querySelectorAll('[data-better-codex-external-mcp-host-hidden="true"]').forEach(node => node.removeAttribute('data-better-codex-external-mcp-host-hidden'));
-      document.documentElement.removeAttribute('data-better-codex-open');
-      delete window.__betterCodexInjection__;
-      return { uninstalled: true };
-    })()`;
-  }
-  if (injectedUiBundleSchemaVersion !== 1 || !/^[0-9a-f]{64}$/.test(injectedUiBundleChecksum) || !injectedUiBundle.includes("BetterCodexInjected")) {
-    throw new Error("injected_ui_bundle_invalid");
+/** Shared renderer configuration; hosts may supply a transport without embedding Runtime credentials. */
+export function browserUiConfig(port: number, accessToken: string, locale: "zh-CN" | "en" = "zh-CN", baseUrl = `http://127.0.0.1:${port}`) {
+  if (browserUiBundleSchemaVersion !== 1 || !/^[0-9a-f]{64}$/.test(browserUiBundleChecksumValue) || !browserUiBundle.includes("BetterCodexUI")) {
+    throw new Error("browser_ui_bundle_invalid");
   }
   const compatibility = activeCompatibility();
   const config = {
-    schemaVersion: injectedUiBundleSchemaVersion,
-    bundleChecksum: injectedUiBundleChecksum,
+    schemaVersion: browserUiBundleSchemaVersion,
+    bundleChecksum: browserUiBundleChecksumValue,
     version: compatibility.version,
     coreVersion,
     profile: betterCodexProfile,
-    host,
+    host: "web",
     sessionNativeCommands,
     desktopNativeCommands,
     helpModeMarkdown: {
@@ -309,10 +295,7 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     logoUrl: `data:image/png;base64,${betterCodexLogoPng().toString("base64")}`,
     defaultAgentAvatarUrl: agentAvatarPngDataUrl("codex"),
     initialLocale: locale,
-    selectors: compatibility.selectors,
-    attributes: compatibility.attributes,
-    navigation: compatibility.navigation,
-    betterCodexRoute: betterCodexMcpRoute,
+    betterCodexRoute: "/web",
     featureManifest: featureManifest(),
     lucideIcons,
     agentAvatarPresets,
@@ -320,5 +303,5 @@ export function injectionScript(port: number, accessToken: string, action: "inst
     designSystemCss: betterCodexDesignSystemCss(),
     suggestedAgents,
   };
-  return `${injectedUiBundle}\nBetterCodexInjected.install(${JSON.stringify(config)})`;
+  return config;
 }
