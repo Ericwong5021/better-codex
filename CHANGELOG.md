@@ -4,6 +4,16 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.19] - 2026-10-04
+
+- Deliver the shared task board, Agents, Projects, and settings through the Better Codex MCP App; retire the injected product pages and keep native session operations in a separate desktop bridge.
+- Add declared external task observations, durable reporting receipts, creator display, and task execution history without granting external reporters local execution ownership or human acceptance.
+- Keep development Mockup isolated from production Runtime and business data.
+- Use a versioned semantic evaluation contract at the standard service tier, and add journaled local core activation with Runtime identity fencing.
+- Recover Codex executable discovery after missing CLI lookups and preserve stable service and launcher entrypoints during installation.
+- Reuse existing Runtime project IDs when switching shared UI pages instead of submitting duplicate project creation requests.
+- Hide Dot setup and its configuration entrypoints until a direct integration is ready.
+
 ## [0.4.18] - 2026-10-01
 
 - Fix Windows PowerShell installation rollback caused by Session Host discovery detecting its own query process (#19).
@@ -1133,7 +1143,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.18...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.19...HEAD
+[0.4.19]: https://github.com/Ericwong5021/better-codex/compare/v0.4.18...v0.4.19
 [0.4.18]: https://github.com/Ericwong5021/better-codex/compare/v0.4.17...v0.4.18
 [0.4.18-beta.5]: https://github.com/Ericwong5021/better-codex/compare/v0.4.18-beta.4...v0.4.18-beta.5
 [0.4.18-beta.4]: https://github.com/Ericwong5021/better-codex/compare/v0.4.18-beta.3...v0.4.18-beta.4
