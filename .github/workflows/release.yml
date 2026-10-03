@@ -98,7 +98,7 @@ jobs:
         uses: ./.github/actions/macos-signing
         with:
           # Explicitly authorized exceptions for these releases only; future releases remain strict.
-          allow-ad-hoc: ${{ github.ref_name == 'v0.4.18' || github.ref_name == 'v0.4.19' }}
+          allow-ad-hoc: ${{ github.ref_name == 'v0.4.18' || github.ref_name == 'v0.4.20' }}
           certificate: ${{ secrets.BETTER_CODEX_MACOS_CERTIFICATE }}
           certificate-password: ${{ secrets.BETTER_CODEX_MACOS_CERTIFICATE_PASSWORD }}
           api-key: ${{ secrets.BETTER_CODEX_MACOS_NOTARY_API_KEY }}
@@ -181,7 +181,7 @@ jobs:
           const statuses = runners.map(runner => {
             const status = JSON.parse(fs.readFileSync(`release/macos-distribution-${runner}.json`, 'utf8'));
             if (status.runner !== runner || !['ad-hoc-unnotarized', 'developer-id-notarized'].includes(status.signingMode)) throw new Error('macos_distribution_status_invalid');
-            if (status.signingMode === 'ad-hoc-unnotarized' && !['v0.4.18', 'v0.4.19'].includes(process.env.GITHUB_REF_NAME)) throw new Error('macos_unnotarized_release_not_authorized');
+            if (status.signingMode === 'ad-hoc-unnotarized' && !['v0.4.18', 'v0.4.20'].includes(process.env.GITHUB_REF_NAME)) throw new Error('macos_unnotarized_release_not_authorized');
             return `${runner === 'macos-15' ? 'Apple Silicon' : 'Intel'}: ${status.signingMode === 'ad-hoc-unnotarized' ? 'ad-hoc signed DMG; not notarized by Apple. macOS may require explicit approval to open it.' : 'Developer ID signed and notarized by Apple.'}`;
           });
           fs.appendFileSync(process.argv[2], `\n\n### macOS distribution\n\n${statuses.map(status => `- ${status}`).join('\n')}\n\nThe Better Codex update manifest and checksums are cryptographically signed independently of Apple signing and notarization.\n`);

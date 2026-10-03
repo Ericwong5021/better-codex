@@ -42,5 +42,5 @@ Historical development evidence in [the MCP documentation](../../docs/standard-m
 records a 2026-10-01 check of `0.4.19-local.mcp.2` with Codex 0.159.3.
 That check covered the then-current plugin inventory, report ingestion and
 deduplication, and the MCP App resource. It is not acceptance evidence for the
-0.4.19 release or for a cloud Dot connection. Existing conversations may require
+current release or for a cloud Dot connection. Existing conversations may require
 a fresh conversation to load an updated tool inventory.

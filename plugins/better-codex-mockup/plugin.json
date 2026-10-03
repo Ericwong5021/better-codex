@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "better-codex-mockup",
-  "version": "0.4.19",
+  "version": "0.4.20",
   "description": "Source-only isolated Better Codex development Mockup.",
   "license": "Apache-2.0",
   "keywords": [
