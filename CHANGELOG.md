@@ -4,6 +4,13 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.21] - 2026-10-14
+
+- Restore desktop catalog discovery and built-in macOS CLI detection for Codex Desktop 26.1007 (#22).
+- Read generation timing from current and older session records, preserve request counts across damaged records, and avoid counting copies of the same thread twice.
+- Confirm archive, restore, and delete operations against both the desktop catalog and renderer cache, with bounded waits and protection against unfinished operations during bridge replacement.
+- Keep loading windows pending and preserve connection errors from other open windows until they recover.
+
 ## [0.4.20] - 2026-10-04
 
 - Deliver the shared task board, Agents, Projects, and settings through the Better Codex MCP App; retire the injected product pages and keep native session operations in a separate desktop bridge.
@@ -1144,7 +1151,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.20...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.21...HEAD
+[0.4.21]: https://github.com/Ericwong5021/better-codex/compare/v0.4.20...v0.4.21
 [0.4.20]: https://github.com/Ericwong5021/better-codex/compare/v0.4.18...v0.4.20
 [0.4.18]: https://github.com/Ericwong5021/better-codex/compare/v0.4.17...v0.4.18
 [0.4.18-beta.5]: https://github.com/Ericwong5021/better-codex/compare/v0.4.18-beta.4...v0.4.18-beta.5
