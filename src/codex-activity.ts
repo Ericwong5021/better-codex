@@ -32,12 +32,14 @@ type TokenEvent = {
 };
 
 type FileCursor = {
+  sourceIdentity: string;
   offset: number;
   remainder: Buffer;
   totalTokens: number | null;
   outputIntervals: Array<{ startedAt: number; completedAt: number }>;
   outputTimingUnavailable: boolean;
   discardFirstLine: boolean;
+  discardOversizedLine: boolean;
   lastSeenAt: number;
 };
 
@@ -70,8 +72,7 @@ function notifySessionChange(path: string) {
 }
 
 function nonNegativeInteger(value: unknown) {
-  const number = Number(value);
-  return Number.isSafeInteger(number) && number >= 0 ? number : null;
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
 function usageOutput(value: unknown) {
@@ -105,6 +106,7 @@ function tokenRecord(line: string) {
   const info = payload.info as Record<string, unknown>;
   const timestamp = Date.parse(String(record.timestamp || ""));
   if (!Number.isFinite(timestamp)) throw new Error("codex_activity_timestamp_invalid");
+  if (timestamp > Date.now() + 5000) throw new Error("codex_activity_timestamp_in_future");
   return {
     outputTokens: usageOutput(info.last_token_usage),
     totalTokens: cumulativeTotal(info.total_token_usage),
@@ -125,16 +127,20 @@ function generationTimingRecord(line: string) {
   if (record.type === "event_msg" && payload.type === "item_completed" && payload.item && typeof payload.item === "object") {
     const item = payload.item as Record<string, unknown>;
     if (item.type !== "Reasoning" && item.type !== "AgentMessage") return null;
-    const hasStartedAt = Object.hasOwn(item, "started_at_ms");
-    const hasCompletedAt = Object.hasOwn(item, "completed_at_ms");
-    // Recent Codex versions omit both optional fields. Completion timestamps and
-    // request boundaries are not evidence of a model-output streaming interval.
+    // Current desktop rollouts place timing on the event envelope. Prefer that
+    // pair when present, retaining item-local timing for older versions.
+    const timing = Object.hasOwn(payload, "started_at_ms") || Object.hasOwn(payload, "completed_at_ms") ? payload : item;
+    const hasStartedAt = Object.hasOwn(timing, "started_at_ms");
+    const hasCompletedAt = Object.hasOwn(timing, "completed_at_ms");
+    // Optional fields may also be absent. Completion timestamps and request
+    // boundaries alone are not evidence of a model-output streaming interval.
     if (!hasStartedAt && !hasCompletedAt) return { requestStarted: false, outputStartedAt: null, outputCompletedAt: null, outputTimingUnavailable: true };
-    const startedAt = item.started_at_ms;
-    const completedAt = item.completed_at_ms;
+    const startedAt = timing.started_at_ms;
+    const completedAt = timing.completed_at_ms;
     if (typeof startedAt !== "number" || typeof completedAt !== "number"
       || !Number.isSafeInteger(startedAt) || !Number.isSafeInteger(completedAt)
       || startedAt < 0 || completedAt < startedAt) throw new Error("codex_activity_generation_timing_invalid");
+    if (completedAt > Date.now() + 5000) throw new Error("codex_activity_timestamp_in_future");
     return { requestStarted: false, outputStartedAt: startedAt, outputCompletedAt: completedAt, outputTimingUnavailable: false };
   }
   return null;
@@ -281,22 +287,26 @@ class CodexActivityCollector {
     const readHistory = this.initialized || fileStat.mtimeMs >= this.startedAt - retentionMs;
     const offset = readHistory ? Math.max(0, fileStat.size - maxInitialReadBytes) : fileStat.size;
     this.cursors.set(path, {
+      sourceIdentity: path.match(/-([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\.jsonl$/i)?.[1]?.toLowerCase() || resolve(path),
       offset,
       remainder: Buffer.alloc(0),
       totalTokens: null,
       outputIntervals: [],
       outputTimingUnavailable: false,
       discardFirstLine: offset > 0,
+      discardOversizedLine: false,
       lastSeenAt: fileStat.mtimeMs,
     });
   }
 
-  private addEvent(timestamp: number, outputTokens: number, generationMs: number | null, cumulative: number | null) {
+  private addEvent(sourceIdentity: string, recordTimestamp: number, timestamp: number, outputTokens: number, generationMs: number | null, cumulative: number | null) {
     const now = Date.now();
     if (timestamp > now + 5000) throw new Error("codex_activity_timestamp_in_future");
     if (outputTokens <= 0 || timestamp < now - retentionMs) return;
     const safeTimestamp = Math.min(now, timestamp);
-    const key = [safeTimestamp, outputTokens, generationMs ?? "", cumulative ?? ""].join(":");
+    // Timing availability can differ in a copied or partially retained rollout;
+    // the usage record identity must not depend on that derived measurement.
+    const key = [sourceIdentity, recordTimestamp, outputTokens, cumulative ?? ""].join(":");
     if (this.eventKeys.has(key)) return;
     this.eventKeys.add(key);
     this.events.push({ timestamp: safeTimestamp, outputTokens, generationMs, key });
@@ -319,18 +329,18 @@ class CodexActivityCollector {
     if (!line.includes("token_count")) return;
     const record = tokenRecord(line);
     if (!record) return;
+    // Metadata-only usage updates are not completed output requests and must
+    // neither consume timing nor advance the counted cumulative watermark.
+    if (record.outputTokens === null || record.outputTokens <= 0) return;
+    if (record.totalTokens !== null && record.totalTokens === cursor.totalTokens) return;
     const generationMs = cursor.outputTimingUnavailable ? null : generationDuration(cursor.outputIntervals);
     const generationCompletedAt = !cursor.outputTimingUnavailable && cursor.outputIntervals.length
       ? cursor.outputIntervals.reduce((latest, interval) => Math.max(latest, interval.completedAt), 0)
       : null;
+    this.addEvent(cursor.sourceIdentity, record.timestamp, generationCompletedAt ?? record.timestamp, record.outputTokens, generationMs, record.totalTokens);
     cursor.outputIntervals = [];
     cursor.outputTimingUnavailable = false;
-    const previousTotal = cursor.totalTokens;
-    if (record.totalTokens !== null) {
-      cursor.totalTokens = record.totalTokens;
-      if (previousTotal !== null && record.totalTokens <= previousTotal) return;
-    }
-    if (record.outputTokens !== null) this.addEvent(generationCompletedAt ?? record.timestamp, record.outputTokens, generationMs, record.totalTokens);
+    if (record.totalTokens !== null) cursor.totalTokens = record.totalTokens;
   }
 
   private async readFile(path: string, cursor: FileCursor, generation: number, failures: CollectionFailure[]) {
@@ -343,6 +353,7 @@ class CodexActivityCollector {
       cursor.outputIntervals = [];
       cursor.outputTimingUnavailable = false;
       cursor.discardFirstLine = cursor.offset > 0;
+      cursor.discardOversizedLine = false;
     }
     if (fileStat.size === cursor.offset) return false;
     const descriptor = await open(path, "r");
@@ -356,31 +367,39 @@ class CodexActivityCollector {
         const combined = cursor.remainder.length ? Buffer.concat([cursor.remainder, buffer.subarray(0, bytesRead)]) : buffer.subarray(0, bytesRead);
         let start = 0;
         let discardFirstLine = cursor.discardFirstLine;
+        let discardOversizedLine = cursor.discardOversizedLine;
+        const failRecord = (code: string) => {
+          cursor.outputIntervals = [];
+          cursor.outputTimingUnavailable = true;
+          failures.push({ event: "record_parse_failed", code, file: path });
+        };
         for (let index = 0; index < combined.length; index += 1) {
           if (combined[index] !== 10) continue;
           if (discardFirstLine) discardFirstLine = false;
+          else if (discardOversizedLine) discardOversizedLine = false;
           else {
             const end = index > start && combined[index - 1] === 13 ? index - 1 : index;
-            if (end - start > maxLineBytes) throw new Error("codex_activity_line_too_large");
-            try {
+            if (end - start > maxLineBytes) failRecord("codex_activity_line_too_large");
+            else try {
               this.parseLine(cursor, combined.subarray(start, end).toString("utf8"));
             } catch (error) {
               const code = errorCode(error);
-              if (code !== "codex_activity_generation_timing_invalid") throw error;
-              // Preserve counts and later records, but report malformed explicit
-              // timing and prevent a partial interval from becoming a speed sample.
-              cursor.outputIntervals = [];
-              cursor.outputTimingUnavailable = true;
-              failures.push({ event: "file_read_failed", code, file: path });
+              failRecord(error instanceof SyntaxError ? "codex_activity_record_json_invalid" : code);
             }
           }
           start = index + 1;
         }
-        const remainder = Buffer.from(combined.subarray(start));
-        if (remainder.length > maxLineBytes) throw new Error("codex_activity_line_too_large");
+        let remainder = Buffer.from(combined.subarray(start));
+        if (discardOversizedLine) remainder = Buffer.alloc(0);
+        else if (remainder.length > maxLineBytes) {
+          if (!discardFirstLine) failRecord("codex_activity_line_too_large");
+          remainder = Buffer.alloc(0);
+          discardOversizedLine = !discardFirstLine;
+        }
         cursor.offset += bytesRead;
         cursor.remainder = remainder;
         cursor.discardFirstLine = discardFirstLine;
+        cursor.discardOversizedLine = discardOversizedLine;
         this.bytesRead += bytesRead;
       }
     } finally {

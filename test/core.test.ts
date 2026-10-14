@@ -809,7 +809,10 @@ test("desktop session relay binds one native thread and tracks its turn", async 
       }
       assert.fail("session_sync_timeout");
     };
-    await waitFor(() => readCodexActivity().errors.includes("codex_activity_line_too_large"));
+    // Bad records are consumed now; a clean watcher cycle may already have
+    // cleared the transient error before session reconciliation finishes.
+    await waitFor(() => readCodexActivity().readErrors > 0);
+    assert.equal(readCodexActivity().readErrors, 1);
     await waitFor(() => store.getIssue(issue.id)?.status === "in_progress" && store.getIssueReplyState(issue.id).status === "running");
     assert.equal(store.getIssue(issue.id)?.session_owned, false);
     assert.equal(store.getIssueSession(issue.id)?.active_turn_id, nativeTurnId);
