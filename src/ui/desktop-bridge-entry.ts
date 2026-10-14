@@ -554,12 +554,26 @@ async function reconcileRelayTurns(values) {
 
 async function resolveDesktopCatalogServices() {
       if (desktopCatalogServices) return desktopCatalogServices;
-      const entry = Array.from(document.querySelectorAll('link[rel="modulepreload"][href]')).find(link => /\/app-initial-[^/]+\.js$/.test(new URL(link.href).pathname));
-      if (!entry) throw new Error(document.readyState === "loading" ? "desktop_catalog_loading" : "desktop_catalog_module_unavailable");
-      const exports = await import(entry.href);
-      desktopCatalogServices = Object.values(exports).find(value => value && typeof value === "object" && typeof value.localThreadCatalog?.notifyThread === "function");
-      if (!desktopCatalogServices) throw new Error(document.readyState === "loading" ? "desktop_catalog_loading" : "desktop_catalog_service_unavailable");
-      return desktopCatalogServices;
+      // Codex 26.1007 moved the existing host services export from app-initial
+      // to app-shared. Reuse preloaded modules and discover by capability, never
+      // by a minified export name or by opening another host connection.
+      const entries = Array.from(document.querySelectorAll('link[rel="modulepreload"][href]')).filter(link => /\/app-(?:initial|shared)-[^/]+\.js$/.test(new URL(link.href).pathname));
+      if (!entries.length) throw new Error(document.readyState === "loading" ? "desktop_catalog_loading" : "desktop_catalog_module_unavailable");
+      const visited = new Set();
+      let imported = false;
+      for (const entry of entries) {
+        if (visited.has(entry.href)) continue;
+        visited.add(entry.href);
+        try {
+          const exports = await import(entry.href);
+          imported = true;
+          desktopCatalogServices = Object.values(exports).find(value => value && typeof value === "object" && typeof value.localThreadCatalog?.notifyThread === "function");
+          if (desktopCatalogServices) return desktopCatalogServices;
+        } catch (error) {
+          appendDiagnostic("desktop_catalog_module_import_failed", { module_url: entry.href, error: error instanceof Error ? error.message : String(error) });
+        }
+      }
+      throw new Error(document.readyState === "loading" ? "desktop_catalog_loading" : imported ? "desktop_catalog_service_unavailable" : "desktop_catalog_module_import_failed");
     }
 
 async function syncThreadCatalogAction(action) {

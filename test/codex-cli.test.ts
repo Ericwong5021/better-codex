@@ -17,6 +17,83 @@ function executable(path: string, modifiedAt = new Date()) {
   return path;
 }
 
+for (const applicationName of ["Codex.app", "ChatGPT.app"]) {
+  test(`macOS discovery supports all bundled CLI layouts in ${applicationName}`, () => {
+    const current = fixture();
+    try {
+      const applicationPath = join(current.root, applicationName);
+      const resources = join(applicationPath, "Contents", "Resources");
+      const legacy = executable(join(resources, "codex"));
+      const bundled = executable(join(resources, "codex-cli", "bin", "codex"));
+      const nested = executable(join(resources, "codex-cli", "CodexCLI.app", "Contents", "MacOS", "codex"));
+      const candidates = codexExecutableCandidates({ platform: "darwin", env: {}, applicationPath });
+      assert.deepEqual(candidates.slice(0, 3), [legacy, bundled, nested]);
+      assert.equal(resolveCodexExecutable({
+        platform: "darwin", env: {}, applicationPath,
+        probe: candidate => candidate === legacy,
+      }), legacy);
+    } finally {
+      current.dispose();
+    }
+  });
+
+  test(`macOS discovery supports a nested-only CLI in ${applicationName}`, () => {
+    const current = fixture();
+    try {
+      const applicationPath = join(current.root, applicationName);
+      const nested = executable(join(applicationPath, "Contents", "Resources", "codex-cli", "CodexCLI.app", "Contents", "MacOS", "codex"));
+      assert.equal(resolveCodexExecutable({
+        platform: "darwin", env: {}, applicationPath,
+        probe: candidate => candidate === nested,
+      }), nested);
+    } finally {
+      current.dispose();
+    }
+  });
+}
+
+test("macOS discovery probes the nested CLI when the first bundled CLI fails", () => {
+  const current = fixture();
+  try {
+    const applicationPath = join(current.root, "Custom Desktop.app");
+    const resources = join(applicationPath, "Contents", "Resources");
+    const bundled = executable(join(resources, "codex-cli", "bin", "codex"));
+    const nested = executable(join(resources, "codex-cli", "CodexCLI.app", "Contents", "MacOS", "codex"));
+    const probed: string[] = [];
+    assert.equal(resolveCodexExecutable({
+      platform: "darwin", env: {}, applicationPath,
+      probe: candidate => {
+        probed.push(candidate);
+        return candidate === nested;
+      },
+    }), nested);
+    assert.deepEqual(probed, [bundled, nested]);
+  } finally {
+    current.dispose();
+  }
+});
+
+test("macOS discovery preserves explicit environment precedence over bundled CLIs", () => {
+  const current = fixture();
+  try {
+    const applicationPath = join(current.root, "ChatGPT.app");
+    const bundled = executable(join(applicationPath, "Contents", "Resources", "codex-cli", "bin", "codex"));
+    const preferred = executable(join(current.root, "preferred", "codex"));
+    const fallback = executable(join(current.root, "fallback", "codex"));
+    const options = {
+      platform: "darwin" as const,
+      env: { BETTER_CODEX_CODEX_PATH: preferred, CODEX_CLI_PATH: fallback },
+      applicationPath,
+    };
+    assert.deepEqual(codexExecutableCandidates(options).slice(0, 3), [preferred, fallback, bundled]);
+    assert.equal(resolveCodexExecutable({ ...options, probe: candidate => candidate === preferred }), preferred);
+    assert.equal(resolveCodexExecutable({ ...options, probe: candidate => candidate === fallback || candidate === bundled }), fallback);
+    assert.equal(resolveCodexExecutable({ ...options, probe: candidate => candidate === bundled }), bundled);
+  } finally {
+    current.dispose();
+  }
+});
+
 test("Windows discovery prefers the newest executable local Codex CLI", () => {
   const current = fixture();
   try {

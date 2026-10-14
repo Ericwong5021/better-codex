@@ -106,7 +106,11 @@ function macApplicationCandidates(applicationPath: string | null | undefined) {
   const applications = applicationPath === undefined
     ? ["/Applications/Codex.app", "/Applications/ChatGPT.app"]
     : [applicationPath];
-  return existing(applications.map(application => application ? join(application, "Contents", "Resources", "codex") : null));
+  return existing(applications.flatMap(application => application ? [
+    join(application, "Contents", "Resources", "codex"),
+    join(application, "Contents", "Resources", "codex-cli", "bin", "codex"),
+    join(application, "Contents", "Resources", "codex-cli", "CodexCLI.app", "Contents", "MacOS", "codex"),
+  ] : []));
 }
 
 export function codexExecutableCandidates(options: CodexExecutableDiscoveryOptions = {}) {

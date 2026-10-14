@@ -35,9 +35,8 @@ type FileCursor = {
   offset: number;
   remainder: Buffer;
   totalTokens: number | null;
-  requestStartedAt: number | null;
-  outputStartedAt: number | null;
-  outputCompletedAt: number | null;
+  outputIntervals: Array<{ startedAt: number; completedAt: number }>;
+  outputTimingUnavailable: boolean;
   discardFirstLine: boolean;
   lastSeenAt: number;
 };
@@ -114,30 +113,42 @@ function tokenRecord(line: string) {
 }
 
 function generationTimingRecord(line: string) {
-  const itemCompleted = line.includes('"type":"item_completed"') && (line.includes('"type":"Reasoning"') || line.includes('"type":"AgentMessage"'));
-  const requestBoundary = line.includes('"type":"task_started"') || line.includes('"type":"user_message"');
-  const outputCompleted = line.includes('"type":"reasoning"') || line.includes('"type":"message"') || line.includes('"type":"custom_tool_call"') || line.includes('"type":"function_call"') || line.includes('"type":"agent_message"');
-  if (!itemCompleted && !requestBoundary && !outputCompleted) return null;
+  const itemCompleted = line.includes('"item_completed"') && (line.includes('"Reasoning"') || line.includes('"AgentMessage"'));
+  const requestBoundary = line.includes('"task_started"') || line.includes('"user_message"');
+  if (!itemCompleted && !requestBoundary) return null;
   const record = JSON.parse(line) as Record<string, unknown>;
   if (!record.payload || typeof record.payload !== "object") return null;
   const payload = record.payload as Record<string, unknown>;
   const timestamp = Date.parse(String(record.timestamp || ""));
   if (!Number.isFinite(timestamp)) throw new Error("codex_activity_timestamp_invalid");
-  if (record.type === "event_msg" && (payload.type === "task_started" || payload.type === "user_message")) return { requestStartedAt: timestamp, outputStartedAt: null, outputCompletedAt: null };
+  if (record.type === "event_msg" && (payload.type === "task_started" || payload.type === "user_message")) return { requestStarted: true, outputStartedAt: null, outputCompletedAt: null, outputTimingUnavailable: false };
   if (record.type === "event_msg" && payload.type === "item_completed" && payload.item && typeof payload.item === "object") {
     const item = payload.item as Record<string, unknown>;
     if (item.type !== "Reasoning" && item.type !== "AgentMessage") return null;
-    const startedAt = nonNegativeInteger(item.started_at_ms);
-    const completedAt = nonNegativeInteger(item.completed_at_ms);
-    if (startedAt === null || completedAt === null || completedAt < startedAt) throw new Error("codex_activity_generation_timing_invalid");
-    return { requestStartedAt: null, outputStartedAt: startedAt, outputCompletedAt: completedAt };
+    const hasStartedAt = Object.hasOwn(item, "started_at_ms");
+    const hasCompletedAt = Object.hasOwn(item, "completed_at_ms");
+    // Recent Codex versions omit both optional fields. Completion timestamps and
+    // request boundaries are not evidence of a model-output streaming interval.
+    if (!hasStartedAt && !hasCompletedAt) return { requestStarted: false, outputStartedAt: null, outputCompletedAt: null, outputTimingUnavailable: true };
+    const startedAt = item.started_at_ms;
+    const completedAt = item.completed_at_ms;
+    if (typeof startedAt !== "number" || typeof completedAt !== "number"
+      || !Number.isSafeInteger(startedAt) || !Number.isSafeInteger(completedAt)
+      || startedAt < 0 || completedAt < startedAt) throw new Error("codex_activity_generation_timing_invalid");
+    return { requestStarted: false, outputStartedAt: startedAt, outputCompletedAt: completedAt, outputTimingUnavailable: false };
   }
-  if (record.type === "event_msg" && payload.type === "agent_message") return { requestStartedAt: null, outputStartedAt: null, outputCompletedAt: timestamp };
-  if (record.type !== "response_item") return null;
-  const type = String(payload.type);
-  const assistantMessage = type === "message" && payload.role === "assistant";
-  if (!["reasoning", "custom_tool_call", "function_call", "agent_message"].includes(type) && !assistantMessage) return null;
-  return { requestStartedAt: null, outputStartedAt: null, outputCompletedAt: timestamp };
+  return null;
+}
+
+function generationDuration(intervals: FileCursor["outputIntervals"]) {
+  let duration = 0;
+  let previousEnd = 0;
+  for (const interval of intervals.sort((left, right) => left.startedAt - right.startedAt)) {
+    const start = Math.max(previousEnd, interval.startedAt);
+    duration += Math.max(0, interval.completedAt - start);
+    previousEnd = Math.max(previousEnd, interval.completedAt);
+  }
+  return duration > 0 ? duration : null;
 }
 
 class CodexActivityCollector {
@@ -273,9 +284,8 @@ class CodexActivityCollector {
       offset,
       remainder: Buffer.alloc(0),
       totalTokens: null,
-      requestStartedAt: null,
-      outputStartedAt: null,
-      outputCompletedAt: null,
+      outputIntervals: [],
+      outputTimingUnavailable: false,
       discardFirstLine: offset > 0,
       lastSeenAt: fileStat.mtimeMs,
     });
@@ -296,44 +306,42 @@ class CodexActivityCollector {
   private parseLine(cursor: FileCursor, line: string) {
     const timing = generationTimingRecord(line);
     if (timing) {
-      if (timing.requestStartedAt !== null) {
-        cursor.requestStartedAt = timing.requestStartedAt;
-        cursor.outputStartedAt = null;
-        cursor.outputCompletedAt = null;
+      if (timing.requestStarted) {
+        cursor.outputIntervals = [];
+        cursor.outputTimingUnavailable = false;
       }
-      if (timing.outputStartedAt !== null) cursor.outputStartedAt = cursor.outputStartedAt === null ? timing.outputStartedAt : Math.min(cursor.outputStartedAt, timing.outputStartedAt);
-      if (timing.outputCompletedAt !== null) cursor.outputCompletedAt = cursor.outputCompletedAt === null ? timing.outputCompletedAt : Math.max(cursor.outputCompletedAt, timing.outputCompletedAt);
+      cursor.outputTimingUnavailable ||= timing.outputTimingUnavailable;
+      if (timing.outputStartedAt !== null && timing.outputCompletedAt !== null) {
+        cursor.outputIntervals.push({ startedAt: timing.outputStartedAt, completedAt: timing.outputCompletedAt });
+      }
       return;
     }
     if (!line.includes("token_count")) return;
     const record = tokenRecord(line);
     if (!record) return;
-    const generationStartedAt = cursor.outputStartedAt ?? cursor.requestStartedAt;
-    const generationCompletedAt = cursor.outputCompletedAt;
-    cursor.requestStartedAt = record.timestamp;
-    cursor.outputStartedAt = null;
-    cursor.outputCompletedAt = null;
+    const generationMs = cursor.outputTimingUnavailable ? null : generationDuration(cursor.outputIntervals);
+    const generationCompletedAt = !cursor.outputTimingUnavailable && cursor.outputIntervals.length
+      ? cursor.outputIntervals.reduce((latest, interval) => Math.max(latest, interval.completedAt), 0)
+      : null;
+    cursor.outputIntervals = [];
+    cursor.outputTimingUnavailable = false;
     const previousTotal = cursor.totalTokens;
     if (record.totalTokens !== null) {
       cursor.totalTokens = record.totalTokens;
       if (previousTotal !== null && record.totalTokens <= previousTotal) return;
     }
-    const generationMs = generationStartedAt !== null && generationCompletedAt !== null && generationCompletedAt > generationStartedAt
-      ? generationCompletedAt - generationStartedAt
-      : null;
     if (record.outputTokens !== null) this.addEvent(generationCompletedAt ?? record.timestamp, record.outputTokens, generationMs, record.totalTokens);
   }
 
-  private async readFile(path: string, cursor: FileCursor, generation: number) {
+  private async readFile(path: string, cursor: FileCursor, generation: number, failures: CollectionFailure[]) {
     const fileStat = await stat(path);
     cursor.lastSeenAt = fileStat.mtimeMs;
     if (fileStat.size < cursor.offset) {
       cursor.offset = Math.max(0, fileStat.size - maxInitialReadBytes);
       cursor.remainder = Buffer.alloc(0);
       cursor.totalTokens = null;
-      cursor.requestStartedAt = null;
-      cursor.outputStartedAt = null;
-      cursor.outputCompletedAt = null;
+      cursor.outputIntervals = [];
+      cursor.outputTimingUnavailable = false;
       cursor.discardFirstLine = cursor.offset > 0;
     }
     if (fileStat.size === cursor.offset) return false;
@@ -354,7 +362,17 @@ class CodexActivityCollector {
           else {
             const end = index > start && combined[index - 1] === 13 ? index - 1 : index;
             if (end - start > maxLineBytes) throw new Error("codex_activity_line_too_large");
-            this.parseLine(cursor, combined.subarray(start, end).toString("utf8"));
+            try {
+              this.parseLine(cursor, combined.subarray(start, end).toString("utf8"));
+            } catch (error) {
+              const code = errorCode(error);
+              if (code !== "codex_activity_generation_timing_invalid") throw error;
+              // Preserve counts and later records, but report malformed explicit
+              // timing and prevent a partial interval from becoming a speed sample.
+              cursor.outputIntervals = [];
+              cursor.outputTimingUnavailable = true;
+              failures.push({ event: "file_read_failed", code, file: path });
+            }
           }
           start = index + 1;
         }
@@ -428,7 +446,7 @@ class CodexActivityCollector {
     for (const [path, cursor] of targets) {
       if (!this.running || generation !== this.generation) return;
       try {
-        await this.readFile(path, cursor, generation);
+        await this.readFile(path, cursor, generation, failures);
       } catch (error) {
         const code = errorCode(error);
         if (code === "ENOENT") this.cursors.delete(path);
