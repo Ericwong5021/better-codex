@@ -29,10 +29,20 @@ async function waitFor(predicate: () => boolean) {
   assert.fail(`activity_collection_timeout: ${JSON.stringify(readCodexActivity())}`);
 }
 
-async function withRollout(lines: string[], run: (path: string) => Promise<void> | void, options: { filename?: string; additional?: Array<{ filename: string; lines: string[] }> } = {}) {
+async function withRollout(lines: string[], run: (path: string, recordErrors: readonly string[]) => Promise<void> | void, options: { filename?: string; additional?: Array<{ filename: string; lines: string[] }> } = {}) {
   const directory = mkdtempSync(join(tmpdir(), "better-codex-activity-"));
   const previousCodexHome = process.env.CODEX_HOME;
   const path = join(directory, "sessions", options.filename || "rollout-test.jsonl");
+  const recordErrors: string[] = [];
+  const originalConsoleError = console.error;
+  console.error = (...args: unknown[]) => {
+    const message = args[0];
+    if (typeof message === "string" && message.startsWith("BETTER_CODEX_DIAGNOSTIC ")) {
+      const diagnostic = JSON.parse(message.slice("BETTER_CODEX_DIAGNOSTIC ".length));
+      if (diagnostic.scope === "codex_activity" && diagnostic.event === "record_parse_failed" && diagnostic.file === path) recordErrors.push(diagnostic.error);
+    }
+    originalConsoleError(...args);
+  };
   try {
     process.env.CODEX_HOME = directory;
     mkdirSync(join(directory, "sessions"));
@@ -40,13 +50,20 @@ async function withRollout(lines: string[], run: (path: string) => Promise<void>
     for (const file of options.additional || []) writeFileSync(join(directory, "sessions", file.filename), `${file.lines.join("\n")}\n`);
     startCodexActivityCollection();
     await waitFor(() => readCodexActivity().collectionCycles > 0);
-    await run(path);
+    await run(path, recordErrors);
   } finally {
     stopCodexActivityCollection();
+    console.error = originalConsoleError;
     if (previousCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = previousCodexHome;
     rmSync(directory, { recursive: true, force: true });
   }
+}
+
+function assertRecordErrors(recordErrors: readonly string[], expected: string[]) {
+  // Current status/errors describe only the latest collection cycle. A clean
+  // watcher cycle can recover before the test observes an earlier bad record.
+  assert.deepEqual([...new Set(recordErrors)].sort(), [...expected].sort());
 }
 
 test("untimed Codex item completions retain requests and tokens without inventing output speed", async () => {
@@ -205,10 +222,9 @@ test("malformed explicit timing remains visible without blocking subsequent vali
         tokens(now - 19_000, 300, 1500),
         item(now - 10_000, "AgentMessage", { started_at_ms: now - 12_000, completed_at_ms: now - 10_000 }),
         tokens(now - 9000, 200, 2000),
-      ], () => {
+      ], (_path, recordErrors) => {
         const activity = readCodexActivity();
-        assert.equal(activity.status, "degraded");
-        assert.deepEqual(activity.errors, ["codex_activity_generation_timing_invalid"]);
+        assertRecordErrors(recordErrors, ["codex_activity_generation_timing_invalid"]);
         assert.equal(activity.readErrors, 1);
         assert.equal(activity.requestCount, 3);
         assert.equal(activity.outputTokens, 1000);
@@ -255,10 +271,10 @@ test("malformed envelope pairs never mix with or fall back to legacy timing", as
       await withRollout([
         envelopeItem(now - 10_000, timing, { started_at_ms: now - 12_000, completed_at_ms: now - 10_000 }),
         tokens(now - 9000, 200, 1000),
-      ], () => {
+      ], (_path, recordErrors) => {
         const activity = readCodexActivity();
-        assert.equal(activity.status, "degraded");
-        assert.deepEqual(activity.errors, ["codex_activity_generation_timing_invalid"]);
+        assertRecordErrors(recordErrors, ["codex_activity_generation_timing_invalid"]);
+        assert.equal(activity.readErrors, 1);
         assert.equal(activity.requestCount, 1);
         assert.equal(activity.tokensPerSecond, null);
       });
@@ -272,28 +288,29 @@ test("malformed JSON and timestamps do not block later records or incremental ap
     '{"type":"event_msg","payload":{"type":"token_count",}',
     JSON.stringify({ timestamp: "invalid", type: "event_msg", payload: { type: "token_count", info: { last_token_usage: { output_tokens: 50 }, total_token_usage: { total_tokens: 100 } } } }),
     tokens(now - 5000, 100, 200),
-  ], async path => {
+  ], async (path, recordErrors) => {
     const initial = readCodexActivity();
     assert.equal(initial.requestCount, 1);
     assert.equal(initial.outputTokens, 100);
     assert.equal(initial.readErrors, 2);
-    assert.deepEqual(initial.errors, ["codex_activity_record_json_invalid", "codex_activity_timestamp_invalid"]);
+    assertRecordErrors(recordErrors, ["codex_activity_record_json_invalid", "codex_activity_timestamp_invalid"]);
     appendFileSync(path, `${tokens(now - 1000, 150, 400)}\n`);
     await waitFor(() => readCodexActivity().requestCount === 2);
     assert.equal(readCodexActivity().status, "ready");
     assert.equal(readCodexActivity().outputTokens, 250);
     assert.equal(readCodexActivity().readErrors, 2);
+    assertRecordErrors(recordErrors, ["codex_activity_record_json_invalid", "codex_activity_timestamp_invalid"]);
   });
 });
 
 test("oversized records are discarded through their newline with bounded incremental recovery", async () => {
   const now = Date.now();
-  await withRollout([], async path => {
+  await withRollout([], async (path, recordErrors) => {
     const initialBytes = readCodexActivity().bytesRead;
     appendFileSync(path, 'x'.repeat(1024 * 1024 + 1));
     await waitFor(() => readCodexActivity().readErrors === 1 && readCodexActivity().bytesRead > initialBytes);
     assert.equal(readCodexActivity().requestCount, 0);
-    assert.deepEqual(readCodexActivity().errors, ["codex_activity_line_too_large"]);
+    assertRecordErrors(recordErrors, ["codex_activity_line_too_large"]);
     assert.equal(readCodexActivity().readErrors, 1);
     appendFileSync(path, 'x'.repeat(300_000));
     await waitFor(() => readCodexActivity().bytesRead >= initialBytes + 1024 * 1024 + 1 + 300_000);
@@ -386,10 +403,10 @@ test("future timestamps and timing do not poison later valid usage at the same c
     tokens(now - 10_000, 100, 1000),
     envelopeItem(now - 9000, { started_at_ms: now - 1000, completed_at_ms: now + 60_000 }),
     tokens(now - 8000, 50, 1100),
-  ], () => {
+  ], (_path, recordErrors) => {
     const activity = readCodexActivity();
-    assert.equal(activity.status, "degraded");
-    assert.deepEqual(activity.errors, ["codex_activity_timestamp_in_future"]);
+    assertRecordErrors(recordErrors, ["codex_activity_timestamp_in_future"]);
+    assert.equal(activity.readErrors, 2);
     assert.equal(activity.requestCount, 2);
     assert.equal(activity.outputTokens, 150);
     assert.equal(activity.speedSampleCount, 0);
