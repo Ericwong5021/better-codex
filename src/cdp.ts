@@ -40,6 +40,34 @@ function currentDesktopBridgeMatches(existing: DesktopBridgeIdentity, endpoint: 
     && existing.pulse;
 }
 
+export function desktopRendererProbeReason(capabilities: RendererCapabilities) {
+  if (capabilities.loading) return "renderer_loading";
+  const missing = missingCapabilities(capabilities);
+  return missing.length ? `missing_${missing.join("_")}` : null;
+}
+
+export function desktopIntegrationState(identity: DesktopBridgeIdentity, expectedEndpoint: string, capabilities: RendererCapabilities) {
+  const rendererReason = desktopRendererProbeReason(capabilities);
+  if (rendererReason === "renderer_loading" || identity.bootstrapError === "desktop_catalog_loading") {
+    return { state: "waiting_window" as const, compatible: false, reason: "renderer_loading", error: identity.bootstrapError || null };
+  }
+  if (identity.documentId !== undefined && capabilities.documentId !== undefined && identity.documentId !== capabilities.documentId) {
+    return { state: "waiting_window" as const, compatible: false, reason: "renderer_document_changed", error: null };
+  }
+  if (rendererReason) return { state: "failed" as const, compatible: false, reason: rendererReason, error: null };
+  if (["desktop_catalog_sync_pending", "desktop_catalog_mutation_pending", "desktop_catalog_renderer_changed"].includes(identity.bootstrapError || "")) {
+    return { state: "waiting_window" as const, compatible: false, reason: "bootstrap_pending", error: identity.bootstrapError };
+  }
+  const ready = Boolean(currentDesktopBridgeMatches(identity, expectedEndpoint)) && identity.ready === true;
+  const failed = identity.bootstrapError && !/fetch|network|timeout|runtime_|update_|503|reconnecting/i.test(identity.bootstrapError);
+  return {
+    state: ready ? "ready" as const : failed ? "failed" as const : "waiting_window" as const,
+    compatible: ready,
+    reason: ready ? null : failed ? "desktop_bridge_bootstrap_failed" : "bootstrap_pending",
+    error: identity.bootstrapError || null,
+  };
+}
+
 class Connection {
   private sequence = 0;
   private socket: WebSocket;
@@ -295,7 +323,7 @@ async function evaluate(connection: Connection, expression: string) {
   return payload?.value;
 }
 
-type MainTargetOptions = { trustIds?: Set<string>; requestTimeoutMs?: number; deadlineAt?: number };
+type MainTargetOptions = { trustIds?: Set<string>; requestTimeoutMs?: number; deadlineAt?: number; verifyListener?: boolean };
 
 function targetTimeout(options: MainTargetOptions, limit: number) {
   const requestLimit = options.requestTimeoutMs === undefined ? limit : Math.min(limit, options.requestTimeoutMs);
@@ -309,7 +337,7 @@ async function mainTargets(port: number, options: MainTargetOptions = {}) {
     writeCompatibilityStatus({ codexVersion: null, compatible: false, reason: "unsupported_platform", targetId: null, capabilities: null });
     throw new Error(`codex_incompatible_unsupported_platform_${process.platform}`);
   }
-  const discovered = await targets(port, targetTimeout(boundedOptions, cdpHttpTimeoutMs));
+  const discovered = await targets(port, targetTimeout(boundedOptions, cdpHttpTimeoutMs), boundedOptions.verifyListener ?? true);
   const candidates = boundedOptions.trustIds?.size
     ? [
         ...discovered.filter(target => boundedOptions.trustIds!.has(target.id)),
@@ -322,6 +350,7 @@ async function mainTargets(port: number, options: MainTargetOptions = {}) {
   let lastTargetId: string | null = null;
   let lastCapabilities: RendererCapabilities | null = null;
   let compatibleCapabilities: RendererCapabilities | null = null;
+  let incompatibleEvidence: { reason: string; target: Target; capabilities: RendererCapabilities } | null = null;
   for (const target of candidates) {
     if (boundedOptions.trustIds?.has(target.id)) {
       selected.push(target);
@@ -337,16 +366,15 @@ async function mainTargets(port: number, options: MainTargetOptions = {}) {
     try {
       await connection.open();
       const capabilities = await evaluate(connection, capabilityExpression()) as RendererCapabilities;
-      const missing = missingCapabilities(capabilities);
+      const reason = desktopRendererProbeReason(capabilities);
       lastTargetId = target.id;
       lastCapabilities = capabilities;
-      if (missing.length === 0) {
+      if (reason === null) {
         selected.push(target);
         compatibleCapabilities ??= capabilities;
-      } else if (capabilities.loading) {
-        lastReason = "renderer_loading";
       } else {
-        lastReason = `missing_${missing.join("_")}`;
+        lastReason = reason;
+        if (reason.startsWith("missing_")) incompatibleEvidence ??= { reason, target, capabilities };
       }
     } catch {
       lastReason = "renderer_probe_failed";
@@ -363,7 +391,12 @@ async function mainTargets(port: number, options: MainTargetOptions = {}) {
     return selected;
   }
   if (Date.now() >= boundedOptions.deadlineAt) throw new Error(`cdp_unavailable_${port}_timeout`);
-  writeCompatibilityStatus({ codexVersion, compatible: false, reason: lastReason, targetId: lastTargetId, capabilities: lastCapabilities });
+  if (incompatibleEvidence) {
+    lastReason = incompatibleEvidence.reason;
+    lastTargetId = incompatibleEvidence.target.id;
+    lastCapabilities = incompatibleEvidence.capabilities;
+  }
+  writeCompatibilityStatus({ codexVersion, compatible: false, reason: lastReason, targetId: lastTargetId, documentId: lastCapabilities?.documentId, capabilities: lastCapabilities });
   if (lastReason.startsWith("missing_")) throw new Error(`codex_incompatible_${lastReason}`);
   return [];
 }
@@ -591,12 +624,23 @@ async function waitForTargets(port: number) {
   return waitForTargetsWithin(port, 30_000);
 }
 
-async function recordDesktopIntegration(connection: Connection, target: Target, expectedEndpoint: string) {
+async function inspectDesktopIntegration(connection: Connection, target: Target, expectedEndpoint: string) {
   const identity = await evaluate(connection, desktopBridgeIdentityExpression) as DesktopBridgeIdentity;
+  const capabilities = await evaluate(connection, capabilityExpression()) as RendererCapabilities;
   const current = readCompatibilityStatus();
-  const ready = Boolean(currentDesktopBridgeMatches(identity, expectedEndpoint)) && identity.ready === true;
-  const failed = identity.bootstrapError && !/fetch|network|timeout|runtime_|update_|503|reconnecting/i.test(identity.bootstrapError);
-  return writeCompatibilityStatus({ codexVersion: current?.codexVersion ?? desktopVersion(), compatible: ready, reason: ready ? null : failed ? "desktop_bridge_bootstrap_failed" : "bootstrap_pending", error: identity.bootstrapError || null, targetId: target.id, targetUrl: target.url, documentId: identity.documentId, capabilities: current?.capabilities ?? null }, ready);
+  const integration = desktopIntegrationState(identity, expectedEndpoint, capabilities);
+  return { ...integration, codexVersion: current?.codexVersion ?? desktopVersion(), targetId: target.id, targetUrl: target.url, documentId: capabilities.documentId, capabilities };
+}
+
+function persistDesktopIntegrationObservations(observations: Array<Awaited<ReturnType<typeof inspectDesktopIntegration>>>) {
+  const priority = (observation: typeof observations[number]) => observation.compatible ? 2 : observation.state === "failed" ? 1 : 0;
+  const currentDocuments = [...new Map(observations.map(observation => [observation.targetId, observation])).values()];
+  const selected = currentDocuments.reduce<typeof observations[number] | null>((best, observation) => !best || priority(observation) > priority(best) ? observation : best, null);
+  return selected ? writeCompatibilityStatus(selected, selected.compatible) : null;
+}
+
+async function recordDesktopIntegration(connection: Connection, target: Target, expectedEndpoint: string) {
+  return persistDesktopIntegrationObservations([await inspectDesktopIntegration(connection, target, expectedEndpoint)]);
 }
 
 async function installTarget(target: Target, runtimePort: number, accessToken: string) {
@@ -844,6 +888,7 @@ export async function watchDesktopBridge(port: number, accessToken: string) {
       activeRuntimePort = runtime.port;
       const values = await mainTargets(port, { trustIds: new Set(attached.keys()) });
       const activeIds = new Set(values.map(target => target.id));
+      const integrationObservations = new Map<string, Awaited<ReturnType<typeof inspectDesktopIntegration>>>();
       for (const [id, current] of attached) {
         if (!activeIds.has(id)) {
           await current.connection.close();
@@ -851,7 +896,11 @@ export async function watchDesktopBridge(port: number, accessToken: string) {
         }
       }
       for (const target of values) {
-        if (attached.has(target.id)) continue;
+        const current = attached.get(target.id);
+        if (current) {
+          current.target = target;
+          continue;
+        }
         const connection = new Connection(target.webSocketDebuggerUrl!);
         let transferred = false;
         try {
@@ -885,7 +934,7 @@ export async function watchDesktopBridge(port: number, accessToken: string) {
           }
           attached.set(target.id, { connection, identifier, target });
           transferred = true;
-          await recordDesktopIntegration(connection, target, expectedEndpoint);
+          integrationObservations.set(target.id, await inspectDesktopIntegration(connection, target, expectedEndpoint));
         } finally {
           if (!transferred) await connection.close();
         }
@@ -899,10 +948,11 @@ export async function watchDesktopBridge(port: number, accessToken: string) {
             yieldedToPeer = true;
             await current.connection.close();
             attached.delete(id);
+            integrationObservations.delete(id);
             writeCompatibilityStatus({ state: "disabled", codexVersion: desktopVersion(), compatible: false, reason: "peer_profile_active", targetId: current.target.id, targetUrl: current.target.url, capabilities: null });
             continue;
           }
-          await recordDesktopIntegration(current.connection, current.target, `http://127.0.0.1:${activeRuntimePort}`);
+          integrationObservations.set(id, await inspectDesktopIntegration(current.connection, current.target, `http://127.0.0.1:${activeRuntimePort}`));
           if (!currentDesktopBridgeMatches(existing, `http://127.0.0.1:${activeRuntimePort}`)) {
             if (current.identifier) {
               try { await current.connection.send("Page.removeScriptToEvaluateOnNewDocument", { identifier: current.identifier }); } catch {}
@@ -913,8 +963,10 @@ export async function watchDesktopBridge(port: number, accessToken: string) {
         } catch {
           await current.connection.close();
           attached.delete(id);
+          integrationObservations.delete(id);
         }
       }
+      persistDesktopIntegrationObservations([...integrationObservations.values()]);
       if (stopping) break;
       settleMs = attached.size > 0 || yieldedToPeer ? 2500 : 250;
     } catch (error) {
@@ -923,7 +975,9 @@ export async function watchDesktopBridge(port: number, accessToken: string) {
       settleMs = message.startsWith("codex_incompatible_") || message.startsWith("cdp_unavailable_") ? 200 : 500;
       const current = readCompatibilityStatus();
       const reason = message.startsWith("cdp_unavailable_") ? "renderer_not_found" : message.startsWith("codex_incompatible_") ? message.slice("codex_incompatible_".length) : "renderer_probe_failed";
-      writeCompatibilityStatus({ codexVersion: desktopVersion(), compatible: false, reason, targetId: null, capabilities: null });
+      if (!(message.startsWith("codex_incompatible_") && current?.state === "failed" && current.reason === reason)) {
+        writeCompatibilityStatus({ codexVersion: desktopVersion(), compatible: false, reason, targetId: null, capabilities: null });
+      }
       if (current?.reason !== reason) console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ scope: "desktop", event: "integration_pending", reason, error: message })}`);
     }
     await Promise.race([activity, new Promise<void>(resolve => setTimeout(resolve, settleMs))]);
@@ -945,6 +999,24 @@ export async function watchDesktopBridge(port: number, accessToken: string) {
 
 export async function probeCdpTargetsForTest(port: number, timeoutMs: number) {
   return targets(port, timeoutMs, false);
+}
+
+export async function probeMainCdpTargetsForTest(port: number, timeoutMs: number) {
+  return mainTargets(port, { requestTimeoutMs: timeoutMs, deadlineAt: Date.now() + timeoutMs, verifyListener: false });
+}
+
+export async function recordDesktopIntegrationsForTest(targets: Array<{ id: string; url: string; webSocketDebuggerUrl: string }>, expectedEndpoint: string) {
+  const observations: Array<Awaited<ReturnType<typeof inspectDesktopIntegration>>> = [];
+  for (const target of targets) {
+    const connection = new Connection(target.webSocketDebuggerUrl);
+    try {
+      await connection.open();
+      observations.push(await inspectDesktopIntegration(connection, target, expectedEndpoint));
+    } finally {
+      await connection.close();
+    }
+  }
+  return persistDesktopIntegrationObservations(observations);
 }
 
 export async function waitForCdpTargetsForTest(port: number, timeoutMs: number) {

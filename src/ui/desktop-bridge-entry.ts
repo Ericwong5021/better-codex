@@ -4,11 +4,15 @@ export function install(config: Record<string, any>) {
   if (previous?.endpoint===config.baseUrl && previous?.profile===config.profile && previous?.bundleChecksum===config.bundleChecksum) { previous.pulse(); return {installed:true,reused:true}; }
   previous?.destroy();
   const VERSION=config.version, BRIDGE_TOKEN=config.bridgeToken;
+  // Native renderer handlers have no cancellation API. Keep their unresolved
+  // side effects fenced across bridge replacement as well as local timeouts.
+  const catalogMutations=window.__betterCodexDesktopCatalogMutations__ instanceof Map?window.__betterCodexDesktopCatalogMutations__:previous?.catalogMutations instanceof Map?previous.catalogMutations:new Map();
+  window.__betterCodexDesktopCatalogMutations__=catalogMutations;
   let destroyed=false, bridgeSequence=0, appServerSequence=0;
   const relayId='better-codex-native:'+crypto.randomUUID();
-  const relayThreads=new Set(), bridgeRequests=new Map(), appServerRequests=new Map(), relayGuardianDenials=new Map();
+  const relayThreads=new Set(), bridgeRequests=new Map(), appServerRequests=new Map(), relayGuardianDenials=new Map(), catalogOperations=new Set();
   let relayTimer=null, relayBusy=false, relayHeartbeatBusy=false, relayTurnProbeAt=0, relayCapability='unknown', relayCapabilityError='',relayCapabilityCheckedAt=0, relayAppSessionId='',relayCurrentThreadId='',relayEventQueue=Promise.resolve(), relayCommandInFlight=false,relayBufferedEvents=[];
-  let lastError='', desktopCatalogServices=null, runtimeAuthenticated=false;
+  let lastError='', desktopCatalogServices=null, runtimeAuthenticated=false, catalogSyncBusy=false;
   function appendDiagnostic(event, fields={}) { console.info('BETTER_CODEX_DESKTOP_BRIDGE', {event,profile:config.profile,version:VERSION,relay_id:relayId,...fields}); }
   function normalizeSessionId(value) {
       const id = String(value || "").replace(/^(local|cloud):/i, "");
@@ -172,6 +176,7 @@ function onAppServerMessage(event) {
     }
 
 function sendAppServerRequest(method, params) {
+      if (destroyed) return Promise.reject(new Error("desktop_bridge_destroyed"));
       if (typeof window.electronBridge?.sendMessageFromView !== "function") return Promise.reject(new Error("desktop_bridge_unavailable"));
       const id = relayId + ":" + (++appServerSequence);
       const startedAt = Date.now();
@@ -375,6 +380,7 @@ async function executeSessionCommand(command) {
       relayCommandInFlight = true;
       relayBufferedEvents = [];
       try {
+        if (threadId && catalogMutations.has(threadId)) throw new Error("desktop_catalog_mutation_pending");
         let completion = {};
         if (command.kind === "bind" || command.kind === "start") {
           const params = {
@@ -552,7 +558,40 @@ async function reconcileRelayTurns(values) {
       }));
     }
 
-async function resolveDesktopCatalogServices() {
+function createCatalogOperation() {
+      let failure = null;
+      const waiters = new Set();
+      const cancel = error => {
+        failure ||= error;
+        for (const reject of waiters) reject(failure);
+        waiters.clear();
+      };
+      const ensure = () => {
+        if (destroyed) throw new Error("desktop_bridge_destroyed");
+        if (failure) throw failure;
+      };
+      const timer = setTimeout(() => cancel(new Error("desktop_catalog_sync_timeout")), 10000);
+      const operation = {
+        cancel,
+        ensure,
+        wait(run) {
+          ensure();
+          return new Promise((resolve, reject) => {
+            waiters.add(reject);
+            Promise.resolve().then(() => { ensure(); return run(); }).then(value => {
+              waiters.delete(reject);
+              try { ensure(); resolve(value); } catch (error) { reject(error); }
+            }, error => { waiters.delete(reject); reject(error); });
+          });
+        },
+        close() { clearTimeout(timer); catalogOperations.delete(operation); },
+      };
+      catalogOperations.add(operation);
+      return operation;
+    }
+
+async function resolveDesktopCatalogServices(operation) {
+      operation.ensure();
       if (desktopCatalogServices) return desktopCatalogServices;
       // Codex 26.1007 moved the existing host services export from app-initial
       // to app-shared. Reuse preloaded modules and discover by capability, never
@@ -561,38 +600,92 @@ async function resolveDesktopCatalogServices() {
       if (!entries.length) throw new Error(document.readyState === "loading" ? "desktop_catalog_loading" : "desktop_catalog_module_unavailable");
       const visited = new Set();
       let imported = false;
+      let services = null, actions = null, Registry = null;
       for (const entry of entries) {
         if (visited.has(entry.href)) continue;
         visited.add(entry.href);
         try {
           const exports = await import(entry.href);
+          operation.ensure();
           imported = true;
-          desktopCatalogServices = Object.values(exports).find(value => value && typeof value === "object" && typeof value.localThreadCatalog?.notifyThread === "function");
-          if (desktopCatalogServices) return desktopCatalogServices;
+          const values = Object.values(exports);
+          services ||= values.find(value => value && typeof value === "object" && Object.hasOwn(value, "localThreadCatalog") && typeof value.localThreadCatalog?.notifyThread === "function" && typeof value.localThreadCatalog?.readEntries === "function");
+          actions ||= values.find(value => value && typeof value === "object" && Object.hasOwn(value, "scope") && typeof value.bindScope === "function" && typeof value.bindThreadActionEnqueuer === "function" && typeof value.enqueueForThread === "function" && typeof value.run === "function");
+          Registry ||= values.find(value => typeof value === "function" && value.prototype && ["getImplForHostId", "getForHostId", "getAll", "addRegistryCallback"].every(method => Object.hasOwn(value.prototype, method) && typeof value.prototype[method] === "function"));
+          if (services && actions && Registry) break;
         } catch (error) {
+          operation.ensure();
           appendDiagnostic("desktop_catalog_module_import_failed", { module_url: entry.href, error: error instanceof Error ? error.message : String(error) });
         }
       }
-      throw new Error(document.readyState === "loading" ? "desktop_catalog_loading" : imported ? "desktop_catalog_service_unavailable" : "desktop_catalog_module_import_failed");
+      if (!services) throw new Error(document.readyState === "loading" ? "desktop_catalog_loading" : imported ? "desktop_catalog_service_unavailable" : "desktop_catalog_module_import_failed");
+      if (!actions || !Registry) throw new Error(document.readyState === "loading" ? "desktop_catalog_loading" : "desktop_catalog_renderer_unavailable");
+      const renderer = () => {
+        if (!actions.scope) throw new Error("desktop_catalog_loading");
+        // This registry only reads the bound renderer scope. It neither creates
+        // an App Server nor acquires thread writer ownership.
+        const manager = new Registry(actions.scope).getImplForHostId("local");
+        const methods = ["getHostId", "handleThreadArchived", "handleThreadDeletion", "handleThreadUnarchived", "getThreadSummary", "getConversation", "isConversationSuppressedAfterArchive"];
+        if (!manager || methods.some(method => typeof manager[method] !== "function") || manager.getHostId() !== "local") throw new Error("desktop_catalog_renderer_unavailable");
+        return manager;
+      };
+      renderer();
+      operation.ensure();
+      desktopCatalogServices = { localThreadCatalog: services.localThreadCatalog, renderer };
+      return desktopCatalogServices;
+    }
+
+async function confirmThreadCatalogAction(operation, services, renderer, action) {
+      const reference = { hostId: "local", threadId: action.thread_id };
+      while (true) {
+        const entries = await operation.wait(() => services.localThreadCatalog.readEntries([reference]));
+        if (!Array.isArray(entries) || entries.some(entry => !entry || typeof entry.hostId !== "string" || typeof entry.threadId !== "string")) throw new Error("desktop_catalog_readback_invalid");
+        if (services.renderer() !== renderer) throw new Error("desktop_catalog_renderer_changed");
+        const inHost = entries.some(entry => entry.hostId === reference.hostId && entry.threadId === reference.threadId);
+        const inRenderer = Boolean(renderer.getThreadSummary(reference.threadId) || renderer.getConversation(reference.threadId));
+        const suppressed = renderer.isConversationSuppressedAfterArchive(reference.threadId);
+        if (action.action === "unarchive" ? inHost && inRenderer && suppressed === false : !inHost && !inRenderer && suppressed === true) return;
+        await operation.wait(() => new Promise(resolve => setTimeout(resolve, 100)));
+      }
     }
 
 async function syncThreadCatalogAction(action) {
       let error = "";
+      const operation = createCatalogOperation();
+      catalogSyncBusy = true;
       try {
-        await resolveDesktopCatalogServices();
-        await desktopCatalogServices.localThreadCatalog.notifyThread({ hostId: "local", threadId: action.thread_id }, action.action === "unarchive" ? "upsert" : "remove");
-        window.dispatchEvent(new MessageEvent("message", { data: {
-          type: "mcp-notification", hostId: "local",
-          method: action.action === "delete" ? "thread/deleted" : action.action === "archive" ? "thread/archived" : "thread/unarchived",
-          params: { threadId: action.thread_id }
-        } }));
+        if (!normalizeSessionId(action.thread_id) || !["archive", "unarchive", "delete"].includes(action.action)) throw new Error("thread_catalog_action_invalid");
+        if (catalogMutations.has(action.thread_id)) throw new Error("desktop_catalog_mutation_pending");
+        const services = await operation.wait(() => resolveDesktopCatalogServices(operation));
+        const renderer = services.renderer();
+        const mutation = { eventId: action.event_id };
+        catalogMutations.set(action.thread_id, mutation);
+        const nativeUpdate = Promise.resolve().then(async () => {
+          operation.ensure();
+          await services.localThreadCatalog.notifyThread({ hostId: "local", threadId: action.thread_id }, action.action === "unarchive" ? "upsert" : "remove");
+          operation.ensure();
+          // Await the native handler itself: dispatchEvent does not await its
+          // asynchronous thread read and could acknowledge a failed restoration.
+          await (action.action === "unarchive" ? renderer.handleThreadUnarchived(action.thread_id)
+            : action.action === "delete" ? renderer.handleThreadDeletion([action.thread_id]) : renderer.handleThreadArchived(action.thread_id));
+        }).finally(() => {
+          if (catalogMutations.get(action.thread_id) === mutation) catalogMutations.delete(action.thread_id);
+          if (destroyed && !catalogMutations.size && window.__betterCodexDesktopCatalogMutations__ === catalogMutations && window.__betterCodexDesktopBridge__?.catalogMutations !== catalogMutations) delete window.__betterCodexDesktopCatalogMutations__;
+        });
+        await operation.wait(() => nativeUpdate);
+        await confirmThreadCatalogAction(operation, services, renderer, action);
+        operation.ensure();
         appendDiagnostic("thread_catalog_synced", { thread_id: action.thread_id, event_id: action.event_id, action: action.action });
       } catch (failure) {
         error = typeof failure?.message === "string" ? failure.message : String(failure);
         lastError = error;
         appendDiagnostic("thread_catalog_sync_failed", { thread_id: action.thread_id, event_id: action.event_id, action: action.action, error });
+      } finally {
+        operation.close();
       }
-      await api("/api/session-relay/catalog-ack", { method: "POST", body: JSON.stringify({ relay_id: relayId, thread_id: action.thread_id, event_id: action.event_id, error }) });
+      try {
+        if (!destroyed) await api("/api/session-relay/catalog-ack", { method: "POST", body: JSON.stringify({ relay_id: relayId, thread_id: action.thread_id, event_id: action.event_id, error }) });
+      } finally { catalogSyncBusy = false; }
     }
 
 async function pollSessionRelay() {
@@ -604,7 +697,9 @@ async function pollSessionRelay() {
           relayCapabilityCheckedAt = Date.now();
           try {
             await sendAppServerRequest("thread/list", { limit: 1 });
-            await resolveDesktopCatalogServices();
+            const operation = createCatalogOperation();
+            try { await operation.wait(() => resolveDesktopCatalogServices(operation)); }
+            finally { operation.close(); }
             relayCapability = "ready";
             relayCapabilityError = "";
           } catch (error) {
@@ -631,11 +726,19 @@ async function pollSessionRelay() {
         });
         if (!result?.leader) return;
         if (relayCapability !== "ready") return;
-        for (const action of result.catalog_actions || []) await syncThreadCatalogAction(action);
+        // Bound each polling cycle to one catalog action and start an admitted
+        // command independently of a slow catalog RPC or readback.
+        const catalogAction = Array.isArray(result.catalog_actions) ? result.catalog_actions[0] : null;
+        const catalogSync = catalogAction ? syncThreadCatalogAction(catalogAction) : Promise.resolve();
         if (result.command) {
-          await executeSessionCommand(result.command);
+          if (catalogAction && normalizeSessionId(result.command.thread_id) === catalogAction.thread_id) {
+            await catalogSync;
+            if (!destroyed) await executeSessionCommand(result.command);
+          } else await Promise.all([catalogSync, executeSessionCommand(result.command)]);
           return;
         }
+        await catalogSync;
+        if (destroyed) return;
         const activeTurns = Array.isArray(result?.active_turns) ? result.active_turns : [];
         if (activeTurns.length && Date.now() - relayTurnProbeAt >= 5000) {
           relayTurnProbeAt = Date.now();
@@ -704,8 +807,8 @@ function startSessionRelay() {
       return openThread(threadId);
     }).catch(error=>{lastError=error.message;appendDiagnostic('native_thread_handoff_failed',{thread_id:threadId,error:lastError});});
   }
-  function destroy(){if(destroyed)return;destroyed=true;clearInterval(relayTimer);window.removeEventListener('message',onAppServerMessage,true);window.removeEventListener('codex-message-from-view',onHostMessageFromView,true);document.removeEventListener('click',onNativeClick,true);for(const pending of [...bridgeRequests.values(),...appServerRequests.values()]){clearTimeout(pending.timer);pending.reject(new Error('desktop_bridge_destroyed'));}bridgeRequests.clear();appServerRequests.clear();delete window.__betterCodexBridgeResolve;delete window.__betterCodexDesktopBridge__;}
-  window.__betterCodexDesktopBridge__={version:VERSION,bundleChecksum:config.bundleChecksum,profile:config.profile,endpoint:config.baseUrl,pulse:pulseSessionRelay,refresh:pulseSessionRelay,ready:()=>runtimeAuthenticated&&relayCapability==='ready'&&!lastError,bootstrapError:()=>lastError||relayCapabilityError||null,openThread,destroy};
+  function destroy(){if(destroyed)return;destroyed=true;clearInterval(relayTimer);for(const operation of catalogOperations){operation.cancel(new Error('desktop_bridge_destroyed'));operation.close();}window.removeEventListener('message',onAppServerMessage,true);window.removeEventListener('codex-message-from-view',onHostMessageFromView,true);document.removeEventListener('click',onNativeClick,true);for(const pending of [...bridgeRequests.values(),...appServerRequests.values()]){clearTimeout(pending.timer);pending.reject(new Error('desktop_bridge_destroyed'));}bridgeRequests.clear();appServerRequests.clear();if(!catalogMutations.size&&window.__betterCodexDesktopCatalogMutations__===catalogMutations)delete window.__betterCodexDesktopCatalogMutations__;delete window.__betterCodexBridgeResolve;delete window.__betterCodexDesktopBridge__;}
+  window.__betterCodexDesktopBridge__={version:VERSION,bundleChecksum:config.bundleChecksum,profile:config.profile,endpoint:config.baseUrl,pulse:pulseSessionRelay,refresh:pulseSessionRelay,catalogMutations,ready:()=>runtimeAuthenticated&&relayCapability==='ready'&&!lastError&&!catalogSyncBusy&&!catalogMutations.size,bootstrapError:()=>lastError||relayCapabilityError||(catalogSyncBusy||catalogMutations.size?'desktop_catalog_sync_pending':null),openThread,destroy};
   window.addEventListener('message',onAppServerMessage,true);window.addEventListener('codex-message-from-view',onHostMessageFromView,true);document.addEventListener('click',onNativeClick,true);startSessionRelay();
   return {installed:true,reused:false};
 }

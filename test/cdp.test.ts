@@ -1,9 +1,15 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
-import { darwinCdpListenerTrusted, windowsCodexPackageProcessPowerShell } from "../src/cdp.js";
+import { WebSocketServer } from "ws";
+import { darwinCdpListenerTrusted, desktopIntegrationState, desktopRendererProbeReason, windowsCodexPackageProcessPowerShell } from "../src/cdp.js";
 import { targetAllowed, missingCapabilities } from "../src/compatibility.js";
+import { betterCodexProfile } from "../src/config.js";
+import { desktopBridgeBundleChecksum, desktopBridgeVersion } from "../src/desktop-bridge.js";
 
 const source = readFileSync(new URL("../src/cdp.ts", import.meta.url), "utf8");
 const cliSource = readFileSync(new URL("../src/cli.ts", import.meta.url), "utf8");
@@ -150,6 +156,170 @@ test("desktop bridge readiness follows bootstrap state instead of panel visibili
   assert.match(source, /ready: typeof window\.__betterCodexDesktopBridge__\?\.ready === 'function' && Boolean\(window\.__betterCodexDesktopBridge__\.ready\(\)\)/);
   assert.match(cliSource, /target => Boolean\(\(target as \{ bridge\?: boolean \}\)\.bridge\) && Boolean\(\(target as \{ ready\?: boolean \}\)\.ready\)/);
   assert.doesNotMatch(cliSource, /target => Boolean\(\(target as \{ bridge\?: boolean \}\)\.bridge\) && Boolean\(\(target as \{ panel\?: boolean \}\)\.panel\)/);
+});
+
+test("loading renderers remain pending even when content and native capabilities are present", () => {
+  const capabilities = { content: true, sidebar: true, threads: false, projects: false, loading: true, documentId: 100 };
+  const identity = {
+    version: desktopBridgeVersion(), bundleChecksum: desktopBridgeBundleChecksum(), profile: betterCodexProfile,
+    endpoint: "http://127.0.0.1:1234", pulse: true, ready: true, documentId: 100,
+  };
+  assert.equal(desktopRendererProbeReason(capabilities), "renderer_loading");
+  assert.deepEqual(desktopIntegrationState(identity, identity.endpoint, capabilities), {
+    state: "waiting_window", compatible: false, reason: "renderer_loading", error: null,
+  });
+  assert.equal(desktopIntegrationState({ ...identity, ready: false, bootstrapError: "desktop_catalog_loading" }, identity.endpoint, capabilities).state, "waiting_window");
+  assert.equal(desktopIntegrationState({ ...identity, ready: false, bootstrapError: "desktop_catalog_loading" }, identity.endpoint, { ...capabilities, loading: false }).state, "waiting_window");
+  assert.deepEqual(desktopIntegrationState(identity, identity.endpoint, { ...capabilities, loading: false }), {
+    state: "ready", compatible: true, reason: null, error: null,
+  });
+});
+
+test("desktop integration distinguishes missing capability, bootstrap failure, and changed document", () => {
+  const capabilities = { content: true, sidebar: false, threads: false, projects: false, loading: false, documentId: 100 };
+  const identity = { ready: false, bootstrapError: "desktop_catalog_service_unavailable", documentId: 100 };
+  assert.deepEqual(desktopIntegrationState(identity, "http://127.0.0.1:1234", capabilities), {
+    state: "failed", compatible: false, reason: "desktop_bridge_bootstrap_failed", error: "desktop_catalog_service_unavailable",
+  });
+  assert.equal(desktopRendererProbeReason({ ...capabilities, content: false }), "missing_content");
+  assert.equal(desktopIntegrationState(identity, "http://127.0.0.1:1234", { ...capabilities, content: false }).reason, "missing_content");
+  assert.deepEqual(desktopIntegrationState(identity, "http://127.0.0.1:1234", { ...capabilities, documentId: 200 }), {
+    state: "waiting_window", compatible: false, reason: "renderer_document_changed", error: null,
+  });
+  for (const bootstrapError of ["desktop_catalog_sync_pending", "desktop_catalog_mutation_pending", "desktop_catalog_renderer_changed"]) {
+    assert.deepEqual(desktopIntegrationState({ ...identity, bootstrapError }, "http://127.0.0.1:1234", capabilities), {
+      state: "waiting_window", compatible: false, reason: "bootstrap_pending", error: bootstrapError,
+    });
+  }
+  assert.equal(desktopIntegrationState({ ...identity, bootstrapError: "desktop_catalog_renderer_unavailable" }, "http://127.0.0.1:1234", capabilities).state, "failed");
+});
+
+type FakeRenderer = {
+  id: string;
+  url?: string;
+  capabilities: { content: boolean; sidebar: boolean; threads: boolean; projects: boolean; loading: boolean; documentId: number };
+  identity?: Record<string, unknown>;
+};
+
+async function runRendererFixture(renderers: FakeRenderer[], script: string) {
+  const home = mkdtempSync(join(tmpdir(), "better-codex-cdp-renderers-"));
+  const evaluated: string[] = [];
+  const server = createServer((_request, response) => {
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify(renderers.map(renderer => ({
+      id: renderer.id, type: "page", title: "Codex", url: renderer.url || "app://-/index.html",
+      webSocketDebuggerUrl: `ws://127.0.0.1:${address.port}/${renderer.id}`,
+    }))));
+  });
+  const websocket = new WebSocketServer({ server });
+  websocket.on("connection", (socket, request) => {
+    const renderer = renderers.find(value => request.url === `/${value.id}`);
+    assert.ok(renderer);
+    socket.on("message", data => {
+      const command = JSON.parse(String(data));
+      assert.equal(command.method, "Runtime.evaluate");
+      evaluated.push(renderer.id);
+      const value = command.params.expression.includes("__betterCodexDesktopBridge__")
+        ? { documentId: renderer.capabilities.documentId, ...renderer.identity }
+        : renderer.capabilities;
+      socket.send(JSON.stringify({ id: command.id, result: { result: { value } } }));
+    });
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    const child = spawn(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script, String(address.port)], {
+      cwd: new URL("..", import.meta.url),
+      env: { ...process.env, BETTER_CODEX_HOME: home, BETTER_CODEX_PEER_HOME: join(home, "peer"), BETTER_CODEX_DISABLE_DESKTOP_BRIDGE: "0" },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", chunk => { stdout += chunk; });
+    child.stderr.on("data", chunk => { stderr += chunk; });
+    const code = await new Promise<number | null>((resolve, reject) => {
+      child.once("error", reject);
+      child.once("close", resolve);
+    });
+    assert.equal(code, 0, stderr);
+    return { value: JSON.parse(stdout.trim()), evaluated };
+  } finally {
+    for (const client of websocket.clients) client.terminate();
+    await new Promise<void>(resolve => websocket.close(() => resolve()));
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    rmSync(home, { recursive: true, force: true });
+  }
+}
+
+const rendererCapabilities = { content: true, sidebar: false, threads: false, projects: false, loading: false, documentId: 100 };
+
+test("CDP discovery preserves completed incompatible-document evidence across loading and auxiliary targets", { skip: process.platform === "linux" }, async t => {
+  const incompatible = { id: "incompatible", capabilities: { ...rendererCapabilities, content: false } };
+  const loading = { id: "loading", capabilities: { ...rendererCapabilities, loading: true, documentId: 200 } };
+  const auxiliary = { id: "auxiliary", url: "app://-/index.html?initialRoute=%2Favatar-overlay", capabilities: { ...rendererCapabilities, content: false, documentId: 300 } };
+  for (const renderers of [[incompatible, loading, auxiliary], [loading, auxiliary, incompatible]]) {
+    await t.test(renderers[0].id, async () => {
+      const result = await runRendererFixture(renderers, `
+        const { probeMainCdpTargetsForTest } = await import('./src/cdp.ts');
+        const { readCompatibilityStatus } = await import('./src/compatibility.ts');
+        let error = null;
+        try { await probeMainCdpTargetsForTest(Number(process.argv[1]), 3000); } catch (failure) { error = failure.message; }
+        console.log(JSON.stringify({ error, status: readCompatibilityStatus() }));
+      `);
+      assert.equal(result.value.error, "codex_incompatible_missing_content");
+      assert.equal(result.value.status.state, "failed");
+      assert.equal(result.value.status.targetId, "incompatible");
+      assert.equal(result.value.status.documentId, 100);
+      assert.ok(!result.evaluated.includes("auxiliary"));
+    });
+  }
+});
+
+test("CDP attached-document observations keep failure ahead of loading and release removed evidence", async () => {
+  const result = await runRendererFixture([
+    { id: "failed", capabilities: rendererCapabilities, identity: { bootstrapError: "desktop_catalog_service_unavailable" } },
+    { id: "loading", capabilities: { ...rendererCapabilities, loading: true, documentId: 200 }, identity: { bootstrapError: "desktop_catalog_loading" } },
+    { id: "reloaded", capabilities: { ...rendererCapabilities, documentId: 300 }, identity: { documentId: 299, bootstrapError: "desktop_catalog_service_unavailable" } },
+  ], `
+    const { recordDesktopIntegrationsForTest } = await import('./src/cdp.ts');
+    const { readCompatibilityStatus } = await import('./src/compatibility.ts');
+    const target = id => ({ id, url: 'app://-/index.html', webSocketDebuggerUrl: 'ws://127.0.0.1:' + process.argv[1] + '/' + id });
+    await recordDesktopIntegrationsForTest(['failed', 'loading'].map(target), 'http://127.0.0.1:1234');
+    const failed = readCompatibilityStatus();
+    await recordDesktopIntegrationsForTest([target('loading')], 'http://127.0.0.1:1234');
+    const loading = readCompatibilityStatus();
+    await recordDesktopIntegrationsForTest([target('reloaded')], 'http://127.0.0.1:1234');
+    console.log(JSON.stringify({ failed, loading, reloaded: readCompatibilityStatus() }));
+  `);
+  assert.equal(result.value.failed.state, "failed");
+  assert.equal(result.value.failed.targetId, "failed");
+  assert.equal(result.value.failed.documentId, 100);
+  assert.equal(result.value.loading.state, "waiting_window");
+  assert.equal(result.value.loading.targetId, "loading");
+  assert.equal(result.value.loading.documentId, 200);
+  assert.equal(result.value.reloaded.state, "waiting_window");
+  assert.equal(result.value.reloaded.reason, "renderer_document_changed");
+  assert.equal(result.value.reloaded.documentId, 300);
+  assert.equal(result.value.reloaded.capabilities.documentId, 300);
+});
+
+test("CDP discovery defers a loading main with mounted content", { skip: process.platform === "linux" }, async () => {
+  const result = await runRendererFixture([
+    { id: "loading", capabilities: { ...rendererCapabilities, loading: true } },
+  ], `
+    const { probeMainCdpTargetsForTest } = await import('./src/cdp.ts');
+    const { readCompatibilityStatus } = await import('./src/compatibility.ts');
+    const targets = await probeMainCdpTargetsForTest(Number(process.argv[1]), 3000);
+    console.log(JSON.stringify({ targets, status: readCompatibilityStatus() }));
+  `);
+  assert.deepEqual(result.value.targets, []);
+  assert.equal(result.value.status.state, "waiting_window");
+  assert.equal(result.value.status.compatible, false);
+  assert.equal(result.value.status.reason, "renderer_loading");
+  assert.equal(result.value.status.documentId, 100);
 });
 
 test("macOS restart quits only the installed Desktop app by Bundle ID", () => {
