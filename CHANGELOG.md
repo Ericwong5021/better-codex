@@ -4,6 +4,11 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.22] - 2026-10-17
+
+- Keep menu-bar status and exit responsive with lightweight database readiness probes, while preserving startup integrity checks and actionable exit diagnostics.
+- Start stopped services and reconnect from the plugin recovery page in one click, with readiness checks, retryable failures, and protection against restarting active services or interrupting updates.
+
 ## [0.4.21] - 2026-10-14
 
 - Restore desktop catalog discovery and built-in macOS CLI detection for Codex Desktop 26.1007 (#22).
@@ -1151,7 +1156,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.21...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.22...HEAD
+[0.4.22]: https://github.com/Ericwong5021/better-codex/compare/v0.4.21...v0.4.22
 [0.4.21]: https://github.com/Ericwong5021/better-codex/compare/v0.4.20...v0.4.21
 [0.4.20]: https://github.com/Ericwong5021/better-codex/compare/v0.4.18...v0.4.20
 [0.4.18]: https://github.com/Ericwong5021/better-codex/compare/v0.4.17...v0.4.18
