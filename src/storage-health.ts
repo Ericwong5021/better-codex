@@ -15,7 +15,7 @@ export function storageHealth(path: string) {
   const freeRatio = totalBytes > 0 ? freeBytes / totalBytes : 0;
   return {
     ok: freeBytes >= criticalReserveBytes,
-    degraded: freeBytes < warningReserveBytes || freeRatio < 0.05,
+    degraded: freeBytes < warningReserveBytes,
     path: target,
     total_bytes: totalBytes,
     free_bytes: freeBytes,
@@ -27,7 +27,7 @@ export function storageHealth(path: string) {
 
 export function requireStorageCapacity(path: string, operationBytes: number) {
   const storage = storageHealth(path);
-  const requiredBytes = criticalReserveBytes + Math.max(0, operationBytes);
+  const requiredBytes = Math.max(warningReserveBytes, criticalReserveBytes + Math.max(0, operationBytes));
   if (storage.free_bytes < requiredBytes) {
     throw new Error(`insufficient_disk_space:free=${storage.free_bytes}:required=${requiredBytes}:path=${storage.path}`);
   }

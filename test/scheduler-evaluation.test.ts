@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { copyFileSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after } from "node:test";
+import type { ModelCatalogEntry } from "../src/model-catalog.js";
 import {
   parseSchedulerEvaluation, schedulerEvaluationArgs, schedulerEvaluationDecision,
   schedulerEvaluationPrompt, schedulerEvaluationSchema, schedulerEvaluationVersion,
@@ -22,6 +23,7 @@ const complete = {
 const fixtureHome = mkdtempSync(join(tmpdir(), "better-codex-evaluator-"));
 process.env.BETTER_CODEX_HOME = fixtureHome;
 process.env.CODEX_HOME = join(fixtureHome, "codex");
+mkdirSync(process.env.CODEX_HOME, { recursive: true });
 const executable = join(fixtureHome, process.platform === "win32" ? "codex-fixture.exe" : "codex-fixture.cjs");
 const fixtureScript = join(fixtureHome, "codex-fixture.cjs");
 const capture = join(fixtureHome, "invocation.json");
@@ -33,6 +35,14 @@ const args = process.argv.slice(2);
 if (args.includes("--version")) { console.log("codex simulated fixture"); process.exit(0); }
 fs.writeFileSync(process.env.BC_SCHEDULER_FIXTURE_CAPTURE, JSON.stringify({ args, cwd: process.cwd(), scheduler: process.env.BETTER_CODEX_SCHEDULER }));
 const result = args[args.indexOf("--output-last-message") + 1];
+if (process.env.BETTER_CODEX_ENRICHMENT === "1") {
+  console.log(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: JSON.stringify({ title: "Generated title", description: "Original request" }) } }));
+  process.exit(0);
+}
+if (process.env.BETTER_CODEX_SCHEDULED_TASK_CREATION === "1") {
+  fs.writeFileSync(result, JSON.stringify({ status: "needs_clarification", question: "Which time?" }));
+  process.exit(0);
+}
 fs.writeFileSync(result, process.env.BC_SCHEDULER_FIXTURE_OUTPUT);
 process.exit(Number(process.env.BC_SCHEDULER_FIXTURE_EXIT || 0));
 `, { mode: 0o755 });
@@ -46,6 +56,7 @@ if (process.platform === "win32") {
   copyFileSync(process.execPath, executable);
   const body = readFileSync(fixtureScript, "utf8").replace("process.argv.slice(2)", '["exec", ...process.argv.slice(2)]');
   writeFileSync(join(fixtureHome, "scheduler-runtime", "exec"), body);
+  writeFileSync(join(fixtureHome, "exec"), body);
 }
 after(() => rmSync(fixtureHome, { recursive: true, force: true }));
 
@@ -81,10 +92,10 @@ test("untrusted injected instructions remain inside one JSON data record", () =>
   assert.equal(schedulerEvaluationDecision(parsed).status, "in_review");
 });
 
-test("evaluator launches a fresh non-Fast model with inherited authoring integrations disabled", () => {
-  const args = schedulerEvaluationArgs(input, "/isolated", "/schema.json", "/result.json", "medium");
+test("evaluator launches the selected model at standard tier with inherited authoring integrations disabled", () => {
+  const args = schedulerEvaluationArgs(input, "/isolated", "/schema.json", "/result.json", "custom-model", "medium");
   assert.equal(args[0], "exec");
-  assert.equal(args[args.indexOf("-m") + 1], "gpt-6.1-sol");
+  assert.equal(args[args.indexOf("-m") + 1], "custom-model");
   assert.ok(args.includes('service_tier="default"'));
   assert.ok(args.includes("--ignore-user-config"));
   assert.ok(args.includes("--strict-config"));
@@ -105,7 +116,7 @@ test("worker subprocess applies evidence policy, failure precedence and independ
     const project = store.createProject({ name: "Evaluator fixture", workspacePath: fixtureHome });
     const agent = store.createAgentProfile({ name: "Fixture", description: "", instructions: "", model: "gpt-test", reasoning_effort: "medium" });
     store.setAutoDispatch(true);
-    // A stale saved scheduler model cannot silently override the required evaluator model.
+    // Explicit configuration takes precedence over all automatic defaults.
     store.setSchedulerModel("legacy-fast-model");
     const cases = [
       { name: "complete", output: complete, success: true, code: 0, expected: "in_review", error: null },
@@ -142,7 +153,7 @@ test("worker subprocess applies evidence policy, failure precedence and independ
       const invoked = JSON.parse(readFileSync(capture, "utf8"));
       assert.equal(invoked.scheduler, "1");
       assert.equal(invoked.cwd, realpathSync(join(fixtureHome, "scheduler-runtime")));
-      assert.equal(invoked.args[invoked.args.indexOf("-m") + 1], "gpt-6.1-sol");
+      assert.equal(invoked.args[invoked.args.indexOf("-m") + 1], "legacy-fast-model");
       assert.ok(invoked.args.includes('service_tier="default"'));
       if (scenario.name === "complete") {
         const run = store.db.prepare("SELECT scheduler_result FROM issue_runs WHERE id = ?").get(claim.runId) as { scheduler_result: string };
@@ -157,4 +168,149 @@ test("worker subprocess applies evidence policy, failure precedence and independ
   } finally {
     store.close();
   }
+});
+
+function model(id: string, displayName = id, isDefault = false): ModelCatalogEntry {
+  return { id, displayName, isDefault, description: "", provider: "fixture", serviceTiers: [], defaultReasoningEffort: "medium", supportedReasoningEfforts: [{ value: "medium", description: "" }] };
+}
+
+function schedulingFixture(name: string, reader: () => Promise<ModelCatalogEntry[]>) {
+  const store = new Store(join(fixtureHome, `${name}.db`));
+  const project = store.createProject({ name, workspacePath: fixtureHome });
+  const agent = store.createAgentProfile({ name: "Fixture", description: "", instructions: "", model: "agent-model", reasoning_effort: "medium" });
+  store.setAutoDispatch(true);
+  const issue = store.createIssue({ projectId: project.id, title: name, description: input.requirements, status: "todo", agentEnabled: true, agentId: agent.id, workspacePath: fixtureHome });
+  const claim = store.claimNextIssue(issue.id)!;
+  store.beginScheduling(claim.runId, issue.id, true);
+  const worker = new IssueWorker(store, () => {}, undefined, reader);
+  const internal = worker as unknown as { stopped: boolean; wake(): void; scheduler(claim: typeof claim, success: boolean, error: string | undefined, reply: string): void };
+  internal.stopped = false;
+  internal.wake = () => {};
+  process.env.BC_SCHEDULER_FIXTURE_OUTPUT = JSON.stringify(complete);
+  process.env.BC_SCHEDULER_FIXTURE_EXIT = "0";
+  return { store, project, issue, claim, worker, launch: () => internal.scheduler(claim, true, undefined, input.final_reply) };
+}
+
+async function waitForScheduler(store: InstanceType<typeof Store>, issueId: string) {
+  const deadline = Date.now() + 3000;
+  while (store.getIssue(issueId)?.active_run_status === "scheduling" && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(store.getIssue(issueId)?.active_run_status, null);
+}
+
+test("worker subprocess resolves saved model, case-insensitive Luna names, user default and catalog default", { timeout: 15000 }, async () => {
+  const cases = [
+    { name: "saved", configured: "chosen-model", user: "user-model", catalog: [model("other", "LuNa variant")], expected: "chosen-model" },
+    { name: "luna-name", configured: "", user: "user-model", catalog: [model("default", "Default", true), model("other", "LuNa variant")], expected: "other" },
+    { name: "luna-id", configured: "", user: "user-model", catalog: [model("GPT-LUNA")], expected: "GPT-LUNA" },
+    { name: "user-default", configured: "", user: "user-model", catalog: [model("default", "Default", true)], expected: "user-model" },
+    { name: "catalog-default", configured: "", user: "", catalog: [model("default", "Default", true)], expected: "default" },
+  ];
+  for (const scenario of cases) {
+    writeFileSync(join(fixtureHome, "codex", "config.toml"), scenario.user ? `model = ${JSON.stringify(scenario.user)}\n` : "");
+    const fixture = schedulingFixture(scenario.name, async () => scenario.catalog);
+    try {
+      if (scenario.configured) fixture.store.setSchedulerModel(scenario.configured);
+      fixture.store.setSchedulerReasoningEffort("high");
+      fixture.launch();
+      await waitForScheduler(fixture.store, fixture.issue.id);
+      const invoked = JSON.parse(readFileSync(capture, "utf8"));
+      assert.equal(invoked.args[invoked.args.indexOf("-m") + 1], scenario.expected, scenario.name);
+      if (scenario.catalog.some(entry => entry.id === scenario.expected)) assert.ok(invoked.args.includes('model_reasoning_effort="medium"'));
+    } finally {
+      fixture.worker.stop();
+      fixture.store.close();
+    }
+  }
+});
+
+test("catalog dependency failure is a visible scheduler failure without a subprocess", async () => {
+  const fixture = schedulingFixture("catalog-failed", async () => { throw new Error("session_host_unavailable"); });
+  try {
+    rmSync(capture, { force: true });
+    fixture.launch();
+    await waitForScheduler(fixture.store, fixture.issue.id);
+    assert.equal(fixture.store.getIssue(fixture.issue.id)?.latest_scheduler_error, "scheduler_model_unavailable: session_host_unavailable");
+    assert.throws(() => readFileSync(capture));
+    assert.equal(fixture.worker.updateDrainStatus().blocking.schedulers, 0);
+  } finally { fixture.worker.stop(); fixture.store.close(); }
+});
+
+test("pending catalog lookup is counted and fenced by issue stop, worker stop and update drain", async () => {
+  for (const action of ["issue-stop", "worker-stop", "update-drain"] as const) {
+    let resolve!: (catalog: ModelCatalogEntry[]) => void;
+    const catalog = new Promise<ModelCatalogEntry[]>(done => { resolve = done; });
+    const fixture = schedulingFixture(action, () => catalog);
+    try {
+      rmSync(capture, { force: true });
+      fixture.launch();
+      assert.equal(fixture.worker.updateDrainStatus().blocking.schedulers, 1);
+      assert.equal(fixture.worker.updateDrainStatus().ready, false);
+      if (action === "issue-stop") assert.equal(await fixture.worker.stopIssue(fixture.issue.id), true);
+      else if (action === "worker-stop") fixture.worker.stop();
+      else assert.equal(fixture.worker.beginUpdateDrain().ready, true);
+      assert.equal(fixture.worker.updateDrainStatus().blocking.schedulers, 0);
+      resolve([model("luna")]);
+      await new Promise(done => setTimeout(done, 50));
+      assert.throws(() => readFileSync(capture));
+      if (action === "issue-stop") assert.equal(fixture.store.getIssue(fixture.issue.id)?.latest_run_status, "interrupted");
+      else assert.equal(fixture.store.listPendingSchedulerRuns().length, 1);
+    } finally { fixture.worker.stop(); fixture.store.close(); }
+  }
+});
+
+test("enrichment and scheduled-task catalog lookups share defaults and cannot escape update drain", async () => {
+  let resolve!: (catalog: ModelCatalogEntry[]) => void;
+  const catalog = new Promise<ModelCatalogEntry[]>(done => { resolve = done; });
+  const fixture = schedulingFixture("other-consumers-drain", () => catalog);
+  try {
+    rmSync(capture, { force: true });
+    const enrichment = fixture.store.createIssue({ projectId: fixture.project.id, title: "Title pending", description: "Original request", status: "todo", agentEnabled: true, workspacePath: fixtureHome, enrichmentStatus: "pending" });
+    fixture.worker.enrichIssue(enrichment, "Original request", "");
+    fixture.worker.enrichIssue(enrichment, "Duplicate request", "");
+    const creation = fixture.worker.createScheduledTaskFromPrompt(fixture.project, "Every day at noon", "");
+    const creationOutcome = creation.then(() => "unexpected success", error => error.message);
+    assert.equal(fixture.worker.updateDrainStatus().blocking.enrichments, 1);
+    assert.equal(fixture.worker.updateDrainStatus().blocking.scheduled_task_creations, 1);
+    assert.equal(fixture.worker.updateDrainStatus().ready, false);
+    assert.equal(fixture.worker.beginUpdateDrain().ready, true);
+    resolve([model("luna")]);
+    assert.equal(await creationOutcome, "worker_stopped");
+    await new Promise(done => setTimeout(done, 30));
+    assert.throws(() => readFileSync(capture));
+    assert.equal(fixture.store.getIssue(enrichment.id)?.enrichment_status, "pending");
+  } finally { fixture.worker.stop(); fixture.store.close(); }
+});
+
+test("stopping an issue cancels pending title enrichment before model discovery returns", async () => {
+  let resolve!: (catalog: ModelCatalogEntry[]) => void;
+  const fixture = schedulingFixture("enrichment-stop", () => new Promise(done => { resolve = done; }));
+  try {
+    rmSync(capture, { force: true });
+    const issue = fixture.store.createIssue({ projectId: fixture.project.id, title: "Title pending", description: "Original request", status: "todo", agentEnabled: true, workspacePath: fixtureHome, enrichmentStatus: "pending" });
+    fixture.worker.enrichIssue(issue, "Original request", "");
+    assert.equal(fixture.worker.updateDrainStatus().blocking.enrichments, 1);
+    assert.equal(await fixture.worker.stopIssue(issue.id), true);
+    assert.equal(fixture.worker.updateDrainStatus().blocking.enrichments, 0);
+    resolve([model("luna")]);
+    await new Promise(done => setTimeout(done, 30));
+    assert.throws(() => readFileSync(capture));
+    assert.equal(fixture.store.getIssue(issue.id)?.enrichment_status, "failed");
+  } finally { fixture.worker.stop(); fixture.store.close(); }
+});
+
+test("scheduled-task creation and title enrichment invoke the same resolved Luna model", async () => {
+  const fixture = schedulingFixture("other-consumers-model", async () => [model("resolved", "Custom LuNa")]);
+  try {
+    const scheduled = await fixture.worker.createScheduledTaskFromPrompt(fixture.project, "Every day at noon", "");
+    assert.deepEqual(scheduled, { question: "Which time?" });
+    let invoked = JSON.parse(readFileSync(capture, "utf8"));
+    assert.equal(invoked.args[invoked.args.indexOf("-m") + 1], "resolved");
+    const issue = fixture.store.createIssue({ projectId: fixture.project.id, title: "Title pending", description: "Original request", status: "todo", agentEnabled: true, workspacePath: fixtureHome, enrichmentStatus: "pending" });
+    fixture.worker.enrichIssue(issue, "Original request", "");
+    const deadline = Date.now() + 3000;
+    while (fixture.store.getIssue(issue.id)?.enrichment_status === "pending" && Date.now() < deadline) await new Promise(done => setTimeout(done, 10));
+    assert.equal(fixture.store.getIssue(issue.id)?.title, "Generated title");
+    invoked = JSON.parse(readFileSync(capture, "utf8"));
+    assert.equal(invoked.args[invoked.args.indexOf("-m") + 1], "resolved");
+  } finally { fixture.worker.stop(); fixture.store.close(); }
 });

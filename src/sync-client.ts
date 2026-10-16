@@ -2,12 +2,11 @@ import { createHash, randomUUID } from "node:crypto";
 import { defaultAgentProfile } from "./agent-profiles.js";
 import { coreVersion } from "./compatibility.js";
 import type { IssueThreadAction, Store } from "./db.js";
-import type { ModelCatalogEntry } from "./model-catalog.js";
+import { resolveSchedulerModel, resolveSchedulerReasoningEffort, type ModelCatalogEntry } from "./model-catalog.js";
 import { readSyncConfiguration, type SyncConfiguration } from "./sync-config.js";
 import { legacySyncProtocolVersion, supportedSyncProtocolVersions, syncProtocolVersion, type AgentDirectoryProjection, type AgentModelCatalogProjection, type CodexUsageProjection, type ConversationProjection, type DirectoryBrowserResult, type RemoteCommand, type RemoteCommandAck, type RemoteFilePayload, type RuntimeProjection, type SyncChange, type SyncProtocolVersion, type SyncPushResponse } from "./sync-contract.js";
 import { controlCapabilities, controlProtocolVersion, decodeControlMessage, encodeControlMessage } from "./control-protocol.js";
 import { agentAvatarPngDataUrl } from "./brand-assets.js";
-import { schedulerEvaluationModel } from "./scheduler-evaluation.js";
 
 type SyncState = {
   connected: boolean;
@@ -253,6 +252,7 @@ export class SyncClient {
   private runtime(configuration: SyncConfiguration, protocolVersion: SyncProtocolVersion, usage: CodexUsageProjection | null, agentModelCatalog: AgentModelCatalogProjection[]): RuntimeProjection {
     const queue = this.store.syncQueueStatus();
     const defaultAgent = defaultAgentProfile();
+    const schedulerModel = resolveSchedulerModel(agentModelCatalog, this.store.getSchedulerModel(), defaultAgent.model);
     return {
       device_id: configuration.device_id,
       device_name: configuration.device_name,
@@ -267,8 +267,8 @@ export class SyncClient {
         agent_models: agentModelCatalog,
         agent_models_error: this.modelCatalogError,
         auto_dispatch: this.store.getAutoDispatch(),
-        scheduler_model: schedulerEvaluationModel,
-        scheduler_reasoning_effort: this.store.getSchedulerReasoningEffort(),
+        scheduler_model: schedulerModel,
+        scheduler_reasoning_effort: resolveSchedulerReasoningEffort(agentModelCatalog, schedulerModel, this.store.getSchedulerReasoningEffort()),
         default_agent_model: defaultAgent.model,
         default_agent_reasoning_effort: defaultAgent.reasoning_effort,
         default_agent_service_tier: defaultAgent.service_tier,

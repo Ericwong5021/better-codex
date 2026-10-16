@@ -192,8 +192,7 @@ export function activateLocalCore(options: { executable: string; version: string
     const sha256 = options.sha256.toLowerCase();
     if (digest(content) !== sha256) fail("artifact_hash_mismatch");
     if (sourcePointer?.current === options.version && sourceSha256 !== sha256) fail("version_conflict");
-    const storage = requireStorageCapacity(runtimeVersionsPath, content.length * 3);
-    if (storage.degraded) fail("storage_degraded");
+    requireStorageCapacity(runtimeVersionsPath, content.length * 3);
     const versionDirectory = join(runtimeVersionsPath, options.version);
     if (existsSync(runtimeVersionsPath) && lstatSync(runtimeVersionsPath).isSymbolicLink()) fail("versions_path_invalid");
     mkdirSync(runtimeVersionsPath, { recursive: true });

@@ -92,6 +92,7 @@ test("Hub mirrors the privacy-filtered projection with durable idempotent sync",
     const agent = local.createAgentProfile({ name: "Remote Agent", name_en: "Remote Agent", description: "Visible directory", instructions: "private instructions", model: "private-model", reasoning_effort: "high", sandbox_mode: "danger-full-access" });
     local.setAgentAvatar(agent.id, "icon:reviewer");
     local.setAgentAvatar("default", "icon:sparkles");
+    local.setSchedulerModel("manual-scheduler-model", "medium");
     const issue = local.createIssue({ projectId: project.id, title: "Safe projection", description: "Visible", workspacePath: join(directory, "private-workspace"), session: { threadId: "019fec06-788f-7af3-a031-76b546904fe5", configFingerprint: "test", active: false } });
     const first = await client.syncNow();
     assert.equal(first.last_error, null);
@@ -101,6 +102,8 @@ test("Hub mirrors the privacy-filtered projection with durable idempotent sync",
     assert.match(board.agents.find(item => item.id === agent.id)?.avatar || "", /^data:image\/png;base64,/);
     assert.match(board.default_avatar, /^data:image\/png;base64,/);
     assert.equal(board.runtime?.health_state, "online");
+    assert.equal(board.runtime?.scheduler_model, "manual-scheduler-model");
+    assert.equal(board.runtime?.scheduler_reasoning_effort, "medium");
     assert.deepEqual(board.runtime?.usage, expectedUsage);
     assert.equal(hub.store.changeWindow(0).changes.some(change => change.entity_type === "runtime"), true);
     assert.deepEqual(board.projects.find(item => item.id === project.id)?.root_paths, [join(directory, "private-workspace")]);

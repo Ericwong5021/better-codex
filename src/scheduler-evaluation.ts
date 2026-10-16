@@ -1,6 +1,5 @@
 /** The evaluator describes execution evidence; it never grants human acceptance. */
 export const schedulerEvaluationVersion = "better-codex.scheduler-evaluation/v1";
-export const schedulerEvaluationModel = "gpt-6.1-sol";
 export const schedulerEvaluationServiceTier = "default";
 
 export type SchedulerEvaluationInput = {
@@ -74,7 +73,7 @@ export function schedulerEvaluationDecision(evaluation: SchedulerEvaluation) {
 }
 
 /** Ignore personal MCP/plugins/config while continuing to use existing Codex authentication. */
-export function schedulerEvaluationArgs(input: SchedulerEvaluationInput, runtimePath: string, schemaPath: string, resultPath: string, reasoningEffort: string) {
+export function schedulerEvaluationArgs(input: SchedulerEvaluationInput, runtimePath: string, schemaPath: string, resultPath: string, model: string, reasoningEffort: string) {
   const overrides = [
     `service_tier="${schedulerEvaluationServiceTier}"`,
     `model_reasoning_effort=${JSON.stringify(reasoningEffort)}`,
@@ -91,7 +90,7 @@ export function schedulerEvaluationArgs(input: SchedulerEvaluationInput, runtime
   return [
     "exec", "--ephemeral", "--strict-config", "--ignore-user-config", "--ignore-rules", "--skip-git-repo-check",
     "--json", "--color", "never", "--output-schema", schemaPath, "--output-last-message", resultPath,
-    "-m", schedulerEvaluationModel, ...overrides.flatMap(value => ["-c", value]),
+    "-m", model, ...overrides.flatMap(value => ["-c", value]),
     "-C", runtimePath, "-s", "read-only", schedulerEvaluationPrompt(input),
   ];
 }

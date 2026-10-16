@@ -19,6 +19,7 @@ import { codexSemanticDocument, codexSemanticRequestFingerprint, normalizeCodexS
 import { sessionNativeCommand } from "./native-commands.js";
 import type { RuntimeState } from "./runtime-state.js";
 import { parseSchedulerEvaluation, schedulerEvaluationArgs, schedulerEvaluationDecision, schedulerEvaluationSchema, type SchedulerEvaluationInput } from "./scheduler-evaluation.js";
+import { resolveSchedulerModel, resolveSchedulerReasoningEffort, type ModelCatalogEntry } from "./model-catalog.js";
 
 const interval = 60000;
 const schedulerTimeout = 180000;
@@ -117,9 +118,11 @@ export function issuePrompt(claim: ClaimedIssue) {
 export class IssueWorker {
   private timer: NodeJS.Timeout | null = null;
   private threadActionTimer: NodeJS.Timeout | null = null;
-  private readonly schedulers = new Map<string, { child: ChildProcess; claim: ClaimedIssue }>();
+  private readonly schedulers = new Map<string, { child: ChildProcess | null; claim: ClaimedIssue }>();
   private readonly enrichments = new Map<string, ChildProcess>();
+  private readonly pendingEnrichments = new Map<string, object>();
   private readonly scheduledTaskCreations = new Set<ChildProcess>();
+  private readonly pendingScheduledTaskCreations = new Set<object>();
   private readonly projectOverviews = new Map<string, ChildProcess | null>();
   private readonly projectPlannings = new Map<string, ChildProcess | null>();
   private readonly manualQueue = new Set<string>();
@@ -133,7 +136,7 @@ export class IssueWorker {
   private drainingThreadActions = false;
   private stopped = true;
 
-  constructor(private readonly store: Store, private readonly onChange: () => void = () => {}, private readonly runtimeIdentity?: Pick<RuntimeState, "instanceId" | "generation" | "version" | "handoffUpdateId">) {
+  constructor(private readonly store: Store, private readonly onChange: () => void = () => {}, private readonly runtimeIdentity?: Pick<RuntimeState, "instanceId" | "generation" | "version" | "handoffUpdateId">, private readonly readModelCatalog: () => Promise<ModelCatalogEntry[]> = async () => []) {
     this.sessionRelay = new SessionHostClient({
       poll: (relayId, busy) => this.pollSessionRelay(relayId, `runtime:${process.pid}`, "ready", undefined, busy),
       release: (relayId, error) => {
@@ -286,12 +289,21 @@ export class IssueWorker {
     this.timer = null;
     this.threadActionTimer = null;
     this.manualQueue.clear();
+    // Catalog lookup has no process to drain. Fence its continuation before an
+    // update can proceed; recovery will evaluate the persisted pending run.
+    for (const [runId, scheduler] of this.schedulers) {
+      if (scheduler.child) continue;
+      this.store.pauseScheduler(runId);
+      this.schedulers.delete(runId);
+    }
+    this.pendingEnrichments.clear();
+    this.pendingScheduledTaskCreations.clear();
     const status = this.updateDrainStatus();
     workerDebug("update_drain_started", {
       active_issue_ids: this.store.listActiveIssueIds(),
       schedulers: this.schedulers.size,
-      enrichments: this.enrichments.size,
-      scheduled_task_creations: this.scheduledTaskCreations.size,
+      enrichments: this.enrichments.size + this.pendingEnrichments.size,
+      scheduled_task_creations: this.scheduledTaskCreations.size + this.pendingScheduledTaskCreations.size,
       project_overviews: this.projectOverviews.size,
       project_plannings: this.projectPlannings.size,
     });
@@ -301,8 +313,8 @@ export class IssueWorker {
   updateDrainStatus() {
     const blocking = {
       schedulers: this.schedulers.size,
-      enrichments: this.enrichments.size,
-      scheduled_task_creations: this.scheduledTaskCreations.size,
+      enrichments: this.enrichments.size + this.pendingEnrichments.size,
+      scheduled_task_creations: this.scheduledTaskCreations.size + this.pendingScheduledTaskCreations.size,
       project_overviews: this.projectOverviews.size,
       project_plannings: this.projectPlannings.size,
     };
@@ -351,10 +363,22 @@ export class IssueWorker {
   stopIssue(issueId: string) {
     this.store.dequeueManualStart(issueId);
     this.manualQueue.delete(issueId);
+    const pendingEnrichmentCancelled = this.pendingEnrichments.delete(issueId);
+    if (pendingEnrichmentCancelled) {
+      const issue = this.store.getIssue(issueId);
+      if (issue) this.failEnrichment(issue, "user_stopped", issue.enrichment_status === "regenerating" ? "regenerate" : "initial");
+    }
     const scheduler = Array.from(this.schedulers.values()).find(({ claim }) => claim.issue.id === issueId);
     if (scheduler) {
+      if (!scheduler.child) {
+        this.schedulers.delete(scheduler.claim.runId);
+        this.store.interruptRun(scheduler.claim.runId, issueId);
+        this.onChange();
+        return Promise.resolve(true);
+      }
+      const child = scheduler.child;
       this.stoppingRuns.add(scheduler.claim.runId);
-      scheduler.child.kill("SIGTERM");
+      child.kill("SIGTERM");
       return new Promise<boolean>(resolve => {
         let settled = false;
         const finish = (stopped: boolean) => {
@@ -364,11 +388,11 @@ export class IssueWorker {
           resolve(stopped);
         };
         const timer = setTimeout(() => {
-          scheduler.child.kill("SIGKILL");
+          child.kill("SIGKILL");
           setTimeout(() => finish(false), 1000).unref();
         }, 5000);
         timer.unref();
-        scheduler.child.once("close", () => finish(true));
+        child.once("close", () => finish(true));
       });
     }
     let commandChanged = false;
@@ -403,7 +427,7 @@ export class IssueWorker {
       this.store.finishSessionReply(issueId, "interrupted", "user_stopped");
       return Promise.resolve(true);
     }
-    return Promise.resolve(false);
+    return Promise.resolve(pendingEnrichmentCancelled);
   }
 
   stop() {
@@ -418,14 +442,16 @@ export class IssueWorker {
     this.sessionRelay.stop();
     for (const { child, claim } of this.schedulers.values()) {
       this.store.pauseScheduler(claim.runId);
-      child.kill("SIGTERM");
+      child?.kill("SIGTERM");
     }
     this.schedulers.clear();
     this.stoppingRuns.clear();
     for (const child of this.enrichments.values()) child.kill("SIGTERM");
     this.enrichments.clear();
+    this.pendingEnrichments.clear();
     for (const child of this.scheduledTaskCreations) child.kill("SIGTERM");
     this.scheduledTaskCreations.clear();
+    this.pendingScheduledTaskCreations.clear();
     for (const [projectId, child] of this.projectOverviews) {
       child?.kill("SIGTERM");
       this.store.failProjectOverview(projectId, "worker_stopped");
@@ -575,6 +601,18 @@ export class IssueWorker {
     if (agentId && !this.store.getAgentProfile(agentId)) throw new Error("agent_not_found");
     const request = prompt.trim();
     if (!request || request.length > 100000 || request.includes("\0")) throw new Error("invalid_scheduled_task_prompt");
+    const pending = {};
+    this.pendingScheduledTaskCreations.add(pending);
+    let schedulerConfig: { model: string; reasoningEffort: string };
+    try {
+      schedulerConfig = await this.schedulerConfig();
+      if (this.stopped || !this.pendingScheduledTaskCreations.has(pending)) throw new Error("worker_stopped");
+    } catch (error) {
+      workerDiagnostic("scheduled_task_model_resolution_failed", { project_id: project.id, agent_id: agentId || null, error: error instanceof Error ? error.message : String(error), runtime_instance_id: this.runtimeIdentity?.instanceId ?? null });
+      throw error;
+    } finally {
+      this.pendingScheduledTaskCreations.delete(pending);
+    }
     mkdirSync(schedulerRuntimePath, { recursive: true });
     mkdirSync(runLogPath, { recursive: true });
     writeFileSync(scheduledTaskCreationSchemaPath, JSON.stringify(scheduledTaskCreationSchema));
@@ -593,9 +631,9 @@ export class IssueWorker {
       outputPath,
       "--skip-git-repo-check",
       "-m",
-      this.store.getSchedulerModel(defaultAgentProfile().model),
+      schedulerConfig.model,
       "-c",
-      `model_reasoning_effort=${this.store.getSchedulerReasoningEffort()}`,
+      `model_reasoning_effort=${JSON.stringify(schedulerConfig.reasoningEffort)}`,
       "-C",
       workspacePath,
       "-s",
@@ -736,12 +774,12 @@ export class IssueWorker {
   async regenerateIssueTitle(issue: Issue) {
     if (this.stopped) throw new Error("worker_stopped");
     if (issue.archived_at) throw new Error("issue_archived");
-    if (this.enrichments.has(issue.id) || this.store.isEnrichmentPending(issue)) throw new Error("issue_enrichment_pending");
+    if (this.enrichments.has(issue.id) || this.pendingEnrichments.has(issue.id) || this.store.isEnrichmentPending(issue)) throw new Error("issue_enrichment_pending");
     const prompt = await this.issueTitleRegenerationContext(issue);
     const current = this.store.getIssue(issue.id);
     if (!current) throw new Error("issue_not_found");
     if (current.version !== issue.version) throw new Error("version_conflict");
-    if (this.enrichments.has(issue.id) || this.store.isEnrichmentPending(current)) throw new Error("issue_enrichment_pending");
+    if (this.enrichments.has(issue.id) || this.pendingEnrichments.has(issue.id) || this.store.isEnrichmentPending(current)) throw new Error("issue_enrichment_pending");
     if (current.active_run_status || current.session_active_turn_id || this.store.getIssueReplyState(current.id).status === "running" || ["starting", "active", "stopping", "waiting_on_approval", "waiting_on_user"].includes(current.session_status || "")) throw new Error("issue_execution_running");
     const regenerating = this.store.updateIssue(current.id, current.version, { enrichment_status: "regenerating" });
     this.onChange();
@@ -769,7 +807,7 @@ export class IssueWorker {
 
   enrichIssue(issue: Issue, prompt: string, agentId: string, mode: "initial" | "regenerate" = "initial") {
     const workspacePath = issue.workspace_path || this.store.getProject(issue.project_id)?.workspace_path || "";
-    if (this.enrichments.has(issue.id) || this.stopped) {
+    if (this.enrichments.has(issue.id) || this.pendingEnrichments.has(issue.id) || this.stopped) {
       workerDebug("enrichment_skipped", {
         issue_id: issue.id,
         identifier: issue.identifier,
@@ -782,6 +820,27 @@ export class IssueWorker {
       this.failEnrichment(issue, "workspace_missing", mode);
       return;
     }
+    const pending = {};
+    this.pendingEnrichments.set(issue.id, pending);
+    void this.schedulerConfig().then(config => {
+      if (this.stopped || this.pendingEnrichments.get(issue.id) !== pending) return;
+      const current = this.store.getIssue(issue.id);
+      if (!current || (mode === "initial" ? current.enrichment_status !== "pending" : current.version !== issue.version || current.enrichment_status !== "regenerating")) {
+        this.pendingEnrichments.delete(issue.id);
+        return;
+      }
+      this.launchEnrichment(current, prompt, agentId, mode, workspacePath, config);
+      this.pendingEnrichments.delete(issue.id);
+    }).catch(error => {
+      if (this.pendingEnrichments.get(issue.id) !== pending) return;
+      this.pendingEnrichments.delete(issue.id);
+      const reason = error instanceof Error ? error.message : String(error);
+      workerDiagnostic("enrichment_model_resolution_failed", { issue_id: issue.id, error: reason, configured_model: this.store.getSchedulerModel() });
+      if (!this.stopped) this.failEnrichment(issue, `scheduler_model_unavailable: ${reason}`, mode);
+    });
+  }
+
+  private launchEnrichment(issue: Issue, prompt: string, agentId: string, mode: "initial" | "regenerate", workspacePath: string, config: { model: string; reasoningEffort: string }) {
     workerDebug("enrichment_started", {
       issue_id: issue.id,
       identifier: issue.identifier,
@@ -798,9 +857,9 @@ export class IssueWorker {
       "never",
       "--skip-git-repo-check",
       "-m",
-      this.store.getSchedulerModel(defaultAgentProfile().model),
+      config.model,
       "-c",
-      `model_reasoning_effort=${this.store.getSchedulerReasoningEffort()}`,
+      `model_reasoning_effort=${JSON.stringify(config.reasoningEffort)}`,
       "-C",
       workspacePath,
       "-s",
@@ -1544,7 +1603,44 @@ export class IssueWorker {
     this.onChange();
   }
 
+  private async schedulerConfig() {
+    const configuredModel = this.store.getSchedulerModel();
+    const configuredEffort = this.store.getSchedulerReasoningEffort();
+    const userDefaultModel = defaultAgentProfile().model;
+    const catalog = await this.readModelCatalog();
+    const model = resolveSchedulerModel(catalog, configuredModel, userDefaultModel);
+    if (!model) throw new Error("scheduler_model_missing");
+    return { model, reasoningEffort: resolveSchedulerReasoningEffort(catalog, model, configuredEffort) };
+  }
+
   private scheduler(claim: ClaimedIssue, executionSuccess: boolean, executionError: string | undefined, executionResult: string) {
+    if (this.stopped || this.schedulers.has(claim.runId)) return;
+    const pending = { child: null as ChildProcess | null, claim };
+    this.schedulers.set(claim.runId, pending);
+    void this.runScheduler(pending, executionSuccess, executionError, executionResult).catch(error => {
+      if (this.schedulers.get(claim.runId) !== pending) return;
+      this.schedulers.delete(claim.runId);
+      const reason = error instanceof Error ? error.message : String(error);
+      workerDiagnostic("scheduler_model_resolution_failed", {
+        issue_id: claim.issue.id, run_id: claim.runId,
+        runtime_instance_id: this.runtimeIdentity?.instanceId ?? null,
+        runtime_generation: this.runtimeIdentity?.generation ?? null,
+        configured_model: this.store.getSchedulerModel(), error: reason,
+      });
+      if (!this.stopped) this.store.finalizeScheduler(claim.runId, claim.issue.id, executionSuccess, null, `scheduler_model_unavailable: ${reason}`);
+      this.onChange();
+      this.wake();
+    });
+  }
+
+  private async runScheduler(pending: { child: ChildProcess | null; claim: ClaimedIssue }, executionSuccess: boolean, executionError: string | undefined, executionResult: string) {
+    const { claim } = pending;
+    const { model, reasoningEffort } = await this.schedulerConfig();
+    if (this.stopped || this.schedulers.get(claim.runId) !== pending) return;
+    if (!this.store.listPendingSchedulerRuns().some(run => run.claim.runId === claim.runId && run.claim.issue.id === claim.issue.id)) {
+      this.schedulers.delete(claim.runId);
+      return;
+    }
     const resultPath = join(runLogPath, `scheduler-result-${claim.runId}.json`);
     writeFileSync(schedulerSchemaPath, JSON.stringify(schedulerEvaluationSchema));
     if (existsSync(resultPath)) unlinkSync(resultPath);
@@ -1556,7 +1652,7 @@ export class IssueWorker {
       execution_error: executionError || null,
       final_reply: executionResult,
     };
-    const args = schedulerEvaluationArgs(evaluationInput, schedulerRuntimePath, schedulerSchemaPath, resultPath, this.store.getSchedulerReasoningEffort());
+    const args = schedulerEvaluationArgs(evaluationInput, schedulerRuntimePath, schedulerSchemaPath, resultPath, model, reasoningEffort);
     const log = createWriteStream(join(runLogPath, `scheduler-${claim.runId}.log`), { flags: "a" });
     const child = spawn(codexExecutablePath(), args, {
       cwd: schedulerRuntimePath,
@@ -1570,7 +1666,7 @@ export class IssueWorker {
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
     });
-    this.schedulers.set(claim.runId, { child, claim });
+    pending.child = child;
     this.store.startScheduler(claim.runId, child.pid || 0);
     const lines = createInterface({ input: child.stdout! });
     lines.on("line", line => {
@@ -1594,6 +1690,7 @@ export class IssueWorker {
       if (forceTimer) clearTimeout(forceTimer);
       lines.close();
       log.end();
+      if (this.schedulers.get(claim.runId) !== pending) return;
       this.schedulers.delete(claim.runId);
       const interrupted = this.stoppingRuns.delete(claim.runId);
       if (!this.stopped) {

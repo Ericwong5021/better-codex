@@ -13,7 +13,6 @@ import { projectDocumentKeys, type ConversationProjection, type DirectoryBrowser
 
 export const issueStatuses = ["backlog", "todo", "in_progress", "in_review", "done", "blocked"] as const;
 export const issuePriorities = ["none", "low", "medium", "high", "urgent"] as const;
-const defaultSchedulerModel = "gpt-5.6-sol";
 const defaultSchedulerReasoningEffort = "high";
 
 export type IssueStatus = typeof issueStatuses[number];
@@ -2097,17 +2096,20 @@ export class Store {
     const row = this.db.prepare("SELECT value FROM settings WHERE key = 'scheduler_model'").get() as { value: string } | undefined;
     const value = row?.value.trim() || "";
     const configured = defaultModel.trim();
-    return value && value.length <= 200 && !value.includes("\0") ? value : configured && configured !== "默认模型" && configured.length <= 200 && !configured.includes("\0") ? configured : defaultSchedulerModel;
+    return value && value.length <= 200 && !value.includes("\0") ? value : configured && configured !== "默认模型" && configured.length <= 200 && !configured.includes("\0") ? configured : "";
   }
 
-  setSchedulerModel(model: string) {
+  setSchedulerModel(model: string, reasoningEffort?: string) {
     const value = model.trim();
     if (!value || value.length > 200 || value.includes("\0")) throw new Error("invalid_scheduler_model");
-    this.db.prepare(`
-      INSERT INTO settings (key, value) VALUES ('scheduler_model', ?)
-      ON CONFLICT(key) DO UPDATE SET value = excluded.value
-    `).run(value);
-    return this.getSchedulerModel();
+    return this.transaction(() => {
+      this.db.prepare(`
+        INSERT INTO settings (key, value) VALUES ('scheduler_model', ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+      `).run(value);
+      if (reasoningEffort !== undefined) this.setSchedulerReasoningEffort(reasoningEffort);
+      return this.getSchedulerModel();
+    });
   }
 
   getSchedulerReasoningEffort() {

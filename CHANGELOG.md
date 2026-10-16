@@ -4,6 +4,9 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+- Restore configurable scheduler models for settings and execution; prefer an available Luna model when unset, otherwise follow the user default model.
+- Use a fixed 5 GiB free-space reserve for upgrades instead of requiring 5% of the disk, while retaining the 2 GiB runtime critical reserve and artifact staging capacity checks.
+
 ## [0.4.22] - 2026-10-17
 
 - Keep menu-bar status and exit responsive with lightweight database readiness probes, while preserving startup integrity checks and actionable exit diagnostics.

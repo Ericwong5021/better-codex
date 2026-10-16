@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "overused-font",
+        "value": "arial",
+        "files": [
+          "test/e2e/browser/toolbar.spec.ts"
+        ],
+        "createdAt": "2026-10-16T19:57:19.777Z",
+        "reason": "Agent: toolbar.spec.ts line 15 explicitly identifies a controlled host-style collision fixture; Arial is the synthetic host baseline, not the Better Codex product font."
+      }
+    ]
+  }
+}

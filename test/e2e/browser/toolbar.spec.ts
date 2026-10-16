@@ -11,29 +11,47 @@ const bundle = buildSync({
 const configuredInjection = browserUiScript(4317, "fixture-token", "en");
 const install = configuredInjection.slice(configuredInjection.lastIndexOf("\nBetterCodexUI.install("));
 
-async function openBoard(page: Page) {
+async function openBoard(page: Page, scheduler: { model?: string; reasoningEffort?: string; catalog?: any[]; catalogError?: string } = {}) {
   // This is a controlled host-style collision, not a recording of private native DOM.
   await page.route("http://toolbar.test/**", route => route.fulfill({ contentType: "text/html", body: `<!doctype html><html><head><style>
     html,body{margin:0;height:100%;font-family:Arial,sans-serif;background:#fff}
     #native-chrome{position:fixed;inset:0 0 auto;height:35px;background:#f7f7f7}
     aside{position:fixed;left:0;top:35px;bottom:0;width:324px;background:#f7f7f7;z-index:50}
     aside button{display:block;border:0;background:transparent;padding:12px 20px;font:inherit}
-    main{position:absolute;inset:0;height:100%;background:#fff}
+    #native-main{position:absolute;inset:0;height:100%;background:#fff}
     #native-main{left:324px;top:35px;height:calc(100% - 35px)}
     #surface,[data-app-shell-main-content-layout],.app-shell-main-content-frame{height:100%}
     @media(max-width:900px){aside{width:64px}aside button{padding:12px 4px;font-size:10px}#native-main{left:64px}}
   </style></head><body><div id="native-chrome"></div><aside data-app-action-sidebar-section><div><button data-sidebar-destination="tasks" aria-label="Tasks"><span>Tasks</span></button><button data-sidebar-destination="better-codex" aria-label="Better Codex"><span>Better Codex</span></button></div></aside><main id="native-main" data-better-codex-web-surface><div id="surface"><div data-app-shell-main-content-layout><div class="app-shell-main-content-frame native-frame-layout">Native content</div></div></div></main></body></html>` }));
   await page.goto("http://toolbar.test/fixture");
-  await page.evaluate(() => {
+  await page.evaluate(scheduler => {
     (window as any).fixtureIssues = [];
     (window as any).fixtureRequests = [];
     (window as any).fixtureIssueReads = 0;
+    (window as any).fixtureScheduler = {
+      model: scheduler.model ?? "gpt-6.1-sol", reasoning_effort: scheduler.reasoningEffort ?? "high",
+      catalog: scheduler.catalog ?? [], catalogError: scheduler.catalogError ?? null,
+    };
     (window as any).betterCodexHost = {
       capabilities: { nativeThreads: false, codexSemantics: false }, subscribe: () => () => {},
-      request: async ({ path, method }: { path: string; method?: string }) => {
-        (window as any).fixtureRequests.push({ path, method: method || "GET" });
+      request: async ({ path, method, body }: { path: string; method?: string; body?: string }) => {
+        (window as any).fixtureRequests.push({ path, method: method || "GET", ...(body ? { body: JSON.parse(body) } : {}) });
         const agents = [{ id: "codex", name: "Codex", is_default: true, avatar: "", model: "gpt-5.6-sol" }];
-        if (path.startsWith("/api/bootstrap")) return { locale: "en", agents, projects: [], user: { id: "fixture", name: "Fixture" }, agentModelCatalog: [], agentReasoningEfforts: [], autoDispatch: false, schedulerModel: "gpt-6.1-sol", schedulerModelLocked: true };
+        const selected = (window as any).fixtureScheduler;
+        if (path.startsWith("/api/bootstrap")) return { locale: "en", agents, projects: [], user: { id: "fixture", name: "Fixture" }, agentModelCatalog: selected.catalog, agentModelCatalogError: selected.catalogError, agentReasoningEfforts: [], autoDispatch: false, schedulerModel: selected.model, schedulerReasoningEffort: selected.reasoning_effort, schedulerModelLocked: false };
+        if (path.startsWith("/api/settings/scheduler-model")) {
+          if (method === "PATCH") {
+            selected.model = JSON.parse(body!).model;
+            const entry = selected.catalog.find((item: any) => item.id === selected.model);
+            const options = entry?.supportedReasoningEfforts ?? [];
+            if (!options.some((item: any) => item.value === selected.reasoning_effort)) selected.reasoning_effort = entry?.defaultReasoningEffort ?? options[0]?.value ?? "high";
+          }
+          return { model: selected.model, model_locked: false, reasoning_effort: selected.reasoning_effort };
+        }
+        if (path.startsWith("/api/settings/scheduler-reasoning-effort")) {
+          if (method === "PATCH") selected.reasoning_effort = JSON.parse(body!).reasoning_effort;
+          return { model: selected.model, reasoning_effort: selected.reasoning_effort };
+        }
         if (path.startsWith("/api/agents")) return agents;
         if (path.startsWith("/api/issues")) { (window as any).fixtureIssueReads++; return (window as any).fixtureIssues; }
         if (path.startsWith("/api/projects") || path.startsWith("/api/external-observations")) return [];
@@ -41,7 +59,7 @@ async function openBoard(page: Page) {
         return {};
       },
     };
-  });
+  }, scheduler);
   await page.evaluate(bundle + install);
   await page.locator("#better-codex-entry").click();
   await expect(page.locator("#better-codex-board .better-codex-column")).toHaveCount(7);
@@ -216,10 +234,63 @@ test("ready preserves the intentionally hidden toolbar in narrow agent creation"
   await expect.poll(() => page.evaluate(() => (window as any).__betterCodexUI__.ready())).toBe(true);
 });
 
-test("fixed scheduler model remains truthful when the catalog is unavailable", async ({ page }) => {
-  await openBoard(page);
+test("saved scheduler model stays visible and selectable when the catalog is unavailable", async ({ page }) => {
+  await openBoard(page, { model: "saved-custom-luna", catalogError: "session_host_unavailable" });
   await page.locator(".better-codex-auto-dispatch-help").click();
-  await expect(page.locator("[data-setting-scheduler-model-label]")).toHaveText("gpt-6.1-sol");
-  await expect(page.locator("[data-setting-scheduler-model]")).toBeDisabled();
+  await page.locator('[data-help-view="settings"]').click();
+  await expect(page.locator("[data-setting-scheduler-model-label]")).toHaveText("saved-custom-luna");
+  await expect(page.locator("[data-setting-scheduler-model]")).toBeEnabled();
+  await expect(page.locator("[data-setting-scheduler-catalog-error]")).toBeVisible();
+  await expect(page.locator("[data-setting-scheduler-catalog-error]")).toContainText(/model/i);
   await expect(page.locator("[data-setting-scheduler-reasoning]")).toBeEnabled();
+  expect(await page.evaluate(() => (window as any).fixtureRequests.filter((request: any) => request.method === "PATCH"))).toEqual([]);
+});
+
+const schedulerCatalog = [
+  { id: "gpt-6.1-sol", displayName: "Sol", isDefault: true, defaultReasoningEffort: "high", supportedReasoningEfforts: [{ value: "high" }, { value: "max" }] },
+  { id: "custom-lite", displayName: "Custom Luna", isDefault: false, defaultReasoningEffort: "medium", supportedReasoningEfforts: [{ value: "low" }, { value: "medium" }] },
+];
+
+test("a saved scheduler model absent from the catalog is never replaced by the default label", async ({ page }) => {
+  await openBoard(page, { model: "saved-older-model", catalog: schedulerCatalog });
+  await page.locator(".better-codex-auto-dispatch-help").click();
+  await page.locator('[data-help-view="settings"]').click();
+  await expect(page.locator("[data-setting-scheduler-model-label]")).toHaveText("saved-older-model");
+  await page.locator("[data-setting-scheduler-model]").click();
+  await expect(page.locator('[data-setting-scheduler-model-option="gpt-6.1-sol"]')).toBeVisible();
+  await expect(page.locator('[data-setting-scheduler-model-option][aria-selected="true"]')).toHaveCount(0);
+  expect(await page.evaluate(() => (window as any).fixtureScheduler.model)).toBe("saved-older-model");
+});
+
+test("scheduler model and reasoning selections PATCH and survive a UI remount", async ({ page }, info) => {
+  await openBoard(page, { catalog: schedulerCatalog });
+  await page.locator(".better-codex-auto-dispatch-help").click();
+  await page.locator('[data-help-view="settings"]').click();
+  const model = page.locator("[data-setting-scheduler-model]");
+  await expect(model).toBeEnabled();
+  await model.click();
+  await expect(page.locator('[data-setting-scheduler-model-option="custom-lite"]')).toBeVisible();
+  await page.locator('[data-setting-scheduler-model-option="custom-lite"]').click();
+  await expect(page.locator("[data-setting-scheduler-model-label]")).toHaveText("Custom Luna");
+  await expect(page.locator("[data-setting-scheduler-reasoning-label]")).toHaveText("Medium");
+  await page.locator("[data-setting-scheduler-reasoning]").click();
+  await expect(page.locator('[data-setting-scheduler-reasoning-option="high"]')).toHaveCount(0);
+  await page.locator('[data-setting-scheduler-reasoning-option="low"]').click();
+  await expect(page.locator("[data-setting-scheduler-reasoning-label]")).toHaveText("Low");
+  const writes = await page.evaluate(() => (window as any).fixtureRequests.filter((request: any) => request.method === "PATCH"));
+  expect(writes.map((request: any) => ({ path: request.path.split("?")[0], body: request.body }))).toEqual([
+    { path: "/api/settings/scheduler-model", body: { model: "custom-lite" } },
+    { path: "/api/settings/scheduler-reasoning-effort", body: { reasoning_effort: "low" } },
+  ]);
+  await page.locator('[data-help-close]').click();
+  await page.evaluate(() => (window as any).__betterCodexUI__.destroy());
+  await page.evaluate(bundle + install);
+  await page.locator("#better-codex-entry").click();
+  await expect(page.locator("#better-codex-board .better-codex-column")).toHaveCount(7);
+  await page.locator(".better-codex-auto-dispatch-help").click();
+  await page.locator('[data-help-view="settings"]').click();
+  await expect(page.locator("[data-setting-scheduler-model-label]")).toHaveText("Custom Luna");
+  await expect(page.locator("[data-setting-scheduler-reasoning-label]")).toHaveText("Low");
+  await expect(page.locator('[data-help-page="settings"]')).toHaveCSS("opacity", "1");
+  await page.screenshot({ path: info.outputPath("scheduler-configurable.png"), animations: "disabled" });
 });

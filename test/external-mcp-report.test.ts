@@ -13,12 +13,6 @@ test("MCP ingestion is opt-in, authenticated, idempotent, observation-only and n
   const headers = { authorization: `Bearer ${runtime.token}`, "content-type": "application/json" };
   const send = (body: unknown) => fetch(`${runtime.baseUrl}/api/external-observations/report`, { method: "POST", headers, body: JSON.stringify(body) });
   try {
-    const scheduler = await (await fetch(`${runtime.baseUrl}/api/settings/scheduler-model`, { headers })).json() as any;
-    assert.equal(scheduler.model, "gpt-6.1-sol"); assert.equal(scheduler.model_locked, true); assert.equal(scheduler.service_tier, "default");
-    const changedModel = await fetch(`${runtime.baseUrl}/api/settings/scheduler-model`, { method: "PATCH", headers, body: JSON.stringify({ model: "gpt-5.6-sol" }) });
-    assert.equal((await changedModel.json() as any).error, "scheduler_model_fixed");
-    const bootstrap = await (await fetch(`${runtime.baseUrl}/api/bootstrap`, { headers })).json() as any;
-    assert.equal(bootstrap.schedulerModel, "gpt-6.1-sol"); assert.equal(bootstrap.schedulerModelLocked, true);
     assert.equal((await fetch(`${runtime.baseUrl}/api/external-observations/report`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(report()) })).status, 401);
     const firstReport = report({ creator: { verification: "verified", avatar: "https://signed.example/private" }, acceptance_state: "accepted", agent_enabled: true, _ingestion_channel: "local_file" });
     const firstResponse = await send(firstReport);

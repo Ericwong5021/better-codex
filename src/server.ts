@@ -14,7 +14,7 @@ import { readCodexActivity, startCodexActivityCollection, stopCodexActivityColle
 import { readCodexUsage } from "./codex-usage.js";
 import { MentionCatalogService, codexSemanticRequestFingerprint, normalizeCodexSemanticSelections, readCodexSemanticCatalog, resolveCodexSemanticReferences, searchCodexFiles } from "./codex-semantics.js";
 import { appendInputDocumentText, compileInputDocument, inputDocumentLegacyReferences, inputDocumentText, legacyInputDocument, type SemanticKindV2 } from "./codex-input-document.js";
-import { ModelCatalog, mockupModelCatalog } from "./model-catalog.js";
+import { ModelCatalog, mockupModelCatalog, resolveSchedulerModel, resolveSchedulerReasoningEffort, type ModelCatalogEntry } from "./model-catalog.js";
 import { attachmentPath, canonicalPath, databasePath, runPath, runtimePort, token, updateLogPath } from "./config.js";
 import { acquireRuntimeLock, cancelRuntimeAuthorityReservation, claimRuntimeAuthority, clearRuntimeState, completeRuntimeAuthorityHandoff, createRuntimeIdentity, publishRuntimeState, reserveRuntimeAuthority, runtimeAuthorityUpdateState, runtimeIdentityHealth } from "./runtime-state.js";
 import { activateStagedUpdate, activationOwnerAlive, activeCoreCommand, activeVersions, bindGatewayUpdateRequest, prepareUpdateRollback, readGatewayUpdateRequest, recoverInterruptedUpdateTransaction, recoverInterruptedActivation, selectedUpdateChannel, checkGatewayUpdate, getGatewayUpdateState, installGatewayUpdate, readGatewayUpdateActivationState, recordGatewayUpdateActivation, rollbackAbandonedUpdate, rollbackActivatedUpdate, startGatewayUpdateChecks, verifyUpdatePointers } from "./updater.js";
@@ -43,7 +43,7 @@ import { stopSessionHostProcess } from "./session-host-client.js";
 import { sessionHostProtocolVersion } from "./session-host-protocol.js";
 import { ExternalObservationStore, type ExternalObservationCapability } from "./external-observations.js";
 import { ExternalReportWatcher } from "./external-report-watcher.js";
-import { schedulerEvaluationModel, schedulerEvaluationServiceTier } from "./scheduler-evaluation.js";
+import { schedulerEvaluationServiceTier } from "./scheduler-evaluation.js";
 import { mcpReportingEnabled } from "./mcp-reporting.js";
 import { TaskCreatorProfiles } from "./task-creator-profiles.js";
 
@@ -879,7 +879,7 @@ export function startServer() {
   const eventHistory: number[] = [];
   let eventRevision = 0;
   let publishChange = () => {};
-  const worker = new IssueWorker(store, () => publishChange(), identity);
+  const worker: IssueWorker = new IssueWorker(store, () => publishChange(), identity, () => readModelCatalog());
   if (identity.handoffUpdateId) worker.beginUpdateDrain();
   const semanticRequest = worker.semanticRequest.bind(worker);
   const modelCatalog = new ModelCatalog(
@@ -889,7 +889,12 @@ export function startServer() {
       return status.connected ? status.host?.instanceId || "" : "";
     },
   );
-  const readModelCatalog = () => mockupEnabled ? Promise.resolve(mockupModelCatalog) : modelCatalog.read();
+  const readModelCatalog: () => Promise<ModelCatalogEntry[]> = () => mockupEnabled ? Promise.resolve(mockupModelCatalog) : modelCatalog.read();
+  const schedulerSettings = (catalog: readonly ModelCatalogEntry[]) => {
+    const model = resolveSchedulerModel(catalog, store.getSchedulerModel(), defaultAgentProfile().model);
+    return { model, model_locked: false, service_tier: schedulerEvaluationServiceTier,
+      reasoning_effort: resolveSchedulerReasoningEffort(catalog, model, store.getSchedulerReasoningEffort()) };
+  };
   const mentionCatalog = new MentionCatalogService(identity.instanceId, semanticRequest);
   const queuedReplies = (issue: Issue, audience: string) => store.listQueuedIssueReplies(issue.id).map(reply => {
     const command = store.getSessionCommandByRequest(issue.id, reply.request_id);
@@ -1343,7 +1348,7 @@ export function startServer() {
         const mockup = mockupEnabled ? readMockupState(mockupLocale) : null;
         if (!mockup) syncCodexProjects(store);
         const external = externalSnapshot();
-        return sendJson(response, 200, { projects: projectSummaries(mockup ? mockup.projects : store.listProjects()), agents: mockup ? mockup.agents : visibleAgentProfiles(), statuses: issueStatuses, priorities: issuePriorities, external_observations: external.observations, external_observation_capability: external.capability, appearance: readCodexAppearance(), hostTheme: readHostThemeInput(), locale: mockup ? mockupLocale : readCodexLocale(), user: mockup ? { name: "Mockup", email: "", avatar: "" } : readCodexUserProfile(), task_creator_profiles: mockup ? [] : taskCreatorProfiles.profiles(), task_creator_profile_error: mockup ? null : taskCreatorProfiles.error, agentModelCatalog, agentModelCatalogError, agentModels, agentReasoningEfforts, autoDispatch: mockup ? mockup.auto_dispatch : store.getAutoDispatch(), schedulerModel: mockup ? mockup.scheduler_model : schedulerEvaluationModel, schedulerModelLocked: !mockup, schedulerServiceTier: schedulerEvaluationServiceTier, schedulerReasoningEffort: mockup ? mockup.scheduler_reasoning_effort : store.getSchedulerReasoningEffort(), limits: { issue_description: maxIssueDescriptionLength }, mockup: mockupEnabled, featureManifest: featureManifest() });
+        return sendJson(response, 200, { projects: projectSummaries(mockup ? mockup.projects : store.listProjects()), agents: mockup ? mockup.agents : visibleAgentProfiles(), statuses: issueStatuses, priorities: issuePriorities, external_observations: external.observations, external_observation_capability: external.capability, appearance: readCodexAppearance(), hostTheme: readHostThemeInput(), locale: mockup ? mockupLocale : readCodexLocale(), user: mockup ? { name: "Mockup", email: "", avatar: "" } : readCodexUserProfile(), task_creator_profiles: mockup ? [] : taskCreatorProfiles.profiles(), task_creator_profile_error: mockup ? null : taskCreatorProfiles.error, agentModelCatalog, agentModelCatalogError, agentModels, agentReasoningEfforts, autoDispatch: mockup ? mockup.auto_dispatch : store.getAutoDispatch(), schedulerModel: mockup ? mockup.scheduler_model : schedulerSettings(agentModelCatalog).model, schedulerModelLocked: false, schedulerServiceTier: schedulerEvaluationServiceTier, schedulerReasoningEffort: mockup ? mockup.scheduler_reasoning_effort : schedulerSettings(agentModelCatalog).reasoning_effort, limits: { issue_description: maxIssueDescriptionLength }, mockup: mockupEnabled, featureManifest: featureManifest() });
       }
       if (mockupEnabled && path[0] === "api" && path[1] === "scheduled-tasks") {
         if (method === "GET" && path.length === 2) return sendJson(response, 200, []);
@@ -1728,24 +1733,29 @@ export function startServer() {
         return sendJson(response, 200, { enabled });
       }
       if (url.pathname === "/api/settings/scheduler-model" && method === "GET") {
-        return sendJson(response, 200, { model: schedulerEvaluationModel, model_locked: true, service_tier: schedulerEvaluationServiceTier, reasoning_effort: store.getSchedulerReasoningEffort() });
+        return sendJson(response, 200, schedulerSettings(await readModelCatalog()));
       }
       if (url.pathname === "/api/settings/scheduler-model" && method === "PATCH") {
         const body = await readBody(request);
         const model = cleanString(body.model, 200);
-        if (model !== schedulerEvaluationModel) throw new Error("scheduler_model_fixed");
-        return sendJson(response, 200, { model: schedulerEvaluationModel, model_locked: true, service_tier: schedulerEvaluationServiceTier, reasoning_effort: store.getSchedulerReasoningEffort() });
+        const catalog = await readModelCatalog();
+        if (!catalog.some(item => item.id === model)) throw new Error("invalid_model");
+        store.setSchedulerModel(model, resolveSchedulerReasoningEffort(catalog, model, store.getSchedulerReasoningEffort()));
+        publishChange();
+        return sendJson(response, 200, schedulerSettings(catalog));
       }
       if (url.pathname === "/api/settings/scheduler-reasoning-effort" && method === "GET") {
-        return sendJson(response, 200, { reasoning_effort: store.getSchedulerReasoningEffort() });
+        return sendJson(response, 200, { reasoning_effort: schedulerSettings(await readModelCatalog()).reasoning_effort });
       }
       if (url.pathname === "/api/settings/scheduler-reasoning-effort" && method === "PATCH") {
         const body = await readBody(request);
         const effort = cleanString(body.reasoning_effort, 20);
         const catalog = await readModelCatalog();
-        const model = catalog.find(item => item.id === schedulerEvaluationModel);
+        const model = catalog.find(item => item.id === schedulerSettings(catalog).model);
         if (!model?.supportedReasoningEfforts.some(item => item.value === effort)) throw new Error("invalid_scheduler_reasoning_effort");
-        return sendJson(response, 200, { reasoning_effort: store.setSchedulerReasoningEffort(effort) });
+        const reasoningEffort = store.setSchedulerReasoningEffort(effort);
+        publishChange();
+        return sendJson(response, 200, { reasoning_effort: reasoningEffort });
       }
       if (url.pathname === "/api/scheduled-tasks" && method === "GET") {
         return sendJson(response, 200, store.listScheduledTasks());

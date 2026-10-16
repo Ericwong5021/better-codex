@@ -20,6 +20,28 @@ export type ModelCatalogEntry = {
   serviceTiers: ModelServiceTier[];
 };
 
+/** Explicit choices survive catalog changes; only an unset choice follows defaults. */
+export function resolveSchedulerModel(catalog: readonly ModelCatalogEntry[], configuredModel: string, userDefaultModel: string): string {
+  const modelId = (value: string) => {
+    const id = value.trim();
+    return id && id !== "默认模型" && id.length <= 200 && !id.includes("\0") ? id : "";
+  };
+  const configured = modelId(configuredModel);
+  if (configured) return configured;
+  const luna = catalog.filter(model => /luna/i.test(model.id) || /luna/i.test(model.displayName));
+  return (luna.find(model => model.isDefault) || luna[0])?.id
+    || modelId(userDefaultModel)
+    || catalog.find(model => model.isDefault)?.id
+    || "";
+}
+
+export function resolveSchedulerReasoningEffort(catalog: readonly ModelCatalogEntry[], modelId: string, configuredEffort: string): string {
+  const model = catalog.find(item => item.id === modelId);
+  if (!model || model.supportedReasoningEfforts.some(item => item.value === configuredEffort)) return configuredEffort;
+  return model.supportedReasoningEfforts.find(item => item.value === model.defaultReasoningEffort)?.value
+    || model.supportedReasoningEfforts[0]?.value || configuredEffort;
+}
+
 export function inferModelProvider(modelId: string, displayName = ""): string {
   const normalizedId = String(modelId || "").trim().toLowerCase();
   const normalizedName = String(displayName || "").trim().toLowerCase();
