@@ -132,6 +132,7 @@ export function betterCodexMcpHostHtml(options: { mockup?: boolean } = {}) {
     let controller;
     let cursor = "";
     let runtimeInstanceId = "";
+    let disconnected = false;
     const stop = () => { stopped = true; clearTimeout(timer); controller?.abort(); subscriptions.delete(stop); };
     subscriptions.add(stop);
     const poll = async () => {
@@ -142,7 +143,8 @@ export function betterCodexMcpHostHtml(options: { mockup?: boolean } = {}) {
       try {
         const result = await callTool(${JSON.stringify(mockup ? "mockup_events" : "runtime_events")}, { cursor: cursor || undefined, runtimeInstanceId: runtimeInstanceId || undefined, timeoutMs: 1000 }, 15000, controller.signal);
         if (stopped) return;
-        const firstConnection = !runtimeInstanceId;
+        const firstConnection = !runtimeInstanceId || disconnected || runtimeInstanceId !== result.runtimeInstanceId;
+        disconnected = false;
         runtimeInstanceId = result.runtimeInstanceId;
         cursor = result.cursor || "";
         for (const event of result.events || []) {
@@ -150,6 +152,7 @@ export function betterCodexMcpHostHtml(options: { mockup?: boolean } = {}) {
         }
       } catch (error) {
         if (stopped) return;
+        disconnected = true;
         // Reconciliation after a reconnect uses the Runtime's own event stream.
         listener({ event: "reset", id: cursor, data: { error: error.message || "runtime_unavailable" } });
         delay = 3000;
@@ -181,6 +184,7 @@ export function betterCodexMcpHostHtml(options: { mockup?: boolean } = {}) {
     return ready;
   }
   window.betterCodexMcpTransport = Object.freeze({ get ready() { return connect(); }, fetch: fetchRuntime, subscribe, routing,
+    ${mockup ? "" : 'startRuntime: () => callTool("runtime_start", {}, 80000),'}
     install: () => { ${browserUiScript(0, "", "zh-CN", "mcp://better-codex/runtime")}; },
   });
   void connect();

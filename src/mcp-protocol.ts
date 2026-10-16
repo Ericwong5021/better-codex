@@ -29,6 +29,7 @@ export type BetterCodexMcpOptions = {
   requestRuntime?: typeof requestMcpRuntime;
   pollEvents?: typeof pollMcpRuntimeEvents;
   ensureRuntime?: () => Promise<unknown>;
+  startRuntime?: () => Promise<{ ready: true }>;
 };
 
 const runtimeId = z.string().regex(/^[A-Za-z0-9_-]{8,200}$/);
@@ -126,6 +127,17 @@ export function createBetterCodexMcpServer(options: BetterCodexMcpOptions): McpS
     try { assertInitialized(); return toolResult(await client.boardApiRequest(input)); } catch (error) { return toolFailure(error); }
   });
   const appOnly = { ui: { resourceUri: boardResourceUri, visibility: ["app"] as ("app" | "model")[] } };
+  registerAppTool(server, "runtime_start", { description: "Start the installed local Runtime after an explicit App button click and wait for readiness. Never restart a running Runtime.",
+    inputSchema: emptyInput, outputSchema: z.object({ ready: z.literal(true) }),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false }, _meta: appOnly }, async () => {
+    try {
+      assertInitialized();
+      if (!options.startRuntime) throw new Error("runtime_start_unavailable");
+      const result = await options.startRuntime();
+      if (result?.ready !== true) throw new Error("runtime_start_not_ready");
+      return toolResult({ ready: true });
+    } catch (error) { return toolFailure(error); }
+  });
   registerAppTool(server, "runtime_read", { description: "Read the local Better Codex Runtime for this App.", inputSchema: readInput, outputSchema: responseSchema,
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }, _meta: appOnly }, async input => {
     try { assertInitialized(); return toolResult({ ...await requestRuntime({ ...readInput.parse(input), method: "GET" }) }); } catch (error) { return toolFailure(error); }

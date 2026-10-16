@@ -72,6 +72,7 @@ test("mockup MCP exposes only its development page and App transport", async () 
     const html = (await client.readResource({ uri: mockupResourceUri })).contents[0].text as string;
     assert.match(html, /data-better-codex-mockup="true"/); assert.match(html, /Mockup/); assert.match(html, /mockup_command/);
     assert.doesNotMatch(html, /board_launch|BetterCodexInjected/);
+    assert.doesNotMatch(html, /startRuntime: \(\) => callTool\("runtime_start"/);
     for (const script of html.matchAll(/<script>([\s\S]*?)<\/script>/g)) new Script(script[1]);
   } finally { await client.close(); await server.close(); }
 });

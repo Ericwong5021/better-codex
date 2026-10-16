@@ -197,7 +197,8 @@ export function startService() {
     return { started: true, label, configurationRepaired: true };
   }
   launchctl(["bootstrap", domain(), launchAgentPath], true);
-  launchctl(["kickstart", "-k", `${domain()}/${label}`]);
+  // Starting is idempotent; only the explicit restart path stops a live service.
+  launchctl(["kickstart", `${domain()}/${label}`]);
   return { started: true, label };
 }
 

@@ -70,6 +70,7 @@ export function install(config: Record<string, any>) {
       else history.back();
     }
     const HOST_CAPABILITIES = HOST_ADAPTER.capabilities;
+    const CAN_START_RUNTIME = HOST_CAPABILITIES.runtimeStart === true && typeof window.betterCodexHost?.startRuntime === "function";
     const READ_ONLY = HOST_CAPABILITIES.issues === "read-only";
     const AGENTS_READ_ONLY = HOST_CAPABILITIES.agents === "read-only";
     const CODEX_SEMANTICS_AVAILABLE = HOST_CAPABILITIES.codexSemantics !== false;
@@ -427,7 +428,7 @@ export function install(config: Record<string, any>) {
       "重试回复": "Retry reply", "重新加载": "Reload", "回复等待超时。请检查模型服务连接后重试。": "The reply timed out. Check the model service connection and retry.", "网络连接异常，回复未完成。请检查网络和 Better Codex Runtime 后重试。": "The reply did not finish because of a network problem. Check your network and Better Codex Runtime, then retry.", "当前权限不足，无法完成回复。请调整智能体权限或允许所需操作后重试。": "The reply needs additional permission. Adjust the agent permission or allow the required action, then retry.", "Better Codex Runtime 已停止。请重新启动后重试。": "Better Codex Runtime stopped. Restart it and retry.", "上一条回复仍在进行中。请稍后重新加载。": "The previous reply is still running. Reload shortly.", "回复未完成。请打开完整会话查看详情，然后重试。": "The reply did not finish. Open the full conversation for details, then retry.", "会话加载超时。请确认 Better Codex Runtime 正在运行，然后重新加载。": "The conversation timed out while loading. Make sure Better Codex Runtime is running, then reload.", "无法加载会话。请检查网络和 Better Codex Runtime，然后重新加载。": "Unable to load the conversation. Check your network and Better Codex Runtime, then reload.", "没有权限加载会话。请调整权限后重新加载。": "You do not have permission to load the conversation. Adjust the permission, then reload.", "VPS 入口返回了 404；这表示路径或资源不存在，不能据此判断本机 Runtime 已停止。": "The VPS endpoint returned 404. The path or resource does not exist; this does not show that the local Runtime stopped.", "浏览器无法连接 VPS Relay 入口。请检查域名、网络、反向代理和 Relay 服务；本机 Runtime 状态未知。": "The browser cannot reach the VPS Relay endpoint. Check DNS, network, reverse proxy, and the Relay service. The local Runtime state is unknown.", "VPS 入口无法连接 Relay 服务。本机 Runtime 状态未知。": "The VPS endpoint cannot reach the Relay service. The local Runtime state is unknown.", "VPS Relay 当前没有连接到本机 Runtime。可能是 Runtime 停止、正在重启或网络中断。": "The VPS Relay is not connected to the local Runtime. The Runtime may be stopped or restarting, or the network may be interrupted.", "本机 Runtime 已主动断开与 VPS Relay 的连接，可能正在重启或已停止。": "The local Runtime actively disconnected from the VPS Relay. It may be restarting or stopped.", "VPS Relay 与本机 Runtime 的请求通道已中断，请等待重连后重试。": "The request channel between the VPS Relay and local Runtime was interrupted. Wait for reconnection, then retry.",
       "内容刚刚发生变化，请稍后重试。": "This content just changed. Try again shortly.", "内容刚刚发生变化，已同步最新状态，请重试本次操作。": "This content just changed. The latest state is synced; try the action again.", "相关内容不存在或已被移除。": "The requested content does not exist or was removed.", "当前账号没有执行此操作的权限。": "Your account does not have permission to perform this action.", "输入内容不符合要求，请检查后重试。": "Check the entered values and try again.", "当前状态无法完成此操作，请刷新后重试。": "This action is not available in the current state. Refresh and try again.", "服务暂时不可用，请稍后重试。": "The service is temporarily unavailable. Try again shortly.", "服务返回的数据格式异常，请稍后重试。": "The service returned an invalid response. Try again shortly.", "数据完整性检查失败，操作已停止。": "The integrity check failed, so the operation was stopped.", "安全校验失败，操作已停止。": "The security check failed, so the operation was stopped.", "服务发生异常，请稍后重试。": "The service encountered an error. Try again shortly.",
       "任务看板": "Task board", "打开任务看板": "Open task board", "智能体": "Agents", "管理智能体": "Manage agents", "创建和管理你的智能体": "Create and manage your agents",
-      "Better Codex 服务需要重启": "Better Codex needs to restart", "当前页面与后台服务的连接已失效。请在终端运行下面的命令，完成后重新连接。": "The connection between this page and the background service has expired. Run the command below in your terminal, then reconnect.", "复制重启命令": "Copy restart command", "复制消息": "Copy message", "已复制": "Copied", "重新连接": "Reconnect", "正在连接…": "Connecting…", "错误详情": "Error details",
+      "Better Codex 服务未连接": "Better Codex is disconnected", "点击下方按钮启动服务并恢复连接。": "Start the service below to reconnect.", "请启动 Better Codex 后重新连接，也可以使用手动启动命令。": "Start Better Codex, then reconnect. You can also use the manual start command.", "启动并重连": "Start and reconnect", "正在启动并连接…": "Starting and connecting…", "启动未完成，请重试或使用手动启动。": "Startup did not finish. Try again or start manually.", "手动启动": "Start manually", "复制启动命令": "Copy start command", "复制消息": "Copy message", "已复制": "Copied", "重新连接": "Reconnect", "正在连接…": "Connecting…", "错误详情": "Error details",
       "全部": "All", "已分配": "Assigned", "未分配": "Unassigned", "待规划": "Backlog", "待办": "Todo", "进行中": "In progress", "待审核": "In review", "调度中": "Scheduling", "已完成": "Done", "已阻塞": "Blocked", "归档": "Archive", "拖到这里即可归档": "Drop here to archive", "查看已归档卡片": "View archived cards", "已归档任务": "Archived tasks", "搜索已归档任务": "Search archived tasks", "所有项目": "All projects", "全部删除": "Delete all", "删除已归档聊天": "Delete archived chat", "删除项目中的全部内容": "Delete all project content", "确定删除项目中的全部已归档任务吗？": "Delete all archived tasks in this project?", "取消归档": "Unarchive", "已归档卡片": "Archived cards", "暂无已归档卡片": "No archived cards", "归档列表加载失败": "Unable to load archived cards",
       "无": "None", "低": "Low", "中": "Medium", "高": "High", "紧急": "Urgent", "超高": "Extra high", "无优先级": "No priority", "优先级": "Priority", "状态": "Status", "日期": "Date", "筛选": "Filter", "标签": "Labels",
       "新建": "New", "新建 issue": "New issue", "新建任务": "New task", "新建智能体": "New agent", "创建": "Create", "创建任务": "Create task", "删除": "Delete", "删除任务": "Delete task", "删除智能体": "Delete agent", "保存": "Save", "确认": "Confirm", "取消": "Cancel", "关闭": "Close", "返回": "Back", "重试": "Retry", "稍后": "Later", "展开": "Expand", "全屏": "Full screen", "缩小": "Minimize", "退出全屏": "Exit full screen", "缩放头像": "Zoom avatar",
@@ -867,6 +868,8 @@ export function install(config: Record<string, any>) {
     let suppressSessionClickUntil = 0;
     let active = false;
     let bootstrapReady = false;
+    let serviceRecoveryBusy = false;
+    let serviceRecoveryRevision = 0;
     let bootstrapFailure = null;
     let bootstrapPromise = null;
 
@@ -1692,11 +1695,19 @@ export function install(config: Record<string, any>) {
       if (liveUnsubscribe || typeof window.betterCodexHost?.subscribe !== "function") return false;
       liveUnsubscribe = window.betterCodexHost.subscribe(event => {
         if (event?.event === "ready" && !bootstrapReady) return;
+        if (CAN_START_RUNTIME && event?.data?.error && needsServiceRecovery(event.data.error)) {
+          showServiceRecovery(new Error(event.data.error));
+          return;
+        }
         if (document.hidden) {
           liveDirty = true;
           return;
         }
-        if (active && !panel?.dataset.recovery) void perform(() => REMOTE ? Promise.all([loadSurface({ background: true }), loadAutoDispatch({ background: true })]) : loadSurface({ background: true }), { background: true });
+        if (active && panel?.dataset.recovery) {
+          if (!serviceRecoveryBusy && !event?.data?.error && ["ready", "reset"].includes(event?.event)) void load();
+          return;
+        }
+        if (active) void perform(() => REMOTE ? Promise.all([loadSurface({ background: true }), loadAutoDispatch({ background: true })]) : loadSurface({ background: true }), { background: true });
       });
       return typeof liveUnsubscribe === "function";
     }
@@ -2210,11 +2221,12 @@ export function install(config: Record<string, any>) {
 
     function needsServiceRecovery(error) {
       const value = error instanceof Error ? error.message : String(error || "");
-      return ["invalid_bridge_request", "runtime_bridge_unavailable", "runtime_bridge_timeout", "runtime_unavailable"].includes(value);
+      return ["invalid_bridge_request", "runtime_bridge_unavailable", "runtime_bridge_timeout", "runtime_unavailable", "mcp_runtime_unavailable", "mcp_runtime_transport_failed", "mcp_runtime_timeout"].includes(value);
     }
 
     function showServiceRecovery(error) {
       if (!panel) return;
+      serviceRecoveryRevision += 1;
       clearError();
       panel.dataset.recovery = "true";
       const recovery = panel.querySelector("#better-codex-recovery");
@@ -2222,8 +2234,8 @@ export function install(config: Record<string, any>) {
       const retry = recovery?.querySelector("[data-recovery-retry]");
       if (detail) detail.textContent = error instanceof Error ? error.message : String(error || "runtime_unavailable");
       if (retry) {
-        retry.disabled = false;
-        retry.innerHTML = icon("refresh") + "<span>" + te("重新连接") + "</span>";
+        retry.disabled = serviceRecoveryBusy;
+        retry.innerHTML = icon("refresh") + "<span>" + te(serviceRecoveryBusy ? CAN_START_RUNTIME ? "正在启动并连接…" : "正在连接…" : CAN_START_RUNTIME ? "启动并重连" : "重新连接") + "</span>";
       }
       if (recovery) recovery.hidden = false;
     }
@@ -2546,6 +2558,10 @@ export function install(config: Record<string, any>) {
         if (options.background) clearPassiveNetworkError();
         return result;
       } catch (error) {
+        if (CAN_START_RUNTIME && needsServiceRecovery(error)) {
+          showServiceRecovery(error);
+          return null;
+        }
         if (options.background && transientNetworkError(error)) {
           showPassiveNetworkError();
           return null;
@@ -3589,18 +3605,42 @@ export function install(config: Record<string, any>) {
       recovery.id = "better-codex-recovery";
       recovery.className = "better-codex-recovery";
       recovery.hidden = true;
-      recovery.innerHTML = '<section class="better-codex-recovery-card"><span class="better-codex-recovery-icon">' + icon("terminal") + '</span><h2>' + te("Better Codex 服务需要重启") + '</h2><p>' + te("当前页面与后台服务的连接已失效。请在终端运行下面的命令，完成后重新连接。") + '</p><div class="better-codex-recovery-command"><code>better-codex service restart</code><button type="button" data-recovery-copy>' + te("复制重启命令") + '</button></div><button class="better-codex-recovery-retry" type="button" data-recovery-retry>' + icon("refresh") + '<span>' + te("重新连接") + '</span></button><details><summary>' + te("错误详情") + '</summary><code data-recovery-error></code></details></section>';
+      recovery.innerHTML = '<section class="better-codex-recovery-card"><span class="better-codex-recovery-icon">' + icon("refresh") + '</span><h2>' + te("Better Codex 服务未连接") + '</h2><p>' + te(CAN_START_RUNTIME ? "点击下方按钮启动服务并恢复连接。" : "请启动 Better Codex 后重新连接，也可以使用手动启动命令。") + '</p><button class="better-codex-recovery-retry" type="button" data-recovery-retry>' + icon("refresh") + '<span>' + te(CAN_START_RUNTIME ? "启动并重连" : "重新连接") + '</span></button><p role="status" aria-live="polite" data-recovery-status hidden></p><details><summary>' + te("手动启动") + '</summary><div class="better-codex-recovery-command"><code>better-codex desktop start</code><button type="button" data-recovery-copy>' + te("复制启动命令") + '</button></div></details><details><summary>' + te("错误详情") + '</summary><code data-recovery-error></code></details></section>';
       recovery.querySelector("[data-recovery-copy]").addEventListener("click", async event => {
-        await copyText("better-codex service restart");
+        await copyText("better-codex desktop start");
         const button = event.currentTarget;
         button.textContent = t("已复制");
-        setTimeout(() => { if (button.isConnected) button.textContent = t("复制重启命令"); }, 1600);
+        setTimeout(() => { if (button.isConnected) button.textContent = t("复制启动命令"); }, 1600);
       });
-      recovery.querySelector("[data-recovery-retry]").addEventListener("click", event => {
+      recovery.querySelector("[data-recovery-retry]").addEventListener("click", async event => {
+        if (serviceRecoveryBusy) return;
+        serviceRecoveryBusy = true;
         const button = event.currentTarget;
+        const status = recovery.querySelector("[data-recovery-status]");
         button.disabled = true;
-        button.innerHTML = icon("refresh") + "<span>" + te("正在连接…") + "</span>";
-        void load();
+        const progress = CAN_START_RUNTIME ? "正在启动并连接…" : "正在连接…";
+        button.innerHTML = icon("refresh") + "<span>" + te(progress) + "</span>";
+        status.hidden = false;
+        status.textContent = t(progress);
+        try {
+          if (CAN_START_RUNTIME) {
+            const result = await window.betterCodexHost.startRuntime();
+            if (result?.ready !== true) throw new Error("runtime_start_not_ready");
+          }
+          if (destroyed) return;
+          bootstrapReady = false;
+          bootstrapPromise = null;
+          await load();
+          if (panel?.dataset.recovery === "true") status.textContent = t("启动未完成，请重试或使用手动启动。");
+        } catch (error) {
+          if (destroyed) return;
+          showServiceRecovery(error);
+          status.textContent = t("启动未完成，请重试或使用手动启动。");
+        } finally {
+          serviceRecoveryBusy = false;
+          button.disabled = false;
+          button.innerHTML = icon("refresh") + "<span>" + te(CAN_START_RUNTIME ? "启动并重连" : "重新连接") + "</span>";
+        }
       });
       const agents = document.createElement("div");
       agents.id = "better-codex-agents";
@@ -6480,6 +6520,7 @@ export function install(config: Record<string, any>) {
     }
 
     async function load() {
+      const recoveryRevision = serviceRecoveryRevision;
       clearError();
       try {
         await ensureBootstrapReady();
@@ -6501,7 +6542,7 @@ export function install(config: Record<string, any>) {
           completionNoticesRestored = true;
           restoreCompletionNotices();
         }
-        hideServiceRecovery();
+        if (recoveryRevision === serviceRecoveryRevision) hideServiceRecovery();
       } catch (error) {
         if (needsServiceRecovery(error)) return showServiceRecovery(error);
         const board = panel?.querySelector("#better-codex-board");

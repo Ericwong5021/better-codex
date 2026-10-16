@@ -11,6 +11,8 @@ export type RuntimeFixture = {
   token: string;
   workspacePath: string;
   output: () => string;
+  pause: () => Promise<void>;
+  resume: () => Promise<void>;
   restart: () => Promise<void>;
   stop: () => Promise<void>;
 };
@@ -45,13 +47,26 @@ async function waitForHealth(baseUrl: string, child: ChildProcess, output: () =>
 }
 
 async function stopProcess(child: ChildProcess) {
-  if (child.exitCode !== null) return;
-  child.kill("SIGTERM");
-  const exited = await Promise.race([
-    new Promise<boolean>(resolve => child.once("exit", () => resolve(true))),
-    new Promise<boolean>(resolve => setTimeout(() => resolve(false), 5_000)),
-  ]);
-  if (!exited && child.exitCode === null) child.kill("SIGKILL");
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  await new Promise<void>(resolve => {
+    const timer = setTimeout(() => { child.kill("SIGKILL"); }, 5_000);
+    child.once("exit", () => { clearTimeout(timer); resolve(); });
+    child.kill("SIGTERM");
+  });
+}
+
+async function waitForReady(baseUrl: string, child: ChildProcess, output: () => string) {
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null || child.signalCode !== null) throw new Error(`runtime_exited_before_ready\n${output()}`);
+    try {
+      const response = await fetch(`${baseUrl}/readyz`, { signal: AbortSignal.timeout(1000) });
+      const value = await response.json() as { ok?: boolean; pid?: number };
+      if (response.ok && value.ok === true && value.pid === child.pid) return;
+    } catch {}
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  throw new Error(`runtime_ready_timeout\n${output()}`);
 }
 
 export async function startRuntimeFixture(options: { externalReportsDirectory?: string; mcpAllowReports?: boolean; taskCreatorProfilesFile?: string } = {}): Promise<RuntimeFixture> {
@@ -93,19 +108,29 @@ export async function startRuntimeFixture(options: { externalReportsDirectory?: 
     rmSync(fixtureHome, { recursive: true, force: true });
     throw error;
   }
+  const pause = async () => { await stopProcess(child); };
+  let resuming: Promise<void> | null = null;
+  const resume = () => {
+    resuming ??= (async () => {
+      if (child.exitCode !== null || child.signalCode !== null) child = spawnRuntime();
+      await waitForReady(baseUrl, child, output);
+    })().finally(() => { resuming = null; });
+    return resuming;
+  };
   return {
     baseUrl,
     databasePath,
     token,
     workspacePath: fixtureHome,
     output,
+    pause,
+    resume,
     restart: async () => {
-      await stopProcess(child);
-      child = spawnRuntime();
-      await waitForHealth(baseUrl, child, output);
+      await pause();
+      await resume();
     },
     stop: async () => {
-      await stopProcess(child);
+      await pause();
       rmSync(fixtureHome, { recursive: true, force: true });
     },
   };

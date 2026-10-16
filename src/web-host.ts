@@ -1345,7 +1345,8 @@ function subscribeRuntime(listener) {
 window.betterCodexHost = Object.freeze({
   version: 1,
   kind: RELAY ? "web" : REMOTE ? "remote" : "web",
-  capabilities: Object.freeze({ issues: "read-write", agents: REMOTE && !RELAY ? "read-only" : "read-write", codexSemantics: !REMOTE || RELAY, liveUpdates: true, nativeThreads: false, fileUploads: Boolean(MCP_TRANSPORT) }),
+  capabilities: Object.freeze({ issues: "read-write", agents: REMOTE && !RELAY ? "read-only" : "read-write", codexSemantics: !REMOTE || RELAY, liveUpdates: true, nativeThreads: false, fileUploads: Boolean(MCP_TRANSPORT), runtimeStart: typeof MCP_TRANSPORT?.startRuntime === "function" }),
+  startRuntime: MCP_TRANSPORT?.startRuntime,
   user: () => webUser,
   users: () => webUsers.slice(),
   request: requestRuntime,

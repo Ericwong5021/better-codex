@@ -11,6 +11,7 @@ let mcpHtml = "";
 let stderr = "";
 const pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void }>();
 const calls: any[] = [];
+let startRuntimeAction = async () => { await runtime.resume(); };
 function call(method: string, params = {}) {
   const id = ++sequence;
   return new Promise<any>((resolve, reject) => {
@@ -21,8 +22,34 @@ function call(method: string, params = {}) {
 
 test.beforeAll(async () => {
   runtime = await startRuntimeFixture();
-  child = spawn(process.execPath, ["--import", "tsx", "--input-type=module", "-e", 'import {startMcpAppServer} from "./src/mcp-app.ts"; await startMcpAppServer({ensureRuntime:async()=>{}});'], {
-    cwd: process.cwd(), env: { ...process.env, BETTER_CODEX_HOME: runtime.workspacePath, BETTER_CODEX_DB: runtime.databasePath, BETTER_CODEX_TOKEN: runtime.token, CODEX_HOME: join(runtime.workspacePath, "codex") }, stdio: ["pipe", "pipe", "pipe"],
+  child = spawn(process.execPath, ["--import", "tsx", "--input-type=module", "-e", `
+    import {startMcpAppServer} from "./src/mcp-app.ts";
+    let sequence = 0;
+    const pending = new Map();
+    process.on("message", message => {
+      if (message?.type !== "fixture-start-result") return;
+      const request = pending.get(message.id);
+      if (!request) return;
+      pending.delete(message.id);
+      clearTimeout(request.timer);
+      if (message.error) request.reject(new Error(message.error)); else request.resolve({ ready: true });
+    });
+    const startRuntime = () => new Promise((resolve, reject) => {
+      const id = ++sequence;
+      const timer = setTimeout(() => { pending.delete(id); reject(new Error("fixture_start_timeout")); }, 20000);
+      pending.set(id, { resolve, reject, timer });
+      process.send({ type: "fixture-start", id });
+    });
+    await startMcpAppServer({ensureRuntime:async()=>{}, startRuntime});
+    process.disconnect();
+  `], {
+    cwd: process.cwd(), env: { ...process.env, BETTER_CODEX_HOME: runtime.workspacePath, BETTER_CODEX_DB: runtime.databasePath, BETTER_CODEX_TOKEN: runtime.token, CODEX_HOME: join(runtime.workspacePath, "codex") }, stdio: ["pipe", "pipe", "pipe", "ipc"],
+  });
+  child.on("message", async (message: any) => {
+    if (message?.type !== "fixture-start") return;
+    let error: string | undefined;
+    try { await startRuntimeAction(); } catch (failure) { error = failure instanceof Error ? failure.message : String(failure); }
+    if (child.connected) child.send({ type: "fixture-start-result", id: message.id, ...(error ? { error } : {}) });
   });
   child.stderr!.on("data", chunk => { stderr += String(chunk); });
   createInterface({ input: child.stdout! }).on("line", line => {
@@ -57,8 +84,8 @@ async function openPlugin(page: Page, options: { textMessages?: boolean } = {}) 
     return { isError: true };
   });
   const hostCapabilities = { serverTools: {}, ...(options.textMessages ? { message: { text: {} } } : {}) };
-  await page.route("http://mcp-host.test/**", route => route.fulfill({ contentType: "text/html", body: `<!doctype html><html><body style="margin:0"><iframe id="app" src="http://mcp-app.test/board" sandbox="allow-scripts allow-same-origin allow-forms allow-downloads" style="border:0;width:100vw;height:100vh"></iframe><script>const frame=document.getElementById('app');window.addEventListener('message',async event=>{if(event.source!==frame.contentWindow||event.data?.jsonrpc!=='2.0')return;const message=event.data;if(message.id===undefined)return;let result;if(message.method==='ui/initialize'){result={protocolVersion:'2026-01-26',hostCapabilities:${JSON.stringify(hostCapabilities)},hostContext:{theme:'light'}};}else if(message.method==='ui/message'){result=await window.mcpFixtureMessage(message);}else{result=await window.mcpFixtureCall(message);}frame.contentWindow.postMessage({jsonrpc:'2.0',id:message.id,result},'*');if(message.method==='ui/initialize')frame.contentWindow.postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:${JSON.stringify(entry)}},'*');});</script></body></html>` }));
-  await page.route("http://mcp-app.test/**", route => route.fulfill({ contentType: "text/html", headers: { "content-security-policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; font-src data:; media-src data:;" }, body: mcpHtml }));
+  await page.route("http://mcp-host.test/**", route => route.fulfill({ contentType: "text/html; charset=utf-8", body: `<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0"><iframe id="app" src="http://mcp-app.test/board" sandbox="allow-scripts allow-same-origin allow-forms allow-downloads" style="border:0;width:100vw;height:100vh"></iframe><script>const frame=document.getElementById('app');window.addEventListener('message',async event=>{if(event.source!==frame.contentWindow||event.data?.jsonrpc!=='2.0')return;const message=event.data;if(message.id===undefined)return;let result;if(message.method==='ui/initialize'){result={protocolVersion:'2026-01-26',hostCapabilities:${JSON.stringify(hostCapabilities)},hostContext:{theme:'light'}};}else if(message.method==='ui/message'){result=await window.mcpFixtureMessage(message);}else{result=await window.mcpFixtureCall(message);}frame.contentWindow.postMessage({jsonrpc:'2.0',id:message.id,result},'*');if(message.method==='ui/initialize')frame.contentWindow.postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:${JSON.stringify(entry)}},'*');});</script></body></html>` }));
+  await page.route("http://mcp-app.test/**", route => route.fulfill({ contentType: "text/html; charset=utf-8", headers: { "content-security-policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; font-src data:; media-src data:;" }, body: mcpHtml }));
   await page.goto("http://mcp-host.test/");
   const frame = page.frameLocator("#app");
   await expect(frame.locator("#better-codex-board")).toBeVisible();
@@ -145,6 +172,69 @@ test("plugin event transport reconnects after the Runtime restarts", async ({ pa
   await createSeedIssue("服务重启后同步的任务");
   await expect(frame.getByText("服务重启后同步的任务", { exact: true })).toBeVisible();
   expect(stderr).not.toContain("unexpected_sidebar_activation");
+});
+
+test("a stopped Runtime starts from the plugin recovery button and preserves tasks", async ({ page }) => {
+  const issue = await createSeedIssue("一键启动后保留的任务");
+  const frame = await openPlugin(page);
+  await expect(frame.getByText(issue.title, { exact: true })).toBeVisible();
+  let releaseStart!: () => void;
+  const startGate = new Promise<void>(resolve => { releaseStart = resolve; });
+  startRuntimeAction = async () => { await startGate; await runtime.resume(); };
+  try {
+    await runtime.pause();
+    const recovery = frame.locator("#better-codex-recovery");
+    const startButton = recovery.getByRole("button", { name: "启动并重连", exact: true });
+    await expect(recovery).toBeVisible();
+    await expect(recovery.getByRole("heading", { name: "Better Codex 服务未连接", exact: true })).toBeVisible();
+    await expect(startButton).toBeEnabled();
+    await page.screenshot({ path: "test-results/mcp-runtime-stopped-recovery.png" });
+    await expect(recovery).toBeVisible();
+    await startButton.click();
+    const busyButton = recovery.getByRole("button", { name: "正在启动并连接…", exact: true });
+    await expect(busyButton).toBeDisabled();
+    await expect(recovery.locator("[data-recovery-status]")).toHaveText("正在启动并连接…");
+    expect(calls.filter(message => message.params?.name === "runtime_start")).toHaveLength(1);
+    expect(calls.find(message => message.params?.name === "runtime_start").params.arguments).toEqual({});
+    await page.screenshot({ path: "test-results/mcp-runtime-starting.png" });
+    releaseStart();
+    await expect(recovery).toBeHidden();
+    await expect(frame.getByText(issue.title, { exact: true })).toBeVisible();
+    const persisted = await fetch(runtime.baseUrl + "/api/issues/" + issue.id, { headers: { authorization: "Bearer " + runtime.token } }).then(response => response.json());
+    expect(persisted.id).toBe(issue.id);
+    expect(persisted.title).toBe(issue.title);
+    await page.screenshot({ path: "test-results/mcp-runtime-started-reconnected.png" });
+  } finally {
+    releaseStart();
+    startRuntimeAction = async () => { await runtime.resume(); };
+    await runtime.resume();
+  }
+});
+
+test("a failed plugin startup stays visible and can be retried", async ({ page }) => {
+  const issue = await createSeedIssue("启动失败重试后保留的任务");
+  const frame = await openPlugin(page);
+  startRuntimeAction = async () => { throw new Error("fixture_start_failed"); };
+  try {
+    await runtime.pause();
+    const recovery = frame.locator("#better-codex-recovery");
+    const startButton = recovery.getByRole("button", { name: "启动并重连", exact: true });
+    await expect(recovery).toBeVisible();
+    await startButton.click();
+    await expect(recovery.locator("[data-recovery-status]")).toHaveText("启动未完成，请重试或使用手动启动。");
+    await expect(recovery).toBeVisible();
+    await expect(startButton).toBeEnabled();
+    await expect(recovery.locator("[data-recovery-error]")).toHaveText("fixture_start_failed");
+    await page.screenshot({ path: "test-results/mcp-runtime-start-failed.png" });
+    startRuntimeAction = async () => { await runtime.resume(); };
+    await startButton.click();
+    await expect(recovery).toBeHidden();
+    await expect(frame.getByText(issue.title, { exact: true })).toBeVisible();
+    expect(calls.filter(message => message.params?.name === "runtime_start")).toHaveLength(2);
+  } finally {
+    startRuntimeAction = async () => { await runtime.resume(); };
+    await runtime.resume();
+  }
 });
 
 test("plugin uploads files and restores image previews through the real Runtime", async ({ page }) => {

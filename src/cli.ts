@@ -38,6 +38,7 @@ import { readRuntimeState, reserveRuntimeAuthorityRecovery, runtimeAuthorityUpda
 import { installationCommand, installLaunchIntegration, launchIntegrationStatus, uninstallLaunchIntegration, openMacMenuBar } from "./launch-integration.js";
 import { desktopBridgeIdentityMatches, legacyInjectorIdentityMatches, type DesktopBridgeProcess } from "./desktop-process.js";
 import { desktopStatus } from "./desktop-status.js";
+import { startMcpRuntime } from "./mcp-runtime-start.js";
 import { readCodexLocale } from "./locale.js";
 import { betterCodexMcpName, startMcpAppServer, startMockupMcpAppServer } from "./mcp-app.js";
 import { packagedBuild } from "./build.js";
@@ -1391,7 +1392,10 @@ async function main() {
     if (action === "status") return print(await desktopStatus());
     if (action === "start") {
       // Opening the menu must not restart a live, unhealthy Runtime.
-      if (!readRuntimeState()) await ensureRuntime();
+      if (!readRuntimeState() && !(betterCodexProfile === "stable" && serviceStatus().running)) {
+        if (readGatewayUpdateActivationState()?.status === "activating") throw new Error("desktop_start_update_in_progress");
+        await ensureRuntime();
+      }
       await waitForRuntimeReady();
       openMacMenuBar();
       return print(await desktopStatus());
@@ -1449,7 +1453,7 @@ async function main() {
     if (isSea() || packagedBuild) throw new Error("mockup_requires_source_development_entry");
     return startMockupMcpAppServer();
   }
-  if (command === "mcp" && !action) return startMcpAppServer({ ensureRuntime });
+  if (command === "mcp" && !action) return startMcpAppServer({ ensureRuntime, startRuntime: startMcpRuntime });
   if (command === "mcp" && action === "--dot") {
     if (args.length) throw new Error("mcp_dot_arguments_invalid");
     return startMcpAppServer({ reportingOnly: true });

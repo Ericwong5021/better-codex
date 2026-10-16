@@ -7,13 +7,14 @@ export { betterCodexMcpName, betterCodexMcpTool, createBetterCodexMcpServer } fr
 export type McpAppServices = {
   reportingOnly?: boolean;
   ensureRuntime?: () => Promise<unknown>;
+  startRuntime?: () => Promise<{ ready: true }>;
   requestRuntime?: typeof requestMcpRuntime;
   pollEvents?: typeof pollMcpRuntimeEvents;
 };
 
 export async function startMcpAppServer(services: McpAppServices = {}) {
   const server = createBetterCodexMcpServer({ reportingOnly: services.reportingOnly, ensureRuntime: services.ensureRuntime,
-    requestRuntime: services.requestRuntime, pollEvents: services.pollEvents, boardHtml: betterCodexMcpHostHtml() });
+    startRuntime: services.startRuntime, requestRuntime: services.requestRuntime, pollEvents: services.pollEvents, boardHtml: betterCodexMcpHostHtml() });
   await connectMcpStdio(server);
 }
 

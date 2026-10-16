@@ -340,7 +340,7 @@ test("desktop capability accepts the navigation shell when the thread list is un
 
 test("plugin launch never starts retired injection or restarts Codex for a missing listener", () => {
   const mcpRoute = cliSource.slice(cliSource.indexOf('if (command === "mcp" && !action)'), cliSource.indexOf('if (command === "mcp")'));
-  assert.match(mcpRoute, /startMcpAppServer\(\{ ensureRuntime \}\)/);
+  assert.match(mcpRoute, /startMcpAppServer\(\{ ensureRuntime, startRuntime: startMcpRuntime \}\)/);
   assert.doesNotMatch(mcpRoute, /restart|launchSidebar|cdpConnect/);
 });
 

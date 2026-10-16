@@ -87,7 +87,7 @@ test("Dot reporting connection exposes only reporting and verifies replay withou
     const tools = (await mcp.client.listTools()).tools;
     assert.deepEqual(tools.map(tool => tool.name).sort(), ["external_observations_events", "external_observations_get", "external_observations_list", "external_tasks_report"]);
     assert.equal(tools.find(tool => tool.name === "external_tasks_report")?.annotations?.idempotentHint, true);
-    for (const name of ["runtime_command", "runtime_read", "runtime_events", "tasks_create", "tasks_update", "board", "board_api_request", "external_observations_report"]) {
+    for (const name of ["runtime_command", "runtime_read", "runtime_events", "runtime_start", "tasks_create", "tasks_update", "board", "board_api_request", "external_observations_report"]) {
       const result = await mcp.client.callTool({ name, arguments: {} });
       assert.equal(result.isError, true, name);
       assert.match(JSON.stringify(result.content), /not found/i);

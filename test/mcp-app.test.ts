@@ -6,9 +6,9 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createBetterCodexMcpServer, boardResourceUri } from "../src/mcp-protocol.js";
 import { betterCodexMcpHostHtml } from "../src/mcp-host.js";
 
-async function connected(requestRuntime: Parameters<typeof createBetterCodexMcpServer>[0]["requestRuntime"]) {
+async function connected(requestRuntime: Parameters<typeof createBetterCodexMcpServer>[0]["requestRuntime"], startRuntime?: () => Promise<{ ready: true }>) {
   let starts = 0;
-  const server = createBetterCodexMcpServer({ boardHtml: betterCodexMcpHostHtml(), requestRuntime, ensureRuntime: async () => { starts++; } });
+  const server = createBetterCodexMcpServer({ boardHtml: betterCodexMcpHostHtml(), requestRuntime, startRuntime, ensureRuntime: async () => { starts++; } });
   const client = new Client({ name: "mcp-app-test", version: "1" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport); await client.connect(clientTransport);
@@ -57,6 +57,41 @@ test("app-only transport rejects a write disguised as a read", async () => {
     const reply = await fixture.client.callTool({ name: "runtime_read", arguments: { path: "/api/issues", method: "POST" } });
     assert.equal(reply.isError, true); assert.equal(forwarded, false);
     const tools = (await fixture.client.listTools()).tools;
-    for (const name of ["runtime_read", "runtime_command", "runtime_events"]) assert.deepEqual((tools.find(tool => tool.name === name)?._meta?.ui as any).visibility, ["app"]);
+    for (const name of ["runtime_read", "runtime_command", "runtime_events", "runtime_start"]) assert.deepEqual((tools.find(tool => tool.name === name)?._meta?.ui as any).visibility, ["app"]);
+  } finally { await fixture.close(); }
+});
+
+test("App startup is an explicit bounded action and surfaces failures before readiness", async () => {
+  let starts = 0;
+  const fixture = await connected(async () => { throw new Error("runtime_unavailable"); }, async () => {
+    if (++starts === 1) throw new Error("database_not_ready");
+    return { ready: true };
+  });
+  try {
+    await fixture.client.callTool({ name: "runtime_read", arguments: { path: "/api/bootstrap" } });
+    assert.equal(starts, 0, "failed reads must not undo an intentional service exit");
+    const injected = await fixture.client.callTool({ name: "runtime_start", arguments: { command: "service restart" } });
+    assert.equal(injected.isError, true);
+    assert.equal(starts, 0, "startup cannot accept executable parameters");
+    const failed = await fixture.client.callTool({ name: "runtime_start", arguments: {} });
+    assert.equal(failed.isError, true);
+    assert.match(JSON.stringify(failed.content), /database_not_ready/);
+    assert.equal(failed.structuredContent?.ready, undefined);
+    const ready = await fixture.client.callTool({ name: "runtime_start", arguments: {} });
+    assert.notEqual(ready.isError, true);
+    assert.deepEqual(ready.structuredContent, { ready: true });
+    assert.equal(starts, 2);
+    const tool = (await fixture.client.listTools()).tools.find(tool => tool.name === "runtime_start");
+    assert.equal(tool?.annotations?.readOnlyHint, false);
+    assert.equal(tool?.annotations?.destructiveHint, false);
+  } finally { await fixture.close(); }
+});
+
+test("an App without local startup capability reports it as unavailable", async () => {
+  const fixture = await connected(async () => { throw new Error("must_not_forward"); });
+  try {
+    const result = await fixture.client.callTool({ name: "runtime_start", arguments: {} });
+    assert.equal(result.isError, true);
+    assert.match(JSON.stringify(result.content), /runtime_start_unavailable/);
   } finally { await fixture.close(); }
 });
