@@ -1401,7 +1401,14 @@ async function main() {
       if (runtime?.handoffUpdateId || readGatewayUpdateActivationState()?.status === "activating") throw new Error("desktop_exit_update_in_progress");
       try {
         if (runtime) {
-          await request("/api/shutdown", { method: "POST", body: JSON.stringify({ reason: "desktop_exit", runtime_instance_id: runtime.instanceId }), signal: AbortSignal.timeout(5000) });
+          try {
+            await request("/api/shutdown", { method: "POST", body: JSON.stringify({ reason: "desktop_exit", runtime_instance_id: runtime.instanceId }), signal: AbortSignal.timeout(5000) });
+          } catch (error) {
+            const transportFailure = error instanceof Error && (["TimeoutError", "AbortError"].includes(error.name) || error instanceof TypeError && error.message === "fetch failed");
+            console.error(`BETTER_CODEX_DIAGNOSTIC ${JSON.stringify({ timestamp: new Date().toISOString(), scope: "desktop", event: "shutdown_request_failed", profile: betterCodexProfile, home: betterCodexHome, runtime_pid: runtime.pid, runtime_instance_id: runtime.instanceId, runtime_generation: runtime.generation, phase: "request_shutdown", outcome: transportFailure ? "unknown" : "rejected", error: error instanceof Error ? error.message : String(error) })}`);
+            if (transportFailure) throw new Error("Runtime 未响应退出请求，退出结果尚未确认。请查看日志后重试。", { cause: error });
+            throw error;
+          }
         }
         await stopDesktopBridge();
         try { await cdpDisconnectDesktopBridge(cdpPort, accessToken(), desktopBridgeOwnership()); } catch {}

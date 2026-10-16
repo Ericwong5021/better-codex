@@ -1732,11 +1732,14 @@ export class Store {
   }
 
   health() {
-    const integrity = this.db.prepare("PRAGMA quick_check").get() as Record<string, unknown> | undefined;
+    // The constructor verifies integrity before this connection can serve traffic.
+    // Readiness is polled by every host; scanning every database page here blocks
+    // the Runtime event loop, including shutdown and Session Host acknowledgements.
+    const schemaVersion = this.schemaVersion();
     const threadActions = this.db.prepare("SELECT SUM(CASE WHEN attempts < 5 THEN 1 ELSE 0 END) AS pending, SUM(CASE WHEN attempts >= 5 THEN 1 ELSE 0 END) AS failed FROM thread_action_queue").get() as { pending: number | null; failed: number | null };
     return {
-      ok: String(integrity?.quick_check ?? "") === "ok",
-      schemaVersion: this.schemaVersion(),
+      ok: schemaVersion === latestSchemaVersion,
+      schemaVersion,
       latestSchemaVersion,
       lastBackupPath: this.lastBackupPath,
       effects: { pending: Number(threadActions.pending || 0), failed: Number(threadActions.failed || 0) },

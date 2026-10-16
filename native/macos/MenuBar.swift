@@ -142,7 +142,14 @@ final class MenuBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let log = home.appendingPathComponent("logs/desktop.log")
             if !FileManager.default.fileExists(atPath: log.path) { FileManager.default.createFile(atPath: log.path, contents: nil, attributes: [.posixPermissions: 0o600]) }
             if let file = try? FileHandle(forWritingTo: log) { _ = try? file.seekToEnd(); try? file.write(contentsOf: data); try? file.close() }
-            throw CommandFailure(message: String(data: data.suffix(6000), encoding: .utf8) ?? "操作失败，详见日志。")
+            // Keep diagnostics in desktop.log; present the actionable error to the user.
+            let details = String(data: data.suffix(6000), encoding: .utf8) ?? ""
+            let message = details.components(separatedBy: .newlines).filter {
+                !$0.hasPrefix("BETTER_CODEX_DIAGNOSTIC ") &&
+                !$0.contains("ExperimentalWarning: SQLite is an experimental feature") &&
+                !$0.hasPrefix("(Use `node --trace-warnings")
+            }.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            throw CommandFailure(message: message.isEmpty ? "操作失败，详见日志。" : message)
         }
         return data
     }
