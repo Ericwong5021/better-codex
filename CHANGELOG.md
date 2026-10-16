@@ -4,6 +4,8 @@ All notable changes to Better Codex are recorded here.
 
 ## [Unreleased]
 
+## [0.4.23] - 2026-10-17
+
 - Restore configurable scheduler models for settings and execution; prefer an available Luna model when unset, otherwise follow the user default model.
 - Use a fixed 5 GiB free-space reserve for upgrades instead of requiring 5% of the disk, while retaining the 2 GiB runtime critical reserve and artifact staging capacity checks.
 
@@ -1159,7 +1161,8 @@ All notable changes to Better Codex are recorded here.
 - Run Agent-owned Issues through an automated local workflow with visible review states.
 - Support macOS and Windows with a managed runtime, compatibility layer, signed updates, and release installers.
 
-[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.22...HEAD
+[Unreleased]: https://github.com/Ericwong5021/better-codex/compare/v0.4.23...HEAD
+[0.4.23]: https://github.com/Ericwong5021/better-codex/compare/v0.4.22...v0.4.23
 [0.4.22]: https://github.com/Ericwong5021/better-codex/compare/v0.4.21...v0.4.22
 [0.4.21]: https://github.com/Ericwong5021/better-codex/compare/v0.4.20...v0.4.21
 [0.4.20]: https://github.com/Ericwong5021/better-codex/compare/v0.4.18...v0.4.20
